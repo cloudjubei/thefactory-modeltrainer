@@ -1,0 +1,58 @@
+{
+  "name": "thefactory-modeltrainer",
+  "version": "0.1.0",
+  "description": "Generic model-training orchestration for the Overseer: experiment campaigns over trainer-conformant projects, with LLM judging and proposing. BlackSwanExperiments is the first consumer.",
+  "license": "MIT",
+  "author": "Kamil Chmurzynski <cloudjubei@gmail.com>",
+  "private": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "viewer"
+  ],
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run clean && npm run build",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:cov": "vitest run --coverage --coverage.reportOnFailure",
+    "compile-check": "tsc --strict --noEmit --pretty false",
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
+  },
+  "dependencies": {
+    "thefactory-tools": "file:../thefactory-tools"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@vitest/coverage-v8": "^1.6.0",
+    "prettier": "^3.6.2",
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cloudjubei/thefactory-modeltrainer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cloudjubei/thefactory-modeltrainer/issues"
+  },
+  "homepage": "https://github.com/cloudjubei/thefactory-modeltrainer#readme",
+  "engines": {
+    "node": ">=24"
+  },
+  "sideEffects": false,
+  "keywords": [
+    "thefactory",
+    "model-training",
+    "experiments",
+    "ml-orchestration",
+    "reinforcement-learning"
+  ]
+}
