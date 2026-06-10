@@ -139,6 +139,166 @@ export function totalCampaignUnits(items: PlannedTrainingItem[]): number | undef
   return total
 }
 
+export function normalizeObjectiveScores(
+  entries: { key: string; objective: number }[],
+  direction: 'max' | 'min',
+): Map<string, number> {
+  const scores = new Map<string, number>()
+  if (entries.length === 0) return scores
+  let min = Infinity
+  let max = -Infinity
+  for (const entry of entries) {
+    if (entry.objective < min) min = entry.objective
+    if (entry.objective > max) max = entry.objective
+  }
+  for (const entry of entries) {
+    if (max === min) {
+      scores.set(entry.key, 50)
+      continue
+    }
+    const normalized = ((entry.objective - min) / (max - min)) * 100
+    scores.set(entry.key, Math.round(direction === 'max' ? normalized : 100 - normalized))
+  }
+  return scores
+}
+
+function clamp(value: number, low: number, high: number): number {
+  if (!Number.isFinite(value)) return low
+  return Math.min(high, Math.max(low, value))
+}
+
+export function blendJudgeScore(
+  objectiveScore: number,
+  llmScore: number,
+  llmWeight: number,
+): number {
+  const objective = clamp(objectiveScore, 0, 100)
+  const llm = clamp(llmScore, 0, 100)
+  const weight = clamp(llmWeight, 0, 1)
+  return Math.round(llm * weight + objective * (1 - weight))
+}
+
+export function coerceVerdictRows(raw: unknown[]): { key: string; score: number; why: string }[] {
+  if (!Array.isArray(raw)) return []
+  const rows: { key: string; score: number; why: string }[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    if (typeof row.key !== 'string' || row.key.length === 0) continue
+    rows.push({
+      key: row.key,
+      score: Math.round(clamp(typeof row.score === 'number' ? row.score : 0, 0, 100)),
+      why: typeof row.why === 'string' ? row.why : '',
+    })
+  }
+  return rows
+}
+
+export function coerceHypothesisItems(
+  raw: unknown[],
+  manifest: TrainerManifest,
+): { title: string; rationale: string; spec: ExperimentSpec }[] {
+  if (!Array.isArray(raw)) return []
+  const leverKeys = new Set(Object.keys(manifest.levers))
+  const items: { title: string; rationale: string; spec: ExperimentSpec }[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const obj = item as Record<string, unknown>
+    if (typeof obj.title !== 'string' || !obj.title) continue
+    if (typeof obj.rationale !== 'string' || !obj.rationale) continue
+    const rawSpec = obj.spec as Record<string, unknown> | undefined
+    if (!rawSpec || typeof rawSpec !== 'object') continue
+
+    const spec: ExperimentSpec = {}
+    let valid = true
+    const sweep = rawSpec.sweep as Record<string, unknown> | undefined
+    if (sweep && typeof sweep === 'object') {
+      const entries = Object.entries(sweep)
+      for (const [key, values] of entries) {
+        if (!leverKeys.has(key) || !Array.isArray(values) || values.length === 0) {
+          valid = false
+          break
+        }
+      }
+      if (valid && entries.length > 0) spec.sweep = sweep as Record<string, unknown[]>
+    }
+    const fixed = rawSpec.fixed as Record<string, unknown> | undefined
+    if (valid && fixed && typeof fixed === 'object') {
+      const entries = Object.entries(fixed)
+      for (const [key] of entries) {
+        if (!leverKeys.has(key)) {
+          valid = false
+          break
+        }
+      }
+      if (valid && entries.length > 0) spec.fixed = fixed
+    }
+    if (!valid || (!spec.sweep && !spec.fixed)) continue
+    if (Array.isArray(rawSpec.seeds)) {
+      spec.seeds = rawSpec.seeds
+        .filter((s): s is number => typeof s === 'number' && Number.isFinite(s))
+        .map((s) => Math.trunc(s))
+    }
+    items.push({ title: obj.title, rationale: obj.rationale, spec })
+  }
+  return items
+}
+
+export function buildJudgeSystemPrompt(manifest: TrainerManifest, instructions?: string): string {
+  return [
+    `You are an exacting ML experiment judge for the "${manifest.name}" training project.`,
+    `Each run reports the objective "${manifest.objective.name}" (direction: ${manifest.objective.direction} is better) plus its config and metrics.`,
+    `Score how PROMISING each run's configuration is for further investment, 0-100 — weigh the objective against signs of luck, instability or overfitting visible in the metrics, and prefer configurations whose neighbours also perform well.`,
+    instructions ? `Additional rubric: ${instructions}` : '',
+    `Return ONLY a JSON array, one row per run: [{"key": "<run key>", "score": <0-100>, "why": "<one concise sentence>"}]. No prose around it.`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function buildJudgeUserContent(
+  runs: {
+    key: string
+    objective: number
+    config?: Record<string, unknown>
+    metrics?: Record<string, number>
+    seed?: number
+  }[],
+): string {
+  return JSON.stringify(runs)
+}
+
+export function buildProposeSystemPrompt(
+  manifest: TrainerManifest,
+  count: number,
+  instructions?: string,
+): string {
+  return [
+    `You are an ML experiment designer for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `The ONLY tunable levers, with their allowed shapes, are: ${JSON.stringify(manifest.levers)}.`,
+    `Given the run history and verdicts, propose up to ${count} NEW experiment specs likely to beat the best run. Explore promising neighbourhoods and untested regions; avoid repeating configurations already run.`,
+    instructions ? `Additional guidance: ${instructions}` : '',
+    `Return ONLY a JSON array: [{"title": "<short name>", "rationale": "<why this is promising>", "spec": {"sweep": {"<lever>": [values]}, "fixed": {"<lever>": value}, "seeds": [0]}}]. Use only declared lever names; sweep arrays must be non-empty; every spec needs a sweep or a fixed. No prose around it.`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function buildProposeUserContent(input: {
+  manifest: TrainerManifest
+  runs: { key: string; objective: number; config?: Record<string, unknown> }[]
+  verdicts: { key: string; score: number; why: string }[]
+  bestObjective?: number
+}): string {
+  return JSON.stringify({
+    objective: input.manifest.objective,
+    bestObjective: input.bestObjective,
+    runs: input.runs,
+    verdicts: input.verdicts,
+  })
+}
+
 export function validateTrainingRunSummary(raw: unknown): TrainingRunSummary {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('run summary must be a JSON object')

@@ -12,6 +12,9 @@ import type {
   DataRecord,
   DataRecordInput,
   DataStorage,
+  InferenceExecutor,
+  InferenceRequest,
+  LLMConfig,
 } from 'thefactory-tools/types'
 import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
@@ -118,6 +121,57 @@ function makeTools(
     tools: createModelTrainerTools({ computeRunner: runner, storage, logger, now: () => NOW }),
     logger,
   }
+}
+
+const LLM: LLMConfig = { provider: 'openai', model: 'm', apiKey: 'k' } as LLMConfig
+
+interface StubExecutor extends InferenceExecutor {
+  requests: InferenceRequest[]
+}
+
+function stubExecutor(text: string | ((req: InferenceRequest) => string)): StubExecutor {
+  const requests: InferenceRequest[] = []
+  return {
+    requests,
+    async runInference(request) {
+      requests.push(request)
+      return { text: typeof text === 'function' ? text(request) : text }
+    },
+  }
+}
+
+function makeJudgeTools(executor: InferenceExecutor | undefined, storage: DataStorage) {
+  const logger = { info: vi.fn(), warn: vi.fn() }
+  return {
+    tools: createModelTrainerTools({
+      computeRunner: stubRunner(),
+      storage,
+      inferenceExecutor: executor,
+      logger,
+      now: () => NOW,
+    }),
+    logger,
+  }
+}
+
+async function seedRun(
+  storage: DataStorage,
+  key: string,
+  objective: number,
+  extra: Record<string, unknown> = {},
+) {
+  await storage.upsertRecord({
+    scope: 'proj',
+    type: 'demo-run',
+    key,
+    content: {
+      objective,
+      status: 'completed',
+      health: { status: 'ok', flags: [] },
+      config: { lr: objective / 100 },
+      ...extra,
+    },
+  })
 }
 
 const tempDirs: string[] = []
@@ -497,5 +551,334 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs[0].commandTemplate).toContain('--config-json {configPath}')
     expect(runner.jobs[0].repoRef).toEqual({ kind: 'local', localPath: '/repo' })
     expect((runner.jobs[0].config as { lr: number }).lr).toBe(0.7)
+  })
+})
+
+describe('judgeTrainingRuns', () => {
+  it('blends the normalised objective with the LLM verdict and persists verdict records', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'low', 10)
+    await seedRun(storage, 'high', 90)
+    const executor = stubExecutor(
+      JSON.stringify([
+        { key: 'low', score: 60, why: 'lucky seed' },
+        { key: 'high', score: 80, why: 'stable' },
+      ]),
+    )
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      judged: 2,
+      rejected: 0,
+      judgedBy: 'openai/m',
+      judgedAt: NOW,
+    })
+    const low = result.verdicts.find((v) => v.key === 'low')!
+    expect(low).toMatchObject({ objectiveScore: 0, llmScore: 60, score: 30, why: 'lucky seed' })
+    const high = result.verdicts.find((v) => v.key === 'high')!
+    expect(high).toMatchObject({ objectiveScore: 100, llmScore: 80, score: 90 })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-verdict' })
+    expect(records).toHaveLength(2)
+    expect(records.find((r) => r.key === 'high')?.content).toMatchObject({
+      score: 90,
+      judgedBy: 'openai/m',
+      judgedAt: NOW,
+    })
+  })
+
+  it('auto-rejects health-flagged runs without consulting the LLM', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'good', 50)
+    await seedRun(storage, 'bad', 99, {
+      health: { status: 'degenerate', flags: ['degenerate_policy'] },
+    })
+    const executor = stubExecutor(JSON.stringify([{ key: 'good', score: 70, why: 'fine' }]))
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.rejected).toBe(1)
+    expect(result.judged).toBe(2)
+    const bad = result.verdicts.find((v) => v.key === 'bad')!
+    expect(bad).toMatchObject({ rejected: true, score: 0 })
+    expect(bad.why).toContain('degenerate_policy')
+    const sent = JSON.parse(executor.requests[0].userContent) as { key: string }[]
+    expect(sent.map((r) => r.key)).toEqual(['good'])
+  })
+
+  it('falls back to the objective score when the LLM returns no row for a run', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'scored', 10)
+    await seedRun(storage, 'missed', 90)
+    const executor = stubExecutor(JSON.stringify([{ key: 'scored', score: 40, why: 'ok' }]))
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const missed = result.verdicts.find((v) => v.key === 'missed')!
+    expect(missed.llmScore).toBeUndefined()
+    expect(missed.score).toBe(100)
+    expect(missed.why).toMatch(/objective/i)
+  })
+
+  it('skips the LLM entirely when there are no completed runs', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'failed-run',
+      content: { objective: 1, status: 'failed' },
+    })
+    const executor = stubExecutor('[]')
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.judged).toBe(0)
+    expect(executor.requests).toHaveLength(0)
+    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run-verdict' })).toHaveLength(0)
+  })
+
+  it('threads extra instructions into the judge prompt', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 1)
+    const executor = stubExecutor('[]')
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      instructions: 'prefer fewer trades',
+    })
+    expect(executor.requests[0].systemPrompt).toContain('prefer fewer trades')
+  })
+
+  it('notifies onRecordWritten per verdict', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 1)
+    const written: string[] = []
+    const { tools } = makeJudgeTools(stubExecutor('[]'), storage)
+    await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      onRecordWritten: (type, key) => {
+        written.push(`${type}:${key}`)
+      },
+    })
+    expect(written).toEqual(['demo-run-verdict:a'])
+  })
+
+  it('throws without an inference executor', async () => {
+    const { tools } = makeJudgeTools(undefined, memoryStorage())
+    await expect(
+      tools.judgeTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+      }),
+    ).rejects.toThrow(/inference/i)
+  })
+
+  it('propagates an inference failure', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 1)
+    const executor: InferenceExecutor = {
+      runInference: () => Promise.reject(new Error('llm down')),
+    }
+    const { tools } = makeJudgeTools(executor, storage)
+    await expect(
+      tools.judgeTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+      }),
+    ).rejects.toThrow('llm down')
+  })
+})
+
+describe('proposeTrainingHypotheses', () => {
+  const PROPOSALS = JSON.stringify([
+    {
+      title: 'Push lr higher',
+      rationale: 'top runs cluster at high lr',
+      spec: { sweep: { lr: [0.5, 0.9] } },
+    },
+    {
+      title: 'Longer training',
+      rationale: 'returns still climbing',
+      spec: { fixed: { steps: 500 } },
+    },
+    { title: 'Bad one', rationale: 'names a ghost lever', spec: { sweep: { ghost: [1] } } },
+  ])
+
+  it('persists valid proposals as pending hypothesis records', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10)
+    const executor = stubExecutor(PROPOSALS)
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      proposed: 2,
+      skippedExisting: 0,
+      proposedBy: 'openai/m',
+      proposedAt: NOW,
+    })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(records).toHaveLength(2)
+    expect(records[0].content).toMatchObject({
+      status: 'pending',
+      source: 'llm',
+      proposedBy: 'openai/m',
+      createdAt: NOW,
+    })
+    expect((records[0].content as { id: string }).id).toBe(records[0].key)
+  })
+
+  it('dedupes against existing hypotheses, preserving their status', async () => {
+    const storage = memoryStorage()
+    const executor = stubExecutor(PROPOSALS)
+    const { tools } = makeJudgeTools(executor, storage)
+    const first = await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const existingKey = first.hypotheses[0].id
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: existingKey,
+      content: { ...first.hypotheses[0], status: 'accepted' },
+    })
+    const second = await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(second.skippedExisting).toBe(2)
+    expect(second.proposed).toBe(0)
+    const record = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: existingKey,
+    })
+    expect((record?.content as { status: string }).status).toBe('accepted')
+  })
+
+  it('dedupes identical specs within one response', async () => {
+    const storage = memoryStorage()
+    const twice = JSON.stringify([
+      { title: 'One', rationale: 'r', spec: { fixed: { lr: 0.5 } } },
+      { title: 'Same spec again', rationale: 'r2', spec: { fixed: { lr: 0.5 } } },
+    ])
+    const { tools } = makeJudgeTools(stubExecutor(twice), storage)
+    const result = await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.proposed).toBe(1)
+  })
+
+  it('caps proposals at the requested count', async () => {
+    const many = JSON.stringify(
+      Array.from({ length: 7 }, (_, i) => ({
+        title: `H${i}`,
+        rationale: 'r',
+        spec: { fixed: { lr: i / 10 } },
+      })),
+    )
+    const { tools } = makeJudgeTools(stubExecutor(many), memoryStorage())
+    const result = await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      count: 2,
+    })
+    expect(result.proposed).toBe(2)
+  })
+
+  it('sends run history and verdicts to the proposer', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-verdict',
+      key: 'a',
+      content: { key: 'a', score: 77, why: 'good' },
+    })
+    const executor = stubExecutor('[]')
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const sent = JSON.parse(executor.requests[0].userContent) as {
+      runs: { key: string }[]
+      verdicts: { score: number }[]
+      bestObjective: number
+    }
+    expect(sent.runs[0].key).toBe('a')
+    expect(sent.verdicts[0].score).toBe(77)
+    expect(sent.bestObjective).toBe(10)
+  })
+
+  it('notifies onRecordWritten per hypothesis', async () => {
+    const written: string[] = []
+    const { tools } = makeJudgeTools(stubExecutor(PROPOSALS), memoryStorage())
+    await tools.proposeTrainingHypotheses({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      onRecordWritten: (type) => {
+        written.push(type)
+      },
+    })
+    expect(written).toEqual(['demo-run-hypothesis', 'demo-run-hypothesis'])
+  })
+
+  it('throws without an inference executor', async () => {
+    const { tools } = makeJudgeTools(undefined, memoryStorage())
+    await expect(
+      tools.proposeTrainingHypotheses({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+      }),
+    ).rejects.toThrow(/inference/i)
   })
 })

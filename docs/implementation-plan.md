@@ -18,18 +18,6 @@ model is _data + the thin CLI contract_, not engine code.
 
 ---
 
-## Phase 5 — LLM judging + proposing (solves "hard to judge" + "lost ideas")
-
-- `judge`: blend the deterministic objective with an LLM verdict via thefactory-tools'
-  inference seam (model the prompt/parse on `rankProductCandidates` + `coerceRankedItems` +
-  `blendScores`); auto-reject health-flagged runs; write `{recordType}-verdict` records;
-  model-selectable via the chip (`llmConfigId` already flows into the activity).
-- `propose`: research/inference over run history + verdicts → `{recordType}-hypothesis`
-  backlog records (`status: pending|accepted|rejected`, rationale, `source: human|llm`).
-  Accept/edit/reject in the viewer; accepted hypotheses become campaign work-items.
-- Viewer: Verdicts surfaced on run rows + a Hypotheses tab.
-- `structuredOutput: false` for all raw-JSON completions.
-
 ## Phase 6 — Remote compute: runner agent + PIN pairing + data cache
 
 - `examples/tabular` — small DVC-tracked dataset; establishes + tests the data path cheaply
@@ -60,7 +48,9 @@ Via Overseer Stories / CLI-agents against the Python repo:
   hodl-relative baseline, degenerate-policy health flag.
 - Re-enable MLflow params+metrics logging; checkpoint-best with run→metrics traceability.
 - Prune dead paths (dead env types, commented MLflow, broken `config_simple` default).
-- Then run real campaigns — local first, then remote.
+- Register BlackSwan in the Model Trainer hub by its absolute directory (it stays a plain
+  repo on disk — no Overseer project needed for running; Stories/CLI-agent editing of the
+  Python code is a separate concern). Then run real campaigns — local first, then remote.
 
 ## Phase 8 (optional) — Autopilot + live handoff
 
@@ -82,9 +72,11 @@ preemptively.
 - Migrate `RecommendTools.buildProductCatalog`'s internal per-item loop onto
   `runActivityWorkItems` (the generic engine was built fresh; recommend still owns a private
   copy of the pattern). Behaviour-preserving; keep recommend tests green.
-- `ProjectEditorForm`: an appSource editor next to the "Has App surface" toggle (today
-  `metadata.appSource` is set via the PATCH API).
+- Mobile parity: the mobile `ProjectEditorForm` lacks the "Has App surface" toggle and the new
+  "App directory" field (web/desktop have both); mirror them per the three-client rule.
 - Viewer: surface `failures[]` from the `{recordType}-campaign` record (data already flows).
+- Viewer: re-attach to a live judge/propose activity after a page reload (today only `train`
+  re-attaches; a reload mid-judge just shows results on the next refresh).
 
 ## Open questions
 

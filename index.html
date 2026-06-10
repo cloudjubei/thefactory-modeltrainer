@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Model Trainer</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="bridge.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <!-- Home — the hub: registered training projects -->
+    <div id="view-home" class="view">
+      <div class="topbar">
+        <header class="home-header"><h1>Model Trainer</h1></header>
+      </div>
+      <div class="app-scroll">
+        <main class="tab-main">
+          <p id="app-banner" class="app-banner" role="status" hidden></p>
+
+          <section class="card" aria-labelledby="projects-h">
+            <div class="card-head">
+              <h2 id="projects-h">Training projects</h2>
+              <p class="card-sub">
+                Each project is a directory with a <code>.factory/trainer.json</code> manifest.
+              </p>
+            </div>
+            <p id="projects-status" class="form-status" role="status" hidden></p>
+            <div id="home-projects" class="home-projects"></div>
+          </section>
+
+          <section class="card" aria-labelledby="project-add-h">
+            <div class="card-head">
+              <h2 id="project-add-h">Add training project</h2>
+              <p class="card-sub">
+                Point at a directory relative to this project&rsquo;s checkout, or an absolute path.
+              </p>
+            </div>
+            <form id="project-add-form" class="project-add-form" autocomplete="off">
+              <div class="lever-grid">
+                <label class="field"
+                  ><span>Name</span>
+                  <input type="text" name="name" placeholder="e.g. CartPole" />
+                </label>
+                <label class="field"
+                  ><span>Directory</span>
+                  <input type="text" name="dir" placeholder="examples/cartpole or /absolute/path" />
+                </label>
+              </div>
+              <div class="form-actions">
+                <button type="submit" id="project-save-btn">Add project</button>
+              </div>
+              <p id="project-form-error" class="form-status" role="alert" hidden></p>
+            </form>
+          </section>
+        </main>
+
+        <footer class="page-foot">
+          <span>Model Trainer — hub</span>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Project dashboard -->
+    <div id="view-dashboard" class="view" hidden>
+      <div class="topbar">
+        <div class="dash-head">
+          <button type="button" id="back-btn" class="back-btn" aria-label="Back to projects">
+            &larr;
+          </button>
+          <span id="dash-project-name" class="dash-project-name"></span>
+        </div>
+        <nav class="tabbar" id="tabbar" role="tablist" aria-label="Sections"></nav>
+      </div>
+
+      <div class="app-scroll">
+        <main class="tab-main">
+          <!-- Runs (completed training runs, best first) -->
+          <section id="tab-runs" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="runs-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="runs-h">Runs</h2>
+                  <p class="card-sub" id="runs-sub">Every training run, best first.</p>
+                  <p class="card-sub" id="judge-last" hidden></p>
+                </div>
+                <div class="head-actions">
+                  <button type="button" id="judge-btn">Judge runs</button>
+                </div>
+              </div>
+              <p id="judge-status" class="form-status" role="status" hidden></p>
+              <div id="runs-sparkline" class="sparkline-wrap" hidden></div>
+              <div id="runs-body" class="runs-body"></div>
+            </section>
+            <section class="card" id="run-detail" aria-label="Run detail" hidden></section>
+          </section>
+
+          <!-- Hypotheses (LLM-proposed + human experiment backlog) -->
+          <section id="tab-hypotheses" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="hypotheses-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="hypotheses-h">Hypotheses</h2>
+                  <p class="card-sub">Experiment ideas — accept the good ones, then run them.</p>
+                  <p class="card-sub" id="propose-last" hidden></p>
+                </div>
+                <div class="head-actions">
+                  <button type="button" id="propose-btn">Propose experiments</button>
+                  <button type="button" id="hypothesis-add-toggle" class="ghost-btn">
+                    Add hypothesis
+                  </button>
+                </div>
+              </div>
+              <p id="hypotheses-status" class="form-status" role="status" hidden></p>
+              <form id="hypothesis-form" class="hypothesis-form" autocomplete="off" hidden></form>
+              <div id="hypotheses-body" class="hypotheses-body"></div>
+            </section>
+          </section>
+
+          <!-- Launch (sweep / fixed lever values → a training campaign) -->
+          <section id="tab-launch" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="launch-h">
+              <div class="card-head">
+                <h2 id="launch-h">Launch a campaign</h2>
+                <p class="card-sub">
+                  Sweep lever values or fix them — every combination runs once per seed.
+                </p>
+              </div>
+              <form id="launch-form" class="launch-form" autocomplete="off"></form>
+            </section>
+          </section>
+
+          <!-- Activity (the current / last campaign) -->
+          <section id="tab-activity" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="activity-h">
+              <div class="card-head">
+                <h2 id="activity-h">Activity</h2>
+                <p class="card-sub">The current or most recent training campaign.</p>
+              </div>
+              <div id="activity-body" class="activity-body"></div>
+            </section>
+          </section>
+        </main>
+
+        <footer class="page-foot">
+          <span id="foot-label">Trainer viewer</span>
+        </footer>
+      </div>
+    </div>
+  </body>
+</html>

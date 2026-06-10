@@ -1,8 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { TrainerManifest } from './modelTrainerTypes.js'
 import {
+  blendJudgeScore,
+  buildJudgeSystemPrompt,
+  buildJudgeUserContent,
+  buildProposeSystemPrompt,
+  buildProposeUserContent,
   canonicalConfigString,
+  coerceHypothesisItems,
+  coerceVerdictRows,
   expandExperimentMatrix,
+  normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
   validateTrainerManifest,
@@ -260,6 +268,195 @@ describe('totalCampaignUnits', () => {
 
   it('returns undefined for an empty plan', () => {
     expect(totalCampaignUnits([])).toBeUndefined()
+  })
+})
+
+describe('normalizeObjectiveScores', () => {
+  it('min-max normalises to 0-100 for max direction', () => {
+    const scores = normalizeObjectiveScores(
+      [
+        { key: 'low', objective: 10 },
+        { key: 'mid', objective: 55 },
+        { key: 'high', objective: 100 },
+      ],
+      'max',
+    )
+    expect(scores.get('low')).toBe(0)
+    expect(scores.get('mid')).toBe(50)
+    expect(scores.get('high')).toBe(100)
+  })
+
+  it('inverts for min direction', () => {
+    const scores = normalizeObjectiveScores(
+      [
+        { key: 'low', objective: 10 },
+        { key: 'high', objective: 100 },
+      ],
+      'min',
+    )
+    expect(scores.get('low')).toBe(100)
+    expect(scores.get('high')).toBe(0)
+  })
+
+  it('gives 50 to every run when all objectives are equal', () => {
+    const scores = normalizeObjectiveScores(
+      [
+        { key: 'a', objective: 7 },
+        { key: 'b', objective: 7 },
+      ],
+      'max',
+    )
+    expect(scores.get('a')).toBe(50)
+    expect(scores.get('b')).toBe(50)
+  })
+
+  it('returns an empty map for no entries', () => {
+    expect(normalizeObjectiveScores([], 'max').size).toBe(0)
+  })
+})
+
+describe('blendJudgeScore', () => {
+  it('blends objective and LLM scores by the weight', () => {
+    expect(blendJudgeScore(100, 0, 0.5)).toBe(50)
+    expect(blendJudgeScore(40, 80, 0.25)).toBe(50)
+  })
+
+  it('clamps out-of-range inputs', () => {
+    expect(blendJudgeScore(150, -10, 0.5)).toBe(50)
+  })
+
+  it('clamps the weight to [0,1]', () => {
+    expect(blendJudgeScore(100, 0, 2)).toBe(0)
+  })
+})
+
+describe('coerceVerdictRows', () => {
+  it('keeps valid rows, clamping and rounding scores', () => {
+    const rows = coerceVerdictRows([
+      { key: 'a', score: 88.6, why: 'solid' },
+      { key: 'b', score: 250, why: 'too high' },
+    ])
+    expect(rows).toEqual([
+      { key: 'a', score: 89, why: 'solid' },
+      { key: 'b', score: 100, why: 'too high' },
+    ])
+  })
+
+  it('drops rows without a key and tolerates junk', () => {
+    const rows = coerceVerdictRows([null, 'x', { score: 5 }, { key: 'ok', score: 5 }])
+    expect(rows).toEqual([{ key: 'ok', score: 5, why: '' }])
+  })
+
+  it('returns empty for a non-array', () => {
+    expect(coerceVerdictRows('nope' as never)).toEqual([])
+  })
+})
+
+describe('coerceHypothesisItems', () => {
+  const m = manifest()
+
+  it('keeps a valid proposal', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 'Higher lr',
+          rationale: 'best run used the top lr',
+          spec: { sweep: { lr: [0.2, 0.4] } },
+        },
+      ],
+      m,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].spec.sweep).toEqual({ lr: [0.2, 0.4] })
+  })
+
+  it('drops a proposal naming an unknown lever', () => {
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { sweep: { ghost: [1] } } }], m),
+    ).toEqual([])
+  })
+
+  it('drops a proposal with an empty sweep array', () => {
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { sweep: { lr: [] } } }], m),
+    ).toEqual([])
+  })
+
+  it('drops a proposal with no sweep and no fixed', () => {
+    expect(coerceHypothesisItems([{ title: 't', rationale: 'r', spec: {} }], m)).toEqual([])
+  })
+
+  it('accepts fixed-only specs and coerces integer seeds', () => {
+    const items = coerceHypothesisItems(
+      [{ title: 't', rationale: 'r', spec: { fixed: { lr: 0.9 }, seeds: [0, 1.7, 'x'] } }],
+      m,
+    )
+    expect(items[0].spec.fixed).toEqual({ lr: 0.9 })
+    expect(items[0].spec.seeds).toEqual([0, 1])
+  })
+
+  it('drops items missing a title or rationale', () => {
+    expect(
+      coerceHypothesisItems(
+        [
+          { rationale: 'r', spec: { fixed: { lr: 1 } } },
+          { title: 't', spec: { fixed: { lr: 1 } } },
+        ],
+        m,
+      ),
+    ).toEqual([])
+  })
+
+  it('drops a fixed value naming an unknown lever', () => {
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { fixed: { ghost: 1 } } }], m),
+    ).toEqual([])
+  })
+
+  it('returns empty for a non-array', () => {
+    expect(coerceHypothesisItems('nope' as never, m)).toEqual([])
+  })
+})
+
+describe('prompt builders', () => {
+  const m = manifest()
+
+  it('judge system prompt carries the objective, direction and output shape', () => {
+    const prompt = buildJudgeSystemPrompt(m, 'prefer fewer trades')
+    expect(prompt).toContain('score')
+    expect(prompt).toContain(m.objective.name)
+    expect(prompt).toContain('max')
+    expect(prompt).toContain('prefer fewer trades')
+    expect(prompt).toContain('"key"')
+  })
+
+  it('judge user content is the JSON of the runs', () => {
+    const content = buildJudgeUserContent([
+      { key: 'a', objective: 1, config: { lr: 0.1 }, metrics: { m1: 2 }, seed: 0 },
+    ])
+    const parsed = JSON.parse(content)
+    expect(parsed[0]).toMatchObject({ key: 'a', objective: 1 })
+  })
+
+  it('propose system prompt names the levers, count and output shape', () => {
+    const prompt = buildProposeSystemPrompt(m, 3, 'explore gamma')
+    expect(prompt).toContain('3')
+    expect(prompt).toContain('lr')
+    expect(prompt).toContain('explore gamma')
+    expect(prompt).toContain('"sweep"')
+  })
+
+  it('propose user content carries runs, verdicts and the best objective', () => {
+    const content = buildProposeUserContent({
+      manifest: m,
+      runs: [{ key: 'a', objective: 9, config: { lr: 0.1 } }],
+      verdicts: [{ key: 'a', score: 80, why: 'good' }],
+      bestObjective: 9,
+    })
+    const parsed = JSON.parse(content)
+    expect(parsed.bestObjective).toBe(9)
+    expect(parsed.runs[0].key).toBe('a')
+    expect(parsed.verdicts[0].score).toBe(80)
   })
 })
 

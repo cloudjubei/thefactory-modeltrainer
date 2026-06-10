@@ -1,21 +1,45 @@
-import type { ComputeRepoRef } from 'thefactory-tools/types'
-import { estimateCampaignEtaSeconds, runActivityWorkItems } from 'thefactory-tools/utils'
+import type { ComputeRepoRef, InferenceExecutor } from 'thefactory-tools/types'
+import {
+  deriveModelRef,
+  estimateCampaignEtaSeconds,
+  parseStructuredItems,
+  runActivityWorkItems,
+} from 'thefactory-tools/utils'
 import type {
   CalibrateTrainingParams,
   ExperimentSpec,
+  JudgeTrainingRunsParams,
+  JudgeTrainingRunsResult,
   ModelTrainerTools,
   ModelTrainerToolsDeps,
   PlannedTrainingItem,
+  ProposeTrainingHypothesesParams,
+  ProposeTrainingHypothesesResult,
   TrainerManifest,
   TrainingCalibration,
   TrainingCampaignParams,
   TrainingCampaignProgress,
   TrainingCampaignResult,
+  TrainingHypothesis,
+  TrainingVerdict,
 } from './modelTrainerTypes.js'
-import { DEFAULT_RAN_BY } from './modelTrainerConstants.js'
+import {
+  DEFAULT_HYPOTHESIS_COUNT,
+  DEFAULT_RAN_BY,
+  JUDGE_LLM_WEIGHT,
+  MAX_JUDGE_RUNS,
+} from './modelTrainerConstants.js'
 import { hashTrainingConfig, readTrainerManifest } from './modelTrainerHelpers.js'
 import {
+  blendJudgeScore,
+  buildJudgeSystemPrompt,
+  buildJudgeUserContent,
+  buildProposeSystemPrompt,
+  buildProposeUserContent,
+  coerceHypothesisItems,
+  coerceVerdictRows,
   expandExperimentMatrix,
+  normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
   validateTrainingRunSummary,
@@ -184,11 +208,236 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  function requireInferenceExecutor(): InferenceExecutor {
+    if (!deps.inferenceExecutor) {
+      throw new Error('judging/proposing requires an inferenceExecutor')
+    }
+    return deps.inferenceExecutor
+  }
+
+  async function listCompletedRuns(scope: string, recordType: string) {
+    const records = await deps.storage.listRecords({ scope, type: recordType })
+    return records
+      .filter(
+        (r) =>
+          r.key &&
+          (r.content as { status?: string })?.status === 'completed' &&
+          typeof (r.content as { objective?: unknown })?.objective === 'number',
+      )
+      .map((r) => ({ key: r.key as string, content: r.content as Record<string, unknown> }))
+  }
+
+  async function judgeTrainingRuns(
+    params: JudgeTrainingRunsParams,
+  ): Promise<JudgeTrainingRunsResult> {
+    const executor = requireInferenceExecutor()
+    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const recordType = manifest.recordType
+    const judgedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const judgedAt = now()
+    const runs = await listCompletedRuns(params.scope, recordType)
+
+    const verdicts: TrainingVerdict[] = []
+    const healthy: { key: string; objective: number; content: Record<string, unknown> }[] = []
+    for (const run of runs) {
+      const health = run.content.health as { status?: string; flags?: string[] } | undefined
+      if (health?.status && health.status !== 'ok') {
+        verdicts.push({
+          key: run.key,
+          score: 0,
+          objectiveScore: 0,
+          why: `auto-rejected on health: ${health.flags?.join(', ') || health.status}`,
+          rejected: true,
+          judgedBy,
+          judgedAt,
+        })
+        continue
+      }
+      healthy.push({
+        key: run.key,
+        objective: run.content.objective as number,
+        content: run.content,
+      })
+    }
+
+    if (healthy.length > 0) {
+      const direction = manifest.objective.direction
+      healthy.sort((a, b) =>
+        direction === 'max' ? b.objective - a.objective : a.objective - b.objective,
+      )
+      if (healthy.length > MAX_JUDGE_RUNS) {
+        logger?.warn('judging only the best runs; the rest keep objective-only verdicts', {
+          judged: MAX_JUDGE_RUNS,
+          total: healthy.length,
+        })
+      }
+      const sent = healthy.slice(0, MAX_JUDGE_RUNS)
+      const objectiveScores = normalizeObjectiveScores(healthy, direction)
+      const res = await executor.runInference({
+        systemPrompt: buildJudgeSystemPrompt(manifest, params.instructions),
+        userContent: buildJudgeUserContent(
+          sent.map((r) => ({
+            key: r.key,
+            objective: r.objective,
+            config: r.content.config as Record<string, unknown> | undefined,
+            metrics: r.content.metrics as Record<string, number> | undefined,
+            seed: r.content.seed as number | undefined,
+          })),
+        ),
+        model: { kind: 'api', llmConfig: params.llmConfig },
+        abortSignal: params.abortSignal,
+      })
+      const rowsByKey = new Map(
+        coerceVerdictRows(parseStructuredItems(res.text)).map((r) => [r.key, r]),
+      )
+      for (const run of healthy) {
+        const objectiveScore = objectiveScores.get(run.key) ?? 0
+        const row = rowsByKey.get(run.key)
+        verdicts.push(
+          row
+            ? {
+                key: run.key,
+                score: blendJudgeScore(objectiveScore, row.score, JUDGE_LLM_WEIGHT),
+                objectiveScore,
+                llmScore: row.score,
+                why: row.why,
+                judgedBy,
+                judgedAt,
+              }
+            : {
+                key: run.key,
+                score: objectiveScore,
+                objectiveScore,
+                why: 'no LLM verdict; scored on the objective alone',
+                judgedBy,
+                judgedAt,
+              },
+        )
+      }
+    }
+
+    const verdictType = `${recordType}-verdict`
+    for (const verdict of verdicts) {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: verdictType,
+        key: verdict.key,
+        content: verdict as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(verdictType, verdict.key)
+    }
+    logger?.info('judged training runs', {
+      recordType,
+      judged: verdicts.length,
+      rejected: verdicts.filter((v) => v.rejected).length,
+    })
+    return {
+      recordType,
+      judged: verdicts.length,
+      rejected: verdicts.filter((v) => v.rejected).length,
+      verdicts,
+      judgedBy,
+      judgedAt,
+    }
+  }
+
+  async function proposeTrainingHypotheses(
+    params: ProposeTrainingHypothesesParams,
+  ): Promise<ProposeTrainingHypothesesResult> {
+    const executor = requireInferenceExecutor()
+    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const recordType = manifest.recordType
+    const proposedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const proposedAt = now()
+    const count = params.count ?? DEFAULT_HYPOTHESIS_COUNT
+
+    const runs = await listCompletedRuns(params.scope, recordType)
+    const direction = manifest.objective.direction
+    runs.sort((a, b) =>
+      direction === 'max'
+        ? (b.content.objective as number) - (a.content.objective as number)
+        : (a.content.objective as number) - (b.content.objective as number),
+    )
+    const sentRuns = runs.slice(0, MAX_JUDGE_RUNS)
+    const verdictRecords = await deps.storage.listRecords({
+      scope: params.scope,
+      type: `${recordType}-verdict`,
+    })
+    const verdicts = coerceVerdictRows(verdictRecords.map((r) => r.content))
+
+    const res = await executor.runInference({
+      systemPrompt: buildProposeSystemPrompt(manifest, count, params.instructions),
+      userContent: buildProposeUserContent({
+        manifest,
+        runs: sentRuns.map((r) => ({
+          key: r.key,
+          objective: r.content.objective as number,
+          config: r.content.config as Record<string, unknown> | undefined,
+        })),
+        verdicts,
+        bestObjective: sentRuns[0]?.content.objective as number | undefined,
+      }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const hypothesisType = `${recordType}-hypothesis`
+    const existing = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
+    const seenIds = new Set(existing.map((r) => r.key).filter((k): k is string => !!k))
+
+    const items = coerceHypothesisItems(parseStructuredItems(res.text), manifest)
+    const hypotheses: TrainingHypothesis[] = []
+    let skippedExisting = 0
+    for (const item of items) {
+      if (hypotheses.length >= count) break
+      const id = hashTrainingConfig(item.spec as Record<string, unknown>)
+      if (seenIds.has(id)) {
+        skippedExisting += 1
+        continue
+      }
+      seenIds.add(id)
+      const hypothesis: TrainingHypothesis = {
+        id,
+        title: item.title,
+        rationale: item.rationale,
+        spec: item.spec,
+        status: 'pending',
+        source: 'llm',
+        proposedBy,
+        createdAt: proposedAt,
+        updatedAt: proposedAt,
+      }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: hypothesisType,
+        key: id,
+        content: hypothesis as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(hypothesisType, id)
+      hypotheses.push(hypothesis)
+    }
+    logger?.info('proposed training hypotheses', {
+      recordType,
+      proposed: hypotheses.length,
+      skippedExisting,
+    })
+    return {
+      recordType,
+      proposed: hypotheses.length,
+      skippedExisting,
+      hypotheses,
+      proposedBy,
+      proposedAt,
+    }
+  }
+
   return {
     readTrainerManifest: (projectRoot: string) => readTrainerManifest(projectRoot),
     planTrainingMatrix: (manifest: TrainerManifest, spec: ExperimentSpec) =>
       expandExperimentMatrix(manifest, spec, hashTrainingConfig),
     calibrateTrainingThroughput,
     runTrainingCampaign,
+    judgeTrainingRuns,
+    proposeTrainingHypotheses,
   }
 }

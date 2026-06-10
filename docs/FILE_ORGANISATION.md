@@ -17,6 +17,8 @@
   - `tabular/` — (planned, Phase 6) small DVC-tracked dataset; establishes the data path.
   - Each has `.factory/trainer.json`, a `trainer/` Python package with the CLI entry
     (`python -m trainer.run`), `configs/`, `pyproject.toml`, its own `.venv/` (gitignored).
-- `viewer/` — the no-build static dashboard served as the Overseer App view
-  (`index.html`, `app.js`, `bridge.js`, `style.css`). Shipped in the npm package (`files`).
+- `index.html` / `app.js` / `bridge.js` / `style.css` — the no-build static **hub app** at the
+  repo root (the template-app layout: the Overseer App view serves the checkout root, so
+  opening this project's App tab just works): a home screen of registered training projects
+  (directories) + a per-project dashboard (runs/launch/judge/hypotheses).
 - `dist/` — build output (gitignored); the surface dependents import.

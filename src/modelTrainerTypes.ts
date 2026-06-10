@@ -1,4 +1,9 @@
-import type { ComputeRunner, DataStorage } from 'thefactory-tools/types'
+import type {
+  ComputeRunner,
+  DataStorage,
+  InferenceExecutor,
+  LLMConfig,
+} from 'thefactory-tools/types'
 
 /** Throughput measured by a calibrate run, plus the campaign ETA derived from it. */
 export interface TrainingCalibration {
@@ -163,9 +168,89 @@ export interface TrainerLogger {
 export interface ModelTrainerToolsDeps {
   computeRunner: ComputeRunner
   storage: DataStorage
+  /** Required for judging/proposing; the train/calibrate surface works without it. */
+  inferenceExecutor?: InferenceExecutor
   logger?: TrainerLogger
   /** Injectable clock for deterministic tests; defaults to ISO now. */
   now?: () => string
+}
+
+/** One judged run: the deterministic objective blended with the LLM's verdict. */
+export interface TrainingVerdict {
+  /** The judged run record's key. */
+  key: string
+  /** Blended 0–100 score the viewer ranks by. */
+  score: number
+  /** Min–max-normalised objective (0–100, direction-aware). */
+  objectiveScore: number
+  /** The LLM's raw 0–100 score; absent when the model returned no row for this run. */
+  llmScore?: number
+  why: string
+  /** Health-flagged runs are auto-rejected without consulting the LLM. */
+  rejected?: boolean
+  /** Provenance label of the judging model. */
+  judgedBy?: string
+  judgedAt: string
+}
+
+export interface JudgeTrainingRunsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  llmConfig: LLMConfig
+  /** Extra rubric appended to the judge prompt. */
+  instructions?: string
+  abortSignal?: AbortSignal
+  /** Fired after each verdict record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface JudgeTrainingRunsResult {
+  recordType: string
+  judged: number
+  rejected: number
+  verdicts: TrainingVerdict[]
+  judgedBy: string
+  judgedAt: string
+}
+
+/** A proposed experiment in the durable backlog — nothing gets lost between sessions. */
+export interface TrainingHypothesis {
+  /** Stable hash of the proposed spec — identical proposals dedupe. */
+  id: string
+  title: string
+  rationale: string
+  spec: ExperimentSpec
+  status: 'pending' | 'accepted' | 'rejected'
+  source: 'human' | 'llm'
+  /** Provenance label of the proposing model (absent for human entries). */
+  proposedBy?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProposeTrainingHypothesesParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  llmConfig: LLMConfig
+  /** How many proposals to ask for; defaults to {@link DEFAULT_HYPOTHESIS_COUNT}. */
+  count?: number
+  /** Extra guidance appended to the proposer prompt. */
+  instructions?: string
+  abortSignal?: AbortSignal
+  /** Fired after each hypothesis record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface ProposeTrainingHypothesesResult {
+  recordType: string
+  proposed: number
+  /** Proposals whose spec already exists as a hypothesis record (any status). */
+  skippedExisting: number
+  hypotheses: TrainingHypothesis[]
+  proposedBy: string
+  proposedAt: string
 }
 
 /**
@@ -184,4 +269,16 @@ export interface ModelTrainerTools {
   ): Promise<TrainingCalibration | undefined>
   /** Plan → skip-if-fresh → run each item → persist records → report progress. */
   runTrainingCampaign(params: TrainingCampaignParams): Promise<TrainingCampaignResult>
+  /**
+   * Score every completed run: auto-reject health-flagged ones, blend the
+   * normalised objective with an LLM verdict, persist `{recordType}-verdict` records.
+   */
+  judgeTrainingRuns(params: JudgeTrainingRunsParams): Promise<JudgeTrainingRunsResult>
+  /**
+   * Ask an LLM for the next experiments given run history + verdicts; persist new
+   * `{recordType}-hypothesis` records (deduped by spec hash, existing statuses kept).
+   */
+  proposeTrainingHypotheses(
+    params: ProposeTrainingHypothesesParams,
+  ): Promise<ProposeTrainingHypothesesResult>
 }

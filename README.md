@@ -17,7 +17,9 @@ BlackSwanExperiments is the first consumer.
   campaign orchestration over a `ComputeRunner`.
 - `examples/cartpole/` — the executable specification of the standard: SB3 + gymnasium RL,
   no data, trains in seconds on CPU.
-- `viewer/` — the no-build static dashboard the Overseer serves as the project's App view.
+- `index.html` + `app.js` + `bridge.js` + `style.css` — the no-build static **hub app** at the
+  repo root, served as this project's Overseer App view (the same layout as the template
+  apps): register training projects by directory, then run/judge/propose per project.
 
 ## Develop
 

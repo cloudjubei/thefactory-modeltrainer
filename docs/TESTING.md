@@ -33,8 +33,9 @@ functions 95 / lines 95). New/changed code gets an atomic test per branch and ed
 
 - `examples/*` Python projects — exercised by integration smoke runs (a real tiny campaign),
   not vitest.
-- `viewer/` — a no-build static app; logical helpers may be extracted and tested if they grow,
-  UI behaviour is verified in the running Overseer.
+- the root app files (`index.html`/`app.js`/`bridge.js`/`style.css`) — a no-build static app;
+  logical helpers may be extracted and tested if they grow, UI behaviour is verified in the
+  running Overseer.
 
 ## Integration smoke
 
