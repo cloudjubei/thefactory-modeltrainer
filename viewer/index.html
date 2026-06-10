@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Trainer</title>
+    <link rel="stylesheet" href="style.css" />
+    <script src="bridge.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <div class="topbar">
+      <nav class="tabbar" id="tabbar" role="tablist" aria-label="Sections"></nav>
+    </div>
+
+    <div class="app-scroll">
+      <main class="tab-main" id="app-main">
+        <p id="app-banner" class="app-banner" role="status" hidden></p>
+
+        <!-- Runs (completed training runs, best first) -->
+        <section id="tab-runs" class="tab-panel" role="tabpanel" hidden>
+          <section class="card" aria-labelledby="runs-h">
+            <div class="card-head">
+              <h2 id="runs-h">Runs</h2>
+              <p class="card-sub" id="runs-sub">Every training run, best first.</p>
+            </div>
+            <div id="runs-sparkline" class="sparkline-wrap" hidden></div>
+            <div id="runs-body" class="runs-body"></div>
+          </section>
+          <section class="card" id="run-detail" aria-label="Run detail" hidden></section>
+        </section>
+
+        <!-- Launch (sweep / fixed lever values → a training campaign) -->
+        <section id="tab-launch" class="tab-panel" role="tabpanel" hidden>
+          <section class="card" aria-labelledby="launch-h">
+            <div class="card-head">
+              <h2 id="launch-h">Launch a campaign</h2>
+              <p class="card-sub">
+                Sweep lever values or fix them — every combination runs once per seed.
+              </p>
+            </div>
+            <form id="launch-form" class="launch-form" autocomplete="off"></form>
+          </section>
+        </section>
+
+        <!-- Activity (the current / last campaign) -->
+        <section id="tab-activity" class="tab-panel" role="tabpanel" hidden>
+          <section class="card" aria-labelledby="activity-h">
+            <div class="card-head">
+              <h2 id="activity-h">Activity</h2>
+              <p class="card-sub">The current or most recent training campaign.</p>
+            </div>
+            <div id="activity-body" class="activity-body"></div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="page-foot">
+        <span id="foot-label">Trainer viewer</span>
+      </footer>
+    </div>
+  </body>
+</html>

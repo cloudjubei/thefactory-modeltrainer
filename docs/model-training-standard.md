@@ -18,18 +18,25 @@ something the orchestrator or a comparison actually depends on.
 ```jsonc
 {
   "name": "cartpole",
-  "recordType": "cartpole-run",          // namespaces all DataStorage records
-  "run":       "python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
+  "recordType": "cartpole-run", // namespaces all DataStorage records
+  "run": "python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
   "calibrate": "python -m trainer.run --calibrate --summary-out {summaryOut}",
-  "objective": { "name": "eval_return", "direction": "max" },   // single north-star
-  "levers": {                            // the sweepable config space (renders the launch form)
+  "objective": { "name": "eval_return", "direction": "max" }, // single north-star
+  "levers": {
+    // the sweepable config space (renders the launch form)
     "learning_rate": { "type": "number", "default": 3e-4, "range": [1e-5, 1e-2] },
-    "gamma":         { "type": "number", "default": 0.99 },
-    "net_arch":      { "type": "choice", "choices": [[64,64],[256,256]] }
+    "gamma": { "type": "number", "default": 0.99 },
+    "net_arch": {
+      "type": "choice",
+      "choices": [
+        [64, 64],
+        [256, 256],
+      ],
+    },
   },
-  "data": [],                            // dataset requirements; [] = self-contained/no data
-  "resources": { "gpu": false, "memory": "2g", "cpus": 2 },     // declared needs → "how big a machine"
-  "image": "thefactory/trainer-cartpole:latest"                // reproducible run image (optional locally)
+  "data": [], // dataset requirements; [] = self-contained/no data
+  "resources": { "gpu": false, "memory": "2g", "cpus": 2 }, // declared needs → "how big a machine"
+  "image": "thefactory/trainer-cartpole:latest", // reproducible run image (optional locally)
 }
 ```
 
@@ -64,16 +71,21 @@ contract's hard requirement is the final `RunSummary`.
 
 ```jsonc
 {
-  "objective": 487.3,                    // the single north-star value (matches manifest.objective.name)
-  "metrics": {                           // standard battery; project-specific keys allowed
-    "train_return": 495.0, "eval_return": 487.3, "baseline_return": 21.0
+  "objective": 487.3, // the single north-star value (matches manifest.objective.name)
+  "metrics": {
+    // standard battery; project-specific keys allowed
+    "train_return": 495.0,
+    "eval_return": 487.3,
+    "baseline_return": 21.0,
   },
-  "health": { "status": "ok", "flags": [] },   // e.g. ["degenerate_policy","nan_loss","zero_trades"]
+  "health": { "status": "ok", "flags": [] }, // e.g. ["degenerate_policy","nan_loss","zero_trades"]
   "seed": 0,
-  "seedAggregate": { "mean": 480.1, "median": 488.0, "std": 12.4, "n": 5 },  // when multi-seed
-  "config": { /* the fully resolved config that produced this run */ },
+  "seedAggregate": { "mean": 480.1, "median": 488.0, "std": 12.4, "n": 5 }, // when multi-seed
+  "config": {
+    /* the fully resolved config that produced this run */
+  },
   "provenance": { "gitCommit": "abc123", "dataVersion": "dvc:…", "configHash": "…", "ranAt": "…" },
-  "artifacts": { "checkpoint": "checkpoints/…", "best": true }   // ref, not the bytes
+  "artifacts": { "checkpoint": "checkpoints/…", "best": true }, // ref, not the bytes
 }
 ```
 
