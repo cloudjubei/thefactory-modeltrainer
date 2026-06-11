@@ -1379,24 +1379,29 @@ function evaluationSectionHtml(run) {
     ${button}${statusLine}`
 }
 function trainingCurveSectionHtml(summary) {
-  const values =
-    summary.series && Array.isArray(summary.series.episode_return)
-      ? summary.series.episode_return
-      : []
-  const points = values
-    .map((v, i) => ({ x: i, y: Number(v), label: `episode ${i} · return ${formatObjective(v)}` }))
+  const series = summary.series
+  if (!series || typeof series !== 'object') return ''
+  // Render the first numeric series the project emitted (episode_return for
+  // RL, val_rmse for regression, equity for trading…), labelled by its key.
+  const seriesKey = Object.keys(series).find(
+    (k) => Array.isArray(series[k]) && series[k].length >= 2,
+  )
+  if (!seriesKey) return ''
+  const label = seriesKey.replace(/_/g, ' ')
+  const points = series[seriesKey]
+    .map((v, i) => ({ x: i, y: Number(v), label: `${label} · step ${i} · ${formatObjective(v)}` }))
     .filter((p) => Number.isFinite(p.y))
   if (points.length < 2) return ''
   const svg = buildLineChart({
     points,
-    xLabel: 'episode',
-    yLabel: 'return',
+    xLabel: 'step',
+    yLabel: label,
     width: 640,
     height: 180,
     markers: points.length <= 80,
-    ariaLabel: 'Training curve (episode return)',
+    ariaLabel: `Training curve (${label})`,
   })
-  return `<h3>Training curve (episode return)</h3><div class="chart-wrap">${svg}</div>`
+  return `<h3>Training curve (${escapeHtml(label)})</h3><div class="chart-wrap">${svg}</div>`
 }
 function renderRunDetail(key) {
   const panel = byId('run-detail')

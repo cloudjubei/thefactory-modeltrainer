@@ -18,21 +18,6 @@ model is _data + the thin CLI contract_, not engine code.
 
 ---
 
-## Phase 7 — Migrate BlackSwanExperiments to the standard (the payoff)
-
-Via Overseer Stories / CLI-agents against the Python repo:
-
-- Conform the entrypoint: `--config-json` / `--summary-out` / `--calibrate`; write
-  `.factory/trainer.json` (+ a Dockerfile declaring GPU/resources).
-- Make the science judgeable: implement the stubbed risk-adjusted objective
-  (Sharpe/CAGR/max-drawdown), seed-aggregate the `iterations_to_pick_best` runs,
-  hodl-relative baseline, degenerate-policy health flag.
-- Re-enable MLflow params+metrics logging; checkpoint-best with run→metrics traceability.
-- Prune dead paths (dead env types, commented MLflow, broken `config_simple` default).
-- Register BlackSwan in the Model Trainer hub by its absolute directory (it stays a plain
-  repo on disk — no Overseer project needed for running; Stories/CLI-agent editing of the
-  Python code is a separate concern). Then run real campaigns — local first, then remote.
-
 ## Phase 8 (optional) — Autopilot + live handoff
 
 Scheduled meta-activity (propose → run → judge → promote, human-approved); on a winner, tag
@@ -49,6 +34,14 @@ preemptively.
 ---
 
 ## Carried-over cleanups (small, no phase dependency)
+
+- BlackSwan dip/regression line: the repo's currently-active research
+  (`regression_predict` env + `model_regression_dip`, f1-style objective) is NOT covered by
+  the trading-line manifest (one objective per project). Give it its own manifest/entrypoint
+  when wanted — needs either a second manifest path convention or a sibling registration.
+- BlackSwan seed plumbing depth: `trainer/run.py` seeds python/numpy/torch/SB3 globally,
+  but most algo constructors in `model_factory.py` don't take a `seed=` arg — per-algo
+  determinism is best-effort until seeds are forwarded into the constructors.
 
 - Migrate `RecommendTools.buildProductCatalog`'s internal per-item loop onto
   `runActivityWorkItems` (the generic engine was built fresh; recommend still owns a private
