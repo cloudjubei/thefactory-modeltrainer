@@ -10,14 +10,10 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
-    "index.html",
-    "app.js",
-    "bridge.js",
-    "style.css"
+    "viewer"
   ],
   "exports": {
-    ".": "./dist/index.js",
-    "./package.json": "./package.json"
+    ".": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

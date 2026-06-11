@@ -1,9 +1,12 @@
 """Model/policy factory: SB3 PPO or DQN on CartPole-v1."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import gymnasium as gym
 from stable_baselines3 import DQN, PPO
 from stable_baselines3.common.base_class import BaseAlgorithm
+from stable_baselines3.common.monitor import Monitor
 
 from trainer.config import TrainerConfig
 
@@ -18,11 +21,14 @@ def build_env() -> gym.Env:
     return gym.make(ENV_ID)
 
 
-def build_model(config: TrainerConfig) -> BaseAlgorithm:
-    algo_cls = PPO if config.algo == "ppo" else DQN
-    return algo_cls(
+def build_train_env() -> Monitor:
+    return Monitor(build_env())
+
+
+def build_model(config: TrainerConfig, env: gym.Env) -> BaseAlgorithm:
+    return _algo_class(config.algo)(
         "MlpPolicy",
-        build_env(),
+        env,
         learning_rate=config.learning_rate,
         gamma=config.gamma,
         seed=config.seed,
@@ -30,3 +36,11 @@ def build_model(config: TrainerConfig) -> BaseAlgorithm:
         device="cpu",
         verbose=0,
     )
+
+
+def load_model(config: TrainerConfig, checkpoint: Path) -> BaseAlgorithm:
+    return _algo_class(config.algo).load(str(checkpoint), device="cpu")
+
+
+def _algo_class(algo: str) -> type[BaseAlgorithm]:
+    return PPO if algo == "ppo" else DQN

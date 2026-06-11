@@ -62,6 +62,12 @@ export interface TrainerManifest {
   run: string
   /** Calibrate-command template containing `{summaryOut}`; omit if the project cannot calibrate. */
   calibrate?: string
+  /**
+   * Evaluate-command template (same `{configPath}`/`{summaryOut}` contract as `run`); the
+   * config it receives carries the original run's levers plus `checkpoint`. Omit if the
+   * project cannot re-evaluate saved checkpoints.
+   */
+  evaluate?: string
   objective: TrainerObjective
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
@@ -105,6 +111,29 @@ export interface TrainingRunSummary {
   artifacts?: Record<string, unknown>
   /** Present on calibrate runs: throughput for ETA math. */
   calibration?: { unitsPerSecond?: number; secondsObserved?: number; units?: number }
+  /** Optional per-run curves (e.g. `episode_return`) for the viewer's training-curve chart. */
+  series?: Record<string, number[]>
+  /** Present on evaluate runs: which checkpoint was re-tested and how hard. */
+  evaluation?: { checkpoint?: string; episodes?: number }
+}
+
+export interface EvaluateTrainingRunParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Key of the completed run record whose checkpoint gets re-evaluated. */
+  runKey: string
+  abortSignal?: AbortSignal
+  /** Fired after the evaluation record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface EvaluateTrainingRunResult {
+  recordType: string
+  runKey: string
+  /** The evaluation's objective value (e.g. mean return over the eval episodes). */
+  objective: number
+  evaluatedAt: string
 }
 
 /** Streamed campaign progress — written to the `{recordType}-progress` record by the host activity. */
@@ -269,6 +298,11 @@ export interface ModelTrainerTools {
   ): Promise<TrainingCalibration | undefined>
   /** Plan → skip-if-fresh → run each item → persist records → report progress. */
   runTrainingCampaign(params: TrainingCampaignParams): Promise<TrainingCampaignResult>
+  /**
+   * Re-test a completed run's saved checkpoint via the manifest's `evaluate`
+   * command, persisting the result as a `{recordType}-evaluation` record.
+   */
+  evaluateTrainingRun(params: EvaluateTrainingRunParams): Promise<EvaluateTrainingRunResult>
   /**
    * Score every completed run: auto-reject health-flagged ones, blend the
    * normalised objective with an LLM verdict, persist `{recordType}-verdict` records.

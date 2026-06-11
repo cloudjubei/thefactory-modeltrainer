@@ -7,6 +7,8 @@ import {
 } from 'thefactory-tools/utils'
 import type {
   CalibrateTrainingParams,
+  EvaluateTrainingRunParams,
+  EvaluateTrainingRunResult,
   ExperimentSpec,
   JudgeTrainingRunsParams,
   JudgeTrainingRunsResult,
@@ -206,6 +208,54 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ...(calibration ? { calibration } : {}),
       finishedAt: now(),
     }
+  }
+
+  async function evaluateTrainingRun(
+    params: EvaluateTrainingRunParams,
+  ): Promise<EvaluateTrainingRunResult> {
+    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    if (!manifest.evaluate) {
+      throw new Error('trainer manifest declares no evaluate command')
+    }
+    const recordType = manifest.recordType
+    const record = await deps.storage.readRecord({
+      scope: params.scope,
+      type: recordType,
+      key: params.runKey,
+    })
+    if (!record) throw new Error(`no run record for key ${params.runKey}`)
+    const content = record.content as {
+      config?: Record<string, unknown>
+      artifacts?: { checkpoint?: unknown }
+    }
+    const checkpoint = content.artifacts?.checkpoint
+    if (typeof checkpoint !== 'string' || !checkpoint) {
+      throw new Error(`run ${params.runKey} has no checkpoint artifact to evaluate`)
+    }
+
+    const handle = deps.computeRunner.runJob({
+      jobId: `eval-${params.runKey}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.evaluate,
+      config: { ...(content.config ?? {}), checkpoint },
+      abortSignal: params.abortSignal,
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      throw new Error(result.error ?? `evaluation exited with code ${result.exitCode}`)
+    }
+    const summary = validateTrainingRunSummary(result.summary)
+    const evaluatedAt = now()
+    const evaluationType = `${recordType}-evaluation`
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: evaluationType,
+      key: params.runKey,
+      content: { ...summary, runKey: params.runKey, status: 'completed', evaluatedAt },
+    })
+    params.onRecordWritten?.(evaluationType, params.runKey)
+    logger?.info('evaluated training run', { recordType, runKey: params.runKey })
+    return { recordType, runKey: params.runKey, objective: summary.objective, evaluatedAt }
   }
 
   function requireInferenceExecutor(): InferenceExecutor {
@@ -437,6 +487,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       expandExperimentMatrix(manifest, spec, hashTrainingConfig),
     calibrateTrainingThroughput,
     runTrainingCampaign,
+    evaluateTrainingRun,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
   }

@@ -61,6 +61,11 @@ A single entrypoint (`python -m trainer.run`) honoring:
 - `--calibrate` — a deliberately tiny end-to-end pass (few steps, one config). Reports
   throughput (`fps`/`secondsObserved`) for ETA **and** doubles as a fast correctness/smoke
   gate (non-zero exit ⇒ the project is broken; usable in CI).
+- `--evaluate` (optional; manifest `evaluate` command template) — re-test a saved checkpoint:
+  the config it receives carries the original run's levers plus `checkpoint` (and optionally
+  `eval_episodes`). No training, no checkpoint writing; writes a `RunSummary` whose
+  `objective` is the fresh evaluation result, with a top-level
+  `evaluation: { checkpoint, episodes }`. Missing/unloadable checkpoint ⇒ non-zero exit.
 
 Streaming during a run is encouraged (progress/metrics to stdout + the tracker) but the
 contract's hard requirement is the final `RunSummary`.
@@ -86,6 +91,11 @@ contract's hard requirement is the final `RunSummary`.
   },
   "provenance": { "gitCommit": "abc123", "dataVersion": "dvc:…", "configHash": "…", "ranAt": "…" },
   "artifacts": { "checkpoint": "checkpoints/…", "best": true }, // ref, not the bytes
+  "series": {
+    "episode_return": [
+      /* ≤200 downsampled points */
+    ],
+  }, // optional per-run curves
 }
 ```
 

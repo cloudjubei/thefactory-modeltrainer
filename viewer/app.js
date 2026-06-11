@@ -3,9 +3,9 @@
 // user registers training-project directories as 'trainer-project' records, a
 // backend 'inspect-trainer' activity writes each project's manifest into a
 // 'trainer-project-manifest' record, and opening a project shows the usual
-// runs/hypotheses/launch/activity dashboard scoped to that manifest's record
-// types, with the project's `dir` threaded into every train/judge/propose
-// activity.
+// runs/charts/hypotheses/launch/activity dashboard scoped to that manifest's
+// record types, with the project's `dir` threaded into every
+// train/judge/propose/evaluate activity.
 
 const POLL_MS = 3000
 const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
@@ -15,6 +15,7 @@ const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const TABS = [
   { id: 'runs', label: 'Runs' },
+  { id: 'charts', label: 'Charts' },
   { id: 'hypotheses', label: 'Hypotheses' },
   { id: 'launch', label: 'Launch' },
   { id: 'activity', label: 'Activity' },
@@ -35,6 +36,8 @@ let manifest = null
 let activeTabId = null
 let runsCache = []
 let verdictsCache = new Map()
+let evaluationsCache = new Map()
+const evaluatingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
 let proposalSummary = null
@@ -157,6 +160,17 @@ async function readVerdicts() {
 }
 async function readJudgement() {
   return readLatestRecord('-judgement')
+}
+async function readEvaluations() {
+  if (!manifest) return new Map()
+  const recs = await queryRecords(manifest.recordType + '-evaluation')
+  const map = new Map()
+  for (const r of recs) {
+    const content = r.content || {}
+    const key = r.key || content.runKey || ''
+    if (key) map.set(key, content)
+  }
+  return map
 }
 async function readProposal() {
   return readLatestRecord('-proposal')
@@ -362,6 +376,8 @@ function showView(view) {
 function resetDashboardState() {
   runsCache = []
   verdictsCache = new Map()
+  evaluationsCache = new Map()
+  evaluatingKeys.clear()
   judgementSummary = null
   hypothesesCache = []
   proposalSummary = null
@@ -385,6 +401,8 @@ function resetDashboardState() {
   }
   const hypothesesBody = byId('hypotheses-body')
   if (hypothesesBody) hypothesesBody.innerHTML = ''
+  const chartsBody = byId('charts-body')
+  if (chartsBody) chartsBody.innerHTML = ''
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -507,6 +525,17 @@ function verdictChipHtml(verdict) {
   const cls = score >= 70 ? 'is-ok' : score >= 40 ? 'is-warn' : 'is-bad'
   return `<span class="badge score-chip ${cls}">${escapeHtml(String(Math.round(score)))}</span>`
 }
+// Green when the re-test held up the training result (respecting the
+// objective's direction), amber when it came back worse.
+function evalChipHtml(run) {
+  const evaluation = evaluationsCache.get(run.key)
+  const value = evaluation ? Number(evaluation.objective) : NaN
+  if (!Number.isFinite(value)) return '<span class="judge-none">—</span>'
+  const train = Number(run.summary.objective)
+  const heldUp =
+    !Number.isFinite(train) || (objectiveDirection() === 'min' ? value <= train : value >= train)
+  return `<span class="badge eval-chip ${heldUp ? 'is-ok' : 'is-warn'}">${escapeHtml(formatObjective(value))}</span>`
+}
 function runRowHtml(run) {
   const s = run.summary
   const selected = run.key === selectedRunKey ? ' class="is-selected"' : ''
@@ -515,6 +544,7 @@ function runRowHtml(run) {
     <td class="num">${escapeHtml(formatObjective(s.objective))}</td>
     <td>${healthBadgeHtml(s.health)}</td>
     <td>${verdictChipHtml(verdictsCache.get(run.key))}</td>
+    <td>${evalChipHtml(run)}</td>
     <td class="num">${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}</td>
     <td class="config-cell">${escapeHtml(configSummaryText(s.config))}</td>
     <td class="when-cell">${escapeHtml(formatWhen(runRanAt(s)))}</td>
@@ -524,10 +554,11 @@ async function renderRuns() {
   const body = byId('runs-body')
   const spark = byId('runs-sparkline')
   if (!body) return
-  ;[runsCache, verdictsCache, judgementSummary] = await Promise.all([
+  ;[runsCache, verdictsCache, judgementSummary, evaluationsCache] = await Promise.all([
     readRuns(),
     readVerdicts(),
     readJudgement(),
+    readEvaluations(),
   ])
   renderJudgeControls()
   if (spark) {
@@ -544,7 +575,7 @@ async function renderRuns() {
   body.innerHTML = `<div class="table-wrap"><table class="runs-table">
     <thead><tr>
       <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Health</th>
-      <th>Judge</th><th class="num">Seed</th><th>Config</th><th>Ran at</th>
+      <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th>Ran at</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`
@@ -585,6 +616,71 @@ function verdictSectionHtml(verdict) {
     ${verdict.why ? `<p class="verdict-why">${escapeHtml(verdict.why)}</p>` : ''}
     ${judgedLine}`
 }
+// The run's live re-test of its saved checkpoint: an Evaluate button while no
+// evaluation exists, a spinner while the evaluate activity runs, and the stored
+// evaluation record (eval vs train objective, episodes, health) once it has.
+function evaluationSectionHtml(run) {
+  const s = run.summary
+  const statusLine = '<p id="run-eval-status" class="form-status" role="status" hidden></p>'
+  if (evaluatingKeys.has(run.key)) {
+    return `<h3>Evaluation</h3>
+      <p class="card-sub"><span class="spinner" aria-hidden="true"></span> Evaluating — re-running the saved checkpoint…</p>
+      ${statusLine}`
+  }
+  const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
+  const evaluation = evaluationsCache.get(run.key)
+  const button = checkpoint
+    ? `<div class="form-actions"><button type="button" data-action="evaluate" data-key="${escapeHtml(run.key)}">${evaluation ? 'Re-evaluate' : 'Evaluate'}</button></div>`
+    : ''
+  if (!evaluation) {
+    const hint = checkpoint
+      ? 'Not evaluated yet — re-test the saved checkpoint.'
+      : 'No saved checkpoint — this run cannot be evaluated.'
+    return `<h3>Evaluation</h3><p class="card-sub">${escapeHtml(hint)}</p>${button}${statusLine}`
+  }
+  const evalObjective = Number(evaluation.objective)
+  const train = Number(s.objective)
+  const delta =
+    Number.isFinite(evalObjective) && Number.isFinite(train) ? evalObjective - train : NaN
+  const deltaText = Number.isFinite(delta)
+    ? `${delta >= 0 ? '+' : ''}${formatObjective(delta)}`
+    : '—'
+  const episodes = Number(
+    (evaluation.evaluation || {}).episodes ?? (evaluation.metrics || {}).episodes_evaluated,
+  )
+  const statusBit =
+    evaluation.status && evaluation.status !== 'completed' ? ` · ${evaluation.status}` : ''
+  return `<h3>Evaluation</h3>
+    <p class="badges-row">${healthBadgeHtml(evaluation.health)}</p>
+    <table class="kv-table"><tbody>
+      <tr><th>Eval ${escapeHtml(objectiveName())}</th><td class="num">${escapeHtml(formatObjective(evalObjective))}</td></tr>
+      <tr><th>Train ${escapeHtml(objectiveName())}</th><td class="num">${escapeHtml(formatObjective(train))}</td></tr>
+      <tr><th>Delta (eval − train)</th><td class="num">${escapeHtml(deltaText)}</td></tr>
+      <tr><th>Episodes</th><td class="num">${escapeHtml(Number.isFinite(episodes) ? String(episodes) : '—')}</td></tr>
+    </tbody></table>
+    <p class="card-sub">Evaluated ${escapeHtml(formatWhen(evaluation.evaluatedAt))}${escapeHtml(statusBit)}</p>
+    ${button}${statusLine}`
+}
+function trainingCurveSectionHtml(summary) {
+  const values =
+    summary.series && Array.isArray(summary.series.episode_return)
+      ? summary.series.episode_return
+      : []
+  const points = values
+    .map((v, i) => ({ x: i, y: Number(v), label: `episode ${i} · return ${formatObjective(v)}` }))
+    .filter((p) => Number.isFinite(p.y))
+  if (points.length < 2) return ''
+  const svg = buildLineChart({
+    points,
+    xLabel: 'episode',
+    yLabel: 'return',
+    width: 640,
+    height: 180,
+    markers: points.length <= 80,
+    ariaLabel: 'Training curve (episode return)',
+  })
+  return `<h3>Training curve (episode return)</h3><div class="chart-wrap">${svg}</div>`
+}
 function renderRunDetail(key) {
   const panel = byId('run-detail')
   if (!panel) return
@@ -612,8 +708,10 @@ function renderRunDetail(key) {
     <h3>Health flags</h3>
     <p class="badges-row">${flagChips}</p>
     ${verdictSectionHtml(verdictsCache.get(run.key))}
+    ${evaluationSectionHtml(run)}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
+    ${trainingCurveSectionHtml(s)}
     <h3>Config</h3>
     <pre class="json">${escapeHtml(JSON.stringify(s.config || {}, null, 2))}</pre>
     <h3>Artifacts</h3>
@@ -717,6 +815,35 @@ async function onJudgeClick() {
     if (epoch === projectEpoch) await renderRuns()
   }
 }
+// Re-test one run's saved checkpoint via the quick 'evaluate' activity (no
+// LLM): start it, observe until it settles, then re-read the evaluation record
+// through renderRuns so the table chip and the detail section both refresh.
+async function onEvaluateRun(key) {
+  if (evaluatingKeys.has(key) || !embedded()) return
+  if (!runsCache.some((r) => r.key === key)) return
+  const epoch = projectEpoch
+  evaluatingKeys.add(key)
+  if (selectedRunKey === key) renderRunDetail(key)
+  let failure = ''
+  try {
+    const started = await window.OverseerBridge.startActivity(
+      'evaluate',
+      trainerActivityParams({ runKey: key }),
+    )
+    const activityId = started && started.activityId
+    if (!activityId) throw new Error('no activity id')
+    const act = await observeQuickActivity(activityId)
+    failure = quickActivityFailureText(act, 'Evaluating')
+  } catch {
+    failure = 'Could not start evaluating — please try again.'
+  } finally {
+    evaluatingKeys.delete(key)
+    if (epoch === projectEpoch) {
+      await renderRuns()
+      if (failure && selectedRunKey === key) setStatusLine('run-eval-status', failure, true)
+    }
+  }
+}
 function setupRuns() {
   const body = byId('runs-body')
   if (body) {
@@ -729,10 +856,324 @@ function setupRuns() {
   if (panel) {
     panel.addEventListener('click', (event) => {
       if (event.target.closest('#run-detail-close')) closeRunDetail()
+      const evalBtn = event.target.closest('button[data-action="evaluate"]')
+      if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
     })
   }
   const judgeBtn = byId('judge-btn')
   if (judgeBtn) judgeBtn.addEventListener('click', onJudgeClick)
+}
+
+// --- SVG chart helpers (hand-rolled, no libs) ----------------------------------
+// One shared XY chart builder behind two thin wrappers: buildLineChart and
+// buildScatterChart take { points: [{ x, y, label?, marker? }], xLabel, yLabel,
+// logX?, xTime?, refDiagonal?, markers?, width?, height?, ariaLabel? } and
+// return an SVG string with axes, grid lines, ticks and per-point <title>
+// tooltips. Scales come from three tiny tick generators below.
+function formatTickValue(value) {
+  const v = Number(value)
+  if (!Number.isFinite(v)) return ''
+  const a = Math.abs(v)
+  if (a !== 0 && (a < 0.001 || a >= 1e5)) return v.toExponential(1)
+  return String(Math.round(v * 1000) / 1000)
+}
+function timeTickFormat(values) {
+  const span = Math.max(...values) - Math.min(...values)
+  if (span < 24 * 60 * 60 * 1000) {
+    return (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  }
+  return (t) => new Date(t).toLocaleDateString()
+}
+function niceStep(rough) {
+  const base = Math.pow(10, Math.floor(Math.log10(rough)))
+  const f = rough / base
+  return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 5 ? 5 : 10) * base
+}
+// Linear scale snapped to "nice" tick steps; always spans at least one step.
+function linearScale(values) {
+  let min = Math.min(...values)
+  let max = Math.max(...values)
+  if (min === max) {
+    const bump = (Math.abs(min) || 1) / 2
+    min -= bump
+    max += bump
+  }
+  const step = niceStep((max - min) / 4)
+  const lo = Math.floor(min / step) * step
+  const hi = Math.ceil(max / step) * step
+  const ticks = []
+  for (let v = lo; v <= hi + step / 2; v += step) ticks.push(v)
+  return { ticks, pos: (v) => (v - lo) / (hi - lo) }
+}
+// Log10 scale (positive values only) with a tick per decade.
+function logScale(values) {
+  const lo = Math.floor(Math.log10(Math.min(...values)))
+  const rawHi = Math.ceil(Math.log10(Math.max(...values)))
+  const hi = rawHi === lo ? lo + 1 : rawHi
+  const ticks = []
+  for (let e = lo; e <= hi; e++) ticks.push(Math.pow(10, e))
+  return { ticks, pos: (v) => (Math.log10(v) - lo) / (hi - lo) }
+}
+// Raw-span scale with evenly spaced ticks — used for time axes, where "nice"
+// millisecond steps land on meaningless instants.
+function spanScale(values, tickCount) {
+  let min = Math.min(...values)
+  let max = Math.max(...values)
+  if (min === max) {
+    min -= 1
+    max += 1
+  }
+  const n = Math.max(2, tickCount || 4)
+  const ticks = Array.from({ length: n }, (_, i) => min + ((max - min) * i) / (n - 1))
+  return { ticks, pos: (v) => (v - min) / (max - min) }
+}
+function buildXyChart(opts) {
+  const points = (opts.points || []).filter(
+    (p) => Number.isFinite(p.x) && Number.isFinite(p.y) && (!opts.logX || p.x > 0),
+  )
+  if (!points.length) return ''
+  const W = opts.width || 460
+  const H = opts.height || 240
+  const pad = { top: 14, right: 16, bottom: 38, left: 58 }
+  const innerW = W - pad.left - pad.right
+  const innerH = H - pad.top - pad.bottom
+  let xValues = points.map((p) => p.x)
+  let yValues = points.map((p) => p.y)
+  if (opts.refDiagonal) {
+    xValues = xValues.concat(yValues)
+    yValues = xValues
+  }
+  const xScale = opts.logX
+    ? logScale(xValues)
+    : opts.xTime
+      ? spanScale(xValues)
+      : linearScale(xValues)
+  const yScale = linearScale(yValues)
+  const px = (v) => Math.round((pad.left + xScale.pos(v) * innerW) * 10) / 10
+  const py = (v) => Math.round((pad.top + (1 - yScale.pos(v)) * innerH) * 10) / 10
+  const fmtX = opts.xTickFormat || formatTickValue
+  const parts = []
+  for (const t of yScale.ticks) {
+    const y = py(t)
+    parts.push(
+      `<line class="chart-grid" x1="${pad.left}" y1="${y}" x2="${W - pad.right}" y2="${y}"></line>`,
+      `<text class="chart-tick" x="${pad.left - 6}" y="${y + 3}" text-anchor="end">${escapeHtml(formatTickValue(t))}</text>`,
+    )
+  }
+  for (const t of xScale.ticks) {
+    const x = px(t)
+    parts.push(
+      `<line class="chart-grid" x1="${x}" y1="${pad.top}" x2="${x}" y2="${H - pad.bottom}"></line>`,
+      `<text class="chart-tick" x="${x}" y="${H - pad.bottom + 14}" text-anchor="middle">${escapeHtml(fmtX(t))}</text>`,
+    )
+  }
+  parts.push(
+    `<line class="chart-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${H - pad.bottom}"></line>`,
+    `<line class="chart-axis" x1="${pad.left}" y1="${H - pad.bottom}" x2="${W - pad.right}" y2="${H - pad.bottom}"></line>`,
+  )
+  if (opts.xLabel) {
+    parts.push(
+      `<text class="chart-label" x="${pad.left + innerW / 2}" y="${H - 4}" text-anchor="middle">${escapeHtml(opts.xLabel)}</text>`,
+    )
+  }
+  if (opts.yLabel) {
+    parts.push(
+      `<text class="chart-label" transform="rotate(-90)" x="${-(pad.top + innerH / 2)}" y="12" text-anchor="middle">${escapeHtml(opts.yLabel)}</text>`,
+    )
+  }
+  if (opts.refDiagonal) {
+    const lo = xScale.ticks[0]
+    const hi = xScale.ticks[xScale.ticks.length - 1]
+    parts.push(
+      `<line class="chart-ref" x1="${px(lo)}" y1="${py(lo)}" x2="${px(hi)}" y2="${py(hi)}"></line>`,
+    )
+  }
+  if (opts.line) {
+    const path = points.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')
+    parts.push(`<polyline class="chart-line" points="${path}"></polyline>`)
+  }
+  if (opts.markers !== false) {
+    for (const p of points) {
+      const x = px(p.x)
+      const y = py(p.y)
+      const title = p.label ? `<title>${escapeHtml(p.label)}</title>` : ''
+      if (p.marker === 'cross') {
+        parts.push(
+          `<g class="chart-cross"><path d="M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x - 4} ${y + 4} L ${x + 4} ${y - 4}"></path>${title}</g>`,
+        )
+      } else {
+        parts.push(`<circle class="chart-point" cx="${x}" cy="${y}" r="3.5">${title}</circle>`)
+      }
+    }
+  }
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(opts.ariaLabel || '')}">${parts.join('')}</svg>`
+}
+function buildLineChart(opts) {
+  return buildXyChart({ ...opts, line: true })
+}
+function buildScatterChart(opts) {
+  return buildXyChart({ ...opts, line: false })
+}
+
+// --- Charts tab ------------------------------------------------------------------
+function chartSectionHtml(title, svg, emptyText) {
+  const content = svg
+    ? `<div class="chart-wrap">${svg}</div>`
+    : `<div class="empty-hint">${escapeHtml(emptyText)}</div>`
+  return `<section class="chart-section"><h3>${escapeHtml(title)}</h3>${content}</section>`
+}
+function chartFigureHtml(title, svg) {
+  return `<figure class="chart-figure"><figcaption>${escapeHtml(title)}</figcaption><div class="chart-wrap">${svg}</div></figure>`
+}
+function spansTwoOrders(values) {
+  const positive = values.filter((v) => v > 0)
+  if (positive.length < 2) return false
+  return Math.max(...positive) / Math.min(...positive) >= 100
+}
+function objectiveTimelineSvg() {
+  const points = runsCache
+    .map((r) => ({
+      x: new Date(runRanAt(r.summary)).getTime(),
+      y: Number(r.summary.objective),
+      label: `${shortKey(r.key)} · ${objectiveName()} ${formatObjective(r.summary.objective)} · ${formatWhen(runRanAt(r.summary))}`,
+    }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    .sort((a, b) => a.x - b.x)
+  if (points.length < 2) return ''
+  return buildLineChart({
+    points,
+    xLabel: 'ran at',
+    yLabel: objectiveName(),
+    xTime: true,
+    xTickFormat: timeTickFormat(points.map((p) => p.x)),
+    width: 920,
+    height: 280,
+    ariaLabel: `${objectiveName()} over time`,
+  })
+}
+// Small-multiple scatters: one per numeric lever with ≥2 distinct swept values,
+// log-x when the values span at least two orders of magnitude.
+function leverScatterFiguresHtml() {
+  const figures = []
+  for (const [key, spec] of leverEntries()) {
+    if (spec.type !== 'number') continue
+    const points = runsCache
+      .map((r) => {
+        const value = Number(r.summary.config && r.summary.config[key])
+        return {
+          x: value,
+          y: Number(r.summary.objective),
+          label: `${shortKey(r.key)} · ${key} ${formatObjective(value)} · ${objectiveName()} ${formatObjective(r.summary.objective)}`,
+        }
+      })
+      .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+    if (new Set(points.map((p) => p.x)).size < 2) continue
+    const svg = buildScatterChart({
+      points,
+      xLabel: key,
+      yLabel: objectiveName(),
+      logX: spansTwoOrders(points.map((p) => p.x)),
+      width: 320,
+      height: 220,
+      ariaLabel: `${objectiveName()} vs ${key}`,
+    })
+    figures.push(chartFigureHtml(key, svg))
+  }
+  return figures
+}
+function leverChartsSectionHtml() {
+  const hasNumericLevers = leverEntries().some(([, spec]) => spec.type === 'number')
+  let content
+  if (!hasNumericLevers) {
+    content = '<div class="empty-hint">No numeric levers in this manifest.</div>'
+  } else {
+    const figures = leverScatterFiguresHtml()
+    content = figures.length
+      ? `<div class="chart-multiples">${figures.join('')}</div>`
+      : '<div class="empty-hint">Not enough runs yet — sweep a lever to see its effect.</div>'
+  }
+  return `<section class="chart-section"><h3>${escapeHtml(objectiveName())} vs levers</h3>${content}</section>`
+}
+function judgeScatterSvg() {
+  const points = []
+  for (const r of runsCache) {
+    const verdict = verdictsCache.get(r.key)
+    if (!verdict) continue
+    const objective = Number(r.summary.objective)
+    if (!Number.isFinite(objective)) continue
+    const score = Number(verdict.score)
+    if (verdict.rejected) {
+      points.push({
+        x: objective,
+        y: Number.isFinite(score) ? score : 0,
+        marker: 'cross',
+        label: `${shortKey(r.key)} · rejected${verdict.why ? ` — ${verdict.why}` : ''}`,
+      })
+    } else if (Number.isFinite(score)) {
+      points.push({
+        x: objective,
+        y: score,
+        label: `${shortKey(r.key)} · score ${Math.round(score)} · ${objectiveName()} ${formatObjective(objective)}`,
+      })
+    }
+  }
+  if (!points.length) return ''
+  return buildScatterChart({
+    points,
+    xLabel: objectiveName(),
+    yLabel: 'blended score',
+    width: 460,
+    height: 260,
+    ariaLabel: `Judge score vs ${objectiveName()}`,
+  })
+}
+function trainEvalScatterSvg() {
+  const points = []
+  for (const r of runsCache) {
+    const evaluation = evaluationsCache.get(r.key)
+    if (!evaluation) continue
+    const train = Number(r.summary.objective)
+    const evalObjective = Number(evaluation.objective)
+    if (!Number.isFinite(train) || !Number.isFinite(evalObjective)) continue
+    points.push({
+      x: train,
+      y: evalObjective,
+      label: `${shortKey(r.key)} · train ${formatObjective(train)} · eval ${formatObjective(evalObjective)}`,
+    })
+  }
+  if (!points.length) return ''
+  return buildScatterChart({
+    points,
+    xLabel: `train ${objectiveName()}`,
+    yLabel: `eval ${objectiveName()}`,
+    refDiagonal: true,
+    width: 460,
+    height: 260,
+    ariaLabel: `Eval vs train ${objectiveName()}`,
+  })
+}
+async function renderCharts() {
+  const body = byId('charts-body')
+  if (!body) return
+  if (!embedded()) {
+    body.innerHTML = '<div class="empty-hint">Open inside the Overseer to see charts.</div>'
+    return
+  }
+  ;[runsCache, verdictsCache, evaluationsCache] = await Promise.all([
+    readRuns(),
+    readVerdicts(),
+    readEvaluations(),
+  ])
+  body.innerHTML = [
+    chartSectionHtml(
+      `${objectiveName()} over time`,
+      objectiveTimelineSvg(),
+      'Not enough runs yet.',
+    ),
+    leverChartsSectionHtml(),
+    chartSectionHtml(`Judge score vs ${objectiveName()}`, judgeScatterSvg(), 'No verdicts yet.'),
+    chartSectionHtml('Train vs eval', trainEvalScatterSvg(), 'No evaluations yet.'),
+  ].join('')
 }
 
 // --- Hypotheses tab --------------------------------------------------------------
@@ -1488,6 +1929,7 @@ function showTab(id) {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
   if (target === 'runs') renderRuns()
+  if (target === 'charts') renderCharts()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'activity') renderActivity()
 }

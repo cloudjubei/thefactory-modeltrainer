@@ -7,12 +7,14 @@ BlackSwan stack (stable-baselines3 + gymnasium) but is self-contained: no datase
 
 The three pieces of the standard, made concrete:
 
-- **Manifest** — `.factory/trainer.json`: name, record type, run/calibrate command
-  templates, the single objective (`eval_return_mean`, max), the sweepable levers,
+- **Manifest** — `.factory/trainer.json`: name, record type, run/calibrate/evaluate
+  command templates, the single objective (`eval_return_mean`, max), the sweepable levers,
   declared resources.
 - **CLI contract** — `python -m trainer.run` honoring `--config-json`, `--summary-out`,
-  `--calibrate`. Config is data, not code; runs are deterministic given the config's seed.
-- **RunSummary** — written to `--summary-out`: objective, metric battery, health flags
+  `--calibrate`, `--evaluate`. Config is data, not code; runs are deterministic given the
+  config's seed.
+- **RunSummary** — written to `--summary-out`: objective, metric battery, training-curve
+  series (`series.episode_return`, downsampled to ≤200 points), health flags
   (`nan_metrics`, `degenerate_policy`), seed, resolved config, provenance (configHash,
   ranAt), checkpoint reference. `--calibrate` additionally reports
   `calibration.unitsPerSecond` for ETA.
@@ -39,6 +41,16 @@ Train from a config:
 ```
 
 Checkpoints are saved to `checkpoints/<configHash>.zip`.
+
+Evaluate a saved checkpoint (no training; the config adds `"checkpoint"` and optionally
+`"eval_episodes"`, default 50):
+
+```sh
+.venv/bin/python -m trainer.run --evaluate --config-json /tmp/cartpole-eval.json --summary-out /tmp/cartpole-eval-sum.json
+```
+
+The evaluate RunSummary carries the same objective/metrics/health/provenance plus an
+`evaluation: { checkpoint, episodes }` block.
 
 ## Layout
 

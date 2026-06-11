@@ -95,6 +95,19 @@
             <section class="card" id="run-detail" aria-label="Run detail" hidden></section>
           </section>
 
+          <!-- Charts (hand-rolled SVG views over the run / verdict / evaluation records) -->
+          <section id="tab-charts" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="charts-h">
+              <div class="card-head">
+                <h2 id="charts-h">Charts</h2>
+                <p class="card-sub">
+                  Objective trends, lever effects and judge / eval agreement across runs.
+                </p>
+              </div>
+              <div id="charts-body" class="charts-body"></div>
+            </section>
+          </section>
+
           <!-- Hypotheses (LLM-proposed + human experiment backlog) -->
           <section id="tab-hypotheses" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="hypotheses-h">

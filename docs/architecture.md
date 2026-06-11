@@ -2,11 +2,11 @@
 
 How a training campaign flows through the system, and which repo owns which piece.
 
-**The hub model:** ONE Overseer project (the thefactory-modeltrainer checkout itself —
-the hub app lives at the repo root like the template apps, so the App tab needs only the
-`hasApp` toggle) hosts the Model Trainer app. Training projects
+**The hub model:** ONE Overseer project (the thefactory-modeltrainer checkout itself, with
+`hasApp` on and `appDir: "viewer"` in its project settings) hosts the Model Trainer app.
+Training projects
 (cartpole, BlackSwan, …) are **not Overseer projects** — they are directories registered
-*inside* the app (`trainer-project` records; relative to the host checkout or absolute).
+_inside_ the app (`trainer-project` records; relative to the host checkout or absolute).
 The `inspect-trainer` activity reads each one's manifest server-side into a
 `trainer-project-manifest` record (so the app can render a launch form for any directory),
 and every `train`/`judge`/`propose` activity carries the target's `dir`, resolved against
@@ -15,7 +15,7 @@ project by its manifest's `recordType`.
 
 ```
 ┌─ Overseer client (web/desktop/mobile) ──────────────────────────────────────┐
-│  App tab (host project) → sandboxed iframe → the hub app (repo root)        │
+│  App tab (host project) → sandboxed iframe → the hub app (viewer/, appDir)  │
 │  home: registered training projects → per-project dashboard                 │
 │  window.OverseerBridge: queryData / putData / startActivity / abort         │
 └──────────────────────────────────┬───────────────────────────────────────────┘
@@ -57,7 +57,7 @@ project by its manifest's `recordType`.
 | -------------------------------------------------------------- | --------------------------------------------- | --------------------------------------- |
 | TrainerManifest/RunSummary contract + docs                     | this repo (`docs/model-training-standard.md`) | the domain standard                     |
 | Matrix planner, campaign loop, judge/propose (Phase 5)         | this repo `src/`                              | the training domain                     |
-| The hub app (home + per-project dashboards)                    | this repo's root app files                    | one app manages every training project  |
+| The hub app (home + per-project dashboards)                    | this repo `viewer/`                           | one app manages every training project  |
 | ComputeRunner seam + LocalComputeRunner + work-item engine     | thefactory-tools                              | generic infra, reusable beyond training |
 | `train` activity registration + composition + app-view serving | thefactory-backend                            | host wiring (mirrors `recommendTools`)  |
 | Model specifics (levers, objective, training code)             | each conformant project                       | the engine stays domain-oblivious       |

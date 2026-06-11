@@ -554,6 +554,178 @@ describe('runTrainingCampaign', () => {
   })
 })
 
+describe('evaluateTrainingRun', () => {
+  function evalManifest(): TrainerManifest {
+    return {
+      ...manifest(),
+      evaluate:
+        'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+    }
+  }
+
+  async function seedCompletedRun(storage: DataStorage, key: string) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key,
+      content: {
+        objective: 100,
+        status: 'completed',
+        config: { lr: 0.1, steps: 100 },
+        artifacts: { checkpoint: `checkpoints/${key}.zip` },
+      },
+    })
+  }
+
+  it('re-runs the checkpoint via the evaluate template and persists the evaluation record', async () => {
+    const storage = memoryStorage()
+    await seedCompletedRun(storage, 'run1')
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: {
+          objective: 95,
+          metrics: { eval_return_mean: 95 },
+          evaluation: { checkpoint: 'checkpoints/run1.zip', episodes: 20 },
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.evaluateTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: evalManifest(),
+      runKey: 'run1',
+    })
+    expect(result).toEqual({
+      recordType: 'demo-run',
+      runKey: 'run1',
+      objective: 95,
+      evaluatedAt: NOW,
+    })
+    expect(runner.jobs[0].commandTemplate).toContain('--evaluate')
+    expect(runner.jobs[0].repoRef).toEqual({ kind: 'local', localPath: '/repo' })
+    expect(runner.jobs[0].config).toMatchObject({
+      lr: 0.1,
+      steps: 100,
+      checkpoint: 'checkpoints/run1.zip',
+    })
+    const record = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-evaluation',
+      key: 'run1',
+    })
+    expect(record?.content).toMatchObject({
+      runKey: 'run1',
+      objective: 95,
+      status: 'completed',
+      evaluatedAt: NOW,
+    })
+  })
+
+  it('notifies onRecordWritten for the evaluation record', async () => {
+    const storage = memoryStorage()
+    await seedCompletedRun(storage, 'run1')
+    const runner = stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) })
+    const { tools } = makeTools(runner, storage)
+    const written: string[] = []
+    await tools.evaluateTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: evalManifest(),
+      runKey: 'run1',
+      onRecordWritten: (type, key) => {
+        written.push(`${type}:${key}`)
+      },
+    })
+    expect(written).toEqual(['demo-run-evaluation:run1'])
+  })
+
+  it('throws when the manifest declares no evaluate command', async () => {
+    const storage = memoryStorage()
+    await seedCompletedRun(storage, 'run1')
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.evaluateTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        runKey: 'run1',
+      }),
+    ).rejects.toThrow(/evaluate/)
+  })
+
+  it('throws when the run record does not exist', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(
+      tools.evaluateTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKey: 'ghost',
+      }),
+    ).rejects.toThrow(/ghost/)
+  })
+
+  it('throws when the run has no checkpoint artifact', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'nockpt',
+      content: { objective: 1, status: 'completed', config: {} },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.evaluateTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKey: 'nockpt',
+      }),
+    ).rejects.toThrow(/checkpoint/)
+  })
+
+  it('throws when the evaluate job fails', async () => {
+    const storage = memoryStorage()
+    await seedCompletedRun(storage, 'run1')
+    const runner = stubRunner({
+      jobResult: () => ({
+        status: 'failed',
+        exitCode: 1,
+        error: 'bad checkpoint',
+        summary: undefined,
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    await expect(
+      tools.evaluateTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKey: 'run1',
+      }),
+    ).rejects.toThrow('bad checkpoint')
+    expect(
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key: 'run1' }),
+    ).toBeUndefined()
+  })
+
+  it('throws when the evaluation summary is invalid', async () => {
+    const storage = memoryStorage()
+    await seedCompletedRun(storage, 'run1')
+    const runner = stubRunner({ jobResult: () => ({ summary: { nope: true } }) })
+    const { tools } = makeTools(runner, storage)
+    await expect(
+      tools.evaluateTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKey: 'run1',
+      }),
+    ).rejects.toThrow(/objective/)
+  })
+})
+
 describe('judgeTrainingRuns', () => {
   it('blends the normalised objective with the LLM verdict and persists verdict records', async () => {
     const storage = memoryStorage()

@@ -80,6 +80,27 @@ describe('validateTrainerManifest', () => {
     expect(validateTrainerManifest(m).calibrate).toBeUndefined()
   })
 
+  it('accepts a valid evaluate template', () => {
+    const m = {
+      ...manifest(),
+      evaluate:
+        'python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+    }
+    expect(validateTrainerManifest(m).evaluate).toContain('--evaluate')
+  })
+
+  it('rejects an evaluate template without {configPath}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), evaluate: 'python e --summary-out {summaryOut}' }),
+    ).toThrow(/configPath/)
+  })
+
+  it('rejects an evaluate template without {summaryOut}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), evaluate: 'python e --config-json {configPath}' }),
+    ).toThrow(/summaryOut/)
+  })
+
   it('rejects an invalid objective direction', () => {
     expect(() =>
       validateTrainerManifest({ ...manifest(), objective: { name: 'score', direction: 'up' } }),

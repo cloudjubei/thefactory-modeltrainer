@@ -344,6 +344,11 @@ body {
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
+.eval-chip {
+  min-width: 30px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
 .judge-none {
   color: var(--muted);
 }
@@ -376,6 +381,80 @@ body {
 .status-pill.is-warn {
   color: var(--warn);
   background: var(--warn-soft);
+}
+
+/* ---- Charts (hand-rolled SVG) ----------------------------------------------- */
+.chart-section {
+  margin-top: 18px;
+}
+.chart-section h3 {
+  margin: 0 0 8px;
+}
+.chart-wrap {
+  padding: 8px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.chart {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart-axis {
+  stroke: var(--muted);
+  stroke-width: 1;
+}
+.chart-tick {
+  fill: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.chart-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chart-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+.chart-point {
+  fill: var(--accent);
+  fill-opacity: 0.85;
+}
+.chart-point:hover {
+  fill-opacity: 1;
+  r: 5;
+}
+.chart-cross path {
+  stroke: var(--bad);
+  stroke-width: 2;
+  fill: none;
+}
+.chart-ref {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+.chart-multiples {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+.chart-figure {
+  margin: 0;
+}
+.chart-figure figcaption {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* ---- Run detail --------------------------------------------------------------- */

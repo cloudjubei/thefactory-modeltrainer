@@ -3,6 +3,7 @@
   "recordType": "cartpole-run",
   "run": ".venv/bin/python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
   "calibrate": ".venv/bin/python -m trainer.run --calibrate --summary-out {summaryOut}",
+  "evaluate": ".venv/bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}",
   "objective": { "name": "eval_return_mean", "direction": "max" },
   "levers": {
     "algo": { "type": "choice", "choices": ["ppo", "dqn"], "default": "ppo" },
