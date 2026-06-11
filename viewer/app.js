@@ -22,6 +22,7 @@ const JUDGE_HELP_TEXT =
   "Scores every completed run 0–100. Health-flagged runs are auto-rejected without using the LLM. For the rest, the objective is normalised (best=100) and blended 50/50 with an LLM verdict that weighs stability and how promising the configuration is — so a run can't win on prose alone. Results appear in the Judge column."
 const PROPOSE_HELP_TEXT =
   "Sends the manifest's levers, the run history and the verdicts to the LLM and asks for new experiment specs likely to beat the best run. Proposals are validated against the levers, deduped by spec, and land below as pending hypotheses for you to accept or reject."
+const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runners panel.'
 const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'charts', label: 'Charts' },
@@ -81,6 +82,10 @@ let itemBarTimer = null
 // 1s ticker for the running item's elapsed timer (mm:ss) between the 3s polls.
 let currentItemTimer = null
 let runnersCache = []
+// The runners offered in the Launch tab's "Run on" select, refreshed each time
+// that tab is shown. Kept apart from runnersCache (the home panel's list) so the
+// two surfaces never fight over each other's render state.
+let launchRunnersCache = []
 let runnerRemoveArmedId = null
 let runnerPairing = null
 // Bumped whenever the pairing sub-panel opens or closes; the observe + countdown
@@ -991,6 +996,7 @@ function resetDashboardState() {
   runsFilterKeys = null
   runsFilterLabel = ''
   chartSplits = {}
+  launchRunnersCache = []
   syncItemBarTimer(false)
   syncCurrentItemTimer(null)
   closeRunDetail()
@@ -1033,6 +1039,8 @@ async function openProject(projectKey) {
   showTab(savedTabId() || TABS[0].id)
   await renderRuns()
   await resumeRunningActivity()
+  if (epoch !== projectEpoch) return
+  await resumeRunningQuickActivity()
   if (epoch !== projectEpoch) return
   await refreshQueue()
   await processSettledCampaignEffects()
@@ -2812,6 +2820,61 @@ function remoteComputeTarget(value) {
   const target = String(value || '').trim()
   return target && target !== 'local' ? target : ''
 }
+// The "Run on" <option>s: a "Local" default, one per known runner labelled with
+// its online/offline state, and — when the persisted selection names a runner no
+// longer in the list (a queued or older target) — a kept "(unavailable)" option
+// so the selection still shows rather than silently reverting to Local.
+function computeTargetOptionsHtml(runners, selected) {
+  const list = Array.isArray(runners) ? runners : []
+  const sel = String(selected || '')
+  const options = [
+    `<option value=""${sel === '' || sel === 'local' ? ' selected' : ''}>Local</option>`,
+  ]
+  for (const runner of list) {
+    const id = String(runner.id || '')
+    if (!id) continue
+    const label = `${runner.name || id} (${runner.online ? 'online' : 'offline'})`
+    options.push(
+      `<option value="${escapeHtml(id)}"${id === sel ? ' selected' : ''}>${escapeHtml(label)}</option>`,
+    )
+  }
+  if (sel && sel !== 'local' && !list.some((r) => String(r.id || '') === sel)) {
+    options.push(
+      `<option value="${escapeHtml(sel)}" selected>(unavailable) ${escapeHtml(sel)}</option>`,
+    )
+  }
+  return options.join('')
+}
+// The "Run on" field's inner markup (the select + hint), rebuilt whenever the
+// runner list refreshes. The hint nudges toward the Compute Runners panel when
+// nothing is paired.
+function computeTargetFieldHtml(runners, selected) {
+  const list = Array.isArray(runners) ? runners : []
+  const hint = list.length
+    ? 'A paired runner runs the campaign; pick Local to run here. Manage runners in the Compute Runners panel.'
+    : NO_RUNNERS_HINT
+  return `<span>Run on</span>
+    <select name="computeTarget">${computeTargetOptionsHtml(list, selected)}</select>
+    <em class="field-hint">${escapeHtml(hint)}</em>`
+}
+// Refresh the Launch tab's "Run on" select from the live runner list, rebuilding
+// it in place via setHtml so it never flashes. Guarded by projectEpoch so a slow
+// list never paints over an unloaded or navigated-away launch form.
+async function refreshLaunchRunners() {
+  const field = byId('launch-target-field')
+  if (!field || !embedded()) return
+  const epoch = projectEpoch
+  let runners = []
+  try {
+    const res = await window.OverseerBridge.listRunners()
+    runners = (res && res.runners) || []
+  } catch {
+    runners = []
+  }
+  if (epoch !== projectEpoch) return
+  launchRunnersCache = runners
+  setHtml(field, computeTargetFieldHtml(runners, savedComputeTarget()))
+}
 function renderLaunchForm() {
   const form = byId('launch-form')
   if (!form) return
@@ -2834,10 +2897,7 @@ function renderLaunchForm() {
           <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
           <span>Auto-evaluate completed runs</span>
         </label>
-        <label class="field launch-target"><span>Run on</span>
-          <input type="text" name="computeTarget" placeholder="local" value="${escapeHtml(savedComputeTarget())}" />
-          <em class="field-hint">A paired runner's id — manage runners in Overseer Settings → Compute Runners. Leave empty to run locally.</em>
-        </label>
+        <label class="field launch-target" id="launch-target-field">${computeTargetFieldHtml(launchRunnersCache, savedComputeTarget())}</label>
       </div>
     </fieldset>
     <p class="launch-summary" id="launch-summary"></p>
@@ -2962,6 +3022,9 @@ function setupLaunch() {
     updateLaunchSummary()
   })
   form.addEventListener('change', (event) => {
+    if (event.target && event.target.name === 'computeTarget') {
+      rememberComputeTarget(event.target.value)
+    }
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     updateLaunchSummary()
   })
@@ -3037,6 +3100,67 @@ async function resumeRunningActivity() {
     lastActivityStatus = 'paused'
     renderActivity()
   }
+}
+// On opening a project (after re-attaching any running train campaign), re-attach
+// to a quick judge / propose activity that is still live for this project — the
+// piece a page reload would otherwise drop, leaving the Judge / Propose button
+// looking idle mid-run. The activity list carries the activity's type in its
+// resumeToken, so judge and propose are told apart precisely and each reuses its
+// own settle handler (button spinner via judging/proposing, then refresh
+// verdicts / hypotheses). Guarded by projectEpoch so navigating away cancels it,
+// and skipped when that button is already observing.
+async function resumeRunningQuickActivity() {
+  const epoch = projectEpoch
+  if (judging || proposing) return
+  let activities
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    activities = (res && res.activities) || []
+  } catch {
+    return
+  }
+  if (epoch !== projectEpoch || !manifest) return
+  const live = activities.filter(
+    (a) => a.recordType === manifest.recordType && a.status === 'running' && a.isLive !== false,
+  )
+  const judge = live.find((a) => quickActivityType(a) === 'judge')
+  const propose = live.find((a) => quickActivityType(a) === 'propose')
+  if (judge) observeResumedJudge(judge.activityId, epoch)
+  if (propose) observeResumedPropose(propose.activityId, epoch)
+}
+// The activity's type from its resume token (the host carries `{activityType,…}`
+// there), used to tell a running judge / propose / train apart in the list.
+function quickActivityType(activity) {
+  const token = activity && activity.resumeToken
+  return token && typeof token.activityType === 'string' ? token.activityType : ''
+}
+// Re-attach to a live judge: light the Judge button's spinner, observe until it
+// settles, then drop the spinner, refresh the verdicts in the Runs table and let
+// the queue dispatch — mirroring onJudgeClick's settle path.
+async function observeResumedJudge(activityId, epoch) {
+  judging = true
+  renderJudgeControls()
+  const act = await observeQuickActivity(activityId)
+  if (epoch !== projectEpoch) return
+  judging = false
+  renderJudgeControls()
+  setStatusLine('judge-status', quickActivityFailureText(act, 'Judging'), true)
+  await renderRuns()
+  pumpQueue()
+}
+// Re-attach to a live propose: light the Propose button's spinner, observe until
+// it settles, then drop the spinner, refresh the hypotheses and let the queue
+// dispatch — mirroring onProposeClick's settle path.
+async function observeResumedPropose(activityId, epoch) {
+  proposing = true
+  renderProposeControls()
+  const act = await observeQuickActivity(activityId)
+  if (epoch !== projectEpoch) return
+  proposing = false
+  renderProposeControls()
+  setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
+  await renderHypotheses()
+  pumpQueue()
 }
 // Poll loop: every 3s while the page is visible, read the progress record + the
 // activity status; settle when the activity leaves 'running'. An orphaned run
@@ -3395,6 +3519,7 @@ function showTab(id) {
   if (target === 'runs') renderRuns()
   if (target === 'charts') renderCharts()
   if (target === 'hypotheses') renderHypotheses()
+  if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
     renderActivity()
     refreshQueue()

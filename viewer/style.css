@@ -720,7 +720,8 @@ pre.json {
 .check-row input {
   accent-color: var(--accent);
 }
-.launch-target input {
+.launch-target input,
+.launch-target select {
   max-width: 240px;
 }
 .field .field-hint {

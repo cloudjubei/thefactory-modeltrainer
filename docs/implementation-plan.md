@@ -38,24 +38,29 @@ preemptively.
 
 ## Carried-over cleanups (small, no phase dependency)
 
-- Migrate `RecommendTools.buildProductCatalog`'s internal per-item loop onto
-  `runActivityWorkItems` (the generic engine was built fresh; recommend still owns a private
-  copy of the pattern). Behaviour-preserving; keep recommend tests green.
-- Mobile parity: the mobile `ProjectEditorForm` lacks the "Has App surface" toggle and the new
-  "App directory" field; mobile/desktop also need a native Compute Runners settings mirror
-  (`useComputeRunners` is headless-shared already). Per the three-client rule.
-- Runner channel WS upgrade: the long-poll protocol works and is verified; a held WS would cut
-  log latency. Upgrade `/runners/channel` when it matters.
-- Viewer "Run on": replace the free-text runner-id input with a proper dropdown — now
-  **unblocked** (the `runners.list` bridge op exists; the app can populate a select).
-- Remote git repoRefs: the agent clones but assumes a self-bootstrapping checkout; the engine
-  still emits local paths only. Wire git refs + project bootstrap when a real second machine
-  needs it (BlackSwan local path covers Phase 7).
-- Viewer: re-attach to a live judge/propose activity after a page reload (today only `train`
-  re-attaches; a reload mid-judge just shows results on the next refresh).
 - App-nav unseen badge: the Overseer App tab already spins on a live activity, but an
   unseen-results badge while idle needs app→host plumbing (the embedded app reports its unseen
   count). The in-app unseen badges cover the immediate need.
+
+### Considered and declined (so they aren't re-raised)
+
+- `RecommendTools.buildProductCatalog` → `runActivityWorkItems` migration: **not a real
+  duplicate.** Recommend's loop is the richer of the two — it streams mid-supplier progress
+  (`gathering`→`done`), carries a `supplierStates` map, and absorbs a gather failure as
+  "done-but-failed" instead of throwing; the generic engine only emits
+  `{done,total,skipped,failed}` per completed item. Forcing the migration would be a
+  behaviour-changing downgrade for ~10 lines saved.
+
+### Deferred to after Phase 9
+
+- Runner-channel WebSocket upgrade: deferred, not dropped. Job dispatch is already effectively
+  instant (the channel `wake()`s a waiting long-poll the moment a job is enqueued); a WS would
+  only shave the agent's ~1.5s log-batch latency, and raw runner logs aren't surfaced in the
+  viewer today — so the win is currently invisible. Revisit when a live-log UI exists to consume
+  it.
+- Remote git repoRefs: the runner agent clones but assumes a self-bootstrapping checkout; the
+  engine still emits local paths only. Wire git refs + project bootstrap when a real remote
+  machine needs it (BlackSwan local path covers Phase 7).
 
 ---
 
@@ -133,11 +138,20 @@ code:**
 
 Depends on the data mine; pick up after the BlackSwan improvements.
 
-## Open questions
+## Open questions (deferred — decisions to make when their dependency lands)
 
 - **Remote artifact/checkpoint storage** — keep-on-runner + reference vs upload; how a winning
-  remote checkpoint reaches the live trading server. (Phase 6/8.)
+  remote checkpoint reaches the live trading server. _Deferred because_ it only has meaning once
+  remote runs **and** the live-trading handoff (Phase 8) both exist; deciding now would be
+  deciding in a vacuum. Revisit when a remote campaign produces a checkpoint someone needs
+  elsewhere. (Phase 6/8.)
 - **GPU + sandbox profile for training images** — `--read-only` rootfs vs ML caches; `--gpus`
-  is wired in SandboxTools but unexercised. (Phase 6/7.)
-- **Judge/proposer model transport** — `ModelSelection` is API-only until the activity engine's
-  CLI stage lands; start with API. (Phase 5.)
+  is wired in SandboxTools but unexercised. _Deferred because_ it isn't on the active path: the
+  runner agent runs jobs directly (`spawnStreamingCommand`), **not** through the Docker-sandboxed
+  `SandboxTools`, so there's no rootfs/GPU profile to exercise until a Docker-sandboxed runner is
+  real. Revisit if/when training runs inside the sandbox image. (Phase 6/7.)
+- **Judge/proposer model transport** — `ModelSelection` (API vs CLI). _Deferred because_ it's
+  being overtaken by the in-flight `ModelSelection` refactor (the activity ctx now carries
+  `model: ModelSelection`, and `ModelSelection` gained a `cli` member); resolving it means
+  finishing that refactor's CLI inference path. Revisit once the CLI inference stage lands — until
+  then judge/propose run on API. (Phase 5.)
