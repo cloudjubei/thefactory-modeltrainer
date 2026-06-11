@@ -571,6 +571,140 @@ describe('runTrainingCampaign', () => {
   })
 })
 
+describe('data files + compute targets', () => {
+  const DATA = [
+    {
+      id: 'wine',
+      files: [{ relPath: 'data/wine.csv', url: 'https://e.x/wine.csv' }],
+    },
+    {
+      id: 'extra',
+      files: [{ relPath: 'data/extra.csv', url: 'https://e.x/extra.csv', sha256: 'abc' }],
+    },
+  ]
+
+  it('threads the manifest data files onto every training job and calibrate probe', async () => {
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, memoryStorage())
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest({ data: DATA }),
+      spec: {},
+    })
+    const expected = [
+      { relPath: 'data/wine.csv', url: 'https://e.x/wine.csv' },
+      { relPath: 'data/extra.csv', url: 'https://e.x/extra.csv', sha256: 'abc' },
+    ]
+    expect(runner.probes[0].dataFiles).toEqual(expected)
+    expect(runner.jobs[0].dataFiles).toEqual(expected)
+  })
+
+  it('threads data files onto evaluate jobs', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: {
+        objective: 1,
+        status: 'completed',
+        config: {},
+        artifacts: { checkpoint: 'c.zip' },
+      },
+    })
+    const runner = stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.evaluateTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: {
+        ...manifest({ data: DATA }),
+        evaluate: 'e --config-json {configPath} --summary-out {summaryOut}',
+      },
+      runKey: 'r1',
+    })
+    expect(runner.jobs[0].dataFiles).toHaveLength(2)
+  })
+
+  it('omits dataFiles when the manifest declares no data', async () => {
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, memoryStorage())
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: {},
+    })
+    expect(runner.jobs[0].dataFiles).toBeUndefined()
+  })
+
+  it('runs on a resolved compute target and stamps it as ranBy', async () => {
+    const local = stubRunner()
+    const remote = stubRunner()
+    const storage = memoryStorage()
+    const tools = createModelTrainerTools({
+      computeRunner: local,
+      resolveComputeRunner: (target) => (target === 'gpu-1' ? remote : undefined),
+      storage,
+      now: () => NOW,
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: {},
+      computeTarget: 'gpu-1',
+    })
+    expect(remote.jobs).toHaveLength(1)
+    expect(remote.probes).toHaveLength(1)
+    expect(local.jobs).toHaveLength(0)
+    expect(result.completed).toBe(1)
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records[0].content).toMatchObject({ ranBy: 'gpu-1' })
+  })
+
+  it('throws on an unresolvable compute target', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(
+      tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        spec: {},
+        computeTarget: 'ghost',
+      }),
+    ).rejects.toThrow(/ghost/)
+  })
+
+  it('evaluates on a resolved compute target', async () => {
+    const local = stubRunner()
+    const remote = stubRunner({ jobResult: () => ({ summary: { objective: 2 } }) })
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, status: 'completed', config: {}, artifacts: { checkpoint: 'c' } },
+    })
+    const tools = createModelTrainerTools({
+      computeRunner: local,
+      resolveComputeRunner: (t) => (t === 'gpu-1' ? remote : undefined),
+      storage,
+      now: () => NOW,
+    })
+    await tools.evaluateTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: { ...manifest(), evaluate: 'e {configPath} {summaryOut}' },
+      runKey: 'r1',
+      computeTarget: 'gpu-1',
+    })
+    expect(remote.jobs).toHaveLength(1)
+    expect(local.jobs).toHaveLength(0)
+  })
+})
+
 describe('evaluateTrainingRun', () => {
   function evalManifest(): TrainerManifest {
     return {

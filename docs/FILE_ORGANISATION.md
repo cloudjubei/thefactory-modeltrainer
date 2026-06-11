@@ -14,9 +14,13 @@
     `modelTrainerConstants.ts`, co-located `*.test.ts` per file.
 - `examples/` — trainer-conformant reference Python projects:
   - `cartpole/` — RL, no data, CPU/seconds (SB3 + gymnasium). The first executable spec.
-  - `tabular/` — (planned, Phase 6) small DVC-tracked dataset; establishes the data path.
+  - `tabular/` — wine-quality regression (sklearn GBM, `val_rmse`/min): the **data-path**
+    spec — declares its CSV in the manifest's `data[]` and never downloads itself.
   - Each has `.factory/trainer.json`, a `trainer/` Python package with the CLI entry
     (`python -m trainer.run`), `configs/`, `pyproject.toml`, its own `.venv/` (gitignored).
+- `runner/` — the compute runner agent (`agent.mjs`: PIN pair + long-poll job loop, reusing
+  thefactory-tools' spawn + data-cache primitives; `Dockerfile`; `README.md`). A program, not
+  library code — exercised by the full-stack E2E, no vitest.
 - `viewer/` — the no-build static **hub app** (`index.html`, `app.js`, `bridge.js`,
   `style.css`), served via the project's `appDir: "viewer"` config (set in project settings):
   a home screen of registered training projects (directories) + a per-project dashboard

@@ -18,25 +18,6 @@ model is _data + the thin CLI contract_, not engine code.
 
 ---
 
-## Phase 6 — Remote compute: runner agent + PIN pairing + data cache
-
-- `examples/tabular` — small DVC-tracked dataset; establishes + tests the data path cheaply
-  before BlackSwan's 7.6 GB.
-- thefactory-tools: `RemoteComputeRunner` (client half over the runner WS channel);
-  `ContentAddressedDataCache` (clone the `DataStorageSourceCache` read-through pattern:
-  sha256 object store on a docker volume, manifest in DataStorage, hardlink materialise,
-  fetch-only-misses); `RunnerCredentialEntry` credential kind (token stored hashed).
-- thefactory-backend: `routes/runners.ts` (PIN issue — Overseer-authed; `pair` — unauthed,
-  validates PIN+TTL, mints the runner token once); runner-token acceptance in `authPlugin`;
-  authenticated runner WS channel + registry + job dispatch (reuse the
-  `wsBroadcast`/`makeCliRunWsProgress` log-streaming pattern back to UI clients).
-- Runner agent: Docker image (`uid 10001`, training stack, job shim), `docker run … --pair`
-  prompts for the PIN, then dials out and holds the WS. Jobs are self-describing
-  (repo@commit + data manifest + `credentialRef`); checkpoints stay on the runner, referenced.
-- Clients: Compute Runners settings category + PIN-pairing form (template:
-  `GitCredentialsForm` device flow). Three-client parity.
-- **Decide here:** runner agent home (own `thefactory-runner` package vs this repo) + image name.
-
 ## Phase 7 — Migrate BlackSwanExperiments to the standard (the payoff)
 
 Via Overseer Stories / CLI-agents against the Python repo:
@@ -73,7 +54,15 @@ preemptively.
   `runActivityWorkItems` (the generic engine was built fresh; recommend still owns a private
   copy of the pattern). Behaviour-preserving; keep recommend tests green.
 - Mobile parity: the mobile `ProjectEditorForm` lacks the "Has App surface" toggle and the new
-  "App directory" field (web/desktop have both); mirror them per the three-client rule.
+  "App directory" field; mobile/desktop also need a native Compute Runners settings mirror
+  (`useComputeRunners` is headless-shared already). Per the three-client rule.
+- Runner channel WS upgrade: the long-poll protocol works and is verified; a held WS would cut
+  log latency. Upgrade `/runners/channel` when it matters.
+- Viewer "Run on": replace the free-text runner-id input with a proper dropdown once a bridge
+  op (or record mirror) exposes the runner list to embedded apps.
+- Remote git repoRefs: the agent clones but assumes a self-bootstrapping checkout; the engine
+  still emits local paths only. Wire git refs + project bootstrap when a real second machine
+  needs it (BlackSwan local path covers Phase 7).
 - Viewer: surface `failures[]` from the `{recordType}-campaign` record (data already flows).
 - Viewer: re-attach to a live judge/propose activity after a page reload (today only `train`
   re-attaches; a reload mid-judge just shows results on the next refresh).

@@ -60,5 +60,11 @@
     // Resume a run that's no longer live (e.g. orphaned by a server restart).
     // No-op if it's still genuinely running. Returns { activityId }.
     resumeActivity: (activityId) => call('activities.resume', { activityId: activityId }, 30000),
+    // Compute runners (remote machines that run training jobs). Pairing returns
+    // a short-lived { pin, pairingId, expiresAt } to enter on the runner; the
+    // runner's token is minted + stored hashed server-side, never here.
+    createRunnerPairing: () => call('runners.create-pairing', undefined),
+    listRunners: () => call('runners.list', undefined),
+    removeRunner: (runnerId) => call('runners.remove', { runnerId: runnerId }),
   }
 })()

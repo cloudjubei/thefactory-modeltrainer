@@ -33,12 +33,19 @@ export interface TrainerObjective {
   direction: 'max' | 'min'
 }
 
-/** A dataset a training project needs; consumed by the data cache + proxy allowlist (Phase 6). */
+/** One file a dataset materialises: workspace destination + where to fetch it. */
+export interface TrainerDataFile {
+  /** Path relative to the project root, e.g. `data/winequality-red.csv`. */
+  relPath: string
+  url: string
+  /** Expected content hash; a fetched object that doesn't match fails the run. */
+  sha256?: string
+}
+
+/** A dataset a training project declares; the compute runner materialises it before runs. */
 export interface TrainerDataRequirement {
   id: string
-  files?: string[]
-  glob?: string
-  source?: string
+  files: TrainerDataFile[]
   credentialRef?: string
 }
 
@@ -123,6 +130,8 @@ export interface EvaluateTrainingRunParams {
   manifest?: TrainerManifest
   /** Key of the completed run record whose checkpoint gets re-evaluated. */
   runKey: string
+  /** Named compute target to evaluate on; omit for the default (local) runner. */
+  computeTarget?: string
   abortSignal?: AbortSignal
   /** Fired after the evaluation record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
@@ -158,7 +167,12 @@ export interface TrainingCampaignParams {
   spec: ExperimentSpec
   /** Re-run items that already have a completed record. */
   refresh?: boolean
-  /** Provenance label stamped on each run record (e.g. a compute target name). */
+  /**
+   * Named compute target to run on (resolved via the deps' `resolveComputeRunner`);
+   * omit for the default (local) runner. Also the provenance label.
+   */
+  computeTarget?: string
+  /** Provenance label stamped on each run record; defaults to the compute target or `local`. */
   ranBy?: string
   abortSignal?: AbortSignal
   onProgress?: (progress: TrainingCampaignProgress) => void | Promise<void>
@@ -198,6 +212,8 @@ export interface TrainerLogger {
 
 export interface ModelTrainerToolsDeps {
   computeRunner: ComputeRunner
+  /** Resolve a named compute target (e.g. a paired remote runner) to its runner. */
+  resolveComputeRunner?: (target: string) => ComputeRunner | undefined
   storage: DataStorage
   /** Required for judging/proposing; the train/calibrate surface works without it. */
   inferenceExecutor?: InferenceExecutor

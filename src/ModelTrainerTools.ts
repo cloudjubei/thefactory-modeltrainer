@@ -1,4 +1,4 @@
-import type { ComputeRepoRef, InferenceExecutor } from 'thefactory-tools/types'
+import type { ComputeRepoRef, ComputeRunner, InferenceExecutor } from 'thefactory-tools/types'
 import {
   deriveModelRef,
   estimateCampaignEtaSeconds,
@@ -34,6 +34,7 @@ import {
 import { hashTrainingConfig, readTrainerManifest } from './modelTrainerHelpers.js'
 import {
   blendJudgeScore,
+  manifestDataFiles,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
@@ -51,19 +52,34 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   const now = deps.now ?? (() => new Date().toISOString())
   const logger = deps.logger
 
-  async function calibrateTrainingThroughput(
+  function resolveRunner(target: string | undefined): ComputeRunner {
+    if (!target) return deps.computeRunner
+    const runner = deps.resolveComputeRunner?.(target)
+    if (!runner) throw new Error(`unknown compute target "${target}"`)
+    return runner
+  }
+
+  async function calibrateOnRunner(
+    runner: ComputeRunner,
     params: CalibrateTrainingParams,
   ): Promise<TrainingCalibration | undefined> {
     if (!params.manifest.calibrate) return undefined
-    const result = await deps.computeRunner.calibrate({
+    const result = await runner.calibrate({
       repoRef: { kind: 'local', localPath: params.projectRoot },
       commandTemplate: params.manifest.calibrate,
+      dataFiles: manifestDataFiles(params.manifest),
       abortSignal: params.abortSignal,
     })
     return {
       secondsObserved: result.secondsObserved,
       ...(result.unitsPerSecond !== undefined ? { unitsPerSecond: result.unitsPerSecond } : {}),
     }
+  }
+
+  async function calibrateTrainingThroughput(
+    params: CalibrateTrainingParams,
+  ): Promise<TrainingCalibration | undefined> {
+    return calibrateOnRunner(deps.computeRunner, params)
   }
 
   async function runTrainingCampaign(
@@ -74,7 +90,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const items = expandExperimentMatrix(manifest, params.spec, hashTrainingConfig)
     const total = items.length
     const repoRef: ComputeRepoRef = { kind: 'local', localPath: params.projectRoot }
-    const ranBy = params.ranBy ?? DEFAULT_RAN_BY
+    const runner = resolveRunner(params.computeTarget)
+    const dataFiles = manifestDataFiles(manifest)
+    const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
 
     const emit = async (progress: TrainingCampaignProgress) => {
       await params.onProgress?.(progress)
@@ -84,7 +102,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (manifest.calibrate) {
       await emit({ phase: 'calibrate', done: 0, total, skipped: 0, failed: 0 })
       try {
-        const measured = await calibrateTrainingThroughput({
+        const measured = await calibrateOnRunner(runner, {
           projectRoot: params.projectRoot,
           manifest,
           abortSignal: params.abortSignal,
@@ -121,11 +139,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         return (existing?.content as { status?: string } | undefined)?.status === 'completed'
       },
       runItem: async (item) => {
-        const handle = deps.computeRunner.runJob({
+        const handle = runner.runJob({
           jobId: item.key,
           repoRef,
           commandTemplate: manifest.run,
           config: item.config,
+          dataFiles,
           abortSignal: params.abortSignal,
         })
         const result = await handle.done
@@ -240,11 +259,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       throw new Error(`run ${params.runKey} has no checkpoint artifact to evaluate`)
     }
 
-    const handle = deps.computeRunner.runJob({
+    const handle = resolveRunner(params.computeTarget).runJob({
       jobId: `eval-${params.runKey}`,
       repoRef: { kind: 'local', localPath: params.projectRoot },
       commandTemplate: manifest.evaluate,
       config: { ...(content.config ?? {}), checkpoint },
+      dataFiles: manifestDataFiles(manifest),
       abortSignal: params.abortSignal,
     })
     const result = await handle.done

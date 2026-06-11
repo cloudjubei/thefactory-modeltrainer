@@ -44,8 +44,11 @@ something the orchestrator or a comparison actually depends on.
   and `{summaryOut}`. The program reads neither env vars nor hardcoded paths for run config.
 - `levers` drives both the launch-form inputs and the matrix planner's sweep. Identity of a
   run = the resolved config (its hash) — the planner's skip-if-fresh key.
-- `data[]` entries (when present): `{ id, files | glob, source, credentialRef? }` — consumed
-  by the content-addressed cache + the proxy allowlist. Never inline secrets.
+- `data[]` entries (when present): `{ id, files: [{ relPath, url, sha256? }], credentialRef? }`.
+  The program NEVER downloads — the compute runner materialises declared files into the
+  workspace before the run via a content-addressed cache (identical bytes are fetched once,
+  ever; a missing file at run time should exit non-zero with a clear message). Never inline
+  secrets. `examples/tabular` is the executable spec of this clause.
 - `resources` is declarative truth for scheduling + for telling a human the machine class.
 
 ---

@@ -12,11 +12,37 @@
     <!-- Home — the hub: registered training projects -->
     <div id="view-home" class="view">
       <div class="topbar">
-        <header class="home-header"><h1>Model Trainer</h1></header>
+        <header class="home-header">
+          <h1>Model Trainer</h1>
+          <div class="header-actions">
+            <button type="button" id="runners-toggle" class="ghost-btn" aria-expanded="false">
+              Compute Runners
+            </button>
+          </div>
+        </header>
       </div>
       <div class="app-scroll">
         <main class="tab-main">
           <p id="app-banner" class="app-banner" role="status" hidden></p>
+
+          <!-- Compute Runners — remote machines that run training jobs (toggled from the header) -->
+          <section id="runners-panel" class="card runners-panel" aria-labelledby="runners-h" hidden>
+            <div class="card-head card-head-row">
+              <div>
+                <h2 id="runners-h">Compute Runners</h2>
+                <p class="card-sub">
+                  Remote machines that run training jobs. Use a runner by entering its id in a
+                  campaign&rsquo;s &ldquo;Run on&rdquo; field.
+                </p>
+              </div>
+              <div class="head-actions">
+                <button type="button" id="runner-pair-btn">Pair a new runner</button>
+              </div>
+            </div>
+            <p id="runners-status" class="form-status" role="status" hidden></p>
+            <div id="runner-pairing" class="runner-pairing" hidden></div>
+            <div id="runners-body" class="runners-body"></div>
+          </section>
 
           <section class="card" aria-labelledby="projects-h">
             <div class="card-head">

@@ -123,6 +123,44 @@ describe('validateTrainerManifest', () => {
     ).toThrow(/lever/)
   })
 
+  it('accepts a valid data declaration', () => {
+    const m = {
+      ...manifest(),
+      data: [{ id: 'wine', files: [{ relPath: 'data/x.csv', url: 'https://e.x/x.csv' }] }],
+    }
+    expect(validateTrainerManifest(m).data?.[0].files[0].relPath).toBe('data/x.csv')
+  })
+
+  it('rejects a data entry without an id', () => {
+    expect(() =>
+      validateTrainerManifest({
+        ...manifest(),
+        data: [{ files: [{ relPath: 'a', url: 'u' }] }],
+      }),
+    ).toThrow(/data/)
+  })
+
+  it('rejects a data entry with no files', () => {
+    expect(() => validateTrainerManifest({ ...manifest(), data: [{ id: 'x', files: [] }] })).toThrow(
+      /files/,
+    )
+  })
+
+  it('rejects a data file missing relPath or url', () => {
+    expect(() =>
+      validateTrainerManifest({
+        ...manifest(),
+        data: [{ id: 'x', files: [{ url: 'u' }] }],
+      }),
+    ).toThrow(/relPath/)
+    expect(() =>
+      validateTrainerManifest({
+        ...manifest(),
+        data: [{ id: 'x', files: [{ relPath: 'a' }] }],
+      }),
+    ).toThrow(/url/)
+  })
+
   it('rejects an eta.unitsLever that names no lever', () => {
     expect(() => validateTrainerManifest({ ...manifest(), eta: { unitsLever: 'ghost' } })).toThrow(
       /unitsLever/,

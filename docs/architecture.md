@@ -38,10 +38,11 @@ project by its manifest's `recordType`.
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │ ComputeRunner seam (thefactory-tools)
 ┌─ thefactory-tools ───────────────▼───────────────────────────────────────────┐
-│  src/computeRunner: ComputeJob/Handle/Result types, LocalComputeRunner       │
-│  (streaming spawn, temp config/summary files), calibrate → fps → ETA         │
+│  src/computeRunner: ComputeJob/Handle/Result (+dataFiles), LocalComputeRunner│
+│  (streaming spawn, temp config/summary, materialises declared data first)    │
+│  src/dataCache: ContentAddressedDataCache (sha256 objects + index,           │
+│  hardlink materialise, fetch-only-misses)                                    │
 │  src/activity: runActivityWorkItems (plan→fresh→run→progress loop)           │
-│  RemoteComputeRunner + runner agent + data cache: Phase 6                    │
 └──────────────────────────────────┬───────────────────────────────────────────┘
                                    │ spawn `{run template}` in the checkout
 ┌─ a trainer-conformant project (e.g. examples/cartpole, BlackSwan later) ─────┐
@@ -90,5 +91,20 @@ project by its manifest's `recordType`.
   statuses survive re-proposing), and the viewer's accept → "Run campaign" turns a hypothesis
   into a `train` activity with that spec. Backlog statuses are plain record edits.
 
-Phases 6–9 (remote runner + PIN pairing + data cache, BlackSwan migration, autopilot,
-notebooks) extend this skeleton — see `implementation-plan.md`.
+## Remote compute
+
+A campaign (or evaluation) names a `computeTarget` — the engine resolves it through the
+backend's `resolveComputeRunner` to either the local runner or a **paired remote runner**.
+Pairing is a one-time PIN exchange (Overseer Settings → Compute Runners shows the PIN; the
+runner claims it on the unauthenticated `pair` endpoint and receives its bearer token once —
+only the hash is stored, as a `compute-runner` record). The runner agent (`runner/agent.mjs`,
+also Dockerised) then **long-polls** `POST /runners/channel/poll` with its own token,
+executes jobs with the same primitives as local (streaming spawn + the content-addressed
+data cache at `~/.thefactory-runner/cache`), streams log batches, and posts the RunSummary
+back — the backend's `RunnerChannel` resolves the awaiting ComputeJobHandle so the engine
+can't tell remote from local. Run records carry the target as `ranBy`. Jobs reference
+projects by local path in v1 (same machine / shared mount); git repoRefs clone but assume a
+self-bootstrapping checkout.
+
+Phases 7–9 (BlackSwan migration, autopilot, notebooks) extend this skeleton — see
+`implementation-plan.md`.

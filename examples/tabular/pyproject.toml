@@ -1,0 +1,17 @@
+[project]
+name = "tabular-wine-trainer"
+version = "0.1.0"
+description = "Executable specification of the model-training standard, DATA path: wine-quality regression (sklearn GradientBoostingRegressor on the UCI red-wine CSV)."
+requires-python = ">=3.10"
+dependencies = [
+  "scikit-learn>=1.3",
+  "pandas>=2.0",
+  "joblib>=1.3",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["trainer"]

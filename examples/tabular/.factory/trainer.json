@@ -1,0 +1,25 @@
+{
+  "name": "tabular-wine",
+  "recordType": "tabular-run",
+  "run": ".venv/bin/python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
+  "calibrate": ".venv/bin/python -m trainer.run --calibrate --summary-out {summaryOut}",
+  "evaluate": ".venv/bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}",
+  "objective": { "name": "val_rmse", "direction": "min" },
+  "levers": {
+    "n_estimators": { "type": "number", "default": 150, "range": [10, 1000] },
+    "learning_rate": { "type": "number", "default": 0.1, "range": [0.005, 0.5] },
+    "max_depth": { "type": "number", "default": 3, "range": [1, 8] },
+    "subsample": { "type": "number", "default": 1.0, "range": [0.3, 1.0] },
+    "seed": { "type": "number", "default": 0 }
+  },
+  "eta": { "unitsLever": "n_estimators" },
+  "data": [
+    {
+      "id": "wine-quality-red",
+      "files": [
+        { "relPath": "data/winequality-red.csv", "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv" }
+      ]
+    }
+  ],
+  "resources": { "gpu": false, "memory": "1g", "cpus": 2 }
+}

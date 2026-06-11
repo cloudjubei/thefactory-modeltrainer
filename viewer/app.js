@@ -12,6 +12,7 @@ const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
 const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
+const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
@@ -66,6 +67,14 @@ let runsFilterKeys = null
 let runsFilterLabel = ''
 let chartSplits = {}
 let itemBarTimer = null
+let runnersCache = []
+let runnerRemoveArmedId = null
+let runnerPairing = null
+// Bumped whenever the pairing sub-panel opens or closes; the observe + countdown
+// loops capture it and stop the moment a newer pairing supersedes them.
+let runnerPairingSession = 0
+let runnerPairingKnownIds = null
+let runnerCountdownTimer = null
 
 // --- Utilities --------------------------------------------------------------
 function escapeHtml(value) {
@@ -115,6 +124,32 @@ function formatWhen(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString()
+}
+// Coarse "n ago" phrasing for a recent timestamp (last-seen), falling back to the
+// absolute time once it is more than a day old.
+function formatRelative(iso) {
+  if (!iso) return '—'
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return String(iso)
+  const sec = Math.max(0, Math.round((Date.now() - t) / 1000))
+  if (sec < 45) return 'just now'
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.round(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  return formatWhen(iso)
+}
+// mm:ss left until an ISO instant; clamped at 0:00 once it has passed.
+function formatCountdown(iso) {
+  const t = new Date(iso || '').getTime()
+  const left = Number.isFinite(t) ? Math.max(0, Math.round((t - Date.now()) / 1000)) : 0
+  const m = Math.floor(left / 60)
+  const s = left % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+function pairingExpired(pairing) {
+  const t = new Date((pairing && pairing.expiresAt) || '').getTime()
+  return !Number.isFinite(t) || t - Date.now() <= 0
 }
 function spinnerHtml() {
   return '<span class="spinner" aria-hidden="true"></span>'
@@ -446,6 +481,316 @@ function setupHome() {
   if (back) back.addEventListener('click', goHome)
 }
 
+// --- Compute Runners (home panel) --------------------------------------------
+// Remote machines that poll the backend for training jobs. Pairing mints a
+// short-lived PIN entered on the runner; this app only shows the PIN and watches
+// the runner list for the new machine to appear. Every call goes through the
+// host bridge — the host holds the credential, this app never does.
+function runnerStatusHtml(runner) {
+  if (runner.online) {
+    const dot = '<span class="status-dot is-online" aria-hidden="true"></span>'
+    const label = runner.busy ? 'Online — running a job' : 'Online — idle'
+    return `${dot}${escapeHtml(label)}`
+  }
+  return '<span class="status-dot is-offline" aria-hidden="true"></span>Offline'
+}
+function runnerRowHtml(runner) {
+  const id = escapeHtml(runner.id)
+  const armed = runnerRemoveArmedId === runner.id
+  const queued = Number(runner.queued) || 0
+  const queuedBit = queued > 0 ? ` · <span class="runner-queued">${queued} queued</span>` : ''
+  const seen = runner.lastSeenAt
+    ? `last seen ${escapeHtml(formatRelative(runner.lastSeenAt))}`
+    : 'never seen'
+  return `<article class="runner-card" data-runner-id="${id}">
+    <div class="runner-main">
+      <h4>${escapeHtml(runner.name || runner.id)}</h4>
+      <p class="runner-status">${runnerStatusHtml(runner)}${queuedBit}</p>
+      <p class="card-sub runner-meta">Paired ${escapeHtml(formatWhen(runner.createdAt))} · ${seen}</p>
+      <p class="runner-id">
+        <code>${id}</code>
+        <button type="button" class="runner-copy-id" data-copy="${id}">copy id</button>
+      </p>
+    </div>
+    <div class="runner-actions">
+      <button type="button" data-action="remove-runner" data-id="${id}" class="${armed ? 'danger-btn' : 'ghost-btn'}">${armed ? 'Confirm' : 'Remove'}</button>
+    </div>
+  </article>`
+}
+async function renderRunnersPanel(showSpinner) {
+  const body = byId('runners-body')
+  if (!body) return
+  if (!embedded()) {
+    body.innerHTML =
+      '<div class="empty-hint">Open inside the Overseer to manage compute runners.</div>'
+    return
+  }
+  if (showSpinner) {
+    body.innerHTML = `<p class="card-sub">${spinnerHtml()} Loading runners…</p>`
+  }
+  let runners
+  try {
+    const res = await window.OverseerBridge.listRunners()
+    runners = (res && res.runners) || []
+  } catch {
+    setStatusLine('runners-status', 'Could not reach the backend to list runners.', true)
+    body.innerHTML = ''
+    return
+  }
+  setStatusLine('runners-status', '')
+  runnersCache = runners
+  if (runnerRemoveArmedId && !runners.some((r) => r.id === runnerRemoveArmedId)) {
+    runnerRemoveArmedId = null
+  }
+  if (!runners.length) {
+    body.innerHTML =
+      '<div class="empty-hint">No runners paired. Pair one to run training on another machine.</div>'
+    return
+  }
+  const ordered = [...runners].sort((a, b) =>
+    String(a.createdAt || '').localeCompare(String(b.createdAt || '')),
+  )
+  body.innerHTML = `<div class="runner-cards">${ordered.map(runnerRowHtml).join('')}</div>`
+}
+// Toggle the panel open/closed from the header button; opening loads the list
+// (with a spinner) and closing tears down any open pairing sub-panel.
+function toggleRunnersPanel(show) {
+  const panel = byId('runners-panel')
+  const btn = byId('runners-toggle')
+  if (!panel) return
+  const open = show === undefined ? panel.hidden : show
+  panel.hidden = !open
+  if (btn) btn.setAttribute('aria-expanded', String(open))
+  if (open) {
+    setStatusLine('runners-status', '')
+    renderRunnersPanel(true)
+  } else {
+    closeRunnerPairing()
+  }
+}
+// Two-click remove mirroring the projects list: first click arms ("Confirm"),
+// second deletes the runner pairing server-side, then the list refreshes.
+async function removeRunnerArmed(id) {
+  if (runnerRemoveArmedId !== id) {
+    runnerRemoveArmedId = id
+    await renderRunnersPanel(false)
+    return
+  }
+  runnerRemoveArmedId = null
+  try {
+    await window.OverseerBridge.removeRunner(id)
+  } catch {
+    setStatusLine('runners-status', 'Could not remove the runner — please try again.', true)
+  }
+  await renderRunnersPanel(false)
+}
+// Copyable setup commands shown to the user; the backend base IS this app's
+// origin (the backend serves it), so the runner pairs straight back to it.
+function pairingCommandsText(pin) {
+  const origin = window.location.origin
+  return (
+    `node runner/agent.mjs pair --backend ${origin} --pin ${pin} --name my-runner\n` +
+    'node runner/agent.mjs run'
+  )
+}
+function renderRunnerPairing() {
+  const el = byId('runner-pairing')
+  if (!el) return
+  if (!runnerPairing) {
+    el.hidden = true
+    el.innerHTML = ''
+    return
+  }
+  const expired = pairingExpired(runnerPairing)
+  const pin = String(runnerPairing.pin || '')
+  const commands = pairingCommandsText(pin)
+  const countdown = expired
+    ? '<span class="runner-countdown is-expired">PIN expired</span><button type="button" id="runner-new-pin" class="ghost-btn">New PIN</button>'
+    : `<span class="runner-countdown">Expires in <strong id="runner-countdown-value">${escapeHtml(formatCountdown(runnerPairing.expiresAt))}</strong></span>`
+  el.hidden = false
+  el.innerHTML = `
+    <div class="card-head card-head-row">
+      <div>
+        <h3>Pair a new runner</h3>
+        <p class="card-sub">
+          Run these on the machine that will train (needs this repo + npm install). It pairs once,
+          then polls for jobs.
+        </p>
+      </div>
+      <button type="button" id="runner-pair-close" class="ghost-btn">Close</button>
+    </div>
+    <div class="runner-pin${expired ? ' is-expired' : ''}">${escapeHtml(pin)}</div>
+    <p class="runner-countdown-row">${countdown}</p>
+    <div class="runner-commands">
+      <pre>${escapeHtml(commands)}</pre>
+      <button type="button" id="runner-copy-cmd" class="ghost-btn">Copy commands</button>
+    </div>`
+}
+// Local 1s ticker for the PIN countdown; on expiry it re-renders the sub-panel
+// (showing "PIN expired" + a New PIN button) and stops the pairing observer.
+function syncRunnerCountdown(active) {
+  if (runnerCountdownTimer) {
+    clearInterval(runnerCountdownTimer)
+    runnerCountdownTimer = null
+  }
+  if (!active) return
+  runnerCountdownTimer = setInterval(() => {
+    if (!runnerPairing) {
+      syncRunnerCountdown(false)
+      return
+    }
+    if (pairingExpired(runnerPairing)) {
+      syncRunnerCountdown(false)
+      renderRunnerPairing()
+      return
+    }
+    const value = byId('runner-countdown-value')
+    if (value) value.textContent = formatCountdown(runnerPairing.expiresAt)
+  }, 1000)
+}
+// While the pairing sub-panel is open and the PIN is live, poll the runner list
+// every 3s; the first id that was not present when pairing started is the new
+// machine — announce it, close the sub-panel and refresh. A newer pairing
+// session (or a close) supersedes this loop via runnerPairingSession.
+async function observeRunnerPairing() {
+  const session = runnerPairingSession
+  while (session === runnerPairingSession && runnerPairing && !pairingExpired(runnerPairing)) {
+    await sleep(POLL_MS)
+    if (session !== runnerPairingSession || !runnerPairing) return
+    let runners
+    try {
+      const res = await window.OverseerBridge.listRunners()
+      runners = (res && res.runners) || []
+    } catch {
+      continue
+    }
+    if (session !== runnerPairingSession || !runnerPairing) return
+    const known = runnerPairingKnownIds || new Set()
+    const fresh = runners.find((r) => !known.has(r.id))
+    if (fresh) {
+      setStatusLine('runners-status', `Paired ✓ ${fresh.name || fresh.id}`)
+      closeRunnerPairing()
+      runnersCache = runners
+      await renderRunnersPanel(false)
+      return
+    }
+  }
+}
+async function onPairRunner() {
+  if (!embedded()) {
+    setStatusLine('runners-status', 'Open inside the Overseer to pair compute runners.', false)
+    return
+  }
+  const btn = byId('runner-pair-btn')
+  if (btn) btn.disabled = true
+  setStatusLine('runners-status', '')
+  let pairing
+  try {
+    pairing = await window.OverseerBridge.createRunnerPairing()
+  } catch {
+    setStatusLine('runners-status', 'Could not start pairing — please try again.', true)
+    if (btn) btn.disabled = false
+    return
+  }
+  if (btn) btn.disabled = false
+  if (!pairing || !pairing.pin) {
+    setStatusLine('runners-status', 'Pairing did not return a PIN — please try again.', true)
+    return
+  }
+  // Snapshot the runners present right now so the observer can tell the newly
+  // paired machine apart from those already known.
+  let known = runnersCache.map((r) => r.id)
+  try {
+    const res = await window.OverseerBridge.listRunners()
+    known = ((res && res.runners) || []).map((r) => r.id)
+  } catch {
+    // fall back to the last rendered list — pairing detection stays best-effort
+  }
+  runnerPairing = pairing
+  runnerPairingSession += 1
+  runnerPairingKnownIds = new Set(known)
+  renderRunnerPairing()
+  syncRunnerCountdown(!pairingExpired(pairing))
+  observeRunnerPairing()
+}
+function closeRunnerPairing() {
+  runnerPairing = null
+  runnerPairingSession += 1
+  runnerPairingKnownIds = null
+  syncRunnerCountdown(false)
+  renderRunnerPairing()
+}
+// navigator.clipboard with a hidden-textarea fallback for sandboxed frames; the
+// button briefly confirms either way.
+async function copyText(text, button) {
+  let ok = false
+  try {
+    await navigator.clipboard.writeText(text)
+    ok = true
+  } catch {
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.append(ta)
+      ta.select()
+      ok = document.execCommand('copy')
+      ta.remove()
+    } catch {
+      ok = false
+    }
+  }
+  if (button) {
+    const original = button.textContent
+    button.textContent = ok ? 'Copied ✓' : 'Copy failed'
+    setTimeout(() => {
+      button.textContent = original
+    }, 1500)
+  }
+}
+function setupRunners() {
+  const toggle = byId('runners-toggle')
+  if (toggle) toggle.addEventListener('click', () => toggleRunnersPanel())
+  const pairBtn = byId('runner-pair-btn')
+  if (pairBtn) pairBtn.addEventListener('click', onPairRunner)
+  const body = byId('runners-body')
+  if (body) {
+    body.addEventListener('click', (event) => {
+      const copyBtn = event.target.closest('button[data-copy]')
+      if (copyBtn) {
+        copyText(copyBtn.dataset.copy, copyBtn)
+        return
+      }
+      const actionBtn = event.target.closest('button[data-action="remove-runner"]')
+      if (actionBtn) {
+        if (runnerRemoveArmedId && actionBtn.dataset.id !== runnerRemoveArmedId) {
+          runnerRemoveArmedId = null
+        }
+        removeRunnerArmed(actionBtn.dataset.id)
+      }
+    })
+  }
+  const pairing = byId('runner-pairing')
+  if (pairing) {
+    pairing.addEventListener('click', (event) => {
+      if (event.target.closest('#runner-pair-close')) {
+        closeRunnerPairing()
+        return
+      }
+      if (event.target.closest('#runner-new-pin')) {
+        onPairRunner()
+        return
+      }
+      const copyCmd = event.target.closest('#runner-copy-cmd')
+      if (copyCmd && runnerPairing) {
+        copyText(pairingCommandsText(String(runnerPairing.pin)), copyCmd)
+      }
+    })
+  }
+}
+
 // --- Navigation (home ↔ project dashboard) ----------------------------------
 function showView(view) {
   const home = byId('view-home')
@@ -504,6 +849,7 @@ async function openProject(projectKey) {
   currentProject = project
   manifest = manifestsCache.get(projectKey).manifest
   removeArmedKey = null
+  closeRunnerPairing()
   resetDashboardState()
   applyManifestChrome()
   renderLaunchForm()
@@ -553,6 +899,13 @@ function trainerActivityParams(extra) {
     dir: currentProject ? currentProject.dir : undefined,
   }
   return extra ? { ...params, ...extra } : params
+}
+// Params for the activities that execute the project's training code — 'train'
+// and 'evaluate' — which also carry the remote compute target when one is set.
+// Judge / propose never take a compute target.
+function trainerComputeParams(extra) {
+  const computeTarget = remoteComputeTarget(savedComputeTarget())
+  return trainerActivityParams(computeTarget ? { ...extra, computeTarget } : extra)
 }
 
 // --- Activity queue (persisted, project-scoped) -------------------------------
@@ -726,7 +1079,11 @@ async function putAutoEvalMarker(activityId, params) {
     id: randomHexId(),
     marker: 'auto-eval',
     activityId,
-    params: { recordType: params.recordType, dir: params.dir },
+    params: {
+      recordType: params.recordType,
+      dir: params.dir,
+      ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+    },
     queuedAt: nowIso(),
   })
 }
@@ -783,6 +1140,13 @@ async function processSettledCampaignEffects() {
 // --- Runs tab -----------------------------------------------------------------
 function runRanAt(summary) {
   return (summary.provenance && summary.provenance.ranAt) || summary.ranAt || ''
+}
+// Run records stamp ranBy with the compute target ('local' when run here) —
+// remote runs get a small muted suffix next to their ran-at time.
+function ranBySuffixHtml(summary) {
+  const ranBy = String(summary.ranBy || '')
+  if (!ranBy || ranBy === 'local') return ''
+  return ` <span class="ran-by">on ${escapeHtml(ranBy)}</span>`
 }
 function sortRunsByObjective(runs) {
   const dir = objectiveDirection()
@@ -870,7 +1234,7 @@ function runRowHtml(run) {
     <td class="num">${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}</td>
     <td class="config-cell">${escapeHtml(configSummaryText(s.config))}</td>
     <td class="num">${escapeHtml(formatDuration(s.durationMs))}</td>
-    <td class="when-cell">${escapeHtml(formatWhen(runRanAt(s)))}</td>
+    <td class="when-cell">${escapeHtml(formatWhen(runRanAt(s)))}${ranBySuffixHtml(s)}</td>
   </tr>`
 }
 function bestObjectiveOf(runs) {
@@ -1191,7 +1555,7 @@ async function onEvaluateRun(key) {
   try {
     const result = await startOrEnqueue(
       'evaluate',
-      trainerActivityParams({ runKey: key }),
+      trainerComputeParams({ runKey: key }),
       `Evaluate ${shortKey(key)}`,
     )
     if (result.queued) {
@@ -1950,7 +2314,7 @@ async function runHypothesisCampaign(id, button) {
   try {
     const result = await startOrEnqueue(
       'train',
-      trainerActivityParams({ spec: h.spec }),
+      trainerComputeParams({ spec: h.spec }),
       `Campaign: ${h.title || h.id}`,
       { hypothesisId: h.id },
     )
@@ -2205,9 +2569,10 @@ function leverFieldsetHtml(key, spec) {
 }
 function savedAutoEval() {
   try {
-    return sessionStorage.getItem(AUTO_EVAL_SS) === '1'
+    const v = sessionStorage.getItem(AUTO_EVAL_SS)
+    return v === null ? true : v === '1'
   } catch {
-    return false
+    return true
   }
 }
 function rememberAutoEval(on) {
@@ -2216,6 +2581,25 @@ function rememberAutoEval(on) {
   } catch {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
+}
+function savedComputeTarget() {
+  try {
+    return sessionStorage.getItem(COMPUTE_TARGET_SS) || ''
+  } catch {
+    return ''
+  }
+}
+function rememberComputeTarget(value) {
+  try {
+    sessionStorage.setItem(COMPUTE_TARGET_SS, value)
+  } catch {
+    // storage may be unavailable in a sandboxed frame — purely best-effort
+  }
+}
+// The remote target a "Run on" value names: empty or "local" → run locally.
+function remoteComputeTarget(value) {
+  const target = String(value || '').trim()
+  return target && target !== 'local' ? target : ''
 }
 function renderLaunchForm() {
   const form = byId('launch-form')
@@ -2238,6 +2622,10 @@ function renderLaunchForm() {
         <label class="check-row launch-autoeval">
           <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
           <span>Auto-evaluate completed runs</span>
+        </label>
+        <label class="field launch-target"><span>Run on</span>
+          <input type="text" name="computeTarget" placeholder="local" value="${escapeHtml(savedComputeTarget())}" />
+          <em class="field-hint">A paired runner's id — manage runners in Overseer Settings → Compute Runners. Leave empty to run locally.</em>
         </label>
       </div>
     </fieldset>
@@ -2297,7 +2685,8 @@ function updateLaunchSummary() {
   const configs = Object.values(spec.sweep).reduce((acc, values) => acc * values.length, 1)
   const seeds = spec.seeds.length
   const total = configs * seeds
-  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}`
+  const target = remoteComputeTarget(savedComputeTarget())
+  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
 }
 function campaignLabel(spec) {
   const sweeps = Object.entries(spec.sweep || {}).map(
@@ -2323,7 +2712,7 @@ async function onLaunchSubmit(event) {
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
-    const params = trainerActivityParams({ spec, refresh })
+    const params = trainerComputeParams({ spec, refresh })
     const result = await startOrEnqueue(
       'train',
       params,
@@ -2355,7 +2744,12 @@ function setupLaunch() {
   const form = byId('launch-form')
   if (!form) return
   form.addEventListener('submit', onLaunchSubmit)
-  form.addEventListener('input', updateLaunchSummary)
+  form.addEventListener('input', (event) => {
+    if (event.target && event.target.name === 'computeTarget') {
+      rememberComputeTarget(event.target.value)
+    }
+    updateLaunchSummary()
+  })
   form.addEventListener('change', (event) => {
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     updateLaunchSummary()
@@ -2737,6 +3131,7 @@ function savedTabId() {
 // --- Init ----------------------------------------------------------------------
 async function init() {
   setupHome()
+  setupRunners()
   setupRuns()
   setupCharts()
   setupHypotheses()

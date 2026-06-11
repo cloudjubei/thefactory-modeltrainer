@@ -1,6 +1,7 @@
 import type {
   ExperimentSpec,
   PlannedTrainingItem,
+  TrainerDataFile,
   TrainerLeverSpec,
   TrainerManifest,
   TrainingRunSummary,
@@ -51,6 +52,25 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
   for (const [key, lever] of Object.entries(levers)) {
     if (!lever || typeof lever !== 'object' || !LEVER_TYPES.has(lever.type)) {
       throw new Error(`trainer manifest lever "${key}" has an invalid type`)
+    }
+  }
+  if (m.data !== undefined) {
+    if (!Array.isArray(m.data)) throw new Error('trainer manifest data must be an array')
+    for (const entry of m.data as Record<string, unknown>[]) {
+      if (!entry || typeof entry.id !== 'string' || !entry.id) {
+        throw new Error('trainer manifest data entries require an id')
+      }
+      if (!Array.isArray(entry.files) || entry.files.length === 0) {
+        throw new Error(`trainer manifest data entry "${entry.id}" requires non-empty files`)
+      }
+      for (const file of entry.files as Record<string, unknown>[]) {
+        if (!file || typeof file.relPath !== 'string' || !file.relPath) {
+          throw new Error(`trainer manifest data entry "${entry.id}" has a file without a relPath`)
+        }
+        if (typeof file.url !== 'string' || !file.url) {
+          throw new Error(`trainer manifest data entry "${entry.id}" has a file without a url`)
+        }
+      }
     }
   }
   const eta = m.eta as { unitsLever?: unknown } | undefined
@@ -135,6 +155,12 @@ export function pickBestRun(
     }
   }
   return best
+}
+
+/** Flatten a manifest's declared datasets into the per-job data file list. */
+export function manifestDataFiles(manifest: TrainerManifest): TrainerDataFile[] | undefined {
+  if (!manifest.data || manifest.data.length === 0) return undefined
+  return manifest.data.flatMap((entry) => entry.files)
 }
 
 export function totalCampaignUnits(items: PlannedTrainingItem[]): number | undefined {
