@@ -235,7 +235,24 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs).toHaveLength(2)
     const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
     expect(records).toHaveLength(2)
-    expect(records[0].content).toMatchObject({ status: 'completed', ranAt: NOW, ranBy: 'local' })
+    expect(records[0].content).toMatchObject({
+      status: 'completed',
+      ranAt: NOW,
+      ranBy: 'local',
+      durationMs: 5,
+    })
+  })
+
+  it('reports the planned item keys on the result', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1, 0.2] } },
+    })
+    expect(result.keys).toHaveLength(2)
+    expect(result.keys.every((k) => /^[0-9a-f]{12}$/.test(k))).toBe(true)
   })
 
   it('reports the best run by objective (max)', async () => {

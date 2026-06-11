@@ -11,8 +11,15 @@ const POLL_MS = 3000
 const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
 const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
+const AUTO_EVAL_SS = 'trainer.autoEval'
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
+const QUEUE_RECORD_TYPE = 'trainer-queue'
+const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
+const JUDGE_HELP_TEXT =
+  "Scores every completed run 0–100. Health-flagged runs are auto-rejected without using the LLM. For the rest, the objective is normalised (best=100) and blended 50/50 with an LLM verdict that weighs stability and how promising the configuration is — so a run can't win on prose alone. Results appear in the Judge column."
+const PROPOSE_HELP_TEXT =
+  "Sends the manifest's levers, the run history and the verdicts to the LLM and asks for new experiment specs likely to beat the best run. Proposals are validated against the levers, deduped by spec, and land below as pending hypotheses for you to accept or reject."
 const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'charts', label: 'Charts' },
@@ -50,6 +57,15 @@ let lastProgress = null
 let lastCampaign = null
 let judging = false
 let proposing = false
+let queueCache = []
+// In-memory double-dispatch guard for the persisted queue: only one pump loop
+// drains the queue at a time, and `activeQueueItem` is the entry being run.
+let queuePumping = false
+let activeQueueItem = null
+let runsFilterKeys = null
+let runsFilterLabel = ''
+let chartSplits = {}
+let itemBarTimer = null
 
 // --- Utilities --------------------------------------------------------------
 function escapeHtml(value) {
@@ -84,10 +100,31 @@ function formatEta(seconds) {
   if (m) return `${m}m ${sec}s`
   return `${sec}s`
 }
+function formatDuration(ms) {
+  const v = Number(ms)
+  if (!Number.isFinite(v) || v < 0) return '—'
+  const s = Math.round(v / 1000)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+  if (m) return `${m}:${String(sec).padStart(2, '0')}`
+  return `${sec}s`
+}
 function formatWhen(iso) {
   if (!iso) return '—'
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString()
+}
+function spinnerHtml() {
+  return '<span class="spinner" aria-hidden="true"></span>'
+}
+// Small circular "?" button with a styled hover/focus callout (no native title).
+function helpCalloutHtml(text) {
+  return `<span class="help-callout"><button type="button" class="help-btn" aria-label="What does this do?">?</button><span class="help-pop" role="tooltip">${escapeHtml(text)}</span></span>`
+}
+function queuedStatusText(ahead) {
+  return `Queued — ${ahead} ahead of it.`
 }
 function nowIso() {
   return new Date().toISOString()
@@ -136,10 +173,20 @@ async function readRuns() {
     })
     .filter((r) => r.key)
 }
+// Latest-record contents get the record-level timestamps merged in (when the
+// content does not carry its own), so observers can anchor time estimates on
+// when the record was actually written.
 async function readLatestRecord(suffix) {
   if (!manifest) return null
   const recs = await queryRecords(manifest.recordType + suffix, 'latest')
-  return (recs[0] && recs[0].content) || null
+  const rec = recs[0]
+  if (!rec || !rec.content) return null
+  const content = rec.content
+  return {
+    ...content,
+    startedAt: content.startedAt || rec.createdAt,
+    updatedAt: content.updatedAt || rec.updatedAt,
+  }
 }
 async function readProgress() {
   return readLatestRecord('-progress')
@@ -211,6 +258,39 @@ async function readManifestRecords() {
   }
   return map
 }
+// Queue records are global ('trainer-queue') but project-scoped through the
+// stored params.recordType; marker items (auto-eval intents) ride the same
+// record type and are filtered out of the visible queue.
+async function readQueueRecords() {
+  if (!manifest) return []
+  const recs = await queryRecords(QUEUE_RECORD_TYPE)
+  return recs
+    .map((r) => {
+      const content = r.content || {}
+      return { ...content, id: content.id || r.key || '' }
+    })
+    .filter((q) => q.id && q.params && q.params.recordType === manifest.recordType)
+}
+async function readQueue() {
+  const items = await readQueueRecords()
+  return items
+    .filter((q) => !q.marker)
+    .sort(
+      (a, b) =>
+        String(a.queuedAt || '').localeCompare(String(b.queuedAt || '')) ||
+        a.id.localeCompare(b.id),
+    )
+}
+async function putQueueItem(item) {
+  await window.OverseerBridge.putData({ type: QUEUE_RECORD_TYPE, key: item.id, content: item })
+}
+async function deleteQueueItem(id) {
+  try {
+    await window.OverseerBridge.deleteData({ type: QUEUE_RECORD_TYPE, key: id })
+  } catch {
+    // a missing record is already gone — nothing to surface
+  }
+}
 
 // --- Home (hub) ----------------------------------------------------------------
 function projectHasManifest(projectKey) {
@@ -219,7 +299,7 @@ function projectHasManifest(projectKey) {
 }
 function manifestStatusHtml(projectKey) {
   if (inspectingKeys.has(projectKey)) {
-    return '<p class="project-status is-muted"><span class="spinner" aria-hidden="true"></span> Inspecting…</p>'
+    return `<p class="project-status is-muted">${spinnerHtml()} Inspecting…</p>`
   }
   const rec = manifestsCache.get(projectKey)
   if (!rec) return '<p class="project-status is-muted">Not inspected yet.</p>'
@@ -388,10 +468,20 @@ function resetDashboardState() {
   lastCampaign = null
   judging = false
   proposing = false
+  queueCache = []
+  runsFilterKeys = null
+  runsFilterLabel = ''
+  chartSplits = {}
+  syncItemBarTimer(false)
   closeRunDetail()
   toggleHypothesisForm(false)
   setStatusLine('judge-status', '')
   setStatusLine('hypotheses-status', '')
+  const live = byId('runs-live')
+  if (live) {
+    live.innerHTML = ''
+    live.hidden = true
+  }
   const runsBody = byId('runs-body')
   if (runsBody) runsBody.innerHTML = ''
   const spark = byId('runs-sparkline')
@@ -410,6 +500,7 @@ async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
   if (!project || !projectHasManifest(projectKey)) return
   projectEpoch += 1
+  const epoch = projectEpoch
   currentProject = project
   manifest = manifestsCache.get(projectKey).manifest
   removeArmedKey = null
@@ -420,11 +511,17 @@ async function openProject(projectKey) {
   showTab(savedTabId() || TABS[0].id)
   await renderRuns()
   await resumeRunningActivity()
+  if (epoch !== projectEpoch) return
+  await refreshQueue()
+  await processSettledCampaignEffects()
+  if (epoch !== projectEpoch) return
+  pumpQueue()
 }
 function goHome() {
   projectEpoch += 1
   currentProject = null
   manifest = null
+  syncItemBarTimer(false)
   document.title = 'Model Trainer'
   showView('home')
   renderHome()
@@ -456,6 +553,231 @@ function trainerActivityParams(extra) {
     dir: currentProject ? currentProject.dir : undefined,
   }
   return extra ? { ...params, ...extra } : params
+}
+
+// --- Activity queue (persisted, project-scoped) -------------------------------
+// Every trainer activity goes through startOrEnqueue: while another activity for
+// this project is live the request lands in the 'trainer-queue' records instead,
+// and pumpQueue drains the queue head-first whenever the live one settles.
+async function findLiveTrainerActivity() {
+  if (!manifest) return null
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return (
+      ((res && res.activities) || []).find(
+        (a) => a.recordType === manifest.recordType && a.status === 'running' && a.isLive !== false,
+      ) || null
+    )
+  } catch {
+    return null
+  }
+}
+async function readLiveActivityIds() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return new Set(
+      ((res && res.activities) || [])
+        .filter((a) => a.status === 'running' && a.isLive !== false)
+        .map((a) => a.activityId),
+    )
+  } catch {
+    return new Set()
+  }
+}
+function trainerBusyLocally() {
+  return queuePumping || !!activeQueueItem || (observing && lastActivityStatus === 'running')
+}
+async function startOrEnqueue(activityType, params, label, extra) {
+  const live = await findLiveTrainerActivity()
+  if (!live && !trainerBusyLocally()) {
+    const started = await window.OverseerBridge.startActivity(activityType, params)
+    const activityId = started && started.activityId
+    if (!activityId) throw new Error('no activity id')
+    return { started: true, activityId }
+  }
+  const queue = await readQueue()
+  const item = {
+    id: randomHexId(),
+    activityType,
+    params,
+    label,
+    queuedAt: nowIso(),
+    ...(extra || {}),
+  }
+  await putQueueItem(item)
+  await refreshQueue()
+  return { queued: true, id: item.id, ahead: queue.length + 1 }
+}
+async function refreshQueue() {
+  queueCache = await readQueue()
+  renderActivity()
+}
+async function onQueueRemove(id) {
+  const item = queueCache.find((q) => q.id === id)
+  await deleteQueueItem(id)
+  if (item && item.hypothesisId && item.params && item.params.recordType) {
+    await clearHypothesisCampaign(item.params.recordType, item.hypothesisId, id)
+    if (activeTabId === 'hypotheses') await renderHypotheses()
+  }
+  await refreshQueue()
+}
+// Drain the queue: while nothing for this project is live, pop the head record,
+// start its stored activity and observe it to settlement before the next pop.
+// Double-dispatch is guarded by the in-memory queuePumping flag; navigation is
+// guarded by projectEpoch.
+async function pumpQueue() {
+  if (queuePumping || !embedded() || !manifest) return
+  const epoch = projectEpoch
+  queuePumping = true
+  try {
+    while (epoch === projectEpoch) {
+      if (lastActivityStatus === 'paused') return
+      if (await findLiveTrainerActivity()) return
+      const queue = await readQueue()
+      if (epoch !== projectEpoch || !queue.length) return
+      const head = queue[0]
+      await deleteQueueItem(head.id)
+      queueCache = queueCache.filter((q) => q.id !== head.id)
+      const settled = await dispatchQueueItem(head, epoch)
+      if (!settled) return
+    }
+  } finally {
+    queuePumping = false
+    activeQueueItem = null
+  }
+}
+// Start one dequeued item and observe it until it settles. Returns true when
+// the pump should continue with the next item.
+async function dispatchQueueItem(item, epoch) {
+  activeQueueItem = item
+  renderActivity()
+  let activityId = null
+  try {
+    const started = await window.OverseerBridge.startActivity(item.activityType, item.params)
+    activityId = started && started.activityId
+    if (!activityId) throw new Error('no activity id')
+  } catch {
+    activeQueueItem = null
+    if (epoch === projectEpoch) renderActivity()
+    return true
+  }
+  if (item.autoEval) await putAutoEvalMarker(activityId, item.params)
+  if (item.hypothesisId && item.params && item.params.recordType) {
+    await stampHypothesisCampaign(item.params.recordType, item.hypothesisId, {
+      activityId,
+      launchedAt: nowIso(),
+      status: 'running',
+    })
+  }
+  if (item.activityType === 'train') {
+    activeQueueItem = null
+    if (epoch !== projectEpoch) return false
+    currentActivityId = activityId
+    lastProgress = null
+    lastCampaign = null
+    lastActivityStatus = 'running'
+    renderActivity()
+    const status = await observeActivityUntilDone(activityId)
+    return status === 'completed' || status === 'failed' || status === 'aborted'
+  }
+  applyQuickDispatchState(item, true)
+  const act = await observeQuickActivity(activityId)
+  applyQuickDispatchState(item, false)
+  activeQueueItem = null
+  if (epoch !== projectEpoch) return false
+  renderActivity()
+  await refreshAfterQuickDispatch(item, act)
+  return !!act
+}
+// Mirror the busy state the direct start sites set, so the same buttons and
+// spinners light up when the queue dispatches a judge / propose / evaluate.
+function applyQuickDispatchState(item, busy) {
+  if (item.activityType === 'judge') {
+    judging = busy
+    renderJudgeControls()
+  } else if (item.activityType === 'propose') {
+    proposing = busy
+    renderProposeControls()
+  } else if (item.activityType === 'evaluate') {
+    const key = (item.params && item.params.runKey) || ''
+    if (!key) return
+    if (busy) evaluatingKeys.add(key)
+    else evaluatingKeys.delete(key)
+    if (selectedRunKey === key) renderRunDetail(key)
+  }
+}
+async function refreshAfterQuickDispatch(item, act) {
+  if (item.activityType === 'judge') {
+    setStatusLine('judge-status', quickActivityFailureText(act, 'Judging'), true)
+    await renderRuns()
+  } else if (item.activityType === 'propose') {
+    setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
+    await renderHypotheses()
+  } else if (item.activityType === 'evaluate') {
+    await renderRuns()
+  }
+}
+// The auto-eval intent survives reloads as a hidden marker record in the queue:
+// it names the campaign activity it belongs to, and is consumed (evaluations of
+// the campaign's completed-with-checkpoint runs get enqueued) once that
+// campaign's record lands.
+async function putAutoEvalMarker(activityId, params) {
+  await putQueueItem({
+    id: randomHexId(),
+    marker: 'auto-eval',
+    activityId,
+    params: { recordType: params.recordType, dir: params.dir },
+    queuedAt: nowIso(),
+  })
+}
+async function processAutoEvalMarkers() {
+  const markers = (await readQueueRecords()).filter((q) => q.marker === 'auto-eval')
+  if (!markers.length) return
+  const campaign = await readCampaign()
+  for (const marker of markers) {
+    if (campaign && campaign.activityId === marker.activityId) {
+      if (!campaign.finishedAt) continue
+      if (!campaign.aborted) await enqueueMissingEvaluations(campaign, marker.params)
+      await deleteQueueItem(marker.id)
+      continue
+    }
+    const act = await getActivity(marker.activityId)
+    if (act && (act.status === 'running' || act.status === 'paused')) continue
+    await deleteQueueItem(marker.id)
+  }
+  await refreshQueue()
+}
+async function enqueueMissingEvaluations(campaign, baseParams) {
+  const keys = Array.isArray(campaign.keys) ? campaign.keys : []
+  if (!keys.length) return
+  const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
+  const queuedKeys = new Set(
+    queue
+      .filter((q) => q.activityType === 'evaluate')
+      .map((q) => (q.params && q.params.runKey) || ''),
+  )
+  for (const key of keys) {
+    const run = runs.find((r) => r.key === key)
+    if (!run) continue
+    const s = run.summary
+    if (s.status && s.status !== 'completed') continue
+    if (!(s.artifacts && s.artifacts.checkpoint)) continue
+    if (evaluations.has(key) || queuedKeys.has(key) || evaluatingKeys.has(key)) continue
+    await putQueueItem({
+      id: randomHexId(),
+      activityType: 'evaluate',
+      params: { ...baseParams, runKey: key },
+      label: `Evaluate ${shortKey(key)}`,
+      queuedAt: nowIso(),
+    })
+  }
+}
+// Settle-time bookkeeping shared by the observe loop and project open: stamp
+// finished campaigns into their hypotheses, consume auto-eval markers.
+async function processSettledCampaignEffects() {
+  await stampHypothesisCampaignResults()
+  await processAutoEvalMarkers()
+  if (activeTabId === 'hypotheses') await renderHypotheses()
 }
 
 // --- Runs tab -----------------------------------------------------------------
@@ -547,8 +869,32 @@ function runRowHtml(run) {
     <td>${evalChipHtml(run)}</td>
     <td class="num">${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}</td>
     <td class="config-cell">${escapeHtml(configSummaryText(s.config))}</td>
+    <td class="num">${escapeHtml(formatDuration(s.durationMs))}</td>
     <td class="when-cell">${escapeHtml(formatWhen(runRanAt(s)))}</td>
   </tr>`
+}
+function bestObjectiveOf(runs) {
+  const values = runs.map((r) => Number(r.summary.objective)).filter((v) => Number.isFinite(v))
+  if (!values.length) return NaN
+  return objectiveDirection() === 'min' ? Math.min(...values) : Math.max(...values)
+}
+// Small live badge in the Runs header while a campaign is training.
+function renderRunsLive() {
+  const el = byId('runs-live')
+  if (!el) return
+  const live = lastActivityStatus === 'running'
+  el.innerHTML = live ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : ''
+  el.hidden = !live
+}
+function runsFilterBarHtml(shownCount) {
+  if (!runsFilterKeys) return ''
+  const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
+  return `<p class="runs-filter-bar">Showing ${shownCount} campaign run${shownCount === 1 ? '' : 's'}${label} — <button type="button" id="runs-filter-clear">clear filter</button></p>`
+}
+function clearRunsFilter() {
+  runsFilterKeys = null
+  runsFilterLabel = ''
+  renderRuns()
 }
 async function renderRuns() {
   const body = byId('runs-body')
@@ -561,8 +907,10 @@ async function renderRuns() {
     readEvaluations(),
   ])
   renderJudgeControls()
+  renderRunsLive()
+  const shown = runsFilterKeys ? runsCache.filter((r) => runsFilterKeys.has(r.key)) : runsCache
   if (spark) {
-    const svg = sparklineSvg(runsCache)
+    const svg = sparklineSvg(shown)
     spark.innerHTML = svg
     spark.hidden = !svg
   }
@@ -571,15 +919,20 @@ async function renderRuns() {
     closeRunDetail()
     return
   }
-  const rows = sortRunsByObjective(runsCache).map(runRowHtml).join('')
-  body.innerHTML = `<div class="table-wrap"><table class="runs-table">
+  if (!shown.length) {
+    body.innerHTML = `${runsFilterBarHtml(0)}<div class="empty-hint">No runs recorded for this campaign yet.</div>`
+    closeRunDetail()
+    return
+  }
+  const rows = sortRunsByObjective(shown).map(runRowHtml).join('')
+  body.innerHTML = `${runsFilterBarHtml(shown.length)}<div class="table-wrap"><table class="runs-table">
     <thead><tr>
       <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Health</th>
-      <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th>Ran at</th>
+      <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th class="num">Took</th><th>Ran at</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`
-  if (selectedRunKey && !runsCache.some((r) => r.key === selectedRunKey)) closeRunDetail()
+  if (selectedRunKey && !shown.some((r) => r.key === selectedRunKey)) closeRunDetail()
   else if (selectedRunKey) renderRunDetail(selectedRunKey)
 }
 function metricsTableHtml(metrics) {
@@ -624,7 +977,7 @@ function evaluationSectionHtml(run) {
   const statusLine = '<p id="run-eval-status" class="form-status" role="status" hidden></p>'
   if (evaluatingKeys.has(run.key)) {
     return `<h3>Evaluation</h3>
-      <p class="card-sub"><span class="spinner" aria-hidden="true"></span> Evaluating — re-running the saved checkpoint…</p>
+      <p class="card-sub">${spinnerHtml()} Evaluating — re-running the saved checkpoint…</p>
       ${statusLine}`
   }
   const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
@@ -738,7 +1091,7 @@ function closeRunDetail() {
   }
 }
 function busyButtonHtml(label) {
-  return `<span class="spinner" aria-hidden="true"></span> ${escapeHtml(label)}`
+  return `${spinnerHtml()} ${escapeHtml(label)}`
 }
 function setStatusLine(id, text, isError) {
   const el = byId(id)
@@ -794,14 +1147,16 @@ async function onJudgeClick() {
     return
   }
   const epoch = projectEpoch
-  judging = true
   setStatusLine('judge-status', '')
-  renderJudgeControls()
   try {
-    const started = await window.OverseerBridge.startActivity('judge', trainerActivityParams())
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
-    const act = await observeQuickActivity(activityId)
+    const result = await startOrEnqueue('judge', trainerActivityParams(), 'Judge runs')
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('judge-status', queuedStatusText(result.ahead))
+      return
+    }
+    judging = true
+    renderJudgeControls()
+    const act = await observeQuickActivity(result.activityId)
     if (epoch === projectEpoch) {
       setStatusLine('judge-status', quickActivityFailureText(act, 'Judging'), true)
     }
@@ -810,9 +1165,12 @@ async function onJudgeClick() {
       setStatusLine('judge-status', 'Could not start judging — please try again.', true)
     }
   } finally {
-    judging = false
-    renderJudgeControls()
-    if (epoch === projectEpoch) await renderRuns()
+    if (judging) {
+      judging = false
+      renderJudgeControls()
+      if (epoch === projectEpoch) await renderRuns()
+      pumpQueue()
+    }
   }
 }
 // Re-test one run's saved checkpoint via the quick 'evaluate' activity (no
@@ -821,26 +1179,42 @@ async function onJudgeClick() {
 async function onEvaluateRun(key) {
   if (evaluatingKeys.has(key) || !embedded()) return
   if (!runsCache.some((r) => r.key === key)) return
+  if (
+    queueCache.some((q) => q.activityType === 'evaluate' && q.params && q.params.runKey === key)
+  ) {
+    if (selectedRunKey === key) setStatusLine('run-eval-status', 'Already queued.')
+    return
+  }
   const epoch = projectEpoch
-  evaluatingKeys.add(key)
-  if (selectedRunKey === key) renderRunDetail(key)
+  let started = false
   let failure = ''
   try {
-    const started = await window.OverseerBridge.startActivity(
+    const result = await startOrEnqueue(
       'evaluate',
       trainerActivityParams({ runKey: key }),
+      `Evaluate ${shortKey(key)}`,
     )
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
-    const act = await observeQuickActivity(activityId)
+    if (result.queued) {
+      if (epoch === projectEpoch && selectedRunKey === key) {
+        setStatusLine('run-eval-status', queuedStatusText(result.ahead))
+      }
+      return
+    }
+    started = true
+    evaluatingKeys.add(key)
+    if (selectedRunKey === key) renderRunDetail(key)
+    const act = await observeQuickActivity(result.activityId)
     failure = quickActivityFailureText(act, 'Evaluating')
   } catch {
     failure = 'Could not start evaluating — please try again.'
   } finally {
-    evaluatingKeys.delete(key)
-    if (epoch === projectEpoch) {
-      await renderRuns()
-      if (failure && selectedRunKey === key) setStatusLine('run-eval-status', failure, true)
+    if (started || failure) {
+      evaluatingKeys.delete(key)
+      if (epoch === projectEpoch) {
+        await renderRuns()
+        if (failure && selectedRunKey === key) setStatusLine('run-eval-status', failure, true)
+      }
+      if (started) pumpQueue()
     }
   }
 }
@@ -848,6 +1222,10 @@ function setupRuns() {
   const body = byId('runs-body')
   if (body) {
     body.addEventListener('click', (event) => {
+      if (event.target.closest('#runs-filter-clear')) {
+        clearRunsFilter()
+        return
+      }
       const row = event.target.closest('tr[data-key]')
       if (row) openRunDetail(row.dataset.key)
     })
@@ -861,15 +1239,37 @@ function setupRuns() {
     })
   }
   const judgeBtn = byId('judge-btn')
-  if (judgeBtn) judgeBtn.addEventListener('click', onJudgeClick)
+  if (judgeBtn) {
+    judgeBtn.addEventListener('click', onJudgeClick)
+    judgeBtn.insertAdjacentHTML('afterend', helpCalloutHtml(JUDGE_HELP_TEXT))
+  }
 }
 
 // --- SVG chart helpers (hand-rolled, no libs) ----------------------------------
 // One shared XY chart builder behind two thin wrappers: buildLineChart and
-// buildScatterChart take { points: [{ x, y, label?, marker? }], xLabel, yLabel,
-// logX?, xTime?, refDiagonal?, markers?, width?, height?, ariaLabel? } and
-// return an SVG string with axes, grid lines, ticks and per-point <title>
-// tooltips. Scales come from three tiny tick generators below.
+// buildScatterChart take { points: [{ x, y, label?, marker?, group? }], xLabel,
+// yLabel, logX?, xTime?, refDiagonal?, markers?, width?, height?, ariaLabel?,
+// groupColors? } and return an SVG string with axes, grid lines, ticks and
+// per-point <title> tooltips. Scales come from three tiny tick generators
+// below. Points carrying a `group` label are colour-coded from a fixed palette
+// (or the caller's groupColors map); grouped line charts draw one polyline per
+// group.
+function groupColorMap(labels) {
+  const distinct = [...new Set(labels.map((l) => String(l)))].sort()
+  const map = new Map()
+  distinct.forEach((label, i) => map.set(label, CHART_PALETTE[i % CHART_PALETTE.length]))
+  return map
+}
+function chartLegendHtml(groupColors) {
+  if (!groupColors || !groupColors.size) return ''
+  const items = [...groupColors]
+    .map(
+      ([label, color]) =>
+        `<span class="chart-legend-item"><span class="chart-legend-swatch" style="background:${color}"></span>${escapeHtml(label)}</span>`,
+    )
+    .join('')
+  return `<div class="chart-legend">${items}</div>`
+}
 function formatTickValue(value) {
   const v = Number(value)
   if (!Number.isFinite(v)) return ''
@@ -988,21 +1388,45 @@ function buildXyChart(opts) {
       `<line class="chart-ref" x1="${px(lo)}" y1="${py(lo)}" x2="${px(hi)}" y2="${py(hi)}"></line>`,
     )
   }
+  const grouped = points.some((p) => p.group !== undefined)
+  const groupColors = grouped
+    ? opts.groupColors ||
+      groupColorMap(points.filter((p) => p.group !== undefined).map((p) => p.group))
+    : null
+  const pointColor = (p) =>
+    groupColors && p.group !== undefined ? groupColors.get(String(p.group)) || '' : ''
   if (opts.line) {
-    const path = points.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')
-    parts.push(`<polyline class="chart-line" points="${path}"></polyline>`)
+    if (groupColors) {
+      for (const [label, color] of groupColors) {
+        const path = points
+          .filter((p) => p.group !== undefined && String(p.group) === label)
+          .map((p) => `${px(p.x)},${py(p.y)}`)
+          .join(' ')
+        if (path) {
+          parts.push(
+            `<polyline class="chart-line" style="stroke:${color}" points="${path}"></polyline>`,
+          )
+        }
+      }
+    } else {
+      const path = points.map((p) => `${px(p.x)},${py(p.y)}`).join(' ')
+      parts.push(`<polyline class="chart-line" points="${path}"></polyline>`)
+    }
   }
   if (opts.markers !== false) {
     for (const p of points) {
       const x = px(p.x)
       const y = py(p.y)
       const title = p.label ? `<title>${escapeHtml(p.label)}</title>` : ''
+      const color = pointColor(p)
       if (p.marker === 'cross') {
         parts.push(
-          `<g class="chart-cross"><path d="M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x - 4} ${y + 4} L ${x + 4} ${y - 4}"></path>${title}</g>`,
+          `<g class="chart-cross"><path${color ? ` style="stroke:${color}"` : ''} d="M ${x - 4} ${y - 4} L ${x + 4} ${y + 4} M ${x - 4} ${y + 4} L ${x + 4} ${y - 4}"></path>${title}</g>`,
         )
       } else {
-        parts.push(`<circle class="chart-point" cx="${x}" cy="${y}" r="3.5">${title}</circle>`)
+        parts.push(
+          `<circle class="chart-point"${color ? ` style="fill:${color}"` : ''} cx="${x}" cy="${y}" r="3.5">${title}</circle>`,
+        )
       }
     }
   }
@@ -1016,11 +1440,42 @@ function buildScatterChart(opts) {
 }
 
 // --- Charts tab ------------------------------------------------------------------
-function chartSectionHtml(title, svg, emptyText) {
-  const content = svg
-    ? `<div class="chart-wrap">${svg}</div>`
-    : `<div class="empty-hint">${escapeHtml(emptyText)}</div>`
-  return `<section class="chart-section"><h3>${escapeHtml(title)}</h3>${content}</section>`
+// Each chart carries a per-chart "Split by" selector over the manifest's choice
+// levers; selections live in chartSplits while the dashboard is open. Split
+// charts colour-group their points by the lever's value in each run's config.
+function chartSplitKey(chartId) {
+  const lever = chartSplits[chartId]
+  const spec = lever && manifest && manifest.levers && manifest.levers[lever]
+  return spec && spec.type === 'choice' ? lever : ''
+}
+function runSplitGroup(run, lever) {
+  const config = run.summary.config || {}
+  return config[lever] === undefined ? '—' : String(config[lever])
+}
+function splitSelectHtml(chartId) {
+  const choices = leverEntries().filter(([, spec]) => spec.type === 'choice')
+  if (!choices.length) return ''
+  const selected = chartSplitKey(chartId)
+  const options = ['<option value="">None</option>']
+    .concat(
+      choices.map(
+        ([key]) =>
+          `<option value="${escapeHtml(key)}"${key === selected ? ' selected' : ''}>${escapeHtml(key)}</option>`,
+      ),
+    )
+    .join('')
+  return `<label class="chart-split"><span>Split by</span> <select data-chart-split="${escapeHtml(chartId)}">${options}</select></label>`
+}
+function chartSectionHtml(title, svg, emptyText, extras) {
+  const controls = (extras && extras.controls) || ''
+  const legend = (extras && extras.legend) || ''
+  const head = `<div class="chart-section-head"><h3>${escapeHtml(title)}</h3>${controls}</div>`
+  const content =
+    (extras && extras.content) ||
+    (svg
+      ? `<div class="chart-wrap">${svg}</div>`
+      : `<div class="empty-hint">${escapeHtml(emptyText)}</div>`)
+  return `<section class="chart-section">${head}${legend}${content}</section>`
 }
 function chartFigureHtml(title, svg) {
   return `<figure class="chart-figure"><figcaption>${escapeHtml(title)}</figcaption><div class="chart-wrap">${svg}</div></figure>`
@@ -1030,12 +1485,18 @@ function spansTwoOrders(values) {
   if (positive.length < 2) return false
   return Math.max(...positive) / Math.min(...positive) >= 100
 }
-function objectiveTimelineSvg() {
+// Group colours for one split lever, computed across every run so the same
+// value keeps the same colour in every chart of the dashboard.
+function splitGroupColors(split) {
+  return split ? groupColorMap(runsCache.map((r) => runSplitGroup(r, split))) : null
+}
+function objectiveTimelineSvg(split, groupColors) {
   const points = runsCache
     .map((r) => ({
       x: new Date(runRanAt(r.summary)).getTime(),
       y: Number(r.summary.objective),
       label: `${shortKey(r.key)} · ${objectiveName()} ${formatObjective(r.summary.objective)} · ${formatWhen(runRanAt(r.summary))}`,
+      group: split ? runSplitGroup(r, split) : undefined,
     }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
     .sort((a, b) => a.x - b.x)
@@ -1049,11 +1510,21 @@ function objectiveTimelineSvg() {
     width: 920,
     height: 280,
     ariaLabel: `${objectiveName()} over time`,
+    groupColors,
+  })
+}
+function timelineChartSectionHtml() {
+  const split = chartSplitKey('timeline')
+  const groupColors = splitGroupColors(split)
+  const svg = objectiveTimelineSvg(split, groupColors)
+  return chartSectionHtml(`${objectiveName()} over time`, svg, 'Not enough runs yet.', {
+    controls: splitSelectHtml('timeline'),
+    legend: svg ? chartLegendHtml(groupColors) : '',
   })
 }
 // Small-multiple scatters: one per numeric lever with ≥2 distinct swept values,
 // log-x when the values span at least two orders of magnitude.
-function leverScatterFiguresHtml() {
+function leverScatterFiguresHtml(split, groupColors) {
   const figures = []
   for (const [key, spec] of leverEntries()) {
     if (spec.type !== 'number') continue
@@ -1064,6 +1535,7 @@ function leverScatterFiguresHtml() {
           x: value,
           y: Number(r.summary.objective),
           label: `${shortKey(r.key)} · ${key} ${formatObjective(value)} · ${objectiveName()} ${formatObjective(r.summary.objective)}`,
+          group: split ? runSplitGroup(r, split) : undefined,
         }
       })
       .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -1076,25 +1548,37 @@ function leverScatterFiguresHtml() {
       width: 320,
       height: 220,
       ariaLabel: `${objectiveName()} vs ${key}`,
+      groupColors,
     })
     figures.push(chartFigureHtml(key, svg))
   }
   return figures
 }
 function leverChartsSectionHtml() {
+  const split = chartSplitKey('levers')
+  const groupColors = splitGroupColors(split)
   const hasNumericLevers = leverEntries().some(([, spec]) => spec.type === 'number')
   let content
+  let legend = ''
   if (!hasNumericLevers) {
     content = '<div class="empty-hint">No numeric levers in this manifest.</div>'
   } else {
-    const figures = leverScatterFiguresHtml()
-    content = figures.length
-      ? `<div class="chart-multiples">${figures.join('')}</div>`
-      : '<div class="empty-hint">Not enough runs yet — sweep a lever to see its effect.</div>'
+    const figures = leverScatterFiguresHtml(split, groupColors)
+    if (figures.length) {
+      content = `<div class="chart-multiples">${figures.join('')}</div>`
+      legend = chartLegendHtml(groupColors)
+    } else {
+      content =
+        '<div class="empty-hint">Not enough runs yet — sweep a lever to see its effect.</div>'
+    }
   }
-  return `<section class="chart-section"><h3>${escapeHtml(objectiveName())} vs levers</h3>${content}</section>`
+  return chartSectionHtml(`${objectiveName()} vs levers`, null, '', {
+    controls: splitSelectHtml('levers'),
+    legend,
+    content,
+  })
 }
-function judgeScatterSvg() {
+function judgeScatterSvg(split, groupColors) {
   const points = []
   for (const r of runsCache) {
     const verdict = verdictsCache.get(r.key)
@@ -1102,18 +1586,21 @@ function judgeScatterSvg() {
     const objective = Number(r.summary.objective)
     if (!Number.isFinite(objective)) continue
     const score = Number(verdict.score)
+    const group = split ? runSplitGroup(r, split) : undefined
     if (verdict.rejected) {
       points.push({
         x: objective,
         y: Number.isFinite(score) ? score : 0,
         marker: 'cross',
         label: `${shortKey(r.key)} · rejected${verdict.why ? ` — ${verdict.why}` : ''}`,
+        group,
       })
     } else if (Number.isFinite(score)) {
       points.push({
         x: objective,
         y: score,
         label: `${shortKey(r.key)} · score ${Math.round(score)} · ${objectiveName()} ${formatObjective(objective)}`,
+        group,
       })
     }
   }
@@ -1125,9 +1612,19 @@ function judgeScatterSvg() {
     width: 460,
     height: 260,
     ariaLabel: `Judge score vs ${objectiveName()}`,
+    groupColors,
   })
 }
-function trainEvalScatterSvg() {
+function judgeChartSectionHtml() {
+  const split = chartSplitKey('judge')
+  const groupColors = splitGroupColors(split)
+  const svg = judgeScatterSvg(split, groupColors)
+  return chartSectionHtml(`Judge score vs ${objectiveName()}`, svg, 'No verdicts yet.', {
+    controls: splitSelectHtml('judge'),
+    legend: svg ? chartLegendHtml(groupColors) : '',
+  })
+}
+function trainEvalScatterSvg(split, groupColors) {
   const points = []
   for (const r of runsCache) {
     const evaluation = evaluationsCache.get(r.key)
@@ -1139,6 +1636,7 @@ function trainEvalScatterSvg() {
       x: train,
       y: evalObjective,
       label: `${shortKey(r.key)} · train ${formatObjective(train)} · eval ${formatObjective(evalObjective)}`,
+      group: split ? runSplitGroup(r, split) : undefined,
     })
   }
   if (!points.length) return ''
@@ -1150,6 +1648,16 @@ function trainEvalScatterSvg() {
     width: 460,
     height: 260,
     ariaLabel: `Eval vs train ${objectiveName()}`,
+    groupColors,
+  })
+}
+function trainEvalChartSectionHtml() {
+  const split = chartSplitKey('train-eval')
+  const groupColors = splitGroupColors(split)
+  const svg = trainEvalScatterSvg(split, groupColors)
+  return chartSectionHtml('Train vs eval', svg, 'No evaluations yet.', {
+    controls: splitSelectHtml('train-eval'),
+    legend: svg ? chartLegendHtml(groupColors) : '',
   })
 }
 async function renderCharts() {
@@ -1165,15 +1673,21 @@ async function renderCharts() {
     readEvaluations(),
   ])
   body.innerHTML = [
-    chartSectionHtml(
-      `${objectiveName()} over time`,
-      objectiveTimelineSvg(),
-      'Not enough runs yet.',
-    ),
+    timelineChartSectionHtml(),
     leverChartsSectionHtml(),
-    chartSectionHtml(`Judge score vs ${objectiveName()}`, judgeScatterSvg(), 'No verdicts yet.'),
-    chartSectionHtml('Train vs eval', trainEvalScatterSvg(), 'No evaluations yet.'),
+    judgeChartSectionHtml(),
+    trainEvalChartSectionHtml(),
   ].join('')
+}
+function setupCharts() {
+  const body = byId('charts-body')
+  if (!body) return
+  body.addEventListener('change', (event) => {
+    const select = event.target.closest('select[data-chart-split]')
+    if (!select) return
+    chartSplits[select.dataset.chartSplit] = select.value
+    renderCharts()
+  })
 }
 
 // --- Hypotheses tab --------------------------------------------------------------
@@ -1194,30 +1708,65 @@ function specSummaryHtml(spec) {
 }
 function hypothesisActionsHtml(h) {
   const id = escapeHtml(h.id)
+  const c = h.campaign
+  const viewRuns =
+    c && c.finishedAt && Array.isArray(c.keys) && c.keys.length
+      ? `<button type="button" data-action="view-runs" data-id="${id}" class="ghost-btn">View runs</button>`
+      : ''
   if (h.status === 'accepted') {
-    return `<button type="button" data-action="run" data-id="${id}">Run campaign</button>`
+    const busy = c && (c.status === 'running' || c.status === 'queued')
+    return `<button type="button" data-action="run" data-id="${id}"${busy ? ' disabled' : ''}>Run campaign</button>${viewRuns}`
   }
   if (h.status === 'rejected') {
-    return `<button type="button" data-action="restore" data-id="${id}" class="ghost-btn">Restore</button>`
+    return `<button type="button" data-action="restore" data-id="${id}" class="ghost-btn">Restore</button>${viewRuns}`
   }
   return `<button type="button" data-action="accept" data-id="${id}">Accept</button>
-    <button type="button" data-action="reject" data-id="${id}" class="ghost-btn">Reject</button>`
+    <button type="button" data-action="reject" data-id="${id}" class="ghost-btn">Reject</button>${viewRuns}`
 }
-function hypothesisCardHtml(h) {
+// The hypothesis's linked campaign: live status while queued/running, and once
+// finished its OWN results (best among its keys, completed/failed counts) next
+// to the project's overall best, so hypotheses are comparable.
+function hypothesisCampaignHtml(h, liveIds) {
+  const c = h.campaign
+  if (!c) return ''
+  if (c.status === 'queued') {
+    return '<p class="badges-row"><span class="run-badge is-queued">campaign queued</span></p>'
+  }
+  if (c.status === 'running') {
+    const live = liveIds && liveIds.has(c.activityId)
+    return `<p class="badges-row"><span class="run-badge is-running">${live ? `${spinnerHtml()} ` : ''}campaign running</span></p>`
+  }
+  const keys = Array.isArray(c.keys) ? c.keys : []
+  const keySet = new Set(keys)
+  const own = runsCache.filter((r) => keySet.has(r.key))
+  const ownBest = bestObjectiveOf(own)
+  const best = Number.isFinite(ownBest) ? ownBest : Number(c.bestObjective)
+  const projectBest = bestObjectiveOf(runsCache)
+  const completed = Number(c.completed) || 0
+  const failed = Number(c.failed) || 0
+  const badge = `<span class="run-badge ${c.status === 'completed' ? 'is-done' : 'is-failed'}">campaign ${escapeHtml(c.status || 'completed')}</span>`
+  return `<div class="hypothesis-campaign">
+    <p class="badges-row">${badge}</p>
+    <p class="card-sub">Own best ${escapeHtml(objectiveName())} <strong>${escapeHtml(formatObjective(best))}</strong> · project best ${escapeHtml(formatObjective(projectBest))}</p>
+    <p class="card-sub">${completed} completed${failed ? ` · ${failed} failed` : ''} · finished ${escapeHtml(formatWhen(c.finishedAt))}</p>
+  </div>`
+}
+function hypothesisCardHtml(h, liveIds) {
   const source = h.source === 'llm' ? 'LLM' : 'human'
   const by = h.proposedBy ? ` · ${escapeHtml(h.proposedBy)}` : ''
   return `<article class="hypothesis-card${h.status === 'rejected' ? ' is-muted' : ''}" data-id="${escapeHtml(h.id)}">
     <h4>${escapeHtml(h.title || h.id)}</h4>
     ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
     ${specSummaryHtml(h.spec)}
+    ${hypothesisCampaignHtml(h, liveIds)}
     <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>
     <div class="hypothesis-actions">${hypothesisActionsHtml(h)}</div>
   </article>`
 }
-function hypothesisGroupHtml(status, items) {
+function hypothesisGroupHtml(status, items, liveIds) {
   const label = status[0].toUpperCase() + status.slice(1)
   const cards = items.length
-    ? `<div class="hypothesis-cards">${items.map(hypothesisCardHtml).join('')}</div>`
+    ? `<div class="hypothesis-cards">${items.map((h) => hypothesisCardHtml(h, liveIds)).join('')}</div>`
     : '<p class="card-sub">None.</p>'
   return `<section class="hypothesis-group">
     <h3>${escapeHtml(label)} <span class="group-count">${items.length}</span></h3>
@@ -1250,7 +1799,14 @@ async function renderHypotheses() {
     body.innerHTML = '<div class="empty-hint">Open inside the Overseer to manage hypotheses.</div>'
     return
   }
-  ;[hypothesesCache, proposalSummary] = await Promise.all([readHypotheses(), readProposal()])
+  ;[hypothesesCache, proposalSummary, runsCache] = await Promise.all([
+    readHypotheses(),
+    readProposal(),
+    readRuns(),
+  ])
+  const liveIds = hypothesesCache.some((h) => h.campaign && h.campaign.status === 'running')
+    ? await readLiveActivityIds()
+    : new Set()
   renderProposeControls()
   if (!hypothesesCache.length) {
     body.innerHTML =
@@ -1263,7 +1819,7 @@ async function renderHypotheses() {
   const groups = { pending: [], accepted: [], rejected: [] }
   for (const h of sorted) (groups[h.status] || groups.pending).push(h)
   body.innerHTML = HYPOTHESIS_STATUSES.map((status) =>
-    hypothesisGroupHtml(status, groups[status]),
+    hypothesisGroupHtml(status, groups[status], liveIds),
   ).join('')
 }
 async function onProposeClick() {
@@ -1273,14 +1829,18 @@ async function onProposeClick() {
     return
   }
   const epoch = projectEpoch
-  proposing = true
   setStatusLine('hypotheses-status', '')
-  renderProposeControls()
   try {
-    const started = await window.OverseerBridge.startActivity('propose', trainerActivityParams())
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
-    const act = await observeQuickActivity(activityId)
+    const result = await startOrEnqueue('propose', trainerActivityParams(), 'Propose experiments')
+    if (result.queued) {
+      if (epoch === projectEpoch) {
+        setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
+      }
+      return
+    }
+    proposing = true
+    renderProposeControls()
+    const act = await observeQuickActivity(result.activityId)
     if (epoch === projectEpoch) {
       setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
     }
@@ -1289,9 +1849,12 @@ async function onProposeClick() {
       setStatusLine('hypotheses-status', 'Could not start proposing — please try again.', true)
     }
   } finally {
-    proposing = false
-    renderProposeControls()
-    if (epoch === projectEpoch) await renderHypotheses()
+    if (proposing) {
+      proposing = false
+      renderProposeControls()
+      if (epoch === projectEpoch) await renderHypotheses()
+      pumpQueue()
+    }
   }
 }
 async function setHypothesisStatus(id, status) {
@@ -1306,28 +1869,114 @@ async function setHypothesisStatus(id, status) {
   }
   await renderHypotheses()
 }
+// Stamp a hypothesis record's `campaign` block (preserving every other field),
+// keyed by the explicit recordType so queue dispatches survive navigation.
+async function stampHypothesisCampaign(recordType, hypothesisId, campaign) {
+  const recs = await queryRecords(recordType + '-hypothesis', hypothesisId)
+  const existing = (recs[0] && recs[0].content) || null
+  if (!existing) return
+  await window.OverseerBridge.putData({
+    type: recordType + '-hypothesis',
+    key: hypothesisId,
+    content: { ...existing, campaign, updatedAt: nowIso() },
+  })
+}
+// Removing a queued campaign from the queue clears its hypothesis stamp again.
+async function clearHypothesisCampaign(recordType, hypothesisId, queueId) {
+  const recs = await queryRecords(recordType + '-hypothesis', hypothesisId)
+  const existing = (recs[0] && recs[0].content) || null
+  if (!existing || !existing.campaign) return
+  if (queueId && existing.campaign.queueId !== queueId) return
+  const { campaign, ...rest } = existing
+  await window.OverseerBridge.putData({
+    type: recordType + '-hypothesis',
+    key: hypothesisId,
+    content: { ...rest, updatedAt: nowIso() },
+  })
+}
+// Finalise hypotheses whose campaign has settled: copy the campaign record's
+// results in when its activityId matches, or fall back to the activity's final
+// status when the campaign record was superseded before we saw it.
+async function stampHypothesisCampaignResults() {
+  if (!manifest) return
+  const recordType = manifest.recordType
+  const hyps = await readHypotheses()
+  const open = hyps.filter((h) => h.campaign && h.campaign.activityId && !h.campaign.finishedAt)
+  if (!open.length) return
+  const campaign = await readCampaign()
+  for (const h of open) {
+    if (campaign && campaign.activityId === h.campaign.activityId && campaign.finishedAt) {
+      await stampHypothesisCampaign(recordType, h.id, {
+        activityId: campaign.activityId,
+        launchedAt: h.campaign.launchedAt,
+        status: campaign.aborted ? 'aborted' : 'completed',
+        keys: Array.isArray(campaign.keys) ? campaign.keys : [],
+        bestKey: campaign.bestKey,
+        bestObjective: campaign.bestObjective,
+        completed: campaign.completed,
+        failed: campaign.failed,
+        finishedAt: campaign.finishedAt,
+      })
+      continue
+    }
+    const act = await getActivity(h.campaign.activityId)
+    if (act && act.status && act.status !== 'running' && act.status !== 'paused') {
+      await stampHypothesisCampaign(recordType, h.id, {
+        ...h.campaign,
+        status: act.status,
+        finishedAt: nowIso(),
+      })
+    }
+  }
+}
+// Switch to the Runs tab filtered down to the hypothesis campaign's own runs.
+function viewHypothesisRuns(id) {
+  const h = hypothesesCache.find((x) => x.id === id)
+  if (!h || !h.campaign || !Array.isArray(h.campaign.keys) || !h.campaign.keys.length) return
+  runsFilterKeys = new Set(h.campaign.keys)
+  runsFilterLabel = h.title || shortKey(id)
+  showTab('runs')
+}
 // Launch the accepted hypothesis as a training campaign, exactly like the
-// Launch tab: start 'train' with its spec, then observe from the Activity tab.
+// Launch tab: start 'train' with its spec (or queue it behind the live
+// activity), stamp the hypothesis with the campaign link, then observe.
 async function runHypothesisCampaign(id, button) {
   const h = hypothesesCache.find((x) => x.id === id)
   if (!h) return
   const epoch = projectEpoch
+  const recordType = manifest.recordType
   setStatusLine('hypotheses-status', '')
   if (button) button.disabled = true
   try {
-    const started = await window.OverseerBridge.startActivity(
+    const result = await startOrEnqueue(
       'train',
       trainerActivityParams({ spec: h.spec }),
+      `Campaign: ${h.title || h.id}`,
+      { hypothesisId: h.id },
     )
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
+    if (result.queued) {
+      await stampHypothesisCampaign(recordType, h.id, {
+        status: 'queued',
+        queueId: result.id,
+        queuedAt: nowIso(),
+      })
+      if (epoch !== projectEpoch) return
+      setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
+      await renderHypotheses()
+      return
+    }
+    await stampHypothesisCampaign(recordType, h.id, {
+      activityId: result.activityId,
+      launchedAt: nowIso(),
+      status: 'running',
+    })
     if (epoch !== projectEpoch) return
-    currentActivityId = activityId
+    currentActivityId = result.activityId
     lastProgress = null
     lastCampaign = null
     lastActivityStatus = 'running'
     showTab('activity')
-    observeActivityUntilDone(activityId)
+    observeActivityUntilDone(result.activityId)
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('hypotheses-status', 'Could not start the campaign — please try again.', true)
@@ -1458,7 +2107,10 @@ async function onHypothesisSave(event) {
 }
 function setupHypotheses() {
   const proposeBtn = byId('propose-btn')
-  if (proposeBtn) proposeBtn.addEventListener('click', onProposeClick)
+  if (proposeBtn) {
+    proposeBtn.addEventListener('click', onProposeClick)
+    proposeBtn.insertAdjacentHTML('afterend', helpCalloutHtml(PROPOSE_HELP_TEXT))
+  }
   const addToggle = byId('hypothesis-add-toggle')
   if (addToggle) {
     addToggle.addEventListener('click', () => {
@@ -1483,6 +2135,7 @@ function setupHypotheses() {
       else if (action === 'reject') setHypothesisStatus(id, 'rejected')
       else if (action === 'restore') setHypothesisStatus(id, 'pending')
       else if (action === 'run') runHypothesisCampaign(id, btn)
+      else if (action === 'view-runs') viewHypothesisRuns(id)
     })
   }
 }
@@ -1550,6 +2203,20 @@ function leverFieldsetHtml(key, spec) {
     ${inner}
   </fieldset>`
 }
+function savedAutoEval() {
+  try {
+    return sessionStorage.getItem(AUTO_EVAL_SS) === '1'
+  } catch {
+    return false
+  }
+}
+function rememberAutoEval(on) {
+  try {
+    sessionStorage.setItem(AUTO_EVAL_SS, on ? '1' : '')
+  } catch {
+    // storage may be unavailable in a sandboxed frame — purely best-effort
+  }
+}
 function renderLaunchForm() {
   const form = byId('launch-form')
   if (!form) return
@@ -1567,6 +2234,10 @@ function renderLaunchForm() {
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
           <span>Refresh — re-run configs that already have results</span>
+        </label>
+        <label class="check-row launch-autoeval">
+          <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
+          <span>Auto-evaluate completed runs</span>
         </label>
       </div>
     </fieldset>
@@ -1628,6 +2299,13 @@ function updateLaunchSummary() {
   const total = configs * seeds
   line.textContent = `${configs} configuration${configs === 1 ? '' : 's'} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}`
 }
+function campaignLabel(spec) {
+  const sweeps = Object.entries(spec.sweep || {}).map(
+    ([key, values]) => `${key} × ${values.length}`,
+  )
+  const seeds = Array.isArray(spec.seeds) ? spec.seeds.length : 1
+  return `Campaign: ${sweeps.length ? `${sweeps.join(', ')}, ` : ''}seeds ${seeds}`
+}
 async function onLaunchSubmit(event) {
   event.preventDefault()
   const form = byId('launch-form')
@@ -1641,25 +2319,34 @@ async function onLaunchSubmit(event) {
   const epoch = projectEpoch
   const spec = buildSpecFromForm(form)
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
+  const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
-    const started = await window.OverseerBridge.startActivity(
+    const params = trainerActivityParams({ spec, refresh })
+    const result = await startOrEnqueue(
       'train',
-      trainerActivityParams({ spec, refresh }),
+      params,
+      campaignLabel(spec),
+      autoEval ? { autoEval: true } : undefined,
     )
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
+    if (result.queued) {
+      if (epoch === projectEpoch && status) status.textContent = queuedStatusText(result.ahead)
+      return
+    }
+    if (autoEval) await putAutoEvalMarker(result.activityId, params)
     if (epoch !== projectEpoch) return
-    currentActivityId = activityId
+    currentActivityId = result.activityId
     lastProgress = null
     lastCampaign = null
     lastActivityStatus = 'running'
     if (status) status.textContent = ''
     showTab('activity')
-    observeActivityUntilDone(activityId)
+    observeActivityUntilDone(result.activityId)
   } catch {
-    if (status) status.textContent = 'Could not start the campaign — please try again.'
+    if (epoch === projectEpoch && status) {
+      status.textContent = 'Could not start the campaign — please try again.'
+    }
   } finally {
     if (button) button.disabled = false
   }
@@ -1669,7 +2356,10 @@ function setupLaunch() {
   if (!form) return
   form.addEventListener('submit', onLaunchSubmit)
   form.addEventListener('input', updateLaunchSummary)
-  form.addEventListener('change', updateLaunchSummary)
+  form.addEventListener('change', (event) => {
+    if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
+    updateLaunchSummary()
+  })
 }
 
 // --- Activity tab ----------------------------------------------------------------
@@ -1795,14 +2485,17 @@ async function observeActivityUntilDone(activityId) {
     if (session === observeSession) observing = false
   }
 }
-// The activity settled: stamp the final status, re-read the campaign result, and
-// always refresh the Runs tab so new run records show up.
+// The activity settled: stamp the final status, re-read the campaign result,
+// refresh the Runs tab so new run records show up, run the settle bookkeeping
+// (hypothesis stamps + auto-eval markers) and let the queue dispatch its head.
 async function settleActivity(status) {
   lastActivityStatus = status
   lastProgress = await readProgress()
   lastCampaign = await readCampaign()
   renderActivity()
   await renderRuns()
+  await processSettledCampaignEffects()
+  pumpQueue()
 }
 async function abortCurrentActivity() {
   if (!currentActivityId) return
@@ -1837,15 +2530,66 @@ const STATUS_META = {
   aborted: { label: 'Aborted', cls: 'is-bad' },
 }
 const PHASE_LABEL = { calibrate: 'Calibrating', train: 'Training', done: 'Done' }
-function progressBarHtml(progress, running) {
+function progressBarHtml(progress, running, labelPrefix) {
   const done = Number(progress && progress.done) || 0
   const total = Number(progress && progress.total) || 0
   const pct = total > 0 ? Math.max(0, Math.min(100, (done / total) * 100)) : 0
   const indeterminate = running && total === 0
   return `<div class="build-progress">
     <div class="build-progress-bar"><span class="${indeterminate ? 'is-indeterminate' : ''}" style="width:${indeterminate ? '' : pct + '%'}"></span></div>
-    <span class="build-progress-label">${done} / ${total || '?'}</span>
+    <span class="build-progress-label">${labelPrefix ? `${escapeHtml(labelPrefix)} ` : ''}${done} / ${total || '?'}</span>
   </div>`
+}
+// Per-item ETA derived from the whole-campaign ETA: etaSeconds covers the
+// remaining items, so one item ≈ etaSeconds / (total - done) — in ms.
+function perItemEtaMs(progress) {
+  const eta = Number(progress && progress.etaSeconds)
+  const total = Number(progress && progress.total) || 0
+  const done = Number(progress && progress.done) || 0
+  const remaining = total - done
+  if (!(eta > 0) || remaining <= 0) return 0
+  return (eta / remaining) * 1000
+}
+// Time-estimated completion of the CURRENT item, animated from the progress
+// record's updatedAt and capped at 95% until the next tick advances done.
+// Negative → not estimable (indeterminate bar).
+function estimatedItemPct(progress) {
+  const per = perItemEtaMs(progress)
+  if (!per) return -1
+  const updated = new Date(progress.updatedAt || '').getTime()
+  const elapsed = Number.isFinite(updated) ? Math.max(0, Date.now() - updated) : 0
+  return Math.min(95, (elapsed / per) * 100)
+}
+// While running, the Activity tab shows TWO bars for multi-item campaigns: the
+// time-estimated current item ("Experiment X of N") above the campaign total.
+function activityProgressHtml(progress, running) {
+  const total = Number(progress && progress.total) || 0
+  if (!running || total < 1) return progressBarHtml(progress, running)
+  const done = Number(progress && progress.done) || 0
+  const itemIndex = Math.min(done + 1, total)
+  const pct = estimatedItemPct(progress)
+  const indeterminate = pct < 0
+  const label = `Experiment ${itemIndex} of ${total}${indeterminate ? '' : ' · ~estimated'}`
+  const itemBar = `<div class="build-progress">
+    <div class="build-progress-bar"><span id="activity-item-bar" class="${indeterminate ? 'is-indeterminate' : ''}" style="width:${indeterminate ? '' : `${pct.toFixed(1)}%`}"></span></div>
+    <span class="build-progress-label">${label}</span>
+  </div>`
+  if (total === 1) return itemBar
+  return itemBar + progressBarHtml(progress, running, 'Total')
+}
+// Local 1s ticker that advances the current-item bar between the 3s polls.
+function syncItemBarTimer(active) {
+  if (itemBarTimer) {
+    clearInterval(itemBarTimer)
+    itemBarTimer = null
+  }
+  if (!active) return
+  itemBarTimer = setInterval(() => {
+    const el = byId('activity-item-bar')
+    if (!el || !lastProgress) return
+    const pct = estimatedItemPct(lastProgress)
+    if (pct >= 0) el.style.width = `${pct.toFixed(1)}%`
+  }, 1000)
 }
 function activityCountsHtml(progress) {
   const skipped = Number(progress && progress.skipped) || 0
@@ -1859,16 +2603,41 @@ function bestLineHtml(campaign) {
   if (!campaign || !campaign.bestKey) return ''
   return `<p class="activity-best">Best: <code>${escapeHtml(shortKey(campaign.bestKey))}</code> @ ${escapeHtml(formatObjective(campaign.bestObjective))}</p>`
 }
+// The persisted queue under the current activity: the item being dispatched
+// (spinner) plus every waiting entry with its type chip and a remove button.
+function queueSectionHtml() {
+  const dispatching = activeQueueItem
+    ? `<p class="queue-dispatching">${spinnerHtml()} ${escapeHtml(activeQueueItem.label || activeQueueItem.activityType)}…</p>`
+    : ''
+  if (!queueCache.length && !dispatching) return ''
+  const rows = queueCache
+    .map(
+      (item) => `<li class="queue-item">
+      <span class="badge queue-chip">${escapeHtml(item.activityType)}</span>
+      <span class="queue-label">${escapeHtml(item.label || item.activityType)}</span>
+      <button type="button" class="queue-remove" data-queue-remove="${escapeHtml(item.id)}" aria-label="Remove from queue">✕</button>
+    </li>`,
+    )
+    .join('')
+  return `<div class="queue-section">
+    <h3>Queue <span class="group-count">${queueCache.length}</span></h3>
+    ${dispatching}
+    ${rows ? `<ul class="queue-list">${rows}</ul>` : ''}
+  </div>`
+}
 function renderActivity() {
   const body = byId('activity-body')
   if (!body) return
+  renderRunsLive()
   if (!embedded()) {
     body.innerHTML = '<div class="empty-hint">Open inside the Overseer to follow campaigns.</div>'
     return
   }
+  const queueHtml = queueSectionHtml()
   if (!lastProgress && !lastCampaign && !lastActivityStatus) {
     body.innerHTML =
-      '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'
+      queueHtml || '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'
+    syncItemBarTimer(false)
     return
   }
   const status = lastActivityStatus || 'completed'
@@ -1890,16 +2659,18 @@ function renderActivity() {
       : ''
   body.innerHTML = `
     <div class="activity-status-row">
-      <span class="status-pill ${meta.cls}">${escapeHtml(meta.label)}</span>
+      <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
       ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
       ${currentActivityId ? `<code class="activity-id">${escapeHtml(shortKey(currentActivityId))}</code>` : ''}
     </div>
-    ${p ? progressBarHtml(p, running) : ''}
+    ${p ? activityProgressHtml(p, running) : ''}
     ${activityCountsHtml(p)}
     ${eta}
     ${times}
     ${bestLineHtml(lastCampaign)}
-    ${actions}`
+    ${actions}
+    ${queueHtml}`
+  syncItemBarTimer(running && !!p && perItemEtaMs(p) > 0)
 }
 function setupActivity() {
   const body = byId('activity-body')
@@ -1907,6 +2678,10 @@ function setupActivity() {
   body.addEventListener('click', (event) => {
     if (event.target.closest('#activity-abort')) abortCurrentActivity()
     else if (event.target.closest('#activity-resume')) resumeCurrentActivity()
+    else {
+      const removeBtn = event.target.closest('button[data-queue-remove]')
+      if (removeBtn) onQueueRemove(removeBtn.dataset.queueRemove)
+    }
   })
 }
 
@@ -1931,7 +2706,10 @@ function showTab(id) {
   if (target === 'runs') renderRuns()
   if (target === 'charts') renderCharts()
   if (target === 'hypotheses') renderHypotheses()
-  if (target === 'activity') renderActivity()
+  if (target === 'activity') {
+    renderActivity()
+    refreshQueue()
+  }
 }
 function setupTabs() {
   const bar = byId('tabbar')
@@ -1960,6 +2738,7 @@ function savedTabId() {
 async function init() {
   setupHome()
   setupRuns()
+  setupCharts()
   setupHypotheses()
   setupLaunch()
   setupActivity()

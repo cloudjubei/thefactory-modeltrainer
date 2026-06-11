@@ -169,6 +169,8 @@ export interface TrainingCampaignParams {
 export interface TrainingCampaignResult {
   recordType: string
   planned: number
+  /** Stable keys of every planned item — the campaign's run-record identities. */
+  keys: string[]
   completed: number
   skipped: number
   failed: number

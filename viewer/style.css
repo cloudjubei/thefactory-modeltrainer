@@ -312,6 +312,31 @@ body {
   color: var(--muted);
   font-size: 12px;
 }
+.runs-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+.runs-filter-bar button {
+  appearance: none;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  cursor: pointer;
+}
 
 /* ---- Badges / pills ------------------------------------------------------------ */
 .badge {
@@ -359,8 +384,41 @@ body {
   gap: 6px;
 }
 
+/* Carfinder-style live pill: spinner + status text. */
+.run-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.run-badge.is-running {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.run-badge.is-done {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.run-badge.is-failed {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.run-badge.is-queued {
+  color: var(--muted);
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+}
+.runs-live {
+  margin-top: 6px;
+}
+
 .status-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 12px;
   border-radius: 999px;
   font-size: 13px;
@@ -389,6 +447,52 @@ body {
 }
 .chart-section h3 {
   margin: 0 0 8px;
+}
+.chart-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.chart-section-head h3 {
+  margin: 0;
+}
+.chart-split {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.chart-split select {
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.chart-legend-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
 }
 .chart-wrap {
   padding: 8px;
@@ -630,20 +734,74 @@ pre.json {
   display: none;
 }
 
+/* Carfinder-style inline spinner: top-transparent ring in the current colour. */
 .spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
   vertical-align: -1px;
   border: 2px solid currentColor;
-  border-right-color: transparent;
+  border-top-color: transparent;
   border-radius: 50%;
+  opacity: 0.6;
   animation: trainer-spin 0.7s linear infinite;
 }
 @keyframes trainer-spin {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ---- Help callouts (circular "?" with a styled hover/focus popover) --------- */
+.help-callout {
+  position: relative;
+  display: inline-flex;
+  align-self: center;
+}
+.help-callout .help-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+}
+.help-callout .help-btn:hover,
+.help-callout .help-btn:focus {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  outline: none;
+}
+.help-pop {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  width: 300px;
+  max-width: 78vw;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.help-callout:hover .help-pop,
+.help-callout:focus-within .help-pop {
+  display: block;
 }
 
 /* ---- Activity --------------------------------------------------------------------- */
@@ -719,6 +877,64 @@ pre.json {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Activity queue --------------------------------------------------------- */
+.queue-section {
+  margin-top: 18px;
+}
+.queue-dispatching {
+  margin: 8px 0 0;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+.queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.queue-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+  font-size: 13px;
+}
+.queue-chip {
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.queue-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.queue-remove {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.queue-remove:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
 /* ---- Hypotheses ----------------------------------------------------------------- */
 .hypothesis-form {
   margin-top: 14px;
@@ -770,6 +986,17 @@ pre.json {
   margin: 0;
   font-size: 13px;
   color: var(--muted);
+}
+.hypothesis-campaign {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.hypothesis-campaign .card-sub {
+  margin: 0;
 }
 .spec-list {
   margin: 0;

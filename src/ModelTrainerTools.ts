@@ -137,7 +137,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           scope: params.scope,
           type: recordType,
           key: item.key,
-          content: { ...runSummary, status: 'completed', ranAt: now(), ranBy },
+          content: {
+            ...runSummary,
+            status: 'completed',
+            ranAt: now(),
+            ranBy,
+            durationMs: result.durationMs,
+          },
         })
         params.onRecordWritten?.(recordType, item.key)
         lastKey = item.key
@@ -198,6 +204,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return {
       recordType,
       planned: total,
+      keys: items.map((item) => item.key),
       completed,
       skipped: summary.skipped,
       failed: summary.failed,
