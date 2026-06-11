@@ -450,6 +450,37 @@ describe('runTrainingCampaign', () => {
     expect(logger.warn).toHaveBeenCalled()
   })
 
+  it('forwards starting + streamed @@PROGRESS markers to onItemProgress', async () => {
+    const events: { key: string; progress: Record<string, unknown> }[] = []
+    const runner = stubRunner()
+    // Make the stub emit a progress marker on its log stream before resolving.
+    const baseRunJob = runner.runJob.bind(runner)
+    runner.runJob = (job) => {
+      const handle = baseRunJob(job)
+      const logs: ((line: string) => void)[] = []
+      return {
+        ...handle,
+        onLog: (cb: (line: string) => void) => logs.push(cb),
+        done: Promise.resolve().then(() => {
+          logs.forEach((cb) => cb('@@PROGRESS {"phase":"train","done":700,"total":1460}'))
+          return handle.done
+        }),
+      }
+    }
+    const { tools } = makeTools(runner, memoryStorage())
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: {},
+      onItemProgress: (key, progress) => {
+        events.push({ key, progress })
+      },
+    })
+    expect(events[0].progress).toEqual({ phase: 'starting' })
+    expect(events.some((e) => e.progress.phase === 'train' && e.progress.done === 700)).toBe(true)
+  })
+
   it('notifies onRecordWritten for every persisted run', async () => {
     const written: string[] = []
     const { tools } = makeTools(stubRunner(), memoryStorage())

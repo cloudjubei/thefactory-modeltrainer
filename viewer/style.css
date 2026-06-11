@@ -176,6 +176,15 @@ body {
   background: var(--accent);
   color: #fff;
 }
+/* A spinner slot on the active tab while the open project has a live activity;
+   empty (zero-width) otherwise so it never widens an inactive tab. */
+.tab-live {
+  display: inline-flex;
+  align-items: center;
+}
+.tab-live:not(:empty) {
+  margin-left: 6px;
+}
 
 .tab-main {
   flex: 1;
@@ -910,6 +919,70 @@ pre.json {
   font-variant-numeric: tabular-nums;
 }
 
+/* The within-run sub-progress for the running experiment: the item's key +
+   phase with a spinner and an elapsed timer, above its own (real or
+   indeterminate) bar — nested under the campaign total bar. */
+.current-item {
+  margin: 6px 0 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface-subtle);
+}
+.current-item .build-progress {
+  margin: 6px 0 0;
+}
+.current-item-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.current-item-head code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface);
+}
+.current-item-elapsed {
+  margin-left: auto;
+  color: var(--muted);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Settled-campaign failures: a collapsible "N runs failed" list of {key, error}. */
+.run-failures {
+  margin: 10px 0 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--bad);
+  border-radius: 9px;
+  background: var(--bad-soft);
+  font-size: 13px;
+}
+.run-failures > summary {
+  color: var(--bad);
+  font-weight: 700;
+  cursor: pointer;
+}
+.run-failures-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+.run-failures-list li {
+  margin: 2px 0;
+  word-break: break-word;
+}
+.run-failures-list code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--surface);
+}
+
 /* ---- Activity queue --------------------------------------------------------- */
 .queue-section {
   margin-top: 18px;
@@ -1076,6 +1149,7 @@ pre.json {
   margin-top: 12px;
 }
 .project-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1086,7 +1160,34 @@ pre.json {
 }
 .project-card h3 {
   margin: 0;
+  padding-right: 64px;
   font-size: 14px;
+}
+.project-card-corner {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-spinner {
+  display: inline-flex;
+  color: var(--accent);
+}
+.new-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.new-badge.header-badge {
+  margin-left: 10px;
+  vertical-align: 2px;
 }
 .project-dir {
   margin: 0;

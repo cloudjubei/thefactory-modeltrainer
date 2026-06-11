@@ -176,6 +176,13 @@ export interface TrainingCampaignParams {
   ranBy?: string
   abortSignal?: AbortSignal
   onProgress?: (progress: TrainingCampaignProgress) => void | Promise<void>
+  /**
+   * Fired with sub-progress for the item currently running — `phase: 'starting'`
+   * when an item begins, then whatever the trainer streams via `@@PROGRESS`
+   * markers (e.g. `{ phase: 'train', done, total }`). Lets the host show real
+   * within-run progress for long, data-driven runs.
+   */
+  onItemProgress?: (key: string, progress: Record<string, unknown>) => void | Promise<void>
   /** Fired after each run record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
 }

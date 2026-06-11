@@ -333,6 +333,30 @@ export function buildProposeUserContent(input: {
   })
 }
 
+const PROGRESS_MARKER = '@@PROGRESS '
+
+/**
+ * Extract a structured progress object from a `@@PROGRESS {json}` log line a
+ * conformant trainer emits during a run; `undefined` for any other line. Lets
+ * the campaign surface real within-run sub-progress (phase, data done/total)
+ * without the engine knowing anything domain-specific.
+ */
+export function parseProgressMarker(line: string): Record<string, unknown> | undefined {
+  const at = line.indexOf(PROGRESS_MARKER)
+  if (at < 0) return undefined
+  const rest = line.slice(at + PROGRESS_MARKER.length).trim()
+  const end = rest.lastIndexOf('}')
+  if (!rest.startsWith('{') || end < 0) return undefined
+  try {
+    const parsed = JSON.parse(rest.slice(0, end + 1))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function validateTrainingRunSummary(raw: unknown): TrainingRunSummary {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('run summary must be a JSON object')

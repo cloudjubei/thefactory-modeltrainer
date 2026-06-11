@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { TrainerManifest } from './modelTrainerTypes.js'
 import {
   blendJudgeScore,
+  parseProgressMarker,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
@@ -141,9 +142,9 @@ describe('validateTrainerManifest', () => {
   })
 
   it('rejects a data entry with no files', () => {
-    expect(() => validateTrainerManifest({ ...manifest(), data: [{ id: 'x', files: [] }] })).toThrow(
-      /files/,
-    )
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), data: [{ id: 'x', files: [] }] }),
+    ).toThrow(/files/)
   })
 
   it('rejects a data file missing relPath or url', () => {
@@ -516,6 +517,35 @@ describe('prompt builders', () => {
     expect(parsed.bestObjective).toBe(9)
     expect(parsed.runs[0].key).toBe('a')
     expect(parsed.verdicts[0].score).toBe(80)
+  })
+})
+
+describe('parseProgressMarker', () => {
+  it('parses a @@PROGRESS line into its object', () => {
+    expect(parseProgressMarker('@@PROGRESS {"phase":"train","done":1200,"total":1460}')).toEqual({
+      phase: 'train',
+      done: 1200,
+      total: 1460,
+    })
+  })
+
+  it('tolerates surrounding text and whitespace', () => {
+    expect(parseProgressMarker('  noise @@PROGRESS {"phase":"test"} trailing')).toEqual({
+      phase: 'test',
+    })
+  })
+
+  it('returns undefined for non-marker lines', () => {
+    expect(parseProgressMarker('just a normal log line')).toBeUndefined()
+    expect(parseProgressMarker('')).toBeUndefined()
+  })
+
+  it('returns undefined for a marker with malformed JSON', () => {
+    expect(parseProgressMarker('@@PROGRESS {not json}')).toBeUndefined()
+  })
+
+  it('returns undefined when the payload is not an object', () => {
+    expect(parseProgressMarker('@@PROGRESS 42')).toBeUndefined()
   })
 })
 

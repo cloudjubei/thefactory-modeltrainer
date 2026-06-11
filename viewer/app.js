@@ -16,6 +16,7 @@ const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
+const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
 const JUDGE_HELP_TEXT =
   "Scores every completed run 0–100. Health-flagged runs are auto-rejected without using the LLM. For the rest, the objective is normalised (best=100) and blended 50/50 with an LLM verdict that weighs stability and how promising the configuration is — so a run can't win on prose alone. Results appear in the Judge column."
@@ -35,6 +36,16 @@ const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
 let projectsCache = []
 let manifestsCache = new Map()
 const inspectingKeys = new Set()
+// Home overview live state: the manifest recordTypes that currently have a
+// running, live activity (drives each project card's spinner), each project's
+// current run keys, and the per-project set of run keys the user has already
+// seen (persisted as 'trainer-seen' records) — their difference is "unseen".
+let liveRecordTypes = new Set()
+let runKeysByProject = new Map()
+let seenKeysByProject = new Map()
+// Bumped whenever the home poll loop should stop (a project is opened); the loop
+// captures it and exits when a newer session supersedes it.
+let homePollSession = 0
 let removeArmedKey = null
 let currentProject = null
 // Bumped on every home↔project navigation; long-lived async work captures it
@@ -67,6 +78,8 @@ let runsFilterKeys = null
 let runsFilterLabel = ''
 let chartSplits = {}
 let itemBarTimer = null
+// 1s ticker for the running item's elapsed timer (mm:ss) between the 3s polls.
+let currentItemTimer = null
 let runnersCache = []
 let runnerRemoveArmedId = null
 let runnerPairing = null
@@ -88,6 +101,14 @@ function sleep(ms) {
 }
 function byId(id) {
   return document.getElementById(id)
+}
+// Anti-flash assignment: the poll/observe loops re-render whole sections every
+// 3s, and blindly re-assigning innerHTML replaces identical DOM (and resets any
+// CSS animation, e.g. the indeterminate bar) every tick — which flashes. Only
+// touch the DOM when the markup actually changed.
+function setHtml(el, html) {
+  if (!el || el.innerHTML === html) return
+  el.innerHTML = html
 }
 function shortKey(key) {
   const k = String(key || '')
@@ -145,6 +166,14 @@ function formatCountdown(iso) {
   const left = Number.isFinite(t) ? Math.max(0, Math.round((t - Date.now()) / 1000)) : 0
   const m = Math.floor(left / 60)
   const s = left % 60
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+// mm:ss elapsed since an ISO instant; clamped at 0:00 before it has started.
+function formatElapsed(iso) {
+  const t = new Date(iso || '').getTime()
+  const sec = Number.isFinite(t) ? Math.max(0, Math.round((Date.now() - t) / 1000)) : 0
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
   return `${m}:${String(s).padStart(2, '0')}`
 }
 function pairingExpired(pairing) {
@@ -293,6 +322,43 @@ async function readManifestRecords() {
   }
   return map
 }
+// The set of run-record keys already SEEN by the user, per project (keyed by
+// projectKey, content { keys, updatedAt }) — persisted so the unseen badge
+// survives reloads and devices, not just this session.
+async function readSeenKeys() {
+  const recs = await queryRecords(SEEN_RECORD_TYPE)
+  const map = new Map()
+  for (const r of recs) {
+    const key = r.key || (r.content && r.content.projectKey) || ''
+    const keys = (r.content && Array.isArray(r.content.keys) && r.content.keys) || []
+    if (key) map.set(key, new Set(keys))
+  }
+  return map
+}
+async function putSeenKeys(projectKey, keys) {
+  await window.OverseerBridge.putData({
+    type: SEEN_RECORD_TYPE,
+    key: projectKey,
+    content: { projectKey, keys: [...keys], updatedAt: nowIso() },
+  })
+}
+// The current run-record keys for one project, read through its manifest's
+// recordType (run records key on the configHash). Empty for an uninspected
+// project or one with no manifest.
+async function readProjectRunKeys(projectKey) {
+  const rec = manifestsCache.get(projectKey)
+  const recordType = rec && rec.manifest && rec.manifest.recordType
+  if (!recordType) return []
+  const recs = await queryRecords(recordType)
+  return recs
+    .map((r) => {
+      const summary = r.content || {}
+      return (
+        r.key || (summary.provenance && summary.provenance.configHash) || summary.configHash || ''
+      )
+    })
+    .filter(Boolean)
+}
 // Queue records are global ('trainer-queue') but project-scoped through the
 // stored params.recordType; marker items (auto-eval intents) ride the same
 // record type and are filtered out of the visible queue.
@@ -348,10 +414,34 @@ function manifestStatusHtml(projectKey) {
   const leverCount = Object.keys(m.levers || {}).length
   return `<p class="project-status">${escapeHtml(obj.name || 'objective')} (${direction}) · ${leverCount} lever${leverCount === 1 ? '' : 's'}</p>`
 }
+// Whether a project's training has a live activity right now — its manifest's
+// recordType is in the running-and-live set the home poll tracks.
+function projectHasLiveActivity(projectKey) {
+  const rec = manifestsCache.get(projectKey)
+  const recordType = rec && rec.manifest && rec.manifest.recordType
+  return !!recordType && liveRecordTypes.has(recordType)
+}
+// How many of a project's current run keys the user has not seen yet (its run
+// keys minus the persisted seen set).
+function projectUnseenCount(projectKey) {
+  const keys = runKeysByProject.get(projectKey) || []
+  if (!keys.length) return 0
+  const seen = seenKeysByProject.get(projectKey) || new Set()
+  return keys.reduce((n, k) => (seen.has(k) ? n : n + 1), 0)
+}
+function totalUnseenCount() {
+  return projectsCache.reduce((n, p) => n + projectUnseenCount(p.key), 0)
+}
 function projectCardHtml(project) {
   const key = escapeHtml(project.key)
   const armed = removeArmedKey === project.key
+  const live = projectHasLiveActivity(project.key)
+  const unseen = projectUnseenCount(project.key)
+  const corner =
+    `${unseen > 0 ? `<span class="new-badge" title="Unseen runs">${unseen} new</span>` : ''}` +
+    `${live ? `<span class="card-spinner" aria-label="Training">${spinnerHtml()}</span>` : ''}`
   return `<article class="project-card" data-key="${key}">
+    ${corner ? `<div class="project-card-corner">${corner}</div>` : ''}
     <h3>${escapeHtml(project.name || project.key)}</h3>
     <p class="project-dir">${escapeHtml(project.dir || '')}</p>
     ${manifestStatusHtml(project.key)}
@@ -362,21 +452,105 @@ function projectCardHtml(project) {
     </div>
   </article>`
 }
+// The total-unseen pill next to the "Model Trainer" home header.
+function renderHomeHeaderBadge() {
+  const h = document.querySelector('.home-header h1')
+  if (!h) return
+  let badge = byId('home-unseen-badge')
+  const total = totalUnseenCount()
+  if (!total) {
+    if (badge) badge.remove()
+    return
+  }
+  if (!badge) {
+    badge = document.createElement('span')
+    badge.id = 'home-unseen-badge'
+    badge.className = 'new-badge header-badge'
+    h.insertAdjacentElement('afterend', badge)
+  }
+  badge.textContent = `${total} new`
+}
+// Refresh just the home-overview surfaces (project cards + header badge) from
+// the current caches, without re-reading projects/manifests — the home poll
+// calls this every tick, so it uses setHtml to avoid re-rendering identical DOM.
+function renderHomeOverview() {
+  const body = byId('home-projects')
+  if (!body || !projectsCache.length) {
+    renderHomeHeaderBadge()
+    return
+  }
+  setHtml(body, `<div class="project-cards">${projectsCache.map(projectCardHtml).join('')}</div>`)
+  renderHomeHeaderBadge()
+}
 async function renderHome() {
   const body = byId('home-projects')
   if (!body) return
   if (!embedded()) {
-    body.innerHTML =
-      '<div class="empty-hint">Open inside the Overseer to manage training projects.</div>'
+    setHtml(
+      body,
+      '<div class="empty-hint">Open inside the Overseer to manage training projects.</div>',
+    )
     return
   }
-  ;[projectsCache, manifestsCache] = await Promise.all([readProjects(), readManifestRecords()])
+  ;[projectsCache, manifestsCache, seenKeysByProject] = await Promise.all([
+    readProjects(),
+    readManifestRecords(),
+    readSeenKeys(),
+  ])
   if (!projectsCache.length) {
-    body.innerHTML =
-      '<div class="empty-hint">No training projects yet — add one (try examples/cartpole).</div>'
+    setHtml(
+      body,
+      '<div class="empty-hint">No training projects yet — add one (try examples/cartpole).</div>',
+    )
+    renderHomeHeaderBadge()
     return
   }
-  body.innerHTML = `<div class="project-cards">${projectsCache.map(projectCardHtml).join('')}</div>`
+  await refreshHomeLiveState()
+  renderHomeOverview()
+}
+// Read the per-project live-activity set and current run keys that drive the card
+// spinners + unseen badges, then re-render the overview. Cheap enough to poll.
+async function refreshHomeLiveState() {
+  liveRecordTypes = await readLiveRecordTypes()
+  const entries = await Promise.all(
+    projectsCache.map(async (p) => [p.key, await readProjectRunKeys(p.key)]),
+  )
+  runKeysByProject = new Map(entries)
+}
+// Every recordType with a running, live activity — matches a card to its project
+// via the manifest's recordType.
+async function readLiveRecordTypes() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return new Set(
+      ((res && res.activities) || [])
+        .filter((a) => a.status === 'running' && a.isLive !== false && a.recordType)
+        .map((a) => a.recordType),
+    )
+  } catch {
+    return new Set()
+  }
+}
+// Lightweight 3s poll while on the home screen: refresh the live-activity set +
+// run keys so the card spinners and unseen badges stay current. A newer session
+// (opening a project bumps homePollSession) or navigating away stops it; it is
+// projectEpoch-guarded so a stale loop never paints over an opened project.
+async function startHomePoll() {
+  const session = ++homePollSession
+  const epoch = projectEpoch
+  while (session === homePollSession && epoch === projectEpoch && embedded()) {
+    await sleep(POLL_MS)
+    if (session !== homePollSession || epoch !== projectEpoch) return
+    if (document.hidden || !projectsCache.length) continue
+    await refreshHomeLiveState()
+    if (session !== homePollSession || epoch !== projectEpoch) return
+    seenKeysByProject = await readSeenKeys()
+    if (session !== homePollSession || epoch !== projectEpoch) return
+    renderHomeOverview()
+  }
+}
+function stopHomePoll() {
+  homePollSession += 1
 }
 // Run the backend inspect for one registered project: it reads the directory's
 // trainer manifest and writes the trainer-project-manifest record this app
@@ -818,6 +992,7 @@ function resetDashboardState() {
   runsFilterLabel = ''
   chartSplits = {}
   syncItemBarTimer(false)
+  syncCurrentItemTimer(null)
   closeRunDetail()
   toggleHypothesisForm(false)
   setStatusLine('judge-status', '')
@@ -844,6 +1019,7 @@ function resetDashboardState() {
 async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
   if (!project || !projectHasManifest(projectKey)) return
+  stopHomePoll()
   projectEpoch += 1
   const epoch = projectEpoch
   currentProject = project
@@ -868,8 +1044,10 @@ function goHome() {
   currentProject = null
   manifest = null
   syncItemBarTimer(false)
+  syncCurrentItemTimer(null)
   document.title = 'Model Trainer'
   showView('home')
+  startHomePoll()
   renderHome()
 }
 function applyManifestChrome() {
@@ -1247,7 +1425,7 @@ function renderRunsLive() {
   const el = byId('runs-live')
   if (!el) return
   const live = lastActivityStatus === 'running'
-  el.innerHTML = live ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : ''
+  setHtml(el, live ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : '')
   el.hidden = !live
 }
 function runsFilterBarHtml(shownCount) {
@@ -1259,6 +1437,24 @@ function clearRunsFilter() {
   runsFilterKeys = null
   runsFilterLabel = ''
   renderRuns()
+}
+// Viewing the Runs tab clears the project's unseen badge: mark every current run
+// key as seen, persisting the union when any are new. No-op when nothing changed,
+// so the poll-driven renderRuns does not write every tick.
+async function markRunsSeen() {
+  if (!embedded() || !currentProject || !manifest) return
+  const projectKey = currentProject.key
+  const seen = seenKeysByProject.get(projectKey) || new Set()
+  const unseen = runsCache.map((r) => r.key).filter((k) => k && !seen.has(k))
+  if (!unseen.length) return
+  const next = new Set(seen)
+  for (const k of unseen) next.add(k)
+  seenKeysByProject.set(projectKey, next)
+  try {
+    await putSeenKeys(projectKey, next)
+  } catch {
+    // best-effort: the badge resyncs from the persisted record on next read
+  }
 }
 async function renderRuns() {
   const body = byId('runs-body')
@@ -1272,30 +1468,37 @@ async function renderRuns() {
   ])
   renderJudgeControls()
   renderRunsLive()
+  await markRunsSeen()
   const shown = runsFilterKeys ? runsCache.filter((r) => runsFilterKeys.has(r.key)) : runsCache
   if (spark) {
     const svg = sparklineSvg(shown)
-    spark.innerHTML = svg
+    setHtml(spark, svg)
     spark.hidden = !svg
   }
   if (!runsCache.length) {
-    body.innerHTML = '<div class="empty-hint">No runs yet — launch a campaign.</div>'
+    setHtml(body, '<div class="empty-hint">No runs yet — launch a campaign.</div>')
     closeRunDetail()
     return
   }
   if (!shown.length) {
-    body.innerHTML = `${runsFilterBarHtml(0)}<div class="empty-hint">No runs recorded for this campaign yet.</div>`
+    setHtml(
+      body,
+      `${runsFilterBarHtml(0)}<div class="empty-hint">No runs recorded for this campaign yet.</div>`,
+    )
     closeRunDetail()
     return
   }
   const rows = sortRunsByObjective(shown).map(runRowHtml).join('')
-  body.innerHTML = `${runsFilterBarHtml(shown.length)}<div class="table-wrap"><table class="runs-table">
+  setHtml(
+    body,
+    `${runsFilterBarHtml(shown.length)}<div class="table-wrap"><table class="runs-table">
     <thead><tr>
       <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Health</th>
       <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th class="num">Took</th><th>Ran at</th>
     </tr></thead>
     <tbody>${rows}</tbody>
-  </table></div>`
+  </table></div>`,
+  )
   if (selectedRunKey && !shown.some((r) => r.key === selectedRunKey)) closeRunDetail()
   else if (selectedRunKey) renderRunDetail(selectedRunKey)
 }
@@ -2033,7 +2236,7 @@ async function renderCharts() {
   const body = byId('charts-body')
   if (!body) return
   if (!embedded()) {
-    body.innerHTML = '<div class="empty-hint">Open inside the Overseer to see charts.</div>'
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to see charts.</div>')
     return
   }
   ;[runsCache, verdictsCache, evaluationsCache] = await Promise.all([
@@ -2041,12 +2244,15 @@ async function renderCharts() {
     readVerdicts(),
     readEvaluations(),
   ])
-  body.innerHTML = [
-    timelineChartSectionHtml(),
-    leverChartsSectionHtml(),
-    judgeChartSectionHtml(),
-    trainEvalChartSectionHtml(),
-  ].join('')
+  setHtml(
+    body,
+    [
+      timelineChartSectionHtml(),
+      leverChartsSectionHtml(),
+      judgeChartSectionHtml(),
+      trainEvalChartSectionHtml(),
+    ].join(''),
+  )
 }
 function setupCharts() {
   const body = byId('charts-body')
@@ -2990,6 +3196,74 @@ function syncItemBarTimer(active) {
     if (pct >= 0) el.style.width = `${pct.toFixed(1)}%`
   }, 1000)
 }
+const CURRENT_PHASE_LABEL = {
+  loading: 'loading data + model…',
+  starting: 'starting…',
+  train: 'training',
+  test: 'testing',
+  summarize: 'summarizing',
+}
+// The within-run sub-progress carried by progress.current while a single
+// experiment executes: the running item's key + phase with a spinner, an elapsed
+// timer, and EITHER a real done/total bar (data-driven runs) or — since this
+// run's model differs from the calibration model, making the campaign ETA
+// unreliable for it — an honest indeterminate striped bar. The item-count "k of
+// N" total bar above it stays accurate and is rendered separately.
+function currentItemHtml(current) {
+  if (!current || !current.key) return ''
+  const phase = String(current.phase || '')
+  const phaseLabel = CURRENT_PHASE_LABEL[phase] || phase || 'running'
+  const done = Number(current.done)
+  const total = Number(current.total)
+  const hasCount = Number.isFinite(done) && Number.isFinite(total) && total > 0
+  const pct = hasCount ? Math.max(0, Math.min(100, (done / total) * 100)) : 0
+  const bar = hasCount
+    ? `<div class="build-progress-bar"><span style="width:${pct.toFixed(1)}%"></span></div>`
+    : '<div class="build-progress-bar"><span class="is-indeterminate"></span></div>'
+  const count = hasCount ? `${done} / ${total} · ${Math.round(pct)}%` : ''
+  // The elapsed value is filled by the ticker (immediately + every 1s), not baked
+  // in here, so this markup stays identical across the 3s polls while the same
+  // item runs — letting setHtml skip the re-render and keep the indeterminate
+  // bar's animation (and the spinner) from restarting every tick.
+  return `<div class="current-item">
+    <p class="current-item-head">${spinnerHtml()} Run <code>${escapeHtml(shortKey(current.key))}</code> · ${escapeHtml(phaseLabel)}<span class="current-item-elapsed" id="activity-current-elapsed"></span></p>
+    <div class="build-progress">
+      ${bar}
+      ${count ? `<span class="build-progress-label">${escapeHtml(count)}</span>` : ''}
+    </div>
+  </div>`
+}
+// Drive the running item's elapsed timer (mm:ss) — once immediately so it shows
+// right after a render, then every 1s between the 3s polls.
+function syncCurrentItemTimer(startedAt) {
+  if (currentItemTimer) {
+    clearInterval(currentItemTimer)
+    currentItemTimer = null
+  }
+  if (!startedAt) return
+  const tick = () => {
+    const el = byId('activity-current-elapsed')
+    if (el) el.textContent = formatElapsed(startedAt)
+  }
+  tick()
+  currentItemTimer = setInterval(tick, 1000)
+}
+// Runs that failed across the settled campaign: a short count plus a collapsible
+// per-run {key, error} list, surfaced once the campaign carries failures[].
+function campaignFailuresHtml(campaign) {
+  const failures = (campaign && Array.isArray(campaign.failures) && campaign.failures) || []
+  if (!failures.length) return ''
+  const items = failures
+    .map(
+      (f) =>
+        `<li><code>${escapeHtml(shortKey(f.key))}</code> — ${escapeHtml(f.error || 'failed')}</li>`,
+    )
+    .join('')
+  return `<details class="run-failures">
+    <summary>${failures.length} run${failures.length === 1 ? '' : 's'} failed</summary>
+    <ul class="run-failures-list">${items}</ul>
+  </details>`
+}
 function activityCountsHtml(progress) {
   const skipped = Number(progress && progress.skipped) || 0
   const failed = Number(progress && progress.failed) || 0
@@ -3028,15 +3302,20 @@ function renderActivity() {
   const body = byId('activity-body')
   if (!body) return
   renderRunsLive()
+  renderTabLiveIndicator()
   if (!embedded()) {
-    body.innerHTML = '<div class="empty-hint">Open inside the Overseer to follow campaigns.</div>'
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to follow campaigns.</div>')
     return
   }
   const queueHtml = queueSectionHtml()
   if (!lastProgress && !lastCampaign && !lastActivityStatus) {
-    body.innerHTML =
-      queueHtml || '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'
+    setHtml(
+      body,
+      queueHtml ||
+        '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>',
+    )
     syncItemBarTimer(false)
+    syncCurrentItemTimer(null)
     return
   }
   const status = lastActivityStatus || 'completed'
@@ -3056,20 +3335,30 @@ function renderActivity() {
     : status === 'paused'
       ? '<div class="form-actions"><button type="button" id="activity-resume">Resume</button></div>'
       : ''
-  body.innerHTML = `
+  // The running item's sub-progress only applies mid-run, while the campaign is
+  // training (not calibrating, where the model differs from the run model).
+  const current = running && p && p.phase === 'train' ? p.current : null
+  const currentHtml = current ? currentItemHtml(current) : ''
+  setHtml(
+    body,
+    `
     <div class="activity-status-row">
       <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
       ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
       ${currentActivityId ? `<code class="activity-id">${escapeHtml(shortKey(currentActivityId))}</code>` : ''}
     </div>
     ${p ? activityProgressHtml(p, running) : ''}
+    ${currentHtml}
     ${activityCountsHtml(p)}
     ${eta}
     ${times}
     ${bestLineHtml(lastCampaign)}
+    ${campaignFailuresHtml(lastCampaign)}
     ${actions}
-    ${queueHtml}`
+    ${queueHtml}`,
+  )
   syncItemBarTimer(running && !!p && perItemEtaMs(p) > 0)
+  syncCurrentItemTimer(currentHtml ? current.startedAt : null)
 }
 function setupActivity() {
   const body = byId('activity-body')
@@ -3102,12 +3391,26 @@ function showTab(id) {
   } catch {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
+  renderTabLiveIndicator()
   if (target === 'runs') renderRuns()
   if (target === 'charts') renderCharts()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'activity') {
     renderActivity()
     refreshQueue()
+  }
+}
+// A tiny spinner on the ACTIVE tab while the open project has a live (running)
+// activity, so the in-flight campaign is visible from any tab — not just
+// Activity. The spinner lives in a fixed `.tab-live` slot on each button so
+// toggling it never disturbs the label text.
+function renderTabLiveIndicator() {
+  const live = lastActivityStatus === 'running'
+  for (const tab of TABS) {
+    const slot = document.querySelector(`.tab-btn[data-tab="${tab.id}"] .tab-live`)
+    if (!slot) continue
+    const show = live && tab.id === activeTabId
+    setHtml(slot, show ? spinnerHtml() : '')
   }
 }
 function setupTabs() {
@@ -3120,7 +3423,7 @@ function setupTabs() {
     btn.className = 'tab-btn'
     btn.dataset.tab = tab.id
     btn.setAttribute('role', 'tab')
-    btn.textContent = tab.label
+    btn.innerHTML = `<span class="tab-label">${escapeHtml(tab.label)}</span><span class="tab-live" aria-hidden="true"></span>`
     btn.addEventListener('click', () => showTab(tab.id))
     bar.append(btn)
   }
@@ -3150,6 +3453,7 @@ async function init() {
     return
   }
   await renderHome()
+  startHomePoll()
 }
 
 init()

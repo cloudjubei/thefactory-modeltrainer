@@ -35,6 +35,7 @@ import { hashTrainingConfig, readTrainerManifest } from './modelTrainerHelpers.j
 import {
   blendJudgeScore,
   manifestDataFiles,
+  parseProgressMarker,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
@@ -147,6 +148,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           dataFiles,
           abortSignal: params.abortSignal,
         })
+        if (params.onItemProgress) {
+          void params.onItemProgress(item.key, { phase: 'starting' })
+          handle.onLog((line) => {
+            const marker = parseProgressMarker(line)
+            if (marker) void params.onItemProgress!(item.key, marker)
+          })
+        }
         const result = await handle.done
         if (result.status !== 'completed') {
           throw new Error(result.error ?? `training exited with code ${result.exitCode}`)
