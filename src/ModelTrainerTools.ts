@@ -86,7 +86,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   async function runTrainingCampaign(
     params: TrainingCampaignParams,
   ): Promise<TrainingCampaignResult> {
-    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const items = expandExperimentMatrix(manifest, params.spec, hashTrainingConfig)
     const total = items.length
@@ -129,6 +130,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       { key: string; objective: number }
     >({
       items,
+      concurrency: params.concurrency,
       abortSignal: params.abortSignal,
       isFresh: async (item) => {
         if (params.refresh) return false
@@ -157,7 +159,27 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         }
         const result = await handle.done
         if (result.status !== 'completed') {
-          throw new Error(result.error ?? `training exited with code ${result.exitCode}`)
+          const error = result.error ?? `training exited with code ${result.exitCode}`
+          if (result.status !== 'aborted') {
+            const partial = (result.summary ?? {}) as Record<string, unknown>
+            await deps.storage.upsertRecord({
+              scope: params.scope,
+              type: recordType,
+              key: item.key,
+              content: {
+                ...partial,
+                status: 'failed',
+                error,
+                ...(result.logTail?.length ? { logTail: result.logTail } : {}),
+                config: item.config,
+                ranAt: now(),
+                ranBy,
+                durationMs: result.durationMs,
+              },
+            })
+            params.onRecordWritten?.(recordType, item.key)
+          }
+          throw new Error(error)
         }
         const runSummary = validateTrainingRunSummary(result.summary)
         await deps.storage.upsertRecord({
@@ -247,7 +269,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   async function evaluateTrainingRun(
     params: EvaluateTrainingRunParams,
   ): Promise<EvaluateTrainingRunResult> {
-    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     if (!manifest.evaluate) {
       throw new Error('trainer manifest declares no evaluate command')
     }
@@ -316,7 +339,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     params: JudgeTrainingRunsParams,
   ): Promise<JudgeTrainingRunsResult> {
     const executor = requireInferenceExecutor()
-    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const judgedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
     const judgedAt = now()
@@ -430,7 +454,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     params: ProposeTrainingHypothesesParams,
   ): Promise<ProposeTrainingHypothesesResult> {
     const executor = requireInferenceExecutor()
-    const manifest = params.manifest ?? (await readTrainerManifest(params.projectRoot))
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const proposedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
     const proposedAt = now()
@@ -517,7 +542,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   }
 
   return {
-    readTrainerManifest: (projectRoot: string) => readTrainerManifest(projectRoot),
+    readTrainerManifest: (projectRoot, manifestRelPath) =>
+      readTrainerManifest(projectRoot, manifestRelPath),
     planTrainingMatrix: (manifest: TrainerManifest, spec: ExperimentSpec) =>
       expandExperimentMatrix(manifest, spec, hashTrainingConfig),
     calibrateTrainingThroughput,

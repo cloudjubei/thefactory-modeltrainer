@@ -64,35 +64,35 @@ preemptively.
 
 ---
 
-## BlackSwan improvements
+## Open verification (BlackSwan-improvements round)
 
-Make the first consumer genuinely better; each one also improves ModelTrainer by extension.
-Pick these up after the core plan is finished.
+The round shipped — all seven improvements (seed plumbing, parallel-runs concurrency,
+data-visibility `asset` lever + `dataset` descriptor, the price-action `runChart` + custom per-run
+UI, lean run-health, the dip/regression line as a second hub project, the `quickStart` preset).
+The Python paths and the engine/backend changes are verified by real runs + unit tests. One pass
+remains: run the hub **embedded in Overseer** and confirm the viewer additions render live — the
+custom price-action chart + dataset badge in run detail, the "Max concurrent runs" control, the
+"Quick start" button, and registering the dip line as a second project (same repo, manifest file
+`.factory/trainer-dip.json`). Build + typecheck + tests passing is not the same as a live embed.
 
-- **Dip/regression line as its own project.** The repo's currently-active research
-  (`regression_predict` env + `model_regression_dip`, an f1-style objective, different
-  `get_run_state` shapes) is NOT in the trading-line manifest — one objective per project.
-  Give it its own manifest/entrypoint (a second conformant project pointing at the same repo,
-  or a manifest-selectable line) so dip/regression runs are judged on f1, not Sharpe.
-- **Seed plumbing depth.** `trainer/run.py` seeds python/numpy/torch/SB3 globally, but most
-  algo constructors in `model_factory.py` don't take a `seed=` arg — per-algo determinism is
-  best-effort until seeds are forwarded into the constructors. Wire `seed` through so a
-  campaign's seed sweep is genuinely reproducible.
-- **Run health & continuation (resume mid-run).** A run that fails partway (crash, OOM,
-  interrupted) is wholly lost today — skip-if-fresh only knows completed vs not. Add a notion
-  of run health + checkpoint-aware continuation: persist partial state (the training is already
-  checkpointed per episode), detect a half-finished run, and resume from its last checkpoint
-  rather than restarting. Spans the engine (a `resumable`/`partial` item state) + the trainer
-  CLI (`--resume-from <checkpoint>`, which BlackSwan's `checkpoint_to_load` already supports).
-- **Parallel runs (concurrency setting in Activity).** Today a campaign runs items
-  sequentially. Add an Activity-tab setting for max concurrent runs (default 1), and run that
-  many work-items at once — with a guard that they don't conflict (each run already uses a
-  unique checkpoint id + its own temp config/summary; the constraint is host CPU/GPU/RAM, so
-  the cap is the safety valve). Spans the work-item engine (`runActivityWorkItems` gains a
-  concurrency arg) + the campaign params + the Activity UI control.
-- **Lighter default first-run.** The tuned default (`reppo-custom`, `[8192,512]`) is heavy on
-  CPU — a great "best known" but a slow first experience. Consider a manifest hint or a
-  recommended "quick start" sweep so a new user's first campaign returns fast.
+### Deferred (consciously, from this round)
+
+- **Full RL resume** — per-episode RL checkpointing + `set_env` continuation for true mid-training
+  resume. Lean run-health shipped (a failed run is recorded + re-dispatched, and the regression
+  line resumes from its per-episode checkpoint), but the RL trading line still restarts from zero.
+  Revisit if mid-run RL continuation is worth the training-loop surgery.
+- **True multi-asset** — only BTCUSDT has 1d/1h klines, so the `asset` lever is BTC-only today.
+  The lever + per-symbol globs + `data_inventory` capability gating are root-cause-correct; altcoin
+  1d/1h backfill is the data mine's job, after which the lever expands with no code change.
+
+## Future path & UX scrutiny (after the BlackSwan improvements above)
+
+**Massive scrutinisation task and critical look to decide on the future path for the project, as
+well as UI/UX usability improvements.** Once the improvements above land and there are real
+multi-asset / multi-timeframe results to read, step back and look hard at the actual run data:
+judge whether the current experiment design, objective, and levers are the right ones, and
+propose the next campaigns to run — expect this may force big changes to how experiments are run.
+Pair it with a usability pass over the hub app and the per-run result UI.
 
 ## The data mine — a shared dataset project for every model trainer
 

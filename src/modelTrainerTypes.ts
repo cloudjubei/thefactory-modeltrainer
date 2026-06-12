@@ -79,6 +79,11 @@ export interface TrainerManifest {
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
   eta?: { unitsLever: string }
+  /**
+   * A recommended "fast first run" preset: fixed lever values the launch form can pre-fill so a
+   * new user's first campaign returns quickly, without changing the tuned best-known defaults.
+   */
+  quickStart?: { label?: string; fixed: Record<string, unknown> }
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
@@ -106,6 +111,20 @@ export interface PlannedTrainingItem {
   units?: number
 }
 
+/** What data a run trained on — generic across trainer projects, for the hub's data-visibility surface. */
+export interface TrainingRunDataset {
+  /** Dataset/asset identifier (e.g. a symbol like `BTCUSDT`, or a named dataset). */
+  asset?: string
+  /** Sampling timeframe / fidelity (e.g. `1d`, `1h`). */
+  timeframe?: string
+  /** Number of samples/candles the run saw. */
+  candles?: number
+  /** ISO start of the data window, when the source carries timestamps. */
+  from?: string
+  /** ISO end of the data window, when the source carries timestamps. */
+  to?: string
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
@@ -116,6 +135,8 @@ export interface TrainingRunSummary {
   config?: Record<string, unknown>
   provenance?: Record<string, unknown>
   artifacts?: Record<string, unknown>
+  /** What data this run trained on (asset, timeframe, sample count, date span) — for the hub's data-visibility surface. */
+  dataset?: TrainingRunDataset
   /** Present on calibrate runs: throughput for ETA math. */
   calibration?: { unitsPerSecond?: number; secondsObserved?: number; units?: number }
   /** Optional per-run curves (e.g. `episode_return`) for the viewer's training-curve chart. */
@@ -128,6 +149,8 @@ export interface EvaluateTrainingRunParams {
   scope: string
   projectRoot: string
   manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`); names a second conformant line in the same repo. */
+  manifestRelPath?: string
   /** Key of the completed run record whose checkpoint gets re-evaluated. */
   runKey: string
   /** Named compute target to evaluate on; omit for the default (local) runner. */
@@ -164,9 +187,17 @@ export interface TrainingCampaignParams {
   projectRoot: string
   /** Pre-read manifest; omitted → read from `projectRoot`. */
   manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`); names a second conformant line in the same repo. */
+  manifestRelPath?: string
   spec: ExperimentSpec
   /** Re-run items that already have a completed record. */
   refresh?: boolean
+  /**
+   * Maximum number of runs dispatched at once (default 1, sequential). Each run is
+   * isolated (unique jobId + its own temp config/summary), so the real cap is host
+   * CPU/GPU/RAM — this is the safety valve.
+   */
+  concurrency?: number
   /**
    * Named compute target to run on (resolved via the deps' `resolveComputeRunner`);
    * omit for the default (local) runner. Also the provenance label.
@@ -251,6 +282,8 @@ export interface JudgeTrainingRunsParams {
   scope: string
   projectRoot: string
   manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`); names a second conformant line in the same repo. */
+  manifestRelPath?: string
   llmConfig: LLMConfig
   /** Extra rubric appended to the judge prompt. */
   instructions?: string
@@ -287,6 +320,8 @@ export interface ProposeTrainingHypothesesParams {
   scope: string
   projectRoot: string
   manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`); names a second conformant line in the same repo. */
+  manifestRelPath?: string
   llmConfig: LLMConfig
   /** How many proposals to ask for; defaults to {@link DEFAULT_HYPOTHESIS_COUNT}. */
   count?: number
@@ -314,7 +349,7 @@ export interface ProposeTrainingHypothesesResult {
  */
 export interface ModelTrainerTools {
   /** Read + validate a project's `.factory/trainer.json`. */
-  readTrainerManifest(projectRoot: string): Promise<TrainerManifest>
+  readTrainerManifest(projectRoot: string, manifestRelPath?: string): Promise<TrainerManifest>
   /** Expand a spec into the fully resolved, stably keyed work items. */
   planTrainingMatrix(manifest: TrainerManifest, spec: ExperimentSpec): PlannedTrainingItem[]
   /** Run the project's calibrate command; `undefined` when the manifest declares none. */

@@ -342,11 +342,17 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs).toHaveLength(1)
   })
 
-  it('marks a failed job failed, writes no record, and continues', async () => {
+  it('records a failed job (no silent loss) and continues', async () => {
     const runner = stubRunner({
       jobResult: (job) =>
         (job.config as { lr: number }).lr === 0.1
-          ? { status: 'failed', exitCode: 1, error: 'exit 1', summary: undefined }
+          ? {
+              status: 'failed',
+              exitCode: 1,
+              error: 'exit 1',
+              summary: undefined,
+              logTail: ['traceback', 'boom'],
+            }
           : {},
     })
     const storage = memoryStorage()
@@ -359,7 +365,81 @@ describe('runTrainingCampaign', () => {
     })
     expect(result.failed).toBe(1)
     expect(result.completed).toBe(1)
-    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run' })).toHaveLength(1)
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records).toHaveLength(2)
+    const failed = records.find((r) => (r.content as { status?: string }).status === 'failed')!
+    expect(failed.content).toMatchObject({
+      status: 'failed',
+      error: 'exit 1',
+      logTail: ['traceback', 'boom'],
+      config: { lr: 0.1 },
+      ranAt: NOW,
+    })
+  })
+
+  it('does not record a job that ended aborted', async () => {
+    const runner = stubRunner({
+      jobResult: () => ({
+        status: 'aborted',
+        exitCode: null,
+        error: 'aborted',
+        summary: undefined,
+      }),
+    })
+    const storage = memoryStorage()
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: {},
+    })
+    expect(result.completed).toBe(0)
+    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run' })).toHaveLength(0)
+  })
+
+  it('dispatches runs concurrently when concurrency > 1', async () => {
+    let active = 0
+    let peak = 0
+    const runner: ComputeRunner = {
+      async calibrate() {
+        return { secondsObserved: 1, unitsPerSecond: 100 }
+      },
+      runJob(job: ComputeJob): ComputeJobHandle {
+        return {
+          jobId: job.jobId,
+          onLog: () => {},
+          abort: () => {},
+          done: (async (): Promise<ComputeJobResult> => {
+            active++
+            peak = Math.max(peak, active)
+            await Promise.resolve()
+            await Promise.resolve()
+            active--
+            return {
+              jobId: job.jobId,
+              status: 'completed',
+              exitCode: 0,
+              summary: { objective: 1 },
+              logTail: [],
+              durationMs: 1,
+            }
+          })(),
+        }
+      },
+    }
+    const m = manifest()
+    delete m.calibrate
+    const { tools } = makeTools(runner, memoryStorage())
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2, 0.3, 0.4] } },
+      concurrency: 3,
+    })
+    expect(peak).toBe(3)
+    expect(result.completed).toBe(4)
   })
 
   it('marks a completed job with an invalid summary as failed', async () => {

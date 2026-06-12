@@ -51,6 +51,20 @@ describe('readTrainerManifest', () => {
     expect(manifest.recordType).toBe('demo-run')
   })
 
+  it('reads a second line from a custom manifestRelPath in the same repo', async () => {
+    const root = await makeProjectDir()
+    await mkdir(join(root, '.factory'), { recursive: true })
+    await writeFile(join(root, '.factory', 'trainer.json'), JSON.stringify(VALID_MANIFEST))
+    await writeFile(
+      join(root, '.factory', 'trainer-dip.json'),
+      JSON.stringify({ ...VALID_MANIFEST, recordType: 'demo-dip-run' }),
+    )
+    const dip = await readTrainerManifest(root, '.factory/trainer-dip.json')
+    expect(dip.recordType).toBe('demo-dip-run')
+    const trading = await readTrainerManifest(root)
+    expect(trading.recordType).toBe('demo-run')
+  })
+
   it('throws a descriptive error when the file is missing', async () => {
     const root = await makeProjectDir()
     await expect(readTrainerManifest(root)).rejects.toThrow(/trainer\.json/)

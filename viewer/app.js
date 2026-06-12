@@ -560,7 +560,7 @@ function stopHomePoll() {
 // Run the backend inspect for one registered project: it reads the directory's
 // trainer manifest and writes the trainer-project-manifest record this app
 // re-reads (via renderHome) once the activity settles.
-async function inspectProject(projectKey, dir) {
+async function inspectProject(projectKey, dir, manifestRelPath) {
   if (inspectingKeys.has(projectKey)) return
   inspectingKeys.add(projectKey)
   setStatusLine('projects-status', '')
@@ -569,6 +569,7 @@ async function inspectProject(projectKey, dir) {
     const started = await window.OverseerBridge.startActivity('inspect-trainer', {
       projectKey,
       dir,
+      ...(manifestRelPath ? { manifestRelPath } : {}),
     })
     const activityId = started && started.activityId
     if (!activityId) throw new Error('no activity id')
@@ -609,6 +610,9 @@ async function onAddProjectSubmit(event) {
   }
   const name = String((form.elements.name && form.elements.name.value) || '').trim()
   const dir = String((form.elements.dir && form.elements.dir.value) || '').trim()
+  const manifestRelPath = String(
+    (form.elements.manifestRelPath && form.elements.manifestRelPath.value) || '',
+  ).trim()
   const key = slugifyProjectName(name)
   if (!name || !key) {
     setStatusLine('project-form-error', 'Give the project a name with letters or digits.', true)
@@ -628,7 +632,13 @@ async function onAddProjectSubmit(event) {
     await window.OverseerBridge.putData({
       type: PROJECT_RECORD_TYPE,
       key,
-      content: { key, name, dir, addedAt: nowIso() },
+      content: {
+        key,
+        name,
+        dir,
+        ...(manifestRelPath ? { manifestRelPath } : {}),
+        addedAt: nowIso(),
+      },
     })
   } catch {
     setStatusLine('project-form-error', 'Could not save the project — please try again.', true)
@@ -638,7 +648,7 @@ async function onAddProjectSubmit(event) {
   }
   setStatusLine('project-form-error', '')
   form.reset()
-  inspectProject(key, dir)
+  inspectProject(key, dir, manifestRelPath)
 }
 function onHomeProjectsClick(event) {
   const btn = event.target.closest('button[data-action]')
@@ -648,7 +658,7 @@ function onHomeProjectsClick(event) {
   if (action === 'open') openProject(key)
   else if (action === 'inspect') {
     const project = projectsCache.find((p) => p.key === key)
-    if (project) inspectProject(project.key, project.dir)
+    if (project) inspectProject(project.key, project.dir, project.manifestRelPath)
   } else if (action === 'remove') removeProject(key)
 }
 function setupHome() {
@@ -1084,6 +1094,9 @@ function trainerActivityParams(extra) {
     recordType: manifest.recordType,
     dir: currentProject ? currentProject.dir : undefined,
   }
+  if (currentProject && currentProject.manifestRelPath) {
+    params.manifestRelPath = currentProject.manifestRelPath
+  }
   return extra ? { ...params, ...extra } : params
 }
 // Params for the activities that execute the project's training code — 'train'
@@ -1414,7 +1427,7 @@ function runRowHtml(run) {
   return `<tr data-key="${escapeHtml(run.key)}"${selected}>
     <td><code>${escapeHtml(shortKey(run.key))}</code></td>
     <td class="num">${escapeHtml(formatObjective(s.objective))}</td>
-    <td>${healthBadgeHtml(s.health)}</td>
+    <td>${s.status === 'failed' ? '<span class="badge is-bad">failed</span>' : healthBadgeHtml(s.health)}</td>
     <td>${verdictChipHtml(verdictsCache.get(run.key))}</td>
     <td>${evalChipHtml(run)}</td>
     <td class="num">${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}</td>
@@ -1614,6 +1627,94 @@ function trainingCurveSectionHtml(summary) {
   })
   return `<h3>Training curve (${escapeHtml(label)})</h3><div class="chart-wrap">${svg}</div>`
 }
+// A project-agnostic "what data did this run use" badge, shown when a run emits
+// a `dataset` descriptor (asset / timeframe / sample count / date span).
+function datasetBadgeHtml(dataset) {
+  if (!dataset || typeof dataset !== 'object') return ''
+  const bits = []
+  if (dataset.asset) bits.push(escapeHtml(String(dataset.asset)))
+  if (dataset.timeframe) bits.push(escapeHtml(String(dataset.timeframe)))
+  if (Number.isFinite(Number(dataset.candles))) bits.push(`${Number(dataset.candles)} candles`)
+  if (!bits.length) return ''
+  const span =
+    dataset.from && dataset.to
+      ? ` · ${escapeHtml(String(dataset.from).slice(0, 10))} → ${escapeHtml(String(dataset.to).slice(0, 10))}`
+      : ''
+  return `<span class="run-dataset" title="data this run trained on">${bits.join(' · ')}${span}</span>`
+}
+// Price line + trade markers (buy/sell/TP/SL), re-surfacing the repo's old
+// matplotlib action-on-price plot as serialised data drawn on our SVG engine.
+// Markers carry their own index into the downsampled price array, so none are lost.
+function buildPriceActionChart(chart, opts) {
+  const price = (chart.price || []).map(Number).filter(Number.isFinite)
+  if (price.length < 2) return ''
+  const markers = Array.isArray(chart.markers) ? chart.markers : []
+  const W = (opts && opts.width) || 640
+  const H = (opts && opts.height) || 200
+  const pad = { top: 14, right: 16, bottom: 30, left: 60 }
+  const innerW = W - pad.left - pad.right
+  const innerH = H - pad.top - pad.bottom
+  const ys = price.slice()
+  for (const m of markers) if (Number.isFinite(Number(m.price))) ys.push(Number(m.price))
+  const xScale = linearScale(price.map((_, i) => i))
+  const yScale = linearScale(ys)
+  const px = (v) => Math.round((pad.left + xScale.pos(v) * innerW) * 10) / 10
+  const py = (v) => Math.round((pad.top + (1 - yScale.pos(v)) * innerH) * 10) / 10
+  const parts = []
+  for (const t of yScale.ticks) {
+    const y = py(t)
+    parts.push(
+      `<line class="chart-grid" x1="${pad.left}" y1="${y}" x2="${W - pad.right}" y2="${y}"></line>`,
+      `<text class="chart-tick" x="${pad.left - 6}" y="${y + 3}" text-anchor="end">${escapeHtml(formatTickValue(t))}</text>`,
+    )
+  }
+  parts.push(
+    `<line class="chart-axis" x1="${pad.left}" y1="${pad.top}" x2="${pad.left}" y2="${H - pad.bottom}"></line>`,
+    `<line class="chart-axis" x1="${pad.left}" y1="${H - pad.bottom}" x2="${W - pad.right}" y2="${H - pad.bottom}"></line>`,
+    `<polyline class="chart-line" points="${price.map((v, i) => `${px(i)},${py(v)}`).join(' ')}"></polyline>`,
+  )
+  for (const m of markers) {
+    const i = Number(m.i)
+    const p = Number(m.price)
+    if (!Number.isFinite(i) || !Number.isFinite(p)) continue
+    const x = px(i)
+    const y = py(p)
+    const up = m.type === 'buy' || m.type === 'tp'
+    const d = up
+      ? `M ${x} ${y - 5} L ${x - 4} ${y + 3} L ${x + 4} ${y + 3} Z`
+      : `M ${x} ${y + 5} L ${x - 4} ${y - 3} L ${x + 4} ${y - 3} Z`
+    parts.push(
+      `<path class="run-mark run-mark-${escapeHtml(String(m.type))}" d="${d}"><title>${escapeHtml(`${m.type} · ${formatTickValue(p)}`)}</title></path>`,
+    )
+  }
+  if (opts && opts.xLabel) {
+    parts.push(
+      `<text class="chart-label" x="${pad.left + innerW / 2}" y="${H - 4}" text-anchor="middle">${escapeHtml(opts.xLabel)}</text>`,
+    )
+  }
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml((opts && opts.ariaLabel) || 'price with trade actions')}">${parts.join('')}</svg>`
+}
+// The custom per-run result view: a price chart with the run's buy/sell/TP/SL
+// markers + a count legend. Gated on `artifacts.runChart`, so non-trading
+// projects (cartpole, regression) keep the generic run-detail view.
+function priceActionSectionHtml(summary) {
+  const chart = summary && summary.artifacts && summary.artifacts.runChart
+  if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return ''
+  const markers = Array.isArray(chart.markers) ? chart.markers : []
+  const counts = {}
+  for (const m of markers) counts[m.type] = (counts[m.type] || 0) + 1
+  const legend = ['buy', 'sell', 'tp', 'sl']
+    .filter((t) => counts[t])
+    .map((t) => `<span class="run-mark-key run-mark-${t}">${escapeHtml(t)} ${counts[t]}</span>`)
+    .join(' ')
+  const svg = buildPriceActionChart(chart, {
+    xLabel: 'step',
+    ariaLabel: 'price with trade actions',
+    width: 640,
+    height: 200,
+  })
+  return `<h3>Price &amp; actions</h3><div class="chart-wrap">${svg}</div>${legend ? `<p class="badges-row run-mark-legend">${legend}</p>` : ''}`
+}
 function renderRunDetail(key) {
   const panel = byId('run-detail')
   if (!panel) return
@@ -1623,33 +1724,40 @@ function renderRunDetail(key) {
     return
   }
   const s = run.summary
+  const failed = s.status === 'failed'
   const flags = (s.health && Array.isArray(s.health.flags) && s.health.flags) || []
   const flagChips = flags.length
     ? flags.map((f) => `<span class="badge is-bad">${escapeHtml(f)}</span>`).join(' ')
     : '<span class="card-sub">none</span>'
   const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
-  panel.innerHTML = `
+  const datasetBadge = datasetBadgeHtml(s.dataset)
+  const headline = failed
+    ? '<span class="badge is-bad">failed</span>'
+    : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
+  const html = `
     <div class="card-head card-head-row">
       <div>
         <h2>Run <code>${escapeHtml(shortKey(run.key))}</code></h2>
-        <p class="card-sub">${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))}
-          · ${healthBadgeHtml(s.health)} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
-          · ${escapeHtml(formatWhen(runRanAt(s)))}</p>
+        <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
+          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}</p>
       </div>
       <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
     </div>
+    ${failed && s.error ? `<p class="verdict-rejected">${escapeHtml(String(s.error))}</p>` : ''}
     <h3>Health flags</h3>
     <p class="badges-row">${flagChips}</p>
     ${verdictSectionHtml(verdictsCache.get(run.key))}
     ${evaluationSectionHtml(run)}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
+    ${priceActionSectionHtml(s)}
     ${trainingCurveSectionHtml(s)}
     <h3>Config</h3>
     <pre class="json">${escapeHtml(JSON.stringify(s.config || {}, null, 2))}</pre>
     <h3>Artifacts</h3>
     <p class="mono">${checkpoint ? escapeHtml(checkpoint) : '—'}</p>
     <p class="card-sub">configHash <code>${escapeHtml(run.key)}</code></p>`
+  setHtml(panel, html)
   panel.hidden = false
 }
 function openRunDetail(key) {
@@ -2889,6 +2997,9 @@ function renderLaunchForm() {
         <label class="field"><span>Seeds <em>(each config runs once per seed 0…N−1)</em></span>
           <input type="number" name="seeds" min="1" step="1" value="1" />
         </label>
+        <label class="field"><span>Max concurrent runs <em>(host CPU/GPU is the real cap)</em></span>
+          <input type="number" name="concurrency" min="1" step="1" value="1" />
+        </label>
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
           <span>Refresh — re-run configs that already have results</span>
@@ -2903,8 +3014,30 @@ function renderLaunchForm() {
     <p class="launch-summary" id="launch-summary"></p>
     <div class="form-actions">
       <button type="submit" id="launch-btn">Launch campaign</button>
+      ${manifest && manifest.quickStart ? `<button type="button" id="quickstart-btn" class="ghost-btn">${escapeHtml((manifest.quickStart && manifest.quickStart.label) || 'Quick start')}</button>` : ''}
     </div>
     <p id="launch-status" class="form-status" role="status"></p>`
+  updateLaunchSummary()
+}
+// Pre-fill the launch form with the manifest's recommended fast-first-run preset:
+// set each named lever's fixed value and clear its sweep so the preset takes effect.
+function applyQuickStart() {
+  const form = byId('launch-form')
+  const preset = manifest && manifest.quickStart && manifest.quickStart.fixed
+  if (!form || !preset) return
+  for (const [key, value] of Object.entries(preset)) {
+    const fixedEl = form.elements['fixed:' + key]
+    const sweepEl = form.elements['sweep:' + key]
+    if (sweepEl) {
+      if (sweepEl.multiple) for (const o of sweepEl.options) o.selected = false
+      else sweepEl.value = ''
+    }
+    if (fixedEl) {
+      if (fixedEl.type === 'checkbox') fixedEl.checked = !!value
+      else fixedEl.value = String(value)
+    }
+  }
+  if (form.elements.seeds) form.elements.seeds.value = '1'
   updateLaunchSummary()
 }
 function parseNumberList(text) {
@@ -2934,6 +3067,11 @@ function readFixedValue(form, key, spec) {
 }
 function readSeedCount(form) {
   const el = form.elements.seeds
+  const n = Math.floor(Number(el && el.value))
+  return Number.isFinite(n) && n >= 1 ? n : 1
+}
+function readConcurrency(form) {
+  const el = form.elements.concurrency
   const n = Math.floor(Number(el && el.value))
   return Number.isFinite(n) && n >= 1 ? n : 1
 }
@@ -2980,10 +3118,15 @@ async function onLaunchSubmit(event) {
   const spec = buildSpecFromForm(form)
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
   const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
+  const concurrency = readConcurrency(form)
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
-    const params = trainerComputeParams({ spec, refresh })
+    const params = trainerComputeParams({
+      spec,
+      refresh,
+      ...(concurrency > 1 ? { concurrency } : {}),
+    })
     const result = await startOrEnqueue(
       'train',
       params,
@@ -3027,6 +3170,9 @@ function setupLaunch() {
     }
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     updateLaunchSummary()
+  })
+  form.addEventListener('click', (event) => {
+    if (event.target && event.target.id === 'quickstart-btn') applyQuickStart()
   })
 }
 

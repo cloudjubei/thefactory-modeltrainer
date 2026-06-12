@@ -596,6 +596,60 @@ body {
   font-size: 12px;
   font-weight: 600;
 }
+/* Price+action chart: buy/TP point up, sell/SL point down; coloured by kind. */
+.run-mark {
+  stroke: none;
+}
+.run-mark:hover {
+  fill-opacity: 0.7;
+}
+.run-mark-buy {
+  fill: var(--ok);
+}
+.run-mark-sell {
+  fill: var(--bad);
+}
+.run-mark-tp {
+  fill: var(--accent);
+}
+.run-mark-sl {
+  fill: #d97706;
+}
+.run-mark-legend {
+  margin-top: 6px;
+}
+.run-mark-key {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+}
+.run-mark-key.run-mark-buy {
+  color: var(--ok);
+  background: var(--ok-soft);
+}
+.run-mark-key.run-mark-sell {
+  color: var(--bad);
+  background: var(--bad-soft);
+}
+.run-mark-key.run-mark-tp {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.run-mark-key.run-mark-sl {
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.12);
+}
+.run-dataset {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 12px;
+}
 
 /* ---- Run detail --------------------------------------------------------------- */
 .kv-table {
