@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { hashTrainingConfig, readTrainerManifest } from './modelTrainerHelpers.js'
+import { hashTrainingConfig, readTrainerManifest, setupKeyOf } from './modelTrainerHelpers.js'
 
 const tempDirs: string[] = []
 
@@ -39,6 +39,18 @@ describe('hashTrainingConfig', () => {
 
   it('differs for different configs', () => {
     expect(hashTrainingConfig({ a: 1 })).not.toBe(hashTrainingConfig({ a: 2 }))
+  })
+})
+
+describe('setupKeyOf', () => {
+  it('is identical for the same setup under different (or absent) seeds', () => {
+    const base = setupKeyOf({ lr: 0.1, steps: 100, seed: 0 })
+    expect(setupKeyOf({ lr: 0.1, steps: 100, seed: 7 })).toBe(base)
+    expect(setupKeyOf({ lr: 0.1, steps: 100 })).toBe(base)
+  })
+
+  it('differs when a non-seed lever changes', () => {
+    expect(setupKeyOf({ lr: 0.1, seed: 0 })).not.toBe(setupKeyOf({ lr: 0.2, seed: 0 }))
   })
 })
 

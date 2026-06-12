@@ -11,6 +11,17 @@ export function hashTrainingConfig(config: Record<string, unknown>): string {
 }
 
 /**
+ * Identity of a config's SETUP — the config minus its `seed` — so exploration can skip a
+ * setup already run under any seed (vs the seed-inclusive {@link hashTrainingConfig}). When
+ * homing in, seeds matter and this is not used.
+ */
+export function setupKeyOf(config: Record<string, unknown>): string {
+  const rest = { ...config }
+  delete rest.seed
+  return hashTrainingConfig(rest)
+}
+
+/**
  * Read + validate a project's manifest. Defaults to `.factory/trainer.json`; pass
  * `manifestRelPath` to read a second conformant line in the same repo (e.g.
  * `.factory/trainer-dip.json`), so one checkout can register as several hub projects.

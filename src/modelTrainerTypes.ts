@@ -204,6 +204,12 @@ export interface TrainingCampaignParams {
    */
   concurrency?: number
   /**
+   * Exploration mode: skip any planned item whose SETUP (config minus seed) was already
+   * run under any seed, so an overlapping sweep doesn't re-run setups expected to produce
+   * similar results. Turn off when homing in (to run a setup across multiple seeds).
+   */
+  skipExplored?: boolean
+  /**
    * Named compute target to run on (resolved via the deps' `resolveComputeRunner`);
    * omit for the default (local) runner. Also the provenance label.
    */

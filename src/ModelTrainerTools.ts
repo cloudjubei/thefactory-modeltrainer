@@ -31,7 +31,7 @@ import {
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
 } from './modelTrainerConstants.js'
-import { hashTrainingConfig, readTrainerManifest } from './modelTrainerHelpers.js'
+import { hashTrainingConfig, readTrainerManifest, setupKeyOf } from './modelTrainerHelpers.js'
 import {
   blendJudgeScore,
   manifestDataFiles,
@@ -124,6 +124,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
+    let exploredSetups: Set<string> | undefined
+    if (params.skipExplored) {
+      const priorRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+      exploredSetups = new Set(
+        priorRecords
+          .map(
+            (r) =>
+              r.content as {
+                status?: string
+                setupKey?: string
+                config?: Record<string, unknown>
+              },
+          )
+          .filter((c) => c?.status === 'completed')
+          .map((c) => c.setupKey ?? (c.config ? setupKeyOf(c.config) : undefined))
+          .filter((k): k is string => typeof k === 'string'),
+      )
+    }
+
     let lastKey: string | undefined
     const summary = await runActivityWorkItems<
       PlannedTrainingItem,
@@ -134,6 +153,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
       isFresh: async (item) => {
         if (params.refresh) return false
+        if (exploredSetups && exploredSetups.has(setupKeyOf(item.config))) return true
         const existing = await deps.storage.readRecord({
           scope: params.scope,
           type: recordType,
@@ -172,6 +192,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 error,
                 ...(result.logTail?.length ? { logTail: result.logTail } : {}),
                 config: item.config,
+                setupKey: setupKeyOf(item.config),
                 ranAt: now(),
                 ranBy,
                 durationMs: result.durationMs,
@@ -189,6 +210,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           content: {
             ...runSummary,
             status: 'completed',
+            setupKey: setupKeyOf(item.config),
             ranAt: now(),
             ranBy,
             durationMs: result.durationMs,

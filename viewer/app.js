@@ -3074,6 +3074,10 @@ function renderLaunchForm() {
           <input type="checkbox" name="refresh" />
           <span>Refresh — re-run configs that already have results</span>
         </label>
+        <label class="check-row launch-skip-explored">
+          <input type="checkbox" name="skipExplored" />
+          <span>Exploration — skip setups already run under any seed</span>
+        </label>
         <label class="check-row launch-autoeval">
           <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
           <span>Auto-evaluate completed runs</span>
@@ -3099,14 +3103,17 @@ function launchPresets() {
     })
   }
   if (manifest && Array.isArray(manifest.presets)) {
-    for (const p of manifest.presets) if (p && p.fixed) list.push({ label: p.label || 'Preset', fixed: p.fixed })
+    for (const p of manifest.presets)
+      if (p && p.fixed) list.push({ label: p.label || 'Preset', fixed: p.fixed })
   }
   return list
 }
 function presetsSelectHtml() {
   const presets = launchPresets()
   if (!presets.length) return ''
-  const opts = presets.map((p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`).join('')
+  const opts = presets
+    .map((p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`)
+    .join('')
   return `<fieldset class="lever launch-presets">
     <legend>Load a setup</legend>
     <label class="field"><span>Known-good setups <em>(fills the form to seed a sweep)</em></span>
@@ -3212,6 +3219,7 @@ async function onLaunchSubmit(event) {
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
   const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
   const concurrency = readConcurrency(form)
+  const skipExplored = !!(form.elements.skipExplored && form.elements.skipExplored.checked)
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
@@ -3219,6 +3227,7 @@ async function onLaunchSubmit(event) {
       spec,
       refresh,
       ...(concurrency > 1 ? { concurrency } : {}),
+      ...(skipExplored ? { skipExplored: true } : {}),
     })
     const result = await startOrEnqueue(
       'train',

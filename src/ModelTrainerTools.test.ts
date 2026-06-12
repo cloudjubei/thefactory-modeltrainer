@@ -442,6 +442,49 @@ describe('runTrainingCampaign', () => {
     expect(result.completed).toBe(4)
   })
 
+  it('skips setups already run under any seed when skipExplored is set', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { fixed: { lr: 0.3 }, seeds: [0] },
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { fixed: { lr: 0.3 }, seeds: [0, 1] },
+      skipExplored: true,
+    })
+    expect(result.skipped).toBe(2)
+    expect(result.completed).toBe(0)
+  })
+
+  it('runs a fresh seed of an explored setup when skipExplored is off', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { fixed: { lr: 0.3 }, seeds: [0] },
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { fixed: { lr: 0.3 }, seeds: [0, 1] },
+    })
+    expect(result.skipped).toBe(1)
+    expect(result.completed).toBe(1)
+  })
+
   it('marks a completed job with an invalid summary as failed', async () => {
     const runner = stubRunner({ jobResult: () => ({ summary: { nope: true } }) })
     const { tools } = makeTools(runner, memoryStorage())
