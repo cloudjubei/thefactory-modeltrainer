@@ -650,6 +650,17 @@ body {
   font-weight: 600;
   font-size: 12px;
 }
+/* Degenerate / failed runs are muted in the table so real results stand out. */
+.runs-table tr.is-degenerate-row td,
+.runs-table tr.is-failed-row td {
+  opacity: 0.5;
+}
+.runs-table tr.is-selected td {
+  opacity: 1;
+}
+.run-rerun-hint {
+  font-style: italic;
+}
 
 /* ---- Run detail --------------------------------------------------------------- */
 .kv-table {

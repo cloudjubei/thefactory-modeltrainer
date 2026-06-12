@@ -1421,12 +1421,31 @@ function evalChipHtml(run) {
     !Number.isFinite(train) || (objectiveDirection() === 'min' ? value <= train : value >= train)
   return `<span class="badge eval-chip ${heldUp ? 'is-ok' : 'is-warn'}">${escapeHtml(formatObjective(value))}</span>`
 }
+// "asset · timeframe" for the runs-table Data column, from the run's dataset
+// descriptor (preferred) or its config — so multi-asset/timeframe runs separate.
+function datasetLabel(s) {
+  const d = (s && s.dataset) || {}
+  const cfg = (s && s.config) || {}
+  const bits = [d.asset || cfg.asset, d.timeframe || cfg.timeframe].filter(Boolean)
+  return bits.length ? bits.join(' · ') : '—'
+}
 function runRowHtml(run) {
   const s = run.summary
-  const selected = run.key === selectedRunKey ? ' class="is-selected"' : ''
-  return `<tr data-key="${escapeHtml(run.key)}"${selected}>
+  const rowClasses = [
+    run.key === selectedRunKey ? 'is-selected' : '',
+    s.status === 'failed'
+      ? 'is-failed-row'
+      : s.health && s.health.status && s.health.status !== 'ok'
+        ? 'is-degenerate-row'
+        : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  const classAttr = rowClasses ? ` class="${rowClasses}"` : ''
+  return `<tr data-key="${escapeHtml(run.key)}"${classAttr}>
     <td><code>${escapeHtml(shortKey(run.key))}</code></td>
     <td class="num">${escapeHtml(formatObjective(s.objective))}</td>
+    <td>${escapeHtml(datasetLabel(s))}</td>
     <td>${s.status === 'failed' ? '<span class="badge is-bad">failed</span>' : healthBadgeHtml(s.health)}</td>
     <td>${verdictChipHtml(verdictsCache.get(run.key))}</td>
     <td>${evalChipHtml(run)}</td>
@@ -1514,7 +1533,7 @@ async function renderRuns() {
     body,
     `${runsFilterBarHtml(shown.length)}<div class="table-wrap"><table class="runs-table">
     <thead><tr>
-      <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Health</th>
+      <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Data</th><th>Health</th>
       <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th class="num">Took</th><th>Ran at</th>
     </tr></thead>
     <tbody>${rows}</tbody>
@@ -1715,6 +1734,55 @@ function priceActionSectionHtml(summary) {
   })
   return `<h3>Price &amp; actions</h3><div class="chart-wrap">${svg}</div>${legend ? `<p class="badges-row run-mark-legend">${legend}</p>` : ''}`
 }
+// Model equity vs the buy-and-hold control: what the portfolio would be worth if
+// you'd simply bought at step 0 and held. Hold is a comparison CONTROL (not a
+// reward target) — derived from the price the run already emits, so no producer
+// change. Shows the model curve, the hold curve, and the end-of-window delta.
+function equityVsHoldSectionHtml(summary) {
+  const series = summary && summary.series
+  const chart = summary && summary.artifacts && summary.artifacts.runChart
+  const equity = series && Array.isArray(series.equity) ? series.equity.map(Number) : []
+  const price = chart && Array.isArray(chart.price) ? chart.price.map(Number) : []
+  if (equity.length < 2 || price.length < 2) return ''
+  const n = Math.min(equity.length, price.length)
+  const start = Number(equity[0])
+  const p0 = Number(price[0])
+  if (!Number.isFinite(start) || !Number.isFinite(p0) || p0 === 0) return ''
+  const points = []
+  for (let i = 0; i < n; i++) {
+    const hold = start * (Number(price[i]) / p0)
+    points.push({ x: i, y: Number(equity[i]), group: 'model' })
+    points.push({ x: i, y: hold, group: 'buy & hold' })
+  }
+  const svg = buildLineChart({
+    points,
+    xLabel: 'step',
+    yLabel: 'net worth',
+    width: 640,
+    height: 200,
+    markers: false,
+    ariaLabel: 'model equity vs buy and hold',
+  })
+  const modelPct = ((Number(equity[n - 1]) - start) / start) * 100
+  const holdPct = ((start * (Number(price[n - 1]) / p0) - start) / start) * 100
+  const delta = modelPct - holdPct
+  const fmt = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+  const cls = delta >= 0 ? 'is-ok' : 'is-warn'
+  return `<h3>Equity vs buy &amp; hold <span class="card-sub">— control</span></h3>
+    <div class="chart-wrap">${svg}</div>
+    <p class="badges-row">model ${escapeHtml(fmt(modelPct))} · hold ${escapeHtml(fmt(holdPct))}
+      · <span class="badge ${cls}">${escapeHtml(`${delta >= 0 ? '+' : ''}${delta.toFixed(1)} pts vs hold`)}</span></p>`
+}
+// Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
+// price-action + hold-comparison view; tell the user a re-run will surface them.
+function oldRunChartHintHtml(s) {
+  const hasEquity = s && s.series && Array.isArray(s.series.equity) && s.series.equity.length >= 2
+  const hasChart = s && s.artifacts && s.artifacts.runChart
+  if (hasEquity && !hasChart && !s.dataset) {
+    return `<p class="card-sub run-rerun-hint">This run predates the price &amp; action view — re-run the config to see the price chart and the buy-and-hold comparison.</p>`
+  }
+  return ''
+}
 function renderRunDetail(key) {
   const panel = byId('run-detail')
   if (!panel) return
@@ -1750,8 +1818,9 @@ function renderRunDetail(key) {
     ${evaluationSectionHtml(run)}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
+    ${oldRunChartHintHtml(s)}
     ${priceActionSectionHtml(s)}
-    ${trainingCurveSectionHtml(s)}
+    ${equityVsHoldSectionHtml(s) || trainingCurveSectionHtml(s)}
     <h3>Config</h3>
     <pre class="json">${escapeHtml(JSON.stringify(s.config || {}, null, 2))}</pre>
     <h3>Artifacts</h3>
@@ -2990,6 +3059,7 @@ function renderLaunchForm() {
     .map(([key, spec]) => leverFieldsetHtml(key, spec))
     .join('')
   form.innerHTML = `
+    ${presetsSelectHtml()}
     ${levers || '<p class="card-sub">This manifest declares no levers — the campaign runs the default config.</p>'}
     <fieldset class="lever">
       <legend>Campaign</legend>
@@ -3014,18 +3084,42 @@ function renderLaunchForm() {
     <p class="launch-summary" id="launch-summary"></p>
     <div class="form-actions">
       <button type="submit" id="launch-btn">Launch campaign</button>
-      ${manifest && manifest.quickStart ? `<button type="button" id="quickstart-btn" class="ghost-btn">${escapeHtml((manifest.quickStart && manifest.quickStart.label) || 'Quick start')}</button>` : ''}
     </div>
     <p id="launch-status" class="form-status" role="status"></p>`
   updateLaunchSummary()
 }
-// Pre-fill the launch form with the manifest's recommended fast-first-run preset:
-// set each named lever's fixed value and clear its sweep so the preset takes effect.
-function applyQuickStart() {
+// All launch presets in order: the quick-start (if any) first, then the manifest's
+// curated known-good setups. The "Load a setup" select indexes into this list.
+function launchPresets() {
+  const list = []
+  if (manifest && manifest.quickStart && manifest.quickStart.fixed) {
+    list.push({
+      label: manifest.quickStart.label || 'Quick start',
+      fixed: manifest.quickStart.fixed,
+    })
+  }
+  if (manifest && Array.isArray(manifest.presets)) {
+    for (const p of manifest.presets) if (p && p.fixed) list.push({ label: p.label || 'Preset', fixed: p.fixed })
+  }
+  return list
+}
+function presetsSelectHtml() {
+  const presets = launchPresets()
+  if (!presets.length) return ''
+  const opts = presets.map((p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`).join('')
+  return `<fieldset class="lever launch-presets">
+    <legend>Load a setup</legend>
+    <label class="field"><span>Known-good setups <em>(fills the form to seed a sweep)</em></span>
+      <select id="launch-preset-select"><option value="">— choose —</option>${opts}</select>
+    </label>
+  </fieldset>`
+}
+// Pre-fill the launch form from a preset's fixed lever values: set each named
+// lever's fixed input and clear its sweep so the preset takes effect.
+function applyPresetFixed(fixed) {
   const form = byId('launch-form')
-  const preset = manifest && manifest.quickStart && manifest.quickStart.fixed
-  if (!form || !preset) return
-  for (const [key, value] of Object.entries(preset)) {
+  if (!form || !fixed) return
+  for (const [key, value] of Object.entries(fixed)) {
     const fixedEl = form.elements['fixed:' + key]
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
@@ -3037,7 +3131,6 @@ function applyQuickStart() {
       else fixedEl.value = String(value)
     }
   }
-  if (form.elements.seeds) form.elements.seeds.value = '1'
   updateLaunchSummary()
 }
 function parseNumberList(text) {
@@ -3165,14 +3258,17 @@ function setupLaunch() {
     updateLaunchSummary()
   })
   form.addEventListener('change', (event) => {
+    if (event.target && event.target.id === 'launch-preset-select') {
+      const idx = Number(event.target.value)
+      const presets = launchPresets()
+      if (Number.isInteger(idx) && presets[idx]) applyPresetFixed(presets[idx].fixed)
+      return
+    }
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
     }
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     updateLaunchSummary()
-  })
-  form.addEventListener('click', (event) => {
-    if (event.target && event.target.id === 'quickstart-btn') applyQuickStart()
   })
 }
 

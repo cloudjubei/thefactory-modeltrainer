@@ -84,6 +84,11 @@ export interface TrainerManifest {
    * new user's first campaign returns quickly, without changing the tuned best-known defaults.
    */
   quickStart?: { label?: string; fixed: Record<string, unknown> }
+  /**
+   * Curated known-good setups (label + fixed lever values) the launch form can load to seed a
+   * sweep — e.g. the historically best-performing configs, so designing a sweep is point-and-pick.
+   */
+  presets?: Array<{ label: string; fixed: Record<string, unknown> }>
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
