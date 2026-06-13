@@ -348,6 +348,13 @@ body {
   font-size: 11px;
   white-space: nowrap;
 }
+.runs-table .seed-unstable {
+  color: #d97706;
+  font-weight: 700;
+}
+.runs-table tbody tr.is-unstable {
+  box-shadow: inset 3px 0 0 #d97706;
+}
 .runs-table td.ledger-note {
   white-space: normal;
   max-width: 240px;

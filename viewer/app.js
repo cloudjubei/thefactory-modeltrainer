@@ -1798,6 +1798,15 @@ function median(xs) {
 function mean(xs) {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN
 }
+// Linear-interpolated quantile (q in [0,1]) over an unsorted array — for IQR spread.
+function quantile(xs, q) {
+  if (!xs.length) return NaN
+  const s = [...xs].sort((a, b) => a - b)
+  const pos = (s.length - 1) * q
+  const lo = Math.floor(pos)
+  const hi = Math.ceil(pos)
+  return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo)
+}
 function aggregateBySetup(runs) {
   const groups = new Map()
   for (const r of runs) {
@@ -1817,6 +1826,10 @@ function aggregateBySetup(runs) {
       const bo = bestRun ? Number(bestRun.summary.objective) : NaN
       if (!bestRun || (dir === 'min' ? o < bo : o > bo)) bestRun = r
     }
+    // RB3 — seed robustness: how tightly the objective clusters across seeds (IQR), how often it
+    // lands on the good side of zero (fraction-positive), and whether it flips sign at all (a
+    // seed-fragile setup you should not trust on a single lucky run).
+    const positive = objs.filter((o) => (dir === 'min' ? o < 0 : o > 0)).length
     out.push({
       key,
       runs: rs,
@@ -1827,6 +1840,11 @@ function aggregateBySetup(runs) {
       objMax: objs.length ? Math.max(...objs) : NaN,
       objAvg: mean(objs),
       objMedian: median(objs),
+      objIqr: objs.length ? quantile(objs, 0.75) - quantile(objs, 0.25) : NaN,
+      fractionPositive: objs.length ? positive / objs.length : NaN,
+      positiveCount: positive,
+      objCount: objs.length,
+      unstable: objs.length >= 2 && Math.min(...objs) < 0 && Math.max(...objs) > 0,
       vsHoldAvg: mean(vsh),
       failed: rs.filter((r) => r.summary.status === 'failed').length,
     })
@@ -1923,9 +1941,10 @@ function bySetupTableHtml(filtered) {
       const failed = g.failed ? ` <span class="card-sub">(${g.failed} failed)</span>` : ''
       const llm = setupLlmNote(g)
       const note = (notesCache.get(g.key) || {}).note || ''
-      return `<tr data-setup-key="${escapeHtml(g.key)}" class="setup-row">
+      return `<tr data-setup-key="${escapeHtml(g.key)}" class="setup-row${g.unstable ? ' is-unstable' : ''}">
         <td>${escapeHtml(g.label)}</td>
         <td class="num">${g.count}${failed}</td>
+        <td class="num">${setupStabilityCell(g)}</td>
         <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
         <td class="num">${range}</td>
         <td class="num">${escapeHtml(formatObjective(g.objMedian))}</td>
@@ -1936,8 +1955,17 @@ function bySetupTableHtml(filtered) {
     })
     .join('')
   return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Setup</th><th class="num">seeds</th><th class="num">${on} avg</th><th class="num">${on} range</th><th class="num">${on} median</th><th class="num">vs hold avg</th><th>LLM verdict ${helpCalloutHtml("The judge's one-line verdict for this setup's best run (if scored).")}</th><th>Your conclusion ${helpCalloutHtml('Your note for this setup — open the setup to edit. The ledger of everything tried.')}</th></tr></thead>
+    <thead><tr><th>Setup</th><th class="num">seeds</th><th class="num">stability ${helpCalloutHtml('Seed robustness: how many seeds land on the good side of 0 (↑), and ⚠ if the objective flips sign across seeds — a fragile setup you should not trust on one lucky run. Hover a cell for the IQR (spread). Needs ≥2 seeds.')}</th><th class="num">${on} avg</th><th class="num">${on} range</th><th class="num">${on} median</th><th class="num">vs hold avg</th><th>LLM verdict ${helpCalloutHtml("The judge's one-line verdict for this setup's best run (if scored).")}</th><th>Your conclusion ${helpCalloutHtml('Your note for this setup — open the setup to edit. The ledger of everything tried.')}</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`
+}
+// RB3 cell: seed-robustness at a glance — "k/n ↑" positive seeds, ⚠ when sign-unstable, IQR on
+// hover. Needs ≥2 seeds to mean anything; single-seed setups show a muted note instead.
+function setupStabilityCell(g) {
+  if (g.objCount < 2) return '<span class="card-sub">1 seed</span>'
+  const iqr = Number.isFinite(g.objIqr) ? formatObjective(g.objIqr) : '—'
+  const warn = g.unstable ? '<span class="seed-unstable">⚠</span> ' : ''
+  const tip = `${g.positiveCount} of ${g.objCount} seeds on the good side of 0 · IQR (spread) ${iqr}${g.unstable ? ' · objective flips sign across seeds — fragile' : ''}`
+  return `<span title="${escapeHtml(tip)}">${warn}${g.positiveCount}/${g.objCount} ↑ <span class="card-sub">· IQR ${escapeHtml(iqr)}</span></span>`
 }
 // One row per EXPERIMENT/thesis: how many runs + setups it spans + its objective
 // spread, so theses compare head-to-head. Click a row to drill into its runs.
