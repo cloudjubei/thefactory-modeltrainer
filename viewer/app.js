@@ -13,6 +13,7 @@ const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
+const CONCURRENCY_SS = 'trainer.concurrency'
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
@@ -57,6 +58,7 @@ let activeTabId = null
 let runsCache = []
 let verdictsCache = new Map()
 let evaluationsCache = new Map()
+let notesCache = new Map()
 const evaluatingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
@@ -77,6 +79,15 @@ let queuePumping = false
 let activeQueueItem = null
 let runsFilterKeys = null
 let runsFilterLabel = ''
+let runsSortKey = null
+let runsSortDir = 'desc'
+let runsLeverFilter = {}
+let runsTextFilter = ''
+let runsCompareKeys = new Set()
+let runsViewMode = 'runs'
+// When drilled into a single setup's runs (via the by-setup view), this holds that
+// setup's key so the runs view can show its conclusion-note editor (C4 ledger).
+let runsDrillSetupKey = null
 let chartSplits = {}
 let itemBarTimer = null
 // 1s ticker for the running item's elapsed timer (mm:ss) between the 3s polls.
@@ -100,6 +111,10 @@ function escapeHtml(value) {
     /[&<>"']/g,
     (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
   )
+}
+function truncate(value, max) {
+  const s = String(value ?? '')
+  return s.length > max ? s.slice(0, max - 1) + '…' : s
 }
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -290,6 +305,27 @@ async function readEvaluations() {
 }
 async function readProposal() {
   return readLatestRecord('-proposal')
+}
+// Per-setup user notes (your conclusion for a setup), keyed by setupKey — the user
+// half of the ledger's "current conclusion" (the rest is score + LLM verdict).
+async function readNotes() {
+  if (!manifest) return new Map()
+  const recs = await queryRecords(manifest.recordType + '-note')
+  const map = new Map()
+  for (const r of recs) {
+    const key = r.key || (r.content && r.content.setupKey) || ''
+    if (key) map.set(key, r.content || {})
+  }
+  return map
+}
+async function saveSetupNote(setupKey, note) {
+  if (!manifest || !setupKey) return
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-note',
+    key: setupKey,
+    content: { setupKey, note: String(note || ''), updatedAt: nowIso() },
+  })
+  notesCache = await readNotes()
 }
 async function readHypotheses() {
   if (!manifest) return []
@@ -1360,14 +1396,6 @@ function sortRunsByObjective(runs) {
     return 0
   })
 }
-function configSummaryText(config) {
-  const cfg = config || {}
-  const keys = Object.keys((manifest && manifest.levers) || {})
-    .filter((k) => cfg[k] !== undefined)
-    .slice(0, 3)
-  if (!keys.length) return '—'
-  return keys.map((k) => `${k}=${String(cfg[k])}`).join(' · ')
-}
 function healthBadgeHtml(health) {
   const status = (health && health.status) || 'unknown'
   const cls = status === 'ok' ? 'is-ok' : 'is-bad'
@@ -1429,7 +1457,7 @@ function datasetLabel(s) {
   const bits = [d.asset || cfg.asset, d.timeframe || cfg.timeframe].filter(Boolean)
   return bits.length ? bits.join(' · ') : '—'
 }
-function runRowHtml(run) {
+function runRowHtml(run, cols) {
   const s = run.summary
   const rowClasses = [
     run.key === selectedRunKey ? 'is-selected' : '',
@@ -1442,18 +1470,8 @@ function runRowHtml(run) {
     .filter(Boolean)
     .join(' ')
   const classAttr = rowClasses ? ` class="${rowClasses}"` : ''
-  return `<tr data-key="${escapeHtml(run.key)}"${classAttr}>
-    <td><code>${escapeHtml(shortKey(run.key))}</code></td>
-    <td class="num">${escapeHtml(formatObjective(s.objective))}</td>
-    <td>${escapeHtml(datasetLabel(s))}</td>
-    <td>${s.status === 'failed' ? '<span class="badge is-bad">failed</span>' : healthBadgeHtml(s.health)}</td>
-    <td>${verdictChipHtml(verdictsCache.get(run.key))}</td>
-    <td>${evalChipHtml(run)}</td>
-    <td class="num">${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}</td>
-    <td class="config-cell">${escapeHtml(configSummaryText(s.config))}</td>
-    <td class="num">${escapeHtml(formatDuration(s.durationMs))}</td>
-    <td class="when-cell">${escapeHtml(formatWhen(runRanAt(s)))}${ranBySuffixHtml(s)}</td>
-  </tr>`
+  const tds = cols.map((c) => `<td class="${c.num ? 'num' : ''}">${c.get(run)}</td>`).join('')
+  return `<tr data-key="${escapeHtml(run.key)}"${classAttr}>${tds}</tr>`
 }
 function bestObjectiveOf(runs) {
   const values = runs.map((r) => Number(r.summary.objective)).filter((v) => Number.isFinite(v))
@@ -1468,15 +1486,33 @@ function renderRunsLive() {
   setHtml(el, live ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : '')
   el.hidden = !live
 }
-function runsFilterBarHtml(shownCount) {
-  if (!runsFilterKeys) return ''
-  const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
-  return `<p class="runs-filter-bar">Showing ${shownCount} campaign run${shownCount === 1 ? '' : 's'}${label} — <button type="button" id="runs-filter-clear">clear filter</button></p>`
-}
 function clearRunsFilter() {
   runsFilterKeys = null
   runsFilterLabel = ''
-  renderRuns()
+  runsLeverFilter = {}
+  runsTextFilter = ''
+  runsDrillSetupKey = null
+  renderRunsTable()
+}
+// Drill from a by-setup row into that setup's individual runs (filter + switch view).
+function drillIntoSetup(key) {
+  const group = aggregateBySetup(applyRunsFilters(runsCache)).find((g) => g.key === key)
+  if (!group) return
+  runsFilterKeys = new Set(group.runs.map((r) => r.key))
+  runsFilterLabel = group.label
+  runsDrillSetupKey = key
+  runsViewMode = 'runs'
+  renderRunsTable()
+}
+// Drill from a by-experiment row into that thesis's individual runs.
+function drillIntoExperiment(thesis) {
+  const group = aggregateByExperiment(applyRunsFilters(runsCache)).find((g) => g.thesis === thesis)
+  if (!group) return
+  runsFilterKeys = new Set(group.runs.map((r) => r.key))
+  runsFilterLabel = thesis
+  runsDrillSetupKey = null
+  runsViewMode = 'runs'
+  renderRunsTable()
 }
 // Viewing the Runs tab clears the project's unseen badge: mark every current run
 // key as seen, persisting the union when any are new. No-op when nothing changed,
@@ -1496,51 +1532,623 @@ async function markRunsSeen() {
     // best-effort: the badge resyncs from the persisted record on next read
   }
 }
-async function renderRuns() {
+// --- Results workbench: dynamic metric columns + sort + filter -----------------
+// Common metric keys first (the rest follow alphabetically) so the table reads
+// well for trading (sharpe/return/drawdown…) and the dip line (f1/precision…).
+const RUN_METRIC_ORDER = [
+  'sharpe',
+  'total_return_pct',
+  'cagr_pct',
+  'max_drawdown_pct',
+  'win_pct',
+  'n_trades',
+  'stop_losses',
+  'final_net_worth',
+  'f1',
+  'precision',
+  'recall',
+  'accuracy',
+  'negative_recall',
+  'positive_rate',
+  'simple_ratio',
+]
+// Plain-language help per metric (shown as a "?" on the column header) so a newcomer
+// knows what each means + which direction is good.
+const METRIC_INFO = {
+  sharpe:
+    'Risk-adjusted return (return ÷ volatility, annualised). Higher is better; above ~1 is strong.',
+  total_return_pct: 'Total % return over the test window. Higher is better.',
+  cagr_pct: 'Annualised growth rate implied by the run. Higher is better.',
+  max_drawdown_pct: 'Worst peak-to-trough fall (negative %). Closer to 0 is better.',
+  win_pct: 'Share of trades that were profitable.',
+  n_trades: 'Number of trades taken — very high can mean churn (fees eat returns).',
+  stop_losses: 'How many trades were closed by the stop-loss.',
+  final_net_worth: 'Ending portfolio value.',
+  f1: 'Dip classifier: balance of precision & recall (0–1, higher better).',
+  precision: 'Of predicted dips, how many were real (higher better).',
+  recall: 'Of real dips, how many were caught (higher better).',
+  accuracy: 'Balanced accuracy across the two classes.',
+  negative_recall: 'Of non-dips, how many were correctly skipped.',
+  positive_rate: 'Share of samples that are positive — the class balance.',
+  simple_ratio: 'Correct vs incorrect positive predictions.',
+}
+const VSHOLD_INFO =
+  'Run return minus buy-and-hold over the same window. Positive = beat just holding. Hold is a control to judge against — never the optimisation target.'
+function runMetricKeys() {
+  const keys = new Set()
+  for (const r of runsCache) {
+    const m = r.summary && r.summary.metrics
+    if (m && typeof m === 'object') for (const k of Object.keys(m)) keys.add(k)
+  }
+  const known = RUN_METRIC_ORDER.filter((k) => keys.has(k))
+  const rest = [...keys].filter((k) => !RUN_METRIC_ORDER.includes(k)).sort()
+  return [...known, ...rest]
+}
+function anyBenchmark() {
+  return runsCache.some(
+    (r) =>
+      r.summary &&
+      r.summary.benchmark &&
+      Number.isFinite(Number(r.summary.benchmark.hold_return_pct)),
+  )
+}
+// Run return % minus the buy-and-hold control over the same window (display only).
+function vsHoldValue(s) {
+  const ret = Number(s && s.metrics && s.metrics.total_return_pct)
+  const hold = Number(s && s.benchmark && s.benchmark.hold_return_pct)
+  return Number.isFinite(ret) && Number.isFinite(hold) ? ret - hold : NaN
+}
+// The column model the table renders + sorts from; metric columns are derived.
+function runsColumns() {
+  const cols = [
+    {
+      id: 'compare',
+      label: 'pick',
+      num: false,
+      noSort: true,
+      help: 'Tick 2+ runs to compare them below — config diff, side-by-side metrics, and overlaid return curves vs buy-and-hold.',
+      get: (r) =>
+        `<input type="checkbox" class="run-compare-cb" data-key="${escapeHtml(r.key)}"${runsCompareKeys.has(r.key) ? ' checked' : ''} aria-label="select to compare" />`,
+    },
+    {
+      id: 'key',
+      label: 'Run',
+      num: false,
+      get: (r) => `<code>${escapeHtml(shortKey(r.key))}</code>`,
+      sort: (r) => r.key,
+    },
+    {
+      id: 'data',
+      label: 'Data',
+      num: false,
+      get: (r) => escapeHtml(datasetLabel(r.summary)),
+      sort: (r) => datasetLabel(r.summary),
+    },
+  ]
+  for (const mk of runMetricKeys()) {
+    cols.push({
+      id: 'm:' + mk,
+      label: mk.replace(/_pct$/, ' %').replace(/_/g, ' '),
+      num: true,
+      help: METRIC_INFO[mk],
+      get: (r) => {
+        const v = r.summary.metrics && r.summary.metrics[mk]
+        return escapeHtml(
+          typeof v === 'number' ? formatObjective(v) : v === undefined ? '—' : String(v),
+        )
+      },
+      sort: (r) => {
+        const v = r.summary.metrics && r.summary.metrics[mk]
+        return typeof v === 'number' ? v : NaN
+      },
+    })
+  }
+  if (anyBenchmark()) {
+    cols.push({
+      id: 'vshold',
+      label: 'vs hold',
+      num: true,
+      help: VSHOLD_INFO,
+      get: (r) => {
+        const d = vsHoldValue(r.summary)
+        return Number.isFinite(d)
+          ? `<span class="${d >= 0 ? 'delta-pos' : 'delta-neg'}">${d >= 0 ? '+' : ''}${d.toFixed(1)}</span>`
+          : '—'
+      },
+      sort: (r) => vsHoldValue(r.summary),
+    })
+  }
+  cols.push(
+    {
+      id: 'seed',
+      label: 'Seed',
+      num: true,
+      get: (r) => escapeHtml(r.summary.seed === undefined ? '—' : String(r.summary.seed)),
+      sort: (r) => Number(r.summary.seed),
+    },
+    {
+      id: 'health',
+      label: 'Status',
+      num: false,
+      get: (r) =>
+        r.summary.status === 'failed'
+          ? '<span class="badge is-bad">failed</span>'
+          : healthBadgeHtml(r.summary.health),
+      sort: (r) =>
+        r.summary.status === 'failed'
+          ? 'failed'
+          : (r.summary.health && r.summary.health.status) || '',
+    },
+    {
+      id: 'judge',
+      label: 'Judge',
+      num: true,
+      get: (r) => verdictChipHtml(verdictsCache.get(r.key)),
+      sort: (r) => {
+        const v = verdictsCache.get(r.key)
+        return v ? Number(v.score) : NaN
+      },
+    },
+    {
+      id: 'eval',
+      label: 'Eval',
+      num: true,
+      get: (r) => evalChipHtml(r),
+      sort: (r) => {
+        const e = evaluationsCache.get(r.key)
+        return e ? Number(e.objective) : NaN
+      },
+    },
+    {
+      id: 'took',
+      label: 'Took',
+      num: true,
+      get: (r) => escapeHtml(formatDuration(r.summary.durationMs)),
+      sort: (r) => Number(r.summary.durationMs),
+    },
+    {
+      id: 'ran',
+      label: 'Ran at',
+      num: false,
+      get: (r) => `${escapeHtml(formatWhen(runRanAt(r.summary)))}${ranBySuffixHtml(r.summary)}`,
+      sort: (r) => String(runRanAt(r.summary)),
+    },
+  )
+  return cols
+}
+function compareNumeric(a, b, dir) {
+  const fa = Number.isFinite(a)
+  const fb = Number.isFinite(b)
+  if (fa && fb) return (a - b) * dir
+  if (fa) return -1
+  if (fb) return 1
+  return 0
+}
+function sortRuns(runs) {
+  const col = runsSortKey ? runsColumns().find((c) => c.id === runsSortKey) : null
+  if (!col) return sortRunsByObjective(runs)
+  const dir = runsSortDir === 'asc' ? 1 : -1
+  return [...runs].sort((a, b) => {
+    const va = col.sort(a)
+    const vb = col.sort(b)
+    if (typeof va === 'number' || typeof vb === 'number')
+      return compareNumeric(Number(va), Number(vb), dir)
+    return String(va).localeCompare(String(vb)) * dir
+  })
+}
+function applyRunsFilters(runs) {
+  let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
+  for (const [lever, val] of Object.entries(runsLeverFilter)) {
+    if (val) out = out.filter((r) => String((r.summary.config || {})[lever]) === String(val))
+  }
+  const q = runsTextFilter.trim().toLowerCase()
+  if (q) {
+    out = out.filter(
+      (r) =>
+        r.key.toLowerCase().includes(q) ||
+        JSON.stringify(r.summary.config || {})
+          .toLowerCase()
+          .includes(q),
+    )
+  }
+  return out
+}
+// --- Per-setup aggregation (a SETUP = config minus seed; a result is a setup, not a
+// single run). Group runs by setup and report min/avg/max across its seeds. ---------
+const SETUP_LABEL_PRIORITY = [
+  'model_name',
+  'net_arch',
+  'reward_model',
+  'timeframe',
+  'asset',
+  'loss_fn',
+]
+function setupKeyOfRun(run) {
+  if (run.summary && run.summary.setupKey) return run.summary.setupKey
+  const cfg = { ...((run.summary && run.summary.config) || {}) }
+  delete cfg.seed
+  return JSON.stringify(
+    Object.keys(cfg)
+      .sort()
+      .map((k) => [k, cfg[k]]),
+  )
+}
+function setupConfigLabel(config) {
+  const cfg = config || {}
+  const all = Object.keys((manifest && manifest.levers) || {}).filter(
+    (k) => k !== 'seed' && cfg[k] !== undefined,
+  )
+  const ordered = [
+    ...SETUP_LABEL_PRIORITY.filter((k) => all.includes(k)),
+    ...all.filter((k) => !SETUP_LABEL_PRIORITY.includes(k)),
+  ]
+  return ordered.length
+    ? ordered
+        .slice(0, 5)
+        .map((k) => `${k}=${cfg[k]}`)
+        .join(' · ')
+    : '—'
+}
+function median(xs) {
+  if (!xs.length) return NaN
+  const s = [...xs].sort((a, b) => a - b)
+  const m = Math.floor(s.length / 2)
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
+}
+function mean(xs) {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : NaN
+}
+function aggregateBySetup(runs) {
+  const groups = new Map()
+  for (const r of runs) {
+    const k = setupKeyOfRun(r)
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(r)
+  }
+  const dir = objectiveDirection()
+  const out = []
+  for (const [key, rs] of groups) {
+    const objs = rs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    const vsh = rs.map((r) => vsHoldValue(r.summary)).filter(Number.isFinite)
+    let bestRun = null
+    for (const r of rs) {
+      const o = Number(r.summary.objective)
+      if (!Number.isFinite(o)) continue
+      const bo = bestRun ? Number(bestRun.summary.objective) : NaN
+      if (!bestRun || (dir === 'min' ? o < bo : o > bo)) bestRun = r
+    }
+    out.push({
+      key,
+      runs: rs,
+      bestRun,
+      label: setupConfigLabel(rs[0].summary.config),
+      count: rs.length,
+      objMin: objs.length ? Math.min(...objs) : NaN,
+      objMax: objs.length ? Math.max(...objs) : NaN,
+      objAvg: mean(objs),
+      objMedian: median(objs),
+      vsHoldAvg: mean(vsh),
+      failed: rs.filter((r) => r.summary.status === 'failed').length,
+    })
+  }
+  return out
+}
+// The LLM's one-line verdict for a setup's best run (if a judge has scored it) — the
+// machine half of the ledger's "current conclusion".
+function setupLlmNote(group) {
+  const v = group.bestRun && verdictsCache.get(group.bestRun.key)
+  return (v && (v.why || v.summary)) || ''
+}
+// Group runs by the THESIS they tested (set at launch) so experiments compare
+// head-to-head — including theses outside the levers (data prep, code changes).
+function aggregateByExperiment(runs) {
+  const groups = new Map()
+  for (const r of runs) {
+    const t = (r.summary && r.summary.thesis) || '(untagged)'
+    if (!groups.has(t)) groups.set(t, [])
+    groups.get(t).push(r)
+  }
+  const out = []
+  for (const [thesis, rs] of groups) {
+    const objs = rs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    const targets = [...new Set(rs.map((r) => r.summary && r.summary.thesisTarget).filter(Boolean))]
+    out.push({
+      thesis,
+      target: targets.join(', '),
+      runs: rs,
+      count: rs.length,
+      setups: new Set(rs.map(setupKeyOfRun)).size,
+      objMin: objs.length ? Math.min(...objs) : NaN,
+      objMax: objs.length ? Math.max(...objs) : NaN,
+      objAvg: mean(objs),
+    })
+  }
+  return out
+}
+function runsToolbarHtml(shownCount, total) {
+  const dropdowns = leverEntries()
+    .filter(([, spec]) => spec.type === 'choice')
+    .map(([key, spec]) => {
+      const opts = [`<option value="">${escapeHtml(key)}: any</option>`]
+        .concat(
+          (spec.choices || []).map(
+            (c) =>
+              `<option value="${escapeHtml(String(c))}"${String(runsLeverFilter[key] || '') === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+          ),
+        )
+        .join('')
+      return `<select class="runs-filter-lever" data-lever="${escapeHtml(key)}">${opts}</select>`
+    })
+    .join('')
+  const active = runsFilterKeys || runsTextFilter || Object.values(runsLeverFilter).some(Boolean)
+  const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
+  const toggle = `<div class="runs-viewmode">
+    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup">By setup ${helpCalloutHtml('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment">By experiment ${helpCalloutHtml('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}</button>
+  </div>`
+  return `<div class="runs-toolbar">
+    ${toggle}
+    ${dropdowns}
+    <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
+    <span class="runs-count">${shownCount}/${total} runs${label}</span>
+    ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
+  </div>`
+}
+function toggleRunsSort(id) {
+  if (runsSortKey === id) runsSortDir = runsSortDir === 'asc' ? 'desc' : 'asc'
+  else {
+    runsSortKey = id
+    runsSortDir = 'desc'
+  }
+  renderRunsTable()
+}
+// One row per SETUP (config minus seed): seed count + min/avg/max/median objective +
+// avg vs-hold. Click a row to drill into that setup's individual runs.
+function bySetupTableHtml(filtered) {
+  const dir = objectiveDirection()
+  const groups = aggregateBySetup(filtered).sort((a, b) => {
+    const fa = Number.isFinite(a.objAvg)
+    const fb = Number.isFinite(b.objAvg)
+    if (fa && fb) return dir === 'min' ? a.objAvg - b.objAvg : b.objAvg - a.objAvg
+    return fa ? -1 : fb ? 1 : 0
+  })
+  const on = escapeHtml(objectiveName())
+  const rows = groups
+    .map((g) => {
+      const range = Number.isFinite(g.objMin)
+        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
+        : '—'
+      const vsh = Number.isFinite(g.vsHoldAvg)
+        ? `<span class="${g.vsHoldAvg >= 0 ? 'delta-pos' : 'delta-neg'}">${g.vsHoldAvg >= 0 ? '+' : ''}${g.vsHoldAvg.toFixed(1)}</span>`
+        : '—'
+      const failed = g.failed ? ` <span class="card-sub">(${g.failed} failed)</span>` : ''
+      const llm = setupLlmNote(g)
+      const note = (notesCache.get(g.key) || {}).note || ''
+      return `<tr data-setup-key="${escapeHtml(g.key)}" class="setup-row">
+        <td>${escapeHtml(g.label)}</td>
+        <td class="num">${g.count}${failed}</td>
+        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
+        <td class="num">${range}</td>
+        <td class="num">${escapeHtml(formatObjective(g.objMedian))}</td>
+        <td class="num">${vsh}</td>
+        <td class="ledger-note" title="${escapeHtml(llm)}">${llm ? escapeHtml(truncate(llm, 70)) : '<span class="card-sub">—</span>'}</td>
+        <td class="ledger-note ${note ? '' : 'is-empty'}" title="${escapeHtml(note)}">${note ? escapeHtml(truncate(note, 70)) : '<span class="card-sub">add note ✎</span>'}</td>
+      </tr>`
+    })
+    .join('')
+  return `<div class="table-wrap"><table class="runs-table">
+    <thead><tr><th>Setup</th><th class="num">seeds</th><th class="num">${on} avg</th><th class="num">${on} range</th><th class="num">${on} median</th><th class="num">vs hold avg</th><th>LLM verdict ${helpCalloutHtml("The judge's one-line verdict for this setup's best run (if scored).")}</th><th>Your conclusion ${helpCalloutHtml('Your note for this setup — open the setup to edit. The ledger of everything tried.')}</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`
+}
+// One row per EXPERIMENT/thesis: how many runs + setups it spans + its objective
+// spread, so theses compare head-to-head. Click a row to drill into its runs.
+function byExperimentTableHtml(filtered) {
+  const dir = objectiveDirection()
+  const groups = aggregateByExperiment(filtered).sort((a, b) => {
+    const fa = Number.isFinite(a.objMax)
+    const fb = Number.isFinite(b.objMax)
+    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
+    return fa ? -1 : fb ? 1 : 0
+  })
+  const on = escapeHtml(objectiveName())
+  const rows = groups
+    .map((g) => {
+      const range = Number.isFinite(g.objMin)
+        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
+        : '—'
+      return `<tr data-experiment-key="${escapeHtml(g.thesis)}" class="setup-row">
+        <td>${escapeHtml(g.thesis)}</td>
+        <td>${escapeHtml(g.target || '—')}</td>
+        <td class="num">${g.count}</td>
+        <td class="num">${g.setups}</td>
+        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
+        <td class="num">${range}</td>
+      </tr>`
+    })
+    .join('')
+  return `<div class="table-wrap"><table class="runs-table">
+    <thead><tr><th>Experiment / thesis</th><th>Target</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`
+}
+// When drilled into a single setup, an editor for that setup's conclusion note —
+// the user half of the ledger (LLM verdict + score being the other halves).
+function setupNoteEditorHtml() {
+  if (!runsDrillSetupKey) return ''
+  const note = (notesCache.get(runsDrillSetupKey) || {}).note || ''
+  return `<div class="setup-note-editor">
+    <label class="setup-note-label">Your conclusion for this setup ${helpCalloutHtml('What did this setup teach you? Saved against the setup (not one run) so it survives re-runs — your ledger of everything tried.')}</label>
+    <textarea id="setup-note-text" class="setup-note-text" rows="2" placeholder="e.g. learns but overfits past episode 20; vs-hold only on 1h data…">${escapeHtml(note)}</textarea>
+    <div class="setup-note-actions"><button type="button" id="setup-note-save" class="ghost-btn">Save conclusion</button><span id="setup-note-status" class="card-sub"></span></div>
+  </div>`
+}
+// Render the table from the in-memory caches (no refetch) — used by sort/filter/view.
+function renderRunsTable() {
   const body = byId('runs-body')
   const spark = byId('runs-sparkline')
   if (!body) return
-  ;[runsCache, verdictsCache, judgementSummary, evaluationsCache] = await Promise.all([
-    readRuns(),
-    readVerdicts(),
-    readJudgement(),
-    readEvaluations(),
-  ])
-  renderJudgeControls()
-  renderRunsLive()
-  await markRunsSeen()
-  const shown = runsFilterKeys ? runsCache.filter((r) => runsFilterKeys.has(r.key)) : runsCache
-  if (spark) {
-    const svg = sparklineSvg(shown)
-    setHtml(spark, svg)
-    spark.hidden = !svg
-  }
   if (!runsCache.length) {
+    if (spark) spark.hidden = true
     setHtml(body, '<div class="empty-hint">No runs yet — launch a campaign.</div>')
     closeRunDetail()
     return
   }
-  if (!shown.length) {
+  const filtered = applyRunsFilters(runsCache)
+  if (spark) {
+    const svg = sparklineSvg(filtered)
+    setHtml(spark, svg)
+    spark.hidden = !svg
+  }
+  if (!filtered.length) {
     setHtml(
       body,
-      `${runsFilterBarHtml(0)}<div class="empty-hint">No runs recorded for this campaign yet.</div>`,
+      `${runsToolbarHtml(0, runsCache.length)}<div class="empty-hint">No runs match the filter.</div>`,
     )
-    closeRunDetail()
     return
   }
-  const rows = sortRunsByObjective(shown).map(runRowHtml).join('')
+  const toolbar = runsToolbarHtml(filtered.length, runsCache.length)
+  if (runsViewMode === 'setup') {
+    const legend = `<p class="runs-legend">Each row is a SETUP (config ignoring seed) — the ledger of everything tried. Click one to drill into its runs <em>and write your conclusion</em> · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold (avg) · "LLM verdict" needs the judge to have run · "—" = not yet scored / noted.</p>`
+    setHtml(body, `${toolbar}${bySetupTableHtml(filtered)}${legend}`)
+    renderCompare()
+    return
+  }
+  if (runsViewMode === 'experiment') {
+    const groups = aggregateByExperiment(filtered)
+    const onlyUntagged = groups.length <= 1 && (!groups[0] || groups[0].thesis === '(untagged)')
+    if (onlyUntagged) {
+      setHtml(
+        body,
+        `${toolbar}<div class="empty-hint">No experiments tagged yet. Set a <strong>Thesis</strong> when you launch a campaign (e.g. "fee-penalty reward" or "1m data prep") — its runs group here so you can compare theses head-to-head, even ones that don't map to a lever.</div>`,
+      )
+      renderCompare()
+      return
+    }
+    const legend = `<p class="runs-legend">Each row is an EXPERIMENT — the thesis set at launch. Click one to drill into its runs. Untagged runs group under "(untagged)".</p>`
+    setHtml(body, `${toolbar}${byExperimentTableHtml(filtered)}${legend}`)
+    renderCompare()
+    return
+  }
+  const shown = sortRuns(filtered)
+  const cols = runsColumns()
+  const header = cols
+    .map((c) => {
+      const help = c.help ? helpCalloutHtml(c.help) : ''
+      if (c.noSort) return `<th class="${c.num ? 'num' : ''}">${escapeHtml(c.label)}${help}</th>`
+      const arrow = runsSortKey === c.id ? (runsSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+      return `<th class="runs-th${c.num ? ' num' : ''}" data-sort="${c.id}">${escapeHtml(c.label)}${help}${arrow}</th>`
+    })
+    .join('')
+  const rows = shown.map((r) => runRowHtml(r, cols)).join('')
+  const legend = `<p class="runs-legend">Click a header to sort · hover <span class="help-legend">?</span> for what a column means · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold · greyed = failed/degenerate · "—" = not recorded (re-run to populate).</p>`
   setHtml(
     body,
-    `${runsFilterBarHtml(shown.length)}<div class="table-wrap"><table class="runs-table">
-    <thead><tr>
-      <th>Key</th><th class="num">${escapeHtml(objectiveName())}</th><th>Data</th><th>Health</th>
-      <th>Judge</th><th>Eval</th><th class="num">Seed</th><th>Config</th><th class="num">Took</th><th>Ran at</th>
-    </tr></thead>
-    <tbody>${rows}</tbody>
-  </table></div>`,
+    `${toolbar}${setupNoteEditorHtml()}<div class="table-wrap"><table class="runs-table">
+    <thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
   )
   if (selectedRunKey && !shown.some((r) => r.key === selectedRunKey)) closeRunDetail()
   else if (selectedRunKey) renderRunDetail(selectedRunKey)
+  renderCompare()
+}
+async function renderRuns() {
+  if (!byId('runs-body')) return
+  ;[runsCache, verdictsCache, judgementSummary, evaluationsCache, notesCache] = await Promise.all([
+    readRuns(),
+    readVerdicts(),
+    readJudgement(),
+    readEvaluations(),
+    readNotes(),
+  ])
+  renderJudgeControls()
+  renderRunsLive()
+  await markRunsSeen()
+  renderRunsTable()
+}
+// Multi-select comparison: a config diff (only differing levers), metrics
+// side-by-side, and overlaid %-return curves (+ the buy-and-hold control) for the
+// runs ticked in the table. Hidden until ≥2 are selected; pruned of stale keys.
+function renderCompare() {
+  const card = byId('run-compare')
+  if (!card) return
+  runsCompareKeys = new Set([...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k)))
+  const runs = [...runsCompareKeys].map((k) => runsCache.find((r) => r.key === k)).filter(Boolean)
+  if (runs.length < 2) {
+    setHtml(card, '')
+    card.hidden = true
+    return
+  }
+  const headRow = runs.map((r) => `<th><code>${escapeHtml(shortKey(r.key))}</code></th>`).join('')
+  const diffRows = Object.keys((manifest && manifest.levers) || {})
+    .map((lk) => {
+      const vals = runs.map((r) => (r.summary.config || {})[lk])
+      if (new Set(vals.map((v) => String(v))).size <= 1) return ''
+      const cells = vals
+        .map((v) => `<td>${escapeHtml(v === undefined ? '—' : String(v))}</td>`)
+        .join('')
+      return `<tr><th>${escapeHtml(lk)}</th>${cells}</tr>`
+    })
+    .filter(Boolean)
+    .join('')
+  const metricRows = runMetricKeys()
+    .map((mk) => {
+      const cells = runs
+        .map((r) => {
+          const v = r.summary.metrics && r.summary.metrics[mk]
+          return `<td class="num">${escapeHtml(typeof v === 'number' ? formatObjective(v) : v === undefined ? '—' : String(v))}</td>`
+        })
+        .join('')
+      return `<tr><th>${escapeHtml(mk.replace(/_pct$/, ' %').replace(/_/g, ' '))}</th>${cells}</tr>`
+    })
+    .join('')
+  setHtml(
+    card,
+    `<div class="card-head card-head-row">
+      <h3>Compare ${runs.length} runs</h3>
+      <button type="button" id="compare-clear" class="ghost-btn">clear</button>
+    </div>
+    ${compareEquityChartHtml(runs)}
+    <h3>Config diff</h3>
+    ${diffRows ? `<table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${diffRows}</tbody></table>` : '<p class="card-sub">Selected runs share the same config.</p>'}
+    <h3>Metrics</h3>
+    <table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${metricRows}</tbody></table>`,
+  )
+  card.hidden = false
+}
+// Overlay each selected run's equity as a % -return curve, plus the buy-and-hold
+// control derived from a run's price series — so the lines are comparable across
+// runs with different absolute net worth.
+function compareEquityChartHtml(runs) {
+  const points = []
+  for (const r of runs) {
+    const eq = r.summary.series && r.summary.series.equity
+    if (!Array.isArray(eq) || eq.length < 2) continue
+    const base = Number(eq[0])
+    if (!Number.isFinite(base) || base === 0) continue
+    eq.forEach((v, i) =>
+      points.push({ x: i, y: (Number(v) / base - 1) * 100, group: shortKey(r.key) }),
+    )
+  }
+  const withPrice = runs.find(
+    (r) =>
+      r.summary.artifacts &&
+      r.summary.artifacts.runChart &&
+      Array.isArray(r.summary.artifacts.runChart.price),
+  )
+  if (withPrice) {
+    const pr = withPrice.summary.artifacts.runChart.price.map(Number)
+    const p0 = pr[0]
+    if (Number.isFinite(p0) && p0 !== 0) {
+      pr.forEach((v, i) => points.push({ x: i, y: (v / p0 - 1) * 100, group: 'buy & hold' }))
+    }
+  }
+  if (points.length < 2) return ''
+  return `<div class="chart-wrap">${buildLineChart({
+    points,
+    xLabel: 'step',
+    yLabel: 'return %',
+    width: 680,
+    height: 240,
+    markers: false,
+    ariaLabel: 'compared returns vs buy and hold',
+  })}</div>`
 }
 function metricsTableHtml(metrics) {
   const entries = Object.entries(metrics || {})
@@ -1809,7 +2417,10 @@ function renderRunDetail(key) {
         <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
           · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}</p>
       </div>
-      <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
+      <div class="head-actions">
+        <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="ghost-btn">Clone to Launch</button>
+        <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
+      </div>
     </div>
     ${failed && s.error ? `<p class="verdict-rejected">${escapeHtml(String(s.error))}</p>` : ''}
     <h3>Health flags</h3>
@@ -1847,6 +2458,14 @@ function closeRunDetail() {
     row.classList.remove('is-selected')
   }
 }
+// Pre-fill the Launch form with a run's exact settings, so it's easy to sweep NEAR
+// a known result (tweak one lever, run the neighbours).
+function cloneRunToLaunch(key) {
+  const run = runsCache.find((r) => r.key === key)
+  if (!run) return
+  showTab('launch')
+  applyPresetFixed(run.summary.config || {})
+}
 function busyButtonHtml(label) {
   return `${spinnerHtml()} ${escapeHtml(label)}`
 }
@@ -1863,6 +2482,7 @@ function renderJudgeControls() {
     btn.disabled = judging
     btn.innerHTML = judging ? busyButtonHtml('Judging…') : 'Judge runs'
   }
+  renderTabLiveIndicator()
   const last = byId('judge-last')
   if (!last) return
   if (judgementSummary && judgementSummary.judgedAt) {
@@ -1983,8 +2603,70 @@ function setupRuns() {
         clearRunsFilter()
         return
       }
+      if (event.target.closest('#setup-note-save')) {
+        const ta = byId('setup-note-text')
+        const status = byId('setup-note-status')
+        if (status) status.textContent = 'Saving…'
+        saveSetupNote(runsDrillSetupKey, ta ? ta.value : '').then(() => {
+          const s = byId('setup-note-status')
+          if (s) s.textContent = 'Saved ✓'
+        })
+        return
+      }
+      if (event.target.closest('.help-btn')) return // a "?" tooltip, not an action
+      const viewBtn = event.target.closest('.runs-view-btn')
+      if (viewBtn) {
+        runsViewMode = viewBtn.dataset.view
+        renderRunsTable()
+        return
+      }
+      const th = event.target.closest('.runs-th[data-sort]')
+      if (th) {
+        toggleRunsSort(th.dataset.sort)
+        return
+      }
+      if (event.target.closest('.run-compare-cb')) return // checkbox toggles compare, not detail
+      const setupRow = event.target.closest('tr[data-setup-key]')
+      if (setupRow) {
+        drillIntoSetup(setupRow.dataset.setupKey)
+        return
+      }
+      const expRow = event.target.closest('tr[data-experiment-key]')
+      if (expRow) {
+        drillIntoExperiment(expRow.dataset.experimentKey)
+        return
+      }
       const row = event.target.closest('tr[data-key]')
       if (row) openRunDetail(row.dataset.key)
+    })
+    body.addEventListener('change', (event) => {
+      const cb = event.target.closest('.run-compare-cb')
+      if (cb) {
+        if (cb.checked) runsCompareKeys.add(cb.dataset.key)
+        else runsCompareKeys.delete(cb.dataset.key)
+        renderCompare()
+        return
+      }
+      const sel = event.target.closest('.runs-filter-lever')
+      if (sel) {
+        runsLeverFilter[sel.dataset.lever] = sel.value
+        renderRunsTable()
+      }
+    })
+    body.addEventListener('input', (event) => {
+      if (event.target.id !== 'runs-filter-text') return
+      runsTextFilter = event.target.value
+      const pos = event.target.selectionStart
+      renderRunsTable()
+      const el = byId('runs-filter-text')
+      if (el) {
+        el.focus()
+        try {
+          el.setSelectionRange(pos, pos)
+        } catch {
+          // some input types disallow setSelectionRange — focus alone is fine
+        }
+      }
     })
   }
   const panel = byId('run-detail')
@@ -1993,6 +2675,17 @@ function setupRuns() {
       if (event.target.closest('#run-detail-close')) closeRunDetail()
       const evalBtn = event.target.closest('button[data-action="evaluate"]')
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
+      const cloneBtn = event.target.closest('button[data-action="clone"]')
+      if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
+    })
+  }
+  const compareCard = byId('run-compare')
+  if (compareCard) {
+    compareCard.addEventListener('click', (event) => {
+      if (event.target.closest('#compare-clear')) {
+        runsCompareKeys = new Set()
+        renderRunsTable()
+      }
     })
   }
   const judgeBtn = byId('judge-btn')
@@ -2539,6 +3232,7 @@ function renderProposeControls() {
     btn.disabled = proposing
     btn.innerHTML = proposing ? busyButtonHtml('Proposing…') : 'Propose experiments'
   }
+  renderTabLiveIndicator()
   const last = byId('propose-last')
   if (!last) return
   if (proposalSummary && proposalSummary.proposedAt) {
@@ -2924,16 +3618,45 @@ function numberLeverHtml(key, spec) {
     </label>
   </div>`
 }
+// Best objective seen so far per value of a choice lever (marginal, across all
+// non-failed runs) — used to annotate the launch options with "best <obj>" + a ★.
+function leverBestSoFar(leverKey) {
+  const dir = objectiveDirection()
+  const best = new Map()
+  for (const r of runsCache) {
+    const v = (r.summary.config || {})[leverKey]
+    const obj = Number(r.summary.objective)
+    if (v === undefined || !Number.isFinite(obj) || r.summary.status === 'failed') continue
+    const k = String(v)
+    if (!best.has(k) || (dir === 'min' ? obj < best.get(k) : obj > best.get(k))) best.set(k, obj)
+  }
+  return best
+}
 function choiceLeverHtml(key, spec) {
   const choices = Array.isArray(spec.choices) ? spec.choices : []
+  const best = leverBestSoFar(key)
+  let topValue
+  for (const [v, o] of best) {
+    if (
+      topValue === undefined ||
+      (objectiveDirection() === 'min' ? o < best.get(topValue) : o > best.get(topValue))
+    ) {
+      topValue = v
+    }
+  }
+  const optionText = (c) => {
+    const b = best.get(String(c))
+    if (b === undefined) return escapeHtml(String(c))
+    return `${escapeHtml(String(c))}${escapeHtml(` — best ${formatObjective(b)}`)}${String(c) === topValue ? ' ★' : ''}`
+  }
   const fixedOptions = choices
     .map(
       (c) =>
-        `<option value="${escapeHtml(String(c))}"${String(c) === String(spec.default) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+        `<option value="${escapeHtml(String(c))}"${String(c) === String(spec.default) ? ' selected' : ''}>${optionText(c)}</option>`,
     )
     .join('')
   const sweepOptions = choices
-    .map((c) => `<option value="${escapeHtml(String(c))}">${escapeHtml(String(c))}</option>`)
+    .map((c) => `<option value="${escapeHtml(String(c))}">${optionText(c)}</option>`)
     .join('')
   const size = Math.max(2, Math.min(choices.length, 4))
   return `<div class="lever-grid">
@@ -2959,7 +3682,7 @@ function leverFieldsetHtml(key, spec) {
         ? choiceLeverHtml(key, spec)
         : booleanLeverHtml(key, spec)
   return `<fieldset class="lever">
-    <legend>${escapeHtml(key)} <span class="lever-type">${escapeHtml(spec.type || '')}</span></legend>
+    <legend>${escapeHtml(key)} <span class="lever-type">${escapeHtml(spec.type || '')}</span>${spec.description ? helpCalloutHtml(spec.description) : ''}</legend>
     ${inner}
   </fieldset>`
 }
@@ -2974,6 +3697,23 @@ function savedAutoEval() {
 function rememberAutoEval(on) {
   try {
     sessionStorage.setItem(AUTO_EVAL_SS, on ? '1' : '')
+  } catch {
+    // storage may be unavailable in a sandboxed frame — purely best-effort
+  }
+}
+// Max parallel runs is an Activity-level setting (not a per-launch field): how many
+// runs of a campaign may execute at once. Persisted; read at launch.
+function savedConcurrency() {
+  try {
+    const n = Math.floor(Number(sessionStorage.getItem(CONCURRENCY_SS)))
+    return Number.isFinite(n) && n >= 1 ? n : 1
+  } catch {
+    return 1
+  }
+}
+function rememberConcurrency(n) {
+  try {
+    sessionStorage.setItem(CONCURRENCY_SS, String(Math.max(1, Math.floor(Number(n)) || 1)))
   } catch {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
@@ -3064,23 +3804,28 @@ function renderLaunchForm() {
     <fieldset class="lever">
       <legend>Campaign</legend>
       <div class="lever-grid">
-        <label class="field"><span>Seeds <em>(each config runs once per seed 0…N−1)</em></span>
-          <input type="number" name="seeds" min="1" step="1" value="1" />
+        <label class="field"><span>Thesis ${helpCalloutHtml('What this campaign tests, e.g. "fee-penalty reward" or "1m data prep". Stamped on every run so you can group + compare by experiment in the By-experiment view. Optional.')}</span>
+          <input type="text" name="thesis" placeholder="what are you testing? (optional)" />
         </label>
-        <label class="field"><span>Max concurrent runs <em>(host CPU/GPU is the real cap)</em></span>
-          <input type="number" name="concurrency" min="1" step="1" value="1" />
+        <label class="field"><span>Testing which setting? ${helpCalloutHtml('Optional: the lever this thesis varies, so the by-experiment view can highlight it. Leave blank for theses outside the levers (e.g. a new data prep or code change).')}</span>
+          <select name="thesisTarget"><option value="">—</option>${leverEntries()
+            .map(([k]) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`)
+            .join('')}</select>
+        </label>
+        <label class="field"><span>Seeds ${helpCalloutHtml('How many seeds to run per config (0…N−1). Keep at 1 while exploring; raise it when homing in to measure variance across seeds (the by-setup view then shows the spread).')}</span>
+          <input type="number" name="seeds" min="1" step="1" value="1" />
         </label>
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
-          <span>Refresh — re-run configs that already have results</span>
+          <span>Refresh — re-run configs that already have a result ${helpCalloutHtml('Off (default): a config with a completed run is skipped. On: re-run it anyway, e.g. after changing code or data.')}</span>
         </label>
         <label class="check-row launch-skip-explored">
-          <input type="checkbox" name="skipExplored" />
-          <span>Exploration — skip setups already run under any seed</span>
+          <input type="checkbox" name="skipExplored" checked />
+          <span>Exploration — skip setups already tried (any seed) ${helpCalloutHtml('On by default: if a setup (the config ignoring seed) was already run, skip it — exploration should not re-test the same idea. Turn OFF when homing in to run more seeds of a setup.')}</span>
         </label>
         <label class="check-row launch-autoeval">
           <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
-          <span>Auto-evaluate completed runs</span>
+          <span>Auto-evaluate completed runs ${helpCalloutHtml('After each run finishes, automatically re-test its saved checkpoint (shown in the Eval column).')}</span>
         </label>
         <label class="field launch-target" id="launch-target-field">${computeTargetFieldHtml(launchRunnersCache, savedComputeTarget())}</label>
       </div>
@@ -3170,11 +3915,6 @@ function readSeedCount(form) {
   const n = Math.floor(Number(el && el.value))
   return Number.isFinite(n) && n >= 1 ? n : 1
 }
-function readConcurrency(form) {
-  const el = form.elements.concurrency
-  const n = Math.floor(Number(el && el.value))
-  return Number.isFinite(n) && n >= 1 ? n : 1
-}
 function buildSpecFromForm(form) {
   const sweep = {}
   const fixed = {}
@@ -3218,8 +3958,12 @@ async function onLaunchSubmit(event) {
   const spec = buildSpecFromForm(form)
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
   const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
-  const concurrency = readConcurrency(form)
+  const concurrency = savedConcurrency()
   const skipExplored = !!(form.elements.skipExplored && form.elements.skipExplored.checked)
+  const thesis = String((form.elements.thesis && form.elements.thesis.value) || '').trim()
+  const thesisTarget = String(
+    (form.elements.thesisTarget && form.elements.thesisTarget.value) || '',
+  ).trim()
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
@@ -3228,6 +3972,8 @@ async function onLaunchSubmit(event) {
       refresh,
       ...(concurrency > 1 ? { concurrency } : {}),
       ...(skipExplored ? { skipExplored: true } : {}),
+      ...(thesis ? { thesis } : {}),
+      ...(thesis && thesisTarget ? { thesisTarget } : {}),
     })
     const result = await startOrEnqueue(
       'train',
@@ -3601,24 +4347,44 @@ function currentItemHtml(current) {
   // item runs — letting setHtml skip the re-render and keep the indeterminate
   // bar's animation (and the spinner) from restarting every tick.
   return `<div class="current-item">
-    <p class="current-item-head">${spinnerHtml()} Run <code>${escapeHtml(shortKey(current.key))}</code> · ${escapeHtml(phaseLabel)}<span class="current-item-elapsed" id="activity-current-elapsed"></span></p>
+    <p class="current-item-head">${spinnerHtml()} Run <code>${escapeHtml(shortKey(current.key))}</code> · ${escapeHtml(phaseLabel)}<span class="current-item-elapsed" id="activity-current-elapsed"></span><span class="current-item-eta" id="activity-current-eta"></span></p>
     <div class="build-progress">
       ${bar}
       ${count ? `<span class="build-progress-label">${escapeHtml(count)}</span>` : ''}
     </div>
   </div>`
 }
-// Drive the running item's elapsed timer (mm:ss) — once immediately so it shows
-// right after a render, then every 1s between the 3s polls.
-function syncCurrentItemTimer(startedAt) {
+// Drive the running item's elapsed timer (mm:ss) + a live time-left estimate from
+// this run's own training progress (elapsed × remaining/done). Setup phases
+// (loading/starting) show no ETA — that time is genuinely indeterminate.
+function syncCurrentItemTimer(current) {
   if (currentItemTimer) {
     clearInterval(currentItemTimer)
     currentItemTimer = null
   }
-  if (!startedAt) return
+  if (!current || !current.startedAt) return
+  const startedAt = current.startedAt
+  const done = Number(current.done)
+  const total = Number(current.total)
+  const determinate =
+    String(current.phase) === 'train' &&
+    Number.isFinite(done) &&
+    Number.isFinite(total) &&
+    done > 0 &&
+    total > done
   const tick = () => {
     const el = byId('activity-current-elapsed')
     if (el) el.textContent = formatElapsed(startedAt)
+    const etaEl = byId('activity-current-eta')
+    if (etaEl) {
+      if (determinate) {
+        const elapsedMs = Date.now() - new Date(startedAt).getTime()
+        const remainingS = (elapsedMs * ((total - done) / done)) / 1000
+        etaEl.textContent = ` · ~${formatEta(remainingS)} left`
+      } else {
+        etaEl.textContent = ''
+      }
+    }
   }
   tick()
   currentItemTimer = setInterval(tick, 1000)
@@ -3673,6 +4439,15 @@ function queueSectionHtml() {
     ${rows ? `<ul class="queue-list">${rows}</ul>` : ''}
   </div>`
 }
+// Activity-level parallelism control (not a per-launch field): how many runs of a
+// campaign may execute at once. Persisted; applied to campaigns launched after.
+function activitySettingsHtml() {
+  return `<div class="activity-settings">
+    <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of a campaign execute at once. Applies to campaigns you launch from now. The real limit is host CPU/GPU/RAM; default 1 = sequential. (Changing it does not resize a campaign already running.)')}</span>
+      <input type="number" id="activity-concurrency" min="1" step="1" value="${savedConcurrency()}" />
+    </label>
+  </div>`
+}
 function renderActivity() {
   const body = byId('activity-body')
   if (!body) return
@@ -3686,8 +4461,9 @@ function renderActivity() {
   if (!lastProgress && !lastCampaign && !lastActivityStatus) {
     setHtml(
       body,
-      queueHtml ||
-        '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>',
+      activitySettingsHtml() +
+        (queueHtml ||
+          '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'),
     )
     syncItemBarTimer(false)
     syncCurrentItemTimer(null)
@@ -3717,6 +4493,7 @@ function renderActivity() {
   setHtml(
     body,
     `
+    ${activitySettingsHtml()}
     <div class="activity-status-row">
       <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
       ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
@@ -3733,7 +4510,7 @@ function renderActivity() {
     ${queueHtml}`,
   )
   syncItemBarTimer(running && !!p && perItemEtaMs(p) > 0)
-  syncCurrentItemTimer(currentHtml ? current.startedAt : null)
+  syncCurrentItemTimer(currentHtml ? current : null)
 }
 function setupActivity() {
   const body = byId('activity-body')
@@ -3745,6 +4522,9 @@ function setupActivity() {
       const removeBtn = event.target.closest('button[data-queue-remove]')
       if (removeBtn) onQueueRemove(removeBtn.dataset.queueRemove)
     }
+  })
+  body.addEventListener('change', (event) => {
+    if (event.target.id === 'activity-concurrency') rememberConcurrency(event.target.value)
   })
 }
 
@@ -3780,13 +4560,22 @@ function showTab(id) {
 // activity, so the in-flight campaign is visible from any tab — not just
 // Activity. The spinner lives in a fixed `.tab-live` slot on each button so
 // toggling it never disturbs the label text.
+// Which tabs currently have work happening WITHIN them (so a spinner shows on the
+// tab no matter where the user is): a running campaign touches Activity/Runs/Charts;
+// judging writes verdicts to Runs; proposing writes Hypotheses.
+function tabHasLiveWork(id) {
+  const campaign = lastActivityStatus === 'running'
+  if (id === 'activity') return campaign
+  if (id === 'runs') return campaign || judging
+  if (id === 'charts') return campaign
+  if (id === 'hypotheses') return proposing
+  return false
+}
 function renderTabLiveIndicator() {
-  const live = lastActivityStatus === 'running'
   for (const tab of TABS) {
     const slot = document.querySelector(`.tab-btn[data-tab="${tab.id}"] .tab-live`)
     if (!slot) continue
-    const show = live && tab.id === activeTabId
-    setHtml(slot, show ? spinnerHtml() : '')
+    setHtml(slot, tabHasLiveWork(tab.id) ? spinnerHtml() : '')
   }
 }
 function setupTabs() {

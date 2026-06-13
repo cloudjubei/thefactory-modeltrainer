@@ -95,6 +95,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const runner = resolveRunner(params.computeTarget)
     const dataFiles = manifestDataFiles(manifest)
     const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
+    const thesisFields = {
+      ...(params.thesis ? { thesis: params.thesis } : {}),
+      ...(params.thesisTarget ? { thesisTarget: params.thesisTarget } : {}),
+    }
 
     const emit = async (progress: TrainingCampaignProgress) => {
       await params.onProgress?.(progress)
@@ -193,6 +197,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 ...(result.logTail?.length ? { logTail: result.logTail } : {}),
                 config: item.config,
                 setupKey: setupKeyOf(item.config),
+                ...thesisFields,
                 ranAt: now(),
                 ranBy,
                 durationMs: result.durationMs,
@@ -211,6 +216,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             ...runSummary,
             status: 'completed',
             setupKey: setupKeyOf(item.config),
+            ...thesisFields,
             ranAt: now(),
             ranBy,
             durationMs: result.durationMs,

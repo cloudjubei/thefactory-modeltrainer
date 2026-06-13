@@ -23,6 +23,8 @@ export interface TrainerLeverSpec {
   range?: [number, number]
   /** Allowed values for `choice` levers. */
   choices?: unknown[]
+  /** Plain-language explanation shown as a help tooltip in the launch form (for newcomers). */
+  description?: string
 }
 
 /** The single north-star metric a run is judged by. */
@@ -209,6 +211,14 @@ export interface TrainingCampaignParams {
    * similar results. Turn off when homing in (to run a setup across multiple seeds).
    */
   skipExplored?: boolean
+  /**
+   * Free-text experiment/thesis this campaign tests (e.g. "fee-penalty reward"), stamped on every
+   * run so the hub can group + compare runs by experiment — even theses outside the lever set
+   * (a new data prep, a code change). Optional.
+   */
+  thesis?: string
+  /** The lever this thesis is varying, when it maps to one (for the by-experiment view to highlight). */
+  thesisTarget?: string
   /**
    * Named compute target to run on (resolved via the deps' `resolveComputeRunner`);
    * omit for the default (local) runner. Also the provenance label.

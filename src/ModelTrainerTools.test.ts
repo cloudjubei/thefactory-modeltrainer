@@ -243,6 +243,38 @@ describe('runTrainingCampaign', () => {
     })
   })
 
+  it('stamps the launch thesis and target on every run record', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1, 0.2] } },
+      thesis: 'fee-penalty reward',
+      thesisTarget: 'lr',
+    })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records).toHaveLength(2)
+    for (const r of records) {
+      expect(r.content).toMatchObject({ thesis: 'fee-penalty reward', thesisTarget: 'lr' })
+    }
+  })
+
+  it('omits the thesis fields when none is given', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1] } },
+    })
+    const [record] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(record.content).not.toHaveProperty('thesis')
+    expect(record.content).not.toHaveProperty('thesisTarget')
+  })
+
   it('reports the planned item keys on the result', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     const result = await tools.runTrainingCampaign({

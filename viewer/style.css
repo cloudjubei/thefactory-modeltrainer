@@ -348,6 +348,48 @@ body {
   font-size: 11px;
   white-space: nowrap;
 }
+.runs-table td.ledger-note {
+  white-space: normal;
+  max-width: 240px;
+  color: var(--text);
+  font-size: 12px;
+}
+.runs-table td.ledger-note.is-empty {
+  color: var(--accent);
+}
+.setup-note-editor {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 9px;
+  background: var(--accent-soft);
+}
+.setup-note-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.setup-note-text {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+}
+.setup-note-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}
 .runs-filter-bar {
   display: flex;
   flex-wrap: wrap;
@@ -660,6 +702,106 @@ body {
 }
 .run-rerun-hint {
   font-style: italic;
+}
+/* ---- Results workbench (runs toolbar + sortable table) ------------------------ */
+.runs-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.runs-filter-lever,
+.runs-filter-text {
+  font-size: 12px;
+  padding: 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  background: transparent;
+}
+.runs-filter-text {
+  min-width: 160px;
+}
+.runs-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.runs-th {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.runs-th:hover {
+  color: var(--accent);
+}
+.delta-pos {
+  color: var(--ok);
+  font-weight: 600;
+}
+.delta-neg {
+  color: var(--bad);
+  font-weight: 600;
+}
+.run-compare-cb {
+  cursor: pointer;
+  vertical-align: middle;
+}
+.compare-table {
+  min-width: 0;
+}
+.compare-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.runs-legend {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.help-legend {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 700;
+}
+.activity-settings {
+  margin-bottom: 10px;
+}
+.activity-settings .field {
+  max-width: 340px;
+}
+.runs-viewmode {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.runs-view-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.runs-view-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.setup-row {
+  cursor: pointer;
+}
+.setup-row:hover td {
+  background: var(--accent-soft);
 }
 
 /* ---- Run detail --------------------------------------------------------------- */

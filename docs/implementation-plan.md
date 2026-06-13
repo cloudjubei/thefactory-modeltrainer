@@ -94,6 +94,129 @@ judge whether the current experiment design, objective, and levers are the right
 propose the next campaigns to run — expect this may force big changes to how experiments are run.
 Pair it with a usability pass over the hub app and the per-run result UI.
 
+## Hub UI — SHIPPED (2026-06-13), with open follow-ups
+
+The full Hub UI roadmap (A1–A3, B1–B2, C1–C4) and the Results-workbench UX-clarity gaps all shipped
+(see git). The Results view now has three modes — **Runs** (sortable/filterable, dynamic metric
+columns + `vs hold` + per-header help), **By setup** (config-minus-seed aggregation: seed count,
+min/max/avg/median, vs-hold, plus the LLM-verdict + your-conclusion ledger columns), **By experiment**
+(group by launch thesis) — plus multi-select compare, clone-to-Launch, per-run progress + ETA, tab
+spinners, lever descriptions + best-so-far annotations, skip-explored default-on, and per-setup
+conclusion notes (`{recordType}-note` records, edited when drilled into a setup).
+
+**Open follow-ups (not blocking; each needs a clear next step or trigger):**
+
+- **B1 conditional-best** — choice options are annotated with the marginal best-so-far value (★), but
+  not the value that is best _conditional on the other currently-selected levers_. Needs a live
+  re-render of the form on each lever change (recompute from history filtered to the current
+  selection). Moderate; do when the lever count makes marginal-best misleading.
+- **A1 live concurrency resize** — concurrency is set per-campaign on the Activity tab, but cannot be
+  changed on an _already-running_ campaign (the bounded pool is fixed at launch). Engine work: the
+  worker pool would need to accept a resize signal mid-run.
+- **Ledger note affordance** — the by-setup "Your conclusion" cell shows `add note ✎`, but editing
+  happens after clicking the row to drill in (the editor sits above that setup's runs). This gives
+  full context but the cell looks inline-editable. Decide: leave (context-rich) vs inline edit.
+
+### New-user UX review of C3/C4 (2026-06-13) — fixed inline
+
+Applied the `feedback_ui_ux_scrutiny` lens to the just-built thesis/ledger work; the two real
+newcomer traps were fixed in the same pass: (1) **By-experiment looked broken** for a project whose
+history predates thesis-tagging — every old run fell into one `(untagged)` row; now that case shows a
+"set a Thesis at launch" empty-state instead. (2) **The ledger columns were unexplained** — the
+by-setup legend now says the LLM verdict needs the judge to have run, `—` = not yet scored/noted, and
+that clicking a row is how you write a conclusion. The launch Thesis / "Testing which setting?" fields
+already carry help callouts + "(optional)".
+
+## Ongoing Research — what to try next (BlackSwan)
+
+The live backlog of experiment-design improvements, from the 2026-06-12 scrutiny (real results in
+`BlackSwan/results_hour.ods` + a grounded code analysis). **"Tried" is data-driven, not a manual
+list** — what's been run lives in the run records (`config` + `setupKey` + `metrics`), and the
+`skipExplored` campaign option already prevents re-running a setup under a new seed. Prune an item
+here once its result is recorded; add ideas as they surface.
+
+> **Reframing (2026-06-13):** the commented-out experiment log shows the model / feature / action /
+> reward space is already **heavily explored** (≈15 RL algos incl. distributional + recurrent; the
+> combo reward family; many TP/SL/trailing variants; indicators tried and **didn't help**; minute
+> data behaves like **noise**; `lookback1` worse; 15m layer did nothing). So feature-richness items
+> (esp. RB1) are largely **re-treading**. The genuinely under-explored, highest-value holes are
+> **(1) evaluation rigor** (selection-on-test leakage, single regime, single seed → results not yet
+> trustworthy), **(2) problem formulation** (RL-on-noisy-price is known-hard), and **(3) a systematic
+> thesis-testing UI + experiment ledger**. Full map + holes: `docs/blackswan-pipeline-map.md`. The
+> quick wins below stand as correctness/measurement fixes (QW3/QW4 done); the deep research targets (1)+(2).
+
+**The one structural truth:** the path that beats hold (1h multi-layer) runs the _impoverished_
+feature pipeline (`abstract_dataprovider.process_df_simple`) — it ignores `config.type`/`indicator`,
+drops the 112 precomputed indicators + taker order-flow, and applies minute-indexed rolling windows
+to hour-aggregated frames (so `price_z_score_1m/1y` are constant-zero). Big nets lose / small nets win
+because the bottleneck is **feature content, not model capacity** — most items below converge here.
+
+### Experiment-recording system (so a run is never repeated) — to build
+
+Every run already records `{config, setupKey, metrics, health, dataset}` and `skipExplored` dedupes by
+setup. Missing for a _complete_ ledger: (a) a **"tried setups" view** in the hub listing every config
+run + its outcome (queryable, sortable by objective, so "what's been tried" is visible); (b) a one-off
+**import of the historical `results_hour.ods` runs** into that ledger so pre-hub experiments count as
+tried; (c) surface `setupKey` collisions ("this setup ran on N seeds → median/IQR"). This is the
+data-mine-adjacent infrastructure that makes the backlog below self-pruning.
+
+### Quick wins (correctness + cheap information; low risk)
+
+- **QW1 — fidelity-aware rolling windows** `[HIGH/S]` — `process_df_simple` windows are minute counts
+  applied to hour bars, so `price_z_score_1m/1y` are NaN→0 constant columns. Scale by minutes-per-bar.
+- **QW2 — taker (aggressor) order-flow features** `[HIGH/S]` — `asset_volume_taker_base/quote` are in
+  every kline but dropped (`# for now lets ignore these`). Add `taker_buy_ratio` (bounded [0,1]).
+- **QW3 — fix `reset_num_timesteps`** `[HIGH/S]` — `rl_model.py` re-warms `learning_starts=20000` each
+  episode and never finishes annealing epsilon; pass `reset_num_timesteps=(i==0)`. Latent bug; re-baseline.
+- **QW4 — in-process buy-and-hold benchmark in every summary** `[HIGH/S]` — free (reuses
+  `provider.prices`); display-only control, NOT a reward target.
+- **QW5 — restore the winning `net_arch`** `[MED/S]` — `model_config.py` has the loser `[8192,512]`
+  active with winners commented; the manifest default now overrides for hub runs, but the legacy
+  `main.py` path still reproduces the −40% loser.
+- **QW6 — use native 1h klines** `[MED→HIGH/M]` — 85 `BTCUSDT-1h-*.json` exist but the 1h path loads
+  ~1.5GB of 1m JSON to rebuild bars that already exist.
+
+### Research bets (higher potential; bigger or uncertain)
+
+- **RB1 — curated indicators into the winning path** `[HIGH/M]` — the 112 precomputed indicators (the
+  emitter's real output, present in every kline) are unreachable on `process_df_simple`. They tier by
+  clamp-safety (measured ranges, from the `BlackSwanPriceEmitter` analysis): **Tier 1 = drop-in free**
+  (rsi/williams/stochastic/choppiness — natively `[-1,1]`, 0-centered); **Tier 1b = light rescale**
+  (bollinger/donchian price-ratios ~[0.85,1.17]; kallman/disparityIndex live in ±0.03 → near-inert
+  under the clamp); **Tier 2 = clamp-hostile, needs RB6 first** (meanReversion ±4, cci, turbulence
+  0–15, obv −2.7, sortino→inf). Start with Tier 1, then RB6, then 1b/2.
+- **RB2 — selection + held-out validation window** `[HIGH/M]` — `iterations_to_pick_best` runs 10× with
+  NO selection; a human cherry-picks the luckiest-of-10 _on the test set_ (leakage). Keep the argmax on
+  a third `val` split; score = risk-adjusted profit, never delta-vs-hold.
+- **RB3 — multi-seed aggregation** `[HIGH/M]` — small-net RL swings +50→+60% on seed alone; report
+  median/IQR/fraction-positive + an `unstable` sign-flip flag for shortlisted configs.
+- **RB4 — fee/turnover penalty reward _variant_** `[HIGH/S]` — no reward branch has an explicit fee
+  term; the losing big-net over-traded. Add as a NEW variant (serves profit-net-of-cost).
+- **RB5 — feed the working dip score into the trading env** `[HIGH/L]` — the f1-0.67 classifier is a
+  dead-end signal; add a causal `dip_score` observation, or a cheaper inference-only buy-veto.
+- **RB6 — rescale features instead of hard-clamping obs to [-1,1]** `[HIGH/S→M]` — **now a PREREQUISITE
+  for RB1's rich features, not a parallel nice-to-have.** The emitter analysis measured the best
+  indicators as either clamp-hostile (meanReversion ±4, turbulence 0–15) or compressed-to-inert
+  (kallman/timeseriesMomentum ±0.03), so feeding them under the current `[-1,1]` clamp feeds dead or
+  clipped columns. Apply a per-feature tanh/robust-quantile squash identically at train+test.
+- **RB7 — expand the test window beyond 2024-Q1** `[HIGH/M]` — a single bull window can't show profit
+  robustness; add post-train 2024 Q2–Q4 windows, report per-window worst/mean/fraction-profitable.
+- **RB8 — sanitise indicator data quality at the source + version the indicator spec** `[MED/M]` — the
+  emitter bakes normalisation into stored values and emits `inf`/`NaN` (sortino/volatilityVolume
+  divide-by-zero) that BlackSwan only silently zeroes downstream; and `config.json` has already drifted
+  from the compute engine (declares atr/sar/ema/macd/pump/dump that are commented out). The data mine
+  must sanitise inf/NaN, prefer storing raw values + a declared normalisation spec, and stamp an
+  **indicator-spec version** so drift can't silently corrupt training data.
+
+**Ground rules (do not violate):** profit is the objective, never beat-hold (hold is a display control);
+the reward family is intentional — add variants, never collapse; BTC-only until the data mine backfills
+altcoin 1d/1h. `combo_noaction=-1` is a latent synthetic-short bias — sweep as a variant, don't edit in place.
+
+**Recommended next (revised after the `BlackSwanPriceEmitter` analysis):** QW1 → QW2 → (QW5 + QW3,
+re-baseline) → QW4 → **RB1 Tier 1** (free clamp-safe indicators) → **RB6** (rescaling framework) →
+**RB1 Tier 1b/2** (the rich indicators that need it) → RB2. The features sequence changed: the
+high-value indicators are mostly clamp-hostile, so RB6 moves ahead of the bulk of RB1.
+
 ## The data mine — a shared dataset project for every model trainer
 
 A standalone project (its own repo, e.g. `thefactory-datamine`) that is the **source of truth
@@ -107,6 +230,20 @@ cleans raw data itself. This is where the user's separate dataset repo for Black
 are in — but it's the natural home for "prepare the data correctly so the models have it in the
 best form," and it makes the remote-runner data path (Phase 6 cache + `data[]` + `credentialRef`)
 pull from one curated origin.
+
+**The basis already exists — `BlackSwanPriceEmitter`** (`/Users/cloud/Documents/Work/BlackSwanPriceEmitter`):
+a NestJS Binance miner (`mines/price-mine-binance.service.ts` → `raw/prices/<COIN>/<interval>/<year>-<month>.json`,
+full OHLCV **+ taker order-flow**) plus an indicator engine (`indicators/core/inidicators-core.service.ts`)
+that produces exactly the 112-key `indicators` object in BlackSwan's klines. It is ~80% the right shape
+(mine → persist → indicator-compute → facade) but needs three upgrades to be the data mine: (a) **persist
++ version indicators as a first-class artifact** — today they're recomputed-on-read / live-only (the
+`raw/indicators/` backfill is commented out) and `config.json` has drifted from the compute engine, so
+stamp an indicator-spec version; (b) **data-engineering BlackSwan can't do at source** — gap/dedup/
+timestamp-continuity checks, inf/NaN sanitisation (sortino/volatilityVolume divide-by-zero), server-side
+resampling (which would retire BlackSwan's `process_fidelity` + the QW1 window bug), and mining the
+missing 1s/15m intervals the config promises; (c) **store raw indicator values + a declared normalisation
+spec** so the consumer applies clamp-aware scaling (RB6) instead of fighting a baked-in `÷price`/`×2−1`/`/100`
+transform. This is the durable home for the Ongoing-Research feature work above.
 
 ## Code-change risk model — the second workspace ML tool (deferred)
 
