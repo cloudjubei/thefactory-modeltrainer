@@ -2224,14 +2224,18 @@ function evaluationSectionHtml(run) {
       ${statusLine}`
   }
   const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
+  const canEvaluate = !!(manifest && manifest.evaluate)
   const evaluation = evaluationsCache.get(run.key)
-  const button = checkpoint
-    ? `<div class="form-actions"><button type="button" data-action="evaluate" data-key="${escapeHtml(run.key)}">${evaluation ? 'Re-evaluate' : 'Evaluate'}</button></div>`
-    : ''
+  const button =
+    checkpoint && canEvaluate
+      ? `<div class="form-actions"><button type="button" data-action="evaluate" data-key="${escapeHtml(run.key)}">${evaluation ? 'Re-evaluate' : 'Evaluate'}</button></div>`
+      : ''
   if (!evaluation) {
-    const hint = checkpoint
-      ? 'Not evaluated yet — re-test the saved checkpoint.'
-      : 'No saved checkpoint — this run cannot be evaluated.'
+    const hint = !canEvaluate
+      ? 'This trainer declares no evaluate command — re-testing a saved checkpoint is not available.'
+      : checkpoint
+        ? 'Not evaluated yet — re-test the saved checkpoint.'
+        : 'No saved checkpoint — this run cannot be evaluated.'
     return `<h3>Evaluation</h3><p class="card-sub">${escapeHtml(hint)}</p>${button}${statusLine}`
   }
   const evalObjective = Number(evaluation.objective)
@@ -2419,6 +2423,18 @@ function oldRunChartHintHtml(s) {
   }
   return ''
 }
+// A failed run's diagnostics: the error line + the captured stdout/stderr tail, so a bare "exit
+// code 1" is actually explainable. The engine records `error` + `logTail` on any non-completed run.
+function failureDetailHtml(s) {
+  const err = s.error
+    ? `<p class="verdict-rejected"><strong>Failed:</strong> ${escapeHtml(String(s.error))}</p>`
+    : '<p class="verdict-rejected">Run failed (no error message recorded).</p>'
+  const tail =
+    Array.isArray(s.logTail) && s.logTail.length
+      ? `<details class="log-tail" open><summary>Last output — ${s.logTail.length} lines (stdout + stderr)</summary><pre class="log-tail-pre">${escapeHtml(s.logTail.join('\n'))}</pre></details>`
+      : '<p class="card-sub">No log output was captured for this run.</p>'
+  return `<div class="failure-detail">${err}${tail}</div>`
+}
 function renderRunDetail(key) {
   const panel = byId('run-detail')
   if (!panel) return
@@ -2450,7 +2466,7 @@ function renderRunDetail(key) {
         <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
       </div>
     </div>
-    ${failed && s.error ? `<p class="verdict-rejected">${escapeHtml(String(s.error))}</p>` : ''}
+    ${failed ? failureDetailHtml(s) : ''}
     <h3>Health flags</h3>
     <p class="badges-row">${flagChips}</p>
     ${verdictSectionHtml(verdictsCache.get(run.key))}
@@ -3877,41 +3893,86 @@ function launchPresets() {
   }
   if (manifest && Array.isArray(manifest.presets)) {
     for (const p of manifest.presets)
-      if (p && p.fixed) list.push({ label: p.label || 'Preset', fixed: p.fixed })
+      if (p && (p.fixed || p.sweep))
+        list.push({
+          label: p.label || 'Preset',
+          fixed: p.fixed,
+          sweep: p.sweep,
+          seeds: p.seeds,
+          thesis: p.thesis,
+          thesisTarget: p.thesisTarget,
+          isExperiment: !!p.sweep,
+        })
   }
   return list
 }
 function presetsSelectHtml() {
   const presets = launchPresets()
   if (!presets.length) return ''
-  const opts = presets
-    .map((p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`)
-    .join('')
+  const opt = (p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`
+  const indexed = presets.map((p, i) => [p, i])
+  const experiments = indexed.filter(([p]) => p.isExperiment)
+  const setups = indexed.filter(([p]) => !p.isExperiment)
+  const groups = []
+  if (experiments.length)
+    groups.push(
+      `<optgroup label="Experiments — one-click campaigns">${experiments.map(([p, i]) => opt(p, i)).join('')}</optgroup>`,
+    )
+  if (setups.length)
+    groups.push(
+      `<optgroup label="Known-good single setups">${setups.map(([p, i]) => opt(p, i)).join('')}</optgroup>`,
+    )
   return `<fieldset class="lever launch-presets">
-    <legend>Load a setup</legend>
-    <label class="field"><span>Known-good setups <em>(fills the form to seed a sweep)</em></span>
-      <select id="launch-preset-select"><option value="">— choose —</option>${opts}</select>
+    <legend>Load a setup or experiment</legend>
+    <label class="field"><span>Presets <em>(an experiment fills a whole sweep + seeds + thesis; a setup pins one config to seed your own sweep)</em></span>
+      <select id="launch-preset-select"><option value="">— choose —</option>${groups.join('')}</select>
     </label>
   </fieldset>`
 }
-// Pre-fill the launch form from a preset's fixed lever values: set each named
-// lever's fixed input and clear its sweep so the preset takes effect.
-function applyPresetFixed(fixed) {
+// Load the launch form from a preset. A preset may set `fixed` lever values, a `sweep`
+// (lever → candidate list, for a full experiment), a `seeds` count, and a `thesis`/`thesisTarget`
+// tag. The form is first reset to defaults so the preset fully determines it, then the preset's
+// fixed values, sweep selections, seeds and thesis are applied.
+function applyPreset(preset) {
   const form = byId('launch-form')
-  if (!form || !fixed) return
-  for (const [key, value] of Object.entries(fixed)) {
-    const fixedEl = form.elements['fixed:' + key]
+  if (!form || !preset) return
+  for (const [key, spec] of leverEntries()) {
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
       if (sweepEl.multiple) for (const o of sweepEl.options) o.selected = false
       else sweepEl.value = ''
     }
+    const fixedEl = form.elements['fixed:' + key]
+    if (fixedEl) {
+      if (fixedEl.type === 'checkbox') fixedEl.checked = !!spec.default
+      else fixedEl.value = spec.default === undefined ? '' : String(spec.default)
+    }
+  }
+  for (const [key, value] of Object.entries(preset.fixed || {})) {
+    const fixedEl = form.elements['fixed:' + key]
     if (fixedEl) {
       if (fixedEl.type === 'checkbox') fixedEl.checked = !!value
       else fixedEl.value = String(value)
     }
   }
+  for (const [key, values] of Object.entries(preset.sweep || {})) {
+    const sweepEl = form.elements['sweep:' + key]
+    if (!sweepEl || !Array.isArray(values)) continue
+    if (sweepEl.multiple) {
+      const want = new Set(values.map(String))
+      for (const o of sweepEl.options) o.selected = want.has(o.value)
+    } else {
+      sweepEl.value = values.join(', ')
+    }
+  }
+  if (preset.seeds && form.elements.seeds) form.elements.seeds.value = String(preset.seeds)
+  if (form.elements.thesis) form.elements.thesis.value = preset.thesis || ''
+  if (form.elements.thesisTarget) form.elements.thesisTarget.value = preset.thesisTarget || ''
   updateLaunchSummary()
+}
+// Clone-to-Launch and other fixed-only callers: a preset that only pins lever values.
+function applyPresetFixed(fixed) {
+  applyPreset({ fixed: fixed || {} })
 }
 function parseNumberList(text) {
   return String(text || '')
@@ -4044,7 +4105,7 @@ function setupLaunch() {
     if (event.target && event.target.id === 'launch-preset-select') {
       const idx = Number(event.target.value)
       const presets = launchPresets()
-      if (Number.isInteger(idx) && presets[idx]) applyPresetFixed(presets[idx].fixed)
+      if (Number.isInteger(idx) && presets[idx]) applyPreset(presets[idx])
       return
     }
     if (event.target && event.target.name === 'computeTarget') {
@@ -4471,7 +4532,7 @@ function queueSectionHtml() {
 // campaign may execute at once. Persisted; applied to campaigns launched after.
 function activitySettingsHtml() {
   return `<div class="activity-settings">
-    <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of a campaign execute at once. Applies to campaigns you launch from now. The real limit is host CPU/GPU/RAM; default 1 = sequential. (Changing it does not resize a campaign already running.)')}</span>
+    <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of a campaign run at once. Set this BEFORE you launch — it applies to the NEXT campaign you start. It does NOT resize a campaign already running (you would relaunch to change that). The real ceiling is host CPU/GPU/RAM; default 1 = sequential.')}</span>
       <input type="number" id="activity-concurrency" min="1" step="1" value="${savedConcurrency()}" />
     </label>
   </div>`

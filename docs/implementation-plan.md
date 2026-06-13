@@ -98,8 +98,15 @@ Pair it with a usability pass over the hub app and the per-run result UI.
 - **B1 conditional-best** — choice options show the marginal best-so-far value (★) but not the value
   best _conditional on the other selected levers_. Needs a live form re-render per lever change
   (recompute from history filtered to the current selection). Do when marginal-best gets misleading.
-- **A1 live concurrency resize** — concurrency is fixed at launch; can't change it on a running campaign.
-  Engine work: the bounded worker pool would need a mid-run resize signal.
+- **A1 live concurrency resize** — concurrency is fixed at launch; can't change it on a running campaign
+  (label now says so). Real fix needs a mid-run control signal: UI → running activity → a resizable
+  `runActivityWorkItems` pool (drop the fixed `Promise.all(N)` for a top-up scheduler reading a live target).
+- **One-click "AI help" on a failed run** — failed runs now show the error + `logTail` in run detail. The
+  next step is a button that opens a chat seeded with the failure (error + logTail + config) to diagnose/
+  fix. Needs a bridge `discussTopic`/`requestChatSidebar` + host support (copy the knowledge-viewer pattern).
+- **Optional real `evaluate` command for BlackSwan** — the Evaluate button is now hidden when a manifest
+  declares no `evaluate` (BlackSwan's case). A real `--evaluate` mode in `trainer/run.py` (re-test a saved
+  checkpoint on a window without retraining) would re-enable it and pairs with RB7 (test a winner on more windows).
 - **Ledger note affordance** — the by-setup "Your conclusion" cell shows `add note ✎` but editing happens
   after drilling into the setup. Decide: leave (context-rich) vs inline edit.
 
@@ -117,10 +124,13 @@ its result is recorded; add ideas as they surface.
 ### Open items (carry-over from this round)
 
 - **Ledger live-write** — `scripts/import-blackswan-ledger.mjs` is dry-run-ready (372 rows → 258 records
-  on the `traded_return` axis). To land them I need (1) which store the live hub uses — thefactory-db
-  (`DbDataStorage`) vs file (`data/overseer-repo/.factory/data`) — and (2) the BlackSwan project scope/id.
-  If DB: import through the backend (or add `DbDataStorage`+`DATABASE_URL` to the script). If file:
-  `--write --scope <projectId> --data-dir <overseerRepoPath>/.factory/data`.
+  on the `traded_return` axis), scope `thefactory-modeltrainer`, type `blackswan-run`. **Read-path
+  constraint:** the hub reads ONE central store (`<overseerRepoPath>/.factory/data`, default
+  `thefactory-backend/data/overseer-repo/.factory/data`) keyed by scope — it does NOT read a project
+  repo's `.factory/data`. So writing to `BlackSwan/.factory/data` makes the records committable there
+  but invisible in the hub. Decision pending: (a) write to the central store (visible now, files live in
+  overseer-repo), or (b) build per-project storage roots so a training project's records live in its own
+  repo AND the hub reads them (the architecturally-right answer; a backend change touching storage resolution).
 - **Objective-scale migration** — any `blackswan-run` record written before the trade-aware objective
   carries `objective = sharpe` (~0.3) vs new `traded_return` (~30–50); the viewer mis-ranks them on one
   axis. Re-run or delete the few old records.

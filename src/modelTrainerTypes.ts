@@ -87,10 +87,19 @@ export interface TrainerManifest {
    */
   quickStart?: { label?: string; fixed: Record<string, unknown> }
   /**
-   * Curated known-good setups (label + fixed lever values) the launch form can load to seed a
-   * sweep — e.g. the historically best-performing configs, so designing a sweep is point-and-pick.
+   * Curated launch presets the launch form can load with one pick. A preset is either a single
+   * known-good setup (`fixed` lever values) or a whole ready-to-run EXPERIMENT — `sweep` (lever →
+   * candidate values), a `seeds` count, and a `thesis`/`thesisTarget` tag — so a designed campaign
+   * is point-and-launch, not hand-assembled.
    */
-  presets?: Array<{ label: string; fixed: Record<string, unknown> }>
+  presets?: Array<{
+    label: string
+    fixed?: Record<string, unknown>
+    sweep?: Record<string, unknown[]>
+    seeds?: number
+    thesis?: string
+    thesisTarget?: string
+  }>
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */

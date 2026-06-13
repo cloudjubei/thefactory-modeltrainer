@@ -348,6 +348,31 @@ body {
   font-size: 11px;
   white-space: nowrap;
 }
+.failure-detail {
+  margin: 8px 0 4px;
+}
+.failure-detail .log-tail {
+  margin-top: 6px;
+}
+.failure-detail .log-tail summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.log-tail-pre {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  max-height: 280px;
+  overflow: auto;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .runs-table .seed-unstable {
   color: #d97706;
   font-weight: 700;
