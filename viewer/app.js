@@ -3662,19 +3662,73 @@ function numberLeverHtml(key, spec) {
     </label>
   </div>`
 }
-// Best objective seen so far per value of a choice lever (marginal, across all
-// non-failed runs) — used to annotate the launch options with "best <obj>" + a ★.
-function leverBestSoFar(leverKey) {
+// Best objective seen so far per value of a choice lever — used to annotate the launch options with
+// "best <obj>" + a ★. When `selection` is given (the other currently-chosen CHOICE levers), only runs
+// matching that context count, so the ★ reflects the best value CONDITIONAL on the rest of the form
+// (B1). With no selection it's the marginal best across all non-failed runs.
+function leverBestSoFar(leverKey, selection) {
   const dir = objectiveDirection()
   const best = new Map()
   for (const r of runsCache) {
-    const v = (r.summary.config || {})[leverKey]
+    const cfg = r.summary.config || {}
+    const v = cfg[leverKey]
     const obj = Number(r.summary.objective)
     if (v === undefined || !Number.isFinite(obj) || r.summary.status === 'failed') continue
+    if (selection && !runMatchesSelection(cfg, selection, leverKey)) continue
     const k = String(v)
     if (!best.has(k) || (dir === 'min' ? obj < best.get(k) : obj > best.get(k))) best.set(k, obj)
   }
   return best
+}
+// True when a run's config matches every selected choice-lever value except the one being annotated.
+function runMatchesSelection(cfg, selection, exceptKey) {
+  for (const [k, val] of Object.entries(selection)) {
+    if (k === exceptKey || val === '' || val === undefined) continue
+    if (String(cfg[k]) !== String(val)) return false
+  }
+  return true
+}
+// The current choice-lever values picked in the launch form (used to condition leverBestSoFar).
+function currentChoiceSelection(form) {
+  const sel = {}
+  if (!form) return sel
+  for (const [key, spec] of leverEntries()) {
+    if (spec.type !== 'choice') continue
+    const el = form.elements['fixed:' + key]
+    if (el && el.value) sel[key] = el.value
+  }
+  return sel
+}
+// Recompute the conditional best-so-far annotations in place (no form re-render, so sweep/seed/thesis
+// selections are preserved) — called after the form builds and on every lever change.
+function refreshLeverAnnotations(form) {
+  if (!form) return
+  const dir = objectiveDirection()
+  const selection = currentChoiceSelection(form)
+  for (const [key, spec] of leverEntries()) {
+    if (spec.type !== 'choice') continue
+    const best = leverBestSoFar(key, selection)
+    let topValue
+    for (const [v, o] of best) {
+      if (
+        topValue === undefined ||
+        (dir === 'min' ? o < best.get(topValue) : o > best.get(topValue))
+      ) {
+        topValue = v
+      }
+    }
+    for (const elName of ['fixed:' + key, 'sweep:' + key]) {
+      const el = form.elements[elName]
+      if (!el || !el.options) continue
+      for (const opt of el.options) {
+        const b = best.get(String(opt.value))
+        opt.textContent =
+          b === undefined
+            ? String(opt.value)
+            : `${opt.value} — best ${formatObjective(b)}${String(opt.value) === topValue ? ' ★' : ''}`
+      }
+    }
+  }
 }
 function choiceLeverHtml(key, spec) {
   const choices = Array.isArray(spec.choices) ? spec.choices : []
@@ -3713,10 +3767,16 @@ function choiceLeverHtml(key, spec) {
   </div>`
 }
 function booleanLeverHtml(key, spec) {
-  return `<label class="check-row">
-    <input type="checkbox" name="fixed:${escapeHtml(key)}"${spec.default ? ' checked' : ''} />
-    <span>Enabled</span>
-  </label>`
+  return `<div class="lever-grid">
+    <label class="check-row">
+      <input type="checkbox" name="fixed:${escapeHtml(key)}"${spec.default ? ' checked' : ''} />
+      <span>Enabled</span>
+    </label>
+    <label class="check-row">
+      <input type="checkbox" name="sweep:${escapeHtml(key)}" />
+      <span>Sweep both ${helpCalloutHtml('Run BOTH off and on in one campaign to compare them side by side. Overrides the value on the left.')}</span>
+    </label>
+  </div>`
 }
 function leverFieldsetHtml(key, spec) {
   const inner =
@@ -3879,6 +3939,7 @@ function renderLaunchForm() {
       <button type="submit" id="launch-btn">Launch campaign</button>
     </div>
     <p id="launch-status" class="form-status" role="status"></p>`
+  refreshLeverAnnotations(form)
   updateLaunchSummary()
 }
 // All launch presets in order: the quick-start (if any) first, then the manifest's
@@ -3940,6 +4001,7 @@ function applyPreset(preset) {
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
       if (sweepEl.multiple) for (const o of sweepEl.options) o.selected = false
+      else if (sweepEl.type === 'checkbox') sweepEl.checked = false
       else sweepEl.value = ''
     }
     const fixedEl = form.elements['fixed:' + key]
@@ -3961,6 +4023,8 @@ function applyPreset(preset) {
     if (sweepEl.multiple) {
       const want = new Set(values.map(String))
       for (const o of sweepEl.options) o.selected = want.has(o.value)
+    } else if (sweepEl.type === 'checkbox') {
+      sweepEl.checked = values.length > 1
     } else {
       sweepEl.value = values.join(', ')
     }
@@ -3968,6 +4032,7 @@ function applyPreset(preset) {
   if (preset.seeds && form.elements.seeds) form.elements.seeds.value = String(preset.seeds)
   if (form.elements.thesis) form.elements.thesis.value = preset.thesis || ''
   if (form.elements.thesisTarget) form.elements.thesisTarget.value = preset.thesisTarget || ''
+  refreshLeverAnnotations(form)
   updateLaunchSummary()
 }
 // Clone-to-Launch and other fixed-only callers: a preset that only pins lever values.
@@ -3987,6 +4052,7 @@ function readSweepValues(form, key, spec) {
   if (!el) return []
   if (spec.type === 'number') return parseNumberList(el.value)
   if (spec.type === 'choice') return [...el.selectedOptions].map((o) => o.value)
+  if (spec.type === 'boolean') return el.checked ? [false, true] : []
   return []
 }
 function readFixedValue(form, key, spec) {
@@ -4112,6 +4178,7 @@ function setupLaunch() {
       rememberComputeTarget(event.target.value)
     }
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
+    refreshLeverAnnotations(form)
     updateLaunchSummary()
   })
 }

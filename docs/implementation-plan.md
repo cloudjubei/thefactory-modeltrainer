@@ -95,18 +95,16 @@ Pair it with a usability pass over the hub app and the per-run result UI.
 
 (The A1–A3 / B1–B2 / C1–C4 roadmap shipped — see git.) Not blocking; each needs a trigger:
 
-- **B1 conditional-best** — choice options show the marginal best-so-far value (★) but not the value
-  best _conditional on the other selected levers_. Needs a live form re-render per lever change
-  (recompute from history filtered to the current selection). Do when marginal-best gets misleading.
 - **A1 live concurrency resize** — concurrency is fixed at launch; can't change it on a running campaign
   (label now says so). Real fix needs a mid-run control signal: UI → running activity → a resizable
   `runActivityWorkItems` pool (drop the fixed `Promise.all(N)` for a top-up scheduler reading a live target).
 - **One-click "AI help" on a failed run** — failed runs now show the error + `logTail` in run detail. The
   next step is a button that opens a chat seeded with the failure (error + logTail + config) to diagnose/
   fix. Needs a bridge `discussTopic`/`requestChatSidebar` + host support (copy the knowledge-viewer pattern).
-(Closed: **evaluate command** — `trainer/run.py --evaluate` + manifest `evaluate` shipped; re-tests a
-saved checkpoint without retraining (skips the train phase), Evaluate button re-enabled. **Ledger-note
-affordance** — decided: leave drill-in editing, it's context-rich.)
+(Closed: **B1 conditional-best** — choice options now annotate the best value CONDITIONAL on the other
+selected choice levers, refreshed in place on every change (no form re-render, so sweep/seed/thesis
+selections survive). **evaluate command** — `trainer/run.py --evaluate` + manifest `evaluate`; re-tests a
+checkpoint without retraining. **Ledger-note affordance** — decided: leave drill-in editing.)
 
 ## Ongoing Research — what to try next (BlackSwan)
 
@@ -131,41 +129,46 @@ windows** — deliberately left unscaled.)
 
 ### Remaining quick wins
 
-- **QW6 — use native 1h klines** `[MED→HIGH/M]` — 85 `BTCUSDT-1h-*.json` exist but the 1h path loads
-  ~1.5GB of 1m JSON to rebuild bars that already exist. (Bonus: at native fidelity the QW1 window-scaling
-  is identity, and it removes the `process_fidelity` aggregation cost.)
-
-(QW5 done — `model_config.py` default restored to the winning `[512,64]`; `[8192,512]` was the −40% loser.)
+(All cleared. **QW6 done — the right way (1m stays canonical).** `trainer/derive_cache.py`
+`ensure_derived` derives 1h from the 1m source (verified derived == native 1h to 0.000000) + caches to
+`binance/derived/` (rebuilt when 1m changes); the 1h path reads the cache instead of re-reading ~1.5GB of
+1m every run. NO separately-mined native files (that would be a 2nd source). Derived bars carry no
+indicators, so `use_indicators` is a no-op on 1h — RB1-on-1h waits for the data mine to compute indicators
+on the canonical bars. (RB1-on-1d still works via native 1d files; those are an eventual derive+cache
+candidate too.) First 1h run builds the cache (one-time ~1.5GB read); fast after. **QW5 done** — `model_config.py`
+default restored to the winning `[512,64]`.)
 
 ### Research bets (higher potential; bigger or uncertain)
 
-- **RB1 — curated indicators into the winning path** `[HIGH/M]` — the 112 precomputed indicators are
-  unreachable on `process_df_simple`. Tier by clamp-safety: **Tier 1 = drop-in free** (rsi/williams/
-  stochastic/choppiness — natively `[-1,1]`); **Tier 1b = light rescale** (bollinger/donchian ~[0.85,1.17];
-  kallman/disparityIndex ±0.03 near-inert); **Tier 2 = clamp-hostile, needs RB6 first** (meanReversion ±4,
-  cci, turbulence 0–15, obv −2.7, sortino→inf). Start Tier 1 → RB6 → 1b/2.
+- **RB1b/2 — compute more indicators** `[MED]` — the curated set is small (4 Tier-1 + 3 squashed Tier-2).
+  More can be added to `src/data/indicators.py` + `_add_curated_indicators` (Tier-1b bollinger/donchian
+  ratios, kallman/disparityIndex; more Tier-2 cci/sortino with RB6 scales) once an experiment shows the
+  current set helps. Decide the set from the `use_indicators` experiment, don't bulk-add blind.
 - **RB5 — feed the working dip score into the trading env** `[HIGH/L]` — add a causal `dip_score`
   observation, or a cheaper inference-only buy-veto.
-- **RB6 — rescale features instead of hard-clamping obs to [-1,1]** `[HIGH/S→M]` — **prerequisite for
-  RB1's rich features.** Per-feature tanh/robust-quantile squash applied identically at train+test.
-- **RB8 — sanitise indicator data quality at source + version the indicator spec** `[MED/M]` — data-mine job.
 
-(Closed: **RB4** — `combo_all_fee` reward variant shipped (combo_all base − per-trade turnover penalty,
-tunable `combo_fee_penalty`; in the manifest choices). **RB7** — test window widened to all on-disk 2024
-(auto-clipped) + per-window robustness in `summary.py` (`worst_window_return_pct`, `windows_profitable_pct`,
-`window_returns_pct` series).)
+(Closed: **RB6** — parameter-free `tanh(x/scale)` squash (constant scales → identical train/test),
+bounding clamp-hostile indicators to [-1,1]. **RB1 — indicators are now COMPUTED at runtime from OHLCV**
+(`src/data/indicators.py`, formulas verified == the emitter to ~1e-8) via a shared `_add_curated_indicators`
+called from `process_df` (1d) AND `process_df_simple` (1h), gated by a `use_indicators` lever (default off);
+**works on EVERY path incl. the 1m-derived 1h winning path — no data mine, no precomputed dict** (this is
+the user's "store minimal data, derive everything at runtime" architecture; was [[RB8]] data-mine work,
+now resolved at runtime). **RB4** — `combo_all_fee` reward variant. **RB7** — wider test window + per-window
+robustness metrics. **RB8** — moot: indicators derived at runtime, so no need to sanitise/version a stored
+indicator artifact.)
 
 **Ground rules (do not violate):** profit is the objective, never beat-hold (hold is a display control),
 now expressed as the trade-gated `traded_return`; trade **often and well** (a 1-trade run ≈ hold);
 the reward family is intentional — add variants, never collapse; BTC-only until the data mine backfills
 altcoin 1d/1h. `combo_noaction=-1` is a latent synthetic-short bias — sweep as a variant, don't edit in place.
 
-**Recommended next:** the **features track — RB6 → RB1 Tier 1 → RB1 1b/2** (RB6 first: per-feature
-rescaling gates the clamp-hostile indicators; then surface the precomputed indicators into
-`process_df_simple`). These are feature-engineering bets whose payoff is proven by a campaign, not just
-the code change — build + then run an experiment to confirm. Also tractable: **B1** conditional-best
-(viewer) and **QW6** (native 1h, housekeeping). Larger/blocked: **A1** live-resize and **RB5** dip-into-env
-are `[L]`; the **AI-help** button is host-blocked (needs bridge `discussTopic`). Deep web research deferred.
+**Recommended next:** **run the `use_indicators` experiment on the 1h winning path** (indicators are now
+computed at runtime there too) — sweep on/off, multi-seed, read `traded_return` / win% / the window-
+robustness metrics in the hub. A quick 1d prelim showed a mixed, seed-dependent effect (helped one seed,
+hurt another), so multi-seed is essential. That result decides whether to expand the indicator set (RB1b/2).
+Remaining: **RB1b/2** (more runtime indicators, after the experiment), **RB5** dip-into-env `[L]`, **A1**
+live-resize `[L]`, the host-blocked **AI-help** button, and the **data mine** (now just gathering + cleaning
+minimal raw OHLCV + generalising the derive-cache — no longer responsible for indicators). Deep web research deferred.
 
 ## The data mine — a shared dataset project for every model trainer
 
@@ -185,15 +188,15 @@ pull from one curated origin.
 a NestJS Binance miner (`mines/price-mine-binance.service.ts` → `raw/prices/<COIN>/<interval>/<year>-<month>.json`,
 full OHLCV **+ taker order-flow**) plus an indicator engine (`indicators/core/inidicators-core.service.ts`)
 that produces exactly the 112-key `indicators` object in BlackSwan's klines. It is ~80% the right shape
-(mine → persist → indicator-compute → facade) but needs three upgrades to be the data mine: (a) **persist
-+ version indicators as a first-class artifact** — today they're recomputed-on-read / live-only (the
-`raw/indicators/` backfill is commented out) and `config.json` has drifted from the compute engine, so
-stamp an indicator-spec version; (b) **data-engineering BlackSwan can't do at source** — gap/dedup/
-timestamp-continuity checks, inf/NaN sanitisation (sortino/volatilityVolume divide-by-zero), server-side
-resampling (which would retire BlackSwan's `process_fidelity` + the QW1 window bug), and mining the
-missing 1s/15m intervals the config promises; (c) **store raw indicator values + a declared normalisation
-spec** so the consumer applies clamp-aware scaling (RB6) instead of fighting a baked-in `÷price`/`×2−1`/`/100`
-transform. This is the durable home for the Ongoing-Research feature work above.
+(mine → persist → facade). **Architecture decision (2026-06-14): the data mine stores MINIMAL raw OHLCV
+only — it does NOT bake in or version indicators.** Indicators (and higher fidelities) are DERIVED AT
+RUNTIME in the consumer (`src/data/indicators.py` + `trainer/derive_cache.py`), so the stored/transferred
+data stays small and an indicator fix is a one-line code change, not a re-derivation of gigabytes. So the
+data mine's remaining job is: (a) **gather + clean raw OHLCV** — gap/dedup/timestamp-continuity checks,
+inf/NaN sanitisation, and mining the missing intervals (the emitter's indicator engine becomes a REFERENCE
+for the runtime formulas — already ported + verified — not a storage artifact); (b) **generalise the
+QW6 `derive_cache`** — 1m canonical, derive+cache higher fidelities centrally so consumers never
+re-aggregate; (c) the content-addressed cache + remote-runner data path pulling from one curated origin.
 
 ## Code-change risk model — the second workspace ML tool (deferred)
 
