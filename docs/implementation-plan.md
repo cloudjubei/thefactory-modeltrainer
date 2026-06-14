@@ -104,11 +104,9 @@ Pair it with a usability pass over the hub app and the per-run result UI.
 - **One-click "AI help" on a failed run** — failed runs now show the error + `logTail` in run detail. The
   next step is a button that opens a chat seeded with the failure (error + logTail + config) to diagnose/
   fix. Needs a bridge `discussTopic`/`requestChatSidebar` + host support (copy the knowledge-viewer pattern).
-- **Optional real `evaluate` command for BlackSwan** — the Evaluate button is now hidden when a manifest
-  declares no `evaluate` (BlackSwan's case). A real `--evaluate` mode in `trainer/run.py` (re-test a saved
-  checkpoint on a window without retraining) would re-enable it and pairs with RB7 (test a winner on more windows).
-- **Ledger note affordance** — the by-setup "Your conclusion" cell shows `add note ✎` but editing happens
-  after drilling into the setup. Decide: leave (context-rich) vs inline edit.
+(Closed: **evaluate command** — `trainer/run.py --evaluate` + manifest `evaluate` shipped; re-tests a
+saved checkpoint without retraining (skips the train phase), Evaluate button re-enabled. **Ledger-note
+affordance** — decided: leave drill-in editing, it's context-rich.)
 
 ## Ongoing Research — what to try next (BlackSwan)
 
@@ -123,29 +121,21 @@ its result is recorded; add ideas as they surface.
 
 ### Open items (carry-over from this round)
 
-- **Ledger live-write** — `scripts/import-blackswan-ledger.mjs` is dry-run-ready (372 rows → 258 records
-  on the `traded_return` axis), scope `thefactory-modeltrainer`, type `blackswan-run`. **Read-path
-  constraint:** the hub reads ONE central store (`<overseerRepoPath>/.factory/data`, default
-  `thefactory-backend/data/overseer-repo/.factory/data`) keyed by scope — it does NOT read a project
-  repo's `.factory/data`. So writing to `BlackSwan/.factory/data` makes the records committable there
-  but invisible in the hub. Decision pending: (a) write to the central store (visible now, files live in
-  overseer-repo), or (b) build per-project storage roots so a training project's records live in its own
-  repo AND the hub reads them (the architecturally-right answer; a backend change touching storage resolution).
-- **Objective-scale migration** — any `blackswan-run` record written before the trade-aware objective
-  carries `objective = sharpe` (~0.3) vs new `traded_return` (~30–50); the viewer mis-ranks them on one
-  axis. Re-run or delete the few old records.
-- **Calibrate `MIN_TRADES_FOR_FULL_CREDIT`** (currently 20, in `trainer/summary.py`) to the test-window
-  length once there are real multi-window results.
-- **Pi-Cycle windows** — `SMA111/350/471` + `EMA150` in `process_df_simple` are left as raw bar-counts
-  (scaling to true days makes them inert on short windows + changes a named indicator's meaning). Revisit deliberately.
+- **Calibrate `MIN_TRADES_FOR_FULL_CREDIT`** (currently 20, in `trainer/summary.py`) — now actionable:
+  RB7 shipped, so run a few multi-window campaigns and set the "trade often" bar to the window length.
+
+(Closed: **ledger live-write** — per-project storage roots shipped (`dataRoot` on the project registry;
+`thefactory-modeltrainer` → `BlackSwan/.factory/data`), 258 historical records written there + the hub
+reads them in file-storage mode. **Objective-scale migration** — moot, no pre-change records. **Pi-Cycle
+windows** — deliberately left unscaled.)
 
 ### Remaining quick wins
 
-- **QW5 — restore the winning `net_arch`** `[LOW/S]` — legacy `main.py` still has `[8192,512]` active;
-  the hub manifest already overrides, so this only matters if the `main.py` research path is used.
 - **QW6 — use native 1h klines** `[MED→HIGH/M]` — 85 `BTCUSDT-1h-*.json` exist but the 1h path loads
   ~1.5GB of 1m JSON to rebuild bars that already exist. (Bonus: at native fidelity the QW1 window-scaling
   is identity, and it removes the `process_fidelity` aggregation cost.)
+
+(QW5 done — `model_config.py` default restored to the winning `[512,64]`; `[8192,512]` was the −40% loser.)
 
 ### Research bets (higher potential; bigger or uncertain)
 
@@ -154,25 +144,28 @@ its result is recorded; add ideas as they surface.
   stochastic/choppiness — natively `[-1,1]`); **Tier 1b = light rescale** (bollinger/donchian ~[0.85,1.17];
   kallman/disparityIndex ±0.03 near-inert); **Tier 2 = clamp-hostile, needs RB6 first** (meanReversion ±4,
   cci, turbulence 0–15, obv −2.7, sortino→inf). Start Tier 1 → RB6 → 1b/2.
-- **RB4 — fee/turnover penalty reward _variant_** `[HIGH/S]` — the gated objective penalises UNDER-trading
-  but not OVER-trading (a high-turnover positive-return run still scores full); a fee/turnover term in the
-  reward still adds distinct value. Add as a NEW variant (profit-net-of-cost).
 - **RB5 — feed the working dip score into the trading env** `[HIGH/L]` — add a causal `dip_score`
   observation, or a cheaper inference-only buy-veto.
 - **RB6 — rescale features instead of hard-clamping obs to [-1,1]** `[HIGH/S→M]` — **prerequisite for
   RB1's rich features.** Per-feature tanh/robust-quantile squash applied identically at train+test.
-- **RB7 — expand the test window beyond 2024-Q1** `[HIGH/M]` — add post-train 2024 Q2–Q4 windows, report
-  per-window worst/mean/fraction-profitable. Cheap rigor; pairs with the trade-aware objective.
 - **RB8 — sanitise indicator data quality at source + version the indicator spec** `[MED/M]` — data-mine job.
+
+(Closed: **RB4** — `combo_all_fee` reward variant shipped (combo_all base − per-trade turnover penalty,
+tunable `combo_fee_penalty`; in the manifest choices). **RB7** — test window widened to all on-disk 2024
+(auto-clipped) + per-window robustness in `summary.py` (`worst_window_return_pct`, `windows_profitable_pct`,
+`window_returns_pct` series).)
 
 **Ground rules (do not violate):** profit is the objective, never beat-hold (hold is a display control),
 now expressed as the trade-gated `traded_return`; trade **often and well** (a 1-trade run ≈ hold);
 the reward family is intentional — add variants, never collapse; BTC-only until the data mine backfills
 altcoin 1d/1h. `combo_noaction=-1` is a latent synthetic-short bias — sweep as a variant, don't edit in place.
 
-**Recommended next:** **RB7** (more test windows — cheap rigor on the new objective) and the features
-track **RB1 Tier 1 → RB6 → RB1 1b/2**; **QW6** (native 1h) as housekeeping that also retires the
-`process_fidelity` tax. The deep web research (formulation) stays deferred per the user.
+**Recommended next:** the **features track — RB6 → RB1 Tier 1 → RB1 1b/2** (RB6 first: per-feature
+rescaling gates the clamp-hostile indicators; then surface the precomputed indicators into
+`process_df_simple`). These are feature-engineering bets whose payoff is proven by a campaign, not just
+the code change — build + then run an experiment to confirm. Also tractable: **B1** conditional-best
+(viewer) and **QW6** (native 1h, housekeeping). Larger/blocked: **A1** live-resize and **RB5** dip-into-env
+are `[L]`; the **AI-help** button is host-blocked (needs bridge `discussTopic`). Deep web research deferred.
 
 ## The data mine — a shared dataset project for every model trainer
 
