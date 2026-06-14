@@ -2545,11 +2545,11 @@ async function observeQuickActivity(activityId) {
   const start = Date.now()
   let missing = 0
   while (Date.now() - start < MAX_QUICK_OBSERVE_MS) {
-    if (!document.hidden) {
-      const act = await getActivity(activityId)
-      if (act && act.status && act.status !== 'running') return act
-      if (!act && ++missing >= 3) return null
-    }
+    // Poll regardless of document visibility: the queue pump advances off this settling, so skipping
+    // the check while backgrounded stalls the whole queue until the user re-opens the app.
+    const act = await getActivity(activityId)
+    if (act && act.status && act.status !== 'running') return act
+    if (!act && ++missing >= 3) return null
     await sleep(POLL_MS)
   }
   return null
@@ -4329,7 +4329,9 @@ async function observeActivityUntilDone(activityId) {
   try {
     while (Date.now() - start < MAX_OBSERVE_MS) {
       if (session !== observeSession || epoch !== projectEpoch) return 'cancelled'
-      if (!document.hidden) {
+      // Poll regardless of document visibility — the queue pump advances off this observation, so
+      // pausing it while backgrounded stalls campaigns + the queue until the user re-opens the app.
+      {
         const [progress, act, campaign] = await Promise.all([
           readProgress(),
           getActivity(activityId),
@@ -4716,14 +4718,14 @@ function showTab(id) {
 // activity, so the in-flight campaign is visible from any tab — not just
 // Activity. The spinner lives in a fixed `.tab-live` slot on each button so
 // toggling it never disturbs the label text.
-// Which tabs currently have work happening WITHIN them (so a spinner shows on the
-// tab no matter where the user is): a running campaign touches Activity/Runs/Charts;
-// judging writes verdicts to Runs; proposing writes Hypotheses.
+// Which tabs show a spinner. Activity is the single home for "what's pending" — it spins for ANY live
+// work (campaign / judge / propose / evaluate). Runs spins ONLY for run-specific work that lands on a
+// run (a judgement or an evaluation). Hypotheses spins while proposing. Charts is view-only — never.
 function tabHasLiveWork(id) {
-  const campaign = lastActivityStatus === 'running'
-  if (id === 'activity') return campaign
-  if (id === 'runs') return campaign || judging
-  if (id === 'charts') return campaign
+  if (id === 'activity') {
+    return lastActivityStatus === 'running' || judging || proposing || evaluatingKeys.size > 0
+  }
+  if (id === 'runs') return judging || evaluatingKeys.size > 0
   if (id === 'hypotheses') return proposing
   return false
 }

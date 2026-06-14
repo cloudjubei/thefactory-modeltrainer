@@ -8,6 +8,23 @@ the trading line, Phase 7 done). The engine stays domain-oblivious so any furthe
 _data + the thin CLI contract_, not engine code. What's below is optional phases, small
 cleanups, and deferred new work.
 
+## North star — two co-equal outcomes
+
+1. **Make the pipeline/app/project the best it can be for creating models** — for ANY model, end to end
+   (propose → run → judge → explore), with excellent, self-explanatory results + comparison UI, and a data
+   layer that stores the minimum and derives the rest at runtime. **The data layer must also GUIDE a user
+   who has a problem to solve but doesn't know what data to mine or how** — walk them from "here's my
+   problem" to "here's what data exists, what to mine, and how", via deep research + exploration of
+   available sources (see "the data mine" below).
+2. **Use it to make BlackSwan the best trading model.** Simple, in STRICT ORDER: **(A) correctness first**
+   — all the data, all the rewards, all our processes must be CORRECT before any result is trusted;
+   **(B) find ONE setup that trades well** — a config that trades often + profitably, stable across seeds,
+   vs buy-and-hold; **(C) then a huge space exploration** of the toggles to find the best. **Measurable
+   progress is the whole point** — that's what the model trainer is for.
+
+Co-equal — don't trade one for the other; the BlackSwan work is the forcing function that hardens the
+generic pipeline. The BlackSwan section below is now structured around the A → B → C order.
+
 ## Repo split (governs all phases)
 
 | Repo                                    | Owns                                                                                                                                                           |
@@ -82,22 +99,23 @@ objective + `few_trades` flag). Reload the viewer; BlackSwan changes apply on th
   The lever + per-symbol globs + `data_inventory` capability gating are root-cause-correct; altcoin
   1d/1h backfill is the data mine's job, after which the lever expands with no code change.
 
-## Future path & UX scrutiny (after the BlackSwan improvements above)
-
-**Massive scrutinisation task and critical look to decide on the future path for the project, as
-well as UI/UX usability improvements.** Once the improvements above land and there are real
-multi-asset / multi-timeframe results to read, step back and look hard at the actual run data:
-judge whether the current experiment design, objective, and levers are the right ones, and
-propose the next campaigns to run — expect this may force big changes to how experiments are run.
-Pair it with a usability pass over the hub app and the per-run result UI.
-
 ## Hub UI — open follow-ups
 
 (The A1–A3 / B1–B2 / C1–C4 roadmap shipped — see git.) Not blocking; each needs a trigger:
 
-- **A1 live concurrency resize** — concurrency is fixed at launch; can't change it on a running campaign
-  (label now says so). Real fix needs a mid-run control signal: UI → running activity → a resizable
-  `runActivityWorkItems` pool (drop the fixed `Promise.all(N)` for a top-up scheduler reading a live target).
+- **Global concurrency budget (issues #1+#3)** — the client queue pump runs ONE activity at a time
+  (`findLiveTrainerActivity` guard, app.js) and "Max parallel runs" is a PER-CAMPAIGN pool, so evaluate
+  runs serially and a campaign under the cap leaves spare capacity idle. The fix is a GLOBAL job budget:
+  a backend semaphore on `ComputeRunner.runJob` (cap total concurrent subprocesses across all activities)
+  + let the pump dispatch multiple activities. Architectural (backend + client); has a "global budget
+  shared across activities/projects" UX to communicate. ~M.
+- **Model chip recents + reactivity (issue #5)** — the activity model chip shows only the active agent's
+  single model, not a recents dropdown, and doesn't react when the active agent changes. Fix in the shared
+  headless: surface a CLI/model recents list to `useActivityChipCli` + subscribe to active-CLI/agent state
+  changes (CliConfigsProvider). Cross-client (web/desktop/mobile). ~M.
+- **Run→Activity link (issue #4 secondary)** — Runs now spins only for run-specific work (judge/eval); add
+  a "View activity" link from a run's evaluation/verdict to its Activity item (store `activityId` on the
+  eval/verdict records in ModelTrainerTools, render a link in run detail).
 - **One-click "AI help" on a failed run** — failed runs now show the error + `logTail` in run detail. The
   next step is a button that opens a chat seeded with the failure (error + logTail + config) to diagnose/
   fix. Needs a bridge `discussTopic`/`requestChatSidebar` + host support (copy the knowledge-viewer pattern).
@@ -106,69 +124,56 @@ selected choice levers, refreshed in place on every change (no form re-render, s
 selections survive). **evaluate command** — `trainer/run.py --evaluate` + manifest `evaluate`; re-tests a
 checkpoint without retraining. **Ledger-note affordance** — decided: leave drill-in editing.)
 
-## Ongoing Research — what to try next (BlackSwan)
+## BlackSwan — the path to a trading model (A → B → C)
 
-**"Tried" is data-driven, not a manual list** — what's been run lives in the run records
-(`config` + `setupKey` + `metrics`); `skipExplored` prevents re-running a setup. Prune an item once
-its result is recorded; add ideas as they surface.
+Strictly ordered: **(A) make everything correct → (B) find ONE setup that trades well → (C) explore the
+toggle space for the best.** "Tried" is data-driven — every run records `config` + `setupKey` + `metrics`;
+`skipExplored` prevents re-running a setup; the by-setup / by-experiment ledger is the memory. Full
+pipeline map + holes: `docs/blackswan-pipeline-map.md`. (Context from the 2026-06-13 scrutiny: the model/
+reward/feature space is already heavily explored — ≈15 RL algos, the combo family, many TP/SL variants;
+indicators "tried and didn't help"; minute data ≈ noise — so the leverage is correctness + a disciplined
+search, NOT more feature-richness.)
 
-> **Why this backlog (2026-06-13 scrutiny):** the model / reward / feature space is already heavily
-> explored (≈15 RL algos, the combo reward family, many TP/SL variants; indicators tried and didn't
-> help; minute data ≈ noise). So feature-richness (RB1) is partly re-treading; the under-explored holes
-> are evaluation rigor, problem formulation, and the experiment ledger. Map: `docs/blackswan-pipeline-map.md`.
+### Phase A — Correctness (the gate: no result is trusted until this passes)
 
-### Open items (carry-over from this round)
+Shipped this round (data + rewards + processes): fidelity-scaled rolling windows (QW1) + taker order-flow
+(QW2); 1m-canonical derive+cache for fidelities (QW6, derived==native to 0.000000) + runtime-computed
+indicators (verified == the emitter to ~1e-8); trade-aware `traded_return` objective + `few_trades`/
+degenerate health; `combo_all_fee` reward variant; wider test window + per-window robustness (RB7); the
+experiment ledger (by-setup median/IQR/stability, by-experiment, conclusions); + the historical
+`results_hour.ods` import. (QW5: `model_config.py` default restored to the winning `[512,64]`.)
 
-- **Calibrate `MIN_TRADES_FOR_FULL_CREDIT`** (currently 20, in `trainer/summary.py`) — now actionable:
-  RB7 shipped, so run a few multi-window campaigns and set the "trade often" bar to the window length.
+**NEXT — the scrutinous correctness audit (do TOGETHER, before trusting any result or picking the Phase-B
+setup).** Look hard at the actual run data + code and, per pillar, decide it's right:
+- **Data** — do the derived bars + runtime indicators actually feed the model correctly (no constant/NaN/
+  zero columns, right per-layer alignment, no leakage)? Is the train/held-out split clean?
+- **Rewards** — is the reward FAMILY itself sound (combo_all & friends): does it genuinely reward "trade
+  often + well", or can it be gamed? Is the `combo_noaction=-1` synthetic-short bias intended?
+- **Processes** — is `traded_return` the right scalar? do the metrics + health flags measure what we think?
+  is the eval honest (single held-out window, multi-seed, window-robustness)? does the hub surface + flag
+  everything a newcomer needs to read a result correctly?
+Output: a short list of any correctness defects to fix → green light for Phase B. Calibrate
+`MIN_TRADES_FOR_FULL_CREDIT` (now 20, `trainer/summary.py`) to the real window length here.
 
-(Closed: **ledger live-write** — per-project storage roots shipped (`dataRoot` on the project registry;
-`thefactory-modeltrainer` → `BlackSwan/.factory/data`), 258 historical records written there + the hub
-reads them in file-storage mode. **Objective-scale migration** — moot, no pre-change records. **Pi-Cycle
-windows** — deliberately left unscaled.)
+### Phase B — Find ONE setup that trades well
 
-### Remaining quick wins
+Tools shipped: the Launch-tab experiment presets (Exp 1–5), the `use_indicators` on/off experiment,
+multi-seed + the seed-stability column, the trade-aware objective + window-robustness. **Success = a config
+that trades OFTEN and PROFITABLY, stable across seeds, beating buy-and-hold.** Start: `use_indicators`
+on/off on 1h, multi-seed (the 1d prelim was seed-dependent, so seeds matter); read By-experiment +
+By-setup; lock in the first setup that clears the bar.
 
-(All cleared. **QW6 done — the right way (1m stays canonical).** `trainer/derive_cache.py`
-`ensure_derived` derives 1h from the 1m source (verified derived == native 1h to 0.000000) + caches to
-`binance/derived/` (rebuilt when 1m changes); the 1h path reads the cache instead of re-reading ~1.5GB of
-1m every run. NO separately-mined native files (that would be a 2nd source). Derived bars carry no
-indicators, so `use_indicators` is a no-op on 1h — RB1-on-1h waits for the data mine to compute indicators
-on the canonical bars. (RB1-on-1d still works via native 1d files; those are an eventual derive+cache
-candidate too.) First 1h run builds the cache (one-time ~1.5GB read); fast after. **QW5 done** — `model_config.py`
-default restored to the winning `[512,64]`.)
+### Phase C — Huge space exploration (after a Phase-B baseline)
 
-### Research bets (higher potential; bigger or uncertain)
-
-- **RB1b/2 — compute more indicators** `[MED]` — the curated set is small (4 Tier-1 + 3 squashed Tier-2).
-  More can be added to `src/data/indicators.py` + `_add_curated_indicators` (Tier-1b bollinger/donchian
-  ratios, kallman/disparityIndex; more Tier-2 cci/sortino with RB6 scales) once an experiment shows the
-  current set helps. Decide the set from the `use_indicators` experiment, don't bulk-add blind.
-- **RB5 — feed the working dip score into the trading env** `[HIGH/L]` — add a causal `dip_score`
-  observation, or a cheaper inference-only buy-veto.
-
-(Closed: **RB6** — parameter-free `tanh(x/scale)` squash (constant scales → identical train/test),
-bounding clamp-hostile indicators to [-1,1]. **RB1 — indicators are now COMPUTED at runtime from OHLCV**
-(`src/data/indicators.py`, formulas verified == the emitter to ~1e-8) via a shared `_add_curated_indicators`
-called from `process_df` (1d) AND `process_df_simple` (1h), gated by a `use_indicators` lever (default off);
-**works on EVERY path incl. the 1m-derived 1h winning path — no data mine, no precomputed dict** (this is
-the user's "store minimal data, derive everything at runtime" architecture; was [[RB8]] data-mine work,
-now resolved at runtime). **RB4** — `combo_all_fee` reward variant. **RB7** — wider test window + per-window
-robustness metrics. **RB8** — moot: indicators derived at runtime, so no need to sanitise/version a stored
-indicator artifact.)
+Sweep the toggles broadly from the baseline; `skipExplored` + by-setup aggregation + the ledger keep it
+self-pruning. Fold in feature bets ONLY if an experiment says they help: **RB1b/2** (compute more
+indicators in `src/data/indicators.py` + `_add_curated_indicators`), **RB5** (causal `dip_score` into the
+trading env, `[L]`).
 
 **Ground rules (do not violate):** profit is the objective, never beat-hold (hold is a display control),
-now expressed as the trade-gated `traded_return`; trade **often and well** (a 1-trade run ≈ hold);
-the reward family is intentional — add variants, never collapse; BTC-only until the data mine backfills
-altcoin 1d/1h. `combo_noaction=-1` is a latent synthetic-short bias — sweep as a variant, don't edit in place.
-
-**Recommended next:** **run the `use_indicators` experiment on the 1h winning path** (indicators are now
-computed at runtime there too) — sweep on/off, multi-seed, read `traded_return` / win% / the window-
-robustness metrics in the hub. A quick 1d prelim showed a mixed, seed-dependent effect (helped one seed,
-hurt another), so multi-seed is essential. That result decides whether to expand the indicator set (RB1b/2).
-Remaining: **RB1b/2** (more runtime indicators, after the experiment), **RB5** dip-into-env `[L]`, **A1**
-live-resize `[L]`, the host-blocked **AI-help** button, and the **data mine** (now just gathering + cleaning
-minimal raw OHLCV + generalising the derive-cache — no longer responsible for indicators). Deep web research deferred.
+expressed as the trade-gated `traded_return`; trade **often and well** (a 1-trade run ≈ hold); the reward
+family is intentional — add variants, never collapse; BTC-only until the data mine backfills altcoins.
+`combo_noaction=-1` is a latent synthetic-short bias — sweep as a variant, don't edit in place.
 
 ## The data mine — a shared dataset project for every model trainer
 
@@ -197,6 +202,15 @@ inf/NaN sanitisation, and mining the missing intervals (the emitter's indicator 
 for the runtime formulas — already ported + verified — not a storage artifact); (b) **generalise the
 QW6 `derive_cache`** — 1m canonical, derive+cache higher fidelities centrally so consumers never
 re-aggregate; (c) the content-addressed cache + remote-runner data path pulling from one curated origin.
+
+**Guided data discovery (north-star outcome 1).** A user often has a PROBLEM to solve but doesn't know
+what data to mine or how. The data mine must guide them from "here's my problem" to a concrete dataset:
+(1) take the problem statement + the model goal; (2) run **deep research / exploration of what data
+actually exists** (sources, APIs, public datasets, coverage, cost, licence, granularity) — reuse the
+deep-research harness; (3) propose candidate datasets + what to mine + how (the miner config) + the
+trade-offs; (4) hand off to the gather→clean→cache pipeline above. This makes "I have a problem" → "I have
+training data" a guided flow, not tribal knowledge — the data-side analogue of the hub's propose→run→judge
+loop. Output a short cited report + a recommended mining plan the user approves.
 
 ## Code-change risk model — the second workspace ML tool (deferred)
 
