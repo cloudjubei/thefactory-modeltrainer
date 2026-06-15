@@ -97,11 +97,14 @@ let runsTextFilter = ''
 let runsHideBad = false
 let runsVersionFilter = ''
 let runsCompareKeys = new Set()
+// First click on Delete arms it (in-app confirm — window.confirm is blocked in the
+// embedding iframe sandbox); the second click within the timeout performs the delete.
+let runsDeleteArmed = false
+let runsDeleteArmTimer = null
 let runsViewMode = 'runs'
 // When drilled into a single setup's runs (via the by-setup view), this holds that
 // setup's key so the runs view can show its conclusion-note editor (C4 ledger).
 let runsDrillSetupKey = null
-let chartSplits = {}
 // 1s ticker for the in-flight runs' elapsed timers (mm:ss) between the 3s polls.
 let currentItemTimer = null
 let runnersCache = []
@@ -228,6 +231,24 @@ function iconDeleteSvg() {
     '</svg>'
   )
 }
+function iconCheckSvg() {
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="20 6 9 17 4 12"/></svg>'
+  )
+}
+function iconCrossSvg() {
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+  )
+}
+function iconChatSvg() {
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6a8.5 8.5 0 0 1-.9-3.9 8.38 8.38 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z"/></svg>'
+  )
+}
 // A balance-scale glyph for the Judge button (the LLM weighs runs against each other).
 function iconJudgeSvg() {
   return (
@@ -241,8 +262,71 @@ function iconJudgeSvg() {
   )
 }
 // Small circular "?" button with a styled hover/focus callout (no native title).
-function helpCalloutHtml(text) {
-  return `<span class="help-callout"><button type="button" class="help-btn" aria-label="What does this do?">?</button><span class="help-pop" role="tooltip">${escapeHtml(text)}</span></span>`
+// Help is shown by HOVERING (or focusing) the item it describes — no "?" buttons. Any
+// element carrying a `data-help` attribute is a trigger; `helpAttr(text)` produces that
+// attribute fragment to splice into the item's opening tag.
+function helpAttr(text) {
+  return text ? ` data-help="${escapeHtml(text)}"` : ''
+}
+let helpTooltipEl = null
+let helpTooltipFor = null
+function ensureHelpTooltip() {
+  if (helpTooltipEl) return helpTooltipEl
+  helpTooltipEl = document.createElement('div')
+  helpTooltipEl.className = 'app-tooltip'
+  helpTooltipEl.setAttribute('role', 'tooltip')
+  helpTooltipEl.hidden = true
+  document.body.appendChild(helpTooltipEl)
+  return helpTooltipEl
+}
+// Position a single fixed tooltip next to its trigger, CLAMPED to the viewport so it is
+// never cut off near an edge or by a scroll container (prefers below, flips above).
+function positionHelpTooltip(target) {
+  const tip = helpTooltipEl
+  if (!tip || tip.hidden) return
+  const r = target.getBoundingClientRect()
+  const margin = 8
+  const tw = tip.offsetWidth
+  const th = tip.offsetHeight
+  let top = r.bottom + 6
+  if (top + th + margin > window.innerHeight) top = r.top - th - 6
+  if (top < margin) top = margin
+  let left = r.left + r.width / 2 - tw / 2
+  left = Math.max(margin, Math.min(left, window.innerWidth - tw - margin))
+  tip.style.left = `${Math.round(left)}px`
+  tip.style.top = `${Math.round(top)}px`
+}
+function showHelpTooltip(target) {
+  const text = target.getAttribute('data-help')
+  if (!text) return
+  const tip = ensureHelpTooltip()
+  helpTooltipFor = target
+  tip.textContent = text
+  tip.hidden = false
+  positionHelpTooltip(target)
+}
+function hideHelpTooltip() {
+  helpTooltipFor = null
+  if (helpTooltipEl) helpTooltipEl.hidden = true
+}
+function setupHelpTooltips() {
+  document.addEventListener('mouseover', (e) => {
+    const t = e.target.closest && e.target.closest('[data-help]')
+    if (t && t !== helpTooltipFor) showHelpTooltip(t)
+  })
+  document.addEventListener('mouseout', (e) => {
+    if (!helpTooltipFor) return
+    if (e.relatedTarget && helpTooltipFor.contains(e.relatedTarget)) return
+    if (e.target.closest && e.target.closest('[data-help]') === helpTooltipFor) hideHelpTooltip()
+  })
+  document.addEventListener('focusin', (e) => {
+    const t = e.target.closest && e.target.closest('[data-help]')
+    if (t) showHelpTooltip(t)
+  })
+  document.addEventListener('focusout', hideHelpTooltip)
+  // A scroll moves the trigger out from under a fixed tooltip — just hide it; it reappears
+  // on the next hover, already clamped.
+  window.addEventListener('scroll', hideHelpTooltip, true)
 }
 function queuedStatusText(ahead) {
   return `Queued — ${ahead} ahead of it.`
@@ -721,6 +805,35 @@ async function inspectProject(projectKey, dir, manifestRelPath) {
     await renderHome()
   }
 }
+// On opening a project, refresh its manifest record from disk in the background (the
+// `inspect-trainer` activity re-reads trainer.json) so an edit — e.g. dropping the
+// `evaluate` command for an RL project — takes effect without a manual Re-inspect.
+// Re-applies + re-renders only if the manifest actually changed.
+async function refreshProjectManifest(project) {
+  if (!embedded() || !project || !window.OverseerBridge) return
+  const epoch = projectEpoch
+  try {
+    const started = await window.OverseerBridge.startActivity('inspect-trainer', {
+      projectKey: project.key,
+      dir: project.dir,
+      ...(project.manifestRelPath ? { manifestRelPath: project.manifestRelPath } : {}),
+    })
+    const activityId = started && started.activityId
+    if (!activityId) return
+    await observeQuickActivity(activityId)
+    if (epoch !== projectEpoch || !currentProject || currentProject.key !== project.key) return
+    manifestsCache = await readManifestRecords()
+    const rec = manifestsCache.get(project.key)
+    if (!rec || !rec.manifest) return
+    if (JSON.stringify(rec.manifest) === JSON.stringify(manifest)) return
+    manifest = rec.manifest
+    applyManifestChrome()
+    renderLaunchForm()
+    if (activeTabId === 'runs') renderRunsTable()
+  } catch {
+    // best-effort — a stale manifest just persists until the next Re-inspect
+  }
+}
 // Two-click remove: the first click arms the button ("Confirm"), the second
 // deletes the trainer-project record. The manifest + run records are kept, so
 // re-adding the same project picks its history right back up.
@@ -1143,7 +1256,6 @@ function resetDashboardState() {
   queueCache = []
   runsFilterKeys = null
   runsFilterLabel = ''
-  chartSplits = {}
   launchRunnersCache = []
   syncInFlightTimer([])
   closeRunDetail()
@@ -1193,6 +1305,9 @@ async function openProject(projectKey) {
   await processSettledCampaignEffects()
   if (epoch !== projectEpoch) return
   pumpQueue()
+  // Pick up any edit to the project's trainer.json (e.g. removing the `evaluate` command)
+  // without a manual Re-inspect — refreshes the cached manifest record in the background.
+  void refreshProjectManifest(project)
 }
 function goHome() {
   projectEpoch += 1
@@ -1449,6 +1564,7 @@ async function processAutoEvalMarkers() {
   await refreshQueue()
 }
 async function enqueueMissingEvaluations(campaign, baseParams) {
+  if (!evalEnabled()) return
   const keys = Array.isArray(campaign.keys) ? campaign.keys : []
   if (!keys.length) return
   const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
@@ -1461,6 +1577,8 @@ async function enqueueMissingEvaluations(campaign, baseParams) {
     if (!run) continue
     const s = run.summary
     if (s.status && s.status !== 'completed') continue
+    // Degenerate runs (zero/few trades, NaN, etc.) have no result worth re-testing — auto-eval skips them.
+    if (runIsDegenerate(run)) continue
     if (!(s.artifacts && s.artifacts.checkpoint)) continue
     if (evaluations.has(key) || queuedKeys.has(key) || evaluatingKeys.has(key)) continue
     pending.push(key)
@@ -1709,7 +1827,16 @@ const METRIC_LABEL = {
   win_pct: 'win %',
   stop_losses: 'SLs',
   final_net_worth: 'Final $',
+  max_drawdown_pct: 'drawdown',
 }
+// Metrics shown to a fixed 2 decimals in the table (money + ratios read cleaner that way).
+const TWO_DP_METRICS = new Set([
+  'win_pct',
+  'final_net_worth',
+  'sharpe',
+  'cagr_pct',
+  'max_drawdown_pct',
+])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.
 const TABLE_HIDDEN_METRICS = new Set([
@@ -1721,9 +1848,10 @@ const TABLE_HIDDEN_METRICS = new Set([
 function metricLabel(mk) {
   return METRIC_LABEL[mk] || mk.replace(/_pct$/, ' %').replace(/_/g, ' ')
 }
-// win % reads as a precise percentage (2dp); everything else uses the objective formatter.
+// Some metrics read cleaner at a fixed 2dp (win %, money, ratios); the rest use the
+// objective formatter.
 function formatMetricValue(mk, v) {
-  if (mk === 'win_pct') return v.toFixed(2)
+  if (TWO_DP_METRICS.has(mk)) return v.toFixed(2)
   return formatObjective(v)
 }
 function runMetricKeys() {
@@ -1768,6 +1896,12 @@ function vsHoldValue(s) {
   const ret = Number(s && s.metrics && s.metrics.total_return_pct)
   const hold = Number(s && s.benchmark && s.benchmark.hold_return_pct)
   return Number.isFinite(ret) && Number.isFinite(hold) ? ret - hold : NaN
+}
+// Whether this project supports re-testing a saved checkpoint ("Eval"). The switch is the
+// manifest declaring an `evaluate` command: classification/regression projects do; RL
+// projects don't (the real test is a live environment/market), so all Eval UI hides.
+function evalEnabled() {
+  return !!(manifest && manifest.evaluate)
 }
 // The column model the table renders + sorts from; metric columns are derived.
 function runsColumns() {
@@ -1839,27 +1973,34 @@ function runsColumns() {
       sort: (r) => vsHoldValue(r.summary),
     })
   }
-  cols.push(
-    {
-      id: 'judge',
-      label: 'Judge',
-      num: true,
-      get: (r) => verdictChipHtml(verdictsCache.get(r.key)),
-      sort: (r) => {
-        const v = verdictsCache.get(r.key)
-        return v ? Number(v.score) : NaN
-      },
+  cols.push({
+    id: 'judge',
+    label: 'Judge',
+    num: true,
+    help: "The LLM judge's blended score (0–100) for this run — objective rank + the model's qualitative read of the config/metrics. Run “Judge” on selected runs to fill it. “—” = not judged.",
+    get: (r) => verdictChipHtml(verdictsCache.get(r.key)),
+    sort: (r) => {
+      const v = verdictsCache.get(r.key)
+      return v ? Number(v.score) : NaN
     },
-    {
+  })
+  // Eval (re-test a saved checkpoint) only applies to projects that declare an `evaluate`
+  // command — RL projects don't (you test on the live environment/market), so the column,
+  // detail section and auto-eval option all disappear for them.
+  if (evalEnabled()) {
+    cols.push({
       id: 'eval',
       label: 'Eval',
       num: true,
+      help: 'Re-tests the run’s saved checkpoint (no retraining). green = held up, amber = came back worse.',
       get: (r) => evalChipHtml(r),
       sort: (r) => {
         const e = evaluationsCache.get(r.key)
         return e ? Number(e.objective) : NaN
       },
-    },
+    })
+  }
+  cols.push(
     {
       id: 'took',
       label: 'Took',
@@ -2097,19 +2238,21 @@ function runsToolbarHtml(shownCount, total) {
     Object.values(runsLeverFilter).some(Boolean)
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
   const toggle = `<div class="runs-viewmode">
-    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup">By setup ${helpCalloutHtml('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment">By experiment ${helpCalloutHtml('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}</button>
+    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup"${helpAttr('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}>By setup</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>
   </div>`
   const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
     <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
   </label>`
-  const versions = [...new Set(runsCache.map(runVersionOf))].sort()
-  const versionFilter =
-    versions.length > 1
-      ? `<select class="runs-filter-lever" id="runs-version-filter" title="Show only runs from one pipeline version (cross-version scores aren't comparable).">
+  const versions = [
+    ...new Set([
+      ...runsCache.map(runVersionOf),
+      String((manifest && manifest.pipelineVersion) || '1'),
+    ]),
+  ].sort()
+  const versionFilter = `<select class="runs-filter-lever" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable. Set automatically when you open a version from the Versions tab.")}>
           <option value="">version: any</option>
           ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
         </select>`
-      : ''
   return `<div class="runs-toolbar">
     ${toggle}
     ${versionFilter}
@@ -2172,7 +2315,7 @@ function bySetupTableHtml(filtered) {
     })
     .join('')
   return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Setup</th><th class="num">seeds</th><th class="num">stability ${helpCalloutHtml('Seed robustness: how many seeds land on the good side of 0 (↑), and ⚠ if the objective flips sign across seeds — a fragile setup you should not trust on one lucky run. Hover a cell for the IQR (spread). Needs ≥2 seeds.')}</th><th class="num">${on} avg</th><th class="num">${on} range</th><th class="num">${on} median</th><th class="num">vs hold avg</th><th>LLM verdict ${helpCalloutHtml("The judge's one-line verdict for this setup's best run (if scored).")}</th><th>Your conclusion ${helpCalloutHtml('Your note for this setup — open the setup to edit. The ledger of everything tried.')}</th></tr></thead>
+    <thead><tr><th>Setup</th><th class="num">seeds</th><th class="num"${helpAttr('Seed robustness: how many seeds land on the good side of 0 (↑), and ⚠ if the objective flips sign across seeds — a fragile setup you should not trust on one lucky run. Hover a cell for the IQR (spread). Needs ≥2 seeds.')}>stability</th><th class="num">${on} avg</th><th class="num">${on} range</th><th class="num">${on} median</th><th class="num">vs hold avg</th><th${helpAttr("The judge's one-line verdict for this setup's best run (if scored).")}>LLM verdict</th><th${helpAttr('Your note for this setup — open the setup to edit. The ledger of everything tried.')}>Your conclusion</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`
 }
 // RB3 cell: seed-robustness at a glance — "k/n ↑" positive seeds, ⚠ when sign-unstable, IQR on
@@ -2220,7 +2363,7 @@ function setupNoteEditorHtml() {
   if (!runsDrillSetupKey) return ''
   const note = (notesCache.get(runsDrillSetupKey) || {}).note || ''
   return `<div class="setup-note-editor">
-    <label class="setup-note-label">Your conclusion for this setup ${helpCalloutHtml('What did this setup teach you? Saved against the setup (not one run) so it survives re-runs — your ledger of everything tried.')}</label>
+    <label class="setup-note-label"${helpAttr('What did this setup teach you? Saved against the setup (not one run) so it survives re-runs — your ledger of everything tried.')}>Your conclusion for this setup</label>
     <textarea id="setup-note-text" class="setup-note-text" rows="2" placeholder="e.g. learns but overfits past episode 20; vs-hold only on 1h data…">${escapeHtml(note)}</textarea>
     <div class="setup-note-actions"><button type="button" id="setup-note-save" class="ghost-btn">Save conclusion</button><span id="setup-note-status" class="card-sub"></span></div>
   </div>`
@@ -2277,18 +2420,18 @@ function renderRunsTable() {
   const allSelected = shown.length > 0 && shown.every((r) => runsCompareKeys.has(r.key))
   const header = cols
     .map((c) => {
-      const help = c.help ? helpCalloutHtml(c.help) : ''
       // The compare column header is a "select all visible" checkbox.
       if (c.id === 'compare') {
         return `<th><input type="checkbox" id="runs-select-all"${allSelected ? ' checked' : ''} aria-label="Select all visible runs" title="Select all visible runs" /></th>`
       }
-      if (c.noSort) return `<th class="${c.num ? 'num' : ''}">${escapeHtml(c.label)}${help}</th>`
+      if (c.noSort)
+        return `<th class="${c.num ? 'num' : ''}"${helpAttr(c.help)}>${escapeHtml(c.label)}</th>`
       const arrow = runsSortKey === c.id ? (runsSortDir === 'asc' ? ' ▲' : ' ▼') : ''
-      return `<th class="runs-th${c.num ? ' num' : ''}" data-sort="${c.id}">${escapeHtml(c.label)}${help}${arrow}</th>`
+      return `<th class="runs-th${c.num ? ' num' : ''}" data-sort="${c.id}"${helpAttr(c.help)}>${escapeHtml(c.label)}${arrow}</th>`
     })
     .join('')
   const rows = shown.map((r) => runRowHtml(r, cols)).join('')
-  const legend = `<p class="runs-legend">Click a header to sort · hover <span class="help-legend">?</span> for what a column means · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold · greyed = failed/degenerate · "—" = not recorded (re-run to populate).</p>`
+  const legend = `<p class="runs-legend">Click a header to sort · hover a column header for what it means · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold · greyed = failed/degenerate · "—" = not recorded (re-run to populate).</p>`
   setHtml(
     body,
     `${toolbar}${setupNoteEditorHtml()}<div class="table-wrap"><table class="runs-table">
@@ -2309,12 +2452,26 @@ function syncRunsSelectionUI() {
     judge.disabled = judging || n === 0
     judge.innerHTML = judging
       ? busyButtonHtml('Judging…')
-      : `${iconJudgeSvg()}<span>Judge selected${n ? ` (${n})` : ''}</span>`
+      : `${iconJudgeSvg()}<span>Judge${n ? ` (${n})` : ''}</span>`
   }
   const del = byId('runs-delete-selected')
   if (del) {
     del.disabled = n === 0
-    del.innerHTML = `${iconDeleteSvg()}<span>Delete selected${n ? ` (${n})` : ''}</span>`
+    del.classList.toggle('is-armed', runsDeleteArmed && n > 0)
+    del.innerHTML =
+      runsDeleteArmed && n > 0
+        ? `${iconDeleteSvg()}<span>Confirm? (${n})</span>`
+        : `${iconDeleteSvg()}<span>(${n})</span>`
+  }
+}
+function disarmRunsDelete() {
+  if (runsDeleteArmTimer) {
+    clearTimeout(runsDeleteArmTimer)
+    runsDeleteArmTimer = null
+  }
+  if (runsDeleteArmed) {
+    runsDeleteArmed = false
+    syncRunsSelectionUI()
   }
 }
 async function renderRuns() {
@@ -2358,7 +2515,17 @@ function renderCompare() {
   // Selecting ≥2 runs is a COMPARE gesture — collapse any single-run detail (and its
   // row highlight) so only the compare pane shows.
   if (selectedRunKey) closeRunDetail()
-  const headRow = runs.map((r) => `<th><code>${escapeHtml(shortKey(r.key))}</code></th>`).join('')
+  // One stable colour per run, reused in the id headers AND the return curves below.
+  const runColors = new Map(
+    runs.map((r, i) => [shortKey(r.key), CHART_PALETTE[i % CHART_PALETTE.length]]),
+  )
+  const colspan = runs.length + 1
+  const headRow = runs
+    .map((r) => {
+      const c = runColors.get(shortKey(r.key))
+      return `<th><code class="cmp-id" style="color:${c};border-color:${c}">${escapeHtml(shortKey(r.key))}</code></th>`
+    })
+    .join('')
   const diffRows = Object.keys((manifest && manifest.levers) || {})
     .map((lk) => {
       const vals = runs.map((r) => (r.summary.config || {})[lk])
@@ -2375,12 +2542,25 @@ function renderCompare() {
       const cells = runs
         .map((r) => {
           const v = r.summary.metrics && r.summary.metrics[mk]
-          return `<td class="num">${escapeHtml(typeof v === 'number' ? formatObjective(v) : v === undefined ? '—' : String(v))}</td>`
+          return `<td class="num">${escapeHtml(typeof v === 'number' ? formatMetricValue(mk, v) : v === undefined ? '—' : String(v))}</td>`
         })
         .join('')
-      return `<tr><th>${escapeHtml(mk.replace(/_pct$/, ' %').replace(/_/g, ' '))}</th>${cells}</tr>`
+      return `<tr><th>${escapeHtml(metricLabel(mk))}</th>${cells}</tr>`
     })
     .join('')
+  // Config diff FIRST, then metrics — one table, run ids as colour-coded columns. The
+  // wrapper scrolls horizontally so many runs don't bleed past the card.
+  const sectionRow = (label) =>
+    `<tr class="cmp-section"><th colspan="${colspan}">${escapeHtml(label)}</th></tr>`
+  const comparisonTable = `<div class="compare-table-wrap"><table class="kv-table compare-table">
+      <thead><tr><th></th>${headRow}</tr></thead>
+      <tbody>
+        ${sectionRow('Config diff')}
+        ${diffRows || `<tr><td colspan="${colspan}" class="card-sub">Selected runs share the same config.</td></tr>`}
+        ${sectionRow('Metrics')}
+        ${metricRows}
+      </tbody>
+    </table></div>`
   const versions = new Set(runs.map((r) => String((r.summary && r.summary.pipelineVersion) || '1')))
   const versionWarn =
     versions.size > 1
@@ -2393,13 +2573,10 @@ function renderCompare() {
       <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
     </div>
     ${versionWarn}
-    ${compareEquityChartHtml(runs)}
-    <h3>Config diff</h3>
-    ${diffRows ? `<table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${diffRows}</tbody></table>` : '<p class="card-sub">Selected runs share the same config.</p>'}
-    <h3>Metrics</h3>
-    <table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${metricRows}</tbody></table>
+    ${comparisonTable}
+    ${compareEquityChartHtml(runs, runColors)}
     <h3>Charts</h3>
-    <div class="charts-body">${chartsSectionsHtml()}</div>`,
+    <div class="charts-body">${chartsSectionsHtml(runs, runColors)}</div>`,
   )
   card.hidden = false
   syncRunsMdLayout()
@@ -2407,7 +2584,7 @@ function renderCompare() {
 // Overlay each selected run's equity as a % -return curve, plus the buy-and-hold
 // control derived from a run's price series — so the lines are comparable across
 // runs with different absolute net worth.
-function compareEquityChartHtml(runs) {
+function compareEquityChartHtml(runs, runColors) {
   const points = []
   for (const r of runs) {
     const eq = r.summary.series && r.summary.series.equity
@@ -2432,15 +2609,22 @@ function compareEquityChartHtml(runs) {
     }
   }
   if (points.length < 2) return ''
-  return `<div class="chart-wrap">${buildLineChart({
-    points,
-    xLabel: 'step',
-    yLabel: 'return %',
-    width: 680,
-    height: 240,
-    markers: false,
-    ariaLabel: 'compared returns vs buy and hold',
-  })}</div>`
+  // Reuse the run-id colours from the comparison table; buy & hold gets a muted grey so it
+  // reads as the control, not another run.
+  const groupColors = new Map(runColors || [])
+  if (points.some((p) => p.group === 'buy & hold')) groupColors.set('buy & hold', '#94a3b8')
+  return `<h3>Returns vs buy &amp; hold</h3>${chartLegendHtml(groupColors)}<div class="chart-wrap">${buildLineChart(
+    {
+      points,
+      xLabel: 'step',
+      yLabel: 'return %',
+      width: 680,
+      height: 240,
+      markers: false,
+      groupColors,
+      ariaLabel: 'compared returns vs buy and hold',
+    },
+  )}</div>`
 }
 function metricsTableHtml(metrics) {
   const entries = Object.entries(metrics || {})
@@ -2626,17 +2810,19 @@ function priceActionSectionHtml(summary) {
   const markers = Array.isArray(chart.markers) ? chart.markers : []
   const counts = {}
   for (const m of markers) counts[m.type] = (counts[m.type] || 0) + 1
-  const legend = ['buy', 'sell', 'tp', 'sl']
+  // Always label the price line; then each action marker that occurred (with its count).
+  const markerKeys = ['buy', 'sell', 'tp', 'sl']
     .filter((t) => counts[t])
     .map((t) => `<span class="run-mark-key run-mark-${t}">${escapeHtml(t)} ${counts[t]}</span>`)
     .join(' ')
+  const legend = `<p class="badges-row run-mark-legend"><span class="run-mark-key run-mark-price">price</span>${markerKeys ? ` ${markerKeys}` : ''}</p>`
   const svg = buildPriceActionChart(chart, {
     xLabel: 'step',
     ariaLabel: 'price with trade actions',
     width: 640,
     height: 200,
   })
-  return `<h3>Price &amp; actions</h3><div class="chart-wrap">${svg}</div>${legend ? `<p class="badges-row run-mark-legend">${legend}</p>` : ''}`
+  return `<h3>Price &amp; actions</h3>${legend}<div class="chart-wrap">${svg}</div>`
 }
 // Model equity vs the buy-and-hold control: what the portfolio would be worth if
 // you'd simply bought at step 0 and held. Hold is a comparison CONTROL (not a
@@ -2658,6 +2844,10 @@ function equityVsHoldSectionHtml(summary) {
     points.push({ x: i, y: Number(equity[i]), group: 'model' })
     points.push({ x: i, y: hold, group: 'buy & hold' })
   }
+  const groupColors = new Map([
+    ['model', CHART_PALETTE[0]],
+    ['buy & hold', '#94a3b8'],
+  ])
   const svg = buildLineChart({
     points,
     xLabel: 'step',
@@ -2665,6 +2855,7 @@ function equityVsHoldSectionHtml(summary) {
     width: 640,
     height: 200,
     markers: false,
+    groupColors,
     ariaLabel: 'model equity vs buy and hold',
   })
   const modelPct = ((Number(equity[n - 1]) - start) / start) * 100
@@ -2673,6 +2864,7 @@ function equityVsHoldSectionHtml(summary) {
   const fmt = (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
   const cls = delta >= 0 ? 'is-ok' : 'is-warn'
   return `<h3>Equity vs buy &amp; hold <span class="card-sub">— control</span></h3>
+    ${chartLegendHtml(groupColors)}
     <div class="chart-wrap">${svg}</div>
     <p class="badges-row">model ${escapeHtml(fmt(modelPct))} · hold ${escapeHtml(fmt(holdPct))}
       · <span class="badge ${cls}">${escapeHtml(`${delta >= 0 ? '+' : ''}${delta.toFixed(1)} pts vs hold`)}</span></p>`
@@ -2697,16 +2889,9 @@ function failureDetailHtml(s, key) {
     Array.isArray(s.logTail) && s.logTail.length
       ? `<details class="log-tail" open><summary>Last output — ${s.logTail.length} lines (stdout + stderr)</summary><pre class="log-tail-pre">${escapeHtml(s.logTail.join('\n'))}</pre></details>`
       : '<p class="card-sub">No log output was captured for this run.</p>'
-  // Re-run (clone the exact config to Launch) + embedded-only "Ask AI for help"
-  // (opens the host chat seeded with the failure, no copy-paste).
-  const aiHelp =
-    embedded() && window.OverseerBridge && window.OverseerBridge.discussTopic
-      ? `<button type="button" data-action="help" data-key="${escapeHtml(key || '')}">Ask AI for help</button>`
-      : ''
-  const actions = key
-    ? `<div class="form-actions"><button type="button" data-action="clone" data-key="${escapeHtml(key)}">Re-run (clone to Launch)</button>${aiHelp}</div>`
-    : ''
-  return `<div class="failure-detail">${err}${tail}${actions}</div>`
+  // Re-run + diagnose are the header icons now (⧉ clone-to-Launch and the chat button),
+  // shown for EVERY run — so the failure block is just the error + log.
+  return `<div class="failure-detail">${err}${tail}</div>`
 }
 function renderRunDetail(key) {
   const panel = byId('run-detail')
@@ -2718,6 +2903,11 @@ function renderRunDetail(key) {
   }
   const s = run.summary
   const failed = s.status === 'failed'
+  const degenerate = !failed && !!(s.health && s.health.status && s.health.status !== 'ok')
+  // Verdict only makes sense for a healthy run (degenerate auto-rejects, failed has no
+  // result). Evaluation needs that AND a project that supports eval at all (not RL).
+  const showVerdict = !failed && !degenerate
+  const showEval = showVerdict && evalEnabled()
   const flags = (s.health && Array.isArray(s.health.flags) && s.health.flags) || []
   const flagChips = flags.length
     ? flags.map((f) => `<span class="badge is-bad">${escapeHtml(f)}</span>`).join(' ')
@@ -2744,16 +2934,16 @@ function renderRunDetail(key) {
       </div>
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
+        <button type="button" data-action="chat" data-key="${escapeHtml(run.key)}" class="icon-btn"${chatAboutRunAvailable() ? '' : ' disabled'} title="Discuss this run with the AI" aria-label="Discuss this run">${iconChatSvg()}</button>
         <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
         <button type="button" data-action="delete-run" data-key="${escapeHtml(run.key)}" class="icon-btn icon-btn-danger" title="Delete this run (and its evaluation/verdict)" aria-label="Delete run">${iconDeleteSvg()}</button>
         <button type="button" id="run-detail-close" class="icon-btn" title="Close" aria-label="Close">✕</button>
       </div>
     </div>
     ${failed ? failureDetailHtml(s, run.key) : ''}
-    <h3>Health flags</h3>
-    <p class="badges-row">${flagChips}</p>
-    ${verdictSectionHtml(verdictsCache.get(run.key))}
-    ${evaluationSectionHtml(run)}
+    ${flags.length ? `<h3>Health flags</h3><p class="badges-row">${flagChips}</p>` : ''}
+    ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
+    ${showEval ? evaluationSectionHtml(run) : ''}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
@@ -2809,16 +2999,29 @@ function cloneRunToLaunch(key) {
   showTab('launch')
   applyPresetFixed(run.summary.config || {})
 }
-// Open the host chat sidebar seeded with a failed run's error + recent log + config,
-// so the user can diagnose/fix without hand-copying anything.
-async function onHelpWithFailure(key) {
+function chatAboutRunAvailable() {
+  return embedded() && !!window.OverseerBridge && !!window.OverseerBridge.discussTopic
+}
+// Open the host chat (a project topic) preloaded with everything about THIS run — config,
+// metrics, health, objective, and (for a failure) the error + log tail — so the user can
+// discuss or diagnose ANY run without hand-copying anything.
+async function chatAboutRun(key) {
   const run = runsCache.find((r) => r.key === key)
-  if (!run || !embedded() || !window.OverseerBridge || !window.OverseerBridge.discussTopic) return
+  if (!run || !chatAboutRunAvailable()) return
   const s = run.summary
+  const failed = s.status === 'failed'
   const logTail = Array.isArray(s.logTail) ? s.logTail.slice(-40).join('\n') : ''
+  const verdict = verdictsCache.get(key)
   const seed = [
-    'A training run failed and I need help diagnosing and fixing it.',
-    `Run: ${shortKey(key)} (${objectiveName()} trainer).`,
+    failed
+      ? 'A training run FAILED and I want to diagnose and fix it.'
+      : 'I want to discuss this training run — what it did and how to improve it.',
+    `Run: ${shortKey(key)} · ${objectiveName()} trainer · pipeline v${escapeHtml(String(s.pipelineVersion || '1'))}.`,
+    failed
+      ? ''
+      : `Objective (${objectiveName()}): ${formatObjective(s.objective)} · health: ${(s.health && s.health.status) || 'unknown'}.`,
+    s.metrics ? `Metrics:\n${JSON.stringify(s.metrics, null, 2)}` : '',
+    verdict && verdict.why ? `Judge verdict: ${verdict.why}` : '',
     s.error ? `Error:\n${s.error}` : '',
     logTail
       ? `Recent log output (last ${Math.min(40, (s.logTail || []).length)} lines):\n${logTail}`
@@ -2828,7 +3031,7 @@ async function onHelpWithFailure(key) {
     .filter(Boolean)
     .join('\n\n')
   try {
-    await window.OverseerBridge.discussTopic({ title: `Failed run ${shortKey(key)}`, seed })
+    await window.OverseerBridge.discussTopic({ title: `Run ${shortKey(key)}`, seed })
   } catch {
     if (selectedRunKey === key)
       setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
@@ -2980,7 +3183,6 @@ function setupRuns() {
         })
         return
       }
-      if (event.target.closest('.help-btn')) return // a "?" tooltip, not an action
       const viewBtn = event.target.closest('.runs-view-btn')
       if (viewBtn) {
         runsViewMode = viewBtn.dataset.view
@@ -3011,6 +3213,7 @@ function setupRuns() {
       if (cb) {
         if (cb.checked) runsCompareKeys.add(cb.dataset.key)
         else runsCompareKeys.delete(cb.dataset.key)
+        disarmRunsDelete()
         renderCompare()
         syncRunsSelectionUI()
         return
@@ -3019,6 +3222,7 @@ function setupRuns() {
         const shownKeys = applyRunsFilters(runsCache).map((r) => r.key)
         if (event.target.checked) for (const k of shownKeys) runsCompareKeys.add(k)
         else for (const k of shownKeys) runsCompareKeys.delete(k)
+        disarmRunsDelete()
         renderRunsTable()
         return
       }
@@ -3062,8 +3266,8 @@ function setupRuns() {
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
       const cloneBtn = event.target.closest('button[data-action="clone"]')
       if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
-      const helpBtn = event.target.closest('button[data-action="help"]')
-      if (helpBtn) onHelpWithFailure(helpBtn.dataset.key)
+      const chatBtn = event.target.closest('button[data-action="chat"]')
+      if (chatBtn) chatAboutRun(chatBtn.dataset.key)
       const unrunBtn = event.target.closest('button[data-action="toggle-unrunnable"]')
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
       const delBtn = event.target.closest('button[data-action="delete-run"]')
@@ -3078,19 +3282,11 @@ function setupRuns() {
         renderRunsTable()
       }
     })
-    // The relocated analysis charts live in the compare pane; their split selects
-    // re-render the compare (which rebuilds the charts).
-    compareCard.addEventListener('change', (event) => {
-      const select = event.target.closest('select[data-chart-split]')
-      if (!select) return
-      chartSplits[select.dataset.chartSplit] = select.value
-      renderCompare()
-    })
   }
   const judgeBtn = byId('judge-btn')
   if (judgeBtn) {
     judgeBtn.addEventListener('click', onJudgeClick)
-    judgeBtn.insertAdjacentHTML('afterend', helpCalloutHtml(JUDGE_HELP_TEXT))
+    judgeBtn.setAttribute('data-help', JUDGE_HELP_TEXT)
   }
   const deleteSelectedBtn = byId('runs-delete-selected')
   if (deleteSelectedBtn) deleteSelectedBtn.addEventListener('click', deleteSelectedRuns)
@@ -3290,33 +3486,9 @@ function buildScatterChart(opts) {
   return buildXyChart({ ...opts, line: false })
 }
 
-// --- Charts tab ------------------------------------------------------------------
-// Each chart carries a per-chart "Split by" selector over the manifest's choice
-// levers; selections live in chartSplits while the dashboard is open. Split
-// charts colour-group their points by the lever's value in each run's config.
-function chartSplitKey(chartId) {
-  const lever = chartSplits[chartId]
-  const spec = lever && manifest && manifest.levers && manifest.levers[lever]
-  return spec && spec.type === 'choice' ? lever : ''
-}
-function runSplitGroup(run, lever) {
-  const config = run.summary.config || {}
-  return config[lever] === undefined ? '—' : String(config[lever])
-}
-function splitSelectHtml(chartId) {
-  const choices = leverEntries().filter(([, spec]) => spec.type === 'choice')
-  if (!choices.length) return ''
-  const selected = chartSplitKey(chartId)
-  const options = ['<option value="">None</option>']
-    .concat(
-      choices.map(
-        ([key]) =>
-          `<option value="${escapeHtml(key)}"${key === selected ? ' selected' : ''}>${escapeHtml(key)}</option>`,
-      ),
-    )
-    .join('')
-  return `<label class="chart-split"><span>Split by</span> <select data-chart-split="${escapeHtml(chartId)}">${options}</select></label>`
-}
+// --- Comparison charts -----------------------------------------------------------
+// Shown in the multi-run COMPARE pane, scoped to the SELECTED runs and colour-coded by
+// run (the same colours as the comparison table + return curves).
 function chartSectionHtml(title, svg, emptyText, extras) {
   const controls = (extras && extras.controls) || ''
   const legend = (extras && extras.legend) || ''
@@ -3336,18 +3508,13 @@ function spansTwoOrders(values) {
   if (positive.length < 2) return false
   return Math.max(...positive) / Math.min(...positive) >= 100
 }
-// Group colours for one split lever, computed across every run so the same
-// value keeps the same colour in every chart of the dashboard.
-function splitGroupColors(split) {
-  return split ? groupColorMap(runsCache.map((r) => runSplitGroup(r, split))) : null
-}
-function objectiveTimelineSvg(split, groupColors) {
-  const points = runsCache
+function objectiveTimelineSvg(runs, runColors) {
+  const points = runs
     .map((r) => ({
       x: new Date(runRanAt(r.summary)).getTime(),
       y: Number(r.summary.objective),
       label: `${shortKey(r.key)} · ${objectiveName()} ${formatObjective(r.summary.objective)} · ${formatWhen(runRanAt(r.summary))}`,
-      group: split ? runSplitGroup(r, split) : undefined,
+      group: shortKey(r.key),
     }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
     .sort((a, b) => a.x - b.x)
@@ -3361,32 +3528,29 @@ function objectiveTimelineSvg(split, groupColors) {
     width: 920,
     height: 280,
     ariaLabel: `${objectiveName()} over time`,
-    groupColors,
+    groupColors: runColors,
   })
 }
-function timelineChartSectionHtml() {
-  const split = chartSplitKey('timeline')
-  const groupColors = splitGroupColors(split)
-  const svg = objectiveTimelineSvg(split, groupColors)
-  return chartSectionHtml(`${objectiveName()} over time`, svg, 'Not enough runs yet.', {
-    controls: splitSelectHtml('timeline'),
-    legend: svg ? chartLegendHtml(groupColors) : '',
+function timelineChartSectionHtml(runs, runColors) {
+  const svg = objectiveTimelineSvg(runs, runColors)
+  return chartSectionHtml(`${objectiveName()} over time`, svg, 'Not enough selected runs.', {
+    legend: svg ? chartLegendHtml(runColors) : '',
   })
 }
-// Small-multiple scatters: one per numeric lever with ≥2 distinct swept values,
-// log-x when the values span at least two orders of magnitude.
-function leverScatterFiguresHtml(split, groupColors) {
+// Small-multiple scatters: one per numeric lever on which the selected runs DIFFER,
+// log-x when the values span at least two orders of magnitude. Dots coloured by run.
+function leverScatterFiguresHtml(runs, runColors) {
   const figures = []
   for (const [key, spec] of leverEntries()) {
     if (spec.type !== 'number') continue
-    const points = runsCache
+    const points = runs
       .map((r) => {
         const value = Number(r.summary.config && r.summary.config[key])
         return {
           x: value,
           y: Number(r.summary.objective),
           label: `${shortKey(r.key)} · ${key} ${formatObjective(value)} · ${objectiveName()} ${formatObjective(r.summary.objective)}`,
-          group: split ? runSplitGroup(r, split) : undefined,
+          group: shortKey(r.key),
         }
       })
       .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
@@ -3399,45 +3563,38 @@ function leverScatterFiguresHtml(split, groupColors) {
       width: 320,
       height: 220,
       ariaLabel: `${objectiveName()} vs ${key}`,
-      groupColors,
+      groupColors: runColors,
     })
     figures.push(chartFigureHtml(key, svg))
   }
   return figures
 }
-function leverChartsSectionHtml() {
-  const split = chartSplitKey('levers')
-  const groupColors = splitGroupColors(split)
+function leverChartsSectionHtml(runs, runColors) {
   const hasNumericLevers = leverEntries().some(([, spec]) => spec.type === 'number')
   let content
   let legend = ''
   if (!hasNumericLevers) {
     content = '<div class="empty-hint">No numeric levers in this manifest.</div>'
   } else {
-    const figures = leverScatterFiguresHtml(split, groupColors)
+    const figures = leverScatterFiguresHtml(runs, runColors)
     if (figures.length) {
       content = `<div class="chart-multiples">${figures.join('')}</div>`
-      legend = chartLegendHtml(groupColors)
+      legend = chartLegendHtml(runColors)
     } else {
-      content =
-        '<div class="empty-hint">Not enough runs yet — sweep a lever to see its effect.</div>'
+      content = '<div class="empty-hint">Selected runs don’t differ on a numeric lever.</div>'
     }
   }
-  return chartSectionHtml(`${objectiveName()} vs levers`, null, '', {
-    controls: splitSelectHtml('levers'),
-    legend,
-    content,
-  })
+  return chartSectionHtml(`${objectiveName()} vs levers`, null, '', { legend, content })
 }
-function judgeScatterSvg(split, groupColors) {
+function judgeScatterSvg(runs, runColors) {
   const points = []
-  for (const r of runsCache) {
+  for (const r of runs) {
     const verdict = verdictsCache.get(r.key)
     if (!verdict) continue
     const objective = Number(r.summary.objective)
     if (!Number.isFinite(objective)) continue
     const score = Number(verdict.score)
-    const group = split ? runSplitGroup(r, split) : undefined
+    const group = shortKey(r.key)
     if (verdict.rejected) {
       points.push({
         x: objective,
@@ -3463,64 +3620,22 @@ function judgeScatterSvg(split, groupColors) {
     width: 460,
     height: 260,
     ariaLabel: `Judge score vs ${objectiveName()}`,
-    groupColors,
+    groupColors: runColors,
   })
 }
-function judgeChartSectionHtml() {
-  const split = chartSplitKey('judge')
-  const groupColors = splitGroupColors(split)
-  const svg = judgeScatterSvg(split, groupColors)
-  return chartSectionHtml(`Judge score vs ${objectiveName()}`, svg, 'No verdicts yet.', {
-    controls: splitSelectHtml('judge'),
-    legend: svg ? chartLegendHtml(groupColors) : '',
+function judgeChartSectionHtml(runs, runColors) {
+  const svg = judgeScatterSvg(runs, runColors)
+  return chartSectionHtml(`Judge score vs ${objectiveName()}`, svg, 'No verdicts for these runs.', {
+    legend: svg ? chartLegendHtml(runColors) : '',
   })
 }
-function trainEvalScatterSvg(split, groupColors) {
-  const points = []
-  for (const r of runsCache) {
-    const evaluation = evaluationsCache.get(r.key)
-    if (!evaluation) continue
-    const train = Number(r.summary.objective)
-    const evalObjective = Number(evaluation.objective)
-    if (!Number.isFinite(train) || !Number.isFinite(evalObjective)) continue
-    points.push({
-      x: train,
-      y: evalObjective,
-      label: `${shortKey(r.key)} · train ${formatObjective(train)} · eval ${formatObjective(evalObjective)}`,
-      group: split ? runSplitGroup(r, split) : undefined,
-    })
-  }
-  if (!points.length) return ''
-  return buildScatterChart({
-    points,
-    xLabel: `train ${objectiveName()}`,
-    yLabel: `eval ${objectiveName()}`,
-    refDiagonal: true,
-    width: 460,
-    height: 260,
-    ariaLabel: `Eval vs train ${objectiveName()}`,
-    groupColors,
-  })
-}
-function trainEvalChartSectionHtml() {
-  const split = chartSplitKey('train-eval')
-  const groupColors = splitGroupColors(split)
-  const svg = trainEvalScatterSvg(split, groupColors)
-  return chartSectionHtml('Train vs eval', svg, 'No evaluations yet.', {
-    controls: splitSelectHtml('train-eval'),
-    legend: svg ? chartLegendHtml(groupColors) : '',
-  })
-}
-// The analysis charts (objective timeline, lever effects, judge + train/eval
-// agreement) over the loaded runs. Rendered inside the multi-run COMPARE pane (the
-// Charts tab was retired — selecting 2+ runs surfaces these). Reads the module
-// caches, which the Runs render has already loaded.
-function chartsSectionsHtml() {
+// The analysis charts (objective timeline, lever effects, judge agreement) over the
+// SELECTED runs only, colour-coded by run. Rendered inside the multi-run COMPARE pane.
+function chartsSectionsHtml(runs, runColors) {
   return [
-    timelineChartSectionHtml(),
-    leverChartsSectionHtml(),
-    judgeChartSectionHtml(),
-    trainEvalChartSectionHtml(),
+    timelineChartSectionHtml(runs, runColors),
+    leverChartsSectionHtml(runs, runColors),
+    judgeChartSectionHtml(runs, runColors),
   ].join('')
 }
 // The Versions tab: the pipeline changelog + how runs fared per version. Each
@@ -3619,8 +3734,8 @@ function hypothesisActionsHtml(h) {
   if (h.status === 'rejected') {
     return `<button type="button" data-action="restore" data-id="${id}" class="ghost-btn">Restore</button>${viewRuns}`
   }
-  return `<button type="button" data-action="accept" data-id="${id}">Accept</button>
-    <button type="button" data-action="reject" data-id="${id}" class="ghost-btn">Reject</button>${viewRuns}`
+  return `<button type="button" data-action="accept" data-id="${id}" class="icon-btn icon-btn-accept" aria-label="Accept"${helpAttr('Accept this experiment — moves it to the backlog so you can run it.')}>${iconCheckSvg()}</button>
+    <button type="button" data-action="reject" data-id="${id}" class="icon-btn icon-btn-reject" aria-label="Reject"${helpAttr('Reject this experiment — hides it from the backlog (you can restore it later).')}>${iconCrossSvg()}</button>${viewRuns}`
 }
 // The hypothesis's linked campaign: live status while queued/running, and once
 // finished its OWN results (best among its keys, completed/failed counts) next
@@ -3835,13 +3950,15 @@ async function deleteSelectedRuns() {
   if (!manifest) return
   const keys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
   if (!keys.length) return
-  if (
-    !confirm(
-      `Delete ${keys.length} selected run${keys.length === 1 ? '' : 's'}? This also removes their evaluation/verdict records and cannot be undone.`,
-    )
-  ) {
+  // In-app confirm: window.confirm is blocked in the embedding iframe sandbox (no
+  // allow-modals), so the first click arms the button and the second deletes.
+  if (!runsDeleteArmed) {
+    runsDeleteArmed = true
+    syncRunsSelectionUI()
+    runsDeleteArmTimer = setTimeout(disarmRunsDelete, 4000)
     return
   }
+  disarmRunsDelete()
   for (const key of keys) {
     const run = runsCache.find((r) => r.key === key)
     try {
@@ -4097,7 +4214,7 @@ function setupHypotheses() {
   const proposeBtn = byId('propose-btn')
   if (proposeBtn) {
     proposeBtn.addEventListener('click', onProposeClick)
-    proposeBtn.insertAdjacentHTML('afterend', helpCalloutHtml(PROPOSE_HELP_TEXT))
+    proposeBtn.setAttribute('data-help', PROPOSE_HELP_TEXT)
   }
   const addToggle = byId('hypothesis-add-toggle')
   if (addToggle) {
@@ -4265,7 +4382,7 @@ function booleanLeverHtml(key, spec) {
     </label>
     <label class="check-row">
       <input type="checkbox" name="sweep:${escapeHtml(key)}" />
-      <span>Sweep both ${helpCalloutHtml('Run BOTH off and on in one campaign to compare them side by side. Overrides the value on the left.')}</span>
+      <span${helpAttr('Run BOTH off and on in one campaign to compare them side by side. Overrides the value on the left.')}>Sweep both</span>
     </label>
   </div>`
 }
@@ -4277,7 +4394,7 @@ function leverFieldsetHtml(key, spec) {
         ? choiceLeverHtml(key, spec)
         : booleanLeverHtml(key, spec)
   return `<fieldset class="lever">
-    <legend>${escapeHtml(key)} <span class="lever-type">${escapeHtml(spec.type || '')}</span>${spec.description ? helpCalloutHtml(spec.description) : ''}</legend>
+    <legend${helpAttr(spec.description || '')}>${escapeHtml(key)} <span class="lever-type">${escapeHtml(spec.type || '')}</span></legend>
     ${inner}
   </fieldset>`
 }
@@ -4402,32 +4519,36 @@ function renderLaunchForm() {
     <fieldset class="lever">
       <legend>Campaign</legend>
       <div class="lever-grid">
-        <label class="field"><span>Thesis ${helpCalloutHtml('What this campaign tests, e.g. "fee-penalty reward" or "1m data prep". Stamped on every run so you can group + compare by experiment in the By-experiment view. Optional.')}</span>
+        <label class="field"><span${helpAttr('What this campaign tests, e.g. "fee-penalty reward" or "1m data prep". Stamped on every run so you can group + compare by experiment in the By-experiment view. Optional.')}>Thesis</span>
           <input type="text" name="thesis" placeholder="what are you testing? (optional)" />
         </label>
-        <label class="field"><span>Testing which setting? ${helpCalloutHtml('Optional: the lever this thesis varies, so the by-experiment view can highlight it. Leave blank for theses outside the levers (e.g. a new data prep or code change).')}</span>
+        <label class="field"><span${helpAttr('Optional: the lever this thesis varies, so the by-experiment view can highlight it. Leave blank for theses outside the levers (e.g. a new data prep or code change).')}>Testing which setting?</span>
           <select name="thesisTarget"><option value="">—</option>${leverEntries()
             .map(([k]) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`)
             .join('')}</select>
         </label>
-        <label class="field"><span>Seeds ${helpCalloutHtml('How many seeds to run per config (0…N−1). Keep at 1 while exploring; raise it when homing in to measure variance across seeds (the by-setup view then shows the spread).')}</span>
+        <label class="field"><span${helpAttr('How many seeds to run per config (0…N−1). Keep at 1 while exploring; raise it when homing in to measure variance across seeds (the by-setup view then shows the spread).')}>Seeds</span>
           <input type="number" name="seeds" min="1" step="1" value="1" />
         </label>
-        <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of this campaign train at once (a bounded worker pool). Higher finishes the sweep faster but uses more CPU/RAM. 1 = strictly sequential.')}</span>
+        <label class="field"><span${helpAttr('How many runs of this campaign train at once (a bounded worker pool). Higher finishes the sweep faster but uses more CPU/RAM. 1 = strictly sequential.')}>Max parallel runs</span>
           <input type="number" name="concurrency" min="1" step="1" value="${savedConcurrency()}" />
         </label>
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
-          <span>Refresh — re-run configs that already have a result ${helpCalloutHtml('Off (default): a config with a completed run is skipped. On: re-run it anyway, e.g. after changing code or data.')}</span>
+          <span${helpAttr('Off (default): a config with a completed run is skipped. On: re-run it anyway, e.g. after changing code or data.')}>Refresh — re-run configs that already have a result</span>
         </label>
         <label class="check-row launch-skip-explored">
           <input type="checkbox" name="skipExplored" checked />
-          <span>Exploration — skip setups already tried (any seed) ${helpCalloutHtml('On by default: if a setup (the config ignoring seed) was already run, skip it — exploration should not re-test the same idea. Turn OFF when homing in to run more seeds of a setup.')}</span>
+          <span${helpAttr('On by default: if a setup (the config ignoring seed) was already run, skip it — exploration should not re-test the same idea. Turn OFF when homing in to run more seeds of a setup.')}>Exploration — skip setups already tried (any seed)</span>
         </label>
-        <label class="check-row launch-autoeval">
+        ${
+          evalEnabled()
+            ? `<label class="check-row launch-autoeval">
           <input type="checkbox" name="autoEval"${savedAutoEval() ? ' checked' : ''} />
-          <span>Auto-evaluate completed runs ${helpCalloutHtml('After each run finishes, automatically re-test its saved checkpoint (shown in the Eval column).')}</span>
-        </label>
+          <span${helpAttr('After each run finishes, automatically re-test its saved checkpoint (shown in the Eval column).')}>Auto-evaluate completed runs</span>
+        </label>`
+            : ''
+        }
         <label class="field launch-target" id="launch-target-field">${computeTargetFieldHtml(launchRunnersCache, savedComputeTarget())}</label>
       </div>
     </fieldset>
@@ -4853,7 +4974,13 @@ async function observeActivityUntilDone(activityId) {
         const sig = activityProgressSig(progress, campaign)
         const advanced = sig !== lastSig
         lastSig = sig
-        if ((!act || act.isLive === false) && !advanced) {
+        if ((!act || act.isLive === false) && !advanced && document.hidden) {
+          // Backgrounded: the browser throttles our timers, so a stalled-looking poll is
+          // most likely us, not the run. Never declare paused while hidden — keep observing
+          // and let the visibility-regain handler re-verify. (Avoids stalling the queue,
+          // whose pump bails on a 'paused' status.)
+          lastActivityStatus = 'running'
+        } else if ((!act || act.isLive === false) && !advanced) {
           // Not live AND nothing moved this poll — start (or continue) the dead clock.
           const now = Date.now()
           if (!deadSince) deadSince = now
@@ -5113,7 +5240,7 @@ function queueSectionHtml() {
 // campaign may execute at once. Persisted; applied to campaigns launched after.
 function activitySettingsHtml() {
   return `<div class="activity-settings">
-    <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of a campaign run at once. Set this BEFORE you launch — it applies to the NEXT campaign you start. It does NOT resize a campaign already running (you would relaunch to change that). The real ceiling is host CPU/GPU/RAM; default 1 = sequential.')}</span>
+    <label class="field"><span${helpAttr('How many runs of a campaign run at once. Set this BEFORE you launch — it applies to the NEXT campaign you start. It does NOT resize a campaign already running (you would relaunch to change that). The real ceiling is host CPU/GPU/RAM; default 1 = sequential.')}>Max parallel runs</span>
       <input type="number" id="activity-concurrency" min="1" step="1" value="${savedConcurrency()}" />
     </label>
   </div>`
@@ -5289,6 +5416,24 @@ function savedTabId() {
 }
 
 // --- Init ----------------------------------------------------------------------
+// When the viewer regains visibility/focus after being backgrounded (timers throttled),
+// re-verify any running activity and keep the queue draining — so a campaign + its queued
+// follow-ups don't appear to "stop between runs" just because we were in the background.
+// (Fully UNATTENDED progression while the app is closed needs a server-side queue drain.)
+function onViewerVisible() {
+  if (!embedded() || !manifest) return
+  if (observing) {
+    pumpQueue()
+    return
+  }
+  void resumeRunningActivity().then(() => pumpQueue())
+}
+function setupVisibilityResume() {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) onViewerVisible()
+  })
+  window.addEventListener('focus', onViewerVisible)
+}
 async function init() {
   setupHome()
   setupRunners()
@@ -5298,6 +5443,8 @@ async function init() {
   setupLaunch()
   setupActivity()
   setupTabs()
+  setupVisibilityResume()
+  setupHelpTooltips()
   showView('home')
   if (!embedded()) {
     setBanner('Open inside the Overseer to use the viewer.')

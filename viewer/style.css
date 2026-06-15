@@ -117,7 +117,8 @@ button:focus-visible,
   background: var(--bad-soft);
   color: var(--bad);
 }
-.danger-btn:hover {
+.danger-btn:hover,
+.danger-btn.is-armed {
   background: var(--bad);
   color: #fff;
 }
@@ -295,19 +296,75 @@ button:focus-visible,
 .runs-md__detail {
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
 }
+/* LIST pane: the card-head + toolbar stay put; only the table body scrolls (its <thead>
+   sticks). So filters/headers never scroll out of view. */
+.runs-md__list {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.runs-md__list > .card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+.runs-md__list > .card > .card-head,
+.runs-md__list > .card > #runs-sparkline,
+.runs-md__list > .card > #judge-status {
+  flex: 0 0 auto;
+}
+#runs-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#runs-body > .runs-toolbar,
+#runs-body > .setup-note-editor,
+#runs-body > .runs-legend {
+  flex: 0 0 auto;
+}
+#runs-body > .table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* DETAIL pane: each card scrolls its own content with its head pinned. */
 .runs-md__detail {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.runs-md__detail > .card {
+  margin-bottom: 0;
+}
+.runs-md__detail > .card > .card-head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding-bottom: 10px;
+  background: var(--surface);
 }
 @media (max-width: 900px) {
   .runs-md.has-detail {
     grid-template-columns: minmax(0, 1fr);
   }
-  .runs-md__list,
+  .runs-md__list {
+    overflow: visible;
+  }
+  .runs-md__list > .card,
+  #runs-body,
+  #runs-body > .table-wrap {
+    overflow: visible;
+    min-height: 0;
+  }
   .runs-md__detail {
     overflow-y: visible;
   }
@@ -399,7 +456,7 @@ button:focus-visible,
 /* ---- Runs table -------------------------------------------------------------- */
 .table-wrap {
   margin-top: 12px;
-  overflow-x: auto;
+  overflow: auto;
 }
 .runs-table {
   width: 100%;
@@ -417,6 +474,13 @@ button:focus-visible,
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
+}
+/* Column headers stay visible while the rows scroll under them. */
+.runs-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
 }
 .runs-table th.num,
 .runs-table td.num {
@@ -690,23 +754,6 @@ button:focus-visible,
 .chart-section-head h3 {
   margin: 0;
 }
-.chart-split {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-.chart-split select {
-  padding: 4px 8px;
-  font: inherit;
-  font-size: 12px;
-  color: var(--text);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-}
 .chart-legend {
   display: flex;
   flex-wrap: wrap;
@@ -837,6 +884,21 @@ button:focus-visible,
   color: #d97706;
   background: rgba(217, 119, 6, 0.12);
 }
+.run-mark-key.run-mark-price {
+  color: var(--text);
+  background: transparent;
+  padding-left: 18px;
+  position: relative;
+}
+.run-mark-key.run-mark-price::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 14px;
+  height: 0;
+  border-top: 2px solid var(--accent);
+}
 .run-dataset {
   display: inline-block;
   padding: 1px 8px;
@@ -937,6 +999,20 @@ button:focus-visible,
   border-color: var(--bad);
   background: var(--bad-soft);
 }
+.icon-btn.icon-btn-accept {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+.icon-btn.icon-btn-accept:hover {
+  background: var(--ok-soft);
+}
+.icon-btn.icon-btn-reject {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+.icon-btn.icon-btn-reject:hover {
+  background: var(--bad-soft);
+}
 .icon-btn svg {
   display: block;
 }
@@ -978,28 +1054,63 @@ button:focus-visible,
   cursor: pointer;
   vertical-align: middle;
 }
+/* Many compared runs would bleed past the card — scroll the table horizontally instead. */
+.compare-table-wrap {
+  overflow-x: auto;
+  margin: 4px 0 10px;
+}
 .compare-table {
   min-width: 0;
+  width: auto;
 }
 .compare-table .num {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+/* The colour-coded run id chip in the comparison header — its colour is reused for the
+   run's curve in the chart below. */
+.compare-table .cmp-id {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.compare-table .cmp-section th {
+  padding-top: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
 }
 .runs-legend {
   margin-top: 8px;
   color: var(--muted);
   font-size: 11px;
 }
-.help-legend {
-  display: inline-block;
-  width: 14px;
-  height: 14px;
-  line-height: 14px;
-  text-align: center;
-  border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 700;
+/* Hovering any element with `data-help` shows it; give plain triggers a help cursor
+   (buttons + form controls keep their own). */
+[data-help]:not(button):not(select):not(input):not(label) {
+  cursor: help;
+}
+.app-tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 12px;
+  line-height: 1.45;
+  font-weight: 400;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+.app-tooltip[hidden] {
+  display: none;
 }
 .activity-settings {
   margin-bottom: 10px;
@@ -1202,58 +1313,6 @@ pre.json {
   to {
     transform: rotate(360deg);
   }
-}
-
-/* ---- Help callouts (circular "?" with a styled hover/focus popover) --------- */
-.help-callout {
-  position: relative;
-  display: inline-flex;
-  align-self: center;
-}
-.help-callout .help-btn {
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-}
-.help-callout .help-btn:hover,
-.help-callout .help-btn:focus {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  outline: none;
-}
-.help-pop {
-  display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 20;
-  width: 300px;
-  max-width: 78vw;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: var(--surface);
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  text-align: left;
-  white-space: normal;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-}
-.help-callout:hover .help-pop,
-.help-callout:focus-within .help-pop {
-  display: block;
 }
 
 /* ---- Activity --------------------------------------------------------------------- */
