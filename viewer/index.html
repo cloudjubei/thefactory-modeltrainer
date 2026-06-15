@@ -134,16 +134,17 @@
           <section id="tab-runs" class="tab-panel" role="tabpanel" hidden>
             <div class="runs-md" id="runs-md">
               <div class="runs-md__list">
-                <section class="card" aria-labelledby="runs-h">
+                <section class="card" aria-label="Runs">
                   <div class="card-head card-head-row">
                     <div>
-                      <h2 id="runs-h">Runs</h2>
-                      <p class="card-sub" id="runs-sub">Every training run, best first.</p>
                       <p class="card-sub runs-live" id="runs-live" hidden></p>
                       <p class="card-sub" id="judge-last" hidden></p>
                     </div>
                     <div class="head-actions">
                       <button type="button" id="judge-btn">Judge runs</button>
+                      <button type="button" id="runs-delete-selected" class="danger-btn" hidden>
+                        Delete selected
+                      </button>
                     </div>
                   </div>
                   <p id="judge-status" class="form-status" role="status" hidden></p>
@@ -158,16 +159,17 @@
             </div>
           </section>
 
-          <!-- Charts (hand-rolled SVG views over the run / verdict / evaluation records) -->
-          <section id="tab-charts" class="tab-panel" role="tabpanel" hidden>
-            <section class="card" aria-labelledby="charts-h">
+          <!-- Versions (pipeline version changelog + how runs fared per version) -->
+          <section id="tab-versions" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="versions-h">
               <div class="card-head">
-                <h2 id="charts-h">Charts</h2>
+                <h2 id="versions-h">Pipeline versions</h2>
                 <p class="card-sub">
-                  Objective trends, lever effects and judge / eval agreement across runs.
+                  Each version is a snapshot of how data is fed + scored. A BREAKING version makes
+                  prior runs' scores incomparable; runs are tagged with the version they ran under.
                 </p>
               </div>
-              <div id="charts-body" class="charts-body"></div>
+              <div id="versions-body" class="versions-body"></div>
             </section>
           </section>
 

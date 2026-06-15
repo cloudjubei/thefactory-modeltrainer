@@ -26,8 +26,8 @@ const PROPOSE_HELP_TEXT =
 const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runners panel.'
 const TABS = [
   { id: 'runs', label: 'Runs' },
-  { id: 'charts', label: 'Charts' },
   { id: 'hypotheses', label: 'Hypotheses' },
+  { id: 'versions', label: 'Versions' },
   { id: 'launch', label: 'Launch' },
   { id: 'activity', label: 'Activity' },
 ]
@@ -90,7 +90,7 @@ let runsSortDir = 'desc'
 let runsLeverFilter = {}
 let runsTextFilter = ''
 let runsHideBad = false
-let runsDeleteArmed = false
+let runsVersionFilter = ''
 let runsCompareKeys = new Set()
 let runsViewMode = 'runs'
 // When drilled into a single setup's runs (via the by-setup view), this holds that
@@ -1147,8 +1147,8 @@ function resetDashboardState() {
   }
   const hypothesesBody = byId('hypotheses-body')
   if (hypothesesBody) hypothesesBody.innerHTML = ''
-  const chartsBody = byId('charts-body')
-  if (chartsBody) chartsBody.innerHTML = ''
+  const versionsBody = byId('versions-body')
+  if (versionsBody) versionsBody.innerHTML = ''
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -1588,8 +1588,8 @@ function clearRunsFilter() {
   runsFilterLabel = ''
   runsLeverFilter = {}
   runsTextFilter = ''
+  runsVersionFilter = ''
   runsDrillSetupKey = null
-  runsDeleteArmed = false
   renderRunsTable()
 }
 // Drill from a by-setup row into that setup's individual runs (filter + switch view).
@@ -1735,6 +1735,14 @@ function runsColumns() {
       get: (r) => escapeHtml(datasetLabel(r.summary)),
       sort: (r) => datasetLabel(r.summary),
     },
+    {
+      id: 'version',
+      label: 'pipeline',
+      num: false,
+      help: 'Pipeline version this run ran under. Runs from different versions are NOT comparable (a breaking version changed how data is fed/scored). Filter by it to clear out old runs.',
+      get: (r) => `v${escapeHtml(String((r.summary && r.summary.pipelineVersion) || '1'))}`,
+      sort: (r) => String((r.summary && r.summary.pipelineVersion) || '1'),
+    },
   ]
   for (const mk of runMetricKeys()) {
     cols.push({
@@ -1857,9 +1865,13 @@ function runIsBad(r) {
   const n = s.metrics && Number(s.metrics.n_trades)
   return Number.isFinite(n) && n <= DEGENERATE_TRADE_COUNT
 }
+function runVersionOf(r) {
+  return String((r.summary && r.summary.pipelineVersion) || '1')
+}
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
   if (runsHideBad) out = out.filter((r) => !runIsBad(r))
+  if (runsVersionFilter) out = out.filter((r) => runVersionOf(r) === runsVersionFilter)
   for (const [lever, val] of Object.entries(runsLeverFilter)) {
     if (val) out = out.filter((r) => String((r.summary.config || {})[lever]) === String(val))
   }
@@ -2022,28 +2034,6 @@ function aggregateByExperiment(runs) {
 // The project's pipeline version + changelog. A BREAKING version changed how data is
 // fed/scored, so runs across versions are NOT comparable; each run is tagged with the
 // version it ran under and a bump re-opens skipExplored/unrunnable. Shown above the runs.
-function pipelineVersionPanelHtml() {
-  if (!manifest) return ''
-  const changelog = Array.isArray(manifest.pipelineChangelog) ? manifest.pipelineChangelog : []
-  const cur = manifest.pipelineVersion
-  if (!cur && !changelog.length) return ''
-  const current = String(cur || '1')
-  const entries = changelog
-    .map((e) => {
-      const isCur = String(e.version) === current
-      const breaking = e.breaking ? '<span class="badge is-bad">breaking</span> ' : ''
-      const date = e.date ? `<span class="card-sub">${escapeHtml(String(e.date))}</span> ` : ''
-      return `<li${isCur ? ' class="pv-current"' : ''}><strong>v${escapeHtml(String(e.version))}</strong>${isCur ? ' <span class="card-sub">(current)</span>' : ''} ${breaking}${date}— ${escapeHtml(String(e.summary || ''))}</li>`
-    })
-    .join('')
-  const help = helpCalloutHtml(
-    'A BREAKING version changes how data is fed/scored, so runs from different versions are NOT comparable. A version bump re-opens skipExplored/unrunnable. Each run is tagged with the version it ran under (shown in its detail).',
-  )
-  return `<details class="pipeline-versions">
-    <summary>Pipeline <strong>v${escapeHtml(current)}</strong> — versions &amp; changelog ${help}</summary>
-    ${entries ? `<ul class="pipeline-versions-list">${entries}</ul>` : '<p class="card-sub">No changelog entries declared in the manifest.</p>'}
-  </details>`
-}
 function runsToolbarHtml(shownCount, total) {
   const dropdowns = leverEntries()
     .filter(([, spec]) => spec.type === 'choice')
@@ -2059,7 +2049,11 @@ function runsToolbarHtml(shownCount, total) {
       return `<select class="runs-filter-lever" data-lever="${escapeHtml(key)}">${opts}</select>`
     })
     .join('')
-  const active = runsFilterKeys || runsTextFilter || Object.values(runsLeverFilter).some(Boolean)
+  const active =
+    runsFilterKeys ||
+    runsTextFilter ||
+    runsVersionFilter ||
+    Object.values(runsLeverFilter).some(Boolean)
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
   const toggle = `<div class="runs-viewmode">
     <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup">By setup ${helpCalloutHtml('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment">By experiment ${helpCalloutHtml('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}</button>
@@ -2067,18 +2061,22 @@ function runsToolbarHtml(shownCount, total) {
   const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
     <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
   </label>`
-  return `${pipelineVersionPanelHtml()}<div class="runs-toolbar">
+  const versions = [...new Set(runsCache.map(runVersionOf))].sort()
+  const versionFilter =
+    versions.length > 1
+      ? `<select class="runs-filter-lever" id="runs-version-filter" title="Show only runs from one pipeline version (cross-version scores aren't comparable).">
+          <option value="">version: any</option>
+          ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
+        </select>`
+      : ''
+  return `<div class="runs-toolbar">
     ${toggle}
+    ${versionFilter}
     ${dropdowns}
     <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
     ${hideBad}
     <span class="runs-count">${shownCount}/${total} runs${label}</span>
     ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
-    ${
-      shownCount > 0
-        ? `<button type="button" id="runs-delete-shown" class="ghost-btn danger-text" title="Delete the ${shownCount} shown run${shownCount === 1 ? '' : 's'} (and their evaluation/verdict records)">${runsDeleteArmed ? `Confirm — delete ${shownCount}?` : `Delete shown (${shownCount})`}</button>`
-        : ''
-    }
   </div>`
 }
 function toggleRunsSort(id) {
@@ -2235,9 +2233,14 @@ function renderRunsTable() {
   }
   const shown = sortRuns(filtered)
   const cols = runsColumns()
+  const allSelected = shown.length > 0 && shown.every((r) => runsCompareKeys.has(r.key))
   const header = cols
     .map((c) => {
       const help = c.help ? helpCalloutHtml(c.help) : ''
+      // The compare column header is a "select all visible" checkbox.
+      if (c.id === 'compare') {
+        return `<th><input type="checkbox" id="runs-select-all"${allSelected ? ' checked' : ''} aria-label="Select all visible runs" title="Select all visible runs" /></th>`
+      }
       if (c.noSort) return `<th class="${c.num ? 'num' : ''}">${escapeHtml(c.label)}${help}</th>`
       const arrow = runsSortKey === c.id ? (runsSortDir === 'asc' ? ' ▲' : ' ▼') : ''
       return `<th class="runs-th${c.num ? ' num' : ''}" data-sort="${c.id}">${escapeHtml(c.label)}${help}${arrow}</th>`
@@ -2253,6 +2256,15 @@ function renderRunsTable() {
   if (selectedRunKey && !shown.some((r) => r.key === selectedRunKey)) closeRunDetail()
   else if (selectedRunKey) renderRunDetail(selectedRunKey)
   renderCompare()
+  syncRunsSelectionUI()
+}
+// Show/label the "Delete selected" button (in the runs head) from the current selection.
+function syncRunsSelectionUI() {
+  const btn = byId('runs-delete-selected')
+  if (!btn) return
+  const n = runsCompareKeys.size
+  btn.hidden = n === 0
+  btn.textContent = `Delete selected (${n})`
 }
 async function renderRuns() {
   if (!byId('runs-body')) return
@@ -2331,7 +2343,9 @@ function renderCompare() {
     <h3>Config diff</h3>
     ${diffRows ? `<table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${diffRows}</tbody></table>` : '<p class="card-sub">Selected runs share the same config.</p>'}
     <h3>Metrics</h3>
-    <table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${metricRows}</tbody></table>`,
+    <table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${metricRows}</tbody></table>
+    <h3>Charts</h3>
+    <div class="charts-body">${chartsSectionsHtml()}</div>`,
   )
   card.hidden = false
   syncRunsMdLayout()
@@ -2898,17 +2912,6 @@ function setupRuns() {
         clearRunsFilter()
         return
       }
-      if (event.target.closest('#runs-delete-shown')) {
-        // Two-click arm: first click confirms intent, second deletes.
-        if (!runsDeleteArmed) {
-          runsDeleteArmed = true
-          renderRunsTable()
-        } else {
-          runsDeleteArmed = false
-          deleteFilteredRuns()
-        }
-        return
-      }
       if (event.target.closest('#setup-note-save')) {
         const ta = byId('setup-note-text')
         const status = byId('setup-note-status')
@@ -2951,6 +2954,19 @@ function setupRuns() {
         if (cb.checked) runsCompareKeys.add(cb.dataset.key)
         else runsCompareKeys.delete(cb.dataset.key)
         renderCompare()
+        syncRunsSelectionUI()
+        return
+      }
+      if (event.target.id === 'runs-select-all') {
+        const shownKeys = applyRunsFilters(runsCache).map((r) => r.key)
+        if (event.target.checked) for (const k of shownKeys) runsCompareKeys.add(k)
+        else for (const k of shownKeys) runsCompareKeys.delete(k)
+        renderRunsTable()
+        return
+      }
+      if (event.target.id === 'runs-version-filter') {
+        runsVersionFilter = event.target.value
+        renderRunsTable()
         return
       }
       const sel = event.target.closest('.runs-filter-lever')
@@ -3004,12 +3020,22 @@ function setupRuns() {
         renderRunsTable()
       }
     })
+    // The relocated analysis charts live in the compare pane; their split selects
+    // re-render the compare (which rebuilds the charts).
+    compareCard.addEventListener('change', (event) => {
+      const select = event.target.closest('select[data-chart-split]')
+      if (!select) return
+      chartSplits[select.dataset.chartSplit] = select.value
+      renderCompare()
+    })
   }
   const judgeBtn = byId('judge-btn')
   if (judgeBtn) {
     judgeBtn.addEventListener('click', onJudgeClick)
     judgeBtn.insertAdjacentHTML('afterend', helpCalloutHtml(JUDGE_HELP_TEXT))
   }
+  const deleteSelectedBtn = byId('runs-delete-selected')
+  if (deleteSelectedBtn) deleteSelectedBtn.addEventListener('click', deleteSelectedRuns)
 }
 
 // --- SVG chart helpers (hand-rolled, no libs) ----------------------------------
@@ -3427,36 +3453,81 @@ function trainEvalChartSectionHtml() {
     legend: svg ? chartLegendHtml(groupColors) : '',
   })
 }
-async function renderCharts() {
-  const body = byId('charts-body')
+// The analysis charts (objective timeline, lever effects, judge + train/eval
+// agreement) over the loaded runs. Rendered inside the multi-run COMPARE pane (the
+// Charts tab was retired — selecting 2+ runs surfaces these). Reads the module
+// caches, which the Runs render has already loaded.
+function chartsSectionsHtml() {
+  return [
+    timelineChartSectionHtml(),
+    leverChartsSectionHtml(),
+    judgeChartSectionHtml(),
+    trainEvalChartSectionHtml(),
+  ].join('')
+}
+// The Versions tab: the pipeline changelog + how runs fared per version. Each
+// version's run-count links into the Runs tab filtered to that version.
+async function renderVersions() {
+  const body = byId('versions-body')
   if (!body) return
   if (!embedded()) {
-    setHtml(body, '<div class="empty-hint">Open inside the Overseer to see charts.</div>')
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to see versions.</div>')
     return
   }
-  ;[runsCache, verdictsCache, evaluationsCache] = await Promise.all([
-    readRuns(),
-    readVerdicts(),
-    readEvaluations(),
-  ])
-  setHtml(
-    body,
-    [
-      timelineChartSectionHtml(),
-      leverChartsSectionHtml(),
-      judgeChartSectionHtml(),
-      trainEvalChartSectionHtml(),
-    ].join(''),
-  )
+  runsCache = await readRuns()
+  const changelog =
+    manifest && Array.isArray(manifest.pipelineChangelog) ? manifest.pipelineChangelog : []
+  const current = String((manifest && manifest.pipelineVersion) || '1')
+  const byVersion = new Map()
+  for (const r of runsCache) {
+    const v = runVersionOf(r)
+    if (!byVersion.has(v)) byVersion.set(v, [])
+    byVersion.get(v).push(r)
+  }
+  const dir = objectiveDirection()
+  const versions = [
+    ...new Set([...changelog.map((e) => String(e.version)), ...byVersion.keys()]),
+  ].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+  if (!versions.length) {
+    setHtml(
+      body,
+      '<div class="empty-hint">No pipeline versions yet — declare <code>pipelineVersion</code> + <code>pipelineChangelog</code> in the trainer manifest.</div>',
+    )
+    return
+  }
+  const cards = versions
+    .map((v) => {
+      const entry = changelog.find((e) => String(e.version) === v)
+      const runs = byVersion.get(v) || []
+      const objs = runs.map((r) => Number(r.summary && r.summary.objective)).filter(Number.isFinite)
+      const best = objs.length ? (dir === 'min' ? Math.min(...objs) : Math.max(...objs)) : NaN
+      const isCur = v === current
+      const breaking = entry && entry.breaking ? '<span class="badge is-bad">breaking</span> ' : ''
+      const date =
+        entry && entry.date ? `<span class="card-sub">${escapeHtml(String(entry.date))}</span>` : ''
+      const summary = entry
+        ? escapeHtml(String(entry.summary || ''))
+        : '<span class="card-sub">(no changelog entry for this version)</span>'
+      const stats = runs.length
+        ? `View ${runs.length} run${runs.length === 1 ? '' : 's'} · best ${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(best))} →`
+        : 'no runs'
+      return `<div class="version-card${isCur ? ' is-current' : ''}">
+        <p class="version-card-head"><strong>v${escapeHtml(v)}</strong>${isCur ? ' <span class="badge">current</span>' : ''} ${breaking}${date}</p>
+        <p class="version-summary">${summary}</p>
+        <p class="card-sub">${runs.length ? `<button type="button" class="link-btn" data-version-filter="${escapeHtml(v)}">${stats}</button>` : stats}</p>
+      </div>`
+    })
+    .join('')
+  setHtml(body, `<div class="versions-list">${cards}</div>`)
 }
-function setupCharts() {
-  const body = byId('charts-body')
+function setupVersions() {
+  const body = byId('versions-body')
   if (!body) return
-  body.addEventListener('change', (event) => {
-    const select = event.target.closest('select[data-chart-split]')
-    if (!select) return
-    chartSplits[select.dataset.chartSplit] = select.value
-    renderCharts()
+  body.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-version-filter]')
+    if (!btn) return
+    runsVersionFilter = btn.dataset.versionFilter
+    showTab('runs')
   })
 }
 
@@ -3700,11 +3771,19 @@ async function deleteRun(key) {
   if (selectedRunKey === key) closeRunDetail()
   await renderRuns()
 }
-// Delete every run currently shown (after the active filters) — e.g. filter to an old
-// pipeline version, then clear them. Two-click armed to avoid an accidental wipe.
-async function deleteFilteredRuns() {
+// Delete the SELECTED runs (the ticked checkboxes) after a confirmation popup —
+// e.g. select old runs (or all via the header checkbox) and clear them.
+async function deleteSelectedRuns() {
   if (!manifest) return
-  const keys = applyRunsFilters(runsCache).map((r) => r.key)
+  const keys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  if (!keys.length) return
+  if (
+    !confirm(
+      `Delete ${keys.length} selected run${keys.length === 1 ? '' : 's'}? This also removes their evaluation/verdict records and cannot be undone.`,
+    )
+  ) {
+    return
+  }
   for (const key of keys) {
     const run = runsCache.find((r) => r.key === key)
     try {
@@ -5052,7 +5131,7 @@ function showTab(id) {
   }
   renderTabLiveIndicator()
   if (target === 'runs') renderRuns()
-  if (target === 'charts') renderCharts()
+  if (target === 'versions') renderVersions()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
@@ -5066,7 +5145,7 @@ function showTab(id) {
 // toggling it never disturbs the label text.
 // Which tabs show a spinner. Activity is the single home for "what's pending" — it spins for ANY live
 // work (campaign / judge / propose / evaluate). Runs spins ONLY for run-specific work that lands on a
-// run (a judgement or an evaluation). Hypotheses spins while proposing. Charts is view-only — never.
+// run (a judgement or an evaluation). Hypotheses spins while proposing. Versions is view-only — never.
 function tabHasLiveWork(id) {
   if (id === 'activity') {
     return lastActivityStatus === 'running' || judging || proposing || evaluatingKeys.size > 0
@@ -5110,7 +5189,7 @@ async function init() {
   setupHome()
   setupRunners()
   setupRuns()
-  setupCharts()
+  setupVersions()
   setupHypotheses()
   setupLaunch()
   setupActivity()

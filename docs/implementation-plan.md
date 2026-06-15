@@ -180,18 +180,14 @@ SHIPPED:
 - **Icon buttons** — run-detail Close (✕), Clone (⧉), Mark-unrunnable (⊘/⊙) are icon-only w/ tooltips;
   Add-hypothesis is "+"; accepted/rejected hypothesis cards get a corner **delete** (🗑) icon. New `.icon-btn`.
 
-REMAINING (this round → fold into the Activity-center / a focused UI pass, needs LIVE verification):
-- **Versions as a dedicated "Versions" TAB** (today it's the collapsible panel) + a version FILTER + COLUMN in Runs.
-- **Single-vs-multi detail**: one run selected → run detail (today); MULTIPLE selected → show the **Charts** content
-  in the detail pane, **removing the Charts tab** (consolidate).
-- **Concurrency display ("only 1 running")**: traced — concurrency IS passed (savedConcurrency → activity param
-  → `runActivityWorkItems`), so the backend should run all N; the Activity view only renders ONE `p.current`
-  item, so it LOOKS like 1. Fix = surface all in-flight runs / a running-count (needs multi-item progress
-  emission). Verify actual backend parallelism live.
-- **ETA + determinate progress bar missing**: the bar/ETA need `etaSeconds` from calibration; calibration runs
-  `trainer.run --calibrate` which builds the model, so it was very likely ALSO crashing on the `custom_net_arch`
-  bug → no `etaSeconds` → indeterminate bar. The crash fix should restore it — VERIFY after a backend restart;
-  if still missing, investigate calibration separately.
+REMAINING (needs LIVE verification after a backend rebuild+restart — `dev:force`):
+- **Concurrency display ("only 1 running")**: backend parallelism is confirmed in code (savedConcurrency →
+  activity param → `runActivityWorkItems` poolSize=min(concurrency,total) + Promise.all of N workers); the
+  `train` activity now emits `progress.inFlight[]` (add on marker / drop on terminal `onItemProgress`) and the
+  viewer renders one row per in-flight run. Confirm N rows actually appear with concurrency>1 live.
+- **ETA + determinate progress bar**: the bar/ETA need `etaSeconds` from calibration, which builds the model and
+  was likely ALSO crashing on the `custom_net_arch` bug (now fixed). Per-run ETA also needs the trainer's
+  `@@PROGRESS done/total` markers. VERIFY post-restart; if still missing, investigate calibration separately.
 
 ## BlackSwan — the path to a trading model (A → B → C)
 

@@ -63,6 +63,65 @@ body {
   line-height: 1.45;
 }
 
+/* ---- Buttons --------------------------------------------------------------- */
+/* One button language across the viewer, mirroring thefactory-ui's `.btn` system:
+   PRIMARY is a surface fill with a 2px accent border (not a solid accent block),
+   `.ghost-btn` is the neutral-bordered secondary, `.danger-btn` is the red-outline
+   destructive. Per-surface rules only add LAYOUT (flex/gap), never re-skin. */
+button,
+.ghost-btn,
+.danger-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 2px solid var(--accent);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+button:hover {
+  background: var(--accent-soft);
+}
+button:active,
+.ghost-btn:active,
+.danger-btn:active {
+  transform: translateY(0.5px);
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+button:focus-visible,
+.ghost-btn:focus-visible,
+.danger-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.ghost-btn {
+  border-color: var(--border);
+}
+.ghost-btn:hover {
+  background: var(--surface-subtle);
+}
+.danger-btn {
+  border-color: var(--bad);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.danger-btn:hover {
+  background: var(--bad);
+  color: #fff;
+}
+
 /* ---- Views (home hub ↔ project dashboard) ---------------------------------- */
 .view {
   flex: 1 1 auto;
@@ -293,26 +352,6 @@ body {
   justify-content: flex-end;
   gap: 8px;
 }
-.head-actions button {
-  padding: 8px 14px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.head-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.head-actions button.ghost-btn {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-}
 .card-sub {
   margin: 4px 0 0;
   color: var(--muted);
@@ -503,6 +542,9 @@ body {
   font-weight: 600;
   text-decoration: underline;
   cursor: pointer;
+}
+.runs-filter-bar button:hover {
+  background: none;
 }
 
 /* ---- Badges / pills ------------------------------------------------------------ */
@@ -809,28 +851,37 @@ body {
   cursor: pointer;
   white-space: nowrap;
 }
-.pipeline-versions {
-  margin: 0 0 10px;
-  padding: 8px 12px;
+.versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.version-card {
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: 10px;
   background: var(--surface);
-  font-size: 13px;
 }
-.pipeline-versions > summary {
-  cursor: pointer;
-  font-weight: 600;
+.version-card.is-current {
+  border-color: var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
-.pipeline-versions-list {
-  margin: 8px 0 0;
-  padding-left: 18px;
+.version-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 4px;
+  flex-wrap: wrap;
 }
-.pipeline-versions-list li {
-  margin: 3px 0;
+.version-card-head strong {
+  font-size: 15px;
+}
+.version-summary {
+  margin: 0 0 6px;
   word-break: break-word;
 }
-.pipeline-versions-list li.pv-current {
-  font-weight: 600;
+.version-card .card-sub {
+  margin: 0;
 }
 .compare-version-warn {
   margin: 0 0 10px;
@@ -865,14 +916,6 @@ body {
 }
 .icon-btn svg {
   display: block;
-}
-.danger-text {
-  color: var(--bad);
-}
-.danger-text:hover {
-  color: var(--bad);
-  border-color: var(--bad);
-  background: var(--bad-soft);
 }
 .runs-filter-lever,
 .runs-filter-text {
@@ -1107,33 +1150,6 @@ pre.json {
   display: flex;
   gap: 8px;
   margin-top: 14px;
-}
-.form-actions button {
-  padding: 9px 16px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-}
-.form-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.form-actions .danger-btn {
-  background: var(--bad);
-}
-.ghost-btn {
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
 }
 .form-status {
   margin: 10px 0 0;
@@ -1386,6 +1402,7 @@ pre.json {
   text-decoration: underline;
 }
 .link-btn:hover {
+  background: none;
   opacity: 0.8;
 }
 .run-failures-empty {
@@ -1538,27 +1555,6 @@ pre.json {
   gap: 8px;
   margin-top: 4px;
 }
-.hypothesis-actions button {
-  padding: 7px 12px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.hypothesis-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.hypothesis-actions button.ghost-btn {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
 /* ---- Home (hub) ------------------------------------------------------------- */
 .project-cards {
   display: grid;
@@ -1631,30 +1627,6 @@ pre.json {
   margin-top: auto;
   padding-top: 4px;
 }
-.project-actions button {
-  padding: 7px 12px;
-  border: 0;
-  border-radius: 9px;
-  background: var(--accent);
-  color: #fff;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.project-actions button:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.project-actions button.ghost-btn {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-.project-actions button.danger-btn {
-  background: var(--bad);
-}
-
 /* ---- Compute Runners (home panel) ------------------------------------------- */
 .runners-panel[hidden] {
   display: none;
@@ -1757,23 +1729,6 @@ pre.json {
   display: flex;
   gap: 8px;
 }
-.runner-actions button {
-  padding: 7px 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.runner-actions button.danger-btn {
-  border-color: transparent;
-  background: var(--bad);
-  color: #fff;
-}
-
 /* ---- Runner pairing sub-panel ----------------------------------------------- */
 .runner-pairing {
   margin-top: 14px;
