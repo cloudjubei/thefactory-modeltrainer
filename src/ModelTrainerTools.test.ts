@@ -652,6 +652,68 @@ describe('runTrainingCampaign', () => {
     expect(terminal[0].progress.status).toBe('completed')
   })
 
+  it('isolates an onItemProgress that throws — progress is a best-effort side-channel', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        spec: { fixed: { lr: 0.1 }, seeds: [0] },
+        onItemProgress: () => {
+          throw new Error('host progress sink blew up')
+        },
+      }),
+    ).resolves.toBeDefined()
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records.some((r) => r.content.status === 'completed')).toBe(true)
+  })
+
+  it('isolates an onItemProgress that rejects asynchronously', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        spec: { fixed: { lr: 0.1 }, seeds: [0] },
+        onItemProgress: () => Promise.reject(new Error('host write failed')),
+      }),
+    ).resolves.toBeDefined()
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records.some((r) => r.content.status === 'completed')).toBe(true)
+  })
+
+  it('emits an approximate wall-clock ETA during training when there is no calibration', async () => {
+    let t = Date.parse('2020-01-01T00:00:00.000Z')
+    const now = () => {
+      t += 5000
+      return new Date(t).toISOString()
+    }
+    const tools = createModelTrainerTools({
+      computeRunner: stubRunner(),
+      storage: memoryStorage(),
+      now,
+    })
+    const trainEvents: { done: number; etaSeconds?: number; etaApprox?: boolean }[] = []
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest({ calibrate: undefined }),
+      spec: { fixed: { lr: 0.1 }, seeds: [0, 1] },
+      onProgress: (p) => {
+        if (p.phase === 'train')
+          trainEvents.push({ done: p.done, etaSeconds: p.etaSeconds, etaApprox: p.etaApprox })
+      },
+    })
+    const withEta = trainEvents.find((e) => e.done > 0 && e.etaSeconds !== undefined)
+    expect(withEta).toBeDefined()
+    expect(withEta!.etaApprox).toBe(true)
+    expect(withEta!.etaSeconds!).toBeGreaterThan(0)
+  })
+
   it('notifies onRecordWritten for every persisted run', async () => {
     const written: string[] = []
     const { tools } = makeTools(stubRunner(), memoryStorage())
@@ -1267,7 +1329,9 @@ describe('evaluateTrainingRun', () => {
       })
       expect(result.evaluated).toBe(1)
       expect(result.failed).toBe(1)
-      expect(result.failures).toEqual([{ runKey: 'nockpt', error: expect.stringMatching(/checkpoint/) }])
+      expect(result.failures).toEqual([
+        { runKey: 'nockpt', error: expect.stringMatching(/checkpoint/) },
+      ])
       expect(
         await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key: 'good' }),
       ).toBeDefined()
@@ -1325,6 +1389,33 @@ describe('judgeTrainingRuns', () => {
       judgedBy: 'openai/m',
       judgedAt: NOW,
     })
+  })
+
+  it('judges only the selected runKeys when provided', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10)
+    await seedRun(storage, 'b', 90)
+    await seedRun(storage, 'c', 50)
+    const executor = stubExecutor(
+      JSON.stringify([
+        { key: 'a', score: 60, why: 'x' },
+        { key: 'c', score: 70, why: 'y' },
+      ]),
+    )
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      runKeys: ['a', 'c'],
+    })
+    expect(result.judged).toBe(2)
+    expect(result.verdicts.map((v) => v.key).sort()).toEqual(['a', 'c'])
+    const sent = JSON.parse(executor.requests[0].userContent) as { key: string }[]
+    expect(sent.map((r) => r.key).sort()).toEqual(['a', 'c'])
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-verdict' })
+    expect(records.map((r) => r.key).sort()).toEqual(['a', 'c'])
   })
 
   it('auto-rejects health-flagged runs without consulting the LLM', async () => {

@@ -9,6 +9,11 @@
 
 const POLL_MS = 3000
 const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
+// How long an activity must read as not-live (controller gone) AND show no progress
+// advancement before we treat it as genuinely dead. `isLive` is an in-memory flag with
+// no heartbeat, so a momentary backend blip (a slow GET, a dev reload) can flip it for a
+// poll or two while the campaign is still training — pausing on that strands a live run.
+const DEAD_CONFIRM_MS = 45000
 const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
@@ -220,6 +225,18 @@ function iconDeleteSvg() {
     '<path d="M10 11v6" stroke="#A855F7" stroke-width="2"/>' +
     '<path d="M14 11v6" stroke="#A855F7" stroke-width="2"/>' +
     '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="#F59E0B" stroke-width="2"/>' +
+    '</svg>'
+  )
+}
+// A balance-scale glyph for the Judge button (the LLM weighs runs against each other).
+function iconJudgeSvg() {
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M12 3v18"/>' +
+    '<path d="M7 21h10"/>' +
+    '<path d="M5 6h14"/>' +
+    '<path d="M5 6l-3 6a3 3 0 0 0 6 0z"/>' +
+    '<path d="M19 6l-3 6a3 3 0 0 0 6 0z"/>' +
     '</svg>'
   )
 }
@@ -1455,7 +1472,7 @@ async function enqueueMissingEvaluations(campaign, baseParams) {
   await putQueueItem({
     id: randomHexId(),
     activityType: 'evaluate',
-    params: { ...baseParams, runKeys: pending, ...(concurrency > 1 ? { concurrency } : {}) },
+    params: { ...baseParams, runKeys: pending, concurrency },
     label:
       pending.length === 1 ? `Evaluate ${shortKey(pending[0])}` : `Evaluate ${pending.length} runs`,
     queuedAt: nowIso(),
@@ -1685,15 +1702,58 @@ const METRIC_INFO = {
 }
 const VSHOLD_INFO =
   'Run return minus buy-and-hold over the same window. Positive = beat just holding. Hold is a control to judge against — never the optimisation target.'
+// Short column headers for the runs TABLE (the detail view keeps the raw metric key).
+const METRIC_LABEL = {
+  total_return_pct: 'return %',
+  n_trades: '#trades',
+  win_pct: 'win %',
+  stop_losses: 'SLs',
+  final_net_worth: 'Final $',
+}
+// Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
+// out of the table's metric columns but still rendered by metricsTableHtml.
+const TABLE_HIDDEN_METRICS = new Set([
+  'trade_gate',
+  'traded_return',
+  'windows_profitable_pct',
+  'worst_window_return_pct',
+])
+function metricLabel(mk) {
+  return METRIC_LABEL[mk] || mk.replace(/_pct$/, ' %').replace(/_/g, ' ')
+}
+// win % reads as a precise percentage (2dp); everything else uses the objective formatter.
+function formatMetricValue(mk, v) {
+  if (mk === 'win_pct') return v.toFixed(2)
+  return formatObjective(v)
+}
 function runMetricKeys() {
   const keys = new Set()
   for (const r of runsCache) {
     const m = r.summary && r.summary.metrics
     if (m && typeof m === 'object') for (const k of Object.keys(m)) keys.add(k)
   }
-  const known = RUN_METRIC_ORDER.filter((k) => keys.has(k))
-  const rest = [...keys].filter((k) => !RUN_METRIC_ORDER.includes(k)).sort()
+  const known = RUN_METRIC_ORDER.filter((k) => keys.has(k) && !TABLE_HIDDEN_METRICS.has(k))
+  const rest = [...keys]
+    .filter((k) => !RUN_METRIC_ORDER.includes(k) && !TABLE_HIDDEN_METRICS.has(k))
+    .sort()
   return [...known, ...rest]
+}
+// A status DOT (no text) for the Run column — green healthy / amber degenerate or
+// health-flagged / red failed / grey unknown. The Run header's "?" explains it.
+function statusDotHtml(s) {
+  let cls = 'is-ok'
+  let label = 'healthy'
+  if (s.status === 'failed') {
+    cls = 'is-bad'
+    label = 'failed'
+  } else if (s.health && s.health.status && s.health.status !== 'ok') {
+    cls = 'is-warn'
+    label = `health: ${s.health.status}`
+  } else if (!s.health || !s.health.status) {
+    cls = 'is-unknown'
+    label = 'unknown'
+  }
+  return `<span class="run-status-dot ${cls}" title="${escapeHtml(label)}" aria-label="status: ${escapeHtml(label)}"></span>`
 }
 function anyBenchmark() {
   return runsCache.some(
@@ -1725,7 +1785,8 @@ function runsColumns() {
       id: 'key',
       label: 'Run',
       num: false,
-      get: (r) => `<code>${escapeHtml(shortKey(r.key))}</code>`,
+      help: 'The dot is run status: green = healthy · amber = degenerate / health-flagged (e.g. too few trades) · red = failed · grey = unknown. The code is the run id (config hash).',
+      get: (r) => `${statusDotHtml(r.summary)}<code>${escapeHtml(shortKey(r.key))}</code>`,
       sort: (r) => r.key,
     },
     {
@@ -1737,24 +1798,24 @@ function runsColumns() {
     },
     {
       id: 'version',
-      label: 'pipeline',
+      label: 'v',
       num: false,
       help: 'Pipeline version this run ran under. Runs from different versions are NOT comparable (a breaking version changed how data is fed/scored). Filter by it to clear out old runs.',
-      get: (r) => `v${escapeHtml(String((r.summary && r.summary.pipelineVersion) || '1'))}`,
+      get: (r) => escapeHtml(String((r.summary && r.summary.pipelineVersion) || '1')),
       sort: (r) => String((r.summary && r.summary.pipelineVersion) || '1'),
     },
   ]
   for (const mk of runMetricKeys()) {
     cols.push({
       id: 'm:' + mk,
-      label: mk.replace(/_pct$/, ' %').replace(/_/g, ' '),
+      label: metricLabel(mk),
       num: true,
       help: METRIC_INFO[mk],
       get: (r) => {
         const v = r.summary.metrics && r.summary.metrics[mk]
         if (typeof v !== 'number') return escapeHtml(v === undefined ? '—' : String(v))
         const cls = metricColorClass(mk, v)
-        const text = formatObjective(v)
+        const text = formatMetricValue(mk, v)
         return cls ? `<span class="${cls}">${escapeHtml(text)}</span>` : escapeHtml(text)
       },
       sort: (r) => {
@@ -1779,26 +1840,6 @@ function runsColumns() {
     })
   }
   cols.push(
-    {
-      id: 'seed',
-      label: 'Seed',
-      num: true,
-      get: (r) => escapeHtml(r.summary.seed === undefined ? '—' : String(r.summary.seed)),
-      sort: (r) => Number(r.summary.seed),
-    },
-    {
-      id: 'health',
-      label: 'Status',
-      num: false,
-      get: (r) =>
-        r.summary.status === 'failed'
-          ? '<span class="badge is-bad">failed</span>'
-          : healthBadgeHtml(r.summary.health),
-      sort: (r) =>
-        r.summary.status === 'failed'
-          ? 'failed'
-          : (r.summary.health && r.summary.health.status) || '',
-    },
     {
       id: 'judge',
       label: 'Judge',
@@ -2258,13 +2299,23 @@ function renderRunsTable() {
   renderCompare()
   syncRunsSelectionUI()
 }
-// Show/label the "Delete selected" button (in the runs head) from the current selection.
+// The two selection-gated run actions in the runs head — Judge selected + Delete
+// selected — share one look (icon + text) and one rule: disabled until ≥1 run is
+// ticked. Judge also reflects the live judging state.
 function syncRunsSelectionUI() {
-  const btn = byId('runs-delete-selected')
-  if (!btn) return
   const n = runsCompareKeys.size
-  btn.hidden = n === 0
-  btn.textContent = `Delete selected (${n})`
+  const judge = byId('judge-btn')
+  if (judge) {
+    judge.disabled = judging || n === 0
+    judge.innerHTML = judging
+      ? busyButtonHtml('Judging…')
+      : `${iconJudgeSvg()}<span>Judge selected${n ? ` (${n})` : ''}</span>`
+  }
+  const del = byId('runs-delete-selected')
+  if (del) {
+    del.disabled = n === 0
+    del.innerHTML = `${iconDeleteSvg()}<span>Delete selected${n ? ` (${n})` : ''}</span>`
+  }
 }
 async function renderRuns() {
   if (!byId('runs-body')) return
@@ -2304,6 +2355,9 @@ function renderCompare() {
     syncRunsMdLayout()
     return
   }
+  // Selecting ≥2 runs is a COMPARE gesture — collapse any single-run detail (and its
+  // row highlight) so only the compare pane shows.
+  if (selectedRunKey) closeRunDetail()
   const headRow = runs.map((r) => `<th><code>${escapeHtml(shortKey(r.key))}</code></th>`).join('')
   const diffRows = Object.keys((manifest && manifest.levers) || {})
     .map((lk) => {
@@ -2336,7 +2390,7 @@ function renderCompare() {
     card,
     `<div class="card-head card-head-row">
       <h3>Compare ${runs.length} runs</h3>
-      <button type="button" id="compare-clear" class="ghost-btn">clear</button>
+      <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
     </div>
     ${versionWarn}
     ${compareEquityChartHtml(runs)}
@@ -2725,6 +2779,9 @@ function syncRunsMdLayout() {
   md.classList.toggle('has-detail', hasDetail)
 }
 function openRunDetail(key) {
+  // While ≥2 runs are ticked for compare, the compare pane owns the detail column —
+  // a stray row click must not pop a single-run detail back open.
+  if (runsCompareKeys.size >= 2) return
   selectedRunKey = key
   for (const row of document.querySelectorAll('#runs-body tr[data-key]')) {
     row.classList.toggle('is-selected', row.dataset.key === key)
@@ -2788,11 +2845,7 @@ function setStatusLine(id, text, isError) {
   el.classList.toggle('is-error', !!isError)
 }
 function renderJudgeControls() {
-  const btn = byId('judge-btn')
-  if (btn) {
-    btn.disabled = judging
-    btn.innerHTML = judging ? busyButtonHtml('Judging…') : 'Judge runs'
-  }
+  syncRunsSelectionUI()
   renderTabLiveIndicator()
   const last = byId('judge-last')
   if (!last) return
@@ -2834,10 +2887,15 @@ async function onJudgeClick() {
     setStatusLine('judge-status', 'Open inside the Overseer to judge runs.', false)
     return
   }
+  const runKeys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  if (!runKeys.length) {
+    setStatusLine('judge-status', 'Select one or more runs to judge.', false)
+    return
+  }
   const epoch = projectEpoch
   setStatusLine('judge-status', '')
   try {
-    const result = await startOrEnqueue('judge', trainerActivityParams(), 'Judge runs')
+    const result = await startOrEnqueue('judge', trainerActivityParams({ runKeys }), 'Judge runs')
     if (result.queued) {
       if (epoch === projectEpoch) setStatusLine('judge-status', queuedStatusText(result.ahead))
       return
@@ -4240,9 +4298,12 @@ function rememberAutoEval(on) {
 }
 // Max parallel runs is an Activity-level setting (not a per-launch field): how many
 // runs of a campaign may execute at once. Persisted; read at launch.
+// Persisted in localStorage (NOT sessionStorage): the embedded iframe gets a fresh
+// session on every host reload / cache-bust, which would silently reset the chosen
+// parallelism back to 1 — the cause of "I configured 12 but only 1 ran".
 function savedConcurrency() {
   try {
-    const n = Math.floor(Number(sessionStorage.getItem(CONCURRENCY_SS)))
+    const n = Math.floor(Number(localStorage.getItem(CONCURRENCY_SS)))
     return Number.isFinite(n) && n >= 1 ? n : 1
   } catch {
     return 1
@@ -4250,7 +4311,7 @@ function savedConcurrency() {
 }
 function rememberConcurrency(n) {
   try {
-    sessionStorage.setItem(CONCURRENCY_SS, String(Math.max(1, Math.floor(Number(n)) || 1)))
+    localStorage.setItem(CONCURRENCY_SS, String(Math.max(1, Math.floor(Number(n)) || 1)))
   } catch {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
@@ -4351,6 +4412,9 @@ function renderLaunchForm() {
         </label>
         <label class="field"><span>Seeds ${helpCalloutHtml('How many seeds to run per config (0…N−1). Keep at 1 while exploring; raise it when homing in to measure variance across seeds (the by-setup view then shows the spread).')}</span>
           <input type="number" name="seeds" min="1" step="1" value="1" />
+        </label>
+        <label class="field"><span>Max parallel runs ${helpCalloutHtml('How many runs of this campaign train at once (a bounded worker pool). Higher finishes the sweep faster but uses more CPU/RAM. 1 = strictly sequential.')}</span>
+          <input type="number" name="concurrency" min="1" step="1" value="${savedConcurrency()}" />
         </label>
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
@@ -4546,7 +4610,11 @@ async function onLaunchSubmit(event) {
   const spec = buildSpecFromForm(form)
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
   const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
-  const concurrency = savedConcurrency()
+  const concurrency = Math.max(
+    1,
+    Math.floor(Number(form.elements.concurrency && form.elements.concurrency.value)) || 1,
+  )
+  rememberConcurrency(concurrency)
   const skipExplored = !!(form.elements.skipExplored && form.elements.skipExplored.checked)
   const thesis = String((form.elements.thesis && form.elements.thesis.value) || '').trim()
   const thesisTarget = String(
@@ -4558,7 +4626,7 @@ async function onLaunchSubmit(event) {
     const params = trainerComputeParams({
       spec,
       refresh,
-      ...(concurrency > 1 ? { concurrency } : {}),
+      concurrency,
       ...(skipExplored ? { skipExplored: true } : {}),
       ...(thesis ? { thesis } : {}),
       ...(thesis && thesisTarget ? { thesisTarget } : {}),
@@ -4597,6 +4665,9 @@ function setupLaunch() {
   form.addEventListener('input', (event) => {
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
+    }
+    if (event.target && event.target.name === 'concurrency') {
+      rememberConcurrency(event.target.value)
     }
     updateLaunchSummary()
   })
@@ -4759,6 +4830,8 @@ async function observeActivityUntilDone(activityId) {
   currentActivityId = activityId
   const start = Date.now()
   let resumeTries = 0
+  let deadSince = 0
+  let lastSig = ''
   try {
     while (Date.now() - start < MAX_OBSERVE_MS) {
       if (session !== observeSession || epoch !== projectEpoch) return 'cancelled'
@@ -4777,20 +4850,36 @@ async function observeActivityUntilDone(activityId) {
           await settleActivity(act.status)
           return act.status
         }
-        if (!act || act.isLive === false) {
-          if (resumeTries < 1) {
-            resumeTries += 1
-            try {
-              await window.OverseerBridge.resumeActivity(activityId)
-            } catch {
-              // keep observing; the records may settle on their own
+        const sig = activityProgressSig(progress, campaign)
+        const advanced = sig !== lastSig
+        lastSig = sig
+        if ((!act || act.isLive === false) && !advanced) {
+          // Not live AND nothing moved this poll — start (or continue) the dead clock.
+          const now = Date.now()
+          if (!deadSince) deadSince = now
+          if (now - deadSince >= DEAD_CONFIRM_MS) {
+            // Sustained-dead: try ONE relaunch (never while advancing — that would
+            // double-run a live campaign), then declare paused if it stays dead.
+            if (resumeTries < 1) {
+              resumeTries += 1
+              deadSince = now
+              try {
+                await window.OverseerBridge.resumeActivity(activityId)
+              } catch {
+                // keep observing; the records may settle on their own
+              }
+            } else {
+              lastActivityStatus = 'paused'
+              renderActivity()
+              return 'paused'
             }
           } else {
-            lastActivityStatus = 'paused'
-            renderActivity()
-            return 'paused'
+            // Within the grace window — the work is most likely still running.
+            lastActivityStatus = 'running'
           }
         } else {
+          // Live, or records advanced (alive despite a transient isLive gap).
+          deadSince = 0
           lastActivityStatus = 'running'
         }
         renderActivity()
@@ -4801,6 +4890,21 @@ async function observeActivityUntilDone(activityId) {
   } finally {
     if (session === observeSession) observing = false
   }
+}
+// A cheap fingerprint of campaign progress; when it changes between polls the run is
+// demonstrably alive (so we never pause/relaunch it even if `isLive` momentarily lies).
+function activityProgressSig(progress, campaign) {
+  const p = progress || {}
+  const c = campaign || {}
+  return [
+    p.updatedAt,
+    p.done,
+    p.total,
+    p.phase,
+    Array.isArray(p.inFlight) ? p.inFlight.length : 0,
+    c.updatedAt,
+    c.done,
+  ].join('|')
 }
 // The activity settled: stamp the final status, re-read the campaign result,
 // refresh the Runs tab so new run records show up, run the settle bookkeeping
@@ -5041,7 +5145,7 @@ function renderActivity() {
   const running = status === 'running'
   const eta =
     running && p && Number(p.etaSeconds) > 0
-      ? `<p class="activity-eta">ETA ~${escapeHtml(formatEta(p.etaSeconds))}</p>`
+      ? `<p class="activity-eta">ETA ~${escapeHtml(formatEta(p.etaSeconds))}${p.etaApprox ? ' (est.)' : ''}</p>`
       : ''
   const times = p
     ? `<p class="card-sub">Started ${escapeHtml(formatWhen(p.startedAt))} · Updated ${escapeHtml(formatWhen(p.updatedAt))}${p.lastKey ? ` · Last run <code>${escapeHtml(shortKey(p.lastKey))}</code>` : ''}</p>`

@@ -586,6 +586,29 @@ button:focus-visible,
 .judge-none {
   color: var(--muted);
 }
+/* Status DOT in the Run column (replaces the old text Status column). */
+.run-status-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 7px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--muted);
+}
+.run-status-dot.is-ok {
+  background: var(--ok);
+}
+.run-status-dot.is-warn {
+  background: var(--warn);
+}
+.run-status-dot.is-bad {
+  background: var(--bad);
+}
+.run-status-dot.is-unknown {
+  background: var(--muted);
+  opacity: 0.5;
+}
 .badges-row {
   margin: 6px 0 0;
   display: flex;

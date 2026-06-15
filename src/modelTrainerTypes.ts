@@ -245,6 +245,8 @@ export interface TrainingCampaignProgress {
   skipped: number
   failed: number
   etaSeconds?: number
+  /** True when `etaSeconds` is a coarse wall-clock estimate (no calibration), so the UI can mark it approximate. */
+  etaApprox?: boolean
   /** Key of the most recently finished item. */
   lastKey?: string
 }
@@ -370,6 +372,8 @@ export interface JudgeTrainingRunsParams {
   llmConfig: LLMConfig
   /** Extra rubric appended to the judge prompt. */
   instructions?: string
+  /** Restrict judging to these run keys (the selection); when omitted, judge every completed run in scope. */
+  runKeys?: string[]
   abortSignal?: AbortSignal
   /** Fired after each verdict record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void

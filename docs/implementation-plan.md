@@ -180,14 +180,34 @@ SHIPPED:
 - **Icon buttons** — run-detail Close (✕), Clone (⧉), Mark-unrunnable (⊘/⊙) are icon-only w/ tooltips;
   Add-hypothesis is "+"; accepted/rejected hypothesis cards get a corner **delete** (🗑) icon. New `.icon-btn`.
 
-REMAINING (needs LIVE verification after a backend rebuild+restart — `dev:force`):
-- **Concurrency display ("only 1 running")**: backend parallelism is confirmed in code (savedConcurrency →
-  activity param → `runActivityWorkItems` poolSize=min(concurrency,total) + Promise.all of N workers); the
-  `train` activity now emits `progress.inFlight[]` (add on marker / drop on terminal `onItemProgress`) and the
-  viewer renders one row per in-flight run. Confirm N rows actually appear with concurrency>1 live.
-- **ETA + determinate progress bar**: the bar/ETA need `etaSeconds` from calibration, which builds the model and
-  was likely ALSO crashing on the `custom_net_arch` bug (now fixed). Per-run ETA also needs the trainer's
-  `@@PROGRESS done/total` markers. VERIFY post-restart; if still missing, investigate calibration separately.
+### Round 7 (2026-06-15) — diagnosed + fixed the parallelism / progress / self-stop trio (multi-agent diagnosis)
+
+SHIPPED (root causes confirmed in code, not guessed):
+- **S1 "only 1 running"** — the pool genuinely parallelises; the bug was the viewer dropping `concurrency`:
+  it lived in per-tab `sessionStorage` (reset to 1 on every cache-bust iframe reload) and was only sent when
+  `> 1`. Fix: `savedConcurrency`/`rememberConcurrency` use **localStorage**, the launch payload **always** sends
+  `concurrency`, and a **"Max parallel runs"** field now sits on the Launch form itself (not stranded on Activity).
+- **S2 per-run rows lost under concurrency** — `onItemProgress` was fire-and-forget and N workers raced on the
+  same `'latest'` record. Fix: tools `emitItemProgress` isolates the sink (sync throw / async reject swallowed,
+  terminal awaited) and the backend `train` activity funnels all progress writes through a single `progressChain`
+  tail-promise (ordered, coalesced snapshots) — completed runs reliably drop out of `inFlight`.
+- **S2 ETA "just sweeps left→right"** — ETA only existed with `calibrate` (BlackSwan has none). Fix: a
+  **wall-clock ETA fallback** (`elapsed/done × remaining`) emitted with `etaApprox:true`; the viewer shows
+  "ETA ~Xm (est.)".
+- **S3 "stopped on its own, had to Resume"** — the viewer's observe loop treated a *transient* `isLive===false`
+  (no heartbeat; a slow GET / dev reload flips it) as terminal after ~6s → auto-resume → "paused" → stalled the
+  queue pump. Fix: only declare paused after `isLive===false` is **sustained `DEAD_CONFIRM_MS` (45s) with no
+  progress advancement**, and never auto-resume an advancing run (would double-launch). Plus a backend
+  `process.on('unhandledRejection')` guard so a stray detached rejection can't crash the process.
+
+REMAINING (open):
+- **LIVE verification** after a `dev:force` backend restart + viewer reload: concurrency>1 shows N in-flight rows;
+  the ETA shows "(est.)"; a brief backend blip no longer self-pauses a live campaign.
+- **S3 secondary — boot-time orphan reclaim (DEFERRED).** A real backend restart still strands a `running`
+  ActivityRun (in-memory controller lost) until a client's observe loop auto-resumes it. A server-side boot scan
+  that relaunches resumable runs (or marks them paused) is the durable fix — deferred as a focused
+  `activityRunner.ts` pass with tests (riskier core-infra change; the viewer auto-resume covers the common case
+  while a client is watching).
 
 ## BlackSwan — the path to a trading model (A → B → C)
 

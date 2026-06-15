@@ -181,6 +181,22 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
 
     let lastKey: string | undefined
+    // Wall-clock anchor for an ETA fallback: when there's no calibration (most projects
+    // declare no `calibrate`), estimate remaining time from how long the completed items
+    // have actually taken — so the UI shows a moving estimate instead of just a sweeping bar.
+    const campaignStartMs = Date.parse(now())
+    // Progress is a best-effort side-channel: a host's sink throwing synchronously or
+    // rejecting (e.g. a transient progress-record write conflict under concurrency) must
+    // never abort a training run, drop the terminal signal's siblings, or escape as an
+    // unhandled rejection that could take the host process down.
+    const emitItemProgress = (key: string, progress: Record<string, unknown>): Promise<void> => {
+      if (!params.onItemProgress) return Promise.resolve()
+      try {
+        return Promise.resolve(params.onItemProgress(key, progress)).catch(() => {})
+      } catch {
+        return Promise.resolve()
+      }
+    }
     const summary = await runActivityWorkItems<
       PlannedTrainingItem,
       { key: string; objective: number }
@@ -213,18 +229,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           abortSignal: params.abortSignal,
         })
         if (params.onItemProgress) {
-          void params.onItemProgress(item.key, { phase: 'starting' })
+          // Subscribe to logs BEFORE the (awaited) starting emit so a synchronously
+          // streamed marker can't slip past an unregistered listener.
           handle.onLog((line) => {
             const marker = parseProgressMarker(line)
-            if (marker) void params.onItemProgress!(item.key, marker)
+            if (marker) void emitItemProgress(item.key, marker)
           })
+          await emitItemProgress(item.key, { phase: 'starting' })
         }
         const result = await handle.done
         // Signal this item left the in-flight set (completed/failed/aborted) so a host
         // tracking concurrent runs can drop it from its live display.
-        if (params.onItemProgress) {
-          void params.onItemProgress(item.key, { terminal: true, status: result.status })
-        }
+        await emitItemProgress(item.key, { terminal: true, status: result.status })
         if (result.status !== 'completed') {
           const error = result.error ?? `training exited with code ${result.exitCode}`
           if (result.status !== 'aborted') {
@@ -272,10 +288,19 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         return { key: item.key, objective: runSummary.objective }
       },
       onProgress: (progress) => {
-        const etaSeconds =
+        // Prefer the calibration-derived ETA; otherwise fall back to a wall-clock estimate
+        // from elapsed-per-completed-item once at least one item has finished.
+        const calibratedEta =
           calibration?.etaSeconds !== undefined && progress.total > 0
             ? calibration.etaSeconds * ((progress.total - progress.done) / progress.total)
             : undefined
+        const elapsedSec = (Date.parse(now()) - campaignStartMs) / 1000
+        const remaining = progress.total - progress.done
+        const wallClockEta =
+          calibratedEta === undefined && progress.done > 0 && remaining > 0 && elapsedSec > 0
+            ? (elapsedSec / progress.done) * remaining
+            : undefined
+        const etaSeconds = calibratedEta ?? wallClockEta
         void emit({
           phase: 'train',
           done: progress.done,
@@ -283,6 +308,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           skipped: progress.skipped,
           failed: progress.failed,
           ...(etaSeconds !== undefined ? { etaSeconds } : {}),
+          ...(wallClockEta !== undefined && calibratedEta === undefined ? { etaApprox: true } : {}),
           ...(lastKey !== undefined ? { lastKey } : {}),
         })
       },
@@ -483,7 +509,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const recordType = manifest.recordType
     const judgedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
     const judgedAt = now()
-    const runs = await listCompletedRuns(params.scope, recordType)
+    const allRuns = await listCompletedRuns(params.scope, recordType)
+    const onlyKeys = params.runKeys && params.runKeys.length ? new Set(params.runKeys) : undefined
+    const runs = onlyKeys ? allRuns.filter((run) => onlyKeys.has(run.key)) : allRuns
 
     const verdicts: TrainingVerdict[] = []
     const healthy: { key: string; objective: number; content: Record<string, unknown> }[] = []
