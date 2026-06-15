@@ -162,6 +162,37 @@ SHIPPED:
   Compare warns when selected runs span multiple versions. Follow-up: a version filter/dropdown + a dedicated
   per-version leaderboard (today: per-run version + the by-setup/by-experiment groupings).
 
+### Round 2 (2026-06-15, live-use feedback)
+
+SHIPPED:
+- **CORRECTNESS — total_return_pct was GROSS (pre-fee).** It read `state[2] = total_profit/initial`, but
+  `total_profit` never subtracts fees while `final_net_worth` is post-fee — so a fee-eaten run showed +41%
+  with a final net worth below the 100k start. `summary.py` now computes `total_return` from the post-fee
+  equity curve (`curve[-1]/curve[0]-1`), consistent with `final_net_worth` AND making the `traded_return`
+  objective fee-honest.
+- **CORRECTNESS — run crash `custom_net_arch[0][0]` (omegaconf list index out of range).** A `*-custom`
+  policy could receive an empty `custom_net_arch`; `create_mlp_custom` now falls back to a standard MLP
+  (`["Linear","activation_fn"]·len(net_arch)+["Linear"]`) instead of crashing.
+- **Runs layout** — fixed the width cap + own-scroll: `.tab-main.is-fullwidth` now establishes a flex-height
+  context (`display:flex;flex-direction:column;min-height:0;padding:0`) + `#tab-runs` fills it (padding moved
+  there) + `.runs-md height:100%`, so the panes (not the page) own their scroll and the Runs tab uses full width.
+- **Lead columns** = %return, #trades, **%wins** (win_pct added to the lead trio).
+- **Icon buttons** — run-detail Close (✕), Clone (⧉), Mark-unrunnable (⊘/⊙) are icon-only w/ tooltips;
+  Add-hypothesis is "+"; accepted/rejected hypothesis cards get a corner **delete** (🗑) icon. New `.icon-btn`.
+
+REMAINING (this round → fold into the Activity-center / a focused UI pass, needs LIVE verification):
+- **Versions as a dedicated "Versions" TAB** (today it's the collapsible panel) + a version FILTER + COLUMN in Runs.
+- **Single-vs-multi detail**: one run selected → run detail (today); MULTIPLE selected → show the **Charts** content
+  in the detail pane, **removing the Charts tab** (consolidate).
+- **Concurrency display ("only 1 running")**: traced — concurrency IS passed (savedConcurrency → activity param
+  → `runActivityWorkItems`), so the backend should run all N; the Activity view only renders ONE `p.current`
+  item, so it LOOKS like 1. Fix = surface all in-flight runs / a running-count (needs multi-item progress
+  emission). Verify actual backend parallelism live.
+- **ETA + determinate progress bar missing**: the bar/ETA need `etaSeconds` from calibration; calibration runs
+  `trainer.run --calibrate` which builds the model, so it was very likely ALSO crashing on the `custom_net_arch`
+  bug → no `etaSeconds` → indeterminate bar. The crash fix should restore it — VERIFY after a backend restart;
+  if still missing, investigate calibration separately.
+
 ## BlackSwan — the path to a trading model (A → B → C)
 
 Strictly ordered: **(A) make everything correct → (B) find ONE setup that trades well → (C) explore the

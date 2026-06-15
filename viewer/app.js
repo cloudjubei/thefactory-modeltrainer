@@ -2658,9 +2658,9 @@ function renderRunDetail(key) {
           · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${unrunnableBadge}</p>
       </div>
       <div class="head-actions">
-        <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="ghost-btn">Clone to Launch</button>
-        <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="ghost-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Skip this setup on re-run (this pipeline version) unless forced'}">${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}</button>
-        <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
+        <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
+        <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
+        <button type="button" id="run-detail-close" class="icon-btn" title="Close" aria-label="Close">✕</button>
       </div>
     </div>
     ${failed ? failureDetailHtml(s, run.key) : ''}
@@ -3493,7 +3493,13 @@ function hypothesisCampaignHtml(h, liveIds) {
 function hypothesisCardHtml(h, liveIds) {
   const source = h.source === 'llm' ? 'LLM' : 'human'
   const by = h.proposedBy ? ` · ${escapeHtml(h.proposedBy)}` : ''
+  // Settled (accepted/rejected) cards get a corner delete button to clear them out.
+  const settled = h.status === 'accepted' || h.status === 'rejected'
+  const deleteBtn = settled
+    ? `<button type="button" class="icon-btn icon-btn-danger hypothesis-delete" data-action="delete" data-id="${escapeHtml(h.id)}" title="Delete hypothesis" aria-label="Delete hypothesis">🗑</button>`
+    : ''
   return `<article class="hypothesis-card${h.status === 'rejected' ? ' is-muted' : ''}" data-id="${escapeHtml(h.id)}">
+    ${deleteBtn}
     <h4>${escapeHtml(h.title || h.id)}</h4>
     ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
     ${specSummaryHtml(h.spec)}
@@ -3607,6 +3613,19 @@ async function setHypothesisStatus(id, status) {
     setStatusLine('hypotheses-status', 'Could not update the hypothesis — please try again.', true)
     return
   }
+  await renderHypotheses()
+}
+// Permanently remove a settled (accepted/rejected) hypothesis card.
+async function deleteHypothesis(id) {
+  if (!manifest || !id) return
+  setStatusLine('hypotheses-status', '')
+  try {
+    await window.OverseerBridge.deleteData({ type: manifest.recordType + '-hypothesis', key: id })
+  } catch {
+    setStatusLine('hypotheses-status', 'Could not delete the hypothesis — please try again.', true)
+    return
+  }
+  hypothesesCache = hypothesesCache.filter((x) => x.id !== id)
   await renderHypotheses()
 }
 // Stamp a hypothesis record's `campaign` block (preserving every other field),
@@ -3876,6 +3895,7 @@ function setupHypotheses() {
       else if (action === 'restore') setHypothesisStatus(id, 'pending')
       else if (action === 'run') runHypothesisCampaign(id, btn)
       else if (action === 'view-runs') viewHypothesisRuns(id)
+      else if (action === 'delete') deleteHypothesis(id)
     })
   }
 }

@@ -203,13 +203,21 @@ body {
    never scrolls the whole screen. When no run is selected the list spans the
    full width; selecting one splits the panes. Narrow screens stack them. */
 .tab-main.is-fullwidth {
+  /* Full-bleed + a flex-height context so #tab-runs can fill the viewport and the
+     panes (not the page) own their scroll. Padding moves onto #tab-runs. */
   max-width: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .tab-main.is-fullwidth > #tab-runs:not([hidden]) {
   display: flex;
   flex-direction: column;
   min-height: 0;
   height: 100%;
+  flex: 1;
+  padding: 16px;
 }
 .runs-md {
   display: grid;
@@ -217,6 +225,7 @@ body {
   gap: 14px;
   flex: 1;
   min-height: 0;
+  height: 100%;
 }
 .runs-md.has-detail {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
@@ -828,6 +837,33 @@ body {
   margin: 0 0 10px;
   font-size: 13px;
 }
+/* Icon-only buttons (close ×, clone, mark-unrunnable, add +, delete) — text lives in the
+   tooltip/aria-label. ~28px square to match the app's compact controls. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.icon-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.icon-btn.icon-btn-danger:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
 .runs-filter-lever,
 .runs-filter-text {
   font-size: 12px;
@@ -1426,6 +1462,7 @@ pre.json {
   gap: 12px;
 }
 .hypothesis-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -1433,6 +1470,14 @@ pre.json {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-subtle);
+}
+.hypothesis-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.hypothesis-card h4 {
+  padding-right: 32px;
 }
 .hypothesis-card h4 {
   margin: 0;
