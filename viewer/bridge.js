@@ -66,5 +66,11 @@
     createRunnerPairing: () => call('runners.create-pairing', undefined),
     listRunners: () => call('runners.list', undefined),
     removeRunner: (runnerId) => call('runners.remove', { runnerId: runnerId }),
+    // Open the host's docked chat sidebar (no seed). The host decides which
+    // project topic to attach.
+    requestChatSidebar: () => call('chat.requestSidebar', undefined, 30000),
+    // Open the docked chat sidebar seeded with a topic + first message, and
+    // auto-send the seed. Used by "Ask AI for help" on a failed run.
+    discussTopic: (payload) => call('chat.discuss', payload, 30000),
   }
 })()

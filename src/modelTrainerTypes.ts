@@ -104,6 +104,28 @@ export interface TrainerManifest {
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
   image?: string
+  /**
+   * The CURRENT data/scoring pipeline version. Bump it ONLY on a BREAKING change — one that changes
+   * how data is fed or scored, so scores are no longer comparable to prior runs (additive changes
+   * like a new model/optimizer option do NOT bump it). Each run is tagged with the version it ran
+   * under; a bump invalidates `skipExplored`/`unrunnable` so every setup is re-explored under the
+   * new pipeline. Omitted ⇒ treated as `"1"`.
+   */
+  pipelineVersion?: string
+  /** Per-version changelog (newest first), so the hub can show what each version changed. */
+  pipelineChangelog?: PipelineVersionEntry[]
+}
+
+/** One entry in a project's pipeline changelog. */
+export interface PipelineVersionEntry {
+  /** The version string this entry documents (matches `TrainerManifest.pipelineVersion` when current). */
+  version: string
+  /** When the version landed (ISO date), if recorded. */
+  date?: string
+  /** True when this version changed data/scoring in a way that makes prior scores incomparable. */
+  breaking?: boolean
+  /** One- or two-line description of what changed in this version. */
+  summary: string
 }
 
 /** Which lever values a campaign explores. Levers absent from both fall back to their defaults. */
@@ -182,6 +204,37 @@ export interface EvaluateTrainingRunResult {
   /** The evaluation's objective value (e.g. mean return over the eval episodes). */
   objective: number
   evaluatedAt: string
+}
+
+export interface EvaluateTrainingRunsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** Keys of completed run records whose checkpoints get re-evaluated, in parallel up to `concurrency`. */
+  runKeys: string[]
+  /** Max evaluations dispatched at once (a bounded pool); defaults to 1 (sequential). */
+  concurrency?: number
+  /** Named compute target to evaluate on; omit for the default (local) runner. */
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  /** Fired after each evaluation record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Streamed cumulative progress as evaluations settle. */
+  onProgress?: (progress: { done: number; total: number; failed: number }) => void
+}
+
+export interface EvaluateTrainingRunsResult {
+  recordType: string
+  /** Number of runs evaluated successfully. */
+  evaluated: number
+  /** Number of runs whose evaluation threw. */
+  failed: number
+  /** The per-run results, one per successful evaluation. */
+  results: EvaluateTrainingRunResult[]
+  /** The runs that failed, with their error; omitted when none failed. */
+  failures?: { runKey: string; error: string }[]
 }
 
 /** Streamed campaign progress — written to the `{recordType}-progress` record by the host activity. */
@@ -393,6 +446,12 @@ export interface ModelTrainerTools {
    * command, persisting the result as a `{recordType}-evaluation` record.
    */
   evaluateTrainingRun(params: EvaluateTrainingRunParams): Promise<EvaluateTrainingRunResult>
+  /**
+   * Re-test many completed runs' checkpoints in parallel (a bounded pool),
+   * persisting one `{recordType}-evaluation` record per run; a failure isolates
+   * to its run and is reported in `failures` without stopping the rest.
+   */
+  evaluateTrainingRuns(params: EvaluateTrainingRunsParams): Promise<EvaluateTrainingRunsResult>
   /**
    * Score every completed run: auto-reject health-flagged ones, blend the
    * normalised objective with an LLM verdict, persist `{recordType}-verdict` records.

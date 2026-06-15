@@ -18,6 +18,7 @@ import type {
 } from 'thefactory-tools/types'
 import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
+import { setupKeyOf } from './modelTrainerHelpers.js'
 
 const NOW = '2026-06-10T12:00:00.000Z'
 
@@ -889,6 +890,133 @@ describe('data files + compute targets', () => {
     expect(remote.jobs).toHaveLength(1)
     expect(local.jobs).toHaveLength(0)
   })
+
+  describe('pipeline versioning + unrunnable', () => {
+    it("tags each run record with the manifest's pipelineVersion", async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest({ pipelineVersion: '3' }),
+        spec: { sweep: { lr: [0.1] } },
+      })
+      const [record] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+      expect(record.content).toMatchObject({ pipelineVersion: '3' })
+    })
+
+    it("defaults pipelineVersion to '1' when the manifest declares none", async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        spec: { sweep: { lr: [0.1] } },
+      })
+      const [record] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+      expect(record.content).toMatchObject({ pipelineVersion: '1' })
+    })
+
+    it('re-explores a setup completed under an OLDER pipelineVersion (a version bump invalidates explored)', async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      const m1 = manifest({ pipelineVersion: '1' })
+      delete m1.calibrate
+      await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m1,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+      })
+      const m2 = manifest({ pipelineVersion: '2' })
+      delete m2.calibrate
+      const result = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m2,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+        skipExplored: true,
+      })
+      expect(result.skipped).toBe(0)
+      expect(result.completed).toBe(1)
+    })
+
+    it('still skips a setup completed under the SAME pipelineVersion', async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      const m = manifest({ pipelineVersion: '2' })
+      delete m.calibrate
+      await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+      })
+      const result = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+        skipExplored: true,
+      })
+      expect(result.skipped).toBe(1)
+      expect(result.completed).toBe(0)
+    })
+
+    it('skips a setup marked unrunnable (same version), and force-runs it on refresh', async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      const m = manifest({ pipelineVersion: '1' })
+      delete m.calibrate
+      const setupKey = setupKeyOf({ lr: 0.3, steps: 100 })
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run-unrunnable',
+        key: setupKey,
+        content: { setupKey, pipelineVersion: '1', unrunnable: true },
+      })
+      const skipResult = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        spec: { fixed: { lr: 0.3, steps: 100 }, seeds: [0] },
+        skipExplored: true,
+      })
+      expect(skipResult.skipped).toBe(1)
+      const forceResult = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        spec: { fixed: { lr: 0.3, steps: 100 }, seeds: [0] },
+        refresh: true,
+      })
+      expect(forceResult.completed).toBe(1)
+    })
+
+    it('ignores an unrunnable mark from a DIFFERENT pipelineVersion', async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      const setupKey = setupKeyOf({ lr: 0.3, steps: 100 })
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run-unrunnable',
+        key: setupKey,
+        content: { setupKey, pipelineVersion: '1', unrunnable: true },
+      })
+      const m2 = manifest({ pipelineVersion: '2' })
+      delete m2.calibrate
+      const result = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m2,
+        spec: { fixed: { lr: 0.3, steps: 100 }, seeds: [0] },
+        skipExplored: true,
+      })
+      expect(result.completed).toBe(1)
+      expect(result.skipped).toBe(0)
+    })
+  })
 })
 
 describe('evaluateTrainingRun', () => {
@@ -1060,6 +1188,89 @@ describe('evaluateTrainingRun', () => {
         runKey: 'run1',
       }),
     ).rejects.toThrow(/objective/)
+  })
+
+  describe('evaluateTrainingRuns (batch, parallel)', () => {
+    it('evaluates every run and persists an evaluation record for each', async () => {
+      const storage = memoryStorage()
+      await seedCompletedRun(storage, 'run1')
+      await seedCompletedRun(storage, 'run2')
+      await seedCompletedRun(storage, 'run3')
+      const runner = stubRunner({ jobResult: () => ({ summary: { objective: 42 } }) })
+      const { tools } = makeTools(runner, storage)
+      const result = await tools.evaluateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKeys: ['run1', 'run2', 'run3'],
+        concurrency: 3,
+      })
+      expect(result).toMatchObject({ recordType: 'demo-run', evaluated: 3, failed: 0 })
+      expect(result.results.map((r) => r.runKey).sort()).toEqual(['run1', 'run2', 'run3'])
+      for (const key of ['run1', 'run2', 'run3']) {
+        const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key })
+        expect(rec?.content).toMatchObject({ runKey: key, objective: 42, status: 'completed' })
+      }
+    })
+
+    it('reports cumulative progress and notifies onRecordWritten per run', async () => {
+      const storage = memoryStorage()
+      await seedCompletedRun(storage, 'run1')
+      await seedCompletedRun(storage, 'run2')
+      const runner = stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) })
+      const { tools } = makeTools(runner, storage)
+      const written: string[] = []
+      const totals: number[] = []
+      await tools.evaluateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKeys: ['run1', 'run2'],
+        onRecordWritten: (type, key) => written.push(`${type}:${key}`),
+        onProgress: (p) => totals.push(p.done),
+      })
+      expect(written.sort()).toEqual(['demo-run-evaluation:run1', 'demo-run-evaluation:run2'])
+      expect(totals.at(-1)).toBe(2)
+    })
+
+    it('isolates a failed run: the rest still evaluate and the failure is reported', async () => {
+      const storage = memoryStorage()
+      await seedCompletedRun(storage, 'good')
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run',
+        key: 'nockpt',
+        content: { objective: 1, status: 'completed', config: {} },
+      })
+      const runner = stubRunner({ jobResult: () => ({ summary: { objective: 7 } }) })
+      const { tools } = makeTools(runner, storage)
+      const result = await tools.evaluateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKeys: ['good', 'nockpt'],
+      })
+      expect(result.evaluated).toBe(1)
+      expect(result.failed).toBe(1)
+      expect(result.failures).toEqual([{ runKey: 'nockpt', error: expect.stringMatching(/checkpoint/) }])
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key: 'good' }),
+      ).toBeDefined()
+    })
+
+    it('throws when the manifest declares no evaluate command', async () => {
+      const storage = memoryStorage()
+      await seedCompletedRun(storage, 'run1')
+      const { tools } = makeTools(stubRunner(), storage)
+      await expect(
+        tools.evaluateTrainingRuns({
+          scope: 'proj',
+          projectRoot: '/repo',
+          manifest: manifest(),
+          runKeys: ['run1'],
+        }),
+      ).rejects.toThrow(/evaluate/)
+    })
   })
 })
 

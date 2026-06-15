@@ -101,28 +101,66 @@ objective + `few_trades` flag). Reload the viewer; BlackSwan changes apply on th
 
 ## Hub UI — open follow-ups
 
-(The A1–A3 / B1–B2 / C1–C4 roadmap shipped — see git.) Not blocking; each needs a trigger:
+(The A1–A3 / B1–B2 / C1–C4 roadmap shipped — see git.)
 
-- **Global concurrency budget (issues #1+#3)** — the client queue pump runs ONE activity at a time
-  (`findLiveTrainerActivity` guard, app.js) and "Max parallel runs" is a PER-CAMPAIGN pool, so evaluate
-  runs serially and a campaign under the cap leaves spare capacity idle. The fix is a GLOBAL job budget:
-  a backend semaphore on `ComputeRunner.runJob` (cap total concurrent subprocesses across all activities)
-  + let the pump dispatch multiple activities. Architectural (backend + client); has a "global budget
-  shared across activities/projects" UX to communicate. ~M.
-- **Model chip recents + reactivity (issue #5)** — the activity model chip shows only the active agent's
-  single model, not a recents dropdown, and doesn't react when the active agent changes. Fix in the shared
-  headless: surface a CLI/model recents list to `useActivityChipCli` + subscribe to active-CLI/agent state
-  changes (CliConfigsProvider). Cross-client (web/desktop/mobile). ~M.
-- **Run→Activity link (issue #4 secondary)** — Runs now spins only for run-specific work (judge/eval); add
-  a "View activity" link from a run's evaluation/verdict to its Activity item (store `activityId` on the
-  eval/verdict records in ModelTrainerTools, render a link in run detail).
-- **One-click "AI help" on a failed run** — failed runs now show the error + `logTail` in run detail. The
-  next step is a button that opens a chat seeded with the failure (error + logTail + config) to diagnose/
-  fix. Needs a bridge `discussTopic`/`requestChatSidebar` + host support (copy the knowledge-viewer pattern).
-(Closed: **B1 conditional-best** — choice options now annotate the best value CONDITIONAL on the other
-selected choice levers, refreshed in place on every change (no form re-render, so sweep/seed/thesis
-selections survive). **evaluate command** — `trainer/run.py --evaluate` + manifest `evaluate`; re-tests a
-checkpoint without retraining. **Ledger-note affordance** — decided: leave drill-in editing.)
+### "Activity & concurrency center" — one dedicated pass (with LIVE verification)
+
+Deep investigation (2026-06-15) found these three "follow-ups" share one root and can't be built well in
+isolation/blind — they need the Activity surface to become a host-aware, browsable, concurrency-capped center:
+
+- **Global concurrency budget (#3).** Needs BOTH a pump rework (today strictly serial: dispatch → await full
+  settlement → next) AND an Activity-rendering rework (assumes exactly one live campaign —
+  `currentActivityId`/`lastProgress`/`lastCampaign`). Pair with a backend semaphore on
+  `LocalComputeRunner.runJob` (the shared `trainerLocalRunner`). Reworks the just-stabilised pump — needs live
+  test. (#1, evals one-at-a-time, is already fixed by the batch parallel-evaluate.)
+- **App-nav unseen-results badge.** The mapped "app reports unseenCount" design is BROKEN: the embedded viewer
+  unmounts when you leave the app tab, so it can't report results landing while you're away. Correct design is
+  HOST-DERIVED: count trainer activities finished (server-side `finishedAt`) since the user last opened the app
+  tab → Sidebar app-tab badge (web + mobile). Generic (uses activity timestamps, not trainer schema).
+- **Run→Activity link (#4).** Blocked: the Activity tab isn't a browsable per-activity history, so a link from a
+  finished eval/verdict has no real target (would just show the current campaign — misleading). Build the
+  history/addressable-activity view first, then `activityId`-tag eval/verdict records + link into it.
+
+Why one pass: all three want the same substrate (browsable activity history + per-activity identity + a global
+budget + completion-derived state) + live verification against a running backend. Doing them piecemeal/blind
+ships flawed UI.
+
+(Closed: **Model chip recents + reactivity (#5)** — shipped: `recentActivityCliModels` in LLMConfigsContext +
+follow-active-agent in `useActivityChipCli` + recents quick-pick in the web Picker & native BottomSheet
+(web/desktop/mobile; device-verify owed). **One-click "AI help" on a failed run** — shipped: `discussTopic`/
+`requestChatSidebar` added to the viewer bridge + an "Ask AI for help" button in run-detail that seeds the
+host chat with error + logTail + config (host handles `chat.discuss` on web + mobile). **B1 conditional-best**,
+**evaluate command**, **Ledger-note affordance** — see git.)
+
+## Runs + failure recovery + pipeline versioning (PRE-PHASE-B — surfaced from live use 2026-06-15)
+
+Real pain hit while running a campaign with many failures.
+
+SHIPPED:
+- **Failed-run/activity recovery.** Activity failures are now per-entry **See error** (→ run detail with the
+  full `error` + `logTail` + Ask-AI-for-help), **Re-run** (clone the exact config to Launch — also from the
+  failed-run detail), and **Dismiss** (persisted `*-dismissed-failure` records, filtered from the list).
+- **Mark a setup UNRUNNABLE.** Run-detail "Mark unrunnable/runnable" writes a version-scoped
+  `<recordType>-unrunnable` marker (keyed by setupKey); `runTrainingCampaign.isFresh` skips marked setups
+  unless `refresh`, and a pipeline-version bump ignores older-version marks. 6 TDD tests.
+- **Pipeline versioning + changelog.** `TrainerManifest.pipelineVersion` + `pipelineChangelog[]`; every run is
+  tagged with its version; `skipExplored`/`unrunnable` are version-scoped (a breaking bump re-opens everything,
+  since scores aren't comparable). BlackSwan declared **v2** (this session's data/scoring overhaul) with a
+  changelog vs v1 (the historical ledger).
+- **Runs columns + filter.** **%return + #trades lead** the metric columns, both colour-coded like `vs hold`
+  (return by sign; #trades green when it actually traded, red when ≤2 ≈ hold). A **Hide bad runs** toggle drops
+  failed/errored + degenerate (≤2-trade / health-flagged) runs.
+
+- **Runs master-detail LAYOUT.** SHIPPED: the Runs tab is now full-width (`.tab-main.is-fullwidth` drops the
+  centred max-width) with a `.runs-md` grid — a left LIST pane + right DETAIL pane that each scroll in their
+  own view; the panes split (`has-detail`) only when a run/compare is open, else the list spans full width;
+  the list narrows on select (table scrolls horizontally) and stacks on narrow screens. NEEDS LIVE VISUAL
+  CHECK (built without a render). Follow-up: a true column-condense (fewer columns when selected) — today it's
+  narrow-pane + horizontal scroll.
+- **Pipeline versions VIEW.** SHIPPED: a collapsible "Pipeline v{N} — versions & changelog" panel above the
+  runs (current version + breaking-flagged entries), each run-detail shows the version it ran under, and
+  Compare warns when selected runs span multiple versions. Follow-up: a version filter/dropdown + a dedicated
+  per-version leaderboard (today: per-run version + the by-setup/by-experiment groupings).
 
 ## BlackSwan — the path to a trading model (A → B → C)
 
@@ -143,17 +181,49 @@ degenerate health; `combo_all_fee` reward variant; wider test window + per-windo
 experiment ledger (by-setup median/IQR/stability, by-experiment, conclusions); + the historical
 `results_hour.ods` import. (QW5: `model_config.py` default restored to the winning `[512,64]`.)
 
-**NEXT — the scrutinous correctness audit (do TOGETHER, before trusting any result or picking the Phase-B
-setup).** Look hard at the actual run data + code and, per pillar, decide it's right:
-- **Data** — do the derived bars + runtime indicators actually feed the model correctly (no constant/NaN/
-  zero columns, right per-layer alignment, no leakage)? Is the train/held-out split clean?
-- **Rewards** — is the reward FAMILY itself sound (combo_all & friends): does it genuinely reward "trade
-  often + well", or can it be gamed? Is the `combo_noaction=-1` synthetic-short bias intended?
-- **Processes** — is `traded_return` the right scalar? do the metrics + health flags measure what we think?
-  is the eval honest (single held-out window, multi-seed, window-robustness)? does the hub surface + flag
-  everything a newcomer needs to read a result correctly?
-Output: a short list of any correctness defects to fix → green light for Phase B. Calibrate
-`MIN_TRADES_FOR_FULL_CREDIT` (now 20, `trainer/summary.py`) to the real window length here.
+**The scrutinous correctness audit RAN (2026-06-15, 3 adversarial readers — data/rewards/processes).**
+FIXED this round:
+
+- **`n_trades` miscount (HIGH, corrupted the objective).** `base_crypto_env.py:583` returned
+  `state[17] = (len(buys)+len(sells))/2` (fractional, e.g. 3.5) instead of the completed-trade count.
+  `state[17]` feeds `trade_gate`, `traded_return`, the displayed `#trades`, AND the `few_trades`/`zero_trades`
+  health flags — every gated objective + health verdict was off. Now returns `total_trades`.
+- **Benchmark / chart lookback misalignment (HIGH, display-only).** `_run_prices` sliced `provider.prices[:n]`
+  (offset-blind), but `SingleDataProvider.get_price(step) = prices[step + get_start_index()]` — so buy-and-hold
+  + the chart were computed over a window shifted by `get_start_index()` bars on the single-provider path
+  (empirically confirmed: old window started in the lookback region; MultiTimeline pre-strips its prices so it
+  was already aligned). Fixed by indexing through the provider's own `get_price(i)` — the exact mapping the env
+  trades on — correct for both providers.
+- **`combo_noaction<0` synthetic-short incentive.** Default flipped to `0` (direction-neutral for a flat
+  long-only agent) in `model_rl`; kept sweepable via a new `combo_noaction` trainer lever (choices `[0, -1]`)
+  so the bias can still be probed deliberately.
+- **Linear trade gate.** `trade_gate` is now QUADRATIC — `min(1, (n_trades/MIN)²)` — so under-trading is
+  punished steeply (half-threshold keeps a quarter of its return); ≥MIN still = full credit.
+- **By-setup degenerate blindness (clarity).** The hub's `aggregateBySetup` now excludes health-flagged
+  (degenerate) runs from a setup's averages / best-run / surfaced verdict, annotates `(k degenerate)`, and
+  marks all-degenerate setups — so a lucky 1-trade fluke can't masquerade as a setup's result
+  ([[feedback_ui_ux_scrutiny]]).
+
+**DEFERRED to after Phase B (need experiments / change the baseline — your rule: "needs more work → defer"):**
+- **Calibrate `MIN_TRADES_FOR_FULL_CREDIT`** (now 20) to the real test-window length — needs a couple of
+  multi-window runs.
+- **Out-of-[-1,1] features on the 1h winning path.** Empirically (2024 Jan–Apr 1h, `type='only_price_percent'`),
+  8 of 25 base-layer features exceed the declared `spaces.Box(-1,1)` obs bound: `volume_percent`,
+  `total_volume_percent`, `volume_quote_percent`, `trades_number_percent` (pct_change spikes to +10.9),
+  `price_z_score_1d/1m` (±4), `price_to_avg_1d/1m` (>1). `process_df_simple` (the 1h multi-layer path) does NOT
+  filter by `type` and does not squash these (only the curated indicators + `taker_buy_ratio` are bounded).
+  The audit's `_1y` / `Pi_Cycle_*_Ratio` columns are ≈0/dead with <1yr of data. SB3 does NOT clip — the NN
+  gets the raw values (not a silent-clip bug). **Deferred because the historical "winning path" results were
+  produced with exactly this representation; squashing changes the baseline + breaks comparability, so it's a
+  normalization EXPERIMENT (tanh-squash the 8, or clip the observation — does it help?), best run in Phase B/C,
+  not a blind pre-B fix.** The fix would mirror the existing `np.tanh(x/scale)` curated-indicator pattern in
+  `abstract_dataprovider.py`.
+
+Confirmed CORRECT by the audit: chronological train(2020-23)/test(2024) split; reward signals not leaked into
+observations; Tier-1/Tier-2 indicators properly normalised; `taker_buy_ratio` clipped; derived-bar OHLCV
+aggregation; deterministic single test per seed; median/IQR/stability math; degenerate-policy/few-trades
+detection. **Phase-A gate is GREEN** — every correctness defect fixed; the two items above are consciously
+deferred to after Phase B (experiments / baseline-changing). Phase B is unblocked.
 
 ### Phase B — Find ONE setup that trades well
 

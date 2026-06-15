@@ -197,6 +197,55 @@ body {
   display: none;
 }
 
+/* ---- Runs master-detail ----------------------------------------------------
+   The Runs tab uses the FULL width (no centred gutters) and a left LIST pane +
+   right DETAIL pane that each scroll in their own view, so the long run list
+   never scrolls the whole screen. When no run is selected the list spans the
+   full width; selecting one splits the panes. Narrow screens stack them. */
+.tab-main.is-fullwidth {
+  max-width: none;
+}
+.tab-main.is-fullwidth > #tab-runs:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.runs-md {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  flex: 1;
+  min-height: 0;
+}
+.runs-md.has-detail {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+}
+.runs-md:not(.has-detail) .runs-md__detail {
+  display: none;
+}
+.runs-md__list,
+.runs-md__detail {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.runs-md__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+@media (max-width: 900px) {
+  .runs-md.has-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .runs-md__list,
+  .runs-md__detail {
+    overflow-y: visible;
+  }
+}
+
 .app-banner {
   margin: 0 0 14px;
   padding: 10px 14px;
@@ -743,6 +792,42 @@ body {
   gap: 8px;
   margin-bottom: 8px;
 }
+.runs-hidebad {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted, var(--text));
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pipeline-versions {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  font-size: 13px;
+}
+.pipeline-versions > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.pipeline-versions-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+.pipeline-versions-list li {
+  margin: 3px 0;
+  word-break: break-word;
+}
+.pipeline-versions-list li.pv-current {
+  font-weight: 600;
+}
+.compare-version-warn {
+  margin: 0 0 10px;
+  font-size: 13px;
+}
 .runs-filter-lever,
 .runs-filter-text {
   font-size: 12px;
@@ -1221,6 +1306,37 @@ pre.json {
   padding: 1px 5px;
   border-radius: 5px;
   background: var(--surface);
+}
+.run-failure-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.run-failure-text {
+  word-break: break-word;
+  min-width: 0;
+}
+.run-failure-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.link-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent, #2563eb);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.link-btn:hover {
+  opacity: 0.8;
+}
+.run-failures-empty {
+  margin: 10px 0 0;
 }
 
 /* ---- Activity queue --------------------------------------------------------- */

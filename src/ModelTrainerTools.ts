@@ -9,6 +9,8 @@ import type {
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
   EvaluateTrainingRunResult,
+  EvaluateTrainingRunsParams,
+  EvaluateTrainingRunsResult,
   ExperimentSpec,
   JudgeTrainingRunsParams,
   JudgeTrainingRunsResult,
@@ -128,6 +130,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
+    // The pipeline version this campaign runs under. A run is "explored"/"unrunnable" only relative
+    // to its OWN pipeline version — a version bump (a breaking data/scoring change) makes every prior
+    // run incomparable, so it re-explores everything regardless of skipExplored/unrunnable marks.
+    const pipelineVersion = manifest.pipelineVersion ?? '1'
+    const versionOf = (c: { pipelineVersion?: string } | undefined) => c?.pipelineVersion ?? '1'
+
     let exploredSetups: Set<string> | undefined
     if (params.skipExplored) {
       const priorRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
@@ -138,11 +146,36 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
               r.content as {
                 status?: string
                 setupKey?: string
+                pipelineVersion?: string
                 config?: Record<string, unknown>
               },
           )
-          .filter((c) => c?.status === 'completed')
+          .filter((c) => c?.status === 'completed' && versionOf(c) === pipelineVersion)
           .map((c) => c.setupKey ?? (c.config ? setupKeyOf(c.config) : undefined))
+          .filter((k): k is string => typeof k === 'string'),
+      )
+    }
+
+    // Setups the user marked unrunnable for THIS version: a hard skip unless `refresh` forces them.
+    let unrunnableSetups = new Set<string>()
+    if (!params.refresh) {
+      const markers = await deps.storage.listRecords({
+        scope: params.scope,
+        type: `${recordType}-unrunnable`,
+      })
+      unrunnableSetups = new Set(
+        markers
+          .map(
+            (r) =>
+              r.content as {
+                setupKey?: string
+                unrunnable?: boolean
+                pipelineVersion?: string
+                config?: Record<string, unknown>
+              },
+          )
+          .filter((c) => c?.unrunnable !== false && versionOf(c) === pipelineVersion)
+          .map((c) => c?.setupKey ?? (c?.config ? setupKeyOf(c.config) : undefined))
           .filter((k): k is string => typeof k === 'string'),
       )
     }
@@ -157,13 +190,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
       isFresh: async (item) => {
         if (params.refresh) return false
-        if (exploredSetups && exploredSetups.has(setupKeyOf(item.config))) return true
+        const setupKey = setupKeyOf(item.config)
+        if (unrunnableSetups.has(setupKey)) return true
+        if (exploredSetups && exploredSetups.has(setupKey)) return true
         const existing = await deps.storage.readRecord({
           scope: params.scope,
           type: recordType,
           key: item.key,
         })
-        return (existing?.content as { status?: string } | undefined)?.status === 'completed'
+        const content = existing?.content as
+          | { status?: string; pipelineVersion?: string }
+          | undefined
+        return content?.status === 'completed' && versionOf(content) === pipelineVersion
       },
       runItem: async (item) => {
         const handle = runner.runJob({
@@ -197,6 +235,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 ...(result.logTail?.length ? { logTail: result.logTail } : {}),
                 config: item.config,
                 setupKey: setupKeyOf(item.config),
+                pipelineVersion,
                 ...thesisFields,
                 ranAt: now(),
                 ranBy,
@@ -216,6 +255,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             ...runSummary,
             status: 'completed',
             setupKey: setupKeyOf(item.config),
+            pipelineVersion,
             ...thesisFields,
             ranAt: now(),
             ranBy,
@@ -294,37 +334,40 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
-  async function evaluateTrainingRun(
-    params: EvaluateTrainingRunParams,
+  async function evaluateOneRun(
+    manifest: TrainerManifest,
+    opts: {
+      scope: string
+      projectRoot: string
+      runKey: string
+      computeTarget?: string
+      abortSignal?: AbortSignal
+      onRecordWritten?: (type: string, key: string) => void
+    },
   ): Promise<EvaluateTrainingRunResult> {
-    const manifest =
-      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
-    if (!manifest.evaluate) {
-      throw new Error('trainer manifest declares no evaluate command')
-    }
     const recordType = manifest.recordType
     const record = await deps.storage.readRecord({
-      scope: params.scope,
+      scope: opts.scope,
       type: recordType,
-      key: params.runKey,
+      key: opts.runKey,
     })
-    if (!record) throw new Error(`no run record for key ${params.runKey}`)
+    if (!record) throw new Error(`no run record for key ${opts.runKey}`)
     const content = record.content as {
       config?: Record<string, unknown>
       artifacts?: { checkpoint?: unknown }
     }
     const checkpoint = content.artifacts?.checkpoint
     if (typeof checkpoint !== 'string' || !checkpoint) {
-      throw new Error(`run ${params.runKey} has no checkpoint artifact to evaluate`)
+      throw new Error(`run ${opts.runKey} has no checkpoint artifact to evaluate`)
     }
 
-    const handle = resolveRunner(params.computeTarget).runJob({
-      jobId: `eval-${params.runKey}`,
-      repoRef: { kind: 'local', localPath: params.projectRoot },
-      commandTemplate: manifest.evaluate,
+    const handle = resolveRunner(opts.computeTarget).runJob({
+      jobId: `eval-${opts.runKey}`,
+      repoRef: { kind: 'local', localPath: opts.projectRoot },
+      commandTemplate: manifest.evaluate!,
       config: { ...(content.config ?? {}), checkpoint },
       dataFiles: manifestDataFiles(manifest),
-      abortSignal: params.abortSignal,
+      abortSignal: opts.abortSignal,
     })
     const result = await handle.done
     if (result.status !== 'completed') {
@@ -334,14 +377,77 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const evaluatedAt = now()
     const evaluationType = `${recordType}-evaluation`
     await deps.storage.upsertRecord({
-      scope: params.scope,
+      scope: opts.scope,
       type: evaluationType,
-      key: params.runKey,
-      content: { ...summary, runKey: params.runKey, status: 'completed', evaluatedAt },
+      key: opts.runKey,
+      content: { ...summary, runKey: opts.runKey, status: 'completed', evaluatedAt },
     })
-    params.onRecordWritten?.(evaluationType, params.runKey)
-    logger?.info('evaluated training run', { recordType, runKey: params.runKey })
-    return { recordType, runKey: params.runKey, objective: summary.objective, evaluatedAt }
+    opts.onRecordWritten?.(evaluationType, opts.runKey)
+    logger?.info('evaluated training run', { recordType, runKey: opts.runKey })
+    return { recordType, runKey: opts.runKey, objective: summary.objective, evaluatedAt }
+  }
+
+  async function evaluateTrainingRun(
+    params: EvaluateTrainingRunParams,
+  ): Promise<EvaluateTrainingRunResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.evaluate) {
+      throw new Error('trainer manifest declares no evaluate command')
+    }
+    return evaluateOneRun(manifest, {
+      scope: params.scope,
+      projectRoot: params.projectRoot,
+      runKey: params.runKey,
+      computeTarget: params.computeTarget,
+      abortSignal: params.abortSignal,
+      onRecordWritten: params.onRecordWritten,
+    })
+  }
+
+  async function evaluateTrainingRuns(
+    params: EvaluateTrainingRunsParams,
+  ): Promise<EvaluateTrainingRunsResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.evaluate) {
+      throw new Error('trainer manifest declares no evaluate command')
+    }
+    const recordType = manifest.recordType
+    const results: EvaluateTrainingRunResult[] = []
+    const summary = await runActivityWorkItems<string, EvaluateTrainingRunResult>({
+      items: params.runKeys,
+      concurrency: params.concurrency,
+      abortSignal: params.abortSignal,
+      runItem: async (runKey) => {
+        const result = await evaluateOneRun(manifest, {
+          scope: params.scope,
+          projectRoot: params.projectRoot,
+          runKey,
+          computeTarget: params.computeTarget,
+          abortSignal: params.abortSignal,
+          onRecordWritten: params.onRecordWritten,
+        })
+        results.push(result)
+        return result
+      },
+      onProgress: (progress) =>
+        params.onProgress?.({
+          done: progress.done,
+          total: progress.total,
+          failed: progress.failed,
+        }),
+    })
+    const failures = summary.outcomes
+      .filter((o) => o.status === 'failed')
+      .map((o) => ({ runKey: o.item, error: o.error ?? 'unknown failure' }))
+    return {
+      recordType,
+      evaluated: summary.outcomes.filter((o) => o.status === 'completed').length,
+      failed: summary.failed,
+      results,
+      ...(failures.length > 0 ? { failures } : {}),
+    }
   }
 
   function requireInferenceExecutor(): InferenceExecutor {
@@ -577,6 +683,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     calibrateTrainingThroughput,
     runTrainingCampaign,
     evaluateTrainingRun,
+    evaluateTrainingRuns,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
   }

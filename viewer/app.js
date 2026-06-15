@@ -59,6 +59,12 @@ let runsCache = []
 let verdictsCache = new Map()
 let evaluationsCache = new Map()
 let notesCache = new Map()
+// Run keys the user dismissed from the Activity failures list (persisted so a
+// reload doesn't resurface them); the failure record itself is left intact.
+let dismissedFailures = new Set()
+// setupKeys the user marked UNRUNNABLE for the current pipeline version — skipped
+// on re-run (alongside skipExplored) unless force-rerun or a version bump clears them.
+let unrunnableCache = new Set()
 const evaluatingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
@@ -83,6 +89,7 @@ let runsSortKey = null
 let runsSortDir = 'desc'
 let runsLeverFilter = {}
 let runsTextFilter = ''
+let runsHideBad = false
 let runsCompareKeys = new Set()
 let runsViewMode = 'runs'
 // When drilled into a single setup's runs (via the by-setup view), this holds that
@@ -326,6 +333,71 @@ async function saveSetupNote(setupKey, note) {
     content: { setupKey, note: String(note || ''), updatedAt: nowIso() },
   })
   notesCache = await readNotes()
+}
+// Failures the user dismissed from the Activity list, persisted as one record per
+// dismissed run key so the dismissal survives reloads + other clients.
+async function readDismissedFailures() {
+  if (!manifest) return new Set()
+  const recs = await queryRecords(manifest.recordType + '-dismissed-failure')
+  const set = new Set()
+  for (const r of recs) {
+    const key = r.key || (r.content && r.content.runKey) || ''
+    if (key) set.add(key)
+  }
+  return set
+}
+async function dismissFailure(key) {
+  if (!manifest || !key) return
+  dismissedFailures.add(key)
+  if (lastActivityStatus) renderActivity()
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-dismissed-failure',
+    key,
+    content: { runKey: key, dismissedAt: nowIso() },
+  })
+}
+// The pipeline version a fresh run would carry; unrunnable marks + explored-skips
+// are scoped to it, so a version bump re-opens everything.
+function currentPipelineVersion() {
+  return (manifest && manifest.pipelineVersion) || '1'
+}
+// setupKeys marked unrunnable for the CURRENT pipeline version (older-version marks
+// are ignored — a breaking change re-opens the setup).
+async function readUnrunnable() {
+  if (!manifest) return new Set()
+  const recs = await queryRecords(manifest.recordType + '-unrunnable')
+  const version = currentPipelineVersion()
+  const set = new Set()
+  for (const r of recs) {
+    const c = r.content || {}
+    const key = r.key || c.setupKey || ''
+    if (key && c.unrunnable !== false && (c.pipelineVersion || '1') === version) set.add(key)
+  }
+  return set
+}
+function setupKeyForRun(run) {
+  return (run && run.summary && run.summary.setupKey) || setupKeyOfRun(run)
+}
+async function toggleUnrunnable(runKey) {
+  if (!manifest || !runKey) return
+  const run = runsCache.find((r) => r.key === runKey)
+  if (!run) return
+  const setupKey = setupKeyForRun(run)
+  if (!setupKey) return
+  const nowUnrunnable = !unrunnableCache.has(setupKey)
+  if (nowUnrunnable) unrunnableCache.add(setupKey)
+  else unrunnableCache.delete(setupKey)
+  if (selectedRunKey === runKey) renderRunDetail(runKey)
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-unrunnable',
+    key: setupKey,
+    content: {
+      setupKey,
+      pipelineVersion: currentPipelineVersion(),
+      unrunnable: nowUnrunnable,
+      markedAt: nowIso(),
+    },
+  })
 }
 async function readHypotheses() {
   if (!manifest) return []
@@ -1277,6 +1349,13 @@ async function dispatchQueueItem(item, epoch) {
   await refreshAfterQuickDispatch(item, act)
   return !!act
 }
+// An evaluate item carries either a batch of `runKeys` (parallel) or a single
+// legacy `runKey`; both collapse to the list of keys it evaluates.
+function evaluateKeysOf(item) {
+  const params = (item && item.params) || {}
+  if (Array.isArray(params.runKeys)) return params.runKeys.filter((k) => typeof k === 'string' && k)
+  return params.runKey ? [params.runKey] : []
+}
 // Mirror the busy state the direct start sites set, so the same buttons and
 // spinners light up when the queue dispatches a judge / propose / evaluate.
 function applyQuickDispatchState(item, busy) {
@@ -1287,11 +1366,13 @@ function applyQuickDispatchState(item, busy) {
     proposing = busy
     renderProposeControls()
   } else if (item.activityType === 'evaluate') {
-    const key = (item.params && item.params.runKey) || ''
-    if (!key) return
-    if (busy) evaluatingKeys.add(key)
-    else evaluatingKeys.delete(key)
-    if (selectedRunKey === key) renderRunDetail(key)
+    const keys = evaluateKeysOf(item)
+    if (!keys.length) return
+    for (const key of keys) {
+      if (busy) evaluatingKeys.add(key)
+      else evaluatingKeys.delete(key)
+    }
+    if (selectedRunKey && keys.includes(selectedRunKey)) renderRunDetail(selectedRunKey)
   }
 }
 async function refreshAfterQuickDispatch(item, act) {
@@ -1344,10 +1425,9 @@ async function enqueueMissingEvaluations(campaign, baseParams) {
   if (!keys.length) return
   const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
   const queuedKeys = new Set(
-    queue
-      .filter((q) => q.activityType === 'evaluate')
-      .map((q) => (q.params && q.params.runKey) || ''),
+    queue.filter((q) => q.activityType === 'evaluate').flatMap(evaluateKeysOf),
   )
+  const pending = []
   for (const key of keys) {
     const run = runs.find((r) => r.key === key)
     if (!run) continue
@@ -1355,14 +1435,20 @@ async function enqueueMissingEvaluations(campaign, baseParams) {
     if (s.status && s.status !== 'completed') continue
     if (!(s.artifacts && s.artifacts.checkpoint)) continue
     if (evaluations.has(key) || queuedKeys.has(key) || evaluatingKeys.has(key)) continue
-    await putQueueItem({
-      id: randomHexId(),
-      activityType: 'evaluate',
-      params: { ...baseParams, runKey: key },
-      label: `Evaluate ${shortKey(key)}`,
-      queuedAt: nowIso(),
-    })
+    pending.push(key)
   }
+  if (!pending.length) return
+  // One batch activity re-tests every checkpoint in parallel (a bounded pool),
+  // instead of one serial activity per run.
+  const concurrency = savedConcurrency()
+  await putQueueItem({
+    id: randomHexId(),
+    activityType: 'evaluate',
+    params: { ...baseParams, runKeys: pending, ...(concurrency > 1 ? { concurrency } : {}) },
+    label:
+      pending.length === 1 ? `Evaluate ${shortKey(pending[0])}` : `Evaluate ${pending.length} runs`,
+    queuedAt: nowIso(),
+  })
 }
 // Settle-time bookkeeping shared by the observe loop and project open: stamp
 // finished campaigns into their hypotheses, consume auto-eval markers.
@@ -1535,13 +1621,15 @@ async function markRunsSeen() {
 // --- Results workbench: dynamic metric columns + sort + filter -----------------
 // Common metric keys first (the rest follow alphabetically) so the table reads
 // well for trading (sharpe/return/drawdown…) and the dip line (f1/precision…).
+// %return + #trades lead (the two the user reads first); both are colour-coded like
+// vs-hold (see metricColorClass). The rest follow; unknown metrics come after, sorted.
 const RUN_METRIC_ORDER = [
-  'sharpe',
   'total_return_pct',
+  'n_trades',
+  'win_pct',
+  'sharpe',
   'cagr_pct',
   'max_drawdown_pct',
-  'win_pct',
-  'n_trades',
   'stop_losses',
   'final_net_worth',
   'f1',
@@ -1552,6 +1640,17 @@ const RUN_METRIC_ORDER = [
   'positive_rate',
   'simple_ratio',
 ]
+// Threshold below which a trade count reads as degenerate (≈ buy-and-hold); mirrors
+// summary.py's DEGENERATE_TRADE_COUNT. Used for the #trades colour + the bad-run filter.
+const DEGENERATE_TRADE_COUNT = 2
+// vs-hold-style green/red for the lead metrics: %return by sign, #trades by whether the
+// run actually traded (more than a near-hold count).
+function metricColorClass(mk, v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return ''
+  if (mk === 'total_return_pct') return v >= 0 ? 'delta-pos' : 'delta-neg'
+  if (mk === 'n_trades') return v > DEGENERATE_TRADE_COUNT ? 'delta-pos' : 'delta-neg'
+  return ''
+}
 // Plain-language help per metric (shown as a "?" on the column header) so a newcomer
 // knows what each means + which direction is good.
 const METRIC_INFO = {
@@ -1633,9 +1732,10 @@ function runsColumns() {
       help: METRIC_INFO[mk],
       get: (r) => {
         const v = r.summary.metrics && r.summary.metrics[mk]
-        return escapeHtml(
-          typeof v === 'number' ? formatObjective(v) : v === undefined ? '—' : String(v),
-        )
+        if (typeof v !== 'number') return escapeHtml(v === undefined ? '—' : String(v))
+        const cls = metricColorClass(mk, v)
+        const text = formatObjective(v)
+        return cls ? `<span class="${cls}">${escapeHtml(text)}</span>` : escapeHtml(text)
       },
       sort: (r) => {
         const v = r.summary.metrics && r.summary.metrics[mk]
@@ -1736,8 +1836,18 @@ function sortRuns(runs) {
     return String(va).localeCompare(String(vb)) * dir
   })
 }
+// A run is "bad" — failed/errored, or a degenerate result (health-flagged: zero/few
+// trades ≤ DEGENERATE_TRADE_COUNT, degenerate policy, NaN). The Hide-bad toggle drops these.
+function runIsBad(r) {
+  const s = r.summary || {}
+  if (s.status === 'failed') return true
+  if (runIsDegenerate(r)) return true
+  const n = s.metrics && Number(s.metrics.n_trades)
+  return Number.isFinite(n) && n <= DEGENERATE_TRADE_COUNT
+}
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
+  if (runsHideBad) out = out.filter((r) => !runIsBad(r))
   for (const [lever, val] of Object.entries(runsLeverFilter)) {
     if (val) out = out.filter((r) => String((r.summary.config || {})[lever]) === String(val))
   }
@@ -1807,6 +1917,13 @@ function quantile(xs, q) {
   const hi = Math.ceil(pos)
   return lo === hi ? s[lo] : s[lo] + (s[hi] - s[lo]) * (pos - lo)
 }
+// A run is degenerate when its health is flagged (zero/few trades, degenerate policy, NaN metrics):
+// its objective is a fluke, not a real test of the setup, so it must not be averaged in blind or
+// chosen as a setup's representative "best".
+function runIsDegenerate(r) {
+  const h = r && r.summary && r.summary.health
+  return !!(h && h.status && h.status !== 'ok')
+}
 function aggregateBySetup(runs) {
   const groups = new Map()
   for (const r of runs) {
@@ -1817,10 +1934,15 @@ function aggregateBySetup(runs) {
   const dir = objectiveDirection()
   const out = []
   for (const [key, rs] of groups) {
-    const objs = rs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
-    const vsh = rs.map((r) => vsHoldValue(r.summary)).filter(Number.isFinite)
+    const healthy = rs.filter((r) => !runIsDegenerate(r))
+    const degenerateCount = rs.length - healthy.length
+    // Aggregate + pick the representative best from HEALTHY runs only, so a setup's headline
+    // numbers + its surfaced verdict/conclusion reflect real trades, not a lucky degenerate run.
+    const scored = healthy.length ? healthy : []
+    const objs = scored.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    const vsh = scored.map((r) => vsHoldValue(r.summary)).filter(Number.isFinite)
     let bestRun = null
-    for (const r of rs) {
+    for (const r of scored) {
       const o = Number(r.summary.objective)
       if (!Number.isFinite(o)) continue
       const bo = bestRun ? Number(bestRun.summary.objective) : NaN
@@ -1836,6 +1958,8 @@ function aggregateBySetup(runs) {
       bestRun,
       label: setupConfigLabel(rs[0].summary.config),
       count: rs.length,
+      degenerateCount,
+      allDegenerate: rs.length > 0 && healthy.length === 0,
       objMin: objs.length ? Math.min(...objs) : NaN,
       objMax: objs.length ? Math.max(...objs) : NaN,
       objAvg: mean(objs),
@@ -1883,6 +2007,31 @@ function aggregateByExperiment(runs) {
   }
   return out
 }
+// The project's pipeline version + changelog. A BREAKING version changed how data is
+// fed/scored, so runs across versions are NOT comparable; each run is tagged with the
+// version it ran under and a bump re-opens skipExplored/unrunnable. Shown above the runs.
+function pipelineVersionPanelHtml() {
+  if (!manifest) return ''
+  const changelog = Array.isArray(manifest.pipelineChangelog) ? manifest.pipelineChangelog : []
+  const cur = manifest.pipelineVersion
+  if (!cur && !changelog.length) return ''
+  const current = String(cur || '1')
+  const entries = changelog
+    .map((e) => {
+      const isCur = String(e.version) === current
+      const breaking = e.breaking ? '<span class="badge is-bad">breaking</span> ' : ''
+      const date = e.date ? `<span class="card-sub">${escapeHtml(String(e.date))}</span> ` : ''
+      return `<li${isCur ? ' class="pv-current"' : ''}><strong>v${escapeHtml(String(e.version))}</strong>${isCur ? ' <span class="card-sub">(current)</span>' : ''} ${breaking}${date}— ${escapeHtml(String(e.summary || ''))}</li>`
+    })
+    .join('')
+  const help = helpCalloutHtml(
+    'A BREAKING version changes how data is fed/scored, so runs from different versions are NOT comparable. A version bump re-opens skipExplored/unrunnable. Each run is tagged with the version it ran under (shown in its detail).',
+  )
+  return `<details class="pipeline-versions">
+    <summary>Pipeline <strong>v${escapeHtml(current)}</strong> — versions &amp; changelog ${help}</summary>
+    ${entries ? `<ul class="pipeline-versions-list">${entries}</ul>` : '<p class="card-sub">No changelog entries declared in the manifest.</p>'}
+  </details>`
+}
 function runsToolbarHtml(shownCount, total) {
   const dropdowns = leverEntries()
     .filter(([, spec]) => spec.type === 'choice')
@@ -1903,10 +2052,14 @@ function runsToolbarHtml(shownCount, total) {
   const toggle = `<div class="runs-viewmode">
     <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup">By setup ${helpCalloutHtml('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment">By experiment ${helpCalloutHtml('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}</button>
   </div>`
-  return `<div class="runs-toolbar">
+  const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
+    <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
+  </label>`
+  return `${pipelineVersionPanelHtml()}<div class="runs-toolbar">
     ${toggle}
     ${dropdowns}
     <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
+    ${hideBad}
     <span class="runs-count">${shownCount}/${total} runs${label}</span>
     ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
   </div>`
@@ -1939,17 +2092,25 @@ function bySetupTableHtml(filtered) {
         ? `<span class="${g.vsHoldAvg >= 0 ? 'delta-pos' : 'delta-neg'}">${g.vsHoldAvg >= 0 ? '+' : ''}${g.vsHoldAvg.toFixed(1)}</span>`
         : '—'
       const failed = g.failed ? ` <span class="card-sub">(${g.failed} failed)</span>` : ''
+      const degen = g.degenerateCount
+        ? ` <span class="card-sub" title="Health-flagged runs (zero/few trades, degenerate policy, NaN) — excluded from this setup's averages, best run and verdict.">(${g.degenerateCount} degenerate)</span>`
+        : ''
       const llm = setupLlmNote(g)
+      const llmCell = g.allDegenerate
+        ? '<span class="card-sub" title="Every run for this setup was health-flagged; no real result to judge.">all runs degenerate</span>'
+        : llm
+          ? escapeHtml(truncate(llm, 70))
+          : '<span class="card-sub">—</span>'
       const note = (notesCache.get(g.key) || {}).note || ''
-      return `<tr data-setup-key="${escapeHtml(g.key)}" class="setup-row${g.unstable ? ' is-unstable' : ''}">
+      return `<tr data-setup-key="${escapeHtml(g.key)}" class="setup-row${g.unstable ? ' is-unstable' : ''}${g.allDegenerate ? ' is-degenerate-row' : ''}">
         <td>${escapeHtml(g.label)}</td>
-        <td class="num">${g.count}${failed}</td>
+        <td class="num">${g.count}${failed}${degen}</td>
         <td class="num">${setupStabilityCell(g)}</td>
         <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
         <td class="num">${range}</td>
         <td class="num">${escapeHtml(formatObjective(g.objMedian))}</td>
         <td class="num">${vsh}</td>
-        <td class="ledger-note" title="${escapeHtml(llm)}">${llm ? escapeHtml(truncate(llm, 70)) : '<span class="card-sub">—</span>'}</td>
+        <td class="ledger-note" title="${escapeHtml(llm)}">${llmCell}</td>
         <td class="ledger-note ${note ? '' : 'is-empty'}" title="${escapeHtml(note)}">${note ? escapeHtml(truncate(note, 70)) : '<span class="card-sub">add note ✎</span>'}</td>
       </tr>`
     })
@@ -2078,12 +2239,22 @@ function renderRunsTable() {
 }
 async function renderRuns() {
   if (!byId('runs-body')) return
-  ;[runsCache, verdictsCache, judgementSummary, evaluationsCache, notesCache] = await Promise.all([
+  ;[
+    runsCache,
+    verdictsCache,
+    judgementSummary,
+    evaluationsCache,
+    notesCache,
+    dismissedFailures,
+    unrunnableCache,
+  ] = await Promise.all([
     readRuns(),
     readVerdicts(),
     readJudgement(),
     readEvaluations(),
     readNotes(),
+    readDismissedFailures(),
+    readUnrunnable(),
   ])
   renderJudgeControls()
   renderRunsLive()
@@ -2101,6 +2272,7 @@ function renderCompare() {
   if (runs.length < 2) {
     setHtml(card, '')
     card.hidden = true
+    syncRunsMdLayout()
     return
   }
   const headRow = runs.map((r) => `<th><code>${escapeHtml(shortKey(r.key))}</code></th>`).join('')
@@ -2126,12 +2298,18 @@ function renderCompare() {
       return `<tr><th>${escapeHtml(mk.replace(/_pct$/, ' %').replace(/_/g, ' '))}</th>${cells}</tr>`
     })
     .join('')
+  const versions = new Set(runs.map((r) => String((r.summary && r.summary.pipelineVersion) || '1')))
+  const versionWarn =
+    versions.size > 1
+      ? `<p class="compare-version-warn"><span class="badge is-bad">heads-up</span> These runs span pipeline versions ${[...versions].map((v) => `v${escapeHtml(v)}`).join(', ')} — a breaking version changed how data is fed/scored, so their scores are NOT directly comparable.</p>`
+      : ''
   setHtml(
     card,
     `<div class="card-head card-head-row">
       <h3>Compare ${runs.length} runs</h3>
       <button type="button" id="compare-clear" class="ghost-btn">clear</button>
     </div>
+    ${versionWarn}
     ${compareEquityChartHtml(runs)}
     <h3>Config diff</h3>
     ${diffRows ? `<table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${diffRows}</tbody></table>` : '<p class="card-sub">Selected runs share the same config.</p>'}
@@ -2139,6 +2317,7 @@ function renderCompare() {
     <table class="kv-table compare-table"><thead><tr><th></th>${headRow}</tr></thead><tbody>${metricRows}</tbody></table>`,
   )
   card.hidden = false
+  syncRunsMdLayout()
 }
 // Overlay each selected run's equity as a % -return curve, plus the buy-and-hold
 // control derived from a run's price series — so the lines are comparable across
@@ -2425,7 +2604,7 @@ function oldRunChartHintHtml(s) {
 }
 // A failed run's diagnostics: the error line + the captured stdout/stderr tail, so a bare "exit
 // code 1" is actually explainable. The engine records `error` + `logTail` on any non-completed run.
-function failureDetailHtml(s) {
+function failureDetailHtml(s, key) {
   const err = s.error
     ? `<p class="verdict-rejected"><strong>Failed:</strong> ${escapeHtml(String(s.error))}</p>`
     : '<p class="verdict-rejected">Run failed (no error message recorded).</p>'
@@ -2433,7 +2612,16 @@ function failureDetailHtml(s) {
     Array.isArray(s.logTail) && s.logTail.length
       ? `<details class="log-tail" open><summary>Last output — ${s.logTail.length} lines (stdout + stderr)</summary><pre class="log-tail-pre">${escapeHtml(s.logTail.join('\n'))}</pre></details>`
       : '<p class="card-sub">No log output was captured for this run.</p>'
-  return `<div class="failure-detail">${err}${tail}</div>`
+  // Re-run (clone the exact config to Launch) + embedded-only "Ask AI for help"
+  // (opens the host chat seeded with the failure, no copy-paste).
+  const aiHelp =
+    embedded() && window.OverseerBridge && window.OverseerBridge.discussTopic
+      ? `<button type="button" data-action="help" data-key="${escapeHtml(key || '')}">Ask AI for help</button>`
+      : ''
+  const actions = key
+    ? `<div class="form-actions"><button type="button" data-action="clone" data-key="${escapeHtml(key)}">Re-run (clone to Launch)</button>${aiHelp}</div>`
+    : ''
+  return `<div class="failure-detail">${err}${tail}${actions}</div>`
 }
 function renderRunDetail(key) {
   const panel = byId('run-detail')
@@ -2451,6 +2639,14 @@ function renderRunDetail(key) {
     : '<span class="card-sub">none</span>'
   const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
   const datasetBadge = datasetBadgeHtml(s.dataset)
+  const isUnrunnable = unrunnableCache.has(setupKeyForRun(run))
+  const unrunnableBadge = isUnrunnable
+    ? ' · <span class="badge is-bad" title="This setup is marked unrunnable — skipped on re-run for this pipeline version unless forced.">unrunnable</span>'
+    : ''
+  // The pipeline version this run was produced under; runs across versions aren't comparable.
+  const versionBit = s.pipelineVersion
+    ? ` · <span title="Pipeline version this run ran under — runs from different versions aren't comparable.">pipeline v${escapeHtml(String(s.pipelineVersion))}</span>`
+    : ''
   const headline = failed
     ? '<span class="badge is-bad">failed</span>'
     : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
@@ -2459,14 +2655,15 @@ function renderRunDetail(key) {
       <div>
         <h2>Run <code>${escapeHtml(shortKey(run.key))}</code></h2>
         <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
-          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}</p>
+          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${unrunnableBadge}</p>
       </div>
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="ghost-btn">Clone to Launch</button>
+        <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="ghost-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Skip this setup on re-run (this pipeline version) unless forced'}">${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}</button>
         <button type="button" id="run-detail-close" class="ghost-btn">Close</button>
       </div>
     </div>
-    ${failed ? failureDetailHtml(s) : ''}
+    ${failed ? failureDetailHtml(s, run.key) : ''}
     <h3>Health flags</h3>
     <p class="badges-row">${flagChips}</p>
     ${verdictSectionHtml(verdictsCache.get(run.key))}
@@ -2483,6 +2680,17 @@ function renderRunDetail(key) {
     <p class="card-sub">configHash <code>${escapeHtml(run.key)}</code></p>`
   setHtml(panel, html)
   panel.hidden = false
+  syncRunsMdLayout()
+}
+// Split the Runs master-detail into two panes only when a detail/compare is open;
+// otherwise the list spans the full width.
+function syncRunsMdLayout() {
+  const md = byId('runs-md')
+  if (!md) return
+  const detail = byId('run-detail')
+  const compare = byId('run-compare')
+  const hasDetail = !!((detail && !detail.hidden) || (compare && !compare.hidden))
+  md.classList.toggle('has-detail', hasDetail)
 }
 function openRunDetail(key) {
   selectedRunKey = key
@@ -2490,6 +2698,7 @@ function openRunDetail(key) {
     row.classList.toggle('is-selected', row.dataset.key === key)
   }
   renderRunDetail(key)
+  syncRunsMdLayout()
 }
 function closeRunDetail() {
   selectedRunKey = null
@@ -2501,6 +2710,7 @@ function closeRunDetail() {
   for (const row of document.querySelectorAll('#runs-body tr.is-selected')) {
     row.classList.remove('is-selected')
   }
+  syncRunsMdLayout()
 }
 // Pre-fill the Launch form with a run's exact settings, so it's easy to sweep NEAR
 // a known result (tweak one lever, run the neighbours).
@@ -2509,6 +2719,31 @@ function cloneRunToLaunch(key) {
   if (!run) return
   showTab('launch')
   applyPresetFixed(run.summary.config || {})
+}
+// Open the host chat sidebar seeded with a failed run's error + recent log + config,
+// so the user can diagnose/fix without hand-copying anything.
+async function onHelpWithFailure(key) {
+  const run = runsCache.find((r) => r.key === key)
+  if (!run || !embedded() || !window.OverseerBridge || !window.OverseerBridge.discussTopic) return
+  const s = run.summary
+  const logTail = Array.isArray(s.logTail) ? s.logTail.slice(-40).join('\n') : ''
+  const seed = [
+    'A training run failed and I need help diagnosing and fixing it.',
+    `Run: ${shortKey(key)} (${objectiveName()} trainer).`,
+    s.error ? `Error:\n${s.error}` : '',
+    logTail
+      ? `Recent log output (last ${Math.min(40, (s.logTail || []).length)} lines):\n${logTail}`
+      : '',
+    `Config:\n${JSON.stringify(s.config || {}, null, 2)}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  try {
+    await window.OverseerBridge.discussTopic({ title: `Failed run ${shortKey(key)}`, seed })
+  } catch {
+    if (selectedRunKey === key)
+      setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
+  }
 }
 function busyButtonHtml(label) {
   return `${spinnerHtml()} ${escapeHtml(label)}`
@@ -2600,9 +2835,7 @@ async function onJudgeClick() {
 async function onEvaluateRun(key) {
   if (evaluatingKeys.has(key) || !embedded()) return
   if (!runsCache.some((r) => r.key === key)) return
-  if (
-    queueCache.some((q) => q.activityType === 'evaluate' && q.params && q.params.runKey === key)
-  ) {
+  if (queueCache.some((q) => q.activityType === 'evaluate' && evaluateKeysOf(q).includes(key))) {
     if (selectedRunKey === key) setStatusLine('run-eval-status', 'Already queued.')
     return
   }
@@ -2612,7 +2845,7 @@ async function onEvaluateRun(key) {
   try {
     const result = await startOrEnqueue(
       'evaluate',
-      trainerComputeParams({ runKey: key }),
+      trainerComputeParams({ runKeys: [key] }),
       `Evaluate ${shortKey(key)}`,
     )
     if (result.queued) {
@@ -2695,6 +2928,11 @@ function setupRuns() {
       if (sel) {
         runsLeverFilter[sel.dataset.lever] = sel.value
         renderRunsTable()
+        return
+      }
+      if (event.target.id === 'runs-hide-bad') {
+        runsHideBad = event.target.checked
+        renderRunsTable()
       }
     })
     body.addEventListener('input', (event) => {
@@ -2721,6 +2959,10 @@ function setupRuns() {
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
       const cloneBtn = event.target.closest('button[data-action="clone"]')
       if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
+      const helpBtn = event.target.closest('button[data-action="help"]')
+      if (helpBtn) onHelpWithFailure(helpBtn.dataset.key)
+      const unrunBtn = event.target.closest('button[data-action="toggle-unrunnable"]')
+      if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
     })
   }
   const compareCard = byId('run-compare')
@@ -4547,21 +4789,43 @@ function syncCurrentItemTimer(current) {
   tick()
   currentItemTimer = setInterval(tick, 1000)
 }
-// Runs that failed across the settled campaign: a short count plus a collapsible
-// per-run {key, error} list, surfaced once the campaign carries failures[].
+// Runs that failed across the settled campaign: a collapsible per-run {key, error}
+// list where each entry is INSPECTABLE (opens the run detail with the full error +
+// logTail + "Ask AI for help"), RE-RUNNABLE (clones its config to Launch), and
+// DISMISSABLE (hidden from the list, persisted). Dismissed entries drop out.
 function campaignFailuresHtml(campaign) {
-  const failures = (campaign && Array.isArray(campaign.failures) && campaign.failures) || []
-  if (!failures.length) return ''
+  const all = (campaign && Array.isArray(campaign.failures) && campaign.failures) || []
+  const failures = all.filter((f) => !dismissedFailures.has(f.key))
+  const dismissed = all.length - failures.length
+  if (!failures.length) {
+    return dismissed
+      ? `<p class="card-sub run-failures-empty">${dismissed} failed run${dismissed === 1 ? '' : 's'} dismissed.</p>`
+      : ''
+  }
   const items = failures
     .map(
       (f) =>
-        `<li><code>${escapeHtml(shortKey(f.key))}</code> — ${escapeHtml(f.error || 'failed')}</li>`,
+        `<li class="run-failure-item">
+          <span class="run-failure-text"><code>${escapeHtml(shortKey(f.key))}</code> — ${escapeHtml(f.error || 'failed')}</span>
+          <span class="run-failure-actions">
+            <button type="button" class="link-btn" data-failure-action="inspect" data-key="${escapeHtml(f.key)}">See error</button>
+            <button type="button" class="link-btn" data-failure-action="rerun" data-key="${escapeHtml(f.key)}">Re-run</button>
+            <button type="button" class="link-btn" data-failure-action="dismiss" data-key="${escapeHtml(f.key)}">Dismiss</button>
+          </span>
+        </li>`,
     )
     .join('')
-  return `<details class="run-failures">
-    <summary>${failures.length} run${failures.length === 1 ? '' : 's'} failed</summary>
+  const dismissedNote = dismissed ? ` <span class="card-sub">· ${dismissed} dismissed</span>` : ''
+  return `<details class="run-failures" open>
+    <summary>${failures.length} run${failures.length === 1 ? '' : 's'} failed${dismissedNote}</summary>
     <ul class="run-failures-list">${items}</ul>
   </details>`
+}
+// Open a failed run's full detail (error + logTail + AI-help) from the Activity list.
+function inspectFailedRun(key) {
+  if (!key) return
+  showTab('runs')
+  openRunDetail(key)
 }
 function activityCountsHtml(progress) {
   const skipped = Number(progress && progress.skipped) || 0
@@ -4677,6 +4941,15 @@ function setupActivity() {
     if (event.target.closest('#activity-abort')) abortCurrentActivity()
     else if (event.target.closest('#activity-resume')) resumeCurrentActivity()
     else {
+      const failBtn = event.target.closest('button[data-failure-action]')
+      if (failBtn) {
+        const action = failBtn.dataset.failureAction
+        const key = failBtn.dataset.key
+        if (action === 'inspect') inspectFailedRun(key)
+        else if (action === 'rerun') cloneRunToLaunch(key)
+        else if (action === 'dismiss') dismissFailure(key)
+        return
+      }
       const removeBtn = event.target.closest('button[data-queue-remove]')
       if (removeBtn) onQueueRemove(removeBtn.dataset.queueRemove)
     }
@@ -4699,6 +4972,9 @@ function showTab(id) {
       btn.setAttribute('aria-selected', String(tab.id === target))
     }
   }
+  // Runs is the only full-width, own-scroll master-detail tab.
+  const main = document.querySelector('.tab-main')
+  if (main) main.classList.toggle('is-fullwidth', target === 'runs')
   try {
     sessionStorage.setItem(ACTIVE_TAB_SS, target)
   } catch {

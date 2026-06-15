@@ -109,24 +109,30 @@
         <main class="tab-main">
           <!-- Runs (completed training runs, best first) -->
           <section id="tab-runs" class="tab-panel" role="tabpanel" hidden>
-            <section class="card" aria-labelledby="runs-h">
-              <div class="card-head card-head-row">
-                <div>
-                  <h2 id="runs-h">Runs</h2>
-                  <p class="card-sub" id="runs-sub">Every training run, best first.</p>
-                  <p class="card-sub runs-live" id="runs-live" hidden></p>
-                  <p class="card-sub" id="judge-last" hidden></p>
-                </div>
-                <div class="head-actions">
-                  <button type="button" id="judge-btn">Judge runs</button>
-                </div>
+            <div class="runs-md" id="runs-md">
+              <div class="runs-md__list">
+                <section class="card" aria-labelledby="runs-h">
+                  <div class="card-head card-head-row">
+                    <div>
+                      <h2 id="runs-h">Runs</h2>
+                      <p class="card-sub" id="runs-sub">Every training run, best first.</p>
+                      <p class="card-sub runs-live" id="runs-live" hidden></p>
+                      <p class="card-sub" id="judge-last" hidden></p>
+                    </div>
+                    <div class="head-actions">
+                      <button type="button" id="judge-btn">Judge runs</button>
+                    </div>
+                  </div>
+                  <p id="judge-status" class="form-status" role="status" hidden></p>
+                  <div id="runs-sparkline" class="sparkline-wrap" hidden></div>
+                  <div id="runs-body" class="runs-body"></div>
+                </section>
               </div>
-              <p id="judge-status" class="form-status" role="status" hidden></p>
-              <div id="runs-sparkline" class="sparkline-wrap" hidden></div>
-              <div id="runs-body" class="runs-body"></div>
-            </section>
-            <section class="card" id="run-detail" aria-label="Run detail" hidden></section>
-            <section class="card" id="run-compare" aria-label="Compare runs" hidden></section>
+              <div class="runs-md__detail">
+                <section class="card" id="run-detail" aria-label="Run detail" hidden></section>
+                <section class="card" id="run-compare" aria-label="Compare runs" hidden></section>
+              </div>
+            </div>
           </section>
 
           <!-- Charts (hand-rolled SVG views over the run / verdict / evaluation records) -->
