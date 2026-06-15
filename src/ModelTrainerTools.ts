@@ -220,6 +220,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           })
         }
         const result = await handle.done
+        // Signal this item left the in-flight set (completed/failed/aborted) so a host
+        // tracking concurrent runs can drop it from its live display.
+        if (params.onItemProgress) {
+          void params.onItemProgress(item.key, { terminal: true, status: result.status })
+        }
         if (result.status !== 'completed') {
           const error = result.error ?? `training exited with code ${result.exitCode}`
           if (result.status !== 'aborted') {

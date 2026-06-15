@@ -637,6 +637,21 @@ describe('runTrainingCampaign', () => {
     expect(events.some((e) => e.progress.phase === 'train' && e.progress.done === 700)).toBe(true)
   })
 
+  it('emits a terminal onItemProgress when an item settles (so a host can drop it from the in-flight set)', async () => {
+    const events: { key: string; progress: Record<string, unknown> }[] = []
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { fixed: { lr: 0.1 }, seeds: [0] },
+      onItemProgress: (key, progress) => events.push({ key, progress }),
+    })
+    const terminal = events.filter((e) => e.progress.terminal === true)
+    expect(terminal).toHaveLength(1)
+    expect(terminal[0].progress.status).toBe('completed')
+  })
+
   it('notifies onRecordWritten for every persisted run', async () => {
     const written: string[] = []
     const { tools } = makeTools(stubRunner(), memoryStorage())

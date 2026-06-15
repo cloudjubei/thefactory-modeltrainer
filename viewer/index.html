@@ -4,9 +4,32 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Model Trainer</title>
-    <link rel="stylesheet" href="style.css" />
-    <script src="bridge.js" defer></script>
-    <script src="app.js" defer></script>
+    <!--
+      Load the viewer's CSS + JS with a per-load cache-bust. index.html is always
+      fetched fresh (its URL carries a one-time viewToken), but an embedding iframe
+      can otherwise hold a STALE copy of these stable-named subresources across
+      reloads — so every edit to app.js / style.css takes effect immediately.
+    -->
+    <script>
+      ;(function () {
+        var v = '?v=' + Date.now()
+        document.write(
+          '<link rel="stylesheet" href="style.css' +
+            v +
+            '">' +
+            '<scr' +
+            'ipt src="bridge.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
+            'ipt src="app.js' +
+            v +
+            '" defer></scr' +
+            'ipt>',
+        )
+      })()
+    </script>
   </head>
   <body>
     <!-- Home — the hub: registered training projects -->

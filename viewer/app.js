@@ -90,14 +90,14 @@ let runsSortDir = 'desc'
 let runsLeverFilter = {}
 let runsTextFilter = ''
 let runsHideBad = false
+let runsDeleteArmed = false
 let runsCompareKeys = new Set()
 let runsViewMode = 'runs'
 // When drilled into a single setup's runs (via the by-setup view), this holds that
 // setup's key so the runs view can show its conclusion-note editor (C4 ledger).
 let runsDrillSetupKey = null
 let chartSplits = {}
-let itemBarTimer = null
-// 1s ticker for the running item's elapsed timer (mm:ss) between the 3s polls.
+// 1s ticker for the in-flight runs' elapsed timers (mm:ss) between the 3s polls.
 let currentItemTimer = null
 let runnersCache = []
 // The runners offered in the Launch tab's "Run on" select, refreshed each time
@@ -209,6 +209,19 @@ function pairingExpired(pairing) {
 }
 function spinnerHtml() {
   return '<span class="spinner" aria-hidden="true"></span>'
+}
+// The app-wide delete/trash icon (mirrors thefactory-ui's IconDelete) for icon-only
+// delete buttons — used instead of an emoji so the viewer matches the rest of the app.
+function iconDeleteSvg() {
+  return (
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<polyline points="3 6 5 6 21 6" stroke="#6366F1" stroke-width="2"/>' +
+    '<path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" stroke="#EF4444" stroke-width="2"/>' +
+    '<path d="M10 11v6" stroke="#A855F7" stroke-width="2"/>' +
+    '<path d="M14 11v6" stroke="#A855F7" stroke-width="2"/>' +
+    '<path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" stroke="#F59E0B" stroke-width="2"/>' +
+    '</svg>'
+  )
 }
 // Small circular "?" button with a styled hover/focus callout (no native title).
 function helpCalloutHtml(text) {
@@ -1115,8 +1128,7 @@ function resetDashboardState() {
   runsFilterLabel = ''
   chartSplits = {}
   launchRunnersCache = []
-  syncItemBarTimer(false)
-  syncCurrentItemTimer(null)
+  syncInFlightTimer([])
   closeRunDetail()
   toggleHypothesisForm(false)
   setStatusLine('judge-status', '')
@@ -1169,8 +1181,7 @@ function goHome() {
   projectEpoch += 1
   currentProject = null
   manifest = null
-  syncItemBarTimer(false)
-  syncCurrentItemTimer(null)
+  syncInFlightTimer([])
   document.title = 'Model Trainer'
   showView('home')
   startHomePoll()
@@ -1578,6 +1589,7 @@ function clearRunsFilter() {
   runsLeverFilter = {}
   runsTextFilter = ''
   runsDrillSetupKey = null
+  runsDeleteArmed = false
   renderRunsTable()
 }
 // Drill from a by-setup row into that setup's individual runs (filter + switch view).
@@ -2062,6 +2074,11 @@ function runsToolbarHtml(shownCount, total) {
     ${hideBad}
     <span class="runs-count">${shownCount}/${total} runs${label}</span>
     ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
+    ${
+      shownCount > 0
+        ? `<button type="button" id="runs-delete-shown" class="ghost-btn danger-text" title="Delete the ${shownCount} shown run${shownCount === 1 ? '' : 's'} (and their evaluation/verdict records)">${runsDeleteArmed ? `Confirm — delete ${shownCount}?` : `Delete shown (${shownCount})`}</button>`
+        : ''
+    }
   </div>`
 }
 function toggleRunsSort(id) {
@@ -2660,6 +2677,7 @@ function renderRunDetail(key) {
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
         <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
+        <button type="button" data-action="delete-run" data-key="${escapeHtml(run.key)}" class="icon-btn icon-btn-danger" title="Delete this run (and its evaluation/verdict)" aria-label="Delete run">${iconDeleteSvg()}</button>
         <button type="button" id="run-detail-close" class="icon-btn" title="Close" aria-label="Close">✕</button>
       </div>
     </div>
@@ -2880,6 +2898,17 @@ function setupRuns() {
         clearRunsFilter()
         return
       }
+      if (event.target.closest('#runs-delete-shown')) {
+        // Two-click arm: first click confirms intent, second deletes.
+        if (!runsDeleteArmed) {
+          runsDeleteArmed = true
+          renderRunsTable()
+        } else {
+          runsDeleteArmed = false
+          deleteFilteredRuns()
+        }
+        return
+      }
       if (event.target.closest('#setup-note-save')) {
         const ta = byId('setup-note-text')
         const status = byId('setup-note-status')
@@ -2963,6 +2992,8 @@ function setupRuns() {
       if (helpBtn) onHelpWithFailure(helpBtn.dataset.key)
       const unrunBtn = event.target.closest('button[data-action="toggle-unrunnable"]')
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
+      const delBtn = event.target.closest('button[data-action="delete-run"]')
+      if (delBtn) deleteRun(delBtn.dataset.key)
     })
   }
   const compareCard = byId('run-compare')
@@ -3496,7 +3527,7 @@ function hypothesisCardHtml(h, liveIds) {
   // Settled (accepted/rejected) cards get a corner delete button to clear them out.
   const settled = h.status === 'accepted' || h.status === 'rejected'
   const deleteBtn = settled
-    ? `<button type="button" class="icon-btn icon-btn-danger hypothesis-delete" data-action="delete" data-id="${escapeHtml(h.id)}" title="Delete hypothesis" aria-label="Delete hypothesis">🗑</button>`
+    ? `<button type="button" class="icon-btn icon-btn-danger hypothesis-delete" data-action="delete" data-id="${escapeHtml(h.id)}" title="Delete hypothesis" aria-label="Delete hypothesis">${iconDeleteSvg()}</button>`
     : ''
   return `<article class="hypothesis-card${h.status === 'rejected' ? ' is-muted' : ''}" data-id="${escapeHtml(h.id)}">
     ${deleteBtn}
@@ -3627,6 +3658,67 @@ async function deleteHypothesis(id) {
   }
   hypothesesCache = hypothesesCache.filter((x) => x.id !== id)
   await renderHypotheses()
+}
+// Also drop a run's derived records so a deleted run fully disappears (no orphan
+// evaluation / verdict / unrunnable marker keyed by the same run/setup key).
+async function deleteRelatedRunRecords(key, setupKey) {
+  const types = [manifest.recordType + '-evaluation', manifest.recordType + '-verdict']
+  for (const type of types) {
+    try {
+      await window.OverseerBridge.deleteData({ type, key })
+    } catch {
+      // best-effort: a missing derived record is fine
+    }
+  }
+  if (setupKey) {
+    try {
+      await window.OverseerBridge.deleteData({
+        type: manifest.recordType + '-unrunnable',
+        key: setupKey,
+      })
+    } catch {
+      // best-effort
+    }
+  }
+}
+// Permanently delete a run record + its derived records. Used to clear out old
+// (pre-fix) runs so only runs with correct stored values remain.
+async function deleteRun(key) {
+  if (!manifest || !key) return
+  const run = runsCache.find((r) => r.key === key)
+  setStatusLine('run-eval-status', '')
+  try {
+    await window.OverseerBridge.deleteData({ type: manifest.recordType, key })
+  } catch {
+    if (selectedRunKey === key)
+      setStatusLine('run-eval-status', 'Could not delete the run — please try again.', true)
+    return
+  }
+  await deleteRelatedRunRecords(key, run ? setupKeyForRun(run) : undefined)
+  runsCache = runsCache.filter((r) => r.key !== key)
+  runsCompareKeys.delete(key)
+  if (selectedRunKey === key) closeRunDetail()
+  await renderRuns()
+}
+// Delete every run currently shown (after the active filters) — e.g. filter to an old
+// pipeline version, then clear them. Two-click armed to avoid an accidental wipe.
+async function deleteFilteredRuns() {
+  if (!manifest) return
+  const keys = applyRunsFilters(runsCache).map((r) => r.key)
+  for (const key of keys) {
+    const run = runsCache.find((r) => r.key === key)
+    try {
+      await window.OverseerBridge.deleteData({ type: manifest.recordType, key })
+      await deleteRelatedRunRecords(key, run ? setupKeyForRun(run) : undefined)
+    } catch {
+      // best-effort: keep going
+    }
+  }
+  const removed = new Set(keys)
+  runsCache = runsCache.filter((r) => !removed.has(r.key))
+  for (const k of keys) runsCompareKeys.delete(k)
+  if (selectedRunKey && removed.has(selectedRunKey)) closeRunDetail()
+  await renderRuns()
 }
 // Stamp a hypothesis record's `campaign` block (preserving every other field),
 // keyed by the explicit recordType so queue dispatches survive navigation.
@@ -4686,56 +4778,11 @@ function progressBarHtml(progress, running, labelPrefix) {
     <span class="build-progress-label">${labelPrefix ? `${escapeHtml(labelPrefix)} ` : ''}${done} / ${total || '?'}</span>
   </div>`
 }
-// Per-item ETA derived from the whole-campaign ETA: etaSeconds covers the
-// remaining items, so one item ≈ etaSeconds / (total - done) — in ms.
-function perItemEtaMs(progress) {
-  const eta = Number(progress && progress.etaSeconds)
-  const total = Number(progress && progress.total) || 0
-  const done = Number(progress && progress.done) || 0
-  const remaining = total - done
-  if (!(eta > 0) || remaining <= 0) return 0
-  return (eta / remaining) * 1000
-}
-// Time-estimated completion of the CURRENT item, animated from the progress
-// record's updatedAt and capped at 95% until the next tick advances done.
-// Negative → not estimable (indeterminate bar).
-function estimatedItemPct(progress) {
-  const per = perItemEtaMs(progress)
-  if (!per) return -1
-  const updated = new Date(progress.updatedAt || '').getTime()
-  const elapsed = Number.isFinite(updated) ? Math.max(0, Date.now() - updated) : 0
-  return Math.min(95, (elapsed / per) * 100)
-}
-// While running, the Activity tab shows TWO bars for multi-item campaigns: the
-// time-estimated current item ("Experiment X of N") above the campaign total.
+// The whole-campaign bar: how many of the planned runs have finished (k of N).
+// Each concurrently-running run shows its own within-run bar + ETA separately
+// (inFlightHtml), and the campaign ETA is shown on its own line.
 function activityProgressHtml(progress, running) {
-  const total = Number(progress && progress.total) || 0
-  if (!running || total < 1) return progressBarHtml(progress, running)
-  const done = Number(progress && progress.done) || 0
-  const itemIndex = Math.min(done + 1, total)
-  const pct = estimatedItemPct(progress)
-  const indeterminate = pct < 0
-  const label = `Experiment ${itemIndex} of ${total}${indeterminate ? '' : ' · ~estimated'}`
-  const itemBar = `<div class="build-progress">
-    <div class="build-progress-bar"><span id="activity-item-bar" class="${indeterminate ? 'is-indeterminate' : ''}" style="width:${indeterminate ? '' : `${pct.toFixed(1)}%`}"></span></div>
-    <span class="build-progress-label">${label}</span>
-  </div>`
-  if (total === 1) return itemBar
-  return itemBar + progressBarHtml(progress, running, 'Total')
-}
-// Local 1s ticker that advances the current-item bar between the 3s polls.
-function syncItemBarTimer(active) {
-  if (itemBarTimer) {
-    clearInterval(itemBarTimer)
-    itemBarTimer = null
-  }
-  if (!active) return
-  itemBarTimer = setInterval(() => {
-    const el = byId('activity-item-bar')
-    if (!el || !lastProgress) return
-    const pct = estimatedItemPct(lastProgress)
-    if (pct >= 0) el.style.width = `${pct.toFixed(1)}%`
-  }, 1000)
+  return progressBarHtml(progress, running, 'Runs')
 }
 const CURRENT_PHASE_LABEL = {
   loading: 'loading data + model…',
@@ -4744,61 +4791,59 @@ const CURRENT_PHASE_LABEL = {
   test: 'testing',
   summarize: 'summarizing',
 }
-// The within-run sub-progress carried by progress.current while a single
-// experiment executes: the running item's key + phase with a spinner, an elapsed
-// timer, and EITHER a real done/total bar (data-driven runs) or — since this
-// run's model differs from the calibration model, making the campaign ETA
-// unreliable for it — an honest indeterminate striped bar. The item-count "k of
-// N" total bar above it stays accurate and is rendered separately.
-function currentItemHtml(current) {
-  if (!current || !current.key) return ''
-  const phase = String(current.phase || '')
+// One row PER in-flight run (the backend tracks all concurrent runs in
+// `progress.inFlight`): key + phase with a spinner, a live elapsed timer + per-run
+// ETA, and EITHER a real within-run done/total bar (data-driven runs) or an honest
+// indeterminate striped bar. The campaign "k of N runs" total bar is separate.
+// Elapsed/ETA are filled by the ticker (data-*-key spans), not baked in, so the
+// markup stays stable across 3s polls and the striped animation doesn't restart.
+function inFlightRowHtml(run) {
+  if (!run || !run.key) return ''
+  const phase = String(run.phase || '')
   const phaseLabel = CURRENT_PHASE_LABEL[phase] || phase || 'running'
-  const done = Number(current.done)
-  const total = Number(current.total)
+  const done = Number(run.done)
+  const total = Number(run.total)
   const hasCount = Number.isFinite(done) && Number.isFinite(total) && total > 0
   const pct = hasCount ? Math.max(0, Math.min(100, (done / total) * 100)) : 0
   const bar = hasCount
     ? `<div class="build-progress-bar"><span style="width:${pct.toFixed(1)}%"></span></div>`
     : '<div class="build-progress-bar"><span class="is-indeterminate"></span></div>'
   const count = hasCount ? `${done} / ${total} · ${Math.round(pct)}%` : ''
-  // The elapsed value is filled by the ticker (immediately + every 1s), not baked
-  // in here, so this markup stays identical across the 3s polls while the same
-  // item runs — letting setHtml skip the re-render and keep the indeterminate
-  // bar's animation (and the spinner) from restarting every tick.
+  const k = escapeHtml(run.key)
   return `<div class="current-item">
-    <p class="current-item-head">${spinnerHtml()} Run <code>${escapeHtml(shortKey(current.key))}</code> · ${escapeHtml(phaseLabel)}<span class="current-item-elapsed" id="activity-current-elapsed"></span><span class="current-item-eta" id="activity-current-eta"></span></p>
+    <p class="current-item-head">${spinnerHtml()} Run <code>${escapeHtml(shortKey(run.key))}</code> · ${escapeHtml(phaseLabel)}<span class="current-item-elapsed" data-elapsed-key="${k}"></span><span class="current-item-eta" data-eta-key="${k}"></span></p>
     <div class="build-progress">
       ${bar}
       ${count ? `<span class="build-progress-label">${escapeHtml(count)}</span>` : ''}
     </div>
   </div>`
 }
-// Drive the running item's elapsed timer (mm:ss) + a live time-left estimate from
-// this run's own training progress (elapsed × remaining/done). Setup phases
-// (loading/starting) show no ETA — that time is genuinely indeterminate.
-function syncCurrentItemTimer(current) {
+function inFlightHtml(runs) {
+  if (!runs.length) return ''
+  const head = `<p class="card-sub inflight-head">${runs.length} run${runs.length === 1 ? '' : 's'} running now</p>`
+  return `<div class="inflight-runs">${head}${runs.map(inFlightRowHtml).join('')}</div>`
+}
+// Drive every in-flight run's elapsed timer (mm:ss) + a live time-left estimate from
+// that run's OWN training progress (elapsed × remaining/done). Setup phases
+// (loading/starting) show no ETA — that time is genuinely indeterminate. One shared
+// interval updates all rows by their data-*-key spans.
+function syncInFlightTimer(runs) {
   if (currentItemTimer) {
     clearInterval(currentItemTimer)
     currentItemTimer = null
   }
-  if (!current || !current.startedAt) return
-  const startedAt = current.startedAt
-  const done = Number(current.done)
-  const total = Number(current.total)
-  const determinate =
-    String(current.phase) === 'train' &&
-    Number.isFinite(done) &&
-    Number.isFinite(total) &&
-    done > 0 &&
-    total > done
+  if (!runs || !runs.length) return
   const tick = () => {
-    const el = byId('activity-current-elapsed')
-    if (el) el.textContent = formatElapsed(startedAt)
-    const etaEl = byId('activity-current-eta')
-    if (etaEl) {
-      if (determinate) {
-        const elapsedMs = Date.now() - new Date(startedAt).getTime()
+    for (const run of runs) {
+      if (!run || !run.key || !run.startedAt) continue
+      const el = document.querySelector(`[data-elapsed-key="${run.key}"]`)
+      if (el) el.textContent = ` · ${formatElapsed(run.startedAt)}`
+      const etaEl = document.querySelector(`[data-eta-key="${run.key}"]`)
+      if (!etaEl) continue
+      const done = Number(run.done)
+      const total = Number(run.total)
+      if (String(run.phase) === 'train' && done > 0 && total > done) {
+        const elapsedMs = Date.now() - new Date(run.startedAt).getTime()
         const remainingS = (elapsedMs * ((total - done) / done)) / 1000
         etaEl.textContent = ` · ~${formatEta(remainingS)} left`
       } else {
@@ -4907,8 +4952,7 @@ function renderActivity() {
         (queueHtml ||
           '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'),
     )
-    syncItemBarTimer(false)
-    syncCurrentItemTimer(null)
+    syncInFlightTimer([])
     return
   }
   const status = lastActivityStatus || 'completed'
@@ -4928,10 +4972,17 @@ function renderActivity() {
     : status === 'paused'
       ? '<div class="form-actions"><button type="button" id="activity-resume">Resume</button></div>'
       : ''
-  // The running item's sub-progress only applies mid-run, while the campaign is
-  // training (not calibrating, where the model differs from the run model).
-  const current = running && p && p.phase === 'train' ? p.current : null
-  const currentHtml = current ? currentItemHtml(current) : ''
+  // Every concurrently-running run's sub-progress, mid-train (not while calibrating,
+  // where the model differs from the run model). The backend tracks all in-flight
+  // runs in `p.inFlight`; older records may still carry a single `current`.
+  const inFlight =
+    running && p && p.phase === 'train'
+      ? Array.isArray(p.inFlight)
+        ? p.inFlight
+        : p.current
+          ? [p.current]
+          : []
+      : []
   setHtml(
     body,
     `
@@ -4942,7 +4993,7 @@ function renderActivity() {
       ${currentActivityId ? `<code class="activity-id">${escapeHtml(shortKey(currentActivityId))}</code>` : ''}
     </div>
     ${p ? activityProgressHtml(p, running) : ''}
-    ${currentHtml}
+    ${inFlightHtml(inFlight)}
     ${activityCountsHtml(p)}
     ${eta}
     ${times}
@@ -4951,8 +5002,7 @@ function renderActivity() {
     ${actions}
     ${queueHtml}`,
   )
-  syncItemBarTimer(running && !!p && perItemEtaMs(p) > 0)
-  syncCurrentItemTimer(currentHtml ? current : null)
+  syncInFlightTimer(inFlight)
 }
 function setupActivity() {
   const body = byId('activity-body')

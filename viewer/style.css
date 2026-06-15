@@ -187,10 +187,9 @@ body {
 }
 
 .tab-main {
+  /* Full-width on every tab — use all available width rather than a centred 1100px column. */
   flex: 1;
   width: 100%;
-  max-width: 1100px;
-  margin: 0 auto;
   padding: 20px 16px;
 }
 .tab-panel[hidden] {
@@ -864,6 +863,17 @@ body {
   border-color: var(--bad);
   background: var(--bad-soft);
 }
+.icon-btn svg {
+  display: block;
+}
+.danger-text {
+  color: var(--bad);
+}
+.danger-text:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: var(--bad-soft);
+}
 .runs-filter-lever,
 .runs-filter-text {
   font-size: 12px;
@@ -1283,6 +1293,13 @@ pre.json {
 /* The within-run sub-progress for the running experiment: the item's key +
    phase with a spinner and an elapsed timer, above its own (real or
    indeterminate) bar — nested under the campaign total bar. */
+.inflight-runs {
+  margin: 8px 0 4px;
+}
+.inflight-head {
+  margin: 0 0 2px;
+  font-weight: 600;
+}
 .current-item {
   margin: 6px 0 4px;
   padding: 8px 10px;
