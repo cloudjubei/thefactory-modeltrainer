@@ -73,6 +73,12 @@ export interface TrainerManifest {
   name: string
   /** Namespaces every DataStorage record this project produces, e.g. `cartpole-run`. */
   recordType: string
+  /**
+   * Plain-language description of what this project trains and what "good" means — the domain,
+   * the model, the objective in human terms, and any key mechanics. Surfaced to the user and used
+   * to brief the in-app chat agent so a discussion is about THIS project, not the generic trainer.
+   */
+  description?: string
   /** Run-command template containing `{configPath}` and `{summaryOut}` placeholders. */
   run: string
   /** Calibrate-command template containing `{summaryOut}`; omit if the project cannot calibrate. */

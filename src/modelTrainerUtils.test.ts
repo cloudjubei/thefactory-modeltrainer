@@ -47,6 +47,11 @@ describe('validateTrainerManifest', () => {
     expect(() => validateTrainerManifest('nope')).toThrow(/manifest/i)
   })
 
+  it('preserves an optional description (used to brief the in-app chat agent)', () => {
+    const m = validateTrainerManifest({ ...manifest(), description: 'Trades BTC under real fees.' })
+    expect(m.description).toBe('Trades BTC under real fees.')
+  })
+
   it('rejects a missing name', () => {
     expect(() => validateTrainerManifest({ ...manifest(), name: '' })).toThrow(/name/)
   })

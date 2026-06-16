@@ -79,10 +79,10 @@ all three windows are on disk now. REMAINS: (a) run Exp 6 live + read the cross-
   `min(1, kelly_fraction / realized_vol)` floored at a min (keep the Discrete head — a Box action
   space forces a from-scratch SB3 retrain). Lookahead-free rolling vol (≤ the 1h lookback of 32).
   `leverage_target` lever [0.5,1.0,1.5]. The structural fix for "60 trades for +1%".
-- **Drop/soften the trade-count gate — EASY.** `trade_gate_mode` lever (none/quadratic/linear/
-  threshold) routed in `summary.py` (post-run only — zero training-loop impact). Realistic fees
-  already regulate churn; keep sweepable so both regimes stay comparable. (Subsumes the old
-  "calibrate `MIN_TRADES_FOR_FULL_CREDIT`" item.)
+- **Drop/soften the trade-count gate — SHIPPED.** `trade_gate_mode` lever
+  (none/linear/quadratic/threshold), pure `_trade_gate` helper in `summary.py` (post-run only — zero
+  training-loop impact), default quadratic = unchanged; trainer.json lever. TDD. Sweep to compare
+  regimes. (Subsumes the old "calibrate `MIN_TRADES_FOR_FULL_CREDIT`" item.)
 - **Broaden the space — EASY.** `lookback_window` [1,8,16,32,64]; regime/vol features (rolling-vol
   bin, trend slope) in `_add_curated_indicators`; a fixed-fraction `position_size` lever; two new
   reward models (`profit_percentage_direct` raw-return, an inline differential-Sharpe approximation);
@@ -90,16 +90,15 @@ all three windows are on disk now. REMAINS: (a) run Exp 6 live + read the cross-
   just unwired); Exp6–11 presets on the 1h winners. Also fold in the deferred **out-of-[-1,1]
   normalization experiment** (tanh-squash the 8 over-bound base features / clip the obs — does it
   help?) as one such lever. Choice levers auto-expand the matrix — no model-trainer change.
-- **Multi-fidelity stacking, made VISIBLE — MEDIUM.** The observation already stacks timeframes
-  (`MultiTimelineDataProvider` over a `layers` list — this IS the user's 1h vs 1h+1d vs 1h+1d+1w
-  experiments, and more layers empirically helped), but the only lever is `timeframe` (1h hardcodes
-  `layers=[1h,1d]` in `config_builder.py`) and `summary.py` never records which layers ran — so it is
-  invisible. Add a `fidelity_set` CHOICE lever (`[1h]`/`[1h+1d]`/`[1h+1d+1w]`/`[1d]`) mapped in
-  `build_data_config`, and emit `fidelity_set` + `layers` in the summary as a generic metadata field
-  (domain-oblivious pass-through) so a run is self-documenting and the app can show a "fidelity"
-  column/badge in Runs + run-detail. Gotcha: `derive_cache` only buckets 1h/1d from the 1m canonical
-  — add WEEKLY bucketing before `1w` is a real choice. Wider sets ≈ quadratic obs growth → pair with
-  a `net_arch`/`batch_size` note in the preset.
+- **Multi-fidelity stacking, made VISIBLE — SHIPPED.** Pure `trainer/fidelity.py` resolver
+  (`fidelity_set` ids `auto`/`1d`/`1h`/`1h+1d`/`1h+1d+1w`; `auto` = follow `timeframe`, so the lever
+  default is backward-compatible), shared by `config_builder.build_data_config` (refactored to resolve
+  layers/lookback/path from it) + `summary.py` (stamps `fidelity_set` + `layers` into `dataset` so a
+  run is self-documenting). `trainer.json` `fidelity_set` lever. TDD. NOTE: the `derive_cache` 1w
+  gotcha did NOT apply — higher layers are RESAMPLED by the multi-layer provider from the loaded base
+  bars (the 1h path loads only the 1h file yet stacks 1d), so 1w needs no new derivation. App-side: a
+  "fidelity" column/badge in Runs is the §3a follow-up (the field is now emitted). Wider sets ≈
+  quadratic obs growth → still worth a `net_arch`/`batch_size` note in a preset.
 
 **Wave 1-parallel — the decisive non-RL baseline. EASY.** Supervised direction/return predictor +
 rules-based execution. The trainer contract is model-agnostic (hodl/regression/technical already

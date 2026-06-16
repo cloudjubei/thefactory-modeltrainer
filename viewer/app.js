@@ -3118,9 +3118,23 @@ function cloneRunToLaunch(key) {
 function chatAboutRunAvailable() {
   return embedded() && !!window.OverseerBridge && !!window.OverseerBridge.discussTopic
 }
-// Open the host chat (a project topic) preloaded with everything about THIS run — config,
-// metrics, health, objective, and (for a failure) the error + log tail — so the user can
-// discuss or diagnose ANY run without hand-copying anything.
+// A topic-chat system prompt describing THIS training project — name, the manifest's plain-language
+// description, and the objective in human terms — so the in-app agent is grounded in the actual
+// project (e.g. BlackSwan), not the generic model trainer.
+function projectChatPreamble() {
+  if (!manifest) return ''
+  const dir = objectiveDirection() === 'min' ? 'lower is better' : 'higher is better'
+  return [
+    `You are an expert assistant for the "${manifest.name}" model-training project, helping the user understand and improve its training runs.`,
+    manifest.description ? String(manifest.description) : '',
+    `The optimisation objective is "${objectiveName()}" (${dir}).`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+// Open the host chat (a project topic) whose SYSTEM PROMPT is preloaded with the project context +
+// everything about THIS run — config, metrics, health, objective, and (for a failure) the error +
+// log tail — so the user can discuss or diagnose ANY run, grounded in the project, without copying.
 async function chatAboutRun(key) {
   const run = runsCache.find((r) => r.key === key)
   if (!run || !chatAboutRunAvailable()) return
@@ -3128,11 +3142,11 @@ async function chatAboutRun(key) {
   const failed = s.status === 'failed'
   const logTail = Array.isArray(s.logTail) ? s.logTail.slice(-40).join('\n') : ''
   const verdict = verdictsCache.get(key)
-  const seed = [
+  const runContext = [
     failed
-      ? 'A training run FAILED and I want to diagnose and fix it.'
-      : 'I want to discuss this training run — what it did and how to improve it.',
-    `Run: ${shortKey(key)} · ${objectiveName()} trainer · pipeline v${escapeHtml(String(s.pipelineVersion || '1'))}.`,
+      ? `The user is investigating training run ${shortKey(key)}, which FAILED.`
+      : `The user is discussing training run ${shortKey(key)}.`,
+    `Pipeline v${String(s.pipelineVersion || '1')}.`,
     failed
       ? ''
       : `Objective (${objectiveName()}): ${formatObjective(s.objective)} · health: ${(s.health && s.health.status) || 'unknown'}.`,
@@ -3146,8 +3160,12 @@ async function chatAboutRun(key) {
   ]
     .filter(Boolean)
     .join('\n\n')
+  const systemPrompt = [projectChatPreamble(), runContext].filter(Boolean).join('\n\n')
+  const seed = failed
+    ? 'This run failed — help me diagnose the cause and propose a fix.'
+    : 'Help me understand what this run did and how to improve it.'
   try {
-    await window.OverseerBridge.discussTopic({ title: `Run ${shortKey(key)}`, seed })
+    await window.OverseerBridge.discussTopic({ title: `Run ${shortKey(key)}`, seed, systemPrompt })
   } catch {
     if (selectedRunKey === key)
       setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
