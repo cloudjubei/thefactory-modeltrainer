@@ -54,20 +54,18 @@ running other approaches in parallel** (never stop RL: an unpublished edge is pl
 counts only when it **beats buy-and-hold out-of-sample on risk-adjusted terms, net of 0.1% fees**
 (`sharpe_alpha > 0`, not just `traded_return`). Effort tags: **EASY / HARD / PROJECT-SPLIT**.
 
-**Wave 0 — the measuring stick (do first; blocks trust in every later result). MEDIUM.** The
-hardcoded 2020–23 / 2024 single split is the overfit trap that makes the +60% sweep results
-untrustworthy. Walk-forward / purged-CV evaluation + cost-honest reporting:
-- `walk_forward_preset` lever (none/monthly/quarterly/biannual) → rolling `(train,test)` windows +
-  embargo in `config_builder.py`; `build_data_config` takes a `window_id` instead of the hardcoded
-  `_TRAIN_PAIRS`/`_TEST_PAIRS`; window identity threaded through `run.py` `_run_one` into `env_test`.
-- `summary.py`: per-window Sharpe/Cagr/maxDD nested under a `windows` key + top-level `sharpe_alpha`
-  (strategy − hold Sharpe; benchmark prices already computed) + `realized_cost_bps`
-  (`(initial−final)/initial·1e4`; fee already in `net_worth`, no double-count).
-- `trainer.json` pipelineVersion → 3 (changelog: rolling-window runs are NOT comparable to the old
-  single split) + a "quarterly walk-forward (4 seeds)" preset. Embargo may defer to 3.1.
-- TDD the window/embargo date logic (`test_start > train_end + embargo`, gap-year edges); a hodl
-  baseline must reproduce matching per-window Sharpe. Model-trainer matrix needs no change (a
-  choice lever auto-expands the campaign); the RESULTS surface does — see §3a.
+**Wave 0 — the measuring stick. SHIPPED (needs a live Exp 6 run).** Design = ONE window = ONE run
+(parallelizes on the concurrency budget, reuses by-setup aggregation, each window independently
+resumable). Built: pure `trainer/walk_forward.py` resolver (windows `2022`/`2023`/`2024` = expanding
+train through the prior year; default `2024` reproduces the legacy 2020–23 / 2024 split EXACTLY);
+`config_builder` (`build_data_config` + `require_data_present`) resolves the selected window instead
+of the hardcoded `_TRAIN_PAIRS`/`_TEST_PAIRS`; `summary.py` adds `sharpe_alpha` (risk-adjusted excess
+over buy-and-hold on the same window) + stamps `walk_forward_window` into `dataset`; `trainer.json`
+gains the `walk_forward_window` lever + an "Exp 6 · walk-forward 2022·2023·2024 ×4 seeds" preset +
+pipelineVersion → 3 (non-breaking — window-2024 == v2). 16 TDD tests green (walk_forward 100% cov);
+all three windows are on disk now. REMAINS: (a) run Exp 6 live + read the cross-window distribution;
+(b) `realized_cost_bps` deferred to Wave 1 — doing it honestly needs env-side cumulative-fee tracking
+(fee-honesty already holds via the post-fee equity curve, so no band-aid shipped).
 
 **Wave 1 — cheap high-payoff RL wins (parallel, all swept under Wave 0).**
 - **Shorting — HARD (single-asset env tweak, NOT a split).** `allow_shorting` + `max_short_size` in
@@ -135,19 +133,16 @@ experiment says they help) continues to run continuously once a Wave-0-validated
 
 ### 3. Model-trainer app — surface the new results + a Papers/Library tab
 
-**(3a) Walk-forward / multi-window results surfacing — MEDIUM.** Today `TrainingRunSummary` carries
-one flat metric set and the viewer shows one number per run; walk-forward emits a DISTRIBUTION. Stay
-domain-oblivious (no trading vocabulary in core types — `windows`/`sharpe_alpha`/`realized_cost_bps`
-are opaque fields the viewer interprets):
-- Types: optional `windows: Array<{ name?: string; metrics: Record<string, number> }>` on
-  `TrainingRunSummary` + pass-through top-level scalars. Single-window runs unchanged (optional).
-- Viewer: synthetic aggregate columns (mean/min/max/std across windows) with a "W" badge; a
-  run-detail "Windows" sub-table + per-metric sparkline/whisker; compare overlays per-window curves;
-  a **banner + filter when single- and multi-window runs are mixed** ("scored under different eval
-  strategies — not directly comparable, even at the same pipelineVersion"); aggregate only
-  same-eval-strategy runs per setup. The user's UX bar: show ALL windows + flag the
-  not-comparable warning, newcomer-legible. (Subsumes the deferred regime-slice testing — windows
-  ARE named slices.)
+**(3a) Surface walk-forward results — MEDIUM.** With one-window-per-run (Wave 0, shipped), the
+by-setup view ALREADY separates windows (the window is part of the config signature), so an Exp 6
+campaign shows 3 setup rows — one per window — each with its seed stats: a usable first cut with zero
+app change. To finish: recognise `walk_forward_window` as an explicit GROUPING dimension (a
+"by-window" view that aggregates a config's OOS distribution across 2022/2023/2024 — mean/worst-window
+`sharpe_alpha`), surface the new `sharpe_alpha` metric column in Runs + run-detail, and flag/filter
+when windows are mixed so a 2022 run is never read against a 2024 run as one number. Stays
+domain-oblivious (`sharpe_alpha` + window are opaque fields the viewer interprets). The user's UX bar:
+show ALL windows + the not-comparable warning, newcomer-legible. (Subsumes the deferred regime-slice
+testing — windows ARE named slices.)
 
 **(3b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
 linking + clone-to-launch).** A roster of approach cards turning "try every positive paper, prove it
