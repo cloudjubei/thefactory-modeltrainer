@@ -202,6 +202,41 @@ describe('expandExperimentMatrix', () => {
     expect(items.map((i) => i.config.seed).filter((s) => s === 2)).toHaveLength(2)
   })
 
+  it('crosses each configuration with environment bundles (applied together, not cartesian)', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      {
+        sweep: { algo: ['a', 'b'] },
+        environments: [
+          { lr: 0.001, steps: 10 },
+          { lr: 0.002, steps: 20 },
+        ],
+      },
+      hashByJson,
+    )
+    // 2 algos × 2 environment bundles = 4 (NOT 2 algos × 2 lr × 2 steps = 8)
+    expect(items).toHaveLength(4)
+    const env0 = items.filter((i) => i.config.lr === 0.001)
+    expect(env0).toHaveLength(2)
+    // a bundle's keys apply TOGETHER: lr 0.001 always pairs with steps 10
+    expect(env0.every((i) => i.config.steps === 10)).toBe(true)
+  })
+
+  it('multiplies environment bundles by seeds', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      { environments: [{ lr: 0.001 }, { lr: 0.002 }], seeds: [0, 1] },
+      hashByJson,
+    )
+    expect(items).toHaveLength(4)
+  })
+
+  it('rejects an environment value that names no lever', () => {
+    expect(() =>
+      expandExperimentMatrix(manifest(), { environments: [{ ghost: 1 }] }, hashByJson),
+    ).toThrow(/ghost/)
+  })
+
   it('keys every item with the injected hash of its config', () => {
     const items = expandExperimentMatrix(manifest(), {}, hashByJson)
     expect(items[0].key).toBe(canonicalConfigString(items[0].config))

@@ -111,6 +111,14 @@ export function expandExperimentMatrix(
       throw new Error(`sweep "${key}" must be a non-empty array`)
     }
   }
+  const environments = spec.environments ?? []
+  for (const bundle of environments) {
+    for (const key of Object.keys(bundle)) {
+      if (!leverKeys.includes(key)) {
+        throw new Error(`environment value "${key}" names no manifest lever`)
+      }
+    }
+  }
 
   const base: Record<string, unknown> = {}
   for (const [key, lever] of Object.entries(manifest.levers)) {
@@ -121,6 +129,10 @@ export function expandExperimentMatrix(
   let configs: Record<string, unknown>[] = [base]
   for (const [key, values] of Object.entries(sweep)) {
     configs = configs.flatMap((config) => values.map((value) => ({ ...config, [key]: value })))
+  }
+  // Environment bundles apply TOGETHER (not cartesian): each crosses the whole model matrix.
+  if (environments.length > 0) {
+    configs = configs.flatMap((config) => environments.map((bundle) => ({ ...config, ...bundle })))
   }
   if (spec.seeds && spec.seeds.length > 0) {
     configs = configs.flatMap((config) => spec.seeds!.map((seed) => ({ ...config, seed })))

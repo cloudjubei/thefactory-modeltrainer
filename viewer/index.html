@@ -173,6 +173,36 @@
             </section>
           </section>
 
+          <!-- Environments (named market-mechanic bundles — fee / TP-SL — to run models against) -->
+          <section id="tab-environments" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="environments-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="environments-h">Environments</h2>
+                  <p class="card-sub">
+                    A named set of <em>environment</em> settings (fees, take-profit / stop-loss) —
+                    the market a model trades in, not the model itself. Run a model against several
+                    to see how it holds up across regimes.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="environment-add-toggle"
+                    class="icon-btn"
+                    title="Add environment"
+                    aria-label="Add environment"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <p id="environments-status" class="form-status" role="status" hidden></p>
+              <form id="environment-form" class="hypothesis-form" autocomplete="off" hidden></form>
+              <div id="environments-body" class="environments-body"></div>
+            </section>
+          </section>
+
           <!-- Hypotheses (LLM-proposed + human experiment backlog) -->
           <section id="tab-hypotheses" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="hypotheses-h">

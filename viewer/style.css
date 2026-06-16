@@ -968,6 +968,30 @@ button:focus-visible,
 .version-card .card-sub {
   margin: 0;
 }
+/* Environments tab + the launch picker. */
+.environments-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.environment-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.environment-card h3 {
+  margin: 0;
+}
+.environment-card .kv-table {
+  margin-top: 8px;
+}
+.env-picker .env-pick {
+  align-items: flex-start;
+}
+.env-picker .env-pick .card-sub {
+  margin-left: 6px;
+}
 .compare-version-warn {
   margin: 0 0 10px;
   font-size: 13px;

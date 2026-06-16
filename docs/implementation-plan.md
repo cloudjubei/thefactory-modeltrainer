@@ -91,28 +91,19 @@ against MULTIPLE named **regime slices** (long uptrend / long downtrend / choppy
 - Surface a per-regime matrix in run-detail + a compare overlay; flag setups that win on one regime
   but collapse on others. Keep it generic; BlackSwan is the first consumer.
 
-### Environments — separate environment settings from model settings (NEXT after concurrency)
+### Environments — SHIPPED (needs a backend restart for the planner change)
 
-Some manifest levers are **environment** settings, not model hyperparameters: they define the
-mechanics of the world the agent acts in, and changing one changes EVERYTHING — a model's result is
-only meaningful relative to its environment. For BlackSwan these are `transaction_fee` (the big one)
-and the exit mechanics `trailing_take_profit` / `take_profit` / `stop_loss` triggers. Today they're
-plain levers mixed in with model settings, which is misleading (e.g. sweeping `transaction_fee` looks
-like a model experiment when it's really a different market). Build an **Environments** concept:
-
-- **Manifest tagging.** Mark which settings are environment vs model — e.g. a per-lever
-  `scope: 'environment' | 'model'` flag (default `model`), or a manifest `environmentSettings: [...]`
-  list. Generic; BlackSwan tags fee + TP/SL/trailing as environment.
-- **Environments tab.** Define + tweak **named environments**, each a bundle of environment-setting
-  values (e.g. "Binance spot · 0.1% fee · TP 5% · SL 2% · trailing on"), persisted as records. The
-  Launch form's model levers stop showing env settings; you pick an environment (or sweep environments
-  as a separate axis). Runs are tagged with the environment they ran in.
-- **Compare across environments.** See how one model/setup fares across environments (the env analogue
-  of the regime testing above) — flag setups that only work under a forgiving fee/exit regime.
-- **Relationship to multi-dataset testing.** Environment = market mechanics; dataset/regime = the data.
-  Both are "what you test a model against" — ideally one **test matrix** surface (model × environment ×
-  dataset). Decided: viewer-only **activity-count** concurrency budget first (see Activity center), then
-  this. Keep it generic so any trainer project can declare environment settings.
+Environment levers (market mechanics — fees, TP/SL — distinct from model hyperparameters) are now a
+first-class concept: a lever spec tagged `scope: 'environment'` is managed as a named **environment** a
+model runs AGAINST, not a model knob. Shipped: `TrainerLeverSpec.scope` + `ExperimentSpec.environments`
+(a BUNDLE axis — `expandExperimentMatrix` crosses the model matrix with each env bundle, applied
+together, not cartesian; TDD); BlackSwan tags fee/TP/SL/trailing as environment; an **Environments tab**
+(CRUD named environments, persisted as `<recordType>-environment` records, with an implicit Default from
+manifest defaults); the **Launch form shows only model levers** + an environment multi-select (pick
+several → one campaign of configs × environments × seeds); a **By-environment** runs grouping + the
+environment shown in run detail (matched from a run's env-lever values). Follow-ups (deferred): a unified
+**test matrix** surface (model × environment × dataset, folding in the regime testing); presets/clone
+currently ignore env-lever values (env values come from the picker now).
 
 ### Activity concurrency — viewer-only budget (SHIPPED, needs live verify) + a server-side pass (deferred)
 
@@ -139,10 +130,13 @@ The rest still want a host-aware, browsable, concurrency-capped center (deferred
   are live — the durable resource guard the viewer-only budget doesn't provide.
 - **Server-side queue drain.** Chain the next queued activity on the backend when one settles, so
   follow-ups advance while the app/viewer is closed.
-- **Boot-time orphan reclaim (S3 secondary).** A real backend restart strands a `running` ActivityRun
-  (in-memory controller lost) until a client's observe loop auto-resumes it. A boot scan that
-  relaunches resumable runs (or marks them paused) is the durable fix — a focused `activityRunner.ts`
-  pass with tests.
+- **Stalled-run resume — SHIPPED (client-driven).** A backend restart leaves a `running` ActivityRun in
+  the store with no live controller; the viewer now surfaces each such stalled activity as a PAUSED
+  block with **Resume** (re-launches via `resumeActivity` → the trainer's completed-record skip re-runs
+  only the PENDING runs) and **Discard** (backend `abortActivity` now marks an orphaned `running` record
+  aborted even with no controller, TDD). DEFERRED: a server-side BOOT scan that auto-reclaims/relaunches
+  resumable runs with no client present (the durable version) — the client-driven path covers it while
+  the app is open.
 - **App-nav unseen-results badge.** HOST-DERIVED (count trainer activities `finishedAt` since the user
   last opened the app tab → Sidebar app-tab badge, web + mobile); the "app reports unseenCount" design
   is broken because the viewer unmounts when you leave.

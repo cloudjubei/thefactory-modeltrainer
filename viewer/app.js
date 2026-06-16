@@ -23,6 +23,7 @@ const ACTIVITY_BUDGET_SS = 'trainer.activityBudget'
 const DEFAULT_ACTIVITY_BUDGET = 3
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
+const ENVIRONMENT_RECORD_SUFFIX = '-environment'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
 const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
@@ -35,6 +36,7 @@ const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'hypotheses', label: 'Hypotheses' },
   { id: 'versions', label: 'Versions' },
+  { id: 'environments', label: 'Environments' },
   { id: 'launch', label: 'Launch' },
   { id: 'activity', label: 'Activity' },
 ]
@@ -106,6 +108,8 @@ let runsCompareKeys = new Set()
 let runsDeleteArmed = false
 let runsDeleteArmTimer = null
 let runsViewMode = 'runs'
+// Named environments (env-lever bundles) the user defined for this project.
+let environmentsCache = []
 // When drilled into a single setup's runs (via the by-setup view), this holds that
 // setup's key so the runs view can show its conclusion-note editor (C4 ledger).
 let runsDrillSetupKey = null
@@ -1280,6 +1284,9 @@ function resetDashboardState() {
   if (hypothesesBody) hypothesesBody.innerHTML = ''
   const versionsBody = byId('versions-body')
   if (versionsBody) versionsBody.innerHTML = ''
+  const environmentsBody = byId('environments-body')
+  if (environmentsBody) environmentsBody.innerHTML = ''
+  environmentsCache = []
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -1295,6 +1302,9 @@ async function openProject(projectKey) {
   closeRunnerPairing()
   resetDashboardState()
   applyManifestChrome()
+  // Load saved environments before the launch form so its environment picker is populated.
+  environmentsCache = hasEnvLevers() ? await readEnvironments() : []
+  if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
   showTab(savedTabId() || TABS[0].id)
@@ -1374,9 +1384,13 @@ async function readLiveActivityIds() {
     return new Set()
   }
 }
-// How many activity slots are in use (every tracked live/paused activity holds one).
+// How many compute slots are in use — only RUNNING/starting activities count (a paused or
+// stalled-waiting-to-resume entry isn't consuming compute, so it shouldn't block new launches).
 function liveSlotCount() {
-  return liveActivities.size
+  let n = 0
+  for (const a of liveActivities.values())
+    if (a.status === 'running' || a.status === 'starting') n++
+  return n
 }
 function anyActivityRunning() {
   for (const a of liveActivities.values())
@@ -1770,6 +1784,16 @@ function drillIntoExperiment(thesis) {
   if (!group) return
   runsFilterKeys = new Set(group.runs.map((r) => r.key))
   runsFilterLabel = thesis
+  runsDrillSetupKey = null
+  runsViewMode = 'runs'
+  renderRunsTable()
+}
+// Drill from a by-environment row into that environment's runs.
+function drillIntoEnvironment(sig) {
+  const group = aggregateByEnvironment(applyRunsFilters(runsCache)).find((g) => g.sig === sig)
+  if (!group) return
+  runsFilterKeys = new Set(group.runs.map((r) => r.key))
+  runsFilterLabel = group.name
   runsDrillSetupKey = null
   runsViewMode = 'runs'
   renderRunsTable()
@@ -2264,8 +2288,11 @@ function runsToolbarHtml(shownCount, total) {
     runsVersionFilter ||
     Object.values(runsLeverFilter).some(Boolean)
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
+  const envViewBtn = hasEnvLevers()
+    ? `<button type="button" class="runs-view-btn${runsViewMode === 'environment' ? ' is-active' : ''}" data-view="environment"${helpAttr('Group runs by the ENVIRONMENT they ran in (fee / TP-SL regime), so you can see how a model holds up across regimes.')}>By environment</button>`
+    : ''
   const toggle = `<div class="runs-viewmode">
-    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup"${helpAttr('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}>By setup</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>
+    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup"${helpAttr('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}>By setup</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>${envViewBtn}
   </div>`
   const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
     <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
@@ -2384,6 +2411,59 @@ function byExperimentTableHtml(filtered) {
     <thead><tr><th>Experiment / thesis</th><th>Target</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`
 }
+// Group runs by the ENVIRONMENT (fee / TP-SL regime) they ran in — so one model can be compared
+// across regimes. The environment is matched from each run's env-lever values to a named environment.
+function aggregateByEnvironment(runs) {
+  const groups = new Map()
+  for (const r of runs) {
+    const sig = runEnvSignature(r)
+    if (!groups.has(sig)) groups.set(sig, { name: runEnvName(r), sig, runs: [] })
+    groups.get(sig).runs.push(r)
+  }
+  const out = []
+  for (const g of groups.values()) {
+    const objs = g.runs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    out.push({
+      name: g.name,
+      sig: g.sig,
+      runs: g.runs,
+      count: g.runs.length,
+      setups: new Set(g.runs.map(setupKeyOfRun)).size,
+      objMin: objs.length ? Math.min(...objs) : NaN,
+      objMax: objs.length ? Math.max(...objs) : NaN,
+      objAvg: mean(objs),
+    })
+  }
+  return out
+}
+function byEnvironmentTableHtml(filtered) {
+  const dir = objectiveDirection()
+  const groups = aggregateByEnvironment(filtered).sort((a, b) => {
+    const fa = Number.isFinite(a.objMax)
+    const fb = Number.isFinite(b.objMax)
+    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
+    return fa ? -1 : fb ? 1 : 0
+  })
+  const on = escapeHtml(objectiveName())
+  const rows = groups
+    .map((g) => {
+      const range = Number.isFinite(g.objMin)
+        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
+        : '—'
+      return `<tr data-environment-sig="${escapeHtml(g.sig)}" class="setup-row">
+        <td>${escapeHtml(g.name)}</td>
+        <td class="card-sub">${escapeHtml(g.sig)}</td>
+        <td class="num">${g.count}</td>
+        <td class="num">${g.setups}</td>
+        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
+        <td class="num">${range}</td>
+      </tr>`
+    })
+    .join('')
+  return `<div class="table-wrap"><table class="runs-table">
+    <thead><tr><th>Environment</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`
+}
 // When drilled into a single setup, an editor for that setup's conclusion note —
 // the user half of the ledger (LLM verdict + score being the other halves).
 function setupNoteEditorHtml() {
@@ -2439,6 +2519,12 @@ function renderRunsTable() {
     }
     const legend = `<p class="runs-legend">Each row is an EXPERIMENT — the thesis set at launch. Click one to drill into its runs. Untagged runs group under "(untagged)".</p>`
     setHtml(body, `${toolbar}${byExperimentTableHtml(filtered)}${legend}`)
+    renderCompare()
+    return
+  }
+  if (runsViewMode === 'environment') {
+    const legend = `<p class="runs-legend">Each row is an ENVIRONMENT (fee / TP-SL regime) a run trained in. Click one to drill into its runs. "Custom" = env values matching no saved environment.</p>`
+    setHtml(body, `${toolbar}${byEnvironmentTableHtml(filtered)}${legend}`)
     renderCompare()
     return
   }
@@ -2949,6 +3035,9 @@ function renderRunDetail(key) {
   const versionBit = s.pipelineVersion
     ? ` · <span title="Pipeline version this run ran under — runs from different versions aren't comparable.">pipeline v${escapeHtml(String(s.pipelineVersion))}</span>`
     : ''
+  const envBit = hasEnvLevers()
+    ? ` · <span title="${escapeHtml(runEnvSignature(run))}">env ${escapeHtml(runEnvName(run))}</span>`
+    : ''
   const headline = failed
     ? '<span class="badge is-bad">failed</span>'
     : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
@@ -2957,7 +3046,7 @@ function renderRunDetail(key) {
       <div>
         <h2>Run <code>${escapeHtml(shortKey(run.key))}</code></h2>
         <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
-          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${unrunnableBadge}</p>
+          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${envBit}${unrunnableBadge}</p>
       </div>
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
@@ -3203,6 +3292,11 @@ function setupRuns() {
       const expRow = event.target.closest('tr[data-experiment-key]')
       if (expRow) {
         drillIntoExperiment(expRow.dataset.experimentKey)
+        return
+      }
+      const envRow = event.target.closest('tr[data-environment-sig]')
+      if (envRow) {
+        drillIntoEnvironment(envRow.dataset.environmentSig)
         return
       }
       const row = event.target.closest('tr[data-key]')
@@ -3702,6 +3796,150 @@ function setupVersions() {
     runsVersionFilter = btn.dataset.versionFilter
     showTab('runs')
   })
+}
+
+// --- Environments tab ------------------------------------------------------------
+function environmentCardHtml(env, editable) {
+  const rows = envLeverEntries()
+    .map(
+      ([k]) =>
+        `<tr><th>${escapeHtml(k)}</th><td class="num">${escapeHtml(env.settings[k] === undefined ? '—' : String(env.settings[k]))}</td></tr>`,
+    )
+    .join('')
+  const actions = editable
+    ? `<div class="head-actions">
+        <button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button>
+        <button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
+      </div>`
+    : `<div class="head-actions"><button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button></div>`
+  return `<div class="environment-card">
+    <div class="card-head card-head-row">
+      <h3>${escapeHtml(env.name)}${editable ? '' : ' <span class="card-sub">(manifest defaults)</span>'}</h3>
+      ${actions}
+    </div>
+    <table class="kv-table"><tbody>${rows}</tbody></table>
+  </div>`
+}
+async function renderEnvironments() {
+  const body = byId('environments-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to manage environments.</div>')
+    return
+  }
+  if (!hasEnvLevers()) {
+    setHtml(
+      body,
+      '<div class="empty-hint">This project declares no environment settings. Tag levers with <code>"scope": "environment"</code> in the manifest (e.g. fees, take-profit / stop-loss) to manage them as environments here.</div>',
+    )
+    return
+  }
+  environmentsCache = await readEnvironments()
+  setHtml(
+    body,
+    environmentCardHtml(defaultEnvironment(), false) +
+      environmentsCache.map((e) => environmentCardHtml(e, true)).join(''),
+  )
+}
+// The create/edit form: a name + a number field per environment lever.
+function environmentFormHtml(env) {
+  const isNew = !env || env.id === 'default'
+  const settings = (env && env.settings) || defaultEnvironment().settings
+  const fields = envLeverEntries()
+    .map(([k, spec]) => {
+      const { min, max } = leverRange(spec)
+      const minAttr = Number.isFinite(Number(min)) ? ` min="${Number(min)}"` : ''
+      const maxAttr = Number.isFinite(Number(max)) ? ` max="${Number(max)}"` : ''
+      const val = settings[k] === undefined ? '' : escapeHtml(String(settings[k]))
+      return `<label class="field"><span${helpAttr(spec.description || '')}>${escapeHtml(k)}</span>
+        <input type="number" step="any" name="env:${escapeHtml(k)}" value="${val}"${minAttr}${maxAttr} /></label>`
+    })
+    .join('')
+  return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : env.id)}" />
+    <label class="field"><span>Name</span>
+      <input type="text" name="name" value="${escapeHtml(isNew ? '' : env.name)}" placeholder="e.g. Low fee · tight SL" /></label>
+    <div class="lever-grid">${fields}</div>
+    <div class="form-actions">
+      <button type="submit">Save environment</button>
+      <button type="button" id="environment-cancel" class="ghost-btn">Cancel</button>
+    </div>`
+}
+function toggleEnvironmentForm(show, env) {
+  const form = byId('environment-form')
+  if (!form) return
+  setStatusLine('environments-status', '')
+  if (show) {
+    form.innerHTML = environmentFormHtml(env)
+    form.hidden = false
+  } else {
+    form.innerHTML = ''
+    form.hidden = true
+  }
+}
+async function onSaveEnvironment(form) {
+  const id = form.elements.id.value
+  const name = String(form.elements.name.value || '').trim()
+  if (!name) {
+    setStatusLine('environments-status', 'Give the environment a name.', true)
+    return
+  }
+  const settings = {}
+  for (const [k] of envLeverEntries()) {
+    const el = form.querySelector(`input[name="env:${k}"]`)
+    if (el && el.value !== '') settings[k] = Number(el.value)
+  }
+  try {
+    await putEnvironment({ id, name, settings })
+  } catch {
+    setStatusLine('environments-status', 'Could not save — please try again.', true)
+    return
+  }
+  toggleEnvironmentForm(false)
+  await renderEnvironments()
+  renderLaunchForm()
+}
+async function onDeleteEnvironment(id) {
+  try {
+    await deleteEnvironmentRecord(id)
+  } catch {
+    setStatusLine('environments-status', 'Could not delete — please try again.', true)
+    return
+  }
+  environmentsCache = environmentsCache.filter((e) => e.id !== id)
+  await renderEnvironments()
+  renderLaunchForm()
+}
+function setupEnvironments() {
+  const addToggle = byId('environment-add-toggle')
+  if (addToggle) addToggle.addEventListener('click', () => toggleEnvironmentForm(true))
+  const form = byId('environment-form')
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      onSaveEnvironment(form)
+    })
+    form.addEventListener('click', (event) => {
+      if (event.target.closest('#environment-cancel')) toggleEnvironmentForm(false)
+    })
+  }
+  const body = byId('environments-body')
+  if (body) {
+    body.addEventListener('click', (event) => {
+      const edit = event.target.closest('button[data-env-edit]')
+      if (edit) {
+        const env = environmentsCache.find((x) => x.id === edit.dataset.envEdit)
+        if (env) toggleEnvironmentForm(true, env)
+        return
+      }
+      const clone = event.target.closest('button[data-env-clone]')
+      if (clone) {
+        toggleEnvironmentForm(true)
+        return
+      }
+      const del = event.target.closest('button[data-env-delete]')
+      if (del) onDeleteEnvironment(del.dataset.envDelete)
+    })
+  }
 }
 
 // --- Hypotheses tab --------------------------------------------------------------
@@ -4227,6 +4465,69 @@ function setupHypotheses() {
 function leverEntries() {
   return Object.entries((manifest && manifest.levers) || {})
 }
+// A lever configures the ENVIRONMENT (market mechanics — fees, TP/SL) rather than the MODEL when its
+// manifest spec sets scope:'environment'. Environment levers are managed as named environments a model
+// runs AGAINST, so they're split out of the model launch form.
+function isEnvLever(spec) {
+  return !!spec && spec.scope === 'environment'
+}
+function modelLeverEntries() {
+  return leverEntries().filter(([, spec]) => !isEnvLever(spec))
+}
+function envLeverEntries() {
+  return leverEntries().filter(([, spec]) => isEnvLever(spec))
+}
+function hasEnvLevers() {
+  return envLeverEntries().length > 0
+}
+// The implicit "Default" environment from the manifest's env-lever defaults — always available,
+// never stored unless the user edits it into a named environment.
+function defaultEnvironment() {
+  const settings = {}
+  for (const [key, spec] of envLeverEntries())
+    if (spec.default !== undefined) settings[key] = spec.default
+  return { id: 'default', name: 'Default', settings }
+}
+// Default first, then the user's saved environments (the launch picker + Environments tab order).
+function allEnvironments() {
+  return [defaultEnvironment(), ...environmentsCache]
+}
+async function readEnvironments() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + ENVIRONMENT_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id && c.id !== 'default')
+}
+async function putEnvironment(env) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + ENVIRONMENT_RECORD_SUFFIX,
+    key: env.id,
+    content: { ...env, updatedAt: nowIso() },
+  })
+}
+async function deleteEnvironmentRecord(id) {
+  await window.OverseerBridge.deleteData({
+    type: manifest.recordType + ENVIRONMENT_RECORD_SUFFIX,
+    key: id,
+  })
+}
+// Canonical signature of a run's environment (its env-lever values), for grouping + naming.
+function runEnvSignature(run) {
+  const cfg = (run && run.summary && run.summary.config) || {}
+  return envLeverEntries()
+    .map(([key]) => `${key}=${cfg[key] === undefined ? '' : String(cfg[key])}`)
+    .join(' · ')
+}
+function envSettingsSignature(settings) {
+  return envLeverEntries()
+    .map(([key]) => `${key}=${settings[key] === undefined ? '' : String(settings[key])}`)
+    .join(' · ')
+}
+// The named environment a run matches (by env-value signature), else 'Custom'.
+function runEnvName(run) {
+  const sig = runEnvSignature(run)
+  const match = allEnvironments().find((e) => envSettingsSignature(e.settings) === sig)
+  return match ? match.name : 'Custom'
+}
 function leverRange(spec) {
   const r = spec.range
   if (Array.isArray(r) && r.length >= 2) return { min: r[0], max: r[1] }
@@ -4502,15 +4803,40 @@ async function refreshLaunchRunners() {
   launchRunnersCache = runners
   setHtml(field, computeTargetFieldHtml(runners, savedComputeTarget()))
 }
+// Which ENVIRONMENTS to run the model against (checkboxes; Default pre-checked). Picking several
+// tests the same model across regimes in one campaign. Hidden when the manifest has no env levers.
+function environmentPickerHtml() {
+  if (!hasEnvLevers()) return ''
+  const rows = allEnvironments()
+    .map((e) => {
+      const summary = envLeverEntries()
+        .map(([k]) => `${k} ${e.settings[k] === undefined ? '—' : e.settings[k]}`)
+        .join(' · ')
+      return `<label class="check-row env-pick">
+        <input type="checkbox" name="env" value="${escapeHtml(e.id)}"${e.id === 'default' ? ' checked' : ''} />
+        <span><strong>${escapeHtml(e.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
+      </label>`
+    })
+    .join('')
+  return `<fieldset class="lever env-picker">
+    <legend${helpAttr('Which ENVIRONMENTS (fee / TP-SL regimes) to run this model against. Pick several to test one model across regimes in a single campaign — runs = configs × environments × seeds. Define + tweak them in the Environments tab.')}>Run against environments</legend>
+    ${rows}
+  </fieldset>`
+}
+function selectedEnvironments(form) {
+  const ids = new Set([...form.querySelectorAll('input[name="env"]:checked')].map((el) => el.value))
+  return allEnvironments().filter((e) => ids.has(e.id))
+}
 function renderLaunchForm() {
   const form = byId('launch-form')
   if (!form) return
-  const levers = leverEntries()
+  const levers = modelLeverEntries()
     .map(([key, spec]) => leverFieldsetHtml(key, spec))
     .join('')
   form.innerHTML = `
     ${presetsSelectHtml()}
-    ${levers || '<p class="card-sub">This manifest declares no levers — the campaign runs the default config.</p>'}
+    ${environmentPickerHtml()}
+    ${levers || '<p class="card-sub">This manifest declares no model levers — the campaign runs the default config.</p>'}
     <fieldset class="lever">
       <legend>Campaign</legend>
       <div class="lever-grid">
@@ -4518,7 +4844,7 @@ function renderLaunchForm() {
           <input type="text" name="thesis" placeholder="what are you testing? (optional)" />
         </label>
         <label class="field"><span${helpAttr('Optional: the lever this thesis varies, so the by-experiment view can highlight it. Leave blank for theses outside the levers (e.g. a new data prep or code change).')}>Testing which setting?</span>
-          <select name="thesisTarget"><option value="">—</option>${leverEntries()
+          <select name="thesisTarget"><option value="">—</option>${modelLeverEntries()
             .map(([k]) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`)
             .join('')}</select>
         </label>
@@ -4686,13 +5012,19 @@ function readSeedCount(form) {
 function buildSpecFromForm(form) {
   const sweep = {}
   const fixed = {}
-  for (const [key, spec] of leverEntries()) {
+  // Only MODEL levers — environment levers come from the selected environments, not the form.
+  for (const [key, spec] of modelLeverEntries()) {
     const values = readSweepValues(form, key, spec)
     if (values.length) sweep[key] = values
     else fixed[key] = readFixedValue(form, key, spec)
   }
   const seedCount = readSeedCount(form)
-  return { sweep, fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
+  const out = { sweep, fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
+  if (hasEnvLevers()) {
+    const envs = selectedEnvironments(form)
+    if (envs.length) out.environments = envs.map((e) => e.settings)
+  }
+  return out
 }
 function updateLaunchSummary() {
   const form = byId('launch-form')
@@ -4700,17 +5032,23 @@ function updateLaunchSummary() {
   if (!form || !line) return
   const spec = buildSpecFromForm(form)
   const configs = Object.values(spec.sweep).reduce((acc, values) => acc * values.length, 1)
+  const envs = Array.isArray(spec.environments) ? spec.environments.length : 1
   const seeds = spec.seeds.length
-  const total = configs * seeds
+  const total = configs * envs * seeds
+  const envBit = Array.isArray(spec.environments)
+    ? ` × ${envs} environment${envs === 1 ? '' : 's'}`
+    : ''
   const target = remoteComputeTarget(savedComputeTarget())
-  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
+  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'}${envBit} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
 }
 function campaignLabel(spec) {
   const sweeps = Object.entries(spec.sweep || {}).map(
     ([key, values]) => `${key} × ${values.length}`,
   )
+  const envs = Array.isArray(spec.environments) ? spec.environments.length : 0
   const seeds = Array.isArray(spec.seeds) ? spec.seeds.length : 1
-  return `Campaign: ${sweeps.length ? `${sweeps.join(', ')}, ` : ''}seeds ${seeds}`
+  const envBit = envs > 1 ? `${envs} envs, ` : ''
+  return `Campaign: ${sweeps.length ? `${sweeps.join(', ')}, ` : ''}${envBit}seeds ${seeds}`
 }
 async function onLaunchSubmit(event) {
   event.preventDefault()
@@ -4833,16 +5171,37 @@ async function resumeRunningActivity() {
     activities = []
   }
   if (epoch !== projectEpoch || !manifest) return
-  const live = activities.filter(
-    (a) => a.recordType === manifest.recordType && a.status === 'running' && a.isLive !== false,
-  )
+  const mine = activities.filter((a) => a.recordType === manifest.recordType)
+  const tracked = (id) => [...liveActivities.values()].some((e) => e.activityId === id)
+  const live = mine.filter((a) => a.status === 'running' && a.isLive !== false)
   for (const a of live) {
     if (liveSlotCount() >= savedActivityBudget()) break
-    if ([...liveActivities.values()].some((e) => e.activityId === a.activityId)) continue
+    if (tracked(a.activityId)) continue
     const type = quickActivityType(a) || 'train'
     trackExistingActivity(a.activityId, type, activityTypeLabel(type))
   }
-  if (!anyActivityRunning()) {
+  // STALLED: 'running' in the store but NOT live in the backend (it restarted mid-run). Surface
+  // each as PAUSED + Resume — resuming re-launches it and the trainer's completed-record skip
+  // re-runs only the PENDING runs (a 4-run campaign with 2 done resumes just the other 2).
+  for (const a of mine) {
+    if (a.status !== 'running' || a.isLive !== false) continue
+    if (!a.resumeToken || !a.resumeToken.activityType) continue
+    if (tracked(a.activityId)) continue
+    const type = a.resumeToken.activityType || 'train'
+    const localId = 'stalled:' + a.activityId
+    liveActivities.set(localId, {
+      localId,
+      activityId: a.activityId,
+      activityType: type,
+      label: activityTypeLabel(type),
+      status: 'paused',
+      progress: null,
+      campaign: null,
+      startedAt: Date.parse(a.updatedAt || a.createdAt || '') || Date.now(),
+      item: { activityType: type, label: activityTypeLabel(type) },
+    })
+  }
+  if (!liveActivities.size) {
     const campaign = await readCampaign()
     const progress = await readProgress()
     if (epoch !== projectEpoch) return
@@ -4982,6 +5341,19 @@ async function abortActivityById(activityId) {
     await window.OverseerBridge.abortActivity(activityId)
   } catch {
     if (btn) btn.disabled = false
+  }
+  // A stalled (paused, not-observed) entry has no observe loop to settle it — drop it here so the
+  // discarded campaign disappears. A live (running) entry is left for its observe loop to settle.
+  let droppedPaused = false
+  for (const [k, e] of liveActivities) {
+    if (e.activityId === activityId && e.status === 'paused') {
+      liveActivities.delete(k)
+      droppedPaused = true
+    }
+  }
+  if (droppedPaused) {
+    renderActivity()
+    pumpQueue()
   }
 }
 // Resume ONE paused activity by id — re-fire its observe loop.
@@ -5201,8 +5573,12 @@ function activityBlockHtml(entry) {
     running && entry.activityId
       ? `<div class="form-actions"><button type="button" class="danger-btn" data-abort="${escapeHtml(entry.activityId)}">Abort</button></div>`
       : status === 'paused' && entry.activityId
-        ? `<div class="form-actions"><button type="button" data-resume="${escapeHtml(entry.activityId)}">Resume</button></div>`
+        ? `<div class="form-actions"><button type="button" data-resume="${escapeHtml(entry.activityId)}">Resume</button><button type="button" class="ghost-btn" data-abort="${escapeHtml(entry.activityId)}">Discard</button></div>`
         : ''
+  const stalledNote =
+    status === 'paused' && isTrain
+      ? '<p class="card-sub">Stalled (the backend restarted while it ran). Resume re-runs only the unfinished runs — completed ones are kept.</p>'
+      : ''
   return `<div class="activity-block">
     <div class="activity-status-row">
       <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
@@ -5210,6 +5586,7 @@ function activityBlockHtml(entry) {
       ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
       ${entry.activityId ? `<code class="activity-id">${escapeHtml(shortKey(entry.activityId))}</code>` : ''}
     </div>
+    ${stalledNote}
     ${isTrain && p ? activityProgressHtml(p, running) : ''}
     ${inFlightHtml(inFlight)}
     ${isTrain ? activityCountsHtml(p) : ''}
@@ -5317,6 +5694,7 @@ function showTab(id) {
   renderTabLiveIndicator()
   if (target === 'runs') renderRuns()
   if (target === 'versions') renderVersions()
+  if (target === 'environments') renderEnvironments()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
@@ -5393,6 +5771,7 @@ async function init() {
   setupRunners()
   setupRuns()
   setupVersions()
+  setupEnvironments()
   setupHypotheses()
   setupLaunch()
   setupActivity()

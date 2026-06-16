@@ -25,6 +25,12 @@ export interface TrainerLeverSpec {
   choices?: unknown[]
   /** Plain-language explanation shown as a help tooltip in the launch form (for newcomers). */
   description?: string
+  /**
+   * Whether this lever configures the MODEL (default) or the ENVIRONMENT the agent acts in (market
+   * mechanics — e.g. fees, take-profit/stop-loss). Environment levers are managed as named
+   * "environments" the hub runs models against, not as ordinary model knobs. Omitted ⇒ `model`.
+   */
+  scope?: 'model' | 'environment'
 }
 
 /** The single north-star metric a run is judged by. */
@@ -134,6 +140,12 @@ export interface ExperimentSpec {
   sweep?: Record<string, unknown[]>
   /** Per-lever pinned values overriding defaults. */
   fixed?: Record<string, unknown>
+  /**
+   * Environment BUNDLES to run every configuration against — each is a set of (environment) lever
+   * values applied together (NOT a cartesian product, unlike `sweep`). Used to test one model
+   * across several named environments (e.g. different fee / TP-SL regimes) in a single campaign.
+   */
+  environments?: Array<Record<string, unknown>>
   /** Seeds to repeat every configuration with (sets `config.seed`); omit to run each config once. */
   seeds?: number[]
   /** Safety cap overriding the default maximum planned items. */
