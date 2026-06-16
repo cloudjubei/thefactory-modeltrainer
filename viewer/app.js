@@ -19,6 +19,8 @@ const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const CONCURRENCY_SS = 'trainer.concurrency'
+const ACTIVITY_BUDGET_SS = 'trainer.activityBudget'
+const DEFAULT_ACTIVITY_BUDGET = 3
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
@@ -75,19 +77,21 @@ let judgementSummary = null
 let hypothesesCache = []
 let proposalSummary = null
 let selectedRunKey = null
-let currentActivityId = null
-let observing = false
-let observeSession = 0
-let lastActivityStatus = null
-let lastProgress = null
-let lastCampaign = null
+// Activities run CONCURRENTLY up to a budget. Each live activity (campaign / judge /
+// propose / evaluate) is tracked here by id with its own observed state; the Activity tab
+// renders one block per entry. Shape: { activityId, activityType, label, status, progress,
+// campaign, startedAt, session, item }.
+let liveActivities = new Map()
+let activitySession = 0
+// The most-recently-settled campaign, kept only so the Activity tab can show its result
+// summary when nothing is live (its runs are in the Runs tab regardless).
+let lastSettledCampaign = null
 let judging = false
 let proposing = false
 let queueCache = []
-// In-memory double-dispatch guard for the persisted queue: only one pump loop
-// drains the queue at a time, and `activeQueueItem` is the entry being run.
+// In-memory double-dispatch guard for the persisted queue: only one pump loop drains it
+// at a time (it dispatches up to the budget, then returns).
 let queuePumping = false
-let activeQueueItem = null
 let runsFilterKeys = null
 let runsFilterLabel = ''
 let runsSortKey = null
@@ -463,7 +467,7 @@ async function readDismissedFailures() {
 async function dismissFailure(key) {
   if (!manifest || !key) return
   dismissedFailures.add(key)
-  if (lastActivityStatus) renderActivity()
+  renderActivity()
   await window.OverseerBridge.putData({
     type: manifest.recordType + '-dismissed-failure',
     key,
@@ -1247,10 +1251,8 @@ function resetDashboardState() {
   hypothesesCache = []
   proposalSummary = null
   selectedRunKey = null
-  currentActivityId = null
-  lastActivityStatus = null
-  lastProgress = null
-  lastCampaign = null
+  liveActivities = new Map()
+  lastSettledCampaign = null
   judging = false
   proposing = false
   queueCache = []
@@ -1298,8 +1300,6 @@ async function openProject(projectKey) {
   showTab(savedTabId() || TABS[0].id)
   await renderRuns()
   await resumeRunningActivity()
-  if (epoch !== projectEpoch) return
-  await resumeRunningQuickActivity()
   if (epoch !== projectEpoch) return
   await refreshQueue()
   await processSettledCampaignEffects()
@@ -1359,22 +1359,9 @@ function trainerComputeParams(extra) {
 }
 
 // --- Activity queue (persisted, project-scoped) -------------------------------
-// Every trainer activity goes through startOrEnqueue: while another activity for
-// this project is live the request lands in the 'trainer-queue' records instead,
-// and pumpQueue drains the queue head-first whenever the live one settles.
-async function findLiveTrainerActivity() {
-  if (!manifest) return null
-  try {
-    const res = await window.OverseerBridge.listActivities()
-    return (
-      ((res && res.activities) || []).find(
-        (a) => a.recordType === manifest.recordType && a.status === 'running' && a.isLive !== false,
-      ) || null
-    )
-  } catch {
-    return null
-  }
-}
+// Trainer activities run CONCURRENTLY up to a budget: startOrEnqueue starts one if a slot is
+// free, else parks it in the 'trainer-queue' records, and pumpQueue dispatches queued items
+// as slots free up. Each activity observes itself; the Activity tab renders one block each.
 async function readLiveActivityIds() {
   try {
     const res = await window.OverseerBridge.listActivities()
@@ -1387,18 +1374,18 @@ async function readLiveActivityIds() {
     return new Set()
   }
 }
-function trainerBusyLocally() {
-  return queuePumping || !!activeQueueItem || (observing && lastActivityStatus === 'running')
+// How many activity slots are in use (every tracked live/paused activity holds one).
+function liveSlotCount() {
+  return liveActivities.size
 }
+function anyActivityRunning() {
+  for (const a of liveActivities.values())
+    if (a.status === 'running' || a.status === 'starting') return true
+  return false
+}
+// Start now if a slot is free (up to the activity budget), else enqueue. The caller only
+// handles the queued message + its own status line — launchActivity owns dispatch + observe.
 async function startOrEnqueue(activityType, params, label, extra) {
-  const live = await findLiveTrainerActivity()
-  if (!live && !trainerBusyLocally()) {
-    const started = await window.OverseerBridge.startActivity(activityType, params)
-    const activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
-    return { started: true, activityId }
-  }
-  const queue = await readQueue()
   const item = {
     id: randomHexId(),
     activityType,
@@ -1407,9 +1394,14 @@ async function startOrEnqueue(activityType, params, label, extra) {
     queuedAt: nowIso(),
     ...(extra || {}),
   }
+  if (liveSlotCount() < savedActivityBudget()) {
+    const activityId = await launchActivity(item)
+    if (activityId) return { started: true, activityId }
+  }
   await putQueueItem(item)
   await refreshQueue()
-  return { queued: true, id: item.id, ahead: queue.length + 1 }
+  const queue = await readQueue()
+  return { queued: true, id: item.id, ahead: queue.length }
 }
 async function refreshQueue() {
   queueCache = await readQueue()
@@ -1424,73 +1416,96 @@ async function onQueueRemove(id) {
   }
   await refreshQueue()
 }
-// Drain the queue: while nothing for this project is live, pop the head record,
-// start its stored activity and observe it to settlement before the next pop.
-// Double-dispatch is guarded by the in-memory queuePumping flag; navigation is
-// guarded by projectEpoch.
+// Drain the queue until the activity budget is full. Each dispatched activity observes
+// itself (non-blocking) and re-pumps when it settles, freeing its slot for the next item.
 async function pumpQueue() {
   if (queuePumping || !embedded() || !manifest) return
   const epoch = projectEpoch
   queuePumping = true
   try {
-    while (epoch === projectEpoch) {
-      if (lastActivityStatus === 'paused') return
-      if (await findLiveTrainerActivity()) return
+    while (epoch === projectEpoch && liveSlotCount() < savedActivityBudget()) {
       const queue = await readQueue()
-      if (epoch !== projectEpoch || !queue.length) return
+      if (epoch !== projectEpoch || !queue.length) break
       const head = queue[0]
       await deleteQueueItem(head.id)
       queueCache = queueCache.filter((q) => q.id !== head.id)
-      const settled = await dispatchQueueItem(head, epoch)
-      if (!settled) return
+      const activityId = await launchActivity(head)
+      if (!activityId) {
+        // Transient backend failure — put it back and stop draining so we don't lose the
+        // whole queue; a later pump (settle / focus) retries.
+        await putQueueItem(head)
+        queueCache = await readQueue()
+        break
+      }
     }
   } finally {
     queuePumping = false
-    activeQueueItem = null
   }
 }
-// Start one dequeued item and observe it until it settles. Returns true when
-// the pump should continue with the next item.
-async function dispatchQueueItem(item, epoch) {
-  activeQueueItem = item
+// Start one activity and observe it CONCURRENTLY. The entry is registered immediately (so
+// the budget + Activity tab reflect it before the backend confirms), then its own observe
+// loop runs and untracks + re-pumps on settle.
+async function launchActivity(item) {
+  const localId = item.id || randomHexId()
+  const entry = {
+    localId,
+    activityId: null,
+    activityType: item.activityType,
+    label: item.label || item.activityType,
+    status: 'starting',
+    progress: null,
+    campaign: null,
+    startedAt: Date.now(),
+    item,
+  }
+  liveActivities.set(localId, entry)
   renderActivity()
-  let activityId = null
   try {
     const started = await window.OverseerBridge.startActivity(item.activityType, item.params)
-    activityId = started && started.activityId
-    if (!activityId) throw new Error('no activity id')
+    entry.activityId = started && started.activityId
+    if (!entry.activityId) throw new Error('no activity id')
   } catch {
-    activeQueueItem = null
-    if (epoch === projectEpoch) renderActivity()
-    return true
-  }
-  if (item.autoEval) await putAutoEvalMarker(activityId, item.params)
-  if (item.hypothesisId && item.params && item.params.recordType) {
-    await stampHypothesisCampaign(item.params.recordType, item.hypothesisId, {
-      activityId,
-      launchedAt: nowIso(),
-      status: 'running',
-    })
-  }
-  if (item.activityType === 'train') {
-    activeQueueItem = null
-    if (epoch !== projectEpoch) return false
-    currentActivityId = activityId
-    lastProgress = null
-    lastCampaign = null
-    lastActivityStatus = 'running'
+    liveActivities.delete(localId)
     renderActivity()
-    const status = await observeActivityUntilDone(activityId)
-    return status === 'completed' || status === 'failed' || status === 'aborted'
+    return null
   }
-  applyQuickDispatchState(item, true)
-  const act = await observeQuickActivity(activityId)
-  applyQuickDispatchState(item, false)
-  activeQueueItem = null
-  if (epoch !== projectEpoch) return false
+  entry.status = 'running'
+  // Best-effort bookkeeping: a marker/stamp write failure must NOT strand the entry (slot
+  // leak → stalled queue) or skip the observe wiring (a live campaign that never settles).
+  try {
+    if (item.autoEval) await putAutoEvalMarker(entry.activityId, item.params)
+    if (item.hypothesisId && item.params && item.params.recordType) {
+      await stampHypothesisCampaign(item.params.recordType, item.hypothesisId, {
+        activityId: entry.activityId,
+        launchedAt: nowIso(),
+        status: 'running',
+      })
+    }
+  } catch {
+    // ignore — the campaign is running; the marker/stamp are non-critical
+  }
   renderActivity()
-  await refreshAfterQuickDispatch(item, act)
-  return !!act
+  void observeActivity(entry)
+  return entry.activityId
+}
+// Re-attach an observe loop to an ALREADY-RUNNING backend activity (on reload / resume) by
+// registering a tracking entry for it and observing — without starting anything new.
+function trackExistingActivity(activityId, activityType, label) {
+  for (const a of liveActivities.values()) if (a.activityId === activityId) return a
+  const entry = {
+    localId: randomHexId(),
+    activityId,
+    activityType,
+    label: label || activityType,
+    status: 'running',
+    progress: null,
+    campaign: null,
+    startedAt: Date.now(),
+    item: { activityType, label },
+  }
+  liveActivities.set(entry.localId, entry)
+  void observeActivity(entry)
+  return entry
 }
 // An evaluate item carries either a batch of `runKeys` (parallel) or a single
 // legacy `runKey`; both collapse to the list of keys it evaluates.
@@ -1553,26 +1568,31 @@ async function processAutoEvalMarkers() {
   for (const marker of markers) {
     if (campaign && campaign.activityId === marker.activityId) {
       if (!campaign.finishedAt) continue
-      if (!campaign.aborted) await enqueueMissingEvaluations(campaign, marker.params)
+      if (!campaign.aborted) await enqueueMissingEvaluations(campaign.keys, marker.params)
       await deleteQueueItem(marker.id)
       continue
     }
     const act = await getActivity(marker.activityId)
     if (act && (act.status === 'running' || act.status === 'paused')) continue
+    // Settled, but a concurrent campaign overwrote the single 'latest' campaign record, so we
+    // can't read this one's keys — fall back to evaluating every completed run missing an eval.
+    if (act && act.status === 'completed') await enqueueMissingEvaluations(null, marker.params)
     await deleteQueueItem(marker.id)
   }
   await refreshQueue()
 }
-async function enqueueMissingEvaluations(campaign, baseParams) {
+// Queue an evaluate for each completed run still missing one. `keys` scopes it to a
+// campaign's runs; when null (its campaign record was overwritten by a concurrent campaign)
+// it falls back to ALL completed runs missing an eval, so auto-eval is never silently lost.
+async function enqueueMissingEvaluations(keys, baseParams) {
   if (!evalEnabled()) return
-  const keys = Array.isArray(campaign.keys) ? campaign.keys : []
-  if (!keys.length) return
   const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
+  const scope = Array.isArray(keys) && keys.length ? keys : runs.map((r) => r.key)
   const queuedKeys = new Set(
     queue.filter((q) => q.activityType === 'evaluate').flatMap(evaluateKeysOf),
   )
   const pending = []
-  for (const key of keys) {
+  for (const key of scope) {
     const run = runs.find((r) => r.key === key)
     if (!run) continue
     const s = run.summary
@@ -1714,9 +1734,16 @@ function bestObjectiveOf(runs) {
 function renderRunsLive() {
   const el = byId('runs-live')
   if (!el) return
-  const live = lastActivityStatus === 'running'
-  setHtml(el, live ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : '')
-  el.hidden = !live
+  let training = false
+  for (const a of liveActivities.values()) {
+    if (a.activityType === 'train' && (a.status === 'running' || a.status === 'starting'))
+      training = true
+  }
+  setHtml(
+    el,
+    training ? `<span class="run-badge is-running">${spinnerHtml()} training…</span>` : '',
+  )
+  el.hidden = !training
 }
 function clearRunsFilter() {
   runsFilterKeys = null
@@ -3098,27 +3125,15 @@ async function onJudgeClick() {
   const epoch = projectEpoch
   setStatusLine('judge-status', '')
   try {
+    // launchActivity (inside startOrEnqueue) observes the judge: lights the button spinner,
+    // refreshes verdicts on settle, and re-pumps the queue. The caller only shows queued.
     const result = await startOrEnqueue('judge', trainerActivityParams({ runKeys }), 'Judge runs')
-    if (result.queued) {
-      if (epoch === projectEpoch) setStatusLine('judge-status', queuedStatusText(result.ahead))
-      return
-    }
-    judging = true
-    renderJudgeControls()
-    const act = await observeQuickActivity(result.activityId)
-    if (epoch === projectEpoch) {
-      setStatusLine('judge-status', quickActivityFailureText(act, 'Judging'), true)
+    if (result.queued && epoch === projectEpoch) {
+      setStatusLine('judge-status', queuedStatusText(result.ahead))
     }
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('judge-status', 'Could not start judging — please try again.', true)
-    }
-  } finally {
-    if (judging) {
-      judging = false
-      renderJudgeControls()
-      if (epoch === projectEpoch) await renderRuns()
-      pumpQueue()
     }
   }
 }
@@ -3133,35 +3148,20 @@ async function onEvaluateRun(key) {
     return
   }
   const epoch = projectEpoch
-  let started = false
-  let failure = ''
   try {
+    // launchActivity observes the evaluate: lights the per-run spinner (evaluatingKeys) and
+    // refreshes the Runs table on settle. The caller only shows the queued message.
     const result = await startOrEnqueue(
       'evaluate',
       trainerComputeParams({ runKeys: [key] }),
       `Evaluate ${shortKey(key)}`,
     )
-    if (result.queued) {
-      if (epoch === projectEpoch && selectedRunKey === key) {
-        setStatusLine('run-eval-status', queuedStatusText(result.ahead))
-      }
-      return
+    if (result.queued && epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-eval-status', queuedStatusText(result.ahead))
     }
-    started = true
-    evaluatingKeys.add(key)
-    if (selectedRunKey === key) renderRunDetail(key)
-    const act = await observeQuickActivity(result.activityId)
-    failure = quickActivityFailureText(act, 'Evaluating')
   } catch {
-    failure = 'Could not start evaluating — please try again.'
-  } finally {
-    if (started || failure) {
-      evaluatingKeys.delete(key)
-      if (epoch === projectEpoch) {
-        await renderRuns()
-        if (failure && selectedRunKey === key) setStatusLine('run-eval-status', failure, true)
-      }
-      if (started) pumpQueue()
+    if (epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-eval-status', 'Could not start evaluating — please try again.', true)
     }
   }
 }
@@ -3852,29 +3852,15 @@ async function onProposeClick() {
   const epoch = projectEpoch
   setStatusLine('hypotheses-status', '')
   try {
+    // launchActivity observes the propose: lights the button spinner, refreshes hypotheses on
+    // settle, and re-pumps the queue. The caller only shows the queued message.
     const result = await startOrEnqueue('propose', trainerActivityParams(), 'Propose experiments')
-    if (result.queued) {
-      if (epoch === projectEpoch) {
-        setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
-      }
-      return
-    }
-    proposing = true
-    renderProposeControls()
-    const act = await observeQuickActivity(result.activityId)
-    if (epoch === projectEpoch) {
-      setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
+    if (result.queued && epoch === projectEpoch) {
+      setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
     }
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('hypotheses-status', 'Could not start proposing — please try again.', true)
-    }
-  } finally {
-    if (proposing) {
-      proposing = false
-      renderProposeControls()
-      if (epoch === projectEpoch) await renderHypotheses()
-      pumpQueue()
     }
   }
 }
@@ -4070,18 +4056,9 @@ async function runHypothesisCampaign(id, button) {
       await renderHypotheses()
       return
     }
-    await stampHypothesisCampaign(recordType, h.id, {
-      activityId: result.activityId,
-      launchedAt: nowIso(),
-      status: 'running',
-    })
+    // launchActivity already stamped the hypothesis + is observing the campaign.
     if (epoch !== projectEpoch) return
-    currentActivityId = result.activityId
-    lastProgress = null
-    lastCampaign = null
-    lastActivityStatus = 'running'
     showTab('activity')
-    observeActivityUntilDone(result.activityId)
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('hypotheses-status', 'Could not start the campaign — please try again.', true)
@@ -4433,6 +4410,24 @@ function rememberConcurrency(n) {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
 }
+// How many ACTIVITIES (campaigns / judge / propose / evaluate) may run at once. A judge no
+// longer blocks a campaign, and several campaigns can run together. Each campaign still has
+// its own "Max parallel runs", so total training processes ≈ the sum — keep both modest.
+function savedActivityBudget() {
+  try {
+    const n = Math.floor(Number(localStorage.getItem(ACTIVITY_BUDGET_SS)))
+    return Number.isFinite(n) && n >= 1 ? n : DEFAULT_ACTIVITY_BUDGET
+  } catch {
+    return DEFAULT_ACTIVITY_BUDGET
+  }
+}
+function rememberActivityBudget(n) {
+  try {
+    localStorage.setItem(ACTIVITY_BUDGET_SS, String(Math.max(1, Math.floor(Number(n)) || 1)))
+  } catch {
+    // best-effort
+  }
+}
 function savedComputeTarget() {
   try {
     return sessionStorage.getItem(COMPUTE_TARGET_SS) || ''
@@ -4762,15 +4757,10 @@ async function onLaunchSubmit(event) {
       if (epoch === projectEpoch && status) status.textContent = queuedStatusText(result.ahead)
       return
     }
-    if (autoEval) await putAutoEvalMarker(result.activityId, params)
+    // launchActivity recorded the auto-eval marker (if any) + is observing the campaign.
     if (epoch !== projectEpoch) return
-    currentActivityId = result.activityId
-    lastProgress = null
-    lastCampaign = null
-    lastActivityStatus = 'running'
     if (status) status.textContent = ''
     showTab('activity')
-    observeActivityUntilDone(result.activityId)
   } catch {
     if (epoch === projectEpoch && status) {
       status.textContent = 'Could not start the campaign — please try again.'
@@ -4823,88 +4813,44 @@ async function getActivity(activityId) {
     return null
   }
 }
-// The campaign still in flight per the latest progress record, with its activity
-// (null when nothing is running or everything already settled).
-async function findRunningActivity() {
-  const progress = await readProgress()
-  if (!progress || !progress.activityId) return null
-  if (progress.phase === 'done') return null
-  const campaign = await readCampaign()
-  if (campaign && campaign.activityId === progress.activityId && campaign.finishedAt) return null
-  const activity = await getActivity(progress.activityId)
-  return { activityId: progress.activityId, activity, progress }
+function activityTypeLabel(type) {
+  if (type === 'train') return 'Campaign'
+  if (type === 'judge') return 'Judge runs'
+  if (type === 'propose') return 'Propose experiments'
+  if (type === 'evaluate') return 'Evaluate runs'
+  return type
 }
-// On opening a project, re-attach to a campaign still marked running. Live →
-// observe; orphaned or paused (not live) → resume it once (carfinder's
-// resume-on-load logic), and fall back to a Resume button when that fails.
+// On opening a project (or regaining focus), re-attach an observer to EVERY backend-live
+// activity for this project we're not already tracking — up to the budget — so concurrent
+// campaigns + a judge all reconnect. When nothing is live, surface the last campaign result.
 async function resumeRunningActivity() {
   const epoch = projectEpoch
-  const progress = await readProgress()
-  const campaign = await readCampaign()
-  const found = await findRunningActivity()
-  if (epoch !== projectEpoch) return
-  lastProgress = progress
-  lastCampaign = campaign
-  if (!found) {
-    if (lastCampaign || (lastProgress && lastProgress.phase === 'done')) {
-      lastActivityStatus = 'completed'
-    }
-    renderActivity()
-    return
-  }
-  currentActivityId = found.activityId
-  lastProgress = found.progress
-  const act = found.activity
-  if (act && act.status && act.status !== 'running' && act.status !== 'paused') {
-    lastActivityStatus = act.status
-    renderActivity()
-    await renderRuns()
-    return
-  }
-  if (act && act.status === 'running' && act.isLive !== false) {
-    lastActivityStatus = 'running'
-    renderActivity()
-    observeActivityUntilDone(found.activityId)
-    return
-  }
-  try {
-    await window.OverseerBridge.resumeActivity(found.activityId)
-    if (epoch !== projectEpoch) return
-    lastActivityStatus = 'running'
-    renderActivity()
-    observeActivityUntilDone(found.activityId)
-  } catch {
-    if (epoch !== projectEpoch) return
-    lastActivityStatus = 'paused'
-    renderActivity()
-  }
-}
-// On opening a project (after re-attaching any running train campaign), re-attach
-// to a quick judge / propose activity that is still live for this project — the
-// piece a page reload would otherwise drop, leaving the Judge / Propose button
-// looking idle mid-run. The activity list carries the activity's type in its
-// resumeToken, so judge and propose are told apart precisely and each reuses its
-// own settle handler (button spinner via judging/proposing, then refresh
-// verdicts / hypotheses). Guarded by projectEpoch so navigating away cancels it,
-// and skipped when that button is already observing.
-async function resumeRunningQuickActivity() {
-  const epoch = projectEpoch
-  if (judging || proposing) return
-  let activities
+  let activities = []
   try {
     const res = await window.OverseerBridge.listActivities()
     activities = (res && res.activities) || []
   } catch {
-    return
+    activities = []
   }
   if (epoch !== projectEpoch || !manifest) return
   const live = activities.filter(
     (a) => a.recordType === manifest.recordType && a.status === 'running' && a.isLive !== false,
   )
-  const judge = live.find((a) => quickActivityType(a) === 'judge')
-  const propose = live.find((a) => quickActivityType(a) === 'propose')
-  if (judge) observeResumedJudge(judge.activityId, epoch)
-  if (propose) observeResumedPropose(propose.activityId, epoch)
+  for (const a of live) {
+    if (liveSlotCount() >= savedActivityBudget()) break
+    if ([...liveActivities.values()].some((e) => e.activityId === a.activityId)) continue
+    const type = quickActivityType(a) || 'train'
+    trackExistingActivity(a.activityId, type, activityTypeLabel(type))
+  }
+  if (!anyActivityRunning()) {
+    const campaign = await readCampaign()
+    const progress = await readProgress()
+    if (epoch !== projectEpoch) return
+    if (campaign || (progress && progress.phase === 'done')) {
+      lastSettledCampaign = campaign
+    }
+  }
+  renderActivity()
 }
 // The activity's type from its resume token (the host carries `{activityType,…}`
 // there), used to tell a running judge / propose / train apart in the list.
@@ -4912,111 +4858,92 @@ function quickActivityType(activity) {
   const token = activity && activity.resumeToken
   return token && typeof token.activityType === 'string' ? token.activityType : ''
 }
-// Re-attach to a live judge: light the Judge button's spinner, observe until it
-// settles, then drop the spinner, refresh the verdicts in the Runs table and let
-// the queue dispatch — mirroring onJudgeClick's settle path.
-async function observeResumedJudge(activityId, epoch) {
-  judging = true
-  renderJudgeControls()
-  const act = await observeQuickActivity(activityId)
-  if (epoch !== projectEpoch) return
-  judging = false
-  renderJudgeControls()
-  setStatusLine('judge-status', quickActivityFailureText(act, 'Judging'), true)
-  await renderRuns()
-  pumpQueue()
-}
-// Re-attach to a live propose: light the Propose button's spinner, observe until
-// it settles, then drop the spinner, refresh the hypotheses and let the queue
-// dispatch — mirroring onProposeClick's settle path.
-async function observeResumedPropose(activityId, epoch) {
-  proposing = true
-  renderProposeControls()
-  const act = await observeQuickActivity(activityId)
-  if (epoch !== projectEpoch) return
-  proposing = false
-  renderProposeControls()
-  setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
-  await renderHypotheses()
-  pumpQueue()
-}
-// Poll loop: every 3s while the page is visible, read the progress record + the
-// activity status; settle when the activity leaves 'running'. An orphaned run
-// (server restart) gets one resume attempt, then shows as paused. A newer loop
-// (another launch, another project) or navigating home cancels this one.
-async function observeActivityUntilDone(activityId) {
-  const session = ++observeSession
+// Orchestrate ONE activity's lifecycle: light its quick-button state, observe to settlement,
+// run the type-specific settle, then untrack + re-pump to free its slot.
+async function observeActivity(entry) {
   const epoch = projectEpoch
-  observing = true
-  currentActivityId = activityId
+  const item = entry.item
+  applyQuickDispatchState(item, true)
+  try {
+    if (item.activityType === 'train') {
+      await observeTrainActivity(entry, epoch)
+    } else {
+      const act = await observeQuickActivity(entry.activityId)
+      entry.status = (act && act.status) || 'completed'
+      if (epoch === projectEpoch) await refreshAfterQuickDispatch(item, act)
+    }
+  } finally {
+    applyQuickDispatchState(item, false)
+    // A paused campaign keeps its slot + block (with a Resume button) until resumed/aborted.
+    if (entry.status !== 'paused') liveActivities.delete(entry.localId)
+    if (epoch === projectEpoch) {
+      renderActivity()
+      pumpQueue()
+    }
+  }
+}
+// Poll a training campaign to settlement, writing its OWN progress/campaign/status into its
+// `entry` (filtered to its activityId — the backend keys these records 'latest', so with two
+// same-project campaigns a block's live progress is best-effort; results are unaffected).
+async function observeTrainActivity(entry, epoch) {
+  const activityId = entry.activityId
   const start = Date.now()
   let resumeTries = 0
   let deadSince = 0
   let lastSig = ''
-  try {
-    while (Date.now() - start < MAX_OBSERVE_MS) {
-      if (session !== observeSession || epoch !== projectEpoch) return 'cancelled'
-      // Poll regardless of document visibility — the queue pump advances off this observation, so
-      // pausing it while backgrounded stalls campaigns + the queue until the user re-opens the app.
-      {
-        const [progress, act, campaign] = await Promise.all([
-          readProgress(),
-          getActivity(activityId),
-          readCampaign(),
-        ])
-        if (session !== observeSession || epoch !== projectEpoch) return 'cancelled'
-        if (progress && progress.activityId === activityId) lastProgress = progress
-        if (campaign) lastCampaign = campaign
-        if (act && act.status && act.status !== 'running') {
-          await settleActivity(act.status)
-          return act.status
-        }
-        const sig = activityProgressSig(progress, campaign)
-        const advanced = sig !== lastSig
-        lastSig = sig
-        if ((!act || act.isLive === false) && !advanced && document.hidden) {
-          // Backgrounded: the browser throttles our timers, so a stalled-looking poll is
-          // most likely us, not the run. Never declare paused while hidden — keep observing
-          // and let the visibility-regain handler re-verify. (Avoids stalling the queue,
-          // whose pump bails on a 'paused' status.)
-          lastActivityStatus = 'running'
-        } else if ((!act || act.isLive === false) && !advanced) {
-          // Not live AND nothing moved this poll — start (or continue) the dead clock.
-          const now = Date.now()
-          if (!deadSince) deadSince = now
-          if (now - deadSince >= DEAD_CONFIRM_MS) {
-            // Sustained-dead: try ONE relaunch (never while advancing — that would
-            // double-run a live campaign), then declare paused if it stays dead.
-            if (resumeTries < 1) {
-              resumeTries += 1
-              deadSince = now
-              try {
-                await window.OverseerBridge.resumeActivity(activityId)
-              } catch {
-                // keep observing; the records may settle on their own
-              }
-            } else {
-              lastActivityStatus = 'paused'
-              renderActivity()
-              return 'paused'
-            }
-          } else {
-            // Within the grace window — the work is most likely still running.
-            lastActivityStatus = 'running'
+  while (Date.now() - start < MAX_OBSERVE_MS) {
+    if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
+    const [progress, act, campaign] = await Promise.all([
+      readProgress(),
+      getActivity(activityId),
+      readCampaign(),
+    ])
+    if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
+    const mineProgress = progress && progress.activityId === activityId ? progress : null
+    const mineCampaign = campaign && campaign.activityId === activityId ? campaign : null
+    if (mineProgress) entry.progress = mineProgress
+    if (mineCampaign) entry.campaign = mineCampaign
+    if (act && act.status && act.status !== 'running') {
+      entry.status = act.status
+      await settleTrainActivity(entry)
+      return
+    }
+    const sig = activityProgressSig(mineProgress, mineCampaign)
+    const advanced = sig !== lastSig
+    lastSig = sig
+    if ((!act || act.isLive === false) && !advanced && document.hidden) {
+      // Backgrounded: throttled timers make a stalled-looking poll most likely us, not the
+      // run — never declare paused while hidden; the visibility-regain handler re-verifies.
+      entry.status = 'running'
+    } else if ((!act || act.isLive === false) && !advanced) {
+      const now = Date.now()
+      if (!deadSince) deadSince = now
+      if (now - deadSince >= DEAD_CONFIRM_MS) {
+        // Sustained-dead: one relaunch (never while advancing — would double-run), then pause.
+        if (resumeTries < 1) {
+          resumeTries += 1
+          deadSince = now
+          try {
+            await window.OverseerBridge.resumeActivity(activityId)
+          } catch {
+            // keep observing; the records may settle on their own
           }
         } else {
-          // Live, or records advanced (alive despite a transient isLive gap).
-          deadSince = 0
-          lastActivityStatus = 'running'
+          entry.status = 'paused'
+          renderActivity()
+          return
         }
-        renderActivity()
+      } else {
+        entry.status = 'running'
       }
-      await sleep(POLL_MS)
+    } else {
+      deadSince = 0
+      entry.status = 'running'
     }
-    return 'running'
-  } finally {
-    if (session === observeSession) observing = false
+    renderActivity()
+    await sleep(POLL_MS)
   }
+  entry.status = 'running'
 }
 // A cheap fingerprint of campaign progress; when it changes between polls the run is
 // demonstrably alive (so we never pause/relaunch it even if `isLive` momentarily lies).
@@ -5033,39 +4960,41 @@ function activityProgressSig(progress, campaign) {
     c.done,
   ].join('|')
 }
-// The activity settled: stamp the final status, re-read the campaign result,
-// refresh the Runs tab so new run records show up, run the settle bookkeeping
-// (hypothesis stamps + auto-eval markers) and let the queue dispatch its head.
-async function settleActivity(status) {
-  lastActivityStatus = status
-  lastProgress = await readProgress()
-  lastCampaign = await readCampaign()
+// A campaign settled: re-read its result, refresh the Runs tab so new run records show,
+// and run the settle bookkeeping (hypothesis stamps + auto-eval markers).
+async function settleTrainActivity(entry) {
+  const activityId = entry.activityId
+  const progress = await readProgress()
+  const campaign = await readCampaign()
+  if (progress && progress.activityId === activityId) entry.progress = progress
+  if (campaign && campaign.activityId === activityId) entry.campaign = campaign
+  if (entry.campaign) lastSettledCampaign = entry.campaign
   renderActivity()
   await renderRuns()
   await processSettledCampaignEffects()
-  pumpQueue()
 }
-async function abortCurrentActivity() {
-  if (!currentActivityId) return
-  const btn = byId('activity-abort')
+// Abort ONE activity by id — the observe loop's next poll sees 'aborted' and settles it.
+async function abortActivityById(activityId) {
+  if (!activityId) return
+  const btn = document.querySelector(`[data-abort="${escapeHtml(activityId)}"]`)
   if (btn) btn.disabled = true
   try {
-    await window.OverseerBridge.abortActivity(currentActivityId)
+    await window.OverseerBridge.abortActivity(activityId)
   } catch {
     if (btn) btn.disabled = false
-    return
   }
-  if (!observing) await settleActivity('aborted')
 }
-async function resumeCurrentActivity() {
-  if (!currentActivityId) return
-  const btn = byId('activity-resume')
+// Resume ONE paused activity by id — re-fire its observe loop.
+async function resumeActivityById(activityId) {
+  const entry = [...liveActivities.values()].find((a) => a.activityId === activityId)
+  if (!entry) return
+  const btn = document.querySelector(`[data-resume="${escapeHtml(activityId)}"]`)
   if (btn) btn.disabled = true
   try {
-    await window.OverseerBridge.resumeActivity(currentActivityId)
-    lastActivityStatus = 'running'
+    await window.OverseerBridge.resumeActivity(activityId)
+    entry.status = 'running'
     renderActivity()
-    observeActivityUntilDone(currentActivityId)
+    void observeActivity(entry)
   } catch {
     if (btn) btn.disabled = false
   }
@@ -5217,10 +5146,7 @@ function bestLineHtml(campaign) {
 // The persisted queue under the current activity: the item being dispatched
 // (spinner) plus every waiting entry with its type chip and a remove button.
 function queueSectionHtml() {
-  const dispatching = activeQueueItem
-    ? `<p class="queue-dispatching">${spinnerHtml()} ${escapeHtml(activeQueueItem.label || activeQueueItem.activityType)}…</p>`
-    : ''
-  if (!queueCache.length && !dispatching) return ''
+  if (!queueCache.length) return ''
   const rows = queueCache
     .map(
       (item) => `<li class="queue-item">
@@ -5232,17 +5158,66 @@ function queueSectionHtml() {
     .join('')
   return `<div class="queue-section">
     <h3>Queue <span class="group-count">${queueCache.length}</span></h3>
-    ${dispatching}
-    ${rows ? `<ul class="queue-list">${rows}</ul>` : ''}
+    <ul class="queue-list">${rows}</ul>
   </div>`
 }
-// Activity-level parallelism control (not a per-launch field): how many runs of a
-// campaign may execute at once. Persisted; applied to campaigns launched after.
+// Two activity-level knobs (persisted, applied to activities started after): how many
+// ACTIVITIES (campaigns / judge / …) run at once, and how many RUNS each campaign runs at once.
 function activitySettingsHtml() {
   return `<div class="activity-settings">
+    <label class="field"><span${helpAttr('How many ACTIVITIES (campaigns, judge, propose, evaluate) run at the same time. A judge no longer blocks a campaign, and several campaigns can run together. Each campaign also has its own “Max parallel runs”, so total training processes ≈ the sum — keep both modest for your host.')}>Max concurrent activities</span>
+      <input type="number" id="activity-budget" min="1" step="1" value="${savedActivityBudget()}" />
+    </label>
     <label class="field"><span${helpAttr('How many runs of a campaign run at once. Set this BEFORE you launch — it applies to the NEXT campaign you start. It does NOT resize a campaign already running (you would relaunch to change that). The real ceiling is host CPU/GPU/RAM; default 1 = sequential.')}>Max parallel runs</span>
       <input type="number" id="activity-concurrency" min="1" step="1" value="${savedConcurrency()}" />
     </label>
+  </div>`
+}
+// One block per LIVE activity (campaign / judge / …); campaigns show full progress, quick
+// activities just a status pill. Each campaign has its own Abort / Resume.
+function activityBlockHtml(entry) {
+  const status = entry.status === 'starting' ? 'running' : entry.status
+  const meta = STATUS_META[status] || { label: status, cls: '' }
+  const running = status === 'running'
+  const isTrain = entry.activityType === 'train'
+  const p = isTrain ? entry.progress : null
+  const phase = p && PHASE_LABEL[p.phase] ? PHASE_LABEL[p.phase] : ''
+  const eta =
+    running && p && Number(p.etaSeconds) > 0
+      ? `<p class="activity-eta">ETA ~${escapeHtml(formatEta(p.etaSeconds))}${p.etaApprox ? ' (est.)' : ''}</p>`
+      : ''
+  const times = p
+    ? `<p class="card-sub">Started ${escapeHtml(formatWhen(p.startedAt))} · Updated ${escapeHtml(formatWhen(p.updatedAt))}${p.lastKey ? ` · Last run <code>${escapeHtml(shortKey(p.lastKey))}</code>` : ''}</p>`
+    : ''
+  const inFlight =
+    running && p && p.phase === 'train'
+      ? Array.isArray(p.inFlight)
+        ? p.inFlight
+        : p.current
+          ? [p.current]
+          : []
+      : []
+  const actions =
+    running && entry.activityId
+      ? `<div class="form-actions"><button type="button" class="danger-btn" data-abort="${escapeHtml(entry.activityId)}">Abort</button></div>`
+      : status === 'paused' && entry.activityId
+        ? `<div class="form-actions"><button type="button" data-resume="${escapeHtml(entry.activityId)}">Resume</button></div>`
+        : ''
+  return `<div class="activity-block">
+    <div class="activity-status-row">
+      <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
+      ${isTrain ? '' : `<span class="activity-kind">${escapeHtml(entry.label)}</span>`}
+      ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
+      ${entry.activityId ? `<code class="activity-id">${escapeHtml(shortKey(entry.activityId))}</code>` : ''}
+    </div>
+    ${isTrain && p ? activityProgressHtml(p, running) : ''}
+    ${inFlightHtml(inFlight)}
+    ${isTrain ? activityCountsHtml(p) : ''}
+    ${eta}
+    ${isTrain ? times : ''}
+    ${isTrain ? bestLineHtml(entry.campaign) : ''}
+    ${isTrain ? campaignFailuresHtml(entry.campaign) : ''}
+    ${actions}
   </div>`
 }
 function renderActivity() {
@@ -5255,87 +5230,66 @@ function renderActivity() {
     return
   }
   const queueHtml = queueSectionHtml()
-  if (!lastProgress && !lastCampaign && !lastActivityStatus) {
+  const entries = [...liveActivities.values()].sort((a, b) => b.startedAt - a.startedAt)
+  const blocks = entries.map(activityBlockHtml).join('')
+  // Every in-flight run across all live campaigns, for the shared elapsed-timer ticker.
+  const allInFlight = []
+  for (const entry of entries) {
+    const p = entry.activityType === 'train' && entry.status === 'running' ? entry.progress : null
+    if (p && p.phase === 'train') {
+      const inf = Array.isArray(p.inFlight) ? p.inFlight : p.current ? [p.current] : []
+      for (const r of inf) allInFlight.push(r)
+    }
+  }
+  if (!blocks) {
+    const last = lastSettledCampaign ? bestLineHtml(lastSettledCampaign) : ''
+    const lastFailures = lastSettledCampaign ? campaignFailuresHtml(lastSettledCampaign) : ''
     setHtml(
       body,
       activitySettingsHtml() +
-        (queueHtml ||
-          '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'),
+        (last
+          ? `<div class="activity-block"><div class="activity-status-row"><span class="status-pill is-ok">Last campaign</span></div>${last}${lastFailures}</div>${queueHtml}`
+          : queueHtml ||
+            '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'),
     )
     syncInFlightTimer([])
     return
   }
-  const status = lastActivityStatus || 'completed'
-  const meta = STATUS_META[status] || { label: status, cls: '' }
-  const p = lastProgress
-  const phase = p && PHASE_LABEL[p.phase] ? PHASE_LABEL[p.phase] : ''
-  const running = status === 'running'
-  const eta =
-    running && p && Number(p.etaSeconds) > 0
-      ? `<p class="activity-eta">ETA ~${escapeHtml(formatEta(p.etaSeconds))}${p.etaApprox ? ' (est.)' : ''}</p>`
-      : ''
-  const times = p
-    ? `<p class="card-sub">Started ${escapeHtml(formatWhen(p.startedAt))} · Updated ${escapeHtml(formatWhen(p.updatedAt))}${p.lastKey ? ` · Last run <code>${escapeHtml(shortKey(p.lastKey))}</code>` : ''}</p>`
-    : ''
-  const actions = running
-    ? '<div class="form-actions"><button type="button" id="activity-abort" class="danger-btn">Abort</button></div>'
-    : status === 'paused'
-      ? '<div class="form-actions"><button type="button" id="activity-resume">Resume</button></div>'
-      : ''
-  // Every concurrently-running run's sub-progress, mid-train (not while calibrating,
-  // where the model differs from the run model). The backend tracks all in-flight
-  // runs in `p.inFlight`; older records may still carry a single `current`.
-  const inFlight =
-    running && p && p.phase === 'train'
-      ? Array.isArray(p.inFlight)
-        ? p.inFlight
-        : p.current
-          ? [p.current]
-          : []
-      : []
-  setHtml(
-    body,
-    `
-    ${activitySettingsHtml()}
-    <div class="activity-status-row">
-      <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
-      ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
-      ${currentActivityId ? `<code class="activity-id">${escapeHtml(shortKey(currentActivityId))}</code>` : ''}
-    </div>
-    ${p ? activityProgressHtml(p, running) : ''}
-    ${inFlightHtml(inFlight)}
-    ${activityCountsHtml(p)}
-    ${eta}
-    ${times}
-    ${bestLineHtml(lastCampaign)}
-    ${campaignFailuresHtml(lastCampaign)}
-    ${actions}
-    ${queueHtml}`,
-  )
-  syncInFlightTimer(inFlight)
+  setHtml(body, `${activitySettingsHtml()}${blocks}${queueHtml}`)
+  syncInFlightTimer(allInFlight)
 }
 function setupActivity() {
   const body = byId('activity-body')
   if (!body) return
   body.addEventListener('click', (event) => {
-    if (event.target.closest('#activity-abort')) abortCurrentActivity()
-    else if (event.target.closest('#activity-resume')) resumeCurrentActivity()
-    else {
-      const failBtn = event.target.closest('button[data-failure-action]')
-      if (failBtn) {
-        const action = failBtn.dataset.failureAction
-        const key = failBtn.dataset.key
-        if (action === 'inspect') inspectFailedRun(key)
-        else if (action === 'rerun') cloneRunToLaunch(key)
-        else if (action === 'dismiss') dismissFailure(key)
-        return
-      }
-      const removeBtn = event.target.closest('button[data-queue-remove]')
-      if (removeBtn) onQueueRemove(removeBtn.dataset.queueRemove)
+    const abortBtn = event.target.closest('button[data-abort]')
+    if (abortBtn) {
+      abortActivityById(abortBtn.dataset.abort)
+      return
     }
+    const resumeBtn = event.target.closest('button[data-resume]')
+    if (resumeBtn) {
+      resumeActivityById(resumeBtn.dataset.resume)
+      return
+    }
+    const failBtn = event.target.closest('button[data-failure-action]')
+    if (failBtn) {
+      const action = failBtn.dataset.failureAction
+      const key = failBtn.dataset.key
+      if (action === 'inspect') inspectFailedRun(key)
+      else if (action === 'rerun') cloneRunToLaunch(key)
+      else if (action === 'dismiss') dismissFailure(key)
+      return
+    }
+    const removeBtn = event.target.closest('button[data-queue-remove]')
+    if (removeBtn) onQueueRemove(removeBtn.dataset.queueRemove)
   })
   body.addEventListener('change', (event) => {
     if (event.target.id === 'activity-concurrency') rememberConcurrency(event.target.value)
+    else if (event.target.id === 'activity-budget') {
+      rememberActivityBudget(event.target.value)
+      pumpQueue()
+    }
   })
 }
 
@@ -5379,7 +5333,7 @@ function showTab(id) {
 // run (a judgement or an evaluation). Hypotheses spins while proposing. Versions is view-only — never.
 function tabHasLiveWork(id) {
   if (id === 'activity') {
-    return lastActivityStatus === 'running' || judging || proposing || evaluatingKeys.size > 0
+    return anyActivityRunning() || judging || proposing || evaluatingKeys.size > 0
   }
   if (id === 'runs') return judging || evaluatingKeys.size > 0
   if (id === 'hypotheses') return proposing
@@ -5422,7 +5376,7 @@ function savedTabId() {
 // (Fully UNATTENDED progression while the app is closed needs a server-side queue drain.)
 function onViewerVisible() {
   if (!embedded() || !manifest) return
-  if (observing) {
+  if (anyActivityRunning()) {
     pumpQueue()
     return
   }

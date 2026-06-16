@@ -91,15 +91,52 @@ against MULTIPLE named **regime slices** (long uptrend / long downtrend / choppy
 - Surface a per-regime matrix in run-detail + a compare overlay; flag setups that win on one regime
   but collapse on others. Keep it generic; BlackSwan is the first consumer.
 
-### "Activity & concurrency center" — one server-side pass (with live verification)
+### Environments — separate environment settings from model settings (NEXT after concurrency)
 
-Several items share one root: the activity/queue handling lives client-side in the viewer (which
-unmounts when you leave the app tab) and the Activity surface assumes a single live campaign. Build it
-once as a host-aware, browsable, concurrency-capped center:
+Some manifest levers are **environment** settings, not model hyperparameters: they define the
+mechanics of the world the agent acts in, and changing one changes EVERYTHING — a model's result is
+only meaningful relative to its environment. For BlackSwan these are `transaction_fee` (the big one)
+and the exit mechanics `trailing_take_profit` / `take_profit` / `stop_loss` triggers. Today they're
+plain levers mixed in with model settings, which is misleading (e.g. sweeping `transaction_fee` looks
+like a model experiment when it's really a different market). Build an **Environments** concept:
 
-- **Global concurrency budget.** Needs a pump rework (today: dispatch → await full settlement → next)
-  + an Activity-render rework (assumes one live campaign) + a backend semaphore on
-  `LocalComputeRunner.runJob`.
+- **Manifest tagging.** Mark which settings are environment vs model — e.g. a per-lever
+  `scope: 'environment' | 'model'` flag (default `model`), or a manifest `environmentSettings: [...]`
+  list. Generic; BlackSwan tags fee + TP/SL/trailing as environment.
+- **Environments tab.** Define + tweak **named environments**, each a bundle of environment-setting
+  values (e.g. "Binance spot · 0.1% fee · TP 5% · SL 2% · trailing on"), persisted as records. The
+  Launch form's model levers stop showing env settings; you pick an environment (or sweep environments
+  as a separate axis). Runs are tagged with the environment they ran in.
+- **Compare across environments.** See how one model/setup fares across environments (the env analogue
+  of the regime testing above) — flag setups that only work under a forgiving fee/exit regime.
+- **Relationship to multi-dataset testing.** Environment = market mechanics; dataset/regime = the data.
+  Both are "what you test a model against" — ideally one **test matrix** surface (model × environment ×
+  dataset). Decided: viewer-only **activity-count** concurrency budget first (see Activity center), then
+  this. Keep it generic so any trainer project can declare environment settings.
+
+### Activity concurrency — viewer-only budget (SHIPPED, needs live verify) + a server-side pass (deferred)
+
+**SHIPPED — viewer-only activity-count budget.** Replaced the singleton observe + one-at-a-time pump
+with a `liveActivities` map + a configurable "Max concurrent activities" budget (localStorage, default 3):
+the pump dispatches up to the budget non-blocking, each activity self-observes (`observeActivity` →
+`observeTrainActivity`/quick branch), and the Activity tab renders one block per live activity (per-block
+Abort/Resume). Resolves the headline pains — a judge no longer blocks campaigns; multiple campaigns run
+at once. Adversarially reviewed; 3 bugs fixed (launchActivity slot-leak on a bookkeeping throw; pumpQueue
+dropping items on a transient launch failure; concurrent-campaign auto-eval drop → `enqueueMissingEvaluations`
+now falls back to all-completed-missing). KNOWN LIMITATION (drives the deferred work below): the backend
+keys the `-progress` and `-campaign` records as `'latest'` per recordType, so two concurrent campaigns of
+the SAME project share that record — their per-block LIVE progress is best-effort (run records + results
+are unaffected). Resource trade-off accepted: N campaigns each keep their own "Max parallel runs", so total
+processes = the sum (no host-enforced cap yet). Needs LIVE verification (start 2 campaigns + a judge).
+
+The rest still want a host-aware, browsable, concurrency-capped center (deferred):
+
+- **Per-activityId progress/campaign records.** Key the `-progress`/`-campaign` records by activityId (not
+  `'latest'`) so concurrent same-project campaigns each show their own live progress — the clean fix for
+  the limitation above.
+- **Host-enforced global RUN cap.** A backend semaphore on `LocalComputeRunner.runJob` (the shared
+  `trainerLocalRunner`) so total concurrent training runs are bounded regardless of how many campaigns
+  are live — the durable resource guard the viewer-only budget doesn't provide.
 - **Server-side queue drain.** Chain the next queued activity on the backend when one settles, so
   follow-ups advance while the app/viewer is closed.
 - **Boot-time orphan reclaim (S3 secondary).** A real backend restart strands a `running` ActivityRun

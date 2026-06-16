@@ -1113,10 +1113,14 @@ button:focus-visible,
   display: none;
 }
 .activity-settings {
-  margin-bottom: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-bottom: 12px;
 }
 .activity-settings .field {
-  max-width: 340px;
+  flex: 1 1 200px;
+  max-width: 320px;
 }
 .runs-viewmode {
   display: inline-flex;
@@ -1316,6 +1320,23 @@ pre.json {
 }
 
 /* ---- Activity --------------------------------------------------------------------- */
+/* One card-within-the-card per concurrently-running activity. */
+.activity-block {
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-subtle);
+}
+.activity-block:last-of-type {
+  margin-bottom: 0;
+}
+.activity-block .activity-status-row:first-child {
+  margin-top: 0;
+}
+.activity-kind {
+  font-weight: 600;
+}
 .activity-status-row {
   display: flex;
   align-items: center;
@@ -1494,12 +1515,6 @@ pre.json {
 /* ---- Activity queue --------------------------------------------------------- */
 .queue-section {
   margin-top: 18px;
-}
-.queue-dispatching {
-  margin: 8px 0 0;
-  color: var(--accent);
-  font-size: 13px;
-  font-weight: 600;
 }
 .queue-list {
   display: flex;
