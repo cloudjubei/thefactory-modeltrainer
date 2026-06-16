@@ -8,3 +8,5 @@ examples/*/checkpoints/
 examples/*/mlruns/
 examples/*/.factory/trainer/
 examples/**/__pycache__/
+
+.factory/
