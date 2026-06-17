@@ -1920,7 +1920,18 @@ const TWO_DP_METRICS = new Set([
 ])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.
-const TABLE_HIDDEN_METRICS = new Set(['trade_gate', 'traded_return'])
+// Retired metrics — no longer produced (summary.py dropped Sharpe/CAGR/max-drawdown + the window
+// breakdown as noise for the trade-frequency objective). Hidden EVERYWHERE so OLD runs that still
+// carry them in storage don't resurrect dead columns/rows. New runs don't emit them at all.
+const RETIRED_METRICS = [
+  'sharpe',
+  'cagr_pct',
+  'max_drawdown_pct',
+  'sharpe_alpha',
+  'worst_window_return_pct',
+  'windows_profitable_pct',
+]
+const TABLE_HIDDEN_METRICS = new Set(['trade_gate', 'traded_return', ...RETIRED_METRICS])
 function metricLabel(mk) {
   return METRIC_LABEL[mk] || mk.replace(/_pct$/, ' %').replace(/_/g, ' ')
 }
@@ -2825,8 +2836,9 @@ function compareEquityChartHtml(runs, runColors) {
     },
   )}</div>`
 }
-// Surfaced via the objective headline already, so it would just duplicate a row in the detail table.
-const DETAIL_HIDDEN_METRICS = new Set(['traded_return'])
+// Surfaced via the objective headline already (traded_return), plus the retired risk metrics that
+// old runs still carry — both hidden so the detail table shows only live, meaningful metrics.
+const DETAIL_HIDDEN_METRICS = new Set(['traded_return', ...RETIRED_METRICS])
 function metricsTableHtml(metrics) {
   const entries = Object.entries(metrics || {}).filter(([k]) => !DETAIL_HIDDEN_METRICS.has(k))
   if (!entries.length) return '<p class="card-sub">No metrics recorded.</p>'

@@ -31,36 +31,11 @@ domain-oblivious: any further model is _data + the thin CLI contract_, not engin
 
 ## NEXT — the active work
 
-### 1. Live-verify the in-flight changes
-
-Confirm on a real run after a `dev:force` backend restart + viewer reload + the app rebuilds:
-
-- **Chat-about-run** — the run id is now explicit in the system prompt with a don't-ask instruction,
-  AND the per-chat prompt is applied on the FIRST message (the prompt was previously persisted but the
-  send read a stale `chats` state, so it only took effect on the 2nd message — fixed with a synchronous
-  `chatsRef` in thefactory-ui's `buildToolSettings`). Confirm the agent is grounded in BlackSwan and
-  doesn't ask for the run id on turn 1 (rebuild thefactory-ui dist + the 3 apps first).
-- **Campaign Pause** — a live campaign now has a Pause button (inline "kills the process" confirm)
-  that keeps it Resume-able; Resume (and a backend blip) re-runs only the unfinished runs. Confirm a
-  30/80 pause→resume continues from run 31, and survives a reload.
-- **Runs scroll** — fixed twice: the list pane's `is-fullwidth` was applied to the wrong `.tab-main`
-  (now `#view-dashboard .tab-main`), and the detail pane now uses a FIXED head + scrolling inner body
-  (`.card-scroll`) instead of a sticky head over the scrolling pane (which bit the card's edges).
-  Confirm controls + table header stay put while rows scroll, and the detail head stays put while only
-  its inner content scrolls — nothing cut off at the top/bottom.
-- **Datasets tab** — a full Environments-style tab for named DATASET bundles (BlackSwan's `asset` /
-  `walk_forward_window` / `fidelity_set` are now `scope:'dataset'`): CRUD + a launch picker +
-  by-dataset runs grouping; Exp 6/10 now run as dataset bundles. Confirm: create "1h" vs "1h+1d"
-  datasets, run a model across both, and read them in the By-dataset view. (A preset that sweeps
-  datasets overrides the picker.)
-
-### 2. BlackSwan Phase B — find ONE setup that trades well
+### 1. BlackSwan Phase B — find ONE setup that trades well
 
 The OOS-honest lever matrix is in place: walk-forward windows (2022/2023/2024), shorting, vol-targeted
 sizing, the `trade_gate_mode`, multi-fidelity (`fidelity_set`), direct + differential-Sharpe rewards,
-regime/vol features, and the `obs_squash` normalization experiment. The summary reconstructs real
-round-trips into a fixed-stake equity curve and reports `return_vs_hold_pct`, an exit-reason breakdown,
-and per-regime (windowed + trend) skill-vs-luck attribution. A setup counts only when it **beats
+regime/vol features, and the `obs_squash` normalization experiment. A setup counts only when it **beats
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
@@ -81,7 +56,7 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 - **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
-  **Papers/Library card** (§3b) with claimed-vs-measured. Candidates: Moody & Saffell direct-recurrent
+  **Papers/Library card** (§2b) with claimed-vs-measured. Candidates: Moody & Saffell direct-recurrent
   (RecurrentPPO already imported + log-return/diff-Sharpe reward + `lstm_hidden_size` lever);
   Zhang/Zohren/Roberts vol-scaling (reuses the Wave-1 vol); a trend-following + mean-reversion exit
   overlay (`trend_filter`/`ma_period`/`reversion_threshold` levers, forced exit in `resolve_tpsl`); a
@@ -92,18 +67,18 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
   aggregation self-prune; fold in **RB1b/2** (more indicators) + **RB5** (causal `dip_score` into the
   env) ONLY if an experiment says they help.
 
-### 3. Model-trainer app
+### 2. Model-trainer app
 
-**(3a) Walk-forward by-window view + behavioural surfacing — MEDIUM.** One-window-per-run already
-shows as separate by-setup rows (a usable first cut). To finish: a "by-window" grouping that
-aggregates a config's OOS distribution across windows (mean / worst-window `return_vs_hold_pct`);
-surface the run's `fidelity_set` + the summary's new behavioural fields (exit-reason breakdown, the
-per-regime windowed/trend skill-vs-luck attribution, the trade ledger) in run-detail; and a flag/filter
-when single- and multi-window runs are mixed so a 2022 run is never read against a 2024 run as one
-number. Stays domain-oblivious (window/`fidelity_set`/the metric fields are opaque to the viewer).
-Subsumes the deferred regime-slice testing — windows ARE named slices.
+**(2a) Walk-forward by-window view — MEDIUM.** One-window-per-run already shows as separate by-setup
+rows (a usable first cut). The summary's behavioural fields — exit-reason breakdown, per-regime
+(windowed + trend) skill-vs-luck attribution, and the trade ledger — now render in run-detail (with a
+🔍-expand popup on the Price&actions chart). To finish: a "by-window" grouping that aggregates a
+config's OOS distribution across windows (mean / worst-window `return_vs_hold_pct`); surface the run's
+`fidelity_set`; and a flag/filter when single- and multi-window runs are mixed so a 2022 run is never
+read against a 2024 run as one number. Stays domain-oblivious (window/`fidelity_set`/the metric fields
+are opaque to the viewer). Subsumes the deferred regime-slice testing — windows ARE named slices.
 
-**(3b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
+**(2b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
 linking + clone-to-launch).** A roster of approach cards turning "try every positive paper, prove it
 good or fluff" into a durable, explorable, evidence-backed registry. Generic ("an approach with a
 source + a claim"); BlackSwan's first consumers = the Wave-2 papers.
@@ -122,10 +97,10 @@ source + a claim"); BlackSwan's first consumers = the Wave-2 papers.
   (status + note; auto-suggest holds-up/fluff from whether measured beats hold OOS, user confirms),
   Edit/Delete. index.html tab + section; style.css cards/badges.
 - **Research-seeded**: extend the propose/research flow so a result can `putPaper(… source:'research')`
-  — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives §3a
+  — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives §2a
   walk-forward + real costs (honest by construction).
 
-### 4. xAI — explain WHY the model acted (parallel track, like Papers)
+### 3. xAI — explain WHY the model acted (parallel track, like Papers)
 
 A decision drill-down: understand what the model did and why. Lands additively across BlackSwan +
 model-trainer (NOT a new project); the model-trainer side stays domain-oblivious (generic "decision
@@ -162,7 +137,7 @@ cheap parts), with the animation capstone parked.
 
 ### Cross-asset robustness testing
 
-The windowing dimension is now Phase-B Wave 0 + §3a (walk-forward windows are named slices). What
+The windowing dimension is now Phase-B Wave 0 + §2a (walk-forward windows are named slices). What
 remains is the **cross-asset** dimension — test a trained checkpoint against any asset in the same
 data format to catch regime/asset overfit:
 - The trainer already replays a checkpoint deterministically; the missing piece is selecting the data
