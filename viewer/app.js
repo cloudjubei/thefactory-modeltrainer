@@ -1910,6 +1910,7 @@ const METRIC_LABEL = {
   final_net_worth: 'Final $',
   hold_return_pct: 'hold %',
   return_vs_hold_pct: 'vs hold',
+  realized_cost_bps: 'cost (bps)',
 }
 // Metrics shown to a fixed 2 decimals in the table (money + ratios read cleaner that way).
 const TWO_DP_METRICS = new Set([
@@ -1917,6 +1918,7 @@ const TWO_DP_METRICS = new Set([
   'final_net_worth',
   'hold_return_pct',
   'return_vs_hold_pct',
+  'realized_cost_bps',
 ])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.

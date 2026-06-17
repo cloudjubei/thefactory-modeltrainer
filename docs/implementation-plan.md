@@ -43,9 +43,6 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
   rewards, fidelity stack, obs-squash) on the 1h winner; read the cross-window OOS distributions, then
   lock in the first config that clears the bar. Keep RL alive while running the other approaches in
   parallel (below) — an unpublished edge is plausible.
-- **`realized_cost_bps`.** Add env-side cumulative-fee tracking (a `self.fees`-derived total) so the
-  realized transaction-cost drag can be reported honestly in `summary.py`. (Fee-honesty already holds
-  via the post-fee equity curve; this is the transparency metric, deferred to avoid a hand-wavy gap.)
 - **Wave 1-parallel — the decisive non-RL baseline. EASY.** A supervised direction/return predictor +
   rules-based execution. The trainer contract is model-agnostic (hodl/regression/technical coexist),
   so a new `supervised_rules` model_type is ~200 lines, additive, touches nothing in the RL track:
@@ -69,14 +66,13 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 ### 2. Model-trainer app
 
-**(2a) Walk-forward by-window view — MEDIUM.** One-window-per-run already shows as separate by-setup
-rows (a usable first cut). The summary's behavioural fields — exit-reason breakdown, per-regime
-(windowed + trend) skill-vs-luck attribution, and the trade ledger — now render in run-detail (with a
-🔍-expand popup on the Price&actions chart). To finish: a "by-window" grouping that aggregates a
-config's OOS distribution across windows (mean / worst-window `return_vs_hold_pct`); surface the run's
-`fidelity_set`; and a flag/filter when single- and multi-window runs are mixed so a 2022 run is never
-read against a 2024 run as one number. Stays domain-oblivious (window/`fidelity_set`/the metric fields
-are opaque to the viewer). Subsumes the deferred regime-slice testing — windows ARE named slices.
+**(2a) Walk-forward by-window view — MOSTLY DONE; minor polish left.** The behavioural surfacing
+shipped: run-detail renders the exit-reason breakdown, per-regime (windowed + trend) skill-vs-luck
+attribution, the trade ledger, and `return_vs_hold_pct` + `realized_cost_bps` in the metrics table;
+the By-dataset view groups runs by `walk_forward_window` (the by-window distribution) and run-detail
+shows `fidelity_set`. LEFT (optional polish): an explicit cross-window aggregate (mean / worst-window
+`return_vs_hold_pct` per config) rather than the generic objective avg/min/max the By-dataset table
+shows; and a clearer mixed single/multi-window not-comparable banner.
 
 **(2b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
 linking + clone-to-launch).** A roster of approach cards turning "try every positive paper, prove it
@@ -100,6 +96,32 @@ source + a claim"); BlackSwan's first consumers = the Wave-2 papers.
   — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives §2a
   walk-forward + real costs (honest by construction).
 
+### 3c. Models / Architectures library (like Papers, for model build-ups) — HARD
+
+We've never looked under BlackSwan's hood — what `reppo-custom` / `trpo-custom` / the dueling /
+Munchausen / LSTM variants actually compose, and how `net_arch` / `activation` / `optimizer` shape
+them. A registry parallel to §3b Papers, generic (BlackSwan first consumer):
+- **The registry/tab** (mirror Papers): each card = a model architecture — its build-up (algo + net
+  shape + policy internals + any custom head), provenance/rationale, and a verdict
+  proven/disproved by linked runs (claimed-vs-measured). `<recordType>-model` records;
+  Replicate→Launch prefills `model_name`/`net_arch`/…; by-model grouping reuses the model-lever
+  signature; research/propose can seed cards. Mirrors the Papers plumbing.
+- **The research + build direction** (the LLM-advances angle): survey modern sequence architectures
+  (attention/transformers, longer-context recurrent) and add the promising ones as new `model_name`s
+  in BlackSwan's `model_factory`, each documented as a card and proven/disproved by sweeps. Real ML
+  work; sequenced after the registry exists.
+
+### 3d. Presets: clean up + SL/TP/trailing sweep + top-3 auto-include — EASY/MEDIUM
+
+The preset list has grown noisy (each run many times; unclear which are good now).
+- **Clean up** the `trainer.json` presets — drop stale/duplicate, keep a curated set.
+- **Add a strong SL+TP+trailing-stop SWEEP preset** — the exit-mechanic combinations are
+  under-explored and make a good sweep starting point.
+- **Auto-include the top-3 results as presets**: the viewer reads the best runs (by objective, OOS)
+  and offers them as one-click "clone-to-sweep" seeds alongside the manifest's presets, so homing in
+  on a winner is point-and-click. (clean-up + SL/TP/trailing = quick `trainer.json`; top-3 = a viewer
+  feature synthesizing presets from the best runs.)
+
 ### 3. xAI — explain WHY the model acted (parallel track, like Papers)
 
 A decision drill-down: understand what the model did and why. Lands additively across BlackSwan +
@@ -122,10 +144,23 @@ cheap parts), with the animation capstone parked.
   the existing chart + record plumbing; renders arbitrary action strings. (The "many buys, few sells"
   case is already explained in BlackSwan's manifest description — the view should make it self-evident
   from the trace.)
+- **The sparse-sell deep-dive (the live symptom).** Even WITH a sell action, several profitable runs
+  fire many BUYs but rarely SELL, so they trade infrequently. The Explain view must show WHY the sell
+  action stays dormant — per-step sell-Q vs hold-Q (or sell-logit vs hold), and the action
+  distribution over time: is hold's value persistently higher, is the sell signal never learned, or
+  is it crowded out by TP/SL exits? A concrete diagnostic, not just a count — this is the first
+  question the decision trace + confidence capture should answer.
 - **Feature attribution — MEDIUM.** Gradient saliency on the torch policy (backprop the chosen
   action's Q-value/logit w.r.t. the observation), selective (only when `actions_made`; skip
   TP/SL-forced steps), ~2–3× test time; aggregate saliency by fidelity layer. Permutation/SHAP
   deferred (expensive).
+- **Data-influence on decisions/weights — HARD, research.** See how a NEW piece of information changes
+  the model — its weights AND its subsequent decisions — and whether that change is GOOD. The goal: judge
+  a tweak as positive from the DECISION deltas even when the final return isn't there yet (so we can
+  steer by "the decisions improved" not just "the score rose"). Approaches to evaluate: counterfactual
+  decision-trace diffing (re-run the test with/without a feature → per-step decision + P&L delta),
+  attribution of a decision to the new input, or a before/after decision-diff around a fine-tune. Builds
+  on the base decision trace + attribution; parked behind them.
 - **Discuss-with-agent — EASY.** Enrich the `chatAboutRun` system prompt with a trace SUMMARY (action
   counts, top features) so "why so few sells?" has context.
 - **PARKED — step-by-step ANIMATION replay** + scrubber, discussed live with an agent. Added last; no
@@ -145,6 +180,15 @@ data format to catch regime/asset overfit:
 - Likely a manifest `testSets` list (`{id, asset, range/description}`) + a generic "test on set"
   activity writing a `<recordType>-regimetest` record per (run, set), surfaced as a per-set matrix in
   run-detail + a compare overlay. Keep it generic; BlackSwan is the first consumer.
+
+### Daily-step multi-fidelity (provider enhancement)
+
+`timeframe` (the agent's STEP) and `fidelity_set` (the LAYERS observed) are now decoupled + validated:
+an hourly step can observe coarser layers (the new `1d+1w` set), and incompatible combos fail fast.
+STILL UNSUPPORTED (fails fast for now): a DAILY step observing FINER layers (e.g. a 1d-step agent
+seeing 1h+1d) — `MultiTimelineDataProvider` has no `divider_run` mapping for `input=1h → run=1d`.
+Enable by adding that mapping + verifying the step/aggregation against a fixture + a live run. Then
+the full step × layers matrix is open.
 
 ### Environments — follow-ups
 
