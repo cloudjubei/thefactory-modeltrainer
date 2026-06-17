@@ -33,23 +33,42 @@ domain-oblivious: any further model is _data + the thin CLI contract_, not engin
 
 ### 1. Live-verify the in-flight changes
 
-Several recent changes were built without a live render — confirm on a real run after a `dev:force`
-backend restart + viewer reload + the app rebuilds:
+Confirm on a real run after a `dev:force` backend restart + viewer reload + the app rebuilds:
 
-- **Chat-about-run** now sets a per-topic system prompt (BlackSwan project briefing + the run/trade);
-  rebuild the thefactory-ui dist + the 3 apps, then open a run chat and confirm the agent is grounded
-  in BlackSwan, not the generic trainer.
-- **Concurrency budget** (≥2 campaigns + a judge run at once), **Environments** tab, **stalled-run
-  resume** (backend blip → Resume re-runs only the pending runs), and the Runs UX batch
-  (independent scroll, compare pane, hover callouts, degenerate hides Verdict).
+- **Chat-about-run** — the run id is now explicit in the system prompt with a don't-ask instruction,
+  AND the per-chat prompt is applied on the FIRST message (the prompt was previously persisted but the
+  send read a stale `chats` state, so it only took effect on the 2nd message — fixed with a synchronous
+  `chatsRef` in thefactory-ui's `buildToolSettings`). Confirm the agent is grounded in BlackSwan and
+  doesn't ask for the run id on turn 1 (rebuild thefactory-ui dist + the 3 apps first).
+- **Campaign Pause** — a live campaign now has a Pause button (inline "kills the process" confirm)
+  that keeps it Resume-able; Resume (and a backend blip) re-runs only the unfinished runs. Confirm a
+  30/80 pause→resume continues from run 31, and survives a reload.
+- **Runs scroll** — fixed twice: the list pane's `is-fullwidth` was applied to the wrong `.tab-main`
+  (now `#view-dashboard .tab-main`), and the detail pane now uses a FIXED head + scrolling inner body
+  (`.card-scroll`) instead of a sticky head over the scrolling pane (which bit the card's edges).
+  Confirm controls + table header stay put while rows scroll, and the detail head stays put while only
+  its inner content scrolls — nothing cut off at the top/bottom.
+
+### 1b. Datasets tab (engine done; viewer + lever-tagging next)
+
+A **Datasets** tab mirroring **Environments** — named bundles of DATASET-scoped levers (asset /
+walk-forward window / fidelity stack) a model runs against, with a launch multi-select and a
+by-dataset runs grouping. The ENGINE foundation shipped: `scope: 'dataset'`, `ExperimentSpec.datasets`
+as a second bundle axis crossing the model × environment matrix (`expandExperimentMatrix`, TDD). REMAINS
+(one coherent piece — they must land together so launch keeps working): tag BlackSwan's `asset` /
+`walk_forward_window` / `fidelity_set` levers `scope:'dataset'`; mirror the Environments viewer
+(`readDatasets`/`putDataset`/… CRUD, the Datasets tab, the launch picker, a by-dataset grouping); and
+extend `modelLeverEntries` to exclude dataset levers too.
 
 ### 2. BlackSwan Phase B — find ONE setup that trades well
 
-The OOS-honest lever matrix is in place: walk-forward windows (2022/2023/2024 + `sharpe_alpha`),
-shorting, vol-targeted sizing, the `trade_gate_mode`, multi-fidelity (`fidelity_set`), direct +
-differential-Sharpe rewards, regime/vol features, and the `obs_squash` normalization experiment.
-A setup counts only when it **beats buy-and-hold out-of-sample on risk-adjusted terms, net of 0.1%
-fees** (`sharpe_alpha > 0`, not just `traded_return`), stable across seeds AND windows.
+The OOS-honest lever matrix is in place: walk-forward windows (2022/2023/2024), shorting, vol-targeted
+sizing, the `trade_gate_mode`, multi-fidelity (`fidelity_set`), direct + differential-Sharpe rewards,
+regime/vol features, and the `obs_squash` normalization experiment. The summary reconstructs real
+round-trips into a fixed-stake equity curve and reports `return_vs_hold_pct`, an exit-reason breakdown,
+and per-regime (windowed + trend) skill-vs-luck attribution. A setup counts only when it **beats
+buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
+(genuine timing, not beta), stable across seeds AND windows.
 
 - **Run the Exp campaigns.** Exp 6–11 (walk-forward robustness, shorting, vol-target, equity-path
   rewards, fidelity stack, obs-squash) on the 1h winner; read the cross-window OOS distributions, then
@@ -81,12 +100,13 @@ fees** (`sharpe_alpha > 0`, not just `traded_return`), stable across seeds AND w
 
 ### 3. Model-trainer app
 
-**(3a) Walk-forward by-window view — MEDIUM.** One-window-per-run already shows as separate by-setup
-rows (a usable first cut). To finish: a "by-window" grouping that aggregates a config's OOS
-distribution across windows (mean / worst-window `sharpe_alpha`); the `sharpe_alpha` column in Runs +
-run-detail; and a flag/filter when single- and multi-window runs are mixed so a 2022 run is never read
-against a 2024 run as one number. Also surface the run's `fidelity_set` (now emitted). Stays
-domain-oblivious (`sharpe_alpha`/window/`fidelity_set` are opaque fields the viewer interprets).
+**(3a) Walk-forward by-window view + behavioural surfacing — MEDIUM.** One-window-per-run already
+shows as separate by-setup rows (a usable first cut). To finish: a "by-window" grouping that
+aggregates a config's OOS distribution across windows (mean / worst-window `return_vs_hold_pct`);
+surface the run's `fidelity_set` + the summary's new behavioural fields (exit-reason breakdown, the
+per-regime windowed/trend skill-vs-luck attribution, the trade ledger) in run-detail; and a flag/filter
+when single- and multi-window runs are mixed so a 2022 run is never read against a 2024 run as one
+number. Stays domain-oblivious (window/`fidelity_set`/the metric fields are opaque to the viewer).
 Subsumes the deferred regime-slice testing — windows ARE named slices.
 
 **(3b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses

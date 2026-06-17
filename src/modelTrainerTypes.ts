@@ -26,11 +26,12 @@ export interface TrainerLeverSpec {
   /** Plain-language explanation shown as a help tooltip in the launch form (for newcomers). */
   description?: string
   /**
-   * Whether this lever configures the MODEL (default) or the ENVIRONMENT the agent acts in (market
-   * mechanics — e.g. fees, take-profit/stop-loss). Environment levers are managed as named
-   * "environments" the hub runs models against, not as ordinary model knobs. Omitted ⇒ `model`.
+   * Whether this lever configures the MODEL (default), the ENVIRONMENT the agent acts in (market
+   * mechanics — e.g. fees, take-profit/stop-loss), or the DATASET it trains/tests on (asset, time
+   * window, fidelity). Environment and dataset levers are managed as named bundles the hub runs
+   * models against, not as ordinary model knobs. Omitted ⇒ `model`.
    */
-  scope?: 'model' | 'environment'
+  scope?: 'model' | 'environment' | 'dataset'
 }
 
 /** The single north-star metric a run is judged by. */
@@ -152,6 +153,13 @@ export interface ExperimentSpec {
    * across several named environments (e.g. different fee / TP-SL regimes) in a single campaign.
    */
   environments?: Array<Record<string, unknown>>
+  /**
+   * Dataset BUNDLES to run every configuration against — like {@link environments}, a set of
+   * (dataset) lever values applied together (NOT a cartesian product). Used to test one model across
+   * several named datasets (e.g. different assets / walk-forward windows / fidelity stacks) in a
+   * single campaign. Crosses the model matrix alongside `environments`.
+   */
+  datasets?: Array<Record<string, unknown>>
   /** Seeds to repeat every configuration with (sets `config.seed`); omit to run each config once. */
   seeds?: number[]
   /** Safety cap overriding the default maximum planned items. */
@@ -181,6 +189,44 @@ export interface TrainingRunDataset {
   to?: string
 }
 
+/** Per-exit-reason aggregate in a trading run's behavioural breakdown (sell/cover/tp/trailing/sl/open). */
+export interface ExitReasonStats {
+  count: number
+  wins: number
+  win_pct: number
+  total_pnl_pct: number
+  avg_pnl_pct: number
+}
+
+/** One equal-time sub-window of the test span: the market's move next to the model's realized P&L. */
+export interface RegimeWindow {
+  market_return_pct: number
+  realized_pnl_pct: number
+  n_trades: number
+  win_pct: number
+}
+
+/** Per market regime (up/flat/down by trailing trend): realized performance + how much of the window it occupied. */
+export interface RegimeTrendStats {
+  n_trades: number
+  win_pct: number
+  realized_pnl_pct: number
+  bars_pct: number
+}
+
+/** One reconstructed round-trip in a trading run's explainability ledger. */
+export interface TradeLedgerEntry {
+  entry_step: number
+  entry_price: number
+  exit_step: number
+  exit_price: number
+  side: 'long' | 'short'
+  reason: 'sell' | 'cover' | 'tp' | 'trailing' | 'sl' | 'open'
+  pnl: number
+  pnl_pct: number
+  bars_held: number
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
@@ -197,6 +243,12 @@ export interface TrainingRunSummary {
   calibration?: { unitsPerSecond?: number; secondsObserved?: number; units?: number }
   /** Optional per-run curves (e.g. `episode_return`) for the viewer's training-curve chart. */
   series?: Record<string, number[]>
+  /** Trading runs: per-exit-reason breakdown (how each position was closed). */
+  exits?: Record<string, ExitReasonStats>
+  /** Trading runs: skill-vs-luck regime split — equal time windows and trailing-trend buckets. */
+  regimes?: { windows?: RegimeWindow[]; trend?: Record<string, RegimeTrendStats> }
+  /** Trading runs: reconstructed round-trips (entry/exit, reason, P&L) — the explainability ledger. */
+  ledger?: TradeLedgerEntry[]
   /** Present on evaluate runs: which checkpoint was re-tested and how hard. */
   evaluation?: { checkpoint?: string; episodes?: number }
 }

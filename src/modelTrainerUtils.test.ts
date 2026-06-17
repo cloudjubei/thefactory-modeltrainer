@@ -242,6 +242,44 @@ describe('expandExperimentMatrix', () => {
     ).toThrow(/ghost/)
   })
 
+  it('crosses each configuration with dataset bundles (applied together, not cartesian)', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      {
+        sweep: { algo: ['a', 'b'] },
+        datasets: [
+          { lr: 0.001, steps: 10 },
+          { lr: 0.002, steps: 20 },
+        ],
+      },
+      hashByJson,
+    )
+    expect(items).toHaveLength(4)
+    const ds0 = items.filter((i) => i.config.lr === 0.001)
+    expect(ds0).toHaveLength(2)
+    expect(ds0.every((i) => i.config.steps === 10)).toBe(true)
+  })
+
+  it('crosses datasets AND environments together (model × dataset × environment)', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      {
+        sweep: { algo: ['a', 'b'] },
+        datasets: [{ lr: 0.001 }, { lr: 0.002 }],
+        environments: [{ steps: 10 }, { steps: 20 }],
+      },
+      hashByJson,
+    )
+    // 2 algos × 2 datasets × 2 environments = 8
+    expect(items).toHaveLength(8)
+  })
+
+  it('rejects a dataset value that names no lever', () => {
+    expect(() =>
+      expandExperimentMatrix(manifest(), { datasets: [{ ghost: 1 }] }, hashByJson),
+    ).toThrow(/ghost/)
+  })
+
   it('keys every item with the injected hash of its config', () => {
     const items = expandExperimentMatrix(manifest(), {}, hashByJson)
     expect(items[0].key).toBe(canonicalConfigString(items[0].config))

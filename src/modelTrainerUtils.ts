@@ -119,6 +119,14 @@ export function expandExperimentMatrix(
       }
     }
   }
+  const datasets = spec.datasets ?? []
+  for (const bundle of datasets) {
+    for (const key of Object.keys(bundle)) {
+      if (!leverKeys.includes(key)) {
+        throw new Error(`dataset value "${key}" names no manifest lever`)
+      }
+    }
+  }
 
   const base: Record<string, unknown> = {}
   for (const [key, lever] of Object.entries(manifest.levers)) {
@@ -130,7 +138,10 @@ export function expandExperimentMatrix(
   for (const [key, values] of Object.entries(sweep)) {
     configs = configs.flatMap((config) => values.map((value) => ({ ...config, [key]: value })))
   }
-  // Environment bundles apply TOGETHER (not cartesian): each crosses the whole model matrix.
+  // Dataset + environment bundles apply TOGETHER (not cartesian): each crosses the whole model matrix.
+  if (datasets.length > 0) {
+    configs = configs.flatMap((config) => datasets.map((bundle) => ({ ...config, ...bundle })))
+  }
   if (environments.length > 0) {
     configs = configs.flatMap((config) => environments.map((bundle) => ({ ...config, ...bundle })))
   }

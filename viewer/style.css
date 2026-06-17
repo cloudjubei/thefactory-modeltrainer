@@ -334,23 +334,33 @@ button:focus-visible,
   min-height: 0;
   overflow: auto;
 }
-/* DETAIL pane: each card scrolls its own content with its head pinned. */
+/* DETAIL pane: the visible detail/compare card fills the pane with a FIXED head + a scrolling inner
+   body, so the head stays put and only the content scrolls — no sticky overlap biting the card's
+   rounded top/bottom edges as it did before. */
 .runs-md__detail {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  overflow: hidden;
 }
-.runs-md__detail > .card {
+.runs-md__detail > .card:not([hidden]) {
   margin-bottom: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .runs-md__detail > .card > .card-head {
-  position: sticky;
-  top: 0;
-  z-index: 3;
+  flex: 0 0 auto;
   padding-bottom: 10px;
   background: var(--surface);
+}
+.runs-md__detail > .card > .card-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 @media (max-width: 900px) {
   .runs-md.has-detail {
@@ -365,8 +375,11 @@ button:focus-visible,
     overflow: visible;
     min-height: 0;
   }
-  .runs-md__detail {
-    overflow-y: visible;
+  .runs-md__detail,
+  .runs-md__detail > .card,
+  .runs-md__detail > .card > .card-scroll {
+    overflow: visible;
+    min-height: 0;
   }
 }
 
@@ -884,6 +897,74 @@ button:focus-visible,
   color: #d97706;
   background: rgba(217, 119, 6, 0.12);
 }
+.run-mark-short {
+  fill: #7c3aed;
+}
+.run-mark-cover {
+  fill: #0ea5e9;
+}
+.run-mark-trailing {
+  fill: #14b8a6;
+}
+/* Attempted (no-op) requests render hollow so they read as "tried, did not execute". */
+.run-mark-buy_attempt,
+.run-mark-sell_attempt,
+.run-mark-short_attempt,
+.run-mark-cover_attempt {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 2 1.5;
+}
+.run-mark-key.run-mark-short {
+  color: #7c3aed;
+  background: rgba(124, 58, 237, 0.12);
+}
+.run-mark-key.run-mark-cover {
+  color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.12);
+}
+.run-mark-key.run-mark-trailing {
+  color: #0d9488;
+  background: rgba(20, 184, 166, 0.14);
+}
+.run-mark-key.run-mark-buy_attempt,
+.run-mark-key.run-mark-sell_attempt,
+.run-mark-key.run-mark-short_attempt,
+.run-mark-key.run-mark-cover_attempt {
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--border, #cbd5e1);
+}
+/* Report-card tables: exits, regimes, trade ledger. */
+.report-table {
+  width: 100%;
+  margin: 6px 0 12px;
+}
+.report-table thead th {
+  text-align: left;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+  padding: 2px 8px;
+}
+.report-table th.num,
+.report-table td.num {
+  text-align: right;
+}
+.ledger-table {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.ledger-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0;
+}
 .run-mark-key.run-mark-price {
   color: var(--text);
   background: transparent;
@@ -1312,6 +1393,14 @@ pre.json {
   display: flex;
   gap: 8px;
   margin-top: 14px;
+}
+.form-actions.activity-confirm {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.form-actions.activity-confirm > .card-sub {
+  flex: 1 1 100%;
+  margin: 0;
 }
 .form-status {
   margin: 10px 0 0;

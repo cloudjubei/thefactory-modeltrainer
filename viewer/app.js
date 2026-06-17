@@ -21,6 +21,13 @@ const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const CONCURRENCY_SS = 'trainer.concurrency'
 const ACTIVITY_BUDGET_SS = 'trainer.activityBudget'
 const DEFAULT_ACTIVITY_BUDGET = 3
+// activityIds the user PAUSED (vs a backend-down stall). Persisted so a paused campaign still
+// surfaces as Resume-able after a reload; resuming re-launches it and the trainer's completed-run
+// skip continues from the last finished run. Cleared on resume/discard.
+const PAUSED_IDS_SS = 'trainer.pausedActivities'
+// The campaign currently showing the inline "kill the process?" pause confirmation (survives the
+// activity block's frequent re-renders, since it lives here, not in the DOM).
+let pausePromptId = null
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
@@ -1825,11 +1832,10 @@ const RUN_METRIC_ORDER = [
   'total_return_pct',
   'n_trades',
   'win_pct',
-  'sharpe',
-  'cagr_pct',
-  'max_drawdown_pct',
   'stop_losses',
   'final_net_worth',
+  'hold_return_pct',
+  'return_vs_hold_pct',
   'f1',
   'precision',
   'recall',
@@ -1845,22 +1851,22 @@ const DEGENERATE_TRADE_COUNT = 2
 // run actually traded (more than a near-hold count).
 function metricColorClass(mk, v) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return ''
-  if (mk === 'total_return_pct') return v >= 0 ? 'delta-pos' : 'delta-neg'
+  if (mk === 'total_return_pct' || mk === 'return_vs_hold_pct') return v >= 0 ? 'delta-pos' : 'delta-neg'
   if (mk === 'n_trades') return v > DEGENERATE_TRADE_COUNT ? 'delta-pos' : 'delta-neg'
   return ''
 }
 // Plain-language help per metric (shown as a "?" on the column header) so a newcomer
 // knows what each means + which direction is good.
 const METRIC_INFO = {
-  sharpe:
-    'Risk-adjusted return (return ÷ volatility, annualised). Higher is better; above ~1 is strong.',
-  total_return_pct: 'Total % return over the test window. Higher is better.',
-  cagr_pct: 'Annualised growth rate implied by the run. Higher is better.',
-  max_drawdown_pct: 'Worst peak-to-trough fall (negative %). Closer to 0 is better.',
+  total_return_pct:
+    'Realized return over the test window — the SUM of per-trade P&L (a position still open at the end is closed at the last price). Higher is better.',
+  traded_return: 'The objective: realized return gated by trade frequency (under-trading is punished).',
   win_pct: 'Share of trades that were profitable.',
-  n_trades: 'Number of trades taken — very high can mean churn (fees eat returns).',
+  n_trades: 'Number of trades (executed exits — agent sells plus auto TP/trailing/SL closes).',
   stop_losses: 'How many trades were closed by the stop-loss.',
-  final_net_worth: 'Ending portfolio value.',
+  final_net_worth: 'Ending portfolio value (initial + realized P&L).',
+  hold_return_pct: 'Buy-and-hold over the same window — a yardstick to beat, never the optimisation target.',
+  return_vs_hold_pct: 'Realized return minus buy-and-hold (indicative; the capital base differs from the fixed-stake strategy).',
   f1: 'Dip classifier: balance of precision & recall (0–1, higher better).',
   precision: 'Of predicted dips, how many were real (higher better).',
   recall: 'Of real dips, how many were caught (higher better).',
@@ -1878,24 +1884,19 @@ const METRIC_LABEL = {
   win_pct: 'win %',
   stop_losses: 'SLs',
   final_net_worth: 'Final $',
-  max_drawdown_pct: 'drawdown',
+  hold_return_pct: 'hold %',
+  return_vs_hold_pct: 'vs hold',
 }
 // Metrics shown to a fixed 2 decimals in the table (money + ratios read cleaner that way).
 const TWO_DP_METRICS = new Set([
   'win_pct',
   'final_net_worth',
-  'sharpe',
-  'cagr_pct',
-  'max_drawdown_pct',
+  'hold_return_pct',
+  'return_vs_hold_pct',
 ])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.
-const TABLE_HIDDEN_METRICS = new Set([
-  'trade_gate',
-  'traded_return',
-  'windows_profitable_pct',
-  'worst_window_return_pct',
-])
+const TABLE_HIDDEN_METRICS = new Set(['trade_gate', 'traded_return'])
 function metricLabel(mk) {
   return METRIC_LABEL[mk] || mk.replace(/_pct$/, ' %').replace(/_/g, ' ')
 }
@@ -2685,11 +2686,12 @@ function renderCompare() {
       <h3>Compare ${runs.length} runs</h3>
       <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
     </div>
+    <div class="card-scroll">
     ${versionWarn}
     ${comparisonTable}
     ${compareEquityChartHtml(runs, runColors)}
     <h3>Charts</h3>
-    <div class="charts-body">${chartsSectionsHtml(runs, runColors)}</div>`,
+    <div class="charts-body">${chartsSectionsHtml(runs, runColors)}</div></div>`,
   )
   card.hidden = false
   syncRunsMdLayout()
@@ -2862,9 +2864,30 @@ function datasetBadgeHtml(dataset) {
       : ''
   return `<span class="run-dataset" title="data this run trained on">${bits.join(' · ')}${span}</span>`
 }
-// Price line + trade markers (buy/sell/TP/SL), re-surfacing the repo's old
-// matplotlib action-on-price plot as serialised data drawn on our SVG engine.
-// Markers carry their own index into the downsampled price array, so none are lost.
+// Marker taxonomy for the price chart: executed opens (buy/short) & agent closes (sell/cover),
+// auto closes (tp/trailing/sl), and no-op ATTEMPTED requests (*_attempt). Bullish marks point up.
+const UP_MARKS = new Set(['buy', 'cover', 'tp', 'trailing', 'buy_attempt', 'cover_attempt'])
+const ATTEMPT_MARKS = new Set(['buy_attempt', 'sell_attempt', 'short_attempt', 'cover_attempt'])
+const MARK_LABEL = {
+  buy: 'buy',
+  sell: 'sell',
+  short: 'short',
+  cover: 'cover',
+  tp: 'TP',
+  trailing: 'trail',
+  sl: 'SL',
+  buy_attempt: 'buy⊘',
+  sell_attempt: 'sell⊘',
+  short_attempt: 'short⊘',
+  cover_attempt: 'cover⊘',
+}
+const MARK_ORDER = [
+  'buy', 'sell', 'short', 'cover', 'tp', 'trailing', 'sl',
+  'buy_attempt', 'sell_attempt', 'short_attempt', 'cover_attempt',
+]
+// Price line + trade markers, re-surfacing the repo's old matplotlib action-on-price plot as
+// serialised data drawn on our SVG engine. Markers carry their own index into the downsampled
+// price array, so none are lost. Attempted (no-op) requests render hollow (see run-mark CSS).
 function buildPriceActionChart(chart, opts) {
   const price = (chart.price || []).map(Number).filter(Number.isFinite)
   if (price.length < 2) return ''
@@ -2899,7 +2922,7 @@ function buildPriceActionChart(chart, opts) {
     if (!Number.isFinite(i) || !Number.isFinite(p)) continue
     const x = px(i)
     const y = py(p)
-    const up = m.type === 'buy' || m.type === 'tp'
+    const up = UP_MARKS.has(m.type)
     const d = up
       ? `M ${x} ${y - 5} L ${x - 4} ${y + 3} L ${x + 4} ${y + 3} Z`
       : `M ${x} ${y + 5} L ${x - 4} ${y - 3} L ${x + 4} ${y - 3} Z`
@@ -2921,12 +2944,18 @@ function priceActionSectionHtml(summary) {
   const chart = summary && summary.artifacts && summary.artifacts.runChart
   if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return ''
   const markers = Array.isArray(chart.markers) ? chart.markers : []
-  const counts = {}
-  for (const m of markers) counts[m.type] = (counts[m.type] || 0) + 1
-  // Always label the price line; then each action marker that occurred (with its count).
-  const markerKeys = ['buy', 'sell', 'tp', 'sl']
-    .filter((t) => counts[t])
-    .map((t) => `<span class="run-mark-key run-mark-${t}">${escapeHtml(t)} ${counts[t]}</span>`)
+  // Prefer the producer's AUTHORITATIVE counts (tallied before the draw-only downsample dedup, so
+  // they match the metrics/ledger); fall back to tallying drawn markers for runs that predate counts.
+  let counts = chart.counts && typeof chart.counts === 'object' ? chart.counts : null
+  if (!counts) {
+    counts = {}
+    for (const m of markers) counts[m.type] = (counts[m.type] || 0) + 1
+  }
+  const markerKeys = MARK_ORDER.filter((t) => counts[t])
+    .map(
+      (t) =>
+        `<span class="run-mark-key run-mark-${t}" title="${ATTEMPT_MARKS.has(t) ? 'requested but did not execute (no-op)' : 'executed'}">${escapeHtml(MARK_LABEL[t] || t)} ${counts[t]}</span>`,
+    )
     .join(' ')
   const legend = `<p class="badges-row run-mark-legend"><span class="run-mark-key run-mark-price">price</span>${markerKeys ? ` ${markerKeys}` : ''}</p>`
   const svg = buildPriceActionChart(chart, {
@@ -2936,6 +2965,111 @@ function priceActionSectionHtml(summary) {
     height: 200,
   })
   return `<h3>Price &amp; actions</h3>${legend}<div class="chart-wrap">${svg}</div>`
+}
+// Human-readable label for an exit reason, shared by the exits table and the ledger.
+const EXIT_REASON_LABEL = {
+  sell: 'agent sell (long)',
+  cover: 'agent cover (short)',
+  tp: 'take-profit',
+  trailing: 'trailing TP',
+  sl: 'stop-loss',
+  open: 'open at end (implied)',
+}
+function fmtReportPct(v) {
+  const n = Number(v)
+  return Number.isFinite(n) ? `${n.toFixed(2)}%` : '—'
+}
+// Exit-reason breakdown: how each position was closed — agent decisions (sell/cover) vs the
+// auto TP/trailing/SL rules, plus an implied close for a position still open at the end. Directly
+// answers "does the model decide to sell, or do the rules close for it?".
+function exitsSectionHtml(summary) {
+  const exits = summary && summary.exits
+  if (!exits || typeof exits !== 'object') return ''
+  const order = ['sell', 'cover', 'tp', 'trailing', 'sl', 'open']
+  const keys = Object.keys(exits).sort((a, b) => {
+    const ia = order.indexOf(a)
+    const ib = order.indexOf(b)
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+  })
+  if (!keys.length) return ''
+  const rows = keys
+    .map((k) => {
+      const e = exits[k] || {}
+      const pnl = Number(e.total_pnl_pct)
+      const cls = Number.isFinite(pnl) ? (pnl >= 0 ? 'delta-pos' : 'delta-neg') : ''
+      return `<tr><th>${escapeHtml(EXIT_REASON_LABEL[k] || k)}</th>
+        <td class="num">${Number(e.count) || 0}</td>
+        <td class="num">${escapeHtml(fmtReportPct(e.win_pct))}</td>
+        <td class="num ${cls}">${escapeHtml(fmtReportPct(e.total_pnl_pct))}</td>
+        <td class="num">${escapeHtml(fmtReportPct(e.avg_pnl_pct))}</td></tr>`
+    })
+    .join('')
+  return `<h3>Exits <span class="card-sub">— how positions closed</span></h3>
+    <table class="kv-table report-table"><thead><tr><th>reason</th><th class="num">#</th><th class="num">win %</th><th class="num">total P&amp;L %</th><th class="num">avg P&amp;L %</th></tr></thead>
+    <tbody>${rows}</tbody></table>`
+}
+// Skill-vs-luck: per equal-time window and per trailing-trend regime, the market's move next to the
+// model's realized trading P&L. Profit that only appears where the market rose is beta, not timing.
+function regimesSectionHtml(summary) {
+  const r = summary && summary.regimes
+  if (!r || typeof r !== 'object') return ''
+  let out = ''
+  if (Array.isArray(r.windows) && r.windows.length) {
+    const rows = r.windows
+      .map((w, i) => {
+        const mkt = Number(w.market_return_pct)
+        const pnl = Number(w.realized_pnl_pct)
+        return `<tr><th>window ${i + 1}</th>
+          <td class="num ${mkt >= 0 ? 'delta-pos' : 'delta-neg'}">${escapeHtml(fmtReportPct(mkt))}</td>
+          <td class="num ${pnl >= 0 ? 'delta-pos' : 'delta-neg'}">${escapeHtml(fmtReportPct(pnl))}</td>
+          <td class="num">${Number(w.n_trades) || 0}</td>
+          <td class="num">${escapeHtml(fmtReportPct(w.win_pct))}</td></tr>`
+      })
+      .join('')
+    out += `<table class="kv-table report-table"><thead><tr><th>by time</th><th class="num">market %</th><th class="num">model P&amp;L %</th><th class="num">#</th><th class="num">win %</th></tr></thead><tbody>${rows}</tbody></table>`
+  }
+  if (r.trend && typeof r.trend === 'object') {
+    const rows = ['up', 'flat', 'down']
+      .filter((k) => r.trend[k])
+      .map((k) => {
+        const t = r.trend[k]
+        const pnl = Number(t.realized_pnl_pct)
+        return `<tr><th>${escapeHtml(k)} market</th>
+          <td class="num ${pnl >= 0 ? 'delta-pos' : 'delta-neg'}">${escapeHtml(fmtReportPct(pnl))}</td>
+          <td class="num">${Number(t.n_trades) || 0}</td>
+          <td class="num">${escapeHtml(fmtReportPct(t.win_pct))}</td>
+          <td class="num">${escapeHtml(fmtReportPct(t.bars_pct))}</td></tr>`
+      })
+      .join('')
+    if (rows) {
+      out += `<table class="kv-table report-table"><thead><tr><th>by regime</th><th class="num">model P&amp;L %</th><th class="num">#</th><th class="num">win %</th><th class="num">% of window</th></tr></thead><tbody>${rows}</tbody></table>`
+    }
+  }
+  if (!out) return ''
+  return `<h3>Regimes <span class="card-sub">— skill vs riding the market</span></h3>${out}`
+}
+// The trade ledger: every reconstructed round-trip, so a run is readable rather than a black box.
+// Long ledgers collapse behind a disclosure.
+const LEDGER_INLINE_MAX = 60
+function ledgerRowHtml(t) {
+  const pnl = Number(t.pnl_pct)
+  const cls = Number.isFinite(pnl) ? (pnl >= 0 ? 'delta-pos' : 'delta-neg') : ''
+  return `<tr><td class="num">${Number(t.entry_step)}→${Number(t.exit_step)}</td>
+    <td>${escapeHtml(String(t.side || ''))}</td>
+    <td>${escapeHtml(EXIT_REASON_LABEL[t.reason] || String(t.reason || ''))}</td>
+    <td class="num">${escapeHtml(formatTickValue(Number(t.entry_price)))}→${escapeHtml(formatTickValue(Number(t.exit_price)))}</td>
+    <td class="num">${Number(t.bars_held)}</td>
+    <td class="num ${cls}">${escapeHtml(fmtReportPct(t.pnl_pct))}</td></tr>`
+}
+function ledgerSectionHtml(summary) {
+  const ledger = summary && Array.isArray(summary.ledger) ? summary.ledger : []
+  if (!ledger.length) return ''
+  const head = `<thead><tr><th class="num">steps</th><th>side</th><th>exit</th><th class="num">price</th><th class="num">bars</th><th class="num">P&amp;L %</th></tr></thead>`
+  const body = `<tbody>${ledger.map(ledgerRowHtml).join('')}</tbody>`
+  const table = `<table class="kv-table report-table ledger-table">${head}${body}</table>`
+  const title = `<h3>Trade ledger <span class="card-sub">— ${ledger.length} round-trips</span></h3>`
+  if (ledger.length <= LEDGER_INLINE_MAX) return `${title}${table}`
+  return `${title}<details class="ledger-details"><summary>Show all ${ledger.length} round-trips</summary>${table}</details>`
 }
 // Model equity vs the buy-and-hold control: what the portfolio would be worth if
 // you'd simply bought at step 0 and held. Hold is a comparison CONTROL (not a
@@ -3056,6 +3190,7 @@ function renderRunDetail(key) {
         <button type="button" id="run-detail-close" class="icon-btn" title="Close" aria-label="Close">✕</button>
       </div>
     </div>
+    <div class="card-scroll">
     ${failed ? failureDetailHtml(s, run.key) : ''}
     ${flags.length ? `<h3>Health flags</h3><p class="badges-row">${flagChips}</p>` : ''}
     ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
@@ -3064,12 +3199,15 @@ function renderRunDetail(key) {
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
     ${priceActionSectionHtml(s)}
+    ${exitsSectionHtml(s)}
+    ${regimesSectionHtml(s)}
     ${equityVsHoldSectionHtml(s) || trainingCurveSectionHtml(s)}
+    ${ledgerSectionHtml(s)}
     <h3>Config</h3>
     <pre class="json">${escapeHtml(JSON.stringify(s.config || {}, null, 2))}</pre>
     <h3>Artifacts</h3>
     <p class="mono">${checkpoint ? escapeHtml(checkpoint) : '—'}</p>
-    <p class="card-sub">configHash <code>${escapeHtml(run.key)}</code></p>`
+    <p class="card-sub">configHash <code>${escapeHtml(run.key)}</code></p></div>`
   setHtml(panel, html)
   panel.hidden = false
   syncRunsMdLayout()
@@ -3143,9 +3281,7 @@ async function chatAboutRun(key) {
   const logTail = Array.isArray(s.logTail) ? s.logTail.slice(-40).join('\n') : ''
   const verdict = verdictsCache.get(key)
   const runContext = [
-    failed
-      ? `The user is investigating training run ${shortKey(key)}, which FAILED.`
-      : `The user is discussing training run ${shortKey(key)}.`,
+    `You are discussing ONE specific, already-selected training run — run id "${shortKey(key)}"${failed ? ', which FAILED' : ''}. Its full configuration, metrics${verdict && verdict.why ? ', judge verdict' : ''}${failed ? ', error and recent logs' : ''} are all given below, so do NOT ask the user for the run id or any of these details — work directly from what follows.`,
     `Pipeline v${String(s.pipelineVersion || '1')}.`,
     failed
       ? ''
@@ -4747,6 +4883,27 @@ function rememberActivityBudget(n) {
     // best-effort
   }
 }
+function loadPausedIds() {
+  try {
+    const v = JSON.parse(localStorage.getItem(PAUSED_IDS_SS) || '[]')
+    return new Set(Array.isArray(v) ? v.map(String) : [])
+  } catch {
+    return new Set()
+  }
+}
+function isPausedByUser(activityId) {
+  return loadPausedIds().has(String(activityId))
+}
+function setPausedByUser(activityId, paused) {
+  try {
+    const ids = loadPausedIds()
+    if (paused) ids.add(String(activityId))
+    else ids.delete(String(activityId))
+    localStorage.setItem(PAUSED_IDS_SS, JSON.stringify([...ids]))
+  } catch {
+    // best-effort
+  }
+}
 function savedComputeTarget() {
   try {
     return sessionStorage.getItem(COMPUTE_TARGET_SS) || ''
@@ -5202,7 +5359,11 @@ async function resumeRunningActivity() {
   // each as PAUSED + Resume — resuming re-launches it and the trainer's completed-record skip
   // re-runs only the PENDING runs (a 4-run campaign with 2 done resumes just the other 2).
   for (const a of mine) {
-    if (a.status !== 'running' || a.isLive !== false) continue
+    // Surface as PAUSED: an orphaned 'running' record (backend restarted mid-run), OR one the user
+    // explicitly paused (now 'aborted' but flagged) — both resume from the last completed run.
+    const orphanedRunning = a.status === 'running' && a.isLive === false
+    const userPaused = isPausedByUser(a.activityId) && a.isLive !== true
+    if (!orphanedRunning && !userPaused) continue
     if (!a.resumeToken || !a.resumeToken.activityType) continue
     if (tracked(a.activityId)) continue
     const type = a.resumeToken.activityType || 'train'
@@ -5281,6 +5442,12 @@ async function observeTrainActivity(entry, epoch) {
     if (mineProgress) entry.progress = mineProgress
     if (mineCampaign) entry.campaign = mineCampaign
     if (act && act.status && act.status !== 'running') {
+      // A user pause aborts the process but must stay Resume-able — keep it 'paused', don't settle.
+      if (isPausedByUser(activityId)) {
+        entry.status = 'paused'
+        renderActivity()
+        return
+      }
       entry.status = act.status
       await settleTrainActivity(entry)
       return
@@ -5350,9 +5517,26 @@ async function settleTrainActivity(entry) {
   await renderRuns()
   await processSettledCampaignEffects()
 }
+// PAUSE ONE running campaign — kills the process but keeps it resumable: marks it user-paused (so the
+// observe loop + reload detection keep it as a Resume-able block), then aborts the live process. The
+// trainer's completed-run skip means a later Resume continues from the last finished run.
+async function pauseActivityById(activityId) {
+  if (!activityId) return
+  pausePromptId = null
+  setPausedByUser(activityId, true)
+  const entry = [...liveActivities.values()].find((a) => a.activityId === activityId)
+  if (entry) entry.status = 'paused'
+  renderActivity()
+  try {
+    await window.OverseerBridge.abortActivity(activityId)
+  } catch {
+    // best-effort — the entry stays paused (user-marked) regardless
+  }
+}
 // Abort ONE activity by id — the observe loop's next poll sees 'aborted' and settles it.
 async function abortActivityById(activityId) {
   if (!activityId) return
+  setPausedByUser(activityId, false)
   const btn = document.querySelector(`[data-abort="${escapeHtml(activityId)}"]`)
   if (btn) btn.disabled = true
   try {
@@ -5382,6 +5566,7 @@ async function resumeActivityById(activityId) {
   if (btn) btn.disabled = true
   try {
     await window.OverseerBridge.resumeActivity(activityId)
+    setPausedByUser(activityId, false)
     entry.status = 'running'
     renderActivity()
     void observeActivity(entry)
@@ -5587,15 +5772,25 @@ function activityBlockHtml(entry) {
           ? [p.current]
           : []
       : []
-  const actions =
-    running && entry.activityId
-      ? `<div class="form-actions"><button type="button" class="danger-btn" data-abort="${escapeHtml(entry.activityId)}">Abort</button></div>`
-      : status === 'paused' && entry.activityId
-        ? `<div class="form-actions"><button type="button" data-resume="${escapeHtml(entry.activityId)}">Resume</button><button type="button" class="ghost-btn" data-abort="${escapeHtml(entry.activityId)}">Discard</button></div>`
-        : ''
+  const id = escapeHtml(entry.activityId || '')
+  let actions = ''
+  if (running && entry.activityId) {
+    if (isTrain) {
+      // Campaigns Pause (resumable); a pause kills the live process but keeps completed runs, so it
+      // resumes from the last finished run. Confirm inline (window.confirm is blocked in the iframe).
+      actions =
+        pausePromptId === entry.activityId
+          ? `<div class="form-actions activity-confirm"><span class="card-sub">Kill the running process and pause? It will resume from the last completed run.</span><button type="button" class="danger-btn" data-pause-confirm="${id}">Pause</button><button type="button" class="ghost-btn" data-pause-cancel="${id}">Cancel</button></div>`
+          : `<div class="form-actions"><button type="button" data-pause="${id}">Pause</button></div>`
+    } else {
+      actions = `<div class="form-actions"><button type="button" class="danger-btn" data-abort="${id}">Abort</button></div>`
+    }
+  } else if (status === 'paused' && entry.activityId) {
+    actions = `<div class="form-actions"><button type="button" data-resume="${id}">Resume</button><button type="button" class="ghost-btn" data-abort="${id}">Discard</button></div>`
+  }
   const stalledNote =
     status === 'paused' && isTrain
-      ? '<p class="card-sub">Stalled (the backend restarted while it ran). Resume re-runs only the unfinished runs — completed ones are kept.</p>'
+      ? '<p class="card-sub">Paused — Resume re-runs only the unfinished runs; completed ones are kept. (A backend restart pauses a campaign here too.)</p>'
       : ''
   return `<div class="activity-block">
     <div class="activity-status-row">
@@ -5657,6 +5852,23 @@ function setupActivity() {
   const body = byId('activity-body')
   if (!body) return
   body.addEventListener('click', (event) => {
+    const pauseBtn = event.target.closest('button[data-pause]')
+    if (pauseBtn) {
+      pausePromptId = pauseBtn.dataset.pause
+      renderActivity()
+      return
+    }
+    const pauseConfirmBtn = event.target.closest('button[data-pause-confirm]')
+    if (pauseConfirmBtn) {
+      pauseActivityById(pauseConfirmBtn.dataset.pauseConfirm)
+      return
+    }
+    const pauseCancelBtn = event.target.closest('button[data-pause-cancel]')
+    if (pauseCancelBtn) {
+      pausePromptId = null
+      renderActivity()
+      return
+    }
     const abortBtn = event.target.closest('button[data-abort]')
     if (abortBtn) {
       abortActivityById(abortBtn.dataset.abort)
@@ -5701,8 +5913,9 @@ function showTab(id) {
       btn.setAttribute('aria-selected', String(tab.id === target))
     }
   }
-  // Runs is the only full-width, own-scroll master-detail tab.
-  const main = document.querySelector('.tab-main')
+  // Runs is the only full-width, own-scroll master-detail tab. Scope to the DASHBOARD's tab-main —
+  // the home view has its own `.tab-main` that would otherwise match `querySelector` first.
+  const main = document.querySelector('#view-dashboard .tab-main')
   if (main) main.classList.toggle('is-fullwidth', target === 'runs')
   try {
     sessionStorage.setItem(ACTIVE_TAB_SS, target)
