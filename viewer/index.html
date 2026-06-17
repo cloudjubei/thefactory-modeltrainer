@@ -173,6 +173,37 @@
             </section>
           </section>
 
+          <!-- Datasets (named data bundles — asset / walk-forward window / fidelity stack — to run models against) -->
+          <section id="tab-datasets" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="datasets-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="datasets-h">Datasets</h2>
+                  <p class="card-sub">
+                    A named set of <em>dataset</em> settings (asset, walk-forward window, fidelity
+                    stack — e.g. 1h vs 1h+1d) — which data a model trains and tests on, not the
+                    model itself. Run a model against several to see how it holds up across
+                    datasets.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="dataset-add-toggle"
+                    class="icon-btn"
+                    title="Add dataset"
+                    aria-label="Add dataset"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <p id="datasets-status" class="form-status" role="status" hidden></p>
+              <form id="dataset-form" class="hypothesis-form" autocomplete="off" hidden></form>
+              <div id="datasets-body" class="environments-body"></div>
+            </section>
+          </section>
+
           <!-- Environments (named market-mechanic bundles — fee / TP-SL — to run models against) -->
           <section id="tab-environments" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="environments-h">

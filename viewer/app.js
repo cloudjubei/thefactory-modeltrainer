@@ -31,6 +31,7 @@ let pausePromptId = null
 const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
+const DATASET_RECORD_SUFFIX = '-dataset'
 const QUEUE_RECORD_TYPE = 'trainer-queue'
 const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
@@ -43,6 +44,7 @@ const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'hypotheses', label: 'Hypotheses' },
   { id: 'versions', label: 'Versions' },
+  { id: 'datasets', label: 'Datasets' },
   { id: 'environments', label: 'Environments' },
   { id: 'launch', label: 'Launch' },
   { id: 'activity', label: 'Activity' },
@@ -117,6 +119,11 @@ let runsDeleteArmTimer = null
 let runsViewMode = 'runs'
 // Named environments (env-lever bundles) the user defined for this project.
 let environmentsCache = []
+// Named datasets (dataset-lever bundles — asset / window / fidelity) the user defined.
+let datasetsCache = []
+// Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
+// override the launch picker's selection. Cleared on reset / manual picker change.
+let launchPresetDatasets = []
 // When drilled into a single setup's runs (via the by-setup view), this holds that
 // setup's key so the runs view can show its conclusion-note editor (C4 ledger).
 let runsDrillSetupKey = null
@@ -1294,6 +1301,8 @@ function resetDashboardState() {
   const environmentsBody = byId('environments-body')
   if (environmentsBody) environmentsBody.innerHTML = ''
   environmentsCache = []
+  datasetsCache = []
+  launchPresetDatasets = []
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -1311,6 +1320,7 @@ async function openProject(projectKey) {
   applyManifestChrome()
   // Load saved environments before the launch form so its environment picker is populated.
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
+  datasetsCache = hasDatasetLevers() ? await readDatasets() : []
   if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
@@ -1805,6 +1815,16 @@ function drillIntoEnvironment(sig) {
   runsViewMode = 'runs'
   renderRunsTable()
 }
+// Drill from a by-dataset row into that dataset's runs.
+function drillIntoDataset(sig) {
+  const group = aggregateByDataset(applyRunsFilters(runsCache)).find((g) => g.sig === sig)
+  if (!group) return
+  runsFilterKeys = new Set(group.runs.map((r) => r.key))
+  runsFilterLabel = group.name
+  runsDrillSetupKey = null
+  runsViewMode = 'runs'
+  renderRunsTable()
+}
 // Viewing the Runs tab clears the project's unseen badge: mark every current run
 // key as seen, persisting the union when any are new. No-op when nothing changed,
 // so the poll-driven renderRuns does not write every tick.
@@ -1851,7 +1871,8 @@ const DEGENERATE_TRADE_COUNT = 2
 // run actually traded (more than a near-hold count).
 function metricColorClass(mk, v) {
   if (typeof v !== 'number' || !Number.isFinite(v)) return ''
-  if (mk === 'total_return_pct' || mk === 'return_vs_hold_pct') return v >= 0 ? 'delta-pos' : 'delta-neg'
+  if (mk === 'total_return_pct' || mk === 'return_vs_hold_pct')
+    return v >= 0 ? 'delta-pos' : 'delta-neg'
   if (mk === 'n_trades') return v > DEGENERATE_TRADE_COUNT ? 'delta-pos' : 'delta-neg'
   return ''
 }
@@ -1860,13 +1881,16 @@ function metricColorClass(mk, v) {
 const METRIC_INFO = {
   total_return_pct:
     'Realized return over the test window — the SUM of per-trade P&L (a position still open at the end is closed at the last price). Higher is better.',
-  traded_return: 'The objective: realized return gated by trade frequency (under-trading is punished).',
+  traded_return:
+    'The objective: realized return gated by trade frequency (under-trading is punished).',
   win_pct: 'Share of trades that were profitable.',
   n_trades: 'Number of trades (executed exits — agent sells plus auto TP/trailing/SL closes).',
   stop_losses: 'How many trades were closed by the stop-loss.',
   final_net_worth: 'Ending portfolio value (initial + realized P&L).',
-  hold_return_pct: 'Buy-and-hold over the same window — a yardstick to beat, never the optimisation target.',
-  return_vs_hold_pct: 'Realized return minus buy-and-hold (indicative; the capital base differs from the fixed-stake strategy).',
+  hold_return_pct:
+    'Buy-and-hold over the same window — a yardstick to beat, never the optimisation target.',
+  return_vs_hold_pct:
+    'Realized return minus buy-and-hold (indicative; the capital base differs from the fixed-stake strategy).',
   f1: 'Dip classifier: balance of precision & recall (0–1, higher better).',
   precision: 'Of predicted dips, how many were real (higher better).',
   recall: 'Of real dips, how many were caught (higher better).',
@@ -2292,8 +2316,11 @@ function runsToolbarHtml(shownCount, total) {
   const envViewBtn = hasEnvLevers()
     ? `<button type="button" class="runs-view-btn${runsViewMode === 'environment' ? ' is-active' : ''}" data-view="environment"${helpAttr('Group runs by the ENVIRONMENT they ran in (fee / TP-SL regime), so you can see how a model holds up across regimes.')}>By environment</button>`
     : ''
+  const datasetViewBtn = hasDatasetLevers()
+    ? `<button type="button" class="runs-view-btn${runsViewMode === 'dataset' ? ' is-active' : ''}" data-view="dataset"${helpAttr('Group runs by the DATASET they ran on (asset / walk-forward window / fidelity stack), so you can see how a model holds up across datasets.')}>By dataset</button>`
+    : ''
   const toggle = `<div class="runs-viewmode">
-    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup"${helpAttr('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}>By setup</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>${envViewBtn}
+    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'setup' ? ' is-active' : ''}" data-view="setup"${helpAttr('Group runs by SETUP (config ignoring seed) and show the spread across seeds — what a setup concluded, not one lucky run.')}>By setup</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>${datasetViewBtn}${envViewBtn}
   </div>`
   const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
     <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
@@ -2465,6 +2492,57 @@ function byEnvironmentTableHtml(filtered) {
     <thead><tr><th>Environment</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`
 }
+function aggregateByDataset(runs) {
+  const groups = new Map()
+  for (const r of runs) {
+    const sig = runDatasetSignature(r)
+    if (!groups.has(sig)) groups.set(sig, { name: runDatasetName(r), sig, runs: [] })
+    groups.get(sig).runs.push(r)
+  }
+  const out = []
+  for (const g of groups.values()) {
+    const objs = g.runs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    out.push({
+      name: g.name,
+      sig: g.sig,
+      runs: g.runs,
+      count: g.runs.length,
+      setups: new Set(g.runs.map(setupKeyOfRun)).size,
+      objMin: objs.length ? Math.min(...objs) : NaN,
+      objMax: objs.length ? Math.max(...objs) : NaN,
+      objAvg: mean(objs),
+    })
+  }
+  return out
+}
+function byDatasetTableHtml(filtered) {
+  const dir = objectiveDirection()
+  const groups = aggregateByDataset(filtered).sort((a, b) => {
+    const fa = Number.isFinite(a.objMax)
+    const fb = Number.isFinite(b.objMax)
+    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
+    return fa ? -1 : fb ? 1 : 0
+  })
+  const on = escapeHtml(objectiveName())
+  const rows = groups
+    .map((g) => {
+      const range = Number.isFinite(g.objMin)
+        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
+        : '—'
+      return `<tr data-dataset-sig="${escapeHtml(g.sig)}" class="setup-row">
+        <td>${escapeHtml(g.name)}</td>
+        <td class="card-sub">${escapeHtml(g.sig)}</td>
+        <td class="num">${g.count}</td>
+        <td class="num">${g.setups}</td>
+        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
+        <td class="num">${range}</td>
+      </tr>`
+    })
+    .join('')
+  return `<div class="table-wrap"><table class="runs-table">
+    <thead><tr><th>Dataset</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`
+}
 // When drilled into a single setup, an editor for that setup's conclusion note —
 // the user half of the ledger (LLM verdict + score being the other halves).
 function setupNoteEditorHtml() {
@@ -2526,6 +2604,12 @@ function renderRunsTable() {
   if (runsViewMode === 'environment') {
     const legend = `<p class="runs-legend">Each row is an ENVIRONMENT (fee / TP-SL regime) a run trained in. Click one to drill into its runs. "Custom" = env values matching no saved environment.</p>`
     setHtml(body, `${toolbar}${byEnvironmentTableHtml(filtered)}${legend}`)
+    renderCompare()
+    return
+  }
+  if (runsViewMode === 'dataset') {
+    const legend = `<p class="runs-legend">Each row is a DATASET (asset / walk-forward window / fidelity stack) a run trained on. Click one to drill into its runs. "Custom" = dataset values matching no saved dataset.</p>`
+    setHtml(body, `${toolbar}${byDatasetTableHtml(filtered)}${legend}`)
     renderCompare()
     return
   }
@@ -2741,8 +2825,10 @@ function compareEquityChartHtml(runs, runColors) {
     },
   )}</div>`
 }
+// Surfaced via the objective headline already, so it would just duplicate a row in the detail table.
+const DETAIL_HIDDEN_METRICS = new Set(['traded_return'])
 function metricsTableHtml(metrics) {
-  const entries = Object.entries(metrics || {})
+  const entries = Object.entries(metrics || {}).filter(([k]) => !DETAIL_HIDDEN_METRICS.has(k))
   if (!entries.length) return '<p class="card-sub">No metrics recorded.</p>'
   const rows = entries
     .map(
@@ -2882,8 +2968,17 @@ const MARK_LABEL = {
   cover_attempt: 'cover⊘',
 }
 const MARK_ORDER = [
-  'buy', 'sell', 'short', 'cover', 'tp', 'trailing', 'sl',
-  'buy_attempt', 'sell_attempt', 'short_attempt', 'cover_attempt',
+  'buy',
+  'sell',
+  'short',
+  'cover',
+  'tp',
+  'trailing',
+  'sl',
+  'buy_attempt',
+  'sell_attempt',
+  'short_attempt',
+  'cover_attempt',
 ]
 // Price line + trade markers, re-surfacing the repo's old matplotlib action-on-price plot as
 // serialised data drawn on our SVG engine. Markers carry their own index into the downsampled
@@ -2935,14 +3030,14 @@ function buildPriceActionChart(chart, opts) {
       `<text class="chart-label" x="${pad.left + innerW / 2}" y="${H - 4}" text-anchor="middle">${escapeHtml(opts.xLabel)}</text>`,
     )
   }
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml((opts && opts.ariaLabel) || 'price with trade actions')}">${parts.join('')}</svg>`
+  const sizeAttr =
+    opts && opts.fixedSize ? ` width="${W}" height="${H}" style="width:${W}px;height:${H}px"` : ''
+  return `<svg class="chart"${sizeAttr} viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml((opts && opts.ariaLabel) || 'price with trade actions')}">${parts.join('')}</svg>`
 }
 // The custom per-run result view: a price chart with the run's buy/sell/TP/SL
 // markers + a count legend. Gated on `artifacts.runChart`, so non-trading
 // projects (cartpole, regression) keep the generic run-detail view.
-function priceActionSectionHtml(summary) {
-  const chart = summary && summary.artifacts && summary.artifacts.runChart
-  if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return ''
+function priceActionLegendHtml(chart) {
   const markers = Array.isArray(chart.markers) ? chart.markers : []
   // Prefer the producer's AUTHORITATIVE counts (tallied before the draw-only downsample dedup, so
   // they match the metrics/ledger); fall back to tallying drawn markers for runs that predate counts.
@@ -2957,14 +3052,82 @@ function priceActionSectionHtml(summary) {
         `<span class="run-mark-key run-mark-${t}" title="${ATTEMPT_MARKS.has(t) ? 'requested but did not execute (no-op)' : 'executed'}">${escapeHtml(MARK_LABEL[t] || t)} ${counts[t]}</span>`,
     )
     .join(' ')
-  const legend = `<p class="badges-row run-mark-legend"><span class="run-mark-key run-mark-price">price</span>${markerKeys ? ` ${markerKeys}` : ''}</p>`
+  return `<p class="badges-row run-mark-legend"><span class="run-mark-key run-mark-price">price</span>${markerKeys ? ` ${markerKeys}` : ''}</p>`
+}
+function priceActionSectionHtml(summary, key) {
+  const chart = summary && summary.artifacts && summary.artifacts.runChart
+  if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return ''
+  const legend = priceActionLegendHtml(chart)
   const svg = buildPriceActionChart(chart, {
     xLabel: 'step',
     ariaLabel: 'price with trade actions',
     width: 640,
     height: 200,
   })
-  return `<h3>Price &amp; actions</h3>${legend}<div class="chart-wrap">${svg}</div>`
+  const expand = key
+    ? ` <button type="button" class="icon-btn chart-expand-btn" data-action="expand-chart" data-key="${escapeHtml(key)}" title="Open larger — zoom &amp; scroll" aria-label="Expand chart">🔍</button>`
+    : ''
+  return `<h3>Price &amp; actions${expand}</h3>${legend}<div class="chart-wrap">${svg}</div>`
+}
+// Expanded Price & actions: a popup of the same chart at large size with zoom (widens the plot so
+// dense marker runs separate) and horizontal scroll. Uses the run's downsampled chart data.
+let chartModalData = null
+let chartModalZoom = 1
+function expandPriceActionChart(key) {
+  const run = runsCache.find((r) => r.key === key)
+  const chart = run && run.summary && run.summary.artifacts && run.summary.artifacts.runChart
+  if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return
+  chartModalData = chart
+  chartModalZoom = 1
+  renderChartModal()
+}
+function setChartZoom(z) {
+  chartModalZoom = Math.max(1, Math.min(12, z))
+  renderChartModal()
+}
+function closeChartModal() {
+  const m = byId('chart-modal')
+  if (m) m.hidden = true
+}
+function renderChartModal() {
+  if (!chartModalData) return
+  let modal = byId('chart-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'chart-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-chart-close]'))
+        return closeChartModal()
+      if (event.target.closest('[data-chart-zoom="in"]')) return setChartZoom(chartModalZoom * 1.5)
+      if (event.target.closest('[data-chart-zoom="out"]')) return setChartZoom(chartModalZoom / 1.5)
+      if (event.target.closest('[data-chart-zoom="reset"]')) return setChartZoom(1)
+    })
+  }
+  const width = Math.round(1100 * chartModalZoom)
+  const svg = buildPriceActionChart(chartModalData, {
+    xLabel: 'step',
+    ariaLabel: 'price with trade actions (expanded)',
+    width,
+    height: 420,
+    fixedSize: true,
+  })
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-chart-close></div>
+    <div class="chart-modal__panel" role="dialog" aria-label="Price and actions (expanded)">
+      <div class="chart-modal__head">
+        <strong>Price &amp; actions <span class="card-sub">— ${Math.round(chartModalZoom * 100)}%</span></strong>
+        <div class="chart-modal__tools">
+          <button type="button" class="icon-btn" data-chart-zoom="out" title="Zoom out" aria-label="Zoom out">−</button>
+          <button type="button" class="icon-btn" data-chart-zoom="reset" title="Reset zoom" aria-label="Reset zoom">100%</button>
+          <button type="button" class="icon-btn" data-chart-zoom="in" title="Zoom in" aria-label="Zoom in">+</button>
+          <button type="button" class="icon-btn" data-chart-close title="Close (Esc)" aria-label="Close">✕</button>
+        </div>
+      </div>
+      ${priceActionLegendHtml(chartModalData)}
+      <div class="chart-modal__scroll">${svg}</div>
+    </div>`
+  modal.hidden = false
 }
 // Human-readable label for an exit reason, shared by the exits table and the ledger.
 const EXIT_REASON_LABEL = {
@@ -3172,6 +3335,9 @@ function renderRunDetail(key) {
   const envBit = hasEnvLevers()
     ? ` · <span title="${escapeHtml(runEnvSignature(run))}">env ${escapeHtml(runEnvName(run))}</span>`
     : ''
+  const datasetNameBit = hasDatasetLevers()
+    ? ` · <span title="${escapeHtml(runDatasetSignature(run))}">dataset ${escapeHtml(runDatasetName(run))}</span>`
+    : ''
   const headline = failed
     ? '<span class="badge is-bad">failed</span>'
     : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
@@ -3180,7 +3346,7 @@ function renderRunDetail(key) {
       <div>
         <h2>Run <code>${escapeHtml(shortKey(run.key))}</code></h2>
         <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
-          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${envBit}${unrunnableBadge}</p>
+          · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${datasetNameBit}${envBit}${unrunnableBadge}</p>
       </div>
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
@@ -3198,7 +3364,7 @@ function renderRunDetail(key) {
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
-    ${priceActionSectionHtml(s)}
+    ${priceActionSectionHtml(s, run.key)}
     ${exitsSectionHtml(s)}
     ${regimesSectionHtml(s)}
     ${equityVsHoldSectionHtml(s) || trainingCurveSectionHtml(s)}
@@ -3453,6 +3619,11 @@ function setupRuns() {
         drillIntoEnvironment(envRow.dataset.environmentSig)
         return
       }
+      const dsRow = event.target.closest('tr[data-dataset-sig]')
+      if (dsRow) {
+        drillIntoDataset(dsRow.dataset.datasetSig)
+        return
+      }
       const row = event.target.closest('tr[data-key]')
       if (row) openRunDetail(row.dataset.key)
     })
@@ -3520,6 +3691,11 @@ function setupRuns() {
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
       const delBtn = event.target.closest('button[data-action="delete-run"]')
       if (delBtn) deleteRun(delBtn.dataset.key)
+      const expandBtn = event.target.closest('button[data-action="expand-chart"]')
+      if (expandBtn) expandPriceActionChart(expandBtn.dataset.key)
+    })
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') closeChartModal()
     })
   }
   const compareCard = byId('run-compare')
@@ -4096,6 +4272,174 @@ function setupEnvironments() {
   }
 }
 
+// --- Datasets tab (named dataset-lever bundles — asset / window / fidelity) ------
+function datasetCardHtml(ds, editable) {
+  const rows = datasetLeverEntries()
+    .map(
+      ([k]) =>
+        `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(ds.settings[k] === undefined ? '—' : String(ds.settings[k]))}</td></tr>`,
+    )
+    .join('')
+  const actions = editable
+    ? `<div class="head-actions">
+        <button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button>
+        <button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
+      </div>`
+    : `<div class="head-actions"><button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Duplicate to a new dataset" aria-label="Duplicate">⧉</button></div>`
+  return `<div class="environment-card">
+    <div class="card-head card-head-row">
+      <h3>${escapeHtml(ds.name)}${editable ? '' : ' <span class="card-sub">(manifest defaults)</span>'}</h3>
+      ${actions}
+    </div>
+    <table class="kv-table"><tbody>${rows}</tbody></table>
+  </div>`
+}
+async function renderDatasets() {
+  const body = byId('datasets-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to manage datasets.</div>')
+    return
+  }
+  if (!hasDatasetLevers()) {
+    setHtml(
+      body,
+      '<div class="empty-hint">This project declares no dataset settings. Tag levers with <code>"scope": "dataset"</code> in the manifest (e.g. asset, walk-forward window, fidelity stack) to manage them as datasets here.</div>',
+    )
+    return
+  }
+  datasetsCache = await readDatasets()
+  setHtml(
+    body,
+    datasetCardHtml(defaultDataset(), false) +
+      datasetsCache.map((d) => datasetCardHtml(d, true)).join(''),
+  )
+}
+// A single-value, type-aware field for one dataset lever (choice → select, number → number input,
+// boolean → true/false select), pre-filled with the dataset's saved value. "" = use the default.
+function datasetFieldHtml(key, spec, value) {
+  const v = value === undefined ? '' : value
+  let input
+  if (spec.type === 'choice') {
+    const opts = (spec.choices || [])
+      .map(
+        (c) =>
+          `<option value="${escapeHtml(String(c))}"${String(c) === String(v) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+      )
+      .join('')
+    input = `<select name="dataset:${escapeHtml(key)}"><option value="">— default —</option>${opts}</select>`
+  } else if (spec.type === 'boolean') {
+    input = `<select name="dataset:${escapeHtml(key)}">
+      <option value=""${v === '' ? ' selected' : ''}>— default —</option>
+      <option value="true"${v === true || v === 'true' ? ' selected' : ''}>true</option>
+      <option value="false"${v === false || v === 'false' ? ' selected' : ''}>false</option></select>`
+  } else {
+    const { min, max } = leverRange(spec)
+    const minAttr = Number.isFinite(Number(min)) ? ` min="${Number(min)}"` : ''
+    const maxAttr = Number.isFinite(Number(max)) ? ` max="${Number(max)}"` : ''
+    input = `<input type="number" step="any" name="dataset:${escapeHtml(key)}" value="${escapeHtml(String(v))}"${minAttr}${maxAttr} />`
+  }
+  return `<label class="field"><span${helpAttr(spec.description || '')}>${escapeHtml(key)}</span>${input}</label>`
+}
+function datasetFormHtml(ds) {
+  const isNew = !ds || ds.id === 'default'
+  const settings = (ds && ds.settings) || defaultDataset().settings
+  const fields = datasetLeverEntries()
+    .map(([k, spec]) => datasetFieldHtml(k, spec, settings[k]))
+    .join('')
+  return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : ds.id)}" />
+    <label class="field"><span>Name</span>
+      <input type="text" name="name" value="${escapeHtml(isNew ? '' : ds.name)}" placeholder="e.g. 1h+1d · 2024" /></label>
+    <div class="lever-grid">${fields}</div>
+    <div class="form-actions">
+      <button type="submit">Save dataset</button>
+      <button type="button" id="dataset-cancel" class="ghost-btn">Cancel</button>
+    </div>`
+}
+function toggleDatasetForm(show, ds) {
+  const form = byId('dataset-form')
+  if (!form) return
+  setStatusLine('datasets-status', '')
+  if (show) {
+    form.innerHTML = datasetFormHtml(ds)
+    form.hidden = false
+  } else {
+    form.innerHTML = ''
+    form.hidden = true
+  }
+}
+async function onSaveDataset(form) {
+  const id = form.elements.id.value
+  const name = String(form.elements.name.value || '').trim()
+  if (!name) {
+    setStatusLine('datasets-status', 'Give the dataset a name.', true)
+    return
+  }
+  const settings = {}
+  for (const [k, spec] of datasetLeverEntries()) {
+    const el = form.querySelector(`[name="dataset:${k}"]`)
+    if (!el || el.value === '') continue
+    settings[k] =
+      spec.type === 'number'
+        ? Number(el.value)
+        : spec.type === 'boolean'
+          ? el.value === 'true'
+          : el.value
+  }
+  try {
+    await putDataset({ id, name, settings })
+  } catch {
+    setStatusLine('datasets-status', 'Could not save — please try again.', true)
+    return
+  }
+  toggleDatasetForm(false)
+  await renderDatasets()
+  renderLaunchForm()
+}
+async function onDeleteDataset(id) {
+  try {
+    await deleteDatasetRecord(id)
+  } catch {
+    setStatusLine('datasets-status', 'Could not delete — please try again.', true)
+    return
+  }
+  datasetsCache = datasetsCache.filter((d) => d.id !== id)
+  await renderDatasets()
+  renderLaunchForm()
+}
+function setupDatasets() {
+  const addToggle = byId('dataset-add-toggle')
+  if (addToggle) addToggle.addEventListener('click', () => toggleDatasetForm(true))
+  const form = byId('dataset-form')
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      onSaveDataset(form)
+    })
+    form.addEventListener('click', (event) => {
+      if (event.target.closest('#dataset-cancel')) toggleDatasetForm(false)
+    })
+  }
+  const body = byId('datasets-body')
+  if (body) {
+    body.addEventListener('click', (event) => {
+      const edit = event.target.closest('button[data-ds-edit]')
+      if (edit) {
+        const ds = datasetsCache.find((x) => x.id === edit.dataset.dsEdit)
+        if (ds) toggleDatasetForm(true, ds)
+        return
+      }
+      const clone = event.target.closest('button[data-ds-clone]')
+      if (clone) {
+        toggleDatasetForm(true)
+        return
+      }
+      const del = event.target.closest('button[data-ds-delete]')
+      if (del) onDeleteDataset(del.dataset.dsDelete)
+    })
+  }
+}
+
 // --- Hypotheses tab --------------------------------------------------------------
 function specSummaryHtml(spec) {
   const s = spec || {}
@@ -4626,7 +4970,7 @@ function isEnvLever(spec) {
   return !!spec && spec.scope === 'environment'
 }
 function modelLeverEntries() {
-  return leverEntries().filter(([, spec]) => !isEnvLever(spec))
+  return leverEntries().filter(([, spec]) => !isEnvLever(spec) && !isDatasetLever(spec))
 }
 function envLeverEntries() {
   return leverEntries().filter(([, spec]) => isEnvLever(spec))
@@ -4680,6 +5024,65 @@ function envSettingsSignature(settings) {
 function runEnvName(run) {
   const sig = runEnvSignature(run)
   const match = allEnvironments().find((e) => envSettingsSignature(e.settings) === sig)
+  return match ? match.name : 'Custom'
+}
+// A lever configures the DATASET (which data the model trains/tests on — asset, time window,
+// fidelity stack) rather than the MODEL when its spec sets scope:'dataset'. Dataset levers are
+// managed as named datasets a model runs AGAINST, so they're split out of the model launch form
+// (mirrors environments).
+function isDatasetLever(spec) {
+  return !!spec && spec.scope === 'dataset'
+}
+function datasetLeverEntries() {
+  return leverEntries().filter(([, spec]) => isDatasetLever(spec))
+}
+function hasDatasetLevers() {
+  return datasetLeverEntries().length > 0
+}
+// The implicit "Default" dataset from the manifest's dataset-lever defaults.
+function defaultDataset() {
+  const settings = {}
+  for (const [key, spec] of datasetLeverEntries())
+    if (spec.default !== undefined) settings[key] = spec.default
+  return { id: 'default', name: 'Default', settings }
+}
+function allDatasets() {
+  return [defaultDataset(), ...datasetsCache]
+}
+async function readDatasets() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + DATASET_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id && c.id !== 'default')
+}
+async function putDataset(ds) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + DATASET_RECORD_SUFFIX,
+    key: ds.id,
+    content: { ...ds, updatedAt: nowIso() },
+  })
+}
+async function deleteDatasetRecord(id) {
+  await window.OverseerBridge.deleteData({
+    type: manifest.recordType + DATASET_RECORD_SUFFIX,
+    key: id,
+  })
+}
+// Canonical signature of a run's dataset (its dataset-lever values), for grouping + naming.
+function runDatasetSignature(run) {
+  const cfg = (run && run.summary && run.summary.config) || {}
+  return datasetLeverEntries()
+    .map(([key]) => `${key}=${cfg[key] === undefined ? '' : String(cfg[key])}`)
+    .join(' · ')
+}
+function datasetSettingsSignature(settings) {
+  return datasetLeverEntries()
+    .map(([key]) => `${key}=${settings[key] === undefined ? '' : String(settings[key])}`)
+    .join(' · ')
+}
+// The named dataset a run matches (by dataset-value signature), else 'Custom'.
+function runDatasetName(run) {
+  const sig = runDatasetSignature(run)
+  const match = allDatasets().find((d) => datasetSettingsSignature(d.settings) === sig)
   return match ? match.name : 'Custom'
 }
 function leverRange(spec) {
@@ -5002,6 +5405,28 @@ function selectedEnvironments(form) {
   const ids = new Set([...form.querySelectorAll('input[name="env"]:checked')].map((el) => el.value))
   return allEnvironments().filter((e) => ids.has(e.id))
 }
+function datasetPickerHtml() {
+  if (!hasDatasetLevers()) return ''
+  const rows = allDatasets()
+    .map((d) => {
+      const summary = datasetLeverEntries()
+        .map(([k]) => `${k} ${d.settings[k] === undefined ? '—' : d.settings[k]}`)
+        .join(' · ')
+      return `<label class="check-row env-pick">
+        <input type="checkbox" name="ds" value="${escapeHtml(d.id)}"${d.id === 'default' ? ' checked' : ''} />
+        <span><strong>${escapeHtml(d.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
+      </label>`
+    })
+    .join('')
+  return `<fieldset class="lever env-picker">
+    <legend${helpAttr('Which DATASETS (asset / walk-forward window / fidelity stack) to run this model against. Pick several to test one model across datasets in a single campaign — runs = configs × datasets × environments × seeds. Define + tweak them in the Datasets tab.')}>Run against datasets</legend>
+    ${rows}
+  </fieldset>`
+}
+function selectedDatasets(form) {
+  const ids = new Set([...form.querySelectorAll('input[name="ds"]:checked')].map((el) => el.value))
+  return allDatasets().filter((d) => ids.has(d.id))
+}
 function renderLaunchForm() {
   const form = byId('launch-form')
   if (!form) return
@@ -5010,6 +5435,7 @@ function renderLaunchForm() {
     .join('')
   form.innerHTML = `
     ${presetsSelectHtml()}
+    ${datasetPickerHtml()}
     ${environmentPickerHtml()}
     ${levers || '<p class="card-sub">This manifest declares no model levers — the campaign runs the default config.</p>'}
     <fieldset class="lever">
@@ -5068,15 +5494,16 @@ function launchPresets() {
   }
   if (manifest && Array.isArray(manifest.presets)) {
     for (const p of manifest.presets)
-      if (p && (p.fixed || p.sweep))
+      if (p && (p.fixed || p.sweep || p.datasets))
         list.push({
           label: p.label || 'Preset',
           fixed: p.fixed,
           sweep: p.sweep,
+          datasets: p.datasets,
           seeds: p.seeds,
           thesis: p.thesis,
           thesisTarget: p.thesisTarget,
-          isExperiment: !!p.sweep,
+          isExperiment: !!(p.sweep || p.datasets),
         })
   }
   return list
@@ -5111,6 +5538,8 @@ function presetsSelectHtml() {
 function applyPreset(preset) {
   const form = byId('launch-form')
   if (!form || !preset) return
+  // A fresh preset replaces any prior preset-supplied dataset bundles (cleared here, set below).
+  launchPresetDatasets = []
   for (const [key, spec] of leverEntries()) {
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
@@ -5146,6 +5575,12 @@ function applyPreset(preset) {
   if (preset.seeds && form.elements.seeds) form.elements.seeds.value = String(preset.seeds)
   if (form.elements.thesis) form.elements.thesis.value = preset.thesis || ''
   if (form.elements.thesisTarget) form.elements.thesisTarget.value = preset.thesisTarget || ''
+  // A preset may sweep DATASETS (e.g. walk-forward windows / fidelity stacks) as bundles; those
+  // override the picker for this launch. Reflect them by unchecking the picker's Default.
+  if (Array.isArray(preset.datasets) && preset.datasets.length) {
+    launchPresetDatasets = preset.datasets
+    for (const cb of form.querySelectorAll('input[name="ds"]')) cb.checked = false
+  }
   refreshLeverAnnotations(form)
   updateLaunchSummary()
 }
@@ -5199,6 +5634,13 @@ function buildSpecFromForm(form) {
     const envs = selectedEnvironments(form)
     if (envs.length) out.environments = envs.map((e) => e.settings)
   }
+  if (hasDatasetLevers()) {
+    // A preset that sweeps datasets wins; otherwise the picker selection.
+    const dsBundles = launchPresetDatasets.length
+      ? launchPresetDatasets
+      : selectedDatasets(form).map((d) => d.settings)
+    if (dsBundles.length) out.datasets = dsBundles
+  }
   return out
 }
 function updateLaunchSummary() {
@@ -5207,23 +5649,29 @@ function updateLaunchSummary() {
   if (!form || !line) return
   const spec = buildSpecFromForm(form)
   const configs = Object.values(spec.sweep).reduce((acc, values) => acc * values.length, 1)
+  const datasets = Array.isArray(spec.datasets) ? spec.datasets.length : 1
   const envs = Array.isArray(spec.environments) ? spec.environments.length : 1
   const seeds = spec.seeds.length
-  const total = configs * envs * seeds
+  const total = configs * datasets * envs * seeds
+  const dsBit = Array.isArray(spec.datasets)
+    ? ` × ${datasets} dataset${datasets === 1 ? '' : 's'}`
+    : ''
   const envBit = Array.isArray(spec.environments)
     ? ` × ${envs} environment${envs === 1 ? '' : 's'}`
     : ''
   const target = remoteComputeTarget(savedComputeTarget())
-  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'}${envBit} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
+  line.textContent = `${configs} configuration${configs === 1 ? '' : 's'}${dsBit}${envBit} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
 }
 function campaignLabel(spec) {
   const sweeps = Object.entries(spec.sweep || {}).map(
     ([key, values]) => `${key} × ${values.length}`,
   )
+  const datasets = Array.isArray(spec.datasets) ? spec.datasets.length : 0
   const envs = Array.isArray(spec.environments) ? spec.environments.length : 0
   const seeds = Array.isArray(spec.seeds) ? spec.seeds.length : 1
+  const dsBit = datasets > 1 ? `${datasets} datasets, ` : ''
   const envBit = envs > 1 ? `${envs} envs, ` : ''
-  return `Campaign: ${sweeps.length ? `${sweeps.join(', ')}, ` : ''}${envBit}seeds ${seeds}`
+  return `Campaign: ${sweeps.length ? `${sweeps.join(', ')}, ` : ''}${dsBit}${envBit}seeds ${seeds}`
 }
 async function onLaunchSubmit(event) {
   event.preventDefault()
@@ -5302,6 +5750,8 @@ function setupLaunch() {
       if (Number.isInteger(idx) && presets[idx]) applyPreset(presets[idx])
       return
     }
+    // Manually touching the dataset picker takes over from any preset-supplied bundles.
+    if (event.target && event.target.name === 'ds') launchPresetDatasets = []
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
     }
@@ -5926,6 +6376,7 @@ function showTab(id) {
   if (target === 'runs') renderRuns()
   if (target === 'versions') renderVersions()
   if (target === 'environments') renderEnvironments()
+  if (target === 'datasets') renderDatasets()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
@@ -6003,6 +6454,7 @@ async function init() {
   setupRuns()
   setupVersions()
   setupEnvironments()
+  setupDatasets()
   setupHypotheses()
   setupLaunch()
   setupActivity()

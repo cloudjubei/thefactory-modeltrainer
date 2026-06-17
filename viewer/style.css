@@ -965,6 +965,56 @@ button:focus-visible,
   font-size: 12px;
   margin: 4px 0;
 }
+.chart-expand-btn {
+  margin-left: 6px;
+  vertical-align: middle;
+  font-size: 13px;
+}
+/* Expanded Price & actions popup: a large, horizontally scrollable, zoomable chart. */
+.chart-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+}
+.chart-modal[hidden] {
+  display: none;
+}
+.chart-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.55);
+}
+.chart-modal__panel {
+  position: relative;
+  margin: 3vh auto;
+  width: min(96vw, 1500px);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 18px 50px rgba(2, 6, 23, 0.4);
+}
+.chart-modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.chart-modal__tools {
+  display: flex;
+  gap: 6px;
+}
+.chart-modal__scroll {
+  overflow: auto;
+  padding: 10px 14px 16px;
+}
+.chart-modal .run-mark-legend {
+  padding: 6px 14px 0;
+}
 .run-mark-key.run-mark-price {
   color: var(--text);
   background: transparent;

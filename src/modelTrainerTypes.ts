@@ -109,6 +109,8 @@ export interface TrainerManifest {
     label: string
     fixed?: Record<string, unknown>
     sweep?: Record<string, unknown[]>
+    /** Dataset bundles to run the preset across (each applied together), e.g. walk-forward windows. */
+    datasets?: Array<Record<string, unknown>>
     seeds?: number
     thesis?: string
     thesisTarget?: string

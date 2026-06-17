@@ -48,17 +48,11 @@ Confirm on a real run after a `dev:force` backend restart + viewer reload + the 
   (`.card-scroll`) instead of a sticky head over the scrolling pane (which bit the card's edges).
   Confirm controls + table header stay put while rows scroll, and the detail head stays put while only
   its inner content scrolls — nothing cut off at the top/bottom.
-
-### 1b. Datasets tab (engine done; viewer + lever-tagging next)
-
-A **Datasets** tab mirroring **Environments** — named bundles of DATASET-scoped levers (asset /
-walk-forward window / fidelity stack) a model runs against, with a launch multi-select and a
-by-dataset runs grouping. The ENGINE foundation shipped: `scope: 'dataset'`, `ExperimentSpec.datasets`
-as a second bundle axis crossing the model × environment matrix (`expandExperimentMatrix`, TDD). REMAINS
-(one coherent piece — they must land together so launch keeps working): tag BlackSwan's `asset` /
-`walk_forward_window` / `fidelity_set` levers `scope:'dataset'`; mirror the Environments viewer
-(`readDatasets`/`putDataset`/… CRUD, the Datasets tab, the launch picker, a by-dataset grouping); and
-extend `modelLeverEntries` to exclude dataset levers too.
+- **Datasets tab** — a full Environments-style tab for named DATASET bundles (BlackSwan's `asset` /
+  `walk_forward_window` / `fidelity_set` are now `scope:'dataset'`): CRUD + a launch picker +
+  by-dataset runs grouping; Exp 6/10 now run as dataset bundles. Confirm: create "1h" vs "1h+1d"
+  datasets, run a model across both, and read them in the By-dataset view. (A preset that sweeps
+  datasets overrides the picker.)
 
 ### 2. BlackSwan Phase B — find ONE setup that trades well
 
