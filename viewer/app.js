@@ -129,6 +129,9 @@ let datasetsCache = []
 // Approach/paper library records + the active verdict filter ('all' | a PAPER_STATUSES value).
 let papersCache = []
 let paperVerdictFilter = 'all'
+// When a campaign is launched right after a paper's Replicate, this holds that paper's id so the new
+// campaign auto-connects to it. Set after Replicate, cleared on launch / a fresh preset.
+let launchFromPaperId = null
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
 let launchPresetDatasets = []
@@ -250,6 +253,21 @@ function pairingExpired(pairing) {
 }
 function spinnerHtml() {
   return '<span class="spinner" aria-hidden="true"></span>'
+}
+let toastTimer = null
+// A transient in-app popup (window.alert is blocked in the embedding iframe sandbox).
+function showToast(message) {
+  let el = byId('app-toast')
+  if (!el) {
+    el = document.createElement('div')
+    el.id = 'app-toast'
+    el.className = 'app-toast'
+    document.body.appendChild(el)
+  }
+  el.textContent = message
+  el.classList.add('is-visible')
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => el.classList.remove('is-visible'), 3500)
 }
 // The app-wide delete/trash icon (mirrors thefactory-ui's IconDelete) for icon-only
 // delete buttons — used instead of an emoji so the viewer matches the rest of the app.
@@ -1316,6 +1334,7 @@ function resetDashboardState() {
   papersCache = []
   launchPresetDatasets = []
   launchPresetEnvironments = []
+  launchFromPaperId = null
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -1525,6 +1544,7 @@ async function launchActivity(item) {
         status: 'running',
       })
     }
+    if (item.paperId) await stampPaperCampaign(item.paperId, entry.activityId)
   } catch {
     // ignore — the campaign is running; the marker/stamp are non-critical
   }
@@ -1664,8 +1684,10 @@ async function enqueueMissingEvaluations(keys, baseParams) {
 // finished campaigns into their hypotheses, consume auto-eval markers.
 async function processSettledCampaignEffects() {
   await stampHypothesisCampaignResults()
+  await stampPaperCampaignResults()
   await processAutoEvalMarkers()
   if (activeTabId === 'hypotheses') await renderHypotheses()
+  if (activeTabId === 'papers') await renderPapers()
 }
 
 // --- Runs tab -----------------------------------------------------------------
@@ -5141,6 +5163,87 @@ async function deletePaperRecord(id) {
     key: id,
   })
 }
+// Connect a campaign (its activityId, and its run keys when known) to a paper, so claimed-vs-measured
+// fills from the campaign's runs. Reads the live record fresh to avoid clobbering concurrent edits.
+async function stampPaperCampaign(paperId, activityId, keys) {
+  if (!manifest) return
+  const recs = await queryRecords(manifest.recordType + PAPER_RECORD_SUFFIX, paperId)
+  const existing = (recs[0] && recs[0].content) || papersCache.find((p) => p.id === paperId)
+  if (!existing) return
+  const next = { ...existing, campaignActivityId: activityId }
+  if (Array.isArray(keys) && keys.length) {
+    next.linkedRunKeys = Array.from(new Set([...(existing.linkedRunKeys || []), ...keys]))
+  }
+  await putPaper(next)
+}
+// Settle-time: papers linked to a campaign (activityId) but missing run keys get them from the
+// finished campaign record (its planned keys), so measured fills in once the campaign completes.
+async function stampPaperCampaignResults() {
+  if (!manifest) return
+  const papers = await readPapers()
+  const open = papers.filter(
+    (p) => p.campaignActivityId && !(Array.isArray(p.linkedRunKeys) && p.linkedRunKeys.length),
+  )
+  if (!open.length) return
+  const campaign = await readCampaign()
+  if (!campaign || !campaign.activityId || !Array.isArray(campaign.keys) || !campaign.keys.length) {
+    return
+  }
+  for (const p of open) {
+    if (campaign.activityId === p.campaignActivityId) {
+      await putPaper({ ...p, linkedRunKeys: campaign.keys })
+    }
+  }
+}
+// Running training campaigns, for the manual "link a campaign to a paper" picker.
+function liveTrainCampaigns() {
+  return [...liveActivities.values()].filter((a) => a.activityType === 'train' && a.activityId)
+}
+async function linkCampaignToPaper() {
+  const activityId = String((byId('paper-link-campaign-select') || {}).value || '').trim()
+  const paperId = String((byId('paper-link-paper-select') || {}).value || '').trim()
+  if (!activityId || !paperId) return
+  const campaign = await readCampaign()
+  const keys =
+    campaign && campaign.activityId === activityId && Array.isArray(campaign.keys)
+      ? campaign.keys
+      : undefined
+  try {
+    await stampPaperCampaign(paperId, activityId, keys)
+  } catch {
+    setStatusLine('papers-status', 'Could not link the campaign — please try again.', true)
+    return
+  }
+  setStatusLine(
+    'papers-status',
+    'Linked the campaign — measured fills in as its runs complete.',
+    false,
+  )
+  await renderPapers()
+}
+function paperLinkCampaignHtml() {
+  const campaigns = liveTrainCampaigns()
+  if (!campaigns.length) {
+    return `<div class="paper-link-campaign"><p class="card-sub">Link a running campaign to a paper: nothing is running now. Launch one (a paper’s <strong>Replicate</strong> auto-links it) or use <strong>Link selected runs</strong>.</p></div>`
+  }
+  const campOpts = campaigns
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c.activityId)}">${escapeHtml(c.label || c.activityId)}</option>`,
+    )
+    .join('')
+  const paperOpts = papersCache
+    .map((p) => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.title || p.id)}</option>`)
+    .join('')
+  return `<div class="paper-link-campaign">
+    <h4>Link a running campaign to a paper</h4>
+    <div class="paper-link-row">
+      <select id="paper-link-campaign-select">${campOpts}</select>
+      <select id="paper-link-paper-select">${paperOpts}</select>
+      <button type="button" class="ghost-btn" data-action="link-campaign">Link</button>
+    </div>
+  </div>`
+}
 // Measured outcome for a paper from its linked, non-failed runs: best objective + whether any beat
 // buy-and-hold out-of-sample (return_vs_hold_pct > 0). Null when nothing is linked / loaded yet.
 function paperMeasured(paper) {
@@ -5211,6 +5314,13 @@ function paperCardHtml(paper) {
     .join(' · ')
   const id = escapeHtml(paper.id)
   const canReplicate = paper.replicateConfig && Object.keys(paper.replicateConfig).length
+  const linkedRuns = Array.isArray(paper.linkedRunKeys) ? paper.linkedRunKeys.length : 0
+  const linkedParts = []
+  if (paper.campaignActivityId) linkedParts.push('campaign linked')
+  if (linkedRuns) linkedParts.push(`${linkedRuns} run${linkedRuns === 1 ? '' : 's'} linked`)
+  const linkedBit = linkedParts.length
+    ? `<p class="card-sub paper-linked">${escapeHtml(linkedParts.join(' · '))}</p>`
+    : ''
   return `<article class="paper-card" data-id="${id}">
     <div class="card-head card-head-row">
       <div>
@@ -5227,6 +5337,7 @@ function paperCardHtml(paper) {
     ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
     ${paperAssumptionChips(paper.assumptions)}
     ${paperClaimedVsMeasuredHtml(paper)}
+    ${linkedBit}
     ${suggestBit}
     ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
   </article>`
@@ -5315,10 +5426,51 @@ async function renderPapers() {
       paperFilterBarHtml() +
       (sorted.length
         ? sorted.map(paperCardHtml).join('')
-        : '<div class="empty-hint">No approaches match this verdict.</div>'),
+        : '<div class="empty-hint">No approaches match this verdict.</div>') +
+      paperLinkCampaignHtml(),
   )
 }
+// New entries open as a CHOOSER: just the link + two paths. "Manual Entry" reveals the full form;
+// "Automatic Fill" (deferred) would read the link with an LLM. Editing skips straight to the full form.
+function paperChooserButtonsHtml() {
+  return `<button type="button" id="paper-manual-entry">Manual Entry</button>
+    <button type="button" id="paper-auto-fill" class="ghost-btn"${helpAttr('Read the link with an LLM and fill the fields automatically.')}>Automatic Fill</button>
+    <button type="button" id="paper-cancel" class="ghost-btn">Cancel</button>`
+}
+function paperChooserHtml() {
+  return `<label class="field"><span>Paper / source link</span>
+    <input type="text" name="url" id="paper-chooser-url" placeholder="https://arxiv.org/abs/… (optional for manual entry)" /></label>
+  <p class="card-sub">Enter a link, then fill it in automatically — or skip the link and enter it manually.</p>
+  <div id="paper-chooser-actions" class="form-actions">${paperChooserButtonsHtml()}</div>`
+}
 function paperFormHtml(paper) {
+  return paper ? paperFullFormHtml(paper) : paperChooserHtml()
+}
+function showPaperManualForm() {
+  const form = byId('paper-form')
+  if (!form) return
+  const url = String((byId('paper-chooser-url') || {}).value || '').trim()
+  form.innerHTML = paperFullFormHtml(url ? { url } : undefined)
+}
+function onPaperAutoFill() {
+  const input = byId('paper-chooser-url')
+  const url = String((input && input.value) || '').trim()
+  if (!/^https?:\/\/\S+/i.test(url)) {
+    setStatusLine('papers-status', 'Enter a valid link (https://…) to auto-fill.', true)
+    return
+  }
+  const actions = byId('paper-chooser-actions')
+  if (actions)
+    setHtml(actions, `<span class="paper-autofill-busy">${spinnerHtml()} Reading paper…</span>`)
+  // Automatic fill (LLM reads the link → fills the entry) isn't built yet — simulate the attempt,
+  // then show the coming-soon toast and restore the chooser so Manual Entry stays available.
+  setTimeout(() => {
+    showToast('Automatic fill is coming soon — use Manual Entry for now.')
+    const a = byId('paper-chooser-actions')
+    if (a) setHtml(a, paperChooserButtonsHtml())
+  }, 700)
+}
+function paperFullFormHtml(paper) {
   const p = paper || {}
   const a = p.assumptions || {}
   const isNew = !p.id
@@ -5378,6 +5530,12 @@ function parseJsonObjectField(form, name) {
   }
 }
 async function onSavePaper(form) {
+  // Submitting from the CHOOSER (Enter in the link field, before any fields exist) advances to the
+  // full manual form rather than crashing on the missing title field.
+  if (!form.elements.title) {
+    showPaperManualForm()
+    return
+  }
   const title = String(form.elements.title.value || '').trim()
   if (!title) {
     setStatusLine('papers-status', 'Give the approach a title.', true)
@@ -5463,6 +5621,11 @@ function replicatePaper(id) {
   const c = p.replicateConfig
   if (c.fixed || c.sweep || c.datasets || c.environments || c.seeds) applyPreset(c)
   else applyPresetFixed(c)
+  // Set AFTER applyPreset (which clears it) so the next launched campaign connects to this paper.
+  launchFromPaperId = p.id
+  showToast(
+    `Launch prefilled — the campaign you start will link to “${p.title || 'this approach'}”.`,
+  )
 }
 // Link the runs currently selected in the Runs tab (the compare checkboxes) so claimed-vs-measured
 // fills in. Reuses the existing run-compare selection rather than a separate picker.
@@ -5504,6 +5667,8 @@ function setupPapers() {
     })
     form.addEventListener('click', (event) => {
       if (event.target.closest('#paper-cancel')) togglePaperForm(false)
+      else if (event.target.closest('#paper-manual-entry')) showPaperManualForm()
+      else if (event.target.closest('#paper-auto-fill')) onPaperAutoFill()
     })
   }
   const body = byId('papers-body')
@@ -5519,6 +5684,7 @@ function setupPapers() {
       if (!btn) return
       const { action, id } = btn.dataset
       if (action === 'import-seeds') importSeedPapers()
+      else if (action === 'link-campaign') linkCampaignToPaper()
       else if (action === 'replicate') replicatePaper(id)
       else if (action === 'link-runs') linkSelectedRunsToPaper(id)
       else if (action === 'edit')
@@ -6205,9 +6371,11 @@ function presetsSelectHtml() {
 function applyPreset(preset) {
   const form = byId('launch-form')
   if (!form || !preset) return
-  // A fresh preset replaces any prior preset-supplied dataset/environment bundles (set below).
+  // A fresh preset replaces any prior preset-supplied dataset/environment bundles (set below) and
+  // any pending paper auto-link (a manual preset isn't replicating a paper).
   launchPresetDatasets = []
   launchPresetEnvironments = []
+  launchFromPaperId = null
   for (const [key, spec] of leverEntries()) {
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
@@ -6381,12 +6549,18 @@ async function onLaunchSubmit(event) {
       ...(thesis ? { thesis } : {}),
       ...(thesis && thesisTarget ? { thesisTarget } : {}),
     })
+    const extra = {
+      ...(autoEval ? { autoEval: true } : {}),
+      ...(launchFromPaperId ? { paperId: launchFromPaperId } : {}),
+    }
     const result = await startOrEnqueue(
       'train',
       params,
       campaignLabel(spec),
-      autoEval ? { autoEval: true } : undefined,
+      Object.keys(extra).length ? extra : undefined,
     )
+    // Consumed: the queued/launched item already carries paperId; don't link a later manual launch.
+    launchFromPaperId = null
     if (result.queued) {
       if (epoch === projectEpoch && status) status.textContent = queuedStatusText(result.ahead)
       return

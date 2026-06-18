@@ -71,13 +71,20 @@ claim, assumption chips (fees / gross / frictionless / multi-asset / retrain), *
 (measured = best objective + beats-hold from `linkedRunKeys`), a verdict filter, and per-card actions
 **Replicate** (prefill Launch from `replicateConfig` — full preset or flat fixed map), **Link selected
 runs** (links the Runs-tab compare selection), Edit (records verdict + note, with a measured-suggested
-verdict hint on the card), Delete.
+verdict hint on the card), Delete. New entries open as a two-step CHOOSER (link + **Manual Entry** /
+**Automatic Fill**); Manual Entry reveals the full form, Automatic Fill shows a spinner then a
+coming-soon toast (the LLM fill is the deferred backend below). Campaign↔paper linking: **Replicate
+auto-connects** the launched campaign (`launchFromPaperId` → `extra.paperId` → `stampPaperCampaign` at
+launch, `stampPaperCampaignResults` fills `linkedRunKeys` from the campaign record on settle), and a
+**"Link a running campaign to a paper"** area at the bottom of the tab links a live campaign manually;
+cards show a "campaign linked · N runs linked" chip.
 - **Starter-paper seeding (DONE):** the manifest ships `papers?: TrainingPaperSeed[]` and the Papers
   tab shows an "Import N starter approaches" banner that upserts them once (by id, skipping any the
   user already has so edits/verdicts aren't clobbered). BlackSwan's `trainer.json` carries the curated
   top-10 trading papers.
-- **NEXT — "Add a paper from a link" (the LLM-analysis entry process):** paste a URL (+ optional notes)
-  → an LLM reads it → a Paper draft is created for review. Concrete design:
+- **DEFERRED — "Automatic Fill" backend (the LLM-analysis entry process):** the FRONT-END is in place
+  (the add-paper chooser's "Automatic Fill" button validates the link, shows a spinner, then a
+  coming-soon toast). What's left is the backend that fills the draft. Concrete design:
   1. `analyzePaperFromUrl({ url, notes?, llmConfig, abortSignal? })` tool method in `ModelTrainerTools`
      (types `AnalyzePaperParams`/`Result` in `modelTrainerTypes.ts`). The TOOL fetches + text-extracts
      the page (arXiv abstract/API; generic HTML→text; PDFs v1 = use the landing/abstract), then makes
@@ -85,13 +92,13 @@ verdict hint on the card), Delete.
      `TrainingPaperRecord` draft (title/authors/year/claim/claimedMetrics/assumptions/approach +
      suggested `replicateConfig` against the manifest levers). No web-tools needed by the model — the
      tool supplies the text. `source:'research'`.
-  2. Backend `analyze-paper` activity mirroring `propose`: calls the tool, upserts the draft as a
-     `<recordType>-paper` record (status `untested`), fires `onRecordWritten` → the viewer's
-     `data:updated` re-renders Papers with the new draft for the user to verify/adjust.
-  3. Viewer: an "Add from link" control in the Papers tab (URL + notes) that triggers the activity.
-  This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers),
-  which stays deferred. Also optional: auto-link the launched campaign (`campaignActivityId`) when
-  Replicate starts a run (today linking is by run key).
+  2. Backend `analyze-paper` activity mirroring `propose`: calls the tool, returns the draft (or upserts
+     a `<recordType>-paper` record `status:untested`) → the viewer fills the form / re-renders Papers.
+  3. Viewer: swap the coming-soon toast in `onPaperAutoFill` for the activity call → prefill the full
+     form from the returned draft (keep the spinner during the call).
+  This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers) +
+  the heavy auto-seed/verify pipeline (the find→web-verify→synthesize workflow used to seed the 10),
+  both of which stay deferred.
 
 ### 3c. Models / Architectures library (like Papers, for model build-ups) — HARD
 
