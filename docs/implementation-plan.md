@@ -39,17 +39,13 @@ regime/vol features, and the `obs_squash` normalization experiment. A setup coun
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
-- **Run the Exp campaigns.** Exp 6–11 (walk-forward robustness, shorting, vol-target, equity-path
-  rewards, fidelity stack, obs-squash) on the 1h winner; read the cross-window OOS distributions, then
-  lock in the first config that clears the bar. Keep RL alive while running the other approaches in
-  parallel (below) — an unpublished edge is plausible.
-- **Wave 1-parallel — the decisive non-RL baseline. EASY.** A supervised direction/return predictor +
-  rules-based execution. The trainer contract is model-agnostic (hodl/regression/technical coexist),
-  so a new `supervised_rules` model_type is ~200 lines, additive, touches nothing in the RL track:
-  predictor fits on TRAIN-ONLY backward-looking labels (audit `get_signal_buy_profitable` for
-  lookahead — the #1 failure mode); a deterministic `RulesExecutor` applies vol-targeted sizing + a
-  cost-aware threshold (trade only if `|edge| > fee`) → env actions 0/1/2. Answers "is supervision
-  beating RL on this env?"
+- **Run the Exp campaigns.** Exp 6–13 on the 1h winner — walk-forward robustness, shorting, vol-target,
+  equity-path rewards, fidelity stack, obs-squash, **Exp 12 exit-mechanic sweep (SL × TP × trailing)**,
+  and **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold on the same features)**. Read the
+  cross-window OOS distributions (the new By-dataset robustness table), then lock in the first config
+  that clears the bar. The supervised+rules baseline (`supervised-logreg`/`supervised-gbm` model types)
+  is BUILT and trades through the unchanged env → comparable RunSummary; running Exp 13 answers "is
+  supervision beating RL on this env?". Keep RL alive while the other approaches run in parallel.
 - **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
@@ -65,14 +61,6 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
   env) ONLY if an experiment says they help.
 
 ### 2. Model-trainer app
-
-**(2a) Walk-forward by-window view — MOSTLY DONE; minor polish left.** The behavioural surfacing
-shipped: run-detail renders the exit-reason breakdown, per-regime (windowed + trend) skill-vs-luck
-attribution, the trade ledger, and `return_vs_hold_pct` + `realized_cost_bps` in the metrics table;
-the By-dataset view groups runs by `walk_forward_window` (the by-window distribution) and run-detail
-shows `fidelity_set`. LEFT (optional polish): an explicit cross-window aggregate (mean / worst-window
-`return_vs_hold_pct` per config) rather than the generic objective avg/min/max the By-dataset table
-shows; and a clearer mixed single/multi-window not-comparable banner.
 
 **(2b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
 linking + clone-to-launch).** A roster of approach cards turning "try every positive paper, prove it
@@ -93,14 +81,14 @@ source + a claim"); BlackSwan's first consumers = the Wave-2 papers.
   (status + note; auto-suggest holds-up/fluff from whether measured beats hold OOS, user confirms),
   Edit/Delete. index.html tab + section; style.css cards/badges.
 - **Research-seeded**: extend the propose/research flow so a result can `putPaper(… source:'research')`
-  — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives §2a
-  walk-forward + real costs (honest by construction).
+  — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives the
+  walk-forward windows + real costs (honest by construction).
 
 ### 3c. Models / Architectures library (like Papers, for model build-ups) — HARD
 
 We've never looked under BlackSwan's hood — what `reppo-custom` / `trpo-custom` / the dueling /
 Munchausen / LSTM variants actually compose, and how `net_arch` / `activation` / `optimizer` shape
-them. A registry parallel to §3b Papers, generic (BlackSwan first consumer):
+them. A registry parallel to §2b Papers, generic (BlackSwan first consumer):
 - **The registry/tab** (mirror Papers): each card = a model architecture — its build-up (algo + net
   shape + policy internals + any custom head), provenance/rationale, and a verdict
   proven/disproved by linked runs (claimed-vs-measured). `<recordType>-model` records;
@@ -110,17 +98,6 @@ them. A registry parallel to §3b Papers, generic (BlackSwan first consumer):
   (attention/transformers, longer-context recurrent) and add the promising ones as new `model_name`s
   in BlackSwan's `model_factory`, each documented as a card and proven/disproved by sweeps. Real ML
   work; sequenced after the registry exists.
-
-### 3d. Presets: clean up + SL/TP/trailing sweep + top-3 auto-include — EASY/MEDIUM
-
-The preset list has grown noisy (each run many times; unclear which are good now).
-- **Clean up** the `trainer.json` presets — drop stale/duplicate, keep a curated set.
-- **Add a strong SL+TP+trailing-stop SWEEP preset** — the exit-mechanic combinations are
-  under-explored and make a good sweep starting point.
-- **Auto-include the top-3 results as presets**: the viewer reads the best runs (by objective, OOS)
-  and offers them as one-click "clone-to-sweep" seeds alongside the manifest's presets, so homing in
-  on a winner is point-and-click. (clean-up + SL/TP/trailing = quick `trainer.json`; top-3 = a viewer
-  feature synthesizing presets from the best runs.)
 
 ### 3. xAI — explain WHY the model acted (parallel track, like Papers)
 
@@ -172,9 +149,9 @@ cheap parts), with the animation capstone parked.
 
 ### Cross-asset robustness testing
 
-The windowing dimension is now Phase-B Wave 0 + §2a (walk-forward windows are named slices). What
-remains is the **cross-asset** dimension — test a trained checkpoint against any asset in the same
-data format to catch regime/asset overfit:
+The windowing dimension is covered by the walk-forward windows (named slices) + the By-dataset
+robustness view. What remains is the **cross-asset** dimension — test a trained checkpoint against any
+asset in the same data format to catch regime/asset overfit:
 - The trainer already replays a checkpoint deterministically; the missing piece is selecting the data
   WINDOW/asset (a `testSet` param: asset + time-range, or a named curated slice).
 - Likely a manifest `testSets` list (`{id, asset, range/description}`) + a generic "test on set"
@@ -192,9 +169,13 @@ the full step × layers matrix is open.
 
 ### Environments — follow-ups
 
-The Environments tab + `scope: 'environment'` lever bundles ship. Remaining: a unified **test matrix**
-surface (model × environment × dataset, folding in cross-asset testing); presets/clone currently
-ignore env-lever values (env values come from the picker).
+The Environments tab + `scope: 'environment'` lever bundles ship; presets can now carry `environments`
+bundles (the SL/TP/trailing sweep uses them, rendered read-only in the launch picker so the swept
+profiles are visible) and the top-3 best-run presets reproduce a run's env values. Remaining: a unified
+**test matrix** surface (model × environment × dataset, folding in cross-asset testing); the fixed-only
+clone-to-launch path (`applyPresetFixed`) still pins model levers only; an optional "save this preset's
+profile as a named environment" promote affordance (deferred — these are git-authored experiment
+constants, not user-tuned regimes).
 
 ### Activity concurrency — server-side pass
 

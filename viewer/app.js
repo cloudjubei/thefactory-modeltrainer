@@ -124,6 +124,9 @@ let datasetsCache = []
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
 let launchPresetDatasets = []
+// Environment bundles supplied by an applied preset (an experiment that sweeps exit/fee regimes);
+// mirrors launchPresetDatasets — overrides the environment picker until reset / manual change.
+let launchPresetEnvironments = []
 // When drilled into a single setup's runs (via the by-setup view), this holds that
 // setup's key so the runs view can show its conclusion-note editor (C4 ledger).
 let runsDrillSetupKey = null
@@ -1303,6 +1306,7 @@ function resetDashboardState() {
   environmentsCache = []
   datasetsCache = []
   launchPresetDatasets = []
+  launchPresetEnvironments = []
   const activityBody = byId('activity-body')
   if (activityBody) activityBody.innerHTML = ''
 }
@@ -2505,6 +2509,14 @@ function byEnvironmentTableHtml(filtered) {
     <thead><tr><th>Environment</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`
 }
+function runMetricValue(run, key) {
+  const v = Number(((run && run.summary && run.summary.metrics) || {})[key])
+  return Number.isFinite(v) ? v : NaN
+}
+function formatSignedPct(v) {
+  if (!Number.isFinite(v)) return '—'
+  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
+}
 function aggregateByDataset(runs) {
   const groups = new Map()
   for (const r of runs) {
@@ -2515,6 +2527,7 @@ function aggregateByDataset(runs) {
   const out = []
   for (const g of groups.values()) {
     const objs = g.runs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
+    const vh = g.runs.map((r) => runMetricValue(r, 'return_vs_hold_pct')).filter(Number.isFinite)
     out.push({
       name: g.name,
       sig: g.sig,
@@ -2524,9 +2537,112 @@ function aggregateByDataset(runs) {
       objMin: objs.length ? Math.min(...objs) : NaN,
       objMax: objs.length ? Math.max(...objs) : NaN,
       objAvg: mean(objs),
+      vhAvg: vh.length ? mean(vh) : NaN,
+      vhWorst: vh.length ? Math.min(...vh) : NaN,
     })
   }
   return out
+}
+// A run's MODEL signature: its config minus seed AND minus dataset levers, so the same model config
+// run across several datasets (e.g. walk-forward windows) shares one signature — the key for judging
+// how a config holds up ACROSS datasets rather than being tuned to one lucky one.
+function modelSignatureOfRun(run) {
+  const cfg = { ...((run.summary && run.summary.config) || {}) }
+  delete cfg.seed
+  for (const [key] of datasetLeverEntries()) delete cfg[key]
+  return JSON.stringify(
+    Object.keys(cfg)
+      .sort()
+      .map((k) => [k, cfg[k]]),
+  )
+}
+// Per model-config robustness ACROSS the datasets it ran on: each dataset is averaged first (so seed
+// counts don't bias), then reduced to a mean and a WORST dataset. Only configs spanning ≥2 datasets
+// are returned. "worst" follows the objective direction (the weakest window for a max objective).
+function aggregateRobustnessAcrossDatasets(runs) {
+  const dir = objectiveDirection()
+  const bySig = new Map()
+  for (const r of runs) {
+    if (!r.summary || r.summary.status === 'failed') continue
+    const sig = modelSignatureOfRun(r)
+    if (!bySig.has(sig)) bySig.set(sig, [])
+    bySig.get(sig).push(r)
+  }
+  const out = []
+  for (const rs of bySig.values()) {
+    const byDataset = new Map()
+    for (const r of rs) {
+      const ds = runDatasetSignature(r)
+      if (!byDataset.has(ds)) byDataset.set(ds, { objs: [], vh: [] })
+      const obj = Number(r.summary.objective)
+      if (Number.isFinite(obj)) byDataset.get(ds).objs.push(obj)
+      const v = runMetricValue(r, 'return_vs_hold_pct')
+      if (Number.isFinite(v)) byDataset.get(ds).vh.push(v)
+    }
+    if (byDataset.size < 2) continue
+    const objMeans = [...byDataset.values()].map((d) => mean(d.objs)).filter(Number.isFinite)
+    const vhMeans = [...byDataset.values()].map((d) => mean(d.vh)).filter(Number.isFinite)
+    out.push({
+      config: (rs[0].summary && rs[0].summary.config) || {},
+      datasets: byDataset.size,
+      runs: rs.length,
+      objMean: mean(objMeans),
+      objWorst: objMeans.length
+        ? dir === 'min'
+          ? Math.max(...objMeans)
+          : Math.min(...objMeans)
+        : NaN,
+      vhMean: vhMeans.length ? mean(vhMeans) : NaN,
+      vhWorst: vhMeans.length ? Math.min(...vhMeans) : NaN,
+    })
+  }
+  out.sort((a, b) => {
+    const fa = Number.isFinite(a.objWorst)
+    const fb = Number.isFinite(b.objWorst)
+    if (fa && fb) return dir === 'min' ? a.objWorst - b.objWorst : b.objWorst - a.objWorst
+    return fa ? -1 : fb ? 1 : 0
+  })
+  return out
+}
+// A warning shown when the runs in view span more than one dataset (e.g. several walk-forward
+// windows): they are separate out-of-sample samples and must not be read as a single number.
+function mixedDatasetBannerHtml(filtered) {
+  if (!hasDatasetLevers()) return ''
+  const withSummary = filtered.filter((r) => r.summary)
+  const sigs = new Set(withSummary.map(runDatasetSignature))
+  if (sigs.size < 2) return ''
+  const names = [...new Set(withSummary.map(runDatasetName))]
+  const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? '…' : '')
+  return `<p class="mixed-dataset-banner">⚠ These runs span ${sigs.size} datasets (${escapeHtml(shown)}) — each is a separate out-of-sample sample. Compare per-dataset; don't read across them as one number.</p>`
+}
+// Compact "how robust is each config across datasets" table for the By-dataset view.
+function robustnessAcrossDatasetsHtml(filtered) {
+  const rows = aggregateRobustnessAcrossDatasets(filtered)
+  if (!rows.length) return ''
+  const on = escapeHtml(objectiveName())
+  const hasVh = rows.some((r) => Number.isFinite(r.vhMean))
+  const vhHead = hasVh ? '<th class="num">vs hold avg</th><th class="num">vs hold worst</th>' : ''
+  const body = rows
+    .slice(0, 12)
+    .map((r) => {
+      const vhCells = hasVh
+        ? `<td class="num ${metricColorClass('return_vs_hold_pct', r.vhMean)}">${escapeHtml(formatSignedPct(r.vhMean))}</td><td class="num ${metricColorClass('return_vs_hold_pct', r.vhWorst)}">${escapeHtml(formatSignedPct(r.vhWorst))}</td>`
+        : ''
+      return `<tr>
+        <td class="card-sub">${escapeHtml(setupConfigLabel(r.config))}</td>
+        <td class="num">${r.datasets}</td>
+        <td class="num">${escapeHtml(formatObjective(r.objMean))}</td>
+        <td class="num">${escapeHtml(formatObjective(r.objWorst))}</td>
+        ${vhCells}</tr>`
+    })
+    .join('')
+  return `<div class="robustness-block">
+    <h4 class="robustness-title">Robustness across datasets</h4>
+    <p class="runs-legend">Each row is one model config aggregated across the datasets it ran on (each dataset averaged first, so seed counts don't bias). "worst" = its weakest dataset — a config tuned to one lucky window shows a strong avg but a weak worst.</p>
+    <div class="table-wrap"><table class="runs-table">
+      <thead><tr><th>Config</th><th class="num">datasets</th><th class="num">${on} avg</th><th class="num">${on} worst</th>${vhHead}</tr></thead>
+      <tbody>${body}</tbody></table></div>
+  </div>`
 }
 function byDatasetTableHtml(filtered) {
   const dir = objectiveDirection()
@@ -2537,11 +2653,15 @@ function byDatasetTableHtml(filtered) {
     return fa ? -1 : fb ? 1 : 0
   })
   const on = escapeHtml(objectiveName())
+  const hasVh = groups.some((g) => Number.isFinite(g.vhAvg))
   const rows = groups
     .map((g) => {
       const range = Number.isFinite(g.objMin)
         ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
         : '—'
+      const vhCell = hasVh
+        ? `<td class="num ${metricColorClass('return_vs_hold_pct', g.vhAvg)}">${escapeHtml(formatSignedPct(g.vhAvg))}</td>`
+        : ''
       return `<tr data-dataset-sig="${escapeHtml(g.sig)}" class="setup-row">
         <td>${escapeHtml(g.name)}</td>
         <td class="card-sub">${escapeHtml(g.sig)}</td>
@@ -2549,11 +2669,13 @@ function byDatasetTableHtml(filtered) {
         <td class="num">${g.setups}</td>
         <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
         <td class="num">${range}</td>
+        ${vhCell}
       </tr>`
     })
     .join('')
+  const vhHead = hasVh ? `<th class="num"${helpAttr(VSHOLD_INFO)}>vs hold avg</th>` : ''
   return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Dataset</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
+    <thead><tr><th>Dataset</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th>${vhHead}</tr></thead>
     <tbody>${rows}</tbody></table></div>`
 }
 // When drilled into a single setup, an editor for that setup's conclusion note —
@@ -2622,7 +2744,10 @@ function renderRunsTable() {
   }
   if (runsViewMode === 'dataset') {
     const legend = `<p class="runs-legend">Each row is a DATASET (asset / walk-forward window / fidelity stack) a run trained on. Click one to drill into its runs. "Custom" = dataset values matching no saved dataset.</p>`
-    setHtml(body, `${toolbar}${byDatasetTableHtml(filtered)}${legend}`)
+    setHtml(
+      body,
+      `${toolbar}${mixedDatasetBannerHtml(filtered)}${robustnessAcrossDatasetsHtml(filtered)}${byDatasetTableHtml(filtered)}${legend}`,
+    )
     renderCompare()
     return
   }
@@ -5397,21 +5522,47 @@ async function refreshLaunchRunners() {
 }
 // Which ENVIRONMENTS to run the model against (checkboxes; Default pre-checked). Picking several
 // tests the same model across regimes in one campaign. Hidden when the manifest has no env levers.
+// Read-only display of the bundles an applied experiment preset sweeps (its own environments /
+// datasets), so the launch form SHOWS what the preset will run rather than leaving the picker
+// looking empty. Purely informational (no inputs) — buildSpecFromForm reads the launchPreset* state.
+function presetBundleListHtml(bundles, entries, slotId, noun) {
+  const rows = bundles
+    .map((b) => {
+      const summary = entries.map(([k]) => `${k} ${b[k] === undefined ? '—' : b[k]}`).join(' · ')
+      return `<div class="check-row preset-bundle-row"><span class="preset-bundle-tag">preset</span><span class="card-sub">${escapeHtml(summary)}</span></div>`
+    })
+    .join('')
+  return `<div id="${slotId}" class="preset-bundles">
+    <p class="preset-bundles-note">This experiment runs ${bundles.length} ${noun}${bundles.length === 1 ? '' : 's'} from the selected preset (read-only). Pick your own below to override.</p>
+    ${rows}
+  </div>`
+}
 function environmentPickerHtml() {
   if (!hasEnvLevers()) return ''
+  const presetActive = launchPresetEnvironments.length > 0
+  const presetBlock = presetActive
+    ? presetBundleListHtml(
+        launchPresetEnvironments,
+        envLeverEntries(),
+        'env-preset-info',
+        'environment',
+      )
+    : ''
   const rows = allEnvironments()
     .map((e) => {
       const summary = envLeverEntries()
         .map(([k]) => `${k} ${e.settings[k] === undefined ? '—' : e.settings[k]}`)
         .join(' · ')
+      const checked = e.id === 'default' && !presetActive ? ' checked' : ''
       return `<label class="check-row env-pick">
-        <input type="checkbox" name="env" value="${escapeHtml(e.id)}"${e.id === 'default' ? ' checked' : ''} />
+        <input type="checkbox" name="env" value="${escapeHtml(e.id)}"${checked} />
         <span><strong>${escapeHtml(e.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
       </label>`
     })
     .join('')
-  return `<fieldset class="lever env-picker">
-    <legend${helpAttr('Which ENVIRONMENTS (fee / TP-SL regimes) to run this model against. Pick several to test one model across regimes in a single campaign — runs = configs × environments × seeds. Define + tweak them in the Environments tab.')}>Run against environments</legend>
+  return `<fieldset id="launch-env-picker" class="lever env-picker">
+    <legend${helpAttr('Which ENVIRONMENTS (fee / TP-SL regimes) to run this model against. Pick several to test one model across regimes in a single campaign — runs = configs × environments × seeds. An applied experiment preset supplies its own environments (shown read-only); define + tweak your own in the Environments tab.')}>Run against environments</legend>
+    ${presetBlock}
     ${rows}
   </fieldset>`
 }
@@ -5421,21 +5572,36 @@ function selectedEnvironments(form) {
 }
 function datasetPickerHtml() {
   if (!hasDatasetLevers()) return ''
+  const presetActive = launchPresetDatasets.length > 0
+  const presetBlock = presetActive
+    ? presetBundleListHtml(launchPresetDatasets, datasetLeverEntries(), 'ds-preset-info', 'dataset')
+    : ''
   const rows = allDatasets()
     .map((d) => {
       const summary = datasetLeverEntries()
         .map(([k]) => `${k} ${d.settings[k] === undefined ? '—' : d.settings[k]}`)
         .join(' · ')
+      const checked = d.id === 'default' && !presetActive ? ' checked' : ''
       return `<label class="check-row env-pick">
-        <input type="checkbox" name="ds" value="${escapeHtml(d.id)}"${d.id === 'default' ? ' checked' : ''} />
+        <input type="checkbox" name="ds" value="${escapeHtml(d.id)}"${checked} />
         <span><strong>${escapeHtml(d.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
       </label>`
     })
     .join('')
-  return `<fieldset class="lever env-picker">
-    <legend${helpAttr('Which DATASETS (asset / walk-forward window / fidelity stack) to run this model against. Pick several to test one model across datasets in a single campaign — runs = configs × datasets × environments × seeds. Define + tweak them in the Datasets tab.')}>Run against datasets</legend>
+  return `<fieldset id="launch-ds-picker" class="lever env-picker">
+    <legend${helpAttr('Which DATASETS (asset / walk-forward window / fidelity stack) to run this model against. Pick several to test one model across datasets in a single campaign — runs = configs × datasets × environments × seeds. An applied experiment preset supplies its own datasets (shown read-only); define + tweak your own in the Datasets tab.')}>Run against datasets</legend>
+    ${presetBlock}
     ${rows}
   </fieldset>`
+}
+// Re-render the dataset + environment picker fieldsets in place from current state (preset bundles +
+// default checks). Safe because the form's change listener is delegated, so swapping a child fieldset
+// keeps it wired.
+function refreshLaunchPickers() {
+  const env = byId('launch-env-picker')
+  if (env) env.outerHTML = environmentPickerHtml()
+  const ds = byId('launch-ds-picker')
+  if (ds) ds.outerHTML = datasetPickerHtml()
 }
 function selectedDatasets(form) {
   const ids = new Set([...form.querySelectorAll('input[name="ds"]:checked')].map((el) => el.value))
@@ -5508,28 +5674,82 @@ function launchPresets() {
   }
   if (manifest && Array.isArray(manifest.presets)) {
     for (const p of manifest.presets)
-      if (p && (p.fixed || p.sweep || p.datasets))
+      if (p && (p.fixed || p.sweep || p.datasets || p.environments))
         list.push({
           label: p.label || 'Preset',
           fixed: p.fixed,
           sweep: p.sweep,
           datasets: p.datasets,
+          environments: p.environments,
           seeds: p.seeds,
           thesis: p.thesis,
           thesisTarget: p.thesisTarget,
-          isExperiment: !!(p.sweep || p.datasets),
+          isExperiment: !!(p.sweep || p.datasets || p.environments),
         })
   }
+  list.push(...bestRunPresets())
   return list
+}
+// Up to 3 one-click presets derived from the best runs SO FAR (by objective), each reproducing that
+// run's exact config — model levers as `fixed`, dataset/environment levers as their bundles — so a
+// proven setup is re-runnable (and a seed for your own sweep) without hand-copying it. Deduped by
+// setup so three seeds of one winner don't crowd out genuinely distinct configs.
+function bestRunPresets() {
+  if (!manifest || !Array.isArray(runsCache) || !runsCache.length) return []
+  const dir = objectiveDirection()
+  const scored = runsCache
+    .filter(
+      (r) =>
+        r.summary && r.summary.status !== 'failed' && Number.isFinite(Number(r.summary.objective)),
+    )
+    .sort((a, b) =>
+      dir === 'min'
+        ? Number(a.summary.objective) - Number(b.summary.objective)
+        : Number(b.summary.objective) - Number(a.summary.objective),
+    )
+  const seen = new Set()
+  const presets = []
+  for (const r of scored) {
+    const key = setupKeyOfRun(r)
+    if (seen.has(key)) continue
+    seen.add(key)
+    const cfg = { ...(r.summary.config || {}) }
+    delete cfg.seed
+    const fixed = {}
+    const ds = {}
+    const env = {}
+    for (const [k, v] of Object.entries(cfg)) {
+      const spec = (manifest.levers || {})[k]
+      if (!spec) continue
+      if (spec.scope === 'dataset') ds[k] = v
+      else if (spec.scope === 'environment') env[k] = v
+      else fixed[k] = v
+    }
+    const preset = {
+      label: `★ Best #${presets.length + 1}: ${objectiveName()} ${formatObjective(r.summary.objective)} · ${setupConfigLabel(cfg)}`,
+      fixed,
+      fromResults: true,
+    }
+    if (Object.keys(ds).length) preset.datasets = [ds]
+    if (Object.keys(env).length) preset.environments = [env]
+    presets.push(preset)
+    if (presets.length >= 3) break
+  }
+  return presets
 }
 function presetsSelectHtml() {
   const presets = launchPresets()
   if (!presets.length) return ''
   const opt = (p, i) => `<option value="${i}">${escapeHtml(p.label)}</option>`
   const indexed = presets.map((p, i) => [p, i])
-  const experiments = indexed.filter(([p]) => p.isExperiment)
-  const setups = indexed.filter(([p]) => !p.isExperiment)
+  const fromResults = indexed.filter(([p]) => p.fromResults)
+  const experiments = indexed.filter(([p]) => p.isExperiment && !p.fromResults)
+  const setups = indexed.filter(([p]) => !p.isExperiment && !p.fromResults)
   const groups = []
+  if (fromResults.length)
+    groups.push(
+      `<optgroup label="Top results so far — one-click re-run">${fromResults.map(([p, i]) => opt(p, i)).join('')}</optgroup>`,
+    )
   if (experiments.length)
     groups.push(
       `<optgroup label="Experiments — one-click campaigns">${experiments.map(([p, i]) => opt(p, i)).join('')}</optgroup>`,
@@ -5552,8 +5772,9 @@ function presetsSelectHtml() {
 function applyPreset(preset) {
   const form = byId('launch-form')
   if (!form || !preset) return
-  // A fresh preset replaces any prior preset-supplied dataset bundles (cleared here, set below).
+  // A fresh preset replaces any prior preset-supplied dataset/environment bundles (set below).
   launchPresetDatasets = []
+  launchPresetEnvironments = []
   for (const [key, spec] of leverEntries()) {
     const sweepEl = form.elements['sweep:' + key]
     if (sweepEl) {
@@ -5589,12 +5810,14 @@ function applyPreset(preset) {
   if (preset.seeds && form.elements.seeds) form.elements.seeds.value = String(preset.seeds)
   if (form.elements.thesis) form.elements.thesis.value = preset.thesis || ''
   if (form.elements.thesisTarget) form.elements.thesisTarget.value = preset.thesisTarget || ''
-  // A preset may sweep DATASETS (e.g. walk-forward windows / fidelity stacks) as bundles; those
-  // override the picker for this launch. Reflect them by unchecking the picker's Default.
-  if (Array.isArray(preset.datasets) && preset.datasets.length) {
+  // A preset may sweep DATASETS (walk-forward windows / fidelity stacks) and/or ENVIRONMENTS (exit/fee
+  // regimes) as bundles; those override the pickers for this launch. Re-render the pickers so the
+  // swept bundles show read-only (and Default unchecks) — the count alone isn't enough to see them.
+  if (Array.isArray(preset.datasets) && preset.datasets.length)
     launchPresetDatasets = preset.datasets
-    for (const cb of form.querySelectorAll('input[name="ds"]')) cb.checked = false
-  }
+  if (Array.isArray(preset.environments) && preset.environments.length)
+    launchPresetEnvironments = preset.environments
+  refreshLaunchPickers()
   refreshLeverAnnotations(form)
   updateLaunchSummary()
 }
@@ -5645,8 +5868,11 @@ function buildSpecFromForm(form) {
   const seedCount = readSeedCount(form)
   const out = { sweep, fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
   if (hasEnvLevers()) {
-    const envs = selectedEnvironments(form)
-    if (envs.length) out.environments = envs.map((e) => e.settings)
+    // A preset that sweeps environments wins; otherwise the picker selection.
+    const envBundles = launchPresetEnvironments.length
+      ? launchPresetEnvironments
+      : selectedEnvironments(form).map((e) => e.settings)
+    if (envBundles.length) out.environments = envBundles
   }
   if (hasDatasetLevers()) {
     // A preset that sweeps datasets wins; otherwise the picker selection.
@@ -5668,10 +5894,10 @@ function updateLaunchSummary() {
   const seeds = spec.seeds.length
   const total = configs * datasets * envs * seeds
   const dsBit = Array.isArray(spec.datasets)
-    ? ` × ${datasets} dataset${datasets === 1 ? '' : 's'}`
+    ? ` × ${datasets} dataset${datasets === 1 ? '' : 's'}${launchPresetDatasets.length ? ' (from preset)' : ''}`
     : ''
   const envBit = Array.isArray(spec.environments)
-    ? ` × ${envs} environment${envs === 1 ? '' : 's'}`
+    ? ` × ${envs} environment${envs === 1 ? '' : 's'}${launchPresetEnvironments.length ? ' (from preset)' : ''}`
     : ''
   const target = remoteComputeTarget(savedComputeTarget())
   line.textContent = `${configs} configuration${configs === 1 ? '' : 's'}${dsBit}${envBit} × ${seeds} seed${seeds === 1 ? '' : 's'} = ${total} run${total === 1 ? '' : 's'}${target ? ` on ${target}` : ''}`
@@ -5759,13 +5985,27 @@ function setupLaunch() {
   })
   form.addEventListener('change', (event) => {
     if (event.target && event.target.id === 'launch-preset-select') {
+      // The '— choose —' placeholder has value '' (→ Number('')===0); guard it so re-selecting the
+      // placeholder no-ops instead of applying presets[0].
       const idx = Number(event.target.value)
       const presets = launchPresets()
-      if (Number.isInteger(idx) && presets[idx]) applyPreset(presets[idx])
+      if (event.target.value !== '' && Number.isInteger(idx) && presets[idx]) {
+        applyPreset(presets[idx])
+      }
       return
     }
-    // Manually touching the dataset picker takes over from any preset-supplied bundles.
-    if (event.target && event.target.name === 'ds') launchPresetDatasets = []
+    // Manually touching the dataset / environment picker takes over from any preset-supplied bundles;
+    // drop the now-stale read-only preset rows (keeping the checkbox the user just toggled).
+    if (event.target && event.target.name === 'ds') {
+      launchPresetDatasets = []
+      const info = byId('ds-preset-info')
+      if (info) info.remove()
+    }
+    if (event.target && event.target.name === 'env') {
+      launchPresetEnvironments = []
+      const info = byId('env-preset-info')
+      if (info) info.remove()
+    }
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
     }

@@ -111,6 +111,8 @@ export interface TrainerManifest {
     sweep?: Record<string, unknown[]>
     /** Dataset bundles to run the preset across (each applied together), e.g. walk-forward windows. */
     datasets?: Array<Record<string, unknown>>
+    /** Environment bundles to run the preset across (each applied together), e.g. exit/fee regimes. */
+    environments?: Array<Record<string, unknown>>
     seeds?: number
     thesis?: string
     thesisTarget?: string

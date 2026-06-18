@@ -1123,6 +1123,32 @@ button:focus-visible,
 .env-picker .env-pick .card-sub {
   margin-left: 6px;
 }
+.preset-bundles {
+  margin: 4px 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--accent, #6366f1);
+  background: var(--surface-2, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+}
+.preset-bundles-note {
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.preset-bundle-row {
+  align-items: center;
+  gap: 6px;
+}
+.preset-bundle-tag {
+  flex: none;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--accent, #6366f1);
+  background: var(--accent-soft, rgba(99, 102, 241, 0.14));
+}
 .compare-version-warn {
   margin: 0 0 10px;
   font-size: 13px;
@@ -1244,6 +1270,22 @@ button:focus-visible,
   margin-top: 8px;
   color: var(--muted);
   font-size: 11px;
+}
+.mixed-dataset-banner {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+  border-radius: 4px;
+}
+.robustness-block {
+  margin: 10px 0 14px;
+}
+.robustness-title {
+  margin: 0 0 4px;
+  font-size: 13px;
 }
 /* Hovering any element with `data-help` shows it; give plain triggers a help cursor
    (buttons + form controls keep their own). */
