@@ -14,6 +14,7 @@ import {
   normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
+  validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
@@ -642,5 +643,113 @@ describe('validateTrainingRunSummary', () => {
 
   it('rejects a NaN objective', () => {
     expect(() => validateTrainingRunSummary({ objective: Number.NaN })).toThrow(/objective/)
+  })
+})
+
+describe('validateDecisionTrace', () => {
+  it('returns undefined for a non-object (missing trace ≠ error)', () => {
+    expect(validateDecisionTrace(undefined)).toBeUndefined()
+    expect(validateDecisionTrace(null)).toBeUndefined()
+    expect(validateDecisionTrace(42)).toBeUndefined()
+    expect(validateDecisionTrace([])).toBeUndefined()
+  })
+
+  it('returns undefined when steps is missing or not an array', () => {
+    expect(validateDecisionTrace({})).toBeUndefined()
+    expect(validateDecisionTrace({ steps: 'nope' })).toBeUndefined()
+  })
+
+  it('returns undefined when no step is well-formed', () => {
+    expect(validateDecisionTrace({ steps: [{ action: 'buy' }, { step: 1 }, 'x'] })).toBeUndefined()
+  })
+
+  it('keeps only well-formed steps and coerces the minimal shape', () => {
+    const trace = validateDecisionTrace({
+      steps: [
+        { step: 0, action: 'hold' },
+        { step: 'bad', action: 'buy' },
+        { step: 1, action: 5 },
+        { step: 2, action: 'sell' },
+      ],
+    })
+    expect(trace?.steps).toEqual([
+      { step: 0, action: 'hold' },
+      { step: 2, action: 'sell' },
+    ])
+  })
+
+  it('carries optional per-step fields only when well-typed', () => {
+    const trace = validateDecisionTrace({
+      steps: [
+        {
+          step: 3,
+          action: 'buy',
+          confidence: 0.8,
+          actionValues: { hold: 1, buy: 2.5, bad: 'x' },
+          alternativeAction: 'hold',
+          forced: true,
+          reward: -0.01,
+          state: 'long',
+          features: [0.1, 0.2, 'nope'],
+        },
+      ],
+    })
+    expect(trace?.steps[0]).toEqual({
+      step: 3,
+      action: 'buy',
+      confidence: 0.8,
+      actionValues: { hold: 1, buy: 2.5 },
+      alternativeAction: 'hold',
+      forced: true,
+      reward: -0.01,
+      state: 'long',
+      features: [0.1, 0.2],
+    })
+  })
+
+  it('drops non-finite numeric fields and empty coerced maps', () => {
+    const trace = validateDecisionTrace({
+      steps: [
+        {
+          step: 0,
+          action: 'hold',
+          confidence: Number.NaN,
+          reward: Number.POSITIVE_INFINITY,
+          actionValues: { bad: 'x' },
+        },
+      ],
+    })
+    expect(trace?.steps[0]).toEqual({ step: 0, action: 'hold' })
+  })
+
+  it('coerces actionCounts, totalSteps and featureAttribution', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      actionCounts: { hold: 10, buy: 3, bad: 'x' },
+      totalSteps: 13,
+      featureAttribution: {
+        perFeature: [0.5, 'x', 0.2],
+        byGroup: { '1h': 0.7, '1d': 0.3, bad: null },
+        method: 'gradient-saliency',
+        samples: 12,
+      },
+    })
+    expect(trace?.actionCounts).toEqual({ hold: 10, buy: 3 })
+    expect(trace?.totalSteps).toBe(13)
+    expect(trace?.featureAttribution).toEqual({
+      perFeature: [0.5, 0.2],
+      byGroup: { '1h': 0.7, '1d': 0.3 },
+      method: 'gradient-saliency',
+      samples: 12,
+    })
+  })
+
+  it('omits featureAttribution when it has no usable content', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      featureAttribution: { method: 7, byGroup: { bad: 'x' } },
+    })
+    expect(trace?.featureAttribution).toBeUndefined()
+    expect(trace?.actionCounts).toBeUndefined()
   })
 })

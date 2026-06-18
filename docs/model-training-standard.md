@@ -93,7 +93,13 @@ contract's hard requirement is the final `RunSummary`.
     /* the fully resolved config that produced this run */
   },
   "provenance": { "gitCommit": "abc123", "dataVersion": "dvc:…", "configHash": "…", "ranAt": "…" },
-  "artifacts": { "checkpoint": "checkpoints/…", "best": true }, // ref, not the bytes
+  "artifacts": {
+    "checkpoint": "checkpoints/…", // ref, not the bytes
+    "best": true,
+    "decisionTrace": {
+      /* optional xAI trace — see below; the hub's Explain view reads it */
+    },
+  },
   "series": {
     "episode_return": [
       /* ≤200 downsampled points */
@@ -109,6 +115,14 @@ contract's hard requirement is the final `RunSummary`.
   NaN/inf loss, zero trades) — cheap, high-signal.
 - **Provenance** makes a run reproducible from `(gitCommit, config, seed, dataVersion)`.
 - **Artifacts are referenced**, never shipped in the summary; "best" is selected by the objective.
+- **Decision trace (optional, xAI).** A project MAY attach `artifacts.decisionTrace` — a generic
+  `DecisionTrace` ({`steps[]` of {`step`, `action` label, optional `confidence`, `actionValues`,
+  `alternativeAction`, `forced`, `reward`}, `actionCounts`, optional `featureAttribution`,
+  `totalSteps`}) — for the hub's **Explain** view (action distribution, per-action value over time,
+  confidence, input attribution). It is domain-oblivious: arbitrary action strings, no domain
+  vocabulary. The embedded trace is downsampled to ≤200 steps to share the chart axis; the full
+  per-step trace (with raw observations) is an optional sidecar at `artifacts.decisionTraceFile`. The
+  engine validates it softly (a missing/unusable trace is dropped, never an error).
 
 ---
 

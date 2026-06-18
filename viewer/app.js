@@ -36,6 +36,9 @@ const PAPER_RECORD_SUFFIX = '-paper'
 // Approach/paper verdict lifecycle (matches TrainingPaperRecord.status). Drives the verdict badge,
 // the verdict filter, and the auto-suggested verdict from measured-vs-hold.
 const PAPER_STATUSES = ['untested', 'replicating', 'holds-up', 'fluff']
+const MODEL_RECORD_SUFFIX = '-model'
+// Model-architecture verdict lifecycle (matches TrainingModelRecord.status).
+const MODEL_STATUSES = ['untested', 'proven', 'disproved']
 const QUEUE_RECORD_TYPE = 'trainer-queue'
 const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
@@ -48,6 +51,7 @@ const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'hypotheses', label: 'Hypotheses' },
   { id: 'papers', label: 'Papers' },
+  { id: 'models', label: 'Models' },
   { id: 'versions', label: 'Versions' },
   { id: 'datasets', label: 'Datasets' },
   { id: 'environments', label: 'Environments' },
@@ -129,6 +133,9 @@ let datasetsCache = []
 // Approach/paper library records + the active verdict filter ('all' | a PAPER_STATUSES value).
 let papersCache = []
 let paperVerdictFilter = 'all'
+// Model-architecture library records + the active verdict filter ('all' | a MODEL_STATUSES value).
+let modelsCache = []
+let modelVerdictFilter = 'all'
 // When a campaign is launched right after a paper's Replicate, this holds that paper's id so the new
 // campaign auto-connects to it. Set after Replicate, cleared on launch / a fresh preset.
 let launchFromPaperId = null
@@ -1332,6 +1339,7 @@ function resetDashboardState() {
   environmentsCache = []
   datasetsCache = []
   papersCache = []
+  modelsCache = []
   launchPresetDatasets = []
   launchPresetEnvironments = []
   launchFromPaperId = null
@@ -3449,6 +3457,233 @@ function equityVsHoldSectionHtml(summary) {
     <p class="badges-row">model ${escapeHtml(fmt(modelPct))} · hold ${escapeHtml(fmt(holdPct))}
       · <span class="badge ${cls}">${escapeHtml(`${delta >= 0 ? '+' : ''}${delta.toFixed(1)} pts vs hold`)}</span></p>`
 }
+// --- Explain: the decision trace (xAI) -------------------------------------
+// A generic, domain-oblivious read of WHY the model acted, from summary.artifacts.decisionTrace (a
+// DecisionTrace; arbitrary action labels, no trading vocabulary): an action-distribution diagnostic
+// that flags anomalies + dormant actions, the per-action VALUE the policy assigned over time (so
+// "why so few sells?" is answerable — sell-value vs hold-value), confidence over time, and any input
+// attribution. The timeline shares the downsampled step axis with the price/equity charts above.
+const ACTION_VALUE_PALETTE = new Map([
+  ['hold', '#94a3b8'],
+  ['buy', '#3b82f6'],
+  ['sell', '#ef4444'],
+  ['short', '#8b5cf6'],
+  ['cover', '#14b8a6'],
+])
+function readDecisionTrace(summary) {
+  const t = summary && summary.artifacts && summary.artifacts.decisionTrace
+  if (!t || typeof t !== 'object') return null
+  const steps = Array.isArray(t.steps)
+    ? t.steps.filter((s) => s && typeof s === 'object' && typeof s.action === 'string')
+    : []
+  if (!steps.length) return null
+  return { ...t, steps }
+}
+function decisionActionColors(labels) {
+  const map = new Map()
+  labels.forEach((label, i) =>
+    map.set(label, ACTION_VALUE_PALETTE.get(label) || CHART_PALETTE[i % CHART_PALETTE.length]),
+  )
+  return map
+}
+// Possible actions = every action the policy ever SCORED (a key in any step's actionValues) unioned
+// with actions actually taken, so a never-taken-but-scorable action surfaces as dormant — the crux of
+// the sparse-sell question.
+function decisionTraceDigest(trace) {
+  const steps = trace.steps
+  const counts =
+    trace.actionCounts && typeof trace.actionCounts === 'object'
+      ? { ...trace.actionCounts }
+      : steps.reduce((m, s) => ((m[s.action] = (m[s.action] || 0) + 1), m), {})
+  const total = Number(trace.totalSteps) || steps.length
+  const scorable = new Set()
+  for (const s of steps)
+    if (s.actionValues) for (const k of Object.keys(s.actionValues)) scorable.add(k)
+  const taken = Object.keys(counts)
+  const possible = [...new Set([...taken, ...scorable])]
+  const entries = taken.map((a) => [a, Number(counts[a]) || 0]).sort((x, y) => y[1] - x[1])
+  const dominant = entries.length ? entries[0][0] : null
+  const dominantCount = entries.length ? entries[0][1] : 0
+  const dormant = possible.filter((a) => !counts[a])
+  const anomalies = []
+  if (dominant) {
+    for (const [a, c] of entries) {
+      if (a !== dominant && dominantCount >= 10 * Math.max(c, 1) && dominantCount >= 5)
+        anomalies.push(`${dominant} ≫ ${a} (${dominantCount} vs ${c})`)
+    }
+  }
+  for (const a of dormant) anomalies.push(`${a} never taken — scored but dormant`)
+  return { total, counts, entries, dominant, dormant, possible, anomalies }
+}
+// Mean (value[a] − value[b]) over steps where both were scored — e.g. how much "hold" outscores
+// "sell", a quantitative read on why an action stays dormant. Null when never co-scored.
+function avgDecisionValueGap(trace, a, b) {
+  let sum = 0
+  let n = 0
+  for (const s of trace.steps) {
+    if (!s.actionValues) continue
+    const va = Number(s.actionValues[a])
+    const vb = Number(s.actionValues[b])
+    if (Number.isFinite(va) && Number.isFinite(vb)) {
+      sum += va - vb
+      n += 1
+    }
+  }
+  return n ? sum / n : null
+}
+function decisionDistributionHtml(digest) {
+  const total = digest.total || 1
+  const rows = digest.entries
+    .map(
+      ([a, c]) =>
+        `<tr><th>${escapeHtml(a)}</th><td class="num">${c}</td><td class="num">${((100 * c) / total).toFixed(1)}%</td></tr>`,
+    )
+    .join('')
+  const dormantRows = digest.dormant
+    .map(
+      (a) => `<tr><th>${escapeHtml(a)} <span class="card-sub">dormant</span></th>
+        <td class="num">0</td><td class="num">0.0%</td></tr>`,
+    )
+    .join('')
+  const anomalyChips = digest.anomalies.length
+    ? `<p class="badges-row">${digest.anomalies.map((a) => `<span class="badge is-warn">${escapeHtml(a)}</span>`).join(' ')}</p>`
+    : '<p class="card-sub">No distribution anomalies.</p>'
+  return `<h4 class="card-sub">Action distribution — ${digest.total} decisions</h4>
+    ${anomalyChips}
+    <table class="kv-table report-table"><thead><tr><th>action</th><th class="num">#</th><th class="num">share</th></tr></thead>
+    <tbody>${rows}${dormantRows}</tbody></table>`
+}
+// The sparse-sell deep-dive: one value line per scorable action over the step axis — makes it
+// self-evident whether "hold" is persistently worth more than "sell" (value never learned) or the
+// signal just never wins.
+function decisionValueChartHtml(trace, digest) {
+  const lines = digest.possible.filter((a) =>
+    trace.steps.some((s) => s.actionValues && Number.isFinite(Number(s.actionValues[a]))),
+  )
+  if (lines.length < 2) return ''
+  const points = []
+  trace.steps.forEach((s, i) => {
+    if (!s.actionValues) return
+    for (const a of lines) {
+      const v = Number(s.actionValues[a])
+      if (Number.isFinite(v)) points.push({ x: i, y: v, group: a })
+    }
+  })
+  if (points.length < 2) return ''
+  const groupColors = decisionActionColors(lines)
+  const svg = buildLineChart({
+    points,
+    xLabel: 'step',
+    yLabel: 'value',
+    width: 640,
+    height: 200,
+    markers: false,
+    groupColors,
+    ariaLabel: 'per-action value over time',
+  })
+  return `<h4 class="card-sub">Per-action value over time — is the dormant signal ever worth more than holding?</h4>
+    ${chartLegendHtml(groupColors)}<div class="chart-wrap">${svg}</div>`
+}
+function decisionConfidenceChartHtml(trace) {
+  const points = []
+  trace.steps.forEach((s, i) => {
+    if (Number.isFinite(Number(s.confidence)))
+      points.push({ x: i, y: Number(s.confidence), group: 'confidence' })
+  })
+  if (points.length < 2) return ''
+  const groupColors = new Map([['confidence', CHART_PALETTE[4]]])
+  const svg = buildLineChart({
+    points,
+    xLabel: 'step',
+    yLabel: 'confidence',
+    width: 640,
+    height: 160,
+    markers: false,
+    groupColors,
+    ariaLabel: 'policy confidence over time',
+  })
+  return `<h4 class="card-sub">Confidence in the chosen action over time</h4><div class="chart-wrap">${svg}</div>`
+}
+function decisionAttributionHtml(trace) {
+  const fa = trace.featureAttribution
+  if (!fa || typeof fa !== 'object') return ''
+  let entries = []
+  let label = 'feature'
+  if (fa.byGroup && typeof fa.byGroup === 'object') {
+    entries = Object.entries(fa.byGroup).filter(([, v]) => Number.isFinite(Number(v)))
+    label = 'group'
+  } else if (Array.isArray(fa.perFeature)) {
+    entries = fa.perFeature
+      .map((v, i) => [`feature ${i}`, Number(v)])
+      .filter(([, v]) => Number.isFinite(v))
+  }
+  if (!entries.length) return ''
+  entries = entries.sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 12)
+  const rows = entries
+    .map(
+      ([k, v]) =>
+        `<tr><th>${escapeHtml(k)}</th><td class="num">${escapeHtml(formatTickValue(v))}</td></tr>`,
+    )
+    .join('')
+  const meta = `${escapeHtml(String(fa.method || 'saliency'))}${fa.samples ? `, ${Number(fa.samples)} decisions` : ''}`
+  return `<h4 class="card-sub">Input attribution — ${meta}</h4>
+    <table class="kv-table report-table"><thead><tr><th>${label}</th><th class="num">saliency</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+function explainSectionHtml(summary) {
+  const trace = readDecisionTrace(summary)
+  if (!trace) return ''
+  const digest = decisionTraceDigest(trace)
+  const inner = [
+    decisionDistributionHtml(digest),
+    decisionValueChartHtml(trace, digest),
+    decisionConfidenceChartHtml(trace),
+    decisionAttributionHtml(trace),
+  ]
+    .filter(Boolean)
+    .join('')
+  if (!inner) return ''
+  const showing =
+    trace.steps.length < digest.total ? ` · showing ${trace.steps.length} of ${digest.total}` : ''
+  return `<h3>Explain <span class="card-sub">— why the model acted${escapeHtml(showing)}</span></h3>${inner}`
+}
+// A compact text read of the decision trace for the chat system prompt, so "why so few sells?" has
+// the action counts, dormant signals, value gaps and top attributed inputs already in context.
+function decisionTraceChatSummary(summary) {
+  const trace = readDecisionTrace(summary)
+  if (!trace) return ''
+  const d = decisionTraceDigest(trace)
+  const parts = [
+    `Action counts over ${d.total} steps: ${d.entries.map(([a, c]) => `${a}=${c}`).join(', ')}.`,
+  ]
+  if (d.anomalies.length) parts.push(`Distribution flags: ${d.anomalies.join('; ')}.`)
+  if (d.dominant) {
+    for (const a of d.dormant) {
+      const gap = avgDecisionValueGap(trace, d.dominant, a)
+      if (gap != null)
+        parts.push(
+          `On average "${d.dominant}" is worth ${formatTickValue(gap)} more than the dormant "${a}" — why "${a}" stays unused.`,
+        )
+    }
+  }
+  const fa = trace.featureAttribution
+  if (fa && fa.byGroup && typeof fa.byGroup === 'object') {
+    const top = Object.entries(fa.byGroup)
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .slice(0, 5)
+      .map(([k, v]) => `${k}(${formatTickValue(v)})`)
+      .join(', ')
+    if (top) parts.push(`Top input groups by saliency: ${top}.`)
+  } else if (fa && Array.isArray(fa.perFeature)) {
+    const top = fa.perFeature
+      .map((v, i) => [i, v])
+      .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+      .slice(0, 5)
+      .map(([i, v]) => `f${i}(${formatTickValue(v)})`)
+      .join(', ')
+    if (top) parts.push(`Top input features by saliency: ${top}.`)
+  }
+  return `Decision trace summary:\n${parts.join('\n')}`
+}
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
 // price-action + hold-comparison view; tell the user a re-run will surface them.
 function oldRunChartHintHtml(s) {
@@ -3538,6 +3773,7 @@ function renderRunDetail(key) {
     ${exitsSectionHtml(s)}
     ${regimesSectionHtml(s)}
     ${equityVsHoldSectionHtml(s) || trainingCurveSectionHtml(s)}
+    ${explainSectionHtml(s)}
     ${ledgerSectionHtml(s)}
     <h3>Config</h3>
     <pre class="json">${escapeHtml(JSON.stringify(s.config || {}, null, 2))}</pre>
@@ -3623,6 +3859,7 @@ async function chatAboutRun(key) {
       ? ''
       : `Objective (${objectiveName()}): ${formatObjective(s.objective)} · health: ${(s.health && s.health.status) || 'unknown'}.`,
     s.metrics ? `Metrics:\n${JSON.stringify(s.metrics, null, 2)}` : '',
+    failed ? '' : decisionTraceChatSummary(s),
     verdict && verdict.why ? `Judge verdict: ${verdict.why}` : '',
     s.error ? `Error:\n${s.error}` : '',
     logTail
@@ -5244,21 +5481,25 @@ function paperLinkCampaignHtml() {
     </div>
   </div>`
 }
-// Measured outcome for a paper from its linked, non-failed runs: best objective + whether any beat
-// buy-and-hold out-of-sample (return_vs_hold_pct > 0). Null when nothing is linked / loaded yet.
-function paperMeasured(paper) {
-  const keys = new Set(Array.isArray(paper.linkedRunKeys) ? paper.linkedRunKeys : [])
-  if (!keys.size) return null
-  const runs = runsCache.filter((r) => keys.has(r.key))
-  if (!runs.length) return null
-  const vhs = runs
+// Measured outcome from a set of runs (shared by the Papers + Models registries): best objective +
+// whether any beat buy-and-hold out-of-sample (return_vs_hold_pct > 0). Null when there are no runs.
+function measuredFromRuns(runs) {
+  const live = (runs || []).filter((r) => r.summary && r.summary.status !== 'failed')
+  if (!live.length) return null
+  const vhs = live
     .map((r) => Number(((r.summary && r.summary.metrics) || {}).return_vs_hold_pct))
     .filter(Number.isFinite)
   return {
-    runs: runs.length,
-    objective: bestObjectiveOf(runs),
+    runs: live.length,
+    objective: bestObjectiveOf(live),
     beatsHold: vhs.length ? Math.max(...vhs) > 0 : null,
   }
+}
+// Measured outcome for a paper from its linked runs. Null when nothing is linked / loaded yet.
+function paperMeasured(paper) {
+  const keys = new Set(Array.isArray(paper.linkedRunKeys) ? paper.linkedRunKeys : [])
+  if (!keys.size) return null
+  return measuredFromRuns(runsCache.filter((r) => keys.has(r.key)))
 }
 // Verdict the measured outcome SUGGESTS (the user confirms): holds-up only if a linked run beat hold OOS.
 function suggestPaperVerdict(paper) {
@@ -5697,6 +5938,370 @@ function setupPapers() {
   }
 }
 
+// --- Models / Architectures tab --------------------------------------------------
+// A registry of model build-ups (algo + net shape + policy internals + rationale). Unlike Papers, a
+// model's evidence is AUTO-DERIVED: `match` names the model-lever values identifying runs that use the
+// architecture, so its verdict comes from those runs (no manual linking). Generic; BlackSwan first.
+const MODEL_VERDICT_BADGE = { untested: 'is-queued', proven: 'is-done', disproved: 'is-failed' }
+const MODEL_VERDICT_LABEL = { untested: 'untested', proven: 'proven', disproved: 'disproved' }
+async function readModels() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + MODEL_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id)
+}
+async function putModel(model) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + MODEL_RECORD_SUFFIX,
+    key: model.id,
+    content: { ...model, updatedAt: nowIso() },
+  })
+}
+async function deleteModelRecord(id) {
+  await window.OverseerBridge.deleteData({
+    type: manifest.recordType + MODEL_RECORD_SUFFIX,
+    key: id,
+  })
+}
+// Runs whose config matches EVERY lever in the model's `match` — the architecture's evidence.
+function modelMatchingRuns(model) {
+  const match = (model && model.match) || {}
+  const keys = Object.keys(match)
+  if (!keys.length) return []
+  return runsCache.filter((r) => {
+    const cfg = (r.summary && r.summary.config) || {}
+    return keys.every((k) => String(cfg[k]) === String(match[k]))
+  })
+}
+function modelMeasured(model) {
+  return measuredFromRuns(modelMatchingRuns(model))
+}
+function suggestModelVerdict(model) {
+  const m = modelMeasured(model)
+  if (!m || m.beatsHold === null) return null
+  return m.beatsHold ? 'proven' : 'disproved'
+}
+function modelBuildupHtml(model) {
+  const rows = []
+  if (model.modelName) rows.push(['model_name', model.modelName])
+  if (model.algo) rows.push(['algo', model.algo])
+  if (model.netArch) rows.push(['net', model.netArch])
+  if (model.policyInternals) rows.push(['policy', model.policyInternals])
+  if (!rows.length) return ''
+  return `<table class="kv-table model-buildup"><tbody>${rows
+    .map(([k, v]) => `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(String(v))}</td></tr>`)
+    .join('')}</tbody></table>`
+}
+function modelMeasuredHtml(model) {
+  const claimed =
+    model.claimedMetrics && Object.keys(model.claimedMetrics).length ? model.claimedMetrics : null
+  const m = modelMeasured(model)
+  if (!claimed && !m) return ''
+  const claimedBits = claimed
+    ? Object.entries(claimed)
+        .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(String(v))}`)
+        .join(' · ')
+    : '—'
+  const measuredBits = m
+    ? `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(m.objective))} · ${m.runs} run${m.runs === 1 ? '' : 's'}${m.beatsHold === null ? '' : m.beatsHold ? ' · beats hold' : ' · trails hold'}`
+    : 'no runs yet'
+  return `<table class="kv-table paper-cvm"><tbody>
+    <tr><th>claimed</th><td>${claimedBits}</td></tr>
+    <tr><th>measured</th><td>${measuredBits}</td></tr>
+  </tbody></table>`
+}
+function modelCardHtml(model) {
+  const status = MODEL_STATUSES.includes(model.status) ? model.status : 'untested'
+  const badge = `<span class="run-badge ${MODEL_VERDICT_BADGE[status]}">${escapeHtml(MODEL_VERDICT_LABEL[status])}</span>`
+  const suggested = suggestModelVerdict(model)
+  const suggestBit =
+    suggested && suggested !== status
+      ? `<p class="paper-suggest"${helpAttr('Suggested from runs using this architecture (measured-vs-hold) — open Edit to record it.')}>runs suggest: ${escapeHtml(MODEL_VERDICT_LABEL[suggested])}</p>`
+      : ''
+  const id = escapeHtml(model.id)
+  const matchRuns = modelMatchingRuns(model).length
+  const canReplicate =
+    (model.replicateConfig && Object.keys(model.replicateConfig).length) ||
+    (model.match && Object.keys(model.match).length)
+  const viewRuns = matchRuns
+    ? `<button type="button" data-action="view-model-runs" data-id="${id}" class="ghost-btn"${helpAttr('Show the runs using this architecture in the Runs tab.')}>View ${matchRuns} run${matchRuns === 1 ? '' : 's'}</button>`
+    : ''
+  return `<article class="model-card" data-id="${id}">
+    <div class="card-head card-head-row">
+      <div><h3>${escapeHtml(model.name || model.modelName || 'Untitled')} ${badge}</h3></div>
+      <div class="head-actions">
+        ${canReplicate ? `<button type="button" data-action="replicate-model" data-id="${id}" class="ghost-btn"${helpAttr('Prefill the Launch form with this architecture.')}>Replicate</button>` : ''}
+        ${viewRuns}
+        <button type="button" class="icon-btn" data-action="edit-model" data-id="${id}" title="Edit / record verdict" aria-label="Edit">✎</button>
+        <button type="button" class="icon-btn icon-btn-danger" data-action="delete-model" data-id="${id}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
+      </div>
+    </div>
+    ${model.rationale ? `<p class="paper-claim">${escapeHtml(model.rationale)}</p>` : ''}
+    ${modelBuildupHtml(model)}
+    ${modelMeasuredHtml(model)}
+    ${suggestBit}
+    ${model.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(model.verdictNote)}</p>` : ''}
+  </article>`
+}
+function modelFilterBarHtml() {
+  const btns = ['all', ...MODEL_STATUSES]
+    .map((s) => {
+      const label = s === 'all' ? 'all' : MODEL_VERDICT_LABEL[s]
+      const count =
+        s === 'all'
+          ? modelsCache.length
+          : modelsCache.filter((m) => (m.status || 'untested') === s).length
+      return `<button type="button" class="paper-filter-btn${modelVerdictFilter === s ? ' is-active' : ''}" data-model-verdict="${escapeHtml(s)}">${escapeHtml(label)} (${count})</button>`
+    })
+    .join('')
+  return `<div class="paper-filter">${btns}</div>`
+}
+function manifestModelSeeds() {
+  return manifest && Array.isArray(manifest.models) ? manifest.models : []
+}
+function pendingSeedModels() {
+  const have = new Set(modelsCache.map((m) => m.id))
+  return manifestModelSeeds().filter((s) => s && s.id && !have.has(s.id))
+}
+function pendingSeedModelsHtml() {
+  const pending = pendingSeedModels()
+  if (!pending.length) return ''
+  return `<div class="paper-seed-banner">${pending.length} architecture${pending.length === 1 ? '' : 's'} from the manifest aren’t in your library yet. <button type="button" class="ghost-btn" data-action="import-model-seeds">Import ${pending.length}</button></div>`
+}
+async function importSeedModels() {
+  const pending = pendingSeedModels()
+  if (!pending.length) return
+  try {
+    for (const s of pending) {
+      await putModel({
+        ...s,
+        status: MODEL_STATUSES.includes(s.status) ? s.status : 'untested',
+        source: s.source || 'manual',
+        createdAt: nowIso(),
+      })
+    }
+  } catch {
+    setStatusLine('models-status', 'Could not import architectures — please try again.', true)
+    return
+  }
+  setStatusLine(
+    'models-status',
+    `Imported ${pending.length} architecture${pending.length === 1 ? '' : 's'}.`,
+    false,
+  )
+  await renderModels()
+}
+async function renderModels() {
+  const body = byId('models-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(
+      body,
+      '<div class="empty-hint">Open inside the Overseer to manage the model library.</div>',
+    )
+    return
+  }
+  // Refresh runs alongside models so the auto-derived measured/verdict reads fresh evidence.
+  ;[modelsCache, runsCache] = await Promise.all([readModels(), readRuns()])
+  const seedBanner = pendingSeedModelsHtml()
+  if (!modelsCache.length) {
+    setHtml(
+      body,
+      seedBanner +
+        '<div class="empty-hint">No architectures yet — add one, or import the curated starter set.</div>',
+    )
+    return
+  }
+  const shown =
+    modelVerdictFilter === 'all'
+      ? modelsCache
+      : modelsCache.filter((m) => (m.status || 'untested') === modelVerdictFilter)
+  const sorted = [...shown].sort((a, b) =>
+    String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+  )
+  setHtml(
+    body,
+    seedBanner +
+      modelFilterBarHtml() +
+      (sorted.length
+        ? sorted.map(modelCardHtml).join('')
+        : '<div class="empty-hint">No architectures match this verdict.</div>'),
+  )
+}
+function modelFormHtml(model) {
+  const m = model || {}
+  const isNew = !m.id
+  const statusOpts = MODEL_STATUSES.map(
+    (s) =>
+      `<option value="${s}"${(m.status || 'untested') === s ? ' selected' : ''}>${escapeHtml(MODEL_VERDICT_LABEL[s])}</option>`,
+  ).join('')
+  return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : m.id)}" />
+    <label class="field"><span>Name</span><input type="text" name="name" value="${escapeHtml(m.name || '')}" placeholder="e.g. Reppo-custom — recurrent PPO" /></label>
+    <div class="lever-grid">
+      <label class="field"><span>model_name lever</span><input type="text" name="modelName" value="${escapeHtml(m.modelName || '')}" placeholder="e.g. reppo-custom" /></label>
+      <label class="field"><span>Algorithm</span><input type="text" name="algo" value="${escapeHtml(m.algo || '')}" placeholder="e.g. RecurrentPPO (sb3-contrib)" /></label>
+    </div>
+    <div class="lever-grid">
+      <label class="field"><span>Net architecture</span><input type="text" name="netArch" value="${escapeHtml(m.netArch || '')}" placeholder="e.g. 512,64 + custom tokens" /></label>
+      <label class="field"><span>Policy internals</span><input type="text" name="policyInternals" value="${escapeHtml(m.policyInternals || '')}" placeholder="e.g. LSTM recurrent + custom head" /></label>
+    </div>
+    <label class="field"><span>Rationale</span><textarea name="rationale" rows="2" placeholder="why this build-up / what it’s good at">${escapeHtml(m.rationale || '')}</textarea></label>
+    <label class="field"><span>Match levers <em>(JSON — runs matching these are this model’s evidence)</em></span><input type="text" name="match" value="${escapeHtml(m.match ? JSON.stringify(m.match) : '')}" placeholder='{"model_name":"reppo-custom"}' /></label>
+    <label class="field"><span>Claimed metrics <em>(JSON, optional)</em></span><input type="text" name="claimedMetrics" value="${escapeHtml(m.claimedMetrics ? JSON.stringify(m.claimedMetrics) : '')}" placeholder='{"return_pct":50}' /></label>
+    <label class="field"><span>Replicate config <em>(JSON preset, optional — defaults to match)</em></span><textarea name="replicateConfig" rows="2" spellcheck="false" placeholder='{"fixed":{"model_name":"reppo-custom","net_arch":"512,64"},"seeds":3}'>${escapeHtml(m.replicateConfig ? JSON.stringify(m.replicateConfig) : '')}</textarea></label>
+    <div class="lever-grid">
+      <label class="field"><span>Verdict</span><select name="status">${statusOpts}</select></label>
+      <label class="field"><span>Tags <em>(comma-sep)</em></span><input type="text" name="tags" value="${escapeHtml(Array.isArray(m.tags) ? m.tags.join(', ') : '')}" /></label>
+    </div>
+    <label class="field"><span>Verdict note</span><textarea name="verdictNote" rows="2" placeholder="what did the runs show?">${escapeHtml(m.verdictNote || '')}</textarea></label>
+    <div class="form-actions"><button type="submit">Save</button><button type="button" id="model-cancel" class="ghost-btn">Cancel</button></div>`
+}
+function toggleModelForm(show, model) {
+  const form = byId('model-form')
+  if (!form) return
+  setStatusLine('models-status', '')
+  if (show) {
+    form.innerHTML = modelFormHtml(model)
+    form.hidden = false
+  } else {
+    form.innerHTML = ''
+    form.hidden = true
+  }
+}
+async function onSaveModel(form) {
+  const name = String(form.elements.name.value || '').trim()
+  if (!name) {
+    setStatusLine('models-status', 'Give the architecture a name.', true)
+    return
+  }
+  const match = parseJsonObjectField(form, 'match')
+  const claimedMetrics = parseJsonObjectField(form, 'claimedMetrics')
+  const replicateConfig = parseJsonObjectField(form, 'replicateConfig')
+  for (const [val, label] of [
+    [match, 'Match levers'],
+    [claimedMetrics, 'Claimed metrics'],
+    [replicateConfig, 'Replicate config'],
+  ]) {
+    if (val === null) {
+      setStatusLine('models-status', `${label} must be a valid JSON object (or blank).`, true)
+      return
+    }
+  }
+  const id = form.elements.id.value
+  const existing = modelsCache.find((x) => x.id === id) || {}
+  const tags = String(form.elements.tags.value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const model = {
+    ...existing,
+    id,
+    name,
+    modelName: String(form.elements.modelName.value || '').trim() || undefined,
+    algo: String(form.elements.algo.value || '').trim() || undefined,
+    netArch: String(form.elements.netArch.value || '').trim() || undefined,
+    policyInternals: String(form.elements.policyInternals.value || '').trim() || undefined,
+    rationale: String(form.elements.rationale.value || '').trim() || undefined,
+    match,
+    claimedMetrics,
+    replicateConfig,
+    status: MODEL_STATUSES.includes(form.elements.status.value)
+      ? form.elements.status.value
+      : 'untested',
+    verdictNote: String(form.elements.verdictNote.value || '').trim() || undefined,
+    tags: tags.length ? tags : undefined,
+    source: existing.source || 'manual',
+    createdAt: existing.createdAt || nowIso(),
+  }
+  try {
+    await putModel(model)
+  } catch {
+    setStatusLine('models-status', 'Could not save — please try again.', true)
+    return
+  }
+  toggleModelForm(false)
+  await renderModels()
+}
+async function onDeleteModel(id) {
+  try {
+    await deleteModelRecord(id)
+  } catch {
+    setStatusLine('models-status', 'Could not delete — please try again.', true)
+    return
+  }
+  modelsCache = modelsCache.filter((m) => m.id !== id)
+  await renderModels()
+}
+// Prefill the Launch form with this architecture (its replicateConfig, else {fixed: match}).
+function replicateModel(id) {
+  const m = modelsCache.find((x) => x.id === id)
+  if (!m) return
+  const c =
+    m.replicateConfig && Object.keys(m.replicateConfig).length
+      ? m.replicateConfig
+      : m.match && Object.keys(m.match).length
+        ? { fixed: m.match }
+        : null
+  if (!c) {
+    setStatusLine('models-status', 'No match / replicate config on this architecture.', true)
+    return
+  }
+  showTab('launch')
+  if (c.fixed || c.sweep || c.datasets || c.environments || c.seeds) applyPreset(c)
+  else applyPresetFixed(c)
+}
+// Show this architecture's runs (those matching its levers) in the Runs tab.
+function viewModelRuns(id) {
+  const m = modelsCache.find((x) => x.id === id)
+  if (!m) return
+  const runs = modelMatchingRuns(m)
+  if (!runs.length) return
+  runsFilterKeys = new Set(runs.map((r) => r.key))
+  runsFilterLabel = m.name || m.modelName || shortKey(id)
+  showTab('runs')
+}
+function setupModels() {
+  const addToggle = byId('model-add-toggle')
+  if (addToggle) {
+    addToggle.addEventListener('click', () => {
+      const f = byId('model-form')
+      toggleModelForm(!!(f && f.hidden))
+    })
+  }
+  const form = byId('model-form')
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      onSaveModel(form)
+    })
+    form.addEventListener('click', (event) => {
+      if (event.target.closest('#model-cancel')) toggleModelForm(false)
+    })
+  }
+  const body = byId('models-body')
+  if (body) {
+    body.addEventListener('click', (event) => {
+      const filterBtn = event.target.closest('button[data-model-verdict]')
+      if (filterBtn) {
+        modelVerdictFilter = filterBtn.dataset.modelVerdict
+        renderModels()
+        return
+      }
+      const btn = event.target.closest('button[data-action]')
+      if (!btn) return
+      const { action, id } = btn.dataset
+      if (action === 'import-model-seeds') importSeedModels()
+      else if (action === 'replicate-model') replicateModel(id)
+      else if (action === 'view-model-runs') viewModelRuns(id)
+      else if (action === 'edit-model')
+        toggleModelForm(
+          true,
+          modelsCache.find((m) => m.id === id),
+        )
+      else if (action === 'delete-model') onDeleteModel(id)
+    })
+  }
+}
+
 // --- Launch tab ----------------------------------------------------------------
 function leverEntries() {
   return Object.entries((manifest && manifest.levers) || {})
@@ -5959,6 +6564,15 @@ function booleanLeverHtml(key, spec) {
     </label>
   </div>`
 }
+// Human-readable "applies only when reward_model = combo_all_noop" note for a conditional lever.
+function appliesWhenLabel(cond) {
+  return (
+    'Applies only when ' +
+    Object.entries(cond)
+      .map(([k, vals]) => `${k} = ${(Array.isArray(vals) ? vals : [vals]).join(' / ')}`)
+      .join('; ')
+  )
+}
 function leverFieldsetHtml(key, spec) {
   const inner =
     spec.type === 'number'
@@ -5966,10 +6580,47 @@ function leverFieldsetHtml(key, spec) {
       : spec.type === 'choice'
         ? choiceLeverHtml(key, spec)
         : booleanLeverHtml(key, spec)
-  return `<fieldset class="lever">
+  const naNote = spec.appliesWhen
+    ? `<p class="lever-na-note">${escapeHtml(appliesWhenLabel(spec.appliesWhen))}</p>`
+    : ''
+  return `<fieldset id="lever-${escapeHtml(key)}" class="lever${spec.appliesWhen ? ' lever-conditional' : ''}">
     <legend${helpAttr(spec.description || '')}>${escapeHtml(key)} <span class="lever-type">${escapeHtml(spec.type || '')}</span></legend>
     ${inner}
+    ${naNote}
   </fieldset>`
+}
+// A lever's currently-effective values in the form: the swept selection if any, else the fixed value.
+function currentLeverValues(form, key) {
+  const spec = (manifest && manifest.levers && manifest.levers[key]) || null
+  if (!spec) return []
+  const sweep = readSweepValues(form, key, spec)
+  if (sweep.length) return sweep.map(String)
+  const fixed = readFixedValue(form, key, spec)
+  return fixed === undefined || fixed === '' ? [] : [String(fixed)]
+}
+// True unless an `appliesWhen` condition is unmet — every named lever must currently hold one of the
+// listed values (matching either the fixed value or any swept value).
+function leverApplies(spec, form) {
+  if (!spec.appliesWhen) return true
+  for (const [k, allowed] of Object.entries(spec.appliesWhen)) {
+    const allowedStr = (Array.isArray(allowed) ? allowed : [allowed]).map(String)
+    const current = currentLeverValues(form, k)
+    if (!current.some((v) => allowedStr.includes(v))) return false
+  }
+  return true
+}
+// Grey out + disable conditional levers whose `appliesWhen` isn't satisfied, so a setting only some
+// reward models use isn't pinned/swept where it does nothing. Re-run whenever a controlling lever changes.
+function refreshLeverApplicability(form) {
+  if (!form) return
+  for (const [key, spec] of modelLeverEntries()) {
+    if (!spec.appliesWhen) continue
+    const fieldset = byId('lever-' + key)
+    if (!fieldset) continue
+    const applies = leverApplies(spec, form)
+    fieldset.classList.toggle('is-na', !applies)
+    for (const el of fieldset.querySelectorAll('input, select, textarea')) el.disabled = !applies
+  }
 }
 function savedAutoEval() {
   try {
@@ -6259,6 +6910,7 @@ function renderLaunchForm() {
     </div>
     <p id="launch-status" class="form-status" role="status"></p>`
   refreshLeverAnnotations(form)
+  refreshLeverApplicability(form)
   updateLaunchSummary()
 }
 // All launch presets in order: the quick-start (if any) first, then the manifest's
@@ -6420,6 +7072,7 @@ function applyPreset(preset) {
     launchPresetEnvironments = preset.environments
   refreshLaunchPickers()
   refreshLeverAnnotations(form)
+  refreshLeverApplicability(form)
   updateLaunchSummary()
 }
 // Clone-to-Launch and other fixed-only callers: a preset that only pins lever values.
@@ -6462,6 +7115,10 @@ function buildSpecFromForm(form) {
   const fixed = {}
   // Only MODEL levers — environment levers come from the selected environments, not the form.
   for (const [key, spec] of modelLeverEntries()) {
+    // A conditional lever that doesn't currently apply is left out of the spec entirely — it falls back
+    // to its manifest default at plan time, so a setting only some reward models use never pins/sweeps
+    // where it does nothing.
+    if (spec.appliesWhen && !leverApplies(spec, form)) continue
     const values = readSweepValues(form, key, spec)
     if (values.length) sweep[key] = values
     else fixed[key] = readFixedValue(form, key, spec)
@@ -6618,6 +7275,7 @@ function setupLaunch() {
     }
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     refreshLeverAnnotations(form)
+    refreshLeverApplicability(form)
     updateLaunchSummary()
   })
 }
@@ -7240,6 +7898,7 @@ function showTab(id) {
   if (target === 'datasets') renderDatasets()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'papers') renderPapers()
+  if (target === 'models') renderModels()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
     renderActivity()
@@ -7319,6 +7978,7 @@ async function init() {
   setupDatasets()
   setupHypotheses()
   setupPapers()
+  setupModels()
   setupLaunch()
   setupActivity()
   setupTabs()

@@ -293,6 +293,36 @@
             </section>
           </section>
 
+          <!-- Models / Architectures (model build-ups, proven/disproved by the runs that use them) -->
+          <section id="tab-models" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="models-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="models-h">Models / Architectures</h2>
+                  <p class="card-sub">
+                    What each model build-up composes (algo + net + policy internals) and why —
+                    proven or disproved automatically by the runs that use it (matched on its
+                    levers).
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="model-add-toggle"
+                    class="icon-btn"
+                    title="Add architecture"
+                    aria-label="Add architecture"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <p id="models-status" class="form-status" role="status" hidden></p>
+              <form id="model-form" class="hypothesis-form" autocomplete="off" hidden></form>
+              <div id="models-body" class="papers-body"></div>
+            </section>
+          </section>
+
           <!-- Launch (sweep / fixed lever values → a training campaign) -->
           <section id="tab-launch" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="launch-h">

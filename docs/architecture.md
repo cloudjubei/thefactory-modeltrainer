@@ -80,6 +80,12 @@ project by its manifest's `recordType`.
   resume re-launches the same campaign and skip-if-fresh makes completed items free.
 - **Failures are per-item**: a failed run records a `failed` count and the campaign continues;
   a completed-but-malformed summary is a failure (never silently ingested).
+- **Explainability is an opt-in artifact, not a code path**: a project may attach a domain-oblivious
+  `artifacts.decisionTrace` (`DecisionTrace`) the hub's Explain view renders (action distribution,
+  per-action value over time, confidence, input attribution). The engine never computes it — each
+  project emits its own (BlackSwan replays its deterministic test once more to capture per-step
+  confidence/Q-values + saliency); the engine only soft-validates it (`validateDecisionTrace`,
+  dropping an unusable trace) so a run without one ingests normally.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best

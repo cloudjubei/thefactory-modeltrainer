@@ -1183,18 +1183,23 @@ button:focus-visible,
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
-.paper-card {
+.paper-card,
+.model-card {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
-.paper-card h3 {
+.paper-card h3,
+.model-card h3 {
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.model-buildup {
+  margin: 6px 0;
 }
 .paper-claim {
   margin: 8px 0 6px;
@@ -1552,6 +1557,19 @@ pre.json {
   color: var(--muted);
   font-weight: 400;
   font-size: 11px;
+}
+.lever-na-note {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+.lever.is-na {
+  opacity: 0.5;
+}
+.lever.is-na .lever-na-note {
+  color: var(--warn);
+  font-style: normal;
 }
 .lever-grid {
   display: grid;

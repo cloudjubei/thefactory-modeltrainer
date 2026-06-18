@@ -1,4 +1,7 @@
 import type {
+  DecisionFeatureAttribution,
+  DecisionStep,
+  DecisionTrace,
   ExperimentSpec,
   PlannedTrainingItem,
   TrainerDataFile,
@@ -389,4 +392,69 @@ export function validateTrainingRunSummary(raw: unknown): TrainingRunSummary {
     throw new Error('run summary requires a numeric objective')
   }
   return summary as unknown as TrainingRunSummary
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === 'object' && !Array.isArray(v)
+
+const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+
+/** Coerce a record to label → finite number, dropping non-numeric entries; `undefined` when empty. */
+function coerceNumberMap(raw: unknown): Record<string, number> | undefined {
+  if (!isPlainObject(raw)) return undefined
+  const out: Record<string, number> = {}
+  for (const [k, v] of Object.entries(raw)) if (isFiniteNumber(v)) out[k] = v
+  return Object.keys(out).length ? out : undefined
+}
+
+/** Keep only the finite numbers from an array; `undefined` when the input is not an array. */
+function coerceNumberArray(raw: unknown): number[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  return raw.filter(isFiniteNumber)
+}
+
+function coerceDecisionStep(raw: unknown): DecisionStep | undefined {
+  if (!isPlainObject(raw)) return undefined
+  if (!isFiniteNumber(raw.step) || typeof raw.action !== 'string') return undefined
+  const step: DecisionStep = { step: raw.step, action: raw.action }
+  if (isFiniteNumber(raw.confidence)) step.confidence = raw.confidence
+  const actionValues = coerceNumberMap(raw.actionValues)
+  if (actionValues) step.actionValues = actionValues
+  if (typeof raw.alternativeAction === 'string') step.alternativeAction = raw.alternativeAction
+  if (typeof raw.forced === 'boolean') step.forced = raw.forced
+  if (isFiniteNumber(raw.reward)) step.reward = raw.reward
+  if (typeof raw.state === 'string') step.state = raw.state
+  const features = coerceNumberArray(raw.features)
+  if (features && features.length) step.features = features
+  return step
+}
+
+function coerceFeatureAttribution(raw: unknown): DecisionFeatureAttribution | undefined {
+  if (!isPlainObject(raw)) return undefined
+  const out: DecisionFeatureAttribution = {}
+  const perFeature = coerceNumberArray(raw.perFeature)
+  if (perFeature && perFeature.length) out.perFeature = perFeature
+  const byGroup = coerceNumberMap(raw.byGroup)
+  if (byGroup) out.byGroup = byGroup
+  if (typeof raw.method === 'string') out.method = raw.method
+  if (isFiniteNumber(raw.samples)) out.samples = raw.samples
+  return out.perFeature || out.byGroup ? out : undefined
+}
+
+/**
+ * Soft-validate a stored `artifacts.decisionTrace` into a clean {@link DecisionTrace}, dropping malformed
+ * steps and fields rather than throwing — a missing or unusable trace is NOT an error (returns
+ * `undefined`), so a run without explainability data ingests normally.
+ */
+export function validateDecisionTrace(raw: unknown): DecisionTrace | undefined {
+  if (!isPlainObject(raw) || !Array.isArray(raw.steps)) return undefined
+  const steps = raw.steps.map(coerceDecisionStep).filter((s): s is DecisionStep => s !== undefined)
+  if (!steps.length) return undefined
+  const trace: DecisionTrace = { steps }
+  const actionCounts = coerceNumberMap(raw.actionCounts)
+  if (actionCounts) trace.actionCounts = actionCounts
+  const featureAttribution = coerceFeatureAttribution(raw.featureAttribution)
+  if (featureAttribution) trace.featureAttribution = featureAttribution
+  if (isFiniteNumber(raw.totalSteps)) trace.totalSteps = raw.totalSteps
+  return trace
 }

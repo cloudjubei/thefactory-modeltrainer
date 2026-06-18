@@ -48,8 +48,22 @@ import {
   normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
+  validateDecisionTrace,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
+
+/** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
+function sanitizeRunArtifacts(
+  artifacts: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!artifacts || typeof artifacts !== 'object' || !('decisionTrace' in artifacts)) {
+    return artifacts
+  }
+  if (validateDecisionTrace(artifacts.decisionTrace)) return artifacts
+  const rest = { ...artifacts }
+  delete rest.decisionTrace
+  return rest
+}
 
 export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrainerTools {
   const now = deps.now ?? (() => new Date().toISOString())
@@ -268,12 +282,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           throw new Error(error)
         }
         const runSummary = validateTrainingRunSummary(result.summary)
+        const artifacts = sanitizeRunArtifacts(runSummary.artifacts)
         await deps.storage.upsertRecord({
           scope: params.scope,
           type: recordType,
           key: item.key,
           content: {
             ...runSummary,
+            ...(artifacts ? { artifacts } : {}),
             status: 'completed',
             setupKey: setupKeyOf(item.config),
             pipelineVersion,

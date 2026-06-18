@@ -244,6 +244,32 @@ describe('runTrainingCampaign', () => {
     })
   })
 
+  it('strips an unusable decisionTrace artifact but keeps a valid one and other artifacts', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({
+      jobResult: (job) => ({
+        summary: {
+          objective: 1,
+          artifacts:
+            (job.config as { lr: number }).lr === 0.1
+              ? { checkpoint: 'c.zip', decisionTrace: { steps: 'garbage' } }
+              : { decisionTrace: { steps: [{ step: 0, action: 'hold' }] } },
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1, 0.2] } },
+    })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    const artifacts = records.map((r) => (r.content as { artifacts?: unknown }).artifacts)
+    expect(artifacts).toContainEqual({ checkpoint: 'c.zip' })
+    expect(artifacts).toContainEqual({ decisionTrace: { steps: [{ step: 0, action: 'hold' }] } })
+  })
+
   it('stamps the launch thesis and target on every run record', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)

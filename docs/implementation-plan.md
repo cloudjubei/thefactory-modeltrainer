@@ -18,14 +18,14 @@ domain-oblivious: any further model is _data + the thin CLI contract_, not engin
 
 ## Repo split (governs all phases)
 
-| Repo                                    | Owns                                                                                                                            |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **thefactory-modeltrainer** (this repo) | `ModelTrainerTools`; matrix planner; campaign loop; judge/propose orchestration; the viewer; the standard + `examples/`.       |
+| Repo                                    | Owns                                                                                                                               |
+| --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| **thefactory-modeltrainer** (this repo) | `ModelTrainerTools`; matrix planner; campaign loop; judge/propose orchestration; the viewer; the standard + `examples/`.           |
 | **thefactory-tools**                    | Generic infra only: `ComputeRunner` seam (+ future `RemoteComputeRunner`, `ContentAddressedDataCache`, pairing); work-item engine. |
-| **thefactory-backend**                  | Activity registration + composition; app-view serving; future PIN-pairing endpoints + runner WS channel.                       |
-| **clients**                             | Future Compute Runners settings/pairing screen (native, cross-project).                                                        |
-| **the runner agent**                    | Future Docker-packaged connect-out program.                                                                                    |
-| **BlackSwan** (the trading repo)        | Its `TrainerManifest` + additive `trainer/` CLI conformance. No Overseer code.                                                 |
+| **thefactory-backend**                  | Activity registration + composition; app-view serving; future PIN-pairing endpoints + runner WS channel.                           |
+| **clients**                             | Future Compute Runners settings/pairing screen (native, cross-project).                                                            |
+| **the runner agent**                    | Future Docker-packaged connect-out program.                                                                                        |
+| **BlackSwan** (the trading repo)        | Its `TrainerManifest` + additive `trainer/` CLI conformance. No Overseer code.                                                     |
 
 ---
 
@@ -39,13 +39,21 @@ regime/vol features, and the `obs_squash` normalization experiment. A setup coun
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
-- **Run the Exp campaigns.** Exp 6–13 on the 1h winner — walk-forward robustness, shorting, vol-target,
+- **Run the Exp campaigns.** Exp 6–15 on the 1h winner — walk-forward robustness, shorting, vol-target,
   equity-path rewards, fidelity stack, obs-squash, **Exp 12 exit-mechanic sweep (SL × TP × trailing)**,
-  and **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold on the same features)**. Read the
-  cross-window OOS distributions (the new By-dataset robustness table), then lock in the first config
-  that clears the bar. The supervised+rules baseline (`supervised-logreg`/`supervised-gbm` model types)
-  is BUILT and trades through the unchanged env → comparable RunSummary; running Exp 13 answers "is
-  supervision beating RL on this env?". Keep RL alive while the other approaches run in parallel.
+  **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold)**, **Exp 14 architecture A/B (LSTM vs
+  attn-ppo vs tcn-ppo)**, **Exp 15 no-op-penalty sweep**. Read the cross-window OOS distributions (the
+  By-dataset robustness table), then lock in the first config that clears the bar. The supervised+rules
+  baseline is BUILT and trades through the unchanged env → comparable RunSummary. Keep RL alive while the
+  other approaches run in parallel.
+- **`combo_all_noop` reward + tunable penalty levers (DONE).** A reward model = `combo_all` plus an
+  explicit penalty for NO-OP trades (buy while already holding, sell while holding cash — `take_action`
+  returns False), via a `_noop_penalty()` mirroring `_turnover_penalty()`. The penalty magnitude is the
+  `combo_noop_penalty` lever (0 = off), and the long-existing turnover penalty got its `combo_fee_penalty`
+  lever exposed too — both wired through `reward_multiplier_*` → `get_reward_multipliers` → env. NEW
+  generic capability: a lever can declare `appliesWhen` (e.g. `{reward_model: ['combo_all_noop']}`) and
+  the Launch form greys out / drops from the spec any conditional lever whose controlling lever isn't set
+  to a matching value — so a setting only some reward models use isn't swept where it does nothing.
 - **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
@@ -78,6 +86,7 @@ auto-connects** the launched campaign (`launchFromPaperId` → `extra.paperId` �
 launch, `stampPaperCampaignResults` fills `linkedRunKeys` from the campaign record on settle), and a
 **"Link a running campaign to a paper"** area at the bottom of the tab links a live campaign manually;
 cards show a "campaign linked · N runs linked" chip.
+
 - **Starter-paper seeding (DONE):** the manifest ships `papers?: TrainingPaperSeed[]` and the Papers
   tab shows an "Import N starter approaches" banner that upserts them once (by id, skipping any the
   user already has so edits/verdicts aren't clobbered). BlackSwan's `trainer.json` carries the curated
@@ -96,67 +105,73 @@ cards show a "campaign linked · N runs linked" chip.
      a `<recordType>-paper` record `status:untested`) → the viewer fills the form / re-renders Papers.
   3. Viewer: swap the coming-soon toast in `onPaperAutoFill` for the activity call → prefill the full
      form from the returned draft (keep the spinner during the call).
-  This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers) +
-  the heavy auto-seed/verify pipeline (the find→web-verify→synthesize workflow used to seed the 10),
-  both of which stay deferred.
+     This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers) +
+     the heavy auto-seed/verify pipeline (the find→web-verify→synthesize workflow used to seed the 10),
+     both of which stay deferred.
 
-### 3c. Models / Architectures library (like Papers, for model build-ups) — HARD
+### 3c. Models / Architectures library (like Papers, for model build-ups)
 
-We've never looked under BlackSwan's hood — what `reppo-custom` / `trpo-custom` / the dueling /
-Munchausen / LSTM variants actually compose, and how `net_arch` / `activation` / `optimizer` shape
-them. A registry parallel to §2b Papers, generic (BlackSwan first consumer):
-- **The registry/tab** (mirror Papers): each card = a model architecture — its build-up (algo + net
-  shape + policy internals + any custom head), provenance/rationale, and a verdict
-  proven/disproved by linked runs (claimed-vs-measured). `<recordType>-model` records;
-  Replicate→Launch prefills `model_name`/`net_arch`/…; by-model grouping reuses the model-lever
-  signature; research/propose can seed cards. Mirrors the Papers plumbing.
-- **The research + build direction** (the LLM-advances angle): survey modern sequence architectures
-  (attention/transformers, longer-context recurrent) and add the promising ones as new `model_name`s
-  in BlackSwan's `model_factory`, each documented as a card and proven/disproved by sweeps. Real ML
-  work; sequenced after the registry exists.
+- **The registry/tab — SHIPPED.** A Models tab mirroring Papers: `TrainingModelRecord`/`TrainingModelSeed`
+  types + `<recordType>-model` records + CRUD, cards showing the build-up (model_name / algo / net /
+  policy internals) + rationale + claimed-vs-measured + a proven/disproved verdict badge + a verdict
+  filter, Replicate→Launch (prefills from `replicateConfig` or `{fixed: match}`), Edit/Delete, and the
+  manifest seed-import banner. KEY DIFFERENCE from Papers: evidence is AUTO-DERIVED — a card's `match`
+  names the model-lever values, and `modelMatchingRuns` finds the runs using that architecture, so
+  measured + the suggested verdict come from them automatically (no manual run-linking / campaign
+  machinery). "View N runs" filters the Runs tab to the architecture's runs. BlackSwan's `trainer.json`
+  seeds 10 architectures (reppo-custom, trpo-custom, ppo-custom, duel-dqn-custom(+lstm),
+  munchausen-dqn-custom, qrdqn-custom, vanilla dqn, supervised+rules, hodl) with honest pre-v3 caveats.
+- **The research + build direction — STARTED (attention + TCN shipped).** A web-grounded survey
+  (5 angles → ranked) picked two cheap, defensible, genuinely-new encoders. Built
+  `src/model/custom/sequence_extractor.py` — a `SequenceFeaturesExtractor(BaseFeaturesExtractor)` that
+  reshapes the flat (time-major) obs back to its `[lookback, per_bar]` bar grid and runs a TRUE
+  temporal encoder over the bars (the existing `custom_net_arch` attention tokens run on the flat
+  vector — degenerate), then pools → policy MLP. Two encoders: `attn` (1-block self-attention +
+  learned positional) and `tcn` (dilated causal residual conv). Wired as PPO model_names
+  **`attn-ppo` / `tcn-ppo`** in `model_factory` (plain `MlpPolicy` + `features_extractor_class`;
+  lookback from `env.data_provider`), added to the manifest model_name choices, seeded as Models cards
+  - an **Exp 14 architecture-A/B sweep** (reppo LSTM vs attn vs tcn). TDD'd (9 tests incl. the
+    reshape-ordering/leakage watchpoint + a `create_model` build smoke). HONEST FRAMING (in the cards):
+    architecture is almost certainly NOT the high-leverage lever on one noisy asset at 0.1% fees — these
+    are variance-reduction + a diagnostic; the acceptance gate is beating BOTH buy-and-hold AND the tuned
+    LSTM on walk-forward `traded_return` across ≥3 seeds + windows.
+- **LEFT (optional):** a **GRU** recurrent core — must be a custom `RecurrentActorCriticPolicy` subclass
+  (state lives in the policy, not a features-extractor), expected to be a wash vs LSTM; and an SSM
+  (S4D) falsification arm. Both deferred (lower value / higher effort); the registry + sweep pattern
+  make them drop-in when wanted.
 
 ### 3. xAI — explain WHY the model acted (parallel track, like Papers)
 
-A decision drill-down: understand what the model did and why. Lands additively across BlackSwan +
-model-trainer (NOT a new project); the model-trainer side stays domain-oblivious (generic "decision
-trace" / "step log", arbitrary action strings, no trading vocabulary). Effort overall **HARD** (sum of
-cheap parts), with the animation capstone parked.
+A decision drill-down across BlackSwan + model-trainer (NOT a new project); the model-trainer side
+stays domain-oblivious (generic "decision trace", arbitrary action strings, no trading vocabulary).
 
-- **Decision-trace emission (BlackSwan) — EASY.** The env already retains per-step arrays (`actions`,
-  `actions_made`, `forced_actions`, `tpsls`, `positions`, `balances`, `net_worths`,
-  `rewards_history`). A `trainer/decision_trace.py` emits them as `{summary}.traces.jsonl`, hooked
-  after `model.test()` in `run.py`; capture model confidence from `.predict()`'s second return (DQN
-  Q-values; PPO/TRPO logits via `policy.get_distribution`). Store the per-step obs (1 line) to enable
-  attribution.
-- **Generic trace artifact + Explain view (model-trainer) — MEDIUM.** Types in `modelTrainerTypes.ts`:
-  `DecisionStep {step, action, confidence?, features?, state?, alternativeAction?}` +
-  `DecisionTrace {steps, featureAttribution?, actionCounts?}` on `artifacts.decisionTrace`, with a
-  soft `validateDecisionTrace` (missing trace ≠ error). An "Explain" sub-view: a decision TIMELINE
-  aligned to the existing Price&actions / Equity-vs-hold charts (shared step axis); an
-  ACTION-DISTRIBUTION diagnostic that flags anomalies generically ("buy ≫ sell", "TP ≫ SL"). Reuses
-  the existing chart + record plumbing; renders arbitrary action strings. (The "many buys, few sells"
-  case is already explained in BlackSwan's manifest description — the view should make it self-evident
-  from the trace.)
-- **The sparse-sell deep-dive (the live symptom).** Even WITH a sell action, several profitable runs
-  fire many BUYs but rarely SELL, so they trade infrequently. The Explain view must show WHY the sell
-  action stays dormant — per-step sell-Q vs hold-Q (or sell-logit vs hold), and the action
-  distribution over time: is hold's value persistently higher, is the sell signal never learned, or
-  is it crowded out by TP/SL exits? A concrete diagnostic, not just a count — this is the first
-  question the decision trace + confidence capture should answer.
-- **Feature attribution — MEDIUM.** Gradient saliency on the torch policy (backprop the chosen
-  action's Q-value/logit w.r.t. the observation), selective (only when `actions_made`; skip
-  TP/SL-forced steps), ~2–3× test time; aggregate saliency by fidelity layer. Permutation/SHAP
-  deferred (expensive).
+**The spine — SHIPPED.** `trainer/decision_trace.py` (BlackSwan) reconstructs the per-step action trace
+from the env's retained arrays, then DETERMINISTICALLY replays `model.test()` once more to capture
+per-step confidence + per-action values (DQN Q-values, PPO/TRPO action probs) and gradient saliency,
+attaching a compact `DecisionTrace` to `summary.artifacts.decisionTrace` (full per-step + obs sidecar
+opt-in via `decision_trace_full`); hooked after `build_summary` in `run.py`, best-effort (a missing
+trace is never an error). Generic types + a soft `validateDecisionTrace` live in the engine
+(`modelTrainerTypes.ts`/`modelTrainerUtils.ts`; ingestion strips an unusable trace). The viewer's
+**Explain** section renders the action-distribution diagnostic (generic anomaly + dormant-action
+flags), the **sparse-sell deep-dive** (per-action value-over-time chart on the shared step axis — makes
+"is hold persistently worth more than sell?" self-evident), confidence-over-time, and input
+attribution; `chatAboutRun` is enriched with a trace summary (counts, dormant-action value gaps, top
+attributed inputs).
+
+Remaining:
+
+- **Feature attribution — sharpen the grouping.** Gradient saliency ships as `perFeature` + a
+  best-effort `byGroup` (by lookback bar when the obs is a clean grid). Left: the precise
+  feature→fidelity-layer mapping (needs the data provider to expose layer boundaries), and
+  permutation/SHAP (expensive, deferred).
 - **Data-influence on decisions/weights — HARD, research.** See how a NEW piece of information changes
   the model — its weights AND its subsequent decisions — and whether that change is GOOD. The goal: judge
-  a tweak as positive from the DECISION deltas even when the final return isn't there yet (so we can
-  steer by "the decisions improved" not just "the score rose"). Approaches to evaluate: counterfactual
-  decision-trace diffing (re-run the test with/without a feature → per-step decision + P&L delta),
-  attribution of a decision to the new input, or a before/after decision-diff around a fine-tune. Builds
-  on the base decision trace + attribution; parked behind them.
-- **Discuss-with-agent — EASY.** Enrich the `chatAboutRun` system prompt with a trace SUMMARY (action
-  counts, top features) so "why so few sells?" has context.
-- **PARKED — step-by-step ANIMATION replay** + scrubber, discussed live with an agent. Added last; no
+  a tweak as positive from the DECISION deltas even when the final return isn't there yet (steer by "the
+  decisions improved", not just "the score rose"). Approaches: counterfactual decision-trace diffing
+  (re-run the test with/without a feature → per-step decision + P&L delta), attribution of a decision to
+  the new input, or a before/after decision-diff around a fine-tune. Now unblocked — builds on the
+  shipped base trace + attribution (+ the opt-in full-obs sidecar).
+- **PARKED — step-by-step ANIMATION replay** + scrubber, discussed live with an agent. No
   trace-artifact change needed.
 
 ---
@@ -168,6 +183,7 @@ cheap parts), with the animation capstone parked.
 The windowing dimension is covered by the walk-forward windows (named slices) + the By-dataset
 robustness view. What remains is the **cross-asset** dimension — test a trained checkpoint against any
 asset in the same data format to catch regime/asset overfit:
+
 - The trainer already replays a checkpoint deterministically; the missing piece is selecting the data
   WINDOW/asset (a `testSet` param: asset + time-range, or a named curated slice).
 - Likely a manifest `testSets` list (`{id, asset, range/description}`) + a generic "test on set"
@@ -197,6 +213,7 @@ constants, not user-tuned regimes).
 
 The viewer-only activity-count budget + client-driven stalled-run resume ship. The rest wants a
 host-aware, browsable, concurrency-capped center:
+
 - **Per-activityId progress/campaign records.** Key the `-progress`/`-campaign` records by activityId
   (not `'latest'`) so concurrent same-project campaigns each show their own live progress.
 - **Host-enforced global RUN cap.** A backend semaphore on `LocalComputeRunner.runJob` (the shared

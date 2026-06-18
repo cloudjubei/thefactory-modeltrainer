@@ -32,6 +32,14 @@ export interface TrainerLeverSpec {
    * models against, not as ordinary model knobs. Omitted ⇒ `model`.
    */
   scope?: 'model' | 'environment' | 'dataset'
+  /**
+   * Conditional applicability: this lever only applies when ANOTHER lever holds one of the listed
+   * values — e.g. `{ reward_model: ['combo_all_noop'] }` means the lever is relevant only for that
+   * reward model. The launch form disables (greys out) the lever when the condition isn't met, so a
+   * setting that some models have and others don't isn't swept/pinned where it does nothing. ALL named
+   * keys must match (AND). Omitted ⇒ always applies.
+   */
+  appliesWhen?: Record<string, unknown[]>
 }
 
 /** The single north-star metric a run is judged by. */
@@ -119,6 +127,8 @@ export interface TrainerManifest {
   }>
   /** Starter approaches/papers the viewer imports into the Papers registry once (keyed by id). */
   papers?: TrainingPaperSeed[]
+  /** Starter model architectures the viewer imports into the Models registry once (keyed by id). */
+  models?: TrainingModelSeed[]
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
@@ -233,6 +243,65 @@ export interface TradeLedgerEntry {
   bars_held: number
 }
 
+/** Aggregate input attribution for a {@link DecisionTrace} — generic saliency over the model's observation. */
+export interface DecisionFeatureAttribution {
+  /** Mean absolute saliency per observation-feature index (length = the observation dimension). */
+  perFeature?: number[]
+  /**
+   * Saliency aggregated into named groups — domain-defined (e.g. the trading line groups by the
+   * observation's fidelity layer), so the Explain view can show which input GROUP drove decisions.
+   */
+  byGroup?: Record<string, number>
+  /** How attribution was computed, e.g. `gradient-saliency`. */
+  method?: string
+  /** Number of decision steps the attribution was averaged over. */
+  samples?: number
+}
+
+/**
+ * One step in a model's {@link DecisionTrace}. Domain-oblivious — the action is an arbitrary
+ * project-defined label (no trading vocabulary in the engine), optionally annotated with how confident
+ * the policy was and what it nearly did instead, so the Explain view can answer "what did it do, and why".
+ */
+export interface DecisionStep {
+  /** Step index within the rollout, aligned to the run's `series`/`artifacts.runChart` step axis. */
+  step: number
+  /** The action the policy took, as a project-defined label (e.g. `hold`, `buy`, `sell`). */
+  action: string
+  /** Confidence in the chosen action in [0,1] (softmax over values / chosen probability), when derivable. */
+  confidence?: number
+  /** Per-action value the policy assigned (Q-values or action probabilities), keyed by action label. */
+  actionValues?: Record<string, number>
+  /** The runner-up action (second-highest value) — what the model nearly did instead. */
+  alternativeAction?: string
+  /** True when the environment FORCED this action (e.g. an automatic exit), so it was not the policy's choice. */
+  forced?: boolean
+  /** The reward the environment returned for this step, when recorded. */
+  reward?: number
+  /** A free-form environment-state label at this step (e.g. position state); project-defined. */
+  state?: string
+  /** Raw observation the policy saw; usually only in the full sidecar, omitted from the embedded trace. */
+  features?: number[]
+}
+
+/**
+ * A model's decision trace over a test/eval rollout — the explainability artifact stored at
+ * `summary.artifacts.decisionTrace`. Domain-oblivious: `steps` carry arbitrary action labels and
+ * `actionCounts` tallies them so the Explain view flags distribution anomalies generically. The embedded
+ * trace is downsampled to the run's chart step axis; the full per-step trace (with raw observations) is an
+ * optional sidecar file the run may also write, referenced by `artifacts.decisionTraceFile`.
+ */
+export interface DecisionTrace {
+  /** Per-step decisions, downsampled to the chart step axis so the Explain timeline aligns to price/equity. */
+  steps: DecisionStep[]
+  /** Count of every action label over the FULL rollout (not just the downsampled `steps`). */
+  actionCounts?: Record<string, number>
+  /** Aggregate input attribution for the run's decisions, when computed. */
+  featureAttribution?: DecisionFeatureAttribution
+  /** Total steps in the full rollout before downsampling (so the view can show "N steps, showing M"). */
+  totalSteps?: number
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
@@ -242,6 +311,11 @@ export interface TrainingRunSummary {
   seed?: number
   config?: Record<string, unknown>
   provenance?: Record<string, unknown>
+  /**
+   * Free-form run outputs. Known keys the hub reads: `checkpoint` (path), `runChart`, and
+   * `decisionTrace` (a {@link DecisionTrace} for the Explain view) plus `decisionTraceFile` (path to
+   * the optional full per-step sidecar). Unknown keys are stored and ignored.
+   */
   artifacts?: Record<string, unknown>
   /** What data this run trained on (asset, timeframe, sample count, date span) — for the hub's data-visibility surface. */
   dataset?: TrainingRunDataset
@@ -539,6 +613,53 @@ export interface TrainingPaperRecord {
  */
 export type TrainingPaperSeed = Omit<TrainingPaperRecord, 'createdAt' | 'updatedAt' | 'status'> & {
   status?: TrainingPaperRecord['status']
+}
+
+/**
+ * A registry entry for a MODEL ARCHITECTURE / build-up — "what `reppo-custom` / a dueling-DQN / an
+ * LSTM variant actually composes, and why". Parallel to {@link TrainingPaperRecord} but its evidence
+ * is AUTO-DERIVED: `match` names the model-lever values that identify runs using this architecture, so
+ * its verdict comes from those runs (no manual run-linking). Domain-oblivious; stored as a
+ * `<recordType>-model` data record (key = id).
+ */
+export interface TrainingModelRecord {
+  /** Stable id (random hex, or a slug for manifest seeds). */
+  id: string
+  /** Display name, e.g. "Reppo-custom — recurrent PPO". */
+  name: string
+  /** The actual `model_name` lever value, e.g. "reppo-custom" (when it maps to one). */
+  modelName?: string
+  /** The base algorithm, e.g. "RecurrentPPO (sb3-contrib)". */
+  algo?: string
+  /** Network shape notes, e.g. "512,64 + custom tokens (BatchNorm / weight_norm / Dropout)". */
+  netArch?: string
+  /** Policy internals / head, e.g. "LSTM recurrent encoder + custom actor-critic head". */
+  policyInternals?: string
+  /** Why this build-up exists / its provenance + design rationale. */
+  rationale?: string
+  /** Metrics a source/author claims for this architecture (free-form), if any. */
+  claimedMetrics?: Record<string, number>
+  /**
+   * The model-lever values that IDENTIFY this architecture (e.g. `{ model_name: 'reppo-custom' }`).
+   * Runs whose config matches every key are this card's evidence (auto-measured + by-model grouping),
+   * and it prefills the Launch form on Replicate (when `replicateConfig` is absent).
+   */
+  match?: Record<string, unknown>
+  /** Optional full launch preset to reproduce it; defaults to `{ fixed: match }`. */
+  replicateConfig?: Record<string, unknown>
+  /** Lifecycle: untested → proven | disproved (from whether matching runs beat hold OOS). */
+  status: 'untested' | 'proven' | 'disproved'
+  /** Free-text verdict / notes recorded by the user. */
+  verdictNote?: string
+  tags?: string[]
+  source: 'manual' | 'research'
+  createdAt: string
+  updatedAt: string
+}
+
+/** A starter Model the manifest ships; imported into the registry once by id (mirrors {@link TrainingPaperSeed}). */
+export type TrainingModelSeed = Omit<TrainingModelRecord, 'createdAt' | 'updatedAt' | 'status'> & {
+  status?: TrainingModelRecord['status']
 }
 
 export interface ProposeTrainingHypothesesParams {
