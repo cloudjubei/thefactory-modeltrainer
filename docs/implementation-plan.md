@@ -62,27 +62,36 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 ### 2. Model-trainer app
 
-**(2b) Papers / Library tab — HARD (mostly surface area; reuses Environments CRUD + Hypotheses
-linking + clone-to-launch).** A roster of approach cards turning "try every positive paper, prove it
-good or fluff" into a durable, explorable, evidence-backed registry. Generic ("an approach with a
-source + a claim"); BlackSwan's first consumers = the Wave-2 papers.
-- Data model: a `<recordType>-paper` data record →
-  `{ id, title, url, authors, year, claim, claimedMetrics?, assumptions (fees? gross/net? retrain
-  cadence? frictionless? multi-asset?), approach, replicateConfig? (a partial launch config / lever
-  preset), status: 'untested'|'replicating'|'holds-up'|'fluff', linkedRunKeys?/campaignActivityId?,
-  measuredSummary?, verdictNote, source: 'manual'|'research', tags?, updatedAt }`. Type
-  `TrainingPaperRecord` in `modelTrainerTypes.ts`.
-- CRUD mirrors Environments: `readPapers`/`putPaper`/`deletePaperRecord` + `setupPapers`/
-  `renderPapers`/`paperFormHtml`/`togglePaperForm`/`onSavePaper`/`onDeletePaper`.
-- UI: cards with title→url, authors/year, a colour-coded verdict badge, the claim, assumption chips,
-  **claimed-vs-measured side by side** (measured read from `linkedRunKeys`), a verdict filter;
-  per-card actions: open link, **Replicate** (prefill the Launch form from `replicateConfig` via the
-  existing clone-to-launch path → switch to Launch), **Link runs/campaign**, **Record verdict**
-  (status + note; auto-suggest holds-up/fluff from whether measured beats hold OOS, user confirms),
-  Edit/Delete. index.html tab + section; style.css cards/badges.
-- **Research-seeded**: extend the propose/research flow so a result can `putPaper(… source:'research')`
-  — closes research → experiment → verdict. A paper earns ✅ holds-up only if it survives the
-  walk-forward windows + real costs (honest by construction).
+**(2b) Papers / Library tab — SHIPPED (manual registry); research-seeding deferred.** The roster of
+approach cards is built: `TrainingPaperRecord` type, a `<recordType>-paper` data record, full CRUD
+(`readPapers`/`putPaper`/`deletePaperRecord` + `setupPapers`/`renderPapers`/`paperCardHtml`/
+`paperFormHtml`/`togglePaperForm`/`onSavePaper`/`onDeletePaper`), a Papers tab (TABS + index.html
+section + showTab/setup wiring), cards with title→url, authors/year, a colour-coded verdict badge, the
+claim, assumption chips (fees / gross / frictionless / multi-asset / retrain), **claimed-vs-measured**
+(measured = best objective + beats-hold from `linkedRunKeys`), a verdict filter, and per-card actions
+**Replicate** (prefill Launch from `replicateConfig` — full preset or flat fixed map), **Link selected
+runs** (links the Runs-tab compare selection), Edit (records verdict + note, with a measured-suggested
+verdict hint on the card), Delete.
+- **Starter-paper seeding (DONE):** the manifest ships `papers?: TrainingPaperSeed[]` and the Papers
+  tab shows an "Import N starter approaches" banner that upserts them once (by id, skipping any the
+  user already has so edits/verdicts aren't clobbered). BlackSwan's `trainer.json` carries the curated
+  top-10 trading papers.
+- **NEXT — "Add a paper from a link" (the LLM-analysis entry process):** paste a URL (+ optional notes)
+  → an LLM reads it → a Paper draft is created for review. Concrete design:
+  1. `analyzePaperFromUrl({ url, notes?, llmConfig, abortSignal? })` tool method in `ModelTrainerTools`
+     (types `AnalyzePaperParams`/`Result` in `modelTrainerTypes.ts`). The TOOL fetches + text-extracts
+     the page (arXiv abstract/API; generic HTML→text; PDFs v1 = use the landing/abstract), then makes
+     ONE structured-output inference (reuse the existing `deps` inference executor) returning a
+     `TrainingPaperRecord` draft (title/authors/year/claim/claimedMetrics/assumptions/approach +
+     suggested `replicateConfig` against the manifest levers). No web-tools needed by the model — the
+     tool supplies the text. `source:'research'`.
+  2. Backend `analyze-paper` activity mirroring `propose`: calls the tool, upserts the draft as a
+     `<recordType>-paper` record (status `untested`), fires `onRecordWritten` → the viewer's
+     `data:updated` re-renders Papers with the new draft for the user to verify/adjust.
+  3. Viewer: an "Add from link" control in the Papers tab (URL + notes) that triggers the activity.
+  This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers),
+  which stays deferred. Also optional: auto-link the launched campaign (`campaignActivityId`) when
+  Replicate starts a run (today linking is by run key).
 
 ### 3c. Models / Architectures library (like Papers, for model build-ups) — HARD
 

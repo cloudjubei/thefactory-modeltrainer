@@ -117,6 +117,8 @@ export interface TrainerManifest {
     thesis?: string
     thesisTarget?: string
   }>
+  /** Starter approaches/papers the viewer imports into the Papers registry once (keyed by id). */
+  papers?: TrainingPaperSeed[]
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
@@ -475,6 +477,68 @@ export interface TrainingHypothesis {
   proposedBy?: string
   createdAt: string
   updatedAt: string
+}
+
+/**
+ * A registry entry for an APPROACH/paper to try and prove out or falsify — "an approach with a source
+ * and a claim". Domain-oblivious; the trading line's first consumers are the published methods it
+ * replicates under real costs. Stored as a `<recordType>-paper` data record (key = id).
+ */
+export interface TrainingPaperRecord {
+  /** Stable id (random hex). */
+  id: string
+  title: string
+  /** Link to the paper / source (arXiv, blog, repo). */
+  url?: string
+  authors?: string
+  year?: number
+  /** The headline claim in plain words, e.g. "RL beats buy-and-hold by 30% out-of-sample". */
+  claim: string
+  /** Metrics the SOURCE claims (free-form, e.g. `{ return_pct: 30, sharpe: 1.5 }`). */
+  claimedMetrics?: Record<string, number>
+  /** Honesty checklist — assumptions that commonly inflate published results. */
+  assumptions?: {
+    /** Are realistic transaction fees modelled? */
+    fees?: boolean
+    /** Returns reported NET of costs (vs gross)? */
+    netOfCosts?: boolean
+    /** How often the model is retrained (free text, e.g. "monthly"). */
+    retrainCadence?: string
+    /** Assumes frictionless execution (no slippage/fees)? */
+    frictionless?: boolean
+    /** Result depends on a multi-asset universe? */
+    multiAsset?: boolean
+    /** Any other caveats. */
+    notes?: string
+  }
+  /** How the approach works (prose). */
+  approach?: string
+  /** A partial launch config / lever preset to reproduce the approach (prefills the Launch form). */
+  replicateConfig?: Record<string, unknown>
+  /** Lifecycle: untested → replicating → holds-up | fluff. */
+  status: 'untested' | 'replicating' | 'holds-up' | 'fluff'
+  /** Run keys whose measured metrics test the claim (claimed-vs-measured reads from these). */
+  linkedRunKeys?: string[]
+  /** The campaign activity that ran the replication, if launched from here. */
+  campaignActivityId?: string
+  /** Snapshot of the measured outcome (e.g. `{ objective, return_vs_hold_pct }`) for quick compare. */
+  measuredSummary?: Record<string, number>
+  /** Free-text verdict / notes recorded by the user. */
+  verdictNote?: string
+  /** Where the entry came from. */
+  source: 'manual' | 'research'
+  tags?: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * A starter Paper a manifest can ship (parallel to `presets`/`quickStart`): curated approaches the
+ * viewer imports into the registry once, keyed by `id` so re-import never duplicates or clobbers an
+ * entry the user has since edited. Timestamps + status default on import.
+ */
+export type TrainingPaperSeed = Omit<TrainingPaperRecord, 'createdAt' | 'updatedAt' | 'status'> & {
+  status?: TrainingPaperRecord['status']
 }
 
 export interface ProposeTrainingHypothesesParams {

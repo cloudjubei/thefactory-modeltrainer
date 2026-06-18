@@ -262,6 +262,37 @@
             </section>
           </section>
 
+          <!-- Papers / Library (approaches to prove out or falsify) -->
+          <section id="tab-papers" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="papers-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="papers-h">Papers / Library</h2>
+                  <p class="card-sub">
+                    Approaches to prove out or falsify — each with its claim, assumptions and a
+                    verdict, and claimed-vs-measured from linked runs. Replicate any into a
+                    campaign; an approach earns "holds up" only if it beats buy-and-hold
+                    out-of-sample, net of fees.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="paper-add-toggle"
+                    class="icon-btn"
+                    title="Add approach"
+                    aria-label="Add approach"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <p id="papers-status" class="form-status" role="status" hidden></p>
+              <form id="paper-form" class="hypothesis-form" autocomplete="off" hidden></form>
+              <div id="papers-body" class="papers-body"></div>
+            </section>
+          </section>
+
           <!-- Launch (sweep / fixed lever values → a training campaign) -->
           <section id="tab-launch" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="launch-h">

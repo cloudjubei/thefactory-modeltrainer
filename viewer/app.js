@@ -32,6 +32,10 @@ const PROJECT_RECORD_TYPE = 'trainer-project'
 const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
 const DATASET_RECORD_SUFFIX = '-dataset'
+const PAPER_RECORD_SUFFIX = '-paper'
+// Approach/paper verdict lifecycle (matches TrainingPaperRecord.status). Drives the verdict badge,
+// the verdict filter, and the auto-suggested verdict from measured-vs-hold.
+const PAPER_STATUSES = ['untested', 'replicating', 'holds-up', 'fluff']
 const QUEUE_RECORD_TYPE = 'trainer-queue'
 const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
@@ -43,6 +47,7 @@ const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runner
 const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'hypotheses', label: 'Hypotheses' },
+  { id: 'papers', label: 'Papers' },
   { id: 'versions', label: 'Versions' },
   { id: 'datasets', label: 'Datasets' },
   { id: 'environments', label: 'Environments' },
@@ -121,6 +126,9 @@ let runsViewMode = 'runs'
 let environmentsCache = []
 // Named datasets (dataset-lever bundles — asset / window / fidelity) the user defined.
 let datasetsCache = []
+// Approach/paper library records + the active verdict filter ('all' | a PAPER_STATUSES value).
+let papersCache = []
+let paperVerdictFilter = 'all'
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
 let launchPresetDatasets = []
@@ -1305,6 +1313,7 @@ function resetDashboardState() {
   if (environmentsBody) environmentsBody.innerHTML = ''
   environmentsCache = []
   datasetsCache = []
+  papersCache = []
   launchPresetDatasets = []
   launchPresetEnvironments = []
   const activityBody = byId('activity-body')
@@ -5098,6 +5107,430 @@ function setupHypotheses() {
   }
 }
 
+// --- Papers / Library tab --------------------------------------------------------
+// A registry of approaches/papers to prove out or falsify — claim + assumptions + a verdict, with
+// claimed-vs-measured read from linked runs and one-click Replicate into the Launch form. Generic; the
+// trading line's first consumers are the published methods it replicates under real 0.1% fees.
+const PAPER_VERDICT_BADGE = {
+  untested: 'is-queued',
+  replicating: 'is-running',
+  'holds-up': 'is-done',
+  fluff: 'is-failed',
+}
+const PAPER_VERDICT_LABEL = {
+  untested: 'untested',
+  replicating: 'replicating',
+  'holds-up': 'holds up',
+  fluff: 'fluff',
+}
+async function readPapers() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + PAPER_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id)
+}
+async function putPaper(paper) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + PAPER_RECORD_SUFFIX,
+    key: paper.id,
+    content: { ...paper, updatedAt: nowIso() },
+  })
+}
+async function deletePaperRecord(id) {
+  await window.OverseerBridge.deleteData({
+    type: manifest.recordType + PAPER_RECORD_SUFFIX,
+    key: id,
+  })
+}
+// Measured outcome for a paper from its linked, non-failed runs: best objective + whether any beat
+// buy-and-hold out-of-sample (return_vs_hold_pct > 0). Null when nothing is linked / loaded yet.
+function paperMeasured(paper) {
+  const keys = new Set(Array.isArray(paper.linkedRunKeys) ? paper.linkedRunKeys : [])
+  if (!keys.size) return null
+  const runs = runsCache.filter((r) => keys.has(r.key))
+  if (!runs.length) return null
+  const vhs = runs
+    .map((r) => Number(((r.summary && r.summary.metrics) || {}).return_vs_hold_pct))
+    .filter(Number.isFinite)
+  return {
+    runs: runs.length,
+    objective: bestObjectiveOf(runs),
+    beatsHold: vhs.length ? Math.max(...vhs) > 0 : null,
+  }
+}
+// Verdict the measured outcome SUGGESTS (the user confirms): holds-up only if a linked run beat hold OOS.
+function suggestPaperVerdict(paper) {
+  const m = paperMeasured(paper)
+  if (!m || m.beatsHold === null) return null
+  return m.beatsHold ? 'holds-up' : 'fluff'
+}
+function paperAssumptionChips(a) {
+  if (!a) return ''
+  const chips = []
+  if (a.frictionless === true) chips.push('<span class="paper-chip is-warn">frictionless</span>')
+  if (a.fees === false) chips.push('<span class="paper-chip is-warn">no fees</span>')
+  else if (a.fees === true) chips.push('<span class="paper-chip">fees modelled</span>')
+  if (a.netOfCosts === false) chips.push('<span class="paper-chip is-warn">gross returns</span>')
+  else if (a.netOfCosts === true) chips.push('<span class="paper-chip">net of costs</span>')
+  if (a.multiAsset === true) chips.push('<span class="paper-chip">multi-asset</span>')
+  if (a.retrainCadence)
+    chips.push(`<span class="paper-chip">retrain: ${escapeHtml(String(a.retrainCadence))}</span>`)
+  return chips.length ? `<div class="paper-chips">${chips.join('')}</div>` : ''
+}
+function paperClaimedVsMeasuredHtml(paper) {
+  const claimed =
+    paper.claimedMetrics && Object.keys(paper.claimedMetrics).length ? paper.claimedMetrics : null
+  const m = paperMeasured(paper)
+  if (!claimed && !m) return ''
+  const claimedBits = claimed
+    ? Object.entries(claimed)
+        .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(String(v))}`)
+        .join(' · ')
+    : '—'
+  const measuredBits = m
+    ? `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(m.objective))} · ${m.runs} run${m.runs === 1 ? '' : 's'}${m.beatsHold === null ? '' : m.beatsHold ? ' · beats hold' : ' · trails hold'}`
+    : 'no linked runs'
+  return `<table class="kv-table paper-cvm"><tbody>
+    <tr><th>claimed</th><td>${claimedBits}</td></tr>
+    <tr><th>measured</th><td>${measuredBits}</td></tr>
+  </tbody></table>`
+}
+function paperCardHtml(paper) {
+  const status = PAPER_STATUSES.includes(paper.status) ? paper.status : 'untested'
+  const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[status]}">${escapeHtml(PAPER_VERDICT_LABEL[status])}</span>`
+  const suggested = suggestPaperVerdict(paper)
+  const suggestBit =
+    suggested && suggested !== status
+      ? `<p class="paper-suggest"${helpAttr('Suggested from the linked runs’ measured-vs-hold — open Edit to record it.')}>measured suggests: ${escapeHtml(PAPER_VERDICT_LABEL[suggested])}</p>`
+      : ''
+  const title = paper.url
+    ? `<a href="${escapeHtml(paper.url)}" target="_blank" rel="noopener">${escapeHtml(paper.title || 'Untitled')}</a>`
+    : escapeHtml(paper.title || 'Untitled')
+  const meta = [paper.authors, paper.year]
+    .filter(Boolean)
+    .map((x) => escapeHtml(String(x)))
+    .join(' · ')
+  const id = escapeHtml(paper.id)
+  const canReplicate = paper.replicateConfig && Object.keys(paper.replicateConfig).length
+  return `<article class="paper-card" data-id="${id}">
+    <div class="card-head card-head-row">
+      <div>
+        <h3>${title} ${badge}</h3>
+        ${meta ? `<p class="card-sub">${meta}</p>` : ''}
+      </div>
+      <div class="head-actions">
+        ${canReplicate ? `<button type="button" data-action="replicate" data-id="${id}" class="ghost-btn"${helpAttr('Prefill the Launch form from this approach’s saved config.')}>Replicate</button>` : ''}
+        <button type="button" data-action="link-runs" data-id="${id}" class="ghost-btn"${helpAttr('Link the runs currently selected in the Runs tab (the compare checkboxes) so measured-vs-claimed fills in.')}>Link selected runs</button>
+        <button type="button" class="icon-btn" data-action="edit" data-id="${id}" title="Edit / record verdict" aria-label="Edit">✎</button>
+        <button type="button" class="icon-btn icon-btn-danger" data-action="delete" data-id="${id}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
+      </div>
+    </div>
+    ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
+    ${paperAssumptionChips(paper.assumptions)}
+    ${paperClaimedVsMeasuredHtml(paper)}
+    ${suggestBit}
+    ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
+  </article>`
+}
+function paperFilterBarHtml() {
+  const opts = ['all', ...PAPER_STATUSES]
+  const btns = opts
+    .map((s) => {
+      const label = s === 'all' ? 'all' : PAPER_VERDICT_LABEL[s]
+      const count =
+        s === 'all'
+          ? papersCache.length
+          : papersCache.filter((p) => (p.status || 'untested') === s).length
+      return `<button type="button" class="paper-filter-btn${paperVerdictFilter === s ? ' is-active' : ''}" data-verdict="${escapeHtml(s)}">${escapeHtml(label)} (${count})</button>`
+    })
+    .join('')
+  return `<div class="paper-filter">${btns}</div>`
+}
+// Starter approaches the manifest ships (parallel to presets); imported into the registry once by id.
+function manifestPaperSeeds() {
+  return manifest && Array.isArray(manifest.papers) ? manifest.papers : []
+}
+function pendingSeedPapers() {
+  const have = new Set(papersCache.map((p) => p.id))
+  return manifestPaperSeeds().filter((s) => s && s.id && !have.has(s.id))
+}
+function pendingSeedPapersHtml() {
+  const pending = pendingSeedPapers()
+  if (!pending.length) return ''
+  return `<div class="paper-seed-banner">${pending.length} curated starter approach${pending.length === 1 ? '' : 'es'} from the manifest aren’t in your library yet. <button type="button" class="ghost-btn" data-action="import-seeds">Import ${pending.length}</button></div>`
+}
+async function importSeedPapers() {
+  const pending = pendingSeedPapers()
+  if (!pending.length) return
+  try {
+    for (const s of pending) {
+      await putPaper({
+        ...s,
+        status: PAPER_STATUSES.includes(s.status) ? s.status : 'untested',
+        source: s.source || 'manual',
+        createdAt: nowIso(),
+      })
+    }
+  } catch {
+    setStatusLine('papers-status', 'Could not import starter papers — please try again.', true)
+    return
+  }
+  setStatusLine(
+    'papers-status',
+    `Imported ${pending.length} starter approach${pending.length === 1 ? '' : 'es'}.`,
+    false,
+  )
+  await renderPapers()
+}
+async function renderPapers() {
+  const body = byId('papers-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(
+      body,
+      '<div class="empty-hint">Open inside the Overseer to manage the approach library.</div>',
+    )
+    return
+  }
+  // Refresh runs alongside papers so claimed-vs-measured reads fresh linked-run metrics.
+  ;[papersCache, runsCache] = await Promise.all([readPapers(), readRuns()])
+  const seedBanner = pendingSeedPapersHtml()
+  if (!papersCache.length) {
+    setHtml(
+      body,
+      seedBanner +
+        '<div class="empty-hint">No approaches yet — add a paper/method, or import the curated starter set.</div>',
+    )
+    return
+  }
+  const shown =
+    paperVerdictFilter === 'all'
+      ? papersCache
+      : papersCache.filter((p) => (p.status || 'untested') === paperVerdictFilter)
+  const sorted = [...shown].sort((a, b) =>
+    String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
+  )
+  setHtml(
+    body,
+    seedBanner +
+      paperFilterBarHtml() +
+      (sorted.length
+        ? sorted.map(paperCardHtml).join('')
+        : '<div class="empty-hint">No approaches match this verdict.</div>'),
+  )
+}
+function paperFormHtml(paper) {
+  const p = paper || {}
+  const a = p.assumptions || {}
+  const isNew = !p.id
+  const cb = (name, on, label) =>
+    `<label class="check-row"><input type="checkbox" name="${name}"${on ? ' checked' : ''} /><span>${label}</span></label>`
+  const statusOpts = PAPER_STATUSES.map(
+    (s) =>
+      `<option value="${s}"${(p.status || 'untested') === s ? ' selected' : ''}>${escapeHtml(PAPER_VERDICT_LABEL[s])}</option>`,
+  ).join('')
+  return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : p.id)}" />
+    <label class="field"><span>Title</span><input type="text" name="title" value="${escapeHtml(p.title || '')}" placeholder="e.g. Deep RL for crypto trading" /></label>
+    <div class="lever-grid">
+      <label class="field"><span>URL</span><input type="text" name="url" value="${escapeHtml(p.url || '')}" placeholder="https://…" /></label>
+      <label class="field"><span>Authors</span><input type="text" name="authors" value="${escapeHtml(p.authors || '')}" /></label>
+      <label class="field"><span>Year</span><input type="number" name="year" value="${escapeHtml(p.year ? String(p.year) : '')}" /></label>
+    </div>
+    <label class="field"><span>Claim</span><textarea name="claim" rows="2" placeholder="what does it claim to achieve?">${escapeHtml(p.claim || '')}</textarea></label>
+    <label class="field"><span>Approach</span><textarea name="approach" rows="2" placeholder="how does it work?">${escapeHtml(p.approach || '')}</textarea></label>
+    <label class="field"><span>Claimed metrics <em>(JSON, optional)</em></span><input type="text" name="claimedMetrics" value="${escapeHtml(p.claimedMetrics ? JSON.stringify(p.claimedMetrics) : '')}" placeholder='{"return_pct":30,"sharpe":1.5}' /></label>
+    <fieldset class="paper-assumptions"><legend>Assumptions (honesty checklist)</legend>
+      ${cb('fees', a.fees === true, 'Realistic fees modelled')}
+      ${cb('netOfCosts', a.netOfCosts === true, 'Returns net of costs')}
+      ${cb('frictionless', a.frictionless === true, 'Assumes frictionless execution')}
+      ${cb('multiAsset', a.multiAsset === true, 'Needs a multi-asset universe')}
+      <label class="field"><span>Retrain cadence</span><input type="text" name="retrainCadence" value="${escapeHtml(a.retrainCadence || '')}" placeholder="e.g. monthly" /></label>
+      <label class="field"><span>Notes</span><input type="text" name="assumptionNotes" value="${escapeHtml(a.notes || '')}" /></label>
+    </fieldset>
+    <label class="field"><span>Replicate config <em>(JSON preset, optional)</em></span><textarea name="replicateConfig" rows="2" spellcheck="false" placeholder='{"fixed":{"model_name":"reppo-custom"},"seeds":3}'>${escapeHtml(p.replicateConfig ? JSON.stringify(p.replicateConfig) : '')}</textarea></label>
+    <div class="lever-grid">
+      <label class="field"><span>Verdict</span><select name="status">${statusOpts}</select></label>
+      <label class="field"><span>Tags <em>(comma-sep)</em></span><input type="text" name="tags" value="${escapeHtml(Array.isArray(p.tags) ? p.tags.join(', ') : '')}" /></label>
+    </div>
+    <label class="field"><span>Verdict note</span><textarea name="verdictNote" rows="2" placeholder="what did running it teach you?">${escapeHtml(p.verdictNote || '')}</textarea></label>
+    <div class="form-actions"><button type="submit">Save</button><button type="button" id="paper-cancel" class="ghost-btn">Cancel</button></div>`
+}
+function togglePaperForm(show, paper) {
+  const form = byId('paper-form')
+  if (!form) return
+  setStatusLine('papers-status', '')
+  if (show) {
+    form.innerHTML = paperFormHtml(paper)
+    form.hidden = false
+  } else {
+    form.innerHTML = ''
+    form.hidden = true
+  }
+}
+// Parse an optional JSON-object form field: '' → undefined (cleared); invalid → null (signals error).
+function parseJsonObjectField(form, name) {
+  const raw = String((form.elements[name] && form.elements[name].value) || '').trim()
+  if (!raw) return undefined
+  try {
+    const v = JSON.parse(raw)
+    return v && typeof v === 'object' && !Array.isArray(v) ? v : null
+  } catch {
+    return null
+  }
+}
+async function onSavePaper(form) {
+  const title = String(form.elements.title.value || '').trim()
+  if (!title) {
+    setStatusLine('papers-status', 'Give the approach a title.', true)
+    return
+  }
+  const claimedMetrics = parseJsonObjectField(form, 'claimedMetrics')
+  if (claimedMetrics === null) {
+    setStatusLine('papers-status', 'Claimed metrics must be a valid JSON object (or blank).', true)
+    return
+  }
+  const replicateConfig = parseJsonObjectField(form, 'replicateConfig')
+  if (replicateConfig === null) {
+    setStatusLine('papers-status', 'Replicate config must be a valid JSON object (or blank).', true)
+    return
+  }
+  const id = form.elements.id.value
+  const existing = papersCache.find((x) => x.id === id) || {}
+  const yearVal = Number(form.elements.year.value)
+  const tags = String(form.elements.tags.value || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const assumptions = {
+    fees: form.elements.fees.checked,
+    netOfCosts: form.elements.netOfCosts.checked,
+    frictionless: form.elements.frictionless.checked,
+    multiAsset: form.elements.multiAsset.checked,
+    retrainCadence: String(form.elements.retrainCadence.value || '').trim() || undefined,
+    notes: String(form.elements.assumptionNotes.value || '').trim() || undefined,
+  }
+  const paper = {
+    ...existing,
+    id,
+    title,
+    url: String(form.elements.url.value || '').trim() || undefined,
+    authors: String(form.elements.authors.value || '').trim() || undefined,
+    year: Number.isFinite(yearVal) && yearVal > 0 ? yearVal : undefined,
+    claim: String(form.elements.claim.value || '').trim(),
+    approach: String(form.elements.approach.value || '').trim() || undefined,
+    claimedMetrics,
+    assumptions,
+    replicateConfig,
+    status: PAPER_STATUSES.includes(form.elements.status.value)
+      ? form.elements.status.value
+      : 'untested',
+    verdictNote: String(form.elements.verdictNote.value || '').trim() || undefined,
+    tags: tags.length ? tags : undefined,
+    source: existing.source || 'manual',
+    createdAt: existing.createdAt || nowIso(),
+  }
+  try {
+    await putPaper(paper)
+  } catch {
+    setStatusLine('papers-status', 'Could not save — please try again.', true)
+    return
+  }
+  togglePaperForm(false)
+  await renderPapers()
+}
+async function onDeletePaper(id) {
+  try {
+    await deletePaperRecord(id)
+  } catch {
+    setStatusLine('papers-status', 'Could not delete — please try again.', true)
+    return
+  }
+  papersCache = papersCache.filter((p) => p.id !== id)
+  await renderPapers()
+}
+// Replicate = prefill the Launch form from the approach's saved config (a full preset spec when it has
+// sweep/seeds/etc., else a flat fixed-lever map), then jump to Launch — mirrors cloneRunToLaunch.
+function replicatePaper(id) {
+  const p = papersCache.find((x) => x.id === id)
+  if (!p || !p.replicateConfig || !Object.keys(p.replicateConfig).length) {
+    setStatusLine(
+      'papers-status',
+      'No replicate config on this approach — add one to prefill Launch.',
+      true,
+    )
+    return
+  }
+  showTab('launch')
+  const c = p.replicateConfig
+  if (c.fixed || c.sweep || c.datasets || c.environments || c.seeds) applyPreset(c)
+  else applyPresetFixed(c)
+}
+// Link the runs currently selected in the Runs tab (the compare checkboxes) so claimed-vs-measured
+// fills in. Reuses the existing run-compare selection rather than a separate picker.
+async function linkSelectedRunsToPaper(id) {
+  const keys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  if (!keys.length) {
+    setStatusLine(
+      'papers-status',
+      'Select runs in the Runs tab (the compare checkboxes) first, then link.',
+      true,
+    )
+    return
+  }
+  const paper = papersCache.find((x) => x.id === id)
+  if (!paper) return
+  const merged = Array.from(new Set([...(paper.linkedRunKeys || []), ...keys]))
+  try {
+    await putPaper({ ...paper, linkedRunKeys: merged })
+  } catch {
+    setStatusLine('papers-status', 'Could not link runs — please try again.', true)
+    return
+  }
+  setStatusLine('papers-status', `Linked ${keys.length} run${keys.length === 1 ? '' : 's'}.`, false)
+  await renderPapers()
+}
+function setupPapers() {
+  const addToggle = byId('paper-add-toggle')
+  if (addToggle) {
+    addToggle.addEventListener('click', () => {
+      const form = byId('paper-form')
+      togglePaperForm(!!(form && form.hidden))
+    })
+  }
+  const form = byId('paper-form')
+  if (form) {
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      onSavePaper(form)
+    })
+    form.addEventListener('click', (event) => {
+      if (event.target.closest('#paper-cancel')) togglePaperForm(false)
+    })
+  }
+  const body = byId('papers-body')
+  if (body) {
+    body.addEventListener('click', (event) => {
+      const filterBtn = event.target.closest('button[data-verdict]')
+      if (filterBtn) {
+        paperVerdictFilter = filterBtn.dataset.verdict
+        renderPapers()
+        return
+      }
+      const btn = event.target.closest('button[data-action]')
+      if (!btn) return
+      const { action, id } = btn.dataset
+      if (action === 'import-seeds') importSeedPapers()
+      else if (action === 'replicate') replicatePaper(id)
+      else if (action === 'link-runs') linkSelectedRunsToPaper(id)
+      else if (action === 'edit')
+        togglePaperForm(
+          true,
+          papersCache.find((p) => p.id === id),
+        )
+      else if (action === 'delete') onDeletePaper(id)
+    })
+  }
+}
+
 // --- Launch tab ----------------------------------------------------------------
 function leverEntries() {
   return Object.entries((manifest && manifest.levers) || {})
@@ -6632,6 +7065,7 @@ function showTab(id) {
   if (target === 'environments') renderEnvironments()
   if (target === 'datasets') renderDatasets()
   if (target === 'hypotheses') renderHypotheses()
+  if (target === 'papers') renderPapers()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
     renderActivity()
@@ -6710,6 +7144,7 @@ async function init() {
   setupEnvironments()
   setupDatasets()
   setupHypotheses()
+  setupPapers()
   setupLaunch()
   setupActivity()
   setupTabs()
