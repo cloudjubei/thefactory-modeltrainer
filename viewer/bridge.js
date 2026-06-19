@@ -33,6 +33,9 @@
   window.OverseerBridge = {
     embedded: window.parent && window.parent !== window,
     queryData: (payload) => call('data.query', payload),
+    // Total records matching a filter (type/where), ignoring limit/offset — pairs with queryData's
+    // limit/offset for server-side pagination. Returns { count }.
+    countData: (payload) => call('data.count', payload),
     putData: (payload) => call('data.put', payload),
     deleteData: (payload) => call('data.delete', payload),
     // The records of every live-data source this project is subscribed to.

@@ -368,6 +368,128 @@ export interface DecisionTraceDiff {
   quality: DecisionQualitySignal
 }
 
+/**
+ * The minimal, domain-oblivious run shape the xAI config-effect engine analyses — projected from a
+ * stored run record. Only completed runs (with a numeric criterion value) participate.
+ */
+export interface AnalysisRun {
+  key: string
+  /** The resolved lever values that produced the run (the config-level "knobs"). */
+  config: Record<string, unknown>
+  metrics?: Record<string, number>
+  objective?: number
+  /** Wall-clock duration (the `runtime` criterion). */
+  durationMs?: number
+  seed?: number
+  dataset?: TrainingRunDataset
+  /** Only `completed` runs are analysed. */
+  status?: string
+}
+
+/**
+ * A criterion to analyse runs by — the metric and which direction is "better". Drives the xAI
+ * config-effect engine and viewer (selectable in the UI: objective / any `metrics.*` key / runtime).
+ */
+export interface AnalysisCriterion {
+  /** Metric key: `objective`, a `metrics.*` key, or `durationMs` (runtime). */
+  key: string
+  /** Whether higher (`max`) or lower (`min`) is better for THIS criterion. */
+  direction: 'max' | 'min'
+  /** Display label; defaults to `key`. */
+  label?: string
+}
+
+/**
+ * A robust interval estimate of one criterion over a set of runs — the rliable-recommended way to
+ * summarise seed variance (point estimates over few seeds are unreliable). `iqm` (interquartile mean)
+ * is the headline aggregate; `ci` is its bootstrap confidence interval.
+ */
+export interface RunValueAggregate {
+  /** Number of runs (seeds) in the sample. */
+  n: number
+  mean: number
+  /** Interquartile mean — robust + efficient aggregate (trims the top/bottom 25%, then means). */
+  iqm: number
+  median: number
+  std: number
+  min: number
+  max: number
+  /** Bootstrap confidence interval of the IQM, `[lo, hi]`. */
+  ci: [number, number]
+}
+
+/** One value of a lever in an {@link OfatAnalysis}: the matched runs (identical on every other lever) + their aggregate. */
+export interface OfatLevel {
+  /** The lever's value at this level (stringified for display/keying). */
+  value: string
+  /** Run keys contributing — all identical on every OTHER lever + dataset/env (a clean one-factor contrast). */
+  runKeys: string[]
+  /** Distinct seeds among the contributing runs. */
+  seeds: number
+  aggregate: RunValueAggregate
+}
+
+/** A pairwise effect between two {@link OfatLevel}s — is the change REAL, not seed noise? */
+export interface OfatEffect {
+  /** The baseline level's value. */
+  from: string
+  /** The compared level's value. */
+  to: string
+  /** `IQM(to) − IQM(from)`, oriented so a positive delta is BETTER per the criterion's direction. */
+  delta: number
+  /** Bootstrap CI of the DIFFERENCE — the honest significance route (excludes 0 ⇒ significant), never CI-overlap. */
+  diffCi: [number, number]
+  /** True when `diffCi` excludes 0 AND survives Benjamini-Hochberg FDR across the analysis's comparisons. */
+  significant: boolean
+  /** Two-sided bootstrap p-value, BEFORE the FDR correction. */
+  pValue: number
+}
+
+/**
+ * One lever's effect on one {@link AnalysisCriterion}, controlling for everything else — the answer to
+ * "how does changing THIS lever affect the score, holding all other levers + the dataset fixed?".
+ * Built from exact one-factor-at-a-time (OFAT) matches over stored runs, with seed-variance rigor.
+ */
+export interface OfatAnalysis {
+  lever: string
+  criterion: AnalysisCriterion
+  /** A stable signature of the held-fixed context (the other levers + dataset/env) this contrast is within. */
+  controlSignature: string
+  /** The lever's observed values and their aggregates, ordered best-first by the criterion. */
+  levels: OfatLevel[]
+  /** Pairwise effects (each non-baseline level vs the baseline), with significance. */
+  effects: OfatEffect[]
+}
+
+/** A lever's cheap, surrogate-free importance under a criterion — the spread of its per-value marginal IQMs. */
+export interface LeverImportance {
+  lever: string
+  /** Fraction of the explained between-lever variance attributable to this lever's marginal means, in [0,1]. */
+  importance: number
+  /** Number of distinct values observed for the lever. */
+  values: number
+  /** Best and worst marginal IQM across the lever's values (oriented to the criterion). */
+  bestValue: string
+  worstValue: string
+}
+
+/**
+ * A deterministic, NON-LLM recommendation for the next experiments to run — each carries a launchable
+ * {@link ExperimentSpec} the viewer fires as a batched campaign, closing the analyse→run→re-analyse loop.
+ */
+export interface ExperimentRecommendation {
+  /** Why this batch: an untested combo, a variance-thin setup needing more seeds, or an untested lever pair. */
+  kind: 'missing-cell' | 'thin-seeds' | 'interaction'
+  /** One-line human reason, e.g. "batch_size=256 never run with the current best setup". */
+  reason: string
+  /** Number of runs this batch would launch. */
+  runCount: number
+  /** The launchable spec (`sweep`/`fixed`/`seeds`) — fed straight to `runTrainingCampaign`. */
+  spec: ExperimentSpec
+  /** Deterministic priority (higher = more valuable to run next). */
+  priority: number
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */

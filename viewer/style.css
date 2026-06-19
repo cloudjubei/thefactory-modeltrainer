@@ -326,8 +326,25 @@ button:focus-visible,
 }
 #runs-body > .runs-toolbar,
 #runs-body > .setup-note-editor,
+#runs-body > .runs-pager,
 #runs-body > .runs-legend {
   flex: 0 0 auto;
+}
+.runs-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 8px 0 2px;
+}
+.runs-pager-info {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.runs-pager .ghost-btn {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 #runs-body > .table-wrap {
   flex: 1;
@@ -1053,10 +1070,13 @@ button:focus-visible,
 /* ---- Results workbench (runs toolbar + sortable table) ------------------------ */
 .runs-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-bottom: 8px;
+}
+.runs-viewmode {
+  align-self: flex-start;
 }
 .runs-hidebad {
   display: inline-flex;
@@ -1066,6 +1086,162 @@ button:focus-visible,
   color: var(--text-muted, var(--text));
   cursor: pointer;
   white-space: nowrap;
+}
+/* #1 — collapsible panel for the lever/version dropdowns. Collapsed, only the dropdowns
+   with a non-default selection (.is-changed, highlighted) stay visible. */
+.runs-dropdowns {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.runs-dropdowns-toggle {
+  align-self: flex-start;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.runs-dropdowns-toggle:hover {
+  color: var(--accent);
+}
+.runs-dropdowns-toggle .caret {
+  font-size: 10px;
+}
+.runs-dropdowns-count {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.runs-dropdowns-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.runs-dropdowns.is-collapsed .runs-filter-lever:not(.is-changed) {
+  display: none;
+}
+.runs-filter-lever.is-changed {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+/* #2 — always-visible filter row: text search, Hide bad, custom toggle chips. */
+.runs-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.runs-custom-toggles {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.filter-chip.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.filter-chip-cb {
+  cursor: pointer;
+  margin: 0;
+}
+.filter-chip-text {
+  user-select: none;
+}
+.filter-chip-x {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 1px;
+  opacity: 0.6;
+}
+.filter-chip-x:hover {
+  opacity: 1;
+  color: var(--bad);
+}
+.runs-add-toggle {
+  border: 1px dashed var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  line-height: 1;
+  cursor: pointer;
+  font-size: 14px;
+}
+.runs-add-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+/* The add/edit custom-filter popup (reuses .chart-modal positioning). */
+.custom-rule-panel {
+  width: min(94vw, 460px);
+  margin: 12vh auto;
+}
+.custom-rule-form {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.custom-rule-form .card-sub {
+  margin: 0;
+}
+.custom-rule-row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.custom-rule-row select,
+.custom-rule-row input {
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+}
+.custom-rule-row #custom-rule-field {
+  flex: 1 1 160px;
+}
+.custom-rule-row #custom-rule-value {
+  width: 96px;
+}
+.custom-rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.ghost-btn.is-primary {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .versions-list {
   display: flex;
@@ -2264,4 +2440,24 @@ pre.json {
   padding: 14px 16px 18px;
   color: var(--muted);
   font-size: 12px;
+}
+
+/* xAI tab — vertical stack of cards, compact contrast/recommendation rows. */
+.xai-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.xai-contrast {
+  margin: 0.25rem 0 1rem;
+  padding-left: 0.5rem;
+  border-left: 2px solid var(--border);
+}
+.xai-rec {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+.xai-rec:last-child {
+  border-bottom: none;
 }

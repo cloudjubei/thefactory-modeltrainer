@@ -57,7 +57,15 @@ const TABS = [
   { id: 'environments', label: 'Environments' },
   { id: 'launch', label: 'Launch' },
   { id: 'activity', label: 'Activity' },
+  { id: 'xai', label: 'xAI' },
 ]
+// xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
+// OFAT lever, and the last recommendation set (so a Run-batch click can launch it by index).
+let xaiCriterionKey = 'objective'
+let xaiCriterionDir = null
+let xaiFocusKey = null
+let xaiLever = null
+let xaiRecsCache = []
 const HYPOTHESIS_STATUSES = ['pending', 'accepted', 'rejected']
 const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
@@ -120,6 +128,28 @@ let runsLeverFilter = {}
 let runsTextFilter = ''
 let runsHideBad = false
 let runsVersionFilter = ''
+// The lever/version dropdowns collapse under a single header; collapsed, only the
+// dropdowns with a non-default selection stay visible (highlighted). Starts collapsed.
+let runsDropdownsCollapsed = true
+// User-defined numeric filter rules (e.g. "return % > 0"), persisted per project as
+// recordType + '-filter-rule' records so they survive reloads. Each: { id, field, op,
+// value, active }. Rendered as toggle chips alongside "Hide bad runs".
+let customRulesCache = []
+// When the add/edit custom-rule popup is open, the id being edited (null = creating new).
+let editingCustomRuleId = null
+// The flat Runs table renders one page at a time so a large run set doesn't build thousands of
+// DOM rows at once (the main cost of "Runs takes a while to show"). Grouped views aggregate to
+// few rows, so they stay unpaginated. `runsVisibleKeys` = the keys on the current page (for
+// "select all visible").
+const RUNS_PAGE_SIZE = 50
+let runsPage = 0
+let runsVisibleKeys = []
+// Total server-side matches for the current pushed filter (the flat view paginates server-side, so
+// the count comes from the backend, not runsCache.length).
+let runsTotalCount = 0
+// Full records for runs that scrolled off the current server page while still open/selected, so a
+// detail/compare view resolves them even though they aren't in the page cache.
+const runExtraCache = new Map()
 let runsCompareKeys = new Set()
 // First click on Delete arms it (in-app confirm — window.confirm is blocked in the
 // embedding iframe sandbox); the second click within the timeout performs the delete.
@@ -424,17 +454,60 @@ async function queryRecords(type, key) {
     return []
   }
 }
+function recordToRun(r) {
+  const summary = r.content || {}
+  const key =
+    r.key || (summary.provenance && summary.provenance.configHash) || summary.configHash || ''
+  return { key, summary }
+}
+// Run records via the bridge, with the server-side filter/sort/pagination passed through (`extra` =
+// { where?, orderBy?, limit?, offset? }). The flat view sends a page; group-by/drill send no limit.
+async function queryRunRecords(extra) {
+  if (!embedded() || !manifest) return []
+  try {
+    const payload = { type: manifest.recordType }
+    if (extra && extra.where) payload.where = extra.where
+    if (extra && extra.orderBy) payload.orderBy = extra.orderBy
+    if (extra && extra.limit !== undefined) payload.limit = extra.limit
+    if (extra && extra.offset !== undefined) payload.offset = extra.offset
+    const recs = await window.OverseerBridge.queryData(payload)
+    return (recs || []).map(recordToRun).filter((r) => r.key)
+  } catch {
+    return []
+  }
+}
+// Total runs matching `where` (ignores limit/offset), for the flat view's pager. Degrades to the
+// loaded length when the host predates the count verb.
+async function countRunRecords(where) {
+  if (!embedded() || !manifest || !window.OverseerBridge.countData) return null
+  try {
+    const payload = { type: manifest.recordType }
+    if (where) payload.where = where
+    const res = await window.OverseerBridge.countData(payload)
+    return Number((res && res.count) || 0)
+  } catch {
+    return null
+  }
+}
 async function readRuns() {
   if (!manifest) return []
-  const recs = await queryRecords(manifest.recordType)
-  return recs
-    .map((r) => {
-      const summary = r.content || {}
-      const key =
-        r.key || (summary.provenance && summary.provenance.configHash) || summary.configHash || ''
-      return { key, summary }
-    })
-    .filter((r) => r.key)
+  const where = buildRunsServerWhere()
+  if (runsServerPaged()) {
+    const [page, total] = await Promise.all([
+      queryRunRecords({
+        where,
+        orderBy: runsServerOrderBy(),
+        limit: RUNS_PAGE_SIZE,
+        offset: runsPage * RUNS_PAGE_SIZE,
+      }),
+      countRunRecords(where),
+    ])
+    runsTotalCount = total === null ? page.length : total
+    return page
+  }
+  const all = await queryRunRecords({ where })
+  runsTotalCount = all.length
+  return all
 }
 // Latest-record contents get the record-level timestamps merged in (when the
 // content does not carry its own), so observers can anchor time estimates on
@@ -587,6 +660,33 @@ async function putHypothesis(content) {
     key: content.id,
     content,
   })
+}
+// User-defined numeric filter rules, one record each (keyed by rule id) so they persist
+// across reloads + clients. Returns them sorted by creation order for a stable chip layout.
+async function readCustomRules() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + '-filter-rule')
+  return recs
+    .map((r) => {
+      const c = r.content || {}
+      return { ...c, id: c.id || r.key || '' }
+    })
+    .filter((c) => c.id && c.field && c.op)
+    .sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+}
+async function saveCustomRule(rule) {
+  if (!manifest || !rule || !rule.id) return
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-filter-rule',
+    key: rule.id,
+    content: rule,
+  })
+  customRulesCache = await readCustomRules()
+}
+async function deleteCustomRule(id) {
+  if (!manifest || !id) return
+  await window.OverseerBridge.deleteData({ type: manifest.recordType + '-filter-rule', key: id })
+  customRulesCache = customRulesCache.filter((r) => r.id !== id)
 }
 async function readProjects() {
   const recs = await queryRecords(PROJECT_RECORD_TYPE)
@@ -887,7 +987,7 @@ async function refreshProjectManifest(project) {
     manifest = rec.manifest
     applyManifestChrome()
     renderLaunchForm()
-    if (activeTabId === 'runs') renderRunsTable()
+    if (activeTabId === 'runs') refreshRuns()
   } catch {
     // best-effort — a stale manifest just persists until the next Re-inspect
   }
@@ -1826,7 +1926,8 @@ function clearRunsFilter() {
   runsTextFilter = ''
   runsVersionFilter = ''
   runsDrillSetupKey = null
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // Drill from a by-setup row into that setup's individual runs (filter + switch view).
 function drillIntoSetup(key) {
@@ -1836,7 +1937,8 @@ function drillIntoSetup(key) {
   runsFilterLabel = group.label
   runsDrillSetupKey = key
   runsViewMode = 'runs'
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // Drill from a by-experiment row into that thesis's individual runs.
 function drillIntoExperiment(thesis) {
@@ -1846,7 +1948,8 @@ function drillIntoExperiment(thesis) {
   runsFilterLabel = thesis
   runsDrillSetupKey = null
   runsViewMode = 'runs'
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // Drill from a by-environment row into that environment's runs.
 function drillIntoEnvironment(sig) {
@@ -1856,7 +1959,8 @@ function drillIntoEnvironment(sig) {
   runsFilterLabel = group.name
   runsDrillSetupKey = null
   runsViewMode = 'runs'
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // Drill from a by-dataset row into that dataset's runs.
 function drillIntoDataset(sig) {
@@ -1866,7 +1970,8 @@ function drillIntoDataset(sig) {
   runsFilterLabel = group.name
   runsDrillSetupKey = null
   runsViewMode = 'runs'
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // Viewing the Runs tab clears the project's unseen badge: mark every current run
 // key as seen, persisting the union when any are new. No-op when nothing changed,
@@ -2182,12 +2287,132 @@ function runIsBad(r) {
 function runVersionOf(r) {
   return String((r.summary && r.summary.pipelineVersion) || '1')
 }
+// The comparison operators a custom numeric rule can use, in menu order.
+const CUSTOM_RULE_OPS = ['<', '<=', '=', '>=', '>']
+function compareWithOp(value, op, target) {
+  switch (op) {
+    case '<':
+      return value < target
+    case '<=':
+      return value <= target
+    case '=':
+      return value === target
+    case '>=':
+      return value >= target
+    case '>':
+      return value > target
+    default:
+      return false
+  }
+}
+// Every run field a custom rule can test — those carrying NUMERIC values: the objective,
+// each measured metric, vs-hold (when a benchmark exists), and every numeric-typed lever.
+// Each entry is { key (stable id), label (for chips/menus), get(run) -> number }.
+function numericRunFields() {
+  const fields = [
+    {
+      key: 'objective',
+      label: objectiveName(),
+      get: (r) => Number(r.summary && r.summary.objective),
+    },
+  ]
+  for (const mk of runMetricKeys()) {
+    fields.push({
+      key: 'metric:' + mk,
+      label: metricLabel(mk),
+      get: (r) => Number(r.summary && r.summary.metrics && r.summary.metrics[mk]),
+    })
+  }
+  if (anyBenchmark()) {
+    fields.push({ key: 'vs_hold', label: 'vs hold', get: (r) => vsHoldValue(r.summary) })
+  }
+  for (const [key, spec] of leverEntries()) {
+    if (spec && spec.type === 'number') {
+      fields.push({
+        key: 'config:' + key,
+        label: key,
+        get: (r) => Number((r.summary && r.summary.config && r.summary.config[key]) ?? NaN),
+      })
+    }
+  }
+  return fields
+}
+function customRuleFieldByKey(key) {
+  return numericRunFields().find((f) => f.key === key)
+}
+// A run passes a rule when its field value is a finite number satisfying the comparison;
+// a missing/non-numeric value (e.g. a failed run with no metrics) never passes.
+function runMatchesCustomRule(run, rule) {
+  const field = customRuleFieldByKey(rule.field)
+  if (!field) return true
+  const v = field.get(run)
+  if (!Number.isFinite(v)) return false
+  return compareWithOp(v, rule.op, Number(rule.value))
+}
+// A short human label for a rule, e.g. "return % > 0".
+function customRuleLabel(rule) {
+  const field = customRuleFieldByKey(rule.field)
+  return `${field ? field.label : rule.field} ${rule.op} ${rule.value}`
+}
+// A custom-rule field maps to a stored content dot-path when it can be pushed to the server; a
+// computed field (vs_hold) returns null and stays a client-side filter.
+function customRuleServerField(field) {
+  if (field === 'objective') return 'objective'
+  if (field.startsWith('metric:')) return 'metrics.' + field.slice(7)
+  if (field.startsWith('config:')) return 'config.' + field.slice(7)
+  return null
+}
+// The filters that push DOWN to the server query: lever-equals, pipeline version, and the pushable
+// numeric rules. Text search, Hide-bad, vs-hold rules, and a group-by drill stay client-side.
+function buildRunsServerWhere() {
+  const preds = []
+  for (const [lever, val] of Object.entries(runsLeverFilter)) {
+    if (val) preds.push({ field: 'config.' + lever, op: '=', value: String(val) })
+  }
+  if (runsVersionFilter) {
+    preds.push({ field: 'pipelineVersion', op: '=', value: String(runsVersionFilter) })
+  }
+  for (const rule of customRulesCache) {
+    if (!rule.active) continue
+    const field = customRuleServerField(rule.field)
+    if (field) preds.push({ field, op: rule.op, value: rule.value })
+  }
+  return preds.length ? { and: preds } : undefined
+}
+// Server ordering for the flat view when the sort column maps to a stored numeric field; other
+// columns (id / data / ran) have no server-sortable key, so the default recency order stands.
+function runsServerOrderBy() {
+  if (!runsSortKey) return undefined
+  let field = null
+  if (runsSortKey.startsWith('m:')) field = 'metrics.' + runsSortKey.slice(2)
+  else if (runsSortKey === 'version') field = 'pipelineVersion'
+  else if (runsSortKey === 'durationMs') field = 'durationMs'
+  if (!field) return undefined
+  return [{ field, direction: runsSortDir, numeric: field !== 'pipelineVersion' }]
+}
+// The flat Runs view paginates server-side; the group-by views and a setup/experiment drill need
+// the full matching set in memory, so they fetch unpaginated.
+function runsServerPaged() {
+  return runsViewMode === 'runs' && !runsFilterKeys
+}
+// Resolve a run by key from the current page cache, falling back to records stashed when a run was
+// opened/selected (so detail + compare survive paging away from the run).
+function findRun(key) {
+  return runsCache.find((r) => r.key === key) || runExtraCache.get(key)
+}
+function rememberRun(key) {
+  const run = runsCache.find((r) => r.key === key)
+  if (run) runExtraCache.set(key, run)
+}
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
   if (runsHideBad) out = out.filter((r) => !runIsBad(r))
   if (runsVersionFilter) out = out.filter((r) => runVersionOf(r) === runsVersionFilter)
   for (const [lever, val] of Object.entries(runsLeverFilter)) {
     if (val) out = out.filter((r) => String((r.summary.config || {})[lever]) === String(val))
+  }
+  for (const rule of customRulesCache) {
+    if (rule.active) out = out.filter((r) => runMatchesCustomRule(r, rule))
   }
   const q = runsTextFilter.trim().toLowerCase()
   if (q) {
@@ -2348,21 +2573,157 @@ function aggregateByExperiment(runs) {
 // The project's pipeline version + changelog. A BREAKING version changed how data is
 // fed/scored, so runs across versions are NOT comparable; each run is tagged with the
 // version it ran under and a bump re-opens skipExplored/unrunnable. Shown above the runs.
+// One toggle chip per saved custom numeric rule + a trailing "+" to add one. A chip is a
+// checkbox (activate/deactivate), the rule text (click to edit), and an ✕ (delete).
+function customTogglesHtml() {
+  const chips = customRulesCache
+    .map(
+      (rule) =>
+        `<span class="filter-chip${rule.active ? ' is-on' : ''}" data-rule-edit="${escapeHtml(rule.id)}" title="Click to edit this filter">
+          <input type="checkbox" class="filter-chip-cb"${rule.active ? ' checked' : ''} data-rule-toggle="${escapeHtml(rule.id)}" aria-label="Activate filter ${escapeHtml(customRuleLabel(rule))}" />
+          <span class="filter-chip-text">${escapeHtml(customRuleLabel(rule))}</span>
+          <button type="button" class="filter-chip-x" data-rule-del="${escapeHtml(rule.id)}" title="Delete this filter" aria-label="Delete filter">✕</button>
+        </span>`,
+    )
+    .join('')
+  return `<span class="runs-custom-toggles">${chips}<button type="button" id="runs-add-toggle" class="runs-add-toggle" title="Add a custom numeric filter (e.g. return % > 0)" aria-label="Add a custom filter">+</button></span>`
+}
+// The add/edit popup for a custom numeric rule: pick a field, a comparison, a value. Opens
+// blank to CREATE, or pre-filled (editingCustomRuleId set) to EDIT an existing rule.
+function openCustomRulePopup(ruleId) {
+  editingCustomRuleId = ruleId || null
+  renderCustomRulePopup()
+}
+function closeCustomRulePopup() {
+  editingCustomRuleId = null
+  const m = byId('custom-rule-modal')
+  if (m) m.hidden = true
+}
+function renderCustomRulePopup() {
+  const fields = numericRunFields()
+  if (!fields.length) return
+  const editing = editingCustomRuleId
+    ? customRulesCache.find((r) => r.id === editingCustomRuleId)
+    : null
+  const selectedField = editing ? editing.field : fields[0].key
+  const selectedOp = editing ? editing.op : '>'
+  const selectedValue = editing ? String(editing.value) : ''
+  let modal = byId('custom-rule-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'custom-rule-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-rule-cancel]')) {
+        return closeCustomRulePopup()
+      }
+    })
+    modal.addEventListener('submit', (event) => {
+      if (event.target.closest('#custom-rule-form')) {
+        event.preventDefault()
+        submitCustomRulePopup()
+      }
+    })
+  }
+  const fieldOpts = fields
+    .map(
+      (f) =>
+        `<option value="${escapeHtml(f.key)}"${f.key === selectedField ? ' selected' : ''}>${escapeHtml(f.label)}</option>`,
+    )
+    .join('')
+  const opOpts = CUSTOM_RULE_OPS.map(
+    (op) => `<option value="${op}"${op === selectedOp ? ' selected' : ''}>${op}</option>`,
+  ).join('')
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-rule-cancel></div>
+    <div class="chart-modal__panel custom-rule-panel" role="dialog" aria-label="${editing ? 'Edit' : 'Add'} a custom filter">
+      <div class="chart-modal__head">
+        <strong>${editing ? 'Edit' : 'Add'} a filter</strong>
+        <button type="button" class="icon-btn" data-rule-cancel title="Close" aria-label="Close">✕</button>
+      </div>
+      <form id="custom-rule-form" class="custom-rule-form">
+        <p class="card-sub">Keep only runs whose value satisfies this rule. Applies to numeric fields.</p>
+        <div class="custom-rule-row">
+          <select id="custom-rule-field" aria-label="Field">${fieldOpts}</select>
+          <select id="custom-rule-op" aria-label="Comparison">${opOpts}</select>
+          <input type="number" id="custom-rule-value" step="any" placeholder="value" value="${escapeHtml(selectedValue)}" aria-label="Value" />
+        </div>
+        <div class="custom-rule-actions">
+          <button type="button" class="ghost-btn" data-rule-cancel>Cancel</button>
+          <button type="submit" class="ghost-btn is-primary">${editing ? 'Save' : 'Create'}</button>
+        </div>
+      </form>
+    </div>`
+  modal.hidden = false
+  const valueInput = byId('custom-rule-value')
+  if (valueInput) valueInput.focus()
+}
+async function submitCustomRulePopup() {
+  const fieldEl = byId('custom-rule-field')
+  const opEl = byId('custom-rule-op')
+  const valueEl = byId('custom-rule-value')
+  if (!fieldEl || !opEl || !valueEl) return
+  const value = Number(valueEl.value)
+  if (valueEl.value === '' || !Number.isFinite(value)) {
+    valueEl.focus()
+    return
+  }
+  const editing = editingCustomRuleId
+    ? customRulesCache.find((r) => r.id === editingCustomRuleId)
+    : null
+  const rule = {
+    id: editing ? editing.id : randomHexId(),
+    field: fieldEl.value,
+    op: opEl.value,
+    value,
+    active: editing ? editing.active !== false : true,
+    createdAt: editing ? editing.createdAt || nowIso() : nowIso(),
+    updatedAt: nowIso(),
+  }
+  await saveCustomRule(rule)
+  closeCustomRulePopup()
+  runsPage = 0
+  refreshRuns()
+}
 function runsToolbarHtml(shownCount, total) {
-  const dropdowns = leverEntries()
+  // Lever choice dropdowns + the pipeline-version dropdown live in the collapsible panel.
+  // Each carries `is-changed` (highlighted) when it has a non-default selection; collapsed,
+  // CSS shows only those.
+  const leverDropdowns = leverEntries()
     .filter(([, spec]) => spec.type === 'choice')
     .map(([key, spec]) => {
+      const selected = String(runsLeverFilter[key] || '')
       const opts = [`<option value="">${escapeHtml(key)}: any</option>`]
         .concat(
           (spec.choices || []).map(
             (c) =>
-              `<option value="${escapeHtml(String(c))}"${String(runsLeverFilter[key] || '') === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+              `<option value="${escapeHtml(String(c))}"${selected === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
           ),
         )
         .join('')
-      return `<select class="runs-filter-lever" data-lever="${escapeHtml(key)}">${opts}</select>`
+      return `<select class="runs-filter-lever${selected ? ' is-changed' : ''}" data-lever="${escapeHtml(key)}">${opts}</select>`
     })
     .join('')
+  const versions = [
+    ...new Set([
+      ...runsCache.map(runVersionOf),
+      String((manifest && manifest.pipelineVersion) || '1'),
+    ]),
+  ].sort()
+  const versionFilter = `<select class="runs-filter-lever${runsVersionFilter ? ' is-changed' : ''}" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable. Set automatically when you open a version from the Versions tab.")}>
+          <option value="">version: any</option>
+          ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
+        </select>`
+  const changedDropdowns =
+    (runsVersionFilter ? 1 : 0) + Object.values(runsLeverFilter).filter(Boolean).length
+  const dropdownsToggle = `<button type="button" id="runs-dropdowns-toggle" class="runs-dropdowns-toggle" aria-expanded="${runsDropdownsCollapsed ? 'false' : 'true'}">
+    <span class="caret">${runsDropdownsCollapsed ? '▸' : '▾'}</span> ${runsDropdownsCollapsed ? 'More filter options' : 'Hide filter options'}${runsDropdownsCollapsed && changedDropdowns ? ` <span class="runs-dropdowns-count">${changedDropdowns}</span>` : ''}
+  </button>`
+  const dropdownsPanel = `<div id="runs-dropdowns" class="runs-dropdowns${runsDropdownsCollapsed ? ' is-collapsed' : ''}">
+    ${dropdownsToggle}
+    <div class="runs-dropdowns-body">${versionFilter}${leverDropdowns}</div>
+  </div>`
+
   const active =
     runsFilterKeys ||
     runsTextFilter ||
@@ -2381,24 +2742,16 @@ function runsToolbarHtml(shownCount, total) {
   const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
     <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
   </label>`
-  const versions = [
-    ...new Set([
-      ...runsCache.map(runVersionOf),
-      String((manifest && manifest.pipelineVersion) || '1'),
-    ]),
-  ].sort()
-  const versionFilter = `<select class="runs-filter-lever" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable. Set automatically when you open a version from the Versions tab.")}>
-          <option value="">version: any</option>
-          ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
-        </select>`
   return `<div class="runs-toolbar">
     ${toggle}
-    ${versionFilter}
-    ${dropdowns}
-    <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
-    ${hideBad}
-    <span class="runs-count">${shownCount}/${total} runs${label}</span>
-    ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
+    ${dropdownsPanel}
+    <div class="runs-filters">
+      <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
+      ${hideBad}
+      ${customTogglesHtml()}
+      <span class="runs-count">${shownCount}/${total} runs${label}</span>
+      ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
+    </div>
   </div>`
 }
 function toggleRunsSort(id) {
@@ -2407,7 +2760,8 @@ function toggleRunsSort(id) {
     runsSortKey = id
     runsSortDir = 'desc'
   }
-  renderRunsTable()
+  runsPage = 0
+  refreshRuns()
 }
 // One row per SETUP (config minus seed): seed count + min/avg/max/median objective +
 // avg vs-hold. Click a row to drill into that setup's individual runs.
@@ -2739,6 +3093,13 @@ function renderRunsTable() {
     closeRunDetail()
     return
   }
+  // Keep the off-page run cache bounded to runs still referenced by an open detail / compare set.
+  for (const k of [...runExtraCache.keys()]) {
+    if (k !== selectedRunKey && !runsCompareKeys.has(k)) runExtraCache.delete(k)
+  }
+  const serverPaged = runsServerPaged()
+  // Server total when the flat view paginates server-side; otherwise the loaded set's size.
+  const total = serverPaged ? runsTotalCount : runsCache.length
   const filtered = applyRunsFilters(runsCache)
   if (spark) {
     const svg = sparklineSvg(filtered)
@@ -2748,11 +3109,11 @@ function renderRunsTable() {
   if (!filtered.length) {
     setHtml(
       body,
-      `${runsToolbarHtml(0, runsCache.length)}<div class="empty-hint">No runs match the filter.</div>`,
+      `${runsToolbarHtml(0, total)}<div class="empty-hint">No runs match the filter.</div>`,
     )
     return
   }
-  const toolbar = runsToolbarHtml(filtered.length, runsCache.length)
+  const toolbar = runsToolbarHtml(filtered.length, total)
   if (runsViewMode === 'setup') {
     const legend = `<p class="runs-legend">Each row is a SETUP (config ignoring seed) — the ledger of everything tried. Click one to drill into its runs <em>and write your conclusion</em> · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold (avg) · "LLM verdict" needs the judge to have run · "—" = not yet scored / noted.</p>`
     setHtml(body, `${toolbar}${bySetupTableHtml(filtered)}${legend}`)
@@ -2790,14 +3151,31 @@ function renderRunsTable() {
     renderCompare()
     return
   }
-  const shown = sortRuns(filtered)
+  // Server-paged: the backend already filtered + sorted + sliced this page, so render it as-is
+  // (client text/Hide-bad already refined `filtered`). Otherwise (group-by drill) sort + slice here.
+  let shown
+  let pageCount
+  let start
+  if (serverPaged) {
+    pageCount = Math.max(1, Math.ceil(total / RUNS_PAGE_SIZE))
+    start = runsPage * RUNS_PAGE_SIZE
+    shown = filtered
+  } else {
+    const sorted = sortRuns(filtered)
+    pageCount = Math.max(1, Math.ceil(sorted.length / RUNS_PAGE_SIZE))
+    runsPage = Math.min(Math.max(0, runsPage), pageCount - 1)
+    start = runsPage * RUNS_PAGE_SIZE
+    shown = sorted.slice(start, start + RUNS_PAGE_SIZE)
+  }
+  runsVisibleKeys = shown.map((r) => r.key)
   const cols = runsColumns()
+  // "Select all visible" reflects the runs on THIS page.
   const allSelected = shown.length > 0 && shown.every((r) => runsCompareKeys.has(r.key))
   const header = cols
     .map((c) => {
       // The compare column header is a "select all visible" checkbox.
       if (c.id === 'compare') {
-        return `<th><input type="checkbox" id="runs-select-all"${allSelected ? ' checked' : ''} aria-label="Select all visible runs" title="Select all visible runs" /></th>`
+        return `<th><input type="checkbox" id="runs-select-all"${allSelected ? ' checked' : ''} aria-label="Select all visible runs" title="Select all runs on this page" /></th>`
       }
       if (c.noSort)
         return `<th class="${c.num ? 'num' : ''}"${helpAttr(c.help)}>${escapeHtml(c.label)}</th>`
@@ -2806,16 +3184,30 @@ function renderRunsTable() {
     })
     .join('')
   const rows = shown.map((r) => runRowHtml(r, cols)).join('')
+  const pager = runsPagerHtml(total, start, shown.length, pageCount)
   const legend = `<p class="runs-legend">Click a header to sort · hover a column header for what it means · <span class="delta-pos">green</span>/<span class="delta-neg">red</span> = beat / lagged buy-and-hold · greyed = failed/degenerate · "—" = not recorded (re-run to populate).</p>`
   setHtml(
     body,
     `${toolbar}${setupNoteEditorHtml()}<div class="table-wrap"><table class="runs-table">
-    <thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
+    <thead><tr>${header}</tr></thead><tbody>${rows}</tbody></table></div>${pager}${legend}`,
   )
-  if (selectedRunKey && !shown.some((r) => r.key === selectedRunKey)) closeRunDetail()
+  // Keep an open detail/compare even when its run scrolled to another server page (resolved via the
+  // remembered-run cache), only closing when the run is genuinely gone.
+  if (selectedRunKey && !findRun(selectedRunKey)) closeRunDetail()
   else if (selectedRunKey) renderRunDetail(selectedRunKey)
   renderCompare()
   syncRunsSelectionUI()
+}
+// Prev/next pager for the flat Runs view; hidden when everything fits on one page.
+function runsPagerHtml(total, start, count, pageCount) {
+  if (pageCount <= 1) return ''
+  const from = total === 0 ? 0 : start + 1
+  const to = start + count
+  return `<div class="runs-pager">
+    <button type="button" class="ghost-btn" id="runs-prev"${runsPage <= 0 ? ' disabled' : ''}>‹ Prev</button>
+    <span class="runs-pager-info">${from}–${to} of ${total} · page ${runsPage + 1}/${pageCount}</span>
+    <button type="button" class="ghost-btn" id="runs-next"${runsPage >= pageCount - 1 ? ' disabled' : ''}>Next ›</button>
+  </div>`
 }
 // The two selection-gated run actions in the runs head — Judge selected + Delete
 // selected — share one look (icon + text) and one rule: disabled until ≥1 run is
@@ -2851,6 +3243,8 @@ function disarmRunsDelete() {
 }
 async function renderRuns() {
   if (!byId('runs-body')) return
+  // Custom rules drive the server-side `where`, so they must be loaded BEFORE readRuns builds it.
+  customRulesCache = await readCustomRules()
   ;[
     runsCache,
     verdictsCache,
@@ -2873,14 +3267,25 @@ async function renderRuns() {
   await markRunsSeen()
   renderRunsTable()
 }
+// Re-fetch only the runs for the current view/filters/sort/page and re-render the table. Server-side
+// filtering + pagination mean a filter/sort/page/view change needs a fresh query, not just a client
+// re-render (the other caches — verdicts/notes/etc. — are unaffected, so they aren't refetched).
+async function refreshRuns() {
+  if (!byId('runs-body')) return
+  runsCache = await readRuns()
+  renderRunsTable()
+  // Close the xAI analyse→run→re-analyse loop: when records change (e.g. a launched batch lands), the
+  // open xAI tab recomputes its effects + recommendations off the fresh runs.
+  if (activeTabId === 'xai') renderXai()
+}
 // Multi-select comparison: a config diff (only differing levers), metrics
 // side-by-side, and overlaid %-return curves (+ the buy-and-hold control) for the
 // runs ticked in the table. Hidden until ≥2 are selected; pruned of stale keys.
 function renderCompare() {
   const card = byId('run-compare')
   if (!card) return
-  runsCompareKeys = new Set([...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k)))
-  const runs = [...runsCompareKeys].map((k) => runsCache.find((r) => r.key === k)).filter(Boolean)
+  runsCompareKeys = new Set([...runsCompareKeys].filter((k) => findRun(k)))
+  const runs = [...runsCompareKeys].map((k) => findRun(k)).filter(Boolean)
   if (runs.length < 2) {
     setHtml(card, '')
     card.hidden = true
@@ -2946,6 +3351,7 @@ function renderCompare() {
     `<div class="card-head card-head-row">
       <h3>Compare ${runs.length} runs</h3>
       <div class="head-actions">
+        ${embedded() && runs.every((r) => r.summary && r.summary.status === 'failed') ? `<button type="button" id="compare-rerun-all" class="ghost-btn" title="Queue all ${runs.length} failed runs again">Re-run all (${runs.length})</button>` : ''}
         ${runs.length === 2 && chatAboutRunAvailable() ? `<button type="button" id="compare-discuss" class="icon-btn" title="Discuss these two runs (incl. the decision diff)" aria-label="Discuss these two runs">${iconChatSvg()}</button>` : ''}
         <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
       </div>
@@ -3256,7 +3662,7 @@ function priceActionSectionHtml(summary, key) {
 let chartModalData = null
 let chartModalZoom = 1
 function expandPriceActionChart(key) {
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRun(key)
   const chart = run && run.summary && run.summary.artifacts && run.summary.artifacts.runChart
   if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return
   chartModalData = chart
@@ -3860,6 +4266,277 @@ function decisionDiffChatSummary(baseline, tweak) {
     .join(', ')
   return `Decision diff vs the other run: ${(diff.divergenceRate * 100).toFixed(0)}% of ${diff.alignedSteps} aligned decisions changed; decision-quality reads "${q.verdict}" (reward Δ ${fmtSignedNum(q.meanRewardDeltaOnChanges)} at changed steps vs ${fmtSignedNum(q.meanRewardDeltaOnUnchanged)} control — heuristic, not causal); objective Δ ${fmtSignedNum(diff.objectiveDelta)}; action-mix Δ ${deltas || 'none'}.`
 }
+// --- xAI tab: model internals + cross-run config effects + the experiment recommender -------------
+// All analysis runs in the browser via window.Xai (a parity-tested mirror of the TS engine) over the
+// run records already in runsCache — deterministic, non-LLM, re-runnable anytime.
+function xaiRuns() {
+  return runsCache
+    .filter(
+      (r) => r.summary && r.summary.status !== 'failed' && typeof r.summary.objective === 'number',
+    )
+    .map((r) => ({
+      key: r.key,
+      config: r.summary.config || {},
+      metrics: r.summary.metrics,
+      objective: r.summary.objective,
+      durationMs: r.summary.durationMs,
+      seed: r.summary.seed,
+      dataset: r.summary.dataset,
+      status: 'completed',
+    }))
+}
+function xaiCriteria() {
+  const list = [{ key: 'objective', label: objectiveName(), dir: objectiveDirection() }]
+  for (const k of runMetricKeys())
+    if (k !== 'objective') list.push({ key: k, label: metricLabel(k), dir: 'max' })
+  list.push({ key: 'durationMs', label: 'runtime', dir: 'min' })
+  return list
+}
+function currentXaiCriterion() {
+  const all = xaiCriteria()
+  const found = all.find((c) => c.key === xaiCriterionKey) || all[0]
+  return { key: found.key, direction: xaiCriterionDir || found.dir, label: found.label }
+}
+function renderXai() {
+  const body = byId('xai-body')
+  if (!body) return
+  if (!manifest) {
+    setHtml(
+      body,
+      '<div class="card"><p class="card-sub">Open a training project to analyse its runs.</p></div>',
+    )
+    return
+  }
+  if (!window.Xai) {
+    setHtml(body, '<div class="card"><p class="card-sub">xAI engine failed to load.</p></div>')
+    return
+  }
+  const runs = xaiRuns()
+  const criterion = currentXaiCriterion()
+  setHtml(
+    body,
+    [
+      xaiHeaderHtml(criterion, runs.length),
+      xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
+      xaiConfigEffectsHtml(runs, criterion),
+      xaiRecommenderHtml(runs, criterion),
+    ].join(''),
+  )
+}
+function xaiHeaderHtml(criterion, nRuns) {
+  const opts = xaiCriteria()
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
+    )
+    .join('')
+  return `<div class="card">
+    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2></div>
+    <p class="badges-row">
+      <label class="card-sub">Criterion <select id="xai-criterion">${opts}</select></label>
+      <label class="card-sub">Better when <select id="xai-direction">
+        <option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option>
+        <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
+      </select></label>
+    </p>
+  </div>`
+}
+// Model internals for the focused run: the Explain panels + the decision-internals reads + a decision
+// diff against the nearest comparable run (same data, differs by a lever).
+function xaiModelInternalsHtml(focusKey) {
+  const run = runsCache.find((r) => r.key === focusKey)
+  if (!run) return ''
+  const s = run.summary
+  const sibling = xaiBestSibling(run)
+  return `<div class="card">
+    <div class="card-head card-head-row"><h3>Model internals <span class="card-sub">— run ${escapeHtml(shortKey(focusKey))}</span></h3>
+      <button type="button" class="icon-btn" data-xai-clear-focus title="Clear focused run" aria-label="Clear">✕</button></div>
+    <div class="card-scroll">
+    ${explainSectionHtml(s)}
+    ${decisionInternalsHtml(readDecisionTrace(s))}
+    ${sibling ? decisionDiffSectionHtml(sibling.summary, s) : ''}
+    </div></div>`
+}
+// The nearest comparable run for a decision diff: same dataset/window (step-alignable), has a trace,
+// differs in config — the best such by objective.
+function xaiBestSibling(run) {
+  const sig = datasetAlignmentSignature(run.summary)
+  if (!sig) return null
+  const candidates = runsCache.filter(
+    (r) =>
+      r.key !== run.key &&
+      r.summary &&
+      r.summary.status !== 'failed' &&
+      datasetAlignmentSignature(r.summary) === sig &&
+      readDecisionTrace(r.summary),
+  )
+  if (!candidates.length) return null
+  const dir = objectiveDirection()
+  return candidates.sort((a, b) =>
+    dir === 'max'
+      ? b.summary.objective - a.summary.objective
+      : a.summary.objective - b.summary.objective,
+  )[0]
+}
+// Decision INTERNALS from the trace: decisiveness (top-2 action-value gap), policy entropy over time
+// (normalised), and a confidence-vs-realised-reward calibration table ("is its confidence trustworthy?").
+function decisionInternalsHtml(trace) {
+  if (!trace) return ''
+  const withVals = trace.steps.filter((s) => s.actionValues)
+  if (withVals.length < 2) return ''
+  const gap = []
+  const entropy = []
+  withVals.forEach((s, i) => {
+    const vals = Object.values(s.actionValues).map(Number).filter(Number.isFinite)
+    if (vals.length < 2) return
+    const sorted = [...vals].sort((a, b) => b - a)
+    gap.push({ x: i, y: sorted[0] - sorted[1], group: 'top-2 gap' })
+    const mx = Math.max(...vals)
+    const ex = vals.map((v) => Math.exp(v - mx))
+    const z = ex.reduce((a, b) => a + b, 0)
+    const ps = ex.map((e) => e / z)
+    const h = -ps.reduce((a, p) => a + (p > 0 ? p * Math.log(p) : 0), 0) / Math.log(vals.length)
+    entropy.push({ x: i, y: h, group: 'entropy' })
+  })
+  const decisiveChart =
+    gap.length >= 2
+      ? `<h4 class="card-sub">Decisiveness — gap between the best and 2nd-best action value (low ⇒ indecision)</h4>
+       <div class="chart-wrap">${buildLineChart({ points: gap, xLabel: 'step', yLabel: 'gap', width: 640, height: 140, markers: false, groupColors: new Map([['top-2 gap', CHART_PALETTE[2]]]), ariaLabel: 'decisiveness over time' })}</div>`
+      : ''
+  const entropyChart =
+    entropy.length >= 2
+      ? `<h4 class="card-sub">Policy entropy over time (normalised 0–1; high ⇒ uncertain, ~0 ⇒ degenerate)</h4>
+       <div class="chart-wrap">${buildLineChart({ points: entropy, xLabel: 'step', yLabel: 'entropy', width: 640, height: 140, markers: false, groupColors: new Map([['entropy', CHART_PALETTE[5]]]), ariaLabel: 'policy entropy over time' })}</div>`
+      : ''
+  return `${decisiveChart}${entropyChart}${calibrationTableHtml(trace)}`
+}
+// Confidence calibration: bin steps by confidence, show the mean realised reward per bin — if higher
+// confidence doesn't track better realised reward, the policy's confidence isn't trustworthy.
+function calibrationTableHtml(trace) {
+  const pts = trace.steps.filter(
+    (s) => typeof s.confidence === 'number' && typeof s.reward === 'number',
+  )
+  if (pts.length < 10) return ''
+  const bins = [0.2, 0.4, 0.6, 0.8, 1.01]
+  const rows = bins
+    .map((hi, bi) => {
+      const lo = bi === 0 ? 0 : bins[bi - 1]
+      const inBin = pts.filter((s) => s.confidence >= lo && s.confidence < hi)
+      if (!inBin.length) return ''
+      const meanR = inBin.reduce((a, s) => a + s.reward, 0) / inBin.length
+      const cls = meanR >= 0 ? 'delta-pos' : 'delta-neg'
+      return `<tr><th>${lo.toFixed(1)}–${(hi > 1 ? 1 : hi).toFixed(1)}</th><td class="num">${inBin.length}</td>
+        <td class="num ${cls}">${escapeHtml(formatTickValue(meanR))}</td></tr>`
+    })
+    .join('')
+  if (!rows) return ''
+  return `<h4 class="card-sub">Confidence calibration — mean realised reward by confidence bin (heuristic)</h4>
+    <table class="kv-table report-table"><thead><tr><th>confidence</th><th class="num">steps</th><th class="num">mean reward</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+function xaiConfigEffectsHtml(runs, criterion) {
+  const importances = window.Xai.leverImportances(runs, criterion)
+  if (!importances.length) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Config effects</h3></div>
+      <p class="card-sub">Need ≥2 runs that vary a lever (on the same data) to analyse config effects.</p></div>`
+  }
+  if (!xaiLever || !importances.some((i) => i.lever === xaiLever)) xaiLever = importances[0].lever
+  const leverOpts = importances
+    .map(
+      (i) =>
+        `<option value="${escapeHtml(i.lever)}"${i.lever === xaiLever ? ' selected' : ''}>${escapeHtml(i.lever)}</option>`,
+    )
+    .join('')
+  const contrasts = window.Xai.ofatContrasts(runs, xaiLever, criterion)
+  const contrastHtml = contrasts.length
+    ? contrasts.map((c) => xaiOfatContrastHtml(c)).join('')
+    : `<p class="card-sub">No clean one-factor contrast for <code>${escapeHtml(xaiLever)}</code> yet — no runs vary only this lever with everything else fixed. The recommender below can fill the gap.</p>`
+  return `<div class="card">
+    <div class="card-head card-head-row"><h3>Config effects <span class="card-sub">— which levers move ${escapeHtml(criterion.label)}</span></h3></div>
+    <div class="card-scroll">
+    <h4 class="card-sub">Lever importance <span class="card-sub">(screening — spread of each lever's marginal; confounded, use the contrast below for the controlled read)</span></h4>
+    ${xaiImportanceTableHtml(importances)}
+    <h4 class="card-sub">One-factor effect — <label>lever <select id="xai-lever">${leverOpts}</select></label> <span class="card-sub">holding everything else fixed</span></h4>
+    ${contrastHtml}
+    </div></div>`
+}
+function xaiImportanceTableHtml(importances) {
+  const rows = importances
+    .map(
+      (
+        i,
+      ) => `<tr><th><code>${escapeHtml(i.lever)}</code></th><td class="num">${Math.round(i.importance * 100)}%</td>
+        <td>${escapeHtml(i.bestValue)}</td><td>${escapeHtml(i.worstValue)}</td><td class="num">${i.values}</td></tr>`,
+    )
+    .join('')
+  return `<table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th>best</th><th>worst</th><th class="num">#vals</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+function xaiOfatContrastHtml(c) {
+  const fmt = (v) => escapeHtml(formatTickValue(v))
+  const levelRows = c.levels
+    .map(
+      (l) => `<tr><th>${escapeHtml(l.value)}</th><td class="num">${fmt(l.aggregate.iqm)}</td>
+        <td class="num">[${fmt(l.aggregate.ci[0])}, ${fmt(l.aggregate.ci[1])}]</td><td class="num">${l.seeds}</td></tr>`,
+    )
+    .join('')
+  const effectRows = c.effects
+    .map((e) => {
+      const cls = e.delta >= 0 ? 'delta-pos' : 'delta-neg'
+      const verdict = e.significant
+        ? '<span class="badge is-ok">significant</span>'
+        : '<span class="badge">not significant</span>'
+      return `<tr><th>${escapeHtml(e.to)} vs ${escapeHtml(e.from)}</th>
+        <td class="num ${cls}">${e.delta >= 0 ? '+' : ''}${fmt(e.delta)}</td>
+        <td class="num">[${fmt(e.diffCi[0])}, ${fmt(e.diffCi[1])}]</td><td>${verdict}</td></tr>`
+    })
+    .join('')
+  const ctx = (c.controlSignature || '').split('||')[0]
+  return `<div class="xai-contrast">
+    <p class="card-sub">held fixed: <code>${escapeHtml(ctx || '(only this lever varies)')}</code></p>
+    <table class="kv-table report-table"><thead><tr><th>${escapeHtml(c.lever)}</th><th class="num">IQM</th><th class="num">95% CI</th><th class="num">seeds</th></tr></thead><tbody>${levelRows}</tbody></table>
+    <table class="kv-table report-table"><thead><tr><th>effect</th><th class="num">Δ</th><th class="num">diff CI (excl. 0 ⇒ real)</th><th>verdict</th></tr></thead><tbody>${effectRows}</tbody></table>
+  </div>`
+}
+function xaiRecommenderHtml(runs, criterion) {
+  xaiRecsCache = window.Xai.recommendExperiments(runs, criterion)
+  if (!xaiRecsCache.length) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Suggested experiments</h3></div>
+      <p class="card-sub">No gaps found — the grids you've explored are complete and well-seeded. 🎉</p></div>`
+  }
+  const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
+  const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
+  return `<div class="card">
+    <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} gaps · ${total} runs</span></h3>
+      <div class="head-actions">
+        <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
+        <button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>
+      </div></div>
+    <div class="card-scroll">${cards}</div></div>`
+}
+function xaiRecCardHtml(r, i) {
+  return `<div class="xai-rec badges-row">
+    <span class="badge">${escapeHtml(r.kind)}</span>
+    <span>${escapeHtml(r.reason)}</span>
+    <span class="card-sub">${r.runCount} run${r.runCount === 1 ? '' : 's'}</span>
+    <button type="button" class="ghost-btn" data-xai-run-rec="${i}">Run batch</button>
+  </div>`
+}
+async function xaiLaunchBatch(specs, label) {
+  const input = byId('xai-batch-concurrency')
+  const concurrency = Math.max(1, Math.floor(Number(input && input.value)) || savedConcurrency())
+  try {
+    for (const spec of specs) {
+      await startOrEnqueue('train', trainerComputeParams({ spec, concurrency }), label)
+    }
+    showTab('activity')
+  } catch {
+    setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
+  }
+}
+// Open the xAI tab focused on a run's internals (the run-detail entry point).
+function analyzeInXai(key) {
+  xaiFocusKey = key
+  showTab('xai')
+}
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
 // price-action + hold-comparison view; tell the user a re-run will surface them.
 function oldRunChartHintHtml(s) {
@@ -3880,14 +4557,17 @@ function failureDetailHtml(s, key) {
     Array.isArray(s.logTail) && s.logTail.length
       ? `<details class="log-tail" open><summary>Last output — ${s.logTail.length} lines (stdout + stderr)</summary><pre class="log-tail-pre">${escapeHtml(s.logTail.join('\n'))}</pre></details>`
       : '<p class="card-sub">No log output was captured for this run.</p>'
-  // Re-run + diagnose are the header icons now (⧉ clone-to-Launch and the chat button),
-  // shown for EVERY run — so the failure block is just the error + log.
-  return `<div class="failure-detail">${err}${tail}</div>`
+  // Re-run queues the EXACT same config again to be tried (header ⧉ clones to Launch instead,
+  // for tweaking before running). Only shown embedded, where queueing is possible.
+  const rerun = embedded()
+    ? `<p class="failure-rerun"><button type="button" class="ghost-btn" data-action="rerun" data-key="${escapeHtml(key)}" title="Queue this exact run again">Re-run</button></p>`
+    : ''
+  return `<div class="failure-detail">${err}${tail}${rerun}</div>`
 }
 function renderRunDetail(key) {
   const panel = byId('run-detail')
   if (!panel) return
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRun(key)
   if (!run) {
     closeRunDetail()
     return
@@ -3931,6 +4611,7 @@ function renderRunDetail(key) {
       </div>
       <div class="head-actions">
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
+        <button type="button" data-action="xai" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Analyze in xAI — internals, config effects, suggested experiments" aria-label="Analyze in xAI">🔬</button>
         <button type="button" data-action="chat" data-key="${escapeHtml(run.key)}" class="icon-btn"${chatAboutRunAvailable() ? '' : ' disabled'} title="Discuss this run with the AI" aria-label="Discuss this run">${iconChatSvg()}</button>
         <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
         <button type="button" data-action="delete-run" data-key="${escapeHtml(run.key)}" class="icon-btn icon-btn-danger" title="Delete this run (and its evaluation/verdict)" aria-label="Delete run">${iconDeleteSvg()}</button>
@@ -3975,6 +4656,7 @@ function openRunDetail(key) {
   // a stray row click must not pop a single-run detail back open.
   if (runsCompareKeys.size >= 2) return
   selectedRunKey = key
+  rememberRun(key)
   for (const row of document.querySelectorAll('#runs-body tr[data-key]')) {
     row.classList.toggle('is-selected', row.dataset.key === key)
   }
@@ -3996,10 +4678,40 @@ function closeRunDetail() {
 // Pre-fill the Launch form with a run's exact settings, so it's easy to sweep NEAR
 // a known result (tweak one lever, run the neighbours).
 function cloneRunToLaunch(key) {
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRun(key)
   if (!run) return
   showTab('launch')
   applyPresetFixed(run.summary.config || {})
+}
+// Build a one-config campaign spec that reproduces a run EXACTLY: every manifest lever it
+// carried, fixed (non-lever keys dropped so the planner doesn't reject them; seed is itself a
+// lever so it rides along). expandSpec layers the manifest defaults underneath, so the planned
+// config — and its hash — matches the original run.
+function reRunSpecForConfig(config) {
+  const cfg = config || {}
+  const leverKeys = new Set(leverEntries().map(([k]) => k))
+  const fixed = {}
+  for (const [k, v] of Object.entries(cfg)) {
+    if (leverKeys.has(k) && v !== undefined) fixed[k] = v
+  }
+  return { sweep: {}, fixed }
+}
+// Queue the exact same run(s) again to be tried — refresh=true so an existing (e.g. failed)
+// result doesn't skip them. Each run becomes its own single-config 'train' activity; any beyond
+// the compute budget park in the queue. Lands the user on the Activity tab to watch progress.
+async function reRunRuns(keys) {
+  if (!embedded()) return
+  const runs = keys.map((k) => findRun(k)).filter(Boolean)
+  if (!runs.length) return
+  for (const run of runs) {
+    const params = trainerComputeParams({
+      spec: reRunSpecForConfig(run.summary.config),
+      refresh: true,
+      concurrency: 1,
+    })
+    await startOrEnqueue('train', params, `Re-run ${shortKey(run.key)}`)
+  }
+  showTab('activity')
 }
 function chatAboutRunAvailable() {
   return embedded() && !!window.OverseerBridge && !!window.OverseerBridge.discussTopic
@@ -4022,7 +4734,7 @@ function projectChatPreamble() {
 // everything about THIS run — config, metrics, health, objective, and (for a failure) the error +
 // log tail — so the user can discuss or diagnose ANY run, grounded in the project, without copying.
 async function chatAboutRun(key) {
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRun(key)
   if (!run || !chatAboutRunAvailable()) return
   const s = run.summary
   const failed = s.status === 'failed'
@@ -4140,7 +4852,7 @@ async function onJudgeClick() {
     setStatusLine('judge-status', 'Open inside the Overseer to judge runs.', false)
     return
   }
-  const runKeys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  const runKeys = [...runsCompareKeys].filter((k) => findRun(k))
   if (!runKeys.length) {
     setStatusLine('judge-status', 'Select one or more runs to judge.', false)
     return
@@ -4196,6 +4908,39 @@ function setupRuns() {
         clearRunsFilter()
         return
       }
+      if (event.target.closest('#runs-dropdowns-toggle')) {
+        runsDropdownsCollapsed = !runsDropdownsCollapsed
+        renderRunsTable()
+        return
+      }
+      if (event.target.closest('#runs-prev')) {
+        runsPage = Math.max(0, runsPage - 1)
+        refreshRuns()
+        return
+      }
+      if (event.target.closest('#runs-next')) {
+        runsPage += 1
+        refreshRuns()
+        return
+      }
+      if (event.target.closest('#runs-add-toggle')) {
+        openCustomRulePopup(null)
+        return
+      }
+      const delChip = event.target.closest('[data-rule-del]')
+      if (delChip) {
+        deleteCustomRule(delChip.dataset.ruleDel).then(() => {
+          runsPage = 0
+          refreshRuns()
+        })
+        return
+      }
+      // A click anywhere on the chip body (but not its checkbox/✕) edits the rule.
+      const editChip = event.target.closest('[data-rule-edit]')
+      if (editChip && !event.target.closest('.filter-chip-cb')) {
+        openCustomRulePopup(editChip.dataset.ruleEdit)
+        return
+      }
       if (event.target.closest('#setup-note-save')) {
         const ta = byId('setup-note-text')
         const status = byId('setup-note-status')
@@ -4209,7 +4954,8 @@ function setupRuns() {
       const viewBtn = event.target.closest('.runs-view-btn')
       if (viewBtn) {
         runsViewMode = viewBtn.dataset.view
-        renderRunsTable()
+        runsPage = 0
+        refreshRuns()
         return
       }
       const th = event.target.closest('.runs-th[data-sort]')
@@ -4244,16 +4990,22 @@ function setupRuns() {
     body.addEventListener('change', (event) => {
       const cb = event.target.closest('.run-compare-cb')
       if (cb) {
-        if (cb.checked) runsCompareKeys.add(cb.dataset.key)
-        else runsCompareKeys.delete(cb.dataset.key)
+        if (cb.checked) {
+          runsCompareKeys.add(cb.dataset.key)
+          rememberRun(cb.dataset.key)
+        } else runsCompareKeys.delete(cb.dataset.key)
         disarmRunsDelete()
         renderCompare()
         syncRunsSelectionUI()
         return
       }
       if (event.target.id === 'runs-select-all') {
-        const shownKeys = applyRunsFilters(runsCache).map((r) => r.key)
-        if (event.target.checked) for (const k of shownKeys) runsCompareKeys.add(k)
+        const shownKeys = runsVisibleKeys
+        if (event.target.checked)
+          for (const k of shownKeys) {
+            runsCompareKeys.add(k)
+            rememberRun(k)
+          }
         else for (const k of shownKeys) runsCompareKeys.delete(k)
         disarmRunsDelete()
         renderRunsTable()
@@ -4261,18 +5013,31 @@ function setupRuns() {
       }
       if (event.target.id === 'runs-version-filter') {
         runsVersionFilter = event.target.value
-        renderRunsTable()
+        runsPage = 0
+        refreshRuns()
         return
       }
       const sel = event.target.closest('.runs-filter-lever')
       if (sel) {
         runsLeverFilter[sel.dataset.lever] = sel.value
-        renderRunsTable()
+        runsPage = 0
+        refreshRuns()
         return
       }
       if (event.target.id === 'runs-hide-bad') {
         runsHideBad = event.target.checked
         renderRunsTable()
+        return
+      }
+      const ruleCb = event.target.closest('[data-rule-toggle]')
+      if (ruleCb) {
+        const rule = customRulesCache.find((r) => r.id === ruleCb.dataset.ruleToggle)
+        if (rule) {
+          rule.active = ruleCb.checked
+          runsPage = 0
+          saveCustomRule(rule)
+          refreshRuns()
+        }
       }
     })
     body.addEventListener('input', (event) => {
@@ -4299,8 +5064,12 @@ function setupRuns() {
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
       const cloneBtn = event.target.closest('button[data-action="clone"]')
       if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
+      const rerunBtn = event.target.closest('button[data-action="rerun"]')
+      if (rerunBtn) reRunRuns([rerunBtn.dataset.key])
       const chatBtn = event.target.closest('button[data-action="chat"]')
       if (chatBtn) chatAboutRun(chatBtn.dataset.key)
+      const xaiBtn = event.target.closest('button[data-action="xai"]')
+      if (xaiBtn) analyzeInXai(xaiBtn.dataset.key)
       const unrunBtn = event.target.closest('button[data-action="toggle-unrunnable"]')
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
       const delBtn = event.target.closest('button[data-action="delete-run"]')
@@ -4309,7 +5078,10 @@ function setupRuns() {
       if (expandBtn) expandPriceActionChart(expandBtn.dataset.key)
     })
     document.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') closeChartModal()
+      if (event.key === 'Escape') {
+        closeChartModal()
+        closeCustomRulePopup()
+      }
     })
   }
   const compareCard = byId('run-compare')
@@ -4322,6 +5094,46 @@ function setupRuns() {
       if (event.target.closest('#compare-discuss')) {
         const keys = [...runsCompareKeys]
         if (keys.length === 2) chatAboutRuns(keys[0], keys[1])
+      }
+      if (event.target.closest('#compare-rerun-all')) {
+        reRunRuns([...runsCompareKeys])
+      }
+    })
+  }
+  const xaiBody = byId('xai-body')
+  if (xaiBody) {
+    xaiBody.addEventListener('change', (event) => {
+      const t = event.target
+      if (t.id === 'xai-criterion') {
+        xaiCriterionKey = t.value
+        xaiCriterionDir = null
+        xaiLever = null
+        renderXai()
+      } else if (t.id === 'xai-direction') {
+        xaiCriterionDir = t.value
+        renderXai()
+      } else if (t.id === 'xai-lever') {
+        xaiLever = t.value
+        renderXai()
+      }
+    })
+    xaiBody.addEventListener('click', (event) => {
+      if (event.target.closest('[data-xai-clear-focus]')) {
+        xaiFocusKey = null
+        renderXai()
+        return
+      }
+      const recBtn = event.target.closest('[data-xai-run-rec]')
+      if (recBtn) {
+        const rec = xaiRecsCache[Number(recBtn.dataset.xaiRunRec)]
+        if (rec) xaiLaunchBatch([rec.spec], `xAI: ${rec.kind}`)
+        return
+      }
+      if (event.target.closest('[data-xai-run-all]')) {
+        xaiLaunchBatch(
+          xaiRecsCache.map((r) => r.spec),
+          'xAI: fill gaps',
+        )
       }
     })
   }
@@ -5269,7 +6081,7 @@ async function deleteRelatedRunRecords(key, setupKey) {
 // (pre-fix) runs so only runs with correct stored values remain.
 async function deleteRun(key) {
   if (!manifest || !key) return
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRun(key)
   setStatusLine('run-eval-status', '')
   try {
     await window.OverseerBridge.deleteData({ type: manifest.recordType, key })
@@ -5288,7 +6100,7 @@ async function deleteRun(key) {
 // e.g. select old runs (or all via the header checkbox) and clear them.
 async function deleteSelectedRuns() {
   if (!manifest) return
-  const keys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  const keys = [...runsCompareKeys].filter((k) => findRun(k))
   if (!keys.length) return
   // In-app confirm: window.confirm is blocked in the embedding iframe sandbox (no
   // allow-modals), so the first click arms the button and the second deletes.
@@ -5300,7 +6112,7 @@ async function deleteSelectedRuns() {
   }
   disarmRunsDelete()
   for (const key of keys) {
-    const run = runsCache.find((r) => r.key === key)
+    const run = findRun(key)
     try {
       await window.OverseerBridge.deleteData({ type: manifest.recordType, key })
       await deleteRelatedRunRecords(key, run ? setupKeyForRun(run) : undefined)
@@ -6124,7 +6936,7 @@ function replicatePaper(id) {
 // Link the runs currently selected in the Runs tab (the compare checkboxes) so claimed-vs-measured
 // fills in. Reuses the existing run-compare selection rather than a separate picker.
 async function linkSelectedRunsToPaper(id) {
-  const keys = [...runsCompareKeys].filter((k) => runsCache.some((r) => r.key === k))
+  const keys = [...runsCompareKeys].filter((k) => findRun(k))
   if (!keys.length) {
     setStatusLine(
       'papers-status',
@@ -8157,6 +8969,7 @@ function showTab(id) {
     renderActivity()
     refreshQueue()
   }
+  if (target === 'xai') renderXai()
 }
 // A tiny spinner on the ACTIVE tab while the open project has a live (running)
 // activity, so the in-flight campaign is visible from any tab — not just

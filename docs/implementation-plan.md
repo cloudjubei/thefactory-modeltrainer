@@ -175,17 +175,42 @@ trace). The viewer's 2-run Compare pane grows a **Decision diff** section + a **
 chat seeded with the diff. Verified live on a real 1d run pair (`use_indicators` off→on: 53% of decisions
 changed, verdict `worse`, agreeing with the objective drop).
 
-Remaining:
+**The xAI TAB — Phase 1+2 SHIPPED.** A dedicated viewer tab collecting both explainability LEVELS, plus
+the analyse→run loop, all deterministic + non-LLM. Two deep-research passes
+(`config-level`: fANOVA/ablation/DoE/variance; `feature-level`: RL-policy interpretability) ground the
+design.
 
-- **Feature attribution — heavier methods (deferred).** Permutation / SHAP — expensive; only if the
-  gradient saliency proves insufficient.
-- **Data-influence — additive follow-ons (deferred).** Both reuse the shipped `DecisionTraceDiff` spine
-  but need a NEW BlackSwan emission first, so they're parked: (a) **attribution-of-the-new-input** — a
-  per-step (not just aggregate) group saliency, to read reward conditioned on how much the new input
-  drove each decision; (b) **before/after weight diff** — a mid-training checkpoint trace, to diff a
-  fine-tune's decision change (run-vs-its-own-evaluate is a null diff).
-- **PARKED — step-by-step ANIMATION replay** + scrubber, discussed live with an agent. No
-  trace-artifact change needed.
+- **Config-effect engine (TypeScript, pure, parity-mirrored to the viewer).** `src/xaiUtils.ts` +
+  types/constants: a SELECTABLE-criterion (objective / any metric / runtime, max-or-min) analysis over
+  stored run records. `ofatContrasts` gives the exact one-factor-at-a-time read (runs identical on every
+  OTHER lever + dataset → no confounding) with seed-variance rigor — **IQM** aggregate, deterministic
+  seeded **bootstrap CIs**, the **difference-CI** significance route (not the CI-overlap fallacy), and
+  **Benjamini-Hochberg FDR** across comparisons; `leverImportances` is the cheap surrogate-free screening
+  view. `viewer/xai.js` mirrors it exactly (a `scripts/xaiParityCheck.mjs` harness asserts byte-identical
+  results). 100% function coverage; the viewer "Config effects" panel renders importance + the controlled
+  contrast.
+- **Model internals (feature-level).** The xAI tab re-homes Explain + the Decision diff and adds cheap
+  trace-only reads: **decisiveness** (top-2 action-value gap), **policy entropy over time**, and
+  **confidence calibration** (mean realised reward by confidence bin). "Analyze in xAI" on a run opens it.
+- **The analyse→run loop.** `recommendExperiments` deterministically surfaces gaps — **missing factorial
+  cells** + **variance-thin top setups** (need ≥5 seeds) — each as a launchable `ExperimentSpec`; the
+  "Suggested experiments" panel fires them as **batched campaigns** (concurrency selector → existing
+  `train` activity, NOT the LLM `propose` path), and the tab auto-recomputes on `data:updated`.
+
+Remaining (the expansion):
+
+- **Phase 3 — the ablation TREE + global importance.** `fANOVA` (main + interaction effects) + ablation
+  paths via a seeded TypeScript random-forest surrogate (the validated methods); slice/contour interaction
+  views ("does A help universally or only at some B?"). The OFAT engine is the no-surrogate floor; this is
+  the across-the-whole-space refinement.
+- **Phase 4 — deeper feature attribution (needs BlackSwan emission).** Integrated Gradients + occlusion /
+  permutation importance + the **Adebayo sanity-check badge** (recompute with randomised weights — visual
+  plausibility ≠ faithfulness) + per-step **reward-component decomposition** (BlackSwan's reward is already
+  a named additive sum). Subsumes the old "permutation/SHAP" bullet.
+- **Phase 5 — parked.** TabularSHAP/DeepSHAP, latent t-SNE/UMAP + probing, attention-weight viz (attn-ppo),
+  generative counterfactual states (needs a GAN), and the per-step group-saliency + mid-training-checkpoint
+  data-influence follow-ons.
+- **PARKED — step-by-step ANIMATION replay** + scrubber. No trace-artifact change needed.
 
 ---
 

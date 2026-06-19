@@ -90,6 +90,13 @@ project by its manifest's `recordType`.
   a lever tweak changed the model's DECISIONS, with a "heuristic, not causal" decision-quality verdict
   (reward delta at the divergent steps, controlled against unchanged steps) kept separate from the
   objective — all off the already-emitted trace, no extra engine or trainer infra.
+- **xAI is deterministic analysis over records, not a model call**: `src/xaiUtils.ts` (pure, domain-
+  oblivious) computes config-effect analysis — one-factor-at-a-time contrasts (no confounding), IQM +
+  seeded-bootstrap CIs, difference-CI significance + Benjamini-Hochberg FDR, lever importance — and a
+  non-LLM experiment recommender, over the stored run records (config + metrics + trace). The sandboxed
+  viewer can't import the build, so `viewer/xai.js` is a parity-mirrored copy (a `scripts/` harness
+  asserts byte-identical results); the xAI tab renders it and fires the recommender's specs as batched
+  `train` campaigns, closing an analyse→run→re-analyse loop with no LLM in it.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best

@@ -28,3 +28,18 @@ export const DECISION_QUALITY_MIN_SCORED_STEPS = 5
  * dead-band so floating-point noise isn't called a decision improvement.
  */
 export const DECISION_QUALITY_REWARD_EPSILON = 1e-6
+
+/** Bootstrap resamples for the xAI engine's interval estimates + difference tests (fixed for determinism). */
+export const XAI_BOOTSTRAP_ITERATIONS = 2000
+
+/** Confidence level for the xAI engine's interval/difference CIs. */
+export const XAI_CI_LEVEL = 0.95
+
+/** Benjamini-Hochberg false-discovery-rate level for the xAI engine's many lever-vs-baseline comparisons. */
+export const XAI_FDR_ALPHA = 0.1
+
+/**
+ * Seeds a setup should have before the xAI engine trusts its interval; below it the recommender suggests
+ * more seeds. The RL-reproducibility consensus warns N<5 averaging is unreliable.
+ */
+export const XAI_MIN_SEEDS = 5
