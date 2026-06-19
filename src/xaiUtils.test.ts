@@ -1,11 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import type { AnalysisCriterion, AnalysisRun } from './modelTrainerTypes.js'
 import {
+  ablationPath,
   aggregateRunValues,
   criterionValueOf,
+  fanovaImportances,
+  fitConfigSurrogate,
+  interactionGrid,
   iqm,
   leverImportances,
   ofatContrasts,
+  predictConfig,
   recommendExperiments,
 } from './xaiUtils.js'
 
@@ -208,6 +213,21 @@ describe('leverImportances', () => {
     const runs = [run('a', { lr: 0.1, fixed: 'x' }, 10), run('b', { lr: 0.2, fixed: 'x' }, 20)]
     expect(leverImportances(runs, MAX).map((i) => i.lever)).toEqual(['lr'])
   })
+
+  it('flags low confidence + the weakest leg when a value has too few runs', () => {
+    const runs = [run('a', { lr: 0.1 }, 10), run('b', { lr: 0.2 }, 20)]
+    const imp = leverImportances(runs, MAX)[0]
+    expect(imp.minRuns).toBe(1)
+    expect(imp.confident).toBe(false)
+  })
+
+  it('is confident when every value has at least the min-seeds bar of runs', () => {
+    const runs = []
+    for (const lr of [0.1, 0.2]) for (let s = 0; s < 5; s++) runs.push(run(`${lr}_${s}`, { lr }, 10 + lr * 100 + s, { seed: s }))
+    const imp = leverImportances(runs, MAX)[0]
+    expect(imp.minRuns).toBe(5)
+    expect(imp.confident).toBe(true)
+  })
 })
 
 describe('recommendExperiments', () => {
@@ -278,5 +298,86 @@ describe('recommendExperiments', () => {
 
   it('returns nothing for an empty run set', () => {
     expect(recommendExperiments([], MAX)).toEqual([])
+  })
+})
+
+describe('config surrogate (Phase 3)', () => {
+  // A grid where lr drives the objective strongly and gamma barely moves it, replicated across seeds.
+  const grid: AnalysisRun[] = []
+  for (const lr of [0.1, 0.2, 0.3]) {
+    for (const gamma of [0.9, 0.99]) {
+      for (let s = 0; s < 3; s++) {
+        grid.push(run(`${lr}_${gamma}_${s}`, { lr, gamma }, lr * 100 + gamma + s * 0.5, { seed: s }))
+      }
+    }
+  }
+
+  it('fits deterministically — same runs give the same prediction', () => {
+    const a = fitConfigSurrogate(grid, MAX)
+    const b = fitConfigSurrogate(grid, MAX)
+    const cfg = { lr: 0.2, gamma: 0.9 }
+    expect(predictConfig(a, cfg)).toBe(predictConfig(b, cfg))
+  })
+
+  it('learns the monotone lr relationship (higher lr ⇒ higher prediction)', () => {
+    const s = fitConfigSurrogate(grid, MAX)
+    expect(predictConfig(s, { lr: 0.3, gamma: 0.9 })).toBeGreaterThan(predictConfig(s, { lr: 0.1, gamma: 0.9 }))
+  })
+
+  it('handles categorical (string-valued) levers', () => {
+    const runs: AnalysisRun[] = []
+    for (const algo of ['ppo', 'dqn']) {
+      for (let s = 0; s < 4; s++) {
+        runs.push(run(`${algo}_${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 + s : 10 + s, { seed: s }))
+      }
+    }
+    const sur = fitConfigSurrogate(runs, MAX)
+    expect(predictConfig(sur, { algo: 'ppo', lr: 0.1 })).toBeGreaterThan(
+      predictConfig(sur, { algo: 'dqn', lr: 0.1 }),
+    )
+    expect(fanovaImportances(sur, runs, MAX)[0].lever).toBe('algo')
+  })
+
+  it('predicts the mean from an unfittable (too few runs) surrogate', () => {
+    const s = fitConfigSurrogate([run('a', { lr: 0.1 }, 42)], MAX)
+    expect(s.trees).toHaveLength(0)
+    expect(predictConfig(s, { lr: 0.9 })).toBe(42)
+  })
+
+  it('fanovaImportances ranks the driving lever first, in [0,1]', () => {
+    const s = fitConfigSurrogate(grid, MAX)
+    const imp = fanovaImportances(s, grid, MAX)
+    expect(imp[0].lever).toBe('lr')
+    expect(imp[0].importance).toBeGreaterThanOrEqual(0)
+    expect(imp[0].importance).toBeLessThanOrEqual(1)
+    expect(imp[0].importance).toBeGreaterThan(imp[1].importance)
+  })
+
+  it('ablationPath steps from worst to best over the differing levers', () => {
+    const s = fitConfigSurrogate(grid, MAX)
+    const path = ablationPath(s, grid, MAX)!
+    expect(path.steps.length).toBeGreaterThanOrEqual(1)
+    // every step changes a lever that actually differs between baseline and incumbent
+    for (const step of path.steps) expect(String(path.baseline[step.lever])).not.toBe(step.to)
+    // the incumbent is predicted at least as good as the baseline (max criterion)
+    expect(path.incumbentPredicted).toBeGreaterThanOrEqual(path.baselinePredicted)
+  })
+
+  it('ablationPath is undefined with too few runs', () => {
+    expect(ablationPath(fitConfigSurrogate([run('a', { lr: 0.1 }, 1)], MAX), [run('a', { lr: 0.1 }, 1)], MAX)).toBeUndefined()
+  })
+
+  it('interactionGrid spans both levers and is deterministic', () => {
+    const s = fitConfigSurrogate(grid, MAX)
+    const g1 = interactionGrid(s, grid, MAX, 'lr', 'gamma')!
+    const g2 = interactionGrid(s, grid, MAX, 'lr', 'gamma')!
+    expect(g1.valuesA).toHaveLength(3)
+    expect(g1.valuesB).toHaveLength(2)
+    expect(g1.cells).toHaveLength(6)
+    expect(g1.cells).toEqual(g2.cells)
+  })
+
+  it('interactionGrid is undefined when a lever has a single value', () => {
+    expect(interactionGrid(fitConfigSurrogate(grid, MAX), grid, MAX, 'lr', 'missing')).toBeUndefined()
   })
 })

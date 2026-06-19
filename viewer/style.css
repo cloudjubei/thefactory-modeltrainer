@@ -2461,3 +2461,34 @@ pre.json {
 .xai-rec:last-child {
   border-bottom: none;
 }
+
+.xai-note {
+  margin: 0 0 0.6rem;
+}
+.xai-note summary {
+  cursor: pointer;
+}
+.xai-flash {
+  animation: xaiFlash 1.6s ease-out;
+}
+@keyframes xaiFlash {
+  0%,
+  30% {
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  100% {
+    box-shadow: none;
+  }
+}
+
+.xai-abl {
+  margin: 0.2rem 0 0.8rem;
+  padding-left: 1.2rem;
+}
+.xai-abl-step {
+  margin: 0.15rem 0;
+}
+.xai-heat td {
+  text-align: center;
+  min-width: 3.5em;
+}

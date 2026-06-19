@@ -31,5 +31,13 @@ for (const crit of [MAX, MIN]) {
   eq(ts.ofatContrasts(runs,'lr',crit), mirror.ofatContrasts(runs,'lr',crit), 'ofat lr '+crit.key)
   eq(ts.leverImportances(runs,crit), mirror.leverImportances(runs,crit), 'importance '+crit.key)
   eq(ts.recommendExperiments(runs,crit), mirror.recommendExperiments(runs,crit), 'recommend '+crit.key)
+  // Phase 3: surrogate + ablation/fANOVA/interaction (rng-order sensitive — the strongest parity test)
+  const sTs = ts.fitConfigSurrogate(runs, crit), sJs = mirror.fitConfigSurrogate(runs, crit)
+  eq(sTs, sJs, 'surrogate trees '+crit.key)
+  for (const cfg of [{lr:0.1,batch_size:64},{lr:0.2,batch_size:128},{lr:0.5,batch_size:256}])
+    eq(ts.predictConfig(sTs,cfg), mirror.predictConfig(sJs,cfg), 'predict '+crit.key+' '+JSON.stringify(cfg))
+  eq(ts.fanovaImportances(sTs,runs,crit), mirror.fanovaImportances(sJs,runs,crit), 'fanova '+crit.key)
+  eq(ts.ablationPath(sTs,runs,crit), mirror.ablationPath(sJs,runs,crit), 'ablation '+crit.key)
+  eq(ts.interactionGrid(sTs,runs,crit,'lr','batch_size'), mirror.interactionGrid(sJs,runs,crit,'lr','batch_size'), 'interaction '+crit.key)
 }
 console.log(fails===0 ? 'PARITY OK — viewer mirror == TS engine across all functions + criteria' : (fails+' MISMATCHES'))

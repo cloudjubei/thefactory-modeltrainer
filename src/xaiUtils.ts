@@ -1,7 +1,12 @@
 import type {
+  AblationPath,
+  AblationStep,
   AnalysisCriterion,
   AnalysisRun,
+  ConfigSurrogate,
   ExperimentRecommendation,
+  FanovaImportance,
+  InteractionGrid,
   LeverImportance,
   OfatAnalysis,
   OfatEffect,
@@ -270,7 +275,14 @@ export function leverImportances(
   criterion: AnalysisCriterion,
 ): LeverImportance[] {
   const valid = validRunsFor(runs, criterion)
-  const raw: { lever: string; variance: number; values: number; best: string; worst: string }[] = []
+  const raw: {
+    lever: string
+    variance: number
+    values: number
+    best: string
+    worst: string
+    minRuns: number
+  }[] = []
   for (const lever of leversOf(valid)) {
     const byValue = new Map<string, number[]>()
     for (const r of valid) {
@@ -294,6 +306,7 @@ export function leverImportances(
       values: byValue.size,
       best: sorted[0].value,
       worst: sorted[sorted.length - 1].value,
+      minRuns: Math.min(...[...byValue.values()].map((vals) => vals.length)),
     })
   }
   const total = raw.reduce((a, b) => a + b.variance, 0) || 1
@@ -304,6 +317,8 @@ export function leverImportances(
       values: r.values,
       bestValue: r.best,
       worstValue: r.worst,
+      minRuns: r.minRuns,
+      confident: r.minRuns >= XAI_MIN_SEEDS,
     }))
     .sort((a, b) => b.importance - a.importance)
 }
@@ -410,4 +425,253 @@ export function recommendExperiments(
   return [...thinSeedRecommendations(valid, criterion), ...missingCellRecommendations(valid, criterion)].sort(
     (a, b) => b.priority - a.priority,
   )
+}
+
+// --- Phase 3: a seeded random-forest config→criterion surrogate + ablation/fANOVA/interaction reads ---
+// The surrogate is the validated retraining-free model (Hutter et al. / Biedenkapp et al.): it predicts
+// the criterion for unobserved configs so the ablation path can step through intermediate nodes and
+// fANOVA can marginalise. Deterministic — the forest is seeded from the data.
+
+const SURROGATE_TREES = 64
+const SURROGATE_MAX_DEPTH = 8
+const SURROGATE_MIN_LEAF = 2
+
+type SurrogateNode =
+  | { leaf: number }
+  | { lever: string; kind: 'num'; threshold: number; left: SurrogateNode; right: SurrogateNode }
+  | { lever: string; kind: 'cat'; value: string; left: SurrogateNode; right: SurrogateNode }
+
+interface SurrogateRow {
+  config: Record<string, unknown>
+  y: number
+}
+
+function varianceOf(values: number[]): number {
+  if (values.length < 2) return 0
+  const m = meanOf(values)
+  return values.reduce((a, b) => a + (b - m) ** 2, 0) / values.length
+}
+
+function leverKindsOf(runs: AnalysisRun[]): { name: string; kind: 'num' | 'cat' }[] {
+  return leversOf(runs).map((name) => {
+    const allNumeric = runs.every(
+      (r) => !(name in r.config) || typeof r.config[name] === 'number',
+    )
+    return { name, kind: allNumeric ? 'num' : 'cat' }
+  })
+}
+
+function sampleSubset<T>(items: T[], k: number, rng: () => number): T[] {
+  const pool = [...items]
+  const out: T[] = []
+  for (let i = 0; i < k && pool.length; i++) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0])
+  return out
+}
+
+function buildSurrogateTree(
+  rows: SurrogateRow[],
+  levers: { name: string; kind: 'num' | 'cat' }[],
+  rng: () => number,
+  depth: number,
+): SurrogateNode {
+  const ys = rows.map((r) => r.y)
+  const parentVar = varianceOf(ys)
+  if (depth >= SURROGATE_MAX_DEPTH || rows.length <= SURROGATE_MIN_LEAF || parentVar === 0) {
+    return { leaf: meanOf(ys) }
+  }
+  const tried = sampleSubset(levers, Math.max(1, Math.round(Math.sqrt(levers.length))), rng)
+  let best:
+    | { lever: string; kind: 'num'; threshold: number; left: SurrogateRow[]; right: SurrogateRow[]; score: number }
+    | { lever: string; kind: 'cat'; value: string; left: SurrogateRow[]; right: SurrogateRow[]; score: number }
+    | undefined
+  const consider = (
+    lever: { name: string; kind: 'num' | 'cat' },
+    pick: (r: SurrogateRow) => boolean,
+    extra: { threshold?: number; value?: string },
+  ) => {
+    const left = rows.filter(pick)
+    const right = rows.filter((r) => !pick(r))
+    if (!left.length || !right.length) return
+    const score =
+      parentVar -
+      (left.length * varianceOf(left.map((r) => r.y)) + right.length * varianceOf(right.map((r) => r.y))) /
+        rows.length
+    if (!best || score > best.score) {
+      best = { lever: lever.name, kind: lever.kind, ...extra, left, right, score } as typeof best
+    }
+  }
+  for (const lever of tried) {
+    if (lever.kind === 'num') {
+      const nums = [...new Set(rows.map((r) => Number(r.config[lever.name])).filter(Number.isFinite))].sort(
+        (a, b) => a - b,
+      )
+      for (let i = 0; i + 1 < nums.length; i++) {
+        const threshold = (nums[i] + nums[i + 1]) / 2
+        consider(lever, (r) => Number(r.config[lever.name]) <= threshold, { threshold })
+      }
+    } else {
+      for (const value of new Set(rows.map((r) => String(r.config[lever.name])))) {
+        consider(lever, (r) => String(r.config[lever.name]) === value, { value })
+      }
+    }
+  }
+  if (!best || best.score <= 0) return { leaf: meanOf(ys) }
+  const left = buildSurrogateTree(best.left, levers, rng, depth + 1)
+  const right = buildSurrogateTree(best.right, levers, rng, depth + 1)
+  return best.kind === 'num'
+    ? { lever: best.lever, kind: 'num', threshold: best.threshold, left, right }
+    : { lever: best.lever, kind: 'cat', value: best.value, left, right }
+}
+
+/** Fit the seeded random-forest surrogate over the completed runs' (config → criterion) pairs. */
+export function fitConfigSurrogate(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): ConfigSurrogate {
+  const valid = validRunsFor(runs, criterion)
+  const rows: SurrogateRow[] = valid.map((r) => ({ config: r.config, y: criterionValueOf(r, criterion)! }))
+  const levers = leverKindsOf(valid)
+  const mean = rows.length ? meanOf(rows.map((r) => r.y)) : 0
+  if (rows.length < 2 || !levers.length) return { trees: [], levers, mean }
+  const rng = makeRng(seedFrom(rows.map((r) => r.y)))
+  const trees: SurrogateNode[] = []
+  for (let t = 0; t < SURROGATE_TREES; t++) {
+    const sample = rows.map(() => rows[Math.floor(rng() * rows.length)])
+    trees.push(buildSurrogateTree(sample, levers, rng, 0))
+  }
+  return { trees, levers, mean }
+}
+
+function predictSurrogateTree(node: SurrogateNode, config: Record<string, unknown>): number {
+  let cur = node
+  while (!('leaf' in cur)) {
+    if (cur.kind === 'num') {
+      const v = Number(config[cur.lever])
+      cur = (Number.isFinite(v) ? v : cur.threshold) <= cur.threshold ? cur.left : cur.right
+    } else {
+      cur = String(config[cur.lever]) === cur.value ? cur.left : cur.right
+    }
+  }
+  return cur.leaf
+}
+
+/** Predict the criterion for any config from a fitted surrogate (the forest mean). */
+export function predictConfig(surrogate: ConfigSurrogate, config: Record<string, unknown>): number {
+  const trees = surrogate.trees as SurrogateNode[]
+  if (!trees.length) return surrogate.mean
+  return meanOf(trees.map((t) => predictSurrogateTree(t, config)))
+}
+
+function observedValues(runs: AnalysisRun[], lever: string): Map<string, unknown> {
+  return distinctValues(runs, lever)
+}
+
+/**
+ * fANOVA MAIN-effect importance from the surrogate: each lever's marginal (averaging the surrogate over
+ * the observed configs with that lever pinned to each value) and the variance it explains as a fraction
+ * of the surrogate's total prediction variance. Captures interactions implicitly via the forest.
+ */
+export function fanovaImportances(
+  surrogate: ConfigSurrogate,
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): FanovaImportance[] {
+  const valid = validRunsFor(runs, criterion)
+  const configs = valid.map((r) => r.config)
+  if (configs.length < 2) return []
+  const totalVar = varianceOf(configs.map((c) => predictConfig(surrogate, c))) || 1
+  const out: FanovaImportance[] = []
+  for (const { name } of surrogate.levers) {
+    const values = [...observedValues(valid, name).values()]
+    if (values.length < 2) continue
+    const marginals = values.map((v) =>
+      meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [name]: v }))),
+    )
+    out.push({ lever: name, importance: varianceOf(marginals) / totalVar, values: values.length })
+  }
+  return out.sort((a, b) => b.importance - a.importance)
+}
+
+/**
+ * The greedy ablation path from the worst observed config (baseline) to the best (incumbent): at each
+ * step apply the single differing-lever change that most improves the surrogate prediction. Returns
+ * `undefined` when there aren't ≥2 runs or the two configs don't differ.
+ */
+export function ablationPath(
+  surrogate: ConfigSurrogate,
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): AblationPath | undefined {
+  const valid = validRunsFor(runs, criterion)
+  if (valid.length < 2) return undefined
+  const sorted = [...valid].sort((a, b) =>
+    orientedBetterFirst(criterion.direction)(criterionValueOf(a, criterion)!, criterionValueOf(b, criterion)!),
+  )
+  const incumbent = sorted[0].config
+  const baseline = sorted[sorted.length - 1].config
+  const orient = (a: number, b: number) => (criterion.direction === 'max' ? a - b : b - a)
+  const diffLevers = surrogate.levers
+    .map((l) => l.name)
+    .filter((l) => String(baseline[l]) !== String(incumbent[l]))
+  if (!diffLevers.length) return undefined
+  const baselinePredicted = predictConfig(surrogate, baseline)
+  const steps: AblationStep[] = []
+  let current: Record<string, unknown> = { ...baseline }
+  let prev = baselinePredicted
+  const remaining = new Set(diffLevers)
+  while (remaining.size) {
+    let pick: { lever: string; predicted: number; gain: number } | undefined
+    for (const lever of remaining) {
+      const predicted = predictConfig(surrogate, { ...current, [lever]: incumbent[lever] })
+      const gain = orient(predicted, prev)
+      if (!pick || gain > pick.gain) pick = { lever, predicted, gain }
+    }
+    if (!pick) break
+    current = { ...current, [pick.lever]: incumbent[pick.lever] }
+    steps.push({
+      lever: pick.lever,
+      from: String(baseline[pick.lever]),
+      to: String(incumbent[pick.lever]),
+      predicted: pick.predicted,
+      gain: pick.gain,
+    })
+    prev = pick.predicted
+    remaining.delete(pick.lever)
+  }
+  return {
+    baseline,
+    incumbent,
+    baselinePredicted,
+    incumbentPredicted: predictConfig(surrogate, incumbent),
+    steps,
+  }
+}
+
+/**
+ * The surrogate-predicted criterion across two levers' observed value grid — the interaction surface that
+ * answers "does A help universally or only at some B?". `undefined` when either lever has <2 values.
+ */
+export function interactionGrid(
+  surrogate: ConfigSurrogate,
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+  leverA: string,
+  leverB: string,
+): InteractionGrid | undefined {
+  const valid = validRunsFor(runs, criterion)
+  const configs = valid.map((r) => r.config)
+  const valsA = observedValues(valid, leverA)
+  const valsB = observedValues(valid, leverB)
+  if (valsA.size < 2 || valsB.size < 2 || !configs.length) return undefined
+  const valuesA = [...valsA.keys()]
+  const valuesB = [...valsB.keys()]
+  const cells: number[] = []
+  for (const a of valuesA) {
+    for (const b of valuesB) {
+      cells.push(
+        meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [leverA]: valsA.get(a), [leverB]: valsB.get(b) }))),
+      )
+    }
+  }
+  return { leverA, leverB, valuesA, valuesB, cells }
 }

@@ -471,6 +471,74 @@ export interface LeverImportance {
   /** Best and worst marginal IQM across the lever's values (oriented to the criterion). */
   bestValue: string
   worstValue: string
+  /** Fewest runs observed for any single value of this lever — the weakest leg of the estimate. */
+  minRuns: number
+  /**
+   * Whether every value has enough runs to trust the importance ({@link minRuns} ≥ the min-seeds bar).
+   * When false the number rests on too few trials and the UI should flag it + suggest more runs.
+   */
+  confident: boolean
+}
+
+/**
+ * A fitted config→criterion surrogate (a small seeded random forest of regression trees) — the
+ * retraining-free model the xAI tree, fANOVA importance, and interaction views predict against. Opaque:
+ * build it with `fitConfigSurrogate` and read it with `predictConfig` / the analysis functions.
+ */
+export interface ConfigSurrogate {
+  /** The forest — each tree is a nested split/leaf node (shape is an implementation detail). */
+  trees: unknown[]
+  /** The levers the surrogate splits on, with how each is treated. */
+  levers: { name: string; kind: 'num' | 'cat' }[]
+  /** Mean target — the fallback prediction for an empty forest. */
+  mean: number
+}
+
+/** One greedy single-lever change in an {@link AblationPath}, with the surrogate-predicted effect. */
+export interface AblationStep {
+  lever: string
+  /** The baseline value before this change. */
+  from: string
+  /** The incumbent value applied at this step. */
+  to: string
+  /** Surrogate-predicted criterion after applying this change. */
+  predicted: number
+  /** Improvement vs the previous step, oriented so positive = better. */
+  gain: number
+}
+
+/**
+ * A greedy ablation path from a baseline config to the incumbent (best) — at each step the single lever
+ * change that most improves the surrogate prediction, so "what handful of changes drove this result?"
+ * reads off as an ordered tree. The validated local hyperparameter-importance method (Fawcett & Hoos).
+ */
+export interface AblationPath {
+  baseline: Record<string, unknown>
+  incumbent: Record<string, unknown>
+  baselinePredicted: number
+  incumbentPredicted: number
+  steps: AblationStep[]
+}
+
+/** A lever's fANOVA MAIN-effect importance from the surrogate — the variance its marginal explains, in [0,1]. */
+export interface FanovaImportance {
+  lever: string
+  importance: number
+  /** Number of distinct values marginalised over. */
+  values: number
+}
+
+/**
+ * The surrogate-predicted criterion across two levers' grid — answers "does A help universally or only at
+ * some B?" (the interaction view). `cells[i*valuesB.length + j]` is `(valuesA[i], valuesB[j])`.
+ */
+export interface InteractionGrid {
+  leverA: string
+  leverB: string
+  valuesA: string[]
+  valuesB: string[]
+  /** Surrogate-predicted criterion per (a, b) cell, row-major over valuesA × valuesB. */
+  cells: number[]
 }
 
 /**

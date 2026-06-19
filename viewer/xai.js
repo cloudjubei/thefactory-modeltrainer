@@ -351,6 +351,12 @@
         values: byValue.size,
         best: sorted[0].value,
         worst: sorted[sorted.length - 1].value,
+        minRuns: Math.min.apply(
+          null,
+          Array.from(byValue.values()).map(function (vals) {
+            return vals.length
+          }),
+        ),
       })
     })
     var total =
@@ -365,6 +371,8 @@
           values: r.values,
           bestValue: r.best,
           worstValue: r.worst,
+          minRuns: r.minRuns,
+          confident: r.minRuns >= MIN_SEEDS,
         }
       })
       .sort(function (a, b) {
@@ -500,13 +508,319 @@
       })
   }
 
+  // --- Phase 3 mirror: seeded RF surrogate + ablation/fANOVA/interaction (must match xaiUtils.ts exactly) ---
+  var SURROGATE_TREES = 64
+  var SURROGATE_MAX_DEPTH = 8
+  var SURROGATE_MIN_LEAF = 2
+
+  function varianceOf(values) {
+    if (values.length < 2) return 0
+    var m = meanOf(values)
+    return (
+      values.reduce(function (a, b) {
+        return a + (b - m) * (b - m)
+      }, 0) / values.length
+    )
+  }
+
+  function leverKindsOf(runs) {
+    return leversOf(runs).map(function (name) {
+      var allNumeric = runs.every(function (r) {
+        return !(name in r.config) || typeof r.config[name] === 'number'
+      })
+      return { name: name, kind: allNumeric ? 'num' : 'cat' }
+    })
+  }
+
+  function sampleSubset(items, k, rng) {
+    var pool = items.slice()
+    var out = []
+    for (var i = 0; i < k && pool.length; i++)
+      out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0])
+    return out
+  }
+
+  function buildSurrogateTree(rows, levers, rng, depth) {
+    var ys = rows.map(function (r) {
+      return r.y
+    })
+    var parentVar = varianceOf(ys)
+    if (depth >= SURROGATE_MAX_DEPTH || rows.length <= SURROGATE_MIN_LEAF || parentVar === 0) {
+      return { leaf: meanOf(ys) }
+    }
+    var tried = sampleSubset(levers, Math.max(1, Math.round(Math.sqrt(levers.length))), rng)
+    var best
+    var consider = function (lever, pick, extra) {
+      var left = rows.filter(pick)
+      var right = rows.filter(function (r) {
+        return !pick(r)
+      })
+      if (!left.length || !right.length) return
+      var score =
+        parentVar -
+        (left.length *
+          varianceOf(
+            left.map(function (r) {
+              return r.y
+            }),
+          ) +
+          right.length *
+            varianceOf(
+              right.map(function (r) {
+                return r.y
+              }),
+            )) /
+          rows.length
+      if (!best || score > best.score) {
+        best = {
+          lever: lever.name,
+          kind: lever.kind,
+          threshold: extra.threshold,
+          value: extra.value,
+          left: left,
+          right: right,
+          score: score,
+        }
+      }
+    }
+    tried.forEach(function (lever) {
+      if (lever.kind === 'num') {
+        var nums = Array.from(
+          new Set(
+            rows
+              .map(function (r) {
+                return Number(r.config[lever.name])
+              })
+              .filter(Number.isFinite),
+          ),
+        ).sort(function (a, b) {
+          return a - b
+        })
+        for (var i = 0; i + 1 < nums.length; i++) {
+          ;(function (threshold) {
+            consider(
+              lever,
+              function (r) {
+                return Number(r.config[lever.name]) <= threshold
+              },
+              { threshold: threshold },
+            )
+          })((nums[i] + nums[i + 1]) / 2)
+        }
+      } else {
+        new Set(
+          rows.map(function (r) {
+            return String(r.config[lever.name])
+          }),
+        ).forEach(function (value) {
+          consider(
+            lever,
+            function (r) {
+              return String(r.config[lever.name]) === value
+            },
+            { value: value },
+          )
+        })
+      }
+    })
+    if (!best || best.score <= 0) return { leaf: meanOf(ys) }
+    var left = buildSurrogateTree(best.left, levers, rng, depth + 1)
+    var right = buildSurrogateTree(best.right, levers, rng, depth + 1)
+    return best.kind === 'num'
+      ? { lever: best.lever, kind: 'num', threshold: best.threshold, left: left, right: right }
+      : { lever: best.lever, kind: 'cat', value: best.value, left: left, right: right }
+  }
+
+  function fitConfigSurrogate(runs, criterion) {
+    var valid = validRunsFor(runs, criterion)
+    var rows = valid.map(function (r) {
+      return { config: r.config, y: criterionValueOf(r, criterion) }
+    })
+    var levers = leverKindsOf(valid)
+    var mean = rows.length
+      ? meanOf(
+          rows.map(function (r) {
+            return r.y
+          }),
+        )
+      : 0
+    if (rows.length < 2 || !levers.length) return { trees: [], levers: levers, mean: mean }
+    var rng = makeRng(
+      seedFrom(
+        rows.map(function (r) {
+          return r.y
+        }),
+      ),
+    )
+    var trees = []
+    for (var t = 0; t < SURROGATE_TREES; t++) {
+      var sample = rows.map(function () {
+        return rows[Math.floor(rng() * rows.length)]
+      })
+      trees.push(buildSurrogateTree(sample, levers, rng, 0))
+    }
+    return { trees: trees, levers: levers, mean: mean }
+  }
+
+  function predictSurrogateTree(node, config) {
+    var cur = node
+    while (!('leaf' in cur)) {
+      if (cur.kind === 'num') {
+        var v = Number(config[cur.lever])
+        cur = (Number.isFinite(v) ? v : cur.threshold) <= cur.threshold ? cur.left : cur.right
+      } else {
+        cur = String(config[cur.lever]) === cur.value ? cur.left : cur.right
+      }
+    }
+    return cur.leaf
+  }
+
+  function predictConfig(surrogate, config) {
+    var trees = surrogate.trees
+    if (!trees.length) return surrogate.mean
+    return meanOf(
+      trees.map(function (t) {
+        return predictSurrogateTree(t, config)
+      }),
+    )
+  }
+
+  function fanovaImportances(surrogate, runs, criterion) {
+    var valid = validRunsFor(runs, criterion)
+    var configs = valid.map(function (r) {
+      return r.config
+    })
+    if (configs.length < 2) return []
+    var totalVar =
+      varianceOf(
+        configs.map(function (c) {
+          return predictConfig(surrogate, c)
+        }),
+      ) || 1
+    var out = []
+    surrogate.levers.forEach(function (lv) {
+      var values = Array.from(distinctValues(valid, lv.name).values())
+      if (values.length < 2) return
+      var marginals = values.map(function (v) {
+        return meanOf(
+          configs.map(function (c) {
+            var next = Object.assign({}, c)
+            next[lv.name] = v
+            return predictConfig(surrogate, next)
+          }),
+        )
+      })
+      out.push({
+        lever: lv.name,
+        importance: varianceOf(marginals) / totalVar,
+        values: values.length,
+      })
+    })
+    return out.sort(function (a, b) {
+      return b.importance - a.importance
+    })
+  }
+
+  function ablationPath(surrogate, runs, criterion) {
+    var valid = validRunsFor(runs, criterion)
+    if (valid.length < 2) return undefined
+    var sorted = valid.slice().sort(function (a, b) {
+      return orientedBetterFirst(criterion.direction)(
+        criterionValueOf(a, criterion),
+        criterionValueOf(b, criterion),
+      )
+    })
+    var incumbent = sorted[0].config
+    var baseline = sorted[sorted.length - 1].config
+    var orient = function (a, b) {
+      return criterion.direction === 'max' ? a - b : b - a
+    }
+    var diffLevers = surrogate.levers
+      .map(function (l) {
+        return l.name
+      })
+      .filter(function (l) {
+        return String(baseline[l]) !== String(incumbent[l])
+      })
+    if (!diffLevers.length) return undefined
+    var baselinePredicted = predictConfig(surrogate, baseline)
+    var steps = []
+    var current = Object.assign({}, baseline)
+    var prev = baselinePredicted
+    var remaining = new Set(diffLevers)
+    while (remaining.size) {
+      var pick = undefined // reset each iteration — var is function-scoped, so a stale pick would loop forever
+      remaining.forEach(function (lever) {
+        var cand = Object.assign({}, current)
+        cand[lever] = incumbent[lever]
+        var predicted = predictConfig(surrogate, cand)
+        var gain = orient(predicted, prev)
+        if (!pick || gain > pick.gain) pick = { lever: lever, predicted: predicted, gain: gain }
+      })
+      if (!pick) break
+      current = Object.assign({}, current)
+      current[pick.lever] = incumbent[pick.lever]
+      steps.push({
+        lever: pick.lever,
+        from: String(baseline[pick.lever]),
+        to: String(incumbent[pick.lever]),
+        predicted: pick.predicted,
+        gain: pick.gain,
+      })
+      prev = pick.predicted
+      remaining.delete(pick.lever)
+    }
+    return {
+      baseline: baseline,
+      incumbent: incumbent,
+      baselinePredicted: baselinePredicted,
+      incumbentPredicted: predictConfig(surrogate, incumbent),
+      steps: steps,
+    }
+  }
+
+  function interactionGrid(surrogate, runs, criterion, leverA, leverB) {
+    var valid = validRunsFor(runs, criterion)
+    var configs = valid.map(function (r) {
+      return r.config
+    })
+    var valsA = distinctValues(valid, leverA)
+    var valsB = distinctValues(valid, leverB)
+    if (valsA.size < 2 || valsB.size < 2 || !configs.length) return undefined
+    var valuesA = Array.from(valsA.keys())
+    var valuesB = Array.from(valsB.keys())
+    var cells = []
+    valuesA.forEach(function (a) {
+      valuesB.forEach(function (b) {
+        cells.push(
+          meanOf(
+            configs.map(function (c) {
+              var next = Object.assign({}, c)
+              next[leverA] = valsA.get(a)
+              next[leverB] = valsB.get(b)
+              return predictConfig(surrogate, next)
+            }),
+          ),
+        )
+      })
+    })
+    return { leverA: leverA, leverB: leverB, valuesA: valuesA, valuesB: valuesB, cells: cells }
+  }
+
   var Xai = {
     iqm: iqm,
     aggregateRunValues: aggregateRunValues,
     criterionValueOf: criterionValueOf,
     ofatContrasts: ofatContrasts,
     leverImportances: leverImportances,
+    fitConfigSurrogate: fitConfigSurrogate,
+    predictConfig: predictConfig,
+    fanovaImportances: fanovaImportances,
+    ablationPath: ablationPath,
+    interactionGrid: interactionGrid,
     recommendExperiments: recommendExperiments,
+    // Exposed so the viewer can recompute a setup key with the SAME canonicalisation the engine uses.
+    canonicalConfigString: canonicalConfigString,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Xai

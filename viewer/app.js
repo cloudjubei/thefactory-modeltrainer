@@ -66,6 +66,9 @@ let xaiCriterionDir = null
 let xaiFocusKey = null
 let xaiLever = null
 let xaiRecsCache = []
+// Phase 3: the two levers crossed in the interaction grid (default to the top-2 by surrogate importance).
+let xaiInterA = null
+let xaiInterB = null
 const HYPOTHESIS_STATUSES = ['pending', 'accepted', 'rejected']
 const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
@@ -2377,12 +2380,40 @@ function buildRunsServerWhere() {
     const field = customRuleServerField(rule.field)
     if (field) preds.push({ field, op: rule.op, value: rule.value })
   }
+  // Hide-bad is an internal criterion, pushed server-side like the custom rules so each page stays
+  // full instead of being thinned after the fact.
+  if (runsHideBad) preds.push(runsHideBadWhere())
   return preds.length ? { and: preds } : undefined
 }
-// Server ordering for the flat view when the sort column maps to a stored numeric field; other
-// columns (id / data / ran) have no server-sortable key, so the default recency order stands.
+// The server-side negation of runIsBad: keep runs that did NOT fail, are NOT health-flagged, and
+// did NOT under-trade (n_trades > DEGENERATE_TRADE_COUNT). `not(<=)` also keeps runs whose n_trades
+// is absent/non-numeric — matching the client's "finite n and n<=2" badness test.
+function runsHideBadWhere() {
+  return {
+    and: [
+      { not: { field: 'status', op: '=', value: 'failed' } },
+      {
+        or: [
+          { not: { field: 'health.status', op: 'exists' } },
+          { field: 'health.status', op: '=', value: 'ok' },
+        ],
+      },
+      { not: { field: 'metrics.n_trades', op: '<=', value: DEGENERATE_TRADE_COUNT } },
+    ],
+  }
+}
+// Server ordering for the flat view. The "Ran at" column must sort by the run's actual ran-at (what
+// it displays: provenance.ranAt, else ranAt) — NOT the entity's updated_at, which a later judge/eval
+// bumps without re-running, which is why most rows look right but edited ones don't. Metric/version/
+// duration columns map to their stored field; id/data have no server-sortable key (recency stands).
 function runsServerOrderBy() {
   if (!runsSortKey) return undefined
+  if (runsSortKey === 'ran') {
+    return [
+      { field: 'provenance.ranAt', direction: runsSortDir, numeric: false },
+      { field: 'ranAt', direction: runsSortDir, numeric: false },
+    ]
+  }
   let field = null
   if (runsSortKey.startsWith('m:')) field = 'metrics.' + runsSortKey.slice(2)
   else if (runsSortKey === 'version') field = 'pipelineVersion'
@@ -4319,6 +4350,7 @@ function renderXai() {
       xaiHeaderHtml(criterion, runs.length),
       xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
       xaiConfigEffectsHtml(runs, criterion),
+      xaiSurrogateHtml(runs, criterion),
       xaiRecommenderHtml(runs, criterion),
     ].join(''),
   )
@@ -4330,6 +4362,10 @@ function xaiHeaderHtml(criterion, nRuns) {
         `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
     )
     .join('')
+  const legacy = xaiLegacyAutoRuns().length
+  const migrate = legacy
+    ? `<p class="card-sub">⚠ ${legacy} run${legacy === 1 ? '' : 's'} store a synonym value (e.g. <code>fidelity_set: auto</code>) that fragments grouping. <button type="button" class="ghost-btn" data-xai-migrate-auto>Normalize ${legacy} run${legacy === 1 ? '' : 's'} to actual values</button></p>`
+    : ''
   return `<div class="card">
     <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2></div>
     <p class="badges-row">
@@ -4339,6 +4375,7 @@ function xaiHeaderHtml(criterion, nRuns) {
         <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
       </select></label>
     </p>
+    ${migrate}
   </div>`
 }
 // Model internals for the focused run: the Explain panels + the decision-internals reads + a decision
@@ -4350,7 +4387,7 @@ function xaiModelInternalsHtml(focusKey) {
   const sibling = xaiBestSibling(run)
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Model internals <span class="card-sub">— run ${escapeHtml(shortKey(focusKey))}</span></h3>
-      <button type="button" class="icon-btn" data-xai-clear-focus title="Clear focused run" aria-label="Clear">✕</button></div>
+      <button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button></div>
     <div class="card-scroll">
     ${explainSectionHtml(s)}
     ${decisionInternalsHtml(readDecisionTrace(s))}
@@ -4453,30 +4490,47 @@ function xaiConfigEffectsHtml(runs, criterion) {
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Config effects <span class="card-sub">— which levers move ${escapeHtml(criterion.label)}</span></h3></div>
     <div class="card-scroll">
+    ${xaiMethodNoteHtml()}
     <h4 class="card-sub">Lever importance <span class="card-sub">(screening — spread of each lever's marginal; confounded, use the contrast below for the controlled read)</span></h4>
     ${xaiImportanceTableHtml(importances)}
     <h4 class="card-sub">One-factor effect — <label>lever <select id="xai-lever">${leverOpts}</select></label> <span class="card-sub">holding everything else fixed</span></h4>
     ${contrastHtml}
     </div></div>`
 }
+// How the numbers are computed + the honesty caveat, so a user doesn't over-trust a 2-run estimate.
+function xaiMethodNoteHtml() {
+  return `<details class="xai-note"><summary class="card-sub">How these numbers are computed</summary>
+    <p class="card-sub">Each value's score is the <strong>interquartile mean (IQM)</strong> of its runs (robust to a lucky/unlucky seed); the 95% CI is a deterministic <strong>bootstrap</strong>. An effect is <strong>“significant”</strong> only when the bootstrap CI of the <em>difference</em> excludes 0 (after a Benjamini-Hochberg multiple-comparison correction) — overlapping value-CIs do <em>not</em> by themselves mean “no effect”. <strong>Importance</strong> is how much a lever's marginal score spreads versus the others — a screening hint only (it ignores interactions and is confounded when runs differ on other levers; trust the controlled one-factor contrast). ⚠ Any estimate built from fewer than ${5} runs per value is unreliable — use <strong>Suggested experiments</strong> below to add seeds first.</p>
+  </details>`
+}
 function xaiImportanceTableHtml(importances) {
   const rows = importances
-    .map(
-      (
-        i,
-      ) => `<tr><th><code>${escapeHtml(i.lever)}</code></th><td class="num">${Math.round(i.importance * 100)}%</td>
-        <td>${escapeHtml(i.bestValue)}</td><td>${escapeHtml(i.worstValue)}</td><td class="num">${i.values}</td></tr>`,
-    )
+    .map((i) => {
+      const pct = `${Math.round(i.importance * 100)}%`
+      const impCell = i.confident
+        ? `<td class="num">${pct}</td>`
+        : `<td class="num card-sub" title="only ${i.minRuns} run(s) for some value — unreliable">⚠ ${pct}</td>`
+      const dataCell = i.confident
+        ? `<td class="num">${i.minRuns}</td>`
+        : `<td class="num"><button type="button" class="ghost-btn" data-xai-scroll-recs title="Jump to Suggested experiments">${i.minRuns} ⤓ run more</button></td>`
+      return `<tr><th><code>${escapeHtml(i.lever)}</code></th>${impCell}
+        <td>${escapeHtml(i.bestValue)}</td><td>${escapeHtml(i.worstValue)}</td><td class="num">${i.values}</td>${dataCell}</tr>`
+    })
     .join('')
-  return `<table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th>best</th><th>worst</th><th class="num">#vals</th></tr></thead><tbody>${rows}</tbody></table>`
+  return `<table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th>best</th><th>worst</th><th class="num">#vals</th><th class="num">min runs/val</th></tr></thead><tbody>${rows}</tbody></table>`
 }
 function xaiOfatContrastHtml(c) {
   const fmt = (v) => escapeHtml(formatTickValue(v))
+  const thin = c.levels.some((l) => l.seeds < 5)
   const levelRows = c.levels
-    .map(
-      (l) => `<tr><th>${escapeHtml(l.value)}</th><td class="num">${fmt(l.aggregate.iqm)}</td>
-        <td class="num">[${fmt(l.aggregate.ci[0])}, ${fmt(l.aggregate.ci[1])}]</td><td class="num">${l.seeds}</td></tr>`,
-    )
+    .map((l) => {
+      const seedCell =
+        l.seeds < 5
+          ? `<td class="num card-sub" title="too few seeds to trust">⚠ ${l.seeds}</td>`
+          : `<td class="num">${l.seeds}</td>`
+      return `<tr><th>${escapeHtml(l.value)}</th><td class="num">${fmt(l.aggregate.iqm)}</td>
+        <td class="num">[${fmt(l.aggregate.ci[0])}, ${fmt(l.aggregate.ci[1])}]</td>${seedCell}</tr>`
+    })
     .join('')
   const effectRows = c.effects
     .map((e) => {
@@ -4490,11 +4544,97 @@ function xaiOfatContrastHtml(c) {
     })
     .join('')
   const ctx = (c.controlSignature || '').split('||')[0]
+  const thinNote = thin
+    ? `<p class="card-sub">⚠ Some values have &lt;5 seeds — these effects aren't trustworthy yet. <button type="button" class="ghost-btn" data-xai-scroll-recs>⤓ Suggested batch</button></p>`
+    : ''
   return `<div class="xai-contrast">
     <p class="card-sub">held fixed: <code>${escapeHtml(ctx || '(only this lever varies)')}</code></p>
     <table class="kv-table report-table"><thead><tr><th>${escapeHtml(c.lever)}</th><th class="num">IQM</th><th class="num">95% CI</th><th class="num">seeds</th></tr></thead><tbody>${levelRows}</tbody></table>
     <table class="kv-table report-table"><thead><tr><th>effect</th><th class="num">Δ</th><th class="num">diff CI (excl. 0 ⇒ real)</th><th>verdict</th></tr></thead><tbody>${effectRows}</tbody></table>
+    ${thinNote}
   </div>`
+}
+// Phase 3: a seeded random-forest surrogate over (config → criterion) drives a global fANOVA importance,
+// the ablation TREE (worst→best, one change at a time), and a 2-lever interaction heatmap — the
+// across-the-whole-space view (predicts unobserved configs, so it fills the OFAT gaps). Deterministic.
+function xaiSurrogateHtml(runs, criterion) {
+  const surrogate = window.Xai.fitConfigSurrogate(runs, criterion)
+  if (!surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
+  const fanova = window.Xai.fanovaImportances(surrogate, runs, criterion)
+  const path = window.Xai.ablationPath(surrogate, runs, criterion)
+  const leverNames = surrogate.levers.map((l) => l.name)
+  const ranked = fanova.map((f) => f.lever)
+  if (!xaiInterA || !leverNames.includes(xaiInterA)) xaiInterA = ranked[0] || leverNames[0] || null
+  if (!xaiInterB || !leverNames.includes(xaiInterB) || xaiInterB === xaiInterA)
+    xaiInterB =
+      ranked.find((l) => l !== xaiInterA) || leverNames.find((l) => l !== xaiInterA) || null
+  const grid =
+    xaiInterA && xaiInterB
+      ? window.Xai.interactionGrid(surrogate, runs, criterion, xaiInterA, xaiInterB)
+      : null
+  return `<div class="card">
+    <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
+    <div class="card-scroll">
+    <p class="card-sub">A seeded random forest fit on every run's (config → ${escapeHtml(criterion.label)}). It predicts the criterion for configs you HAVEN'T run, so it can rank levers globally and walk an ablation path — a model, so treat it as a hypothesis to confirm with real runs, not ground truth.</p>
+    ${xaiFanovaHtml(fanova)}
+    ${xaiAblationTreeHtml(path, criterion)}
+    ${xaiInteractionHtml(grid, leverNames)}
+    </div></div>`
+}
+function xaiFanovaHtml(fanova) {
+  if (!fanova.length) return ''
+  const rows = fanova
+    .map(
+      (f) =>
+        `<tr><th><code>${escapeHtml(f.lever)}</code></th><td class="num">${Math.round(f.importance * 100)}%</td><td class="num">${f.values}</td></tr>`,
+    )
+    .join('')
+  return `<h4 class="card-sub">fANOVA importance <span class="card-sub">— variance each lever explains in the surrogate (captures interactions)</span></h4>
+    <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th class="num">#vals</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+function xaiAblationTreeHtml(path, criterion) {
+  if (!path || !path.steps.length) return ''
+  const fmt = (v) => escapeHtml(formatTickValue(v))
+  const steps = path.steps
+    .map((s, i) => {
+      const cls = s.gain >= 0 ? 'delta-pos' : 'delta-neg'
+      return `<li class="xai-abl-step"><span class="card-sub">${i + 1}.</span> <code>${escapeHtml(s.lever)}</code> ${escapeHtml(s.from)} → <strong>${escapeHtml(s.to)}</strong>
+        <span class="num ${cls}">${s.gain >= 0 ? '+' : ''}${fmt(s.gain)}</span> <span class="card-sub">→ ${fmt(s.predicted)}</span></li>`
+    })
+    .join('')
+  return `<h4 class="card-sub">Ablation tree <span class="card-sub">— worst→best config, the single change at each step that helps most (predicted)</span></h4>
+    <p class="card-sub">baseline ${fmt(path.baselinePredicted)} → incumbent ${fmt(path.incumbentPredicted)}</p>
+    <ol class="xai-abl">${steps}</ol>`
+}
+function xaiInteractionHtml(grid, leverNames) {
+  if (leverNames.length < 2) return ''
+  const sel = (id, current) =>
+    `<select id="${id}">${leverNames.map((l) => `<option value="${escapeHtml(l)}"${l === current ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`
+  const picker = `<h4 class="card-sub">Interaction — <label>rows ${sel('xai-inter-a', xaiInterA)}</label> × <label>cols ${sel('xai-inter-b', xaiInterB)}</label> <span class="card-sub">does one help universally or only at some value of the other?</span></h4>`
+  if (!grid)
+    return `${picker}<p class="card-sub">Pick two different levers to see their interaction.</p>`
+  const all = grid.cells.filter((v) => Number.isFinite(v))
+  const lo = Math.min(...all)
+  const hi = Math.max(...all)
+  const shade = (v) => {
+    const t = hi > lo ? (v - lo) / (hi - lo) : 0.5
+    // green (better=high) gradient; the criterion direction is already baked into "higher prediction".
+    return `background:rgba(34,197,94,${(0.12 + t * 0.5).toFixed(2)})`
+  }
+  const head = `<tr><th></th>${grid.valuesB.map((b) => `<th class="num">${escapeHtml(b)}</th>`).join('')}</tr>`
+  const body = grid.valuesA
+    .map((a, i) => {
+      const cells = grid.valuesB
+        .map((b, j) => {
+          const v = grid.cells[i * grid.valuesB.length + j]
+          return `<td class="num" style="${shade(v)}" title="${escapeHtml(grid.leverA)}=${escapeHtml(a)}, ${escapeHtml(grid.leverB)}=${escapeHtml(b)}">${escapeHtml(formatTickValue(v))}</td>`
+        })
+        .join('')
+      return `<tr><th>${escapeHtml(a)}</th>${cells}</tr>`
+    })
+    .join('')
+  return `${picker}<div class="compare-table-wrap"><table class="kv-table report-table xai-heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
+    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value.</p>`
 }
 function xaiRecommenderHtml(runs, criterion) {
   xaiRecsCache = window.Xai.recommendExperiments(runs, criterion)
@@ -4504,7 +4644,7 @@ function xaiRecommenderHtml(runs, criterion) {
   }
   const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
   const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
-  return `<div class="card">
+  return `<div class="card" id="xai-recommender">
     <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} gaps · ${total} runs</span></h3>
       <div class="head-actions">
         <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
@@ -4536,6 +4676,56 @@ async function xaiLaunchBatch(specs, label) {
 function analyzeInXai(key) {
   xaiFocusKey = key
   showTab('xai')
+}
+// Legacy "auto"-synonym normalization. Some levers were stored as the convenience value "auto" (e.g.
+// BlackSwan's fidelity_set), which fragments grouping vs the equivalent explicit value. Each known
+// synonym lever has a resolver that reads the run's OWN recorded resolution — no domain rules needed.
+const XAI_AUTO_RESOLVERS = {
+  fidelity_set: (summary) => {
+    const layers = summary && summary.dataset && summary.dataset.layers
+    return Array.isArray(layers) && layers.length ? layers.join('+') : null
+  },
+}
+function xaiResolveLegacyConfig(summary) {
+  const config = (summary && summary.config) || {}
+  let next = null
+  for (const lever of Object.keys(XAI_AUTO_RESOLVERS)) {
+    if (config[lever] !== 'auto') continue
+    const resolved = XAI_AUTO_RESOLVERS[lever](summary)
+    if (resolved && resolved !== 'auto') {
+      next = next || { ...config }
+      next[lever] = resolved
+    }
+  }
+  return next
+}
+function xaiLegacyAutoRuns() {
+  return runsCache.filter((r) => xaiResolveLegacyConfig(r.summary))
+}
+// Recompute a run's setupKey the way the engine does — sha256(canonical config minus seed), first 12
+// hex — so a migrated run regroups with its concrete-valued siblings in the by-setup view.
+async function xaiSetupKeyOf(config) {
+  const rest = { ...config }
+  delete rest.seed
+  const canonical = window.Xai.canonicalConfigString(rest)
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 12)
+}
+async function xaiMigrateLegacyAuto() {
+  const affected = xaiLegacyAutoRuns()
+  if (!affected.length) return
+  for (const r of affected) {
+    const config = xaiResolveLegacyConfig(r.summary)
+    if (!config) continue
+    const content = { ...r.summary, config }
+    if (r.summary.setupKey) content.setupKey = await xaiSetupKeyOf(config)
+    await window.OverseerBridge.putData({ type: manifest.recordType, key: r.key, content })
+  }
+  await refreshRuns()
+  if (activeTabId === 'xai') renderXai()
 }
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
 // price-action + hold-comparison view; tell the user a re-run will surface them.
@@ -5026,7 +5216,8 @@ function setupRuns() {
       }
       if (event.target.id === 'runs-hide-bad') {
         runsHideBad = event.target.checked
-        renderRunsTable()
+        runsPage = 0
+        refreshRuns()
         return
       }
       const ruleCb = event.target.closest('[data-rule-toggle]')
@@ -5115,12 +5306,27 @@ function setupRuns() {
       } else if (t.id === 'xai-lever') {
         xaiLever = t.value
         renderXai()
+      } else if (t.id === 'xai-inter-a') {
+        xaiInterA = t.value
+        renderXai()
+      } else if (t.id === 'xai-inter-b') {
+        xaiInterB = t.value
+        renderXai()
       }
     })
     xaiBody.addEventListener('click', (event) => {
       if (event.target.closest('[data-xai-clear-focus]')) {
         xaiFocusKey = null
         renderXai()
+        return
+      }
+      if (event.target.closest('[data-xai-scroll-recs]')) {
+        const recs = byId('xai-recommender')
+        if (recs) {
+          recs.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          recs.classList.add('xai-flash')
+          setTimeout(() => recs.classList.remove('xai-flash'), 1600)
+        }
         return
       }
       const recBtn = event.target.closest('[data-xai-run-rec]')
@@ -5134,6 +5340,10 @@ function setupRuns() {
           xaiRecsCache.map((r) => r.spec),
           'xAI: fill gaps',
         )
+        return
+      }
+      if (event.target.closest('[data-xai-migrate-auto]')) {
+        xaiMigrateLegacyAuto()
       }
     })
   }
