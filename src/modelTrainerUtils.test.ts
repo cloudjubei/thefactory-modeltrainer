@@ -3,21 +3,27 @@ import type { TrainerManifest } from './modelTrainerTypes.js'
 import {
   blendJudgeScore,
   parseProgressMarker,
+  buildAnalyzePaperSystemPrompt,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
   canonicalConfigString,
   coerceHypothesisItems,
+  coercePaperDraft,
   coerceVerdictRows,
+  extractPaperText,
   expandExperimentMatrix,
   normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
+  datasetAlignmentSignature,
+  diffDecisionTraces,
   validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
+import type { TrainingRunSummary } from './modelTrainerTypes.js'
 
 const hashByJson = (config: Record<string, unknown>): string => canonicalConfigString(config)
 
@@ -751,5 +757,271 @@ describe('validateDecisionTrace', () => {
     })
     expect(trace?.featureAttribution).toBeUndefined()
     expect(trace?.actionCounts).toBeUndefined()
+  })
+})
+
+describe('datasetAlignmentSignature', () => {
+  const ds = (over: Record<string, unknown> = {}): TrainingRunSummary => ({
+    objective: 0,
+    dataset: { asset: 'BTC', timeframe: '1h', candles: 100, from: 'a', to: 'b', ...over },
+  })
+
+  it('builds a stable signature from the step-axis dataset fields', () => {
+    expect(datasetAlignmentSignature(ds())).toBe('asset=BTC|timeframe=1h|candles=100|from=a|to=b')
+  })
+
+  it('ignores observation-only fields like fidelity_set so a fidelity tweak stays alignable', () => {
+    expect(datasetAlignmentSignature(ds({ fidelity_set: '1h+1d', layers: ['1h', '1d'] }))).toBe(
+      datasetAlignmentSignature(ds({ fidelity_set: '1h' })),
+    )
+  })
+
+  it('returns empty when there is no dataset', () => {
+    expect(datasetAlignmentSignature({ objective: 0 })).toBe('')
+  })
+
+  it('differs when the window differs', () => {
+    expect(datasetAlignmentSignature(ds())).not.toBe(datasetAlignmentSignature(ds({ to: 'c' })))
+  })
+})
+
+describe('diffDecisionTraces', () => {
+  type StepSpec = { b: string; t: string; rb?: number; rt?: number; cb?: number; ct?: number }
+  const DS = { asset: 'BTC', timeframe: '1h', candles: 100, from: 'a', to: 'b' }
+  const run = (
+    steps: Array<Record<string, unknown>>,
+    extra: Partial<TrainingRunSummary> & { actionCounts?: Record<string, number> } = {},
+  ): TrainingRunSummary => {
+    const { actionCounts, ...rest } = extra
+    return {
+      objective: 0,
+      dataset: DS,
+      ...rest,
+      artifacts: {
+        decisionTrace: {
+          steps,
+          totalSteps: steps.length,
+          ...(actionCounts ? { actionCounts } : {}),
+        },
+      },
+    }
+  }
+  const pair = (specs: StepSpec[], opts: { objB?: number; objT?: number } = {}) => {
+    const side = (k: 'b' | 't', rk: 'rb' | 'rt', ck: 'cb' | 'ct') =>
+      specs.map((s, i) => ({
+        step: i,
+        action: s[k],
+        ...(s[rk] !== undefined ? { reward: s[rk] } : {}),
+        ...(s[ck] !== undefined ? { confidence: s[ck] } : {}),
+      }))
+    return {
+      baseline: run(side('b', 'rb', 'cb'), { objective: opts.objB ?? 0 }),
+      tweak: run(side('t', 'rt', 'ct'), { objective: opts.objT ?? 0 }),
+    }
+  }
+  // n changed steps with a fixed tweak−baseline reward delta, then m unchanged steps with a control delta.
+  const churn = (nChanged: number, changeDelta: number, mUnchanged: number, ctrlDelta: number) => [
+    ...Array.from({ length: nChanged }, () => ({ b: 'hold', t: 'buy', rb: 0, rt: changeDelta })),
+    ...Array.from({ length: mUnchanged }, () => ({ b: 'hold', t: 'hold', rb: 0, rt: ctrlDelta })),
+  ]
+
+  it('returns undefined when the baseline has no usable trace', () => {
+    const { tweak } = pair([{ b: 'hold', t: 'buy' }])
+    expect(diffDecisionTraces({ objective: 0, dataset: DS }, tweak)).toBeUndefined()
+  })
+
+  it('returns undefined when the tweak has no usable trace', () => {
+    const { baseline } = pair([{ b: 'hold', t: 'buy' }])
+    expect(diffDecisionTraces(baseline, { objective: 0, dataset: DS })).toBeUndefined()
+  })
+
+  it('reports aligned:false with a note when the dataset differs', () => {
+    const { baseline, tweak } = pair([{ b: 'hold', t: 'buy' }])
+    const other = { ...tweak, dataset: { ...DS, asset: 'ETH' } }
+    const diff = diffDecisionTraces(baseline, other)
+    expect(diff?.aligned).toBe(false)
+    expect(diff?.alignmentNote).toMatch(/dataset/i)
+  })
+
+  it('reports aligned:false when totalSteps differ', () => {
+    const baseline = run([{ step: 0, action: 'hold' }], { objective: 0 })
+    const tweak = run([{ step: 0, action: 'buy' }], { objective: 0 })
+    ;(tweak.artifacts!.decisionTrace as { totalSteps: number }).totalSteps = 99
+    const diff = diffDecisionTraces(baseline, tweak)
+    expect(diff?.aligned).toBe(false)
+    expect(diff?.alignmentNote).toMatch(/totalSteps/i)
+  })
+
+  it('reports aligned:false when there are no shared step indices', () => {
+    const baseline = run([{ step: 0, action: 'hold' }], { objective: 0 })
+    const tweak = run([{ step: 7, action: 'buy' }], { objective: 0 })
+    ;(tweak.artifacts!.decisionTrace as { totalSteps: number }).totalSteps = 1
+    const diff = diffDecisionTraces(baseline, tweak)
+    expect(diff?.aligned).toBe(false)
+    expect(diff?.alignmentNote).toMatch(/shared/i)
+  })
+
+  it('computes alignment counts and divergence over shared steps', () => {
+    const { baseline, tweak } = pair([
+      { b: 'hold', t: 'hold' },
+      { b: 'hold', t: 'buy' },
+      { b: 'sell', t: 'buy' },
+      { b: 'hold', t: 'hold' },
+    ])
+    const diff = diffDecisionTraces(baseline, tweak)!
+    expect(diff.aligned).toBe(true)
+    expect(diff.alignedSteps).toBe(4)
+    expect(diff.changedSteps).toBe(2)
+    expect(diff.divergenceRate).toBe(0.5)
+    expect(diff.steps[1]).toMatchObject({
+      step: 1,
+      baselineAction: 'hold',
+      tweakAction: 'buy',
+      changed: true,
+    })
+  })
+
+  it('records rewardDelta only when both steps have a reward', () => {
+    const { baseline, tweak } = pair([
+      { b: 'hold', t: 'buy', rb: 1, rt: 1.5 },
+      { b: 'hold', t: 'buy', rt: 2 },
+    ])
+    const diff = diffDecisionTraces(baseline, tweak)!
+    expect(diff.steps[0].rewardDelta).toBeCloseTo(0.5)
+    expect(diff.steps[1].rewardDelta).toBeUndefined()
+  })
+
+  it('records confidenceDelta and the mean shift only over steps with both confidences', () => {
+    const { baseline, tweak } = pair([
+      { b: 'hold', t: 'buy', cb: 0.4, ct: 0.6 },
+      { b: 'hold', t: 'buy', ct: 0.9 },
+    ])
+    const diff = diffDecisionTraces(baseline, tweak)!
+    expect(diff.steps[0].confidenceDelta).toBeCloseTo(0.2)
+    expect(diff.steps[1].confidenceDelta).toBeUndefined()
+    expect(diff.meanConfidenceShift).toBeCloseTo(0.2)
+  })
+
+  it('tallies non-zero action-count deltas including labels in only one run', () => {
+    const { baseline, tweak } = pair([{ b: 'hold', t: 'buy' }])
+    baseline.artifacts!.decisionTrace = {
+      ...(baseline.artifacts!.decisionTrace as object),
+      actionCounts: { hold: 10, sell: 4 },
+    }
+    tweak.artifacts!.decisionTrace = {
+      ...(tweak.artifacts!.decisionTrace as object),
+      actionCounts: { hold: 7, buy: 3 },
+    }
+    const diff = diffDecisionTraces(baseline, tweak)!
+    expect(diff.actionCountDeltas).toEqual({ hold: -3, sell: -4, buy: 3 })
+  })
+
+  it('folds in the objective delta as context', () => {
+    const { baseline, tweak } = pair([{ b: 'hold', t: 'buy' }], { objB: 1, objT: 3 })
+    expect(diffDecisionTraces(baseline, tweak)!.objectiveDelta).toBe(2)
+  })
+
+  it('reads quality "insufficient" with too few scored changed steps', () => {
+    const { baseline, tweak } = pair(churn(3, 0.1, 4, 0))
+    const q = diffDecisionTraces(baseline, tweak)!.quality
+    expect(q.verdict).toBe('insufficient')
+    expect(q.scoredChangedSteps).toBe(3)
+  })
+
+  it('reads quality "better" when changed steps beat the unchanged control', () => {
+    const q = diffDecisionTraces(
+      ...(Object.values(pair(churn(6, 0.1, 6, 0))) as [TrainingRunSummary, TrainingRunSummary]),
+    )!.quality
+    expect(q.verdict).toBe('better')
+    expect(q.meanRewardDeltaOnChanges).toBeCloseTo(0.1)
+    expect(q.meanRewardDeltaOnUnchanged).toBeCloseTo(0)
+  })
+
+  it('reads quality "worse" symmetrically', () => {
+    const { baseline, tweak } = pair(churn(6, -0.1, 6, 0))
+    expect(diffDecisionTraces(baseline, tweak)!.quality.verdict).toBe('worse')
+  })
+
+  it('reads quality "mixed" when the whole rollout shifted equally (control trips)', () => {
+    const { baseline, tweak } = pair(churn(6, 0.1, 6, 0.1))
+    expect(diffDecisionTraces(baseline, tweak)!.quality.verdict).toBe('mixed')
+  })
+
+  it('reads quality "unchanged" when the changed-step delta is ~0', () => {
+    const { baseline, tweak } = pair(churn(6, 0, 6, 0))
+    expect(diffDecisionTraces(baseline, tweak)!.quality.verdict).toBe('unchanged')
+  })
+
+  it('always labels the quality summary as a heuristic', () => {
+    const { baseline, tweak } = pair(churn(6, 0.1, 6, 0))
+    expect(diffDecisionTraces(baseline, tweak)!.quality.summary.toLowerCase()).toContain(
+      'heuristic',
+    )
+  })
+
+  it('is "insufficient" with no per-step rewards anywhere', () => {
+    const { baseline, tweak } = pair([
+      { b: 'hold', t: 'buy' },
+      { b: 'sell', t: 'buy' },
+    ])
+    const q = diffDecisionTraces(baseline, tweak)!.quality
+    expect(q.verdict).toBe('insufficient')
+    expect(q.meanRewardDeltaOnChanges).toBeUndefined()
+  })
+})
+
+describe('extractPaperText', () => {
+  it('strips tags + scripts/styles and decodes common entities', () => {
+    const html =
+      '<html><head><style>x{}</style><script>bad()</script></head><body><h1>Title</h1><p>A &amp; B &lt; C</p></body></html>'
+    const text = extractPaperText(html)
+    expect(text).toContain('Title')
+    expect(text).toContain('A & B < C')
+    expect(text).not.toMatch(/<[a-z/]/i) // no HTML tags remain (a decoded "< C" is fine)
+    expect(text).not.toContain('bad()')
+  })
+  it('caps very long input', () => {
+    expect(extractPaperText('x'.repeat(20000)).length).toBe(12000)
+  })
+})
+
+describe('buildAnalyzePaperSystemPrompt', () => {
+  const m = {
+    name: 'Demo',
+    recordType: 'demo-run',
+    run: '{configPath} {summaryOut}',
+    objective: { name: 'obj', direction: 'max' },
+    levers: { lr: { type: 'number' } },
+  } as unknown as TrainerManifest
+  it('asks for a single JSON object and includes the levers + notes', () => {
+    const p = buildAnalyzePaperSystemPrompt(m, 'focus on fees')
+    expect(p).toMatch(/JSON object/i)
+    expect(p).toContain('lr')
+    expect(p).toContain('focus on fees')
+  })
+})
+
+describe('coercePaperDraft', () => {
+  it('keeps a well-formed draft and drops ill-typed fields', () => {
+    const d = coercePaperDraft({
+      title: ' T ',
+      claim: 'C',
+      year: 2023,
+      authors: 'A',
+      claimedMetrics: { sharpe: 1.2, bad: 'x' },
+      tags: ['a', 1],
+      replicateConfig: { fixed: { lr: 1 } },
+      assumptions: { fees: false },
+      junk: 'ignored',
+    })
+    expect(d).toMatchObject({ title: 'T', claim: 'C', year: 2023, authors: 'A' })
+    expect(d?.claimedMetrics).toEqual({ sharpe: 1.2 })
+    expect(d?.tags).toEqual(['a'])
+    expect((d as Record<string, unknown>).junk).toBeUndefined()
+  })
+  it('returns undefined without a title or claim', () => {
+    expect(coercePaperDraft({ title: 'T' })).toBeUndefined()
+    expect(coercePaperDraft({ claim: 'C' })).toBeUndefined()
+    expect(coercePaperDraft('nope')).toBeUndefined()
   })
 })

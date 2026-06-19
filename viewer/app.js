@@ -2945,12 +2945,16 @@ function renderCompare() {
     card,
     `<div class="card-head card-head-row">
       <h3>Compare ${runs.length} runs</h3>
-      <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
+      <div class="head-actions">
+        ${runs.length === 2 && chatAboutRunAvailable() ? `<button type="button" id="compare-discuss" class="icon-btn" title="Discuss these two runs (incl. the decision diff)" aria-label="Discuss these two runs">${iconChatSvg()}</button>` : ''}
+        <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
+      </div>
     </div>
     <div class="card-scroll">
     ${versionWarn}
     ${comparisonTable}
     ${compareEquityChartHtml(runs, runColors)}
+    ${runs.length === 2 ? decisionDiffSectionHtml(runs[0], runs[1]) : ''}
     <h3>Charts</h3>
     <div class="charts-body">${chartsSectionsHtml(runs, runColors)}</div></div>`,
   )
@@ -3684,6 +3688,178 @@ function decisionTraceChatSummary(summary) {
   }
   return `Decision trace summary:\n${parts.join('\n')}`
 }
+// --- Data-influence: the decision DIFF between two runs (xAI) ----------------
+// A counterfactual read of how a lever tweak (the "new information") changed the model's DECISIONS,
+// not just the score. Mirrors the engine's diffDecisionTraces (modelTrainerUtils.ts) over the compact
+// traces both runs already carry — the engine util stays the source of truth. Domain-oblivious.
+const ALIGNMENT_DATASET_KEYS = ['asset', 'timeframe', 'candles', 'from', 'to']
+function datasetAlignmentSignature(summary) {
+  const d = summary && summary.dataset
+  if (!d || typeof d !== 'object') return ''
+  return ALIGNMENT_DATASET_KEYS.filter((k) => d[k] !== undefined && d[k] !== null)
+    .map((k) => `${k}=${d[k]}`)
+    .join('|')
+}
+function meanOf(xs) {
+  return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : undefined
+}
+function classifyDecisionQuality(changed, unchanged) {
+  const MIN = 5
+  const EPS = 1e-6
+  const onChanges = meanOf(changed)
+  const onUnchanged = meanOf(unchanged)
+  const out = {
+    scoredChangedSteps: changed.length,
+    meanRewardDeltaOnChanges: onChanges,
+    meanRewardDeltaOnUnchanged: onUnchanged,
+    verdict: 'insufficient',
+  }
+  if (changed.length < MIN) return out
+  const ch = onChanges || 0
+  const un = onUnchanged || 0
+  if (Math.abs(ch) <= EPS) out.verdict = 'unchanged'
+  else if (ch > EPS) out.verdict = ch > un + EPS ? 'better' : 'mixed'
+  else out.verdict = ch < un - EPS ? 'worse' : 'mixed'
+  return out
+}
+function diffDecisionTraces(baseline, tweak) {
+  const a = readDecisionTrace(baseline)
+  const b = readDecisionTrace(tweak)
+  if (!a || !b) return null
+  const sigA = datasetAlignmentSignature(baseline)
+  const sigB = datasetAlignmentSignature(tweak)
+  if (!sigA || !sigB || sigA !== sigB)
+    return { aligned: false, alignmentNote: 'different dataset — not step-comparable' }
+  const totalA = Number(a.totalSteps) || a.steps.length
+  const totalB = Number(b.totalSteps) || b.steps.length
+  if (totalA !== totalB)
+    return { aligned: false, alignmentNote: `different step counts (${totalA} vs ${totalB})` }
+  const mapA = new Map(a.steps.map((s) => [s.step, s]))
+  const mapB = new Map(b.steps.map((s) => [s.step, s]))
+  const shared = [...mapA.keys()].filter((k) => mapB.has(k)).sort((x, y) => x - y)
+  if (!shared.length) return { aligned: false, alignmentNote: 'no shared steps' }
+  const changedDeltas = []
+  const unchangedDeltas = []
+  const confDeltas = []
+  const stepFlags = []
+  let changedSteps = 0
+  for (const step of shared) {
+    const sa = mapA.get(step)
+    const sb = mapB.get(step)
+    const changed = sa.action !== sb.action
+    if (changed) changedSteps += 1
+    stepFlags.push({ step, changed })
+    if (typeof sa.reward === 'number' && typeof sb.reward === 'number')
+      (changed ? changedDeltas : unchangedDeltas).push(sb.reward - sa.reward)
+    if (typeof sa.confidence === 'number' && typeof sb.confidence === 'number')
+      confDeltas.push(sb.confidence - sa.confidence)
+  }
+  const labels = new Set([
+    ...Object.keys(a.actionCounts || {}),
+    ...Object.keys(b.actionCounts || {}),
+  ])
+  const actionCountDeltas = {}
+  for (const k of labels) {
+    const d = ((b.actionCounts || {})[k] || 0) - ((a.actionCounts || {})[k] || 0)
+    if (d) actionCountDeltas[k] = d
+  }
+  return {
+    aligned: true,
+    alignedSteps: shared.length,
+    changedSteps,
+    divergenceRate: changedSteps / shared.length,
+    stepFlags,
+    actionCountDeltas,
+    meanConfidenceShift: meanOf(confDeltas),
+    objectiveDelta: Number(tweak.objective) - Number(baseline.objective),
+    quality: classifyDecisionQuality(changedDeltas, unchangedDeltas),
+  }
+}
+const DECISION_VERDICT_BADGE = {
+  better: 'is-ok',
+  worse: 'is-bad',
+  mixed: 'is-warn',
+  unchanged: '',
+  insufficient: '',
+}
+function fmtSignedNum(v) {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return 'n/a'
+  const r = Number(v.toFixed(4))
+  return r >= 0 ? `+${r}` : `${r}`
+}
+function decisionDivergenceStripHtml(diff, runColors, labelA, labelB) {
+  const pts = diff.stepFlags.map((f, i) => ({ x: i, y: f.changed ? 1 : 0, group: 'changed' }))
+  if (pts.length < 2) return ''
+  const svg = buildLineChart({
+    points: pts,
+    xLabel: 'step',
+    yLabel: 'changed',
+    width: 640,
+    height: 90,
+    markers: false,
+    groupColors: new Map([['changed', CHART_PALETTE[3]]]),
+    ariaLabel: 'where the decisions diverged over the step axis',
+  })
+  return `<p class="card-sub">Where decisions diverged (${escapeHtml(labelA)} → ${escapeHtml(labelB)}), on the same step axis as the equity overlay:</p><div class="chart-wrap">${svg}</div>`
+}
+// The compare-pane decision-diff section (exactly 2 runs). baseline = the first selected, tweak = the
+// second; the config diff above already shows WHICH lever changed (the "new information").
+function decisionDiffSectionHtml(baseline, tweak) {
+  const diff = diffDecisionTraces(baseline, tweak)
+  if (!diff) return '' // one or both runs have no decision trace
+  const labelA = shortKey(baseline.key)
+  const labelB = shortKey(tweak.key)
+  if (!diff.aligned) {
+    return `<h3>Decision diff <span class="card-sub">— ${escapeHtml(labelA)} → ${escapeHtml(labelB)}</span></h3>
+      <p class="card-sub">${escapeHtml(diff.alignmentNote)} — the two runs aren't step-comparable, so their decisions can't be diffed.</p>`
+  }
+  const q = diff.quality
+  const badge = DECISION_VERDICT_BADGE[q.verdict] || ''
+  const verdictChip = `<span class="badge ${badge}">decisions: ${escapeHtml(q.verdict)}${q.verdict === 'better' || q.verdict === 'worse' || q.verdict === 'mixed' ? ' — heuristic' : ''}</span>`
+  const divergence = `<p class="badges-row">${verdictChip} · ${(diff.divergenceRate * 100).toFixed(0)}% of ${diff.alignedSteps} aligned steps changed</p>`
+  const control =
+    q.scoredChangedSteps >= 5
+      ? `<p class="card-sub">At the ${q.scoredChangedSteps} changed steps the tweak averaged ${fmtSignedNum(q.meanRewardDeltaOnChanges)} per-step reward vs baseline; on unchanged steps ${fmtSignedNum(q.meanRewardDeltaOnUnchanged)} (the control). A real decision gain shows AT the changes, not everywhere — heuristic, not causal.</p>`
+      : `<p class="card-sub">Too few changed steps carry a reward (${q.scoredChangedSteps}) to read decision quality.</p>`
+  const objDelta =
+    typeof diff.objectiveDelta === 'number'
+      ? `<p class="card-sub">objective Δ ${fmtSignedNum(diff.objectiveDelta)} <span class="card-sub">— context, not the verdict${(q.verdict === 'better' && diff.objectiveDelta <= 0) || (q.verdict === 'worse' && diff.objectiveDelta >= 0) ? '; note it DISAGREES with the decision read — steer by the decisions' : ''}</span></p>`
+      : ''
+  const deltaEntries = Object.entries(diff.actionCountDeltas).sort(
+    (x, y) => Math.abs(y[1]) - Math.abs(x[1]),
+  )
+  const countTable = deltaEntries.length
+    ? `<table class="kv-table report-table"><thead><tr><th>action</th><th class="num">count Δ</th></tr></thead><tbody>${deltaEntries
+        .map(
+          ([k, v]) =>
+            `<tr><th>${escapeHtml(k)}</th><td class="num ${v >= 0 ? 'delta-pos' : 'delta-neg'}">${v >= 0 ? '+' : ''}${v}</td></tr>`,
+        )
+        .join('')}</tbody></table>`
+    : '<p class="card-sub">No change in the action mix.</p>'
+  const confShift =
+    typeof diff.meanConfidenceShift === 'number'
+      ? `<p class="card-sub">mean confidence shift ${fmtSignedNum(diff.meanConfidenceShift)}</p>`
+      : ''
+  return `<h3>Decision diff <span class="card-sub">— how the tweak changed the decisions, not just the score</span></h3>
+    ${divergence}
+    ${control}
+    ${objDelta}
+    ${confShift}
+    <h4 class="card-sub">Action mix shift (full rollout)</h4>
+    ${countTable}
+    ${decisionDivergenceStripHtml(diff, null, labelA, labelB)}`
+}
+// A one-line decision-diff read for the 2-run Discuss seed, so the agent can reason about the delta.
+function decisionDiffChatSummary(baseline, tweak) {
+  const diff = diffDecisionTraces(baseline, tweak)
+  if (!diff || !diff.aligned) return ''
+  const q = diff.quality
+  const deltas = Object.entries(diff.actionCountDeltas)
+    .sort((x, y) => Math.abs(y[1]) - Math.abs(x[1]))
+    .map(([k, v]) => `${k}${v >= 0 ? '+' : ''}${v}`)
+    .join(', ')
+  return `Decision diff vs the other run: ${(diff.divergenceRate * 100).toFixed(0)}% of ${diff.alignedSteps} aligned decisions changed; decision-quality reads "${q.verdict}" (reward Δ ${fmtSignedNum(q.meanRewardDeltaOnChanges)} at changed steps vs ${fmtSignedNum(q.meanRewardDeltaOnUnchanged)} control — heuristic, not causal); objective Δ ${fmtSignedNum(diff.objectiveDelta)}; action-mix Δ ${deltas || 'none'}.`
+}
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
 // price-action + hold-comparison view; tell the user a re-run will surface them.
 function oldRunChartHintHtml(s) {
@@ -3878,6 +4054,37 @@ async function chatAboutRun(key) {
   } catch {
     if (selectedRunKey === key)
       setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
+  }
+}
+// Discuss TWO selected runs: the config diff (which lever changed = the "new information"), both runs'
+// objective/metrics, and the DECISION DIFF — so the agent can reason about whether the tweak's decision
+// changes look good even when the score hasn't moved.
+async function chatAboutRuns(keyA, keyB) {
+  const a = runsCache.find((r) => r.key === keyA)
+  const b = runsCache.find((r) => r.key === keyB)
+  if (!a || !b || !chatAboutRunAvailable()) return
+  const configDiff = Object.keys((manifest && manifest.levers) || {})
+    .map((lk) => [lk, (a.summary.config || {})[lk], (b.summary.config || {})[lk]])
+    .filter(([, va, vb]) => String(va) !== String(vb))
+    .map(([lk, va, vb]) => `${lk}: ${va === undefined ? '—' : va} → ${vb === undefined ? '—' : vb}`)
+  const ctx = [
+    `You are comparing TWO training runs of this project — baseline "${shortKey(keyA)}" vs tweak "${shortKey(keyB)}". Work from the details below; do not ask for the run ids.`,
+    configDiff.length
+      ? `What changed (the "new information"):\n${configDiff.join('\n')}`
+      : 'The two runs share the same config (compare seeds / nondeterminism).',
+    `Objective (${objectiveName()}): ${formatObjective(a.summary.objective)} → ${formatObjective(b.summary.objective)}.`,
+    decisionDiffChatSummary(a.summary, b.summary),
+    `Help me judge whether the tweak improved the model's DECISIONS — not just the score. Steer by the decision diff (divergence, the reward delta AT the changed steps vs the control, the action-mix shift), treating it as a heuristic, not proof of causation.`,
+  ].filter(Boolean)
+  const systemPrompt = [projectChatPreamble(), ...ctx].filter(Boolean).join('\n\n')
+  try {
+    await window.OverseerBridge.discussTopic({
+      title: `Runs ${shortKey(keyA)} vs ${shortKey(keyB)}`,
+      seed: 'Did this tweak improve the decisions? Walk me through the decision diff.',
+      systemPrompt,
+    })
+  } catch {
+    setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
   }
 }
 function busyButtonHtml(label) {
@@ -4111,6 +4318,10 @@ function setupRuns() {
       if (event.target.closest('#compare-clear')) {
         runsCompareKeys = new Set()
         renderRunsTable()
+      }
+      if (event.target.closest('#compare-discuss')) {
+        const keys = [...runsCompareKeys]
+        if (keys.length === 2) chatAboutRuns(keys[0], keys[1])
       }
     })
   }
@@ -5693,23 +5904,65 @@ function showPaperManualForm() {
   const url = String((byId('paper-chooser-url') || {}).value || '').trim()
   form.innerHTML = paperFullFormHtml(url ? { url } : undefined)
 }
-function onPaperAutoFill() {
+// Automatic Fill: an LLM reads the link and drafts the entry. The backend 'analyze-paper' activity
+// fetches the page text, summarises it, and writes a DRAFT <recordType>-paper record (status untested,
+// source research); on completion we close the form and re-render Papers so the draft appears for review.
+async function onPaperAutoFill() {
   const input = byId('paper-chooser-url')
   const url = String((input && input.value) || '').trim()
   if (!/^https?:\/\/\S+/i.test(url)) {
     setStatusLine('papers-status', 'Enter a valid link (https://…) to auto-fill.', true)
     return
   }
+  if (!embedded()) {
+    setStatusLine('papers-status', 'Open inside the Overseer to use Automatic Fill.', true)
+    return
+  }
+  const restore = () => {
+    const a = byId('paper-chooser-actions')
+    if (a) setHtml(a, paperChooserButtonsHtml())
+  }
   const actions = byId('paper-chooser-actions')
   if (actions)
     setHtml(actions, `<span class="paper-autofill-busy">${spinnerHtml()} Reading paper…</span>`)
-  // Automatic fill (LLM reads the link → fills the entry) isn't built yet — simulate the attempt,
-  // then show the coming-soon toast and restore the chooser so Manual Entry stays available.
-  setTimeout(() => {
-    showToast('Automatic fill is coming soon — use Manual Entry for now.')
-    const a = byId('paper-chooser-actions')
-    if (a) setHtml(a, paperChooserButtonsHtml())
-  }, 700)
+  setStatusLine('papers-status', '')
+  const epoch = projectEpoch
+  try {
+    const result = await startOrEnqueue(
+      'analyze-paper',
+      trainerActivityParams({ url }),
+      'Analyze paper',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) {
+        restore()
+        setStatusLine(
+          'papers-status',
+          queuedStatusText(result.ahead) + ' — the draft will appear here when it finishes.',
+        )
+      }
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      togglePaperForm(false)
+      await renderPapers()
+      showToast('Drafted from the link — review & save it (marked “untested”) below.')
+    } else {
+      restore()
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Automatic fill'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      restore()
+      setStatusLine(
+        'papers-status',
+        'Automatic fill failed — please try again or use Manual Entry.',
+        true,
+      )
+    }
+  }
 }
 function paperFullFormHtml(paper) {
   const p = paper || {}

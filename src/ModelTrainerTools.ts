@@ -2,10 +2,14 @@ import type { ComputeRepoRef, ComputeRunner, InferenceExecutor } from 'thefactor
 import {
   deriveModelRef,
   estimateCampaignEtaSeconds,
+  parseFirstValidJson,
   parseStructuredItems,
   runActivityWorkItems,
+  uuidv4,
 } from 'thefactory-tools/utils'
 import type {
+  AnalyzePaperFromUrlParams,
+  AnalyzePaperFromUrlResult,
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
   EvaluateTrainingRunResult,
@@ -25,6 +29,7 @@ import type {
   TrainingCampaignProgress,
   TrainingCampaignResult,
   TrainingHypothesis,
+  TrainingPaperRecord,
   TrainingVerdict,
 } from './modelTrainerTypes.js'
 import {
@@ -33,16 +38,24 @@ import {
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
 } from './modelTrainerConstants.js'
-import { hashTrainingConfig, readTrainerManifest, setupKeyOf } from './modelTrainerHelpers.js'
+import {
+  fetchPaperText,
+  hashTrainingConfig,
+  readTrainerManifest,
+  setupKeyOf,
+} from './modelTrainerHelpers.js'
 import {
   blendJudgeScore,
   manifestDataFiles,
   parseProgressMarker,
+  buildAnalyzePaperSystemPrompt,
+  buildAnalyzePaperUserContent,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
   coerceHypothesisItems,
+  coercePaperDraft,
   coerceVerdictRows,
   expandExperimentMatrix,
   normalizeObjectiveScores,
@@ -724,6 +737,54 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function analyzePaperFromUrl(
+    params: AnalyzePaperFromUrlParams,
+  ): Promise<AnalyzePaperFromUrlResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const analyzedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const analyzedAt = now()
+
+    // The TOOL fetches the page text and hands it to the model — no web tools needed by the model.
+    const fetchText = params.fetchPaperText ?? fetchPaperText
+    const text = await fetchText(params.url, params.abortSignal)
+
+    const res = await executor.runInference({
+      systemPrompt: buildAnalyzePaperSystemPrompt(manifest, params.notes),
+      userContent: buildAnalyzePaperUserContent({ url: params.url, text, notes: params.notes }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const draft = coercePaperDraft(parseFirstValidJson(res.text))
+    if (!draft) throw new Error('the model did not return a usable paper summary for this link')
+
+    const id = uuidv4()
+    const paperType = `${recordType}-paper`
+    const paper: TrainingPaperRecord = {
+      ...draft,
+      id,
+      title: draft.title as string,
+      claim: draft.claim as string,
+      url: params.url,
+      status: 'untested',
+      source: 'research',
+      createdAt: analyzedAt,
+      updatedAt: analyzedAt,
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: paperType,
+      key: id,
+      content: paper as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(paperType, id)
+    logger?.info('analyzed paper from url', { recordType, url: params.url, id })
+    return { recordType, paper, analyzedBy, analyzedAt }
+  }
+
   return {
     readTrainerManifest: (projectRoot, manifestRelPath) =>
       readTrainerManifest(projectRoot, manifestRelPath),
@@ -735,5 +796,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     evaluateTrainingRuns,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
+    analyzePaperFromUrl,
   }
 }

@@ -85,7 +85,11 @@ project by its manifest's `recordType`.
   per-action value over time, confidence, input attribution). The engine never computes it — each
   project emits its own (BlackSwan replays its deterministic test once more to capture per-step
   confidence/Q-values + saliency); the engine only soft-validates it (`validateDecisionTrace`,
-  dropping an unusable trace) so a run without one ingests normally.
+  dropping an unusable trace) so a run without one ingests normally. Two runs that share a
+  dataset/window are diffable step-by-step (`diffDecisionTraces`) — the viewer's Compare pane reads how
+  a lever tweak changed the model's DECISIONS, with a "heuristic, not causal" decision-quality verdict
+  (reward delta at the divergent steps, controlled against unchanged steps) kept separate from the
+  objective — all off the already-emitted trace, no extra engine or trainer infra.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best

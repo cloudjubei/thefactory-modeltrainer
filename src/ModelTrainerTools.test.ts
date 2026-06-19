@@ -1734,3 +1734,74 @@ describe('proposeTrainingHypotheses', () => {
     ).rejects.toThrow(/inference/i)
   })
 })
+
+describe('analyzePaperFromUrl', () => {
+  const DRAFT = JSON.stringify({
+    title: 'Deep RL for Trading',
+    authors: 'A. Researcher',
+    year: 2023,
+    claim: 'RL beats buy-and-hold OOS',
+    approach: 'PPO over price features',
+    claimedMetrics: { sharpe: 1.3 },
+    assumptions: { fees: false, notes: 'no costs modelled' },
+    replicateConfig: { fixed: { lr: 0.5 } },
+    verdictNote: 'omits fees — likely fluff after costs',
+    tags: ['rl', 'trading'],
+  })
+  const fetchStub = async () => 'the fetched paper text'
+  const base = (overrides = {}) => ({
+    scope: 'proj',
+    projectRoot: '/repo',
+    manifest: manifest(),
+    url: 'https://arxiv.org/abs/1234.5678',
+    llmConfig: LLM,
+    fetchPaperText: fetchStub,
+    ...overrides,
+  })
+
+  it('fetches, summarises, and upserts a draft paper record for review', async () => {
+    const storage = memoryStorage()
+    const executor = stubExecutor(DRAFT)
+    const { tools } = makeJudgeTools(executor, storage)
+    const written: string[] = []
+    const result = await tools.analyzePaperFromUrl(base({ onRecordWritten: (t: string) => written.push(t) }))
+    expect(result).toMatchObject({ recordType: 'demo-run', analyzedBy: 'openai/m', analyzedAt: NOW })
+    expect(result.paper).toMatchObject({
+      title: 'Deep RL for Trading',
+      claim: 'RL beats buy-and-hold OOS',
+      url: 'https://arxiv.org/abs/1234.5678',
+      status: 'untested',
+      source: 'research',
+      createdAt: NOW,
+    })
+    // the model is handed the fetched text — it does not browse
+    expect(executor.requests[0].userContent).toContain('the fetched paper text')
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-paper' })
+    expect(records).toHaveLength(1)
+    expect((records[0].content as { id: string }).id).toBe(records[0].key)
+    expect(written).toEqual(['demo-run-paper'])
+  })
+
+  it('throws without an inference executor', async () => {
+    const { tools } = makeJudgeTools(undefined, memoryStorage())
+    await expect(tools.analyzePaperFromUrl(base())).rejects.toThrow(/inference/i)
+  })
+
+  it('throws when the model returns no usable summary', async () => {
+    const { tools } = makeJudgeTools(stubExecutor('{"nope": true}'), memoryStorage())
+    await expect(tools.analyzePaperFromUrl(base())).rejects.toThrow(/usable paper summary/i)
+  })
+
+  it('propagates a fetch failure', async () => {
+    const { tools } = makeJudgeTools(stubExecutor(DRAFT), memoryStorage())
+    await expect(
+      tools.analyzePaperFromUrl(
+        base({
+          fetchPaperText: async () => {
+            throw new Error('could not fetch paper (HTTP 404)')
+          },
+        }),
+      ),
+    ).rejects.toThrow(/404/)
+  })
+})

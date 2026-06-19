@@ -302,6 +302,72 @@ export interface DecisionTrace {
   totalSteps?: number
 }
 
+/** One aligned step in a {@link DecisionTraceDiff}: what each run did at the SAME step index, with per-step deltas. */
+export interface DecisionStepDelta {
+  /** Shared step index on the downsampled axis (present in BOTH traces). */
+  step: number
+  /** Baseline run's action label at this step. */
+  baselineAction: string
+  /** +Tweak run's action label at this step. */
+  tweakAction: string
+  /** True when the two runs took different actions here (a divergence point). */
+  changed: boolean
+  /** `tweak.reward − baseline.reward` at this step, when BOTH recorded a reward; the per-step quality delta. */
+  rewardDelta?: number
+  /** `tweak.confidence − baseline.confidence`, when both recorded confidence. */
+  confidenceDelta?: number
+}
+
+/**
+ * A HEURISTIC, explicitly-caveated read of whether a tweak's DECISION changes look better — never a causal
+ * claim. Rests on the realized per-step reward AT the steps where the decision changed, controlled against
+ * the reward shift on steps where it did NOT change (so a whole-rollout regime move isn't mistaken for a
+ * decision improvement).
+ */
+export interface DecisionQualitySignal {
+  /** Number of CHANGED (divergent) steps for which BOTH runs recorded a reward — the population this read rests on. */
+  scoredChangedSteps: number
+  /** Mean `rewardDelta` over CHANGED steps. `>0` ⇒ where decisions changed, the tweak earned more per-step reward. */
+  meanRewardDeltaOnChanges?: number
+  /** Mean `rewardDelta` over UNCHANGED aligned steps — the CONTROL: a real decision gain shows AT the changes, not everywhere. */
+  meanRewardDeltaOnUnchanged?: number
+  /** Coarse verdict, confounds folded in. */
+  verdict: 'better' | 'worse' | 'mixed' | 'unchanged' | 'insufficient'
+  /** One-line plain read that NEVER claims causation; always carries "heuristic, not causal". */
+  summary: string
+}
+
+/**
+ * A step-by-step counterfactual diff of two runs' {@link DecisionTrace}s that share a dataset/window
+ * (baseline vs +tweak) — the "did this new information change the model's DECISIONS, and for the better?"
+ * read. Domain-oblivious (arbitrary action labels). The decision-quality verdict is kept deliberately
+ * SEPARATE from the objective so a tweak can read positive on decisions even when the score hasn't moved.
+ */
+export interface DecisionTraceDiff {
+  /** Whether the traces are step-alignable (same dataset signature + same `totalSteps` + a shared step axis). */
+  aligned: boolean
+  /** Why not aligned, when `aligned` is false (e.g. "different dataset", "different totalSteps", "no shared steps"). */
+  alignmentNote?: string
+  /** The dataset signature both runs share, echoed for display. */
+  datasetSignature?: string
+  /** Count of step indices present in BOTH downsampled traces — the diffable population. */
+  alignedSteps: number
+  /** Count of aligned steps where the action differs. */
+  changedSteps: number
+  /** `changedSteps / alignedSteps` in [0,1] — how much the tweak moved decisions. */
+  divergenceRate: number
+  /** Per-aligned-step deltas, in step order. */
+  steps: DecisionStepDelta[]
+  /** Per-action FULL-rollout count delta (`tweak.actionCounts − baseline.actionCounts`), non-zero entries only. */
+  actionCountDeltas: Record<string, number>
+  /** Mean `confidenceDelta` over steps where both have confidence; undefined when unavailable. */
+  meanConfidenceShift?: number
+  /** `tweak.objective − baseline.objective` — CONTEXT only, NOT the decision-quality verdict. */
+  objectiveDelta?: number
+  /** The decision-quality read, kept deliberately separate from the objective. */
+  quality: DecisionQualitySignal
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
@@ -688,6 +754,36 @@ export interface ProposeTrainingHypothesesResult {
   proposedAt: string
 }
 
+export interface AnalyzePaperFromUrlParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** The paper / source URL to read and summarise. */
+  url: string
+  /** Optional extra steering for the summary (e.g. "focus on the cost assumptions"). */
+  notes?: string
+  llmConfig: LLMConfig
+  abortSignal?: AbortSignal
+  /** Fired after the draft paper record is upserted so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /**
+   * Injectable URL→text fetcher (for tests); defaults to a real HTTP fetch + HTML/abstract extraction.
+   * The TOOL supplies the page text to the model — the model needs no web tools.
+   */
+  fetchPaperText?: (url: string, abortSignal?: AbortSignal) => Promise<string>
+}
+
+export interface AnalyzePaperFromUrlResult {
+  recordType: string
+  /** The drafted, persisted Paper record (status 'untested', source 'research') for the user to verify. */
+  paper: TrainingPaperRecord
+  /** Provenance label of the summarising model. */
+  analyzedBy: string
+  analyzedAt: string
+}
+
 /**
  * The model-training toolset: plans experiment matrices from a TrainerManifest,
  * runs them through a ComputeRunner, and persists each RunSummary as a record.
@@ -727,4 +823,10 @@ export interface ModelTrainerTools {
   proposeTrainingHypotheses(
     params: ProposeTrainingHypothesesParams,
   ): Promise<ProposeTrainingHypothesesResult>
+  /**
+   * Read a paper/source URL, summarise it with an LLM (the tool fetches the page text — no web tools),
+   * and persist a DRAFT `{recordType}-paper` record (status 'untested', source 'research') for the user
+   * to verify. Powers the Papers tab's "Automatic Fill".
+   */
+  analyzePaperFromUrl(params: AnalyzePaperFromUrlParams): Promise<AnalyzePaperFromUrlResult>
 }

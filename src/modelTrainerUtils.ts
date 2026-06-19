@@ -1,15 +1,23 @@
 import type {
   DecisionFeatureAttribution,
+  DecisionQualitySignal,
   DecisionStep,
+  DecisionStepDelta,
   DecisionTrace,
+  DecisionTraceDiff,
   ExperimentSpec,
   PlannedTrainingItem,
   TrainerDataFile,
   TrainerLeverSpec,
   TrainerManifest,
+  TrainingPaperRecord,
   TrainingRunSummary,
 } from './modelTrainerTypes.js'
-import { MAX_CAMPAIGN_ITEMS } from './modelTrainerConstants.js'
+import {
+  DECISION_QUALITY_MIN_SCORED_STEPS,
+  DECISION_QUALITY_REWARD_EPSILON,
+  MAX_CAMPAIGN_ITEMS,
+} from './modelTrainerConstants.js'
 
 const LEVER_TYPES: ReadonlySet<string> = new Set(['number', 'choice', 'boolean'])
 
@@ -359,6 +367,110 @@ export function buildProposeUserContent(input: {
   })
 }
 
+/** Upper bound on extracted paper text handed to the model — enough for an abstract/intro, bounded cost. */
+export const PAPER_TEXT_CAP = 12000
+
+const _HTML_ENTITIES: Record<string, string> = {
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+  '&nbsp;': ' ',
+}
+
+/** Strip HTML to readable text (scripts/styles/tags removed, entities decoded, whitespace collapsed),
+ * capped to {@link PAPER_TEXT_CAP}. Pure — the network fetch lives in the helpers layer. */
+export function extractPaperText(raw: string): string {
+  let text = String(raw || '')
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+  for (const [entity, ch] of Object.entries(_HTML_ENTITIES)) text = text.split(entity).join(ch)
+  text = text
+    .replace(/&#\d+;/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return text.length > PAPER_TEXT_CAP ? text.slice(0, PAPER_TEXT_CAP) : text
+}
+
+/** System prompt for "Automatic Fill": the model is GIVEN the paper text and must return one honest
+ * registry-entry JSON object (no browsing, no prose). */
+export function buildAnalyzePaperSystemPrompt(manifest: TrainerManifest, notes?: string): string {
+  return [
+    `You are a research librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given the TEXT of a paper/source (already fetched — DO NOT browse). Summarise it HONESTLY as a registry entry.`,
+    `The project's tunable levers (for a suggested replicateConfig) are: ${JSON.stringify(manifest.levers)}.`,
+    notes ? `Extra guidance: ${notes}` : '',
+    `Return ONLY a single JSON object (no prose, no code fence): {"title": string (required), "authors"?: string, ` +
+      `"year"?: number, "claim": string (the source's headline claim in its own terms, required), "approach"?: string, ` +
+      `"claimedMetrics"?: {"<name>": number}, "assumptions"?: {"fees"?: boolean, "netOfCosts"?: boolean, ` +
+      `"frictionless"?: boolean, "multiAsset"?: boolean, "retrainCadence"?: string, "notes"?: string}, ` +
+      `"replicateConfig"?: {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "seeds"?: number} ` +
+      `(use ONLY declared lever names; {} if it maps to no runnable setup), "verdictNote"?: string ` +
+      `(skeptical — does it likely survive real costs + walk-forward OOS?), "tags"?: [string]}. ` +
+      `Be honest about assumptions that inflate results (no fees, in-sample, single split).`,
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+export function buildAnalyzePaperUserContent(input: {
+  url: string
+  text: string
+  notes?: string
+}): string {
+  return JSON.stringify({ url: input.url, notes: input.notes, text: input.text })
+}
+
+/** Defensively coerce the model's JSON into a Paper draft — `undefined` unless title + claim are
+ * present (mirrors {@link coerceHypothesisItems}). Drops unknown/ill-typed fields; the tool stamps
+ * id/url/status/source/timestamps. */
+export function coercePaperDraft(raw: unknown): Partial<TrainingPaperRecord> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  const str = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : undefined)
+  const title = str(o.title)
+  const claim = str(o.claim)
+  if (!title || !claim) return undefined
+  const draft: Partial<TrainingPaperRecord> = { title, claim }
+  const authors = str(o.authors)
+  if (authors) draft.authors = authors
+  if (typeof o.year === 'number' && Number.isFinite(o.year)) draft.year = o.year
+  const approach = str(o.approach)
+  if (approach) draft.approach = approach
+  const verdictNote = str(o.verdictNote)
+  if (verdictNote) draft.verdictNote = verdictNote
+  if (
+    o.claimedMetrics &&
+    typeof o.claimedMetrics === 'object' &&
+    !Array.isArray(o.claimedMetrics)
+  ) {
+    const metrics: Record<string, number> = {}
+    for (const [k, v] of Object.entries(o.claimedMetrics as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v)) metrics[k] = v
+    }
+    if (Object.keys(metrics).length) draft.claimedMetrics = metrics
+  }
+  if (o.assumptions && typeof o.assumptions === 'object' && !Array.isArray(o.assumptions)) {
+    draft.assumptions = o.assumptions as TrainingPaperRecord['assumptions']
+  }
+  if (
+    o.replicateConfig &&
+    typeof o.replicateConfig === 'object' &&
+    !Array.isArray(o.replicateConfig)
+  ) {
+    draft.replicateConfig = o.replicateConfig as Record<string, unknown>
+  }
+  if (Array.isArray(o.tags)) {
+    const tags = o.tags.filter((x): x is string => typeof x === 'string')
+    if (tags.length) draft.tags = tags
+  }
+  return draft
+}
+
 const PROGRESS_MARKER = '@@PROGRESS '
 
 /**
@@ -457,4 +569,174 @@ export function validateDecisionTrace(raw: unknown): DecisionTrace | undefined {
   if (featureAttribution) trace.featureAttribution = featureAttribution
   if (isFiniteNumber(raw.totalSteps)) trace.totalSteps = raw.totalSteps
   return trace
+}
+
+// The dataset fields that determine the STEP AXIS (so two runs sharing them tested the same bars).
+// Deliberately excludes observation-only fields (fidelity_set/layers) — those are exactly the "new
+// information" tweaks we want to diff, and they don't change the step count.
+const ALIGNMENT_DATASET_KEYS = ['asset', 'timeframe', 'candles', 'from', 'to'] as const
+
+/**
+ * A stable dataset/window signature for step-alignment, read off `summary.dataset` — only runs with the
+ * SAME signature share a step axis and are safely diffable. Empty when no dataset is recorded (callers
+ * treat two empty signatures as NOT auto-alignable).
+ */
+export function datasetAlignmentSignature(summary: TrainingRunSummary): string {
+  const dataset = summary.dataset as Record<string, unknown> | undefined
+  if (!dataset || typeof dataset !== 'object') return ''
+  const parts: string[] = []
+  for (const key of ALIGNMENT_DATASET_KEYS) {
+    const value = dataset[key]
+    if (value !== undefined && value !== null) parts.push(`${key}=${value}`)
+  }
+  return parts.join('|')
+}
+
+function averageOf(values: number[]): number | undefined {
+  return values.length ? values.reduce((a, b) => a + b, 0) / values.length : undefined
+}
+
+function fmtDelta(value: number | undefined): string {
+  if (value === undefined) return 'n/a'
+  const rounded = Number(value.toFixed(4))
+  return rounded >= 0 ? `+${rounded}` : `${rounded}`
+}
+
+/**
+ * Map the changed-step and unchanged-step reward deltas to an HONEST decision-quality verdict. The
+ * changed-step gain must clear a dead-band AND beat the unchanged-step CONTROL to read `better`/`worse`
+ * (so a whole-rollout regime move isn't mistaken for a decision improvement); too few scored steps reads
+ * `insufficient`. Never claims causation. Pure.
+ */
+function classifyDecisionQuality(
+  changedRewardDeltas: number[],
+  unchangedRewardDeltas: number[],
+): DecisionQualitySignal {
+  const scoredChangedSteps = changedRewardDeltas.length
+  const onChanges = averageOf(changedRewardDeltas)
+  const onUnchanged = averageOf(unchangedRewardDeltas)
+  const base: DecisionQualitySignal = {
+    scoredChangedSteps,
+    ...(onChanges !== undefined ? { meanRewardDeltaOnChanges: onChanges } : {}),
+    ...(onUnchanged !== undefined ? { meanRewardDeltaOnUnchanged: onUnchanged } : {}),
+    verdict: 'insufficient',
+    summary: '',
+  }
+  if (scoredChangedSteps < DECISION_QUALITY_MIN_SCORED_STEPS) {
+    return {
+      ...base,
+      summary: `Only ${scoredChangedSteps}/${DECISION_QUALITY_MIN_SCORED_STEPS} changed steps carry a reward — too few to read decision quality (heuristic, not causal).`,
+    }
+  }
+  const change = onChanges ?? 0
+  const control = onUnchanged ?? 0
+  const eps = DECISION_QUALITY_REWARD_EPSILON
+  let verdict: DecisionQualitySignal['verdict']
+  if (Math.abs(change) <= eps) verdict = 'unchanged'
+  else if (change > eps) verdict = change > control + eps ? 'better' : 'mixed'
+  else verdict = change < control - eps ? 'worse' : 'mixed'
+  const summary =
+    verdict === 'unchanged'
+      ? `Where decisions changed, per-step reward barely moved (${fmtDelta(change)}) — heuristic, not causal.`
+      : verdict === 'mixed'
+        ? `At changed steps reward moved ${fmtDelta(change)}, but unchanged steps shifted ~equally (${fmtDelta(control)}) — likely the rollout, not the decisions (heuristic, not causal).`
+        : `At the ${scoredChangedSteps} changed steps the tweak averaged ${fmtDelta(change)} reward vs baseline (control ${fmtDelta(control)} on unchanged) — decisions look ${verdict} (heuristic, not causal).`
+  return { ...base, verdict, summary }
+}
+
+function notAlignedDiff(note: string, signature: string): DecisionTraceDiff {
+  return {
+    aligned: false,
+    alignmentNote: note,
+    ...(signature ? { datasetSignature: signature } : {}),
+    alignedSteps: 0,
+    changedSteps: 0,
+    divergenceRate: 0,
+    steps: [],
+    actionCountDeltas: {},
+    quality: classifyDecisionQuality([], []),
+  }
+}
+
+/**
+ * Diff two runs' decision traces step-by-step — how a lever tweak (the "new information") changed the
+ * model's DECISIONS, with a decision-quality read kept separate from the objective. Returns `undefined`
+ * when EITHER run has no usable trace; an `aligned:false` diff (with `alignmentNote`) when traces exist
+ * but can't be step-aligned (different dataset, `totalSteps`, or no shared step indices). Never throws.
+ */
+export function diffDecisionTraces(
+  baseline: TrainingRunSummary,
+  tweak: TrainingRunSummary,
+): DecisionTraceDiff | undefined {
+  const traceA = validateDecisionTrace(baseline.artifacts?.decisionTrace)
+  const traceB = validateDecisionTrace(tweak.artifacts?.decisionTrace)
+  if (!traceA || !traceB) return undefined
+
+  const sigA = datasetAlignmentSignature(baseline)
+  const sigB = datasetAlignmentSignature(tweak)
+  if (!sigA || !sigB || sigA !== sigB) {
+    return notAlignedDiff('different dataset — not step-comparable', sigA || sigB)
+  }
+  const totalA = traceA.totalSteps ?? traceA.steps.length
+  const totalB = traceB.totalSteps ?? traceB.steps.length
+  if (totalA !== totalB) {
+    return notAlignedDiff(`different totalSteps (${totalA} vs ${totalB})`, sigA)
+  }
+
+  const mapA = new Map(traceA.steps.map((s) => [s.step, s]))
+  const mapB = new Map(traceB.steps.map((s) => [s.step, s]))
+  const sharedSteps = [...mapA.keys()].filter((step) => mapB.has(step)).sort((x, y) => x - y)
+  if (!sharedSteps.length) return notAlignedDiff('no shared steps', sigA)
+
+  const steps: DecisionStepDelta[] = []
+  const changedRewardDeltas: number[] = []
+  const unchangedRewardDeltas: number[] = []
+  const confidenceDeltas: number[] = []
+  let changedSteps = 0
+  for (const step of sharedSteps) {
+    const a = mapA.get(step)!
+    const b = mapB.get(step)!
+    const changed = a.action !== b.action
+    if (changed) changedSteps += 1
+    const delta: DecisionStepDelta = {
+      step,
+      baselineAction: a.action,
+      tweakAction: b.action,
+      changed,
+    }
+    if (typeof a.reward === 'number' && typeof b.reward === 'number') {
+      const rewardDelta = b.reward - a.reward
+      delta.rewardDelta = rewardDelta
+      ;(changed ? changedRewardDeltas : unchangedRewardDeltas).push(rewardDelta)
+    }
+    if (typeof a.confidence === 'number' && typeof b.confidence === 'number') {
+      delta.confidenceDelta = b.confidence - a.confidence
+      confidenceDeltas.push(delta.confidenceDelta)
+    }
+    steps.push(delta)
+  }
+
+  const actionCountDeltas: Record<string, number> = {}
+  const labels = new Set([
+    ...Object.keys(traceA.actionCounts ?? {}),
+    ...Object.keys(traceB.actionCounts ?? {}),
+  ])
+  for (const label of labels) {
+    const d = (traceB.actionCounts?.[label] ?? 0) - (traceA.actionCounts?.[label] ?? 0)
+    if (d !== 0) actionCountDeltas[label] = d
+  }
+  const meanConfidenceShift = averageOf(confidenceDeltas)
+
+  return {
+    aligned: true,
+    datasetSignature: sigA,
+    alignedSteps: sharedSteps.length,
+    changedSteps,
+    divergenceRate: changedSteps / sharedSteps.length,
+    steps,
+    actionCountDeltas,
+    ...(meanConfidenceShift !== undefined ? { meanConfidenceShift } : {}),
+    objectiveDelta: tweak.objective - baseline.objective,
+    quality: classifyDecisionQuality(changedRewardDeltas, unchangedRewardDeltas),
+  }
 }

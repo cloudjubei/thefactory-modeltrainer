@@ -91,23 +91,21 @@ cards show a "campaign linked · N runs linked" chip.
   tab shows an "Import N starter approaches" banner that upserts them once (by id, skipping any the
   user already has so edits/verdicts aren't clobbered). BlackSwan's `trainer.json` carries the curated
   top-10 trading papers.
-- **DEFERRED — "Automatic Fill" backend (the LLM-analysis entry process):** the FRONT-END is in place
-  (the add-paper chooser's "Automatic Fill" button validates the link, shows a spinner, then a
-  coming-soon toast). What's left is the backend that fills the draft. Concrete design:
-  1. `analyzePaperFromUrl({ url, notes?, llmConfig, abortSignal? })` tool method in `ModelTrainerTools`
-     (types `AnalyzePaperParams`/`Result` in `modelTrainerTypes.ts`). The TOOL fetches + text-extracts
-     the page (arXiv abstract/API; generic HTML→text; PDFs v1 = use the landing/abstract), then makes
-     ONE structured-output inference (reuse the existing `deps` inference executor) returning a
-     `TrainingPaperRecord` draft (title/authors/year/claim/claimedMetrics/assumptions/approach +
-     suggested `replicateConfig` against the manifest levers). No web-tools needed by the model — the
-     tool supplies the text. `source:'research'`.
-  2. Backend `analyze-paper` activity mirroring `propose`: calls the tool, returns the draft (or upserts
-     a `<recordType>-paper` record `status:untested`) → the viewer fills the form / re-renders Papers.
-  3. Viewer: swap the coming-soon toast in `onPaperAutoFill` for the activity call → prefill the full
-     form from the returned draft (keep the spinner during the call).
-     This is the scoped version of the deferred open-ended `researchTrainingPapers` (discover N papers) +
-     the heavy auto-seed/verify pipeline (the find→web-verify→synthesize workflow used to seed the 10),
-     both of which stay deferred.
+- **"Automatic Fill" backend — SHIPPED.** Paste a link in the add-paper chooser → "Automatic Fill" →
+  an LLM drafts the entry. Built across all three layers: (1) `analyzePaperFromUrl` tool method in
+  `ModelTrainerTools` (the TOOL fetches + text-extracts the page via `fetchPaperText` — arXiv pdf→abs
+  normalised, PDFs rejected with a clear message; `extractPaperText` is pure HTML→text; then ONE
+  structured-output inference via the existing `inferenceExecutor`, `parseFirstValidJson` →
+  `coercePaperDraft` → a `TrainingPaperRecord` draft incl. a suggested `replicateConfig` against the
+  manifest levers; upserts a `<recordType>-paper` record `status:'untested' source:'research'` keyed by
+  `uuidv4`, fires `onRecordWritten`). (2) Backend `analyze-paper` activity (`requiresApi:true`, mirrors
+  `propose`; also writes a `-paper-analysis` 'latest' summary). (3) Viewer `onPaperAutoFill` triggers it,
+  holds the spinner, observes, then closes the form + re-renders Papers so the **draft appears as a
+  reviewable card** (Design X — the bridge has no generic request→response, so we auto-create + review
+  rather than prefill the add-form). TDD'd (utils + tool with mock executor/storage/fetch).
+  - Still DEFERRED: open-ended `researchTrainingPapers` (discover N papers) + the heavy
+    auto-seed/verify pipeline. Optional UX upgrade — prefill the add-form from the draft instead of
+    auto-creating the card — would need a request→response bridge verb.
 
 ### 3c. Models / Architectures library (like Papers, for model build-ups)
 
@@ -154,23 +152,38 @@ trace is never an error). Generic types + a soft `validateDecisionTrace` live in
 (`modelTrainerTypes.ts`/`modelTrainerUtils.ts`; ingestion strips an unusable trace). The viewer's
 **Explain** section renders the action-distribution diagnostic (generic anomaly + dormant-action
 flags), the **sparse-sell deep-dive** (per-action value-over-time chart on the shared step axis — makes
-"is hold persistently worth more than sell?" self-evident), confidence-over-time, and input
-attribution; `chatAboutRun` is enriched with a trace summary (counts, dormant-action value gaps, top
-attributed inputs).
+"is hold persistently worth more than sell?" self-evident), confidence-over-time, and **input
+attribution by fidelity layer + engineered signal**; `chatAboutRun` is enriched with a trace summary
+(counts, dormant-action value gaps, top attributed inputs).
+
+Feature attribution (gradient saliency) ships `perFeature` AND a precise `byGroup` — `layer:1h` /
+`layer:1d` (each fidelity layer's columns) and `engineered:drawdown` / `in_position` / … — derived in
+`decision_trace.py` from the env's observation layout (`config.layers` + the active engineered extras),
+reconciled against `obs_dim/lookback` so any drift degrades to per-feature-only rather than mislabel.
+Verified live on 1d and 1h+1d runs.
+
+**Data-influence on decisions — counterfactual diff SHIPPED.** "Did this new information change the
+model's DECISIONS, and for the better — even when the score hasn't moved?" The engine's pure
+`diffDecisionTraces(baseline, tweak)` (`modelTrainerUtils.ts`; types `DecisionTraceDiff` /
+`DecisionStepDelta` / `DecisionQualitySignal`) aligns two runs that share a dataset/window step-by-step
+(by `datasetAlignmentSignature` + equal `totalSteps`) and reports divergence rate, per-action count
+deltas, confidence shift, and — the honest core — a decision-quality verdict from the realized reward
+delta AT the divergent steps, CONTROLLED against unchanged steps, with an insufficiency guard and
+"heuristic, not causal" labeling; the objective delta is context, not the verdict, and a disagreement
+between them is surfaced as the interesting case. ZERO new BlackSwan infra (runs off the already-emitted
+trace). The viewer's 2-run Compare pane grows a **Decision diff** section + a **Discuss these two runs**
+chat seeded with the diff. Verified live on a real 1d run pair (`use_indicators` off→on: 53% of decisions
+changed, verdict `worse`, agreeing with the objective drop).
 
 Remaining:
 
-- **Feature attribution — sharpen the grouping.** Gradient saliency ships as `perFeature` + a
-  best-effort `byGroup` (by lookback bar when the obs is a clean grid). Left: the precise
-  feature→fidelity-layer mapping (needs the data provider to expose layer boundaries), and
-  permutation/SHAP (expensive, deferred).
-- **Data-influence on decisions/weights — HARD, research.** See how a NEW piece of information changes
-  the model — its weights AND its subsequent decisions — and whether that change is GOOD. The goal: judge
-  a tweak as positive from the DECISION deltas even when the final return isn't there yet (steer by "the
-  decisions improved", not just "the score rose"). Approaches: counterfactual decision-trace diffing
-  (re-run the test with/without a feature → per-step decision + P&L delta), attribution of a decision to
-  the new input, or a before/after decision-diff around a fine-tune. Now unblocked — builds on the
-  shipped base trace + attribution (+ the opt-in full-obs sidecar).
+- **Feature attribution — heavier methods (deferred).** Permutation / SHAP — expensive; only if the
+  gradient saliency proves insufficient.
+- **Data-influence — additive follow-ons (deferred).** Both reuse the shipped `DecisionTraceDiff` spine
+  but need a NEW BlackSwan emission first, so they're parked: (a) **attribution-of-the-new-input** — a
+  per-step (not just aggregate) group saliency, to read reward conditioned on how much the new input
+  drove each decision; (b) **before/after weight diff** — a mid-training checkpoint trace, to diff a
+  fine-tune's decision change (run-vs-its-own-evaluate is a null diff).
 - **PARKED — step-by-step ANIMATION replay** + scrubber, discussed live with an agent. No
   trace-artifact change needed.
 
