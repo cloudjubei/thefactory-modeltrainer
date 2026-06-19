@@ -195,14 +195,22 @@ design.
 - **The analyse→run loop.** `recommendExperiments` deterministically surfaces gaps — **missing factorial
   cells** + **variance-thin top setups** (need ≥5 seeds) — each as a launchable `ExperimentSpec`; the
   "Suggested experiments" panel fires them as **batched campaigns** (concurrency selector → existing
-  `train` activity, NOT the LLM `propose` path), and the tab auto-recomputes on `data:updated`.
+  `train` activity, NOT the LLM `propose` path), and the tab auto-recomputes on `data:updated`. Low-data
+  estimates carry a ⚠ + a "run more" jump to the batch; an "Analyze in xAI" 🔬 entry + a clear-focus
+  control round out the UX. BlackSwan now stores the CONCRETE `fidelity_set` (never the `auto` synonym),
+  and a one-click viewer migration normalises legacy `auto` records (recomputing the setup key).
+
+- **Phase 3 — the ablation TREE + global importance — SHIPPED.** A seeded TypeScript **random-forest
+  surrogate** (`fitConfigSurrogate`/`predictConfig`, deterministic) over (config → criterion) predicts
+  UNOBSERVED configs, so it fills the OFAT gaps. On it: **fANOVA** main+interaction importance
+  (`fanovaImportances`), the **ablation tree** (`ablationPath` — greedy worst→best, the single change at
+  each step that helps most), and a **2-lever interaction heatmap** (`interactionGrid` — "does A help
+  universally or only at some B?"). All mirrored into `viewer/xai.js` and asserted byte-identical by the
+  parity harness (which caught a real mirror infinite-loop). 100% function coverage; the "Surrogate model"
+  panel renders all three, framed honestly as a model to confirm with real runs.
 
 Remaining (the expansion):
 
-- **Phase 3 — the ablation TREE + global importance.** `fANOVA` (main + interaction effects) + ablation
-  paths via a seeded TypeScript random-forest surrogate (the validated methods); slice/contour interaction
-  views ("does A help universally or only at some B?"). The OFAT engine is the no-surrogate floor; this is
-  the across-the-whole-space refinement.
 - **Phase 4 — deeper feature attribution (needs BlackSwan emission).** Integrated Gradients + occlusion /
   permutation importance + the **Adebayo sanity-check badge** (recompute with randomised weights — visual
   plausibility ≠ faithfulness) + per-step **reward-component decomposition** (BlackSwan's reward is already

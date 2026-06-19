@@ -96,7 +96,10 @@ project by its manifest's `recordType`.
   non-LLM experiment recommender, over the stored run records (config + metrics + trace). The sandboxed
   viewer can't import the build, so `viewer/xai.js` is a parity-mirrored copy (a `scripts/` harness
   asserts byte-identical results); the xAI tab renders it and fires the recommender's specs as batched
-  `train` campaigns, closing an analyse→run→re-analyse loop with no LLM in it.
+  `train` campaigns, closing an analyse→run→re-analyse loop with no LLM in it. A seeded random-forest
+  surrogate (`fitConfigSurrogate`) over (config → criterion) adds the global view — fANOVA importance, a
+  greedy ablation tree, and a 2-lever interaction grid — predicting unobserved configs (the determinism is
+  load-bearing: the forest is seeded from the data, so analysis never drifts between runs).
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best
