@@ -1642,6 +1642,70 @@ button:focus-visible,
   flex: 1 1 200px;
   max-width: 320px;
 }
+/* ---- Activity two-lane layout ----------------------------------------------
+   Experiments (campaigns + evaluations) on the left, Tasks (judge / propose /
+   paper import) on the right. The tasks column is collapsible and shows an
+   empty view when its lane is idle. Stacks on narrow screens. */
+.activity-cols {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.activity-col {
+  min-width: 0;
+}
+.activity-col-tasks {
+  border-left: 1px solid var(--border);
+  padding-left: 20px;
+}
+.activity-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  margin-bottom: 10px;
+}
+.activity-col-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.activity-col-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.activity-col-toggle .twisty {
+  color: var(--muted);
+  font-size: 11px;
+  width: 12px;
+}
+@media (max-width: 900px) {
+  .activity-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .activity-col-tasks {
+    border-left: none;
+    padding-left: 0;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+}
+/* When the idle Tasks column is collapsed, let Experiments reclaim the row; the Tasks column
+   shrinks to its content (toggle + budget control). Wide screens only — narrow screens stack. */
+@media (min-width: 901px) {
+  .activity-cols.tasks-collapsed {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+}
 .runs-viewmode {
   display: inline-flex;
   border: 1px solid var(--border);

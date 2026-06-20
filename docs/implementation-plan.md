@@ -43,17 +43,9 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
   equity-path rewards, fidelity stack, obs-squash, **Exp 12 exit-mechanic sweep (SL × TP × trailing)**,
   **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold)**, **Exp 14 architecture A/B (LSTM vs
   attn-ppo vs tcn-ppo)**, **Exp 15 no-op-penalty sweep**. Read the cross-window OOS distributions (the
-  By-dataset robustness table), then lock in the first config that clears the bar. The supervised+rules
-  baseline is BUILT and trades through the unchanged env → comparable RunSummary. Keep RL alive while the
-  other approaches run in parallel.
-- **`combo_all_noop` reward + tunable penalty levers (DONE).** A reward model = `combo_all` plus an
-  explicit penalty for NO-OP trades (buy while already holding, sell while holding cash — `take_action`
-  returns False), via a `_noop_penalty()` mirroring `_turnover_penalty()`. The penalty magnitude is the
-  `combo_noop_penalty` lever (0 = off), and the long-existing turnover penalty got its `combo_fee_penalty`
-  lever exposed too — both wired through `reward_multiplier_*` → `get_reward_multipliers` → env. NEW
-  generic capability: a lever can declare `appliesWhen` (e.g. `{reward_model: ['combo_all_noop']}`) and
-  the Launch form greys out / drops from the spec any conditional lever whose controlling lever isn't set
-  to a matching value — so a setting only some reward models use isn't swept where it does nothing.
+  By-dataset robustness table), then lock in the first config that clears the bar. (The supervised+rules
+  baseline trades through the unchanged env, so its RunSummary is directly comparable.) Keep RL alive
+  while the other approaches run in parallel.
 - **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
@@ -70,154 +62,35 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 ### 2. Model-trainer app
 
-**(2b) Papers / Library tab — SHIPPED (manual registry); research-seeding deferred.** The roster of
-approach cards is built: `TrainingPaperRecord` type, a `<recordType>-paper` data record, full CRUD
-(`readPapers`/`putPaper`/`deletePaperRecord` + `setupPapers`/`renderPapers`/`paperCardHtml`/
-`paperFormHtml`/`togglePaperForm`/`onSavePaper`/`onDeletePaper`), a Papers tab (TABS + index.html
-section + showTab/setup wiring), cards with title→url, authors/year, a colour-coded verdict badge, the
-claim, assumption chips (fees / gross / frictionless / multi-asset / retrain), **claimed-vs-measured**
-(measured = best objective + beats-hold from `linkedRunKeys`), a verdict filter, and per-card actions
-**Replicate** (prefill Launch from `replicateConfig` — full preset or flat fixed map), **Link selected
-runs** (links the Runs-tab compare selection), Edit (records verdict + note, with a measured-suggested
-verdict hint on the card), Delete. New entries open as a two-step CHOOSER (link + **Manual Entry** /
-**Automatic Fill**); Manual Entry reveals the full form, Automatic Fill shows a spinner then a
-coming-soon toast (the LLM fill is the deferred backend below). Campaign↔paper linking: **Replicate
-auto-connects** the launched campaign (`launchFromPaperId` → `extra.paperId` → `stampPaperCampaign` at
-launch, `stampPaperCampaignResults` fills `linkedRunKeys` from the campaign record on settle), and a
-**"Link a running campaign to a paper"** area at the bottom of the tab links a live campaign manually;
-cards show a "campaign linked · N runs linked" chip.
+**(2b) Papers / Library tab** — shipped (registry + CRUD + claimed-vs-measured + the Automatic-Fill LLM
+draft). Pending:
 
-- **Starter-paper seeding (DONE):** the manifest ships `papers?: TrainingPaperSeed[]` and the Papers
-  tab shows an "Import N starter approaches" banner that upserts them once (by id, skipping any the
-  user already has so edits/verdicts aren't clobbered). BlackSwan's `trainer.json` carries the curated
-  top-10 trading papers.
-- **"Automatic Fill" backend — SHIPPED.** Paste a link in the add-paper chooser → "Automatic Fill" →
-  an LLM drafts the entry. Built across all three layers: (1) `analyzePaperFromUrl` tool method in
-  `ModelTrainerTools` (the TOOL fetches + text-extracts the page via `fetchPaperText` — arXiv pdf→abs
-  normalised, PDFs rejected with a clear message; `extractPaperText` is pure HTML→text; then ONE
-  structured-output inference via the existing `inferenceExecutor`, `parseFirstValidJson` →
-  `coercePaperDraft` → a `TrainingPaperRecord` draft incl. a suggested `replicateConfig` against the
-  manifest levers; upserts a `<recordType>-paper` record `status:'untested' source:'research'` keyed by
-  `uuidv4`, fires `onRecordWritten`). (2) Backend `analyze-paper` activity (`requiresApi:true`, mirrors
-  `propose`; also writes a `-paper-analysis` 'latest' summary). (3) Viewer `onPaperAutoFill` triggers it,
-  holds the spinner, observes, then closes the form + re-renders Papers so the **draft appears as a
-  reviewable card** (Design X — the bridge has no generic request→response, so we auto-create + review
-  rather than prefill the add-form). TDD'd (utils + tool with mock executor/storage/fetch).
-  - Still DEFERRED: open-ended `researchTrainingPapers` (discover N papers) + the heavy
-    auto-seed/verify pipeline. Optional UX upgrade — prefill the add-form from the draft instead of
-    auto-creating the card — would need a request→response bridge verb.
+- Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
+  (find → web-verify → synthesize). Deferred.
+- Optional UX: prefill the add-paper form from the Automatic-Fill draft instead of auto-creating a
+  reviewable card — needs a request→response bridge verb.
 
 ### 3c. Models / Architectures library (like Papers, for model build-ups)
 
-- **The registry/tab — SHIPPED.** A Models tab mirroring Papers: `TrainingModelRecord`/`TrainingModelSeed`
-  types + `<recordType>-model` records + CRUD, cards showing the build-up (model_name / algo / net /
-  policy internals) + rationale + claimed-vs-measured + a proven/disproved verdict badge + a verdict
-  filter, Replicate→Launch (prefills from `replicateConfig` or `{fixed: match}`), Edit/Delete, and the
-  manifest seed-import banner. KEY DIFFERENCE from Papers: evidence is AUTO-DERIVED — a card's `match`
-  names the model-lever values, and `modelMatchingRuns` finds the runs using that architecture, so
-  measured + the suggested verdict come from them automatically (no manual run-linking / campaign
-  machinery). "View N runs" filters the Runs tab to the architecture's runs. BlackSwan's `trainer.json`
-  seeds 10 architectures (reppo-custom, trpo-custom, ppo-custom, duel-dqn-custom(+lstm),
-  munchausen-dqn-custom, qrdqn-custom, vanilla dqn, supervised+rules, hodl) with honest pre-v3 caveats.
-- **The research + build direction — STARTED (attention + TCN shipped).** A web-grounded survey
-  (5 angles → ranked) picked two cheap, defensible, genuinely-new encoders. Built
-  `src/model/custom/sequence_extractor.py` — a `SequenceFeaturesExtractor(BaseFeaturesExtractor)` that
-  reshapes the flat (time-major) obs back to its `[lookback, per_bar]` bar grid and runs a TRUE
-  temporal encoder over the bars (the existing `custom_net_arch` attention tokens run on the flat
-  vector — degenerate), then pools → policy MLP. Two encoders: `attn` (1-block self-attention +
-  learned positional) and `tcn` (dilated causal residual conv). Wired as PPO model_names
-  **`attn-ppo` / `tcn-ppo`** in `model_factory` (plain `MlpPolicy` + `features_extractor_class`;
-  lookback from `env.data_provider`), added to the manifest model_name choices, seeded as Models cards
-  - an **Exp 14 architecture-A/B sweep** (reppo LSTM vs attn vs tcn). TDD'd (9 tests incl. the
-    reshape-ordering/leakage watchpoint + a `create_model` build smoke). HONEST FRAMING (in the cards):
-    architecture is almost certainly NOT the high-leverage lever on one noisy asset at 0.1% fees — these
-    are variance-reduction + a diagnostic; the acceptance gate is beating BOTH buy-and-hold AND the tuned
-    LSTM on walk-forward `traded_return` across ≥3 seeds + windows.
+The Models tab + the `attn-ppo` / `tcn-ppo` encoders are shipped. Pending:
+
 - **LEFT (optional):** a **GRU** recurrent core — must be a custom `RecurrentActorCriticPolicy` subclass
   (state lives in the policy, not a features-extractor), expected to be a wash vs LSTM; and an SSM
   (S4D) falsification arm. Both deferred (lower value / higher effort); the registry + sweep pattern
   make them drop-in when wanted.
 
-### 3. xAI — explain WHY the model acted (parallel track, like Papers)
+### 3. xAI — explain WHY the model acted (parallel track)
 
-A decision drill-down across BlackSwan + model-trainer (NOT a new project); the model-trainer side
-stays domain-oblivious (generic "decision trace", arbitrary action strings, no trading vocabulary).
+The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is shipped (git +
+`docs/architecture.md`); the model-trainer side stays domain-oblivious. Pending:
 
-**The spine — SHIPPED.** `trainer/decision_trace.py` (BlackSwan) reconstructs the per-step action trace
-from the env's retained arrays, then DETERMINISTICALLY replays `model.test()` once more to capture
-per-step confidence + per-action values (DQN Q-values, PPO/TRPO action probs) and gradient saliency,
-attaching a compact `DecisionTrace` to `summary.artifacts.decisionTrace` (full per-step + obs sidecar
-opt-in via `decision_trace_full`); hooked after `build_summary` in `run.py`, best-effort (a missing
-trace is never an error). Generic types + a soft `validateDecisionTrace` live in the engine
-(`modelTrainerTypes.ts`/`modelTrainerUtils.ts`; ingestion strips an unusable trace). The viewer's
-**Explain** section renders the action-distribution diagnostic (generic anomaly + dormant-action
-flags), the **sparse-sell deep-dive** (per-action value-over-time chart on the shared step axis — makes
-"is hold persistently worth more than sell?" self-evident), confidence-over-time, and **input
-attribution by fidelity layer + engineered signal**; `chatAboutRun` is enriched with a trace summary
-(counts, dormant-action value gaps, top attributed inputs).
-
-Feature attribution (gradient saliency) ships `perFeature` AND a precise `byGroup` — `layer:1h` /
-`layer:1d` (each fidelity layer's columns) and `engineered:drawdown` / `in_position` / … — derived in
-`decision_trace.py` from the env's observation layout (`config.layers` + the active engineered extras),
-reconciled against `obs_dim/lookback` so any drift degrades to per-feature-only rather than mislabel.
-Verified live on 1d and 1h+1d runs.
-
-**Data-influence on decisions — counterfactual diff SHIPPED.** "Did this new information change the
-model's DECISIONS, and for the better — even when the score hasn't moved?" The engine's pure
-`diffDecisionTraces(baseline, tweak)` (`modelTrainerUtils.ts`; types `DecisionTraceDiff` /
-`DecisionStepDelta` / `DecisionQualitySignal`) aligns two runs that share a dataset/window step-by-step
-(by `datasetAlignmentSignature` + equal `totalSteps`) and reports divergence rate, per-action count
-deltas, confidence shift, and — the honest core — a decision-quality verdict from the realized reward
-delta AT the divergent steps, CONTROLLED against unchanged steps, with an insufficiency guard and
-"heuristic, not causal" labeling; the objective delta is context, not the verdict, and a disagreement
-between them is surfaced as the interesting case. ZERO new BlackSwan infra (runs off the already-emitted
-trace). The viewer's 2-run Compare pane grows a **Decision diff** section + a **Discuss these two runs**
-chat seeded with the diff. Verified live on a real 1d run pair (`use_indicators` off→on: 53% of decisions
-changed, verdict `worse`, agreeing with the objective drop).
-
-**The xAI TAB — Phase 1+2 SHIPPED.** A dedicated viewer tab collecting both explainability LEVELS, plus
-the analyse→run loop, all deterministic + non-LLM. Two deep-research passes
-(`config-level`: fANOVA/ablation/DoE/variance; `feature-level`: RL-policy interpretability) ground the
-design.
-
-- **Config-effect engine (TypeScript, pure, parity-mirrored to the viewer).** `src/xaiUtils.ts` +
-  types/constants: a SELECTABLE-criterion (objective / any metric / runtime, max-or-min) analysis over
-  stored run records. `ofatContrasts` gives the exact one-factor-at-a-time read (runs identical on every
-  OTHER lever + dataset → no confounding) with seed-variance rigor — **IQM** aggregate, deterministic
-  seeded **bootstrap CIs**, the **difference-CI** significance route (not the CI-overlap fallacy), and
-  **Benjamini-Hochberg FDR** across comparisons; `leverImportances` is the cheap surrogate-free screening
-  view. `viewer/xai.js` mirrors it exactly (a `scripts/xaiParityCheck.mjs` harness asserts byte-identical
-  results). 100% function coverage; the viewer "Config effects" panel renders importance + the controlled
-  contrast.
-- **Model internals (feature-level).** The xAI tab re-homes Explain + the Decision diff and adds cheap
-  trace-only reads: **decisiveness** (top-2 action-value gap), **policy entropy over time**, and
-  **confidence calibration** (mean realised reward by confidence bin). "Analyze in xAI" on a run opens it.
-- **The analyse→run loop.** `recommendExperiments` deterministically surfaces gaps — **missing factorial
-  cells** + **variance-thin top setups** (need ≥5 seeds) — each as a launchable `ExperimentSpec`; the
-  "Suggested experiments" panel fires them as **batched campaigns** (concurrency selector → existing
-  `train` activity, NOT the LLM `propose` path), and the tab auto-recomputes on `data:updated`. Low-data
-  estimates carry a ⚠ + a "run more" jump to the batch; an "Analyze in xAI" 🔬 entry + a clear-focus
-  control round out the UX. BlackSwan now stores the CONCRETE `fidelity_set` (never the `auto` synonym),
-  and a one-click viewer migration normalises legacy `auto` records (recomputing the setup key).
-
-- **Phase 3 — the ablation TREE + global importance — SHIPPED.** A seeded TypeScript **random-forest
-  surrogate** (`fitConfigSurrogate`/`predictConfig`, deterministic) over (config → criterion) predicts
-  UNOBSERVED configs, so it fills the OFAT gaps. On it: **fANOVA** main+interaction importance
-  (`fanovaImportances`), the **ablation tree** (`ablationPath` — greedy worst→best, the single change at
-  each step that helps most), and a **2-lever interaction heatmap** (`interactionGrid` — "does A help
-  universally or only at some B?"). All mirrored into `viewer/xai.js` and asserted byte-identical by the
-  parity harness (which caught a real mirror infinite-loop). 100% function coverage; the "Surrogate model"
-  panel renders all three, framed honestly as a model to confirm with real runs.
-
-Remaining (the expansion):
-
-- **Phase 4 — deeper feature attribution (needs BlackSwan emission).** Integrated Gradients + occlusion /
-  permutation importance + the **Adebayo sanity-check badge** (recompute with randomised weights — visual
-  plausibility ≠ faithfulness) + per-step **reward-component decomposition** (BlackSwan's reward is already
-  a named additive sum). Subsumes the old "permutation/SHAP" bullet.
-- **Phase 5 — parked.** TabularSHAP/DeepSHAP, latent t-SNE/UMAP + probing, attention-weight viz (attn-ppo),
-  generative counterfactual states (needs a GAN), and the per-step group-saliency + mid-training-checkpoint
-  data-influence follow-ons.
+- **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
+  clean but has NOT been eyeballed in the running app — the one open verification.
+- **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
+  sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
+  (attn-ppo only); generative counterfactual states (needs a GAN).
+- **Data-influence follow-ons (parked).** Per-step group-saliency + a mid-training-checkpoint trace —
+  both reuse the shipped `DecisionTraceDiff` spine but need a NEW BlackSwan emission first.
 - **PARKED — step-by-step ANIMATION replay** + scrubber. No trace-artifact change needed.
 
 ---

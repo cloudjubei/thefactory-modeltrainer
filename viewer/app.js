@@ -19,8 +19,19 @@ const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const CONCURRENCY_SS = 'trainer.concurrency'
-const ACTIVITY_BUDGET_SS = 'trainer.activityBudget'
-const DEFAULT_ACTIVITY_BUDGET = 3
+// Two independent concurrency lanes. EXPERIMENT activities (training campaigns + checkpoint
+// evaluations) execute the project's training code on compute and share one budget; the lighter
+// TASK activities (judge / propose / analyze-paper) get their own budget so a quick judge or paper
+// import is never blocked behind a long campaign. The experiment key is kept stable so an existing
+// 'activityBudget' setting carries over as the experiment budget.
+const EXPERIMENT_BUDGET_SS = 'trainer.activityBudget'
+const DEFAULT_EXPERIMENT_BUDGET = 3
+const TASK_BUDGET_SS = 'trainer.taskBudget'
+const DEFAULT_TASK_BUDGET = 3
+// Activity types that run on compute — the experiment lane. Everything else is a task.
+const EXPERIMENT_ACTIVITY_TYPES = new Set(['train', 'evaluate'])
+// Whether the 2nd ('Tasks') column is collapsed (persisted per session).
+const TASKS_COLLAPSED_SS = 'trainer.tasksCollapsed'
 // activityIds the user PAUSED (vs a backend-down stall). Persisted so a paused campaign still
 // surfaces as Resume-able after a reload; resuming re-launches it and the trainer's completed-run
 // skip continues from the last finished run. Cleared on resume/discard.
@@ -1544,13 +1555,25 @@ async function readLiveActivityIds() {
     return new Set()
   }
 }
-// How many compute slots are in use — only RUNNING/starting activities count (a paused or
+// Whether an activity type runs on compute (experiment lane) vs the lighter task lane.
+function isExperimentActivityType(type) {
+  return EXPERIMENT_ACTIVITY_TYPES.has(type)
+}
+// How many slots one lane is using — only RUNNING/starting activities count (a paused or
 // stalled-waiting-to-resume entry isn't consuming compute, so it shouldn't block new launches).
-function liveSlotCount() {
+function laneSlotCount(experiment) {
   let n = 0
-  for (const a of liveActivities.values())
-    if (a.status === 'running' || a.status === 'starting') n++
+  for (const a of liveActivities.values()) {
+    if (a.status !== 'running' && a.status !== 'starting') continue
+    if (isExperimentActivityType(a.activityType) === experiment) n++
+  }
   return n
+}
+function experimentSlotCount() {
+  return laneSlotCount(true)
+}
+function taskSlotCount() {
+  return laneSlotCount(false)
 }
 function anyActivityRunning() {
   for (const a of liveActivities.values())
@@ -1568,14 +1591,18 @@ async function startOrEnqueue(activityType, params, label, extra) {
     queuedAt: nowIso(),
     ...(extra || {}),
   }
-  if (liveSlotCount() < savedActivityBudget()) {
+  const experiment = isExperimentActivityType(activityType)
+  const slots = experiment ? experimentSlotCount() : taskSlotCount()
+  const budget = experiment ? savedExperimentBudget() : savedTaskBudget()
+  if (slots < budget) {
     const activityId = await launchActivity(item)
     if (activityId) return { started: true, activityId }
   }
   await putQueueItem(item)
   await refreshQueue()
   const queue = await readQueue()
-  return { queued: true, id: item.id, ahead: queue.length }
+  const ahead = queue.filter((q) => isExperimentActivityType(q.activityType) === experiment).length
+  return { queued: true, id: item.id, ahead }
 }
 async function refreshQueue() {
   queueCache = await readQueue()
@@ -1590,26 +1617,45 @@ async function onQueueRemove(id) {
   }
   await refreshQueue()
 }
-// Drain the queue until the activity budget is full. Each dispatched activity observes
-// itself (non-blocking) and re-pumps when it settles, freeing its slot for the next item.
+// Drain BOTH lanes until each is full to its own budget. The lanes are independent: a full
+// experiment lane never holds back a queued task, and vice versa. Each dispatched activity
+// observes itself (non-blocking) and re-pumps when it settles, freeing its slot for the next item.
 async function pumpQueue() {
   if (queuePumping || !embedded() || !manifest) return
   const epoch = projectEpoch
   queuePumping = true
   try {
-    while (epoch === projectEpoch && liveSlotCount() < savedActivityBudget()) {
+    // A lane that hits a transient launch failure is skipped for the rest of this pump so we
+    // never lose the queue or hammer a failing launch; a later pump (settle / focus) retries.
+    const lanes = [
+      {
+        isExp: true,
+        slotCount: experimentSlotCount,
+        budget: savedExperimentBudget,
+        blocked: false,
+      },
+      { isExp: false, slotCount: taskSlotCount, budget: savedTaskBudget, blocked: false },
+    ]
+    let progressing = true
+    while (progressing && epoch === projectEpoch) {
+      progressing = false
       const queue = await readQueue()
       if (epoch !== projectEpoch || !queue.length) break
-      const head = queue[0]
-      await deleteQueueItem(head.id)
-      queueCache = queueCache.filter((q) => q.id !== head.id)
-      const activityId = await launchActivity(head)
-      if (!activityId) {
-        // Transient backend failure — put it back and stop draining so we don't lose the
-        // whole queue; a later pump (settle / focus) retries.
-        await putQueueItem(head)
-        queueCache = await readQueue()
-        break
+      for (const lane of lanes) {
+        if (epoch !== projectEpoch || lane.blocked) continue
+        if (lane.slotCount() >= lane.budget()) continue
+        const head = queue.find((q) => isExperimentActivityType(q.activityType) === lane.isExp)
+        if (!head) continue
+        await deleteQueueItem(head.id)
+        queueCache = queueCache.filter((q) => q.id !== head.id)
+        const activityId = await launchActivity(head)
+        if (activityId) {
+          progressing = true
+        } else {
+          await putQueueItem(head)
+          queueCache = await readQueue()
+          lane.blocked = true
+        }
       }
     }
   } finally {
@@ -4045,6 +4091,66 @@ function decisionConfidenceChartHtml(trace) {
   })
   return `<h4 class="card-sub">Confidence in the chosen action over time</h4><div class="chart-wrap">${svg}</div>`
 }
+// Reward decomposition — "why this reward": the named additive contributions (base earnings vs the
+// penalties that dragged it down), so the user sees what's driving the score. `total` shown last.
+function decisionRewardBreakdownHtml(trace) {
+  const bd = trace.rewardBreakdown
+  if (!bd || typeof bd !== 'object') return ''
+  const entries = Object.entries(bd).filter(([, v]) => Number.isFinite(Number(v)))
+  if (!entries.length) return ''
+  const sorted = entries
+    .filter(([k]) => k !== 'total')
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+  if (bd.total !== undefined && Number.isFinite(Number(bd.total)))
+    sorted.push(['total', Number(bd.total)])
+  const rows = sorted
+    .map(([k, v]) => {
+      const isTotal = k === 'total'
+      const cls = Number(v) >= 0 ? 'delta-pos' : 'delta-neg'
+      return `<tr><th>${isTotal ? '<strong>total</strong>' : escapeHtml(k)}</th><td class="num ${cls}">${Number(v) >= 0 ? '+' : ''}${escapeHtml(formatTickValue(v))}</td></tr>`
+    })
+    .join('')
+  return `<h4 class="card-sub">Reward breakdown <span class="card-sub">— why this reward (named contributions sum to the total)</span></h4>
+    <table class="kv-table report-table"><thead><tr><th>component</th><th class="num">contribution</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+// Latent state map — a 2-D PCA of the policy's penultimate-layer activations, coloured by the action
+// taken. Clusters = how the model organises states by decision (its INTERNAL representation).
+function decisionLatentMapHtml(trace) {
+  const lm = trace.latentMap
+  if (!lm || !Array.isArray(lm.points)) return ''
+  const points = lm.points
+    .map((p) => ({ x: Number(p.x), y: Number(p.y), group: String(p.action) }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y))
+  if (points.length < 3) return ''
+  const actions = [...new Set(points.map((p) => p.group))]
+  const groupColors = new Map(actions.map((a, i) => [a, CHART_PALETTE[i % CHART_PALETTE.length]]))
+  const svg = buildScatterChart({
+    points,
+    xLabel: 'PC1',
+    yLabel: 'PC2',
+    width: 460,
+    height: 320,
+    groupColors,
+    ariaLabel: 'latent state map coloured by action',
+  })
+  const varPct = Number.isFinite(Number(lm.varianceExplained))
+    ? `${Math.round(Number(lm.varianceExplained) * 100)}% of variance`
+    : ''
+  return `<h4 class="card-sub">Latent state map <span class="card-sub">— penultimate-layer activations (PCA${varPct ? `, ${escapeHtml(varPct)}` : ''}); clusters = how it organises states by decision</span></h4>
+    ${chartLegendHtml(groupColors)}<div class="chart-wrap">${svg}</div>
+    ${xaiLatentProbeHtml(lm.probe)}`
+}
+// The linear-probe read: does the latent linearly encode the action? Accuracy vs the majority baseline.
+function xaiLatentProbeHtml(probe) {
+  if (!probe || typeof probe !== 'object' || !Number.isFinite(Number(probe.accuracy))) return ''
+  const acc = Math.round(Number(probe.accuracy) * 100)
+  const base = Number.isFinite(Number(probe.baseline))
+    ? Math.round(Number(probe.baseline) * 100)
+    : null
+  const beats = base !== null && acc > base + 5
+  const cls = beats ? 'is-ok' : ''
+  return `<p class="badges-row"><span class="badge ${cls}">linear probe ${acc}%</span> <span class="card-sub">— a linear classifier predicts the action from the latent at ${acc}% accuracy${base !== null ? ` (vs ${base}% majority baseline)` : ''}${beats ? ' — the representation linearly encodes the decision' : base !== null ? ' — barely above chance, so the decision isn’t linearly separable in the latent' : ''}.</span></p>`
+}
 function decisionAttributionHtml(trace) {
   const fa = trace.featureAttribution
   if (!fa || typeof fa !== 'object') return ''
@@ -4068,7 +4174,20 @@ function decisionAttributionHtml(trace) {
     .join('')
   const meta = `${escapeHtml(String(fa.method || 'saliency'))}${fa.samples ? `, ${Number(fa.samples)} decisions` : ''}`
   return `<h4 class="card-sub">Input attribution — ${meta}</h4>
+    ${xaiSanityBadgeHtml(fa.sanityCheck)}
     <table class="kv-table report-table"><thead><tr><th>${label}</th><th class="num">saliency</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+// The Adebayo saliency sanity-check verdict: a faithful map CHANGES when the model's weights are
+// randomized (low rank correlation). A failed/absent check tells the user not to over-trust the map.
+function xaiSanityBadgeHtml(sc) {
+  if (!sc || typeof sc !== 'object') return ''
+  const corr = Number.isFinite(Number(sc.rankCorrelation))
+    ? Number(sc.rankCorrelation).toFixed(2)
+    : '?'
+  if (sc.passed === true) {
+    return `<p class="badges-row"><span class="badge is-ok">sanity ✓ faithful</span> <span class="card-sub">— saliency changed under weight-randomization (rank corr ${escapeHtml(corr)}); Adebayo check.</span></p>`
+  }
+  return `<p class="badges-row"><span class="badge is-warn">sanity ⚠ unreliable</span> <span class="card-sub">— saliency barely changed when weights were randomized (rank corr ${escapeHtml(corr)}), so it may reflect the input/architecture, not what the model learned. Treat with caution.</span></p>`
 }
 function explainSectionHtml(summary) {
   const trace = readDecisionTrace(summary)
@@ -4076,9 +4195,11 @@ function explainSectionHtml(summary) {
   const digest = decisionTraceDigest(trace)
   const inner = [
     decisionDistributionHtml(digest),
+    decisionRewardBreakdownHtml(trace),
     decisionValueChartHtml(trace, digest),
     decisionConfidenceChartHtml(trace),
     decisionAttributionHtml(trace),
+    decisionLatentMapHtml(trace),
   ]
     .filter(Boolean)
     .join('')
@@ -4122,6 +4243,14 @@ function decisionTraceChatSummary(summary) {
       .map(([i, v]) => `f${i}(${formatTickValue(v)})`)
       .join(', ')
     if (top) parts.push(`Top input features by saliency: ${top}.`)
+  }
+  const bd = trace.rewardBreakdown
+  if (bd && typeof bd === 'object') {
+    const comps = Object.entries(bd)
+      .filter(([k, v]) => k !== 'total' && Number.isFinite(Number(v)))
+      .map(([k, v]) => `${k} ${Number(v) >= 0 ? '+' : ''}${formatTickValue(v)}`)
+      .join(', ')
+    if (comps) parts.push(`Reward breakdown (why this reward): ${comps}.`)
   }
   return `Decision trace summary:\n${parts.join('\n')}`
 }
@@ -7932,20 +8061,47 @@ function rememberConcurrency(n) {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
 }
-// How many ACTIVITIES (campaigns / judge / propose / evaluate) may run at once. A judge no
-// longer blocks a campaign, and several campaigns can run together. Each campaign still has
-// its own "Max parallel runs", so total training processes ≈ the sum — keep both modest.
-function savedActivityBudget() {
+// How many EXPERIMENTS (campaigns + evaluations) and how many TASKS (judge / propose / paper) may
+// run at once — two independent lanes so a quick task never waits behind a long campaign. Each
+// campaign still has its own "Max parallel runs", so total training processes ≈ the sum.
+function savedLaneBudget(key, fallback) {
   try {
-    const n = Math.floor(Number(localStorage.getItem(ACTIVITY_BUDGET_SS)))
-    return Number.isFinite(n) && n >= 1 ? n : DEFAULT_ACTIVITY_BUDGET
+    const n = Math.floor(Number(localStorage.getItem(key)))
+    return Number.isFinite(n) && n >= 1 ? n : fallback
   } catch {
-    return DEFAULT_ACTIVITY_BUDGET
+    return fallback
   }
 }
-function rememberActivityBudget(n) {
+function savedExperimentBudget() {
+  return savedLaneBudget(EXPERIMENT_BUDGET_SS, DEFAULT_EXPERIMENT_BUDGET)
+}
+function savedTaskBudget() {
+  return savedLaneBudget(TASK_BUDGET_SS, DEFAULT_TASK_BUDGET)
+}
+function rememberLaneBudget(key, n) {
   try {
-    localStorage.setItem(ACTIVITY_BUDGET_SS, String(Math.max(1, Math.floor(Number(n)) || 1)))
+    localStorage.setItem(key, String(Math.max(1, Math.floor(Number(n)) || 1)))
+  } catch {
+    // best-effort
+  }
+}
+function rememberExperimentBudget(n) {
+  rememberLaneBudget(EXPERIMENT_BUDGET_SS, n)
+}
+function rememberTaskBudget(n) {
+  rememberLaneBudget(TASK_BUDGET_SS, n)
+}
+// Whether the 2nd ('Tasks') column is collapsed — a per-session UI preference.
+function tasksColCollapsed() {
+  try {
+    return sessionStorage.getItem(TASKS_COLLAPSED_SS) === '1'
+  } catch {
+    return false
+  }
+}
+function setTasksColCollapsed(collapsed) {
+  try {
+    sessionStorage.setItem(TASKS_COLLAPSED_SS, collapsed ? '1' : '0')
   } catch {
     // best-effort
   }
@@ -8594,9 +8750,12 @@ async function resumeRunningActivity() {
   const tracked = (id) => [...liveActivities.values()].some((e) => e.activityId === id)
   const live = mine.filter((a) => a.status === 'running' && a.isLive !== false)
   for (const a of live) {
-    if (liveSlotCount() >= savedActivityBudget()) break
     if (tracked(a.activityId)) continue
     const type = quickActivityType(a) || 'train'
+    const experiment = isExperimentActivityType(type)
+    const slots = experiment ? experimentSlotCount() : taskSlotCount()
+    const budget = experiment ? savedExperimentBudget() : savedTaskBudget()
+    if (slots >= budget) continue
     trackExistingActivity(a.activityId, type, activityTypeLabel(type))
   }
   // STALLED: 'running' in the store but NOT live in the backend (it restarted mid-run). Surface
@@ -8962,11 +9121,10 @@ function bestLineHtml(campaign) {
   if (!campaign || !campaign.bestKey) return ''
   return `<p class="activity-best">Best: <code>${escapeHtml(shortKey(campaign.bestKey))}</code> @ ${escapeHtml(formatObjective(campaign.bestObjective))}</p>`
 }
-// The persisted queue under the current activity: the item being dispatched
-// (spinner) plus every waiting entry with its type chip and a remove button.
-function queueSectionHtml() {
-  if (!queueCache.length) return ''
-  const rows = queueCache
+// A persisted queue for one lane: each waiting entry with its type chip and a remove button.
+function queueSectionHtml(items, title) {
+  if (!items.length) return ''
+  const rows = items
     .map(
       (item) => `<li class="queue-item">
       <span class="badge queue-chip">${escapeHtml(item.activityType)}</span>
@@ -8976,19 +9134,27 @@ function queueSectionHtml() {
     )
     .join('')
   return `<div class="queue-section">
-    <h3>Queue <span class="group-count">${queueCache.length}</span></h3>
+    <h3>${escapeHtml(title)} <span class="group-count">${items.length}</span></h3>
     <ul class="queue-list">${rows}</ul>
   </div>`
 }
-// Two activity-level knobs (persisted, applied to activities started after): how many
-// ACTIVITIES (campaigns / judge / …) run at once, and how many RUNS each campaign runs at once.
+// The experiment lane's knobs (persisted, applied to activities started after): how many
+// EXPERIMENTS (campaigns + evaluations) run at once, and how many RUNS each campaign runs at once.
 function activitySettingsHtml() {
   return `<div class="activity-settings">
-    <label class="field"><span${helpAttr('How many ACTIVITIES (campaigns, judge, propose, evaluate) run at the same time. A judge no longer blocks a campaign, and several campaigns can run together. Each campaign also has its own “Max parallel runs”, so total training processes ≈ the sum — keep both modest for your host.')}>Max concurrent activities</span>
-      <input type="number" id="activity-budget" min="1" step="1" value="${savedActivityBudget()}" />
+    <label class="field"><span${helpAttr('How many EXPERIMENTS (training campaigns + checkpoint evaluations) run at the same time. These execute the project training code on compute. Each campaign also has its own “Max parallel runs”, so total training processes ≈ the sum — keep both modest for your host.')}>Max concurrent experiments</span>
+      <input type="number" id="experiment-budget" min="1" step="1" value="${savedExperimentBudget()}" />
     </label>
     <label class="field"><span${helpAttr('How many runs of a campaign run at once. Set this BEFORE you launch — it applies to the NEXT campaign you start. It does NOT resize a campaign already running (you would relaunch to change that). The real ceiling is host CPU/GPU/RAM; default 1 = sequential.')}>Max parallel runs</span>
       <input type="number" id="activity-concurrency" min="1" step="1" value="${savedConcurrency()}" />
+    </label>
+  </div>`
+}
+// The task lane's only knob: how many light TASKS (judge / propose / paper import) run at once.
+function taskSettingsHtml() {
+  return `<div class="activity-settings">
+    <label class="field"><span${helpAttr('How many TASKS (judge, propose experiments, import paper) run at the same time. These are light LLM activities that do not use the training compute, so they run in their own lane and never wait behind a campaign.')}>Max concurrent tasks</span>
+      <input type="number" id="task-budget" min="1" step="1" value="${savedTaskBudget()}" />
     </label>
   </div>`
 }
@@ -9054,6 +9220,50 @@ function activityBlockHtml(entry) {
     ${actions}
   </div>`
 }
+// The Activity tab is split into two columns by lane: EXPERIMENTS (campaigns + evaluations) on the
+// left and TASKS (judge / propose / paper import) on the right. The tasks column is collapsible and
+// shows an empty view when nothing is live or queued there.
+function experimentColumnHtml(entries, queue) {
+  const blocks = entries.map(activityBlockHtml).join('')
+  const queueHtml = queueSectionHtml(queue, 'Queue')
+  let inner
+  if (blocks) {
+    inner = `${blocks}${queueHtml}`
+  } else {
+    const last = lastSettledCampaign ? bestLineHtml(lastSettledCampaign) : ''
+    const lastFailures = lastSettledCampaign ? campaignFailuresHtml(lastSettledCampaign) : ''
+    inner = last
+      ? `<div class="activity-block"><div class="activity-status-row"><span class="status-pill is-ok">Last campaign</span></div>${last}${lastFailures}</div>${queueHtml}`
+      : queueHtml ||
+        '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'
+  }
+  const count = entries.length + queue.length
+  return `<section class="activity-col activity-col-experiments">
+    <header class="activity-col-head"><span class="activity-col-title">Experiments${count ? ` <span class="group-count">${count}</span>` : ''}</span></header>
+    ${activitySettingsHtml()}
+    ${inner}
+  </section>`
+}
+function taskColumnHtml(entries, queue, collapsed) {
+  const count = entries.length + queue.length
+  const blocks = entries.map(activityBlockHtml).join('')
+  const queueHtml = queueSectionHtml(queue, 'Queued')
+  const bodyContent = count
+    ? `${blocks}${queueHtml}`
+    : '<div class="empty-hint">No tasks running. Judging, proposing experiments, and importing papers appear here — they run without waiting on training.</div>'
+  // The toggle only appears on the IDLE lane (to declutter the empty view); once there is work the
+  // header is a plain title so the body — with its Abort/Resume/remove controls — always shows.
+  const header = count
+    ? `<span class="activity-col-title">Tasks <span class="group-count">${count}</span></span>`
+    : `<button type="button" class="activity-col-toggle" data-tasks-toggle aria-expanded="${collapsed ? 'false' : 'true'}"><span class="twisty">${collapsed ? '▸' : '▾'}</span> Tasks</button>`
+  // The task-budget control mirrors the experiment column's settings and stays visible in every
+  // state (including collapsed) so the lane's concurrency is always adjustable.
+  return `<section class="activity-col activity-col-tasks">
+    <header class="activity-col-head">${header}</header>
+    ${taskSettingsHtml()}
+    ${collapsed ? '' : `<div class="activity-col-body">${bodyContent}</div>`}
+  </section>`
+}
 function renderActivity() {
   const body = byId('activity-body')
   if (!body) return
@@ -9063,39 +9273,40 @@ function renderActivity() {
     setHtml(body, '<div class="empty-hint">Open inside the Overseer to follow campaigns.</div>')
     return
   }
-  const queueHtml = queueSectionHtml()
   const entries = [...liveActivities.values()].sort((a, b) => b.startedAt - a.startedAt)
-  const blocks = entries.map(activityBlockHtml).join('')
+  const experimentEntries = entries.filter((e) => isExperimentActivityType(e.activityType))
+  const taskEntries = entries.filter((e) => !isExperimentActivityType(e.activityType))
+  const experimentQueue = queueCache.filter((q) => isExperimentActivityType(q.activityType))
+  const taskQueue = queueCache.filter((q) => !isExperimentActivityType(q.activityType))
+  // The Tasks column only collapses when its lane is IDLE — any live/paused block or queued item
+  // keeps it shown so the Abort/Resume/remove controls stay reachable. Collapsing the idle column
+  // reclaims its width (via the grid modifier) so Experiments fills the row.
+  const tasksCollapsed = tasksColCollapsed() && taskEntries.length + taskQueue.length === 0
+  setHtml(
+    body,
+    `<div class="activity-cols${tasksCollapsed ? ' tasks-collapsed' : ''}">${experimentColumnHtml(experimentEntries, experimentQueue)}${taskColumnHtml(taskEntries, taskQueue, tasksCollapsed)}</div>`,
+  )
   // Every in-flight run across all live campaigns, for the shared elapsed-timer ticker.
   const allInFlight = []
-  for (const entry of entries) {
+  for (const entry of experimentEntries) {
     const p = entry.activityType === 'train' && entry.status === 'running' ? entry.progress : null
     if (p && p.phase === 'train') {
       const inf = Array.isArray(p.inFlight) ? p.inFlight : p.current ? [p.current] : []
       for (const r of inf) allInFlight.push(r)
     }
   }
-  if (!blocks) {
-    const last = lastSettledCampaign ? bestLineHtml(lastSettledCampaign) : ''
-    const lastFailures = lastSettledCampaign ? campaignFailuresHtml(lastSettledCampaign) : ''
-    setHtml(
-      body,
-      activitySettingsHtml() +
-        (last
-          ? `<div class="activity-block"><div class="activity-status-row"><span class="status-pill is-ok">Last campaign</span></div>${last}${lastFailures}</div>${queueHtml}`
-          : queueHtml ||
-            '<div class="empty-hint">No campaign yet — launch one from the Launch tab.</div>'),
-    )
-    syncInFlightTimer([])
-    return
-  }
-  setHtml(body, `${activitySettingsHtml()}${blocks}${queueHtml}`)
   syncInFlightTimer(allInFlight)
 }
 function setupActivity() {
   const body = byId('activity-body')
   if (!body) return
   body.addEventListener('click', (event) => {
+    const tasksToggle = event.target.closest('[data-tasks-toggle]')
+    if (tasksToggle) {
+      setTasksColCollapsed(!tasksColCollapsed())
+      renderActivity()
+      return
+    }
     const pauseBtn = event.target.closest('button[data-pause]')
     if (pauseBtn) {
       pausePromptId = pauseBtn.dataset.pause
@@ -9137,8 +9348,11 @@ function setupActivity() {
   })
   body.addEventListener('change', (event) => {
     if (event.target.id === 'activity-concurrency') rememberConcurrency(event.target.value)
-    else if (event.target.id === 'activity-budget') {
-      rememberActivityBudget(event.target.value)
+    else if (event.target.id === 'experiment-budget') {
+      rememberExperimentBudget(event.target.value)
+      pumpQueue()
+    } else if (event.target.id === 'task-budget') {
+      rememberTaskBudget(event.target.value)
       pumpQueue()
     }
   })

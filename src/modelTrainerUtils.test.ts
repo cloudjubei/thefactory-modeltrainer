@@ -750,6 +750,99 @@ describe('validateDecisionTrace', () => {
     })
   })
 
+  it('coerces the saliency sanityCheck (Adebayo model-randomization)', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      featureAttribution: {
+        perFeature: [0.5, 0.2],
+        sanityCheck: {
+          method: 'model-randomization',
+          rankCorrelation: 0.12,
+          passed: true,
+          junk: 1,
+        },
+      },
+    })
+    expect(trace?.featureAttribution?.sanityCheck).toEqual({
+      method: 'model-randomization',
+      rankCorrelation: 0.12,
+      passed: true,
+    })
+  })
+
+  it('drops an empty/garbage sanityCheck', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      featureAttribution: {
+        perFeature: [0.5],
+        sanityCheck: { rankCorrelation: 'x', passed: 'no' },
+      },
+    })
+    expect(trace?.featureAttribution?.sanityCheck).toBeUndefined()
+  })
+
+  it('coerces a rewardBreakdown (why this reward), dropping non-numeric entries', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      rewardBreakdown: {
+        base: 3.2,
+        turnover_penalty: -0.4,
+        noop_penalty: -0.1,
+        total: 2.7,
+        bad: 'x',
+      },
+    })
+    expect(trace?.rewardBreakdown).toEqual({
+      base: 3.2,
+      turnover_penalty: -0.4,
+      noop_penalty: -0.1,
+      total: 2.7,
+    })
+  })
+
+  it('coerces a latentMap, dropping malformed points and requiring ≥3', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      latentMap: {
+        points: [
+          { x: 0.1, y: 0.2, action: 'buy' },
+          { x: -0.3, y: 0.4, action: 'sell' },
+          { x: 0.5, y: -0.1, action: 'hold' },
+          { x: 'bad', y: 0, action: 'hold' },
+        ],
+        varianceExplained: 0.71,
+        dim: 64,
+        method: 'pca',
+        probe: {
+          accuracy: 0.88,
+          baseline: 0.45,
+          classes: 3,
+          method: 'ridge-linear',
+          testSize: 60,
+          bad: 'x',
+        },
+      },
+    })
+    expect(trace?.latentMap?.points).toHaveLength(3)
+    expect(trace?.latentMap?.varianceExplained).toBe(0.71)
+    expect(trace?.latentMap?.dim).toBe(64)
+    expect(trace?.latentMap?.probe).toEqual({
+      accuracy: 0.88,
+      baseline: 0.45,
+      classes: 3,
+      method: 'ridge-linear',
+      testSize: 60,
+    })
+  })
+
+  it('drops a latentMap with too few valid points', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      latentMap: { points: [{ x: 0, y: 0, action: 'buy' }] },
+    })
+    expect(trace?.latentMap).toBeUndefined()
+  })
+
   it('omits featureAttribution when it has no usable content', () => {
     const trace = validateDecisionTrace({
       steps: [{ step: 0, action: 'hold' }],

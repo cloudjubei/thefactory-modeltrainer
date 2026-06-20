@@ -256,6 +256,19 @@ export interface DecisionFeatureAttribution {
   method?: string
   /** Number of decision steps the attribution was averaged over. */
   samples?: number
+  /**
+   * The Adebayo "Sanity Checks for Saliency Maps" model-randomization test: a FAITHFUL attribution
+   * changes when the model's weights are randomized. Lets the viewer warn when the saliency reflects the
+   * input/architecture rather than what the model learned, instead of trusting a plausible-but-unfaithful map.
+   */
+  sanityCheck?: {
+    /** How the check was run, e.g. `model-randomization`. */
+    method?: string
+    /** Rank correlation between the real and weight-randomized saliency — low = faithful. */
+    rankCorrelation?: number
+    /** True when the saliency passed (changed enough under randomization to be trusted). */
+    passed?: boolean
+  }
 }
 
 /**
@@ -300,6 +313,55 @@ export interface DecisionTrace {
   featureAttribution?: DecisionFeatureAttribution
   /** Total steps in the full rollout before downsampling (so the view can show "N steps, showing M"). */
   totalSteps?: number
+  /**
+   * Named additive contributions to the run's total reward ("why this reward") — each value is a signed
+   * contribution and they sum to `total`. Domain-defined (e.g. the trading line splits base earnings from
+   * the turnover/no-op penalties), so the Explain view can show what drove vs dragged the reward.
+   */
+  rewardBreakdown?: Record<string, number>
+  /** A 2-D projection of the policy's internal (penultimate-layer) representation — how it organises states. */
+  latentMap?: DecisionLatentMap
+}
+
+/** One projected state in a {@link DecisionLatentMap}: its 2-D coordinates + the action taken there. */
+export interface DecisionLatentPoint {
+  x: number
+  y: number
+  /** The action label chosen at this state (the point's colour). */
+  action: string
+}
+
+/**
+ * A deterministic 2-D projection (PCA) of the policy's penultimate-layer activations over the rollout —
+ * the model's INTERNAL state representation. Clusters by action reveal how it organises states by
+ * decision. Domain-oblivious: arbitrary action labels.
+ */
+export interface DecisionLatentMap {
+  /** The projected states (downsampled to the chart cap), coloured by their action. */
+  points: DecisionLatentPoint[]
+  /** Fraction of the activation variance the two projection axes capture, in [0,1]. */
+  varianceExplained?: number
+  /** The original activation dimensionality (before projection). */
+  dim?: number
+  /** How the projection was computed, e.g. `pca`. */
+  method?: string
+  /**
+   * A linear PROBE (Alain & Bengio) of the latent: how well a linear classifier predicts the action from
+   * the activations. `accuracy` well above `baseline` (the majority-class rate) ⇒ the representation
+   * linearly encodes the decision.
+   */
+  probe?: {
+    /** Held-out accuracy of the linear probe, in [0,1]. */
+    accuracy?: number
+    /** Majority-class accuracy on the held-out set — the trivial baseline to beat. */
+    baseline?: number
+    /** Number of action classes probed. */
+    classes?: number
+    /** How the probe was fit, e.g. `ridge-linear`. */
+    method?: string
+    /** Held-out sample count the accuracy rests on. */
+    testSize?: number
+  }
 }
 
 /** One aligned step in a {@link DecisionTraceDiff}: what each run did at the SAME step index, with per-step deltas. */

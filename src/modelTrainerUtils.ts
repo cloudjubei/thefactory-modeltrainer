@@ -550,6 +550,14 @@ function coerceFeatureAttribution(raw: unknown): DecisionFeatureAttribution | un
   if (byGroup) out.byGroup = byGroup
   if (typeof raw.method === 'string') out.method = raw.method
   if (isFiniteNumber(raw.samples)) out.samples = raw.samples
+  if (isPlainObject(raw.sanityCheck)) {
+    const sc = raw.sanityCheck
+    const sanityCheck: NonNullable<DecisionFeatureAttribution['sanityCheck']> = {}
+    if (typeof sc.method === 'string') sanityCheck.method = sc.method
+    if (isFiniteNumber(sc.rankCorrelation)) sanityCheck.rankCorrelation = sc.rankCorrelation
+    if (typeof sc.passed === 'boolean') sanityCheck.passed = sc.passed
+    if (Object.keys(sanityCheck).length) out.sanityCheck = sanityCheck
+  }
   return out.perFeature || out.byGroup ? out : undefined
 }
 
@@ -568,7 +576,40 @@ export function validateDecisionTrace(raw: unknown): DecisionTrace | undefined {
   const featureAttribution = coerceFeatureAttribution(raw.featureAttribution)
   if (featureAttribution) trace.featureAttribution = featureAttribution
   if (isFiniteNumber(raw.totalSteps)) trace.totalSteps = raw.totalSteps
+  const rewardBreakdown = coerceNumberMap(raw.rewardBreakdown)
+  if (rewardBreakdown) trace.rewardBreakdown = rewardBreakdown
+  const latentMap = coerceLatentMap(raw.latentMap)
+  if (latentMap) trace.latentMap = latentMap
   return trace
+}
+
+function coerceLatentMap(raw: unknown): DecisionTrace['latentMap'] | undefined {
+  if (!isPlainObject(raw) || !Array.isArray(raw.points)) return undefined
+  const points = raw.points
+    .filter(
+      (p): p is { x: number; y: number; action: string } =>
+        isPlainObject(p) &&
+        isFiniteNumber(p.x) &&
+        isFiniteNumber(p.y) &&
+        typeof p.action === 'string',
+    )
+    .map((p) => ({ x: p.x, y: p.y, action: p.action }))
+  if (points.length < 3) return undefined
+  const out: NonNullable<DecisionTrace['latentMap']> = { points }
+  if (isFiniteNumber(raw.varianceExplained)) out.varianceExplained = raw.varianceExplained
+  if (isFiniteNumber(raw.dim)) out.dim = raw.dim
+  if (typeof raw.method === 'string') out.method = raw.method
+  if (isPlainObject(raw.probe)) {
+    const p = raw.probe
+    const probe: NonNullable<NonNullable<DecisionTrace['latentMap']>['probe']> = {}
+    if (isFiniteNumber(p.accuracy)) probe.accuracy = p.accuracy
+    if (isFiniteNumber(p.baseline)) probe.baseline = p.baseline
+    if (isFiniteNumber(p.classes)) probe.classes = p.classes
+    if (typeof p.method === 'string') probe.method = p.method
+    if (isFiniteNumber(p.testSize)) probe.testSize = p.testSize
+    if (Object.keys(probe).length) out.probe = probe
+  }
+  return out
 }
 
 // The dataset fields that determine the STEP AXIS (so two runs sharing them tested the same bars).
