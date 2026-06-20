@@ -367,6 +367,86 @@ export function buildProposeUserContent(input: {
   })
 }
 
+function round2(v: number): number {
+  return Math.round(v * 100) / 100
+}
+
+/** The system prompt for the one-shot xAI narrative — synthesise the deterministic analysis, hedge on uncertainty. */
+export function buildXaiNarrateSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are an ML experiment analyst for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `Below is the DETERMINISTIC xAI analysis of the runs so far. Write a SHORT narrative (3–6 sentences, plain prose — NO headings or bullet lists): what has been learned (which levers matter and which way, what the best setup looks like, the trend), the single biggest opportunity OR risk, and the most valuable next experiment.`,
+    `Be specific and HONEST about uncertainty: lever importances are CONFOUNDED screening signals, the ablation path is a SURROGATE PREDICTION (not measured), and low-seed estimates are unreliable — hedge where the data is thin. Synthesise; do not restate the numbers verbatim. No preamble.`,
+  ].join('\n')
+}
+
+/** Compact, model-readable digest of the deterministic xAI analysis for the narrative. Pure. */
+export function buildXaiNarrateUserContent(input: {
+  criterion: { key: string; direction: 'max' | 'min'; label?: string }
+  runCount: number
+  topRuns: { key: string; value: number; config: Record<string, unknown> }[]
+  fanova: { lever: string; importance: number }[]
+  importances: { lever: string; importance: number; confident: boolean; bestValue: string; worstValue: string }[]
+  ablation?: {
+    baselinePredicted: number
+    incumbentPredicted: number
+    steps: { lever: string; from: string; to: string; gain: number }[]
+  }
+  recommendations: { kind: string; reason: string }[]
+}): string {
+  const c = input.criterion
+  const label = c.label || c.key
+  const pct = (v: number) => `${Math.round(v * 100)}%`
+  const lines = [`Criterion: ${label} (${c.direction} is better). ${input.runCount} completed runs analysed.`]
+  if (input.topRuns.length) {
+    lines.push(
+      `Top runs by ${label}: ` +
+        input.topRuns
+          .slice(0, 5)
+          .map(
+            (r) =>
+              `${r.key.slice(0, 8)}=${round2(r.value)} {${Object.entries(r.config)
+                .filter(([k]) => k !== 'seed')
+                .map(([k, v]) => `${k}=${v}`)
+                .join(' ')}}`,
+          )
+          .join(' | '),
+    )
+  }
+  if (input.fanova.length) {
+    lines.push(
+      `Lever importance (fANOVA on a surrogate; main+interaction): ` +
+        input.fanova.slice(0, 6).map((f) => `${f.lever} ${pct(f.importance)}`).join(', '),
+    )
+  }
+  if (input.importances.length) {
+    lines.push(
+      `Lever importance (marginal screening, CONFOUNDED): ` +
+        input.importances
+          .slice(0, 6)
+          .map((i) => `${i.lever} ${pct(i.importance)}${i.confident ? '' : ' (low data)'} best=${i.bestValue}/worst=${i.worstValue}`)
+          .join('; '),
+    )
+  }
+  if (input.ablation && input.ablation.steps.length) {
+    lines.push(
+      `Ablation path (worst→best, SURROGATE-PREDICTED): baseline ${round2(input.ablation.baselinePredicted)} ` +
+        input.ablation.steps
+          .map((s) => `→ ${s.lever} ${s.from}→${s.to} (${s.gain >= 0 ? '+' : ''}${round2(s.gain)})`)
+          .join(' ') +
+        ` → incumbent ${round2(input.ablation.incumbentPredicted)}`,
+    )
+  }
+  lines.push(
+    input.recommendations.length
+      ? `Deterministic gaps the recommender found: ` +
+          input.recommendations.slice(0, 6).map((r) => `[${r.kind}] ${r.reason}`).join(' | ')
+      : `No obvious factorial/seed gaps — the explored grid is complete + seeded.`,
+  )
+  return lines.join('\n')
+}
+
 /** Upper bound on extracted paper text handed to the model — enough for an abstract/intro, bounded cost. */
 export const PAPER_TEXT_CAP = 12000
 

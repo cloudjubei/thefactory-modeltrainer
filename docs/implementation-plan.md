@@ -86,6 +86,13 @@ The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is 
 
 - **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
   clean but has NOT been eyeballed in the running app — the one open verification.
+- **Agent tools `getRunData` / `getRunXAI` (by run id).** The xAI-tab "Discuss xAI" chat seeds the focused
+  run's full xAI context inline; to let the agent pull ANY run's data/analysis mid-conversation (not just
+  the seeded one), expose two read tools on the project chat via the `extraToolSchemas` seam (the knowledge
+  read-tools precedent — backend owns a `trainerReadTools.ts`, advertised + dispatched, no ToolSchemas
+  regen): `getRunData(runId)` → the stored run record (config + metrics + dataset + trace), and
+  `getRunXAI(runId)` → the deterministic config-effect + trace-internals analysis for that run (the
+  `xaiUtils` reads run server-side). Read-only.
 - **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
   sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
   (attn-ppo only); generative counterfactual states (needs a GAN).

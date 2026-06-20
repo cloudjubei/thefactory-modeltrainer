@@ -1735,6 +1735,76 @@ describe('proposeTrainingHypotheses', () => {
   })
 })
 
+describe('xaiNarrate', () => {
+  it('runs the deterministic xAI analysis, persists the narrative + run count, and feeds the model the facts', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10, { config: { lr: 0.1 }, seed: 0 })
+    await seedRun(storage, 'b', 90, { config: { lr: 0.9 }, seed: 0 })
+    await seedRun(storage, 'c', 50, { config: { lr: 0.5 }, seed: 1 })
+    const executor = stubExecutor('lr is the dominant lever; push it higher.')
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      runCount: 3,
+      narratedBy: 'openai/m',
+      narratedAt: NOW,
+    })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-narrative' })
+    expect(records).toHaveLength(1)
+    expect(records[0].key).toBe('latest')
+    expect(records[0].content).toMatchObject({
+      narrative: 'lr is the dominant lever; push it higher.',
+      runCount: 3,
+      criterionKey: 'objective',
+      narratedBy: 'openai/m',
+    })
+    expect(executor.requests).toHaveLength(1)
+    expect(executor.requests[0].userContent).toContain('lr')
+    expect(executor.requests[0].userContent).toContain('3 completed runs')
+  })
+
+  it('honours a non-default criterion', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10, { durationMs: 1000 })
+    const { tools } = makeJudgeTools(stubExecutor('fast.'), storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      criterion: { key: 'runtime', direction: 'min', label: 'runtime' },
+    })
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-narrative' })
+    expect((records[0].content as { criterionKey: string }).criterionKey).toBe('runtime')
+  })
+
+  it('fires onRecordWritten and requires an inference executor', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10)
+    const written: string[] = []
+    const { tools } = makeJudgeTools(stubExecutor('n'), storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      onRecordWritten: (t, k) => written.push(`${t}/${k}`),
+    })
+    expect(written).toContain('demo-run-xai-narrative/latest')
+
+    const { tools: noLlm } = makeJudgeTools(undefined, storage)
+    await expect(
+      noLlm.xaiNarrate({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM }),
+    ).rejects.toThrow(/inferenceExecutor/)
+  })
+})
+
 describe('analyzePaperFromUrl', () => {
   const DRAFT = JSON.stringify({
     title: 'Deep RL for Trading',

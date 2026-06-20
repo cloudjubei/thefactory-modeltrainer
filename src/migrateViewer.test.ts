@@ -54,6 +54,13 @@ describe('fidelitySetFromLayers', () => {
       'legacy:1m+15m+1h+1d',
     )
   })
+  it('tags a non-sub-hourly stack that is not a runnable set as legacy too', () => {
+    expect(Migrate.fidelitySetFromLayers(['1h', '1w'])).toEqual({
+      fidelitySet: 'legacy:1h+1w',
+      layers: ['1h', '1w'],
+      legacy: true,
+    })
+  })
   it('returns null for empty/invalid input', () => {
     expect(Migrate.fidelitySetFromLayers([])).toBeNull()
     expect(Migrate.fidelitySetFromLayers(null)).toBeNull()

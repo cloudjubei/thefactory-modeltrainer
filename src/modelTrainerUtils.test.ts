@@ -8,6 +8,8 @@ import {
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
+  buildXaiNarrateSystemPrompt,
+  buildXaiNarrateUserContent,
   canonicalConfigString,
   coerceHypothesisItems,
   coercePaperDraft,
@@ -602,6 +604,62 @@ describe('prompt builders', () => {
     expect(parsed.bestObjective).toBe(9)
     expect(parsed.runs[0].key).toBe('a')
     expect(parsed.verdicts[0].score).toBe(80)
+  })
+
+  it('xai-narrate system prompt names the project, objective and demands an honest short narrative', () => {
+    const prompt = buildXaiNarrateSystemPrompt(m)
+    expect(prompt).toContain(m.name)
+    expect(prompt).toContain(m.objective.name)
+    expect(prompt).toContain(m.objective.direction)
+    expect(prompt).toMatch(/SHORT narrative/)
+    expect(prompt).toMatch(/CONFOUNDED|SURROGATE/)
+  })
+
+  it('xai-narrate user content carries criterion, top runs, both importance signals, the ablation path and gaps', () => {
+    const content = buildXaiNarrateUserContent({
+      criterion: { key: 'objective', direction: 'max', label: 'traded return' },
+      runCount: 7,
+      topRuns: [{ key: 'abc123def456', value: 12.34, config: { lr: 0.1, seed: 0 } }],
+      fanova: [{ lever: 'lr', importance: 0.6 }],
+      importances: [
+        { lever: 'lr', importance: 0.5, confident: true, bestValue: '0.1', worstValue: '0.9' },
+        { lever: 'gamma', importance: 0.2, confident: false, bestValue: '0.99', worstValue: '0.9' },
+      ],
+      ablation: {
+        baselinePredicted: 1,
+        incumbentPredicted: 5,
+        steps: [
+          { lever: 'lr', from: '0.9', to: '0.1', gain: 4 },
+          { lever: 'gamma', from: '0.9', to: '0.99', gain: -0.5 },
+        ],
+      },
+      recommendations: [{ kind: 'thin-seeds', reason: 'only 1 seed at the best cell' }],
+    })
+    expect(content).toContain('traded return')
+    expect(content).toContain('7 completed runs')
+    expect(content).toContain('abc123de') // 8-char run id, seed dropped from the config digest
+    expect(content).not.toMatch(/seed=0/)
+    expect(content).toContain('fANOVA')
+    expect(content).toMatch(/gamma .*low data/)
+    expect(content).toContain('best=0.1')
+    // both gain signs are formatted (+ for a gain, bare - for a loss)
+    expect(content).toMatch(/Ablation path.*baseline 1.*lr 0.9→0.1 \(\+4\).*gamma 0.9→0.99 \(-0.5\).*incumbent 5/)
+    expect(content).toMatch(/\[thin-seeds\] only 1 seed/)
+  })
+
+  it('xai-narrate user content states when there are no gaps and omits empty sections', () => {
+    const content = buildXaiNarrateUserContent({
+      criterion: { key: 'objective', direction: 'min' },
+      runCount: 2,
+      topRuns: [],
+      fanova: [],
+      importances: [],
+      recommendations: [],
+    })
+    expect(content).toContain('objective (min is better)')
+    expect(content).toMatch(/No obvious factorial\/seed gaps/)
+    expect(content).not.toContain('fANOVA')
+    expect(content).not.toContain('Ablation path')
   })
 })
 

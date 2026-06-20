@@ -2525,6 +2525,12 @@ pre.json {
 .xai-rec:last-child {
   border-bottom: none;
 }
+.xai-narrative {
+  margin: 0.25rem 0 0.5rem;
+  line-height: 1.5;
+  max-width: 70ch;
+  white-space: pre-wrap;
+}
 
 .xai-note {
   margin: 0 0 0.6rem;

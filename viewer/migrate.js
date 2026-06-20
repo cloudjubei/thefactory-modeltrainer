@@ -131,6 +131,10 @@
   }
 
   var Migrate = {
+    // Input-only convenience values a lever accepts in the launch form but that are NEVER stored on a run
+    // (the migration resolves them to a concrete value). The runs filter drops these from its options so a
+    // synonym like `fidelity_set: auto` can't be "filtered to" when no stored run actually carries it.
+    INPUT_SYNONYMS: ['auto'],
     fidelitySetFromLayers: fidelitySetFromLayers,
     legacyLayersFromHistoricalData: legacyLayersFromHistoricalData,
     walkForwardWindowFromHistoricalData: walkForwardWindowFromHistoricalData,

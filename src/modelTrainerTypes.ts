@@ -1036,6 +1036,29 @@ export interface AnalyzePaperFromUrlResult {
   analyzedAt: string
 }
 
+export interface XaiNarrateParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  llmConfig: LLMConfig
+  /** Criterion to analyse by; defaults to the manifest objective. */
+  criterion?: AnalysisCriterion
+  abortSignal?: AbortSignal
+  /** Fired after the narrative record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface XaiNarrateResult {
+  recordType: string
+  /** Completed-run count the narrative was generated from — the viewer shows "N new runs since". */
+  runCount: number
+  /** Provenance label of the narrating model. */
+  narratedBy: string
+  narratedAt: string
+}
+
 /**
  * The model-training toolset: plans experiment matrices from a TrainerManifest,
  * runs them through a ComputeRunner, and persists each RunSummary as a record.
@@ -1081,4 +1104,11 @@ export interface ModelTrainerTools {
    * to verify. Powers the Papers tab's "Automatic Fill".
    */
   analyzePaperFromUrl(params: AnalyzePaperFromUrlParams): Promise<AnalyzePaperFromUrlResult>
+  /**
+   * Synthesise the campaign's DETERMINISTIC xAI analysis (lever importances, the surrogate ablation
+   * path, the recommender's gaps) into a short LLM narrative — "what's been learned + what to try next" —
+   * persisted as a `{recordType}-xai-narrative` 'latest' record. The computation stays deterministic;
+   * the LLM only narrates the facts.
+   */
+  xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult>
 }

@@ -77,6 +77,9 @@ let xaiCriterionDir = null
 let xaiFocusKey = null
 let xaiLever = null
 let xaiRecsCache = []
+// The latest LLM narrative record ({narrative, runCount, criterionKey, narratedBy, narratedAt}) or null.
+let xaiNarrativeCache = null
+let narrating = false
 // Phase 3: the two levers crossed in the interaction grid (default to the top-2 by surrogate importance).
 let xaiInterA = null
 let xaiInterB = null
@@ -1418,6 +1421,8 @@ function resetDashboardState() {
   judgementSummary = null
   hypothesesCache = []
   proposalSummary = null
+  xaiNarrativeCache = null
+  narrating = false
   selectedRunKey = null
   liveActivities = new Map()
   lastSettledCampaign = null
@@ -1475,6 +1480,10 @@ async function openProject(projectKey) {
   // Load saved environments before the launch form so its environment picker is populated.
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
+  if (epoch !== projectEpoch) return
+  // Normalize every historical + in-flight run's dataset identity on open (see migrateAllRunRecords),
+  // so the by-setup / by-dataset views group default/auto runs with their explicit-dataset siblings.
+  await migrateAllRunRecords()
   if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
@@ -1744,6 +1753,10 @@ function applyQuickDispatchState(item, busy) {
   } else if (item.activityType === 'propose') {
     proposing = busy
     renderProposeControls()
+    if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'xai-narrate') {
+    narrating = busy
+    if (activeTabId === 'xai') renderXai()
   } else if (item.activityType === 'evaluate') {
     const keys = evaluateKeysOf(item)
     if (!keys.length) return
@@ -1761,6 +1774,10 @@ async function refreshAfterQuickDispatch(item, act) {
   } else if (item.activityType === 'propose') {
     setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
     await renderHypotheses()
+    if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'xai-narrate') {
+    await refreshXai()
+    setStatusLine('xai-status', quickActivityFailureText(act, 'Narrating'), true)
   } else if (item.activityType === 'evaluate') {
     await renderRuns()
   }
@@ -2766,15 +2783,28 @@ function runsToolbarHtml(shownCount, total) {
   // Lever choice dropdowns + the pipeline-version dropdown live in the collapsible panel.
   // Each carries `is-changed` (highlighted) when it has a non-default selection; collapsed,
   // CSS shows only those.
+  // Filter options = the manifest choices UNION the values actually present in the runs (so migration's
+  // `legacy:…` dataset tags are filterable), minus input-only synonyms (e.g. `fidelity_set: auto`) that no
+  // stored run carries — unless one actually does. So the dropdown reflects what you can really filter to.
+  const synonyms = new Set((window.Migrate && window.Migrate.INPUT_SYNONYMS) || [])
   const leverDropdowns = leverEntries()
     .filter(([, spec]) => spec.type === 'choice')
     .map(([key, spec]) => {
       const selected = String(runsLeverFilter[key] || '')
+      const present = new Set(
+        runsCache
+          .map((r) => (r.summary.config || {})[key])
+          .filter((v) => v !== undefined && v !== null)
+          .map(String),
+      )
+      const values = [...new Set([...(spec.choices || []).map(String), ...present])].filter(
+        (v) => present.has(v) || !synonyms.has(v),
+      )
       const opts = [`<option value="">${escapeHtml(key)}: any</option>`]
         .concat(
-          (spec.choices || []).map(
+          values.map(
             (c) =>
-              `<option value="${escapeHtml(String(c))}"${selected === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+              `<option value="${escapeHtml(c)}"${selected === c ? ' selected' : ''}>${escapeHtml(c)}</option>`,
           ),
         )
         .join('')
@@ -3339,6 +3369,7 @@ async function renderRuns() {
     readDismissedFailures(),
     readUnrunnable(),
   ])
+  await normalizeRunRecords(runsCache)
   renderJudgeControls()
   renderRunsLive()
   await markRunsSeen()
@@ -3350,10 +3381,52 @@ async function renderRuns() {
 async function refreshRuns() {
   if (!byId('runs-body')) return
   runsCache = await readRuns()
+  await normalizeRunRecords(runsCache)
   renderRunsTable()
   // Close the xAI analyse→run→re-analyse loop: when records change (e.g. a launched batch lands), the
   // open xAI tab recomputes its effects + recommendations off the fresh runs.
   if (activeTabId === 'xai') renderXai()
+}
+// One-pass, idempotent normalization of run records' DATASET IDENTITY (see viewer/migrate.js). The
+// `fidelity_set: "auto"` synonym — and pre-hub ledger imports that carry no fidelity_set — are rewritten
+// to the CONCRETE dataset each run actually used, so a default/auto run regroups with its explicit-dataset
+// siblings instead of fragmenting. Runs on project open over EVERY run (the backlog), then on each runs
+// refresh over the loaded set, so in-flight experiments emitting fresh `auto` runs are continuously
+// regrouped. Each rewrite recomputes setupKey so the by-setup view regroups too.
+async function recomputeSetupKey(config) {
+  const rest = { ...config }
+  delete rest.seed
+  const canonical = window.Xai.canonicalConfigString(rest)
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
+  return [...new Uint8Array(buf)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 12)
+}
+async function normalizeRunRecords(runs) {
+  if (!manifest || !embedded() || !window.Migrate || !Array.isArray(runs)) return 0
+  let changed = 0
+  for (const run of runs) {
+    const patch = window.Migrate.migrationPatchFor(run.summary)
+    if (!patch) continue
+    const content = { ...run.summary, config: { ...run.summary.config, ...patch.config } }
+    if (patch.dataset) content.dataset = { ...(run.summary.dataset || {}), ...patch.dataset }
+    if (run.summary.setupKey) content.setupKey = await recomputeSetupKey(content.config)
+    try {
+      await window.OverseerBridge.putData({ type: manifest.recordType, key: run.key, content })
+      run.summary = content
+      changed++
+    } catch {
+      // A transient write failure shouldn't abort the batch — the next pass retries this record.
+    }
+  }
+  return changed
+}
+// Normalize EVERY run of the open project (ignores the flat view's pagination, since the backlog spans
+// pages). Run once on open; the per-refresh pass keeps newly-landed runs in step thereafter.
+async function migrateAllRunRecords() {
+  if (!manifest || !embedded() || !window.Migrate) return 0
+  return normalizeRunRecords(await queryRunRecords())
 }
 // Multi-select comparison: a config diff (only differing levers), metrics
 // side-by-side, and overlaid %-return curves (+ the buy-and-hold control) for the
@@ -4477,6 +4550,7 @@ function renderXai() {
     body,
     [
       xaiHeaderHtml(criterion, runs.length),
+      xaiNarrativeHtml(runs, criterion),
       xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
       xaiConfigEffectsHtml(runs, criterion),
       xaiSurrogateHtml(runs, criterion),
@@ -4491,10 +4565,6 @@ function xaiHeaderHtml(criterion, nRuns) {
         `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
     )
     .join('')
-  const legacy = xaiLegacyAutoRuns().length
-  const migrate = legacy
-    ? `<p class="card-sub">⚠ ${legacy} run${legacy === 1 ? '' : 's'} store a synonym value (e.g. <code>fidelity_set: auto</code>) that fragments grouping. <button type="button" class="ghost-btn" data-xai-migrate-auto>Normalize ${legacy} run${legacy === 1 ? '' : 's'} to actual values</button></p>`
-    : ''
   return `<div class="card">
     <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2></div>
     <p class="badges-row">
@@ -4504,7 +4574,34 @@ function xaiHeaderHtml(criterion, nRuns) {
         <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
       </select></label>
     </p>
-    ${migrate}
+  </div>`
+}
+// The one-shot LLM narrative of the WHOLE campaign — a synthesis of the deterministic analysis below.
+// Once present, the button becomes "Refresh (N new runs since)" so it's obvious how much data has changed.
+function xaiNarrativeHtml(runs, criterion) {
+  const rec = xaiNarrativeCache
+  const hasNarrative = !!(rec && rec.narrative)
+  const since = hasNarrative ? Math.max(0, runs.length - (Number(rec.runCount) || 0)) : 0
+  const staleCriterion =
+    hasNarrative && rec.criterionKey && rec.criterionKey !== criterion.key ? rec.criterionKey : ''
+  const label = !hasNarrative
+    ? 'Generate narrative'
+    : since > 0
+      ? `Refresh (${since} new run${since === 1 ? '' : 's'})`
+      : 'Refresh'
+  const btn = `<button type="button" data-xai-narrate${narrating || !embedded() ? ' disabled' : ''}>${
+    narrating ? `${spinnerHtml()} Narrating…` : escapeHtml(label)
+  }</button>`
+  const body = hasNarrative
+    ? `<p class="xai-narrative">${escapeHtml(rec.narrative)}</p>
+       <p class="card-sub">${escapeHtml(rec.narratedBy || 'AI')}${rec.narratedAt ? ` · ${escapeHtml(formatWhen(rec.narratedAt))}` : ''}${
+         staleCriterion ? ` · generated for the “${escapeHtml(staleCriterion)}” criterion` : ''
+       }${since > 0 ? ` · <strong>${since}</strong> new run${since === 1 ? '' : 's'} since — refresh to update` : ' · up to date'}</p>`
+    : `<p class="card-sub">A one-shot LLM read of everything below — what's been learned and the best next experiment. It synthesises the deterministic analysis; it doesn't replace it.</p>`
+  return `<div class="card">
+    <div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— LLM synthesis</span></h3>${btn}</div>
+    ${body}
+    <p id="xai-status" class="form-status" role="status" hidden></p>
   </div>`
 }
 // Model internals for the focused run: the Explain panels + the decision-internals reads + a decision
@@ -4516,7 +4613,10 @@ function xaiModelInternalsHtml(focusKey) {
   const sibling = xaiBestSibling(run)
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Model internals <span class="card-sub">— run ${escapeHtml(shortKey(focusKey))}</span></h3>
-      <button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button></div>
+      <div class="head-actions">
+        ${chatAboutRunAvailable() ? `<button type="button" class="ghost-btn" data-xai-discuss="${escapeHtml(focusKey)}" title="Discuss the FULL xAI analysis of this run with the AI">${iconChatSvg()} Discuss xAI</button>` : ''}
+        <button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button>
+      </div></div>
     <div class="card-scroll">
     ${explainSectionHtml(s)}
     ${decisionInternalsHtml(readDecisionTrace(s))}
@@ -4768,8 +4868,9 @@ function xaiInteractionHtml(grid, leverNames) {
 function xaiRecommenderHtml(runs, criterion) {
   xaiRecsCache = window.Xai.recommendExperiments(runs, criterion)
   if (!xaiRecsCache.length) {
-    return `<div class="card"><div class="card-head card-head-row"><h3>Suggested experiments</h3></div>
-      <p class="card-sub">No gaps found — the grids you've explored are complete and well-seeded. 🎉</p></div>`
+    return `<div class="card" id="xai-recommender"><div class="card-head card-head-row"><h3>Suggested experiments</h3>
+      <button type="button" class="ghost-btn" data-xai-propose${proposing || !embedded() ? ' disabled' : ''} title="Ask the AI to propose NEW experiments from the xAI analysis (lands in Hypotheses)">${proposing ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button></div>
+      <p class="card-sub">No deterministic gaps — the grids you've explored are complete and well-seeded. 🎉 Ask the AI to propose experiments beyond the explored grid.</p></div>`
   }
   const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
   const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
@@ -4777,6 +4878,7 @@ function xaiRecommenderHtml(runs, criterion) {
     <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} gaps · ${total} runs</span></h3>
       <div class="head-actions">
         <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
+        <button type="button" class="ghost-btn" data-xai-propose${proposing || !embedded() ? ' disabled' : ''} title="Ask the AI to propose NEW experiments from the xAI analysis (lands in Hypotheses)">${proposing ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button>
         <button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>
       </div></div>
     <div class="card-scroll">${cards}</div></div>`
@@ -4801,60 +4903,92 @@ async function xaiLaunchBatch(specs, label) {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
   }
 }
+// Load the latest narrative record so renderXai can show it; null when none / not embedded.
+async function loadXaiNarrative() {
+  if (!manifest) return null
+  const recs = await queryRecords(`${manifest.recordType}-xai-narrative`, 'latest')
+  return recs && recs[0] ? recs[0].content : null
+}
+async function refreshXai() {
+  xaiNarrativeCache = await loadXaiNarrative()
+  renderXai()
+}
+async function onXaiNarrateClick() {
+  if (narrating) return
+  if (!embedded()) {
+    setStatusLine('xai-status', 'Open inside the Overseer to generate a narrative.', false)
+    return
+  }
+  const criterion = currentXaiCriterion()
+  setStatusLine('xai-status', '')
+  try {
+    const result = await startOrEnqueue(
+      'xai-narrate',
+      trainerActivityParams({
+        criterionKey: criterion.key,
+        criterionDir: criterion.direction,
+        criterionLabel: criterion.label,
+      }),
+      'xAI narrative',
+    )
+    if (result.queued) setStatusLine('xai-status', queuedStatusText(result.ahead))
+  } catch {
+    setStatusLine('xai-status', 'Could not start the narrative — please try again.', true)
+  }
+}
+// Enrich the existing LLM proposer with the deterministic xAI signal (top levers + the criterion +
+// the recommender's gaps), then route the user to Hypotheses where proposals land.
+function xaiProposeInstructions() {
+  const runs = xaiRuns()
+  const criterion = currentXaiCriterion()
+  const top = window.Xai.leverImportances(runs, criterion)
+    .slice(0, 4)
+    .map(
+      (i) =>
+        `${i.lever} (${Math.round(i.importance * 100)}% importance${i.confident ? '' : ', low data'}, best≈${i.bestValue})`,
+    )
+    .join(', ')
+  const gaps = xaiRecsCache
+    .slice(0, 4)
+    .map((r) => r.reason)
+    .join('; ')
+  return [
+    `Optimise for the "${criterion.label}" criterion (${criterion.direction} is better).`,
+    top
+      ? `Deterministic xAI screening of the ${runs.length} runs so far ranks the levers: ${top}.`
+      : '',
+    gaps ? `Under-explored regions the deterministic recommender flagged: ${gaps}.` : '',
+    `Prioritise experiments that exploit the best-known region AND test promising untried values; avoid configs already run.`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+async function onXaiProposeClick() {
+  if (!embedded()) {
+    setStatusLine('xai-status', 'Open inside the Overseer to propose experiments.', false)
+    return
+  }
+  if (proposing) {
+    showTab('hypotheses')
+    return
+  }
+  setStatusLine('xai-status', '')
+  try {
+    const result = await startOrEnqueue(
+      'propose',
+      trainerActivityParams({ instructions: xaiProposeInstructions() }),
+      'Propose experiments',
+    )
+    showTab('hypotheses')
+    if (result.queued) setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
+  } catch {
+    setStatusLine('xai-status', 'Could not start proposing — please try again.', true)
+  }
+}
 // Open the xAI tab focused on a run's internals (the run-detail entry point).
 function analyzeInXai(key) {
   xaiFocusKey = key
   showTab('xai')
-}
-// Legacy "auto"-synonym normalization. Some levers were stored as the convenience value "auto" (e.g.
-// BlackSwan's fidelity_set), which fragments grouping vs the equivalent explicit value. Each known
-// synonym lever has a resolver that reads the run's OWN recorded resolution — no domain rules needed.
-const XAI_AUTO_RESOLVERS = {
-  fidelity_set: (summary) => {
-    const layers = summary && summary.dataset && summary.dataset.layers
-    return Array.isArray(layers) && layers.length ? layers.join('+') : null
-  },
-}
-function xaiResolveLegacyConfig(summary) {
-  const config = (summary && summary.config) || {}
-  let next = null
-  for (const lever of Object.keys(XAI_AUTO_RESOLVERS)) {
-    if (config[lever] !== 'auto') continue
-    const resolved = XAI_AUTO_RESOLVERS[lever](summary)
-    if (resolved && resolved !== 'auto') {
-      next = next || { ...config }
-      next[lever] = resolved
-    }
-  }
-  return next
-}
-function xaiLegacyAutoRuns() {
-  return runsCache.filter((r) => xaiResolveLegacyConfig(r.summary))
-}
-// Recompute a run's setupKey the way the engine does — sha256(canonical config minus seed), first 12
-// hex — so a migrated run regroups with its concrete-valued siblings in the by-setup view.
-async function xaiSetupKeyOf(config) {
-  const rest = { ...config }
-  delete rest.seed
-  const canonical = window.Xai.canonicalConfigString(rest)
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
-  return [...new Uint8Array(buf)]
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 12)
-}
-async function xaiMigrateLegacyAuto() {
-  const affected = xaiLegacyAutoRuns()
-  if (!affected.length) return
-  for (const r of affected) {
-    const config = xaiResolveLegacyConfig(r.summary)
-    if (!config) continue
-    const content = { ...r.summary, config }
-    if (r.summary.setupKey) content.setupKey = await xaiSetupKeyOf(config)
-    await window.OverseerBridge.putData({ type: manifest.recordType, key: r.key, content })
-  }
-  await refreshRuns()
-  if (activeTabId === 'xai') renderXai()
 }
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
 // price-action + hold-comparison view; tell the user a re-run will surface them.
@@ -5116,6 +5250,83 @@ async function chatAboutRuns(keyA, keyB) {
     })
   } catch {
     setStatusLine('run-eval-status', 'Could not open chat — please try again.', true)
+  }
+}
+// The comprehensive xAI seed for ONE run — far more than the Runs-detail chat: the decision-trace digest
+// PLUS the attribution faithfulness (sanity check), the latent representation + probe, the run's standing
+// + lever importances among all runs, and the decision diff vs its nearest comparable run.
+function xaiRunChatSummary(run) {
+  const s = run.summary
+  const parts = []
+  const traceSummary = decisionTraceChatSummary(s)
+  if (traceSummary) parts.push(traceSummary)
+  const trace = readDecisionTrace(s)
+  const fa = trace && trace.featureAttribution
+  if (fa && fa.sanityCheck) {
+    const sc = fa.sanityCheck
+    parts.push(
+      `Attribution faithfulness (Adebayo model-randomization check on ${fa.method || 'saliency'}): ${sc.passed ? 'PASSED' : 'FAILED'} (rank corr ${formatTickValue(sc.rankCorrelation)}) — ${sc.passed ? 'the attribution changes when the weights are randomized, so it reflects the learned function' : 'the attribution barely changes when the weights are randomized, so it likely reflects the input/architecture, NOT what the model learned — do not over-trust it'}.`,
+    )
+  }
+  const lm = trace && trace.latentMap
+  if (lm && lm.probe && Number.isFinite(Number(lm.probe.accuracy))) {
+    const acc = Math.round(Number(lm.probe.accuracy) * 100)
+    const base = Math.round(Number(lm.probe.baseline || 0) * 100)
+    parts.push(
+      `Latent representation: the penultimate-layer activations project to 2-D retaining ${Math.round(Number(lm.varianceExplained || 0) * 100)}% of variance; a linear probe predicts the action from the latent at ${acc}% vs a ${base}% majority baseline — the representation ${acc > base + 5 ? 'linearly encodes the decision' : 'barely separates the actions linearly'}.`,
+    )
+  }
+  if (window.Xai) {
+    const runs = xaiRuns()
+    const criterion = currentXaiCriterion()
+    const ranked = runs
+      .map((r) => ({ key: r.key, v: window.Xai.criterionValueOf(r, criterion) }))
+      .filter((r) => r.v != null)
+      .sort((a, b) => (criterion.direction === 'max' ? b.v - a.v : a.v - b.v))
+    const rank = ranked.findIndex((r) => r.key === run.key)
+    if (rank >= 0)
+      parts.push(`This run ranks #${rank + 1} of ${ranked.length} by ${criterion.label}.`)
+    const importances = window.Xai.leverImportances(runs, criterion)
+    if (importances.length) {
+      const top = importances
+        .slice(0, 4)
+        .map(
+          (i) => `${i.lever} ${Math.round(i.importance * 100)}%${i.confident ? '' : ' (low data)'}`,
+        )
+        .join(', ')
+      parts.push(
+        `Lever importance for ${criterion.label} across all runs (which knobs move it — confounded screening): ${top}.`,
+      )
+    }
+  }
+  const sibling = xaiBestSibling(run)
+  if (sibling) {
+    const dd = decisionDiffChatSummary(sibling.summary, s)
+    if (dd) parts.push(`Vs the nearest comparable run ${shortKey(sibling.key)} — ${dd}`)
+  }
+  return parts.join('\n\n')
+}
+// Discuss the FULL xAI analysis of one run (the xAI-tab entry point — richer than the Runs-detail chat).
+async function chatAboutRunXai(key) {
+  const run = findRun(key)
+  if (!run || !chatAboutRunAvailable()) return
+  const s = run.summary
+  const ctx = [
+    `You are discussing the FULL xAI analysis of ONE training run — id "${shortKey(key)}". Everything below is provided (config, metrics, the decision trace, input attribution + its faithfulness check, the reward breakdown, the latent representation + probe, the run's standing + lever importances among all runs, and the decision diff vs its nearest comparable run), so work directly from it — don't ask for the run id or these details. The xAI computations are DETERMINISTIC + heuristic; treat the attribution and decision-quality reads as EVIDENCE, not proof, and say so when a signal is weak (e.g. an attribution that FAILED its sanity check).`,
+    `Pipeline v${String(s.pipelineVersion || '1')}. Objective (${objectiveName()}): ${formatObjective(s.objective)} · health: ${(s.health && s.health.status) || 'unknown'}.`,
+    s.metrics ? `Metrics:\n${JSON.stringify(s.metrics, null, 2)}` : '',
+    `Config:\n${JSON.stringify(s.config || {}, null, 2)}`,
+    xaiRunChatSummary(run),
+  ].filter(Boolean)
+  const systemPrompt = [projectChatPreamble(), ...ctx].filter(Boolean).join('\n\n')
+  try {
+    await window.OverseerBridge.discussTopic({
+      title: `xAI ${shortKey(key)}`,
+      seed: 'Walk me through what this model is doing and why — the decisions it makes, what drives them, how trustworthy the explanation is, and what to try next.',
+      systemPrompt,
+    })
+  } catch {
+    setStatusLine('xai-status', 'Could not open chat — please try again.', true)
   }
 }
 function busyButtonHtml(label) {
@@ -5444,6 +5655,19 @@ function setupRuns() {
       }
     })
     xaiBody.addEventListener('click', (event) => {
+      const discussBtn = event.target.closest('[data-xai-discuss]')
+      if (discussBtn) {
+        chatAboutRunXai(discussBtn.dataset.xaiDiscuss)
+        return
+      }
+      if (event.target.closest('[data-xai-narrate]')) {
+        onXaiNarrateClick()
+        return
+      }
+      if (event.target.closest('[data-xai-propose]')) {
+        onXaiProposeClick()
+        return
+      }
       if (event.target.closest('[data-xai-clear-focus]')) {
         xaiFocusKey = null
         renderXai()
@@ -5470,9 +5694,6 @@ function setupRuns() {
           'xAI: fill gaps',
         )
         return
-      }
-      if (event.target.closest('[data-xai-migrate-auto]')) {
-        xaiMigrateLegacyAuto()
       }
     })
   }
@@ -5898,22 +6119,32 @@ function setupVersions() {
 }
 
 // --- Environments tab ------------------------------------------------------------
-function environmentCardHtml(env, editable) {
+function environmentCardHtml(env, editable, isDefault) {
   const rows = envLeverEntries()
     .map(
       ([k]) =>
         `<tr><th>${escapeHtml(k)}</th><td class="num">${escapeHtml(env.settings[k] === undefined ? '—' : String(env.settings[k]))}</td></tr>`,
     )
     .join('')
+  const setDefaultBtn =
+    editable && !isDefault
+      ? `<button type="button" class="icon-btn" data-env-default="${escapeHtml(env.id)}" title="Set as default environment" aria-label="Set as default">☆</button>`
+      : ''
   const actions = editable
     ? `<div class="head-actions">
+        ${setDefaultBtn}
         <button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button>
         <button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
       </div>`
     : `<div class="head-actions"><button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button></div>`
+  const note = isDefault
+    ? ' <span class="badge">★ default</span>'
+    : editable
+      ? ''
+      : ' <span class="card-sub">(manifest defaults — clone to start)</span>'
   return `<div class="environment-card">
     <div class="card-head card-head-row">
-      <h3>${escapeHtml(env.name)}${editable ? '' : ' <span class="card-sub">(manifest defaults)</span>'}</h3>
+      <h3>${escapeHtml(env.name)}${note}</h3>
       ${actions}
     </div>
     <table class="kv-table"><tbody>${rows}</tbody></table>
@@ -5934,10 +6165,13 @@ async function renderEnvironments() {
     return
   }
   environmentsCache = await readEnvironments()
+  const defId = defaultEnvironmentId()
+  // The manifest-defaults card is only a clone-to-start SEED for a project with no environments yet; once
+  // the user has defined any, it's hidden (the chosen default lives among their records).
+  const seed = environmentsCache.length ? '' : environmentCardHtml(defaultEnvironment(), false)
   setHtml(
     body,
-    environmentCardHtml(defaultEnvironment(), false) +
-      environmentsCache.map((e) => environmentCardHtml(e, true)).join(''),
+    seed + environmentsCache.map((e) => environmentCardHtml(e, true, e.id === defId)).join(''),
   )
 }
 // The create/edit form: a name + a number field per environment lever.
@@ -5987,8 +6221,19 @@ async function onSaveEnvironment(form) {
     const el = form.querySelector(`input[name="env:${k}"]`)
     if (el && el.value !== '') settings[k] = Number(el.value)
   }
+  if (environmentDuplicateOf(name, settings, id)) {
+    setStatusLine(
+      'environments-status',
+      'An environment with the same name or settings already exists.',
+      true,
+    )
+    return
+  }
+  // Editing preserves the default flag; the FIRST environment a project gets becomes its default.
+  const existing = environmentsCache.find((e) => e.id === id)
+  const isDefault = existing ? !!existing.default : environmentsCache.length === 0
   try {
-    await putEnvironment({ id, name, settings })
+    await putEnvironment({ id, name, settings, default: isDefault })
   } catch {
     setStatusLine('environments-status', 'Could not save — please try again.', true)
     return
@@ -5997,7 +6242,13 @@ async function onSaveEnvironment(form) {
   await renderEnvironments()
   renderLaunchForm()
 }
+async function onSetDefaultEnvironment(id) {
+  await setDefaultEnvironment(id)
+  await renderEnvironments()
+  renderLaunchForm()
+}
 async function onDeleteEnvironment(id) {
+  const wasDefault = !!(environmentsCache.find((e) => e.id === id) || {}).default
   try {
     await deleteEnvironmentRecord(id)
   } catch {
@@ -6005,6 +6256,8 @@ async function onDeleteEnvironment(id) {
     return
   }
   environmentsCache = environmentsCache.filter((e) => e.id !== id)
+  // Removing the default promotes the next available environment (the picker always has a default).
+  if (wasDefault && environmentsCache.length) await setDefaultEnvironment(environmentsCache[0].id)
   await renderEnvironments()
   renderLaunchForm()
 }
@@ -6035,6 +6288,11 @@ function setupEnvironments() {
         toggleEnvironmentForm(true)
         return
       }
+      const setDef = event.target.closest('button[data-env-default]')
+      if (setDef) {
+        onSetDefaultEnvironment(setDef.dataset.envDefault)
+        return
+      }
       const del = event.target.closest('button[data-env-delete]')
       if (del) onDeleteEnvironment(del.dataset.envDelete)
     })
@@ -6042,22 +6300,32 @@ function setupEnvironments() {
 }
 
 // --- Datasets tab (named dataset-lever bundles — asset / window / fidelity) ------
-function datasetCardHtml(ds, editable) {
+function datasetCardHtml(ds, editable, isDefault) {
   const rows = datasetLeverEntries()
     .map(
       ([k]) =>
         `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(ds.settings[k] === undefined ? '—' : String(ds.settings[k]))}</td></tr>`,
     )
     .join('')
+  const setDefaultBtn =
+    editable && !isDefault
+      ? `<button type="button" class="icon-btn" data-ds-default="${escapeHtml(ds.id)}" title="Set as default dataset" aria-label="Set as default">☆</button>`
+      : ''
   const actions = editable
     ? `<div class="head-actions">
+        ${setDefaultBtn}
         <button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button>
         <button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
       </div>`
     : `<div class="head-actions"><button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Duplicate to a new dataset" aria-label="Duplicate">⧉</button></div>`
+  const note = isDefault
+    ? ' <span class="badge">★ default</span>'
+    : editable
+      ? ''
+      : ' <span class="card-sub">(manifest defaults — clone to start)</span>'
   return `<div class="environment-card">
     <div class="card-head card-head-row">
-      <h3>${escapeHtml(ds.name)}${editable ? '' : ' <span class="card-sub">(manifest defaults)</span>'}</h3>
+      <h3>${escapeHtml(ds.name)}${note}</h3>
       ${actions}
     </div>
     <table class="kv-table"><tbody>${rows}</tbody></table>
@@ -6078,11 +6346,11 @@ async function renderDatasets() {
     return
   }
   datasetsCache = await readDatasets()
-  setHtml(
-    body,
-    datasetCardHtml(defaultDataset(), false) +
-      datasetsCache.map((d) => datasetCardHtml(d, true)).join(''),
-  )
+  const defId = defaultDatasetId()
+  // The manifest-defaults card is only a clone-to-start SEED for a project with no datasets yet; once the
+  // user has defined any, it's hidden (the chosen default lives among their records, not this synthetic one).
+  const seed = datasetsCache.length ? '' : datasetCardHtml(defaultDataset(), false)
+  setHtml(body, seed + datasetsCache.map((d) => datasetCardHtml(d, true, d.id === defId)).join(''))
 }
 // A single-value, type-aware field for one dataset lever (choice → select, number → number input,
 // boolean → true/false select), pre-filled with the dataset's saved value. "" = use the default.
@@ -6155,8 +6423,19 @@ async function onSaveDataset(form) {
           ? el.value === 'true'
           : el.value
   }
+  if (datasetDuplicateOf(name, settings, id)) {
+    setStatusLine(
+      'datasets-status',
+      'A dataset with the same name or settings already exists.',
+      true,
+    )
+    return
+  }
+  // Editing preserves the default flag; the FIRST dataset a project gets becomes its default.
+  const existing = datasetsCache.find((d) => d.id === id)
+  const isDefault = existing ? !!existing.default : datasetsCache.length === 0
   try {
-    await putDataset({ id, name, settings })
+    await putDataset({ id, name, settings, default: isDefault })
   } catch {
     setStatusLine('datasets-status', 'Could not save — please try again.', true)
     return
@@ -6165,7 +6444,13 @@ async function onSaveDataset(form) {
   await renderDatasets()
   renderLaunchForm()
 }
+async function onSetDefaultDataset(id) {
+  await setDefaultDataset(id)
+  await renderDatasets()
+  renderLaunchForm()
+}
 async function onDeleteDataset(id) {
+  const wasDefault = !!(datasetsCache.find((d) => d.id === id) || {}).default
   try {
     await deleteDatasetRecord(id)
   } catch {
@@ -6173,6 +6458,8 @@ async function onDeleteDataset(id) {
     return
   }
   datasetsCache = datasetsCache.filter((d) => d.id !== id)
+  // Removing the default promotes the next available dataset (the launch picker always has a default).
+  if (wasDefault && datasetsCache.length) await setDefaultDataset(datasetsCache[0].id)
   await renderDatasets()
   renderLaunchForm()
 }
@@ -6201,6 +6488,11 @@ function setupDatasets() {
       const clone = event.target.closest('button[data-ds-clone]')
       if (clone) {
         toggleDatasetForm(true)
+        return
+      }
+      const setDef = event.target.closest('button[data-ds-default]')
+      if (setDef) {
+        onSetDefaultDataset(setDef.dataset.dsDefault)
         return
       }
       const del = event.target.closest('button[data-ds-delete]')
@@ -7737,6 +8029,36 @@ function defaultEnvironment() {
 function allEnvironments() {
   return [defaultEnvironment(), ...environmentsCache]
 }
+// The user's CHOSEN default environment: the saved record flagged `default`, else the first saved one
+// (the fallback after a default is removed). Null when the project HAS env levers but the user hasn't
+// defined any environment yet — launch is gated on this, since there's nothing to run against.
+function defaultEnvironmentId() {
+  if (!environmentsCache.length) return null
+  return (environmentsCache.find((e) => e.default) || environmentsCache[0]).id
+}
+// Make `id` the sole default among saved environments (clearing the flag on the rest); persists each
+// record whose flag changed. No-op for an unknown id.
+async function setDefaultEnvironment(id) {
+  if (!environmentsCache.some((e) => e.id === id)) return
+  for (const env of environmentsCache) {
+    const shouldBe = env.id === id
+    if (!!env.default !== shouldBe) {
+      env.default = shouldBe
+      await putEnvironment(env)
+    }
+  }
+}
+// Another saved environment with the same name (case-insensitive) or the exact same settings already
+// exists — used to refuse a duplicate. `exceptId` skips the record being edited.
+function environmentDuplicateOf(name, settings, exceptId) {
+  const sig = envSettingsSignature(settings)
+  const lower = name.trim().toLowerCase()
+  return environmentsCache.find(
+    (e) =>
+      e.id !== exceptId &&
+      (e.name.trim().toLowerCase() === lower || envSettingsSignature(e.settings) === sig),
+  )
+}
 async function readEnvironments() {
   if (!manifest) return []
   const recs = await queryRecords(manifest.recordType + ENVIRONMENT_RECORD_SUFFIX)
@@ -7795,6 +8117,36 @@ function defaultDataset() {
 }
 function allDatasets() {
   return [defaultDataset(), ...datasetsCache]
+}
+// The user's CHOSEN default dataset: the saved record flagged `default`, else the first saved one (the
+// fallback after a default is removed). Null when the project HAS dataset levers but the user hasn't
+// defined any dataset yet — launch is gated on this, since there's nothing to run against.
+function defaultDatasetId() {
+  if (!datasetsCache.length) return null
+  return (datasetsCache.find((d) => d.default) || datasetsCache[0]).id
+}
+// Make `id` the sole default among saved datasets (clearing the flag on the rest); persists each record
+// whose flag changed. No-op for an unknown id.
+async function setDefaultDataset(id) {
+  if (!datasetsCache.some((d) => d.id === id)) return
+  for (const ds of datasetsCache) {
+    const shouldBe = ds.id === id
+    if (!!ds.default !== shouldBe) {
+      ds.default = shouldBe
+      await putDataset(ds)
+    }
+  }
+}
+// Another saved dataset with the same name (case-insensitive) or the exact same settings already exists
+// — used to refuse a duplicate. `exceptId` skips the record being edited.
+function datasetDuplicateOf(name, settings, exceptId) {
+  const sig = datasetSettingsSignature(settings)
+  const lower = name.trim().toLowerCase()
+  return datasetsCache.find(
+    (d) =>
+      d.id !== exceptId &&
+      (d.name.trim().toLowerCase() === lower || datasetSettingsSignature(d.settings) === sig),
+  )
 }
 async function readDatasets() {
   if (!manifest) return []
@@ -8229,22 +8581,27 @@ function environmentPickerHtml() {
         'environment',
       )
     : ''
-  const rows = allEnvironments()
+  const defId = defaultEnvironmentId()
+  const rows = environmentsCache
     .map((e) => {
       const summary = envLeverEntries()
         .map(([k]) => `${k} ${e.settings[k] === undefined ? '—' : e.settings[k]}`)
         .join(' · ')
-      const checked = e.id === 'default' && !presetActive ? ' checked' : ''
+      const checked = !presetActive && e.id === defId ? ' checked' : ''
+      const star = e.id === defId ? ' <span class="card-sub" title="default">★</span>' : ''
       return `<label class="check-row env-pick">
         <input type="checkbox" name="env" value="${escapeHtml(e.id)}"${checked} />
-        <span><strong>${escapeHtml(e.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
+        <span><strong>${escapeHtml(e.name)}</strong>${star} <span class="card-sub">${escapeHtml(summary)}</span></span>
       </label>`
     })
     .join('')
+  const rowsOrHint = environmentsCache.length
+    ? rows
+    : '<p class="card-sub">No environments defined yet — add one in the Environments tab before launching.</p>'
   return `<fieldset id="launch-env-picker" class="lever env-picker">
-    <legend${helpAttr('Which ENVIRONMENTS (fee / TP-SL regimes) to run this model against. Pick several to test one model across regimes in a single campaign — runs = configs × environments × seeds. An applied experiment preset supplies its own environments (shown read-only); define + tweak your own in the Environments tab.')}>Run against environments</legend>
+    <legend${helpAttr('Which ENVIRONMENTS (fee / TP-SL regimes) to run this model against. Pick several to test one model across regimes in a single campaign — runs = configs × environments × seeds. An applied experiment preset supplies its own environments (shown read-only); define + tweak your own (and set the default) in the Environments tab.')}>Run against environments</legend>
     ${presetBlock}
-    ${rows}
+    ${rowsOrHint}
   </fieldset>`
 }
 function selectedEnvironments(form) {
@@ -8257,22 +8614,27 @@ function datasetPickerHtml() {
   const presetBlock = presetActive
     ? presetBundleListHtml(launchPresetDatasets, datasetLeverEntries(), 'ds-preset-info', 'dataset')
     : ''
-  const rows = allDatasets()
+  const defId = defaultDatasetId()
+  const rows = datasetsCache
     .map((d) => {
       const summary = datasetLeverEntries()
         .map(([k]) => `${k} ${d.settings[k] === undefined ? '—' : d.settings[k]}`)
         .join(' · ')
-      const checked = d.id === 'default' && !presetActive ? ' checked' : ''
+      const checked = !presetActive && d.id === defId ? ' checked' : ''
+      const star = d.id === defId ? ' <span class="card-sub" title="default">★</span>' : ''
       return `<label class="check-row env-pick">
         <input type="checkbox" name="ds" value="${escapeHtml(d.id)}"${checked} />
-        <span><strong>${escapeHtml(d.name)}</strong> <span class="card-sub">${escapeHtml(summary)}</span></span>
+        <span><strong>${escapeHtml(d.name)}</strong>${star} <span class="card-sub">${escapeHtml(summary)}</span></span>
       </label>`
     })
     .join('')
+  const rowsOrHint = datasetsCache.length
+    ? rows
+    : '<p class="card-sub">No datasets defined yet — add one in the Datasets tab before launching.</p>'
   return `<fieldset id="launch-ds-picker" class="lever env-picker">
-    <legend${helpAttr('Which DATASETS (asset / walk-forward window / fidelity stack) to run this model against. Pick several to test one model across datasets in a single campaign — runs = configs × datasets × environments × seeds. An applied experiment preset supplies its own datasets (shown read-only); define + tweak your own in the Datasets tab.')}>Run against datasets</legend>
+    <legend${helpAttr('Which DATASETS (asset / walk-forward window / fidelity stack) to run this model against. Pick several to test one model across datasets in a single campaign — runs = configs × datasets × environments × seeds. An applied experiment preset supplies its own datasets (shown read-only); define + tweak your own (and set the default) in the Datasets tab.')}>Run against datasets</legend>
     ${presetBlock}
-    ${rows}
+    ${rowsOrHint}
   </fieldset>`
 }
 // Re-render the dataset + environment picker fieldsets in place from current state (preset bundles +
@@ -8578,14 +8940,32 @@ function updateLaunchSummary() {
   if (!form || !line) return
   const spec = buildSpecFromForm(form)
   const configs = Object.values(spec.sweep).reduce((acc, values) => acc * values.length, 1)
-  const datasets = Array.isArray(spec.datasets) ? spec.datasets.length : 1
-  const envs = Array.isArray(spec.environments) ? spec.environments.length : 1
+  // For a project WITH dataset/env levers the count is the SELECTED bundles (0 when none picked → nothing
+  // runs); a project without those levers has no such dimension (treated as 1).
+  const datasets = hasDatasetLevers()
+    ? Array.isArray(spec.datasets)
+      ? spec.datasets.length
+      : 0
+    : 1
+  const envs = hasEnvLevers()
+    ? Array.isArray(spec.environments)
+      ? spec.environments.length
+      : 0
+    : 1
   const seeds = spec.seeds.length
+  if (hasDatasetLevers() && !datasets) {
+    line.textContent = 'Select at least one dataset to run against.'
+    return
+  }
+  if (hasEnvLevers() && !envs) {
+    line.textContent = 'Select at least one environment to run against.'
+    return
+  }
   const total = configs * datasets * envs * seeds
-  const dsBit = Array.isArray(spec.datasets)
+  const dsBit = hasDatasetLevers()
     ? ` × ${datasets} dataset${datasets === 1 ? '' : 's'}${launchPresetDatasets.length ? ' (from preset)' : ''}`
     : ''
-  const envBit = Array.isArray(spec.environments)
+  const envBit = hasEnvLevers()
     ? ` × ${envs} environment${envs === 1 ? '' : 's'}${launchPresetEnvironments.length ? ' (from preset)' : ''}`
     : ''
   const target = remoteComputeTarget(savedComputeTarget())
@@ -8610,6 +8990,25 @@ async function onLaunchSubmit(event) {
   if (!form) return
   if (!embedded()) {
     if (status) status.textContent = 'Open inside the Overseer to launch campaigns.'
+    return
+  }
+  // A project with dataset/environment levers can't launch with NONE selected (nothing to run against).
+  // An applied preset supplying its own bundles satisfies this; otherwise it's the picker selection — and
+  // with none DEFINED at all (a valid just-started-project state) the message points at the tab.
+  if (hasDatasetLevers() && !launchPresetDatasets.length && !selectedDatasets(form).length) {
+    if (status) {
+      status.textContent = datasetsCache.length
+        ? 'Select at least one dataset to run against.'
+        : 'Define a dataset in the Datasets tab before launching.'
+    }
+    return
+  }
+  if (hasEnvLevers() && !launchPresetEnvironments.length && !selectedEnvironments(form).length) {
+    if (status) {
+      status.textContent = environmentsCache.length
+        ? 'Select at least one environment to run against.'
+        : 'Define an environment in the Environments tab before launching.'
+    }
     return
   }
   const epoch = projectEpoch
@@ -8731,6 +9130,7 @@ function activityTypeLabel(type) {
   if (type === 'judge') return 'Judge runs'
   if (type === 'propose') return 'Propose experiments'
   if (type === 'evaluate') return 'Evaluate runs'
+  if (type === 'xai-narrate') return 'xAI narrative'
   return type
 }
 // On opening a project (or regaining focus), re-attach an observer to EVERY backend-live
@@ -9393,7 +9793,7 @@ function showTab(id) {
     renderActivity()
     refreshQueue()
   }
-  if (target === 'xai') renderXai()
+  if (target === 'xai') void refreshXai()
 }
 // A tiny spinner on the ACTIVE tab while the open project has a live (running)
 // activity, so the in-flight campaign is visible from any tab — not just

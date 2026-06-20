@@ -100,6 +100,14 @@ project by its manifest's `recordType`.
   surrogate (`fitConfigSurrogate`) over (config → criterion) adds the global view — fANOVA importance, a
   greedy ablation tree, and a 2-lever interaction grid — predicting unobserved configs (the determinism is
   load-bearing: the forest is seeded from the data, so analysis never drifts between runs).
+- **LLM only synthesises the xAI, never computes it**: a thin layer sits on top of the deterministic engine.
+  `xaiNarrate` (tool) runs the SAME deterministic analysis server-side, then makes ONE inference to write a
+  short campaign **narrative** (`{recordType}-xai-narrative` 'latest' record, via the `xai-narrate`
+  activity) the viewer shows at the top of the tab with an "N new runs since" refresh. A **"Discuss xAI"**
+  button seeds a chat with one run's FULL analysis (attribution + its Adebayo sanity check, latent probe,
+  the decision diff vs its nearest sibling). A **"Propose with AI"** button feeds the lever-importance +
+  gap signal as instructions into the existing `proposeTrainingHypotheses`. The deterministic records stay
+  the source of truth; the model interprets them and is told to hedge on the confounded/surrogate signals.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best
@@ -110,6 +118,21 @@ project by its manifest's `recordType`.
   `{recordType}-hypothesis` record by the spec's hash (identical proposals dedupe, existing
   statuses survive re-proposing), and the viewer's accept → "Run campaign" turns a hypothesis
   into a `train` activity with that spec. Backlog statuses are plain record edits.
+- **Datasets/environments are user-managed bundles with a settable default**: levers tagged
+  `scope: "dataset"`/`"environment"` aren't model knobs — they're managed in their own tabs as
+  named `{recordType}-dataset`/`-environment` records (`{id, name, settings, default}`). One record
+  holds the `default` flag (the launch picker pre-checks it; removing it promotes the next record);
+  the first one created becomes the default, and a save is refused if a record with the same name or
+  settings already exists. The manifest-defaults card stays only as a read-only clone-to-start seed.
+  A project that declares such levers but has none defined cannot launch (a valid just-started state).
+- **Run dataset identity is normalized on open, not at the call site**: runs group by the VALUE
+  signature of their dataset/env levers, so the `fidelity_set: "auto"` synonym (and pre-hub ledger
+  imports carrying no fidelity_set) would fragment a run away from its explicit-dataset siblings.
+  `viewer/migrate.js` (a pure, parity-mirror-style module, unit-tested via `src/migrateViewer.test.ts`)
+  derives each run's CONCRETE identity from data it already carries — its own `dataset.layers`, or the
+  `historical_data` tag for imports (sub-hourly/retired stacks get a truthful `legacy:` label, never
+  force-merged into a runnable set). The viewer runs it idempotently on project open (the whole backlog)
+  and on every runs refresh (in-flight `auto` runs), recomputing `setupKey` so by-setup regroups too.
 
 ## Remote compute
 

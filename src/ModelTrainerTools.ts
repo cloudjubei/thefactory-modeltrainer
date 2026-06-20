@@ -8,6 +8,7 @@ import {
   uuidv4,
 } from 'thefactory-tools/utils'
 import type {
+  AnalysisRun,
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
   CalibrateTrainingParams,
@@ -31,6 +32,8 @@ import type {
   TrainingHypothesis,
   TrainingPaperRecord,
   TrainingVerdict,
+  XaiNarrateParams,
+  XaiNarrateResult,
 } from './modelTrainerTypes.js'
 import {
   DEFAULT_HYPOTHESIS_COUNT,
@@ -54,6 +57,8 @@ import {
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
+  buildXaiNarrateSystemPrompt,
+  buildXaiNarrateUserContent,
   coerceHypothesisItems,
   coercePaperDraft,
   coerceVerdictRows,
@@ -64,6 +69,14 @@ import {
   validateDecisionTrace,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
+import {
+  ablationPath,
+  criterionValueOf,
+  fanovaImportances,
+  fitConfigSurrogate,
+  leverImportances,
+  recommendExperiments,
+} from './xaiUtils.js'
 
 /** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
 function sanitizeRunArtifacts(
@@ -785,6 +798,70 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, paper, analyzedBy, analyzedAt }
   }
 
+  async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const narratedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const narratedAt = now()
+    const criterion = params.criterion ?? {
+      key: 'objective',
+      direction: manifest.objective.direction,
+      label: manifest.objective.name,
+    }
+
+    // Project the stored run records into the engine's AnalysisRun shape, then run the SAME deterministic
+    // xAI analysis the viewer shows — the LLM only narrates these facts, it never computes them.
+    const runs: AnalysisRun[] = (await listCompletedRuns(params.scope, recordType)).map((r) => ({
+      key: r.key,
+      config: (r.content.config as Record<string, unknown>) || {},
+      metrics: r.content.metrics as Record<string, number> | undefined,
+      objective: r.content.objective as number,
+      durationMs: r.content.durationMs as number | undefined,
+      seed: r.content.seed as number | undefined,
+      dataset: r.content.dataset as AnalysisRun['dataset'],
+      status: 'completed',
+    }))
+    const ranked = runs
+      .map((r) => ({ run: r, value: criterionValueOf(r, criterion) }))
+      .filter((x): x is { run: AnalysisRun; value: number } => x.value !== undefined)
+      .sort((a, b) => (criterion.direction === 'max' ? b.value - a.value : a.value - b.value))
+    const surrogate = fitConfigSurrogate(runs, criterion)
+    const userContent = buildXaiNarrateUserContent({
+      criterion,
+      runCount: runs.length,
+      topRuns: ranked.slice(0, 5).map((x) => ({ key: x.run.key, value: x.value, config: x.run.config })),
+      fanova: fanovaImportances(surrogate, runs, criterion),
+      importances: leverImportances(runs, criterion),
+      ablation: ablationPath(surrogate, runs, criterion),
+      recommendations: recommendExperiments(runs, criterion),
+    })
+    const res = await executor.runInference({
+      systemPrompt: buildXaiNarrateSystemPrompt(manifest),
+      userContent,
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const narrativeType = `${recordType}-xai-narrative`
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: narrativeType,
+      key: 'latest',
+      content: {
+        narrative: String(res.text || '').trim(),
+        runCount: runs.length,
+        criterionKey: criterion.key,
+        narratedBy,
+        narratedAt,
+      },
+    })
+    params.onRecordWritten?.(narrativeType, 'latest')
+    logger?.info('narrated xAI', { recordType, runCount: runs.length })
+    return { recordType, runCount: runs.length, narratedBy, narratedAt }
+  }
+
   return {
     readTrainerManifest: (projectRoot, manifestRelPath) =>
       readTrainerManifest(projectRoot, manifestRelPath),
@@ -797,5 +874,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     judgeTrainingRuns,
     proposeTrainingHypotheses,
     analyzePaperFromUrl,
+    xaiNarrate,
   }
 }
