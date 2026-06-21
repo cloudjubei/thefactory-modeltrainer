@@ -31,6 +31,7 @@ import type {
   TrainingCampaignResult,
   TrainingHypothesis,
   TrainingPaperRecord,
+  TrainingRunSummary,
   TrainingVerdict,
   XaiNarrateParams,
   XaiNarrateResult,
@@ -62,6 +63,7 @@ import {
   coerceHypothesisItems,
   coercePaperDraft,
   coerceVerdictRows,
+  diffDecisionTraces,
   expandExperimentMatrix,
   normalizeObjectiveScores,
   pickBestRun,
@@ -69,14 +71,7 @@ import {
   validateDecisionTrace,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
-import {
-  ablationPath,
-  criterionValueOf,
-  fanovaImportances,
-  fitConfigSurrogate,
-  leverImportances,
-  recommendExperiments,
-} from './xaiUtils.js'
+import { criterionValueOf, leverImportances } from './xaiUtils.js'
 
 /** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
 function sanitizeRunArtifacts(
@@ -811,9 +806,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       label: manifest.objective.name,
     }
 
-    // Project the stored run records into the engine's AnalysisRun shape, then run the SAME deterministic
-    // xAI analysis the viewer shows — the LLM only narrates these facts, it never computes them.
-    const runs: AnalysisRun[] = (await listCompletedRuns(params.scope, recordType)).map((r) => ({
+    // The narrative is PER RUN: digest the focused run's OWN deterministic xAI (its decisions, attribution +
+    // sanity check, reward breakdown, latent probe, sibling decision-diff) plus its standing among all runs.
+    // The LLM only narrates these facts — it never computes them.
+    const records = await listCompletedRuns(params.scope, recordType)
+    const focus = records.find((r) => r.key === params.runKey)
+    if (!focus) throw new Error(`run "${params.runKey}" is not a completed run of this project`)
+    const focusConfig = (focus.content.config as Record<string, unknown>) || {}
+
+    const runs: AnalysisRun[] = records.map((r) => ({
       key: r.key,
       config: (r.content.config as Record<string, unknown>) || {},
       metrics: r.content.metrics as Record<string, number> | undefined,
@@ -824,18 +825,71 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       status: 'completed',
     }))
     const ranked = runs
-      .map((r) => ({ run: r, value: criterionValueOf(r, criterion) }))
-      .filter((x): x is { run: AnalysisRun; value: number } => x.value !== undefined)
+      .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
+      .filter((x): x is { key: string; value: number } => x.value !== undefined)
       .sort((a, b) => (criterion.direction === 'max' ? b.value - a.value : a.value - b.value))
-    const surrogate = fitConfigSurrogate(runs, criterion)
+    const rankPos = ranked.findIndex((x) => x.key === params.runKey)
+
+    const trace = validateDecisionTrace(
+      (focus.content.artifacts as { decisionTrace?: unknown } | undefined)?.decisionTrace,
+    )
+    const fa = trace?.featureAttribution
+    const topGroups: [string, number][] = fa?.byGroup
+      ? Object.entries(fa.byGroup)
+          .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+          .slice(0, 5)
+      : []
+    const probe = trace?.latentMap?.probe
+
+    let sibling: Parameters<typeof buildXaiNarrateUserContent>[0]['sibling']
+    const sib = params.siblingKey ? records.find((r) => r.key === params.siblingKey) : undefined
+    if (sib) {
+      const diff = diffDecisionTraces(
+        sib.content as unknown as TrainingRunSummary,
+        focus.content as unknown as TrainingRunSummary,
+      )
+      if (diff && diff.aligned) {
+        const sibConfig = (sib.content.config as Record<string, unknown>) || {}
+        const changed =
+          Object.keys(manifest.levers)
+            .filter((lk) => String(sibConfig[lk]) !== String(focusConfig[lk]))
+            .map((lk) => `${lk} ${sibConfig[lk]}→${focusConfig[lk]}`)
+            .join(', ') || 'seed/nondeterminism'
+        sibling = {
+          key: params.siblingKey as string,
+          changed,
+          divergencePct: Math.round(diff.divergenceRate * 100),
+          qualityVerdict: diff.quality.verdict,
+          qualitySummary: diff.quality.summary,
+        }
+      }
+    }
+
     const userContent = buildXaiNarrateUserContent({
+      runKey: params.runKey,
+      config: focusConfig,
+      objective: focus.content.objective as number | undefined,
       criterion,
-      runCount: runs.length,
-      topRuns: ranked.slice(0, 5).map((x) => ({ key: x.run.key, value: x.value, config: x.run.config })),
-      fanova: fanovaImportances(surrogate, runs, criterion),
+      rank: rankPos >= 0 ? { position: rankPos + 1, total: ranked.length } : undefined,
+      actionCounts: trace?.actionCounts,
+      attribution: fa
+        ? {
+            topGroups,
+            method: fa.method,
+            sanityPassed: fa.sanityCheck?.passed,
+            sanityRankCorr: fa.sanityCheck?.rankCorrelation,
+          }
+        : undefined,
+      rewardBreakdown: trace?.rewardBreakdown,
+      latent: trace?.latentMap
+        ? {
+            varianceExplained: trace.latentMap.varianceExplained,
+            probeAccuracy: probe?.accuracy,
+            probeBaseline: probe?.baseline,
+          }
+        : undefined,
       importances: leverImportances(runs, criterion),
-      ablation: ablationPath(surrogate, runs, criterion),
-      recommendations: recommendExperiments(runs, criterion),
+      sibling,
     })
     const res = await executor.runInference({
       systemPrompt: buildXaiNarrateSystemPrompt(manifest),
@@ -848,18 +902,19 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     await deps.storage.upsertRecord({
       scope: params.scope,
       type: narrativeType,
-      key: 'latest',
+      key: params.runKey,
       content: {
         narrative: String(res.text || '').trim(),
+        runKey: params.runKey,
         runCount: runs.length,
         criterionKey: criterion.key,
         narratedBy,
         narratedAt,
       },
     })
-    params.onRecordWritten?.(narrativeType, 'latest')
-    logger?.info('narrated xAI', { recordType, runCount: runs.length })
-    return { recordType, runCount: runs.length, narratedBy, narratedAt }
+    params.onRecordWritten?.(narrativeType, params.runKey)
+    logger?.info('narrated xAI run', { recordType, runKey: params.runKey, runCount: runs.length })
+    return { recordType, runKey: params.runKey, runCount: runs.length, narratedBy, narratedAt }
   }
 
   return {

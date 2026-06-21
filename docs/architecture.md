@@ -101,13 +101,16 @@ project by its manifest's `recordType`.
   greedy ablation tree, and a 2-lever interaction grid — predicting unobserved configs (the determinism is
   load-bearing: the forest is seeded from the data, so analysis never drifts between runs).
 - **LLM only synthesises the xAI, never computes it**: a thin layer sits on top of the deterministic engine.
-  `xaiNarrate` (tool) runs the SAME deterministic analysis server-side, then makes ONE inference to write a
-  short campaign **narrative** (`{recordType}-xai-narrative` 'latest' record, via the `xai-narrate`
-  activity) the viewer shows at the top of the tab with an "N new runs since" refresh. A **"Discuss xAI"**
-  button seeds a chat with one run's FULL analysis (attribution + its Adebayo sanity check, latent probe,
-  the decision diff vs its nearest sibling). A **"Propose with AI"** button feeds the lever-importance +
-  gap signal as instructions into the existing `proposeTrainingHypotheses`. The deterministic records stay
-  the source of truth; the model interprets them and is told to hedge on the confounded/surrogate signals.
+  `xaiNarrate` (tool) digests ONE run's own deterministic xAI server-side (its action mix, input attribution
+  - the Adebayo sanity verdict, reward breakdown, latent probe, the decision-diff vs a passed-in sibling,
+    plus its rank + cross-run lever importances for context), then makes ONE inference to write a short
+    **per-run narrative** — a `{recordType}-xai-narrative` record KEYED BY RUN, via the `xai-narrate` activity.
+    The viewer shows the focused run's narrative at the top of the tab with an "N new runs since" refresh (the
+    cross-run context drifts as the campaign grows); selecting a different run shows that run's own narrative.
+    A **"Discuss xAI"** button seeds an interactive chat with the same per-run analysis. A **"Propose with AI"**
+    button feeds the lever-importance + gap signal as instructions into the existing `proposeTrainingHypotheses`.
+    The deterministic records stay the source of truth; the model interprets them and is told to hedge on the
+    confounded/surrogate signals (e.g. an attribution that FAILED its sanity check).
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best

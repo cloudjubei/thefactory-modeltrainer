@@ -371,79 +371,111 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100
 }
 
-/** The system prompt for the one-shot xAI narrative — synthesise the deterministic analysis, hedge on uncertainty. */
+/** The system prompt for the one-shot PER-RUN xAI narrative — explain this run, hedge on weak signals. */
 export function buildXaiNarrateSystemPrompt(manifest: TrainerManifest): string {
   return [
-    `You are an ML experiment analyst for the "${manifest.name}" training project.`,
+    `You are an ML interpretability analyst for the "${manifest.name}" training project.`,
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-    `Below is the DETERMINISTIC xAI analysis of the runs so far. Write a SHORT narrative (3–6 sentences, plain prose — NO headings or bullet lists): what has been learned (which levers matter and which way, what the best setup looks like, the trend), the single biggest opportunity OR risk, and the most valuable next experiment.`,
-    `Be specific and HONEST about uncertainty: lever importances are CONFOUNDED screening signals, the ablation path is a SURROGATE PREDICTION (not measured), and low-seed estimates are unreliable — hedge where the data is thin. Synthesise; do not restate the numbers verbatim. No preamble.`,
+    `Below is the DETERMINISTIC xAI analysis of ONE specific run. Write a SHORT narrative (3–6 sentences, plain prose — NO headings or bullet lists): what this model is DOING (its decisions/action mix), what DRIVES those decisions (input attribution), how TRUSTWORTHY that explanation is, how it compares to its nearest sibling, and the single most valuable thing to try next.`,
+    `Be specific and HONEST about uncertainty: if the attribution FAILED its sanity check, say the input explanation is unreliable; lever importances are CONFOUNDED screening signals; a decision-quality verdict is heuristic, not causal; low-data estimates are weak. Synthesise; don't restate the numbers verbatim. No preamble.`,
   ].join('\n')
 }
 
-/** Compact, model-readable digest of the deterministic xAI analysis for the narrative. Pure. */
+/** Compact, model-readable digest of ONE run's deterministic xAI analysis for the narrative. Pure. */
 export function buildXaiNarrateUserContent(input: {
+  runKey: string
+  config: Record<string, unknown>
+  objective?: number
   criterion: { key: string; direction: 'max' | 'min'; label?: string }
-  runCount: number
-  topRuns: { key: string; value: number; config: Record<string, unknown> }[]
-  fanova: { lever: string; importance: number }[]
-  importances: { lever: string; importance: number; confident: boolean; bestValue: string; worstValue: string }[]
-  ablation?: {
-    baselinePredicted: number
-    incumbentPredicted: number
-    steps: { lever: string; from: string; to: string; gain: number }[]
+  rank?: { position: number; total: number }
+  actionCounts?: Record<string, number>
+  attribution?: {
+    topGroups: [string, number][]
+    method?: string
+    sanityPassed?: boolean
+    sanityRankCorr?: number
   }
-  recommendations: { kind: string; reason: string }[]
+  rewardBreakdown?: Record<string, number>
+  latent?: { varianceExplained?: number; probeAccuracy?: number; probeBaseline?: number }
+  importances: { lever: string; importance: number; bestValue: string }[]
+  sibling?: {
+    key: string
+    changed: string
+    divergencePct: number
+    qualityVerdict?: string
+    qualitySummary?: string
+  }
 }): string {
-  const c = input.criterion
-  const label = c.label || c.key
+  const label = input.criterion.label || input.criterion.key
   const pct = (v: number) => `${Math.round(v * 100)}%`
-  const lines = [`Criterion: ${label} (${c.direction} is better). ${input.runCount} completed runs analysed.`]
-  if (input.topRuns.length) {
+  const cfg = Object.entries(input.config)
+    .filter(([k]) => k !== 'seed')
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' ')
+  const lines = [
+    `Run ${input.runKey.slice(0, 8)} — config {${cfg}}.`,
+    `${label}: ${input.objective === undefined ? 'n/a' : round2(input.objective)}${
+      input.rank ? ` (ranks #${input.rank.position} of ${input.rank.total})` : ''
+    }.`,
+  ]
+  if (input.actionCounts && Object.keys(input.actionCounts).length) {
     lines.push(
-      `Top runs by ${label}: ` +
-        input.topRuns
-          .slice(0, 5)
-          .map(
-            (r) =>
-              `${r.key.slice(0, 8)}=${round2(r.value)} {${Object.entries(r.config)
-                .filter(([k]) => k !== 'seed')
-                .map(([k, v]) => `${k}=${v}`)
-                .join(' ')}}`,
-          )
-          .join(' | '),
+      `Action mix: ` +
+        Object.entries(input.actionCounts)
+          .sort((a, b) => b[1] - a[1])
+          .map(([a, c]) => `${a}=${c}`)
+          .join(', ') +
+        '.',
     )
   }
-  if (input.fanova.length) {
+  if (input.attribution && input.attribution.topGroups.length) {
+    const top = input.attribution.topGroups.map(([k, v]) => `${k}(${round2(v)})`).join(', ')
+    const sanity =
+      input.attribution.sanityPassed === undefined
+        ? ''
+        : input.attribution.sanityPassed
+          ? ` — sanity check PASSED (rank corr ${round2(input.attribution.sanityRankCorr ?? 0)}), so this attribution is trustworthy`
+          : ` — sanity check FAILED (rank corr ${round2(input.attribution.sanityRankCorr ?? 0)}): the attribution barely changes under weight randomization, so it likely reflects the input/architecture, NOT what the model learned`
+    lines.push(`Input attribution (${input.attribution.method || 'saliency'}): ${top}${sanity}.`)
+  }
+  if (input.rewardBreakdown && Object.keys(input.rewardBreakdown).length) {
     lines.push(
-      `Lever importance (fANOVA on a surrogate; main+interaction): ` +
-        input.fanova.slice(0, 6).map((f) => `${f.lever} ${pct(f.importance)}`).join(', '),
+      `Reward breakdown (why this reward): ` +
+        Object.entries(input.rewardBreakdown)
+          .filter(([k]) => k !== 'total')
+          .map(([k, v]) => `${k} ${Number(v) >= 0 ? '+' : ''}${round2(Number(v))}`)
+          .join(', ') +
+        '.',
+    )
+  }
+  if (input.latent && input.latent.probeAccuracy !== undefined) {
+    lines.push(
+      `Latent: a linear probe predicts the action from the penultimate activations at ${pct(
+        input.latent.probeAccuracy,
+      )} vs a ${pct(input.latent.probeBaseline ?? 0)} majority baseline${
+        input.latent.varianceExplained !== undefined
+          ? ` (2-D projection keeps ${pct(input.latent.varianceExplained)} variance)`
+          : ''
+      }.`,
+    )
+  }
+  if (input.sibling) {
+    lines.push(
+      `Vs nearest sibling ${input.sibling.key.slice(0, 8)} (changed ${input.sibling.changed}): ${input.sibling.divergencePct}% of aligned decisions differ; decision-quality ${input.sibling.qualityVerdict || 'n/a'}${
+        input.sibling.qualitySummary ? ` — ${input.sibling.qualitySummary}` : ''
+      } (heuristic, not causal).`,
     )
   }
   if (input.importances.length) {
     lines.push(
-      `Lever importance (marginal screening, CONFOUNDED): ` +
+      `Cross-run lever importance (CONFOUNDED screening) for context: ` +
         input.importances
-          .slice(0, 6)
-          .map((i) => `${i.lever} ${pct(i.importance)}${i.confident ? '' : ' (low data)'} best=${i.bestValue}/worst=${i.worstValue}`)
-          .join('; '),
+          .slice(0, 4)
+          .map((i) => `${i.lever} ${pct(i.importance)} (best≈${i.bestValue})`)
+          .join(', ') +
+        '.',
     )
   }
-  if (input.ablation && input.ablation.steps.length) {
-    lines.push(
-      `Ablation path (worst→best, SURROGATE-PREDICTED): baseline ${round2(input.ablation.baselinePredicted)} ` +
-        input.ablation.steps
-          .map((s) => `→ ${s.lever} ${s.from}→${s.to} (${s.gain >= 0 ? '+' : ''}${round2(s.gain)})`)
-          .join(' ') +
-        ` → incumbent ${round2(input.ablation.incumbentPredicted)}`,
-    )
-  }
-  lines.push(
-    input.recommendations.length
-      ? `Deterministic gaps the recommender found: ` +
-          input.recommendations.slice(0, 6).map((r) => `[${r.kind}] ${r.reason}`).join(' | ')
-      : `No obvious factorial/seed gaps — the explored grid is complete + seeded.`,
-  )
   return lines.join('\n')
 }
 

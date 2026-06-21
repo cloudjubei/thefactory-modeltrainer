@@ -1736,71 +1736,135 @@ describe('proposeTrainingHypotheses', () => {
 })
 
 describe('xaiNarrate', () => {
-  it('runs the deterministic xAI analysis, persists the narrative + run count, and feeds the model the facts', async () => {
+  const TRACE = {
+    steps: [{ step: 0, action: 'hold' }],
+    actionCounts: { hold: 90, buy: 10 },
+    featureAttribution: {
+      byGroup: { '1h': 0.4, '1d': 0.1 },
+      method: 'gradient-saliency',
+      sanityCheck: { passed: true, rankCorrelation: 0.05 },
+    },
+    rewardBreakdown: { base: 1.5, turnover_penalty: -0.2 },
+    latentMap: {
+      varianceExplained: 0.7,
+      points: [
+        { x: 0, y: 0, action: 'hold' },
+        { x: 1, y: 1, action: 'buy' },
+        { x: 2, y: 0, action: 'hold' },
+      ],
+      probe: { accuracy: 0.8, baseline: 0.6 },
+    },
+  }
+
+  it('narrates ONE run: keys the record by run, digests its trace, ranks it, and feeds the model the facts', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'a', 10, { config: { lr: 0.1 }, seed: 0 })
-    await seedRun(storage, 'b', 90, { config: { lr: 0.9 }, seed: 0 })
-    await seedRun(storage, 'c', 50, { config: { lr: 0.5 }, seed: 1 })
-    const executor = stubExecutor('lr is the dominant lever; push it higher.')
+    await seedRun(storage, 'aaa', 10, { config: { lr: 0.1 } })
+    await seedRun(storage, 'bbb', 90, { config: { lr: 0.9 }, artifacts: { decisionTrace: TRACE } })
+    const executor = stubExecutor('hold-dominant; saliency trustworthy.')
     const { tools } = makeJudgeTools(executor, storage)
     const result = await tools.xaiNarrate({
       scope: 'proj',
       projectRoot: '/repo',
       manifest: manifest(),
       llmConfig: LLM,
+      runKey: 'bbb',
     })
     expect(result).toMatchObject({
       recordType: 'demo-run',
-      runCount: 3,
+      runKey: 'bbb',
+      runCount: 2,
       narratedBy: 'openai/m',
       narratedAt: NOW,
     })
     const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-narrative' })
     expect(records).toHaveLength(1)
-    expect(records[0].key).toBe('latest')
+    expect(records[0].key).toBe('bbb')
     expect(records[0].content).toMatchObject({
-      narrative: 'lr is the dominant lever; push it higher.',
-      runCount: 3,
+      narrative: 'hold-dominant; saliency trustworthy.',
+      runKey: 'bbb',
+      runCount: 2,
       criterionKey: 'objective',
-      narratedBy: 'openai/m',
     })
-    expect(executor.requests).toHaveLength(1)
-    expect(executor.requests[0].userContent).toContain('lr')
-    expect(executor.requests[0].userContent).toContain('3 completed runs')
+    const uc = executor.requests[0].userContent
+    expect(uc).toContain('Run bbb')
+    expect(uc).toMatch(/Action mix: hold=90/)
+    expect(uc).toMatch(/sanity check PASSED/)
+    expect(uc).toMatch(/linear probe.*80% vs a 60%/)
+    expect(uc).toMatch(/ranks #1 of 2/) // bbb's objective (90) is best under max
   })
 
-  it('honours a non-default criterion', async () => {
+  it('includes the sibling decision-diff when siblingKey is given', async () => {
+    const aligned = (action: string) => ({
+      steps: [{ step: 0, action, reward: 1 }],
+      totalSteps: 1,
+      actionCounts: { [action]: 1 },
+    })
     const storage = memoryStorage()
-    await seedRun(storage, 'a', 10, { durationMs: 1000 })
+    await seedRun(storage, 'base', 10, {
+      config: { lr: 0.9 },
+      dataset: { asset: 'BTC' },
+      artifacts: { decisionTrace: aligned('hold') },
+    })
+    await seedRun(storage, 'tweak', 20, {
+      config: { lr: 0.1 },
+      dataset: { asset: 'BTC' },
+      artifacts: { decisionTrace: aligned('buy') },
+    })
+    const executor = stubExecutor('the tweak buys.')
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      runKey: 'tweak',
+      siblingKey: 'base',
+    })
+    expect(executor.requests[0].userContent).toMatch(/nearest sibling base \(changed lr 0.9→0.1\)/)
+  })
+
+  it('honours a non-default criterion and fires onRecordWritten with the run key', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'aaa', 10, { durationMs: 1000 })
+    const written: string[] = []
     const { tools } = makeJudgeTools(stubExecutor('fast.'), storage)
     await tools.xaiNarrate({
       scope: 'proj',
       projectRoot: '/repo',
       manifest: manifest(),
       llmConfig: LLM,
+      runKey: 'aaa',
       criterion: { key: 'runtime', direction: 'min', label: 'runtime' },
+      onRecordWritten: (t, k) => written.push(`${t}/${k}`),
     })
     const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-narrative' })
     expect((records[0].content as { criterionKey: string }).criterionKey).toBe('runtime')
+    expect(written).toContain('demo-run-xai-narrative/aaa')
   })
 
-  it('fires onRecordWritten and requires an inference executor', async () => {
+  it('throws for an unknown run and without an inference executor', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'a', 10)
-    const written: string[] = []
+    await seedRun(storage, 'aaa', 10)
     const { tools } = makeJudgeTools(stubExecutor('n'), storage)
-    await tools.xaiNarrate({
-      scope: 'proj',
-      projectRoot: '/repo',
-      manifest: manifest(),
-      llmConfig: LLM,
-      onRecordWritten: (t, k) => written.push(`${t}/${k}`),
-    })
-    expect(written).toContain('demo-run-xai-narrative/latest')
+    await expect(
+      tools.xaiNarrate({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+        runKey: 'ghost',
+      }),
+    ).rejects.toThrow(/not a completed run/)
 
     const { tools: noLlm } = makeJudgeTools(undefined, storage)
     await expect(
-      noLlm.xaiNarrate({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM }),
+      noLlm.xaiNarrate({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+        runKey: 'aaa',
+      }),
     ).rejects.toThrow(/inferenceExecutor/)
   })
 })

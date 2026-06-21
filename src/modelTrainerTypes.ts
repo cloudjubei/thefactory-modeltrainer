@@ -1043,7 +1043,11 @@ export interface XaiNarrateParams {
   /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
   manifestRelPath?: string
   llmConfig: LLMConfig
-  /** Criterion to analyse by; defaults to the manifest objective. */
+  /** The run to narrate — the narrative is PER RUN, keyed by this run's key. */
+  runKey: string
+  /** Optional nearest comparable run for the decision-diff context line. */
+  siblingKey?: string
+  /** Criterion the run is ranked + the levers screened by; defaults to the manifest objective. */
   criterion?: AnalysisCriterion
   abortSignal?: AbortSignal
   /** Fired after the narrative record upsert so the host can broadcast `data:updated`. */
@@ -1052,7 +1056,9 @@ export interface XaiNarrateParams {
 
 export interface XaiNarrateResult {
   recordType: string
-  /** Completed-run count the narrative was generated from — the viewer shows "N new runs since". */
+  /** The narrated run's key (the narrative record's key). */
+  runKey: string
+  /** Completed-run count at generation — the viewer shows "N new runs since" as the cross-run context drifts. */
   runCount: number
   /** Provenance label of the narrating model. */
   narratedBy: string

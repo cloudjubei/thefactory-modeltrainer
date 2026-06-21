@@ -606,60 +606,86 @@ describe('prompt builders', () => {
     expect(parsed.verdicts[0].score).toBe(80)
   })
 
-  it('xai-narrate system prompt names the project, objective and demands an honest short narrative', () => {
+  it('xai-narrate system prompt names the project, objective and demands an honest per-run narrative', () => {
     const prompt = buildXaiNarrateSystemPrompt(m)
     expect(prompt).toContain(m.name)
     expect(prompt).toContain(m.objective.name)
     expect(prompt).toContain(m.objective.direction)
     expect(prompt).toMatch(/SHORT narrative/)
-    expect(prompt).toMatch(/CONFOUNDED|SURROGATE/)
+    expect(prompt).toMatch(/ONE specific run/)
+    expect(prompt).toMatch(/sanity check/)
   })
 
-  it('xai-narrate user content carries criterion, top runs, both importance signals, the ablation path and gaps', () => {
+  it('xai-narrate user content digests one run: decisions, attribution+sanity, reward, latent, sibling, context', () => {
     const content = buildXaiNarrateUserContent({
+      runKey: 'abc123def456',
+      config: { lr: 0.1, seed: 0 },
+      objective: 12.34,
       criterion: { key: 'objective', direction: 'max', label: 'traded return' },
-      runCount: 7,
-      topRuns: [{ key: 'abc123def456', value: 12.34, config: { lr: 0.1, seed: 0 } }],
-      fanova: [{ lever: 'lr', importance: 0.6 }],
-      importances: [
-        { lever: 'lr', importance: 0.5, confident: true, bestValue: '0.1', worstValue: '0.9' },
-        { lever: 'gamma', importance: 0.2, confident: false, bestValue: '0.99', worstValue: '0.9' },
-      ],
-      ablation: {
-        baselinePredicted: 1,
-        incumbentPredicted: 5,
-        steps: [
-          { lever: 'lr', from: '0.9', to: '0.1', gain: 4 },
-          { lever: 'gamma', from: '0.9', to: '0.99', gain: -0.5 },
+      rank: { position: 2, total: 9 },
+      actionCounts: { hold: 80, buy: 15, sell: 5 },
+      attribution: {
+        topGroups: [
+          ['1h', 0.42],
+          ['1d', 0.18],
         ],
+        method: 'integrated-gradients',
+        sanityPassed: false,
+        sanityRankCorr: 0.91,
       },
-      recommendations: [{ kind: 'thin-seeds', reason: 'only 1 seed at the best cell' }],
+      rewardBreakdown: { base: 1.2, turnover_penalty: -0.3 },
+      latent: { varianceExplained: 0.7, probeAccuracy: 0.82, probeBaseline: 0.6 },
+      importances: [{ lever: 'lr', importance: 0.5, bestValue: '0.1' }],
+      sibling: {
+        key: 'sib9999',
+        changed: 'lr 0.9→0.1',
+        divergencePct: 23,
+        qualityVerdict: 'better',
+        qualitySummary: 'earned more where decisions changed',
+      },
     })
-    expect(content).toContain('traded return')
-    expect(content).toContain('7 completed runs')
     expect(content).toContain('abc123de') // 8-char run id, seed dropped from the config digest
     expect(content).not.toMatch(/seed=0/)
-    expect(content).toContain('fANOVA')
-    expect(content).toMatch(/gamma .*low data/)
-    expect(content).toContain('best=0.1')
-    // both gain signs are formatted (+ for a gain, bare - for a loss)
-    expect(content).toMatch(/Ablation path.*baseline 1.*lr 0.9→0.1 \(\+4\).*gamma 0.9→0.99 \(-0.5\).*incumbent 5/)
-    expect(content).toMatch(/\[thin-seeds\] only 1 seed/)
+    expect(content).toMatch(/traded return: 12.34 \(ranks #2 of 9\)/)
+    expect(content).toMatch(/Action mix: hold=80, buy=15, sell=5/)
+    expect(content).toMatch(/integrated-gradients.*1h\(0.42\)/)
+    expect(content).toMatch(/sanity check FAILED \(rank corr 0.91\)/)
+    expect(content).toMatch(/turnover_penalty -0.3/)
+    expect(content).toMatch(/linear probe.*82% vs a 60%/)
+    expect(content).toMatch(/sibling sib9999 \(changed lr 0.9→0.1\): 23%.*better/)
+    expect(content).toMatch(/lever importance.*lr 50% \(best≈0.1\)/)
   })
 
-  it('xai-narrate user content states when there are no gaps and omits empty sections', () => {
+  it('xai-narrate user content omits empty sections and marks a PASSED sanity check', () => {
     const content = buildXaiNarrateUserContent({
+      runKey: 'deadbeef',
+      config: {},
       criterion: { key: 'objective', direction: 'min' },
-      runCount: 2,
-      topRuns: [],
-      fanova: [],
+      attribution: { topGroups: [['1h', 0.1]], sanityPassed: true, sanityRankCorr: 0.05 },
       importances: [],
-      recommendations: [],
     })
-    expect(content).toContain('objective (min is better)')
-    expect(content).toMatch(/No obvious factorial\/seed gaps/)
-    expect(content).not.toContain('fANOVA')
-    expect(content).not.toContain('Ablation path')
+    expect(content).toContain('objective: n/a')
+    expect(content).toMatch(/sanity check PASSED \(rank corr 0.05\)/)
+    expect(content).not.toContain('Action mix')
+    expect(content).not.toContain('Reward breakdown')
+    expect(content).not.toContain('Latent')
+    expect(content).not.toContain('nearest sibling')
+    expect(content).not.toContain('lever importance')
+  })
+
+  it('xai-narrate user content handles attribution without a sanity check and latent without variance', () => {
+    const content = buildXaiNarrateUserContent({
+      runKey: 'cafe',
+      config: { lr: 0.2 },
+      criterion: { key: 'objective', direction: 'max' },
+      attribution: { topGroups: [['1h', 0.3]] },
+      latent: { probeAccuracy: 0.7 },
+      importances: [],
+    })
+    expect(content).toMatch(/Input attribution \(saliency\): 1h\(0.3\)\./)
+    expect(content).not.toContain('sanity check')
+    expect(content).toMatch(/linear probe.*70% vs a 0% majority baseline\./)
+    expect(content).not.toContain('variance')
   })
 })
 

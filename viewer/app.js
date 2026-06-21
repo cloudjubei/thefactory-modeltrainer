@@ -77,8 +77,8 @@ let xaiCriterionDir = null
 let xaiFocusKey = null
 let xaiLever = null
 let xaiRecsCache = []
-// The latest LLM narrative record ({narrative, runCount, criterionKey, narratedBy, narratedAt}) or null.
-let xaiNarrativeCache = null
+// Per-run LLM narrative records, keyed by run key → {narrative, runKey, runCount, criterionKey, narratedBy, narratedAt}.
+const xaiNarrativeCache = new Map()
 let narrating = false
 // Phase 3: the two levers crossed in the interaction grid (default to the top-2 by surrogate importance).
 let xaiInterA = null
@@ -1421,7 +1421,7 @@ function resetDashboardState() {
   judgementSummary = null
   hypothesesCache = []
   proposalSummary = null
-  xaiNarrativeCache = null
+  xaiNarrativeCache.clear()
   narrating = false
   selectedRunKey = null
   liveActivities = new Map()
@@ -1776,7 +1776,8 @@ async function refreshAfterQuickDispatch(item, act) {
     await renderHypotheses()
     if (activeTabId === 'xai') renderXai()
   } else if (item.activityType === 'xai-narrate') {
-    await refreshXai()
+    await loadXaiNarrative(item.params && item.params.runKey)
+    if (activeTabId === 'xai') renderXai()
     setStatusLine('xai-status', quickActivityFailureText(act, 'Narrating'), true)
   } else if (item.activityType === 'evaluate') {
     await renderRuns()
@@ -4576,10 +4577,15 @@ function xaiHeaderHtml(criterion, nRuns) {
     </p>
   </div>`
 }
-// The one-shot LLM narrative of the WHOLE campaign — a synthesis of the deterministic analysis below.
-// Once present, the button becomes "Refresh (N new runs since)" so it's obvious how much data has changed.
+// The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
+// sibling, what to try next. Per run (keyed by run key); the button becomes "Refresh (N new runs)" as the
+// cross-run context drifts. With no run focused, a slim hint points the user at how to focus one.
 function xaiNarrativeHtml(runs, criterion) {
-  const rec = xaiNarrativeCache
+  if (!xaiFocusKey) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— LLM synthesis, per run</span></h3></div>
+      <p class="card-sub">Focus a run (open it in Runs → “Analyze in xAI”) to generate a one-shot narrative of what that model is doing and why.</p></div>`
+  }
+  const rec = xaiNarrativeCache.get(xaiFocusKey)
   const hasNarrative = !!(rec && rec.narrative)
   const since = hasNarrative ? Math.max(0, runs.length - (Number(rec.runCount) || 0)) : 0
   const staleCriterion =
@@ -4597,9 +4603,9 @@ function xaiNarrativeHtml(runs, criterion) {
        <p class="card-sub">${escapeHtml(rec.narratedBy || 'AI')}${rec.narratedAt ? ` · ${escapeHtml(formatWhen(rec.narratedAt))}` : ''}${
          staleCriterion ? ` · generated for the “${escapeHtml(staleCriterion)}” criterion` : ''
        }${since > 0 ? ` · <strong>${since}</strong> new run${since === 1 ? '' : 's'} since — refresh to update` : ' · up to date'}</p>`
-    : `<p class="card-sub">A one-shot LLM read of everything below — what's been learned and the best next experiment. It synthesises the deterministic analysis; it doesn't replace it.</p>`
+    : `<p class="card-sub">A one-shot LLM read of THIS run — its decisions, what drives them, how trustworthy the explanation is, and what to try next. Synthesises the analysis below; it doesn't replace it.</p>`
   return `<div class="card">
-    <div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— LLM synthesis</span></h3>${btn}</div>
+    <div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— run ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>${btn}</div>
     ${body}
     <p id="xai-status" class="form-status" role="status" hidden></p>
   </div>`
@@ -4903,28 +4909,32 @@ async function xaiLaunchBatch(specs, label) {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
   }
 }
-// Load the latest narrative record so renderXai can show it; null when none / not embedded.
-async function loadXaiNarrative() {
-  if (!manifest) return null
-  const recs = await queryRecords(`${manifest.recordType}-xai-narrative`, 'latest')
-  return recs && recs[0] ? recs[0].content : null
+// Load ONE run's narrative record into the cache (or drop it when none).
+async function loadXaiNarrative(runKey) {
+  if (!manifest || !runKey) return
+  const recs = await queryRecords(`${manifest.recordType}-xai-narrative`, runKey)
+  if (recs && recs[0] && recs[0].content) xaiNarrativeCache.set(runKey, recs[0].content)
+  else xaiNarrativeCache.delete(runKey)
 }
 async function refreshXai() {
-  xaiNarrativeCache = await loadXaiNarrative()
+  if (xaiFocusKey) await loadXaiNarrative(xaiFocusKey)
   renderXai()
 }
 async function onXaiNarrateClick() {
-  if (narrating) return
+  if (narrating || !xaiFocusKey) return
   if (!embedded()) {
     setStatusLine('xai-status', 'Open inside the Overseer to generate a narrative.', false)
     return
   }
   const criterion = currentXaiCriterion()
+  const sibling = xaiBestSibling(findRun(xaiFocusKey))
   setStatusLine('xai-status', '')
   try {
     const result = await startOrEnqueue(
       'xai-narrate',
       trainerActivityParams({
+        runKey: xaiFocusKey,
+        siblingKey: sibling ? sibling.key : undefined,
         criterionKey: criterion.key,
         criterionDir: criterion.direction,
         criterionLabel: criterion.label,
@@ -6358,7 +6368,11 @@ function datasetFieldHtml(key, spec, value) {
   const v = value === undefined ? '' : value
   let input
   if (spec.type === 'choice') {
+    // A named dataset must pin a CONCRETE identity, so input-only synonyms (e.g. fidelity_set "auto", which
+    // resolves at run time) are not offered as options here.
+    const synonyms = new Set((window.Migrate && window.Migrate.INPUT_SYNONYMS) || [])
     const opts = (spec.choices || [])
+      .filter((c) => !synonyms.has(String(c)))
       .map(
         (c) =>
           `<option value="${escapeHtml(String(c))}"${String(c) === String(v) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
