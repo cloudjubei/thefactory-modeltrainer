@@ -516,6 +516,50 @@ export function buildAnalyzePaperUserContent(input: {
   return JSON.stringify({ url: input.url, notes: input.notes, text: input.text })
 }
 
+/** System prompt for "Suggest hypotheses": match the paper against EXISTING hypotheses (link the ones
+ * that test its claims) AND propose NEW testable hypotheses not already covered. */
+export function buildSuggestHypothesesSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a research librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given a PAPER (its fields, and its text when available) and the project's EXISTING hypotheses.`,
+    `The project's tunable levers (for any new hypothesis spec) are: ${JSON.stringify(manifest.levers)}.`,
+    `Do TWO things: (1) MATCH — pick the existing hypotheses (by id) that are genuine tests of THIS paper's claims; (2) SUGGEST — propose NEW testable hypotheses for the paper's claims that NO existing hypothesis already covers (each a runnable spec using ONLY declared lever names). Do not duplicate an existing hypothesis as a new one.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], ` +
+      `"newHypotheses": [{"title": string, "rationale": string, "spec": {"fixed"?: {"<lever>": value}, ` +
+      `"sweep"?: {"<lever>": [values]}, "seeds"?: [number]}}]}. Use [] for either when there is nothing to add.`,
+  ].join('\n')
+}
+
+export function buildSuggestHypothesesUserContent(input: {
+  paper: Record<string, unknown>
+  existingHypotheses: Array<{ id: string; title?: string; rationale?: string; spec?: unknown }>
+  text?: string
+}): string {
+  return JSON.stringify({
+    paper: input.paper,
+    existingHypotheses: input.existingHypotheses,
+    ...(input.text ? { text: input.text } : {}),
+  })
+}
+
+/** Coerce the model's suggest response into matched-existing ids + validated new hypothesis items. */
+export function coerceSuggestedHypotheses(
+  raw: unknown,
+  manifest: TrainerManifest,
+): { matchIds: string[]; newItems: { title: string; rationale: string; spec: ExperimentSpec }[] } {
+  const o =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const matchIds = Array.isArray(o.matchExistingIds)
+    ? o.matchExistingIds.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    : []
+  const newItems = coerceHypothesisItems(
+    Array.isArray(o.newHypotheses) ? o.newHypotheses : [],
+    manifest,
+  )
+  return { matchIds, newItems }
+}
+
 /** Defensively coerce the model's JSON into a Paper draft — `undefined` unless title + claim are
  * present (mirrors {@link coerceHypothesisItems}). Drops unknown/ill-typed fields; the tool stamps
  * id/url/status/source/timestamps. */

@@ -8,11 +8,14 @@ import {
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
+  buildSuggestHypothesesSystemPrompt,
+  buildSuggestHypothesesUserContent,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   canonicalConfigString,
   coerceHypothesisItems,
   coercePaperDraft,
+  coerceSuggestedHypotheses,
   coerceVerdictRows,
   extractPaperText,
   expandExperimentMatrix,
@@ -1207,5 +1210,61 @@ describe('coercePaperDraft', () => {
     expect(coercePaperDraft({ title: 'T' })).toBeUndefined()
     expect(coercePaperDraft({ claim: 'C' })).toBeUndefined()
     expect(coercePaperDraft('nope')).toBeUndefined()
+  })
+})
+
+describe('buildSuggestHypothesesSystemPrompt', () => {
+  const m = {
+    name: 'Demo',
+    recordType: 'demo-run',
+    run: '{configPath} {summaryOut}',
+    objective: { name: 'obj', direction: 'max' },
+    levers: { lr: { type: 'number' } },
+  } as unknown as TrainerManifest
+  it('asks to MATCH existing + SUGGEST new, and includes the levers', () => {
+    const p = buildSuggestHypothesesSystemPrompt(m)
+    expect(p).toMatch(/matchExistingIds/)
+    expect(p).toMatch(/newHypotheses/)
+    expect(p).toContain('lr')
+  })
+})
+
+describe('buildSuggestHypothesesUserContent', () => {
+  it('serializes the paper + existing hypotheses, and text only when present', () => {
+    const withText = JSON.parse(
+      buildSuggestHypothesesUserContent({
+        paper: { title: 'P' },
+        existingHypotheses: [{ id: 'h1', title: 'X' }],
+        text: 'body',
+      }),
+    )
+    expect(withText).toMatchObject({ paper: { title: 'P' }, text: 'body' })
+    expect(withText.existingHypotheses).toHaveLength(1)
+    const noText = JSON.parse(
+      buildSuggestHypothesesUserContent({ paper: { title: 'P' }, existingHypotheses: [] }),
+    )
+    expect('text' in noText).toBe(false)
+  })
+})
+
+describe('coerceSuggestedHypotheses', () => {
+  it('extracts string match ids and coerces valid new hypotheses', () => {
+    const out = coerceSuggestedHypotheses(
+      {
+        matchExistingIds: ['h1', 'h2', 7, ''],
+        newHypotheses: [
+          { title: 'N', rationale: 'R', spec: { fixed: { lr: 0.5 } } },
+          { title: 'bad', rationale: 'R', spec: { fixed: { unknown_lever: 1 } } },
+        ],
+      },
+      manifest(),
+    )
+    expect(out.matchIds).toEqual(['h1', 'h2'])
+    expect(out.newItems).toHaveLength(1)
+    expect(out.newItems[0]).toMatchObject({ title: 'N' })
+  })
+  it('defaults to empty for a malformed response', () => {
+    expect(coerceSuggestedHypotheses('nope', manifest())).toEqual({ matchIds: [], newItems: [] })
+    expect(coerceSuggestedHypotheses({}, manifest())).toEqual({ matchIds: [], newItems: [] })
   })
 })

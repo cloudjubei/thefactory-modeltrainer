@@ -1079,6 +1079,41 @@ export interface AnalyzePaperFromUrlResult {
   analyzedAt: string
 }
 
+export interface SuggestPaperHypothesesParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** The paper to enrich — read from `{recordType}-paper`. */
+  paperId: string
+  llmConfig: LLMConfig
+  abortSignal?: AbortSignal
+  /** Fired after each paper/hypothesis record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /**
+   * Injectable URL→text fetcher (for tests); defaults to a real HTTP fetch. When the paper carries a
+   * URL the tool tries to fetch its text as extra context; a fetch failure is non-fatal (the paper's
+   * stored fields + the existing hypotheses are enough).
+   */
+  fetchPaperText?: (url: string, abortSignal?: AbortSignal) => Promise<string>
+}
+
+export interface SuggestPaperHypothesesResult {
+  recordType: string
+  /** The paper with its updated `hypothesisIds`. */
+  paper: TrainingPaperRecord
+  /** Ids of PRE-EXISTING hypotheses the model matched to this paper and that were linked. */
+  linkedExistingIds: string[]
+  /** The NEW hypotheses created from the model's suggestions and linked. */
+  newHypotheses: TrainingHypothesis[]
+  /** Every hypothesis id now linked to the paper (matched existing ∪ new). */
+  linkedHypothesisIds: string[]
+  /** Provenance label of the suggesting model. */
+  suggestedBy: string
+  suggestedAt: string
+}
+
 export interface XaiNarrateParams {
   scope: string
   projectRoot: string
@@ -1226,6 +1261,15 @@ export interface ModelTrainerTools {
    * to verify. Powers the Papers tab's "Automatic Fill".
    */
   analyzePaperFromUrl(params: AnalyzePaperFromUrlParams): Promise<AnalyzePaperFromUrlResult>
+  /**
+   * Enrich an EXISTING paper with hypotheses: an LLM matches the paper against the project's existing
+   * hypotheses (linking the ones that test its claims) AND proposes any NEW testable hypotheses not yet
+   * covered (created + linked). Powers the Papers tab's "Suggest hypotheses". Works for any paper (URL
+   * optional — its text is used as extra context when present).
+   */
+  suggestPaperHypotheses(
+    params: SuggestPaperHypothesesParams,
+  ): Promise<SuggestPaperHypothesesResult>
   /**
    * Synthesise the campaign's DETERMINISTIC xAI analysis (lever importances, the surrogate ablation
    * path, the recommender's gaps) into a short LLM narrative — "what's been learned + what to try next" —

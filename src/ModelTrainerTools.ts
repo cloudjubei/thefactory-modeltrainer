@@ -30,6 +30,8 @@ import type {
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
   RunXaiDigest,
+  SuggestPaperHypothesesParams,
+  SuggestPaperHypothesesResult,
   TrainerManifest,
   TrainingCalibration,
   TrainingCampaignParams,
@@ -64,10 +66,13 @@ import {
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
+  buildSuggestHypothesesSystemPrompt,
+  buildSuggestHypothesesUserContent,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   coerceHypothesisItems,
   coercePaperDraft,
+  coerceSuggestedHypotheses,
   coerceVerdictRows,
   diffDecisionTraces,
   expandExperimentMatrix,
@@ -865,6 +870,153 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, paper, hypotheses, linkedHypothesisIds, analyzedBy, analyzedAt }
   }
 
+  async function suggestPaperHypotheses(
+    params: SuggestPaperHypothesesParams,
+  ): Promise<SuggestPaperHypothesesResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const suggestedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const suggestedAt = now()
+    const paperType = `${recordType}-paper`
+    const hypothesisType = `${recordType}-hypothesis`
+
+    const paperRecord = await deps.storage.readRecord({
+      scope: params.scope,
+      type: paperType,
+      key: params.paperId,
+    })
+    if (!paperRecord) throw new Error(`no paper "${params.paperId}" in this project`)
+    const paper = paperRecord.content as unknown as TrainingPaperRecord
+
+    const existingRecords = await deps.storage.listRecords({
+      scope: params.scope,
+      type: hypothesisType,
+    })
+    const existing = new Map<string, TrainingHypothesis>()
+    for (const r of existingRecords) {
+      const content = r.content as unknown as TrainingHypothesis
+      if (content && typeof content.id === 'string') existing.set(content.id, content)
+    }
+
+    // The paper's URL text is helpful extra context, but optional — a fetch failure must not abort.
+    let text: string | undefined
+    if (typeof paper.url === 'string' && paper.url) {
+      const fetchText = params.fetchPaperText ?? fetchPaperText
+      try {
+        text = await fetchText(paper.url, params.abortSignal)
+      } catch {
+        text = undefined
+      }
+    }
+
+    const res = await executor.runInference({
+      systemPrompt: buildSuggestHypothesesSystemPrompt(manifest),
+      userContent: buildSuggestHypothesesUserContent({
+        paper: {
+          title: paper.title,
+          claim: paper.claim,
+          approach: paper.approach,
+          claimedMetrics: paper.claimedMetrics,
+          assumptions: paper.assumptions,
+          url: paper.url,
+        },
+        existingHypotheses: [...existing.values()].map((h) => ({
+          id: h.id,
+          title: h.title,
+          rationale: h.rationale,
+          spec: h.spec,
+        })),
+        text,
+      }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const { matchIds, newItems } = coerceSuggestedHypotheses(
+      parseFirstValidJson(res.text),
+      manifest,
+    )
+    const linkedExistingIds = matchIds.filter((id) => existing.has(id))
+
+    // Create the new hypotheses (spec-hash id, dedup — a "new" one that already exists links instead).
+    const newHypotheses: TrainingHypothesis[] = []
+    const linkedIds = new Set<string>(linkedExistingIds)
+    const seen = new Set<string>()
+    for (const item of newItems) {
+      const hid = hashTrainingConfig(item.spec as Record<string, unknown>)
+      if (seen.has(hid)) continue
+      seen.add(hid)
+      const prior = existing.get(hid)
+      if (prior) {
+        linkedIds.add(hid)
+        continue
+      }
+      const hypothesis: TrainingHypothesis = {
+        id: hid,
+        title: item.title,
+        rationale: item.rationale,
+        spec: item.spec,
+        status: 'untested',
+        verdictSource: 'auto',
+        source: 'paper',
+        proposedBy: suggestedBy,
+        paperIds: [params.paperId],
+        createdAt: suggestedAt,
+        updatedAt: suggestedAt,
+      }
+      newHypotheses.push(hypothesis)
+      linkedIds.add(hid)
+    }
+
+    // Persist: every linked hypothesis gets this paperId; the paper gets every linked id.
+    for (const id of linkedIds) {
+      const created = newHypotheses.find((h) => h.id === id)
+      const base = created ?? existing.get(id)
+      if (!base) continue
+      const content: TrainingHypothesis = created
+        ? created
+        : {
+            ...base,
+            paperIds: Array.from(new Set([...(base.paperIds ?? []), params.paperId])),
+            updatedAt: suggestedAt,
+          }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: hypothesisType,
+        key: id,
+        content: content as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(hypothesisType, id)
+    }
+
+    const hypothesisIds = Array.from(new Set([...(paper.hypothesisIds ?? []), ...linkedIds]))
+    const updatedPaper: TrainingPaperRecord = { ...paper, hypothesisIds, updatedAt: suggestedAt }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: paperType,
+      key: params.paperId,
+      content: updatedPaper as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(paperType, params.paperId)
+    logger?.info('suggested paper hypotheses', {
+      recordType,
+      paperId: params.paperId,
+      matched: linkedExistingIds.length,
+      created: newHypotheses.length,
+    })
+    return {
+      recordType,
+      paper: updatedPaper,
+      linkedExistingIds,
+      newHypotheses,
+      linkedHypothesisIds: [...linkedIds],
+      suggestedBy,
+      suggestedAt,
+    }
+  }
+
   // Build ONE run's structured deterministic xAI digest — its decisions, attribution + sanity, reward
   // breakdown, latent probe, the sibling decision-diff, and its standing among all completed runs. Shared by
   // the LLM narrative (xaiNarrate) and the agent-facing getRunXAI tool, so the facts live in ONE place.
@@ -1094,6 +1246,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     judgeTrainingRuns,
     proposeTrainingHypotheses,
     analyzePaperFromUrl,
+    suggestPaperHypotheses,
     xaiNarrate,
     getRunData,
     getRunXAI,

@@ -19,6 +19,16 @@ const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const CONCURRENCY_SS = 'trainer.concurrency'
+// Input-only convenience lever values that are NEVER stored on a run (e.g. fidelity_set 'auto', which
+// resolves to a concrete value at run time). The dataset form + runs filter drop these so a named dataset
+// always pins a concrete value.
+const INPUT_SYNONYMS = ['auto']
+// Mirror of trainer/fidelity.py: the "auto" fidelity follows the run step (the `timeframe` lever) — an
+// hourly step observes 1h+1d, any other step observes its own bar. Used so the synthetic-default dataset
+// seed shows a concrete value instead of 'auto'.
+function autoFidelity(timeframe) {
+  return String(timeframe) === '1h' ? '1h+1d' : '1d'
+}
 // Two independent concurrency lanes. EXPERIMENT activities (training campaigns + checkpoint
 // evaluations) execute the project's training code on compute and share one budget; the lighter
 // TASK activities (judge / propose / analyze-paper) get their own budget so a quick judge or paper
@@ -147,6 +157,8 @@ let runsLeverFilter = {}
 let runsTextFilter = ''
 let runsHideBad = false
 let runsVersionFilter = ''
+// Status filter: '' (any), or one of the keys in RUN_STATUS_FILTERS (completed / degenerate / failed).
+let runsStatusFilter = ''
 // The lever/version dropdowns collapse under a single header; collapsed, only the
 // dropdowns with a non-default selection stay visible (highlighted). Starts collapsed.
 let runsDropdownsCollapsed = true
@@ -186,6 +198,8 @@ let paperVerdictFilter = 'all'
 // add/link sub-form state (`null` | { paperId, mode: 'add' | 'link' }).
 let hypothesisVerdictFilter = 'all'
 let hypothesisOverrideId = null
+// Ids of the hypothesis cards the user has expanded (collapsible rows), so expansion survives re-render.
+const hypothesisExpanded = new Set()
 let paperSubform = null
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
@@ -1471,11 +1485,6 @@ async function openProject(projectKey) {
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
   if (epoch !== projectEpoch) return
-  // On-load record migrations: the hold-fee metrics fix over every run + the legacy hypothesis/model
-  // normalization.
-  await migrateAllRunRecords()
-  await migrateModelsToHypotheses()
-  if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
   showTab(savedTabId() || TABS[0].id)
@@ -1984,6 +1993,7 @@ function clearRunsFilter() {
   runsLeverFilter = {}
   runsTextFilter = ''
   runsVersionFilter = ''
+  runsStatusFilter = ''
   runsPage = 0
   refreshRuns()
 }
@@ -2413,7 +2423,32 @@ function customRuleServerField(field) {
   if (field.startsWith('config:')) return 'config.' + field.slice(7)
   return null
 }
-// The filters that push DOWN to the server query: lever-equals, pipeline version, and the pushable
+// The selectable run-status filters: each carries the server `where` predicate AND the client predicate so
+// the flat (server-paged) view and the in-memory group-by views filter identically. "degenerate" is the
+// health-flagged subset (derived, not a stored status).
+const RUN_STATUS_FILTERS = {
+  completed: {
+    label: 'completed',
+    where: { field: 'status', op: '=', value: 'completed' },
+    test: (r) => (r.summary && r.summary.status) === 'completed',
+  },
+  degenerate: {
+    label: 'degenerate',
+    where: {
+      and: [
+        { field: 'health.status', op: 'exists' },
+        { not: { field: 'health.status', op: '=', value: 'ok' } },
+      ],
+    },
+    test: (r) => runIsDegenerate(r),
+  },
+  failed: {
+    label: 'failed',
+    where: { field: 'status', op: '=', value: 'failed' },
+    test: (r) => (r.summary && r.summary.status) === 'failed',
+  },
+}
+// The filters that push DOWN to the server query: lever-equals, pipeline version, status, and the pushable
 // numeric rules. Text search, Hide-bad, vs-hold rules, and a group-by drill stay client-side.
 function buildRunsServerWhere() {
   const preds = []
@@ -2423,6 +2458,7 @@ function buildRunsServerWhere() {
   if (runsVersionFilter) {
     preds.push({ field: 'pipelineVersion', op: '=', value: String(runsVersionFilter) })
   }
+  if (RUN_STATUS_FILTERS[runsStatusFilter]) preds.push(RUN_STATUS_FILTERS[runsStatusFilter].where)
   for (const rule of customRulesCache) {
     if (!rule.active) continue
     const field = customRuleServerField(rule.field)
@@ -2487,6 +2523,8 @@ function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
   if (runsHideBad) out = out.filter((r) => !runIsBad(r))
   if (runsVersionFilter) out = out.filter((r) => runVersionOf(r) === runsVersionFilter)
+  if (RUN_STATUS_FILTERS[runsStatusFilter])
+    out = out.filter(RUN_STATUS_FILTERS[runsStatusFilter].test)
   for (const [lever, val] of Object.entries(runsLeverFilter)) {
     if (val) out = out.filter((r) => String((r.summary.config || {})[lever]) === String(val))
   }
@@ -2714,7 +2752,7 @@ function runsToolbarHtml(shownCount, total) {
   // Filter options = the manifest choices UNION the values actually present in the runs (so migration's
   // `legacy:…` dataset tags are filterable), minus input-only synonyms (e.g. `fidelity_set: auto`) that no
   // stored run carries — unless one actually does. So the dropdown reflects what you can really filter to.
-  const synonyms = new Set((window.Migrate && window.Migrate.INPUT_SYNONYMS) || [])
+  const synonyms = new Set(INPUT_SYNONYMS)
   const leverDropdowns = leverEntries()
     .filter(([, spec]) => spec.type === 'choice')
     .map(([key, spec]) => {
@@ -2749,20 +2787,32 @@ function runsToolbarHtml(shownCount, total) {
           <option value="">version: any</option>
           ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
         </select>`
+  const statusFilter = `<select class="runs-filter-lever${runsStatusFilter ? ' is-changed' : ''}" id="runs-status-filter"${helpAttr('Show only runs in one state — completed, degenerate (health-flagged), or failed.')}>
+          <option value="">status: any</option>
+          ${Object.entries(RUN_STATUS_FILTERS)
+            .map(
+              ([k, s]) =>
+                `<option value="${escapeHtml(k)}"${runsStatusFilter === k ? ' selected' : ''}>${escapeHtml(s.label)}</option>`,
+            )
+            .join('')}
+        </select>`
   const changedDropdowns =
-    (runsVersionFilter ? 1 : 0) + Object.values(runsLeverFilter).filter(Boolean).length
+    (runsVersionFilter ? 1 : 0) +
+    (runsStatusFilter ? 1 : 0) +
+    Object.values(runsLeverFilter).filter(Boolean).length
   const dropdownsToggle = `<button type="button" id="runs-dropdowns-toggle" class="runs-dropdowns-toggle" aria-expanded="${runsDropdownsCollapsed ? 'false' : 'true'}">
     <span class="caret">${runsDropdownsCollapsed ? '▸' : '▾'}</span> ${runsDropdownsCollapsed ? 'More filter options' : 'Hide filter options'}${runsDropdownsCollapsed && changedDropdowns ? ` <span class="runs-dropdowns-count">${changedDropdowns}</span>` : ''}
   </button>`
   const dropdownsPanel = `<div id="runs-dropdowns" class="runs-dropdowns${runsDropdownsCollapsed ? ' is-collapsed' : ''}">
     ${dropdownsToggle}
-    <div class="runs-dropdowns-body">${versionFilter}${leverDropdowns}</div>
+    <div class="runs-dropdowns-body">${statusFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
   const active =
     runsFilterKeys ||
     runsTextFilter ||
     runsVersionFilter ||
+    runsStatusFilter ||
     Object.values(runsLeverFilter).some(Boolean)
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
   const envViewBtn = hasEnvLevers()
@@ -3224,7 +3274,6 @@ async function renderRuns() {
     readDismissedFailures(),
     readUnrunnable(),
   ])
-  await normalizeRunRecords(runsCache)
   renderJudgeControls()
   renderRunsLive()
   await markRunsSeen()
@@ -3236,27 +3285,12 @@ async function renderRuns() {
 async function refreshRuns() {
   if (!byId('runs-body')) return
   runsCache = await readRuns()
-  await normalizeRunRecords(runsCache)
   renderRunsTable()
   // Close the xAI analyse→run→re-analyse loop: when records change (e.g. a launched batch lands), the
   // open xAI tab recomputes its effects + recommendations off the fresh runs.
   if (activeTabId === 'xai') renderXai()
 }
-// The generic on-load run-record migration applier (see normalizeRunRecords): each run gets
-// window.Migrate.migrationPatchFor (currently the hold-fee metrics fix), written back idempotently, with
-// the in-memory run updated so the render reflects it. Runs on project open over EVERY run (the backlog)
-// and on each runs refresh over the loaded set. setupKey is recomputed only when a patch changes the config.
-async function recomputeSetupKey(config) {
-  const rest = { ...config }
-  delete rest.seed
-  const canonical = window.Xai.canonicalConfigString(rest)
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonical))
-  return [...new Uint8Array(buf)]
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-    .slice(0, 12)
-}
-// A hypothesis's canonical identity = the spec hash (the seed-inclusive sibling of recomputeSetupKey),
+// A hypothesis's canonical identity = the spec hash (matching how the engine hashes a run's config),
 // matching the backend `hashTrainingConfig` so the same spec dedupes across viewer + LLM/paper sources.
 // Async (subtle-crypto) — await it at every id site (form save, add-to-paper, migration, seed dedup).
 async function hashTrainingConfig(spec) {
@@ -3277,75 +3311,6 @@ function normalizeSpec(spec) {
   const seeds = (spec && spec.seeds) || []
   if (Array.isArray(seeds) && seeds.length) out.seeds = seeds
   return out
-}
-async function normalizeRunRecords(runs) {
-  if (!manifest || !embedded() || !window.Migrate || !Array.isArray(runs)) return 0
-  let changed = 0
-  for (const run of runs) {
-    const patch = window.Migrate.migrationPatchFor(run.summary)
-    if (!patch) continue
-    const content = { ...run.summary, config: { ...run.summary.config, ...patch.config } }
-    if (patch.dataset) content.dataset = { ...(run.summary.dataset || {}), ...patch.dataset }
-    if (patch.metrics) content.metrics = { ...(run.summary.metrics || {}), ...patch.metrics }
-    if (patch.pipelineVersion) content.pipelineVersion = patch.pipelineVersion
-    if (patch.config && run.summary.setupKey)
-      content.setupKey = await recomputeSetupKey(content.config)
-    try {
-      await window.OverseerBridge.putData({ type: manifest.recordType, key: run.key, content })
-      run.summary = content
-      changed++
-    } catch {
-      // A transient write failure shouldn't abort the batch — the next pass retries this record.
-    }
-  }
-  return changed
-}
-// Normalize EVERY run of the open project (ignores the flat view's pagination, since the backlog spans
-// pages). Run once on open; the per-refresh pass keeps newly-landed runs in step thereafter.
-async function migrateAllRunRecords() {
-  if (!manifest || !embedded() || !window.Migrate) return 0
-  return normalizeRunRecords(await queryRunRecords())
-}
-// One-time on project open: fold any legacy `-model` records into the unified Hypotheses registry
-// (spec = {fixed: match}, deduped by spec hash), deleting the `-model` record. Idempotent — once the
-// `-model` records are gone it no-ops. Also migrates old pending/accepted/rejected hypotheses to the
-// verdict model (rejected → dismissed). The pure mappings live in migrate.js so they're node-tested.
-async function migrateModelsToHypotheses() {
-  if (!manifest || !embedded() || !window.Migrate) return
-  const modelType = manifest.recordType + '-model'
-  const modelRecs = await queryRecords(modelType)
-  const models = modelRecs.map((r) => r.content).filter((c) => c && c.id)
-  if (models.length) {
-    const have = new Set((await readHypotheses()).map((h) => h.id))
-    const now = nowIso()
-    for (const m of models) {
-      const spec = normalizeSpec({ fixed: m.match || {} })
-      const id = await hashTrainingConfig(spec)
-      if (!have.has(id)) {
-        const h = window.Migrate.hypothesisFromLegacyModel(m, id, now)
-        h.spec = spec
-        await putHypothesis(h)
-        have.add(id)
-      }
-      try {
-        await window.OverseerBridge.deleteData({ type: modelType, key: m.id })
-      } catch {
-        // best-effort: a failed delete just leaves the legacy record to be retried next open
-      }
-    }
-  }
-  // Migrate any old-lifecycle hypotheses (pending/accepted/rejected) onto the verdict model.
-  const now = nowIso()
-  for (const h of await readHypotheses()) {
-    const patch = window.Migrate.legacyHypothesisPatch(h, now)
-    if (patch) {
-      try {
-        await putHypothesis({ ...h, ...patch })
-      } catch {
-        // best-effort
-      }
-    }
-  }
 }
 // Multi-select comparison: a config diff (only differing levers), metrics
 // side-by-side, and overlaid %-return curves (+ the buy-and-hold control) for the
@@ -3419,12 +3384,18 @@ function renderCompare() {
     majors.size > 1
       ? `<p class="compare-version-warn"><span class="badge is-bad">heads-up</span> These runs span pipeline versions ${[...versions].map((v) => `v${escapeHtml(v)}`).join(', ')} — a breaking (MAJOR) version changed how data is fed/scored, so their scores are NOT directly comparable.</p>`
       : ''
+  // Batch re-run affordances are mutually exclusive: ALL-failed gets "Re-run all"; otherwise ALL-outdated
+  // (and on the same version) gets "Re-run all with latest version". Never both.
+  const allFailed = runs.every((r) => r.summary && r.summary.status === 'failed')
+  const allOutdated =
+    !allFailed && runs.every(runIsOutdated) && new Set(runs.map(runVersionOf)).size === 1
   setHtml(
     card,
     `<div class="card-head card-head-row">
       <h3>Compare ${runs.length} runs</h3>
       <div class="head-actions">
-        ${embedded() && runs.every((r) => r.summary && r.summary.status === 'failed') ? `<button type="button" id="compare-rerun-all" class="ghost-btn" title="Queue all ${runs.length} failed runs again">Re-run all (${runs.length})</button>` : ''}
+        ${embedded() && allFailed ? `<button type="button" id="compare-rerun-all" class="ghost-btn" title="Queue all ${runs.length} failed runs again">Re-run all (${runs.length})</button>` : ''}
+        ${embedded() && allOutdated ? `<button type="button" id="compare-rerun-latest" class="ghost-btn" title="Re-run all ${runs.length} runs under the current pipeline version (v${escapeHtml(String(currentPipelineVersion()))}) — they ran under an older, incomparable version">↻ Re-run all with latest version (${runs.length})</button>` : ''}
         ${runs.length === 2 && chatAboutRunAvailable() ? `<button type="button" id="compare-discuss" class="icon-btn" title="Discuss these two runs (incl. the decision diff)" aria-label="Discuss these two runs">${iconChatSvg()}</button>` : ''}
         <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
       </div>
@@ -5101,7 +5072,9 @@ async function reRunRuns(keys) {
     })
     await startOrEnqueue('train', params, `Re-run ${shortKey(run.key)}`)
   }
-  showToast(`Queued ${runs.length} run${runs.length === 1 ? '' : 's'} to re-run — see the Activity tab.`)
+  showToast(
+    `Queued ${runs.length} run${runs.length === 1 ? '' : 's'} to re-run — see the Activity tab.`,
+  )
 }
 function chatAboutRunAvailable() {
   return embedded() && !!window.OverseerBridge && !!window.OverseerBridge.discussTopic
@@ -5469,6 +5442,12 @@ function setupRuns() {
         refreshRuns()
         return
       }
+      if (event.target.id === 'runs-status-filter') {
+        runsStatusFilter = event.target.value
+        runsPage = 0
+        refreshRuns()
+        return
+      }
       const sel = event.target.closest('.runs-filter-lever')
       if (sel) {
         runsLeverFilter[sel.dataset.lever] = sel.value
@@ -5548,7 +5527,10 @@ function setupRuns() {
         const keys = [...runsCompareKeys]
         if (keys.length === 2) chatAboutRuns(keys[0], keys[1])
       }
-      if (event.target.closest('#compare-rerun-all')) {
+      if (
+        event.target.closest('#compare-rerun-all') ||
+        event.target.closest('#compare-rerun-latest')
+      ) {
         reRunRuns([...runsCompareKeys])
       }
     })
@@ -6280,7 +6262,7 @@ function datasetFieldHtml(key, spec, value) {
   // A named dataset must pin a CONCRETE value for every lever — there is no "— default —" escape that would
   // leave it unpinned (and so resolve to a synonym at run time). A concrete option is always pre-selected:
   // the saved value when editing/cloning, else the manifest default, else the first concrete choice.
-  const synonyms = new Set((window.Migrate && window.Migrate.INPUT_SYNONYMS) || [])
+  const synonyms = new Set(INPUT_SYNONYMS)
   let input
   if (spec.type === 'choice') {
     const choices = (spec.choices || []).map(String).filter((c) => !synonyms.has(c))
@@ -6578,9 +6560,22 @@ function hypothesisVerdictFormHtml(h) {
     </div>
   </div>`
 }
+// The one-line measured stat shown collapsed: run count + best objective + beats/trails hold.
+function hypothesisQuickStatHtml(h) {
+  const m = hypothesisMeasured(h)
+  if (!m) return '<span class="hyp-quick">no matching runs</span>'
+  const obj = Number.isFinite(m.objective)
+    ? ` · ${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(m.objective))}`
+    : ''
+  const hold = m.beatsHold === null ? '' : m.beatsHold ? ' · beats hold' : ' · trails hold'
+  return `<span class="hyp-quick">${m.runs} run${m.runs === 1 ? '' : 's'}${obj}${hold}</span>`
+}
 function hypothesisCardHtml(h, liveIds) {
   const verdict = effectiveHypothesisVerdict(h)
   const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</span>`
+  const live =
+    h.campaign && h.campaign.status === 'running' && liveIds && liveIds.has(h.campaign.activityId)
+  const running = live ? `<span class="hyp-running">${spinnerHtml()}</span>` : ''
   const source =
     h.source === 'llm'
       ? 'LLM'
@@ -6595,22 +6590,28 @@ function hypothesisCardHtml(h, liveIds) {
       ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[window.Hypothesis.autoVerdictFor(hypothesisMeasured(h))])}</p>`
       : ''
   const overrideForm = hypothesisOverrideId === h.id ? hypothesisVerdictFormHtml(h) : ''
-  return `<article class="hypothesis-card${h.dismissed ? ' is-dismissed' : ''}" data-id="${escapeHtml(h.id)}">
-    <div class="card-head card-head-row">
-      <div><h4>${escapeHtml(h.title || h.id)} ${badge}</h4></div>
-      <div class="head-actions">${hypothesisActionsHtml(h)}</div>
+  const open = hypothesisExpanded.has(h.id) ? ' open' : ''
+  return `<details class="hypothesis-card${h.dismissed ? ' is-dismissed' : ''}" data-id="${escapeHtml(h.id)}"${open}>
+    <summary class="hypothesis-summary">
+      ${badge}
+      <span class="hyp-title">${escapeHtml(h.title || h.id)}</span>
+      ${hypothesisQuickStatHtml(h)}
+      ${running}
+    </summary>
+    <div class="hypothesis-body">
+      ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
+      ${specSummaryHtml(h.spec)}
+      ${hypothesisClaimedVsMeasuredHtml(h)}
+      ${overrideNote}
+      ${transitionsHtml(h.transitions)}
+      ${linkedPaperChipsHtml(h)}
+      ${hypothesisCampaignHtml(h, liveIds)}
+      ${h.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(h.verdictNote)}</p>` : ''}
+      ${overrideForm}
+      <div class="hypothesis-actions">${hypothesisActionsHtml(h)}</div>
+      <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>
     </div>
-    ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
-    ${specSummaryHtml(h.spec)}
-    ${hypothesisClaimedVsMeasuredHtml(h)}
-    ${overrideNote}
-    ${transitionsHtml(h.transitions)}
-    ${linkedPaperChipsHtml(h)}
-    ${hypothesisCampaignHtml(h, liveIds)}
-    ${h.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(h.verdictNote)}</p>` : ''}
-    ${overrideForm}
-    <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>
-  </article>`
+  </details>`
 }
 function hypothesisGroupHtml(verdict, items, liveIds) {
   const label = HYPOTHESIS_VERDICT_LABEL[verdict] || verdict
@@ -7213,6 +7214,17 @@ function setupHypotheses() {
   }
   const body = byId('hypotheses-body')
   if (body) {
+    // Track expand/collapse so it survives re-render. The `toggle` event doesn't bubble — capture it.
+    body.addEventListener(
+      'toggle',
+      (event) => {
+        const d = event.target
+        if (!d || !d.classList || !d.classList.contains('hypothesis-card') || !d.dataset.id) return
+        if (d.open) hypothesisExpanded.add(d.dataset.id)
+        else hypothesisExpanded.delete(d.dataset.id)
+      },
+      true,
+    )
     body.addEventListener('click', (event) => {
       const seedBtn = event.target.closest('button[data-action="import-hyp-seeds"]')
       if (seedBtn) {
@@ -7431,6 +7443,7 @@ function paperCardHtml(paper) {
         ${meta ? `<p class="card-sub">${meta}</p>` : ''}
       </div>
       <div class="head-actions">
+        <button type="button" data-action="suggest-hyp" data-id="${id}" class="ghost-btn"${helpAttr('Let an LLM match existing hypotheses to this paper and suggest new ones — all auto-linked.')}>Suggest hypotheses</button>
         <button type="button" data-action="add-hyp" data-id="${id}" class="ghost-btn"${helpAttr('Add a hypothesis manually and link it to this paper.')}>Add hypothesis</button>
         <button type="button" data-action="link-existing" data-id="${id}" class="ghost-btn"${helpAttr('Link an existing hypothesis to this paper.')}>Link existing</button>
         ${linkedCount ? `<button type="button" data-action="replicate" data-id="${id}" class="ghost-btn"${helpAttr('Launch every linked hypothesis’s spec.')}>Replicate</button>` : ''}
@@ -7745,6 +7758,42 @@ async function replicatePaper(id) {
   for (const hid of ids) await runHypothesisCampaign(hid)
   showToast(`Launching ${ids.length} linked hypothes${ids.length === 1 ? 'is' : 'es'}.`)
 }
+// Suggest hypotheses: an LLM matches existing hypotheses to the paper + proposes new ones (all
+// auto-linked). Triggers the backend `suggest-paper-hypotheses` activity, then re-renders Papers.
+async function onSuggestPaperHypotheses(id, button) {
+  if (!embedded()) {
+    setStatusLine('papers-status', 'Open inside the Overseer to suggest hypotheses.', true)
+    return
+  }
+  const epoch = projectEpoch
+  setStatusLine('papers-status', '')
+  if (button) button.disabled = true
+  try {
+    const result = await startOrEnqueue(
+      'suggest-paper-hypotheses',
+      trainerActivityParams({ paperId: id }),
+      'Suggest hypotheses',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('papers-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      await renderPapers()
+      showToast('Suggested + linked hypotheses — review them on the card.')
+    } else {
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('papers-status', 'Could not suggest hypotheses — please try again.', true)
+    }
+  } finally {
+    if (button) button.disabled = false
+  }
+}
 function setupPapers() {
   const addToggle = byId('paper-add-toggle')
   if (addToggle) {
@@ -7785,6 +7834,7 @@ function setupPapers() {
       const paperId = btn.dataset.paper
       if (action === 'import-seeds') importSeedPapers()
       else if (action === 'replicate') replicatePaper(id)
+      else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id, btn)
       else if (action === 'add-hyp') {
         paperSubform =
           paperSubform && paperSubform.paperId === id ? null : { paperId: id, mode: 'add' }
@@ -7921,7 +7971,6 @@ function hasDatasetLevers() {
 }
 // The implicit "Default" dataset from the manifest's dataset-lever defaults.
 function defaultDataset() {
-  const synonyms = (window.Migrate && window.Migrate.INPUT_SYNONYMS) || []
   const tfSpec = (manifest && manifest.levers && manifest.levers.timeframe) || {}
   const settings = {}
   for (const [key, spec] of datasetLeverEntries()) {
@@ -7930,11 +7979,11 @@ function defaultDataset() {
     // The synthetic 'manifest defaults' bundle must be CONCRETE — never carry an input synonym like
     // fidelity_set 'auto'. Resolve fidelity_set via the auto rule on the manifest's default timeframe;
     // any other synonym falls back to the first concrete choice.
-    if (synonyms.includes(String(value))) {
+    if (INPUT_SYNONYMS.includes(String(value))) {
       value =
-        key === 'fidelity_set' && window.Migrate && window.Migrate.autoFidelity
-          ? window.Migrate.autoFidelity(tfSpec.default)
-          : (spec.choices || []).map(String).find((c) => !synonyms.includes(c))
+        key === 'fidelity_set'
+          ? autoFidelity(tfSpec.default)
+          : (spec.choices || []).map(String).find((c) => !INPUT_SYNONYMS.includes(c))
     }
     if (value !== undefined) settings[key] = value
   }

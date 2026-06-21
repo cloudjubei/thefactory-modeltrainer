@@ -6,7 +6,7 @@ import { dirname, join } from 'path'
 import { describe, it, expect } from 'vitest'
 
 // viewer/hypothesis.js is the no-build browser module for the Hypotheses registry; load it as CommonJS
-// the same way migrateViewer.test.ts loads viewer/migrate.js, so the ACTUAL viewer logic is tested here.
+// the same way scripts/xaiParityCheck.mjs loads viewer/xai.js, so the ACTUAL viewer logic is tested here.
 const require = createRequire(import.meta.url)
 const here = dirname(fileURLToPath(import.meta.url))
 const mpath = join(here, '..', 'viewer', 'hypothesis.js')

@@ -71,13 +71,15 @@ so identical specs dedup across human/llm/paper/migrated sources. The **Models t
 architecture = a hypothesis whose `spec.fixed` pins the levers; the 12 seeds migrated to `manifest.hypotheses[]`,
 old `-model` records auto-migrate on open). **Papers are containers** of N hypotheses created three ways —
 **Extract** (the reworked Automatic-Fill: the LLM drafts the paper AND extracts its testable hypotheses,
-linked back), manual **Add hypothesis**, and **Link existing**; the paper's verdict rolls up from them. Pure
-decision logic lives in node-tested `viewer/hypothesis.js`. Pending:
+linked back), manual **Add hypothesis**, **Link existing**, and **Suggest hypotheses** (on an existing card —
+`suggestPaperHypotheses` tool + `suggest-paper-hypotheses` activity: the LLM matches the paper against
+existing hypotheses, links the fits, AND proposes new ones, all auto-linked + spec-hash-deduped). The paper's
+verdict rolls up from them. Hypothesis cards are full-width **collapsible** rows (crucial info collapsed;
+expand for spec/measured/transitions/actions; expansion survives re-render). Pure decision logic lives in
+node-tested `viewer/hypothesis.js`. Pending:
 
 - Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
   (find → web-verify → synthesize). Deferred.
-- Optional: a card-level "Extract" that re-analyses an existing paper's link and merges new hypotheses INTO
-  that paper (needs a `paperId` param on `analyzePaperFromUrl`). Today Extract is the add-chooser path only.
 
 ### 3c. Model architectures (now hypotheses)
 

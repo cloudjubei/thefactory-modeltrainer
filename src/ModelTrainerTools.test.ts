@@ -1974,7 +1974,9 @@ describe('getRunData / getRunXAI (agent read tools)', () => {
     const storage = memoryStorage()
     await seedProject(storage)
     await seedRun(storage, 'aaa', 10, {
-      artifacts: { decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5 } } },
+      artifacts: {
+        decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5 } },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.getRunData({ scope: 'proj', runKey: 'aaa' })
@@ -2168,5 +2170,145 @@ describe('analyzePaperFromUrl', () => {
         }),
       ),
     ).rejects.toThrow(/404/)
+  })
+})
+
+describe('suggestPaperHypotheses', () => {
+  const seedPaper = async (storage: DataStorage, overrides: Record<string, unknown> = {}) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'p1',
+      content: {
+        id: 'p1',
+        title: 'Vol scaling paper',
+        claim: 'scale by vol',
+        status: 'untested',
+        source: 'manual',
+        createdAt: NOW,
+        updatedAt: NOW,
+        ...overrides,
+      },
+    })
+  const seedHyp = async (storage: DataStorage, id: string, content: Record<string, unknown>) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: id,
+      content: { id, ...content },
+    })
+  const base = (overrides = {}) => ({
+    scope: 'proj',
+    projectRoot: '/repo',
+    manifest: manifest(),
+    paperId: 'p1',
+    llmConfig: LLM,
+    ...overrides,
+  })
+
+  it('links matched existing hypotheses and creates+links the suggested new ones', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage)
+    await seedHyp(storage, 'e1', {
+      title: 'existing vol',
+      rationale: 'r',
+      spec: { fixed: { lr: 0.5 } },
+      status: 'proven',
+      verdictSource: 'manual',
+      source: 'human',
+      paperIds: [],
+    })
+    await seedHyp(storage, 'e2', {
+      title: 'unrelated',
+      spec: { fixed: { steps: 50 } },
+      paperIds: [],
+    })
+    const exec = stubExecutor(
+      JSON.stringify({
+        matchExistingIds: ['e1', 'missing-id'],
+        newHypotheses: [{ title: 'New', rationale: 'R', spec: { sweep: { steps: [100, 200] } } }],
+      }),
+    )
+    const { tools } = makeJudgeTools(exec, storage)
+    const written: string[] = []
+    const result = await tools.suggestPaperHypotheses(
+      base({ onRecordWritten: (t: string) => written.push(t) }),
+    )
+    expect(result.linkedExistingIds).toEqual(['e1']) // 'missing-id' filtered out
+    expect(result.newHypotheses).toHaveLength(1)
+    expect(result.newHypotheses[0]).toMatchObject({
+      source: 'paper',
+      status: 'untested',
+      verdictSource: 'auto',
+    })
+    const newId = result.newHypotheses[0].id
+    // paper links both
+    expect([...result.paper.hypothesisIds!].sort()).toEqual(['e1', newId].sort())
+    // e1 keeps its manual proven verdict, gains the paper link
+    const e1 = (await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'e1',
+    }))!.content as { status: string; verdictSource: string; paperIds: string[] }
+    expect(e1).toMatchObject({ status: 'proven', verdictSource: 'manual' })
+    expect(e1.paperIds).toContain('p1')
+    // e2 untouched (no paper link)
+    const e2 = (await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'e2',
+    }))!.content as { paperIds: string[] }
+    expect(e2.paperIds).toEqual([])
+    expect(written).toContain('demo-run-paper')
+  })
+
+  it('dedups a suggested NEW hypothesis whose spec already exists (links, no duplicate)', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage)
+    const dupId = hashTrainingConfig({ fixed: { lr: 0.5 } })
+    await seedHyp(storage, dupId, {
+      title: 'already here',
+      spec: { fixed: { lr: 0.5 } },
+      paperIds: [],
+    })
+    const exec = stubExecutor(
+      JSON.stringify({
+        matchExistingIds: [],
+        newHypotheses: [{ title: 'restated', rationale: 'R', spec: { fixed: { lr: 0.5 } } }],
+      }),
+    )
+    const { tools } = makeJudgeTools(exec, storage)
+    const result = await tools.suggestPaperHypotheses(base())
+    expect(result.newHypotheses).toHaveLength(0) // it already existed → linked, not created
+    expect(result.linkedHypothesisIds).toEqual([dupId])
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(1)
+  })
+
+  it('tolerates a paper-URL fetch failure (uses stored fields instead)', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage, { url: 'https://arxiv.org/abs/1' })
+    const exec = stubExecutor(JSON.stringify({ matchExistingIds: [], newHypotheses: [] }))
+    const { tools } = makeJudgeTools(exec, storage)
+    const result = await tools.suggestPaperHypotheses(
+      base({
+        fetchPaperText: async () => {
+          throw new Error('HTTP 404')
+        },
+      }),
+    )
+    expect(result.linkedHypothesisIds).toEqual([])
+  })
+
+  it('throws when the paper does not exist', async () => {
+    const { tools } = makeJudgeTools(stubExecutor('{}'), memoryStorage())
+    await expect(tools.suggestPaperHypotheses(base())).rejects.toThrow(/no paper/i)
+  })
+
+  it('throws without an inference executor', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage)
+    const { tools } = makeJudgeTools(undefined, storage)
+    await expect(tools.suggestPaperHypotheses(base())).rejects.toThrow(/inference/i)
   })
 })

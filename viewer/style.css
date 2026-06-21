@@ -2204,39 +2204,61 @@ pre.json {
   font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
+/* Hypotheses render as full-width, collapsible rows so each claim has room for all its detail. */
 .hypothesis-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-.hypothesis-card {
-  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 12px 14px;
+  gap: 8px;
+}
+.hypothesis-card {
+  width: 100%;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface-subtle);
 }
-.hypothesis-delete {
-  position: absolute;
-  top: 8px;
-  right: 8px;
+.hypothesis-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
 }
-.hypothesis-card h4 {
-  padding-right: 32px;
+.hypothesis-summary::-webkit-details-marker {
+  display: none;
 }
-.hypothesis-card h4 {
-  margin: 0;
+.hypothesis-summary::before {
+  content: '▸';
+  color: var(--muted);
+  font-size: 11px;
+  transition: transform 0.12s ease;
+}
+.hypothesis-card[open] > .hypothesis-summary::before {
+  transform: rotate(90deg);
+}
+.hyp-title {
+  flex: 1 1 auto;
+  font-weight: 600;
   font-size: 14px;
+}
+.hyp-quick {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.hyp-running {
+  display: inline-flex;
+  align-items: center;
+}
+.hypothesis-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 14px 12px;
 }
 .hypothesis-card.is-muted,
 .hypothesis-card.is-dismissed {
   opacity: 0.55;
-}
-.hypothesis-card .card-sub {
-  margin-top: auto;
 }
 .hypothesis-transitions {
   margin: 6px 0;
