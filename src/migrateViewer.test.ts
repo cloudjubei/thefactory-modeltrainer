@@ -18,126 +18,190 @@ mod.paths = []
 mod._compile(readFileSync(mpath, 'utf8'), mpath)
 const Migrate: any = mod.exports
 
-// The six DISTINCT historical_data strings actually present in BlackSwan's ledger-import runs (verified
-// against .factory/data). Separators vary by era: `|`, `]`, `~` (filesystem-safe `.`). Only the 1h-step /
-// 1h+1d observers map to a current fidelity_set; the sub-hourly stacks are retired (fail-fast today) and
-// get a truthful `legacy:` identity, never force-merged into 1h+1d.
-const HD_1H_1D = 'data_2017_to_2023vs2024_1h_1d_only_price_percent_day_of_week_none_1h_1h|1d_32_1_1_0.004_20'
-const HD_1H_1D_LB10 = 'data_2017_to_2023vs2024_1h_1d_only_price_percent_day_of_week_none_1h_1h|1d_32_1_1_0.004_10'
-const HD_5M = 'data_2017_to_2023vs2024_only_price_percent_only_price_percent_day_of_week_none_1m]5m_5m]1h]1d_1m]1m_5m]1h]1d_32_0~004_20'
-const HD_15M = 'data_2017_to_2023vs2024_only_price_percent_only_price_percent_day_of_week_none_1m|15m_15m|1h|1d_1m|1m_15m|1h|1d_32_0.004_20'
-const HD_1M_A = '2017vs2024_1m_1h_1d_only_price_percent_only_price_percent_day_of_week_none_1m|1h_1h|1d_1m|1h_1h|1d_1_0.004_20'
-const HD_1M_B = 'data_2017_to_2023vs2024_only_price_percent_only_price_percent_day_of_week_none_1m|1h_1h|1d_1m|1m_1h|1d_32_0.004_20'
+describe('hold-fee migration', () => {
+  it('recomputes a fee-free hold benchmark net of the round-trip fee and flags it', () => {
+    const summary = {
+      config: { transaction_fee: 0.001 },
+      metrics: { hold_return_pct: 100, total_return_pct: 50 },
+    }
+    const patch = Migrate.holdFeeMetricsPatch(summary)
+    const expectedHold = (2 * (1 - 0.001) ** 2 - 1) * 100 // 99.6002
+    expect(patch.hold_return_pct).toBeCloseTo(expectedHold, 4)
+    expect(patch.return_vs_hold_pct).toBeCloseTo(50 - expectedHold, 4)
+    expect(patch.hold_net_of_fees).toBe(true)
+  })
 
-describe('fidelitySetFromLayers', () => {
-  it('maps a clean 1h+1d layer stack to the canonical fidelity_set', () => {
-    expect(Migrate.fidelitySetFromLayers(['1h', '1d'])).toEqual({
-      fidelitySet: '1h+1d',
-      layers: ['1h', '1d'],
-      legacy: false,
+  it('defaults the fee to the env default (0.001) when the run carries no transaction_fee', () => {
+    const patch = Migrate.holdFeeMetricsPatch({
+      config: {},
+      metrics: { hold_return_pct: 0, total_return_pct: 0 },
     })
+    expect(patch.hold_net_of_fees).toBe(true)
+    expect(patch.hold_return_pct).toBeCloseTo(((1 - 0.001) ** 2 - 1) * 100, 4) // -0.1999
   })
-  it('maps single + multi clean stacks to their canonical labels (order-independent)', () => {
-    expect(Migrate.fidelitySetFromLayers(['1d']).fidelitySet).toBe('1d')
-    expect(Migrate.fidelitySetFromLayers(['1h']).fidelitySet).toBe('1h')
-    expect(Migrate.fidelitySetFromLayers(['1d', '1h']).fidelitySet).toBe('1h+1d')
-    expect(Migrate.fidelitySetFromLayers(['1w', '1h', '1d']).fidelitySet).toBe('1h+1d+1w')
-    expect(Migrate.fidelitySetFromLayers(['1w', '1d']).fidelitySet).toBe('1d+1w')
+
+  it('is idempotent: returns null once a run is already net of fees', () => {
+    expect(
+      Migrate.holdFeeMetricsPatch({
+        config: {},
+        metrics: { hold_return_pct: 100, total_return_pct: 50, hold_net_of_fees: true },
+      }),
+    ).toBeNull()
   })
-  it('tags any sub-hourly stack as legacy, finest-first, never as a runnable label', () => {
-    expect(Migrate.fidelitySetFromLayers(['1d', '1h', '5m', '1m'])).toEqual({
-      fidelitySet: 'legacy:1m+5m+1h+1d',
-      layers: ['1m', '5m', '1h', '1d'],
-      legacy: true,
+
+  it('returns null when there is no benchmark to adjust', () => {
+    expect(
+      Migrate.holdFeeMetricsPatch({ config: {}, metrics: { total_return_pct: 50 } }),
+    ).toBeNull()
+    expect(Migrate.holdFeeMetricsPatch({})).toBeNull()
+  })
+
+  it('migrationPatchFor returns the hold-fee metrics fix under a `metrics` key (no config change)', () => {
+    const patch = Migrate.migrationPatchFor({
+      config: { fidelity_set: '1h+1d' },
+      metrics: { hold_return_pct: 100, total_return_pct: 50 },
     })
-    expect(Migrate.fidelitySetFromLayers(['15m', '1h', '1d', '1m']).fidelitySet).toBe(
-      'legacy:1m+15m+1h+1d',
+    expect(patch.config).toBeUndefined()
+    expect(patch.metrics.hold_net_of_fees).toBe(true)
+  })
+
+  it('migrationPatchFor is null for a fully-migrated run', () => {
+    expect(
+      Migrate.migrationPatchFor({
+        config: {},
+        metrics: { hold_return_pct: 100, total_return_pct: 50, hold_net_of_fees: true },
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('autoFidelity', () => {
+  it('mirrors fidelity.py: hourly step observes 1h+1d, any other step observes its own bar', () => {
+    expect(Migrate.autoFidelity('1h')).toBe('1h+1d')
+    expect(Migrate.autoFidelity('1d')).toBe('1d')
+    expect(Migrate.autoFidelity(undefined)).toBe('1d')
+  })
+})
+
+describe('hypothesisFromLegacyModel', () => {
+  it('maps a model to a hypothesis whose spec.fixed pins the architecture levers', () => {
+    const h = Migrate.hypothesisFromLegacyModel(
+      {
+        id: 'm1',
+        name: 'Reppo-custom',
+        match: { model_name: 'reppo-custom' },
+        algo: 'RecurrentPPO',
+        netArch: '512,64',
+        rationale: 'recurrent core',
+        status: 'untested',
+      },
+      'abc123',
+      'T',
     )
-  })
-  it('tags a non-sub-hourly stack that is not a runnable set as legacy too', () => {
-    expect(Migrate.fidelitySetFromLayers(['1h', '1w'])).toEqual({
-      fidelitySet: 'legacy:1h+1w',
-      layers: ['1h', '1w'],
-      legacy: true,
+    expect(h).toMatchObject({
+      id: 'abc123',
+      title: 'Reppo-custom',
+      spec: { fixed: { model_name: 'reppo-custom' } },
+      status: 'untested',
+      verdictSource: 'auto',
+      source: 'migrated-model',
+      createdAt: 'T',
+      updatedAt: 'T',
     })
+    expect(h.rationale).toContain('recurrent core')
+    expect(h.rationale).toContain('512,64')
   })
-  it('returns null for empty/invalid input', () => {
-    expect(Migrate.fidelitySetFromLayers([])).toBeNull()
-    expect(Migrate.fidelitySetFromLayers(null)).toBeNull()
+  it('preserves a human proven/disproved verdict as a MANUAL override', () => {
+    const h = Migrate.hypothesisFromLegacyModel(
+      { name: 'X', match: {}, status: 'proven' },
+      'id',
+      'T',
+    )
+    expect(h).toMatchObject({ status: 'proven', verdictSource: 'manual' })
+  })
+  it('keeps a research-sourced model as research; defaults an unknown status to untested/auto', () => {
+    const h = Migrate.hypothesisFromLegacyModel(
+      { name: 'X', source: 'research', status: 'weird' },
+      'id',
+      'T',
+    )
+    expect(h).toMatchObject({ source: 'research', status: 'untested', verdictSource: 'auto' })
+    expect(h.spec).toEqual({ fixed: {} })
   })
 })
 
-describe('legacyLayersFromHistoricalData', () => {
-  it('parses the observed layer union across pipe/bracket/tilde encodings', () => {
-    expect(Migrate.legacyLayersFromHistoricalData(HD_1H_1D)).toEqual(['1h', '1d'])
-    expect(Migrate.legacyLayersFromHistoricalData(HD_5M)).toEqual(['1m', '5m', '1h', '1d'])
-    expect(Migrate.legacyLayersFromHistoricalData(HD_15M)).toEqual(['1m', '15m', '1h', '1d'])
-    expect(Migrate.legacyLayersFromHistoricalData(HD_1M_A)).toEqual(['1m', '1h', '1d'])
-  })
-  it('returns null when there is no multi-layer group or no string', () => {
-    expect(Migrate.legacyLayersFromHistoricalData('')).toBeNull()
-    expect(Migrate.legacyLayersFromHistoricalData(undefined)).toBeNull()
-    expect(Migrate.legacyLayersFromHistoricalData('data_2017vs2024_1h_only_price_32_20')).toBeNull()
-  })
-})
-
-describe('walkForwardWindowFromHistoricalData', () => {
-  it('derives the test year from the vsYYYY span', () => {
-    expect(Migrate.walkForwardWindowFromHistoricalData(HD_1H_1D)).toBe('2024')
-    expect(Migrate.walkForwardWindowFromHistoricalData(HD_1M_A)).toBe('2024')
-  })
-  it('returns null when no span is present', () => {
-    expect(Migrate.walkForwardWindowFromHistoricalData('rl_ppo_combo')).toBeNull()
-  })
-})
-
-describe('migrationPatchFor', () => {
-  it('normalizes a live `auto` run from its own recorded layers', () => {
-    const patch = Migrate.migrationPatchFor({
-      config: { fidelity_set: 'auto', timeframe: '1h' },
-      dataset: { layers: ['1h', '1d'] },
-    })
-    expect(patch).toEqual({ config: { fidelity_set: '1h+1d' } })
-  })
-  it('skips an `auto` run with no recorded layers (cannot safely resolve)', () => {
-    expect(Migrate.migrationPatchFor({ config: { fidelity_set: 'auto' }, dataset: {} })).toBeNull()
-  })
-  it('backfills a clean 1h+1d import (fidelity_set + walk_forward_window + dataset.layers)', () => {
-    const patch = Migrate.migrationPatchFor({
-      config: { asset: 'BTCUSDT', timeframe: '1h', historical_data: HD_1H_1D },
-      dataset: { asset: 'BTCUSDT', timeframe: '1h' },
-    })
-    expect(patch).toEqual({
-      config: { fidelity_set: '1h+1d', walk_forward_window: '2024' },
-      dataset: { layers: ['1h', '1d'] },
+describe('legacyHypothesisPatch', () => {
+  it('migrates a pending hypothesis to untested/auto', () => {
+    expect(Migrate.legacyHypothesisPatch({ status: 'pending' }, 'T')).toEqual({
+      verdictSource: 'auto',
+      status: 'untested',
+      updatedAt: 'T',
     })
   })
-  it('tags a retired sub-hourly import with a legacy identity, not 1h+1d', () => {
-    const patch = Migrate.migrationPatchFor({
-      config: { timeframe: '1h', historical_data: HD_5M },
-      dataset: { timeframe: '1h' },
+  it('migrates accepted to untested/auto', () => {
+    expect(Migrate.legacyHypothesisPatch({ status: 'accepted' }, 'T')).toMatchObject({
+      status: 'untested',
+      verdictSource: 'auto',
     })
-    expect(patch.config.fidelity_set).toBe('legacy:1m+5m+1h+1d')
-    expect(patch.dataset.layers).toEqual(['1m', '5m', '1h', '1d'])
   })
-  it('does not override an existing walk_forward_window on an import', () => {
-    const patch = Migrate.migrationPatchFor({
-      config: { timeframe: '1h', historical_data: HD_1H_1D_LB10, walk_forward_window: '2023' },
-      dataset: {},
+  it('migrates rejected to a dismissed untested card', () => {
+    expect(Migrate.legacyHypothesisPatch({ status: 'rejected' }, 'T')).toEqual({
+      verdictSource: 'auto',
+      status: 'untested',
+      dismissed: true,
+      updatedAt: 'T',
     })
-    expect(patch.config.walk_forward_window).toBeUndefined()
-    expect(patch.config.fidelity_set).toBe('1h+1d')
   })
-  it('is a no-op for already-concrete runs (idempotent)', () => {
+  it('preserves an already-valid verdict status', () => {
+    expect(Migrate.legacyHypothesisPatch({ status: 'proven' }, 'T')).toMatchObject({
+      status: 'proven',
+      verdictSource: 'auto',
+    })
+  })
+  it('returns null for an already-migrated record', () => {
     expect(
-      Migrate.migrationPatchFor({ config: { fidelity_set: '1h+1d', timeframe: '1h' } }),
+      Migrate.legacyHypothesisPatch({ status: 'untested', verdictSource: 'auto' }, 'T'),
     ).toBeNull()
     expect(
-      Migrate.migrationPatchFor({ config: { fidelity_set: 'legacy:1m+5m+1h+1d' } }),
+      Migrate.legacyHypothesisPatch({ status: 'proven', verdictSource: 'manual' }, 'T'),
     ).toBeNull()
   })
-  it('skips a run with neither fidelity_set nor historical_data', () => {
-    expect(Migrate.migrationPatchFor({ config: { timeframe: '1h' }, dataset: {} })).toBeNull()
-    expect(Migrate.migrationPatchFor({})).toBeNull()
+})
+
+describe('pipelineVersion normalization (bare integer → major.minor)', () => {
+  it('normalizes a bare-integer string version to N.0', () => {
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: '4' })).toEqual({
+      pipelineVersion: '4.0',
+    })
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: '3' })).toEqual({
+      pipelineVersion: '3.0',
+    })
+  })
+  it('normalizes a numeric version to N.0', () => {
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: 4 })).toEqual({ pipelineVersion: '4.0' })
+  })
+  it('is idempotent for an already major.minor version', () => {
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: '4.0' })).toBeNull()
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: '4.2' })).toBeNull()
+  })
+  it('leaves a missing or non-integer version alone', () => {
+    expect(Migrate.pipelineVersionPatch({})).toBeNull()
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: '' })).toBeNull()
+    expect(Migrate.pipelineVersionPatch({ pipelineVersion: 'legacy:foo' })).toBeNull()
+  })
+  it('migrationPatchFor merges the version fix alongside the hold-fee fix', () => {
+    const patch = Migrate.migrationPatchFor({
+      pipelineVersion: '4',
+      metrics: { hold_return_pct: 100, total_return_pct: 50 },
+    })
+    expect(patch.pipelineVersion).toBe('4.0')
+    expect(patch.metrics.hold_net_of_fees).toBe(true)
+  })
+  it('migrationPatchFor returns the version fix alone when metrics are already net of fees', () => {
+    const patch = Migrate.migrationPatchFor({
+      pipelineVersion: '4',
+      metrics: { hold_return_pct: 100, total_return_pct: 50, hold_net_of_fees: true },
+    })
+    expect(patch).toEqual({ pipelineVersion: '4.0' })
   })
 })

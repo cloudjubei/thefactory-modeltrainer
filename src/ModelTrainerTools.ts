@@ -8,6 +8,7 @@ import {
   uuidv4,
 } from 'thefactory-tools/utils'
 import type {
+  AnalysisCriterion,
   AnalysisRun,
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
@@ -17,6 +18,10 @@ import type {
   EvaluateTrainingRunsParams,
   EvaluateTrainingRunsResult,
   ExperimentSpec,
+  GetRunDataParams,
+  GetRunDataResult,
+  GetRunXaiParams,
+  GetRunXaiResult,
   JudgeTrainingRunsParams,
   JudgeTrainingRunsResult,
   ModelTrainerTools,
@@ -24,6 +29,7 @@ import type {
   PlannedTrainingItem,
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
+  RunXaiDigest,
   TrainerManifest,
   TrainingCalibration,
   TrainingCampaignParams,
@@ -165,11 +171,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
-    // The pipeline version this campaign runs under. A run is "explored"/"unrunnable" only relative
-    // to its OWN pipeline version — a version bump (a breaking data/scoring change) makes every prior
-    // run incomparable, so it re-explores everything regardless of skipExplored/unrunnable marks.
+    // The pipeline version this campaign runs under. Comparability is by MAJOR version ("major.minor",
+    // a bare "1" reads as 1.0): a breaking (MAJOR) bump makes every prior run incomparable, so it
+    // re-explores everything regardless of skipExplored/unrunnable marks; a MINOR bump is additive and
+    // comparable, so marks from the same major still apply. The full string is still stored per run.
     const pipelineVersion = manifest.pipelineVersion ?? '1'
-    const versionOf = (c: { pipelineVersion?: string } | undefined) => c?.pipelineVersion ?? '1'
+    const majorOf = (v: string | undefined) => parseInt(String(v ?? '1'), 10) || 1
+    const pipelineMajor = majorOf(pipelineVersion)
+    const versionOf = (c: { pipelineVersion?: string } | undefined) => majorOf(c?.pipelineVersion)
 
     let exploredSetups: Set<string> | undefined
     if (params.skipExplored) {
@@ -185,7 +194,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 config?: Record<string, unknown>
               },
           )
-          .filter((c) => c?.status === 'completed' && versionOf(c) === pipelineVersion)
+          .filter((c) => c?.status === 'completed' && versionOf(c) === pipelineMajor)
           .map((c) => c.setupKey ?? (c.config ? setupKeyOf(c.config) : undefined))
           .filter((k): k is string => typeof k === 'string'),
       )
@@ -209,7 +218,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 config?: Record<string, unknown>
               },
           )
-          .filter((c) => c?.unrunnable !== false && versionOf(c) === pipelineVersion)
+          .filter((c) => c?.unrunnable !== false && versionOf(c) === pipelineMajor)
           .map((c) => c?.setupKey ?? (c?.config ? setupKeyOf(c.config) : undefined))
           .filter((k): k is string => typeof k === 'string'),
       )
@@ -252,7 +261,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const content = existing?.content as
           | { status?: string; pipelineVersion?: string }
           | undefined
-        return content?.status === 'completed' && versionOf(content) === pipelineVersion
+        return content?.status === 'completed' && versionOf(content) === pipelineMajor
       },
       runItem: async (item) => {
         const handle = runner.runJob({
@@ -715,7 +724,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         title: item.title,
         rationale: item.rationale,
         spec: item.spec,
-        status: 'pending',
+        status: 'untested',
+        verdictSource: 'auto',
         source: 'llm',
         proposedBy,
         createdAt: proposedAt,
@@ -766,17 +776,74 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
     })
 
-    const draft = coercePaperDraft(parseFirstValidJson(res.text))
+    const parsed = parseFirstValidJson(res.text)
+    const draft = coercePaperDraft(parsed)
     if (!draft) throw new Error('the model did not return a usable paper summary for this link')
 
-    const id = uuidv4()
+    const paperId = uuidv4()
     const paperType = `${recordType}-paper`
+    const hypothesisType = `${recordType}-hypothesis`
+
+    // Extract the paper's testable hypotheses; dedup by spec hash so identical specs from any source
+    // (propose / manual / another paper) link to the ONE existing record rather than duplicate.
+    const rawHyps =
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray((parsed as Record<string, unknown>).hypotheses)
+        ? ((parsed as Record<string, unknown>).hypotheses as unknown[])
+        : []
+    const items = coerceHypothesisItems(rawHyps, manifest)
+    const existing = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
+    const byId = new Map<string, TrainingHypothesis>()
+    for (const r of existing) {
+      const content = r.content as unknown as TrainingHypothesis
+      if (content && typeof content.id === 'string') byId.set(content.id, content)
+    }
+    const hypotheses: TrainingHypothesis[] = []
+    const linkedHypothesisIds: string[] = []
+    const seen = new Set<string>()
+    for (const item of items) {
+      const hid = hashTrainingConfig(item.spec as Record<string, unknown>)
+      if (seen.has(hid)) continue
+      seen.add(hid)
+      const prior = byId.get(hid)
+      const hypothesis: TrainingHypothesis = prior
+        ? {
+            ...prior,
+            paperIds: Array.from(new Set([...(prior.paperIds ?? []), paperId])),
+            updatedAt: analyzedAt,
+          }
+        : {
+            id: hid,
+            title: item.title,
+            rationale: item.rationale,
+            spec: item.spec,
+            status: 'untested',
+            verdictSource: 'auto',
+            source: 'paper',
+            proposedBy: analyzedBy,
+            paperIds: [paperId],
+            createdAt: analyzedAt,
+            updatedAt: analyzedAt,
+          }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: hypothesisType,
+        key: hid,
+        content: hypothesis as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(hypothesisType, hid)
+      hypotheses.push(hypothesis)
+      linkedHypothesisIds.push(hid)
+    }
+
     const paper: TrainingPaperRecord = {
       ...draft,
-      id,
+      id: paperId,
       title: draft.title as string,
       claim: draft.claim as string,
       url: params.url,
+      hypothesisIds: linkedHypothesisIds,
       status: 'untested',
       source: 'research',
       createdAt: analyzedAt,
@@ -785,33 +852,32 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     await deps.storage.upsertRecord({
       scope: params.scope,
       type: paperType,
-      key: id,
+      key: paperId,
       content: paper as unknown as Record<string, unknown>,
     })
-    params.onRecordWritten?.(paperType, id)
-    logger?.info('analyzed paper from url', { recordType, url: params.url, id })
-    return { recordType, paper, analyzedBy, analyzedAt }
+    params.onRecordWritten?.(paperType, paperId)
+    logger?.info('analyzed paper from url', {
+      recordType,
+      url: params.url,
+      id: paperId,
+      hypotheses: hypotheses.length,
+    })
+    return { recordType, paper, hypotheses, linkedHypothesisIds, analyzedBy, analyzedAt }
   }
 
-  async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
-    const executor = requireInferenceExecutor()
-    const manifest =
-      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
-    const recordType = manifest.recordType
-    const narratedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
-    const narratedAt = now()
-    const criterion = params.criterion ?? {
-      key: 'objective',
-      direction: manifest.objective.direction,
-      label: manifest.objective.name,
-    }
-
-    // The narrative is PER RUN: digest the focused run's OWN deterministic xAI (its decisions, attribution +
-    // sanity check, reward breakdown, latent probe, sibling decision-diff) plus its standing among all runs.
-    // The LLM only narrates these facts — it never computes them.
-    const records = await listCompletedRuns(params.scope, recordType)
-    const focus = records.find((r) => r.key === params.runKey)
-    if (!focus) throw new Error(`run "${params.runKey}" is not a completed run of this project`)
+  // Build ONE run's structured deterministic xAI digest — its decisions, attribution + sanity, reward
+  // breakdown, latent probe, the sibling decision-diff, and its standing among all completed runs. Shared by
+  // the LLM narrative (xaiNarrate) and the agent-facing getRunXAI tool, so the facts live in ONE place.
+  async function buildRunXaiDigest(
+    scope: string,
+    manifest: TrainerManifest,
+    runKey: string,
+    criterion: AnalysisCriterion,
+    siblingKey?: string,
+  ): Promise<{ digest: RunXaiDigest; runCount: number }> {
+    const records = await listCompletedRuns(scope, manifest.recordType)
+    const focus = records.find((r) => r.key === runKey)
+    if (!focus) throw new Error(`run "${runKey}" is not a completed run of this project`)
     const focusConfig = (focus.content.config as Record<string, unknown>) || {}
 
     const runs: AnalysisRun[] = records.map((r) => ({
@@ -828,7 +894,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
       .filter((x): x is { key: string; value: number } => x.value !== undefined)
       .sort((a, b) => (criterion.direction === 'max' ? b.value - a.value : a.value - b.value))
-    const rankPos = ranked.findIndex((x) => x.key === params.runKey)
+    const rankPos = ranked.findIndex((x) => x.key === runKey)
 
     const trace = validateDecisionTrace(
       (focus.content.artifacts as { decisionTrace?: unknown } | undefined)?.decisionTrace,
@@ -841,8 +907,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       : []
     const probe = trace?.latentMap?.probe
 
-    let sibling: Parameters<typeof buildXaiNarrateUserContent>[0]['sibling']
-    const sib = params.siblingKey ? records.find((r) => r.key === params.siblingKey) : undefined
+    let sibling: RunXaiDigest['sibling']
+    const sib = siblingKey ? records.find((r) => r.key === siblingKey) : undefined
     if (sib) {
       const diff = diffDecisionTraces(
         sib.content as unknown as TrainingRunSummary,
@@ -856,7 +922,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             .map((lk) => `${lk} ${sibConfig[lk]}→${focusConfig[lk]}`)
             .join(', ') || 'seed/nondeterminism'
         sibling = {
-          key: params.siblingKey as string,
+          key: siblingKey as string,
           changed,
           divergencePct: Math.round(diff.divergenceRate * 100),
           qualityVerdict: diff.quality.verdict,
@@ -865,8 +931,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
-    const userContent = buildXaiNarrateUserContent({
-      runKey: params.runKey,
+    const digest: RunXaiDigest = {
+      runKey,
       config: focusConfig,
       objective: focus.content.objective as number | undefined,
       criterion,
@@ -890,10 +956,83 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         : undefined,
       importances: leverImportances(runs, criterion),
       sibling,
-    })
+    }
+    return { digest, runCount: runs.length }
+  }
+
+  // Resolve which registered training project a run id belongs to: search the host's
+  // `trainer-project-manifest` records for one whose recordType holds a COMPLETED record keyed by `runKey`.
+  async function resolveRunRecord(
+    scope: string,
+    runKey: string,
+  ): Promise<
+    { recordType: string; manifest: TrainerManifest; content: Record<string, unknown> } | undefined
+  > {
+    const manifests = await deps.storage.listRecords({ scope, type: 'trainer-project-manifest' })
+    for (const mr of manifests) {
+      const manifest = (mr.content as { manifest?: TrainerManifest } | undefined)?.manifest
+      if (!manifest?.recordType) continue
+      const rec = await deps.storage.readRecord({ scope, type: manifest.recordType, key: runKey })
+      if (rec && (rec.content as { status?: string })?.status === 'completed') {
+        return {
+          recordType: manifest.recordType,
+          manifest,
+          content: rec.content as Record<string, unknown>,
+        }
+      }
+    }
+    return undefined
+  }
+
+  // Strip the heavy parts of a stored run summary (the per-step decision trace + the chart series) so an
+  // agent gets a compact record; leave a small decision-trace digest in their place.
+  function trimRunForAgent(content: Record<string, unknown>): Record<string, unknown> {
+    const out: Record<string, unknown> = { ...content }
+    delete out.series
+    const artifacts = content.artifacts as { decisionTrace?: unknown } | undefined
+    const trace = validateDecisionTrace(artifacts?.decisionTrace)
+    if (artifacts) {
+      const rest = { ...artifacts }
+      delete rest.decisionTrace
+      out.artifacts = rest
+    }
+    if (trace) {
+      const fa = trace.featureAttribution
+      out.decisionTraceDigest = {
+        totalSteps: trace.totalSteps ?? trace.steps.length,
+        actionCounts: trace.actionCounts,
+        ...(fa
+          ? { attributionMethod: fa.method, attributionSanityPassed: fa.sanityCheck?.passed }
+          : {}),
+        ...(trace.rewardBreakdown ? { rewardBreakdown: trace.rewardBreakdown } : {}),
+        ...(trace.latentMap?.probe ? { latentProbeAccuracy: trace.latentMap.probe.accuracy } : {}),
+      }
+    }
+    return out
+  }
+
+  async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const narratedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const narratedAt = now()
+    const criterion = params.criterion ?? {
+      key: 'objective',
+      direction: manifest.objective.direction,
+      label: manifest.objective.name,
+    }
+    const { digest, runCount } = await buildRunXaiDigest(
+      params.scope,
+      manifest,
+      params.runKey,
+      criterion,
+      params.siblingKey,
+    )
     const res = await executor.runInference({
       systemPrompt: buildXaiNarrateSystemPrompt(manifest),
-      userContent,
+      userContent: buildXaiNarrateUserContent(digest),
       model: { kind: 'api', llmConfig: params.llmConfig },
       abortSignal: params.abortSignal,
     })
@@ -906,15 +1045,41 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       content: {
         narrative: String(res.text || '').trim(),
         runKey: params.runKey,
-        runCount: runs.length,
+        runCount,
         criterionKey: criterion.key,
         narratedBy,
         narratedAt,
       },
     })
     params.onRecordWritten?.(narrativeType, params.runKey)
-    logger?.info('narrated xAI run', { recordType, runKey: params.runKey, runCount: runs.length })
-    return { recordType, runKey: params.runKey, runCount: runs.length, narratedBy, narratedAt }
+    logger?.info('narrated xAI run', { recordType, runKey: params.runKey, runCount })
+    return { recordType, runKey: params.runKey, runCount, narratedBy, narratedAt }
+  }
+
+  async function getRunData(params: GetRunDataParams): Promise<GetRunDataResult> {
+    const resolved = await resolveRunRecord(params.scope, params.runKey)
+    if (!resolved)
+      return { found: false, error: `no completed run "${params.runKey}" found in this project` }
+    return { found: true, recordType: resolved.recordType, run: trimRunForAgent(resolved.content) }
+  }
+
+  async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
+    const resolved = await resolveRunRecord(params.scope, params.runKey)
+    if (!resolved)
+      return { found: false, error: `no completed run "${params.runKey}" found in this project` }
+    const criterion = params.criterion ?? {
+      key: 'objective',
+      direction: resolved.manifest.objective.direction,
+      label: resolved.manifest.objective.name,
+    }
+    const { digest, runCount } = await buildRunXaiDigest(
+      params.scope,
+      resolved.manifest,
+      params.runKey,
+      criterion,
+      params.siblingKey,
+    )
+    return { found: true, recordType: resolved.recordType, runCount, analysis: digest }
   }
 
   return {
@@ -930,5 +1095,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingHypotheses,
     analyzePaperFromUrl,
     xaiNarrate,
+    getRunData,
+    getRunXAI,
   }
 }

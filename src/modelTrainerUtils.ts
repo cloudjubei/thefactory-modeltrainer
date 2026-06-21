@@ -7,6 +7,7 @@ import type {
   DecisionTraceDiff,
   ExperimentSpec,
   PlannedTrainingItem,
+  RunXaiDigest,
   TrainerDataFile,
   TrainerLeverSpec,
   TrainerManifest,
@@ -382,30 +383,7 @@ export function buildXaiNarrateSystemPrompt(manifest: TrainerManifest): string {
 }
 
 /** Compact, model-readable digest of ONE run's deterministic xAI analysis for the narrative. Pure. */
-export function buildXaiNarrateUserContent(input: {
-  runKey: string
-  config: Record<string, unknown>
-  objective?: number
-  criterion: { key: string; direction: 'max' | 'min'; label?: string }
-  rank?: { position: number; total: number }
-  actionCounts?: Record<string, number>
-  attribution?: {
-    topGroups: [string, number][]
-    method?: string
-    sanityPassed?: boolean
-    sanityRankCorr?: number
-  }
-  rewardBreakdown?: Record<string, number>
-  latent?: { varianceExplained?: number; probeAccuracy?: number; probeBaseline?: number }
-  importances: { lever: string; importance: number; bestValue: string }[]
-  sibling?: {
-    key: string
-    changed: string
-    divergencePct: number
-    qualityVerdict?: string
-    qualitySummary?: string
-  }
-}): string {
+export function buildXaiNarrateUserContent(input: RunXaiDigest): string {
   const label = input.criterion.label || input.criterion.key
   const pct = (v: number) => `${Math.round(v * 100)}%`
   const cfg = Object.entries(input.config)
@@ -513,16 +491,17 @@ export function buildAnalyzePaperSystemPrompt(manifest: TrainerManifest, notes?:
   return [
     `You are a research librarian for the "${manifest.name}" training project.`,
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-    `You are given the TEXT of a paper/source (already fetched — DO NOT browse). Summarise it HONESTLY as a registry entry.`,
-    `The project's tunable levers (for a suggested replicateConfig) are: ${JSON.stringify(manifest.levers)}.`,
+    `You are given the TEXT of a paper/source (already fetched — DO NOT browse). Summarise it HONESTLY as a registry entry AND break it into the distinct, runnable HYPOTHESES it makes for this project.`,
+    `The project's tunable levers (for the hypothesis specs) are: ${JSON.stringify(manifest.levers)}.`,
     notes ? `Extra guidance: ${notes}` : '',
     `Return ONLY a single JSON object (no prose, no code fence): {"title": string (required), "authors"?: string, ` +
       `"year"?: number, "claim": string (the source's headline claim in its own terms, required), "approach"?: string, ` +
       `"claimedMetrics"?: {"<name>": number}, "assumptions"?: {"fees"?: boolean, "netOfCosts"?: boolean, ` +
       `"frictionless"?: boolean, "multiAsset"?: boolean, "retrainCadence"?: string, "notes"?: string}, ` +
-      `"replicateConfig"?: {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "seeds"?: number} ` +
-      `(use ONLY declared lever names; {} if it maps to no runnable setup), "verdictNote"?: string ` +
-      `(skeptical — does it likely survive real costs + walk-forward OOS?), "tags"?: [string]}. ` +
+      `"verdictNote"?: string (skeptical — does it likely survive real costs + walk-forward OOS?), "tags"?: [string], ` +
+      `"hypotheses"?: [{"title": string, "rationale": string, "spec": {"fixed"?: {"<lever>": value}, ` +
+      `"sweep"?: {"<lever>": [values]}, "seeds"?: [number]}}] ` +
+      `(one per DISTINCT testable claim, each a runnable spec using ONLY declared lever names; [] if it maps to no runnable setup)}. ` +
       `Be honest about assumptions that inflate results (no fees, in-sample, single split).`,
   ]
     .filter(Boolean)
@@ -568,13 +547,6 @@ export function coercePaperDraft(raw: unknown): Partial<TrainingPaperRecord> | u
   }
   if (o.assumptions && typeof o.assumptions === 'object' && !Array.isArray(o.assumptions)) {
     draft.assumptions = o.assumptions as TrainingPaperRecord['assumptions']
-  }
-  if (
-    o.replicateConfig &&
-    typeof o.replicateConfig === 'object' &&
-    !Array.isArray(o.replicateConfig)
-  ) {
-    draft.replicateConfig = o.replicateConfig as Record<string, unknown>
   }
   if (Array.isArray(o.tags)) {
     const tags = o.tags.filter((x): x is string => typeof x === 'string')

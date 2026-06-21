@@ -18,7 +18,7 @@ import type {
 } from 'thefactory-tools/types'
 import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
-import { setupKeyOf } from './modelTrainerHelpers.js'
+import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
 
 const NOW = '2026-06-10T12:00:00.000Z'
 
@@ -1067,6 +1067,30 @@ describe('data files + compute targets', () => {
       expect(result.completed).toBe(0)
     })
 
+    it('still skips a setup explored under an older MINOR of the same major (minor bumps stay comparable)', async () => {
+      const storage = memoryStorage()
+      const { tools } = makeTools(stubRunner(), storage)
+      const m1 = manifest({ pipelineVersion: '2.0' })
+      delete m1.calibrate
+      await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m1,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+      })
+      const m2 = manifest({ pipelineVersion: '2.3' })
+      delete m2.calibrate
+      const result = await tools.runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m2,
+        spec: { fixed: { lr: 0.3 }, seeds: [0] },
+        skipExplored: true,
+      })
+      expect(result.skipped).toBe(1)
+      expect(result.completed).toBe(0)
+    })
+
     it('skips a setup marked unrunnable (same version), and force-runs it on refresh', async () => {
       const storage = memoryStorage()
       const { tools } = makeTools(stubRunner(), storage)
@@ -1583,7 +1607,7 @@ describe('proposeTrainingHypotheses', () => {
     { title: 'Bad one', rationale: 'names a ghost lever', spec: { sweep: { ghost: [1] } } },
   ])
 
-  it('persists valid proposals as pending hypothesis records', async () => {
+  it('persists valid proposals as untested hypothesis records', async () => {
     const storage = memoryStorage()
     await seedRun(storage, 'a', 10)
     const executor = stubExecutor(PROPOSALS)
@@ -1604,7 +1628,8 @@ describe('proposeTrainingHypotheses', () => {
     const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
     expect(records).toHaveLength(2)
     expect(records[0].content).toMatchObject({
-      status: 'pending',
+      status: 'untested',
+      verdictSource: 'auto',
       source: 'llm',
       proposedBy: 'openai/m',
       createdAt: NOW,
@@ -1869,19 +1894,134 @@ describe('xaiNarrate', () => {
   })
 })
 
-describe('analyzePaperFromUrl', () => {
-  const DRAFT = JSON.stringify({
-    title: 'Deep RL for Trading',
-    authors: 'A. Researcher',
-    year: 2023,
-    claim: 'RL beats buy-and-hold OOS',
-    approach: 'PPO over price features',
-    claimedMetrics: { sharpe: 1.3 },
-    assumptions: { fees: false, notes: 'no costs modelled' },
-    replicateConfig: { fixed: { lr: 0.5 } },
-    verdictNote: 'omits fees — likely fluff after costs',
-    tags: ['rl', 'trading'],
+describe('getRunData / getRunXAI (agent read tools)', () => {
+  // Register the training project so the read tools can resolve a run id → its recordType.
+  async function seedProject(storage: DataStorage) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'blackswan',
+      content: { manifest: manifest(), dir: 'BlackSwan' },
+    })
+  }
+
+  it('getRunData resolves the recordType from the registered project and returns a trimmed record', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'aaa', 12, {
+      config: { lr: 0.1 },
+      metrics: { total_return_pct: 12 },
+      series: { equity: [1, 2, 3] },
+      artifacts: {
+        decisionTrace: {
+          steps: [{ step: 0, action: 'hold' }],
+          actionCounts: { hold: 90, buy: 10 },
+          featureAttribution: {
+            byGroup: { '1h': 0.4 },
+            method: 'gradient-saliency',
+            sanityCheck: { passed: true },
+          },
+        },
+        checkpoint: 'ckpt',
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunData({ scope: 'proj', runKey: 'aaa' })
+    expect(result.found).toBe(true)
+    expect(result.recordType).toBe('demo-run')
+    const run = result.run as Record<string, unknown>
+    expect(run.config).toEqual({ lr: 0.1 })
+    // heavy parts stripped, compact digest kept
+    expect(run.series).toBeUndefined()
+    expect((run.artifacts as Record<string, unknown>).decisionTrace).toBeUndefined()
+    expect((run.artifacts as Record<string, unknown>).checkpoint).toBe('ckpt')
+    expect(run.decisionTraceDigest).toMatchObject({
+      actionCounts: { hold: 90, buy: 10 },
+      attributionMethod: 'gradient-saliency',
+      attributionSanityPassed: true,
+    })
   })
+
+  it('getRunXAI returns the structured digest with the run ranked among all runs', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'lo', 10, { config: { lr: 0.1 } })
+    await seedRun(storage, 'hi', 90, { config: { lr: 0.9 } })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunXAI({ scope: 'proj', runKey: 'hi' })
+    expect(result.found).toBe(true)
+    expect(result.recordType).toBe('demo-run')
+    expect(result.runCount).toBe(2)
+    expect(result.analysis?.runKey).toBe('hi')
+    expect(result.analysis?.rank).toEqual({ position: 1, total: 2 }) // hi (90) is best under max
+    expect(result.analysis?.criterion.key).toBe('objective')
+    expect(Array.isArray(result.analysis?.importances)).toBe(true)
+  })
+
+  it('both return found:false for an unknown run id', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'aaa', 10)
+    const { tools } = makeTools(stubRunner(), storage)
+    const data = await tools.getRunData({ scope: 'proj', runKey: 'ghost' })
+    const xai = await tools.getRunXAI({ scope: 'proj', runKey: 'ghost' })
+    expect(data.found).toBe(false)
+    expect(data.error).toMatch(/ghost/)
+    expect(xai.found).toBe(false)
+  })
+
+  it('getRunData keeps a minimal trace digest when the trace has no attribution/reward/latent', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'aaa', 10, {
+      artifacts: { decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5 } } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunData({ scope: 'proj', runKey: 'aaa' })
+    expect(result.run?.decisionTraceDigest).toEqual({ totalSteps: 1, actionCounts: { hold: 5 } })
+  })
+
+  it('getRunData ignores a non-completed run (only completed runs resolve)', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'failed1',
+      content: { status: 'failed', config: { lr: 0.1 } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    expect((await tools.getRunData({ scope: 'proj', runKey: 'failed1' })).found).toBe(false)
+  })
+})
+
+describe('analyzePaperFromUrl', () => {
+  const HYPS = [
+    {
+      title: 'Vol scaling helps',
+      rationale: 'scale position by realized vol',
+      spec: { fixed: { lr: 0.5 } },
+    },
+    {
+      title: 'Longer training helps',
+      rationale: 'more steps',
+      spec: { sweep: { steps: [100, 200] } },
+    },
+  ]
+  const draftWith = (hypotheses?: unknown) =>
+    JSON.stringify({
+      title: 'Deep RL for Trading',
+      authors: 'A. Researcher',
+      year: 2023,
+      claim: 'RL beats buy-and-hold OOS',
+      approach: 'PPO over price features',
+      claimedMetrics: { sharpe: 1.3 },
+      assumptions: { fees: false, notes: 'no costs modelled' },
+      verdictNote: 'omits fees — likely fluff after costs',
+      tags: ['rl', 'trading'],
+      ...(hypotheses === undefined ? {} : { hypotheses }),
+    })
+  const DRAFT = draftWith(HYPS)
   const fetchStub = async () => 'the fetched paper text'
   const base = (overrides = {}) => ({
     scope: 'proj',
@@ -1898,8 +2038,14 @@ describe('analyzePaperFromUrl', () => {
     const executor = stubExecutor(DRAFT)
     const { tools } = makeJudgeTools(executor, storage)
     const written: string[] = []
-    const result = await tools.analyzePaperFromUrl(base({ onRecordWritten: (t: string) => written.push(t) }))
-    expect(result).toMatchObject({ recordType: 'demo-run', analyzedBy: 'openai/m', analyzedAt: NOW })
+    const result = await tools.analyzePaperFromUrl(
+      base({ onRecordWritten: (t: string) => written.push(t) }),
+    )
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      analyzedBy: 'openai/m',
+      analyzedAt: NOW,
+    })
     expect(result.paper).toMatchObject({
       title: 'Deep RL for Trading',
       claim: 'RL beats buy-and-hold OOS',
@@ -1913,7 +2059,92 @@ describe('analyzePaperFromUrl', () => {
     const records = await storage.listRecords({ scope: 'proj', type: 'demo-run-paper' })
     expect(records).toHaveLength(1)
     expect((records[0].content as { id: string }).id).toBe(records[0].key)
-    expect(written).toEqual(['demo-run-paper'])
+    // paper + its two hypotheses persisted and cross-linked
+    expect(result.paper.hypothesisIds).toEqual(result.linkedHypothesisIds)
+    expect(result.linkedHypothesisIds).toHaveLength(2)
+    expect(written).toEqual(['demo-run-hypothesis', 'demo-run-hypothesis', 'demo-run-paper'])
+  })
+
+  it('extracts the testable hypotheses, links them to the paper, and marks them untested/auto', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeJudgeTools(stubExecutor(DRAFT), storage)
+    const result = await tools.analyzePaperFromUrl(base())
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(2)
+    for (const r of hyps) {
+      const h = r.content as {
+        id: string
+        status: string
+        verdictSource: string
+        source: string
+        paperIds: string[]
+      }
+      expect(h.id).toBe(r.key)
+      expect(h).toMatchObject({ status: 'untested', verdictSource: 'auto', source: 'paper' })
+      expect(h.paperIds).toContain(result.paper.id)
+    }
+    expect([...result.paper.hypothesisIds!].sort()).toEqual(hyps.map((r) => r.key).sort())
+  })
+
+  it('dedups identical specs within one paper to a single hypothesis', async () => {
+    const storage = memoryStorage()
+    const dup = [HYPS[0], { ...HYPS[0], title: 'restated' }]
+    const { tools } = makeJudgeTools(stubExecutor(draftWith(dup)), storage)
+    const result = await tools.analyzePaperFromUrl(base())
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(1)
+    expect(result.paper.hypothesisIds).toHaveLength(1)
+  })
+
+  it('links a PRE-EXISTING hypothesis (same spec) without duplicating or clobbering its verdict', async () => {
+    const storage = memoryStorage()
+    const priorId = hashTrainingConfig({ fixed: { lr: 0.5 } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: priorId,
+      content: {
+        id: priorId,
+        title: 'pre-existing',
+        rationale: 'set earlier',
+        spec: { fixed: { lr: 0.5 } },
+        status: 'proven',
+        verdictSource: 'manual',
+        source: 'human',
+        paperIds: [],
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+    })
+    const { tools } = makeJudgeTools(stubExecutor(DRAFT), storage)
+    const result = await tools.analyzePaperFromUrl(base())
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(2) // the prior + the one new (steps) hypothesis, not a duplicate
+    const prior = hyps.find((r) => r.key === priorId)!.content as {
+      status: string
+      verdictSource: string
+      paperIds: string[]
+    }
+    expect(prior).toMatchObject({ status: 'proven', verdictSource: 'manual' })
+    expect(prior.paperIds).toContain(result.paper.id)
+  })
+
+  it('handles a paper with no runnable hypotheses (container stays empty)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeJudgeTools(stubExecutor(draftWith([])), storage)
+    const result = await tools.analyzePaperFromUrl(base())
+    expect(result.hypotheses).toEqual([])
+    expect(result.paper.hypothesisIds).toEqual([])
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(0)
+  })
+
+  it('tolerates a response with no hypotheses field at all', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeJudgeTools(stubExecutor(draftWith(undefined)), storage)
+    const result = await tools.analyzePaperFromUrl(base())
+    expect(result.hypotheses).toEqual([])
+    expect(result.paper.hypothesisIds).toEqual([])
   })
 
   it('throws without an inference executor', async () => {

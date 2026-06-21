@@ -1316,15 +1316,6 @@ button:focus-visible,
   font-size: 13px;
   color: var(--muted);
 }
-.paper-link-campaign {
-  margin-top: 14px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.paper-link-campaign h4 {
-  margin: 0 0 8px;
-  font-size: 13px;
-}
 .paper-link-row {
   display: flex;
   flex-wrap: wrap;
@@ -1359,23 +1350,44 @@ button:focus-visible,
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
-.paper-card,
-.model-card {
+.paper-card {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
 }
-.paper-card h3,
-.model-card h3 {
+.paper-card h3 {
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-.model-buildup {
-  margin: 6px 0;
+.paper-hyps {
+  margin: 8px 0 4px;
+}
+.paper-hyp-list {
+  margin: 4px 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.paper-hyp-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.paper-hyp-title {
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.paper-subform {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 .paper-claim {
   margin: 8px 0 6px;
@@ -2219,11 +2231,30 @@ pre.json {
   margin: 0;
   font-size: 14px;
 }
-.hypothesis-card.is-muted {
-  opacity: 0.65;
+.hypothesis-card.is-muted,
+.hypothesis-card.is-dismissed {
+  opacity: 0.55;
 }
 .hypothesis-card .card-sub {
   margin-top: auto;
+}
+.hypothesis-transitions {
+  margin: 6px 0;
+  font-size: 12px;
+}
+.hypothesis-transitions summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.hypothesis-transitions ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+.hypothesis-override {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
 }
 .hypothesis-rationale {
   margin: 0;

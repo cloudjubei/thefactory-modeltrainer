@@ -127,8 +127,8 @@ export interface TrainerManifest {
   }>
   /** Starter approaches/papers the viewer imports into the Papers registry once (keyed by id). */
   papers?: TrainingPaperSeed[]
-  /** Starter model architectures the viewer imports into the Models registry once (keyed by id). */
-  models?: TrainingModelSeed[]
+  /** Starter hypotheses (incl. model architectures) the viewer imports into the Hypotheses registry once (keyed by spec hash). */
+  hypotheses?: TrainingHypothesisSeed[]
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
@@ -856,25 +856,117 @@ export interface JudgeTrainingRunsResult {
   judgedAt: string
 }
 
-/** A proposed experiment in the durable backlog — nothing gets lost between sessions. */
+/** Whether a hypothesis is proven/disproved by its matching runs — `untested` until evidence exists. */
+export type HypothesisStatus = 'untested' | 'proven' | 'disproved'
+
+/** The aggregate read of a hypothesis's matching runs — the numbers behind a verdict. */
+export interface MeasuredSummary {
+  /** Count of non-failed matching runs. */
+  runs: number
+  /** Best objective among the matching runs (per the manifest objective direction). */
+  objective: number
+  /** Whether the best matching run beats buy-and-hold OOS; `null` when no run carries that metric. */
+  beatsHold: boolean | null
+}
+
+/** A snapshot of the last auto-evaluation — diffed on the next refresh to detect which runs are new. */
+export interface HypothesisEvidence {
+  /** When this snapshot was taken (ISO). */
+  at: string
+  /** The auto-derived status at this snapshot. */
+  status: HypothesisStatus
+  /** Sorted keys of the runs that matched the spec at this snapshot. */
+  matchedKeys: string[]
+  /** The measured read at this snapshot (`null` when no runs matched). */
+  measured: MeasuredSummary | null
+}
+
+/** One recorded change of a hypothesis's auto-verdict — names the runs that flipped it and the read. */
+export interface HypothesisTransition {
+  /** When the flip was observed (ISO). */
+  at: string
+  /** The status before the flip. */
+  from: HypothesisStatus
+  /** The status after the flip. */
+  to: HypothesisStatus
+  /** Keys of the runs new since the prior snapshot — the evidence that caused the flip. */
+  byRunKeys: string[]
+  /** The measured read at the flip (`null` when no runs matched). */
+  measured: MeasuredSummary | null
+}
+
+/**
+ * A registry entry for a CLAIM that runs prove or disprove — an architecture, a paper's method, or an
+ * ad-hoc idea. Its `spec` both LAUNCHES the runs that test it AND identifies them: a run is evidence iff
+ * its config is consistent with `spec` (every `fixed` lever matches; every swept lever's value is one of
+ * the options). The verdict is AUTO-derived from those runs (beats buy-and-hold OOS) and re-checked when
+ * runs land, with manual override. Domain-oblivious; stored as a `<recordType>-hypothesis` record
+ * (key = `hashTrainingConfig(spec)`, so identical specs dedupe across human/llm/paper/migrated sources).
+ */
 export interface TrainingHypothesis {
-  /** Stable hash of the proposed spec — identical proposals dedupe. */
+  /** Stable hash of the spec — the canonical identity; identical specs dedupe. */
   id: string
   title: string
   rationale: string
   spec: ExperimentSpec
-  status: 'pending' | 'accepted' | 'rejected'
-  source: 'human' | 'llm'
+  /** The verdict: auto-derived from matching runs, or pinned when `verdictSource` is `manual`. */
+  status: HypothesisStatus
+  /** Whether `status` is auto-derived from runs or a manual override that refresh must not overwrite. */
+  verdictSource: 'auto' | 'manual'
+  /** Free-text note recorded with a manual verdict. */
+  verdictNote?: string
+  /** Hidden from the default view (a rejected/irrelevant proposal) without deleting it. */
+  dismissed?: boolean
+  /** Where the entry came from. */
+  source: 'human' | 'llm' | 'paper' | 'migrated-model'
   /** Provenance label of the proposing model (absent for human entries). */
   proposedBy?: string
+  /** Metrics a source/author claims (free-form), shown alongside the measured read. */
+  claimedMetrics?: Record<string, number>
+  /** The last auto-evaluation snapshot — the baseline the next refresh diffs against. */
+  evidence?: HypothesisEvidence
+  /** History of auto-verdict flips, newest last — each names the runs that caused it. */
+  transitions?: HypothesisTransition[]
+  /** Ids of Papers that link this hypothesis (reverse of `TrainingPaperRecord.hypothesisIds`). */
+  paperIds?: string[]
+  /** The last launched campaign for live "running" status (verdict derives from ALL matching runs, not these). */
+  campaign?: TrainingHypothesisCampaign
   createdAt: string
   updatedAt: string
 }
 
+/** The runtime block the viewer stamps when a hypothesis launches a campaign — for the live badge only. */
+export interface TrainingHypothesisCampaign {
+  activityId: string
+  launchedAt: string
+  status: 'queued' | 'running' | 'completed' | 'aborted'
+  keys?: string[]
+  bestObjective?: number
+  bestKey?: string
+  completed?: number
+  failed?: number
+  finishedAt?: string
+  queueId?: string
+}
+
 /**
- * A registry entry for an APPROACH/paper to try and prove out or falsify — "an approach with a source
- * and a claim". Domain-oblivious; the trading line's first consumers are the published methods it
- * replicates under real costs. Stored as a `<recordType>-paper` data record (key = id).
+ * A starter Hypothesis a manifest can ship (parallel to `presets`/`papers`): curated claims the viewer
+ * imports into the registry once, keyed by spec hash so re-import never duplicates. The verdict + its
+ * evidence are derived from runs, so seeds omit them; timestamps default on import.
+ */
+export type TrainingHypothesisSeed = Omit<
+  TrainingHypothesis,
+  'createdAt' | 'updatedAt' | 'status' | 'verdictSource' | 'evidence' | 'transitions' | 'campaign'
+> & {
+  /** Optional pinned verdict for a seed whose outcome is already known. */
+  status?: HypothesisStatus
+}
+
+/**
+ * A registry entry for an APPROACH/paper — "an approach with a source and a claim". A CONTAINER: it
+ * links to N {@link TrainingHypothesis} (created by LLM extraction, manual add, or linking an existing
+ * one) and its verdict ROLLS UP from theirs. Domain-oblivious; the trading line's first consumers are
+ * the published methods it replicates under real costs. Stored as a `<recordType>-paper` record (key = id).
  */
 export interface TrainingPaperRecord {
   /** Stable id (random hex). */
@@ -905,16 +997,10 @@ export interface TrainingPaperRecord {
   }
   /** How the approach works (prose). */
   approach?: string
-  /** A partial launch config / lever preset to reproduce the approach (prefills the Launch form). */
-  replicateConfig?: Record<string, unknown>
-  /** Lifecycle: untested → replicating → holds-up | fluff. */
+  /** Ids of the hypotheses this paper creates/links; the paper's verdict ROLLS UP from theirs. */
+  hypothesisIds?: string[]
+  /** Lifecycle: untested → replicating → holds-up | fluff (legacy/manual; the card badge rolls up from `hypothesisIds`). */
   status: 'untested' | 'replicating' | 'holds-up' | 'fluff'
-  /** Run keys whose measured metrics test the claim (claimed-vs-measured reads from these). */
-  linkedRunKeys?: string[]
-  /** The campaign activity that ran the replication, if launched from here. */
-  campaignActivityId?: string
-  /** Snapshot of the measured outcome (e.g. `{ objective, return_vs_hold_pct }`) for quick compare. */
-  measuredSummary?: Record<string, number>
   /** Free-text verdict / notes recorded by the user. */
   verdictNote?: string
   /** Where the entry came from. */
@@ -931,53 +1017,6 @@ export interface TrainingPaperRecord {
  */
 export type TrainingPaperSeed = Omit<TrainingPaperRecord, 'createdAt' | 'updatedAt' | 'status'> & {
   status?: TrainingPaperRecord['status']
-}
-
-/**
- * A registry entry for a MODEL ARCHITECTURE / build-up — "what `reppo-custom` / a dueling-DQN / an
- * LSTM variant actually composes, and why". Parallel to {@link TrainingPaperRecord} but its evidence
- * is AUTO-DERIVED: `match` names the model-lever values that identify runs using this architecture, so
- * its verdict comes from those runs (no manual run-linking). Domain-oblivious; stored as a
- * `<recordType>-model` data record (key = id).
- */
-export interface TrainingModelRecord {
-  /** Stable id (random hex, or a slug for manifest seeds). */
-  id: string
-  /** Display name, e.g. "Reppo-custom — recurrent PPO". */
-  name: string
-  /** The actual `model_name` lever value, e.g. "reppo-custom" (when it maps to one). */
-  modelName?: string
-  /** The base algorithm, e.g. "RecurrentPPO (sb3-contrib)". */
-  algo?: string
-  /** Network shape notes, e.g. "512,64 + custom tokens (BatchNorm / weight_norm / Dropout)". */
-  netArch?: string
-  /** Policy internals / head, e.g. "LSTM recurrent encoder + custom actor-critic head". */
-  policyInternals?: string
-  /** Why this build-up exists / its provenance + design rationale. */
-  rationale?: string
-  /** Metrics a source/author claims for this architecture (free-form), if any. */
-  claimedMetrics?: Record<string, number>
-  /**
-   * The model-lever values that IDENTIFY this architecture (e.g. `{ model_name: 'reppo-custom' }`).
-   * Runs whose config matches every key are this card's evidence (auto-measured + by-model grouping),
-   * and it prefills the Launch form on Replicate (when `replicateConfig` is absent).
-   */
-  match?: Record<string, unknown>
-  /** Optional full launch preset to reproduce it; defaults to `{ fixed: match }`. */
-  replicateConfig?: Record<string, unknown>
-  /** Lifecycle: untested → proven | disproved (from whether matching runs beat hold OOS). */
-  status: 'untested' | 'proven' | 'disproved'
-  /** Free-text verdict / notes recorded by the user. */
-  verdictNote?: string
-  tags?: string[]
-  source: 'manual' | 'research'
-  createdAt: string
-  updatedAt: string
-}
-
-/** A starter Model the manifest ships; imported into the registry once by id (mirrors {@link TrainingPaperSeed}). */
-export type TrainingModelSeed = Omit<TrainingModelRecord, 'createdAt' | 'updatedAt' | 'status'> & {
-  status?: TrainingModelRecord['status']
 }
 
 export interface ProposeTrainingHypothesesParams {
@@ -1031,6 +1070,10 @@ export interface AnalyzePaperFromUrlResult {
   recordType: string
   /** The drafted, persisted Paper record (status 'untested', source 'research') for the user to verify. */
   paper: TrainingPaperRecord
+  /** The hypotheses extracted from the paper and persisted (new + pre-existing it linked). */
+  hypotheses: TrainingHypothesis[]
+  /** Ids of every hypothesis now linked to the paper (`paper.hypothesisIds`). */
+  linkedHypothesisIds: string[]
   /** Provenance label of the summarising model. */
   analyzedBy: string
   analyzedAt: string
@@ -1063,6 +1106,79 @@ export interface XaiNarrateResult {
   /** Provenance label of the narrating model. */
   narratedBy: string
   narratedAt: string
+}
+
+/**
+ * The compact, structured deterministic xAI analysis of ONE run — its decisions, what drives them, how
+ * trustworthy that is, how it compares to a sibling, and its standing among all runs. The narrative
+ * builder ({@link buildXaiNarrateUserContent}) AND the agent-facing `getRunXAI` tool both consume it, so the
+ * facts live in one place and the LLM never computes them.
+ */
+export interface RunXaiDigest {
+  runKey: string
+  config: Record<string, unknown>
+  objective?: number
+  criterion: AnalysisCriterion
+  /** Where this run ranks by the criterion among all completed runs. */
+  rank?: { position: number; total: number }
+  /** Full-rollout action label counts. */
+  actionCounts?: Record<string, number>
+  attribution?: {
+    /** Top input GROUPS by absolute saliency, `[group, value]`. */
+    topGroups: [string, number][]
+    method?: string
+    /** The Adebayo sanity-check verdict — a FAILED check means the attribution is untrustworthy. */
+    sanityPassed?: boolean
+    sanityRankCorr?: number
+  }
+  /** Named additive reward contributions ("why this reward"). */
+  rewardBreakdown?: Record<string, number>
+  /** Linear-probe read of the penultimate-layer representation. */
+  latent?: { varianceExplained?: number; probeAccuracy?: number; probeBaseline?: number }
+  /** Cross-run lever importance (CONFOUNDED screening) for context. */
+  importances: { lever: string; importance: number; bestValue: string }[]
+  /** The decision-diff vs the nearest comparable run, when a sibling was given + the traces align. */
+  sibling?: {
+    key: string
+    changed: string
+    divergencePct: number
+    qualityVerdict?: string
+    qualitySummary?: string
+  }
+}
+
+export interface GetRunDataParams {
+  /** The HOST project scope the run records live in. */
+  scope: string
+  /** The run id (config-hash key). The recordType is resolved from the host's registered training projects. */
+  runKey: string
+}
+
+export interface GetRunDataResult {
+  found: boolean
+  /** The training project's record type the run was found under. */
+  recordType?: string
+  /** The run record, with the heavy per-step trace + series stripped (only a compact trace digest kept). */
+  run?: Record<string, unknown>
+  error?: string
+}
+
+export interface GetRunXaiParams {
+  scope: string
+  runKey: string
+  /** Optional nearest comparable run for the decision-diff context. */
+  siblingKey?: string
+  /** Criterion to rank + screen by; defaults to the run's training project objective. */
+  criterion?: AnalysisCriterion
+}
+
+export interface GetRunXaiResult {
+  found: boolean
+  recordType?: string
+  /** Completed-run count the analysis was computed over. */
+  runCount?: number
+  analysis?: RunXaiDigest
+  error?: string
 }
 
 /**
@@ -1117,4 +1233,16 @@ export interface ModelTrainerTools {
    * the LLM only narrates the facts.
    */
   xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult>
+  /**
+   * Agent-facing READ tool: fetch ONE run's stored record by id, resolving its training project from the
+   * host's registered projects. The heavy per-step trace + series are stripped (a compact trace digest is
+   * kept) so the result is agent-sized. Read-only.
+   */
+  getRunData(params: GetRunDataParams): Promise<GetRunDataResult>
+  /**
+   * Agent-facing READ tool: compute the deterministic xAI analysis ({@link RunXaiDigest}) for ONE run by
+   * id — the same facts the narrative is built from, returned as structured data (the LLM never computes
+   * them). Read-only.
+   */
+  getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult>
 }

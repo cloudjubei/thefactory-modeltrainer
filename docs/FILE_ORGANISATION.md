@@ -24,5 +24,7 @@
 - `viewer/` — the no-build static **hub app** (`index.html`, `app.js`, `bridge.js`,
   `style.css`), served via the project's `appDir: "viewer"` config (set in project settings):
   a home screen of registered training projects (directories) + a per-project dashboard
-  (runs/launch/judge/hypotheses/charts).
+  (runs/launch/judge/hypotheses/papers/xai/charts). Pure decision logic the viewer can't unit-test
+  in-place lives in dual-loaded IIFE modules (`hypothesis.js`, `migrate.js`, `xai.js` — exported to
+  both `window.*` and `module.exports`, node-tested from `src/*.test.ts`).
 - `dist/` — build output (gitignored); the surface dependents import.

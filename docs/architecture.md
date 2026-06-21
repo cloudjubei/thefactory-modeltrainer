@@ -110,17 +110,28 @@ project by its manifest's `recordType`.
     A **"Discuss xAI"** button seeds an interactive chat with the same per-run analysis. A **"Propose with AI"**
     button feeds the lever-importance + gap signal as instructions into the existing `proposeTrainingHypotheses`.
     The deterministic records stay the source of truth; the model interprets them and is told to hedge on the
-    confounded/surrogate signals (e.g. an attribution that FAILED its sanity check).
+    confounded/surrogate signals (e.g. an attribution that FAILED its sanity check). A chat agent can also pull
+    ANY run mid-conversation (not just the seeded one) via two AGENT READ TOOLS — `getRunData` (a run's
+    config/metrics + a compact decision-trace digest) and `getRunXAI` (the same deterministic `RunXaiDigest`)
+    — advertised on the project chat through the backend's `extraToolSchemas` seam (`trainerReadTools.ts`,
+    the knowledge-read-tools precedent; no ToolSchemas regen). They resolve a run id → its training project by
+    searching the host's `trainer-project-manifest` records, and the `getRunXAI`/narrative facts share ONE
+    `buildRunXaiDigest`. Read-only.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best
   by prose. Health-flagged runs are auto-rejected without spending an LLM call. Runs the LLM
   skips keep an objective-only verdict.
-- **Proposals are validated + deduped data**: `proposeTrainingHypotheses` coerces the LLM's
-  ideas against the manifest's levers (unknown lever ⇒ dropped), keys each
-  `{recordType}-hypothesis` record by the spec's hash (identical proposals dedupe, existing
-  statuses survive re-proposing), and the viewer's accept → "Run campaign" turns a hypothesis
-  into a `train` activity with that spec. Backlog statuses are plain record edits.
+- **Hypotheses are the one registry — claims runs prove or disprove**: a `{recordType}-hypothesis`
+  record's `spec` both launches its runs AND identifies them (a run is evidence iff its config is
+  consistent with the spec); its verdict (untested/proven/disproved) auto-derives from those runs
+  (beats-buy-and-hold OOS), re-checks on settle/tab-open, and records which runs flipped it
+  (`transitions[]`). Identity = the spec hash, so identical specs from any source (LLM
+  `proposeTrainingHypotheses`, manual add, paper Extract, migrated model architecture) dedupe.
+  Pure decision logic lives in node-tested `viewer/hypothesis.js` (the `migrate.js`/`xai.js`
+  dual-loaded precedent). **Papers** are containers of `hypothesisIds[]` (Extract / add / link),
+  verdict rolled up; the former **Models** tab is gone — a model architecture is a hypothesis whose
+  `spec.fixed` pins the levers (manifest `hypotheses[]`; old `-model` records auto-migrate on open).
 - **Datasets/environments are user-managed bundles with a settable default**: levers tagged
   `scope: "dataset"`/`"environment"` aren't model knobs — they're managed in their own tabs as
   named `{recordType}-dataset`/`-environment` records (`{id, name, settings, default}`). One record
@@ -128,14 +139,12 @@ project by its manifest's `recordType`.
   the first one created becomes the default, and a save is refused if a record with the same name or
   settings already exists. The manifest-defaults card stays only as a read-only clone-to-start seed.
   A project that declares such levers but has none defined cannot launch (a valid just-started state).
-- **Run dataset identity is normalized on open, not at the call site**: runs group by the VALUE
-  signature of their dataset/env levers, so the `fidelity_set: "auto"` synonym (and pre-hub ledger
-  imports carrying no fidelity_set) would fragment a run away from its explicit-dataset siblings.
-  `viewer/migrate.js` (a pure, parity-mirror-style module, unit-tested via `src/migrateViewer.test.ts`)
-  derives each run's CONCRETE identity from data it already carries — its own `dataset.layers`, or the
-  `historical_data` tag for imports (sub-hourly/retired stacks get a truthful `legacy:` label, never
-  force-merged into a runnable set). The viewer runs it idempotently on project open (the whole backlog)
-  and on every runs refresh (in-flight `auto` runs), recomputing `setupKey` so by-setup regroups too.
+- **A named dataset always pins a CONCRETE identity**: runs group by the VALUE signature of their
+  dataset/env levers, so the input-only `fidelity_set: "auto"` synonym would fragment a run away from its
+  explicit-dataset siblings. The dataset form therefore requires a concrete pick (no "— default —"
+  escape), the runs filter hides input synonyms, and the synthetic manifest-defaults seed is shown
+  resolved via the auto rule (`Migrate.autoFidelity` / `Migrate.INPUT_SYNONYMS` in `viewer/migrate.js`,
+  mirroring `fidelity.py`) — so `auto` never enters a newly-created dataset or surfaces in the UI.
 
 ## Remote compute
 

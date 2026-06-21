@@ -33,6 +33,11 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
+            'ipt src="hypothesis.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
             'ipt src="app.js' +
             v +
             '" defer></scr' +
@@ -250,7 +255,11 @@
               <div class="card-head card-head-row">
                 <div>
                   <h2 id="hypotheses-h">Hypotheses</h2>
-                  <p class="card-sub">Experiment ideas — accept the good ones, then run them.</p>
+                  <p class="card-sub">
+                    Claims that runs prove or disprove — each verdict (untested / proven /
+                    disproved) auto-derives from the runs matching its spec and re-checks as new
+                    runs land.
+                  </p>
                   <p class="card-sub" id="propose-last" hidden></p>
                 </div>
                 <div class="head-actions">
@@ -279,10 +288,10 @@
                 <div>
                   <h2 id="papers-h">Papers / Library</h2>
                   <p class="card-sub">
-                    Approaches to prove out or falsify — each with its claim, assumptions and a
-                    verdict, and claimed-vs-measured from linked runs. Replicate any into a
-                    campaign; an approach earns "holds up" only if it beats buy-and-hold
-                    out-of-sample, net of fees.
+                    Approaches to prove out or falsify — a container of the testable hypotheses it
+                    makes (extract them from the link, add your own, or link existing ones). Its
+                    verdict rolls up from those hypotheses; it "holds up" only when one beats
+                    buy-and-hold out-of-sample, net of fees.
                   </p>
                 </div>
                 <div class="head-actions">
@@ -300,36 +309,6 @@
               <p id="papers-status" class="form-status" role="status" hidden></p>
               <form id="paper-form" class="hypothesis-form" autocomplete="off" hidden></form>
               <div id="papers-body" class="papers-body"></div>
-            </section>
-          </section>
-
-          <!-- Models / Architectures (model build-ups, proven/disproved by the runs that use them) -->
-          <section id="tab-models" class="tab-panel" role="tabpanel" hidden>
-            <section class="card" aria-labelledby="models-h">
-              <div class="card-head card-head-row">
-                <div>
-                  <h2 id="models-h">Models / Architectures</h2>
-                  <p class="card-sub">
-                    What each model build-up composes (algo + net + policy internals) and why —
-                    proven or disproved automatically by the runs that use it (matched on its
-                    levers).
-                  </p>
-                </div>
-                <div class="head-actions">
-                  <button
-                    type="button"
-                    id="model-add-toggle"
-                    class="icon-btn"
-                    title="Add architecture"
-                    aria-label="Add architecture"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-              <p id="models-status" class="form-status" role="status" hidden></p>
-              <form id="model-form" class="hypothesis-form" autocomplete="off" hidden></form>
-              <div id="models-body" class="papers-body"></div>
             </section>
           </section>
 

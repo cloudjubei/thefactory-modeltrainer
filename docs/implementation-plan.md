@@ -62,17 +62,27 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 ### 2. Model-trainer app
 
-**(2b) Papers / Library tab** — shipped (registry + CRUD + claimed-vs-measured + the Automatic-Fill LLM
-draft). Pending:
+**Unified Hypotheses registry** — shipped. Models + Papers + Hypotheses collapsed into ONE primitive: a
+hypothesis is a claim runs prove or disprove. Its `spec` both launches the runs AND identifies them (a run
+is evidence iff its config is consistent with the spec); the verdict (untested/proven/disproved) auto-derives
+from those runs (beats-buy-and-hold OOS), re-checks on settle/tab-open, records which runs flipped it
+(`transitions[]`), is filterable + manually overridable + dismissible. Identity = `hashTrainingConfig(spec)`
+so identical specs dedup across human/llm/paper/migrated sources. The **Models tab is removed** (a model
+architecture = a hypothesis whose `spec.fixed` pins the levers; the 12 seeds migrated to `manifest.hypotheses[]`,
+old `-model` records auto-migrate on open). **Papers are containers** of N hypotheses created three ways —
+**Extract** (the reworked Automatic-Fill: the LLM drafts the paper AND extracts its testable hypotheses,
+linked back), manual **Add hypothesis**, and **Link existing**; the paper's verdict rolls up from them. Pure
+decision logic lives in node-tested `viewer/hypothesis.js`. Pending:
 
 - Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
   (find → web-verify → synthesize). Deferred.
-- Optional UX: prefill the add-paper form from the Automatic-Fill draft instead of auto-creating a
-  reviewable card — needs a request→response bridge verb.
+- Optional: a card-level "Extract" that re-analyses an existing paper's link and merges new hypotheses INTO
+  that paper (needs a `paperId` param on `analyzePaperFromUrl`). Today Extract is the add-chooser path only.
 
-### 3c. Models / Architectures library (like Papers, for model build-ups)
+### 3c. Model architectures (now hypotheses)
 
-The Models tab + the `attn-ppo` / `tcn-ppo` encoders are shipped. Pending:
+The `attn-ppo` / `tcn-ppo` encoders are shipped; architectures are now hypotheses (their `spec.fixed` pins
+`model_name`). Pending:
 
 - **LEFT (optional):** a **GRU** recurrent core — must be a custom `RecurrentActorCriticPolicy` subclass
   (state lives in the policy, not a features-extractor), expected to be a wash vs LSTM; and an SSM
@@ -86,13 +96,14 @@ The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is 
 
 - **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
   clean but has NOT been eyeballed in the running app — the one open verification.
-- **Agent tools `getRunData` / `getRunXAI` (by run id).** The xAI-tab "Discuss xAI" chat seeds the focused
-  run's full xAI context inline; to let the agent pull ANY run's data/analysis mid-conversation (not just
-  the seeded one), expose two read tools on the project chat via the `extraToolSchemas` seam (the knowledge
-  read-tools precedent — backend owns a `trainerReadTools.ts`, advertised + dispatched, no ToolSchemas
-  regen): `getRunData(runId)` → the stored run record (config + metrics + dataset + trace), and
-  `getRunXAI(runId)` → the deterministic config-effect + trace-internals analysis for that run (the
-  `xaiUtils` reads run server-side). Read-only.
+- **Configuration-space map (t-SNE / projection) + reward normalization.** Next major xAI push (AFTER the
+  current batch). Two parts the user will spec in detail: (1) a t-SNE/UMAP-style 2-D map of the
+  CONFIGURATION space (runs positioned by config similarity, coloured by a criterion) so neighbourhoods +
+  gradients are visible the way the latent map shows the policy's state space; (2) NORMALISING some
+  signals — especially the model REWARDS — so cross-run/cross-setup comparison isn't distorted by raw scale.
+  Open questions to resolve when specced: which projection (deterministic vs t-SNE seeded), what distance
+  over mixed numeric/categorical levers, and exactly which quantities get normalised + against what
+  baseline. Deterministic + parity-mirrored like the rest of the engine.
 - **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
   sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
   (attn-ppo only); generative counterfactual states (needs a GAN).

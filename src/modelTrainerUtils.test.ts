@@ -1176,6 +1176,10 @@ describe('buildAnalyzePaperSystemPrompt', () => {
     expect(p).toContain('lr')
     expect(p).toContain('focus on fees')
   })
+  it('requests the testable hypotheses array', () => {
+    const p = buildAnalyzePaperSystemPrompt(m)
+    expect(p).toContain('hypotheses')
+  })
 })
 
 describe('coercePaperDraft', () => {
@@ -1187,7 +1191,6 @@ describe('coercePaperDraft', () => {
       authors: 'A',
       claimedMetrics: { sharpe: 1.2, bad: 'x' },
       tags: ['a', 1],
-      replicateConfig: { fixed: { lr: 1 } },
       assumptions: { fees: false },
       junk: 'ignored',
     })
@@ -1195,6 +1198,10 @@ describe('coercePaperDraft', () => {
     expect(d?.claimedMetrics).toEqual({ sharpe: 1.2 })
     expect(d?.tags).toEqual(['a'])
     expect((d as Record<string, unknown>).junk).toBeUndefined()
+  })
+  it('drops replicateConfig (the paper no longer carries one — its hypotheses hold the specs)', () => {
+    const d = coercePaperDraft({ title: 'T', claim: 'C', replicateConfig: { fixed: { lr: 1 } } })
+    expect((d as Record<string, unknown>).replicateConfig).toBeUndefined()
   })
   it('returns undefined without a title or claim', () => {
     expect(coercePaperDraft({ title: 'T' })).toBeUndefined()
