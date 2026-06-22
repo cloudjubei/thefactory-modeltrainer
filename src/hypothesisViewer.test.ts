@@ -116,6 +116,37 @@ describe('autoVerdictFor', () => {
     expect(H.autoVerdictFor({ runs: 1, objective: 1, beatsHold: true })).toBe('proven')
     expect(H.autoVerdictFor({ runs: 1, objective: 1, beatsHold: false })).toBe('disproved')
   })
+  it('stays untested when there are fewer than minRuns (not enough data to trust)', () => {
+    expect(H.autoVerdictFor({ runs: 1, objective: 1, beatsHold: true }, 3)).toBe('untested')
+    expect(H.autoVerdictFor({ runs: 3, objective: 1, beatsHold: true }, 3)).toBe('proven')
+    expect(H.autoVerdictFor({ runs: 5, objective: 1, beatsHold: false }, 3)).toBe('disproved')
+  })
+})
+
+describe('the minRuns gate threads through the verdict', () => {
+  const spec = { fixed: { model_name: 'a' } }
+  const oneWinner = [run('r1', { model_name: 'a' }, { vh: 5 })]
+  it('effectiveVerdict honours minRuns', () => {
+    const h = { spec, verdictSource: 'auto', status: 'untested' }
+    expect(H.effectiveVerdict(h, oneWinner, 'max', 2)).toBe('untested')
+    expect(H.effectiveVerdict(h, oneWinner, 'max', 1)).toBe('proven')
+  })
+  it('evaluateHypothesis honours opts.minRuns', () => {
+    const h = { spec, verdictSource: 'auto', status: 'untested' }
+    const gated = H.evaluateHypothesis(h, oneWinner, { direction: 'max', at: 'T', minRuns: 2 })
+    expect(gated.next.status).toBe('untested')
+    const allowed = H.evaluateHypothesis(h, oneWinner, { direction: 'max', at: 'T', minRuns: 1 })
+    expect(allowed.next.status).toBe('proven')
+  })
+  it('rollupPaperVerdict honours minRuns (a one-run paper stays untested)', () => {
+    const hyps = [{ id: 'a', spec, verdictSource: 'auto', status: 'untested' }]
+    expect(H.rollupPaperVerdict({ hypothesisIds: ['a'] }, hyps, oneWinner, 'max', 2)).toBe(
+      'untested',
+    )
+    expect(H.rollupPaperVerdict({ hypothesisIds: ['a'] }, hyps, oneWinner, 'max', 1)).toBe(
+      'holds-up',
+    )
+  })
 })
 
 describe('effectiveVerdict', () => {

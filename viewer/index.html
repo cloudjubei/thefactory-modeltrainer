@@ -257,17 +257,26 @@
                   </p>
                   <p class="card-sub" id="propose-last" hidden></p>
                 </div>
-                <div class="head-actions">
-                  <button type="button" id="propose-btn">Propose experiments</button>
+                <div class="head-actions hyp-head-actions">
+                  <label
+                    class="min-runs-field"
+                    data-help="Minimum matching runs before a hypothesis is judged proven or disproved — with fewer it stays untested (a single run can't prove a claim). Launch more runs to reach it."
+                  >
+                    <span>Min runs</span>
+                    <input type="number" id="hypothesis-min-runs" min="1" step="1" />
+                  </label>
+                  <button
+                    type="button"
+                    id="propose-btn"
+                    class="card-btn combo"
+                    aria-label="Propose experiments"
+                  ></button>
                   <button
                     type="button"
                     id="hypothesis-add-toggle"
-                    class="icon-btn"
-                    title="Add hypothesis"
+                    class="card-btn combo"
                     aria-label="Add hypothesis"
-                  >
-                    +
-                  </button>
+                  ></button>
                 </div>
               </div>
               <p id="hypotheses-status" class="form-status" role="status" hidden></p>

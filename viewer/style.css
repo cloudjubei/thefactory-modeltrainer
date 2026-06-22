@@ -1351,7 +1351,6 @@ button:focus-visible,
   transform: translateX(-50%) translateY(0);
 }
 .paper-card {
-  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
@@ -2216,45 +2215,148 @@ pre.json {
   border-radius: 10px;
   background: var(--surface-subtle);
 }
-.hypothesis-summary {
+/* Collapsible card summaries (hypotheses + papers) share the chevron + flex-row layout. */
+.hypothesis-summary,
+.paper-summary {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 8px 12px;
   cursor: pointer;
   list-style: none;
 }
-.hypothesis-summary::-webkit-details-marker {
+.hypothesis-summary::-webkit-details-marker,
+.paper-summary::-webkit-details-marker {
   display: none;
 }
-.hypothesis-summary::before {
+.hypothesis-summary::before,
+.paper-summary::before {
   content: '▸';
   color: var(--muted);
   font-size: 11px;
+  flex: 0 0 auto;
   transition: transform 0.12s ease;
 }
-.hypothesis-card[open] > .hypothesis-summary::before {
+.hypothesis-card[open] > .hypothesis-summary::before,
+.paper-card[open] > .paper-summary::before {
   transform: rotate(90deg);
 }
-.hyp-title {
+.hyp-title,
+.paper-summary-title {
   flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   font-size: 14px;
-}
-.hyp-quick {
-  color: var(--muted);
-  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .hyp-running {
   display: inline-flex;
   align-items: center;
 }
-.hypothesis-body {
+/* The action-button group, pushed to the right edge of a card summary. */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+/* Uniform icon action buttons (run / edit / delete / the verb+hypothesis combos). Same height; tooltips
+ * via the global data-help callout. `.combo` holds two small glyphs ("<verb> a hypothesis"). */
+.card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.card-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-subtle);
+}
+.card-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.card-btn.combo {
+  min-width: 40px;
+}
+.card-btn-danger:hover:not(:disabled) {
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.hypothesis-body,
+.paper-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 0 14px 12px;
+  padding: 0 12px 12px;
+}
+/* Run-count chip on a hypothesis (clickable → its runs); "is-low" flags too few runs to judge. */
+.run-count-chip {
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.run-count-chip:hover {
+  border-color: var(--accent);
+}
+.run-count-chip.is-low {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+/* Linked-hypothesis count chip on a paper; "is-empty" highlights a paper with none. */
+.hyp-count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.hyp-count-chip.is-empty {
+  border-color: #f59e0b;
+  color: #b45309;
+}
+/* The min-runs-to-judge setting in the Hypotheses tab header. */
+.min-runs-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.min-runs-field input {
+  width: 56px;
+}
+.hyp-head-actions {
+  align-items: center;
+}
+/* The hypothesis-glyph that sits left of the tab label. */
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 5px;
+  vertical-align: middle;
 }
 .hypothesis-card.is-muted,
 .hypothesis-card.is-dismissed {

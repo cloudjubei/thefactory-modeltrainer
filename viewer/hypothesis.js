@@ -63,16 +63,21 @@
     }
   }
 
-  // The verdict a measured read implies: untested with no beats-hold signal, else proven/disproved.
-  function autoVerdictFor(measured) {
+  // The verdict a measured read implies: untested with no beats-hold signal OR too few runs to trust
+  // (fewer than `minRuns`), else proven/disproved. A single run can't adequately prove a hypothesis.
+  function autoVerdictFor(measured, minRuns) {
     if (!measured || measured.beatsHold === null) return 'untested'
+    if (minRuns && measured.runs < minRuns) return 'untested'
     return measured.beatsHold ? 'proven' : 'disproved'
   }
 
   // The verdict to SHOW: a manual override wins; otherwise the live auto-verdict from matching runs.
-  function effectiveVerdict(h, runs, direction) {
+  function effectiveVerdict(h, runs, direction, minRuns) {
     if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0) return h.status
-    return autoVerdictFor(measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction))
+    return autoVerdictFor(
+      measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction),
+      minRuns,
+    )
   }
 
   // Sorted keys of the runs matching a hypothesis (the evidence-set identity used to detect new runs).
@@ -93,10 +98,11 @@
   function evaluateHypothesis(h, runs, opts) {
     const direction = (opts && opts.direction) || 'max'
     const at = (opts && opts.at) || ''
+    const minRuns = (opts && opts.minRuns) || 0
     if (h && h.verdictSource === 'manual') return { next: h, transition: null, changed: false }
     const matchedKeys = matchedKeysOf(h && h.spec, runs)
     const measured = measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction)
-    const nextStatus = autoVerdictFor(measured)
+    const nextStatus = autoVerdictFor(measured, minRuns)
     const prev = (h && h.evidence) || { matchedKeys: [], status: 'untested' }
     const prevKeys = prev.matchedKeys || []
     const keysChanged =
@@ -126,13 +132,13 @@
 
   // A paper's verdict rolls up from its linked hypotheses: any proven ⇒ holds-up, all disproved ⇒ fluff,
   // else untested (no links, or a mix of untested/disproved).
-  function rollupPaperVerdict(paper, hyps, runs, direction) {
+  function rollupPaperVerdict(paper, hyps, runs, direction, minRuns) {
     const ids = {}
     const linkIds = (paper && paper.hypothesisIds) || []
     for (let i = 0; i < linkIds.length; i++) ids[linkIds[i]] = true
     const linked = (hyps || []).filter((h) => ids[h.id])
     if (!linked.length) return 'untested'
-    const verdicts = linked.map((h) => effectiveVerdict(h, runs, direction))
+    const verdicts = linked.map((h) => effectiveVerdict(h, runs, direction, minRuns))
     if (verdicts.indexOf('proven') >= 0) return 'holds-up'
     if (verdicts.every((v) => v === 'disproved')) return 'fluff'
     return 'untested'

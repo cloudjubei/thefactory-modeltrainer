@@ -11,6 +11,7 @@ import type {
   TrainerDataFile,
   TrainerLeverSpec,
   TrainerManifest,
+  TrainerMigrationRule,
   TrainingPaperRecord,
   TrainingRunSummary,
 } from './modelTrainerTypes.js'
@@ -92,6 +93,66 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
     }
   }
   return m as unknown as TrainerManifest
+}
+
+/**
+ * The FIRST {@link TrainerMigrationRule} that handles `config`, or `null` when none do. A rule matches
+ * when every `match` field is present and loosely equal (so a JSON `0` matches a stored number/string
+ * `0`) AND every `matchNot` field is present and loosely UNEQUAL — so a record missing a `matchNot`
+ * field is never matched (runs without that key are left alone). A rule with neither clause matches
+ * nothing.
+ */
+export function findMigrationRule(
+  config: Record<string, unknown>,
+  rules: TrainerMigrationRule[],
+): TrainerMigrationRule | null {
+  const matches = (rule: TrainerMigrationRule): boolean => {
+    if (!rule.match && !rule.matchNot) return false
+    const eq = Object.entries(rule.match ?? {}).every(
+      ([k, v]) => k in config && String(config[k]) === String(v),
+    )
+    const neq = Object.entries(rule.matchNot ?? {}).every(
+      ([k, v]) => k in config && String(config[k]) !== String(v),
+    )
+    return eq && neq
+  }
+  return rules.find(matches) ?? null
+}
+
+/**
+ * Roll one config forward through a project's rules for the REWRITE path: returns the new config
+ * (`{...config, ...set}` with each `keepOrDefault` key resolved to the config's current value when
+ * present, else the rule's default), or `null` when no rule matches OR the matched rule is a `delete`
+ * rule (deletion isn't a config the caller can use — see {@link findMigrationRule} for that decision).
+ * Re-running once everything is migrated is a no-op.
+ */
+export function applyMigrationRules(
+  config: Record<string, unknown>,
+  rules: TrainerMigrationRule[],
+): Record<string, unknown> | null {
+  const rule = findMigrationRule(config, rules)
+  if (!rule || rule.delete) return null
+  const out: Record<string, unknown> = { ...config, ...rule.set }
+  for (const [k, fallback] of Object.entries(rule.keepOrDefault ?? {})) {
+    out[k] = k in config ? config[k] : fallback
+  }
+  return out
+}
+
+/**
+ * Roll an {@link ExperimentSpec} forward through the same migration rules before it is planned, so a
+ * run dispatched from an OLD queued/pending spec (e.g. `reward_model: "combo_all"`) executes under the
+ * migrated shape rather than the retired one. Only `spec.fixed` is migrated (the pinned config a single
+ * run carries); a `sweep` over a migrated lever is left untouched (its values are a list, not a config).
+ * Returns the SAME spec object when no rule matches, so callers can treat it as a cheap pass-through.
+ */
+export function migrateExperimentSpec(
+  spec: ExperimentSpec,
+  migrations: TrainerMigrationRule[] | undefined,
+): ExperimentSpec {
+  if (!migrations || migrations.length === 0 || !spec || !spec.fixed) return spec
+  const migrated = applyMigrationRules(spec.fixed, migrations)
+  return migrated ? { ...spec, fixed: migrated } : spec
 }
 
 export function canonicalConfigString(value: unknown): string {
@@ -263,6 +324,30 @@ export function coerceVerdictRows(raw: unknown[]): { key: string; score: number;
   return rows
 }
 
+/**
+ * A backstop for the "must be a TESTABLE claim" rule the propose/extract/suggest prompts enforce: reject
+ * items that are pure DATA-GATHERING (more seeds/runs of a known setup to tighten a confidence interval,
+ * reproduce, or reduce noise) rather than a falsifiable conjecture. Such "establish a trustworthy interval"
+ * work is handled by the min-runs gate, "Launch more runs", and the xAI tab — never as a hypothesis. The
+ * patterns are deliberately high-precision (a real claim rarely uses this phrasing) to avoid false drops.
+ */
+export function looksLikeDataGathering(title: string, rationale: string): boolean {
+  const t = `${title || ''} ${rationale || ''}`.toLowerCase()
+  return (
+    /\b(\d+\s+more|more|additional|extra|further|repeat(?:ed)?)\s+seeds?\b/.test(t) ||
+    /\b(trustworthy|confidence|reliable|tighter|narrower|stable|robust)\s+(interval|ci|estimate)\b/.test(
+      t,
+    ) ||
+    /\bestablish(?:ing)?\b[^.]*\binterval\b/.test(t) ||
+    /\b(gather|collect|accumulate|get)\b[^.]*\bmore\s+(data|runs|seeds|samples|evidence)\b/.test(
+      t,
+    ) ||
+    /\b(more|additional|extra)\s+runs?\b[^.]*\b(establish|confirm|tighten|interval|trust|reproduc)/.test(
+      t,
+    )
+  )
+}
+
 export function coerceHypothesisItems(
   raw: unknown[],
   manifest: TrainerManifest,
@@ -275,6 +360,8 @@ export function coerceHypothesisItems(
     const obj = item as Record<string, unknown>
     if (typeof obj.title !== 'string' || !obj.title) continue
     if (typeof obj.rationale !== 'string' || !obj.rationale) continue
+    // Drop "run more seeds to establish an interval"-style data-gathering — not a falsifiable test.
+    if (looksLikeDataGathering(obj.title, obj.rationale)) continue
     const rawSpec = obj.spec as Record<string, unknown> | undefined
     if (!rawSpec || typeof rawSpec !== 'object') continue
 
@@ -337,6 +424,16 @@ export function buildJudgeUserContent(
   return JSON.stringify(runs)
 }
 
+// The bar every proposed/extracted/suggested hypothesis must clear, shared by all three prompts: a
+// FALSIFIABLE test-claim, never "gather more data for a known setup" (that's the min-runs gate + xAI tab).
+const HYPOTHESIS_RULE =
+  'Each hypothesis MUST be a FALSIFIABLE claim a run can PROVE OR DISPROVE — that a specific lever value, ' +
+  'or a comparison against a baseline, CHANGES the objective in a stated direction. It must be able to turn ' +
+  'out FALSE. Do NOT propose pure DATA-GATHERING: running more seeds/runs of an already-identified config to ' +
+  'tighten a confidence interval, reduce variance/noise, reproduce, or "establish a trustworthy interval" is ' +
+  'NOT a hypothesis — that is handled separately (the min-runs threshold and the xAI tab). Every spec must ' +
+  'introduce or compare a lever setting whose effect is what is being tested.'
+
 export function buildProposeSystemPrompt(
   manifest: TrainerManifest,
   count: number,
@@ -347,8 +444,9 @@ export function buildProposeSystemPrompt(
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
     `The ONLY tunable levers, with their allowed shapes, are: ${JSON.stringify(manifest.levers)}.`,
     `Given the run history and verdicts, propose up to ${count} NEW experiment specs likely to beat the best run. Explore promising neighbourhoods and untested regions; avoid repeating configurations already run.`,
+    HYPOTHESIS_RULE,
     instructions ? `Additional guidance: ${instructions}` : '',
-    `Return ONLY a JSON array: [{"title": "<short name>", "rationale": "<why this is promising>", "spec": {"sweep": {"<lever>": [values]}, "fixed": {"<lever>": value}, "seeds": [0]}}]. Use only declared lever names; sweep arrays must be non-empty; every spec needs a sweep or a fixed. No prose around it.`,
+    `Return ONLY a JSON array: [{"title": "<short name>", "rationale": "<the falsifiable claim being tested>", "spec": {"sweep": {"<lever>": [values]}, "fixed": {"<lever>": value}, "seeds": [0]}}]. Use only declared lever names; sweep arrays must be non-empty; every spec needs a sweep or a fixed. No prose around it.`,
   ]
     .filter(Boolean)
     .join('\n')
@@ -493,6 +591,7 @@ export function buildAnalyzePaperSystemPrompt(manifest: TrainerManifest, notes?:
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
     `You are given the TEXT of a paper/source (already fetched — DO NOT browse). Summarise it HONESTLY as a registry entry AND break it into the distinct, runnable HYPOTHESES it makes for this project.`,
     `The project's tunable levers (for the hypothesis specs) are: ${JSON.stringify(manifest.levers)}.`,
+    HYPOTHESIS_RULE,
     notes ? `Extra guidance: ${notes}` : '',
     `Return ONLY a single JSON object (no prose, no code fence): {"title": string (required), "authors"?: string, ` +
       `"year"?: number, "claim": string (the source's headline claim in its own terms, required), "approach"?: string, ` +
@@ -525,6 +624,7 @@ export function buildSuggestHypothesesSystemPrompt(manifest: TrainerManifest): s
     `You are given a PAPER (its fields, and its text when available) and the project's EXISTING hypotheses.`,
     `The project's tunable levers (for any new hypothesis spec) are: ${JSON.stringify(manifest.levers)}.`,
     `Do TWO things: (1) MATCH — pick the existing hypotheses (by id) that are genuine tests of THIS paper's claims; (2) SUGGEST — propose NEW testable hypotheses for the paper's claims that NO existing hypothesis already covers (each a runnable spec using ONLY declared lever names). Do not duplicate an existing hypothesis as a new one.`,
+    HYPOTHESIS_RULE,
     `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], ` +
       `"newHypotheses": [{"title": string, "rationale": string, "spec": {"fixed"?: {"<lever>": value}, ` +
       `"sweep"?: {"<lever>": [values]}, "seeds"?: [number]}}]}. Use [] for either when there is nothing to add.`,

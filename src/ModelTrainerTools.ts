@@ -24,6 +24,8 @@ import type {
   GetRunXaiResult,
   JudgeTrainingRunsParams,
   JudgeTrainingRunsResult,
+  MigrateTrainingRunsParams,
+  MigrateTrainingRunsResult,
   ModelTrainerTools,
   ModelTrainerToolsDeps,
   PlannedTrainingItem,
@@ -57,8 +59,11 @@ import {
   setupKeyOf,
 } from './modelTrainerHelpers.js'
 import {
+  applyMigrationRules,
   blendJudgeScore,
+  findMigrationRule,
   manifestDataFiles,
+  migrateExperimentSpec,
   parseProgressMarker,
   buildAnalyzePaperSystemPrompt,
   buildAnalyzePaperUserContent,
@@ -83,6 +88,14 @@ import {
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
 import { criterionValueOf, leverImportances } from './xaiUtils.js'
+
+/**
+ * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
+ * (per-run judge score), and `-xai-narrative` (per-run narrative). When a run is deleted these are
+ * removed alongside it so none orphan. The `-unrunnable` marker is keyed by SETUP key, not run key,
+ * so it is handled separately.
+ */
+const RUN_KEYED_CHILD_SUFFIXES = ['-evaluation', '-verdict', '-xai-narrative'] as const
 
 /** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
 function sanitizeRunArtifacts(
@@ -137,7 +150,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
-    const items = expandExperimentMatrix(manifest, params.spec, hashTrainingConfig)
+    // Roll the spec forward through the manifest's migrations BEFORE planning, so a run dispatched from
+    // an old queued/pending config (e.g. a retired `reward_model` name) executes under the migrated
+    // shape — runs can't start un-migrated regardless of who dispatched them. No-op when nothing matches.
+    const spec = migrateExperimentSpec(params.spec, manifest.migrations)
+    const items = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
     const total = items.length
     const repoRef: ComputeRepoRef = { kind: 'local', localPath: params.projectRoot }
     const runner = resolveRunner(params.computeTarget)
@@ -1234,6 +1251,128 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { found: true, recordType: resolved.recordType, runCount, analysis: digest }
   }
 
+  async function migrateTrainingRuns(
+    params: MigrateTrainingRunsParams,
+  ): Promise<MigrateTrainingRunsResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const rules = manifest.migrations ?? []
+    let examinedRuns = 0
+    let migratedRuns = 0
+    let deletedRuns = 0
+    let examinedQueue = 0
+    let migratedQueue = 0
+    let deletedQueue = 0
+    if (rules.length === 0) {
+      return {
+        recordType,
+        examinedRuns,
+        migratedRuns,
+        deletedRuns,
+        examinedQueue,
+        migratedQueue,
+        deletedQueue,
+      }
+    }
+
+    // Delete a run AND its derived records (so nothing orphans), broadcasting each actual removal.
+    const deleteRunAndDerived = async (runKey: string, setupKey: unknown): Promise<void> => {
+      await deps.storage.deleteRecord({ scope: params.scope, type: recordType, key: runKey })
+      params.onRecordWritten?.(recordType, runKey)
+      for (const suffix of RUN_KEYED_CHILD_SUFFIXES) {
+        const childType = recordType + suffix
+        const removed = await deps.storage.deleteRecord({
+          scope: params.scope,
+          type: childType,
+          key: runKey,
+        })
+        if (removed) params.onRecordWritten?.(childType, runKey)
+      }
+      if (typeof setupKey === 'string' && setupKey) {
+        const unrunnableType = `${recordType}-unrunnable`
+        const removed = await deps.storage.deleteRecord({
+          scope: params.scope,
+          type: unrunnableType,
+          key: setupKey,
+        })
+        if (removed) params.onRecordWritten?.(unrunnableType, setupKey)
+      }
+    }
+
+    const runRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    for (const record of runRecords) {
+      examinedRuns++
+      const content = (record.content ?? {}) as Record<string, unknown>
+      const config = content.config
+      if (!record.key || !config || typeof config !== 'object') continue
+      const rule = findMigrationRule(config as Record<string, unknown>, rules)
+      if (!rule) continue
+      if (rule.delete) {
+        await deleteRunAndDerived(record.key, content.setupKey)
+        deletedRuns++
+        continue
+      }
+      const migrated = applyMigrationRules(config as Record<string, unknown>, rules)
+      if (!migrated) continue
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: recordType,
+        key: record.key,
+        content: { ...content, config: migrated, setupKey: setupKeyOf(migrated) },
+      })
+      migratedRuns++
+      params.onRecordWritten?.(recordType, record.key)
+    }
+
+    if (params.queueRecordType) {
+      const queueRecords = await deps.storage.listRecords({
+        scope: params.scope,
+        type: params.queueRecordType,
+      })
+      for (const record of queueRecords) {
+        examinedQueue++
+        const content = (record.content ?? {}) as Record<string, unknown>
+        const itemParams = content.params as Record<string, unknown> | undefined
+        const spec = itemParams?.spec as { fixed?: Record<string, unknown> } | undefined
+        const fixed = spec?.fixed
+        if (!record.key || !fixed || typeof fixed !== 'object') continue
+        const rule = findMigrationRule(fixed, rules)
+        if (!rule) continue
+        if (rule.delete) {
+          await deps.storage.deleteRecord({
+            scope: params.scope,
+            type: params.queueRecordType,
+            key: record.key,
+          })
+          deletedQueue++
+          params.onRecordWritten?.(params.queueRecordType, record.key)
+          continue
+        }
+        const migrated = applyMigrationRules(fixed, rules)
+        if (!migrated) continue
+        await deps.storage.upsertRecord({
+          scope: params.scope,
+          type: params.queueRecordType,
+          key: record.key,
+          content: { ...content, params: { ...itemParams, spec: { ...spec, fixed: migrated } } },
+        })
+        migratedQueue++
+        params.onRecordWritten?.(params.queueRecordType, record.key)
+      }
+    }
+
+    return {
+      recordType,
+      examinedRuns,
+      migratedRuns,
+      deletedRuns,
+      examinedQueue,
+      migratedQueue,
+      deletedQueue,
+    }
+  }
+
   return {
     readTrainerManifest: (projectRoot, manifestRelPath) =>
       readTrainerManifest(projectRoot, manifestRelPath),
@@ -1250,5 +1389,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     xaiNarrate,
     getRunData,
     getRunXAI,
+    migrateTrainingRuns,
   }
 }

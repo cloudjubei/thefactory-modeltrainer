@@ -12,11 +12,15 @@ import {
   buildSuggestHypothesesUserContent,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
+  applyMigrationRules,
+  findMigrationRule,
+  migrateExperimentSpec,
   canonicalConfigString,
   coerceHypothesisItems,
   coercePaperDraft,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
+  looksLikeDataGathering,
   extractPaperText,
   expandExperimentMatrix,
   normalizeObjectiveScores,
@@ -48,6 +52,160 @@ function manifest(overrides: Partial<TrainerManifest> = {}): TrainerManifest {
     ...overrides,
   }
 }
+
+describe('applyMigrationRules', () => {
+  const rules = [
+    {
+      match: { reward_model: 'combo_all' },
+      set: {
+        reward_model: 'combo_unified',
+        combo_sell: 1000,
+        combo_wrongaction: 0,
+        combo_fee_penalty: 0,
+      },
+    },
+    {
+      match: { reward_model: 'combo_all_fee' },
+      set: { reward_model: 'combo_unified', combo_sell: 1000, combo_wrongaction: 0 },
+      keepOrDefault: { combo_fee_penalty: 1.0 },
+    },
+    {
+      match: { reward_model: 'combo_all2', combo_noaction: 0 },
+      set: { reward_model: 'combo_unified', combo_sell: 1000 },
+      keepOrDefault: { combo_wrongaction: -0.01 },
+    },
+  ]
+
+  it('returns null when no rule matches (idempotent for already-migrated configs)', () => {
+    expect(
+      applyMigrationRules({ reward_model: 'combo_unified', combo_sell: 1000 }, rules),
+    ).toBeNull()
+    expect(applyMigrationRules({ reward_model: 'profit_all2' }, rules)).toBeNull()
+    expect(applyMigrationRules({ lr: 0.1 }, rules)).toBeNull()
+  })
+
+  it("applies the matching rule's set fields over the source config", () => {
+    const out = applyMigrationRules(
+      { reward_model: 'combo_all', combo_noaction: -1, lr: 0.1 },
+      rules,
+    )
+    expect(out).toEqual({
+      reward_model: 'combo_unified',
+      combo_noaction: -1,
+      lr: 0.1,
+      combo_sell: 1000,
+      combo_wrongaction: 0,
+      combo_fee_penalty: 0,
+    })
+  })
+
+  it('keeps an existing keepOrDefault value, else writes the default', () => {
+    const kept = applyMigrationRules(
+      { reward_model: 'combo_all_fee', combo_fee_penalty: 0.5 },
+      rules,
+    )
+    expect(kept?.combo_fee_penalty).toBe(0.5)
+    const defaulted = applyMigrationRules({ reward_model: 'combo_all_fee' }, rules)
+    expect(defaulted?.combo_fee_penalty).toBe(1.0)
+  })
+
+  it('requires every match key (multi-key match) and compares loosely', () => {
+    // combo_all2 only unifies under combo_noaction == 0
+    expect(
+      applyMigrationRules({ reward_model: 'combo_all2', combo_noaction: -1 }, rules),
+    ).toBeNull()
+    const out = applyMigrationRules({ reward_model: 'combo_all2', combo_noaction: 0 }, rules)
+    expect(out?.reward_model).toBe('combo_unified')
+    expect(out?.combo_wrongaction).toBe(-0.01)
+    // a stored numeric 0 matched by a JSON 0 even across number/string boundaries
+    expect(
+      applyMigrationRules({ reward_model: 'combo_all2', combo_noaction: '0' }, rules)?.reward_model,
+    ).toBe('combo_unified')
+  })
+
+  it('uses the FIRST matching rule and does not mutate the input', () => {
+    const input = { reward_model: 'combo_all', combo_sell: 7 }
+    const out = applyMigrationRules(input, rules)
+    expect(out?.combo_sell).toBe(1000)
+    expect(input.combo_sell).toBe(7)
+  })
+
+  it('returns null for an empty rule set', () => {
+    expect(applyMigrationRules({ reward_model: 'combo_all' }, [])).toBeNull()
+  })
+
+  it('returns null (no rewrite) when the matched rule is a delete rule', () => {
+    const rules = [{ matchNot: { reward_model: 'combo_unified' }, delete: true }]
+    expect(applyMigrationRules({ reward_model: 'profit_percentage3' }, rules)).toBeNull()
+  })
+})
+
+describe('findMigrationRule', () => {
+  const rewrite = { match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified' } }
+  const del = { matchNot: { reward_model: 'combo_unified' }, delete: true }
+  const rules = [rewrite, del]
+
+  it('picks the rewrite rule for a matched old name (rewrite wins over the trailing delete rule)', () => {
+    expect(findMigrationRule({ reward_model: 'combo_all' }, rules)).toBe(rewrite)
+  })
+
+  it('picks the delete rule (matchNot) for any other present reward_model', () => {
+    expect(findMigrationRule({ reward_model: 'profit_percentage3' }, rules)).toBe(del)
+    expect(findMigrationRule({ reward_model: 'profit_all2' }, rules)).toBe(del)
+    expect(findMigrationRule({ reward_model: 'buy_sell_signal' }, rules)).toBe(del)
+  })
+
+  it('does NOT match the delete rule for the kept value (combo_unified)', () => {
+    expect(findMigrationRule({ reward_model: 'combo_unified' }, rules)).toBeNull()
+  })
+
+  it('does NOT match a matchNot rule when the field is absent (e.g. hodl/supervised runs)', () => {
+    expect(findMigrationRule({ model_name: 'hodl' }, rules)).toBeNull()
+  })
+
+  it('requires match fields to be PRESENT (a missing match key never fires)', () => {
+    const rule = {
+      match: { reward_model: 'combo_all', combo_noaction: 0 },
+      set: { reward_model: 'combo_unified' },
+    }
+    expect(findMigrationRule({ reward_model: 'combo_all' }, [rule])).toBeNull()
+    expect(findMigrationRule({ reward_model: 'combo_all', combo_noaction: 0 }, [rule])).toBe(rule)
+  })
+
+  it('ignores a rule with neither match nor matchNot', () => {
+    expect(findMigrationRule({ reward_model: 'x' }, [{ delete: true }])).toBeNull()
+  })
+})
+
+describe('migrateExperimentSpec', () => {
+  const migrations = [
+    {
+      match: { reward_model: 'combo_all' },
+      set: { reward_model: 'combo_unified', combo_sell: 1000 },
+    },
+  ]
+
+  it('migrates spec.fixed in place so a dispatched run plans under the new shape', () => {
+    const out = migrateExperimentSpec(
+      { fixed: { reward_model: 'combo_all', lr: 0.1 }, seeds: [0] },
+      migrations,
+    )
+    expect(out.fixed).toEqual({ reward_model: 'combo_unified', lr: 0.1, combo_sell: 1000 })
+    expect(out.seeds).toEqual([0])
+  })
+
+  it('returns the SAME spec object (cheap pass-through) when nothing matches or no migrations', () => {
+    const spec = { fixed: { reward_model: 'combo_unified' } }
+    expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
+    expect(migrateExperimentSpec(spec, [])).toBe(spec)
+    expect(migrateExperimentSpec(spec, undefined)).toBe(spec)
+  })
+
+  it('is a no-op when the spec has no fixed block (e.g. a pure sweep)', () => {
+    const spec = { sweep: { reward_model: ['combo_all', 'profit_all2'] } }
+    expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
+  })
+})
 
 describe('validateTrainerManifest', () => {
   it('accepts a valid manifest and returns it typed', () => {
@@ -565,6 +723,56 @@ describe('coerceHypothesisItems', () => {
 
   it('returns empty for a non-array', () => {
     expect(coerceHypothesisItems('nope' as never, m)).toEqual([])
+  })
+
+  it('drops data-gathering "hypotheses" (more seeds to establish an interval — not a test)', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 'Top Setup 1 Interval',
+          rationale:
+            'Running 4 more seeds for the best performing configuration to establish a trustworthy interval (≥5).',
+          spec: { fixed: { lr: 0.5 } },
+        },
+        {
+          title: 'Higher lr beats the baseline',
+          rationale: 'test the lr effect',
+          spec: { sweep: { lr: [0.2] } },
+        },
+      ],
+      m,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].title).toBe('Higher lr beats the baseline')
+  })
+})
+
+describe('looksLikeDataGathering', () => {
+  it('flags add-more-seeds / establish-interval / reduce-noise phrasing', () => {
+    expect(
+      looksLikeDataGathering(
+        'Top Setup 1 Interval',
+        'Run 4 more seeds to establish a trustworthy interval (≥5).',
+      ),
+    ).toBe(true)
+    expect(
+      looksLikeDataGathering('Tighten estimate', 'additional seeds for a reliable interval'),
+    ).toBe(true)
+    expect(looksLikeDataGathering('Confirm', 'gather more runs to confirm the result')).toBe(true)
+  })
+  it('does NOT flag real test-claims (even when they mention variance)', () => {
+    expect(
+      looksLikeDataGathering('Higher lr beats baseline', 'a larger lr should raise the objective'),
+    ).toBe(false)
+    expect(
+      looksLikeDataGathering(
+        'Lower lr reduces return variance',
+        'tests whether lr lowers variance',
+      ),
+    ).toBe(false)
+    expect(
+      looksLikeDataGathering('Attention beats LSTM', 'compare attn-ppo vs reppo on Sharpe'),
+    ).toBe(false)
   })
 })
 
@@ -1226,6 +1434,27 @@ describe('buildSuggestHypothesesSystemPrompt', () => {
     expect(p).toMatch(/matchExistingIds/)
     expect(p).toMatch(/newHypotheses/)
     expect(p).toContain('lr')
+  })
+})
+
+describe('the hypothesis prompts forbid data-gathering', () => {
+  const m = {
+    name: 'Demo',
+    recordType: 'demo-run',
+    run: '{configPath} {summaryOut}',
+    objective: { name: 'obj', direction: 'max' },
+    levers: { lr: { type: 'number' } },
+  } as unknown as TrainerManifest
+  it('every prompt that asks for hypotheses demands a FALSIFIABLE claim, not data-gathering', () => {
+    for (const p of [
+      buildProposeSystemPrompt(m, 5),
+      buildAnalyzePaperSystemPrompt(m),
+      buildSuggestHypothesesSystemPrompt(m),
+    ]) {
+      expect(p).toMatch(/FALSIFIABLE/)
+      expect(p).toMatch(/DATA-GATHERING/)
+      expect(p).toMatch(/trustworthy interval/)
+    }
   })
 })
 

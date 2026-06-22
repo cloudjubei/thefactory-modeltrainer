@@ -67,7 +67,7 @@ const PROPOSE_HELP_TEXT =
 const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runners panel.'
 const TABS = [
   { id: 'runs', label: 'Runs' },
-  { id: 'hypotheses', label: 'Hypotheses' },
+  { id: 'hypotheses', label: 'Hypotheses', icon: iconHypothesisSvg },
   { id: 'papers', label: 'Papers' },
   { id: 'versions', label: 'Versions' },
   { id: 'datasets', label: 'Datasets' },
@@ -99,6 +99,8 @@ const HYPOTHESIS_VERDICT_BADGE = {
 const HYPOTHESIS_VERDICT_LABEL = { untested: 'untested', proven: 'proven', disproved: 'disproved' }
 const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
+const DEFAULT_HYPOTHESIS_MIN_RUNS = 3
+const HYPOTHESIS_CONFIG_SUFFIX = '-hypothesis-config'
 
 let projectsCache = []
 let manifestsCache = new Map()
@@ -198,8 +200,13 @@ let paperVerdictFilter = 'all'
 // add/link sub-form state (`null` | { paperId, mode: 'add' | 'link' }).
 let hypothesisVerdictFilter = 'all'
 let hypothesisOverrideId = null
-// Ids of the hypothesis cards the user has expanded (collapsible rows), so expansion survives re-render.
+// Minimum matching runs before a hypothesis can be judged proven/disproved (fewer ⇒ stays untested — a
+// single run can't adequately prove a claim). User-settable at the top of the Hypotheses tab; persisted
+// per project. Default 3.
+let hypothesisMinRuns = DEFAULT_HYPOTHESIS_MIN_RUNS
+// Ids of the hypothesis/paper cards the user has expanded (collapsible rows), so expansion survives re-render.
 const hypothesisExpanded = new Set()
+const paperExpanded = new Set()
 let paperSubform = null
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
@@ -376,6 +383,55 @@ function iconJudgeSvg() {
     '<path d="M5 6l-3 6a3 3 0 0 0 6 0z"/>' +
     '<path d="M19 6l-3 6a3 3 0 0 0 6 0z"/>' +
     '</svg>'
+  )
+}
+// A flask glyph — the "hypothesis" icon (a claim tested by experiment). Used in the tab + composed into
+// the paper/hypothesis action buttons so a button reads "<verb> a hypothesis".
+function iconHypothesisSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M9 3h6"/><path d="M10 3v6l-5 9a1 1 0 0 0 1 1.5h12a1 1 0 0 0 1-1.5l-5-9V3"/><line x1="8" y1="15" x2="16" y2="15"/></svg>'
+  )
+}
+// A lightbulb — "suggest / propose ideas".
+function iconLightbulbSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.4c.7.6 1 1.4 1 2.1h6c0-.7.3-1.5 1-2.1A6 6 0 0 0 12 3z"/></svg>'
+  )
+}
+// A chain-link — "link an existing one".
+function iconLinkSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1"/></svg>'
+  )
+}
+// A play triangle — "run / launch".
+function iconRunSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">` +
+    '<path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>'
+  )
+}
+// A plus — "add a new one".
+function iconPlusSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">` +
+    '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>'
+  )
+}
+// A pencil — "edit".
+function iconEditSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'
   )
 }
 // Small circular "?" button with a styled hover/focus callout (no native title).
@@ -681,6 +737,27 @@ async function putHypothesis(content) {
     type: manifest.recordType + '-hypothesis',
     key: content.id,
     content,
+  })
+}
+// Load the per-project min-runs-to-judge setting (default DEFAULT_HYPOTHESIS_MIN_RUNS) into the module var.
+async function loadHypothesisMinRuns() {
+  hypothesisMinRuns = DEFAULT_HYPOTHESIS_MIN_RUNS
+  if (!manifest) return
+  try {
+    const recs = await queryRecords(manifest.recordType + HYPOTHESIS_CONFIG_SUFFIX, 'latest')
+    const v = Number(recs[0] && recs[0].content && recs[0].content.minRuns)
+    if (Number.isFinite(v) && v >= 1) hypothesisMinRuns = Math.floor(v)
+  } catch {
+    // keep the default
+  }
+}
+async function saveHypothesisMinRuns(n) {
+  const v = Math.max(1, Math.floor(Number(n) || DEFAULT_HYPOTHESIS_MIN_RUNS))
+  hypothesisMinRuns = v
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + HYPOTHESIS_CONFIG_SUFFIX,
+    key: 'latest',
+    content: { minRuns: v, updatedAt: nowIso() },
   })
 }
 // User-defined numeric filter rules, one record each (keyed by rule id) so they persist
@@ -1484,6 +1561,7 @@ async function openProject(projectKey) {
   // Load saved environments before the launch form so its environment picker is populated.
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
+  await loadHypothesisMinRuns()
   if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
@@ -6449,20 +6527,32 @@ function hypothesisMeasured(h) {
   return window.Hypothesis.measuredFromRuns(hypothesisMatchedRuns(h), objectiveDirection())
 }
 function effectiveHypothesisVerdict(h) {
-  return window.Hypothesis.effectiveVerdict(h, runsCache, objectiveDirection())
+  return window.Hypothesis.effectiveVerdict(h, runsCache, objectiveDirection(), hypothesisMinRuns)
 }
+// Icon-only action buttons (same size, tooltips on hover) — shown in the card summary so they're
+// available collapsed AND expanded. "Launch more runs" is the play button; it stays enabled below
+// minRuns so the user can gather the data a verdict needs.
 function hypothesisActionsHtml(h) {
   const id = escapeHtml(h.id)
   const c = h.campaign
   const busy = c && (c.status === 'running' || c.status === 'queued')
-  const matched = hypothesisMatchedRuns(h).length
-  const viewRuns = matched
-    ? `<button type="button" data-action="view-runs" data-id="${id}" class="ghost-btn"${helpAttr('Show the runs matching this hypothesis in the Runs tab.')}>View ${matched} run${matched === 1 ? '' : 's'}</button>`
-    : ''
-  return `<button type="button" data-action="run" data-id="${id}"${busy ? ' disabled' : ''}${helpAttr('Launch this hypothesis’s spec to gather more evidence — the verdict updates as runs land.')}>Launch more runs</button>${viewRuns}
-    <button type="button" class="icon-btn" data-action="override" data-id="${id}" title="Override verdict" aria-label="Override verdict">✎</button>
-    <button type="button" class="icon-btn" data-action="${h.dismissed ? 'restore' : 'dismiss'}" data-id="${id}" title="${h.dismissed ? 'Restore' : 'Dismiss'}" aria-label="${h.dismissed ? 'Restore' : 'Dismiss'}">${h.dismissed ? '↺' : iconCrossSvg()}</button>
-    <button type="button" class="icon-btn icon-btn-danger" data-action="delete" data-id="${id}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
+  return (
+    `<button type="button" class="card-btn" data-action="run" data-id="${id}"${busy ? ' disabled' : ''}${helpAttr('Launch more runs — gather the evidence the verdict needs (the verdict updates as runs land).')}>${iconRunSvg(15)}</button>` +
+    `<button type="button" class="card-btn" data-action="override" data-id="${id}"${helpAttr('Override the verdict manually.')}>${iconEditSvg(15)}</button>` +
+    `<button type="button" class="card-btn" data-action="${h.dismissed ? 'restore' : 'dismiss'}" data-id="${id}"${helpAttr(h.dismissed ? 'Restore this hypothesis.' : 'Dismiss this hypothesis (hide without deleting).')}>${h.dismissed ? '↺' : iconCrossSvg()}</button>` +
+    `<button type="button" class="card-btn card-btn-danger" data-action="delete" data-id="${id}"${helpAttr('Delete this hypothesis.')}>${iconDeleteSvg()}</button>`
+  )
+}
+// The run-count chip shown next to the verdict — click to view the matching runs. Highlights "n/min"
+// when there aren't enough runs to judge it yet.
+function hypothesisRunChipHtml(h) {
+  const n = hypothesisMatchedRuns(h).length
+  const enough = n >= hypothesisMinRuns
+  const label = enough ? `${n} run${n === 1 ? '' : 's'}` : `${n}/${hypothesisMinRuns} runs`
+  const help = enough
+    ? 'Runs matching this hypothesis — click to view them in the Runs tab.'
+    : `Only ${n} of ${hypothesisMinRuns} runs needed to judge it — launch more.`
+  return `<button type="button" class="run-count-chip${enough ? '' : ' is-low'}" data-action="view-runs" data-id="${escapeHtml(h.id)}"${helpAttr(help)}>${label}</button>`
 }
 // The hypothesis's linked campaign: live status while queued/running, and once
 // finished its OWN results (best among its keys, completed/failed counts) next
@@ -6560,16 +6650,6 @@ function hypothesisVerdictFormHtml(h) {
     </div>
   </div>`
 }
-// The one-line measured stat shown collapsed: run count + best objective + beats/trails hold.
-function hypothesisQuickStatHtml(h) {
-  const m = hypothesisMeasured(h)
-  if (!m) return '<span class="hyp-quick">no matching runs</span>'
-  const obj = Number.isFinite(m.objective)
-    ? ` · ${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(m.objective))}`
-    : ''
-  const hold = m.beatsHold === null ? '' : m.beatsHold ? ' · beats hold' : ' · trails hold'
-  return `<span class="hyp-quick">${m.runs} run${m.runs === 1 ? '' : 's'}${obj}${hold}</span>`
-}
 function hypothesisCardHtml(h, liveIds) {
   const verdict = effectiveHypothesisVerdict(h)
   const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</span>`
@@ -6587,16 +6667,17 @@ function hypothesisCardHtml(h, liveIds) {
   const by = h.proposedBy ? ` · ${escapeHtml(h.proposedBy)}` : ''
   const overrideNote =
     h.verdictSource === 'manual'
-      ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[window.Hypothesis.autoVerdictFor(hypothesisMeasured(h))])}</p>`
+      ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[window.Hypothesis.autoVerdictFor(hypothesisMeasured(h), hypothesisMinRuns)])}</p>`
       : ''
   const overrideForm = hypothesisOverrideId === h.id ? hypothesisVerdictFormHtml(h) : ''
   const open = hypothesisExpanded.has(h.id) ? ' open' : ''
   return `<details class="hypothesis-card${h.dismissed ? ' is-dismissed' : ''}" data-id="${escapeHtml(h.id)}"${open}>
     <summary class="hypothesis-summary">
       ${badge}
+      ${hypothesisRunChipHtml(h)}
       <span class="hyp-title">${escapeHtml(h.title || h.id)}</span>
-      ${hypothesisQuickStatHtml(h)}
       ${running}
+      <span class="card-actions">${hypothesisActionsHtml(h)}</span>
     </summary>
     <div class="hypothesis-body">
       ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
@@ -6608,7 +6689,6 @@ function hypothesisCardHtml(h, liveIds) {
       ${hypothesisCampaignHtml(h, liveIds)}
       ${h.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(h.verdictNote)}</p>` : ''}
       ${overrideForm}
-      <div class="hypothesis-actions">${hypothesisActionsHtml(h)}</div>
       <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>
     </div>
   </details>`
@@ -6711,7 +6791,11 @@ async function refreshHypothesisVerdicts(hyps) {
   const at = nowIso()
   let wrote = false
   for (const h of hyps || []) {
-    const { next, changed } = window.Hypothesis.evaluateHypothesis(h, runsCache, { direction, at })
+    const { next, changed } = window.Hypothesis.evaluateHypothesis(h, runsCache, {
+      direction,
+      at,
+      minRuns: hypothesisMinRuns,
+    })
     if (!changed) continue
     try {
       await putHypothesis(next)
@@ -6727,7 +6811,8 @@ function renderProposeControls() {
   const btn = byId('propose-btn')
   if (btn) {
     btn.disabled = proposing
-    btn.innerHTML = proposing ? busyButtonHtml('Proposing…') : 'Propose experiments'
+    // Lightbulb + hypothesis = "propose new experiment ideas". Icon-only; the tooltip explains it.
+    btn.innerHTML = proposing ? spinnerHtml() : iconLightbulbSvg(15) + iconHypothesisSvg(15)
   }
   renderTabLiveIndicator()
   const last = byId('propose-last')
@@ -6757,6 +6842,9 @@ async function renderHypotheses() {
     readRuns(),
   ])
   await refreshHypothesisVerdicts(hypothesesCache)
+  const minRunsInput = byId('hypothesis-min-runs')
+  if (minRunsInput && document.activeElement !== minRunsInput)
+    minRunsInput.value = hypothesisMinRuns
   const liveIds = hypothesesCache.some((h) => h.campaign && h.campaign.status === 'running')
     ? await readLiveActivityIds()
     : new Set()
@@ -6867,9 +6955,13 @@ async function deleteHypothesis(id) {
   await renderHypotheses()
 }
 // Also drop a run's derived records so a deleted run fully disappears (no orphan
-// evaluation / verdict / unrunnable marker keyed by the same run/setup key).
+// evaluation / verdict / xai-narrative / unrunnable marker keyed by the same run/setup key).
 async function deleteRelatedRunRecords(key, setupKey) {
-  const types = [manifest.recordType + '-evaluation', manifest.recordType + '-verdict']
+  const types = [
+    manifest.recordType + '-evaluation',
+    manifest.recordType + '-verdict',
+    manifest.recordType + '-xai-narrative',
+  ]
   for (const type of types) {
     try {
       await window.OverseerBridge.deleteData({ type, key })
@@ -7200,9 +7292,18 @@ function setupHypotheses() {
   }
   const addToggle = byId('hypothesis-add-toggle')
   if (addToggle) {
+    addToggle.innerHTML = iconPlusSvg(13) + iconHypothesisSvg(14)
+    addToggle.setAttribute('data-help', 'Add a hypothesis manually.')
     addToggle.addEventListener('click', () => {
       const form = byId('hypothesis-form')
       toggleHypothesisForm(!!(form && form.hidden))
+    })
+  }
+  const minRunsInput = byId('hypothesis-min-runs')
+  if (minRunsInput) {
+    minRunsInput.addEventListener('change', async () => {
+      await saveHypothesisMinRuns(minRunsInput.value)
+      await renderHypotheses()
     })
   }
   const form = byId('hypothesis-form')
@@ -7226,6 +7327,10 @@ function setupHypotheses() {
       true,
     )
     body.addEventListener('click', (event) => {
+      // A control inside a <summary> must not toggle the card — it runs its own action.
+      if (event.target.closest('summary') && event.target.closest('[data-action]')) {
+        event.preventDefault()
+      }
       const seedBtn = event.target.closest('button[data-action="import-hyp-seeds"]')
       if (seedBtn) {
         importSeedHypotheses()
@@ -7248,7 +7353,13 @@ function setupHypotheses() {
       if (action === 'run') runHypothesisCampaign(id, btn)
       else if (action === 'view-runs') viewHypothesisRuns(id)
       else if (action === 'override') {
-        hypothesisOverrideId = hypothesisOverrideId === id ? null : id
+        // Open the inline override form AND expand the card so it's visible from the collapsed state.
+        if (hypothesisOverrideId === id) {
+          hypothesisOverrideId = null
+        } else {
+          hypothesisOverrideId = id
+          hypothesisExpanded.add(id)
+        }
         renderHypotheses()
       } else if (action === 'save-override') saveHypothesisOverride(id)
       else if (action === 'clear-override') clearHypothesisOverride(id)
@@ -7302,6 +7413,7 @@ function paperVerdict(paper) {
     hypothesesCache,
     runsCache,
     objectiveDirection(),
+    hypothesisMinRuns,
   )
 }
 // The linked hypotheses, each as a row (title + its live verdict badge + Unlink), with the add/link picker.
@@ -7424,6 +7536,15 @@ function paperAssumptionChips(a) {
     chips.push(`<span class="paper-chip">retrain: ${escapeHtml(String(a.retrainCadence))}</span>`)
   return chips.length ? `<div class="paper-chips">${chips.join('')}</div>` : ''
 }
+// Chip showing how many hypotheses the paper links — highlighted when none, so an empty paper stands out.
+function paperHypCountChipHtml(paper) {
+  const n = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds.length : 0
+  const label = `${n} hypoth${n === 1 ? 'esis' : 'eses'}`
+  const help = n
+    ? 'Hypotheses linked to this paper — the verdict rolls up from them.'
+    : 'No hypotheses yet — Suggest, Add, or Link one so this paper can be judged.'
+  return `<span class="hyp-count-chip${n ? '' : ' is-empty'}"${helpAttr(help)}>${iconHypothesisSvg(12)} ${label}</span>`
+}
 function paperCardHtml(paper) {
   const verdict = paperVerdict(paper)
   const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}">${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
@@ -7436,26 +7557,32 @@ function paperCardHtml(paper) {
     .join(' · ')
   const id = escapeHtml(paper.id)
   const linkedCount = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds.length : 0
-  return `<article class="paper-card" data-id="${id}">
-    <div class="card-head card-head-row">
-      <div>
-        <h3>${title} ${badge}</h3>
-        ${meta ? `<p class="card-sub">${meta}</p>` : ''}
-      </div>
-      <div class="head-actions">
-        <button type="button" data-action="suggest-hyp" data-id="${id}" class="ghost-btn"${helpAttr('Let an LLM match existing hypotheses to this paper and suggest new ones — all auto-linked.')}>Suggest hypotheses</button>
-        <button type="button" data-action="add-hyp" data-id="${id}" class="ghost-btn"${helpAttr('Add a hypothesis manually and link it to this paper.')}>Add hypothesis</button>
-        <button type="button" data-action="link-existing" data-id="${id}" class="ghost-btn"${helpAttr('Link an existing hypothesis to this paper.')}>Link existing</button>
-        ${linkedCount ? `<button type="button" data-action="replicate" data-id="${id}" class="ghost-btn"${helpAttr('Launch every linked hypothesis’s spec.')}>Replicate</button>` : ''}
-        <button type="button" class="icon-btn" data-action="edit" data-id="${id}" title="Edit" aria-label="Edit">✎</button>
-        <button type="button" class="icon-btn icon-btn-danger" data-action="delete" data-id="${id}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
-      </div>
+  const open = paperExpanded.has(paper.id) ? ' open' : ''
+  // Icon-only action buttons (verb + hypothesis glyph), shown collapsed AND expanded; tooltips on hover.
+  const actions =
+    `<button type="button" class="card-btn combo" data-action="suggest-hyp" data-id="${id}"${helpAttr('Suggest hypotheses — an LLM matches existing ones to this paper and proposes new ones, all auto-linked.')}>${iconLightbulbSvg(13)}${iconHypothesisSvg(14)}</button>` +
+    `<button type="button" class="card-btn combo" data-action="add-hyp" data-id="${id}"${helpAttr('Add a hypothesis manually and link it to this paper.')}>${iconPlusSvg(13)}${iconHypothesisSvg(14)}</button>` +
+    `<button type="button" class="card-btn combo" data-action="link-existing" data-id="${id}"${helpAttr('Link an existing hypothesis to this paper.')}>${iconLinkSvg(13)}${iconHypothesisSvg(14)}</button>` +
+    (linkedCount
+      ? `<button type="button" class="card-btn" data-action="replicate" data-id="${id}"${helpAttr('Replicate — launch every linked hypothesis’s spec.')}>${iconRunSvg(15)}</button>`
+      : '') +
+    `<button type="button" class="card-btn" data-action="edit" data-id="${id}"${helpAttr('Edit this paper.')}>${iconEditSvg(15)}</button>` +
+    `<button type="button" class="card-btn card-btn-danger" data-action="delete" data-id="${id}"${helpAttr('Delete this paper.')}>${iconDeleteSvg()}</button>`
+  return `<details class="paper-card" data-id="${id}"${open}>
+    <summary class="paper-summary">
+      ${badge}
+      ${paperHypCountChipHtml(paper)}
+      <span class="paper-summary-title">${title}</span>
+      <span class="card-actions">${actions}</span>
+    </summary>
+    <div class="paper-body">
+      ${meta ? `<p class="card-sub">${meta}</p>` : ''}
+      ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
+      ${paperAssumptionChips(paper.assumptions)}
+      ${paperLinkedHypothesesHtml(paper)}
+      ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
     </div>
-    ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
-    ${paperAssumptionChips(paper.assumptions)}
-    ${paperLinkedHypothesesHtml(paper)}
-    ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
-  </article>`
+  </details>`
 }
 function paperFilterBarHtml() {
   const opts = ['all', 'untested', 'holds-up', 'fluff']
@@ -7816,7 +7943,22 @@ function setupPapers() {
   }
   const body = byId('papers-body')
   if (body) {
+    // Track expand/collapse so it survives re-render. The `toggle` event doesn't bubble — capture it.
+    body.addEventListener(
+      'toggle',
+      (event) => {
+        const d = event.target
+        if (!d || !d.classList || !d.classList.contains('paper-card') || !d.dataset.id) return
+        if (d.open) paperExpanded.add(d.dataset.id)
+        else paperExpanded.delete(d.dataset.id)
+      },
+      true,
+    )
     body.addEventListener('click', (event) => {
+      // A control inside a <summary> must not toggle the card — it runs its own action.
+      if (event.target.closest('summary') && event.target.closest('[data-action]')) {
+        event.preventDefault()
+      }
       const filterBtn = event.target.closest('button[data-verdict]')
       if (filterBtn) {
         paperVerdictFilter = filterBtn.dataset.verdict
@@ -7836,12 +7978,21 @@ function setupPapers() {
       else if (action === 'replicate') replicatePaper(id)
       else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id, btn)
       else if (action === 'add-hyp') {
-        paperSubform =
-          paperSubform && paperSubform.paperId === id ? null : { paperId: id, mode: 'add' }
+        // Open the add sub-form AND expand the card so it's visible from the collapsed state.
+        if (paperSubform && paperSubform.paperId === id && paperSubform.mode === 'add') {
+          paperSubform = null
+        } else {
+          paperSubform = { paperId: id, mode: 'add' }
+          paperExpanded.add(id)
+        }
         renderPapers()
       } else if (action === 'link-existing') {
-        paperSubform =
-          paperSubform && paperSubform.paperId === id ? null : { paperId: id, mode: 'link' }
+        if (paperSubform && paperSubform.paperId === id && paperSubform.mode === 'link') {
+          paperSubform = null
+        } else {
+          paperSubform = { paperId: id, mode: 'link' }
+          paperExpanded.add(id)
+        }
         renderPapers()
       } else if (action === 'create-hyp') createPaperHypothesis(paperId)
       else if (action === 'do-link-existing') linkExistingHypothesisToPaper(paperId)
@@ -8194,7 +8345,7 @@ function booleanLeverHtml(key, spec) {
     </label>
   </div>`
 }
-// Human-readable "applies only when reward_model = combo_all_noop" note for a conditional lever.
+// Human-readable "applies only when reward_model = combo_unified" note for a conditional lever.
 function appliesWhenLabel(cond) {
   return (
     'Applies only when ' +
@@ -9696,7 +9847,7 @@ function setupTabs() {
     btn.className = 'tab-btn'
     btn.dataset.tab = tab.id
     btn.setAttribute('role', 'tab')
-    btn.innerHTML = `<span class="tab-label">${escapeHtml(tab.label)}</span><span class="tab-live" aria-hidden="true"></span>`
+    btn.innerHTML = `${tab.icon ? `<span class="tab-icon" aria-hidden="true">${tab.icon(14)}</span>` : ''}<span class="tab-label">${escapeHtml(tab.label)}</span><span class="tab-live" aria-hidden="true"></span>`
     btn.addEventListener('click', () => showTab(tab.id))
     bar.append(btn)
   }

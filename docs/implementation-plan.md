@@ -74,9 +74,17 @@ old `-model` records auto-migrate on open). **Papers are containers** of N hypot
 linked back), manual **Add hypothesis**, **Link existing**, and **Suggest hypotheses** (on an existing card —
 `suggestPaperHypotheses` tool + `suggest-paper-hypotheses` activity: the LLM matches the paper against
 existing hypotheses, links the fits, AND proposes new ones, all auto-linked + spec-hash-deduped). The paper's
-verdict rolls up from them. Hypothesis cards are full-width **collapsible** rows (crucial info collapsed;
-expand for spec/measured/transitions/actions; expansion survives re-render). Pure decision logic lives in
-node-tested `viewer/hypothesis.js`. Pending:
+verdict rolls up from them. **Both** hypothesis and paper cards are full-width **collapsible** rows
+(crucial info — verdict badge + run-count/linked-hypothesis chip + icon action buttons — in the summary;
+detail expands; expansion survives re-render). Action buttons are icon-only with hover callouts (verb +
+hypothesis-flask glyph: Suggest=lightbulb, Add=plus, Link=chain, Launch/Replicate=play, plus edit/delete);
+the Hypotheses tab + Propose button carry the flask glyph. A per-project **min-runs-to-judge** setting (top
+of the Hypotheses tab) gates the verdict — below it a hypothesis stays `untested` (one run can't prove a
+claim) and the run-chip flags "n/min"; Launch-more stays enabled to reach it. Pure decision logic lives in
+node-tested `viewer/hypothesis.js`. Every LLM ask for hypotheses (propose / paper-extract / suggest) shares
+a `HYPOTHESIS_RULE` demanding a FALSIFIABLE test-claim and forbidding pure data-gathering ("more seeds to
+establish a trustworthy interval" — that's the min-runs gate + xAI tab); a `looksLikeDataGathering` backstop
+in `coerceHypothesisItems` drops such items whichever prompt produced them. Pending:
 
 - Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
   (find → web-verify → synthesize). Deferred.
@@ -98,14 +106,40 @@ The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is 
 
 - **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
   clean but has NOT been eyeballed in the running app — the one open verification.
-- **Configuration-space map (t-SNE / projection) + reward normalization.** Next major xAI push (AFTER the
-  current batch). Two parts the user will spec in detail: (1) a t-SNE/UMAP-style 2-D map of the
-  CONFIGURATION space (runs positioned by config similarity, coloured by a criterion) so neighbourhoods +
-  gradients are visible the way the latent map shows the policy's state space; (2) NORMALISING some
-  signals — especially the model REWARDS — so cross-run/cross-setup comparison isn't distorted by raw scale.
-  Open questions to resolve when specced: which projection (deterministic vs t-SNE seeded), what distance
-  over mixed numeric/categorical levers, and exactly which quantities get normalised + against what
-  baseline. Deterministic + parity-mirrored like the rest of the engine.
+- **Configuration-space exploration push (N-D map) — build order.** Goal: from logged runs, see how the
+  config knobs combine + steer toward the optimum. Verdict from the deep-research: the "which way to explore"
+  intelligence belongs to a SURROGATE + ACQUISITION + SENSITIVITY stack (which the xAI engine already
+  half-owns), NOT to t-SNE — t-SNE is non-invertible (no 2-D→config map), distance/density/global-structure
+  distorting, and perplexity-fragile, so it can't yield a navigation direction or honest importance/coupling.
+  Don't try to grid-FILL an N-D space (curse of dimensionality); model it from sparse smart samples. Steps,
+  in order:
+  1. **Reward reconciliation → `combo_unified` (the enabler). DONE.** The categorical reward names are now
+     ONE `combo_unified` per-step weighted sum with continuous weight levers
+     (`combo_sell`/`combo_buy`/`combo_positionprofitpercentage`/`combo_direct`/`combo_noaction`/
+     `combo_wrongaction`/`combo_fee_penalty`/`combo_noop_penalty`), proven by byte-identical per-step
+     equivalence tests (`combo_all`/`_fee`/`_noop` any weights, `combo_all2` under `combo_noaction=0`, and
+     `profit_percentage_direct` ≡ `combo_direct=1` with the rest 0). `combo` (reward-side look-ahead) and
+     `differential_sharpe` removed; the named variants stay in the env only for byte-reproduction of old runs.
+     Migration mechanism re-added as a generic, idempotent, manifest-declared `migrations` engine
+     (`applyMigrationRules` + `ModelTrainerTools.migrateTrainingRuns` → backend `migrate-runs` activity →
+     Versions-tab "Migrate runs" button), rewriting every stored run AND pending-queue config in place.
+     Runs can't start un-migrated: `runTrainingCampaign` migrates each spec before planning
+     (`migrateExperimentSpec`), and a non-blocking backend boot sweep (`sweepTrainerMigrations`, gated like
+     the live-data scheduler) rolls all registered training projects' history + queue forward before the
+     viewer pumps its queue (whose pump is also held while a migration is in flight). Risk-adjustment (the
+     old `differential_sharpe` intent) can return LATER as a separate reward FAMILY facet.
+  2. **Surrogate acquisition = "next experiment toward the optimum."** Put an Expected-Improvement / UCB
+     acquisition on the existing seeded RF surrogate so the recommender actively climbs (sample-efficient),
+     not just fills factorial gaps. This is the real "which way to explore." Deterministic (seeded).
+  3. **fANOVA / Sobol importance + coupling** — main effects → which params matter (reject the flat ones);
+     interactions → which are coupled. Mostly already in the engine (fANOVA + interaction grid); surface the
+     "this dim's importance ≈ 0 across the explored range → stop sweeping it" call.
+  4. **PCA projection coloured by performance — a VISUALISATION/intuition layer only**, honestly labelled
+     ("a 2-D sketch for spotting clusters/outliers, NOT a map you navigate"). Prefer PCA (deterministic,
+     invertible, interpretable axes) over t-SNE; UMAP optional. t-SNE skipped or clearly caveated.
+  - Open follow-on: reward/metric NORMALISATION so cross-run/cross-setup comparison isn't distorted by raw
+    scale (which quantities, against what baseline) — fold into the surrogate/criterion layer when specced.
+    Deterministic + parity-mirrored like the rest of the engine. (Cited deep-research report pending.)
 - **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
   sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
   (attn-ppo only); generative counterfactual states (needs a GAN).

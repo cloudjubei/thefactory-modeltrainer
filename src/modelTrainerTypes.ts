@@ -143,6 +143,39 @@ export interface TrainerManifest {
   pipelineVersion?: string
   /** Per-version changelog (newest first), so the hub can show what each version changed. */
   pipelineChangelog?: PipelineVersionEntry[]
+  /**
+   * One-time, idempotent record migrations (see {@link TrainerMigrationRule}). The host's
+   * `migrate-runs` activity applies them to every stored run (and pending-queue) config so a
+   * config-shape change — e.g. collapsing several reward-model names into one parameterised model —
+   * can be rolled forward across the whole history without re-running anything. Applying twice is a
+   * no-op (rules only match the OLD shape).
+   */
+  migrations?: TrainerMigrationRule[]
+}
+
+/**
+ * A single declarative migration rule. A record is handled by the FIRST rule it matches — `match`
+ * fields must all be PRESENT and loosely equal (so JSON `0` matches a stored `0`/`"0"`), and `matchNot`
+ * fields must all be PRESENT and loosely UNEQUAL (so a record missing the field is never matched by a
+ * `matchNot` clause — runs without that key are left alone). A rule needs at least one of `match` /
+ * `matchNot`; one with neither matches nothing.
+ *
+ * A matched rule either REWRITES the record (`set` + `keepOrDefault`: the new config is
+ * `{...config, ...set}`, then each `keepOrDefault` key keeps the config's current value when present
+ * else the default) or, when `delete` is true, REMOVES the record entirely. When no rule matches, the
+ * record is left untouched — so applying the rules twice is a no-op (idempotency).
+ */
+export interface TrainerMigrationRule {
+  /** Field/value pairs the config must all have AND equal for this rule to fire. */
+  match?: Record<string, unknown>
+  /** Field/value pairs the config must all have AND NOT equal (a negative match, e.g. "not combo_unified"). */
+  matchNot?: Record<string, unknown>
+  /** Field values written unconditionally onto the migrated config (rewrite rules only). */
+  set?: Record<string, unknown>
+  /** Field → fallback: keep the config's current value when present, else write this default. */
+  keepOrDefault?: Record<string, unknown>
+  /** When true, a matched record is DELETED rather than rewritten (irreversible). */
+  delete?: boolean
 }
 
 /** One entry in a project's pipeline changelog. */
@@ -1198,6 +1231,36 @@ export interface GetRunDataResult {
   error?: string
 }
 
+export interface MigrateTrainingRunsParams {
+  /** The HOST project scope the run + queue records live in. */
+  scope: string
+  projectRoot: string
+  /** Pre-loaded manifest (carries `recordType` + `migrations`); read from disk when omitted. */
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /**
+   * Record type of the host's pending-run queue (e.g. `trainer-queue`). When given, each queued
+   * train item's `params.spec.fixed` is migrated too, so pending runs launch under the new shape.
+   * Omit to migrate only completed run records.
+   */
+  queueRecordType?: string
+  /** Fired after each record rewrite OR deletion so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface MigrateTrainingRunsResult {
+  recordType: string
+  /** Completed run records examined / rewritten / deleted (a delete rule removes the record). */
+  examinedRuns: number
+  migratedRuns: number
+  deletedRuns: number
+  /** Pending-queue records examined / rewritten / deleted (0 when no `queueRecordType` was given). */
+  examinedQueue: number
+  migratedQueue: number
+  deletedQueue: number
+}
+
 export interface GetRunXaiParams {
   scope: string
   runKey: string
@@ -1289,4 +1352,11 @@ export interface ModelTrainerTools {
    * them). Read-only.
    */
   getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult>
+  /**
+   * Apply the manifest's one-time `migrations` to every stored run config (and, when a
+   * `queueRecordType` is given, every pending-queue item's `spec.fixed`), rewriting each in place and
+   * recomputing its `setupKey`. Idempotent — rules only match the old config shape, so re-firing is a
+   * no-op. Returns how many records were examined vs actually changed.
+   */
+  migrateTrainingRuns(params: MigrateTrainingRunsParams): Promise<MigrateTrainingRunsResult>
 }
