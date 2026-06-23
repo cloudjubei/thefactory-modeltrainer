@@ -6582,23 +6582,61 @@ function hypothesisCampaignHtml(h, liveIds) {
     <p class="card-sub">${completed} completed${failed ? ` · ${failed} failed` : ''} · finished ${escapeHtml(formatWhen(c.finishedAt))}</p>
   </div>`
 }
-// Claimed (if any) vs the measured read from the matching runs — mirrors the old model card table.
-function hypothesisClaimedVsMeasuredHtml(h) {
+// The EVIDENCE behind a hypothesis's verdict: a plain-language basis line (on what grounds it's
+// proven/disproved/untested), the source's claimed metrics if any, and the list of matching runs (each
+// with its objective + return-vs-hold) with a link that opens the Runs tab filtered to exactly them.
+function hypothesisEvidenceHtml(h) {
+  const runs = hypothesisMatchedRuns(h)
+  const id = escapeHtml(h.id)
   const claimed = h.claimedMetrics && Object.keys(h.claimedMetrics).length ? h.claimedMetrics : null
-  const m = hypothesisMeasured(h)
-  if (!claimed && !m) return ''
-  const claimedBits = claimed
-    ? Object.entries(claimed)
-        .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(String(v))}`)
-        .join(' · ')
-    : '—'
-  const measuredBits = m
-    ? `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(m.objective))} · ${m.runs} run${m.runs === 1 ? '' : 's'}${m.beatsHold === null ? '' : m.beatsHold ? ' · beats hold' : ' · trails hold'}`
-    : 'no matching runs yet'
-  return `<table class="kv-table paper-cvm"><tbody>
-    <tr><th>claimed</th><td>${claimedBits}</td></tr>
-    <tr><th>measured</th><td>${measuredBits}</td></tr>
-  </tbody></table>`
+  const claimedRow = claimed
+    ? `<p class="card-sub hyp-claimed">Source claims: ${escapeHtml(
+        Object.entries(claimed)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(' · '),
+      )}</p>`
+    : ''
+  if (!runs.length) {
+    return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No matching runs yet — verdict stays <strong>untested</strong>. Launch runs to test it.</p></div>`
+  }
+  const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
+  const rows = runs
+    .map((r) => ({
+      key: r.key,
+      obj: Number(r.summary && r.summary.objective),
+      vh: runMetricValue(r, 'return_vs_hold_pct'),
+    }))
+    .sort((a, b) => (Number.isFinite(b.vh) ? b.vh : -Infinity) - (Number.isFinite(a.vh) ? a.vh : -Infinity))
+  const vhVals = rows.map((r) => r.vh).filter(Number.isFinite)
+  const beat = vhVals.filter((v) => v > 0).length
+  const verdict = effectiveHypothesisVerdict(h)
+  let basis
+  if (!vhVals.length) {
+    basis = `${rows.length} matching run${rows.length === 1 ? '' : 's'}, but none report return-vs-hold — can't judge against buy-and-hold yet.`
+  } else if (verdict === 'proven') {
+    basis = `<strong>Proven</strong> — ${beat} of ${rows.length} matching runs beat buy-and-hold OOS (best ${pct(Math.max(...vhVals))} vs hold).`
+  } else if (verdict === 'disproved') {
+    basis = `<strong>Disproved</strong> — 0 of ${rows.length} matching runs beat buy-and-hold OOS (best ${pct(Math.max(...vhVals))} vs hold).`
+  } else if (rows.length < hypothesisMinRuns) {
+    basis = `<strong>Untested</strong> — only ${rows.length}/${hypothesisMinRuns} runs needed to judge (best ${pct(Math.max(...vhVals))} vs hold so far). Launch more.`
+  } else {
+    basis = `<strong>Untested</strong> — ${rows.length} runs, best ${pct(Math.max(...vhVals))} vs hold.`
+  }
+  const shown = rows.slice(0, 6)
+  const runRows = shown
+    .map(
+      (r) =>
+        `<tr><td><code>${escapeHtml(shortKey(r.key))}</code></td><td>${Number.isFinite(r.obj) ? escapeHtml(formatObjective(r.obj)) : '—'}</td><td>${Number.isFinite(r.vh) ? escapeHtml(pct(r.vh)) : '—'}</td></tr>`,
+    )
+    .join('')
+  const more = rows.length > shown.length ? `<p class="card-sub">+${rows.length - shown.length} more</p>` : ''
+  return `<div class="hyp-evidence">
+    ${claimedRow}
+    <p class="card-sub hyp-basis">${basis}</p>
+    <table class="kv-table hyp-runs"><thead><tr><th>run</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${runRows}</tbody></table>
+    ${more}
+    <button type="button" class="ghost-btn" data-action="view-runs" data-id="${id}"${helpAttr('Open the Runs tab filtered to exactly these matching runs.')}>View ${rows.length} run${rows.length === 1 ? '' : 's'} in Runs</button>
+  </div>`
 }
 // The history of auto-verdict flips — each names the runs new since the prior snapshot and the read.
 function transitionsHtml(transitions) {
@@ -6682,7 +6720,7 @@ function hypothesisCardHtml(h, liveIds) {
     <div class="hypothesis-body">
       ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
       ${specSummaryHtml(h.spec)}
-      ${hypothesisClaimedVsMeasuredHtml(h)}
+      ${hypothesisEvidenceHtml(h)}
       ${overrideNote}
       ${transitionsHtml(h.transitions)}
       ${linkedPaperChipsHtml(h)}
@@ -6693,94 +6731,22 @@ function hypothesisCardHtml(h, liveIds) {
     </div>
   </details>`
 }
-function hypothesisGroupHtml(verdict, items, liveIds) {
+// Each verdict view is its own collapsible, internally-scrolling section (accordion: only one open at a
+// time, tracked by `hypothesisOpenSection`), so all three views stay visible at once and the open one
+// scrolls within rather than pushing the page.
+function hypothesisSectionHtml(verdict, items, liveIds) {
   const label = HYPOTHESIS_VERDICT_LABEL[verdict] || verdict
+  const open = hypothesisOpenSection === verdict ? ' open' : ''
   const cards = items.length
     ? `<div class="hypothesis-cards">${items.map((h) => hypothesisCardHtml(h, liveIds)).join('')}</div>`
     : '<p class="card-sub">None.</p>'
-  return `<section class="hypothesis-group">
-    <h3>${escapeHtml(label[0].toUpperCase() + label.slice(1))} <span class="group-count">${items.length}</span></h3>
-    ${cards}
-  </section>`
-}
-function hypothesisFilterBarHtml(visible) {
-  const btns = ['all', ...HYPOTHESIS_VERDICTS]
-    .map((v) => {
-      const label = v === 'all' ? 'all' : HYPOTHESIS_VERDICT_LABEL[v]
-      const count =
-        v === 'all'
-          ? visible.length
-          : visible.filter((h) => effectiveHypothesisVerdict(h) === v).length
-      return `<button type="button" class="paper-filter-btn${hypothesisVerdictFilter === v ? ' is-active' : ''}" data-hyp-verdict="${escapeHtml(v)}">${escapeHtml(label)} (${count})</button>`
-    })
-    .join('')
-  return `<div class="paper-filter">${btns}</div>`
-}
-// Starter hypotheses the manifest ships (plus legacy models[] converted to {fixed: match} specs);
-// dedup is by spec hash (async), so a seed already present as a migrated/manual hypothesis isn't re-offered.
-function manifestHypothesisSeeds() {
-  const out = []
-  for (const h of (manifest && manifest.hypotheses) || []) if (h && h.spec) out.push(h)
-  for (const m of (manifest && manifest.models) || []) {
-    if (m && (m.spec || m.match))
-      out.push({
-        ...m,
-        title: m.name || m.modelName || m.title,
-        spec: m.spec || { fixed: m.match || {} },
-      })
-  }
-  return out
-}
-async function pendingSeedHypotheses() {
-  const seeds = manifestHypothesisSeeds()
-  if (!seeds.length) return []
-  const have = new Set(hypothesesCache.map((h) => h.id))
-  const pending = []
-  for (const s of seeds) {
-    if (!s.spec) continue
-    const id = await hashTrainingConfig(normalizeSpec(s.spec))
-    if (!have.has(id)) pending.push({ seed: s, id })
-  }
-  return pending
-}
-function pendingSeedHypothesesBannerHtml(pending) {
-  if (!pending.length) return ''
-  return `<div class="paper-seed-banner">${pending.length} starter hypothes${pending.length === 1 ? 'is' : 'es'} from the manifest aren’t in your library yet. <button type="button" class="ghost-btn" data-action="import-hyp-seeds">Import ${pending.length}</button></div>`
-}
-async function importSeedHypotheses() {
-  const pending = await pendingSeedHypotheses()
-  if (!pending.length) return
-  try {
-    const now = nowIso()
-    for (const { seed, id } of pending) {
-      await putHypothesis({
-        id,
-        title: seed.title || 'Hypothesis',
-        rationale: seed.rationale || '',
-        spec: normalizeSpec(seed.spec),
-        status: HYPOTHESIS_VERDICTS.includes(seed.status) ? seed.status : 'untested',
-        verdictSource: seed.status && seed.status !== 'untested' ? 'manual' : 'auto',
-        claimedMetrics: seed.claimedMetrics,
-        tags: seed.tags,
-        source: seed.source || 'human',
-        createdAt: now,
-        updatedAt: now,
-      })
-    }
-  } catch {
-    setStatusLine(
-      'hypotheses-status',
-      'Could not import starter hypotheses — please try again.',
-      true,
-    )
-    return
-  }
-  setStatusLine(
-    'hypotheses-status',
-    `Imported ${pending.length} hypothes${pending.length === 1 ? 'is' : 'es'}.`,
-    false,
-  )
-  await renderHypotheses()
+  return `<details class="hypothesis-section" data-section="${escapeHtml(verdict)}"${open}>
+    <summary class="hypothesis-section-head">
+      <span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(label[0].toUpperCase() + label.slice(1))}</span>
+      <span class="group-count">${items.length}</span>
+    </summary>
+    <div class="hypothesis-section-body">${cards}</div>
+  </details>`
 }
 // Re-evaluate every hypothesis against the current runs, persisting only material changes (a new
 // matched-run set OR an auto-verdict flip), recording a transition on each flip. Runs on tab open + on
@@ -7097,6 +7063,18 @@ function viewHypothesisRuns(id) {
   if (!runs.length) return
   runsFilterKeys = new Set(runs.map((r) => r.key))
   runsFilterLabel = h.title || shortKey(id)
+  showTab('runs')
+}
+// Open the Runs tab drilled to the analysed runs whose config matches EVERY (lever, value) pair — the
+// runs behind an xAI fANOVA value or interaction cell. No-op when the pairs name no actual run (e.g. a
+// surrogate-predicted cell). `pairs` is an array of [lever, value]; `label` becomes the runs chip.
+function viewRunsByLeverValues(pairs, label) {
+  const matches = xaiRuns().filter((r) =>
+    pairs.every(([lever, value]) => String((r.config || {})[lever]) === String(value)),
+  )
+  if (!matches.length) return
+  runsFilterKeys = new Set(matches.map((r) => r.key))
+  runsFilterLabel = label
   showTab('runs')
 }
 // Launch the accepted hypothesis as a training campaign, exactly like the

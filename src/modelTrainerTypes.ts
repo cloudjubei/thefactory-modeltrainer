@@ -144,11 +144,11 @@ export interface TrainerManifest {
   /** Per-version changelog (newest first), so the hub can show what each version changed. */
   pipelineChangelog?: PipelineVersionEntry[]
   /**
-   * One-time, idempotent record migrations (see {@link TrainerMigrationRule}). The host's
-   * `migrate-runs` activity applies them to every stored run (and pending-queue) config so a
-   * config-shape change — e.g. collapsing several reward-model names into one parameterised model —
-   * can be rolled forward across the whole history without re-running anything. Applying twice is a
-   * no-op (rules only match the OLD shape).
+   * One-time, idempotent record migrations (see {@link TrainerMigrationRule}). The host's boot-time
+   * migration sweep applies them via {@link ModelTrainerTools.migrateTrainingRuns} to every stored run
+   * (and pending-queue) config so a config-shape change — e.g. collapsing several reward-model names
+   * into one parameterised model, or pruning retired ones — is rolled forward across the whole history
+   * without re-running anything. Applying twice is a no-op (rules only match the OLD shape).
    */
   migrations?: TrainerMigrationRule[]
 }

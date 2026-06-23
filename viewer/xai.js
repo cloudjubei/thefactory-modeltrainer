@@ -714,6 +714,8 @@
         lever: lv.name,
         importance: varianceOf(marginals) / totalVar,
         values: values.length,
+        // The distinct observed values themselves, so the viewer can link each to its runs.
+        valueList: values,
       })
     })
     return out.sort(function (a, b) {
