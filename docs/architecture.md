@@ -130,8 +130,29 @@ project by its manifest's `recordType`.
   `proposeTrainingHypotheses`, manual add, paper Extract, migrated model architecture) dedupe.
   Pure decision logic lives in node-tested `viewer/hypothesis.js` (the `migrate.js`/`xai.js`
   dual-loaded precedent). **Papers** are containers of `hypothesisIds[]` (Extract / add / link),
-  verdict rolled up; the former **Models** tab is gone — a model architecture is a hypothesis whose
-  `spec.fixed` pins the levers (manifest `hypotheses[]`; old `-model` records auto-migrate on open).
+  verdict rolled up. A model architecture can still BE a hypothesis (its `spec.fixed` pins
+  `model_name`), but cataloguing — "what models do we have, what do they need" — is its own concern,
+  the **Models catalog** below.
+- **Models are the catalog — an aggregating layer over runs, papers and hypotheses**: a
+  `<recordType>-model` record (key = `slug`) names a model architecture/algorithm the project can
+  train. It OWNS its runs by binding one or more `model_name` lever values (`modelNames`): a run
+  trains it iff its `config.model_name` is one of them, so its status (`proposed` / `implemented` /
+  `failing`) AUTO-derives from those runs (`deriveModelStatus` — proposed when unimplemented +
+  unrun, implemented when lever-bound or `implPath`-backed, failing when every matching run is
+  health-flagged) just like a hypothesis verdict, with `needs-improvement` / `deprecated` as manual
+  pins. It LINKS the papers that introduce/improve it (`paperIds`) and the hypotheses that test it
+  (`hypothesisIds`); the viewer unions both link directions. Pure decision logic lives in node-tested
+  `viewer/models.js`; the LLM-facing build logic (slug/category/humanize heuristics, scan/analyse
+  prompt-builders + coercers) lives in `modelTrainerUtils.ts`. Three population paths: manifest
+  `models[]` SEEDS (imported once by slug, parallel to `papers[]`/`hypotheses[]`); **Scan Project**
+  (`scanProjectModels` → `scan-models` activity: discovers `model_name` choices the catalog doesn't
+  cover, heuristic-first, LLM-enriched — the engine reads the manifest only, never model code); and
+  the Papers tab's **Find models** (`analyzePaperModels` → `analyze-paper-models` activity: an LLM
+  links a paper to the catalog models it is about AND names the ones it proposes with no entry yet —
+  returned, not persisted, so the card offers a one-click "Add to catalog" that writes a `proposed`
+  record). "Discuss" seeds a project chat (the `discussTopic` seam, like a run) whose seed adapts to
+  status — implement (proposed), fix (failing), or improve — so an agent can be put to work on any
+  model. The engine stays domain-oblivious: a model is data + the `model_name` binding.
 - **Datasets/environments are user-managed bundles with a settable default**: levers tagged
   `scope: "dataset"`/`"environment"` aren't model knobs — they're managed in their own tabs as
   named `{recordType}-dataset`/`-environment` records (`{id, name, settings, default}`). One record

@@ -39,5 +39,11 @@ for (const crit of [MAX, MIN]) {
   eq(ts.fanovaImportances(sTs,runs,crit), mirror.fanovaImportances(sJs,runs,crit), 'fanova '+crit.key)
   eq(ts.ablationPath(sTs,runs,crit), mirror.ablationPath(sJs,runs,crit), 'ablation '+crit.key)
   eq(ts.interactionGrid(sTs,runs,crit,'lr','batch_size'), mirror.interactionGrid(sJs,runs,crit,'lr','batch_size'), 'interaction '+crit.key)
+  // Phase 2/3/4: acquisition stats, coupling, and the PCA projection (rng/order sensitive).
+  for (const cfg of [{lr:0.2,batch_size:128},{lr:0.5,batch_size:128}])
+    eq(ts.predictConfigStats(sTs,cfg), mirror.predictConfigStats(sJs,cfg), 'predictStats '+crit.key+' '+JSON.stringify(cfg))
+  eq(ts.expectedImprovement(94.8,78.9,26.4,crit.direction), mirror.expectedImprovement(94.8,78.9,26.4,crit.direction), 'EI '+crit.key)
+  eq(ts.leverCouplings(sTs,runs,crit), mirror.leverCouplings(sJs,runs,crit), 'coupling '+crit.key)
+  eq(ts.pcaProjection(runs,crit), mirror.pcaProjection(runs,crit), 'pca '+crit.key)
 }
 console.log(fails===0 ? 'PARITY OK — viewer mirror == TS engine across all functions + criteria' : (fails+' MISMATCHES'))

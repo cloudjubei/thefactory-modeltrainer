@@ -42,10 +42,18 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 - **Run the Exp campaigns.** Exp 6–15 on the 1h winner — walk-forward robustness, shorting, vol-target,
   equity-path rewards, fidelity stack, obs-squash, **Exp 12 exit-mechanic sweep (SL × TP × trailing)**,
   **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold)**, **Exp 14 architecture A/B (LSTM vs
-  attn-ppo vs tcn-ppo)**, **Exp 15 no-op-penalty sweep**. Read the cross-window OOS distributions (the
-  By-dataset robustness table), then lock in the first config that clears the bar. (The supervised+rules
-  baseline trades through the unchanged env, so its RunSummary is directly comparable.) Keep RL alive
-  while the other approaches run in parallel.
+  attn-ppo vs tcn-ppo)**, **Exp 15 no-op/wrong-action × reward-scale sweep**. Read the cross-window OOS
+  distributions (the By-dataset robustness table), then lock in the first config that clears the bar. (The
+  supervised+rules baseline trades through the unchanged env, so its RunSummary is directly comparable.)
+  Keep RL alive while the other approaches run in parallel.
+  - **Exp 15 reads the new `blocked_signal_ratio` metric** (summary.py: share of the agent's buy/sell
+    output that was a no-op it couldn't act on; ~0.95 on the current great-return runs). The sweep crosses
+    `combo_noop_penalty` × `combo_sell` × `combo_wrongaction` to test that a penalty drives
+    `blocked_signal_ratio` → 0 WITHOUT collapsing `traded_return`, and that it only bites as `combo_sell`
+    shrinks (a ≤0.5 penalty is washed out at the baked `combo_sell=1000`). If even the favourable cells
+    (low `combo_sell`, high penalty) show no suppression, raise `episodes` next — `episodes=1` may be too
+    few to learn the penalty. NOTE: this only ever SILENCES out-of-position output (pushes it to hold); it
+    cannot make a flat-state signal meaningful — that needs the position-blind objective (Deferred).
 - **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
@@ -62,32 +70,20 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 ### 2. Model-trainer app
 
-**Unified Hypotheses registry** — shipped. Models + Papers + Hypotheses collapsed into ONE primitive: a
-hypothesis is a claim runs prove or disprove. Its `spec` both launches the runs AND identifies them (a run
-is evidence iff its config is consistent with the spec); the verdict (untested/proven/disproved) auto-derives
-from those runs (beats-buy-and-hold OOS), re-checks on settle/tab-open, records which runs flipped it
-(`transitions[]`), is filterable + manually overridable + dismissible. Identity = `hashTrainingConfig(spec)`
-so identical specs dedup across human/llm/paper/migrated sources. The **Models tab is removed** (a model
-architecture = a hypothesis whose `spec.fixed` pins the levers; the 12 seeds migrated to `manifest.hypotheses[]`,
-old `-model` records auto-migrate on open). **Papers are containers** of N hypotheses created three ways —
-**Extract** (the reworked Automatic-Fill: the LLM drafts the paper AND extracts its testable hypotheses,
-linked back), manual **Add hypothesis**, **Link existing**, and **Suggest hypotheses** (on an existing card —
-`suggestPaperHypotheses` tool + `suggest-paper-hypotheses` activity: the LLM matches the paper against
-existing hypotheses, links the fits, AND proposes new ones, all auto-linked + spec-hash-deduped). The paper's
-verdict rolls up from them. **Both** hypothesis and paper cards are full-width **collapsible** rows
-(crucial info — verdict badge + run-count/linked-hypothesis chip + icon action buttons — in the summary;
-detail expands; expansion survives re-render). Action buttons are icon-only with hover callouts (verb +
-hypothesis-flask glyph: Suggest=lightbulb, Add=plus, Link=chain, Launch/Replicate=play, plus edit/delete);
-the Hypotheses tab + Propose button carry the flask glyph. A per-project **min-runs-to-judge** setting (top
-of the Hypotheses tab) gates the verdict — below it a hypothesis stays `untested` (one run can't prove a
-claim) and the run-chip flags "n/min"; Launch-more stays enabled to reach it. Pure decision logic lives in
-node-tested `viewer/hypothesis.js`. Every LLM ask for hypotheses (propose / paper-extract / suggest) shares
-a `HYPOTHESIS_RULE` demanding a FALSIFIABLE test-claim and forbidding pure data-gathering ("more seeds to
-establish a trustworthy interval" — that's the min-runs gate + xAI tab); a `looksLikeDataGathering` backstop
-in `coerceHypothesisItems` drops such items whichever prompt produced them. Pending:
+The **Hypotheses registry**, **Papers library**, and **Models catalog** are built — how they fit lives in
+`docs/architecture.md` (Hypotheses = falsifiable claims runs prove/disprove; Papers = containers of
+hypotheses; Models = the catalog aggregating runs + papers + hypotheses, with `scanProjectModels` /
+`analyzePaperModels` and a Discuss-to-work chat). Pending:
 
 - Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
   (find → web-verify → synthesize). Deferred.
+- **Models catalog — live VISUAL pass in the Overseer.** The Models tab + the Papers "Find models" /
+  add-missing flow are reference-clean and logic-tested but have NOT been eyeballed in the running app
+  (parity is automatic — one embedded viewer across web/desktop/mobile — but the visual/device check is
+  still open).
+- **Per-model launch (optional).** A "Launch" affordance on a model card that prefills the Launch tab with
+  `model_name` fixed — today runs launch from Launch/Hypotheses; the catalog focuses on cataloguing +
+  agent work + chat.
 
 ### 3c. Model architectures (now hypotheses)
 
@@ -200,6 +196,34 @@ host-aware, browsable, concurrency-capped center:
   last opened the app tab → Sidebar app-tab badge, web + mobile).
 - **Run→Activity link.** Needs a browsable per-activity history first; then `activityId`-tag
   eval/verdict records and link into it.
+
+### Position-blind signal model — a SEPARATE objective (always-on correct signal)
+
+The trading line trains a position MANAGER: actions are position-gated, so an out-of-position or
+redundant action (sell while flat, buy while already long) earns ZERO differentiating reward and is
+never shaped — at deterministic eval the policy emits uncontrolled junk there (the `blocked_signal_ratio`
+metric quantifies it; ~0.95 even on great-return runs). Exp 15's penalties can only SILENCE that output
+(push it to hold); they cannot make a flat-state signal MEANINGFUL. A model whose raw per-step output is
+directly consumable as a long/flat(/short) signal — independent of any current position, since we trade
+in percentages so position size is irrelevant — is a **different objective**, planned separately.
+
+- **Mechanism (reuse, don't fork the env).** The env already carries a `buy_sell_signal` reward family
+  (`base_crypto_env.py`) that scores each step's action against the NEXT-step price move regardless of
+  position, and a supervised direction line (`forward_horizon`/`prob_threshold`, logreg/gbm) that predicts
+  next-return direction. The signal model builds on one of these: a per-step forecast reward (every step
+  scored as a prediction, no gate) or a first-class supervised "direction head" whose output IS the signal.
+  Reuses the data provider, feature engineering, SB3 algos, and walk-forward harness.
+- **It needs its own objective + metrics.** Not `traded_return` (gated portfolio return) but SIGNAL
+  QUALITY — precision/recall/coverage of the signal vs realized forward returns, or a signal-following
+  backtest — with its own objective name + direction. Likely its OWN manifest (`trainer-signal.json`),
+  mirroring how the dip/trend prediction line already splits from the trading manifest (model-training-
+  standard §3), rather than overloading the trading manifest with a mode flag.
+- **UI implications (must design up front).** The hub assumes one trading objective everywhere: the
+  single-objective compare, the hypothesis verdict (`beats-buy-and-hold OOS`), the run chart (trade
+  markers), the judge, and the lever picker all bake in `traded_return`. A signal model needs: its own
+  "good" definition + verdict rule, signal-quality run metrics, and a signal-overlay chart (predicted
+  long/flat vs forward return) instead of trade markers. Decide manifest split vs mode early — the verdict
+  + objective plumbing is the bulk of the work, not the model.
 
 ### Multi-asset portfolio / cross-sectional long-short — a SEPARATE project (Phase-B Wave 3)
 

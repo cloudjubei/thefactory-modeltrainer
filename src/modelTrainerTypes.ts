@@ -127,8 +127,8 @@ export interface TrainerManifest {
   }>
   /** Starter approaches/papers the viewer imports into the Papers registry once (keyed by id). */
   papers?: TrainingPaperSeed[]
-  /** Starter hypotheses (incl. model architectures) the viewer imports into the Hypotheses registry once (keyed by spec hash). */
-  hypotheses?: TrainingHypothesisSeed[]
+  /** Starter models the viewer imports into the Models catalog once (keyed by slug id). */
+  models?: TrainingModelSeed[]
   data?: TrainerDataRequirement[]
   resources?: TrainerResources
   /** Reproducible run image (Phase 6 remote runners). */
@@ -618,9 +618,27 @@ export interface AblationPath {
 /** A lever's fANOVA MAIN-effect importance from the surrogate — the variance its marginal explains, in [0,1]. */
 export interface FanovaImportance {
   lever: string
+  /** MAIN-effect importance (Sobol first-order): variance of the lever's marginal / total. */
   importance: number
+  /**
+   * TOTAL-effect importance (Sobol total-order): the variance contributed by varying this lever at each
+   * fixed combination of the others, averaged / total — so it includes the lever's INTERACTIONS. `total
+   * − importance` is how much of the lever's effect is interactive; a tiny `total` means the lever is
+   * inert across the explored range (a "stop sweeping it" signal).
+   */
+  total: number
   /** Number of distinct values marginalised over. */
   values: number
+  /** The distinct observed values themselves, so the viewer can link each to its runs. */
+  valueList: unknown[]
+}
+
+/** Interaction (coupling) strength between a lever pair — the 2-way ANOVA term as a fraction of total variance. */
+export interface LeverCoupling {
+  leverA: string
+  leverB: string
+  /** Variance explained by the pair's INTERACTION (joint minus the two main effects), normalised by total. */
+  strength: number
 }
 
 /**
@@ -636,13 +654,43 @@ export interface InteractionGrid {
   cells: number[]
 }
 
+/** One setup projected onto the 2-D PCA plane, coloured by its criterion value. */
+export interface PcaPoint {
+  x: number
+  y: number
+  /** The setup's criterion value (IQM across its seeds) — the colour. */
+  value: number
+  /** A representative run key (for tooltips / drill-down). */
+  key: string
+  /** All run keys in this setup. */
+  runKeys: string[]
+}
+
+/**
+ * A deterministic PCA projection of the explored configs onto 2 axes, coloured by performance — a
+ * VISUALISATION/intuition layer (spot clusters + outliers), NOT a space you navigate (PC axes aren't
+ * levers). One point per SETUP (config minus seed). Numeric levers are standardised; categorical levers
+ * one-hot encoded; the top-2 principal components are found by deterministic power iteration.
+ */
+export interface PcaProjection {
+  points: PcaPoint[]
+  /** Fraction of total variance each of PC1/PC2 explains (each in [0,1]). */
+  explainedVariance: [number, number]
+  /** Number of encoded feature columns the projection ran over. */
+  features: number
+}
+
 /**
  * A deterministic, NON-LLM recommendation for the next experiments to run — each carries a launchable
  * {@link ExperimentSpec} the viewer fires as a batched campaign, closing the analyse→run→re-analyse loop.
  */
 export interface ExperimentRecommendation {
-  /** Why this batch: an untested combo, a variance-thin setup needing more seeds, or an untested lever pair. */
-  kind: 'missing-cell' | 'thin-seeds' | 'interaction'
+  /**
+   * Why this batch: `acquisition` (the surrogate's highest Expected-Improvement unrun config — climb
+   * toward the optimum), `thin-seeds` (a variance-thin setup needing more seeds), `missing-cell` (an
+   * untested factorial combo), or `interaction` (an untested lever pair).
+   */
+  kind: 'acquisition' | 'missing-cell' | 'thin-seeds' | 'interaction'
   /** One-line human reason, e.g. "batch_size=256 never run with the current best setup". */
   reason: string
   /** Number of runs this batch would launch. */
@@ -983,19 +1031,6 @@ export interface TrainingHypothesisCampaign {
 }
 
 /**
- * A starter Hypothesis a manifest can ship (parallel to `presets`/`papers`): curated claims the viewer
- * imports into the registry once, keyed by spec hash so re-import never duplicates. The verdict + its
- * evidence are derived from runs, so seeds omit them; timestamps default on import.
- */
-export type TrainingHypothesisSeed = Omit<
-  TrainingHypothesis,
-  'createdAt' | 'updatedAt' | 'status' | 'verdictSource' | 'evidence' | 'transitions' | 'campaign'
-> & {
-  /** Optional pinned verdict for a seed whose outcome is already known. */
-  status?: HypothesisStatus
-}
-
-/**
  * A registry entry for an APPROACH/paper — "an approach with a source and a claim". A CONTAINER: it
  * links to N {@link TrainingHypothesis} (created by LLM extraction, manual add, or linking an existing
  * one) and its verdict ROLLS UP from theirs. Domain-oblivious; the trading line's first consumers are
@@ -1032,6 +1067,8 @@ export interface TrainingPaperRecord {
   approach?: string
   /** Ids of the hypotheses this paper creates/links; the paper's verdict ROLLS UP from theirs. */
   hypothesisIds?: string[]
+  /** Slug ids of the catalog Models this paper introduces or improves (set by `analyzePaperModels`). */
+  modelIds?: string[]
   /** Lifecycle: untested → replicating → holds-up | fluff (legacy/manual; the card badge rolls up from `hypothesisIds`). */
   status: 'untested' | 'replicating' | 'holds-up' | 'fluff'
   /** Free-text verdict / notes recorded by the user. */
@@ -1050,6 +1087,98 @@ export interface TrainingPaperRecord {
  */
 export type TrainingPaperSeed = Omit<TrainingPaperRecord, 'createdAt' | 'updatedAt' | 'status'> & {
   status?: TrainingPaperRecord['status']
+}
+
+/** What KIND of model a catalog entry is — drives grouping + the heuristic category guess in a scan. */
+export type ModelCategory = 'rl' | 'supervised' | 'baseline' | 'component'
+
+/**
+ * Lifecycle of a catalog Model. `proposed` = named (often by a paper) but not yet implemented;
+ * `implemented` = present in the project and training healthily; `failing` = implemented but its runs
+ * are health-flagged/degenerate; `needs-improvement` = works but a paper or result asks for more;
+ * `deprecated` = retired. The first two/three auto-derive from runs (see `deriveModelStatus` in
+ * `viewer/models.js`); `needs-improvement`/`deprecated` are manual pins.
+ */
+export type ModelStatus =
+  | 'proposed'
+  | 'implemented'
+  | 'failing'
+  | 'needs-improvement'
+  | 'deprecated'
+
+/** Where a catalog Model entry came from. */
+export type ModelSource = 'scan' | 'paper' | 'manual' | 'llm'
+
+/**
+ * A catalog entry for a MODEL ARCHITECTURE/algorithm the project can train — the aggregating layer the
+ * Models tab renders. It OWNS its runs by binding one or more `model_name` lever values (`modelNames`):
+ * a run trains this model iff its `config.model_name` is one of them, so the run roll-up, verdict and
+ * "is it failing" all derive from the same substrate as everything else. It LINKS the papers that
+ * introduce/improve it (`paperIds`) and the hypotheses that test it (`hypothesisIds`). Domain-oblivious;
+ * stored as a `<recordType>-model` record (key = `id`, which is the `slug`). Distinct from a hypothesis
+ * (a falsifiable claim): a Model is the thing a claim, paper or run is ABOUT.
+ */
+export interface TrainingModel {
+  /** Stable id — equals `slug`; identical slugs dedupe across scan/paper/manual/seed sources. */
+  id: string
+  /** Human name, e.g. "Rainbow DQN (custom)". */
+  name: string
+  /** Canonical kebab identity, e.g. `rainbow-dqn-custom`. */
+  slug: string
+  /** One or two sentences: what the model is + how it differs. */
+  description: string
+  category: ModelCategory
+  /** Lifecycle verdict — auto-derived from runs unless `statusSource` is `manual`. */
+  status: ModelStatus
+  /** Whether `status` is auto-derived from runs or a manual pin that the run roll-up must not overwrite. */
+  statusSource: 'auto' | 'manual'
+  /** Free-text note recorded with a manual status, or why a scan flagged it. */
+  statusNote?: string
+  /**
+   * The `model_name` lever values that bind runs to this model. A run is this model's evidence iff its
+   * `config.model_name` is one of these. Empty for a purely-proposed model not yet wired to the lever.
+   */
+  modelNames: string[]
+  /** Ids of Papers that introduce or improve this model. */
+  paperIds?: string[]
+  /** Ids (spec hashes) of Hypotheses that test this model. */
+  hypothesisIds?: string[]
+  /** Where the model is (or, when `proposed`, should be) implemented — a repo-relative path hint. */
+  implPath?: string
+  /** When `proposed`: what a paper/scan asks to add or change, in plain words (the agent's brief). */
+  proposal?: string
+  source: ModelSource
+  /** Provenance label of the proposing model (absent for human/seed entries). */
+  proposedBy?: string
+  /** Free-text notes. */
+  notes?: string
+  /** Hidden from the default view (a rejected/irrelevant candidate) without deleting it. */
+  dismissed?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * A starter Model a manifest can ship (parallel to `papers`/`hypotheses`): curated catalog entries the
+ * viewer imports once, keyed by `id`/`slug` so re-import never duplicates or clobbers a user's edit.
+ * `statusSource` + timestamps default on import.
+ */
+export type TrainingModelSeed = Omit<TrainingModel, 'createdAt' | 'updatedAt' | 'statusSource'> & {
+  statusSource?: TrainingModel['statusSource']
+}
+
+/**
+ * A model a paper PROPOSES that has no catalog entry yet — the payload the Models tab turns into a
+ * one-click "Add to catalog" affordance (persisting a `proposed` {@link TrainingModel}). Returned by
+ * {@link ModelTrainerTools.analyzePaperModels}; never auto-persisted.
+ */
+export interface ProposedModel {
+  name: string
+  slug: string
+  description: string
+  category: ModelCategory
+  /** What the paper asks to add/change — becomes the proposed model's `proposal`. */
+  proposal: string
 }
 
 export interface ProposeTrainingHypothesesParams {
@@ -1145,6 +1274,61 @@ export interface SuggestPaperHypothesesResult {
   /** Provenance label of the suggesting model. */
   suggestedBy: string
   suggestedAt: string
+}
+
+export interface ScanProjectModelsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** When present, an LLM enriches each discovered candidate (category/description/paper links); when
+   * absent the scan is heuristic-only (the candidate's guessed name/category and no paper links). */
+  llmConfig?: LLMConfig
+  abortSignal?: AbortSignal
+  /** Fired after each model record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface ScanProjectModelsResult {
+  recordType: string
+  /** How many candidate models the heuristic found that were not already in the catalog. */
+  discovered: number
+  /** How many new `<recordType>-model` records were persisted. */
+  created: number
+  /** Candidates skipped because a model with the same slug already exists. */
+  skippedExisting: number
+  /** The newly-created models. */
+  models: TrainingModel[]
+  /** Provenance label of the enriching model (absent for a heuristic-only scan). */
+  scannedBy?: string
+  scannedAt: string
+}
+
+export interface AnalyzePaperModelsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  paperId: string
+  llmConfig: LLMConfig
+  /** Optionally re-fetch the paper URL for extra context (injected in tests). */
+  fetchPaperText?: (url: string, abortSignal?: AbortSignal) => Promise<string>
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface AnalyzePaperModelsResult {
+  recordType: string
+  /** The paper with its updated `modelIds`. */
+  paper: TrainingPaperRecord
+  /** Slug ids of EXISTING catalog models the paper was matched + linked to. */
+  linkedModelIds: string[]
+  /** Models the paper proposes that have NO catalog entry yet — the "Add to catalog" candidates. */
+  missingModels: ProposedModel[]
+  /** Provenance label of the analysing model. */
+  analyzedBy: string
+  analyzedAt: string
 }
 
 export interface XaiNarrateParams {
@@ -1333,6 +1517,21 @@ export interface ModelTrainerTools {
   suggestPaperHypotheses(
     params: SuggestPaperHypothesesParams,
   ): Promise<SuggestPaperHypothesesResult>
+  /**
+   * Discover MODELS the project declares (its `model_name` lever choices) that the catalog does not yet
+   * cover, optionally enrich each with an LLM (category, description, paper links), and persist them as
+   * `<recordType>-model` records. Heuristic-first (works with no LLM); deduped by slug so re-scanning
+   * never duplicates. Powers the Models tab's "Scan Project" button.
+   */
+  scanProjectModels(params: ScanProjectModelsParams): Promise<ScanProjectModelsResult>
+  /**
+   * Analyse ONE paper for the MODELS it introduces/improves: an LLM matches it against the existing
+   * catalog (linking the models it is about, updating the paper's `modelIds` and each model's
+   * `paperIds`) AND names any models the paper proposes that have no catalog entry yet. The missing ones
+   * are RETURNED (not persisted) for the Models tab's one-click "Add to catalog". Powers the Papers
+   * tab's "Find models" + the per-paper "add missing model" affordance.
+   */
+  analyzePaperModels(params: AnalyzePaperModelsParams): Promise<AnalyzePaperModelsResult>
   /**
    * Synthesise the campaign's DETERMINISTIC xAI analysis (lever importances, the surrogate ablation
    * path, the recommender's gaps) into a short LLM narrative — "what's been learned + what to try next" —

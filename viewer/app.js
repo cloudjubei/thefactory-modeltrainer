@@ -54,6 +54,7 @@ const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
 const DATASET_RECORD_SUFFIX = '-dataset'
 const PAPER_RECORD_SUFFIX = '-paper'
+const MODEL_RECORD_SUFFIX = '-model'
 // Approach/paper verdict lifecycle (matches TrainingPaperRecord.status). Drives the verdict badge,
 // the verdict filter, and the auto-suggested verdict from measured-vs-hold.
 const PAPER_STATUSES = ['untested', 'replicating', 'holds-up', 'fluff']
@@ -69,6 +70,7 @@ const TABS = [
   { id: 'runs', label: 'Runs' },
   { id: 'hypotheses', label: 'Hypotheses', icon: iconHypothesisSvg },
   { id: 'papers', label: 'Papers' },
+  { id: 'models', label: 'Models' },
   { id: 'versions', label: 'Versions' },
   { id: 'datasets', label: 'Datasets' },
   { id: 'environments', label: 'Environments' },
@@ -196,9 +198,10 @@ let datasetsCache = []
 // Approach/paper library records + the active rolled-up-verdict filter ('all' | a paper verdict).
 let papersCache = []
 let paperVerdictFilter = 'all'
-// The active hypothesis verdict filter ('all' | a HYPOTHESIS_VERDICTS value), and the paper-scoped
+// Which verdict section is expanded (accordion — only one at a time). `undefined` = not yet chosen
+// (render default-opens the first non-empty); `null` = the user collapsed them all. Plus the paper-scoped
 // add/link sub-form state (`null` | { paperId, mode: 'add' | 'link' }).
-let hypothesisVerdictFilter = 'all'
+let hypothesisOpenSection
 let hypothesisOverrideId = null
 // Minimum matching runs before a hypothesis can be judged proven/disproved (fewer ⇒ stays untested — a
 // single run can't adequately prove a claim). User-settable at the top of the Hypotheses tab; persisted
@@ -208,6 +211,13 @@ let hypothesisMinRuns = DEFAULT_HYPOTHESIS_MIN_RUNS
 const hypothesisExpanded = new Set()
 const paperExpanded = new Set()
 let paperSubform = null
+// Models catalog records + the active category filter + which cards are expanded (survives re-render).
+let modelsCache = []
+let modelCategoryFilter = 'all'
+const modelExpanded = new Set()
+// Missing-model proposals from the last "Find models" run, keyed by paperId — the Papers card turns
+// these into one-click "Add to catalog" buttons until the user acts on them.
+const paperMissingModels = new Map()
 // Dataset bundles supplied by an applied preset (an experiment that sweeps datasets); when set they
 // override the launch picker's selection. Cleared on reset / manual picker change.
 let launchPresetDatasets = []
@@ -365,6 +375,14 @@ function iconCrossSvg() {
   return (
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+  )
+}
+// A layered-stack glyph — the "model" icon (a model architecture). Used on the Papers card's Find-models button.
+function iconModelSvg(size) {
+  const s = size || 14
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>'
   )
 }
 function iconChatSvg() {
@@ -2132,6 +2150,7 @@ const RUN_METRIC_ORDER = [
   'total_return_pct',
   'n_trades',
   'win_pct',
+  'blocked_signal_ratio',
   'stop_losses',
   'final_net_worth',
   'hold_return_pct',
@@ -2153,6 +2172,8 @@ function metricColorClass(mk, v) {
   if (mk === 'total_return_pct' || mk === 'return_vs_hold_pct')
     return v >= 0 ? 'delta-pos' : 'delta-neg'
   if (mk === 'n_trades') return v > DEGENERATE_TRADE_COUNT ? 'delta-pos' : 'delta-neg'
+  // blocked-signal share: lower is better (a clean, actionable signal stream); green/red at half.
+  if (mk === 'blocked_signal_ratio') return v <= 0.5 ? 'delta-pos' : 'delta-neg'
   return ''
 }
 // Plain-language help per metric (shown as a "?" on the column header) so a newcomer
@@ -2177,6 +2198,10 @@ const METRIC_INFO = {
   negative_recall: 'Of non-dips, how many were correctly skipped.',
   positive_rate: 'Share of samples that are positive — the class balance.',
   simple_ratio: 'Correct vs incorrect positive predictions.',
+  realized_cost_bps:
+    'Total trading fees paid over the run, in basis points of the stake (1 bp = 0.01%). Each round-trip pays the per-trade fee twice, so more trading means more fee drag. Lower is better.',
+  blocked_signal_ratio:
+    "Share of the agent's buy/sell signals that were NO-OPS — a buy emitted while already in position, or a sell while flat — that the environment could not act on. High means the raw per-step signal stream is mostly unusable even when the executed trades are good. Lower is better (0% = every emitted signal was actionable).",
 }
 const VSHOLD_INFO =
   'Run return minus buy-and-hold over the same window. Positive = beat just holding. Hold is a control to judge against — never the optimisation target.'
@@ -2189,7 +2214,8 @@ const METRIC_LABEL = {
   final_net_worth: 'Final $',
   hold_return_pct: 'hold %',
   return_vs_hold_pct: 'vs hold',
-  realized_cost_bps: 'cost (bps)',
+  realized_cost_bps: 'fees (bps)',
+  blocked_signal_ratio: 'blocked %',
 }
 // Metrics shown to a fixed 2 decimals in the table (money + ratios read cleaner that way).
 const TWO_DP_METRICS = new Set([
@@ -2199,6 +2225,8 @@ const TWO_DP_METRICS = new Set([
   'return_vs_hold_pct',
   'realized_cost_bps',
 ])
+// Stored as a 0–1 fraction but read as a percentage in the table (e.g. 0.95 → "95.0%").
+const PERCENT_RATIO_METRICS = new Set(['blocked_signal_ratio'])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.
 // Retired metrics — no longer produced (summary.py dropped Sharpe/CAGR/max-drawdown + the window
@@ -2219,6 +2247,10 @@ const TABLE_HIDDEN_METRICS = new Set([
   'traded_return',
   'return_vs_hold_pct',
   'hold_net_of_fees',
+  // Signal-noise breakdown is detail-only; the Runs table shows just blocked_signal_ratio (as "blocked %").
+  'blocked_signals',
+  'executed_signals',
+  'signal_noise_pct',
   ...RETIRED_METRICS,
 ])
 function metricLabel(mk) {
@@ -2227,6 +2259,7 @@ function metricLabel(mk) {
 // Some metrics read cleaner at a fixed 2dp (win %, money, ratios); the rest use the
 // objective formatter.
 function formatMetricValue(mk, v) {
+  if (PERCENT_RATIO_METRICS.has(mk)) return (v * 100).toFixed(1) + '%'
   if (TWO_DP_METRICS.has(mk)) return v.toFixed(2)
   return formatObjective(v)
 }
@@ -3536,7 +3569,9 @@ function compareEquityChartHtml(runs, runColors) {
 }
 // Surfaced via the objective headline already (traded_return), plus the retired risk metrics that
 // old runs still carry — both hidden so the detail table shows only live, meaningful metrics.
-const DETAIL_HIDDEN_METRICS = new Set(['traded_return', ...RETIRED_METRICS])
+// blocked_signal_ratio is the Runs-table "blocked %" column only; the detail shows the breakdown
+// (blocked_signals / executed_signals / signal_noise_pct) instead, so the ratio is hidden here.
+const DETAIL_HIDDEN_METRICS = new Set(['traded_return', 'blocked_signal_ratio', ...RETIRED_METRICS])
 function metricsTableHtml(metrics) {
   const entries = Object.entries(metrics || {}).filter(([k]) => !DETAIL_HIDDEN_METRICS.has(k))
   if (!entries.length) return '<p class="card-sub">No metrics recorded.</p>'
@@ -4526,6 +4561,7 @@ function renderXai() {
       xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
       xaiConfigEffectsHtml(runs, criterion),
       xaiSurrogateHtml(runs, criterion),
+      xaiPcaHtml(runs, criterion),
       xaiRecommenderHtml(runs, criterion),
     ].join(''),
   )
@@ -4778,25 +4814,114 @@ function xaiSurrogateHtml(runs, criterion) {
     xaiInterA && xaiInterB
       ? window.Xai.interactionGrid(surrogate, runs, criterion, xaiInterA, xaiInterB)
       : null
+  const couplings = window.Xai.leverCouplings(surrogate, runs, criterion)
   return `<div class="card">
-    <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
+    <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · coupling · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
     <div class="card-scroll">
     <p class="card-sub">A seeded random forest fit on every run's (config → ${escapeHtml(criterion.label)}). It predicts the criterion for configs you HAVEN'T run, so it can rank levers globally and walk an ablation path — a model, so treat it as a hypothesis to confirm with real runs, not ground truth.</p>
     ${xaiFanovaHtml(fanova)}
+    ${xaiCouplingHtml(couplings)}
     ${xaiAblationTreeHtml(path, criterion)}
-    ${xaiInteractionHtml(grid, leverNames)}
+    ${xaiInteractionHtml(grid, leverNames, runs)}
     </div></div>`
+}
+// Below this TOTAL-effect fraction a lever is effectively inert across the explored range ("stop sweeping").
+const XAI_NEGLIGIBLE_TOTAL = 0.03
+// Classify a lever by its main vs total effect: inert (drop it), interactive (tune with its partner), or direct.
+function fanovaEffectTag(f) {
+  if ((f.total || 0) < XAI_NEGLIGIBLE_TOTAL) {
+    return {
+      label: '✕ inert',
+      cls: 'fanova-inert',
+      title: 'No measurable effect across the explored range — stop sweeping this lever.',
+    }
+  }
+  const interactive = (f.total || 0) - f.importance
+  if (interactive > f.importance && interactive > 0.05) {
+    return {
+      label: '↔ interactive',
+      cls: 'fanova-interactive',
+      title: 'Most of its effect comes through interactions — tune it together with its partner (see Coupling).',
+    }
+  }
+  return { label: '→ direct', cls: '', title: 'Mostly a direct (main) effect, independent of the other levers.' }
 }
 function xaiFanovaHtml(fanova) {
   if (!fanova.length) return ''
   const rows = fanova
+    .map((f) => {
+      const vals = (f.valueList || [])
+        .map(
+          (v) =>
+            `<button type="button" class="link-btn" data-xai-runs data-l1="${escapeHtml(f.lever)}" data-v1="${escapeHtml(String(v))}" title="View the runs with ${escapeHtml(f.lever)} = ${escapeHtml(String(v))} in the Runs tab">${escapeHtml(formatTickValue(v))}</button>`,
+        )
+        .join('<span class="card-sub">, </span>')
+      const tag = fanovaEffectTag(f)
+      return `<tr><th><code>${escapeHtml(f.lever)}</code></th><td class="num">${Math.round(f.importance * 100)}%</td><td class="num">${Math.round((f.total || 0) * 100)}%</td><td><span class="${tag.cls}" title="${escapeHtml(tag.title)}">${tag.label}</span></td><td>${vals}</td></tr>`
+    })
+    .join('')
+  return `<h4 class="card-sub">fANOVA importance <span class="card-sub">— <strong>main</strong> = the lever's own effect; <strong>total</strong> = main + its interactions. total≈0 ⇒ inert (stop sweeping); total≫main ⇒ interactive. Click a value to see its runs.</span></h4>
+    <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">main</th><th class="num">total</th><th>effect</th><th>values</th></tr></thead><tbody>${rows}</tbody></table>`
+}
+// The strongly COUPLED lever pairs (one's best value depends on the other) — read alongside the interaction grid.
+function xaiCouplingHtml(couplings) {
+  const strong = (couplings || []).filter((c) => c.strength >= 0.05).slice(0, 6)
+  if (!strong.length) {
+    return `<p class="card-sub"><strong>Coupling</strong> — none notable: the levers act independently (their effects add up), so you can tune them one at a time.</p>`
+  }
+  const items = strong
     .map(
-      (f) =>
-        `<tr><th><code>${escapeHtml(f.lever)}</code></th><td class="num">${Math.round(f.importance * 100)}%</td><td class="num">${f.values}</td></tr>`,
+      (c) =>
+        `<li><code>${escapeHtml(c.leverA)}</code> × <code>${escapeHtml(c.leverB)}</code> <span class="num">${Math.round(c.strength * 100)}%</span></li>`,
     )
     .join('')
-  return `<h4 class="card-sub">fANOVA importance <span class="card-sub">— variance each lever explains in the surrogate (captures interactions)</span></h4>
-    <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th class="num">#vals</th></tr></thead><tbody>${rows}</tbody></table>`
+  return `<h4 class="card-sub">Coupling <span class="card-sub">— lever PAIRS whose best value depends on each other (tune together, not one-at-a-time); % = interaction variance explained</span></h4>
+    <ul class="xai-coupling">${items}</ul>`
+}
+// PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
+// Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
+function xaiPcaHtml(runs, criterion) {
+  if (!window.Xai.pcaProjection) return ''
+  const pca = window.Xai.pcaProjection(runs, criterion)
+  if (!pca || pca.points.length < 3) return ''
+  const values = pca.points.map((p) => p.value)
+  const lo = Math.min(...values)
+  const hi = Math.max(...values)
+  // Orient so "better" (per the criterion direction) is green (hue 120), "worse" red (hue 0).
+  const oriented = (v) =>
+    hi === lo ? 0.5 : criterion.direction === 'min' ? (hi - v) / (hi - lo) : (v - lo) / (hi - lo)
+  const runByKey = new Map(runs.map((r) => [r.key, r]))
+  const compactConfig = (cfg) =>
+    Object.entries(cfg || {})
+      .filter(([k]) => k !== 'seed')
+      .map(([k, v]) => `${k}=${formatTickValue(v)}`)
+      .join(' ')
+      .slice(0, 140)
+  const points = pca.points.map((p) => {
+    const run = runByKey.get(p.key)
+    const cfg = run ? compactConfig(run.config) : ''
+    const seeds = p.runKeys.length > 1 ? ` (${p.runKeys.length} seeds)` : ''
+    return {
+      x: p.x,
+      y: p.y,
+      color: `hsl(${Math.round(oriented(p.value) * 120)}, 70%, 45%)`,
+      label: `${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)}${seeds}`,
+    }
+  })
+  const ev = (i) => Math.round((pca.explainedVariance[i] || 0) * 100)
+  const svg = buildScatterChart({
+    points,
+    xLabel: `PC1 · ${ev(0)}% var`,
+    yLabel: `PC2 · ${ev(1)}% var`,
+    width: 480,
+    height: 300,
+    ariaLabel: 'PCA projection of explored configs coloured by performance',
+  })
+  return `<div class="card"><div class="card-head card-head-row"><h3>Configuration map (PCA) <span class="card-sub">— ${pca.points.length} setups · ${pca.features} features</span></h3></div>
+    <div class="card-scroll">
+    <p class="card-sub">A 2-D <em>sketch</em> of the explored setups (numeric levers z-scored, categorical one-hot), coloured by ${escapeHtml(criterion.label)} — <strong style="color:hsl(120,70%,40%)">green = better</strong>, <strong style="color:hsl(0,70%,45%)">red = worse</strong>. Use it to spot CLUSTERS + OUTLIERS only: the PC axes are mixes of levers, not knobs you turn, so don't read them as directions. PC1+PC2 capture ${ev(0) + ev(1)}% of the configuration variance.</p>
+    <div class="chart-wrap">${svg}</div>
+    </div></div>`
 }
 function xaiAblationTreeHtml(path, criterion) {
   if (!path || !path.steps.length) return ''
@@ -4812,7 +4937,7 @@ function xaiAblationTreeHtml(path, criterion) {
     <p class="card-sub">baseline ${fmt(path.baselinePredicted)} → incumbent ${fmt(path.incumbentPredicted)}</p>
     <ol class="xai-abl">${steps}</ol>`
 }
-function xaiInteractionHtml(grid, leverNames) {
+function xaiInteractionHtml(grid, leverNames, runs) {
   if (leverNames.length < 2) return ''
   const sel = (id, current) =>
     `<select id="${id}">${leverNames.map((l) => `<option value="${escapeHtml(l)}"${l === current ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`
@@ -4827,20 +4952,33 @@ function xaiInteractionHtml(grid, leverNames) {
     // green (better=high) gradient; the criterion direction is already baked into "higher prediction".
     return `background:rgba(34,197,94,${(0.12 + t * 0.5).toFixed(2)})`
   }
+  // How many ACTUAL runs sit in this (leverA=a, leverB=b) cell — only those cells link to the Runs tab;
+  // a surrogate-PREDICTED cell with no runs stays plain (nothing to open).
+  const runsInCell = (a, b) =>
+    (runs || []).filter(
+      (r) =>
+        String((r.config || {})[grid.leverA]) === String(a) &&
+        String((r.config || {})[grid.leverB]) === String(b),
+    ).length
   const head = `<tr><th></th>${grid.valuesB.map((b) => `<th class="num">${escapeHtml(b)}</th>`).join('')}</tr>`
   const body = grid.valuesA
     .map((a, i) => {
       const cells = grid.valuesB
         .map((b, j) => {
           const v = grid.cells[i * grid.valuesB.length + j]
-          return `<td class="num" style="${shade(v)}" title="${escapeHtml(grid.leverA)}=${escapeHtml(a)}, ${escapeHtml(grid.leverB)}=${escapeHtml(b)}">${escapeHtml(formatTickValue(v))}</td>`
+          const where = `${escapeHtml(grid.leverA)}=${escapeHtml(a)}, ${escapeHtml(grid.leverB)}=${escapeHtml(b)}`
+          const n = runsInCell(a, b)
+          if (!n) {
+            return `<td class="num" style="${shade(v)}" title="${where} (surrogate-predicted; no runs)">${escapeHtml(formatTickValue(v))}</td>`
+          }
+          return `<td class="num xai-cell-link" style="${shade(v)}" data-xai-runs data-l1="${escapeHtml(grid.leverA)}" data-v1="${escapeHtml(String(a))}" data-l2="${escapeHtml(grid.leverB)}" data-v2="${escapeHtml(String(b))}" title="${where} — view ${n} run${n === 1 ? '' : 's'} in the Runs tab">${escapeHtml(formatTickValue(v))}</td>`
         })
         .join('')
       return `<tr><th>${escapeHtml(a)}</th>${cells}</tr>`
     })
     .join('')
   return `${picker}<div class="compare-table-wrap"><table class="kv-table report-table xai-heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value.</p>`
+    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value. Click a cell with runs to see them.</p>`
 }
 function xaiRecommenderHtml(runs, criterion) {
   xaiRecsCache = window.Xai.recommendExperiments(runs, criterion)
@@ -4850,19 +4988,30 @@ function xaiRecommenderHtml(runs, criterion) {
       <p class="card-sub">No deterministic gaps — the grids you've explored are complete and well-seeded. 🎉 Ask the AI to propose experiments beyond the explored grid.</p></div>`
   }
   const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
+  const climbs = xaiRecsCache.filter((r) => r.kind === 'acquisition').length
   const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
   return `<div class="card" id="xai-recommender">
-    <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} gaps · ${total} runs</span></h3>
+    <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} suggestions · ${total} runs</span></h3>
       <div class="head-actions">
         <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
         <button type="button" class="ghost-btn" data-xai-propose${proposing || !embedded() ? ' disabled' : ''} title="Ask the AI to propose NEW experiments from the xAI analysis (lands in Hypotheses)">${proposing ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button>
         <button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>
       </div></div>
+    <p class="card-sub">${climbs ? `<strong>▲ climb</strong> picks are the surrogate's highest Expected-Improvement unrun configs — the next steps toward the optimum. ` : ''}<strong>seeds</strong> firm up a thin top setup; <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells.</p>
     <div class="card-scroll">${cards}</div></div>`
 }
+// Friendly badge labels for each recommendation kind (the raw kind is kept as the badge's tooltip).
+const REC_KIND_LABELS = {
+  acquisition: '▲ climb',
+  'thin-seeds': 'seeds',
+  'missing-cell': 'gap',
+  interaction: 'pair',
+}
 function xaiRecCardHtml(r, i) {
+  const label = REC_KIND_LABELS[r.kind] || r.kind
+  const cls = r.kind === 'acquisition' ? 'badge xai-rec-climb' : 'badge'
   return `<div class="xai-rec badges-row">
-    <span class="badge">${escapeHtml(r.kind)}</span>
+    <span class="${cls}" title="${escapeHtml(r.kind)}">${escapeHtml(label)}</span>
     <span>${escapeHtml(r.reason)}</span>
     <span class="card-sub">${r.runCount} run${r.runCount === 1 ? '' : 's'}</span>
     <button type="button" class="ghost-btn" data-xai-run-rec="${i}">Run batch</button>
@@ -5637,6 +5786,18 @@ function setupRuns() {
       }
     })
     xaiBody.addEventListener('click', (event) => {
+      const runsLink = event.target.closest('[data-xai-runs]')
+      if (runsLink) {
+        const d = runsLink.dataset
+        const pairs = [[d.l1, d.v1]]
+        let label = `${d.l1} = ${d.v1}`
+        if (d.l2 != null) {
+          pairs.push([d.l2, d.v2])
+          label = `${d.l1}=${d.v1} × ${d.l2}=${d.v2}`
+        }
+        viewRunsByLeverValues(pairs, label)
+        return
+      }
       const discussBtn = event.target.closest('[data-xai-discuss]')
       if (discussBtn) {
         chatAboutRunXai(discussBtn.dataset.xaiDiscuss)
@@ -5837,7 +5998,8 @@ function buildXyChart(opts) {
       groupColorMap(points.filter((p) => p.group !== undefined).map((p) => p.group))
     : null
   const pointColor = (p) =>
-    groupColors && p.group !== undefined ? groupColors.get(String(p.group)) || '' : ''
+    p.color ||
+    (groupColors && p.group !== undefined ? groupColors.get(String(p.group)) || '' : '')
   if (opts.line) {
     if (groupColors) {
       for (const [label, color] of groupColors) {
@@ -6606,7 +6768,10 @@ function hypothesisEvidenceHtml(h) {
       obj: Number(r.summary && r.summary.objective),
       vh: runMetricValue(r, 'return_vs_hold_pct'),
     }))
-    .sort((a, b) => (Number.isFinite(b.vh) ? b.vh : -Infinity) - (Number.isFinite(a.vh) ? a.vh : -Infinity))
+    .sort(
+      (a, b) =>
+        (Number.isFinite(b.vh) ? b.vh : -Infinity) - (Number.isFinite(a.vh) ? a.vh : -Infinity),
+    )
   const vhVals = rows.map((r) => r.vh).filter(Number.isFinite)
   const beat = vhVals.filter((v) => v > 0).length
   const verdict = effectiveHypothesisVerdict(h)
@@ -6629,7 +6794,8 @@ function hypothesisEvidenceHtml(h) {
         `<tr><td><code>${escapeHtml(shortKey(r.key))}</code></td><td>${Number.isFinite(r.obj) ? escapeHtml(formatObjective(r.obj)) : '—'}</td><td>${Number.isFinite(r.vh) ? escapeHtml(pct(r.vh)) : '—'}</td></tr>`,
     )
     .join('')
-  const more = rows.length > shown.length ? `<p class="card-sub">+${rows.length - shown.length} more</p>` : ''
+  const more =
+    rows.length > shown.length ? `<p class="card-sub">+${rows.length - shown.length} more</p>` : ''
   return `<div class="hyp-evidence">
     ${claimedRow}
     <p class="card-sub hyp-basis">${basis}</p>
@@ -6815,28 +6981,24 @@ async function renderHypotheses() {
     ? await readLiveActivityIds()
     : new Set()
   renderProposeControls()
-  const pending = await pendingSeedHypotheses()
-  const seedBanner = pendingSeedHypothesesBannerHtml(pending)
   const visible = hypothesesCache.filter((h) => !h.dismissed)
   if (!visible.length) {
     body.innerHTML =
-      seedBanner +
-      '<div class="empty-hint">No hypotheses yet — propose some, add your own, or import the starter set.</div>'
+      '<div class="empty-hint">No hypotheses yet — propose some (the lightbulb above) or add your own.</div>'
     return
   }
-  const shown =
-    hypothesisVerdictFilter === 'all'
-      ? visible
-      : visible.filter((h) => effectiveHypothesisVerdict(h) === hypothesisVerdictFilter)
-  const sorted = [...shown].sort((a, b) =>
+  const sorted = [...visible].sort((a, b) =>
     String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
   )
   const groups = { untested: [], proven: [], disproved: [] }
   for (const h of sorted) (groups[effectiveHypothesisVerdict(h)] || groups.untested).push(h)
-  body.innerHTML =
-    seedBanner +
-    hypothesisFilterBarHtml(visible) +
-    HYPOTHESIS_VERDICTS.map((v) => hypothesisGroupHtml(v, groups[v], liveIds)).join('')
+  // First load (open section not yet chosen): default-open the first non-empty section so it isn't blank.
+  if (hypothesisOpenSection === undefined) {
+    hypothesisOpenSection = HYPOTHESIS_VERDICTS.find((v) => groups[v].length) || null
+  }
+  body.innerHTML = HYPOTHESIS_VERDICTS.map((v) =>
+    hypothesisSectionHtml(v, groups[v], liveIds),
+  ).join('')
 }
 async function onProposeClick() {
   if (proposing) return
@@ -7294,13 +7456,22 @@ function setupHypotheses() {
   const body = byId('hypotheses-body')
   if (body) {
     // Track expand/collapse so it survives re-render. The `toggle` event doesn't bubble — capture it.
+    // A verdict SECTION is an accordion (only one open): opening one closes the rest via re-render.
     body.addEventListener(
       'toggle',
       (event) => {
         const d = event.target
-        if (!d || !d.classList || !d.classList.contains('hypothesis-card') || !d.dataset.id) return
-        if (d.open) hypothesisExpanded.add(d.dataset.id)
-        else hypothesisExpanded.delete(d.dataset.id)
+        if (!d || !d.classList || !d.dataset) return
+        if (d.classList.contains('hypothesis-section') && d.dataset.section) {
+          const next = d.open ? d.dataset.section : null
+          if (next !== hypothesisOpenSection) {
+            hypothesisOpenSection = next
+            renderHypotheses()
+          }
+        } else if (d.classList.contains('hypothesis-card') && d.dataset.id) {
+          if (d.open) hypothesisExpanded.add(d.dataset.id)
+          else hypothesisExpanded.delete(d.dataset.id)
+        }
       },
       true,
     )
@@ -7308,17 +7479,6 @@ function setupHypotheses() {
       // A control inside a <summary> must not toggle the card — it runs its own action.
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
         event.preventDefault()
-      }
-      const seedBtn = event.target.closest('button[data-action="import-hyp-seeds"]')
-      if (seedBtn) {
-        importSeedHypotheses()
-        return
-      }
-      const filterBtn = event.target.closest('button[data-hyp-verdict]')
-      if (filterBtn) {
-        hypothesisVerdictFilter = filterBtn.dataset.hypVerdict
-        renderHypotheses()
-        return
       }
       const chip = event.target.closest('[data-action="goto-paper"]')
       if (chip) {
@@ -7515,6 +7675,22 @@ function paperAssumptionChips(a) {
   return chips.length ? `<div class="paper-chips">${chips.join('')}</div>` : ''
 }
 // Chip showing how many hypotheses the paper links — highlighted when none, so an empty paper stands out.
+// Drop links to hypotheses that no longer exist (deleted) from every paper, persisting the cleaned list
+// + updating papersCache so the count chip + rolled-up verdict are correct. Idempotent (a no-op once clean).
+async function prunePaperHypothesisLinks() {
+  const live = new Set(hypothesesCache.map((h) => h.id))
+  for (const p of papersCache) {
+    const ids = Array.isArray(p.hypothesisIds) ? p.hypothesisIds : []
+    const kept = ids.filter((id) => live.has(id))
+    if (kept.length === ids.length) continue
+    p.hypothesisIds = kept
+    try {
+      await putPaper({ ...p, hypothesisIds: kept })
+    } catch {
+      // best-effort: a failed cleanup write just retries next render
+    }
+  }
+}
 function paperHypCountChipHtml(paper) {
   const n = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds.length : 0
   const label = `${n} hypoth${n === 1 ? 'esis' : 'eses'}`
@@ -7541,6 +7717,7 @@ function paperCardHtml(paper) {
     `<button type="button" class="card-btn combo" data-action="suggest-hyp" data-id="${id}"${helpAttr('Suggest hypotheses — an LLM matches existing ones to this paper and proposes new ones, all auto-linked.')}>${iconLightbulbSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="add-hyp" data-id="${id}"${helpAttr('Add a hypothesis manually and link it to this paper.')}>${iconPlusSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="link-existing" data-id="${id}"${helpAttr('Link an existing hypothesis to this paper.')}>${iconLinkSvg(13)}${iconHypothesisSvg(14)}</button>` +
+    `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${helpAttr('Find models — an LLM links this paper to the catalog models it introduces/improves and proposes any missing ones to add.')}>${iconModelSvg(14)}</button>` +
     (linkedCount
       ? `<button type="button" class="card-btn" data-action="replicate" data-id="${id}"${helpAttr('Replicate — launch every linked hypothesis’s spec.')}>${iconRunSvg(15)}</button>`
       : '') +
@@ -7558,6 +7735,7 @@ function paperCardHtml(paper) {
       ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
       ${paperAssumptionChips(paper.assumptions)}
       ${paperLinkedHypothesesHtml(paper)}
+      ${paperModelsHtml(paper)}
       ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
     </div>
   </details>`
@@ -7620,13 +7798,18 @@ async function renderPapers() {
     )
     return
   }
-  // Load hypotheses + runs alongside papers so the linked-hypothesis verdicts + paper roll-up are fresh.
-  ;[papersCache, hypothesesCache, runsCache] = await Promise.all([
+  // Load hypotheses + runs + models alongside papers so the linked-hypothesis verdicts, paper roll-up,
+  // and the per-paper linked-models section are all fresh.
+  ;[papersCache, hypothesesCache, runsCache, modelsCache] = await Promise.all([
     readPapers(),
     readHypotheses(),
     readRuns(),
+    readModels(),
   ])
   await refreshHypothesisVerdicts(hypothesesCache)
+  // Self-heal: a paper may reference hypotheses since deleted — drop those stale links (persisted) so the
+  // count chip + rolled-up verdict reflect reality.
+  await prunePaperHypothesisLinks()
   const seedBanner = pendingSeedPapersHtml()
   if (!papersCache.length) {
     setHtml(
@@ -7948,12 +8131,19 @@ function setupPapers() {
         showTab('hypotheses')
         return
       }
+      const modelChip = event.target.closest('[data-action="goto-model"]')
+      if (modelChip) {
+        showTab('models')
+        return
+      }
       const btn = event.target.closest('button[data-action]')
       if (!btn) return
       const { action, id } = btn.dataset
       const paperId = btn.dataset.paper
       if (action === 'import-seeds') importSeedPapers()
       else if (action === 'replicate') replicatePaper(id)
+      else if (action === 'find-models') onFindPaperModels(id, btn)
+      else if (action === 'add-model') addProposedModelToCatalog(paperId, id)
       else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id, btn)
       else if (action === 'add-hyp') {
         // Open the add sub-form AND expand the card so it's visible from the collapsed state.
@@ -7986,6 +8176,461 @@ function setupPapers() {
       else if (action === 'delete') onDeletePaper(id)
     })
   }
+}
+
+// --- Models tab ----------------------------------------------------------------
+// The catalog of model architectures the project can train. A model OWNS its runs by binding model_name
+// lever values; its status (proposed/implemented/failing) auto-derives from those runs (viewer/models.js).
+// It LINKS the papers that introduce/improve it + the hypotheses that test it. "Discuss" seeds a project
+// chat to implement / improve / fix it; "Scan Project" + the Papers tab's "Find models" populate it.
+async function readModels() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + MODEL_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id)
+}
+async function putModel(model) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + MODEL_RECORD_SUFFIX,
+    key: model.id,
+    content: { ...model, updatedAt: nowIso() },
+  })
+}
+async function deleteModelRecord(id) {
+  await window.OverseerBridge.deleteData({
+    type: manifest.recordType + MODEL_RECORD_SUFFIX,
+    key: id,
+  })
+}
+// Starter models the manifest ships (parallel to papers); imported into the catalog once by id/slug.
+function manifestModelSeeds() {
+  return manifest && Array.isArray(manifest.models) ? manifest.models : []
+}
+function pendingSeedModels() {
+  const have = new Set(modelsCache.map((m) => m.id))
+  return manifestModelSeeds().filter((s) => s && s.id && !have.has(s.id))
+}
+function pendingSeedModelsHtml() {
+  const pending = pendingSeedModels()
+  if (!pending.length) return ''
+  return `<div class="paper-seed-banner">${pending.length} curated model${pending.length === 1 ? '' : 's'} from the manifest aren’t in your catalog yet. <button type="button" class="ghost-btn" data-action="import-seeds">Import ${pending.length}</button></div>`
+}
+async function importSeedModels() {
+  const pending = pendingSeedModels()
+  if (!pending.length) return
+  try {
+    for (const s of pending) {
+      await putModel({
+        ...s,
+        statusSource: s.statusSource === 'manual' ? 'manual' : 'auto',
+        createdAt: nowIso(),
+      })
+    }
+  } catch {
+    setStatusLine('models-status', 'Could not import models — please try again.', true)
+    return
+  }
+  setStatusLine(
+    'models-status',
+    `Imported ${pending.length} model${pending.length === 1 ? '' : 's'}.`,
+    false,
+  )
+  await renderModels()
+}
+// The auto-derived (or manually pinned) lifecycle status of a model, from its matching runs.
+function modelStatusOf(model) {
+  return window.Models.deriveModelStatus(model, runsCache, manifest)
+}
+function modelStatusBadgeHtml(model) {
+  const st = modelStatusOf(model)
+  const cls = window.Models.MODEL_STATUS_BADGE[st] || 'is-queued'
+  const label = window.Models.MODEL_STATUS_LABEL[st] || st
+  return `<span class="run-badge ${cls}">${escapeHtml(label)}</span>`
+}
+function modelRunChipHtml(model) {
+  const s = window.Models.modelRunSummary(model, runsCache, objectiveDirection())
+  if (!s.runs) {
+    return `<span class="hyp-count-chip is-empty"${helpAttr('No runs have trained this model yet.')}>0 runs</span>`
+  }
+  const parts = [`${s.runs} run${s.runs === 1 ? '' : 's'}`]
+  if (s.best !== null) parts.push(`best ${formatObjective(s.best)}`)
+  if (s.failing) parts.push(`${s.failing} failing`)
+  return `<span class="hyp-count-chip"${helpAttr('Runs whose model_name binds to this model — the status + verdict roll up from them.')}>${escapeHtml(parts.join(' · '))}</span>`
+}
+function modelLinkedPapersHtml(model) {
+  const papers = window.Models.papersForModel(model, papersCache)
+  if (!papers.length) return ''
+  const rows = papers
+    .map(
+      (p) =>
+        `<li><span class="paper-hyp-title" data-action="goto-paper" data-id="${escapeHtml(p.id)}">${escapeHtml(p.title || p.id)}</span></li>`,
+    )
+    .join('')
+  return `<div class="model-links"><span class="card-sub">Papers</span><ul class="paper-hyp-list">${rows}</ul></div>`
+}
+function modelLinkedHypothesesHtml(model) {
+  const hyps = window.Models.hypothesesForModel(model, hypothesesCache)
+  if (!hyps.length) return ''
+  const rows = hyps
+    .map((h) => {
+      const v = effectiveHypothesisVerdict(h)
+      const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[v]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[v])}</span>`
+      return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(h.id)}">${escapeHtml(h.title || h.id)}</span> ${badge}</li>`
+    })
+    .join('')
+  return `<div class="model-links"><span class="card-sub">Hypotheses</span><ul class="paper-hyp-list">${rows}</ul></div>`
+}
+// A manual status override (or 'auto' to let runs drive it) — the "what needs adding/improving" control.
+function modelStatusSelectHtml(model) {
+  const cur = model.statusSource === 'manual' ? model.status : 'auto'
+  const opts = ['auto'].concat(window.Models.MODEL_STATUSES)
+  const sel = opts
+    .map(
+      (s) =>
+        `<option value="${escapeHtml(s)}"${s === cur ? ' selected' : ''}>${s === 'auto' ? 'auto (from runs)' : escapeHtml(window.Models.MODEL_STATUS_LABEL[s] || s)}</option>`,
+    )
+    .join('')
+  return `<label class="field model-status-field"><span>Status</span><select data-action="set-status" data-id="${escapeHtml(model.id)}">${sel}</select></label>`
+}
+function modelCardHtml(model) {
+  const id = escapeHtml(model.id)
+  const open = modelExpanded.has(model.id) ? ' open' : ''
+  const bindings = Array.isArray(model.modelNames) ? model.modelNames : []
+  const st = modelStatusOf(model)
+  const discussTitle =
+    st === 'failing'
+      ? 'Discuss + fix this failing model with the AI'
+      : st === 'proposed'
+        ? 'Discuss implementing this model with the AI'
+        : 'Discuss / improve this model with the AI'
+  const actions =
+    (chatAboutRunAvailable()
+      ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
+      : '') +
+    `<button type="button" class="card-btn card-btn-danger" data-action="delete-model" data-id="${id}"${helpAttr('Remove this model from the catalog.')}>${iconDeleteSvg()}</button>`
+  return `<details class="paper-card model-card" data-id="${id}"${open}>
+    <summary class="paper-summary">
+      ${modelStatusBadgeHtml(model)}
+      ${modelRunChipHtml(model)}
+      <span class="paper-summary-title">${escapeHtml(model.name || model.id)}</span>
+      <span class="card-actions">${actions}</span>
+    </summary>
+    <div class="paper-body">
+      ${model.description ? `<p class="paper-claim">${escapeHtml(model.description)}</p>` : ''}
+      ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
+      ${
+        bindings.length
+          ? `<p class="card-sub">Binds runs where model_name ∈ {${escapeHtml(bindings.join(', '))}}</p>`
+          : '<p class="card-sub">No model_name binding yet — a proposal not wired into the lever.</p>'
+      }
+      ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
+      ${modelStatusSelectHtml(model)}
+      ${modelLinkedPapersHtml(model)}
+      ${modelLinkedHypothesesHtml(model)}
+    </div>
+  </details>`
+}
+function modelCategoryFilterBarHtml() {
+  const cats = ['all'].concat(window.Models.MODEL_CATEGORIES)
+  const btns = cats
+    .map((c) => {
+      const count =
+        c === 'all' ? modelsCache.length : modelsCache.filter((m) => m.category === c).length
+      if (c !== 'all' && !count) return ''
+      const label = c === 'all' ? 'all' : window.Models.MODEL_CATEGORY_LABEL[c] || c
+      return `<button type="button" class="paper-filter-btn${modelCategoryFilter === c ? ' is-active' : ''}" data-category="${escapeHtml(c)}">${escapeHtml(label)} (${count})</button>`
+    })
+    .join('')
+  return `<div class="paper-filter">${btns}</div>`
+}
+async function renderModels() {
+  const body = byId('models-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to manage the model catalog.</div>')
+    return
+  }
+  // Load runs + papers + hypotheses alongside models so the status roll-up + links are fresh.
+  ;[modelsCache, runsCache, papersCache, hypothesesCache] = await Promise.all([
+    readModels(),
+    readRuns(),
+    readPapers(),
+    readHypotheses(),
+  ])
+  await refreshHypothesisVerdicts(hypothesesCache)
+  const seedBanner = pendingSeedModelsHtml()
+  if (!modelsCache.length) {
+    setHtml(
+      body,
+      seedBanner +
+        '<div class="empty-hint">No models yet — Scan Project to discover them, or import the curated set.</div>',
+    )
+    return
+  }
+  const shown =
+    modelCategoryFilter === 'all'
+      ? modelsCache
+      : modelsCache.filter((m) => m.category === modelCategoryFilter)
+  const order = window.Models.MODEL_CATEGORIES
+  const byName = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))
+  const groups = order
+    .map((cat) => ({ cat, models: shown.filter((m) => m.category === cat).sort(byName) }))
+    .filter((g) => g.models.length)
+  const other = shown.filter((m) => order.indexOf(m.category) < 0).sort(byName)
+  if (other.length) groups.push({ cat: 'other', models: other })
+  const html = groups
+    .map((g) => {
+      const label = window.Models.MODEL_CATEGORY_LABEL[g.cat] || 'Other'
+      return `<div class="model-group"><h3 class="model-group-h">${escapeHtml(label)}</h3>${g.models.map(modelCardHtml).join('')}</div>`
+    })
+    .join('')
+  setHtml(
+    body,
+    seedBanner +
+      modelCategoryFilterBarHtml() +
+      (html || '<div class="empty-hint">No models in this category.</div>'),
+  )
+}
+// Open the host chat preloaded with this model's full context (status, bindings, runs, linked papers +
+// hypotheses); the seed adapts to status — implement (proposed), fix (failing), or improve.
+async function chatAboutModel(id) {
+  const model = modelsCache.find((m) => m.id === id)
+  if (!model || !chatAboutRunAvailable()) return
+  const status = modelStatusOf(model)
+  const runs = window.Models.modelRunSummary(model, runsCache, objectiveDirection())
+  const papers = window.Models.papersForModel(model, papersCache)
+  const hyps = window.Models.hypothesesForModel(model, hypothesesCache)
+  const bindings = Array.isArray(model.modelNames) ? model.modelNames : []
+  const ctx = [
+    `You are discussing ONE specific MODEL in this project's catalog — "${model.name || model.id}" (status: ${status}). Work from the details below; don't ask the user to restate them.`,
+    `Category: ${model.category}.`,
+    model.description ? `What it is: ${model.description}` : '',
+    model.proposal ? `What's asked: ${model.proposal}` : '',
+    bindings.length
+      ? `It is trained by runs whose model_name is one of: ${bindings.join(', ')}.`
+      : 'It is NOT yet wired to a model_name lever value (a pure proposal).',
+    model.implPath ? `Implemented at: ${model.implPath}` : 'No implementation path on record yet.',
+    `Training runs so far: ${runs.runs}${runs.best !== null ? `, best ${objectiveName()} ${formatObjective(runs.best)}` : ''}${runs.failing ? `, ${runs.failing} health-flagged/failed` : ''}.`,
+    papers.length ? `Linked papers: ${papers.map((p) => p.title || p.id).join('; ')}.` : '',
+    hyps.length ? `Linked hypotheses: ${hyps.map((h) => h.title || h.id).join('; ')}.` : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  const systemPrompt = [projectChatPreamble(), ctx].filter(Boolean).join('\n\n')
+  const seed =
+    status === 'proposed'
+      ? 'Help me implement this model in the project — outline the files, classes and the model_name wiring needed to add it.'
+      : status === 'failing'
+        ? 'This model is failing — help me diagnose why its runs are degenerate/erroring and propose a fix.'
+        : status === 'needs-improvement'
+          ? 'Help me improve this model — what changes are most likely to raise its objective?'
+          : 'Help me work on this model — what would most improve it from here?'
+  try {
+    await window.OverseerBridge.discussTopic({
+      title: `Model ${model.name || model.id}`,
+      seed,
+      systemPrompt,
+    })
+  } catch {
+    setStatusLine('models-status', 'Could not open chat — please try again.', true)
+  }
+}
+// Scan Project: discover declared models (model_name choices) not yet catalogued, enrich with the LLM,
+// and persist them. Triggers the backend `scan-models` activity, then re-renders Models.
+async function onScanModels() {
+  if (!embedded()) {
+    setStatusLine('models-status', 'Open inside the Overseer to scan for models.', true)
+    return
+  }
+  const epoch = projectEpoch
+  setStatusLine('models-status', '')
+  const btn = byId('models-scan-btn')
+  if (btn) btn.disabled = true
+  try {
+    const result = await startOrEnqueue('scan-models', trainerActivityParams({}), 'Scan models')
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('models-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      await renderModels()
+      showToast('Scanned the project for models.')
+    } else {
+      setStatusLine('models-status', quickActivityFailureText(act, 'Scan'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('models-status', 'Could not scan — please try again.', true)
+    }
+  } finally {
+    if (btn) btn.disabled = false
+  }
+}
+async function onDeleteModel(id) {
+  try {
+    await deleteModelRecord(id)
+  } catch {
+    setStatusLine('models-status', 'Could not delete — please try again.', true)
+    return
+  }
+  modelsCache = modelsCache.filter((m) => m.id !== id)
+  await renderModels()
+}
+async function setModelStatus(id, value) {
+  const model = modelsCache.find((m) => m.id === id)
+  if (!model) return
+  const next =
+    value === 'auto'
+      ? { ...model, statusSource: 'auto' }
+      : { ...model, statusSource: 'manual', status: value }
+  try {
+    await putModel(next)
+  } catch {
+    setStatusLine('models-status', 'Could not update status — please try again.', true)
+    return
+  }
+  await renderModels()
+}
+// Add a paper-proposed (missing) model to the catalog as a `proposed` record, linked to the paper.
+async function addProposedModelToCatalog(paperId, slug) {
+  const missing = paperMissingModels.get(paperId) || []
+  const proposed = missing.find((p) => p.slug === slug)
+  if (!proposed) return
+  const rec = window.Models.buildProposedModelRecord(proposed, paperId, nowIso())
+  try {
+    await putModel(rec)
+    const p = papersCache.find((x) => x.id === paperId)
+    if (p) {
+      const ids = Array.from(new Set([...(p.modelIds || []), rec.id]))
+      await putPaper({ ...p, modelIds: ids })
+    }
+  } catch {
+    setStatusLine('papers-status', 'Could not add the model — please try again.', true)
+    return
+  }
+  paperMissingModels.set(
+    paperId,
+    missing.filter((x) => x.slug !== slug),
+  )
+  await renderPapers()
+  showToast(`Added “${proposed.name}” to the Models catalog as proposed.`)
+}
+// Find models: an LLM links the paper to the catalog models it is about + names any missing ones.
+// Triggers the backend `analyze-paper-models` activity, then surfaces the missing models on the card.
+async function onFindPaperModels(id, button) {
+  if (!embedded()) {
+    setStatusLine('papers-status', 'Open inside the Overseer to find models.', true)
+    return
+  }
+  const epoch = projectEpoch
+  setStatusLine('papers-status', '')
+  if (button) button.disabled = true
+  try {
+    const result = await startOrEnqueue(
+      'analyze-paper-models',
+      trainerActivityParams({ paperId: id }),
+      'Find models',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('papers-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      const recs = await queryRecords(manifest.recordType + '-model-analysis', 'latest')
+      const analysis = recs && recs[0] && recs[0].content
+      const missing =
+        analysis && analysis.paperId === id && Array.isArray(analysis.missingModels)
+          ? analysis.missingModels
+          : []
+      paperMissingModels.set(id, missing)
+      paperExpanded.add(id)
+      await renderPapers()
+      showToast(
+        missing.length
+          ? `Found ${missing.length} model${missing.length === 1 ? '' : 's'} to add — see the card.`
+          : 'Linked the paper to its catalog models.',
+      )
+    } else {
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Find models'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('papers-status', 'Could not find models — please try again.', true)
+    }
+  } finally {
+    if (button) button.disabled = false
+  }
+}
+// The linked + proposed-missing models shown on a Papers card (the "add missing model" affordance).
+function paperModelsHtml(paper) {
+  if (!window.Models) return ''
+  const linked = window.Models.modelsForPaper(paper, modelsCache)
+  const missing = paperMissingModels.get(paper.id) || []
+  if (!linked.length && !missing.length) return ''
+  const linkedRows = linked
+    .map(
+      (m) =>
+        `<li><span class="paper-hyp-title" data-action="goto-model" data-id="${escapeHtml(m.id)}">${escapeHtml(m.name || m.id)}</span> ${modelStatusBadgeHtml(m)}</li>`,
+    )
+    .join('')
+  const missingRows = missing
+    .map(
+      (p) =>
+        `<li><span class="paper-hyp-title">${escapeHtml(p.name)}</span> <span class="run-badge is-queued">not in catalog</span> <button type="button" class="icon-btn" data-action="add-model" data-paper="${escapeHtml(paper.id)}" data-id="${escapeHtml(p.slug)}" title="Add to the Models catalog as a proposed model" aria-label="Add model to catalog">+</button></li>`,
+    )
+    .join('')
+  return `<div class="paper-models"><span class="card-sub">Models</span><ul class="paper-hyp-list">${linkedRows}${missingRows}</ul></div>`
+}
+function setupModels() {
+  const scanBtn = byId('models-scan-btn')
+  if (scanBtn) scanBtn.addEventListener('click', onScanModels)
+  const body = byId('models-body')
+  if (!body) return
+  // Track expand/collapse so it survives re-render (the `toggle` event doesn't bubble — capture it).
+  body.addEventListener(
+    'toggle',
+    (event) => {
+      const d = event.target
+      if (!d || !d.classList || !d.classList.contains('model-card') || !d.dataset.id) return
+      if (d.open) modelExpanded.add(d.dataset.id)
+      else modelExpanded.delete(d.dataset.id)
+    },
+    true,
+  )
+  body.addEventListener('change', (event) => {
+    const sel = event.target.closest('select[data-action="set-status"]')
+    if (sel) setModelStatus(sel.dataset.id, sel.value)
+  })
+  body.addEventListener('click', (event) => {
+    if (event.target.closest('summary') && event.target.closest('[data-action]')) {
+      event.preventDefault()
+    }
+    const filterBtn = event.target.closest('button[data-category]')
+    if (filterBtn) {
+      modelCategoryFilter = filterBtn.dataset.category
+      renderModels()
+      return
+    }
+    const gotoPaper = event.target.closest('[data-action="goto-paper"]')
+    if (gotoPaper) {
+      showTab('papers')
+      return
+    }
+    const gotoHyp = event.target.closest('[data-action="goto-hyp"]')
+    if (gotoHyp) {
+      showTab('hypotheses')
+      return
+    }
+    const btn = event.target.closest('button[data-action]')
+    if (!btn) return
+    const { action, id } = btn.dataset
+    if (action === 'import-seeds') importSeedModels()
+    else if (action === 'discuss-model') chatAboutModel(id)
+    else if (action === 'delete-model') onDeleteModel(id)
+  })
 }
 
 // --- Launch tab ----------------------------------------------------------------
@@ -9786,6 +10431,7 @@ function showTab(id) {
   if (target === 'datasets') renderDatasets()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'papers') renderPapers()
+  if (target === 'models') renderModels()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
     renderActivity()
@@ -9866,6 +10512,7 @@ async function init() {
   setupDatasets()
   setupHypotheses()
   setupPapers()
+  setupModels()
   setupLaunch()
   setupActivity()
   setupTabs()

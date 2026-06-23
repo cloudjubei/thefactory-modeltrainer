@@ -252,11 +252,18 @@ describe('runTrainingCampaign', () => {
       levers: {
         lr: { type: 'number', default: 0.01 },
         steps: { type: 'number', default: 100 },
-        reward_model: { type: 'choice', choices: ['combo_all', 'combo_unified'], default: 'combo_unified' },
+        reward_model: {
+          type: 'choice',
+          choices: ['combo_all', 'combo_unified'],
+          default: 'combo_unified',
+        },
         combo_sell: { type: 'number', default: 0 },
       },
       migrations: [
-        { match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified', combo_sell: 1000 } },
+        {
+          match: { reward_model: 'combo_all' },
+          set: { reward_model: 'combo_unified', combo_sell: 1000 },
+        },
       ],
     })
     await tools.runTrainingCampaign({
@@ -2363,7 +2370,11 @@ describe('migrateTrainingRuns', () => {
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 1, config: { reward_model: 'combo_all', lr: 0.1, seed: 3 }, setupKey: 'old' },
+      content: {
+        objective: 1,
+        config: { reward_model: 'combo_all', lr: 0.1, seed: 3 },
+        setupKey: 'old',
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.migrateTrainingRuns({
@@ -2374,7 +2385,11 @@ describe('migrateTrainingRuns', () => {
     expect(result).toMatchObject({ recordType: 'demo-run', examinedRuns: 1, migratedRuns: 1 })
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
     const content = rec?.content as { config: Record<string, unknown>; setupKey: string }
-    expect(content.config).toMatchObject({ reward_model: 'combo_unified', combo_sell: 1000, lr: 0.1 })
+    expect(content.config).toMatchObject({
+      reward_model: 'combo_unified',
+      combo_sell: 1000,
+      lr: 0.1,
+    })
     expect(content.setupKey).not.toBe('old')
   })
 
@@ -2387,7 +2402,11 @@ describe('migrateTrainingRuns', () => {
       content: { objective: 1, config: { reward_model: 'combo_all_fee', combo_fee_penalty: 0.5 } },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
     expect((rec?.content as { config: Record<string, unknown> }).config.combo_fee_penalty).toBe(0.5)
   })
@@ -2418,7 +2437,10 @@ describe('migrateTrainingRuns', () => {
       content: {
         id: 'q1',
         activityType: 'train',
-        params: { spec: { fixed: { reward_model: 'combo_all', lr: 0.2 }, seeds: [0] }, concurrency: 1 },
+        params: {
+          spec: { fixed: { reward_model: 'combo_all', lr: 0.2 }, seeds: [0] },
+          concurrency: 1,
+        },
       },
     })
     const { tools } = makeTools(stubRunner(), storage)
@@ -2430,8 +2452,9 @@ describe('migrateTrainingRuns', () => {
     })
     expect(result).toMatchObject({ examinedQueue: 1, migratedQueue: 1 })
     const rec = await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q1' })
-    const fixed = (rec?.content as { params: { spec: { fixed: Record<string, unknown>; seeds: number[] } } })
-      .params.spec
+    const fixed = (
+      rec?.content as { params: { spec: { fixed: Record<string, unknown>; seeds: number[] } } }
+    ).params.spec
     expect(fixed.fixed).toMatchObject({ reward_model: 'combo_unified', combo_sell: 1000, lr: 0.2 })
     expect(fixed.seeds).toEqual([0])
   })
@@ -2445,12 +2468,22 @@ describe('migrateTrainingRuns', () => {
       projectRoot: '/repo',
       manifest: manifest(),
     })
-    expect(result).toMatchObject({ examinedRuns: 0, migratedRuns: 0, examinedQueue: 0, migratedQueue: 0 })
+    expect(result).toMatchObject({
+      examinedRuns: 0,
+      migratedRuns: 0,
+      examinedQueue: 0,
+      migratedQueue: 0,
+    })
   })
 
   it('skips run records that carry no config object', async () => {
     const storage = memoryStorage()
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'noconf', content: { objective: 1 } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'noconf',
+      content: { objective: 1 },
+    })
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
@@ -2470,10 +2503,7 @@ describe('migrateTrainingRuns', () => {
     const storage = memoryStorage()
     const root = await mkdtemp(join(tmpdir(), 'mtq-'))
     tempDirs.push(root)
-    await writeFile(
-      join(root, 'trainer.json'),
-      JSON.stringify(manifest({ migrations })),
-    )
+    await writeFile(join(root, 'trainer.json'), JSON.stringify(manifest({ migrations })))
     await storage.upsertRecord({
       scope: 'proj',
       type: 'trainer-queue',
@@ -2493,39 +2523,65 @@ describe('migrateTrainingRuns', () => {
   describe('delete rules', () => {
     // Rewrite rules first, then a trailing "delete anything that isn't combo_unified" rule.
     const pruneMigrations = [
-      { match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified', combo_sell: 1000 } },
+      {
+        match: { reward_model: 'combo_all' },
+        set: { reward_model: 'combo_unified', combo_sell: 1000 },
+      },
       { matchNot: { reward_model: 'combo_unified' }, delete: true },
     ]
     const withPrune = () => manifest({ migrations: pruneMigrations })
 
     async function seedRunRec(storage: DataStorage, key: string, config: Record<string, unknown>) {
-      await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { objective: 1, config } })
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run',
+        key,
+        content: { objective: 1, config },
+      })
     }
 
     it('deletes runs whose reward_model is not combo_unified, rewrites the migratable ones, keeps combo_unified', async () => {
       const storage = memoryStorage()
-      await seedRunRec(storage, 'old', { reward_model: 'combo_all', lr: 0.1 })       // → rewritten
+      await seedRunRec(storage, 'old', { reward_model: 'combo_all', lr: 0.1 }) // → rewritten
       await seedRunRec(storage, 'pp3', { reward_model: 'profit_percentage3', lr: 0.2 }) // → deleted
-      await seedRunRec(storage, 'pa2', { reward_model: 'profit_all2', lr: 0.3 })        // → deleted
-      await seedRunRec(storage, 'uni', { reward_model: 'combo_unified', lr: 0.4 })      // → kept
+      await seedRunRec(storage, 'pa2', { reward_model: 'profit_all2', lr: 0.3 }) // → deleted
+      await seedRunRec(storage, 'uni', { reward_model: 'combo_unified', lr: 0.4 }) // → kept
       const { tools } = makeTools(stubRunner(), storage)
-      const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withPrune() })
+      const result = await tools.migrateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: withPrune(),
+      })
 
       expect(result).toMatchObject({ examinedRuns: 4, migratedRuns: 1, deletedRuns: 2 })
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'pp3' })).toBeUndefined()
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'pa2' })).toBeUndefined()
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'uni' })).toBeDefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'pp3' }),
+      ).toBeUndefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'pa2' }),
+      ).toBeUndefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'uni' }),
+      ).toBeDefined()
       const kept = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'old' })
-      expect((kept?.content as { config: Record<string, unknown> }).config.reward_model).toBe('combo_unified')
+      expect((kept?.content as { config: Record<string, unknown> }).config.reward_model).toBe(
+        'combo_unified',
+      )
     })
 
     it('never deletes a run that lacks the matchNot field (e.g. hodl/supervised with no reward_model)', async () => {
       const storage = memoryStorage()
       await seedRunRec(storage, 'hodl', { model_name: 'hodl', lr: 0.1 })
       const { tools } = makeTools(stubRunner(), storage)
-      const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withPrune() })
+      const result = await tools.migrateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: withPrune(),
+      })
       expect(result).toMatchObject({ examinedRuns: 1, migratedRuns: 0, deletedRuns: 0 })
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'hodl' })).toBeDefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'hodl' }),
+      ).toBeDefined()
     })
 
     it('deletes pending-queue items whose spec.fixed reward is being removed', async () => {
@@ -2534,7 +2590,11 @@ describe('migrateTrainingRuns', () => {
         scope: 'proj',
         type: 'trainer-queue',
         key: 'q1',
-        content: { id: 'q1', activityType: 'train', params: { spec: { fixed: { reward_model: 'profit_percentage3' } } } },
+        content: {
+          id: 'q1',
+          activityType: 'train',
+          params: { spec: { fixed: { reward_model: 'profit_percentage3' } } },
+        },
       })
       const { tools } = makeTools(stubRunner(), storage)
       const result = await tools.migrateTrainingRuns({
@@ -2544,7 +2604,9 @@ describe('migrateTrainingRuns', () => {
         queueRecordType: 'trainer-queue',
       })
       expect(result).toMatchObject({ examinedQueue: 1, deletedQueue: 1, migratedQueue: 0 })
-      expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q1' })).toBeUndefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q1' }),
+      ).toBeUndefined()
     })
 
     it('is idempotent — a second pass deletes/rewrites nothing', async () => {
@@ -2552,8 +2614,16 @@ describe('migrateTrainingRuns', () => {
       await seedRunRec(storage, 'pp3', { reward_model: 'profit_percentage3' })
       await seedRunRec(storage, 'uni', { reward_model: 'combo_unified' })
       const { tools } = makeTools(stubRunner(), storage)
-      await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withPrune() })
-      const second = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withPrune() })
+      await tools.migrateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: withPrune(),
+      })
+      const second = await tools.migrateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: withPrune(),
+      })
       expect(second).toMatchObject({ examinedRuns: 1, migratedRuns: 0, deletedRuns: 0 })
     })
 
@@ -2564,19 +2634,33 @@ describe('migrateTrainingRuns', () => {
         scope: 'proj',
         type: 'demo-run',
         key: 'pp3',
-        content: { objective: 1, config: { reward_model: 'profit_percentage3' }, setupKey: 'setupPP3' },
+        content: {
+          objective: 1,
+          config: { reward_model: 'profit_percentage3' },
+          setupKey: 'setupPP3',
+        },
       })
       for (const type of ['demo-run-evaluation', 'demo-run-verdict', 'demo-run-xai-narrative']) {
         await storage.upsertRecord({ scope: 'proj', type, key: 'pp3', content: { runKey: 'pp3' } })
       }
-      await storage.upsertRecord({ scope: 'proj', type: 'demo-run-unrunnable', key: 'setupPP3', content: {} })
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run-unrunnable',
+        key: 'setupPP3',
+        content: {},
+      })
       await storage.upsertRecord({
         scope: 'proj',
         type: 'demo-run',
         key: 'uni',
         content: { objective: 2, config: { reward_model: 'combo_unified' }, setupKey: 'setupUNI' },
       })
-      await storage.upsertRecord({ scope: 'proj', type: 'demo-run-verdict', key: 'uni', content: { runKey: 'uni' } })
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run-verdict',
+        key: 'uni',
+        content: { runKey: 'uni' },
+      })
 
       const { tools } = makeTools(stubRunner(), storage)
       const written: string[] = []
@@ -2589,13 +2673,24 @@ describe('migrateTrainingRuns', () => {
 
       expect(result).toMatchObject({ deletedRuns: 1 })
       // The run AND every derived record are gone.
-      for (const type of ['demo-run', 'demo-run-evaluation', 'demo-run-verdict', 'demo-run-xai-narrative']) {
+      for (const type of [
+        'demo-run',
+        'demo-run-evaluation',
+        'demo-run-verdict',
+        'demo-run-xai-narrative',
+      ]) {
         expect(await storage.readRecord({ scope: 'proj', type, key: 'pp3' })).toBeUndefined()
       }
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run-unrunnable', key: 'setupPP3' })).toBeUndefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run-unrunnable', key: 'setupPP3' }),
+      ).toBeUndefined()
       // The KEPT run and its verdict are untouched.
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'uni' })).toBeDefined()
-      expect(await storage.readRecord({ scope: 'proj', type: 'demo-run-verdict', key: 'uni' })).toBeDefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'uni' }),
+      ).toBeDefined()
+      expect(
+        await storage.readRecord({ scope: 'proj', type: 'demo-run-verdict', key: 'uni' }),
+      ).toBeDefined()
       // Each real deletion was broadcast (run + 3 children + unrunnable); a missing child isn't broadcast.
       expect(written).toEqual(
         expect.arrayContaining([
@@ -2627,5 +2722,305 @@ describe('migrateTrainingRuns', () => {
       })
       expect(written).toEqual(['demo-run:pp3'])
     })
+  })
+})
+
+describe('scanProjectModels', () => {
+  const mm = (choices: string[], desc?: string): TrainerManifest =>
+    manifest({
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        model_name: {
+          type: 'choice',
+          choices,
+          default: choices[0],
+          ...(desc ? { description: desc } : {}),
+        },
+      },
+    })
+
+  it('heuristically discovers uncatalogued model_name choices and persists them (no LLM)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm(['dqn', 'rainbow-dqn-custom', 'hodl']),
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      discovered: 3,
+      created: 3,
+      skippedExisting: 0,
+      scannedAt: NOW,
+    })
+    expect(result.scannedBy).toBeUndefined()
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-model' })
+    expect(recs).toHaveLength(3)
+    const rainbow = recs.find((r) => r.key === 'rainbow-dqn-custom')!.content as Record<
+      string,
+      unknown
+    >
+    expect(rainbow).toMatchObject({
+      id: 'rainbow-dqn-custom',
+      slug: 'rainbow-dqn-custom',
+      name: 'Rainbow DQN Custom',
+      category: 'rl',
+      status: 'implemented',
+      statusSource: 'auto',
+      source: 'scan',
+      modelNames: ['rainbow-dqn-custom'],
+    })
+    const hodl = recs.find((r) => r.key === 'hodl')!.content as Record<string, unknown>
+    expect(hodl).toMatchObject({ name: 'Buy-and-Hold', category: 'baseline' })
+  })
+
+  it('enriches each candidate with the LLM (name/description/category/paper links)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'p1',
+      content: {
+        id: 'p1',
+        title: 'Rainbow',
+        claim: 'combines six DQN improvements',
+        status: 'untested',
+        source: 'manual',
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    })
+    const enrich = JSON.stringify([
+      {
+        slug: 'rainbow-dqn-custom',
+        name: 'Rainbow DQN',
+        description: 'Combines six DQN improvements.',
+        category: 'rl',
+        paperIds: ['p1', 'ghost'],
+      },
+    ])
+    const executor = stubExecutor(enrich)
+    const { tools } = makeJudgeTools(executor, storage)
+    const written: string[] = []
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm(['rainbow-dqn-custom'], 'the algorithm'),
+      llmConfig: LLM,
+      onRecordWritten: (t: string) => written.push(t),
+    })
+    expect(result.created).toBe(1)
+    expect(result.scannedBy).toBe('openai/m')
+    const m = (await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'rainbow-dqn-custom',
+    }))!.content as Record<string, unknown>
+    expect(m).toMatchObject({
+      name: 'Rainbow DQN',
+      description: 'Combines six DQN improvements.',
+      category: 'rl',
+      source: 'llm',
+      paperIds: ['p1'],
+      proposedBy: 'openai/m',
+    })
+    expect(executor.requests[0].userContent).toContain('the algorithm')
+    expect(written).toContain('demo-run-model')
+  })
+
+  it('does not re-discover a choice already in the catalog (counts it as skippedExisting)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'dqn',
+      content: {
+        id: 'dqn',
+        slug: 'dqn',
+        name: 'DQN',
+        description: '',
+        category: 'rl',
+        status: 'implemented',
+        statusSource: 'auto',
+        modelNames: ['dqn'],
+        source: 'manual',
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm(['dqn', 'ppo']),
+    })
+    expect(result).toMatchObject({ discovered: 1, created: 1, skippedExisting: 1 })
+    expect(result.models[0].slug).toBe('ppo')
+  })
+
+  it('returns nothing when the manifest has no model_name choice lever', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+    })
+    expect(result).toMatchObject({ discovered: 0, created: 0, skippedExisting: 0, models: [] })
+  })
+})
+
+describe('analyzePaperModels', () => {
+  const mm = manifest({
+    levers: {
+      lr: { type: 'number', default: 0.01 },
+      model_name: { type: 'choice', choices: ['dqn', 'rainbow-dqn-custom'], default: 'dqn' },
+    },
+  })
+  const seedPaper = (storage: DataStorage, id = 'p1', extra: Record<string, unknown> = {}) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: id,
+      content: {
+        id,
+        title: 'Rainbow',
+        claim: 'combine improvements',
+        status: 'untested',
+        source: 'manual',
+        createdAt: NOW,
+        updatedAt: NOW,
+        ...extra,
+      },
+    })
+  const seedModel = (storage: DataStorage, slug: string, extra: Record<string, unknown> = {}) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: slug,
+      content: {
+        id: slug,
+        slug,
+        name: slug,
+        description: '',
+        category: 'rl',
+        status: 'implemented',
+        statusSource: 'auto',
+        modelNames: [slug],
+        source: 'manual',
+        createdAt: NOW,
+        updatedAt: NOW,
+        ...extra,
+      },
+    })
+
+  it('links matched existing models both directions and returns missing proposals', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage)
+    await seedModel(storage, 'rainbow-dqn-custom', {
+      modelNames: ['rainbow-dqn-custom', 'rainbow-dqn'],
+    })
+    const resp = JSON.stringify({
+      matchModelIds: ['rainbow-dqn-custom', 'ghost'],
+      proposedModels: [
+        {
+          name: 'C51 Distributional DQN',
+          description: 'categorical',
+          category: 'rl',
+          proposal: 'add C51 head',
+        },
+        { name: 'Rainbow DQN', slug: 'rainbow-dqn', description: '', category: 'rl', proposal: '' },
+      ],
+    })
+    const { tools } = makeJudgeTools(stubExecutor(resp), storage)
+    const written: string[] = []
+    const result = await tools.analyzePaperModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm,
+      paperId: 'p1',
+      llmConfig: LLM,
+      onRecordWritten: (t: string, k: string) => written.push(`${t}:${k}`),
+    })
+    expect(result.linkedModelIds).toEqual(['rainbow-dqn-custom'])
+    expect(result.missingModels.map((p) => p.slug)).toEqual(['c51-distributional-dqn'])
+    expect(result.paper.modelIds).toEqual(['rainbow-dqn-custom'])
+    const m = (await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'rainbow-dqn-custom',
+    }))!.content as { paperIds?: string[] }
+    expect(m.paperIds).toContain('p1')
+    expect(written).toContain('demo-run-model:rainbow-dqn-custom')
+    expect(written).toContain('demo-run-paper:p1')
+  })
+
+  it('throws when the paper is not in the project', async () => {
+    const { tools } = makeJudgeTools(stubExecutor('{}'), memoryStorage())
+    await expect(
+      tools.analyzePaperModels({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: mm,
+        paperId: 'nope',
+        llmConfig: LLM,
+      }),
+    ).rejects.toThrow(/no paper/)
+  })
+
+  it('stamps the paper (preserving prior modelIds) when nothing matches', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage, 'p1', { modelIds: ['existing-link'] })
+    const { tools } = makeJudgeTools(
+      stubExecutor(JSON.stringify({ matchModelIds: [], proposedModels: [] })),
+      storage,
+    )
+    const result = await tools.analyzePaperModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm,
+      paperId: 'p1',
+      llmConfig: LLM,
+    })
+    expect(result.linkedModelIds).toEqual([])
+    expect(result.missingModels).toEqual([])
+    expect(result.paper.modelIds).toEqual(['existing-link'])
+    expect(result.paper.updatedAt).toBe(NOW)
+  })
+
+  it('hands the model the fetched paper text when the paper has a url', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage, 'p1', { url: 'https://arxiv.org/abs/1' })
+    const executor = stubExecutor(JSON.stringify({ matchModelIds: [], proposedModels: [] }))
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.analyzePaperModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm,
+      paperId: 'p1',
+      llmConfig: LLM,
+      fetchPaperText: async () => 'ABSTRACT TEXT',
+    })
+    expect(executor.requests[0].userContent).toContain('ABSTRACT TEXT')
+  })
+
+  it('still analyses when the paper-text fetch fails (text omitted)', async () => {
+    const storage = memoryStorage()
+    await seedPaper(storage, 'p1', { url: 'https://arxiv.org/abs/1' })
+    const executor = stubExecutor(JSON.stringify({ matchModelIds: [], proposedModels: [] }))
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.analyzePaperModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm,
+      paperId: 'p1',
+      llmConfig: LLM,
+      fetchPaperText: async () => {
+        throw new Error('network down')
+      },
+    })
+    expect(result.paper.modelIds).toEqual([])
+    expect(executor.requests[0].userContent).not.toContain('ABSTRACT')
   })
 })

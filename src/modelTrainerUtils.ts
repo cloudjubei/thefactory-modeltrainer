@@ -6,7 +6,9 @@ import type {
   DecisionTrace,
   DecisionTraceDiff,
   ExperimentSpec,
+  ModelCategory,
   PlannedTrainingItem,
+  ProposedModel,
   RunXaiDigest,
   TrainerDataFile,
   TrainerLeverSpec,
@@ -1008,4 +1010,257 @@ export function diffDecisionTraces(
     objectiveDelta: tweak.objective - baseline.objective,
     quality: classifyDecisionQuality(changedRewardDeltas, unchangedRewardDeltas),
   }
+}
+
+// --- Models catalog ----------------------------------------------------------
+
+const MODEL_CATEGORIES: ReadonlySet<string> = new Set(['rl', 'supervised', 'baseline', 'component'])
+
+/** Tokens rendered verbatim (uppercased acronym or expanded alias) when humanizing a model_name. */
+const MODEL_NAME_ACRONYMS: Record<string, string> = {
+  dqn: 'DQN',
+  ppo: 'PPO',
+  a2c: 'A2C',
+  a3c: 'A3C',
+  trpo: 'TRPO',
+  iqn: 'IQN',
+  qrdqn: 'QR-DQN',
+  tcn: 'TCN',
+  lstm: 'LSTM',
+  gru: 'GRU',
+  gbm: 'GBM',
+  mlp: 'MLP',
+  rl: 'RL',
+  sac: 'SAC',
+  td3: 'TD3',
+  ddpg: 'DDPG',
+  ars: 'ARS',
+  sbx: 'SBX',
+  reppo: 'RecurrentPPO',
+  hodl: 'Buy-and-Hold',
+}
+
+/** Canonical kebab slug for a model name/identifier — lowercase, alphanumeric runs joined by hyphens. */
+export function modelSlug(name: string): string {
+  return String(name || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/** Heuristic {@link ModelCategory} for a model_name/identifier; RL is the default for an algorithm name. */
+export function inferModelCategory(modelName: string): ModelCategory {
+  const s = String(modelName || '').toLowerCase()
+  if (/(^|[-_])(hodl|buy-?and-?hold|technical|time-strategy|random)([-_]|$)/.test(s))
+    return 'baseline'
+  if (/(supervised|logreg|gbm|xgboost|regression|classifier|forecast)/.test(s)) return 'supervised'
+  if (/(extractor|policy|buffer|network|encoder|backbone|component|optimizer)/.test(s))
+    return 'component'
+  return 'rl'
+}
+
+/** Heuristic human name for a model_name lever value, e.g. `rainbow-dqn-custom` → `Rainbow DQN Custom`. */
+export function humanizeModelName(modelName: string): string {
+  const slug = modelSlug(modelName)
+  if (!slug) return String(modelName || '')
+  return slug
+    .split('-')
+    .map((tok) => MODEL_NAME_ACRONYMS[tok] ?? (tok ? tok[0].toUpperCase() + tok.slice(1) : ''))
+    .filter(Boolean)
+    .join(' ')
+}
+
+/**
+ * From a manifest's `model_name` choice lever, the candidate models whose slug is not already in the
+ * catalog and whose `model_name` is not already a binding of an existing model — each with a heuristic
+ * name + category. `[]` when the manifest declares no `model_name` choice lever.
+ */
+export function discoverManifestModelCandidates(
+  manifest: TrainerManifest,
+  existingModels: Array<{ slug?: string; modelNames?: string[] }>,
+): { modelName: string; slug: string; name: string; category: ModelCategory }[] {
+  const lever = manifest.levers?.model_name as TrainerLeverSpec | undefined
+  if (!lever || lever.type !== 'choice' || !Array.isArray(lever.choices)) return []
+  const haveSlugs = new Set<string>()
+  const haveBindings = new Set<string>()
+  for (const m of existingModels) {
+    if (m.slug) haveSlugs.add(m.slug)
+    for (const n of m.modelNames ?? []) haveBindings.add(n)
+  }
+  const out: { modelName: string; slug: string; name: string; category: ModelCategory }[] = []
+  const seen = new Set<string>()
+  for (const choice of lever.choices) {
+    if (typeof choice !== 'string' || !choice || haveBindings.has(choice)) continue
+    const slug = modelSlug(choice)
+    if (!slug || haveSlugs.has(slug) || seen.has(slug)) continue
+    seen.add(slug)
+    out.push({
+      modelName: choice,
+      slug,
+      name: humanizeModelName(choice),
+      category: inferModelCategory(choice),
+    })
+  }
+  return out
+}
+
+/** Keep the first occurrence of each `slug` (entries without a slug pass through unchanged). Pure. */
+export function dedupeModelsBySlug<T extends { slug?: string }>(models: T[]): T[] {
+  const seen = new Set<string>()
+  const out: T[] = []
+  for (const m of models) {
+    const slug = typeof m.slug === 'string' ? m.slug : ''
+    if (slug && seen.has(slug)) continue
+    if (slug) seen.add(slug)
+    out.push(m)
+  }
+  return out
+}
+
+/**
+ * Coerce the model's scan-enrichment response (an array of `{slug,name?,description?,category?,paperIds?}`)
+ * into a map keyed by slug, keeping only known candidate slugs + known paper ids and dropping ill-typed
+ * fields. An empty map for a non-array response.
+ */
+export function coerceScannedModels(
+  raw: unknown,
+  candidateSlugs: Set<string>,
+  knownPaperIds: Set<string>,
+): Map<
+  string,
+  { name?: string; description?: string; category?: ModelCategory; paperIds?: string[] }
+> {
+  const out = new Map<
+    string,
+    { name?: string; description?: string; category?: ModelCategory; paperIds?: string[] }
+  >()
+  if (!Array.isArray(raw)) return out
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const o = item as Record<string, unknown>
+    const slug = typeof o.slug === 'string' ? o.slug : ''
+    if (!candidateSlugs.has(slug)) continue
+    const enrich: {
+      name?: string
+      description?: string
+      category?: ModelCategory
+      paperIds?: string[]
+    } = {}
+    if (typeof o.name === 'string' && o.name.trim()) enrich.name = o.name.trim()
+    if (typeof o.description === 'string' && o.description.trim())
+      enrich.description = o.description.trim()
+    if (typeof o.category === 'string' && MODEL_CATEGORIES.has(o.category)) {
+      enrich.category = o.category as ModelCategory
+    }
+    if (Array.isArray(o.paperIds)) {
+      const ids = o.paperIds.filter(
+        (x): x is string => typeof x === 'string' && knownPaperIds.has(x),
+      )
+      if (ids.length) enrich.paperIds = ids
+    }
+    out.set(slug, enrich)
+  }
+  return out
+}
+
+/** System prompt for "Scan Project": enrich the given candidate models into honest catalog entries. */
+export function buildScanModelsSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a model librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given CANDIDATE models (each a model_name the project can train, with a heuristic name + category) and the project's PAPERS.`,
+    `For each candidate, return an enriched catalog entry: a clearer human NAME, a one/two-sentence DESCRIPTION of what the model is and how it differs, the best CATEGORY (rl|supervised|baseline|component), and the ids of any given PAPERS that introduce or improve it (only ids from the list; [] if none).`,
+    `Return ONLY a JSON array, one object per candidate you can enrich: [{"slug": "<the candidate slug, verbatim>", "name": string, "description": string, "category": "rl|supervised|baseline|component", "paperIds": [string]}]. No prose.`,
+  ].join('\n')
+}
+
+export function buildScanModelsUserContent(input: {
+  candidates: { slug: string; modelName: string; name: string; category: ModelCategory }[]
+  papers: { id: string; title: string; claim?: string }[]
+  leverDescription?: string
+}): string {
+  return JSON.stringify({
+    candidates: input.candidates,
+    papers: input.papers,
+    ...(input.leverDescription ? { leverDescription: input.leverDescription } : {}),
+  })
+}
+
+/**
+ * Coerce the model's paper→models response into the existing-model ids it matched + the proposed (missing)
+ * models. A proposed model needs a non-empty name; its slug defaults from the name and category defaults
+ * to `rl`. Empty for a malformed response.
+ */
+export function coerceAnalyzedPaperModels(raw: unknown): {
+  matchModelIds: string[]
+  proposedModels: ProposedModel[]
+} {
+  const o =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const matchModelIds = Array.isArray(o.matchModelIds)
+    ? o.matchModelIds.filter((x): x is string => typeof x === 'string' && x.length > 0)
+    : []
+  const proposedModels: ProposedModel[] = []
+  const rawProposed = Array.isArray(o.proposedModels) ? o.proposedModels : []
+  for (const item of rawProposed) {
+    if (!item || typeof item !== 'object') continue
+    const p = item as Record<string, unknown>
+    const name = typeof p.name === 'string' && p.name.trim() ? p.name.trim() : ''
+    if (!name) continue
+    const slug = (typeof p.slug === 'string' && modelSlug(p.slug)) || modelSlug(name)
+    if (!slug) continue
+    const description = typeof p.description === 'string' ? p.description.trim() : ''
+    const category =
+      typeof p.category === 'string' && MODEL_CATEGORIES.has(p.category)
+        ? (p.category as ModelCategory)
+        : 'rl'
+    const proposal = typeof p.proposal === 'string' ? p.proposal.trim() : ''
+    proposedModels.push({ name, slug, description, category, proposal })
+  }
+  return { matchModelIds, proposedModels }
+}
+
+/** Of `proposed`, the models with NO catalog entry — matched by slug, by a catalog model's name slug, or
+ *  by a catalog model's `model_name` binding. The Models tab's "Add to catalog" candidates. */
+export function detectMissingPaperModels(
+  proposed: ProposedModel[],
+  catalog: Array<{ slug?: string; name?: string; modelNames?: string[] }>,
+): ProposedModel[] {
+  const slugs = new Set<string>()
+  const bindings = new Set<string>()
+  for (const m of catalog) {
+    if (m.slug) slugs.add(m.slug)
+    if (m.name) slugs.add(modelSlug(m.name))
+    for (const n of m.modelNames ?? []) bindings.add(n)
+  }
+  return proposed.filter((p) => !slugs.has(p.slug) && !bindings.has(p.slug))
+}
+
+/** System prompt for "Find models": match the paper to existing catalog models + propose missing ones. */
+export function buildAnalyzePaperModelsSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a model librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given a PAPER (its fields, and its text when available) and the project's EXISTING catalog models.`,
+    `Do TWO things: (1) MATCH — the ids of existing models this paper INTRODUCES or IMPROVES (a genuine "this paper is about that model" link, not a passing mention); (2) PROPOSE — any models the paper introduces or requires that are NOT in the catalog, each with what to add.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchModelIds": [string], "proposedModels": [{"name": string, "slug": string, "description": string, "category": "rl|supervised|baseline|component", "proposal": string}]}. Use [] for either when there is nothing to add.`,
+  ].join('\n')
+}
+
+export function buildAnalyzePaperModelsUserContent(input: {
+  paper: Record<string, unknown>
+  existingModels: {
+    id: string
+    name: string
+    slug: string
+    category: string
+    modelNames?: string[]
+  }[]
+  text?: string
+}): string {
+  return JSON.stringify({
+    paper: input.paper,
+    existingModels: input.existingModels,
+    ...(input.text ? { text: input.text } : {}),
+  })
 }

@@ -1395,6 +1395,26 @@ button:focus-visible,
   margin: 6px 0 0;
   font-style: italic;
 }
+/* Models tab — category groups + per-card link sections (reuse paper-card/paper-hyp-list styling). */
+.model-group {
+  margin: 0 0 18px;
+}
+.model-group-h {
+  margin: 12px 0 6px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #888);
+}
+.model-links,
+.paper-models {
+  margin: 8px 0 4px;
+}
+.model-status-field {
+  margin: 8px 0;
+  max-width: 280px;
+}
 .paper-cvm {
   margin: 6px 0;
 }
@@ -1419,6 +1439,40 @@ button:focus-visible,
 .paper-chip.is-warn {
   background: var(--warn-soft);
   color: var(--warn);
+}
+/* A linked-paper / linked-hypothesis chip is clickable — show the pointer + an affordance on hover. */
+.paper-chip[data-action] {
+  cursor: pointer;
+}
+.paper-chip[data-action]:hover {
+  text-decoration: underline;
+  color: var(--accent);
+}
+/* The expanded-hypothesis evidence block: the basis line + the matching-runs table. */
+.hyp-evidence {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0;
+}
+.hyp-basis {
+  margin: 0;
+}
+.hyp-claimed {
+  margin: 0;
+  font-style: italic;
+}
+.hyp-runs {
+  font-size: 12px;
+}
+.hyp-runs th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--muted);
+  padding-right: 12px;
+}
+.hyp-runs td {
+  padding-right: 12px;
 }
 .paper-filter {
   display: flex;
@@ -2215,6 +2269,39 @@ pre.json {
   border-radius: 10px;
   background: var(--surface-subtle);
 }
+/* Verdict views as accordion sections: each header always visible; the open one scrolls internally. */
+.hypothesis-section {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  margin-bottom: 8px;
+}
+.hypothesis-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+}
+.hypothesis-section-head::-webkit-details-marker {
+  display: none;
+}
+.hypothesis-section-head::before {
+  content: '▸';
+  color: var(--muted);
+  font-size: 11px;
+  transition: transform 0.12s ease;
+}
+.hypothesis-section[open] > .hypothesis-section-head::before {
+  transform: rotate(90deg);
+}
+.hypothesis-section-body {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0 12px 12px;
+}
 /* Collapsible card summaries (hypotheses + papers) share the chevron + flex-row layout. */
 .hypothesis-summary,
 .paper-summary {
@@ -2716,4 +2803,34 @@ pre.json {
 .xai-heat td {
   text-align: center;
   min-width: 3.5em;
+}
+/* Interaction cells that have actual runs drill into the Runs tab on click. */
+.xai-cell-link {
+  cursor: pointer;
+}
+.xai-cell-link:hover {
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: -2px;
+}
+/* The acquisition ("climb toward the optimum") recommendation badge — accented to stand out. */
+.badge.xai-rec-climb {
+  background: rgba(34, 197, 94, 0.18);
+  color: #15803d;
+  font-weight: 600;
+}
+/* fANOVA per-lever effect tags: inert (drop), interactive (coupled), direct (plain). */
+.fanova-inert {
+  color: var(--muted);
+  font-style: italic;
+}
+.fanova-interactive {
+  color: #b45309;
+  font-weight: 600;
+}
+.xai-coupling {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+}
+.xai-coupling li {
+  margin: 2px 0;
 }

@@ -12,6 +12,8 @@ import type {
   AnalysisRun,
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
+  AnalyzePaperModelsParams,
+  AnalyzePaperModelsResult,
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
   EvaluateTrainingRunResult,
@@ -32,9 +34,13 @@ import type {
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
   RunXaiDigest,
+  ScanProjectModelsParams,
+  ScanProjectModelsResult,
   SuggestPaperHypothesesParams,
   SuggestPaperHypothesesResult,
+  TrainerLeverSpec,
   TrainerManifest,
+  TrainingModel,
   TrainingCalibration,
   TrainingCampaignParams,
   TrainingCampaignProgress,
@@ -65,21 +71,29 @@ import {
   manifestDataFiles,
   migrateExperimentSpec,
   parseProgressMarker,
+  buildAnalyzePaperModelsSystemPrompt,
+  buildAnalyzePaperModelsUserContent,
   buildAnalyzePaperSystemPrompt,
   buildAnalyzePaperUserContent,
   buildJudgeSystemPrompt,
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
+  buildScanModelsSystemPrompt,
+  buildScanModelsUserContent,
   buildSuggestHypothesesSystemPrompt,
   buildSuggestHypothesesUserContent,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
+  coerceAnalyzedPaperModels,
   coerceHypothesisItems,
   coercePaperDraft,
+  coerceScannedModels,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
+  detectMissingPaperModels,
   diffDecisionTraces,
+  discoverManifestModelCandidates,
   expandExperimentMatrix,
   normalizeObjectiveScores,
   pickBestRun,
@@ -1180,6 +1194,216 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return out
   }
 
+  async function scanProjectModels(
+    params: ScanProjectModelsParams,
+  ): Promise<ScanProjectModelsResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const modelType = `${recordType}-model`
+    const scannedAt = now()
+
+    const existingRecords = await deps.storage.listRecords({ scope: params.scope, type: modelType })
+    const existingModels = existingRecords
+      .map((r) => r.content as unknown as TrainingModel)
+      .filter((c): c is TrainingModel => !!c && typeof c.slug === 'string')
+
+    const candidates = discoverManifestModelCandidates(manifest, existingModels)
+    const lever = manifest.levers?.model_name as TrainerLeverSpec | undefined
+    const totalChoices =
+      lever && lever.type === 'choice' && Array.isArray(lever.choices)
+        ? lever.choices.filter((c): c is string => typeof c === 'string' && !!c).length
+        : 0
+    const skippedExisting = Math.max(0, totalChoices - candidates.length)
+
+    let enrichments = new Map<
+      string,
+      {
+        name?: string
+        description?: string
+        category?: TrainingModel['category']
+        paperIds?: string[]
+      }
+    >()
+    let scannedBy: string | undefined
+    if (params.llmConfig && candidates.length) {
+      const executor = requireInferenceExecutor()
+      scannedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+      const paperRecords = await deps.storage.listRecords({
+        scope: params.scope,
+        type: `${recordType}-paper`,
+      })
+      const papers = paperRecords
+        .map((r) => r.content as unknown as TrainingPaperRecord)
+        .filter((p): p is TrainingPaperRecord => !!p && typeof p.id === 'string')
+        .map((p) => ({ id: p.id, title: p.title, claim: p.claim }))
+      const res = await executor.runInference({
+        systemPrompt: buildScanModelsSystemPrompt(manifest),
+        userContent: buildScanModelsUserContent({
+          candidates,
+          papers,
+          leverDescription: lever?.description,
+        }),
+        model: { kind: 'api', llmConfig: params.llmConfig },
+        abortSignal: params.abortSignal,
+      })
+      enrichments = coerceScannedModels(
+        parseFirstValidJson(res.text),
+        new Set(candidates.map((c) => c.slug)),
+        new Set(papers.map((p) => p.id)),
+      )
+    }
+
+    const models: TrainingModel[] = []
+    for (const c of candidates) {
+      const e = enrichments.get(c.slug) ?? {}
+      const model: TrainingModel = {
+        id: c.slug,
+        slug: c.slug,
+        name: e.name ?? c.name,
+        description: e.description ?? '',
+        category: e.category ?? c.category,
+        status: 'implemented',
+        statusSource: 'auto',
+        modelNames: [c.modelName],
+        ...(e.paperIds && e.paperIds.length ? { paperIds: e.paperIds } : {}),
+        source: params.llmConfig ? 'llm' : 'scan',
+        ...(scannedBy ? { proposedBy: scannedBy } : {}),
+        createdAt: scannedAt,
+        updatedAt: scannedAt,
+      }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: modelType,
+        key: c.slug,
+        content: model as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(modelType, c.slug)
+      models.push(model)
+    }
+    logger?.info('scanned project models', {
+      recordType,
+      discovered: candidates.length,
+      created: models.length,
+      skippedExisting,
+    })
+    return {
+      recordType,
+      discovered: candidates.length,
+      created: models.length,
+      skippedExisting,
+      models,
+      scannedBy,
+      scannedAt,
+    }
+  }
+
+  async function analyzePaperModels(
+    params: AnalyzePaperModelsParams,
+  ): Promise<AnalyzePaperModelsResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const paperType = `${recordType}-paper`
+    const modelType = `${recordType}-model`
+    const analyzedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const analyzedAt = now()
+
+    const paperRecord = await deps.storage.readRecord({
+      scope: params.scope,
+      type: paperType,
+      key: params.paperId,
+    })
+    if (!paperRecord) throw new Error(`no paper "${params.paperId}" in this project`)
+    const paper = paperRecord.content as unknown as TrainingPaperRecord
+
+    const existingRecords = await deps.storage.listRecords({ scope: params.scope, type: modelType })
+    const existing = new Map<string, TrainingModel>()
+    for (const r of existingRecords) {
+      const content = r.content as unknown as TrainingModel
+      if (content && typeof content.id === 'string') existing.set(content.id, content)
+    }
+
+    let text: string | undefined
+    if (typeof paper.url === 'string' && paper.url) {
+      const fetchText = params.fetchPaperText ?? fetchPaperText
+      try {
+        text = await fetchText(paper.url, params.abortSignal)
+      } catch {
+        text = undefined
+      }
+    }
+
+    const res = await executor.runInference({
+      systemPrompt: buildAnalyzePaperModelsSystemPrompt(manifest),
+      userContent: buildAnalyzePaperModelsUserContent({
+        paper: {
+          title: paper.title,
+          claim: paper.claim,
+          approach: paper.approach,
+          url: paper.url,
+        },
+        existingModels: [...existing.values()].map((m) => ({
+          id: m.id,
+          name: m.name,
+          slug: m.slug,
+          category: m.category,
+          modelNames: m.modelNames,
+        })),
+        text,
+      }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const { matchModelIds, proposedModels } = coerceAnalyzedPaperModels(
+      parseFirstValidJson(res.text),
+    )
+    const linkedModelIds = matchModelIds.filter((id) => existing.has(id))
+
+    for (const id of linkedModelIds) {
+      const m = existing.get(id)!
+      const paperIds = Array.from(new Set([...(m.paperIds ?? []), params.paperId]))
+      if (paperIds.length !== (m.paperIds?.length ?? 0)) {
+        const updated: TrainingModel = { ...m, paperIds, updatedAt: analyzedAt }
+        await deps.storage.upsertRecord({
+          scope: params.scope,
+          type: modelType,
+          key: id,
+          content: updated as unknown as Record<string, unknown>,
+        })
+        params.onRecordWritten?.(modelType, id)
+      }
+    }
+
+    const missingModels = detectMissingPaperModels(proposedModels, [...existing.values()])
+
+    const modelIds = Array.from(new Set([...(paper.modelIds ?? []), ...linkedModelIds]))
+    const updatedPaper: TrainingPaperRecord = { ...paper, modelIds, updatedAt: analyzedAt }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: paperType,
+      key: params.paperId,
+      content: updatedPaper as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(paperType, params.paperId)
+    logger?.info('analyzed paper models', {
+      recordType,
+      paperId: params.paperId,
+      linked: linkedModelIds.length,
+      missing: missingModels.length,
+    })
+    return {
+      recordType,
+      paper: updatedPaper,
+      linkedModelIds,
+      missingModels,
+      analyzedBy,
+      analyzedAt,
+    }
+  }
+
   async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
     const executor = requireInferenceExecutor()
     const manifest =
@@ -1386,6 +1610,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingHypotheses,
     analyzePaperFromUrl,
     suggestPaperHypotheses,
+    scanProjectModels,
+    analyzePaperModels,
     xaiNarrate,
     getRunData,
     getRunXAI,

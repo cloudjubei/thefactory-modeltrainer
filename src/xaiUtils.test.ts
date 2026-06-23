@@ -4,13 +4,17 @@ import {
   ablationPath,
   aggregateRunValues,
   criterionValueOf,
+  expectedImprovement,
   fanovaImportances,
   fitConfigSurrogate,
   interactionGrid,
   iqm,
+  leverCouplings,
   leverImportances,
+  pcaProjection,
   ofatContrasts,
   predictConfig,
+  predictConfigStats,
   recommendExperiments,
 } from './xaiUtils.js'
 
@@ -256,9 +260,15 @@ describe('recommendExperiments', () => {
       // missing: lr=0.2, batch_size=128
     ]
     const recs = recommendExperiments(runs, MAX)
-    const cell = recs.find((r) => r.kind === 'missing-cell')
-    expect(cell).toBeDefined()
-    expect(cell!.spec.fixed).toMatchObject({ lr: 0.2, batch_size: 128 })
+    // The untested cell is recommended — as `acquisition` when the surrogate rates it promising (it
+    // supersedes the bare `missing-cell` via dedup), else as `missing-cell` for coverage.
+    const rec = recs.find(
+      (r) =>
+        (r.spec.fixed as Record<string, unknown>)?.lr === 0.2 &&
+        (r.spec.fixed as Record<string, unknown>)?.batch_size === 128,
+    )
+    expect(rec).toBeDefined()
+    expect(['acquisition', 'missing-cell']).toContain(rec!.kind)
   })
 
   it('does not recommend a missing cell when the grid is complete', () => {
@@ -298,6 +308,90 @@ describe('recommendExperiments', () => {
 
   it('returns nothing for an empty run set', () => {
     expect(recommendExperiments([], MAX)).toEqual([])
+  })
+})
+
+describe('acquisition (Phase 2)', () => {
+  describe('expectedImprovement', () => {
+    it('collapses to the raw oriented gain when std is 0', () => {
+      expect(expectedImprovement(15, 0, 10, 'max')).toBe(5)
+      expect(expectedImprovement(5, 0, 10, 'max')).toBe(0) // no improvement
+      expect(expectedImprovement(5, 0, 10, 'min')).toBe(5) // lower is better
+      expect(expectedImprovement(15, 0, 10, 'min')).toBe(0)
+    })
+
+    it('is positive at the incumbent due to uncertainty (φ(0)·std), and grows with std', () => {
+      const atBest = expectedImprovement(10, 2, 10, 'max')
+      expect(atBest).toBeCloseTo(2 * 0.39894, 3) // std · φ(0)
+      expect(expectedImprovement(8, 5, 10, 'max')).toBeGreaterThan(0) // below best but uncertain
+      expect(expectedImprovement(10, 4, 10, 'max')).toBeGreaterThan(atBest) // more uncertainty → more EI
+    })
+  })
+
+  describe('predictConfigStats', () => {
+    const grid = [0.1, 0.2, 0.3].flatMap((lr) =>
+      [0, 1].map((s) => run(`${lr}-${s}`, { lr }, lr * 100, { seed: s })),
+    )
+
+    it('returns the forest mean (matching predictConfig) plus a non-negative std', () => {
+      const s = fitConfigSurrogate(grid, MAX)
+      const stats = predictConfigStats(s, { lr: 0.2 })
+      expect(stats.mean).toBeCloseTo(predictConfig(s, { lr: 0.2 }), 10)
+      expect(stats.std).toBeGreaterThanOrEqual(0)
+    })
+
+    it('reports zero uncertainty for an empty (untrained) surrogate', () => {
+      const s = fitConfigSurrogate([run('a', { lr: 0.1 }, 10)], MAX) // <2 rows → no trees
+      expect(predictConfigStats(s, { lr: 0.1 })).toEqual({ mean: s.mean, std: 0 })
+    })
+  })
+
+  describe('acquisitionRecommendations (via recommendExperiments)', () => {
+    // lr=0.2 clearly best; the (0.2,128) corner is untested and should look promising to the surrogate.
+    const runs = [
+      run('a', { lr: 0.1, batch_size: 64 }, 10, { seed: 0 }),
+      run('b', { lr: 0.1, batch_size: 128 }, 12, { seed: 0 }),
+      run('c', { lr: 0.2, batch_size: 64 }, 30, { seed: 0 }),
+    ]
+
+    it('surfaces an acquisition rec for the strongest unrun config, ranked above missing-cell coverage', () => {
+      const recs = recommendExperiments(runs, MAX)
+      const acq = recs.find((r) => r.kind === 'acquisition')
+      expect(acq).toBeDefined()
+      expect(acq!.spec.fixed).toMatchObject({ lr: 0.2, batch_size: 128 }) // the untested corner
+      expect(acq!.reason).toMatch(/expected improvement/i)
+      const cell = recs.find((r) => r.kind === 'missing-cell')
+      if (cell) expect(acq!.priority).toBeGreaterThan(cell.priority)
+    })
+
+    it('measures expected improvement against the BEST observed value, not the worst', () => {
+      // runs span 10..30; the incumbent for a MAX criterion is 30. The reason must cite that, not the min.
+      const acq = recommendExperiments(runs, MAX).find((r) => r.kind === 'acquisition')!
+      expect(acq.reason).toMatch(/best so far 30\b/)
+    })
+
+    it('never recommends an already-run config', () => {
+      const acqs = recommendExperiments(runs, MAX).filter((r) => r.kind === 'acquisition')
+      const ran = new Set(runs.map((r) => `${r.config.lr}|${r.config.batch_size}`))
+      for (const a of acqs) {
+        const f = a.spec.fixed as Record<string, unknown>
+        expect(ran.has(`${f.lr}|${f.batch_size}`)).toBe(false)
+      }
+    })
+
+    it('is deterministic — identical runs give identical recommendations', () => {
+      expect(recommendExperiments(runs, MAX)).toEqual(recommendExperiments([...runs], MAX))
+    })
+
+    it('returns no acquisition recs when the grid is fully explored', () => {
+      const full = [
+        run('a', { lr: 0.1, batch_size: 64 }, 10, { seed: 0 }),
+        run('b', { lr: 0.1, batch_size: 128 }, 12, { seed: 0 }),
+        run('c', { lr: 0.2, batch_size: 64 }, 30, { seed: 0 }),
+        run('d', { lr: 0.2, batch_size: 128 }, 28, { seed: 0 }),
+      ]
+      expect(recommendExperiments(full, MAX).find((r) => r.kind === 'acquisition')).toBeUndefined()
+    })
   })
 })
 
@@ -379,5 +473,115 @@ describe('config surrogate (Phase 3)', () => {
 
   it('interactionGrid is undefined when a lever has a single value', () => {
     expect(interactionGrid(fitConfigSurrogate(grid, MAX), grid, MAX, 'lr', 'missing')).toBeUndefined()
+  })
+
+  it('fanovaImportances total-effect is ≥ the main effect for every lever', () => {
+    const imp = fanovaImportances(fitConfigSurrogate(grid, MAX), grid, MAX)
+    for (const f of imp) expect(f.total).toBeGreaterThanOrEqual(f.importance - 1e-9)
+  })
+})
+
+describe('coupling / total-effect (Phase 3)', () => {
+  // ADDITIVE: a drives the objective, b adds a little, NO interaction.
+  const additive: AnalysisRun[] = []
+  for (const a of [0, 1, 2]) {
+    for (const b of [0, 1]) {
+      for (let s = 0; s < 3; s++) additive.push(run(`add-${a}-${b}-${s}`, { a, b }, 10 * a + b, { seed: s }))
+    }
+  }
+  // PURE INTERACTION (XOR): neither a nor b matters alone; only their combination does.
+  const xor: AnalysisRun[] = []
+  for (const a of [0, 1]) {
+    for (const b of [0, 1]) {
+      for (let s = 0; s < 4; s++)
+        xor.push(run(`xor-${a}-${b}-${s}`, { a, b }, a === b ? 0 : 10, { seed: s }))
+    }
+  }
+
+  it('additive design: total ≈ main (little interaction) and coupling is near zero', () => {
+    const s = fitConfigSurrogate(additive, MAX)
+    const aImp = fanovaImportances(s, additive, MAX).find((f) => f.lever === 'a')!
+    expect(aImp.total - aImp.importance).toBeLessThan(0.15) // mostly main effect
+    const coupling = leverCouplings(s, additive, MAX)[0]
+    expect(coupling.strength).toBeLessThan(0.15)
+  })
+
+  it('XOR design: main effects vanish but total-effect + coupling are large', () => {
+    const s = fitConfigSurrogate(xor, MAX)
+    const imp = fanovaImportances(s, xor, MAX)
+    const a = imp.find((f) => f.lever === 'a')!
+    expect(a.importance).toBeLessThan(0.2) // marginal of a is flat
+    expect(a.total).toBeGreaterThan(0.5) // but a matters a lot at each fixed b
+    const coupling = leverCouplings(s, xor, MAX)
+    expect(coupling[0].strength).toBeGreaterThan(0.5) // a×b are strongly coupled
+    expect([coupling[0].leverA, coupling[0].leverB].sort()).toEqual(['a', 'b'])
+  })
+
+  it('is deterministic and empty for too few runs', () => {
+    expect(leverCouplings(fitConfigSurrogate(xor, MAX), xor, MAX)).toEqual(
+      leverCouplings(fitConfigSurrogate(xor, MAX), xor, MAX),
+    )
+    expect(leverCouplings(fitConfigSurrogate([run('a', { a: 1 }, 1)], MAX), [run('a', { a: 1 }, 1)], MAX)).toEqual([])
+  })
+})
+
+describe('pcaProjection (Phase 4)', () => {
+  // lr carries most of the variance (0/5/10), gamma barely moves (0.90/0.91).
+  const runs: AnalysisRun[] = []
+  for (const lr of [0, 5, 10]) {
+    for (const gamma of [0.9, 0.91]) {
+      for (let s = 0; s < 2; s++) runs.push(run(`${lr}-${gamma}-${s}`, { lr, gamma }, lr + s * 0.1, { seed: s }))
+    }
+  }
+
+  it('returns null below 3 setups', () => {
+    expect(pcaProjection([run('a', { lr: 1 }, 1), run('b', { lr: 2 }, 2)], MAX)).toBeNull()
+  })
+
+  it('projects one point per setup with values = the setup IQM, and explained variance in [0,1]', () => {
+    const p = pcaProjection(runs, MAX)!
+    expect(p.points).toHaveLength(6) // 3 lr × 2 gamma setups (seeds collapsed)
+    for (const ev of p.explainedVariance) {
+      expect(ev).toBeGreaterThanOrEqual(0)
+      expect(ev).toBeLessThanOrEqual(1)
+    }
+    expect(p.explainedVariance[0]).toBeGreaterThanOrEqual(p.explainedVariance[1])
+    expect(p.features).toBe(2) // two numeric levers → two columns
+  })
+
+  it('PC1 captures the dominant lever — setups separate along x by lr', () => {
+    const p = pcaProjection(runs, MAX)!
+    // Mean PC1 coordinate per lr group should be monotone (the dominant axis spreads them out).
+    const byLr = new Map<number, number[]>()
+    runs
+      .map((r) => r.config.lr as number)
+      .forEach((lr) => byLr.set(lr, []))
+    p.points.forEach((pt) => {
+      // recover lr from the first run key "lr-gamma-seed"
+      const lr = Number(pt.key.split('-')[0])
+      byLr.get(lr)!.push(pt.x)
+    })
+    const meanX = (lr: number) => byLr.get(lr)!.reduce((a, b) => a + b, 0) / byLr.get(lr)!.length
+    const spread = Math.abs(meanX(10) - meanX(0))
+    expect(spread).toBeGreaterThan(0.5) // the lr extremes are well separated on PC1
+    expect(p.explainedVariance[0]).toBeGreaterThan(0.4)
+  })
+
+  it('is deterministic — identical runs give an identical projection', () => {
+    expect(pcaProjection(runs, MAX)).toEqual(pcaProjection([...runs], MAX))
+  })
+
+  it('handles categorical (one-hot) levers and separates the algorithms on the plane', () => {
+    const cat: AnalysisRun[] = []
+    for (const algo of ['ppo', 'dqn', 'sac']) {
+      for (let s = 0; s < 2; s++) cat.push(run(`${algo}-${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 : 10, { seed: s }))
+    }
+    const p = pcaProjection(cat, MAX)!
+    expect(p).not.toBeNull()
+    expect(p.points).toHaveLength(3) // one per algo setup
+    expect(p.features).toBe(4) // 3 one-hot (algo) + 1 numeric (lr, constant → std 0 guarded)
+    // distinct algos land at distinct points (the encoding actually varied them)
+    const xs = p.points.map((pt) => Math.round(pt.x * 1e6))
+    expect(new Set(xs).size).toBeGreaterThan(1)
   })
 })

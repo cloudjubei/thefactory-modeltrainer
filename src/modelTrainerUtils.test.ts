@@ -31,8 +31,20 @@ import {
   validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
+  modelSlug,
+  inferModelCategory,
+  humanizeModelName,
+  discoverManifestModelCandidates,
+  dedupeModelsBySlug,
+  coerceScannedModels,
+  buildScanModelsSystemPrompt,
+  buildScanModelsUserContent,
+  coerceAnalyzedPaperModels,
+  detectMissingPaperModels,
+  buildAnalyzePaperModelsSystemPrompt,
+  buildAnalyzePaperModelsUserContent,
 } from './modelTrainerUtils.js'
-import type { TrainingRunSummary } from './modelTrainerTypes.js'
+import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
 
 const hashByJson = (config: Record<string, unknown>): string => canonicalConfigString(config)
 
@@ -1495,5 +1507,246 @@ describe('coerceSuggestedHypotheses', () => {
   it('defaults to empty for a malformed response', () => {
     expect(coerceSuggestedHypotheses('nope', manifest())).toEqual({ matchIds: [], newItems: [] })
     expect(coerceSuggestedHypotheses({}, manifest())).toEqual({ matchIds: [], newItems: [] })
+  })
+})
+
+// --- Models catalog ----------------------------------------------------------
+
+function modelManifest(
+  choices: string[],
+  leverExtras: Record<string, unknown> = {},
+): TrainerManifest {
+  return manifest({
+    levers: {
+      lr: { type: 'number', default: 0.01 },
+      model_name: { type: 'choice', choices, default: choices[0], ...leverExtras },
+    },
+  })
+}
+
+describe('modelSlug', () => {
+  it('kebab-cases a display name, dropping punctuation', () => {
+    expect(modelSlug('Rainbow DQN (custom)')).toBe('rainbow-dqn-custom')
+  })
+  it('lowercases an acronym', () => {
+    expect(modelSlug('IQN')).toBe('iqn')
+  })
+  it('trims surrounding whitespace + symbols to a clean slug', () => {
+    expect(modelSlug('  A2C!! ')).toBe('a2c')
+  })
+  it('leaves an already-kebab identifier intact', () => {
+    expect(modelSlug('duel-dqn-custom-lstm')).toBe('duel-dqn-custom-lstm')
+  })
+  it('is empty for a name with no alphanumerics', () => {
+    expect(modelSlug('***')).toBe('')
+  })
+})
+
+describe('inferModelCategory', () => {
+  it('flags buy-and-hold as a baseline', () => {
+    expect(inferModelCategory('hodl')).toBe('baseline')
+  })
+  it('flags a rule-based time strategy as a baseline', () => {
+    expect(inferModelCategory('time-strategy')).toBe('baseline')
+  })
+  it('flags a supervised classifier as supervised', () => {
+    expect(inferModelCategory('supervised-gbm')).toBe('supervised')
+  })
+  it('flags a features extractor as a component', () => {
+    expect(inferModelCategory('sequence-features-extractor')).toBe('component')
+  })
+  it('defaults an RL algorithm name to rl', () => {
+    expect(inferModelCategory('rainbow-dqn-custom')).toBe('rl')
+  })
+})
+
+describe('humanizeModelName', () => {
+  it('uppercases known acronyms and title-cases the rest', () => {
+    expect(humanizeModelName('rainbow-dqn-custom')).toBe('Rainbow DQN Custom')
+  })
+  it('expands a known alias', () => {
+    expect(humanizeModelName('hodl')).toBe('Buy-and-Hold')
+  })
+  it('keeps a single token', () => {
+    expect(humanizeModelName('a2c')).toBe('A2C')
+  })
+})
+
+describe('discoverManifestModelCandidates', () => {
+  it('returns lever choices not already covered by an existing model (by slug or binding)', () => {
+    const out = discoverManifestModelCandidates(
+      modelManifest(['dqn', 'ppo', 'rainbow-dqn-custom', 'hodl']),
+      [
+        { slug: 'dqn', modelNames: ['dqn'] },
+        { slug: 'buy-and-hold', modelNames: ['hodl'] },
+      ],
+    )
+    expect(out.map((c) => c.modelName)).toEqual(['ppo', 'rainbow-dqn-custom'])
+  })
+  it('carries a heuristic name + category + slug per candidate', () => {
+    const out = discoverManifestModelCandidates(modelManifest(['rainbow-dqn-custom']), [])
+    expect(out[0]).toEqual({
+      modelName: 'rainbow-dqn-custom',
+      slug: 'rainbow-dqn-custom',
+      name: 'Rainbow DQN Custom',
+      category: 'rl',
+    })
+  })
+  it('is empty when the manifest has no model_name choice lever', () => {
+    expect(discoverManifestModelCandidates(manifest(), [])).toEqual([])
+  })
+  it('is empty when model_name is not a choice lever', () => {
+    const m = manifest({ levers: { model_name: { type: 'number', default: 1 } } })
+    expect(discoverManifestModelCandidates(m, [])).toEqual([])
+  })
+})
+
+describe('dedupeModelsBySlug', () => {
+  it('keeps the first occurrence of each slug', () => {
+    expect(
+      dedupeModelsBySlug([
+        { slug: 'a', v: 1 },
+        { slug: 'b', v: 2 },
+        { slug: 'a', v: 3 },
+      ]),
+    ).toEqual([
+      { slug: 'a', v: 1 },
+      { slug: 'b', v: 2 },
+    ])
+  })
+})
+
+describe('coerceScannedModels', () => {
+  it('keeps only candidate slugs and filters fields + paper ids', () => {
+    const out = coerceScannedModels(
+      [
+        {
+          slug: 'ppo',
+          name: 'Proximal Policy Optimization',
+          description: 'On-policy.',
+          category: 'rl',
+          paperIds: ['p1', 'ghost'],
+        },
+        { slug: 'unknown', name: 'x' },
+        { slug: 'rainbow-dqn-custom', category: 'nonsense' },
+      ],
+      new Set(['ppo', 'rainbow-dqn-custom']),
+      new Set(['p1']),
+    )
+    expect(out.get('ppo')).toEqual({
+      name: 'Proximal Policy Optimization',
+      description: 'On-policy.',
+      category: 'rl',
+      paperIds: ['p1'],
+    })
+    expect(out.get('rainbow-dqn-custom')).toEqual({})
+    expect(out.has('unknown')).toBe(false)
+  })
+  it('is an empty map for a non-array response', () => {
+    expect(coerceScannedModels('nope', new Set(['a']), new Set()).size).toBe(0)
+  })
+})
+
+describe('buildScanModelsSystemPrompt', () => {
+  it('names the project and asks for a JSON array', () => {
+    const p = buildScanModelsSystemPrompt(manifest())
+    expect(p).toContain('demo')
+    expect(p).toContain('JSON array')
+  })
+})
+
+describe('buildScanModelsUserContent', () => {
+  it('serialises candidates + papers as parseable JSON', () => {
+    const content = buildScanModelsUserContent({
+      candidates: [{ slug: 'ppo', modelName: 'ppo', name: 'PPO', category: 'rl' }],
+      papers: [{ id: 'p1', title: 'A paper', claim: 'beats hold' }],
+      leverDescription: 'the algorithm',
+    })
+    const parsed = JSON.parse(content)
+    expect(parsed.candidates[0].slug).toBe('ppo')
+    expect(parsed.papers[0].id).toBe('p1')
+    expect(parsed.leverDescription).toBe('the algorithm')
+  })
+})
+
+describe('coerceAnalyzedPaperModels', () => {
+  it('keeps string match ids and coerces proposed models (slug from name, category default)', () => {
+    const out = coerceAnalyzedPaperModels({
+      matchModelIds: ['rainbow-dqn-custom', '', 5],
+      proposedModels: [
+        {
+          name: 'C51 Distributional DQN',
+          description: 'categorical value distribution',
+          category: 'rl',
+          proposal: 'add categorical DQN head',
+        },
+        { description: 'no name — dropped' },
+        { name: 'NoisyNet', category: 'bogus' },
+      ],
+    })
+    expect(out.matchModelIds).toEqual(['rainbow-dqn-custom'])
+    expect(out.proposedModels).toEqual<ProposedModel[]>([
+      {
+        name: 'C51 Distributional DQN',
+        slug: 'c51-distributional-dqn',
+        description: 'categorical value distribution',
+        category: 'rl',
+        proposal: 'add categorical DQN head',
+      },
+      { name: 'NoisyNet', slug: 'noisynet', description: '', category: 'rl', proposal: '' },
+    ])
+  })
+  it('defaults to empty for a malformed response', () => {
+    expect(coerceAnalyzedPaperModels('nope')).toEqual({ matchModelIds: [], proposedModels: [] })
+  })
+})
+
+describe('detectMissingPaperModels', () => {
+  const proposed: ProposedModel[] = [
+    { name: 'Rainbow DQN', slug: 'rainbow-dqn', description: '', category: 'rl', proposal: '' },
+    { name: 'C51', slug: 'c51', description: '', category: 'rl', proposal: '' },
+  ]
+  it('drops a proposal already covered by a catalog binding', () => {
+    const out = detectMissingPaperModels(proposed, [
+      {
+        slug: 'rainbow-dqn-custom',
+        name: 'Rainbow DQN (custom)',
+        modelNames: ['rainbow-dqn-custom', 'rainbow-dqn'],
+      },
+    ])
+    expect(out.map((p) => p.slug)).toEqual(['c51'])
+  })
+  it('drops a proposal whose slug matches a catalog slug', () => {
+    const out = detectMissingPaperModels(proposed, [
+      { slug: 'rainbow-dqn', name: 'x', modelNames: [] },
+    ])
+    expect(out.map((p) => p.slug)).toEqual(['c51'])
+  })
+  it('returns all when the catalog is empty', () => {
+    expect(detectMissingPaperModels(proposed, [])).toHaveLength(2)
+  })
+})
+
+describe('buildAnalyzePaperModelsSystemPrompt', () => {
+  it('names the project and asks for a JSON object', () => {
+    const p = buildAnalyzePaperModelsSystemPrompt(manifest())
+    expect(p).toContain('demo')
+    expect(p).toContain('JSON object')
+  })
+})
+
+describe('buildAnalyzePaperModelsUserContent', () => {
+  it('serialises paper + existing models + optional text', () => {
+    const content = buildAnalyzePaperModelsUserContent({
+      paper: { title: 'P', claim: 'c' },
+      existingModels: [
+        { id: 'ppo', name: 'PPO', slug: 'ppo', category: 'rl', modelNames: ['ppo'] },
+      ],
+      text: 'abstract',
+    })
+    const parsed = JSON.parse(content)
+    expect(parsed.paper.title).toBe('P')
+    expect(parsed.existingModels[0].slug).toBe('ppo')
+    expect(parsed.text).toBe('abstract')
   })
 })

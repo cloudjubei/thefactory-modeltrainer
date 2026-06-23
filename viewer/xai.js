@@ -501,17 +501,29 @@
   function recommendExperiments(runs, criterion) {
     var valid = validRunsFor(runs, criterion)
     if (!valid.length) return []
-    return thinSeedRecommendations(valid, criterion)
+    var all = acquisitionRecommendations(valid, criterion)
+      .concat(thinSeedRecommendations(valid, criterion))
       .concat(missingCellRecommendations(valid, criterion))
       .sort(function (a, b) {
         return b.priority - a.priority
       })
+    // Dedup by the launched config (acquisition can coincide with a missing-cell gap); keep the higher-priority.
+    var seen = {}
+    return all.filter(function (rec) {
+      var key = canonicalConfigString((rec.spec && rec.spec.fixed) || {})
+      if (seen[key]) return false
+      seen[key] = true
+      return true
+    })
   }
 
   // --- Phase 3 mirror: seeded RF surrogate + ablation/fANOVA/interaction (must match xaiUtils.ts exactly) ---
   var SURROGATE_TREES = 64
   var SURROGATE_MAX_DEPTH = 8
   var SURROGATE_MIN_LEAF = 2
+  // Phase 2 acquisition (mirror of xaiUtils.ts).
+  var MAX_ACQUISITION_CANDIDATES = 2000
+  var TOP_ACQUISITION_RECS = 5
 
   function varianceOf(values) {
     if (values.length < 2) return 0
@@ -685,6 +697,133 @@
     )
   }
 
+  // Forest mean + epistemic std (tree disagreement) at a config — the explore signal EI balances.
+  function predictConfigStats(surrogate, config) {
+    var trees = surrogate.trees
+    if (!trees.length) return { mean: surrogate.mean, std: 0 }
+    var preds = trees.map(function (t) {
+      return predictSurrogateTree(t, config)
+    })
+    return { mean: meanOf(preds), std: Math.sqrt(varianceOf(preds)) }
+  }
+
+  function erf(x) {
+    var sign = x < 0 ? -1 : 1
+    var ax = Math.abs(x)
+    var t = 1 / (1 + 0.3275911 * ax)
+    var y =
+      1 -
+      ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+        t *
+        Math.exp(-ax * ax)
+    return sign * y
+  }
+  function normalCdf(z) {
+    return 0.5 * (1 + erf(z / Math.SQRT2))
+  }
+  function normalPdf(z) {
+    return Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI)
+  }
+
+  // Expected Improvement over the incumbent `best` (direction-aware), closed form under a Gaussian.
+  function expectedImprovement(mean, std, best, direction) {
+    var improve = direction === 'min' ? best - mean : mean - best
+    if (std <= 1e-9) return Math.max(0, improve)
+    var z = improve / std
+    return improve * normalCdf(z) + std * normalPdf(z)
+  }
+
+  function cappedCartesian(lists, cap, rng) {
+    var total = lists.reduce(function (a, l) {
+      return a * Math.max(1, l.length)
+    }, 1)
+    if (total <= cap) {
+      var acc = [[]]
+      for (var i = 0; i < lists.length; i++) {
+        var next = []
+        for (var j = 0; j < acc.length; j++)
+          for (var k = 0; k < lists[i].length; k++) next.push(acc[j].concat([lists[i][k]]))
+        acc = next
+      }
+      return acc
+    }
+    var out = []
+    var seen = {}
+    for (var attempts = 0; out.length < cap && attempts < cap * 4; attempts++) {
+      var combo = lists.map(function (l) {
+        return l[Math.floor(rng() * l.length)]
+      })
+      var key = combo.map(String).join('')
+      if (seen[key]) continue
+      seen[key] = true
+      out.push(combo)
+    }
+    return out
+  }
+
+  function fmtAcq(x) {
+    if (!Number.isFinite(x)) return 'n/a'
+    return Math.abs(x) >= 100 ? x.toFixed(1) : Number(x.toPrecision(3)).toString()
+  }
+
+  // Score every UNRUN config in the explored grid by Expected Improvement, surface the top few — the
+  // "which way to explore" climb toward the optimum. Deterministic (seeded surrogate + sampler).
+  function acquisitionRecommendations(valid, criterion) {
+    var surrogate = fitConfigSurrogate(valid, criterion)
+    if (!surrogate.trees.length || surrogate.levers.length === 0) return []
+    var ys = valid.map(function (r) {
+      return criterionValueOf(r, criterion)
+    })
+    var best = criterion.direction === 'min' ? Math.min.apply(null, ys) : Math.max.apply(null, ys)
+    var observed = {}
+    valid.forEach(function (r) {
+      observed[canonicalConfigString(configWithout(r.config, 'seed'))] = true
+    })
+    var rng = makeRng(seedFrom(ys))
+    var valueLists = surrogate.levers.map(function (l) {
+      return Array.from(distinctValues(valid, l.name).values())
+    })
+    var scored = cappedCartesian(valueLists, MAX_ACQUISITION_CANDIDATES, rng)
+      .map(function (combo) {
+        var config = {}
+        surrogate.levers.forEach(function (l, i) {
+          config[l.name] = combo[i]
+        })
+        return config
+      })
+      .filter(function (config) {
+        return !observed[canonicalConfigString(config)]
+      })
+      .map(function (config) {
+        var st = predictConfigStats(surrogate, config)
+        return { config: config, mean: st.mean, std: st.std, ei: expectedImprovement(st.mean, st.std, best, criterion.direction) }
+      })
+      .filter(function (s) {
+        return s.ei > 0
+      })
+      .sort(function (a, b) {
+        return b.ei - a.ei
+      })
+    return scored.slice(0, TOP_ACQUISITION_RECS).map(function (s, i) {
+      return {
+        kind: 'acquisition',
+        reason:
+          'Surrogate predicts ' +
+          fmtAcq(s.mean) +
+          ' ± ' +
+          fmtAcq(s.std) +
+          ' (best so far ' +
+          fmtAcq(best) +
+          ') — expected improvement ' +
+          fmtAcq(s.ei) +
+          '; the strongest unrun config toward the optimum.',
+        runCount: 1,
+        spec: { fixed: s.config, seeds: [0] },
+        priority: 90 - i,
+      }
+    })
+  }
+
   function fanovaImportances(surrogate, runs, criterion) {
     var valid = validRunsFor(runs, criterion)
     var configs = valid.map(function (r) {
@@ -710,9 +849,20 @@
           }),
         )
       })
+      // TOTAL effect: per config, the variance from sweeping THIS lever (interactions count), averaged.
+      var perConfigVar = configs.map(function (c) {
+        return varianceOf(
+          values.map(function (v) {
+            var next = Object.assign({}, c)
+            next[lv.name] = v
+            return predictConfig(surrogate, next)
+          }),
+        )
+      })
       out.push({
         lever: lv.name,
         importance: varianceOf(marginals) / totalVar,
+        total: meanOf(perConfigVar) / totalVar,
         values: values.length,
         // The distinct observed values themselves, so the viewer can link each to its runs.
         valueList: values,
@@ -720,6 +870,78 @@
     })
     return out.sort(function (a, b) {
       return b.importance - a.importance
+    })
+  }
+
+  // Pairwise coupling strength (2-way ANOVA interaction term / total variance), sorted strongest-first.
+  function leverCouplings(surrogate, runs, criterion) {
+    var valid = validRunsFor(runs, criterion)
+    var configs = valid.map(function (r) {
+      return r.config
+    })
+    if (configs.length < 2) return []
+    var totalVar =
+      varianceOf(
+        configs.map(function (c) {
+          return predictConfig(surrogate, c)
+        }),
+      ) || 1
+    var grand = meanOf(
+      configs.map(function (c) {
+        return predictConfig(surrogate, c)
+      }),
+    )
+    var swept = surrogate.levers
+      .map(function (l) {
+        return l.name
+      })
+      .filter(function (n) {
+        return distinctValues(valid, n).size >= 2
+      })
+    var mainEffect = function (lever) {
+      var m = new Map()
+      distinctValues(valid, lever).forEach(function (v, k) {
+        m.set(
+          k,
+          meanOf(
+            configs.map(function (c) {
+              var next = Object.assign({}, c)
+              next[lever] = v
+              return predictConfig(surrogate, next)
+            }),
+          ),
+        )
+      })
+      return m
+    }
+    var out = []
+    for (var i = 0; i < swept.length; i++) {
+      for (var j = i + 1; j < swept.length; j++) {
+        var lA = swept[i]
+        var lB = swept[j]
+        var valsA = distinctValues(valid, lA)
+        var valsB = distinctValues(valid, lB)
+        var mainA = mainEffect(lA)
+        var mainB = mainEffect(lB)
+        var residuals = []
+        valsA.forEach(function (va, ka) {
+          valsB.forEach(function (vb, kb) {
+            var joint = meanOf(
+              configs.map(function (c) {
+                var next = Object.assign({}, c)
+                next[lA] = va
+                next[lB] = vb
+                return predictConfig(surrogate, next)
+              }),
+            )
+            residuals.push(joint - mainA.get(ka) - mainB.get(kb) + grand)
+          })
+        })
+        out.push({ leverA: lA, leverB: lB, strength: varianceOf(residuals) / totalVar })
+      }
+    }
+    return out.sort(function (a, b) {
+      return b.strength - a.strength
     })
   }
 
@@ -809,6 +1031,137 @@
     return { leverA: leverA, leverB: leverB, valuesA: valuesA, valuesB: valuesB, cells: cells }
   }
 
+  // Phase 4 mirror: deterministic PCA projection (one point per setup, coloured by criterion).
+  function dotVec(a, b) {
+    var s = 0
+    for (var i = 0; i < a.length; i++) s += a[i] * b[i]
+    return s
+  }
+  function normalizeVec(v) {
+    var norm = Math.sqrt(dotVec(v, v)) || 1
+    return v.map(function (x) {
+      return x / norm
+    })
+  }
+  function topEigenpair(m, d) {
+    var v = normalizeVec(
+      Array.from({ length: d }, function (_, i) {
+        return Math.sin(i + 1) + 1e-3
+      }),
+    )
+    var value = 0
+    for (var iter = 0; iter < 200; iter++) {
+      var mv = m.map(function (row) {
+        return dotVec(row, v)
+      })
+      value = dotVec(v, mv)
+      v = normalizeVec(mv)
+    }
+    return { vector: v, value: value }
+  }
+  function pcaProjection(runs, criterion) {
+    var valid = validRunsFor(runs, criterion)
+    if (valid.length < 3) return null
+    var bySetup = new Map()
+    valid.forEach(function (r) {
+      var sig = setupSignatureOf(r)
+      var g = bySetup.get(sig)
+      if (g) g.push(r)
+      else bySetup.set(sig, [r])
+    })
+    var rows = Array.from(bySetup.values()).map(function (rs) {
+      return {
+        config: configWithout(rs[0].config, 'seed'),
+        value: iqm(
+          rs.map(function (r) {
+            return criterionValueOf(r, criterion)
+          }),
+        ),
+        runKeys: rs.map(function (r) {
+          return r.key
+        }),
+      }
+    })
+    if (rows.length < 3) return null
+    var columns = []
+    leverKindsOf(valid).forEach(function (l) {
+      if (l.kind === 'num') {
+        columns.push(function (c) {
+          var v = Number(c[l.name])
+          return Number.isFinite(v) ? v : 0
+        })
+      } else {
+        var vals = new Set(
+          rows.map(function (r) {
+            return String(r.config[l.name])
+          }),
+        )
+        vals.forEach(function (val) {
+          columns.push(function (c) {
+            return String(c[l.name]) === val ? 1 : 0
+          })
+        })
+      }
+    })
+    var d = columns.length
+    if (d === 0) return null
+    var raw = rows.map(function (r) {
+      return columns.map(function (col) {
+        return col(r.config)
+      })
+    })
+    var n = raw.length
+    var means = []
+    var stds = []
+    for (var j = 0; j < d; j++) {
+      var colv = raw.map(function (row) {
+        return row[j]
+      })
+      means.push(meanOf(colv))
+      stds.push(Math.sqrt(varianceOf(colv)) || 1)
+    }
+    var X = raw.map(function (row) {
+      return row.map(function (v, jj) {
+        return (v - means[jj]) / stds[jj]
+      })
+    })
+    var C = Array.from({ length: d }, function () {
+      return new Array(d).fill(0)
+    })
+    for (var a = 0; a < d; a++) {
+      for (var b = a; b < d; b++) {
+        var s = 0
+        for (var i = 0; i < n; i++) s += X[i][a] * X[i][b]
+        C[a][b] = C[b][a] = s / n
+      }
+    }
+    var trace =
+      C.reduce(function (acc, row, ii) {
+        return acc + row[ii]
+      }, 0) || 1
+    var pc1 = topEigenpair(C, d)
+    var C2 = C.map(function (row, aa) {
+      return row.map(function (val, bb) {
+        return val - pc1.value * pc1.vector[aa] * pc1.vector[bb]
+      })
+    })
+    var pc2 = d >= 2 ? topEigenpair(C2, d) : { vector: new Array(d).fill(0), value: 0 }
+    var points = rows.map(function (r, ii) {
+      return {
+        x: dotVec(X[ii], pc1.vector),
+        y: dotVec(X[ii], pc2.vector),
+        value: r.value,
+        key: r.runKeys[0],
+        runKeys: r.runKeys,
+      }
+    })
+    return {
+      points: points,
+      explainedVariance: [Math.max(0, pc1.value) / trace, Math.max(0, pc2.value) / trace],
+      features: d,
+    }
+  }
+
   var Xai = {
     iqm: iqm,
     aggregateRunValues: aggregateRunValues,
@@ -817,9 +1170,13 @@
     leverImportances: leverImportances,
     fitConfigSurrogate: fitConfigSurrogate,
     predictConfig: predictConfig,
+    predictConfigStats: predictConfigStats,
+    expectedImprovement: expectedImprovement,
     fanovaImportances: fanovaImportances,
+    leverCouplings: leverCouplings,
     ablationPath: ablationPath,
     interactionGrid: interactionGrid,
+    pcaProjection: pcaProjection,
     recommendExperiments: recommendExperiments,
     // Exposed so the viewer can recompute a setup key with the SAME canonicalisation the engine uses.
     canonicalConfigString: canonicalConfigString,

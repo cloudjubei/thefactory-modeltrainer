@@ -33,6 +33,11 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
+            'ipt src="models.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
             'ipt src="app.js' +
             v +
             '" defer></scr' +
@@ -313,6 +318,35 @@
               <p id="papers-status" class="form-status" role="status" hidden></p>
               <form id="paper-form" class="hypothesis-form" autocomplete="off" hidden></form>
               <div id="papers-body" class="papers-body"></div>
+            </section>
+          </section>
+
+          <!-- Models (the catalog of model architectures — linked to papers, runs, hypotheses) -->
+          <section id="tab-models" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="models-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="models-h">Models</h2>
+                  <p class="card-sub">
+                    The model architectures this project can train — each linked to the papers that
+                    introduce or improve it, the runs that train it, and the hypotheses that test it.
+                    Status (proposed / implemented / failing) rolls up from its runs. Discuss a model
+                    with the AI to implement, improve, or fix it.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="models-scan-btn"
+                    class="ghost-btn"
+                    title="Scan the project for declared models not yet in the catalog and add them (heuristic + LLM)"
+                  >
+                    Scan Project
+                  </button>
+                </div>
+              </div>
+              <p id="models-status" class="form-status" role="status" hidden></p>
+              <div id="models-body" class="papers-body"></div>
             </section>
           </section>
 

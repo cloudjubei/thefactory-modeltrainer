@@ -7,10 +7,13 @@ import type {
   ExperimentRecommendation,
   FanovaImportance,
   InteractionGrid,
+  LeverCoupling,
   LeverImportance,
   OfatAnalysis,
   OfatEffect,
   OfatLevel,
+  PcaPoint,
+  PcaProjection,
   RunValueAggregate,
 } from './modelTrainerTypes.js'
 import {
@@ -422,9 +425,20 @@ export function recommendExperiments(
 ): ExperimentRecommendation[] {
   const valid = validRunsFor(runs, criterion)
   if (!valid.length) return []
-  return [...thinSeedRecommendations(valid, criterion), ...missingCellRecommendations(valid, criterion)].sort(
-    (a, b) => b.priority - a.priority,
-  )
+  const all = [
+    ...acquisitionRecommendations(valid, criterion),
+    ...thinSeedRecommendations(valid, criterion),
+    ...missingCellRecommendations(valid, criterion),
+  ].sort((a, b) => b.priority - a.priority)
+  // Dedup by the launched config — an acquisition pick can coincide with a missing-cell gap; keep the
+  // higher-priority one (first after the sort) for each distinct `fixed` config.
+  const seen = new Set<string>()
+  return all.filter((rec) => {
+    const key = canonicalConfigString(rec.spec.fixed ?? {})
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 // --- Phase 3: a seeded random-forest config→criterion surrogate + ablation/fANOVA/interaction reads ---
@@ -435,6 +449,11 @@ export function recommendExperiments(
 const SURROGATE_TREES = 64
 const SURROGATE_MAX_DEPTH = 8
 const SURROGATE_MIN_LEAF = 2
+
+// Acquisition (Phase 2): how many candidate configs the EI search scores, and how many top suggestions
+// it returns. The candidate grid is the cartesian product of OBSERVED lever values (capped + sampled).
+const MAX_ACQUISITION_CANDIDATES = 2000
+const TOP_ACQUISITION_RECS = 5
 
 type SurrogateNode =
   | { leaf: number }
@@ -562,6 +581,123 @@ export function predictConfig(surrogate: ConfigSurrogate, config: Record<string,
   return meanOf(trees.map((t) => predictSurrogateTree(t, config)))
 }
 
+/**
+ * Predict the criterion AND the surrogate's epistemic uncertainty at a config: the forest mean plus the
+ * std of the per-tree predictions (tree disagreement). Disagreement is high where the data is sparse, so
+ * `std` is the explore signal Expected Improvement balances against the predicted mean.
+ */
+export function predictConfigStats(
+  surrogate: ConfigSurrogate,
+  config: Record<string, unknown>,
+): { mean: number; std: number } {
+  const trees = surrogate.trees as SurrogateNode[]
+  if (!trees.length) return { mean: surrogate.mean, std: 0 }
+  const preds = trees.map((t) => predictSurrogateTree(t, config))
+  return { mean: meanOf(preds), std: Math.sqrt(varianceOf(preds)) }
+}
+
+// Standard-normal helpers for the closed-form EI. erf via Abramowitz & Stegun 7.1.26.
+function erf(x: number): number {
+  const sign = x < 0 ? -1 : 1
+  const ax = Math.abs(x)
+  const t = 1 / (1 + 0.3275911 * ax)
+  const y =
+    1 -
+    ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+      t *
+      Math.exp(-ax * ax)
+  return sign * y
+}
+function normalCdf(z: number): number {
+  return 0.5 * (1 + erf(z / Math.SQRT2))
+}
+function normalPdf(z: number): number {
+  return Math.exp(-0.5 * z * z) / Math.sqrt(2 * Math.PI)
+}
+
+/**
+ * Expected Improvement of a candidate over the incumbent `best`, given the surrogate's predicted `mean`
+ * and uncertainty `std`, direction-aware. Closed form under a Gaussian: `improve·Φ(z) + std·φ(z)` with
+ * `z = improve/std` and `improve` the (oriented) gain over `best`. Zero std collapses to the raw gain.
+ */
+export function expectedImprovement(
+  mean: number,
+  std: number,
+  best: number,
+  direction: 'max' | 'min',
+): number {
+  const improve = direction === 'min' ? best - mean : mean - best
+  if (std <= 1e-9) return Math.max(0, improve)
+  const z = improve / std
+  return improve * normalCdf(z) + std * normalPdf(z)
+}
+
+/** Cartesian product of per-lever value lists, capped: enumerate all when small, else sample deterministically. */
+function cappedCartesian(lists: unknown[][], cap: number, rng: () => number): unknown[][] {
+  const total = lists.reduce((a, l) => a * Math.max(1, l.length), 1)
+  if (total <= cap) {
+    let acc: unknown[][] = [[]]
+    for (const list of lists) {
+      const next: unknown[][] = []
+      for (const combo of acc) for (const v of list) next.push([...combo, v])
+      acc = next
+    }
+    return acc
+  }
+  const out: unknown[][] = []
+  const seen = new Set<string>()
+  for (let attempts = 0; out.length < cap && attempts < cap * 4; attempts++) {
+    const combo = lists.map((l) => l[Math.floor(rng() * l.length)])
+    const key = combo.map(String).join('')
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(combo)
+  }
+  return out
+}
+
+const fmtAcq = (x: number): string =>
+  !Number.isFinite(x) ? 'n/a' : Math.abs(x) >= 100 ? x.toFixed(1) : Number(x.toPrecision(3)).toString()
+
+/**
+ * Acquisition recommendations (Phase 2): score every UNRUN config in the explored grid (cartesian product
+ * of observed lever values) by Expected Improvement against the surrogate, and surface the top few — the
+ * configs that most likely beat the current best. This is the "which way to explore" climb: it actively
+ * moves toward the optimum, not just fills factorial gaps. Deterministic (seeded surrogate + sampler).
+ */
+function acquisitionRecommendations(
+  valid: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): ExperimentRecommendation[] {
+  const surrogate = fitConfigSurrogate(valid, criterion)
+  if (!surrogate.trees.length || surrogate.levers.length === 0) return []
+  const ys = valid.map((r) => criterionValueOf(r, criterion)!)
+  const best = criterion.direction === 'min' ? Math.min(...ys) : Math.max(...ys)
+  const observed = new Set(valid.map((r) => canonicalConfigString(configWithout(r.config, 'seed'))))
+  const rng = makeRng(seedFrom(ys))
+  const valueLists = surrogate.levers.map((l) => [...distinctValues(valid, l.name).values()])
+  const scored = cappedCartesian(valueLists, MAX_ACQUISITION_CANDIDATES, rng)
+    .map((combo) => {
+      const config: Record<string, unknown> = {}
+      surrogate.levers.forEach((l, i) => (config[l.name] = combo[i]))
+      return config
+    })
+    .filter((config) => !observed.has(canonicalConfigString(config)))
+    .map((config) => {
+      const { mean, std } = predictConfigStats(surrogate, config)
+      return { config, mean, std, ei: expectedImprovement(mean, std, best, criterion.direction) }
+    })
+    .filter((s) => s.ei > 0)
+    .sort((a, b) => b.ei - a.ei)
+  return scored.slice(0, TOP_ACQUISITION_RECS).map((s, i) => ({
+    kind: 'acquisition',
+    reason: `Surrogate predicts ${fmtAcq(s.mean)} ± ${fmtAcq(s.std)} (best so far ${fmtAcq(best)}) — expected improvement ${fmtAcq(s.ei)}; the strongest unrun config toward the optimum.`,
+    runCount: 1,
+    spec: { fixed: s.config, seeds: [0] },
+    priority: 90 - i,
+  }))
+}
+
 function observedValues(runs: AnalysisRun[], lever: string): Map<string, unknown> {
   return distinctValues(runs, lever)
 }
@@ -584,12 +720,71 @@ export function fanovaImportances(
   for (const { name } of surrogate.levers) {
     const values = [...observedValues(valid, name).values()]
     if (values.length < 2) continue
+    // MAIN effect: variance of the marginal (lever pinned, averaged over the other levers).
     const marginals = values.map((v) =>
       meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [name]: v }))),
     )
-    out.push({ lever: name, importance: varianceOf(marginals) / totalVar, values: values.length })
+    // TOTAL effect: at each observed config, the variance from sweeping THIS lever over its values
+    // (so interactions count), averaged across configs. main ≤ total; total − main = interaction share.
+    const perConfigVar = configs.map((c) =>
+      varianceOf(values.map((v) => predictConfig(surrogate, { ...c, [name]: v }))),
+    )
+    out.push({
+      lever: name,
+      importance: varianceOf(marginals) / totalVar,
+      total: meanOf(perConfigVar) / totalVar,
+      values: values.length,
+      // The distinct observed values themselves, so the viewer can link each to its runs (mirror parity).
+      valueList: values,
+    })
   }
   return out.sort((a, b) => b.importance - a.importance)
+}
+
+/**
+ * Pairwise COUPLING strength for every swept lever pair: the 2-way ANOVA interaction term — the variance
+ * of `joint(a,b) − mainA(a) − mainB(b) + grand` over the pair's value grid, as a fraction of total
+ * variance. High strength ⇒ the two levers must be tuned together (one's best value depends on the
+ * other); ~0 ⇒ they act independently (the heatmap is additive). Sorted strongest-first.
+ */
+export function leverCouplings(
+  surrogate: ConfigSurrogate,
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): LeverCoupling[] {
+  const valid = validRunsFor(runs, criterion)
+  const configs = valid.map((r) => r.config)
+  if (configs.length < 2) return []
+  const totalVar = varianceOf(configs.map((c) => predictConfig(surrogate, c))) || 1
+  const grand = meanOf(configs.map((c) => predictConfig(surrogate, c)))
+  const swept = surrogate.levers.map((l) => l.name).filter((n) => observedValues(valid, n).size >= 2)
+  const mainEffect = (lever: string): Map<string, number> => {
+    const m = new Map<string, number>()
+    for (const [k, v] of observedValues(valid, lever)) {
+      m.set(k, meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [lever]: v }))))
+    }
+    return m
+  }
+  const out: LeverCoupling[] = []
+  for (let i = 0; i < swept.length; i++) {
+    for (let j = i + 1; j < swept.length; j++) {
+      const lA = swept[i]
+      const lB = swept[j]
+      const valsA = observedValues(valid, lA)
+      const valsB = observedValues(valid, lB)
+      const mainA = mainEffect(lA)
+      const mainB = mainEffect(lB)
+      const residuals: number[] = []
+      for (const [ka, va] of valsA) {
+        for (const [kb, vb] of valsB) {
+          const joint = meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [lA]: va, [lB]: vb })))
+          residuals.push(joint - mainA.get(ka)! - mainB.get(kb)! + grand)
+        }
+      }
+      out.push({ leverA: lA, leverB: lB, strength: varianceOf(residuals) / totalVar })
+    }
+  }
+  return out.sort((a, b) => b.strength - a.strength)
 }
 
 /**
@@ -674,4 +869,105 @@ export function interactionGrid(
     }
   }
   return { leverA, leverB, valuesA, valuesB, cells }
+}
+
+// --- Phase 4: deterministic PCA projection of the explored configs, coloured by performance ----------
+// A 2-D intuition map (clusters/outliers), NOT a navigable space — the PC axes are not levers. One point
+// per SETUP; numeric levers standardised, categorical one-hot; top-2 PCs via power iteration + deflation.
+
+function dotVec(a: number[], b: number[]): number {
+  let s = 0
+  for (let i = 0; i < a.length; i++) s += a[i] * b[i]
+  return s
+}
+function normalizeVec(v: number[]): number[] {
+  const norm = Math.sqrt(dotVec(v, v)) || 1
+  return v.map((x) => x / norm)
+}
+/** Largest eigenpair of a symmetric matrix via power iteration from a FIXED (deterministic) start. */
+function topEigenpair(m: number[][], d: number): { vector: number[]; value: number } {
+  let v = normalizeVec(Array.from({ length: d }, (_, i) => Math.sin(i + 1) + 1e-3))
+  let value = 0
+  for (let iter = 0; iter < 200; iter++) {
+    const mv = m.map((row) => dotVec(row, v))
+    value = dotVec(v, mv)
+    v = normalizeVec(mv)
+  }
+  return { vector: v, value }
+}
+
+/**
+ * Project the explored SETUPS (config minus seed) onto the top-2 principal components, coloured by the
+ * setup's criterion IQM. Numeric levers are z-scored, categorical levers one-hot encoded, and the PCs are
+ * found by deterministic power iteration. Returns `null` with fewer than 3 setups or no encodable levers.
+ */
+export function pcaProjection(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): PcaProjection | null {
+  const valid = validRunsFor(runs, criterion)
+  if (valid.length < 3) return null
+  const bySetup = new Map<string, AnalysisRun[]>()
+  for (const r of valid) {
+    const sig = setupSignatureOf(r)
+    const g = bySetup.get(sig)
+    if (g) g.push(r)
+    else bySetup.set(sig, [r])
+  }
+  const rows = [...bySetup.values()].map((rs) => ({
+    config: configWithout(rs[0].config, 'seed'),
+    value: iqm(rs.map((r) => criterionValueOf(r, criterion)!)),
+    runKeys: rs.map((r) => r.key),
+  }))
+  if (rows.length < 3) return null
+  // Encode: numeric lever → one standardised column; categorical → one-hot per observed value.
+  const columns: ((c: Record<string, unknown>) => number)[] = []
+  for (const l of leverKindsOf(valid)) {
+    if (l.kind === 'num') {
+      columns.push((c) => {
+        const v = Number(c[l.name])
+        return Number.isFinite(v) ? v : 0
+      })
+    } else {
+      for (const val of new Set(rows.map((r) => String(r.config[l.name])))) {
+        columns.push((c) => (String(c[l.name]) === val ? 1 : 0))
+      }
+    }
+  }
+  const d = columns.length
+  if (d === 0) return null
+  const raw = rows.map((r) => columns.map((col) => col(r.config)))
+  const n = raw.length
+  const means: number[] = []
+  const stds: number[] = []
+  for (let j = 0; j < d; j++) {
+    const colv = raw.map((row) => row[j])
+    means.push(meanOf(colv))
+    stds.push(Math.sqrt(varianceOf(colv)) || 1)
+  }
+  const X = raw.map((row) => row.map((v, j) => (v - means[j]) / stds[j]))
+  const C: number[][] = Array.from({ length: d }, () => new Array(d).fill(0))
+  for (let a = 0; a < d; a++) {
+    for (let b = a; b < d; b++) {
+      let s = 0
+      for (let i = 0; i < n; i++) s += X[i][a] * X[i][b]
+      C[a][b] = C[b][a] = s / n
+    }
+  }
+  const trace = C.reduce((acc, row, i) => acc + row[i], 0) || 1
+  const pc1 = topEigenpair(C, d)
+  const C2 = C.map((row, a) => row.map((val, b) => val - pc1.value * pc1.vector[a] * pc1.vector[b]))
+  const pc2 = d >= 2 ? topEigenpair(C2, d) : { vector: new Array(d).fill(0), value: 0 }
+  const points: PcaPoint[] = rows.map((r, i) => ({
+    x: dotVec(X[i], pc1.vector),
+    y: dotVec(X[i], pc2.vector),
+    value: r.value,
+    key: r.runKeys[0],
+    runKeys: r.runKeys,
+  }))
+  return {
+    points,
+    explainedVariance: [Math.max(0, pc1.value) / trace, Math.max(0, pc2.value) / trace],
+    features: d,
+  }
 }
