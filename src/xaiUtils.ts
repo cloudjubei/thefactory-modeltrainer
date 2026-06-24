@@ -4,6 +4,7 @@ import type {
   AnalysisCriterion,
   AnalysisRun,
   ConfigSpaceAnalysis,
+  EnvironmentSummary,
   ConfigSurrogate,
   ExperimentRecommendation,
   FanovaImportance,
@@ -1020,12 +1021,82 @@ export function aggregateToSetupRuns(
   return out
 }
 
+function pickKeys(config: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of keys) if (k in config) out[k] = config[k]
+  return out
+}
+
+/** A run is in an environment when every one of that environment's context-lever values matches its config. */
+function matchesContext(config: Record<string, unknown>, env: Record<string, unknown>): boolean {
+  return Object.entries(env).every(([k, v]) => String(config[k]) === String(v))
+}
+
+/** The distinct environments (combinations of context-lever values) across the runs, most-run first. */
+function summarizeEnvironments(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+  contextLevers: string[],
+): EnvironmentSummary[] {
+  if (!contextLevers.length) return []
+  const groups = new Map<string, AnalysisRun[]>()
+  for (const r of runs) {
+    const sig = canonicalConfigString(pickKeys(r.config, contextLevers))
+    const g = groups.get(sig)
+    if (g) g.push(r)
+    else groups.set(sig, [r])
+  }
+  const out: EnvironmentSummary[] = []
+  for (const [signature, group] of groups) {
+    const setupValues = aggregateToSetupRuns(group, criterion)
+      .map((s) => criterionValueOf(s, criterion))
+      .filter((v): v is number => v !== undefined)
+    const best = setupValues.length
+      ? criterion.direction === 'min'
+        ? Math.min(...setupValues)
+        : Math.max(...setupValues)
+      : 0
+    out.push({ signature, values: pickKeys(group[0].config, contextLevers), runCount: group.length, best })
+  }
+  return out.sort((a, b) => b.runCount - a.runCount)
+}
+
+/**
+ * The whole-space bundle, scoped to ONE environment over the MODEL levers. `opts.contextLevers` are the
+ * environment + dataset levers (market mechanics + which data): the analysis filters to a single
+ * environment, strips those levers, and never recommends changing them — so configs from different
+ * environments aren't blended. The cross-environment comparison (`environments`, `contextImportances`)
+ * spans all runs. With no context levers it analyses the whole space together (backward compatible).
+ */
 export function computeConfigSpaceAnalysis(
   runs: AnalysisRun[],
   criterion: AnalysisCriterion,
+  opts?: { contextLevers?: string[]; environment?: Record<string, unknown> },
 ): ConfigSpaceAnalysis | null {
-  const valid = validRunsFor(runs, criterion)
+  const valid0 = validRunsFor(runs, criterion)
+  if (!valid0.length) return null
+  const present = leversOf(valid0)
+  const contextLevers = (opts?.contextLevers ?? []).filter((l) => present.includes(l))
+  const environments = summarizeEnvironments(valid0, criterion, contextLevers)
+  const contextImportances = contextLevers.length
+    ? leverImportances(valid0, criterion).filter((s) => contextLevers.includes(s.lever))
+    : []
+  // Pick the environment to analyse within: the requested one, else the most-run one.
+  const environment = !contextLevers.length
+    ? null
+    : opts?.environment
+      ? pickKeys(opts.environment, contextLevers)
+      : (environments[0]?.values ?? null)
+  const envRuns = environment ? valid0.filter((r) => matchesContext(r.config, environment)) : valid0
+  // Strip the context levers so the surrogate/importances/recommender see ONLY the model levers.
+  const valid = contextLevers.length
+    ? envRuns.map((r) => ({ ...r, config: configWithout(r.config, ...contextLevers) }))
+    : envRuns
   if (!valid.length) return null
+
+  const screening = leverImportances(valid, criterion)
+  const ofat: Record<string, OfatAnalysis[]> = {}
+  for (const s of screening) ofat[s.lever] = ofatContrasts(valid, s.lever, criterion)
   const setups = aggregateToSetupRuns(valid, criterion)
   const surrogate = fitConfigSurrogate(setups, criterion)
   const importances = fanovaImportances(surrogate, setups, criterion)
@@ -1037,12 +1108,23 @@ export function computeConfigSpaceAnalysis(
   const couplings = leverCouplings(surrogate, setups, criterion, coupledLevers)
   const ablation = ablationPath(surrogate, setups, criterion) ?? null
   const pca = pcaProjection(valid, criterion)
-  const recommendations = recommendExperiments(valid, criterion, { surrogate, setups })
+  const rawRecs = recommendExperiments(valid, criterion, { surrogate, setups })
+  // Stamp the environment's context values back onto each recommendation so the launched config is complete.
+  const recommendations = environment
+    ? rawRecs.map((r) => ({
+        ...r,
+        spec: { ...r.spec, fixed: { ...environment, ...(r.spec.fixed ?? {}) } },
+      }))
+    : rawRecs
+
   return {
     criterion: { key: criterion.key, direction: criterion.direction },
-    runCount: valid.length,
+    runCount: envRuns.length,
     setupCount: setups.length,
     levers: surrogate.levers.map((l) => l.name),
+    setups,
+    screening,
+    ofat,
     surrogate,
     importances,
     couplings,
@@ -1050,5 +1132,9 @@ export function computeConfigSpaceAnalysis(
     ablation,
     pca,
     recommendations,
+    environment,
+    environments,
+    contextImportances,
+    contextLevers,
   }
 }

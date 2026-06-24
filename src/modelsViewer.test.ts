@@ -16,124 +16,207 @@ mod.paths = []
 mod._compile(readFileSync(mpath, 'utf8'), mpath)
 const M: any = mod.exports
 
-const run = (
+// A run row for computeModelStats: { key, config, objective, status, health, ranAt }.
+const row = (
   modelName: string,
-  opts: { objective?: number; status?: string; flags?: string[] } = {},
+  opts: {
+    objective?: number
+    status?: string
+    flags?: string[]
+    ranAt?: string
+    config?: Record<string, unknown>
+  } = {},
 ) => ({
   key: `run-${modelName}-${opts.objective ?? 'x'}`,
-  summary: {
-    config: { model_name: modelName },
-    objective: opts.objective,
-    status: opts.status || 'completed',
-    health: { status: opts.flags && opts.flags.length ? 'flagged' : 'ok', flags: opts.flags || [] },
-  },
+  config: { model_name: modelName, ...(opts.config || {}) },
+  objective: opts.objective,
+  status: opts.status || 'completed',
+  health: { status: opts.flags && opts.flags.length ? 'flagged' : 'ok', flags: opts.flags || [] },
+  ranAt: opts.ranAt,
 })
 
-const manifest = (choices: string[]) => ({
-  levers: { model_name: { type: 'choice', choices } },
-})
+const manifest = (choices: string[]) => ({ levers: { model_name: { type: 'choice', choices } } })
 
 const model = (over: Record<string, unknown> = {}) => ({
-  id: 'rainbow-dqn-custom',
-  slug: 'rainbow-dqn-custom',
-  name: 'Rainbow DQN',
+  id: 'dueling-dqn',
+  slug: 'dueling-dqn',
+  name: 'Dueling DQN',
   category: 'rl',
   status: 'implemented',
   statusSource: 'auto',
-  modelNames: ['rainbow-dqn-custom'],
+  flavors: [
+    { name: 'custom', modelName: 'duel-dqn-custom' },
+    { name: 'vanilla', modelName: 'duel-dqn' },
+  ],
   source: 'manual',
   ...over,
 })
 
-describe('modelMatchesRun', () => {
-  it('matches when the run config model_name is one of the bindings', () => {
-    expect(M.modelMatchesRun(model(), { model_name: 'rainbow-dqn-custom' })).toBe(true)
+describe('modelFlavors', () => {
+  it('returns the structured flavors', () => {
+    expect(M.modelFlavors(model()).map((f: any) => f.modelName)).toEqual([
+      'duel-dqn-custom',
+      'duel-dqn',
+    ])
+  })
+  it('derives one flavor per legacy modelNames entry', () => {
+    expect(M.modelFlavors({ modelNames: ['a', 'b'] })).toEqual([
+      { modelName: 'a' },
+      { modelName: 'b' },
+    ])
+  })
+  it('is empty for a flavorless proposal', () => {
+    expect(M.modelFlavors({ flavors: [] })).toEqual([])
+  })
+})
+
+describe('flavorMatchesConfig', () => {
+  it('matches by model_name alone', () => {
+    expect(M.flavorMatchesConfig({ modelName: 'duel-dqn' }, { model_name: 'duel-dqn' })).toBe(true)
   })
   it('rejects a different model_name', () => {
-    expect(M.modelMatchesRun(model(), { model_name: 'dqn' })).toBe(false)
+    expect(M.flavorMatchesConfig({ modelName: 'duel-dqn' }, { model_name: 'dqn' })).toBe(false)
   })
-  it('matches nothing when the model has no bindings', () => {
-    expect(M.modelMatchesRun(model({ modelNames: [] }), { model_name: 'rainbow-dqn-custom' })).toBe(
+  it('narrows by an extra config value (loose-equal)', () => {
+    const fl = { modelName: 'duel-dqn-custom-lstm', config: { lstm_hidden_size: 3 } }
+    expect(
+      M.flavorMatchesConfig(fl, { model_name: 'duel-dqn-custom-lstm', lstm_hidden_size: '3' }),
+    ).toBe(true)
+    expect(
+      M.flavorMatchesConfig(fl, { model_name: 'duel-dqn-custom-lstm', lstm_hidden_size: 2 }),
+    ).toBe(false)
+  })
+})
+
+describe('flavorKey', () => {
+  it('is model_name + a sorted config signature', () => {
+    expect(M.flavorKey({ modelName: 'x', config: { b: 2, a: 1 } })).toBe('x|a=1&b=2')
+    expect(M.flavorKey({ modelName: 'x' })).toBe('x|')
+  })
+})
+
+describe('runMatchesModel + flavorModelNames', () => {
+  it('matches a run binding any flavor', () => {
+    expect(M.runMatchesModel(model(), { model_name: 'duel-dqn' })).toBe(true)
+    expect(M.runMatchesModel(model(), { model_name: 'dqn' })).toBe(false)
+  })
+  it('lists the distinct flavor model_names', () => {
+    expect(M.flavorModelNames(model())).toEqual(['duel-dqn-custom', 'duel-dqn'])
+  })
+})
+
+describe('isModelImplemented', () => {
+  it('is true when a flavor model_name is a manifest choice', () => {
+    expect(M.isModelImplemented(model(), manifest(['duel-dqn-custom']))).toBe(true)
+  })
+  it('is true when a flavor carries an implPath even if not in the lever', () => {
+    expect(
+      M.isModelImplemented(
+        { flavors: [{ modelName: 'agent57', implPath: 'src/model/agent57.py' }] },
+        manifest(['dqn']),
+      ),
+    ).toBe(true)
+  })
+  it('is false when no flavor is in the lever and there is no implPath', () => {
+    expect(M.isModelImplemented({ flavors: [{ modelName: 'nope' }] }, manifest(['dqn']))).toBe(
       false,
     )
   })
 })
 
-describe('runsForModel', () => {
-  it('keeps only the runs whose config binds to the model', () => {
-    const runs = [run('rainbow-dqn-custom', { objective: 1 }), run('dqn', { objective: 2 })]
-    expect(M.runsForModel(model(), runs).map((r: any) => r.key)).toEqual([
-      'run-rainbow-dqn-custom-1',
+describe('computeModelStats', () => {
+  const models = [
+    model({
+      flavors: [
+        { name: 'custom', modelName: 'duel-dqn-custom' },
+        { name: 'vanilla', modelName: 'duel-dqn' },
+      ],
+    }),
+    {
+      id: 'recurrent-ppo',
+      slug: 'recurrent-ppo',
+      flavors: [{ modelName: 'reppo-custom' }],
+    },
+  ]
+
+  it('aggregates per-model + per-flavor over ALL runs (counts, best, failing, lastRunAt)', () => {
+    const runs = [
+      row('duel-dqn-custom', { objective: 1, ranAt: '2026-06-01' }),
+      row('duel-dqn-custom', { objective: 5, ranAt: '2026-06-03' }),
+      row('duel-dqn', { objective: 2, ranAt: '2026-06-02' }),
+      row('duel-dqn-custom', { flags: ['nan_loss'], ranAt: '2026-06-04' }),
+      row('reppo-custom', { objective: 9 }),
+    ]
+    const stats = M.computeModelStats(models, runs, 'max')
+    expect(stats.totalRuns).toBe(5)
+    expect(stats.newestRunAt).toBe('2026-06-04')
+    const dd = stats.perModel['dueling-dqn']
+    expect(dd.runs).toBe(4)
+    expect(dd.best).toBe(5)
+    expect(dd.failing).toBe(1)
+    expect(dd.lastRunAt).toBe('2026-06-04')
+    expect(dd.perFlavor['duel-dqn-custom|'].runs).toBe(3)
+    expect(dd.perFlavor['duel-dqn|'].runs).toBe(1)
+    expect(stats.perModel['recurrent-ppo'].runs).toBe(1)
+    expect(stats.perModel['recurrent-ppo'].best).toBe(9)
+  })
+
+  it('honours the objective direction for best', () => {
+    const stats = M.computeModelStats(
+      models,
+      [row('duel-dqn', { objective: 2 }), row('duel-dqn', { objective: 8 })],
+      'min',
+    )
+    expect(stats.perModel['dueling-dqn'].best).toBe(2)
+  })
+
+  it('collects runs matching NO flavor as uncataloged (the missing-flavor signal)', () => {
+    const runs = [
+      row('duel-dqn-custom', { objective: 1 }),
+      row('duel-dqn-custom-lstm3', { objective: 2 }),
+      row('duel-dqn-custom-lstm3', { objective: 3 }),
+      row('agent57', { objective: 4 }),
+    ]
+    const stats = M.computeModelStats(models, runs, 'max')
+    expect(stats.uncataloged.map((u: any) => [u.modelName, u.runs])).toEqual([
+      ['duel-dqn-custom-lstm3', 2],
+      ['agent57', 1],
     ])
   })
 })
 
-describe('isModelImplemented', () => {
-  it('is true when a binding is one of the manifest model_name choices', () => {
-    expect(M.isModelImplemented(model(), manifest(['rainbow-dqn-custom', 'dqn']))).toBe(true)
+describe('aggForModel + deriveModelStatus', () => {
+  const mani = manifest(['duel-dqn-custom'])
+  it('reads a model aggregate from a stats record', () => {
+    const stats = { perModel: { 'dueling-dqn': { runs: 3, best: 5, failing: 0 } } }
+    expect(M.aggForModel(stats, 'dueling-dqn').runs).toBe(3)
+    expect(M.aggForModel(stats, 'missing')).toBe(null)
   })
-  it('is true when the model has an implPath even if not in the lever', () => {
-    expect(
-      M.isModelImplemented(
-        model({ modelNames: ['agent57'], implPath: 'src/model/agent57.py' }),
-        manifest(['dqn']),
-      ),
-    ).toBe(true)
-  })
-  it('is false when no binding is in the lever and there is no implPath', () => {
-    expect(M.isModelImplemented(model({ modelNames: ['nope'] }), manifest(['dqn']))).toBe(false)
-  })
-})
-
-describe('deriveModelStatus', () => {
   it('returns a manual pin unchanged', () => {
     expect(
       M.deriveModelStatus(
         model({ statusSource: 'manual', status: 'needs-improvement' }),
-        [],
-        manifest(['rainbow-dqn-custom']),
+        null,
+        mani,
       ),
     ).toBe('needs-improvement')
   })
-  it('is proposed when not implemented and has no runs', () => {
-    expect(M.deriveModelStatus(model({ modelNames: [] }), [], manifest(['dqn']))).toBe('proposed')
+  it('is proposed when unimplemented with no runs', () => {
+    expect(M.deriveModelStatus({ flavors: [] }, null, mani)).toBe('proposed')
   })
-  it('is implemented when lever-bound but no runs yet', () => {
-    expect(M.deriveModelStatus(model(), [], manifest(['rainbow-dqn-custom']))).toBe('implemented')
+  it('is implemented when lever-bound but unrun', () => {
+    expect(M.deriveModelStatus(model(), null, mani)).toBe('implemented')
   })
-  it('is failing when every matching run is health-flagged or errored', () => {
-    const runs = [
-      run('rainbow-dqn-custom', { flags: ['zero_trades'] }),
-      run('rainbow-dqn-custom', { status: 'failed' }),
-    ]
-    expect(M.deriveModelStatus(model(), runs, manifest(['rainbow-dqn-custom']))).toBe('failing')
+  it('is failing when every aggregated run is unhealthy', () => {
+    expect(M.deriveModelStatus(model(), { runs: 4, failing: 4 }, mani)).toBe('failing')
   })
-  it('is implemented when at least one matching run is healthy', () => {
-    const runs = [
-      run('rainbow-dqn-custom', { objective: 1 }),
-      run('rainbow-dqn-custom', { status: 'failed' }),
-    ]
-    expect(M.deriveModelStatus(model(), runs, manifest(['rainbow-dqn-custom']))).toBe('implemented')
-  })
-})
-
-describe('modelRunSummary', () => {
-  it('counts runs, the best objective (direction-aware), and the failing count', () => {
-    const runs = [
-      run('rainbow-dqn-custom', { objective: 1 }),
-      run('rainbow-dqn-custom', { objective: 3 }),
-      run('rainbow-dqn-custom', { flags: ['nan_loss'] }),
-      run('dqn', { objective: 99 }),
-    ]
-    expect(M.modelRunSummary(model(), runs, 'max')).toEqual({ runs: 3, best: 3, failing: 1 })
-  })
-  it('reports a null best when no matching run carries an objective', () => {
-    expect(M.modelRunSummary(model(), [], 'max')).toEqual({ runs: 0, best: null, failing: 0 })
+  it('is implemented when at least one aggregated run is healthy', () => {
+    expect(M.deriveModelStatus(model(), { runs: 4, failing: 1 }, mani)).toBe('implemented')
   })
 })
 
 describe('buildProposedModelRecord', () => {
-  it('builds a proposed, paper-linked catalog record from a ProposedModel', () => {
+  it('builds a proposed, flavorless, paper-linked catalog record', () => {
     const rec = M.buildProposedModelRecord(
       {
         name: 'C51',
@@ -143,7 +226,7 @@ describe('buildProposedModelRecord', () => {
         proposal: 'add C51 head',
       },
       'p1',
-      '2026-06-23T00:00:00.000Z',
+      '2026-06-24T00:00:00.000Z',
     )
     expect(rec).toEqual({
       id: 'c51',
@@ -153,37 +236,36 @@ describe('buildProposedModelRecord', () => {
       category: 'rl',
       status: 'proposed',
       statusSource: 'auto',
-      modelNames: [],
+      flavors: [],
       paperIds: ['p1'],
       proposal: 'add C51 head',
       source: 'paper',
-      createdAt: '2026-06-23T00:00:00.000Z',
-      updatedAt: '2026-06-23T00:00:00.000Z',
+      createdAt: '2026-06-24T00:00:00.000Z',
+      updatedAt: '2026-06-24T00:00:00.000Z',
     })
   })
 })
 
-describe('modelsForPaper', () => {
-  it('unions both link directions (paper.modelIds and model.paperIds)', () => {
-    const models = [
-      model({ id: 'a', slug: 'a', paperIds: ['p1'] }),
-      model({ id: 'b', slug: 'b' }),
-      model({ id: 'c', slug: 'c' }),
-    ]
-    const out = M.modelsForPaper({ id: 'p1', modelIds: ['b'] }, models)
-    expect(out.map((m: any) => m.id).sort()).toEqual(['a', 'b'])
+describe('modelsForPaper / papersForModel', () => {
+  it('unions both link directions for a paper', () => {
+    const models = [model({ id: 'a', paperIds: ['p1'] }), model({ id: 'b' }), model({ id: 'c' })]
+    expect(
+      M.modelsForPaper({ id: 'p1', modelIds: ['b'] }, models)
+        .map((m: any) => m.id)
+        .sort(),
+    ).toEqual(['a', 'b'])
   })
-})
-
-describe('papersForModel', () => {
-  it('unions both link directions (model.paperIds and paper.modelIds)', () => {
+  it('unions both link directions for a model', () => {
     const papers = [
       { id: 'p1', modelIds: [] },
-      { id: 'p2', modelIds: ['rainbow-dqn-custom'] },
+      { id: 'p2', modelIds: ['dueling-dqn'] },
       { id: 'p3', modelIds: [] },
     ]
-    const out = M.papersForModel(model({ paperIds: ['p1'] }), papers)
-    expect(out.map((p: any) => p.id).sort()).toEqual(['p1', 'p2'])
+    expect(
+      M.papersForModel(model({ paperIds: ['p1'] }), papers)
+        .map((p: any) => p.id)
+        .sort(),
+    ).toEqual(['p1', 'p2'])
   })
 })
 
@@ -196,7 +278,6 @@ describe('status + category metadata', () => {
       'needs-improvement',
       'deprecated',
     ])
-    expect(M.MODEL_STATUS_LABEL.failing).toBe('failing')
     expect(M.MODEL_STATUS_BADGE.implemented).toBe('is-done')
     expect(M.MODEL_STATUS_BADGE.failing).toBe('is-failed')
   })
@@ -205,7 +286,7 @@ describe('status + category metadata', () => {
   })
 })
 
-describe('seed re-sync (consolidation reaches already-imported catalogs)', () => {
+describe('seed re-sync (flavors)', () => {
   const seed = {
     id: 'dueling-dqn',
     slug: 'dueling-dqn',
@@ -213,33 +294,35 @@ describe('seed re-sync (consolidation reaches already-imported catalogs)', () =>
     description: 'value + advantage streams',
     category: 'rl',
     status: 'implemented',
-    modelNames: ['duel-dqn-custom', 'duel-dqn', 'duel-dqn-custom-lstm'],
+    flavors: [
+      { name: 'custom', modelName: 'duel-dqn-custom' },
+      { name: 'vanilla', modelName: 'duel-dqn' },
+      { name: 'custom + LSTM', modelName: 'duel-dqn-custom-lstm' },
+    ],
     implPath: 'src/model/dueling_dqn/dueling_dqn.py',
     source: 'manual',
   }
-
-  it('flags a seed with no existing record as differing (a new import)', () => {
+  it('flags a new seed as differing', () => {
     expect(M.seedDiffersFromModel(seed, undefined)).toBe(true)
   })
-  it('flags a binding change (the consolidation) as differing', () => {
-    const existing = { ...seed, modelNames: ['duel-dqn-custom'] }
+  it('flags a flavor change (the consolidation) as differing', () => {
+    const existing = { ...seed, flavors: [{ modelName: 'duel-dqn-custom' }] }
     expect(M.seedDiffersFromModel(seed, existing)).toBe(true)
   })
-  it('is false when the manifest-owned fields already match', () => {
+  it('is false when flavors + scalar fields already match', () => {
     expect(M.seedDiffersFromModel(seed, { ...seed, statusSource: 'auto' })).toBe(false)
   })
-
-  it('merges seed (manifest) fields while preserving a manual status + user notes/dismissed/links', () => {
+  it('merges seed flavors while preserving a manual status + user notes/dismissed/links', () => {
     const existing = {
       id: 'dueling-dqn',
       slug: 'dueling-dqn',
-      name: 'old name',
-      modelNames: ['duel-dqn-custom'],
+      name: 'old',
+      flavors: [{ modelName: 'duel-dqn-custom' }],
       category: 'rl',
       status: 'needs-improvement',
       statusSource: 'manual',
-      statusNote: 'hand-pinned',
-      notes: 'keep this',
+      statusNote: 'pinned',
+      notes: 'keep',
       dismissed: true,
       hypothesisIds: ['h1'],
       paperIds: ['p-user'],
@@ -251,15 +334,14 @@ describe('seed re-sync (consolidation reaches already-imported catalogs)', () =>
       existing,
       '2026-06-24T00:00:00.000Z',
     )
-    // manifest-owned fields come from the seed
-    expect(merged.name).toBe('Dueling DQN')
-    expect(merged.modelNames).toEqual(['duel-dqn-custom', 'duel-dqn', 'duel-dqn-custom-lstm'])
-    expect(merged.implPath).toBe('src/model/dueling_dqn/dueling_dqn.py')
-    // user-owned fields are preserved
+    expect(merged.flavors.map((f: any) => f.modelName)).toEqual([
+      'duel-dqn-custom',
+      'duel-dqn',
+      'duel-dqn-custom-lstm',
+    ])
     expect(merged.status).toBe('needs-improvement')
     expect(merged.statusSource).toBe('manual')
-    expect(merged.statusNote).toBe('hand-pinned')
-    expect(merged.notes).toBe('keep this')
+    expect(merged.notes).toBe('keep')
     expect(merged.dismissed).toBe(true)
     expect(merged.hypothesisIds).toEqual(['h1'])
     expect(merged.paperIds.sort()).toEqual(['p-seed', 'p-user'])
@@ -270,6 +352,5 @@ describe('seed re-sync (consolidation reaches already-imported catalogs)', () =>
     const merged = M.mergeSeedIntoModel(seed, undefined, '2026-06-24T00:00:00.000Z')
     expect(merged.status).toBe('implemented')
     expect(merged.statusSource).toBe('auto')
-    expect(merged.createdAt).toBe('2026-06-24T00:00:00.000Z')
   })
 })

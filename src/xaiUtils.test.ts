@@ -610,6 +610,17 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     expect(a.pca!.points).toHaveLength(6) // one point per setup
     expect(Array.isArray(a.recommendations)).toBe(true)
     expect(a.criterion).toEqual({ key: 'objective', direction: 'max' })
+    // Config-effects folded in: screening importances + per-lever OFAT, computed over the raw runs.
+    expect(a.screening.map((s) => s.lever).sort()).toEqual(['batch_size', 'lr'])
+    expect(a.ofat).toBeTypeOf('object')
+    expect(Object.keys(a.ofat).sort()).toEqual(['batch_size', 'lr'])
+    expect(a.ofat.lr).toEqual(ofatContrasts(spaceRuns(), 'lr', MAX))
+    // Setups (distinct configs) are shipped so the viewer can marginalise the surrogate for interactions.
+    expect(a.setups).toHaveLength(6)
+    expect(a.setups.every((s) => 'lr' in s.config && 'batch_size' in s.config)) .toBe(true)
+    // The interaction grid the viewer will draw is reproducible from the embedded surrogate + setups.
+    const grid = interactionGrid(a.surrogate, a.setups, MAX, 'lr', 'batch_size')
+    expect(grid).not.toBeNull()
   })
 
   it('searches coupling only among the high-effect levers, skipping inert ones', () => {
@@ -635,5 +646,49 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
 
   it('returns null when there are no valid runs', () => {
     expect(computeConfigSpaceAnalysis([], MAX)).toBeNull()
+  })
+
+  function envRuns(): AnalysisRun[] {
+    // Two environments (transaction_fee 0.001 vs 0.01) over one model lever (lr). Fee is CONTEXT.
+    const out: AnalysisRun[] = []
+    let k = 0
+    for (const transaction_fee of [0.001, 0.01])
+      for (const lr of [0.1, 0.5])
+        for (const seed of [0, 1])
+          out.push(run(`r${k++}`, { transaction_fee, lr }, (transaction_fee === 0.001 ? 100 : 50) + lr * 10, { seed }))
+    return out
+  }
+
+  it('scopes the analysis to one environment over MODEL levers only, never tuning context', () => {
+    const a = computeConfigSpaceAnalysis(envRuns(), MAX, { contextLevers: ['transaction_fee'] })!
+    expect(a.environments).toHaveLength(2)
+    expect(a.environments[0].runCount).toBe(4)
+    expect(a.environment).toEqual({ transaction_fee: 0.001 }) // most-run (tie → insertion order)
+    expect(a.runCount).toBe(4) // only that environment's runs
+    expect(a.levers).toEqual(['lr']) // context lever stripped from the model space
+    expect(a.importances.every((f) => f.lever !== 'transaction_fee')).toBe(true)
+    expect(a.contextImportances.map((s) => s.lever)).toEqual(['transaction_fee'])
+    // every recommendation stays IN this environment (carries its fee) and varies only model levers
+    expect(a.recommendations.length).toBeGreaterThan(0)
+    for (const rec of a.recommendations) {
+      expect(rec.spec.fixed?.transaction_fee).toBe(0.001)
+      expect('transaction_fee' in (rec.spec.sweep ?? {})).toBe(false)
+    }
+  })
+
+  it('targets a requested environment', () => {
+    const a = computeConfigSpaceAnalysis(envRuns(), MAX, {
+      contextLevers: ['transaction_fee'],
+      environment: { transaction_fee: 0.01 },
+    })!
+    expect(a.environment).toEqual({ transaction_fee: 0.01 })
+    for (const rec of a.recommendations) expect(rec.spec.fixed?.transaction_fee).toBe(0.01)
+  })
+
+  it('analyses the whole space together when there are no context levers', () => {
+    const a = computeConfigSpaceAnalysis(spaceRuns(), MAX)!
+    expect(a.environment).toBeNull()
+    expect(a.environments).toEqual([])
+    expect(a.contextImportances).toEqual([])
   })
 })

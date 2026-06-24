@@ -99,6 +99,7 @@ import {
   detectMissingPaperModels,
   diffDecisionTraces,
   discoverManifestModelCandidates,
+  modelBindingNames,
   expandExperimentMatrix,
   normalizeObjectiveScores,
   pickBestRun,
@@ -1139,8 +1140,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       key: params.criterionKey ?? 'objective',
       direction: params.criterionDir ?? manifest.objective.direction,
     }
+    // Environment + dataset levers are CONTEXT — the analysis scopes within one environment over the model
+    // levers, never tuning these. Derived from the manifest's per-lever `scope`.
+    const contextLevers = Object.entries(manifest.levers)
+      .filter(([, spec]) => spec.scope === 'environment' || spec.scope === 'dataset')
+      .map(([name]) => name)
     const records = await listCompletedRuns(params.scope, recordType)
-    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion)
+    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion, {
+      contextLevers,
+      environment: params.environment,
+    })
     return { recordType, criterion, analysis }
   }
 
@@ -1352,7 +1361,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         category: e.category ?? c.category,
         status: 'implemented',
         statusSource: 'auto',
-        modelNames: [c.modelName],
+        flavors: [{ modelName: c.modelName }],
         ...(e.paperIds && e.paperIds.length ? { paperIds: e.paperIds } : {}),
         source: params.llmConfig ? 'llm' : 'scan',
         ...(scannedBy ? { proposedBy: scannedBy } : {}),
@@ -1436,7 +1445,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           name: m.name,
           slug: m.slug,
           category: m.category,
-          modelNames: m.modelNames,
+          modelNames: modelBindingNames(m),
         })),
         text,
       }),
@@ -1626,6 +1635,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
       const migrated = applyMigrationRules(config as Record<string, unknown>, rules)
       if (!migrated) continue
+      // A rule that resolves to an identical config (e.g. a keepOrDefault backfill on an already-set
+      // field) is a no-op — skip the rewrite so the sweep converges and doesn't churn every boot.
+      if (hashTrainingConfig(migrated) === hashTrainingConfig(config as Record<string, unknown>)) {
+        continue
+      }
       await deps.storage.upsertRecord({
         scope: params.scope,
         type: recordType,
@@ -1662,6 +1676,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         }
         const migrated = applyMigrationRules(fixed, rules)
         if (!migrated) continue
+        if (hashTrainingConfig(migrated) === hashTrainingConfig(fixed)) continue
         await deps.storage.upsertRecord({
           scope: params.scope,
           type: params.queueRecordType,

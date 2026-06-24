@@ -1799,8 +1799,16 @@ describe('proposeTrainingHypotheses', () => {
 
 describe('proposeTrainingExperiments', () => {
   const PROPOSALS = JSON.stringify([
-    { title: 'Push lr higher', rationale: 'top runs cluster at high lr', spec: { sweep: { lr: [0.5, 0.9] } } },
-    { title: 'Longer training', rationale: 'returns still climbing', spec: { fixed: { steps: 500 } } },
+    {
+      title: 'Push lr higher',
+      rationale: 'top runs cluster at high lr',
+      spec: { sweep: { lr: [0.5, 0.9] } },
+    },
+    {
+      title: 'Longer training',
+      rationale: 'returns still climbing',
+      spec: { fixed: { steps: 500 } },
+    },
     { title: 'Bad one', rationale: 'names a ghost lever', spec: { sweep: { ghost: [1] } } },
   ])
 
@@ -1821,9 +1829,16 @@ describe('proposeTrainingExperiments', () => {
       proposedBy: 'openai/m',
       proposedAt: NOW,
     })
-    const suggestions = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-suggestion' })
+    const suggestions = await storage.listRecords({
+      scope: 'proj',
+      type: 'demo-run-xai-suggestion',
+    })
     expect(suggestions).toHaveLength(2)
-    expect(suggestions[0].content).toMatchObject({ source: 'llm', proposedBy: 'openai/m', proposedAt: NOW })
+    expect(suggestions[0].content).toMatchObject({
+      source: 'llm',
+      proposedBy: 'openai/m',
+      proposedAt: NOW,
+    })
     expect((suggestions[0].content as { id: string }).id).toBe(suggestions[0].key)
     // The whole point: it must NOT write hypothesis records.
     const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
@@ -1833,8 +1848,18 @@ describe('proposeTrainingExperiments', () => {
   it('dedupes identical specs against existing suggestions', async () => {
     const storage = memoryStorage()
     const { tools } = makeJudgeTools(stubExecutor(PROPOSALS), storage)
-    await tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
-    const second = await tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
+    await tools.proposeTrainingExperiments({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const second = await tools.proposeTrainingExperiments({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
     expect(second.skippedExisting).toBe(2)
     expect(second.proposed).toBe(0)
   })
@@ -1855,7 +1880,12 @@ describe('proposeTrainingExperiments', () => {
   it('throws without an inference executor', async () => {
     const { tools } = makeJudgeTools(undefined, memoryStorage())
     await expect(
-      tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM }),
+      tools.proposeTrainingExperiments({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+      }),
     ).rejects.toThrow(/inference/i)
   })
 })
@@ -2474,6 +2504,57 @@ describe('migrateTrainingRuns', () => {
     expect((rec?.content as { config: Record<string, unknown> }).config.combo_fee_penalty).toBe(0.5)
   })
 
+  it('backfills a MISSING field via keepOrDefault and counts it migrated', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, config: { reward_model: 'combo_unified', lr: 0.1 } },
+    })
+    const backfill = [
+      { match: { reward_model: 'combo_unified' }, keepOrDefault: { allow_shorting: false } },
+    ]
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest({ migrations: backfill }),
+    })
+    expect(result.migratedRuns).toBe(1)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { config: Record<string, unknown> }).config.allow_shorting).toBe(false)
+  })
+
+  it('skips a NO-OP rewrite (idempotent backfill on an already-set field does not churn)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: {
+        objective: 1,
+        config: { reward_model: 'combo_unified', allow_shorting: false },
+        setupKey: 'keep',
+      },
+    })
+    const backfill = [
+      { match: { reward_model: 'combo_unified' }, keepOrDefault: { allow_shorting: false } },
+    ]
+    const written: string[] = []
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest({ migrations: backfill }),
+      onRecordWritten: (_t: string, k: string) => written.push(k),
+    })
+    expect(result).toMatchObject({ examinedRuns: 1, migratedRuns: 0 })
+    expect(written).toEqual([]) // no rewrite, no broadcast
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { setupKey: string }).setupKey).toBe('keep') // untouched
+  })
+
   it('leaves already-migrated runs untouched and is idempotent', async () => {
     const storage = memoryStorage()
     await storage.upsertRecord({
@@ -2832,7 +2913,7 @@ describe('scanProjectModels', () => {
       status: 'implemented',
       statusSource: 'auto',
       source: 'scan',
-      modelNames: ['rainbow-dqn-custom'],
+      flavors: [{ modelName: 'rainbow-dqn-custom' }],
     })
     const hodl = recs.find((r) => r.key === 'hodl')!.content as Record<string, unknown>
     expect(hodl).toMatchObject({ name: 'Buy-and-Hold', category: 'baseline' })
@@ -3097,7 +3178,11 @@ describe('analyzeConfigSpace', () => {
         for (const seed of [0, 1])
           await seedRun(storage, `r${k++}`, lr * 100 + bs, { config: { lr, batch_size: bs }, seed })
     const { tools } = makeJudgeTools(undefined, storage)
-    const result = await tools.analyzeConfigSpace({ scope: 'proj', projectRoot: '/repo', manifest: manifest() })
+    const result = await tools.analyzeConfigSpace({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+    })
     expect(result.recordType).toBe('demo-run')
     expect(result.criterion.key).toBe('objective')
     expect(result.analysis).not.toBeNull()
@@ -3108,7 +3193,11 @@ describe('analyzeConfigSpace', () => {
 
   it('returns a null analysis when there are no completed runs', async () => {
     const { tools } = makeJudgeTools(undefined, memoryStorage())
-    const result = await tools.analyzeConfigSpace({ scope: 'proj', projectRoot: '/repo', manifest: manifest() })
+    const result = await tools.analyzeConfigSpace({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+    })
     expect(result.analysis).toBeNull()
   })
 })

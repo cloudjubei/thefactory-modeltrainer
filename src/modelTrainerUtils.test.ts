@@ -34,6 +34,7 @@ import {
   modelSlug,
   inferModelCategory,
   humanizeModelName,
+  modelBindingNames,
   discoverManifestModelCandidates,
   dedupeModelsBySlug,
   coerceScannedModels,
@@ -135,6 +136,20 @@ describe('applyMigrationRules', () => {
     ).toBe('combo_unified')
   })
 
+  it('strips keys named by `unset` and is idempotent once they are gone', () => {
+    const stripRules = [{ unset: ['position_mode', 'trade_gate_mode'] }]
+    const out = applyMigrationRules({ lr: 0.1, position_mode: 'x', trade_gate_mode: 'y' }, stripRules)
+    expect(out).toEqual({ lr: 0.1 })
+    // a config without any target key no longer matches the rule (no further rewrite)
+    expect(applyMigrationRules({ lr: 0.1 }, stripRules)).toBeNull()
+    // unset combines with set/match on the same rule
+    const combo = applyMigrationRules(
+      { reward_model: 'combo_unified', position_mode: 'x' },
+      [{ match: { reward_model: 'combo_unified' }, unset: ['position_mode'] }],
+    )
+    expect(combo).toEqual({ reward_model: 'combo_unified' })
+  })
+
   it('uses the FIRST matching rule and does not mutate the input', () => {
     const input = { reward_model: 'combo_all', combo_sell: 7 }
     const out = applyMigrationRules(input, rules)
@@ -215,6 +230,22 @@ describe('migrateExperimentSpec', () => {
 
   it('is a no-op when the spec has no fixed block (e.g. a pure sweep)', () => {
     const spec = { sweep: { reward_model: ['combo_all', 'profit_all2'] } }
+    expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
+  })
+
+  it('migrates every entry in spec.configs (batch re-run rolls old configs forward)', () => {
+    const out = migrateExperimentSpec(
+      { configs: [{ reward_model: 'combo_all', lr: 0.1 }, { reward_model: 'combo_unified' }] },
+      migrations,
+    )
+    expect(out.configs).toEqual([
+      { reward_model: 'combo_unified', lr: 0.1, combo_sell: 1000 },
+      { reward_model: 'combo_unified' },
+    ])
+  })
+
+  it('returns the SAME spec object when its configs need no migration', () => {
+    const spec = { configs: [{ reward_model: 'combo_unified' }] }
     expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
   })
 })
@@ -459,6 +490,33 @@ describe('expandExperimentMatrix', () => {
   it('rejects a dataset value that names no lever', () => {
     expect(() =>
       expandExperimentMatrix(manifest(), { datasets: [{ ghost: 1 }] }, hashByJson),
+    ).toThrow(/ghost/)
+  })
+
+  it('plans exactly the explicit configs (each merged onto defaults), with no default base item', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      { configs: [{ lr: 0.7, algo: 'b' }, { lr: 0.9 }] },
+      hashByJson,
+    )
+    expect(items).toHaveLength(2)
+    expect(items[0].config).toEqual({ lr: 0.7, algo: 'b', steps: 100 })
+    expect(items[1].config).toEqual({ lr: 0.9, algo: 'a', steps: 100 })
+  })
+
+  it('ignores sweep/seeds when explicit configs are given (configs define the matrix verbatim)', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      { sweep: { lr: [0.1, 0.2] }, seeds: [0, 1], configs: [{ lr: 0.5, algo: 'b' }] },
+      hashByJson,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].config).toEqual({ lr: 0.5, algo: 'b', steps: 100 })
+  })
+
+  it('rejects an explicit config value that names no lever', () => {
+    expect(() =>
+      expandExperimentMatrix(manifest(), { configs: [{ ghost: 1 }] }, hashByJson),
     ).toThrow(/ghost/)
   })
 
@@ -1569,6 +1627,22 @@ describe('humanizeModelName', () => {
   })
   it('keeps a single token', () => {
     expect(humanizeModelName('a2c')).toBe('A2C')
+  })
+})
+
+describe('modelBindingNames', () => {
+  it('reads model_name values from flavors', () => {
+    expect(
+      modelBindingNames({
+        flavors: [{ modelName: 'a' }, { modelName: 'b' }, { name: 'x' } as never],
+      }),
+    ).toEqual(['a', 'b'])
+  })
+  it('falls back to a legacy flat modelNames[]', () => {
+    expect(modelBindingNames({ modelNames: ['a', 'b'] })).toEqual(['a', 'b'])
+  })
+  it('is empty when neither is present', () => {
+    expect(modelBindingNames({})).toEqual([])
   })
 })
 

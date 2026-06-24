@@ -109,14 +109,19 @@ export function findMigrationRule(
   rules: TrainerMigrationRule[],
 ): TrainerMigrationRule | null {
   const matches = (rule: TrainerMigrationRule): boolean => {
-    if (!rule.match && !rule.matchNot) return false
+    const hasClause = !!(rule.match || rule.matchNot)
+    const hasUnset = !!(rule.unset && rule.unset.length)
+    if (!hasClause && !hasUnset) return false
     const eq = Object.entries(rule.match ?? {}).every(
       ([k, v]) => k in config && String(config[k]) === String(v),
     )
     const neq = Object.entries(rule.matchNot ?? {}).every(
       ([k, v]) => k in config && String(config[k]) !== String(v),
     )
-    return eq && neq
+    const clauseOk = hasClause ? eq && neq : true
+    // An unset-ONLY rule fires only while a target key remains, so the sweep converges (idempotent).
+    const unsetOk = hasUnset && !hasClause ? rule.unset!.some((k) => k in config) : true
+    return clauseOk && unsetOk
   }
   return rules.find(matches) ?? null
 }
@@ -138,23 +143,42 @@ export function applyMigrationRules(
   for (const [k, fallback] of Object.entries(rule.keepOrDefault ?? {})) {
     out[k] = k in config ? config[k] : fallback
   }
+  for (const k of rule.unset ?? []) delete out[k]
   return out
 }
 
 /**
  * Roll an {@link ExperimentSpec} forward through the same migration rules before it is planned, so a
  * run dispatched from an OLD queued/pending spec (e.g. `reward_model: "combo_all"`) executes under the
- * migrated shape rather than the retired one. Only `spec.fixed` is migrated (the pinned config a single
- * run carries); a `sweep` over a migrated lever is left untouched (its values are a list, not a config).
- * Returns the SAME spec object when no rule matches, so callers can treat it as a cheap pass-through.
+ * migrated shape rather than the retired one. `spec.fixed` and each `spec.configs` entry are migrated (the
+ * pinned/explicit configs runs carry); a `sweep` over a migrated lever is left untouched (its values are a
+ * list, not a config). Returns the SAME spec object when no rule matches, so callers can treat it as a
+ * cheap pass-through.
  */
 export function migrateExperimentSpec(
   spec: ExperimentSpec,
   migrations: TrainerMigrationRule[] | undefined,
 ): ExperimentSpec {
-  if (!migrations || migrations.length === 0 || !spec || !spec.fixed) return spec
-  const migrated = applyMigrationRules(spec.fixed, migrations)
-  return migrated ? { ...spec, fixed: migrated } : spec
+  if (!migrations || migrations.length === 0 || !spec) return spec
+  const next: ExperimentSpec = { ...spec }
+  let changed = false
+  if (spec.fixed) {
+    const migrated = applyMigrationRules(spec.fixed, migrations)
+    if (migrated) {
+      next.fixed = migrated
+      changed = true
+    }
+  }
+  if (spec.configs && spec.configs.length > 0) {
+    const migratedConfigs = spec.configs.map(
+      (config) => applyMigrationRules(config, migrations) ?? config,
+    )
+    if (migratedConfigs.some((config, i) => config !== spec.configs![i])) {
+      next.configs = migratedConfigs
+      changed = true
+    }
+  }
+  return changed ? next : spec
 }
 
 export function canonicalConfigString(value: unknown): string {
@@ -202,6 +226,14 @@ export function expandExperimentMatrix(
       }
     }
   }
+  const explicitConfigs = spec.configs ?? []
+  for (const config of explicitConfigs) {
+    for (const key of Object.keys(config)) {
+      if (!leverKeys.includes(key)) {
+        throw new Error(`config value "${key}" names no manifest lever`)
+      }
+    }
+  }
 
   const base: Record<string, unknown> = {}
   for (const [key, lever] of Object.entries(manifest.levers)) {
@@ -209,7 +241,10 @@ export function expandExperimentMatrix(
   }
   Object.assign(base, spec.fixed ?? {})
 
-  let configs: Record<string, unknown>[] = [base]
+  // Explicit configs run VERBATIM (merged onto defaults): when present they DEFINE the matrix, so the
+  // sweep/bundle/seed expansion below starts from nothing and only they remain.
+  const explicit = explicitConfigs.map((config) => ({ ...base, ...config }))
+  let configs: Record<string, unknown>[] = explicit.length ? [] : [base]
   for (const [key, values] of Object.entries(sweep)) {
     configs = configs.flatMap((config) => values.map((value) => ({ ...config, [key]: value })))
   }
@@ -223,6 +258,7 @@ export function expandExperimentMatrix(
   if (spec.seeds && spec.seeds.length > 0) {
     configs = configs.flatMap((config) => spec.seeds!.map((seed) => ({ ...config, seed })))
   }
+  configs = configs.concat(explicit)
 
   const cap = spec.maxItems ?? MAX_CAMPAIGN_ITEMS
   if (configs.length > cap) {
@@ -1075,9 +1111,29 @@ export function humanizeModelName(modelName: string): string {
  * catalog and whose `model_name` is not already a binding of an existing model — each with a heuristic
  * name + category. `[]` when the manifest declares no `model_name` choice lever.
  */
+/** The `model_name` values a model binds runs through — from its `flavors`, falling back to a legacy
+ * flat `modelNames[]`. The one place that reconciles the two shapes for the tool side. */
+export function modelBindingNames(model: {
+  flavors?: { modelName?: string }[]
+  modelNames?: string[]
+}): string[] {
+  if (Array.isArray(model.flavors) && model.flavors.length) {
+    return model.flavors
+      .map((f) => f.modelName)
+      .filter((n): n is string => typeof n === 'string' && !!n)
+  }
+  return Array.isArray(model.modelNames)
+    ? model.modelNames.filter((n): n is string => typeof n === 'string' && !!n)
+    : []
+}
+
 export function discoverManifestModelCandidates(
   manifest: TrainerManifest,
-  existingModels: Array<{ slug?: string; modelNames?: string[] }>,
+  existingModels: Array<{
+    slug?: string
+    modelNames?: string[]
+    flavors?: { modelName?: string }[]
+  }>,
 ): { modelName: string; slug: string; name: string; category: ModelCategory }[] {
   const lever = manifest.levers?.model_name as TrainerLeverSpec | undefined
   if (!lever || lever.type !== 'choice' || !Array.isArray(lever.choices)) return []
@@ -1085,7 +1141,7 @@ export function discoverManifestModelCandidates(
   const haveBindings = new Set<string>()
   for (const m of existingModels) {
     if (m.slug) haveSlugs.add(m.slug)
-    for (const n of m.modelNames ?? []) haveBindings.add(n)
+    for (const n of modelBindingNames(m)) haveBindings.add(n)
   }
   const out: { modelName: string; slug: string; name: string; category: ModelCategory }[] = []
   const seen = new Set<string>()
@@ -1224,14 +1280,19 @@ export function coerceAnalyzedPaperModels(raw: unknown): {
  *  by a catalog model's `model_name` binding. The Models tab's "Add to catalog" candidates. */
 export function detectMissingPaperModels(
   proposed: ProposedModel[],
-  catalog: Array<{ slug?: string; name?: string; modelNames?: string[] }>,
+  catalog: Array<{
+    slug?: string
+    name?: string
+    modelNames?: string[]
+    flavors?: { modelName?: string }[]
+  }>,
 ): ProposedModel[] {
   const slugs = new Set<string>()
   const bindings = new Set<string>()
   for (const m of catalog) {
     if (m.slug) slugs.add(m.slug)
     if (m.name) slugs.add(modelSlug(m.name))
-    for (const n of m.modelNames ?? []) bindings.add(n)
+    for (const n of modelBindingNames(m)) bindings.add(n)
   }
   return proposed.filter((p) => !slugs.has(p.slug) && !bindings.has(p.slug))
 }

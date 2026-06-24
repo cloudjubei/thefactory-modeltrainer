@@ -174,6 +174,9 @@ export interface TrainerMigrationRule {
   set?: Record<string, unknown>
   /** Field → fallback: keep the config's current value when present, else write this default. */
   keepOrDefault?: Record<string, unknown>
+  /** Config keys to REMOVE (e.g. retiring a dead lever). On its own (no match/matchNot) the rule fires
+   * for any config that still has one of these keys, then stops — so the sweep is idempotent. */
+  unset?: string[]
   /** When true, a matched record is DELETED rather than rewritten (irreversible). */
   delete?: boolean
 }
@@ -196,6 +199,14 @@ export interface ExperimentSpec {
   sweep?: Record<string, unknown[]>
   /** Per-lever pinned values overriding defaults. */
   fixed?: Record<string, unknown>
+  /**
+   * Explicit, fully-resolved configs to run AS-IS (each merged onto the lever defaults), planned VERBATIM
+   * with no sweep/bundle/seed expansion. When present and non-empty it DEFINES the matrix (`sweep`/`seeds`
+   * are ignored). Used to re-run a specific SET of existing runs as ONE campaign/activity — e.g. a batch
+   * version-upgrade or failure-retry — instead of one activity per run. Each entry is migrated like
+   * {@link ExperimentSpec.fixed}.
+   */
+  configs?: Array<Record<string, unknown>>
   /**
    * Environment BUNDLES to run every configuration against — each is a set of (environment) lever
    * values applied together (NOT a cartesian product, unlike `sweep`). Used to test one model
@@ -694,6 +705,14 @@ export interface ConfigSpaceAnalysis {
   setupCount: number
   /** Every lever (model + dataset + environment) the space varies over. */
   levers: string[]
+  /** The distinct configs (seeds folded, each carrying its IQM where the criterion reads it) — so the
+   * viewer can marginalise the surrogate live for any lever-pair interaction grid + label PCA points. */
+  setups: AnalysisRun[]
+  /** Surrogate-free screening: each lever's importance from the spread of its per-value marginal IQMs. */
+  screening: LeverImportance[]
+  /** One-factor-at-a-time contrasts per lever (each lever → its controlled contrasts), so the viewer's
+   * Config-effects card renders from the cache instead of recomputing bootstraps in the browser. */
+  ofat: Record<string, OfatAnalysis[]>
   /** The seeded forest the reads derive from; embedded so the viewer can compute interaction grids live. */
   surrogate: ConfigSurrogate
   importances: FanovaImportance[]
@@ -704,6 +723,32 @@ export interface ConfigSpaceAnalysis {
   ablation: AblationPath | null
   pca: PcaProjection | null
   recommendations: ExperimentRecommendation[]
+  /**
+   * The ENVIRONMENT this bundle is scoped to — the held-fixed values of the environment/dataset levers
+   * (market mechanics + which data). The surrogate/importances/recommender above are computed ONLY within
+   * it, over the MODEL levers, so configs aren't blended across environments. Null when the project
+   * declares no environment/dataset levers (whole space analysed together).
+   */
+  environment: Record<string, unknown> | null
+  /** Every distinct environment present in the runs — drives the selector + cross-environment comparison. */
+  environments: EnvironmentSummary[]
+  /** Importance of each ENVIRONMENT/DATASET lever across ALL runs — "how much does this context matter?"
+   * for the compare view. These are context, never recommended; the viewer tags them 🔒. */
+  contextImportances: LeverImportance[]
+  /** The environment + dataset levers (context); the rest are model levers. */
+  contextLevers: string[]
+}
+
+/** One distinct environment (a combination of environment+dataset lever values) across the runs. */
+export interface EnvironmentSummary {
+  /** Canonical signature of the context-lever values — the environment's stable identity. */
+  signature: string
+  /** The held-fixed context-lever values that define this environment. */
+  values: Record<string, unknown>
+  /** Completed runs in this environment. */
+  runCount: number
+  /** Best (criterion-oriented) setup IQM achieved in this environment — for ranking environments. */
+  best: number
 }
 
 export interface AnalyzeConfigSpaceParams {
@@ -714,6 +759,8 @@ export interface AnalyzeConfigSpaceParams {
   /** Criterion to analyse over the whole space; defaults to the manifest objective. */
   criterionKey?: string
   criterionDir?: 'max' | 'min'
+  /** The environment to scope the analysis to (its context-lever values). Omit ⇒ the most-run environment. */
+  environment?: Record<string, unknown>
 }
 
 export interface AnalyzeConfigSpaceResult {
@@ -1155,13 +1202,36 @@ export type ModelStatus =
 export type ModelSource = 'scan' | 'paper' | 'manual' | 'llm'
 
 /**
+ * One concrete VARIANT of a model — how it actually appears in run configs. A run trains this flavor iff
+ * its `config.model_name` equals `modelName` AND every key in `config` (the extra matchers, e.g.
+ * `{ lstm_hidden_size: 3 }`) loosely-equals the run's value. Recording flavors makes a family (e.g.
+ * "Dueling DQN") map PRECISELY to the variants in code, lets a missing flavor be spotted + added, and
+ * lets papers/hypotheses attach to the exact variant they concern.
+ */
+export interface ModelFlavor {
+  /** Short label distinguishing this variant, e.g. "custom + LSTM (h3)". */
+  name?: string
+  /** The `config.model_name` value this flavor trains as. */
+  modelName: string
+  /** Extra config matchers that pin this flavor WITHIN a shared `model_name` (omit when the name alone identifies it). */
+  config?: Record<string, unknown>
+  /** Where this flavor is implemented — a repo-relative path hint. */
+  implPath?: string
+  /** Papers specific to THIS flavor (the model-level `paperIds` cover the whole family). */
+  paperIds?: string[]
+  /** Hypotheses specific to THIS flavor. */
+  hypothesisIds?: string[]
+  notes?: string
+}
+
+/**
  * A catalog entry for a MODEL ARCHITECTURE/algorithm the project can train — the aggregating layer the
- * Models tab renders. It OWNS its runs by binding one or more `model_name` lever values (`modelNames`):
- * a run trains this model iff its `config.model_name` is one of them, so the run roll-up, verdict and
- * "is it failing" all derive from the same substrate as everything else. It LINKS the papers that
- * introduce/improve it (`paperIds`) and the hypotheses that test it (`hypothesisIds`). Domain-oblivious;
- * stored as a `<recordType>-model` record (key = `id`, which is the `slug`). Distinct from a hypothesis
- * (a falsifiable claim): a Model is the thing a claim, paper or run is ABOUT.
+ * Models tab renders. It OWNS its runs through its `flavors`: a run trains this model iff it matches one
+ * of the flavors (by `model_name`, optionally narrowed by config), so run counts, verdict and "is it
+ * failing" derive from an all-runs aggregate. It LINKS the papers that introduce/improve it (`paperIds`)
+ * and the hypotheses that test it (`hypothesisIds`). Domain-oblivious; stored as a `<recordType>-model`
+ * record (key = `id`, which is the `slug`). Distinct from a hypothesis (a falsifiable claim): a Model is
+ * the thing a claim, paper or run is ABOUT.
  */
 export interface TrainingModel {
   /** Stable id — equals `slug`; identical slugs dedupe across scan/paper/manual/seed sources. */
@@ -1180,10 +1250,11 @@ export interface TrainingModel {
   /** Free-text note recorded with a manual status, or why a scan flagged it. */
   statusNote?: string
   /**
-   * The `model_name` lever values that bind runs to this model. A run is this model's evidence iff its
-   * `config.model_name` is one of these. Empty for a purely-proposed model not yet wired to the lever.
+   * The concrete VARIANTS that bind runs to this model. A run is this model's evidence iff it matches one
+   * flavor. Empty for a purely-proposed model not yet wired to any run config. (Records written before
+   * flavors carried a flat `modelNames: string[]`; the viewer reads either.)
    */
-  modelNames: string[]
+  flavors: ModelFlavor[]
   /** Ids of Papers that introduce or improve this model. */
   paperIds?: string[]
   /** Ids (spec hashes) of Hypotheses that test this model. */

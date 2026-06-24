@@ -237,6 +237,14 @@ metric quantifies it; ~0.95 even on great-return runs). Exp 15's penalties can o
 directly consumable as a long/flat(/short) signal — independent of any current position, since we trade
 in percentages so position size is irrelevant — is a **different objective**, planned separately.
 
+**The clean manager is NOT this (don't conflate them).** Turning on `combo_noop_penalty` (e.g. `duel-dqn-custom`
+at 0.1) drops `blocked_signal_ratio` ~0.95 → ~0.02: the model learns to go SILENT (hold) when an action would be
+a no-op, using the `in_position` feature. That makes its EXECUTED entry/exit stream clean + directly usable — but
+it is still a position MANAGER, read WITH position; it gives no counterfactual per-step opinion ("flat right now —
+should I be long?"). So before building the forecaster: confirm the clean manager (explorable TODAY via the
+`blocked %` filter / Exp 15) is not already enough. The forecaster needs FRESH training — you cannot convert a
+manager run into one — and adds another quality axis to validate, so it is explicitly later, lower priority.
+
 - **Mechanism (reuse, don't fork the env).** The env already carries a `buy_sell_signal` reward family
   (`base_crypto_env.py`) that scores each step's action against the NEXT-step price move regardless of
   position, and a supervised direction line (`forward_horizon`/`prob_threshold`, logreg/gbm) that predicts
@@ -254,6 +262,14 @@ in percentages so position size is irrelevant — is a **different objective**, 
   "good" definition + verdict rule, signal-quality run metrics, and a signal-overlay chart (predicted
   long/flat vs forward return) instead of trade markers. Decide manifest split vs mode early — the verdict
   - objective plumbing is the bulk of the work, not the model.
+- **Migration (derive, don't rewrite).** Runs with `combo_noop_penalty>0` are CLEAN-MANAGER runs, NOT forecaster
+  runs — they do not migrate into this approach (different objective + training). Represent the split as a DERIVED
+  `approach` facet (from `reward_model`/objective), grouped + filtered at runtime per "store the minimum, derive the
+  rest"; only stamp an explicit stored tag via the idempotent `migrations` engine if a persisted field is needed.
+- **Cross-approach comparison.** Compare manager vs forecaster on a SHARED yardstick: push the manager's executed
+  trades AND the forecaster's per-step signal through the SAME signal-following backtest (same 0.1% fees), then rank
+  both on `return_vs_hold_pct` with each approach's native objective shown alongside — a best-of-each-approach
+  leaderboard answering "which actually produces the better tradeable signal".
 
 ### Multi-asset portfolio / cross-sectional long-short — a SEPARATE project (Phase-B Wave 3)
 

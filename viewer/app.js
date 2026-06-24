@@ -94,18 +94,22 @@ let xaiSuggestionsCache = []
 // Busy flag for the xAI tab's "Propose with AI" (the propose-experiments activity), kept independent of
 // the Hypotheses-tab proposer.
 let proposingExperiments = false
+// Which scope the xAI tab analyses: 'all' (the whole-space bundle over EVERY run) or 'current' (one focused
+// run's deterministic digest). Both are computed on demand server-side and cached — never over the page.
+let xaiScope = 'all'
 // Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
-// heavy surrogate/fANOVA/coupling/PCA work runs server-side; the cards render from this instead of fitting
-// a forest in the browser at 5000+ runs. Falls back to live compute only for small spaces.
+// heavy surrogate/fANOVA/coupling/PCA work runs server-side over ALL runs; the cards render purely from this
+// — no browser fit, no page-limited picture.
 let xaiConfigSpaceCache = new Map()
-// Below this run count the whole-space bundle is cheap enough to compute live in the browser; above it the
-// viewer requires the server-side cache (a "Refresh analysis" prompt) rather than freezing the tab.
-const XAI_LIVE_COMPUTE_MAX_RUNS = 600
 let analyzingConfigSpace = false
+// Cached per-run xAI digests ({recordType}-run-xai records), keyed by run key — the server keeps only the 5
+// most-recent (LRU), so this mirrors that. The run whose digest is currently being computed, for the spinner.
+let xaiRunAnalysisCache = new Map()
+let analyzingRunKey = null
 // Per-run LLM narrative records, keyed by run key → {narrative, runKey, runCount, criterionKey, narratedBy, narratedAt}.
 const xaiNarrativeCache = new Map()
 let narrating = false
-// Phase 3: the two levers crossed in the interaction grid (default to the top-2 by surrogate importance).
+// The two levers crossed in the whole-space interaction grid (default to the top-2 by fANOVA importance).
 let xaiInterA = null
 let xaiInterB = null
 // Hypothesis verdict (auto-derived from matching runs, manually overridable). Drives the badge + filter.
@@ -239,6 +243,12 @@ let paperSubform = null
 let modelsCache = []
 let modelCategoryFilter = 'all'
 const modelExpanded = new Set()
+// The persisted all-runs aggregate (a `<recordType>-model-stats` record): per-model + per-flavor run
+// counts/best/failing computed over EVERY run, not the current Runs page. `modelStatsStale` flags that
+// newer runs exist past the aggregate; `modelStatsRefreshing` spins the Refresh button while recomputing.
+let modelStatsCache = null
+let modelStatsStale = false
+let modelStatsRefreshing = false
 // Missing-model proposals from the last "Find models" run, keyed by paperId — the Papers card turns
 // these into one-click "Add to catalog" buttons until the user acts on them.
 const paperMissingModels = new Map()
@@ -637,6 +647,23 @@ async function countRunRecords(where) {
   } catch {
     return null
   }
+}
+// EVERY run record — independent of the Runs-tab filter (no `where`) and of any page cap. An unbounded
+// query returns nothing for a large set, so page through with a fixed limit until exhausted, deduped by
+// key. `onProgress(n)` fires after each page so a long scan can show how far it's got.
+async function queryAllRunRecords(onProgress) {
+  const PAGE = 500
+  const byKey = new Map()
+  let offset = 0
+  for (let guard = 0; guard < 10000; guard++) {
+    const page = await queryRunRecords({ limit: PAGE, offset })
+    if (!page.length) break
+    for (const r of page) byKey.set(r.key, r)
+    if (onProgress) onProgress(byKey.size)
+    if (page.length < PAGE) break
+    offset += PAGE
+  }
+  return [...byKey.values()]
 }
 async function readRuns() {
   if (!manifest) return []
@@ -1571,8 +1598,11 @@ function resetDashboardState() {
   xaiLaunchedSpecs.clear()
   xaiSuggestionsCache = []
   proposingExperiments = false
+  xaiScope = 'all'
   xaiConfigSpaceCache = new Map()
   analyzingConfigSpace = false
+  xaiRunAnalysisCache = new Map()
+  analyzingRunKey = null
   narrating = false
   selectedRunKey = null
   liveActivities = new Map()
@@ -1906,6 +1936,9 @@ function applyQuickDispatchState(item, busy) {
   } else if (item.activityType === 'config-space-analyze') {
     analyzingConfigSpace = busy
     if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'run-xai-analyze') {
+    analyzingRunKey = busy ? (item.params && item.params.runKey) || analyzingRunKey : null
+    if (activeTabId === 'xai') renderXai()
   } else if (item.activityType === 'xai-narrate') {
     narrating = busy
     if (activeTabId === 'xai') renderXai()
@@ -1943,6 +1976,11 @@ async function refreshAfterQuickDispatch(item, act) {
     setStatusLine('xai-status', quickActivityFailureText(act, 'Proposing'), true)
   } else if (item.activityType === 'config-space-analyze') {
     if (act && act.status === 'completed') await loadXaiConfigSpace()
+    if (activeTabId === 'xai') renderXai()
+    setStatusLine('xai-status', quickActivityFailureText(act, 'Analysing'), true)
+  } else if (item.activityType === 'run-xai-analyze') {
+    analyzingRunKey = null
+    if (act && act.status === 'completed') await loadXaiRunAnalyses()
     if (activeTabId === 'xai') renderXai()
     setStatusLine('xai-status', quickActivityFailureText(act, 'Analysing'), true)
   } else if (item.activityType === 'xai-narrate') {
@@ -2566,6 +2604,23 @@ function compareWithOp(value, op, target) {
       return false
   }
 }
+// blocked_signal_ratio is stored as a 0–1 fraction but typed + shown as a % in filters (matching the
+// "blocked %" column), so the user enters "10" for 10% instead of "0.1". The conversion lives ONLY at the
+// editor's input/label boundary — the stored rule value stays a fraction so the client predicate and the
+// server-pushed `where` keep comparing it against the raw metric value.
+function ruleFieldIsPercent(fieldKey) {
+  return (
+    typeof fieldKey === 'string' &&
+    fieldKey.startsWith('metric:') &&
+    PERCENT_RATIO_METRICS.has(fieldKey.slice(7))
+  )
+}
+function ruleDisplayValue(fieldKey, storedValue) {
+  return ruleFieldIsPercent(fieldKey) ? Number((storedValue * 100).toFixed(6)) : storedValue
+}
+function ruleStoredValue(fieldKey, displayValue) {
+  return ruleFieldIsPercent(fieldKey) ? Number((displayValue / 100).toFixed(8)) : displayValue
+}
 // Every run field a custom rule can test — those carrying NUMERIC values: the objective,
 // each measured metric, vs-hold (when a benchmark exists), and every numeric-typed lever.
 // Each entry is { key (stable id), label (for chips/menus), get(run) -> number }.
@@ -2613,7 +2668,7 @@ function runMatchesCustomRule(run, rule) {
 // A short human label for a rule, e.g. "return % > 0".
 function customRuleLabel(rule) {
   const field = customRuleFieldByKey(rule.field)
-  return `${field ? field.label : rule.field} ${rule.op} ${rule.value}`
+  return `${field ? field.label : rule.field} ${rule.op} ${ruleDisplayValue(rule.field, Number(rule.value))}`
 }
 // A custom-rule field maps to a stored content dot-path when it can be pushed to the server; a
 // computed field (vs_hold) returns null and stays a client-side filter.
@@ -2867,7 +2922,9 @@ function renderCustomRulePopup() {
     : null
   const selectedField = editing ? editing.field : fields[0].key
   const selectedOp = editing ? editing.op : '>'
-  const selectedValue = editing ? String(editing.value) : ''
+  const selectedValue = editing
+    ? String(ruleDisplayValue(editing.field, Number(editing.value)))
+    : ''
   let modal = byId('custom-rule-modal')
   if (!modal) {
     modal = document.createElement('div')
@@ -2935,7 +2992,7 @@ async function submitCustomRulePopup() {
     id: editing ? editing.id : randomHexId(),
     field: fieldEl.value,
     op: opEl.value,
-    value,
+    value: ruleStoredValue(fieldEl.value, value),
     active: editing ? editing.active !== false : true,
     createdAt: editing ? editing.createdAt || nowIso() : nowIso(),
     updatedAt: nowIso(),
@@ -4640,43 +4697,34 @@ function renderXai() {
     setHtml(body, '<div class="card"><p class="card-sub">xAI engine failed to load.</p></div>')
     return
   }
-  const runs = xaiRuns()
   const criterion = currentXaiCriterion()
-  const bundle = xaiResolveBundle(criterion)
   setHtml(
     body,
     [
-      xaiHeaderHtml(criterion, runs.length, bundle),
-      xaiNarrativeHtml(runs, criterion),
-      xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
-      xaiConfigEffectsHtml(runs, criterion),
-      xaiSurrogateHtml(runs, criterion, bundle),
-      xaiPcaHtml(runs, criterion, bundle),
-      xaiRecommenderHtml(runs, criterion, bundle),
+      xaiHeaderHtml(criterion),
+      xaiScope === 'current' ? xaiCurrentRunHtml(criterion) : xaiAllRunsHtml(criterion),
     ].join(''),
   )
 }
-function xaiHeaderHtml(criterion, nRuns, bundle) {
+// The best total-run count the viewer knows without re-querying — the analysed bundle's count, else the
+// runs-tab total, else the loaded page. Used for the narrative's "N new runs since" hint.
+function xaiTotalRuns() {
+  let max = 0
+  for (const c of xaiConfigSpaceCache.values()) max = Math.max(max, c.runCount || 0)
+  return max || runsTotalCount || runsCache.length
+}
+function xaiHeaderHtml(criterion) {
   const opts = xaiCriteria()
     .map(
       (c) =>
         `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
     )
     .join('')
-  // Whole-space status: how fresh the cached bundle is (or that it's live / needs computing), plus a refresh.
-  let status
-  if (bundle) {
-    const stale = nRuns - (bundle.cachedRunCount || 0)
-    status = `whole-space map cached on ${bundle.analysis.setupCount} setups / ${bundle.cachedRunCount} runs${stale > 0 ? ` · <strong>${stale} new since</strong>` : ' · up to date'}`
-  } else if (nRuns > XAI_LIVE_COMPUTE_MAX_RUNS) {
-    status = `whole-space map not computed yet — refresh to analyse all ${nRuns} runs server-side`
-  } else {
-    status = `whole-space map computed live (${nRuns} runs)`
-  }
-  const refreshDisabled = analyzingConfigSpace || !embedded() ? ' disabled' : ''
-  const refreshBtn = `<button type="button" class="ghost-btn" data-xai-refresh-analysis${refreshDisabled} title="Recompute the whole-space surrogate/fANOVA/coupling/PCA over EVERY run, server-side">${analyzingConfigSpace ? `${spinnerHtml()} Analysing…` : 'Refresh analysis'}</button>`
+  const scopeBtn = (scope, label) =>
+    `<button type="button" class="ghost-btn xai-scope-btn${xaiScope === scope ? ' active' : ''}" data-xai-scope="${scope}">${label}</button>`
   return `<div class="card">
-    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2>${refreshBtn}</div>
+    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— deterministic, non-LLM</span></h2>
+      <div class="xai-scope-switch">${scopeBtn('all', 'All runs')}${scopeBtn('current', 'Current run')}</div></div>
     <p class="badges-row">
       <label class="card-sub">Criterion <select id="xai-criterion">${opts}</select></label>
       <label class="card-sub">Better when <select id="xai-direction">
@@ -4684,20 +4732,151 @@ function xaiHeaderHtml(criterion, nRuns, bundle) {
         <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
       </select></label>
     </p>
-    <p class="card-sub">${status}</p>
   </div>`
+}
+// The "Run/Re-run analysis" button for the whole-space scope — drives config-space-analyze.
+function xaiAnalyzeAllBtnHtml(label) {
+  const disabled = analyzingConfigSpace || !embedded() ? ' disabled' : ''
+  return `<button type="button" class="ghost-btn" data-xai-refresh-analysis${disabled} title="Compute the whole-space surrogate / fANOVA / coupling / PCA / config-effects over EVERY completed run, server-side (runs in the activity queue)">${analyzingConfigSpace ? `${spinnerHtml()} Analysing…` : escapeHtml(label)}</button>`
+}
+// ALL-RUNS scope: render purely from the server-cached whole-space bundle — never the current page.
+function xaiAllRunsHtml(criterion) {
+  const bundle = xaiResolveBundle(criterion)
+  if (!bundle) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis</h3>${xaiAnalyzeAllBtnHtml('Run analysis')}</div>
+      <p class="card-sub">Runs the surrogate, fANOVA, coupling, PCA, config-effects and recommender over <strong>EVERY completed run</strong> (not just this page) — server-side, in the activity queue — and caches the result here. ${analyzingConfigSpace ? 'Analysing now…' : `Click <strong>Run analysis</strong> for the “${escapeHtml(criterion.label)}” criterion.`}</p>
+      <p id="xai-status" class="form-status" role="status" hidden></p></div>`
+  }
+  const a = bundle.analysis
+  const when = bundle.generatedAt ? formatWhen(bundle.generatedAt) : 'recently'
+  const envs = a.environments || []
+  const scopeNote = a.environment
+    ? `Scoped to environment <strong>${escapeHtml(xaiEnvLabel(a.environment))}</strong> — <strong>model levers only</strong>; its environment/dataset settings are held fixed (never tuned).`
+    : `Computed over every completed run for the “${escapeHtml(criterion.label)}” criterion.`
+  const status = `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis <span class="card-sub">— ${a.runCount} runs · ${a.setupCount} setups · analysed ${escapeHtml(when)}</span></h3>${xaiAnalyzeAllBtnHtml('Re-run analysis')}</div>
+    ${xaiEnvSelectorHtml(a)}
+    <p class="card-sub">${scopeNote} Re-run to fold in runs added since.</p>
+    <p id="xai-status" class="form-status" role="status" hidden></p></div>`
+  return [
+    status,
+    envs.length ? xaiCompareEnvironmentsHtml(a, criterion) : '',
+    xaiConfigEffectsHtml(bundle, criterion),
+    xaiSurrogateHtml(bundle, criterion),
+    xaiPcaHtml(bundle, criterion),
+    xaiRecommenderHtml(criterion, bundle),
+  ].join('')
+}
+// A human-readable label for an environment (its context-lever values).
+function xaiEnvLabel(values) {
+  const parts = Object.entries(values || {}).map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
+  return parts.length ? parts.join(' · ') : 'default'
+}
+// The environment picker — choosing one re-scopes the whole analysis to it (model levers only).
+function xaiEnvSelectorHtml(a) {
+  const envs = a.environments || []
+  if (envs.length < 2) return '' // 0 or 1 environment — nothing to switch between
+  const currentSig = window.Xai.canonicalConfigString(a.environment || {})
+  const opts = envs
+    .map(
+      (e) =>
+        `<option value="${escapeHtml(e.signature)}"${e.signature === currentSig ? ' selected' : ''}>${escapeHtml(xaiEnvLabel(e.values))} · ${e.runCount} run${e.runCount === 1 ? '' : 's'}</option>`,
+    )
+    .join('')
+  return `<p class="badges-row"><label class="card-sub">Environment <select id="xai-environment"${analyzingConfigSpace ? ' disabled' : ''}>${opts}</select></label> <span class="card-sub">market mechanics + data — analysed separately</span></p>`
+}
+// Cross-environment comparison: rank environments by best result + show which context settings matter most.
+// Context is held fixed within each environment and never recommended — these are 🔒, for comparison only.
+function xaiCompareEnvironmentsHtml(a, criterion) {
+  const envs = [...(a.environments || [])].sort((x, y) =>
+    criterion.direction === 'min' ? x.best - y.best : y.best - x.best,
+  )
+  const currentSig = window.Xai.canonicalConfigString(a.environment || {})
+  const rows = envs
+    .map((e) => {
+      const cur = e.signature === currentSig
+      return `<tr class="${cur ? 'xai-env-current' : ''}">
+        <td><button type="button" class="link-btn" data-xai-env="${escapeHtml(e.signature)}" title="Scope the analysis to this environment">${cur ? '▸ ' : ''}${escapeHtml(xaiEnvLabel(e.values))}</button></td>
+        <td class="num">${e.runCount}</td><td class="num">${escapeHtml(formatTickValue(e.best))}</td></tr>`
+    })
+    .join('')
+  const ctx = [...(a.contextImportances || [])].sort((x, y) => y.importance - x.importance)
+  const ctxList = ctx.length
+    ? `<h4 class="card-sub">Which environment/dataset settings move the score most <span class="card-sub">(🔒 context — compare only, never tuned)</span></h4>
+       <ul class="xai-coupling">${ctx.map((s) => `<li>🔒 <code>${escapeHtml(s.lever)}</code> <span class="num">${Math.round(s.importance * 100)}%</span> <span class="card-sub">best ${escapeHtml(String(s.bestValue))}</span></li>`).join('')}</ul>`
+    : ''
+  return `<div class="card"><div class="card-head card-head-row"><h3>Compare environments <span class="card-sub">— ${envs.length} environments · context held fixed, never tuned</span></h3></div>
+    <div class="card-scroll">
+    <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended. Click an environment to scope the analysis below to it.</p>
+    <table class="kv-table report-table"><thead><tr><th>environment</th><th class="num">runs</th><th class="num">best ${escapeHtml(criterion.label)}</th></tr></thead><tbody>${rows}</tbody></table>
+    ${ctxList}
+    </div></div>`
+}
+// CURRENT-RUN scope: one focused run's deterministic analysis (its standing among ALL runs is computed on
+// demand + LRU-cached), plus its internals + the per-run LLM narrative.
+function xaiCurrentRunHtml(criterion) {
+  if (!xaiFocusKey) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Current run</h3></div>
+      <p class="card-sub">Focus a run (Runs → “Analyze in xAI”) to analyse one model in depth — its decisions, what drives them, and how it ranks among all runs.</p></div>`
+  }
+  const run = findRun(xaiFocusKey)
+  if (!run) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>Current run <span class="card-sub">— ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>
+      <button type="button" class="ghost-btn" data-xai-clear-focus>✕ Clear run</button></div>
+      <p class="card-sub">This run isn’t loaded — open it from the Runs tab and choose “Analyze in xAI”.</p></div>`
+  }
+  return [
+    xaiRunStandingHtml(xaiFocusKey, criterion),
+    xaiNarrativeHtml(xaiTotalRuns(), criterion),
+    xaiModelInternalsHtml(xaiFocusKey),
+  ].join('')
+}
+// The focused run's standing among ALL runs (rank + action mix + attribution sanity), from the on-demand
+// LRU-cached digest. The button computes/recomputes it server-side over every run.
+function xaiRunStandingHtml(runKey, criterion) {
+  const busy = analyzingRunKey === runKey
+  const rec = xaiRunAnalysisCache.get(runKey)
+  const digest = rec && rec.analysis ? rec.analysis : null
+  const disabled = busy || !embedded() ? ' disabled' : ''
+  const btn = `<button type="button" class="ghost-btn" data-xai-analyze-run="${escapeHtml(runKey)}"${disabled} title="Compute this run's standing among EVERY run (rank, decisions, attribution), server-side">${busy ? `${spinnerHtml()} Analysing…` : digest ? 'Re-analyse' : 'Analyse among all runs'}</button>`
+  let bodyHtml
+  if (!digest) {
+    bodyHtml = `<p class="card-sub">${busy ? 'Analysing this run against every other run…' : 'Compute how this run ranks among <strong>all</strong> runs (not just this page) and what drives its decisions — on demand, server-side. Only the 5 most-recently analysed runs are kept.'}</p>`
+  } else {
+    const rank = digest.rank ? `#${digest.rank.position} of ${digest.rank.total}` : '—'
+    const when = rec.generatedAt ? formatWhen(rec.generatedAt) : ''
+    const actions = digest.actionCounts
+      ? Object.entries(digest.actionCounts)
+          .map(([k, v]) => `${escapeHtml(k)} ${v}`)
+          .join(' · ')
+      : ''
+    const sanity =
+      digest.attribution && typeof digest.attribution.sanityPassed === 'boolean'
+        ? digest.attribution.sanityPassed
+          ? '<span class="delta-pos">attribution sanity ✓</span>'
+          : '<span class="delta-neg">attribution sanity ✗ (untrustworthy)</span>'
+        : ''
+    bodyHtml = `<table class="kv-table"><tbody>
+      <tr><th>Rank by ${escapeHtml(criterion.label)}</th><td>${escapeHtml(rank)}</td></tr>
+      ${actions ? `<tr><th>Action mix</th><td>${actions}</td></tr>` : ''}
+      ${sanity ? `<tr><th>Attribution</th><td>${sanity}</td></tr>` : ''}
+    </tbody></table>
+    <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p>`
+  }
+  return `<div class="card"><div class="card-head card-head-row"><h3>Standing among all runs <span class="card-sub">— run ${escapeHtml(shortKey(runKey))}</span></h3>
+      <div class="head-actions">${btn}<button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button></div></div>
+    ${bodyHtml}</div>`
 }
 // The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
 // sibling, what to try next. Per run (keyed by run key); the button becomes "Refresh (N new runs)" as the
 // cross-run context drifts. With no run focused, a slim hint points the user at how to focus one.
-function xaiNarrativeHtml(runs, criterion) {
+function xaiNarrativeHtml(nRuns, criterion) {
   if (!xaiFocusKey) {
     return `<div class="card"><div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— LLM synthesis, per run</span></h3></div>
       <p class="card-sub">Focus a run (open it in Runs → “Analyze in xAI”) to generate a one-shot narrative of what that model is doing and why.</p></div>`
   }
   const rec = xaiNarrativeCache.get(xaiFocusKey)
   const hasNarrative = !!(rec && rec.narrative)
-  const since = hasNarrative ? Math.max(0, runs.length - (Number(rec.runCount) || 0)) : 0
+  const since = hasNarrative ? Math.max(0, nRuns - (Number(rec.runCount) || 0)) : 0
   const staleCriterion =
     hasNarrative && rec.criterionKey && rec.criterionKey !== criterion.key ? rec.criterionKey : ''
   const label = !hasNarrative
@@ -4723,7 +4902,7 @@ function xaiNarrativeHtml(runs, criterion) {
 // Model internals for the focused run: the Explain panels + the decision-internals reads + a decision
 // diff against the nearest comparable run (same data, differs by a lever).
 function xaiModelInternalsHtml(focusKey) {
-  const run = runsCache.find((r) => r.key === focusKey)
+  const run = findRun(focusKey)
   if (!run) return ''
   const s = run.summary
   const sibling = xaiBestSibling(run)
@@ -4815,8 +4994,8 @@ function calibrationTableHtml(trace) {
   return `<h4 class="card-sub">Confidence calibration — mean realised reward by confidence bin (heuristic)</h4>
     <table class="kv-table report-table"><thead><tr><th>confidence</th><th class="num">steps</th><th class="num">mean reward</th></tr></thead><tbody>${rows}</tbody></table>`
 }
-function xaiConfigEffectsHtml(runs, criterion) {
-  const importances = window.Xai.leverImportances(runs, criterion)
+function xaiConfigEffectsHtml(bundle, criterion) {
+  const importances = (bundle.analysis.screening || []).slice()
   if (!importances.length) {
     return `<div class="card"><div class="card-head card-head-row"><h3>Config effects</h3></div>
       <p class="card-sub">Need ≥2 runs that vary a lever (on the same data) to analyse config effects.</p></div>`
@@ -4828,7 +5007,7 @@ function xaiConfigEffectsHtml(runs, criterion) {
         `<option value="${escapeHtml(i.lever)}"${i.lever === xaiLever ? ' selected' : ''}>${escapeHtml(i.lever)}</option>`,
     )
     .join('')
-  const contrasts = window.Xai.ofatContrasts(runs, xaiLever, criterion)
+  const contrasts = (bundle.analysis.ofat && bundle.analysis.ofat[xaiLever]) || []
   const contrastHtml = contrasts.length
     ? contrasts.map((c) => xaiOfatContrastHtml(c)).join('')
     : `<p class="card-sub">No clean one-factor contrast for <code>${escapeHtml(xaiLever)}</code> yet — no runs vary only this lever with everything else fixed. The recommender below can fill the gap.</p>`
@@ -4900,49 +5079,32 @@ function xaiOfatContrastHtml(c) {
   </div>`
 }
 // Phase 3: a seeded random-forest surrogate over (config → criterion) drives a global fANOVA importance,
-// the ablation TREE (worst→best, one change at a time), and a 2-lever interaction heatmap — the
-// across-the-whole-space view (predicts unobserved configs, so it fills the OFAT gaps). Deterministic.
-// A placeholder shown when the space is too large to analyse live and no server-side bundle is cached yet.
-function xaiNeedsAnalysisHtml(title) {
-  return `<div class="card"><div class="card-head card-head-row"><h3>${escapeHtml(title)}</h3></div>
-    <p class="card-sub">Too many runs to analyse in the browser — click <strong>Refresh analysis</strong> above to compute the whole-space map server-side.</p></div>`
-}
-function xaiSurrogateHtml(runs, criterion, bundle) {
-  let surrogate, fanova, path, couplings
-  if (bundle) {
-    // Render from the server-cached whole-space bundle — no forest fit in the browser.
-    surrogate = bundle.analysis.surrogate
-    fanova = bundle.analysis.importances
-    path = bundle.analysis.ablation
-    couplings = bundle.analysis.couplings
-  } else if (runs.length > XAI_LIVE_COMPUTE_MAX_RUNS) {
-    return xaiNeedsAnalysisHtml('Surrogate model')
-  } else {
-    surrogate = window.Xai.fitConfigSurrogate(runs, criterion)
-    if (!surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
-    fanova = window.Xai.fanovaImportances(surrogate, runs, criterion)
-    path = window.Xai.ablationPath(surrogate, runs, criterion)
-    couplings = window.Xai.leverCouplings(surrogate, runs, criterion)
-  }
-  if (!surrogate || !surrogate.trees.length) return ''
+// pairwise coupling, the ablation TREE (worst→best, one change at a time), and a 2-lever interaction
+// heatmap — the across-the-whole-space view (predicts unobserved configs). Rendered + the grid marginalised
+// live from the server-cached surrogate + setups. Deterministic.
+function xaiSurrogateHtml(bundle, criterion) {
+  const a = bundle.analysis
+  const surrogate = a.surrogate
+  if (!surrogate || !surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
+  const setups = a.setups || []
   const leverNames = surrogate.levers.map((l) => l.name)
-  const ranked = fanova.map((f) => f.lever)
+  const ranked = a.importances.map((f) => f.lever)
   if (!xaiInterA || !leverNames.includes(xaiInterA)) xaiInterA = ranked[0] || leverNames[0] || null
   if (!xaiInterB || !leverNames.includes(xaiInterB) || xaiInterB === xaiInterA)
     xaiInterB =
       ranked.find((l) => l !== xaiInterA) || leverNames.find((l) => l !== xaiInterA) || null
   const grid =
-    xaiInterA && xaiInterB
-      ? window.Xai.interactionGrid(surrogate, runs, criterion, xaiInterA, xaiInterB)
+    xaiInterA && xaiInterB && setups.length
+      ? window.Xai.interactionGrid(surrogate, setups, criterion, xaiInterA, xaiInterB)
       : null
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · coupling · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
     <div class="card-scroll">
     <p class="card-sub">A seeded random forest fit on every run's (config → ${escapeHtml(criterion.label)}). It predicts the criterion for configs you HAVEN'T run, so it can rank levers globally and walk an ablation path — a model, so treat it as a hypothesis to confirm with real runs, not ground truth.</p>
-    ${xaiFanovaHtml(fanova)}
-    ${xaiCouplingHtml(couplings)}
-    ${xaiAblationTreeHtml(path, criterion)}
-    ${xaiInteractionHtml(grid, leverNames, runs)}
+    ${xaiFanovaHtml(a.importances)}
+    ${xaiCouplingHtml(a.couplings)}
+    ${xaiAblationTreeHtml(a.ablation, criterion)}
+    ${xaiInteractionHtml(grid, leverNames, setups)}
     </div></div>`
 }
 // Below this TOTAL-effect fraction a lever is effectively inert across the explored range ("stop sweeping").
@@ -4971,22 +5133,47 @@ function fanovaEffectTag(f) {
     title: 'Mostly a direct (main) effect, independent of the other levers.',
   }
 }
+// Order lever values numerically when both look numeric, else alphabetically — so any value series shown is sorted.
+function xaiCmpValues(a, b) {
+  const na = Number(a)
+  const nb = Number(b)
+  const aNum = a !== '' && a != null && Number.isFinite(na)
+  const bNum = b !== '' && b != null && Number.isFinite(nb)
+  if (aNum && bNum) return na - nb
+  return String(a).localeCompare(String(b))
+}
+// Display a lever value: numbers (incl. numeric strings) via the tick formatter; everything else verbatim
+// (so categorical levers like model_name render their names, not blank).
+function xaiFmtLeverValue(v) {
+  if (typeof v === 'number') return formatTickValue(v)
+  const n = Number(v)
+  if (typeof v === 'string' && v.trim() !== '' && Number.isFinite(n)) return formatTickValue(n)
+  return String(v)
+}
+// Render a lever's distinct values as run-links, sorted; long/many values collapse to #1,#2… with the full
+// value on hover so the table stays readable.
+function xaiValueLinksHtml(lever, valueList) {
+  const sorted = [...(valueList || [])].sort(xaiCmpValues)
+  const abbreviate = sorted.length > 6 || sorted.some((v) => String(v).length > 10)
+  return sorted
+    .map((v, i) => {
+      const shown = abbreviate ? `#${i + 1}` : xaiFmtLeverValue(v)
+      return `<button type="button" class="link-btn" data-xai-runs data-l1="${escapeHtml(lever)}" data-v1="${escapeHtml(String(v))}" title="${escapeHtml(lever)} = ${escapeHtml(String(v))} — view its runs">${escapeHtml(shown)}</button>`
+    })
+    .join('<span class="card-sub">, </span>')
+}
 function xaiFanovaHtml(fanova) {
   if (!fanova.length) return ''
   const rows = fanova
     .map((f) => {
-      const vals = (f.valueList || [])
-        .map(
-          (v) =>
-            `<button type="button" class="link-btn" data-xai-runs data-l1="${escapeHtml(f.lever)}" data-v1="${escapeHtml(String(v))}" title="View the runs with ${escapeHtml(f.lever)} = ${escapeHtml(String(v))} in the Runs tab">${escapeHtml(formatTickValue(v))}</button>`,
-        )
-        .join('<span class="card-sub">, </span>')
+      const vals = xaiValueLinksHtml(f.lever, f.valueList)
       const tag = fanovaEffectTag(f)
       return `<tr><th><code>${escapeHtml(f.lever)}</code></th><td class="num">${Math.round(f.importance * 100)}%</td><td class="num">${Math.round((f.total || 0) * 100)}%</td><td><span class="${tag.cls}" title="${escapeHtml(tag.title)}">${tag.label}</span></td><td>${vals}</td></tr>`
     })
     .join('')
-  return `<h4 class="card-sub">fANOVA importance <span class="card-sub">— <strong>main</strong> = the lever's own effect; <strong>total</strong> = main + its interactions. total≈0 ⇒ inert (stop sweeping); total≫main ⇒ interactive. Click a value to see its runs.</span></h4>
-    <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">main</th><th class="num">total</th><th>effect</th><th>values</th></tr></thead><tbody>${rows}</tbody></table>`
+  return `<h4 class="card-sub">fANOVA importance <span class="card-sub">— how much each lever moves the score. Click a value to see its runs.</span></h4>
+    <p class="card-sub"><strong>main</strong> = the lever's effect <em>on its own</em> (varying just it, averaging the rest). <strong>total</strong> = main <em>plus</em> everything it does <em>through interactions</em> with other levers. So: <strong>total ≈ main</strong> ⇒ acts independently; <strong>total ≫ main</strong> ⇒ its best value depends on other levers (↔ interactive); <strong>total ≈ 0</strong> ⇒ no measurable effect (✕ inert — stop sweeping it).</p>
+    <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num" title="The lever's own first-order effect (Sobol main effect)">main</th><th class="num" title="Main effect + all interaction effects (Sobol total effect)">total</th><th>effect</th><th>values</th></tr></thead><tbody>${rows}</tbody></table>`
 }
 // The strongly COUPLED lever pairs (one's best value depends on the other) — read alongside the interaction grid.
 function xaiCouplingHtml(couplings) {
@@ -5005,39 +5192,39 @@ function xaiCouplingHtml(couplings) {
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
-function xaiPcaHtml(runs, criterion, bundle) {
-  let pca
-  if (bundle) {
-    pca = bundle.analysis.pca
-  } else if (runs.length > XAI_LIVE_COMPUTE_MAX_RUNS) {
-    return '' // the surrogate card already shows the "Refresh analysis" prompt for large spaces
-  } else {
-    if (!window.Xai.pcaProjection) return ''
-    pca = window.Xai.pcaProjection(runs, criterion)
-  }
+function xaiPcaHtml(bundle, criterion) {
+  const pca = bundle.analysis.pca
   if (!pca || pca.points.length < 3) return ''
   const values = pca.points.map((p) => p.value)
-  const lo = Math.min(...values)
-  const hi = Math.max(...values)
-  // Orient so "better" (per the criterion direction) is green (hue 120), "worse" red (hue 0).
-  const oriented = (v) =>
-    hi === lo ? 0.5 : criterion.direction === 'min' ? (hi - v) / (hi - lo) : (v - lo) / (hi - lo)
-  const runByKey = new Map(runs.map((r) => [r.key, r]))
+  // Colour by PERFORMANCE RANK, not raw value: sort points worst→best and map position to a red→green hue.
+  // This always uses the full colour range — so a field where most configs perform similarly still shows a
+  // clear best/worst spread (raw-value colouring washed out to "all green" when one outlier set the scale).
+  const order = values
+    .map((v, i) => [v, i])
+    .sort((a, b) => (criterion.direction === 'min' ? b[0] - a[0] : a[0] - b[0])) // worst first
+  const rankFrac = new Array(values.length).fill(0.5)
+  order.forEach(([, idx], k) => {
+    rankFrac[idx] = values.length > 1 ? k / (values.length - 1) : 0.5
+  })
+  // Each PCA point's representative key matches a setup's key (both the first run of the setup group), so
+  // we can label points with their config from the bundle's setups.
+  const setupByKey = new Map((bundle.analysis.setups || []).map((s) => [s.key, s]))
   const compactConfig = (cfg) =>
     Object.entries(cfg || {})
       .filter(([k]) => k !== 'seed')
-      .map(([k, v]) => `${k}=${formatTickValue(v)}`)
+      .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
       .join(' ')
       .slice(0, 140)
-  const points = pca.points.map((p) => {
-    const run = runByKey.get(p.key)
-    const cfg = run ? compactConfig(run.config) : ''
+  const points = pca.points.map((p, i) => {
+    const setup = setupByKey.get(p.key)
+    const cfg = setup ? compactConfig(setup.config) : ''
     const seeds = p.runKeys.length > 1 ? ` (${p.runKeys.length} seeds)` : ''
+    const pct = Math.round(rankFrac[i] * 100)
     return {
       x: p.x,
       y: p.y,
-      color: `hsl(${Math.round(oriented(p.value) * 120)}, 70%, 45%)`,
-      label: `${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)}${seeds}`,
+      color: `hsl(${Math.round(rankFrac[i] * 120)}, 70%, 45%)`,
+      label: `${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)} · top ${100 - pct}%${seeds}`,
     }
   })
   const ev = (i) => Math.round((pca.explainedVariance[i] || 0) * 100)
@@ -5047,11 +5234,11 @@ function xaiPcaHtml(runs, criterion, bundle) {
     yLabel: `PC2 · ${ev(1)}% var`,
     width: 480,
     height: 300,
-    ariaLabel: 'PCA projection of explored configs coloured by performance',
+    ariaLabel: 'PCA projection of explored configs coloured by performance rank',
   })
   return `<div class="card"><div class="card-head card-head-row"><h3>Configuration map (PCA) <span class="card-sub">— ${pca.points.length} setups · ${pca.features} features</span></h3></div>
     <div class="card-scroll">
-    <p class="card-sub">A 2-D <em>sketch</em> of the explored setups (numeric levers z-scored, categorical one-hot), coloured by ${escapeHtml(criterion.label)} — <strong style="color:hsl(120,70%,40%)">green = better</strong>, <strong style="color:hsl(0,70%,45%)">red = worse</strong>. Use it to spot CLUSTERS + OUTLIERS only: the PC axes are mixes of levers, not knobs you turn, so don't read them as directions. PC1+PC2 capture ${ev(0) + ev(1)}% of the configuration variance.</p>
+    <p class="card-sub">A 2-D <em>sketch</em> of the explored configs (numeric levers z-scored, categorical one-hot), coloured by <strong>${escapeHtml(criterion.label)} rank</strong> — <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong>, evenly across all configs. <strong>How to use it:</strong> nearby points have similar configs, so look for a <em>region where the green points cluster</em> — that's a promising part of the space to explore more (use the recommender). Scattered green with no cluster means performance isn't driven by where you are in this 2-D mix (check the lever importances instead). The PC axes are blends of levers, not knobs — don't read them as directions. PC1+PC2 capture ${ev(0) + ev(1)}% of the configuration variance.</p>
     <div class="chart-wrap">${svg}</div>
     </div></div>`
 }
@@ -5069,7 +5256,9 @@ function xaiAblationTreeHtml(path, criterion) {
     <p class="card-sub">baseline ${fmt(path.baselinePredicted)} → incumbent ${fmt(path.incumbentPredicted)}</p>
     <ol class="xai-abl">${steps}</ol>`
 }
-function xaiInteractionHtml(grid, leverNames, runs) {
+// The 2-lever interaction heatmap: the surrogate's predicted criterion for every (leverA × leverB) cell,
+// marginalised over the explored setups. Cells with a real explored config link to those runs.
+function xaiInteractionHtml(grid, leverNames, setups) {
   if (leverNames.length < 2) return ''
   const sel = (id, current) =>
     `<select id="${id}">${leverNames.map((l) => `<option value="${escapeHtml(l)}"${l === current ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`
@@ -5084,33 +5273,42 @@ function xaiInteractionHtml(grid, leverNames, runs) {
     // green (better=high) gradient; the criterion direction is already baked into "higher prediction".
     return `background:rgba(34,197,94,${(0.12 + t * 0.5).toFixed(2)})`
   }
-  // How many ACTUAL runs sit in this (leverA=a, leverB=b) cell — only those cells link to the Runs tab;
-  // a surrogate-PREDICTED cell with no runs stays plain (nothing to open).
-  const runsInCell = (a, b) =>
-    (runs || []).filter(
-      (r) =>
-        String((r.config || {})[grid.leverA]) === String(a) &&
-        String((r.config || {})[grid.leverB]) === String(b),
-    ).length
-  const head = `<tr><th></th>${grid.valuesB.map((b) => `<th class="num">${escapeHtml(b)}</th>`).join('')}</tr>`
-  const body = grid.valuesA
+  // Does an EXPLORED config sit at this (leverA=a, leverB=b) cell? Only those cells link to the Runs tab;
+  // a surrogate-PREDICTED cell with no explored config stays plain (nothing to open).
+  const explored = (a, b) =>
+    (setups || []).some(
+      (s) =>
+        String((s.config || {})[grid.leverA]) === String(a) &&
+        String((s.config || {})[grid.leverB]) === String(b),
+    )
+  // Sort both axes (numeric or alphabetic) via an index permutation, remapping cells to match.
+  const aIdx = grid.valuesA
+    .map((_, i) => i)
+    .sort((i, j) => xaiCmpValues(grid.valuesA[i], grid.valuesA[j]))
+  const bIdx = grid.valuesB
+    .map((_, i) => i)
+    .sort((i, j) => xaiCmpValues(grid.valuesB[i], grid.valuesB[j]))
+  const valuesA = aIdx.map((i) => grid.valuesA[i])
+  const valuesB = bIdx.map((i) => grid.valuesB[i])
+  const cellAt = (ai, bj) => grid.cells[aIdx[ai] * grid.valuesB.length + bIdx[bj]]
+  const head = `<tr><th></th>${valuesB.map((b) => `<th class="num">${escapeHtml(xaiFmtLeverValue(b))}</th>`).join('')}</tr>`
+  const body = valuesA
     .map((a, i) => {
-      const cells = grid.valuesB
+      const cells = valuesB
         .map((b, j) => {
-          const v = grid.cells[i * grid.valuesB.length + j]
-          const where = `${escapeHtml(grid.leverA)}=${escapeHtml(a)}, ${escapeHtml(grid.leverB)}=${escapeHtml(b)}`
-          const n = runsInCell(a, b)
-          if (!n) {
-            return `<td class="num" style="${shade(v)}" title="${where} (surrogate-predicted; no runs)">${escapeHtml(formatTickValue(v))}</td>`
+          const v = cellAt(i, j)
+          const where = `${escapeHtml(grid.leverA)}=${escapeHtml(String(a))}, ${escapeHtml(grid.leverB)}=${escapeHtml(String(b))}`
+          if (!explored(a, b)) {
+            return `<td class="num" style="${shade(v)}" title="${where} (surrogate-predicted; not yet run)">${escapeHtml(formatTickValue(v))}</td>`
           }
-          return `<td class="num xai-cell-link" style="${shade(v)}" data-xai-runs data-l1="${escapeHtml(grid.leverA)}" data-v1="${escapeHtml(String(a))}" data-l2="${escapeHtml(grid.leverB)}" data-v2="${escapeHtml(String(b))}" title="${where} — view ${n} run${n === 1 ? '' : 's'} in the Runs tab">${escapeHtml(formatTickValue(v))}</td>`
+          return `<td class="num xai-cell-link" style="${shade(v)}" data-xai-runs data-l1="${escapeHtml(grid.leverA)}" data-v1="${escapeHtml(String(a))}" data-l2="${escapeHtml(grid.leverB)}" data-v2="${escapeHtml(String(b))}" title="${where} — view the runs here in the Runs tab">${escapeHtml(formatTickValue(v))}</td>`
         })
         .join('')
-      return `<tr><th>${escapeHtml(a)}</th>${cells}</tr>`
+      return `<tr><th>${escapeHtml(xaiFmtLeverValue(a))}</th>${cells}</tr>`
     })
     .join('')
   return `${picker}<div class="compare-table-wrap"><table class="kv-table report-table xai-heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value. Click a cell with runs to see them.</p>`
+    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value. Click an explored cell to see its runs.</p>`
 }
 // The "Propose with AI" button — shared by the empty + populated recommender. Drives the
 // propose-experiments activity; results land as runnable ✦ AI suggestions in THIS list.
@@ -5135,18 +5333,16 @@ function xaiSuggestionToRec(sug) {
     priority: 100,
   }
 }
-// Merge LLM suggestions (first) with the deterministic recommender, deduped by spec so an AI pick that
-// coincides with a grid gap shows once. Prefer the server-cached bundle's recommendations (computed off the
-// whole-space surrogate) over a live recompute; skip the live recompute entirely for large uncached spaces.
-function xaiBuildRecs(runs, criterion, bundle) {
-  const deterministic = bundle
-    ? bundle.analysis.recommendations
-    : runs.length > XAI_LIVE_COMPUTE_MAX_RUNS
-      ? []
-      : window.Xai.recommendExperiments(runs, criterion)
+// Merge LLM suggestions (first) with the bundle's deterministic recommendations (computed off the
+// whole-space surrogate over EVERY run), deduped by spec so an AI pick that coincides with a grid gap
+// shows once.
+function xaiBuildRecs(bundle) {
   const merged = []
   const seen = new Set()
-  for (const r of [...xaiSuggestionsCache.map(xaiSuggestionToRec), ...deterministic]) {
+  for (const r of [
+    ...xaiSuggestionsCache.map(xaiSuggestionToRec),
+    ...bundle.analysis.recommendations,
+  ]) {
     const k = xaiSpecKey(r.spec)
     if (seen.has(k)) continue
     seen.add(k)
@@ -5154,8 +5350,8 @@ function xaiBuildRecs(runs, criterion, bundle) {
   }
   return merged
 }
-function xaiRecommenderHtml(runs, criterion, bundle) {
-  xaiRecsCache = xaiBuildRecs(runs, criterion, bundle)
+function xaiRecommenderHtml(criterion, bundle) {
+  xaiRecsCache = xaiBuildRecs(bundle)
   if (!xaiRecsCache.length) {
     return `<div class="card" id="xai-recommender"><div class="card-head card-head-row"><h3>Suggested experiments</h3>
       ${xaiProposeButtonHtml()}</div>
@@ -5256,19 +5452,34 @@ async function loadXaiConfigSpace() {
     if (c && c.criterion && c.criterion.key) xaiConfigSpaceCache.set(c.criterion.key, c)
   }
 }
-// The server-cached whole-space bundle for a criterion (null if none computed yet). `cachedRunCount` lets
-// the cards flag staleness against the current run count.
+// The server-cached whole-space bundle for a criterion (null if none computed yet). Carries the run count +
+// when it was computed, so the header can say "analysed N runs · <when>".
 function xaiResolveBundle(criterion) {
   const cached = xaiConfigSpaceCache.get(criterion.key)
   if (cached && cached.analysis) {
-    return { analysis: cached.analysis, cachedRunCount: cached.runCount || 0, generatedAt: cached.generatedAt }
+    return {
+      analysis: cached.analysis,
+      cachedRunCount: cached.runCount || 0,
+      generatedAt: cached.generatedAt,
+    }
   }
   return null
+}
+// Load the LRU-cached per-run xAI digests ({recordType}-run-xai records) into the cache, keyed by run key.
+async function loadXaiRunAnalyses() {
+  xaiRunAnalysisCache = new Map()
+  if (!manifest) return
+  const recs = await queryRecords(`${manifest.recordType}-run-xai`)
+  for (const r of recs || []) {
+    const c = r.content
+    if (c && c.runKey) xaiRunAnalysisCache.set(c.runKey, c)
+  }
 }
 async function refreshXai() {
   if (xaiFocusKey) await loadXaiNarrative(xaiFocusKey)
   await loadXaiSuggestions()
   await loadXaiConfigSpace()
+  await loadXaiRunAnalyses()
   renderXai()
 }
 async function onXaiNarrateClick() {
@@ -5348,9 +5559,20 @@ async function onXaiProposeClick() {
     setStatusLine('xai-status', 'Could not start proposing — please try again.', true)
   }
 }
-async function onXaiRefreshAnalysisClick() {
+// Re-scope the whole-space analysis to a chosen environment (by its signature) — looks up its context
+// values from the cached bundle and triggers a fresh, environment-scoped analysis.
+function xaiAnalyzeEnvironment(signature) {
+  const bundle = xaiResolveBundle(currentXaiCriterion())
+  const env = bundle && (bundle.analysis.environments || []).find((e) => e.signature === signature)
+  if (env) onXaiRefreshAnalysisClick(env.values)
+}
+async function onXaiRefreshAnalysisClick(environment) {
   if (!embedded()) {
-    setStatusLine('xai-status', 'Open inside the Overseer to compute the whole-space analysis.', false)
+    setStatusLine(
+      'xai-status',
+      'Open inside the Overseer to compute the whole-space analysis.',
+      false,
+    )
     return
   }
   if (analyzingConfigSpace) return
@@ -5359,7 +5581,12 @@ async function onXaiRefreshAnalysisClick() {
   try {
     const result = await startOrEnqueue(
       'config-space-analyze',
-      trainerActivityParams({ criterionKey: criterion.key, criterionDir: criterion.direction }),
+      trainerActivityParams({
+        criterionKey: criterion.key,
+        criterionDir: criterion.direction,
+        // The environment to scope within (its context-lever values); omit ⇒ the most-run environment.
+        environment: environment || undefined,
+      }),
       'Analyse config space',
     )
     if (result.queued) setStatusLine('xai-status', queuedStatusText(result.ahead))
@@ -5367,9 +5594,39 @@ async function onXaiRefreshAnalysisClick() {
     setStatusLine('xai-status', 'Could not start the analysis — please try again.', true)
   }
 }
-// Open the xAI tab focused on a run's internals (the run-detail entry point).
+async function onXaiAnalyzeRunClick(runKey) {
+  if (!runKey || analyzingRunKey) return
+  if (!embedded()) {
+    setStatusLine('xai-status', 'Open inside the Overseer to analyse a run.', false)
+    return
+  }
+  const criterion = currentXaiCriterion()
+  const sibling = xaiBestSibling(findRun(runKey))
+  analyzingRunKey = runKey
+  renderXai()
+  setStatusLine('xai-status', '')
+  try {
+    const result = await startOrEnqueue(
+      'run-xai-analyze',
+      trainerActivityParams({
+        runKey,
+        siblingKey: sibling ? sibling.key : undefined,
+        criterionKey: criterion.key,
+        criterionDir: criterion.direction,
+      }),
+      `Analyse run ${shortKey(runKey)}`,
+    )
+    if (result.queued) setStatusLine('xai-status', queuedStatusText(result.ahead))
+  } catch {
+    analyzingRunKey = null
+    renderXai()
+    setStatusLine('xai-status', 'Could not start the analysis — please try again.', true)
+  }
+}
+// Open the xAI tab focused on ONE run (the current-run scope) — the run-detail entry point.
 function analyzeInXai(key) {
   xaiFocusKey = key
+  xaiScope = 'current'
   showTab('xai')
 }
 // Older trading runs (an `equity` series but no `runChart`/`dataset`) predate the
@@ -5525,34 +5782,35 @@ function cloneRunToLaunch(key) {
 // carried, fixed (non-lever keys dropped so the planner doesn't reject them; seed is itself a
 // lever so it rides along). expandSpec layers the manifest defaults underneath, so the planned
 // config — and its hash — matches the original run.
-function reRunSpecForConfig(config) {
+// The lever-only config to re-run for a stored run — the planner's expected shape, used as one entry in
+// the batch re-run's spec.configs.
+function reRunConfigForRun(config) {
   const cfg = config || {}
   const leverKeys = new Set(leverEntries().map(([k]) => k))
   const fixed = {}
   for (const [k, v] of Object.entries(cfg)) {
     if (leverKeys.has(k) && v !== undefined) fixed[k] = v
   }
-  return { sweep: {}, fixed }
+  return fixed
 }
-// Queue the exact same run(s) again to be tried — refresh=true so an existing (e.g. failed) result
-// doesn't skip them. The config — and therefore its hash + record key — matches the original, so each
-// re-run UPDATES that run in place (it never creates a new record) and the fresh result carries the
-// current pipelineVersion. Each becomes its own single-config 'train' activity; any beyond the compute
-// budget park in the queue. Stays put (a toast confirms) rather than yanking the user to Activity.
+// Queue the exact same run(s) again to be tried, as ONE campaign/activity (a spec.configs batch, like a
+// Launch sweep) — never one activity per run. refresh=true so an existing (e.g. failed/outdated) result
+// doesn't skip them. Each config — and therefore its hash + record key — matches the original, so a re-run
+// UPDATES that run in place (it never creates a new record) and the fresh result carries the current
+// pipelineVersion. Stays put (a toast confirms) rather than yanking the user to Activity.
 async function reRunRuns(keys) {
   if (!embedded()) return
   const runs = keys.map((k) => findRun(k)).filter(Boolean)
   if (!runs.length) return
-  for (const run of runs) {
-    const params = trainerComputeParams({
-      spec: reRunSpecForConfig(run.summary.config),
-      refresh: true,
-      concurrency: 1,
-    })
-    await startOrEnqueue('train', params, `Re-run ${shortKey(run.key)}`)
-  }
+  const params = trainerComputeParams({
+    spec: { configs: runs.map((run) => reRunConfigForRun(run.summary.config)) },
+    refresh: true,
+    concurrency: savedConcurrency(),
+  })
+  const label = runs.length === 1 ? `Re-run ${shortKey(runs[0].key)}` : `Re-run ${runs.length} runs`
+  await startOrEnqueue('train', params, label)
   showToast(
-    `Queued ${runs.length} run${runs.length === 1 ? '' : 's'} to re-run — see the Activity tab.`,
+    `Queued ${runs.length} run${runs.length === 1 ? '' : 's'} to re-run as one activity — see the Activity tab.`,
   )
 }
 function chatAboutRunAvailable() {
@@ -6035,6 +6293,8 @@ function setupRuns() {
       } else if (t.id === 'xai-inter-b') {
         xaiInterB = t.value
         renderXai()
+      } else if (t.id === 'xai-environment') {
+        xaiAnalyzeEnvironment(t.value)
       }
     })
     xaiBody.addEventListener('click', (event) => {
@@ -6064,7 +6324,25 @@ function setupRuns() {
         return
       }
       if (event.target.closest('[data-xai-refresh-analysis]')) {
-        onXaiRefreshAnalysisClick()
+        // Re-run keeps the currently-scoped environment (don't snap back to the default).
+        const cur = xaiResolveBundle(currentXaiCriterion())
+        onXaiRefreshAnalysisClick((cur && cur.analysis.environment) || undefined)
+        return
+      }
+      const envBtn = event.target.closest('[data-xai-env]')
+      if (envBtn) {
+        xaiAnalyzeEnvironment(envBtn.dataset.xaiEnv)
+        return
+      }
+      const scopeBtn = event.target.closest('[data-xai-scope]')
+      if (scopeBtn) {
+        xaiScope = scopeBtn.dataset.xaiScope === 'current' ? 'current' : 'all'
+        renderXai()
+        return
+      }
+      const analyzeRunBtn = event.target.closest('[data-xai-analyze-run]')
+      if (analyzeRunBtn) {
+        onXaiAnalyzeRunClick(analyzeRunBtn.dataset.xaiAnalyzeRun)
         return
       }
       if (event.target.closest('[data-xai-clear-focus]')) {
@@ -6533,13 +6811,24 @@ function environmentCardHtml(env, editable, isDefault) {
     editable && !isDefault
       ? `<button type="button" class="icon-btn" data-env-default="${escapeHtml(env.id)}" title="Set as default environment" aria-label="Set as default">☆</button>`
       : ''
+  // Shorting is an environment property: a one-click "clone to a long+short variant" on any long-only
+  // env, so each existing environment gets a shorting counterpart without hand-editing the field.
+  const shortingOn = String(env.settings.allow_shorting) === 'true'
+  const cloneShortBtn =
+    'allow_shorting' in ((manifest && manifest.levers) || {}) && !shortingOn
+      ? `<button type="button" class="icon-btn" data-env-clone-short="${escapeHtml(env.id)}" title="Clone to a long+short variant (shorting on)" aria-label="Clone with shorting">⇅</button>`
+      : ''
   const actions = editable
     ? `<div class="head-actions">
+        ${cloneShortBtn}
         ${setDefaultBtn}
         <button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button>
         <button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
       </div>`
-    : `<div class="head-actions"><button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button></div>`
+    : `<div class="head-actions">
+        ${cloneShortBtn}
+        <button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button>
+      </div>`
   const note = isDefault
     ? ' <span class="badge">★ default</span>'
     : editable
@@ -6577,17 +6866,33 @@ async function renderEnvironments() {
     seed + environmentsCache.map((e) => environmentCardHtml(e, true, e.id === defId)).join(''),
   )
 }
-// The create/edit form: a name + a number field per environment lever.
+// The create/edit form: a name + a typed field per environment lever (checkbox for boolean levers like
+// allow_shorting, a select for choices, else a number).
 function environmentFormHtml(env) {
   const isNew = !env || env.id === 'default'
   const settings = (env && env.settings) || defaultEnvironment().settings
   const fields = envLeverEntries()
     .map(([k, spec]) => {
+      const cur = settings[k]
+      const labelSpan = `<span${helpAttr(spec.description || '')}>${escapeHtml(k)}</span>`
+      if (spec.type === 'boolean') {
+        const checked = cur === true || String(cur) === 'true' ? ' checked' : ''
+        return `<label class="check-row"><input type="checkbox" name="env:${escapeHtml(k)}"${checked} />${labelSpan}</label>`
+      }
+      if (spec.type === 'choice') {
+        const opts = (spec.choices || [])
+          .map(
+            (c) =>
+              `<option value="${escapeHtml(String(c))}"${String(cur) === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+          )
+          .join('')
+        return `<label class="field">${labelSpan}<select name="env:${escapeHtml(k)}">${opts}</select></label>`
+      }
       const { min, max } = leverRange(spec)
       const minAttr = Number.isFinite(Number(min)) ? ` min="${Number(min)}"` : ''
       const maxAttr = Number.isFinite(Number(max)) ? ` max="${Number(max)}"` : ''
-      const val = settings[k] === undefined ? '' : escapeHtml(String(settings[k]))
-      return `<label class="field"><span${helpAttr(spec.description || '')}>${escapeHtml(k)}</span>
+      const val = cur === undefined ? '' : escapeHtml(String(cur))
+      return `<label class="field">${labelSpan}
         <input type="number" step="any" name="env:${escapeHtml(k)}" value="${val}"${minAttr}${maxAttr} /></label>`
     })
     .join('')
@@ -6620,9 +6925,13 @@ async function onSaveEnvironment(form) {
     return
   }
   const settings = {}
-  for (const [k] of envLeverEntries()) {
-    const el = form.querySelector(`input[name="env:${k}"]`)
-    if (el && el.value !== '') settings[k] = Number(el.value)
+  for (const [k, spec] of envLeverEntries()) {
+    const el = form.querySelector(`[name="env:${k}"]`)
+    if (!el) continue
+    if (spec.type === 'boolean') settings[k] = el.checked
+    else if (spec.type === 'choice') {
+      if (el.value !== '') settings[k] = el.value
+    } else if (el.value !== '') settings[k] = Number(el.value)
   }
   if (environmentDuplicateOf(name, settings, id)) {
     setStatusLine(
@@ -6664,6 +6973,35 @@ async function onDeleteEnvironment(id) {
   await renderEnvironments()
   renderLaunchForm()
 }
+// Clone an environment (named record OR the synthetic Default) to a new long+short variant — copies its
+// settings, flips allow_shorting on, names it "<env> (long+short)". The pair is how long-only vs long+short
+// is compared: run a model across both environments.
+async function cloneEnvironmentWithShorting(id) {
+  const env =
+    id && id !== 'default' && id !== defaultEnvironmentId()
+      ? environmentsCache.find((e) => e.id === id)
+      : defaultEnvironment()
+  if (!env) return
+  const baseName = String(env.name || 'Environment').replace(/\s*\(long\+short\)\s*$/i, '')
+  try {
+    await putEnvironment({
+      id: randomHexId(),
+      name: `${baseName} (long+short)`,
+      settings: { ...env.settings, allow_shorting: true },
+      default: false,
+    })
+  } catch {
+    setStatusLine(
+      'environments-status',
+      'Could not clone the environment — please try again.',
+      true,
+    )
+    return
+  }
+  setStatusLine('environments-status', `Created “${baseName} (long+short)”.`, false)
+  await renderEnvironments()
+  renderLaunchForm()
+}
 function setupEnvironments() {
   const addToggle = byId('environment-add-toggle')
   if (addToggle) addToggle.addEventListener('click', () => toggleEnvironmentForm(true))
@@ -6684,6 +7022,11 @@ function setupEnvironments() {
       if (edit) {
         const env = environmentsCache.find((x) => x.id === edit.dataset.envEdit)
         if (env) toggleEnvironmentForm(true, env)
+        return
+      }
+      const cloneShort = event.target.closest('button[data-env-clone-short]')
+      if (cloneShort) {
+        cloneEnvironmentWithShorting(cloneShort.dataset.envCloneShort)
         return
       }
       const clone = event.target.closest('button[data-env-clone]')
@@ -8621,9 +8964,13 @@ async function importSeedModels() {
   )
   await renderModels()
 }
-// The auto-derived (or manually pinned) lifecycle status of a model, from its matching runs.
+// The model's all-runs aggregate ({runs,best,failing,lastRunAt,perFlavor}) from the persisted stats, or null.
+function modelAgg(model) {
+  return window.Models.aggForModel(modelStatsCache, model.id)
+}
+// The auto-derived (or manually pinned) lifecycle status of a model, from its all-runs aggregate.
 function modelStatusOf(model) {
-  return window.Models.deriveModelStatus(model, runsCache, manifest)
+  return window.Models.deriveModelStatus(model, modelAgg(model), manifest)
 }
 function modelStatusBadgeHtml(model) {
   const st = modelStatusOf(model)
@@ -8632,14 +8979,44 @@ function modelStatusBadgeHtml(model) {
   return `<span class="run-badge ${cls}">${escapeHtml(label)}</span>`
 }
 function modelRunChipHtml(model) {
-  const s = window.Models.modelRunSummary(model, runsCache, objectiveDirection())
-  if (!s.runs) {
+  const s = modelAgg(model)
+  if (!modelStatsCache) {
+    return `<span class="hyp-count-chip is-empty"${helpAttr('Run counts are computed over ALL runs — press Refresh.')}>— runs</span>`
+  }
+  if (!s || !s.runs) {
     return `<span class="hyp-count-chip is-empty"${helpAttr('No runs have trained this model yet.')}>0 runs</span>`
   }
   const parts = [`${s.runs} run${s.runs === 1 ? '' : 's'}`]
-  if (s.best !== null) parts.push(`best ${formatObjective(s.best)}`)
+  if (s.best !== null && s.best !== undefined) parts.push(`best ${formatObjective(s.best)}`)
   if (s.failing) parts.push(`${s.failing} failing`)
-  return `<span class="hyp-count-chip"${helpAttr('Runs whose model_name binds to this model — the status + verdict roll up from them.')}>${escapeHtml(parts.join(' · '))}</span>`
+  return `<span class="hyp-count-chip"${helpAttr('Every run binding this model (all flavors), aggregated over ALL runs.')}>${escapeHtml(parts.join(' · '))}</span>`
+}
+// The model's flavors, each with its per-flavor run count (from the aggregate) + any flavor-specific links.
+function modelFlavorsHtml(model) {
+  const flavors = window.Models.modelFlavors(model)
+  if (!flavors.length) return ''
+  const agg = modelAgg(model)
+  const rows = flavors
+    .map((fl) => {
+      const per = agg && agg.perFlavor && agg.perFlavor[window.Models.flavorKey(fl)]
+      const count = per ? per.runs : modelStatsCache ? 0 : null
+      const chip =
+        count === null
+          ? ''
+          : ` <span class="flavor-runs${count ? '' : ' is-empty'}">${count} run${count === 1 ? '' : 's'}</span>`
+      const cfg =
+        fl.config && Object.keys(fl.config).length
+          ? ` <span class="card-sub">(${escapeHtml(
+              Object.entries(fl.config)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(', '),
+            )})</span>`
+          : ''
+      const label = escapeHtml(fl.name || fl.modelName)
+      return `<li><code>${escapeHtml(fl.modelName)}</code> ${label}${cfg}${chip}</li>`
+    })
+    .join('')
+  return `<div class="model-flavors"><span class="card-sub">Flavors</span><ul class="paper-hyp-list">${rows}</ul></div>`
 }
 function modelLinkedPapersHtml(model) {
   const papers = window.Models.papersForModel(model, papersCache)
@@ -8679,7 +9056,7 @@ function modelStatusSelectHtml(model) {
 function modelCardHtml(model) {
   const id = escapeHtml(model.id)
   const open = modelExpanded.has(model.id) ? ' open' : ''
-  const bindings = Array.isArray(model.modelNames) ? model.modelNames : []
+  const flavorCount = window.Models.modelFlavors(model).length
   const st = modelStatusOf(model)
   const discussTitle =
     st === 'failing'
@@ -8702,12 +9079,9 @@ function modelCardHtml(model) {
     <div class="paper-body">
       ${model.description ? `<p class="paper-claim">${escapeHtml(model.description)}</p>` : ''}
       ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
-      ${
-        bindings.length
-          ? `<p class="card-sub">Binds runs where model_name ∈ {${escapeHtml(bindings.join(', '))}}</p>`
-          : '<p class="card-sub">No model_name binding yet — a proposal not wired into the lever.</p>'
-      }
+      ${flavorCount ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
       ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
+      ${modelFlavorsHtml(model)}
       ${modelStatusSelectHtml(model)}
       ${modelLinkedPapersHtml(model)}
       ${modelLinkedHypothesesHtml(model)}
@@ -8727,6 +9101,126 @@ function modelCategoryFilterBarHtml() {
     .join('')
   return `<div class="paper-filter">${btns}</div>`
 }
+async function readModelStats() {
+  return readLatestRecord('-model-stats')
+}
+// A run record → the compact row computeModelStats needs.
+function modelRunRow(run) {
+  const s = (run && run.summary) || {}
+  return {
+    key: run.key,
+    config: s.config || {},
+    objective: s.objective,
+    status: s.status,
+    health: s.health,
+    ranAt: (s.provenance && s.provenance.ranAt) || s.ranAt,
+  }
+}
+// The Refresh-stats control row + freshness note. Refresh recomputes the all-runs aggregate (a process
+// that scans EVERY run, so it spins); a stale flag appears when newer runs exist past the aggregate.
+function modelStatsControlsHtml() {
+  const total = modelStatsCache ? modelStatsCache.totalRuns : null
+  const label = modelStatsRefreshing
+    ? `${spinnerHtml()} Refreshing…`
+    : modelStatsCache
+      ? 'Refresh stats'
+      : 'Compute run stats'
+  const at =
+    modelStatsCache && modelStatsCache.aggregatedAt
+      ? ' · ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
+      : ''
+  const note = modelStatsCache
+    ? `Run counts aggregated over ${total} run${total === 1 ? '' : 's'}${at}.`
+    : 'Run counts are computed over ALL runs (not the current page) — press to compute.'
+  const stale = modelStatsStale
+    ? '<span class="model-stats-stale">newer runs exist — refresh to update</span>'
+    : ''
+  return `<div class="model-stats-controls"><button type="button" id="models-refresh-btn" class="ghost-btn"${modelStatsRefreshing ? ' disabled' : ''}>${label}</button> <span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
+}
+// Runs whose model_name matches no catalog flavor — the "a flavor is missing" signal.
+function uncatalogedModelsHtml() {
+  const unc = (modelStatsCache && modelStatsCache.uncataloged) || []
+  if (!unc.length) return ''
+  const rows = unc
+    .map(
+      (u) =>
+        `<li><code>${escapeHtml(u.modelName)}</code> <span class="flavor-runs">${u.runs} run${u.runs === 1 ? '' : 's'}</span></li>`,
+    )
+    .join('')
+  return `<div class="model-group"><h3 class="model-group-h">Unmapped runs — missing flavors</h3><p class="card-sub">These <code>model_name</code> values appear in runs but match no catalog flavor — add a flavor (or Scan) so they roll up to a model.</p><ul class="paper-hyp-list">${rows}</ul></div>`
+}
+// Recompute the all-runs aggregate (over EVERY run), persist it as `<recordType>-model-stats`, re-render.
+async function refreshModelStats() {
+  if (!embedded() || !manifest || modelStatsRefreshing) return
+  const epoch = projectEpoch
+  modelStatsRefreshing = true
+  await renderModels()
+  let ok = false
+  try {
+    const models = await readModels()
+    // Page through EVERY run (the Runs-tab filter never applies here); show progress on the button.
+    const allRuns = await queryAllRunRecords((n) => {
+      const btn = byId('models-refresh-btn')
+      if (btn) setHtml(btn, `${spinnerHtml()} Scanning ${n} runs…`)
+    })
+    const stats = window.Models.computeModelStats(
+      models,
+      allRuns.map(modelRunRow),
+      objectiveDirection(),
+    )
+    const content = { ...stats, aggregatedAt: nowIso() }
+    await window.OverseerBridge.putData({
+      type: manifest.recordType + '-model-stats',
+      key: 'latest',
+      content,
+    })
+    ok = true
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('models-status', 'Could not compute run stats — please try again.', true)
+    }
+  } finally {
+    modelStatsRefreshing = false
+    if (epoch === projectEpoch) {
+      await renderModels()
+      if (ok) showToast('Run stats refreshed over all runs.')
+    }
+  }
+}
+// Cheap freshness check: is the live newest run / count past what the aggregate covered? Updates ONLY the
+// control row in place (no full re-render) so it can run after each render without looping.
+async function checkModelStatsStale() {
+  const was = modelStatsStale
+  if (!modelStatsCache) {
+    modelStatsStale = false
+  } else {
+    try {
+      const newest = await queryRunRecords({
+        orderBy: [{ field: 'provenance.ranAt', direction: 'desc', numeric: false }],
+        limit: 1,
+      })
+      const liveNewest =
+        newest[0] && newest[0].summary && newest[0].summary.provenance
+          ? newest[0].summary.provenance.ranAt
+          : null
+      const total = await countRunRecords(undefined)
+      modelStatsStale =
+        (!!liveNewest && liveNewest !== modelStatsCache.newestRunAt) ||
+        (total !== null && total !== modelStatsCache.totalRuns)
+    } catch {
+      modelStatsStale = false
+    }
+  }
+  if (modelStatsStale !== was && activeTabId === 'models') {
+    const body = byId('models-body')
+    const el = body && body.querySelector('.model-stats-controls')
+    if (el) {
+      const tmp = document.createElement('div')
+      tmp.innerHTML = modelStatsControlsHtml()
+      if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild)
+    }
+  }
+}
 async function renderModels() {
   const body = byId('models-body')
   if (!body) return
@@ -8737,10 +9231,10 @@ async function renderModels() {
     )
     return
   }
-  // Load runs + papers + hypotheses alongside models so the status roll-up + links are fresh.
-  ;[modelsCache, runsCache, papersCache, hypothesesCache] = await Promise.all([
+  // Load the persisted all-runs STATS (not a page of runs) + papers + hypotheses for the links.
+  ;[modelsCache, modelStatsCache, papersCache, hypothesesCache] = await Promise.all([
     readModels(),
-    readRuns(),
+    readModelStats(),
     readPapers(),
     readHypotheses(),
   ])
@@ -8750,8 +9244,10 @@ async function renderModels() {
     setHtml(
       body,
       seedBanner +
+        modelStatsControlsHtml() +
         '<div class="empty-hint">No models yet — Scan Project to discover them, or import the curated set.</div>',
     )
+    void checkModelStatsStale()
     return
   }
   const shown =
@@ -8774,9 +9270,12 @@ async function renderModels() {
   setHtml(
     body,
     seedBanner +
+      modelStatsControlsHtml() +
       modelCategoryFilterBarHtml() +
-      (html || '<div class="empty-hint">No models in this category.</div>'),
+      (html || '<div class="empty-hint">No models in this category.</div>') +
+      uncatalogedModelsHtml(),
   )
+  void checkModelStatsStale()
 }
 // Open the host chat preloaded with this model's full context (status, bindings, runs, linked papers +
 // hypotheses); the seed adapts to status — implement (proposed), fix (failing), or improve.
@@ -8784,10 +9283,13 @@ async function chatAboutModel(id) {
   const model = modelsCache.find((m) => m.id === id)
   if (!model || !chatAboutRunAvailable()) return
   const status = modelStatusOf(model)
-  const runs = window.Models.modelRunSummary(model, runsCache, objectiveDirection())
+  const agg = modelAgg(model)
   const papers = window.Models.papersForModel(model, papersCache)
   const hyps = window.Models.hypothesesForModel(model, hypothesesCache)
-  const bindings = Array.isArray(model.modelNames) ? model.modelNames : []
+  const bindings = window.Models.flavorModelNames(model)
+  const runsLine = agg
+    ? `Training runs so far: ${agg.runs}${agg.best !== null && agg.best !== undefined ? `, best ${objectiveName()} ${formatObjective(agg.best)}` : ''}${agg.failing ? `, ${agg.failing} health-flagged/failed` : ''}.`
+    : 'Run counts not yet aggregated.'
   const ctx = [
     `You are discussing ONE specific MODEL in this project's catalog — "${model.name || model.id}" (status: ${status}). Work from the details below; don't ask the user to restate them.`,
     `Category: ${model.category}.`,
@@ -8795,9 +9297,9 @@ async function chatAboutModel(id) {
     model.proposal ? `What's asked: ${model.proposal}` : '',
     bindings.length
       ? `It is trained by runs whose model_name is one of: ${bindings.join(', ')}.`
-      : 'It is NOT yet wired to a model_name lever value (a pure proposal).',
+      : 'It is NOT yet wired to any run config (a pure proposal).',
     model.implPath ? `Implemented at: ${model.implPath}` : 'No implementation path on record yet.',
-    `Training runs so far: ${runs.runs}${runs.best !== null ? `, best ${objectiveName()} ${formatObjective(runs.best)}` : ''}${runs.failing ? `, ${runs.failing} health-flagged/failed` : ''}.`,
+    runsLine,
     papers.length ? `Linked papers: ${papers.map((p) => p.title || p.id).join('; ')}.` : '',
     hyps.length ? `Linked hypotheses: ${hyps.map((h) => h.title || h.id).join('; ')}.` : '',
   ]
@@ -8951,6 +9453,10 @@ function setupModels() {
   body.addEventListener('click', (event) => {
     if (event.target.closest('summary') && event.target.closest('[data-action]')) {
       event.preventDefault()
+    }
+    if (event.target.closest('#models-refresh-btn')) {
+      refreshModelStats()
+      return
     }
     const filterBtn = event.target.closest('button[data-category]')
     if (filterBtn) {

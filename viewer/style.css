@@ -1428,12 +1428,33 @@ button:focus-visible,
   color: var(--muted, #888);
 }
 .model-links,
-.paper-models {
+.paper-models,
+.model-flavors {
   margin: 8px 0 4px;
 }
 .model-status-field {
   margin: 8px 0;
   max-width: 280px;
+}
+/* Models — the all-runs stats control row + per-flavor run counts. */
+.model-stats-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+}
+.model-stats-stale {
+  font-size: 12px;
+  color: var(--warn, #d97706);
+  font-weight: 600;
+}
+.flavor-runs {
+  font-size: 11px;
+  color: var(--muted, #888);
+}
+.flavor-runs.is-empty {
+  opacity: 0.55;
 }
 .paper-cvm {
   margin: 6px 0;
@@ -2841,6 +2862,29 @@ pre.json {
 .badge.xai-rec-llm {
   background: rgba(139, 92, 246, 0.18);
   color: #6d28d9;
+  font-weight: 600;
+}
+/* xAI scope switch: segmented "All runs | Current run" toggle. */
+.xai-scope-switch {
+  display: inline-flex;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.xai-scope-btn {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.xai-scope-btn.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+  font-weight: 600;
+}
+/* The currently-scoped environment row in the Compare-environments table. */
+.xai-env-current {
+  background: rgba(37, 99, 235, 0.1);
   font-weight: 600;
 }
 /* fANOVA per-lever effect tags: inert (drop), interactive (coupled), direct (plain). */
