@@ -131,6 +131,73 @@
     return (papers || []).filter((p) => direct[p.id] || (p.modelIds || []).indexOf(model.id) >= 0)
   }
 
+  // Manifest-owned fields a seed re-sync overwrites onto an existing record (the rest are user-owned:
+  // statusSource:manual status + statusNote, notes, dismissed, hypothesisIds, createdAt).
+  const MODEL_SEED_FIELDS = ['name', 'description', 'category', 'implPath', 'proposal', 'source']
+
+  function sameStringList(a, b) {
+    const x = a || []
+    const y = b || []
+    if (x.length !== y.length) return false
+    for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false
+    return true
+  }
+
+  // True iff importing this seed would CHANGE the catalog — no existing record, or a manifest-owned
+  // field (esp. the modelNames bindings — the consolidation) differs. Drives the "import / re-sync" banner.
+  function seedDiffersFromModel(seed, existing) {
+    if (!existing) return true
+    if (!sameStringList(seed.modelNames, existing.modelNames)) return true
+    for (let i = 0; i < MODEL_SEED_FIELDS.length; i++) {
+      const f = MODEL_SEED_FIELDS[i]
+      if ((seed[f] || '') !== (existing[f] || '')) return true
+    }
+    return false
+  }
+
+  // The record to persist when syncing a manifest seed: manifest-owned fields from the seed, user-owned
+  // fields preserved from any existing record. A manual status pin is never overwritten by the re-sync.
+  function mergeSeedIntoModel(seed, existing, nowIso) {
+    const slug = seed.slug || seed.id
+    const merged = {
+      id: seed.id || slug,
+      slug: slug,
+      name: seed.name,
+      description: seed.description || '',
+      category: seed.category,
+      modelNames: Array.isArray(seed.modelNames) ? seed.modelNames.slice() : [],
+      source: seed.source || 'manual',
+    }
+    if (seed.implPath) merged.implPath = seed.implPath
+    if (seed.proposal) merged.proposal = seed.proposal
+    const paperIds = []
+    const seen = {}
+    const allPapers = (seed.paperIds || []).concat((existing && existing.paperIds) || [])
+    for (let i = 0; i < allPapers.length; i++) {
+      if (!seen[allPapers[i]]) {
+        seen[allPapers[i]] = true
+        paperIds.push(allPapers[i])
+      }
+    }
+    if (paperIds.length) merged.paperIds = paperIds
+    if (existing && existing.hypothesisIds && existing.hypothesisIds.length) {
+      merged.hypothesisIds = existing.hypothesisIds
+    }
+    if (existing && existing.statusSource === 'manual') {
+      merged.status = existing.status
+      merged.statusSource = 'manual'
+      if (existing.statusNote) merged.statusNote = existing.statusNote
+    } else {
+      merged.status = seed.status || 'implemented'
+      merged.statusSource = 'auto'
+    }
+    if (existing && existing.notes) merged.notes = existing.notes
+    if (existing && existing.dismissed) merged.dismissed = existing.dismissed
+    merged.createdAt = (existing && existing.createdAt) || nowIso
+    merged.updatedAt = nowIso
+    return merged
+  }
+
   // The hypotheses a model is linked to (model.hypothesisIds).
   function hypothesesForModel(model, hyps) {
     const direct = {}
@@ -155,6 +222,8 @@
     modelsForPaper: modelsForPaper,
     papersForModel: papersForModel,
     hypothesesForModel: hypothesesForModel,
+    seedDiffersFromModel: seedDiffersFromModel,
+    mergeSeedIntoModel: mergeSeedIntoModel,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Models

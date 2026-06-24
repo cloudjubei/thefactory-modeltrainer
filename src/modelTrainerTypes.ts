@@ -681,6 +681,49 @@ export interface PcaProjection {
 }
 
 /**
+ * The whole-space xAI analysis precomputed in ONE pass over every run (seeds folded into setups), so the
+ * heavy surrogate/fANOVA/coupling/PCA work happens server-side and the viewer just renders + recomputes
+ * cheap interaction grids off the embedded surrogate. Deterministic; cached as a `{recordType}-config-space`
+ * record and refreshed as runs land.
+ */
+export interface ConfigSpaceAnalysis {
+  criterion: { key: string; direction: 'max' | 'min' }
+  /** Runs behind the analysis (every seed of every config). */
+  runCount: number
+  /** Distinct configurations after folding seeds into one IQM each — what the surrogate trained on. */
+  setupCount: number
+  /** Every lever (model + dataset + environment) the space varies over. */
+  levers: string[]
+  /** The seeded forest the reads derive from; embedded so the viewer can compute interaction grids live. */
+  surrogate: ConfigSurrogate
+  importances: FanovaImportance[]
+  /** Pairwise interaction strengths, computed ONLY among {@link coupledLevers}. */
+  couplings: LeverCoupling[]
+  /** The high-effect levers coupling was searched among (top-K by total effect); the rest are too inert. */
+  coupledLevers: string[]
+  ablation: AblationPath | null
+  pca: PcaProjection | null
+  recommendations: ExperimentRecommendation[]
+}
+
+export interface AnalyzeConfigSpaceParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Criterion to analyse over the whole space; defaults to the manifest objective. */
+  criterionKey?: string
+  criterionDir?: 'max' | 'min'
+}
+
+export interface AnalyzeConfigSpaceResult {
+  recordType: string
+  criterion: AnalysisCriterion
+  /** Null when there are no completed runs to analyse. */
+  analysis: ConfigSpaceAnalysis | null
+}
+
+/**
  * A deterministic, NON-LLM recommendation for the next experiments to run — each carries a launchable
  * {@link ExperimentSpec} the viewer fires as a batched campaign, closing the analyse→run→re-analyse loop.
  */
@@ -1073,6 +1116,8 @@ export interface TrainingPaperRecord {
   status: 'untested' | 'replicating' | 'holds-up' | 'fluff'
   /** Free-text verdict / notes recorded by the user. */
   verdictNote?: string
+  /** Hidden from the default Papers view (marked "not wanted") without deleting it. */
+  dismissed?: boolean
   /** Where the entry came from. */
   source: 'manual' | 'research'
   tags?: string[]
@@ -1203,6 +1248,45 @@ export interface ProposeTrainingHypothesesResult {
   /** Proposals whose spec already exists as a hypothesis record (any status). */
   skippedExisting: number
   hypotheses: TrainingHypothesis[]
+  proposedBy: string
+  proposedAt: string
+}
+
+/** An LLM-proposed experiment surfaced as a runnable suggestion in the xAI recommender (NOT a hypothesis). */
+export interface TrainingExperimentSuggestion {
+  /** Stable hash of the spec — the canonical identity; identical specs dedupe. */
+  id: string
+  title: string
+  rationale: string
+  spec: ExperimentSpec
+  source: 'llm'
+  /** Provenance label of the proposing model. */
+  proposedBy: string
+  proposedAt: string
+}
+
+export interface ProposeTrainingExperimentsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`); names a second conformant line in the same repo. */
+  manifestRelPath?: string
+  llmConfig: LLMConfig
+  /** How many suggestions to ask for; defaults to {@link DEFAULT_HYPOTHESIS_COUNT}. */
+  count?: number
+  /** Extra guidance appended to the proposer prompt. */
+  instructions?: string
+  abortSignal?: AbortSignal
+  /** Fired after each suggestion record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface ProposeTrainingExperimentsResult {
+  recordType: string
+  proposed: number
+  /** Proposals whose spec already exists as a suggestion record. */
+  skippedExisting: number
+  suggestions: TrainingExperimentSuggestion[]
   proposedBy: string
   proposedAt: string
 }
@@ -1503,6 +1587,14 @@ export interface ModelTrainerTools {
     params: ProposeTrainingHypothesesParams,
   ): Promise<ProposeTrainingHypothesesResult>
   /**
+   * Ask an LLM for the next experiments given run history + verdicts; persist new
+   * `{recordType}-xai-suggestion` records (deduped by spec hash) for the xAI recommender to surface as
+   * runnable suggestions. Unlike {@link proposeTrainingHypotheses} this creates NO hypothesis records.
+   */
+  proposeTrainingExperiments(
+    params: ProposeTrainingExperimentsParams,
+  ): Promise<ProposeTrainingExperimentsResult>
+  /**
    * Read a paper/source URL, summarise it with an LLM (the tool fetches the page text — no web tools),
    * and persist a DRAFT `{recordType}-paper` record (status 'untested', source 'research') for the user
    * to verify. Powers the Papers tab's "Automatic Fill".
@@ -1551,6 +1643,12 @@ export interface ModelTrainerTools {
    * them). Read-only.
    */
   getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult>
+  /**
+   * Compute the whole-space xAI bundle ({@link ConfigSpaceAnalysis}) over EVERY completed run — surrogate,
+   * fANOVA, coupling, PCA, recommendations — folding seeds into setups. Heavy + deterministic, so the host
+   * runs it server-side and caches the result for the viewer to render.
+   */
+  analyzeConfigSpace(params: AnalyzeConfigSpaceParams): Promise<AnalyzeConfigSpaceResult>
   /**
    * Apply the manifest's one-time `migrations` to every stored run config (and, when a
    * `queueRecordType` is given, every pending-queue item's `spec.fixed`), rewriting each in place and

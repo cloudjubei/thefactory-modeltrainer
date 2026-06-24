@@ -1797,6 +1797,69 @@ describe('proposeTrainingHypotheses', () => {
   })
 })
 
+describe('proposeTrainingExperiments', () => {
+  const PROPOSALS = JSON.stringify([
+    { title: 'Push lr higher', rationale: 'top runs cluster at high lr', spec: { sweep: { lr: [0.5, 0.9] } } },
+    { title: 'Longer training', rationale: 'returns still climbing', spec: { fixed: { steps: 500 } } },
+    { title: 'Bad one', rationale: 'names a ghost lever', spec: { sweep: { ghost: [1] } } },
+  ])
+
+  it('persists valid proposals as xai-suggestion records, never hypotheses', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 10)
+    const { tools } = makeJudgeTools(stubExecutor(PROPOSALS), storage)
+    const result = await tools.proposeTrainingExperiments({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      proposed: 2, // the ghost-lever proposal is dropped
+      skippedExisting: 0,
+      proposedBy: 'openai/m',
+      proposedAt: NOW,
+    })
+    const suggestions = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-suggestion' })
+    expect(suggestions).toHaveLength(2)
+    expect(suggestions[0].content).toMatchObject({ source: 'llm', proposedBy: 'openai/m', proposedAt: NOW })
+    expect((suggestions[0].content as { id: string }).id).toBe(suggestions[0].key)
+    // The whole point: it must NOT write hypothesis records.
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(0)
+  })
+
+  it('dedupes identical specs against existing suggestions', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeJudgeTools(stubExecutor(PROPOSALS), storage)
+    await tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
+    const second = await tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
+    expect(second.skippedExisting).toBe(2)
+    expect(second.proposed).toBe(0)
+  })
+
+  it('notifies onRecordWritten per suggestion', async () => {
+    const written: string[] = []
+    const { tools } = makeJudgeTools(stubExecutor(PROPOSALS), memoryStorage())
+    await tools.proposeTrainingExperiments({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      onRecordWritten: (type) => written.push(type),
+    })
+    expect(written).toEqual(['demo-run-xai-suggestion', 'demo-run-xai-suggestion'])
+  })
+
+  it('throws without an inference executor', async () => {
+    const { tools } = makeJudgeTools(undefined, memoryStorage())
+    await expect(
+      tools.proposeTrainingExperiments({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM }),
+    ).rejects.toThrow(/inference/i)
+  })
+})
+
 describe('xaiNarrate', () => {
   const TRACE = {
     steps: [{ step: 0, action: 'hold' }],
@@ -3022,5 +3085,30 @@ describe('analyzePaperModels', () => {
     })
     expect(result.paper.modelIds).toEqual([])
     expect(executor.requests[0].userContent).not.toContain('ABSTRACT')
+  })
+})
+
+describe('analyzeConfigSpace', () => {
+  it('builds the whole-space bundle over every completed run, folding seeds into setups', async () => {
+    const storage = memoryStorage()
+    let k = 0
+    for (const lr of [0.1, 0.5])
+      for (const bs of [32, 64])
+        for (const seed of [0, 1])
+          await seedRun(storage, `r${k++}`, lr * 100 + bs, { config: { lr, batch_size: bs }, seed })
+    const { tools } = makeJudgeTools(undefined, storage)
+    const result = await tools.analyzeConfigSpace({ scope: 'proj', projectRoot: '/repo', manifest: manifest() })
+    expect(result.recordType).toBe('demo-run')
+    expect(result.criterion.key).toBe('objective')
+    expect(result.analysis).not.toBeNull()
+    expect(result.analysis!.runCount).toBe(8)
+    expect(result.analysis!.setupCount).toBe(4) // 2 lr × 2 batch_size, the 2 seeds folded
+    expect(result.analysis!.surrogate.trees.length).toBeGreaterThan(0)
+  })
+
+  it('returns a null analysis when there are no completed runs', async () => {
+    const { tools } = makeJudgeTools(undefined, memoryStorage())
+    const result = await tools.analyzeConfigSpace({ scope: 'proj', projectRoot: '/repo', manifest: manifest() })
+    expect(result.analysis).toBeNull()
   })
 })

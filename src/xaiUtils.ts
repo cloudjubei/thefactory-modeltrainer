@@ -3,6 +3,7 @@ import type {
   AblationStep,
   AnalysisCriterion,
   AnalysisRun,
+  ConfigSpaceAnalysis,
   ConfigSurrogate,
   ExperimentRecommendation,
   FanovaImportance,
@@ -422,11 +423,16 @@ function missingCellRecommendations(
 export function recommendExperiments(
   runs: AnalysisRun[],
   criterion: AnalysisCriterion,
+  opts?: { surrogate?: ConfigSurrogate; setups?: AnalysisRun[] },
 ): ExperimentRecommendation[] {
   const valid = validRunsFor(runs, criterion)
   if (!valid.length) return []
+  // Acquisition scores the surrogate (passed in pre-fit by the whole-space bundle, else fit here); the
+  // setup-level source keeps the incumbent + candidate scale consistent with that surrogate. Thin-seeds /
+  // missing-cell always use the raw runs — they reason about per-config seed counts + observed cells.
+  const acqSource = opts?.setups ?? valid
   const all = [
-    ...acquisitionRecommendations(valid, criterion),
+    ...acquisitionRecommendations(acqSource, criterion, opts?.surrogate),
     ...thinSeedRecommendations(valid, criterion),
     ...missingCellRecommendations(valid, criterion),
   ].sort((a, b) => b.priority - a.priority)
@@ -668,8 +674,9 @@ const fmtAcq = (x: number): string =>
 function acquisitionRecommendations(
   valid: AnalysisRun[],
   criterion: AnalysisCriterion,
+  prefit?: ConfigSurrogate,
 ): ExperimentRecommendation[] {
-  const surrogate = fitConfigSurrogate(valid, criterion)
+  const surrogate = prefit ?? fitConfigSurrogate(valid, criterion)
   if (!surrogate.trees.length || surrogate.levers.length === 0) return []
   const ys = valid.map((r) => criterionValueOf(r, criterion)!)
   const best = criterion.direction === 'min' ? Math.min(...ys) : Math.max(...ys)
@@ -751,13 +758,16 @@ export function leverCouplings(
   surrogate: ConfigSurrogate,
   runs: AnalysisRun[],
   criterion: AnalysisCriterion,
+  onlyLevers?: string[],
 ): LeverCoupling[] {
   const valid = validRunsFor(runs, criterion)
   const configs = valid.map((r) => r.config)
   if (configs.length < 2) return []
   const totalVar = varianceOf(configs.map((c) => predictConfig(surrogate, c))) || 1
   const grand = meanOf(configs.map((c) => predictConfig(surrogate, c)))
-  const swept = surrogate.levers.map((l) => l.name).filter((n) => observedValues(valid, n).size >= 2)
+  // O(levers²): when the bundle restricts to its high-effect levers, skip the inert rest entirely.
+  let swept = surrogate.levers.map((l) => l.name).filter((n) => observedValues(valid, n).size >= 2)
+  if (onlyLevers) swept = swept.filter((n) => onlyLevers.includes(n))
   const mainEffect = (lever: string): Map<string, number> => {
     const m = new Map<string, number>()
     for (const [k, v] of observedValues(valid, lever)) {
@@ -969,5 +979,76 @@ export function pcaProjection(
     points,
     explainedVariance: [Math.max(0, pc1.value) / trace, Math.max(0, pc2.value) / trace],
     features: d,
+  }
+}
+
+// --- Phase 5: the whole-space bundle ---
+// One pass over EVERY run (seeds folded into setups so the surrogate trains on the denoised, far smaller
+// distinct-config set) producing surrogate + fANOVA + coupling + ablation + PCA + recommendations. Run
+// server-side and cached so the browser renders instead of fits. Coupling is O(levers²), so it is searched
+// only among the high-effect levers — the inert rest can't interact meaningfully anyway.
+const CONFIG_SPACE_TOP_LEVERS = 8
+const CONFIG_SPACE_MIN_TOTAL = 0.03
+
+/**
+ * Fold every seed of a config into ONE synthetic run whose criterion value is the setup's IQM — the
+ * denoised dataset the whole-space surrogate trains on (turns 5000 noisy runs into a few hundred setups).
+ */
+export function aggregateToSetupRuns(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): AnalysisRun[] {
+  const valid = validRunsFor(runs, criterion)
+  const groups = new Map<string, AnalysisRun[]>()
+  for (const r of valid) {
+    const sig = setupSignatureOf(r)
+    const g = groups.get(sig)
+    if (g) g.push(r)
+    else groups.set(sig, [r])
+  }
+  const out: AnalysisRun[] = []
+  for (const group of groups.values()) {
+    const value = iqm(group.map((r) => criterionValueOf(r, criterion)!))
+    const rep = group[0]
+    const setup: AnalysisRun = { ...rep, config: configWithout(rep.config, 'seed'), status: 'completed' }
+    // Store the aggregate where this criterion reads it, so the original criterion still works on setups.
+    if (criterion.key === 'objective') setup.objective = value
+    else if (criterion.key === 'durationMs') setup.durationMs = value
+    else setup.metrics = { ...(rep.metrics ?? {}), [criterion.key]: value }
+    out.push(setup)
+  }
+  return out
+}
+
+export function computeConfigSpaceAnalysis(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+): ConfigSpaceAnalysis | null {
+  const valid = validRunsFor(runs, criterion)
+  if (!valid.length) return null
+  const setups = aggregateToSetupRuns(valid, criterion)
+  const surrogate = fitConfigSurrogate(setups, criterion)
+  const importances = fanovaImportances(surrogate, setups, criterion)
+  const coupledLevers = [...importances]
+    .filter((f) => f.total > CONFIG_SPACE_MIN_TOTAL)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, CONFIG_SPACE_TOP_LEVERS)
+    .map((f) => f.lever)
+  const couplings = leverCouplings(surrogate, setups, criterion, coupledLevers)
+  const ablation = ablationPath(surrogate, setups, criterion) ?? null
+  const pca = pcaProjection(valid, criterion)
+  const recommendations = recommendExperiments(valid, criterion, { surrogate, setups })
+  return {
+    criterion: { key: criterion.key, direction: criterion.direction },
+    runCount: valid.length,
+    setupCount: setups.length,
+    levers: surrogate.levers.map((l) => l.name),
+    surrogate,
+    importances,
+    couplings,
+    coupledLevers,
+    ablation,
+    pca,
+    recommendations,
   }
 }

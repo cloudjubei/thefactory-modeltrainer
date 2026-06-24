@@ -10,6 +10,8 @@ import {
 import type {
   AnalysisCriterion,
   AnalysisRun,
+  AnalyzeConfigSpaceParams,
+  AnalyzeConfigSpaceResult,
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
   AnalyzePaperModelsParams,
@@ -31,6 +33,8 @@ import type {
   ModelTrainerTools,
   ModelTrainerToolsDeps,
   PlannedTrainingItem,
+  ProposeTrainingExperimentsParams,
+  ProposeTrainingExperimentsResult,
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
   RunXaiDigest,
@@ -45,6 +49,7 @@ import type {
   TrainingCampaignParams,
   TrainingCampaignProgress,
   TrainingCampaignResult,
+  TrainingExperimentSuggestion,
   TrainingHypothesis,
   TrainingPaperRecord,
   TrainingRunSummary,
@@ -101,7 +106,7 @@ import {
   validateDecisionTrace,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
-import { criterionValueOf, leverImportances } from './xaiUtils.js'
+import { computeConfigSpaceAnalysis, criterionValueOf, leverImportances } from './xaiUtils.js'
 
 /**
  * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
@@ -699,9 +704,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
-  async function proposeTrainingHypotheses(
-    params: ProposeTrainingHypothesesParams,
-  ): Promise<ProposeTrainingHypothesesResult> {
+  // Shared front half of both proposers: read history + verdicts, ask the LLM, and parse + validate the
+  // returned items. The two proposers diverge only in how they PERSIST the items (hypothesis vs suggestion).
+  async function proposeInferenceItems(
+    params: ProposeTrainingHypothesesParams | ProposeTrainingExperimentsParams,
+  ) {
     const executor = requireInferenceExecutor()
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
@@ -740,11 +747,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
     })
 
+    const items = coerceHypothesisItems(parseStructuredItems(res.text), manifest)
+    return { items, recordType, proposedBy, proposedAt, count }
+  }
+
+  async function proposeTrainingHypotheses(
+    params: ProposeTrainingHypothesesParams,
+  ): Promise<ProposeTrainingHypothesesResult> {
+    const { items, recordType, proposedBy, proposedAt, count } = await proposeInferenceItems(params)
     const hypothesisType = `${recordType}-hypothesis`
     const existing = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
     const seenIds = new Set(existing.map((r) => r.key).filter((k): k is string => !!k))
 
-    const items = coerceHypothesisItems(parseStructuredItems(res.text), manifest)
     const hypotheses: TrainingHypothesis[] = []
     let skippedExisting = 0
     for (const item of items) {
@@ -786,6 +800,57 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       proposed: hypotheses.length,
       skippedExisting,
       hypotheses,
+      proposedBy,
+      proposedAt,
+    }
+  }
+
+  async function proposeTrainingExperiments(
+    params: ProposeTrainingExperimentsParams,
+  ): Promise<ProposeTrainingExperimentsResult> {
+    const { items, recordType, proposedBy, proposedAt, count } = await proposeInferenceItems(params)
+    const suggestionType = `${recordType}-xai-suggestion`
+    const existing = await deps.storage.listRecords({ scope: params.scope, type: suggestionType })
+    const seenIds = new Set(existing.map((r) => r.key).filter((k): k is string => !!k))
+
+    const suggestions: TrainingExperimentSuggestion[] = []
+    let skippedExisting = 0
+    for (const item of items) {
+      if (suggestions.length >= count) break
+      const id = hashTrainingConfig(item.spec as Record<string, unknown>)
+      if (seenIds.has(id)) {
+        skippedExisting += 1
+        continue
+      }
+      seenIds.add(id)
+      const suggestion: TrainingExperimentSuggestion = {
+        id,
+        title: item.title,
+        rationale: item.rationale,
+        spec: item.spec,
+        source: 'llm',
+        proposedBy,
+        proposedAt,
+      }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: suggestionType,
+        key: id,
+        content: suggestion as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(suggestionType, id)
+      suggestions.push(suggestion)
+    }
+    logger?.info('proposed training experiments', {
+      recordType,
+      proposed: suggestions.length,
+      skippedExisting,
+    })
+    return {
+      recordType,
+      proposed: suggestions.length,
+      skippedExisting,
+      suggestions,
       proposedBy,
       proposedAt,
     }
@@ -1048,6 +1113,37 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Map completed-run records to the engine's AnalysisRun shape (shared by the digest + whole-space bundle).
+  function recordsToAnalysisRuns(
+    records: { key: string; content: Record<string, unknown> }[],
+  ): AnalysisRun[] {
+    return records.map((r) => ({
+      key: r.key,
+      config: (r.content.config as Record<string, unknown>) || {},
+      metrics: r.content.metrics as Record<string, number> | undefined,
+      objective: r.content.objective as number,
+      durationMs: r.content.durationMs as number | undefined,
+      seed: r.content.seed as number | undefined,
+      dataset: r.content.dataset as AnalysisRun['dataset'],
+      status: 'completed',
+    }))
+  }
+
+  async function analyzeConfigSpace(
+    params: AnalyzeConfigSpaceParams,
+  ): Promise<AnalyzeConfigSpaceResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const criterion: AnalysisCriterion = {
+      key: params.criterionKey ?? 'objective',
+      direction: params.criterionDir ?? manifest.objective.direction,
+    }
+    const records = await listCompletedRuns(params.scope, recordType)
+    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion)
+    return { recordType, criterion, analysis }
+  }
+
   // Build ONE run's structured deterministic xAI digest — its decisions, attribution + sanity, reward
   // breakdown, latent probe, the sibling decision-diff, and its standing among all completed runs. Shared by
   // the LLM narrative (xaiNarrate) and the agent-facing getRunXAI tool, so the facts live in ONE place.
@@ -1063,16 +1159,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (!focus) throw new Error(`run "${runKey}" is not a completed run of this project`)
     const focusConfig = (focus.content.config as Record<string, unknown>) || {}
 
-    const runs: AnalysisRun[] = records.map((r) => ({
-      key: r.key,
-      config: (r.content.config as Record<string, unknown>) || {},
-      metrics: r.content.metrics as Record<string, number> | undefined,
-      objective: r.content.objective as number,
-      durationMs: r.content.durationMs as number | undefined,
-      seed: r.content.seed as number | undefined,
-      dataset: r.content.dataset as AnalysisRun['dataset'],
-      status: 'completed',
-    }))
+    const runs = recordsToAnalysisRuns(records)
     const ranked = runs
       .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
       .filter((x): x is { key: string; value: number } => x.value !== undefined)
@@ -1608,6 +1695,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     evaluateTrainingRuns,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
+    proposeTrainingExperiments,
     analyzePaperFromUrl,
     suggestPaperHypotheses,
     scanProjectModels,
@@ -1615,6 +1703,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     xaiNarrate,
     getRunData,
     getRunXAI,
+    analyzeConfigSpace,
     migrateTrainingRuns,
   }
 }

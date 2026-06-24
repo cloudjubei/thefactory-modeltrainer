@@ -85,6 +85,23 @@ let xaiCriterionDir = null
 let xaiFocusKey = null
 let xaiLever = null
 let xaiRecsCache = []
+// Canonical config keys of suggested batches already launched this session (queued/running). Keyed by
+// the spec's fixed config so a re-render keeps the button locked; the rec itself disappears once its runs
+// land (the config becomes observed), so no explicit clear is needed beyond the per-project reset.
+let xaiLaunchedSpecs = new Set()
+// LLM-proposed experiment suggestions ({recordType}-xai-suggestion records), surfaced in the recommender.
+let xaiSuggestionsCache = []
+// Busy flag for the xAI tab's "Propose with AI" (the propose-experiments activity), kept independent of
+// the Hypotheses-tab proposer.
+let proposingExperiments = false
+// Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
+// heavy surrogate/fANOVA/coupling/PCA work runs server-side; the cards render from this instead of fitting
+// a forest in the browser at 5000+ runs. Falls back to live compute only for small spaces.
+let xaiConfigSpaceCache = new Map()
+// Below this run count the whole-space bundle is cheap enough to compute live in the browser; above it the
+// viewer requires the server-side cache (a "Refresh analysis" prompt) rather than freezing the tab.
+const XAI_LIVE_COMPUTE_MAX_RUNS = 600
+let analyzingConfigSpace = false
 // Per-run LLM narrative records, keyed by run key → {narrative, runKey, runCount, criterionKey, narratedBy, narratedAt}.
 const xaiNarrativeCache = new Map()
 let narrating = false
@@ -198,6 +215,13 @@ let datasetsCache = []
 // Approach/paper library records + the active rolled-up-verdict filter ('all' | a paper verdict).
 let papersCache = []
 let paperVerdictFilter = 'all'
+// How the Papers list is sorted: 'status' (rolled-up verdict, then creation date — the default), 'name',
+// or 'year'. User-picked via the sort dropdown; the list only re-sorts on a full render, not on each update.
+let paperSortKey = 'status'
+// Per-paper LLM ops in flight ('analyze-paper-models:<id>' / 'suggest-paper-hypotheses:<id>'), set at click
+// (covering the queued wait) and cleared when the activity settles — drives the per-button spinner so the
+// user can keep launching on OTHER papers while one is queued/running.
+const pendingPaperOps = new Set()
 // Which verdict section is expanded (accordion — only one at a time). `undefined` = not yet chosen
 // (render default-opens the first non-empty); `null` = the user collapsed them all. Plus the paper-scoped
 // add/link sub-form state (`null` | { paperId, mode: 'add' | 'link' }).
@@ -339,7 +363,9 @@ function spinnerHtml() {
 }
 let toastTimer = null
 // A transient in-app popup (window.alert is blocked in the embedding iframe sandbox).
-function showToast(message) {
+// Show a transient toast. When `onClick` is given the toast is clickable (and lingers a little longer) —
+// clicking runs it then dismisses, so an "activity done" toast can take the user straight to the result.
+function showToast(message, onClick) {
   let el = byId('app-toast')
   if (!el) {
     el = document.createElement('div')
@@ -348,9 +374,21 @@ function showToast(message) {
     document.body.appendChild(el)
   }
   el.textContent = message
+  el.classList.toggle('is-clickable', !!onClick)
+  el.onclick = onClick
+    ? () => {
+        el.classList.remove('is-visible')
+        if (toastTimer) clearTimeout(toastTimer)
+        try {
+          onClick()
+        } catch {
+          // a navigation failure must not throw out of the toast handler
+        }
+      }
+    : null
   el.classList.add('is-visible')
   if (toastTimer) clearTimeout(toastTimer)
-  toastTimer = setTimeout(() => el.classList.remove('is-visible'), 3500)
+  toastTimer = setTimeout(() => el.classList.remove('is-visible'), onClick ? 6000 : 3500)
 }
 // The app-wide delete/trash icon (mirrors thefactory-ui's IconDelete) for icon-only
 // delete buttons — used instead of an emoji so the viewer matches the rest of the app.
@@ -383,6 +421,14 @@ function iconModelSvg(size) {
   return (
     `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/></svg>'
+  )
+}
+// A circle-slash glyph — the "not wanted" icon (hide without deleting). Used on the Papers card.
+function iconBanSvg(size) {
+  const s = size || 14
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>'
   )
 }
 function iconChatSvg() {
@@ -1522,6 +1568,11 @@ function resetDashboardState() {
   hypothesesCache = []
   proposalSummary = null
   xaiNarrativeCache.clear()
+  xaiLaunchedSpecs.clear()
+  xaiSuggestionsCache = []
+  proposingExperiments = false
+  xaiConfigSpaceCache = new Map()
+  analyzingConfigSpace = false
   narrating = false
   selectedRunKey = null
   liveActivities = new Map()
@@ -1849,6 +1900,12 @@ function applyQuickDispatchState(item, busy) {
     proposing = busy
     renderProposeControls()
     if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'propose-experiments') {
+    proposingExperiments = busy
+    if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'config-space-analyze') {
+    analyzingConfigSpace = busy
+    if (activeTabId === 'xai') renderXai()
   } else if (item.activityType === 'xai-narrate') {
     narrating = busy
     if (activeTabId === 'xai') renderXai()
@@ -1860,6 +1917,16 @@ function applyQuickDispatchState(item, busy) {
       else evaluatingKeys.delete(key)
     }
     if (selectedRunKey && keys.includes(selectedRunKey)) renderRunDetail(selectedRunKey)
+  } else if (
+    item.activityType === 'analyze-paper-models' ||
+    item.activityType === 'suggest-paper-hypotheses'
+  ) {
+    const pid = item.params && item.params.paperId
+    if (!pid) return
+    const key = paperOpKey(item.activityType, pid)
+    if (busy) pendingPaperOps.add(key)
+    else pendingPaperOps.delete(key)
+    if (activeTabId === 'papers') updatePaperCard(pid)
   }
 }
 async function refreshAfterQuickDispatch(item, act) {
@@ -1870,12 +1937,34 @@ async function refreshAfterQuickDispatch(item, act) {
     setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Proposing'), true)
     await renderHypotheses()
     if (activeTabId === 'xai') renderXai()
+  } else if (item.activityType === 'propose-experiments') {
+    if (act && act.status === 'completed') await loadXaiSuggestions()
+    if (activeTabId === 'xai') renderXai()
+    setStatusLine('xai-status', quickActivityFailureText(act, 'Proposing'), true)
+  } else if (item.activityType === 'config-space-analyze') {
+    if (act && act.status === 'completed') await loadXaiConfigSpace()
+    if (activeTabId === 'xai') renderXai()
+    setStatusLine('xai-status', quickActivityFailureText(act, 'Analysing'), true)
   } else if (item.activityType === 'xai-narrate') {
     await loadXaiNarrative(item.params && item.params.runKey)
     if (activeTabId === 'xai') renderXai()
     setStatusLine('xai-status', quickActivityFailureText(act, 'Narrating'), true)
   } else if (item.activityType === 'evaluate') {
     await renderRuns()
+  } else if (item.activityType === 'analyze-paper-models') {
+    const pid = item.params && item.params.paperId
+    if (act && act.status === 'completed' && pid) await loadPaperModelsResult(pid)
+    else setStatusLine('papers-status', quickActivityFailureText(act, 'Find models'), true)
+  } else if (item.activityType === 'suggest-paper-hypotheses') {
+    if (act && act.status === 'completed') {
+      papersCache = await readPapers()
+      hypothesesCache = await readHypotheses()
+      await refreshHypothesisVerdicts(hypothesesCache)
+      const pid = item.params && item.params.paperId
+      showToast('Suggested + linked hypotheses — view', pid ? () => focusPaper(pid) : undefined)
+    } else {
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
+    }
   }
 }
 // The auto-eval intent survives reloads as a hidden marker record in the queue:
@@ -4553,28 +4642,41 @@ function renderXai() {
   }
   const runs = xaiRuns()
   const criterion = currentXaiCriterion()
+  const bundle = xaiResolveBundle(criterion)
   setHtml(
     body,
     [
-      xaiHeaderHtml(criterion, runs.length),
+      xaiHeaderHtml(criterion, runs.length, bundle),
       xaiNarrativeHtml(runs, criterion),
       xaiFocusKey ? xaiModelInternalsHtml(xaiFocusKey) : '',
       xaiConfigEffectsHtml(runs, criterion),
-      xaiSurrogateHtml(runs, criterion),
-      xaiPcaHtml(runs, criterion),
-      xaiRecommenderHtml(runs, criterion),
+      xaiSurrogateHtml(runs, criterion, bundle),
+      xaiPcaHtml(runs, criterion, bundle),
+      xaiRecommenderHtml(runs, criterion, bundle),
     ].join(''),
   )
 }
-function xaiHeaderHtml(criterion, nRuns) {
+function xaiHeaderHtml(criterion, nRuns, bundle) {
   const opts = xaiCriteria()
     .map(
       (c) =>
         `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
     )
     .join('')
+  // Whole-space status: how fresh the cached bundle is (or that it's live / needs computing), plus a refresh.
+  let status
+  if (bundle) {
+    const stale = nRuns - (bundle.cachedRunCount || 0)
+    status = `whole-space map cached on ${bundle.analysis.setupCount} setups / ${bundle.cachedRunCount} runs${stale > 0 ? ` · <strong>${stale} new since</strong>` : ' · up to date'}`
+  } else if (nRuns > XAI_LIVE_COMPUTE_MAX_RUNS) {
+    status = `whole-space map not computed yet — refresh to analyse all ${nRuns} runs server-side`
+  } else {
+    status = `whole-space map computed live (${nRuns} runs)`
+  }
+  const refreshDisabled = analyzingConfigSpace || !embedded() ? ' disabled' : ''
+  const refreshBtn = `<button type="button" class="ghost-btn" data-xai-refresh-analysis${refreshDisabled} title="Recompute the whole-space surrogate/fANOVA/coupling/PCA over EVERY run, server-side">${analyzingConfigSpace ? `${spinnerHtml()} Analysing…` : 'Refresh analysis'}</button>`
   return `<div class="card">
-    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2></div>
+    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— ${nRuns} runs · deterministic, non-LLM</span></h2>${refreshBtn}</div>
     <p class="badges-row">
       <label class="card-sub">Criterion <select id="xai-criterion">${opts}</select></label>
       <label class="card-sub">Better when <select id="xai-direction">
@@ -4582,6 +4684,7 @@ function xaiHeaderHtml(criterion, nRuns) {
         <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
       </select></label>
     </p>
+    <p class="card-sub">${status}</p>
   </div>`
 }
 // The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
@@ -4799,11 +4902,29 @@ function xaiOfatContrastHtml(c) {
 // Phase 3: a seeded random-forest surrogate over (config → criterion) drives a global fANOVA importance,
 // the ablation TREE (worst→best, one change at a time), and a 2-lever interaction heatmap — the
 // across-the-whole-space view (predicts unobserved configs, so it fills the OFAT gaps). Deterministic.
-function xaiSurrogateHtml(runs, criterion) {
-  const surrogate = window.Xai.fitConfigSurrogate(runs, criterion)
-  if (!surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
-  const fanova = window.Xai.fanovaImportances(surrogate, runs, criterion)
-  const path = window.Xai.ablationPath(surrogate, runs, criterion)
+// A placeholder shown when the space is too large to analyse live and no server-side bundle is cached yet.
+function xaiNeedsAnalysisHtml(title) {
+  return `<div class="card"><div class="card-head card-head-row"><h3>${escapeHtml(title)}</h3></div>
+    <p class="card-sub">Too many runs to analyse in the browser — click <strong>Refresh analysis</strong> above to compute the whole-space map server-side.</p></div>`
+}
+function xaiSurrogateHtml(runs, criterion, bundle) {
+  let surrogate, fanova, path, couplings
+  if (bundle) {
+    // Render from the server-cached whole-space bundle — no forest fit in the browser.
+    surrogate = bundle.analysis.surrogate
+    fanova = bundle.analysis.importances
+    path = bundle.analysis.ablation
+    couplings = bundle.analysis.couplings
+  } else if (runs.length > XAI_LIVE_COMPUTE_MAX_RUNS) {
+    return xaiNeedsAnalysisHtml('Surrogate model')
+  } else {
+    surrogate = window.Xai.fitConfigSurrogate(runs, criterion)
+    if (!surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
+    fanova = window.Xai.fanovaImportances(surrogate, runs, criterion)
+    path = window.Xai.ablationPath(surrogate, runs, criterion)
+    couplings = window.Xai.leverCouplings(surrogate, runs, criterion)
+  }
+  if (!surrogate || !surrogate.trees.length) return ''
   const leverNames = surrogate.levers.map((l) => l.name)
   const ranked = fanova.map((f) => f.lever)
   if (!xaiInterA || !leverNames.includes(xaiInterA)) xaiInterA = ranked[0] || leverNames[0] || null
@@ -4814,7 +4935,6 @@ function xaiSurrogateHtml(runs, criterion) {
     xaiInterA && xaiInterB
       ? window.Xai.interactionGrid(surrogate, runs, criterion, xaiInterA, xaiInterB)
       : null
-  const couplings = window.Xai.leverCouplings(surrogate, runs, criterion)
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · coupling · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
     <div class="card-scroll">
@@ -4841,10 +4961,15 @@ function fanovaEffectTag(f) {
     return {
       label: '↔ interactive',
       cls: 'fanova-interactive',
-      title: 'Most of its effect comes through interactions — tune it together with its partner (see Coupling).',
+      title:
+        'Most of its effect comes through interactions — tune it together with its partner (see Coupling).',
     }
   }
-  return { label: '→ direct', cls: '', title: 'Mostly a direct (main) effect, independent of the other levers.' }
+  return {
+    label: '→ direct',
+    cls: '',
+    title: 'Mostly a direct (main) effect, independent of the other levers.',
+  }
 }
 function xaiFanovaHtml(fanova) {
   if (!fanova.length) return ''
@@ -4880,9 +5005,16 @@ function xaiCouplingHtml(couplings) {
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
-function xaiPcaHtml(runs, criterion) {
-  if (!window.Xai.pcaProjection) return ''
-  const pca = window.Xai.pcaProjection(runs, criterion)
+function xaiPcaHtml(runs, criterion, bundle) {
+  let pca
+  if (bundle) {
+    pca = bundle.analysis.pca
+  } else if (runs.length > XAI_LIVE_COMPUTE_MAX_RUNS) {
+    return '' // the surrogate card already shows the "Refresh analysis" prompt for large spaces
+  } else {
+    if (!window.Xai.pcaProjection) return ''
+    pca = window.Xai.pcaProjection(runs, criterion)
+  }
   if (!pca || pca.points.length < 3) return ''
   const values = pca.points.map((p) => p.value)
   const lo = Math.min(...values)
@@ -4980,50 +5112,117 @@ function xaiInteractionHtml(grid, leverNames, runs) {
   return `${picker}<div class="compare-table-wrap"><table class="kv-table report-table xai-heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
     <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value. Click a cell with runs to see them.</p>`
 }
-function xaiRecommenderHtml(runs, criterion) {
-  xaiRecsCache = window.Xai.recommendExperiments(runs, criterion)
+// The "Propose with AI" button — shared by the empty + populated recommender. Drives the
+// propose-experiments activity; results land as runnable ✦ AI suggestions in THIS list.
+function xaiProposeButtonHtml() {
+  const disabled = proposingExperiments || !embedded() ? ' disabled' : ''
+  return `<button type="button" class="ghost-btn" data-xai-propose${disabled} title="Ask the AI to propose NEW experiments beyond the explored grid — they appear here as runnable suggestions">${proposingExperiments ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button>`
+}
+// How many runs an LLM suggestion's spec expands to (sweep cartesian × seeds), for the run-count chip.
+function xaiSpecRunCount(spec) {
+  const s = spec || {}
+  const seeds = Array.isArray(s.seeds) && s.seeds.length ? s.seeds.length : 1
+  let combos = 1
+  for (const v of Object.values(s.sweep || {})) if (Array.isArray(v) && v.length) combos *= v.length
+  return combos * seeds
+}
+function xaiSuggestionToRec(sug) {
+  return {
+    kind: 'llm',
+    reason: sug.rationale ? `${sug.title} — ${sug.rationale}` : sug.title,
+    runCount: xaiSpecRunCount(sug.spec),
+    spec: sug.spec,
+    priority: 100,
+  }
+}
+// Merge LLM suggestions (first) with the deterministic recommender, deduped by spec so an AI pick that
+// coincides with a grid gap shows once. Prefer the server-cached bundle's recommendations (computed off the
+// whole-space surrogate) over a live recompute; skip the live recompute entirely for large uncached spaces.
+function xaiBuildRecs(runs, criterion, bundle) {
+  const deterministic = bundle
+    ? bundle.analysis.recommendations
+    : runs.length > XAI_LIVE_COMPUTE_MAX_RUNS
+      ? []
+      : window.Xai.recommendExperiments(runs, criterion)
+  const merged = []
+  const seen = new Set()
+  for (const r of [...xaiSuggestionsCache.map(xaiSuggestionToRec), ...deterministic]) {
+    const k = xaiSpecKey(r.spec)
+    if (seen.has(k)) continue
+    seen.add(k)
+    merged.push(r)
+  }
+  return merged
+}
+function xaiRecommenderHtml(runs, criterion, bundle) {
+  xaiRecsCache = xaiBuildRecs(runs, criterion, bundle)
   if (!xaiRecsCache.length) {
     return `<div class="card" id="xai-recommender"><div class="card-head card-head-row"><h3>Suggested experiments</h3>
-      <button type="button" class="ghost-btn" data-xai-propose${proposing || !embedded() ? ' disabled' : ''} title="Ask the AI to propose NEW experiments from the xAI analysis (lands in Hypotheses)">${proposing ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button></div>
+      ${xaiProposeButtonHtml()}</div>
       <p class="card-sub">No deterministic gaps — the grids you've explored are complete and well-seeded. 🎉 Ask the AI to propose experiments beyond the explored grid.</p></div>`
   }
   const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
   const climbs = xaiRecsCache.filter((r) => r.kind === 'acquisition').length
+  const llms = xaiRecsCache.filter((r) => r.kind === 'llm').length
   const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
   return `<div class="card" id="xai-recommender">
     <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} suggestions · ${total} runs</span></h3>
       <div class="head-actions">
         <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
-        <button type="button" class="ghost-btn" data-xai-propose${proposing || !embedded() ? ' disabled' : ''} title="Ask the AI to propose NEW experiments from the xAI analysis (lands in Hypotheses)">${proposing ? `${spinnerHtml()} Proposing…` : 'Propose with AI'}</button>
+        ${xaiProposeButtonHtml()}
         <button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>
       </div></div>
-    <p class="card-sub">${climbs ? `<strong>▲ climb</strong> picks are the surrogate's highest Expected-Improvement unrun configs — the next steps toward the optimum. ` : ''}<strong>seeds</strong> firm up a thin top setup; <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells.</p>
+    <p class="card-sub">${climbs ? `<strong>▲ climb</strong> picks are the surrogate's highest Expected-Improvement unrun configs — the next steps toward the optimum. ` : ''}${llms ? `<strong>✦ AI</strong> picks are model-proposed experiments beyond the grid. ` : ''}<strong>seeds</strong> firm up a thin top setup; <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells.</p>
     <div class="card-scroll">${cards}</div></div>`
 }
 // Friendly badge labels for each recommendation kind (the raw kind is kept as the badge's tooltip).
 const REC_KIND_LABELS = {
   acquisition: '▲ climb',
+  llm: '✦ AI',
   'thin-seeds': 'seeds',
   'missing-cell': 'gap',
   interaction: 'pair',
 }
 function xaiRecCardHtml(r, i) {
   const label = REC_KIND_LABELS[r.kind] || r.kind
-  const cls = r.kind === 'acquisition' ? 'badge xai-rec-climb' : 'badge'
+  const cls =
+    r.kind === 'acquisition'
+      ? 'badge xai-rec-climb'
+      : r.kind === 'llm'
+        ? 'badge xai-rec-llm'
+        : 'badge'
+  const launched = xaiLaunchedSpecs.has(xaiSpecKey(r.spec))
+  const action = launched
+    ? `<button type="button" class="ghost-btn" data-xai-view-activity title="This batch is queued or running">View in Activity →</button>`
+    : `<button type="button" class="ghost-btn" data-xai-run-rec="${i}">Run batch</button>`
   return `<div class="xai-rec badges-row">
     <span class="${cls}" title="${escapeHtml(r.kind)}">${escapeHtml(label)}</span>
     <span>${escapeHtml(r.reason)}</span>
     <span class="card-sub">${r.runCount} run${r.runCount === 1 ? '' : 's'}</span>
-    <button type="button" class="ghost-btn" data-xai-run-rec="${i}">Run batch</button>
+    ${action}
   </div>`
+}
+// A content key for a spec covering BOTH a single cell (fixed) and an LLM sweep, so the launch lock + the
+// merge dedup distinguish sweep suggestions from each other and from grid cells.
+function xaiSpecKey(spec) {
+  const s = spec || {}
+  return `${window.Xai.canonicalConfigString(s.fixed || {})}#${window.Xai.canonicalConfigString(s.sweep || {})}`
 }
 async function xaiLaunchBatch(specs, label) {
   const input = byId('xai-batch-concurrency')
   const concurrency = Math.max(1, Math.floor(Number(input && input.value)) || savedConcurrency())
+  // Skip any batch already launched this session (its button is locked) so Run-all never double-fires.
+  const pending = specs.filter((spec) => !xaiLaunchedSpecs.has(xaiSpecKey(spec)))
+  if (!pending.length) {
+    showTab('activity')
+    return
+  }
   try {
-    for (const spec of specs) {
+    for (const spec of pending) {
       await startOrEnqueue('train', trainerComputeParams({ spec, concurrency }), label)
+      xaiLaunchedSpecs.add(xaiSpecKey(spec)) // lock its button + Run-all until its runs land
     }
+    if (activeTabId === 'xai') renderXai() // reflect the now-locked buttons
     showTab('activity')
   } catch {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
@@ -5036,8 +5235,40 @@ async function loadXaiNarrative(runKey) {
   if (recs && recs[0] && recs[0].content) xaiNarrativeCache.set(runKey, recs[0].content)
   else xaiNarrativeCache.delete(runKey)
 }
+// Load the LLM-proposed experiment suggestions so the recommender can surface them as runnable batches.
+async function loadXaiSuggestions() {
+  if (!manifest) {
+    xaiSuggestionsCache = []
+    return
+  }
+  const recs = await queryRecords(`${manifest.recordType}-xai-suggestion`)
+  xaiSuggestionsCache = (recs || [])
+    .map((r) => r.content)
+    .filter((c) => c && c.spec && (c.spec.fixed || c.spec.sweep))
+}
+// Load the cached whole-space analysis bundles (one per criterion) into the cache, keyed by criterion.
+async function loadXaiConfigSpace() {
+  xaiConfigSpaceCache = new Map()
+  if (!manifest) return
+  const recs = await queryRecords(`${manifest.recordType}-config-space`)
+  for (const r of recs || []) {
+    const c = r.content
+    if (c && c.criterion && c.criterion.key) xaiConfigSpaceCache.set(c.criterion.key, c)
+  }
+}
+// The server-cached whole-space bundle for a criterion (null if none computed yet). `cachedRunCount` lets
+// the cards flag staleness against the current run count.
+function xaiResolveBundle(criterion) {
+  const cached = xaiConfigSpaceCache.get(criterion.key)
+  if (cached && cached.analysis) {
+    return { analysis: cached.analysis, cachedRunCount: cached.runCount || 0, generatedAt: cached.generatedAt }
+  }
+  return null
+}
 async function refreshXai() {
   if (xaiFocusKey) await loadXaiNarrative(xaiFocusKey)
+  await loadXaiSuggestions()
+  await loadXaiConfigSpace()
   renderXai()
 }
 async function onXaiNarrateClick() {
@@ -5098,21 +5329,42 @@ async function onXaiProposeClick() {
     setStatusLine('xai-status', 'Open inside the Overseer to propose experiments.', false)
     return
   }
-  if (proposing) {
-    showTab('hypotheses')
+  if (proposingExperiments) {
+    showTab('activity')
     return
   }
   setStatusLine('xai-status', '')
   try {
+    // Lands the proposals as runnable suggestions in THIS tab's recommender (not as hypotheses); the
+    // observe loop reloads them on settle. Stay on the xAI tab.
     const result = await startOrEnqueue(
-      'propose',
+      'propose-experiments',
       trainerActivityParams({ instructions: xaiProposeInstructions() }),
       'Propose experiments',
     )
-    showTab('hypotheses')
-    if (result.queued) setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
+    if (result.queued) setStatusLine('xai-status', queuedStatusText(result.ahead))
+    else setStatusLine('xai-status', 'Proposing experiments — they’ll appear below as suggestions.')
   } catch {
     setStatusLine('xai-status', 'Could not start proposing — please try again.', true)
+  }
+}
+async function onXaiRefreshAnalysisClick() {
+  if (!embedded()) {
+    setStatusLine('xai-status', 'Open inside the Overseer to compute the whole-space analysis.', false)
+    return
+  }
+  if (analyzingConfigSpace) return
+  const criterion = currentXaiCriterion()
+  setStatusLine('xai-status', '')
+  try {
+    const result = await startOrEnqueue(
+      'config-space-analyze',
+      trainerActivityParams({ criterionKey: criterion.key, criterionDir: criterion.direction }),
+      'Analyse config space',
+    )
+    if (result.queued) setStatusLine('xai-status', queuedStatusText(result.ahead))
+  } catch {
+    setStatusLine('xai-status', 'Could not start the analysis — please try again.', true)
   }
 }
 // Open the xAI tab focused on a run's internals (the run-detail entry point).
@@ -5811,6 +6063,10 @@ function setupRuns() {
         onXaiProposeClick()
         return
       }
+      if (event.target.closest('[data-xai-refresh-analysis]')) {
+        onXaiRefreshAnalysisClick()
+        return
+      }
       if (event.target.closest('[data-xai-clear-focus]')) {
         xaiFocusKey = null
         renderXai()
@@ -5823,6 +6079,10 @@ function setupRuns() {
           recs.classList.add('xai-flash')
           setTimeout(() => recs.classList.remove('xai-flash'), 1600)
         }
+        return
+      }
+      if (event.target.closest('[data-xai-view-activity]')) {
+        showTab('activity')
         return
       }
       const recBtn = event.target.closest('[data-xai-run-rec]')
@@ -5998,8 +6258,7 @@ function buildXyChart(opts) {
       groupColorMap(points.filter((p) => p.group !== undefined).map((p) => p.group))
     : null
   const pointColor = (p) =>
-    p.color ||
-    (groupColors && p.group !== undefined ? groupColors.get(String(p.group)) || '' : '')
+    p.color || (groupColors && p.group !== undefined ? groupColors.get(String(p.group)) || '' : '')
   if (opts.line) {
     if (groupColors) {
       for (const [label, color] of groupColors) {
@@ -7712,16 +7971,21 @@ function paperCardHtml(paper) {
   const id = escapeHtml(paper.id)
   const linkedCount = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds.length : 0
   const open = paperExpanded.has(paper.id) ? ' open' : ''
+  const suggestPending = paperOpPending('suggest-paper-hypotheses', paper.id)
+  const findPending = paperOpPending('analyze-paper-models', paper.id)
   // Icon-only action buttons (verb + hypothesis glyph), shown collapsed AND expanded; tooltips on hover.
+  // A per-paper LLM op (suggest / find-models) shows a spinner + disables ITS button until it settles — the
+  // user can still launch the other op, or the same op on other papers (those queue past the running limit).
   const actions =
-    `<button type="button" class="card-btn combo" data-action="suggest-hyp" data-id="${id}"${helpAttr('Suggest hypotheses — an LLM matches existing ones to this paper and proposes new ones, all auto-linked.')}>${iconLightbulbSvg(13)}${iconHypothesisSvg(14)}</button>` +
+    `<button type="button" class="card-btn combo" data-action="suggest-hyp" data-id="${id}"${suggestPending ? ' disabled' : ''}${helpAttr('Suggest hypotheses — an LLM matches existing ones to this paper and proposes new ones, all auto-linked.')}>${suggestPending ? spinnerHtml() : iconLightbulbSvg(13) + iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="add-hyp" data-id="${id}"${helpAttr('Add a hypothesis manually and link it to this paper.')}>${iconPlusSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="link-existing" data-id="${id}"${helpAttr('Link an existing hypothesis to this paper.')}>${iconLinkSvg(13)}${iconHypothesisSvg(14)}</button>` +
-    `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${helpAttr('Find models — an LLM links this paper to the catalog models it introduces/improves and proposes any missing ones to add.')}>${iconModelSvg(14)}</button>` +
+    `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${findPending ? ' disabled' : ''}${helpAttr('Find models — an LLM links this paper to the catalog models it introduces/improves and proposes any missing ones to add.')}>${findPending ? spinnerHtml() : iconModelSvg(14)}</button>` +
     (linkedCount
       ? `<button type="button" class="card-btn" data-action="replicate" data-id="${id}"${helpAttr('Replicate — launch every linked hypothesis’s spec.')}>${iconRunSvg(15)}</button>`
       : '') +
     `<button type="button" class="card-btn" data-action="edit" data-id="${id}"${helpAttr('Edit this paper.')}>${iconEditSvg(15)}</button>` +
+    `<button type="button" class="card-btn" data-action="toggle-dismiss" data-id="${id}"${helpAttr(paper.dismissed ? 'Restore — show this paper in the list again.' : 'Not wanted — hide this paper from the list (without deleting it).')}>${iconBanSvg(14)}</button>` +
     `<button type="button" class="card-btn card-btn-danger" data-action="delete" data-id="${id}"${helpAttr('Delete this paper.')}>${iconDeleteSvg()}</button>`
   return `<details class="paper-card" data-id="${id}"${open}>
     <summary class="paper-summary">
@@ -7740,17 +8004,52 @@ function paperCardHtml(paper) {
     </div>
   </details>`
 }
+// Order papers for a FULL render. Default 'status' = rolled-up verdict bucket, then newest-first within it
+// (stable across an update, so a changed card never jumps); 'name' / 'year' are explicit user picks.
+const PAPER_VERDICT_SORT = { 'holds-up': 0, replicating: 1, untested: 2, fluff: 3 }
+function sortPapers(list) {
+  const arr = [...list]
+  if (paperSortKey === 'name') {
+    arr.sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')))
+  } else if (paperSortKey === 'year') {
+    arr.sort(
+      (a, b) =>
+        (Number(b.year) || 0) - (Number(a.year) || 0) ||
+        String(a.title || '').localeCompare(String(b.title || '')),
+    )
+  } else {
+    arr.sort((a, b) => {
+      const va = PAPER_VERDICT_SORT[paperVerdict(a)] ?? 9
+      const vb = PAPER_VERDICT_SORT[paperVerdict(b)] ?? 9
+      if (va !== vb) return va - vb
+      return String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+    })
+  }
+  return arr
+}
 function paperFilterBarHtml() {
   const opts = ['all', 'untested', 'holds-up', 'fluff']
+  const active = papersCache.filter((p) => !p.dismissed)
   const btns = opts
     .map((s) => {
       const label = s === 'all' ? 'all' : PAPER_VERDICT_LABEL[s]
-      const count =
-        s === 'all' ? papersCache.length : papersCache.filter((p) => paperVerdict(p) === s).length
+      const count = s === 'all' ? active.length : active.filter((p) => paperVerdict(p) === s).length
       return `<button type="button" class="paper-filter-btn${paperVerdictFilter === s ? ' is-active' : ''}" data-verdict="${escapeHtml(s)}">${escapeHtml(label)} (${count})</button>`
     })
     .join('')
-  return `<div class="paper-filter">${btns}</div>`
+  const dismissedCount = papersCache.filter((p) => p.dismissed).length
+  const notWanted = dismissedCount
+    ? `<button type="button" class="paper-filter-btn${paperVerdictFilter === 'dismissed' ? ' is-active' : ''}" data-verdict="dismissed">not wanted (${dismissedCount})</button>`
+    : ''
+  const sortOpts = [
+    ['status', 'Status'],
+    ['name', 'Name'],
+    ['year', 'Year'],
+  ]
+    .map(([v, l]) => `<option value="${v}"${paperSortKey === v ? ' selected' : ''}>${l}</option>`)
+    .join('')
+  const sort = `<label class="paper-sort">Sort <select id="paper-sort-select" aria-label="Sort papers">${sortOpts}</select></label>`
+  return `<div class="paper-filter">${btns}${notWanted}${sort}</div>`
 }
 // Starter approaches the manifest ships (parallel to presets); imported into the registry once by id.
 function manifestPaperSeeds() {
@@ -7819,20 +8118,23 @@ async function renderPapers() {
     )
     return
   }
+  // "not wanted" papers are hidden from every verdict view except the dedicated 'dismissed' filter.
   const shown =
-    paperVerdictFilter === 'all'
-      ? papersCache
-      : papersCache.filter((p) => paperVerdict(p) === paperVerdictFilter)
-  const sorted = [...shown].sort((a, b) =>
-    String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
-  )
+    paperVerdictFilter === 'dismissed'
+      ? papersCache.filter((p) => p.dismissed)
+      : papersCache.filter(
+          (p) =>
+            !p.dismissed &&
+            (paperVerdictFilter === 'all' || paperVerdict(p) === paperVerdictFilter),
+        )
+  const sorted = sortPapers(shown)
   setHtml(
     body,
     seedBanner +
       paperFilterBarHtml() +
       (sorted.length
         ? sorted.map(paperCardHtml).join('')
-        : '<div class="empty-hint">No approaches match this verdict.</div>'),
+        : '<div class="empty-hint">No approaches match this view.</div>'),
   )
 }
 // New entries open as a CHOOSER: just the link + two paths. "Manual Entry" reveals the full form;
@@ -8048,39 +8350,111 @@ async function replicatePaper(id) {
 }
 // Suggest hypotheses: an LLM matches existing hypotheses to the paper + proposes new ones (all
 // auto-linked). Triggers the backend `suggest-paper-hypotheses` activity, then re-renders Papers.
-async function onSuggestPaperHypotheses(id, button) {
+// A per-paper LLM op keyed for the in-flight Set, so its button can spin until the activity settles.
+function paperOpKey(activityType, paperId) {
+  return activityType + ':' + paperId
+}
+function paperOpPending(activityType, paperId) {
+  return pendingPaperOps.has(paperOpKey(activityType, paperId))
+}
+// Launch a per-paper LLM op WITHOUT blocking: mark it pending now (covers the queued wait), start/enqueue,
+// and let the shared observe lifecycle (applyQuickDispatchState / refreshAfterQuickDispatch) clear it +
+// update the card on settle. The user can keep launching on other papers freely (they queue past the limit).
+async function launchPaperOp(activityType, paperId, label) {
   if (!embedded()) {
-    setStatusLine('papers-status', 'Open inside the Overseer to suggest hypotheses.', true)
+    setStatusLine('papers-status', 'Open inside the Overseer to run this.', true)
     return
   }
+  if (paperOpPending(activityType, paperId)) return
   const epoch = projectEpoch
   setStatusLine('papers-status', '')
-  if (button) button.disabled = true
+  pendingPaperOps.add(paperOpKey(activityType, paperId))
+  if (activeTabId === 'papers') updatePaperCard(paperId)
   try {
-    const result = await startOrEnqueue(
-      'suggest-paper-hypotheses',
-      trainerActivityParams({ paperId: id }),
-      'Suggest hypotheses',
-    )
-    if (result.queued) {
-      if (epoch === projectEpoch) setStatusLine('papers-status', queuedStatusText(result.ahead))
-      return
-    }
-    const act = await observeQuickActivity(result.activityId)
-    if (epoch !== projectEpoch) return
-    if (act && act.status === 'completed') {
-      await renderPapers()
-      showToast('Suggested + linked hypotheses — review them on the card.')
-    } else {
-      setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
+    const result = await startOrEnqueue(activityType, trainerActivityParams({ paperId }), label)
+    if (result.queued && epoch === projectEpoch) {
+      setStatusLine('papers-status', queuedStatusText(result.ahead))
     }
   } catch {
-    if (epoch === projectEpoch) {
-      setStatusLine('papers-status', 'Could not suggest hypotheses — please try again.', true)
-    }
-  } finally {
-    if (button) button.disabled = false
+    pendingPaperOps.delete(paperOpKey(activityType, paperId))
+    if (activeTabId === 'papers') updatePaperCard(paperId)
+    if (epoch === projectEpoch)
+      setStatusLine('papers-status', 'Could not start — please try again.', true)
   }
+}
+async function onSuggestPaperHypotheses(id) {
+  await launchPaperOp('suggest-paper-hypotheses', id, 'Suggest hypotheses')
+}
+async function onFindPaperModels(id) {
+  await launchPaperOp('analyze-paper-models', id, 'Find models')
+}
+// Settle handler for Find-models: reload the paper + models, surface the missing-model proposals, and
+// toast a clickable "view" that focuses the card.
+async function loadPaperModelsResult(pid) {
+  papersCache = await readPapers()
+  modelsCache = await readModels()
+  const recs = await queryRecords(manifest.recordType + '-model-analysis', 'latest')
+  const analysis = recs && recs[0] && recs[0].content
+  const missing =
+    analysis && analysis.paperId === pid && Array.isArray(analysis.missingModels)
+      ? analysis.missingModels
+      : []
+  paperMissingModels.set(pid, missing)
+  paperExpanded.add(pid)
+  showToast(
+    missing.length
+      ? `Found ${missing.length} model${missing.length === 1 ? '' : 's'} to add on this paper — view`
+      : 'Linked the paper to its catalog models — view',
+    () => focusPaper(pid),
+  )
+}
+// Re-render ONE paper card in place (no list re-sort, no full-tab flash) — used when an async op settles.
+function updatePaperCard(pid) {
+  const body = byId('papers-body')
+  if (!body) return
+  const paper = papersCache.find((p) => p.id === pid)
+  const el = [...body.querySelectorAll('details.paper-card')].find((e) => e.dataset.id === pid)
+  if (!el) return
+  if (!paper || (paper.dismissed && paperVerdictFilter !== 'dismissed')) {
+    el.remove()
+    return
+  }
+  const wasOpen = el.open || paperExpanded.has(pid)
+  const tmp = document.createElement('div')
+  tmp.innerHTML = paperCardHtml(paper)
+  const fresh = tmp.firstElementChild
+  if (fresh) {
+    el.replaceWith(fresh)
+    fresh.open = wasOpen
+  }
+}
+// Bring a paper into view: expand it + (on the Papers tab) update + scroll to it; else switch tabs.
+function focusPaper(pid) {
+  paperExpanded.add(pid)
+  if (activeTabId !== 'papers') {
+    showTab('papers')
+    return
+  }
+  updatePaperCard(pid)
+  const body = byId('papers-body')
+  const el =
+    body && [...body.querySelectorAll('details.paper-card')].find((e) => e.dataset.id === pid)
+  if (el) {
+    el.open = true
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
+async function onToggleDismissPaper(id) {
+  const p = papersCache.find((x) => x.id === id)
+  if (!p) return
+  try {
+    await putPaper({ ...p, dismissed: !p.dismissed })
+  } catch {
+    setStatusLine('papers-status', 'Could not update — please try again.', true)
+    return
+  }
+  p.dismissed = !p.dismissed
+  await renderPapers()
 }
 function setupPapers() {
   const addToggle = byId('paper-add-toggle')
@@ -8115,6 +8489,13 @@ function setupPapers() {
       },
       true,
     )
+    body.addEventListener('change', (event) => {
+      const sort = event.target.closest('#paper-sort-select')
+      if (sort) {
+        paperSortKey = sort.value
+        renderPapers()
+      }
+    })
     body.addEventListener('click', (event) => {
       // A control inside a <summary> must not toggle the card — it runs its own action.
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
@@ -8142,9 +8523,10 @@ function setupPapers() {
       const paperId = btn.dataset.paper
       if (action === 'import-seeds') importSeedPapers()
       else if (action === 'replicate') replicatePaper(id)
-      else if (action === 'find-models') onFindPaperModels(id, btn)
+      else if (action === 'find-models') onFindPaperModels(id)
       else if (action === 'add-model') addProposedModelToCatalog(paperId, id)
-      else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id, btn)
+      else if (action === 'toggle-dismiss') onToggleDismissPaper(id)
+      else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id)
       else if (action === 'add-hyp') {
         // Open the add sub-form AND expand the card so it's visible from the collapsed state.
         if (paperSubform && paperSubform.paperId === id && paperSubform.mode === 'add') {
@@ -8205,33 +8587,36 @@ async function deleteModelRecord(id) {
 function manifestModelSeeds() {
   return manifest && Array.isArray(manifest.models) ? manifest.models : []
 }
+// Manifest seeds that are NEW or OUT OF SYNC (a manifest-owned field — esp. the model_name bindings —
+// differs from the imported record). Syncing re-writes those fields while preserving the user's status
+// override / notes / dismissed / hypothesis links — so a consolidation reaches already-imported catalogs.
 function pendingSeedModels() {
-  const have = new Set(modelsCache.map((m) => m.id))
-  return manifestModelSeeds().filter((s) => s && s.id && !have.has(s.id))
+  const byId = new Map(modelsCache.map((m) => [m.id, m]))
+  return manifestModelSeeds().filter(
+    (s) => s && s.id && window.Models.seedDiffersFromModel(s, byId.get(s.id)),
+  )
 }
 function pendingSeedModelsHtml() {
   const pending = pendingSeedModels()
   if (!pending.length) return ''
-  return `<div class="paper-seed-banner">${pending.length} curated model${pending.length === 1 ? '' : 's'} from the manifest aren’t in your catalog yet. <button type="button" class="ghost-btn" data-action="import-seeds">Import ${pending.length}</button></div>`
+  const plural = pending.length === 1 ? '' : 's'
+  return `<div class="paper-seed-banner">${pending.length} model${plural} from the manifest ${pending.length === 1 ? 'is' : 'are'} new or out of sync (e.g. updated run bindings). <button type="button" class="ghost-btn" data-action="import-seeds">Sync ${pending.length}</button></div>`
 }
 async function importSeedModels() {
   const pending = pendingSeedModels()
   if (!pending.length) return
+  const byId = new Map(modelsCache.map((m) => [m.id, m]))
   try {
     for (const s of pending) {
-      await putModel({
-        ...s,
-        statusSource: s.statusSource === 'manual' ? 'manual' : 'auto',
-        createdAt: nowIso(),
-      })
+      await putModel(window.Models.mergeSeedIntoModel(s, byId.get(s.id), nowIso()))
     }
   } catch {
-    setStatusLine('models-status', 'Could not import models — please try again.', true)
+    setStatusLine('models-status', 'Could not sync models — please try again.', true)
     return
   }
   setStatusLine(
     'models-status',
-    `Imported ${pending.length} model${pending.length === 1 ? '' : 's'}.`,
+    `Synced ${pending.length} model${pending.length === 1 ? '' : 's'} from the manifest.`,
     false,
   )
   await renderModels()
@@ -8346,7 +8731,10 @@ async function renderModels() {
   const body = byId('models-body')
   if (!body) return
   if (!embedded()) {
-    setHtml(body, '<div class="empty-hint">Open inside the Overseer to manage the model catalog.</div>')
+    setHtml(
+      body,
+      '<div class="empty-hint">Open inside the Overseer to manage the model catalog.</div>',
+    )
     return
   }
   // Load runs + papers + hypotheses alongside models so the status roll-up + links are fresh.
@@ -8504,6 +8892,7 @@ async function addProposedModelToCatalog(paperId, slug) {
     if (p) {
       const ids = Array.from(new Set([...(p.modelIds || []), rec.id]))
       await putPaper({ ...p, modelIds: ids })
+      p.modelIds = ids
     }
   } catch {
     setStatusLine('papers-status', 'Could not add the model — please try again.', true)
@@ -8513,56 +8902,11 @@ async function addProposedModelToCatalog(paperId, slug) {
     paperId,
     missing.filter((x) => x.slug !== slug),
   )
-  await renderPapers()
-  showToast(`Added “${proposed.name}” to the Models catalog as proposed.`)
-}
-// Find models: an LLM links the paper to the catalog models it is about + names any missing ones.
-// Triggers the backend `analyze-paper-models` activity, then surfaces the missing models on the card.
-async function onFindPaperModels(id, button) {
-  if (!embedded()) {
-    setStatusLine('papers-status', 'Open inside the Overseer to find models.', true)
-    return
-  }
-  const epoch = projectEpoch
-  setStatusLine('papers-status', '')
-  if (button) button.disabled = true
-  try {
-    const result = await startOrEnqueue(
-      'analyze-paper-models',
-      trainerActivityParams({ paperId: id }),
-      'Find models',
-    )
-    if (result.queued) {
-      if (epoch === projectEpoch) setStatusLine('papers-status', queuedStatusText(result.ahead))
-      return
-    }
-    const act = await observeQuickActivity(result.activityId)
-    if (epoch !== projectEpoch) return
-    if (act && act.status === 'completed') {
-      const recs = await queryRecords(manifest.recordType + '-model-analysis', 'latest')
-      const analysis = recs && recs[0] && recs[0].content
-      const missing =
-        analysis && analysis.paperId === id && Array.isArray(analysis.missingModels)
-          ? analysis.missingModels
-          : []
-      paperMissingModels.set(id, missing)
-      paperExpanded.add(id)
-      await renderPapers()
-      showToast(
-        missing.length
-          ? `Found ${missing.length} model${missing.length === 1 ? '' : 's'} to add — see the card.`
-          : 'Linked the paper to its catalog models.',
-      )
-    } else {
-      setStatusLine('papers-status', quickActivityFailureText(act, 'Find models'), true)
-    }
-  } catch {
-    if (epoch === projectEpoch) {
-      setStatusLine('papers-status', 'Could not find models — please try again.', true)
-    }
-  } finally {
-    if (button) button.disabled = false
-  }
+  modelsCache = await readModels()
+  updatePaperCard(paperId)
+  showToast(`Added “${proposed.name}” to the Models catalog — view`, () => {
+    showTab('models')
+  })
 }
 // The linked + proposed-missing models shown on a Papers card (the "add missing model" affordance).
 function paperModelsHtml(paper) {

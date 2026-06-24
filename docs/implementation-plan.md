@@ -85,15 +85,45 @@ hypotheses; Models = the catalog aggregating runs + papers + hypotheses, with `s
   `model_name` fixed — today runs launch from Launch/Hypotheses; the catalog focuses on cataloguing +
   agent work + chat.
 
-### 3c. Model architectures (now hypotheses)
+### 2b. Models to implement / expose (the catalog backlog)
 
-The `attn-ppo` / `tcn-ppo` encoders are shipped; architectures are now hypotheses (their `spec.fixed` pins
-`model_name`). Pending:
+The Models catalog seeds the families that have runs or lever choices; the items below exist in BlackSwan
+code but are NOT exposed in the active `model_name` lever (so they don't sweep), or are genuinely new. We
+will want to add them soon — wiring a code-only model is just adding its `model_name` to the lever (+ a
+catalog `modelNames` binding); a proposed one is a real build. (Inventory from `src/model/model_factory.py`.)
 
-- **LEFT (optional):** a **GRU** recurrent core — must be a custom `RecurrentActorCriticPolicy` subclass
-  (state lives in the policy, not a features-extractor), expected to be a wash vs LSTM; and an SSM
-  (S4D) falsification arm. Both deferred (lower value / higher effort); the registry + sweep pattern
-  make them drop-in when wanted.
+**Proposed (new — build):**
+
+- **iTransformer-PPO** — an inverted-attention sequence encoder, a third `SequenceFeaturesExtractor`
+  variant to A/B against `attn-ppo` / `tcn-ppo` (seeded as a `proposed` model). `src/model/custom/sequence_extractor.py`.
+- **GRU recurrent core** — a custom `RecurrentActorCriticPolicy` subclass (state in the policy, not a
+  features-extractor); expected ~wash vs LSTM. **SSM (S4D)** falsification arm. Both deferred (lower value).
+
+**Code-only models (exist in code, not in the active lever — expose + catalog):**
+
+- PPO family: `reppo` (vanilla RecurrentPPO), `ppo-sbx`, `dqn-sbx` (JAX/SBX builds), `a2c-custom`.
+- TRPO: `trpo` (vanilla).
+- DQN family: `dqn-custom`, `dqn-lstm`.
+- Dueling DQN: `duel-dqn-custom-lstm3` (LSTM hidden=3), `duel-dqn-lstm` (vanilla policy + LSTM).
+- Munchausen DQN: `munchausen-dqn` (vanilla MlpPolicy).
+- Rainbow DQN: `rainbow-dqn` (SB3-subclass, non-custom), `rainbow-dqn-old` (legacy standalone agent — flagged slow).
+- IQN: `iqn`, `iqn-custom` (custom quantile net). QR-DQN: `qrdqn` (vanilla).
+- `ensemble` (4× dueling DQN), `agent57` (intrinsic-reward exploration), `ars`/`ars-mlp` (random search).
+- Non-RL `model_type` paths: `mlp` (regression — note `regression` is missing from the documented
+  `model_type` choices despite `create_regression_model` being implemented), `technical`
+  (`TechnicalStrategyModel`), `time` (`TimeStrategyModel`).
+
+**Reusable components (surface as `component` catalog entries / building blocks):**
+
+- Features-extractors: `SequenceFeaturesExtractor` (attn/tcn, `custom/sequence_extractor.py`), `LSTMFCE`
+  (`dqn_lstm_policy.py`), `CustomMlpExtractor` (`custom/custommlpextractor.py`).
+- Custom policies / Q-nets: `custom/policies.py` (ActorCritic / RecurrentActorCritic / DQN / Dueling /
+  Rainbow / QRDQN), `custom/policy_iqn.py` (`CustomIQNPolicy`), `custom/customqnetwork.py`
+  (`create_mlp_custom`), `dueling_dqn/policies.py`.
+- Replay buffers: `rainbow_dqn/prioritized_replay_buffer.py`, `rainbow/replay_buffer.py` (+ `segment_tree.py`),
+  `custom/agent57/agent57.py` (`CustomAgent57ReplayBuffer` / `EpisodicMemory`).
+- Optimizer: `custom/dgwo.py` (`DGWO`, grey-wolf). NN blocks: `custom/attention.py`, `custom/noisylinear.py`,
+  `custom/dropconnect.py`, `custom/residualblock.py`, `custom/denseblock.py`, `custom/memorymodels.py`.
 
 ### 3. xAI — explain WHY the model acted (parallel track)
 
@@ -223,7 +253,7 @@ in percentages so position size is irrelevant — is a **different objective**, 
   markers), the judge, and the lever picker all bake in `traded_return`. A signal model needs: its own
   "good" definition + verdict rule, signal-quality run metrics, and a signal-overlay chart (predicted
   long/flat vs forward return) instead of trade markers. Decide manifest split vs mode early — the verdict
-  + objective plumbing is the bulk of the work, not the model.
+  - objective plumbing is the bulk of the work, not the model.
 
 ### Multi-asset portfolio / cross-sectional long-short — a SEPARATE project (Phase-B Wave 3)
 

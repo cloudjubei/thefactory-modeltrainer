@@ -204,3 +204,72 @@ describe('status + category metadata', () => {
     expect(M.MODEL_CATEGORIES).toEqual(['rl', 'supervised', 'baseline', 'component'])
   })
 })
+
+describe('seed re-sync (consolidation reaches already-imported catalogs)', () => {
+  const seed = {
+    id: 'dueling-dqn',
+    slug: 'dueling-dqn',
+    name: 'Dueling DQN',
+    description: 'value + advantage streams',
+    category: 'rl',
+    status: 'implemented',
+    modelNames: ['duel-dqn-custom', 'duel-dqn', 'duel-dqn-custom-lstm'],
+    implPath: 'src/model/dueling_dqn/dueling_dqn.py',
+    source: 'manual',
+  }
+
+  it('flags a seed with no existing record as differing (a new import)', () => {
+    expect(M.seedDiffersFromModel(seed, undefined)).toBe(true)
+  })
+  it('flags a binding change (the consolidation) as differing', () => {
+    const existing = { ...seed, modelNames: ['duel-dqn-custom'] }
+    expect(M.seedDiffersFromModel(seed, existing)).toBe(true)
+  })
+  it('is false when the manifest-owned fields already match', () => {
+    expect(M.seedDiffersFromModel(seed, { ...seed, statusSource: 'auto' })).toBe(false)
+  })
+
+  it('merges seed (manifest) fields while preserving a manual status + user notes/dismissed/links', () => {
+    const existing = {
+      id: 'dueling-dqn',
+      slug: 'dueling-dqn',
+      name: 'old name',
+      modelNames: ['duel-dqn-custom'],
+      category: 'rl',
+      status: 'needs-improvement',
+      statusSource: 'manual',
+      statusNote: 'hand-pinned',
+      notes: 'keep this',
+      dismissed: true,
+      hypothesisIds: ['h1'],
+      paperIds: ['p-user'],
+      createdAt: '2026-06-01T00:00:00.000Z',
+      updatedAt: '2026-06-01T00:00:00.000Z',
+    }
+    const merged = M.mergeSeedIntoModel(
+      { ...seed, paperIds: ['p-seed'] },
+      existing,
+      '2026-06-24T00:00:00.000Z',
+    )
+    // manifest-owned fields come from the seed
+    expect(merged.name).toBe('Dueling DQN')
+    expect(merged.modelNames).toEqual(['duel-dqn-custom', 'duel-dqn', 'duel-dqn-custom-lstm'])
+    expect(merged.implPath).toBe('src/model/dueling_dqn/dueling_dqn.py')
+    // user-owned fields are preserved
+    expect(merged.status).toBe('needs-improvement')
+    expect(merged.statusSource).toBe('manual')
+    expect(merged.statusNote).toBe('hand-pinned')
+    expect(merged.notes).toBe('keep this')
+    expect(merged.dismissed).toBe(true)
+    expect(merged.hypothesisIds).toEqual(['h1'])
+    expect(merged.paperIds.sort()).toEqual(['p-seed', 'p-user'])
+    expect(merged.createdAt).toBe('2026-06-01T00:00:00.000Z')
+    expect(merged.updatedAt).toBe('2026-06-24T00:00:00.000Z')
+  })
+  it('defaults status to the seed value + auto source for a fresh import', () => {
+    const merged = M.mergeSeedIntoModel(seed, undefined, '2026-06-24T00:00:00.000Z')
+    expect(merged.status).toBe('implemented')
+    expect(merged.statusSource).toBe('auto')
+    expect(merged.createdAt).toBe('2026-06-24T00:00:00.000Z')
+  })
+})

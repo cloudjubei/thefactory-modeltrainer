@@ -3,6 +3,7 @@ import type { AnalysisCriterion, AnalysisRun } from './modelTrainerTypes.js'
 import {
   ablationPath,
   aggregateRunValues,
+  computeConfigSpaceAnalysis,
   criterionValueOf,
   expectedImprovement,
   fanovaImportances,
@@ -583,5 +584,56 @@ describe('pcaProjection (Phase 4)', () => {
     // distinct algos land at distinct points (the encoding actually varied them)
     const xs = p.points.map((pt) => Math.round(pt.x * 1e6))
     expect(new Set(xs).size).toBeGreaterThan(1)
+  })
+})
+
+describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
+  function spaceRuns(): AnalysisRun[] {
+    const runs: AnalysisRun[] = []
+    let k = 0
+    for (const lr of [0.1, 0.2, 0.5])
+      for (const bs of [32, 64])
+        for (const seed of [0, 1, 2])
+          runs.push(run(`r${k++}`, { lr, batch_size: bs }, lr * 100 + bs * 0.1 + seed * 0.01, { seed }))
+    return runs
+  }
+
+  it('folds seeds into setups and bundles every read off ONE surrogate', () => {
+    const a = computeConfigSpaceAnalysis(spaceRuns(), MAX)!
+    expect(a).not.toBeNull()
+    expect(a.runCount).toBe(18)
+    expect(a.setupCount).toBe(6) // 3 lr × 2 batch_size — the 3 seeds folded into each
+    expect(a.surrogate.trees.length).toBeGreaterThan(0)
+    expect(a.levers.sort()).toEqual(['batch_size', 'lr'])
+    expect(a.importances).toHaveLength(2)
+    expect(a.pca).not.toBeNull()
+    expect(a.pca!.points).toHaveLength(6) // one point per setup
+    expect(Array.isArray(a.recommendations)).toBe(true)
+    expect(a.criterion).toEqual({ key: 'objective', direction: 'max' })
+  })
+
+  it('searches coupling only among the high-effect levers, skipping inert ones', () => {
+    const runs: AnalysisRun[] = []
+    let k = 0
+    // lr and batch_size drive the objective; `noise` has two values but no effect → inert.
+    for (const lr of [0.1, 0.9])
+      for (const bs of [32, 64])
+        for (const noise of ['x', 'y'])
+          for (const seed of [0, 1])
+            runs.push(run(`r${k++}`, { lr, batch_size: bs, noise }, lr * 100 + bs, { seed }))
+    const a = computeConfigSpaceAnalysis(runs, MAX)!
+    expect(a.coupledLevers).not.toContain('noise')
+    for (const c of a.couplings) {
+      expect(a.coupledLevers).toContain(c.leverA)
+      expect(a.coupledLevers).toContain(c.leverB)
+    }
+  })
+
+  it('is deterministic — identical runs give an identical bundle', () => {
+    expect(computeConfigSpaceAnalysis(spaceRuns(), MAX)).toEqual(computeConfigSpaceAnalysis(spaceRuns(), MAX))
+  })
+
+  it('returns null when there are no valid runs', () => {
+    expect(computeConfigSpaceAnalysis([], MAX)).toBeNull()
   })
 })
