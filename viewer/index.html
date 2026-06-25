@@ -139,6 +139,7 @@
             &larr;
           </button>
           <span id="dash-project-name" class="dash-project-name"></span>
+          <div class="dash-refresh" id="dash-refresh"></div>
         </div>
         <nav class="tabbar" id="tabbar" role="tablist" aria-label="Sections"></nav>
       </div>
@@ -304,6 +305,15 @@
                   </p>
                 </div>
                 <div class="head-actions">
+                  <!-- TEMPORARY: re-verify every paper's hypotheses against the cross-context capability. -->
+                  <button
+                    type="button"
+                    id="papers-reverify-btn"
+                    class="ghost-btn"
+                    title="Re-check every paper's hypotheses now that specs can span environments/datasets, and auto-update the stale ones"
+                  >
+                    Re-verify hypotheses
+                  </button>
                   <button
                     type="button"
                     id="paper-add-toggle"

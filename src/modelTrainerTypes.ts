@@ -1435,6 +1435,41 @@ export interface AnalyzePaperFromUrlResult {
   analyzedAt: string
 }
 
+export interface RevisePaperHypothesesParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** Restrict the revision to ONE paper; omit to re-verify every paper that has linked hypotheses. */
+  paperId?: string
+  llmConfig: LLMConfig
+  abortSignal?: AbortSignal
+  /** Fired after each hypothesis/paper record is upserted or deleted so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+/** One hypothesis the re-verify pass auto-updated in place. `fromId`/`toId` differ when the spec changed
+ * (spec-hash identity ⇒ a new record replaces the old); they match when only the comparison criterion did. */
+export interface RevisePaperHypothesisChange {
+  paperId: string
+  fromId: string
+  toId: string
+  title: string
+}
+
+export interface RevisePaperHypothesesResult {
+  recordType: string
+  /** How many papers were examined. */
+  papers: number
+  /** The hypotheses rewritten to the context-aware form (auto-updated in place). */
+  changed: RevisePaperHypothesisChange[]
+  /** Count of linked hypotheses left unchanged. */
+  unchanged: number
+  revisedBy: string
+  revisedAt: string
+}
+
 export interface SuggestPaperHypothesesParams {
   scope: string
   projectRoot: string
@@ -1719,6 +1754,13 @@ export interface ModelTrainerTools {
   suggestPaperHypotheses(
     params: SuggestPaperHypothesesParams,
   ): Promise<SuggestPaperHypothesesResult>
+  /**
+   * Re-verify each paper's linked hypotheses against the cross-context capability: an LLM rewrites the
+   * specs whose claim is really about a context (environment/dataset) to the context-spanning form and
+   * auto-updates them in place (spec-hash identity ⇒ a new record replaces the old, and every paper that
+   * linked it is re-pointed). Powers the Papers tab's temporary "Re-verify hypotheses".
+   */
+  revisePaperHypotheses(params: RevisePaperHypothesesParams): Promise<RevisePaperHypothesesResult>
   /**
    * Discover MODELS the project declares (its `model_name` lever choices) that the catalog does not yet
    * cover, optionally enrich each with an LLM (category, description, paper links), and persist them as

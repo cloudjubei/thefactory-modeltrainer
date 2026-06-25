@@ -6,6 +6,8 @@ import type {
   DecisionTrace,
   DecisionTraceDiff,
   ExperimentSpec,
+  HypothesisComparison,
+  HypothesisComparisonKind,
   ModelCategory,
   PlannedTrainingItem,
   ProposedModel,
@@ -392,13 +394,60 @@ export function looksLikeDataGathering(title: string, rationale: string): boolea
   )
 }
 
+// Validate an LLM-proposed comparison criterion; drop it unless `kind` is one of the known kinds.
+function coerceComparison(raw: unknown): HypothesisComparison | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
+  const o = raw as Record<string, unknown>
+  const kinds: HypothesisComparisonKind[] = ['beats-baseline', 'invariant', 'differs']
+  if (typeof o.kind !== 'string' || !kinds.includes(o.kind as HypothesisComparisonKind))
+    return undefined
+  const c: HypothesisComparison = { kind: o.kind as HypothesisComparisonKind }
+  if (
+    typeof o.baselineIndex === 'number' &&
+    Number.isFinite(o.baselineIndex) &&
+    o.baselineIndex >= 0
+  ) {
+    c.baselineIndex = Math.trunc(o.baselineIndex)
+  }
+  if (typeof o.tolerance === 'number' && Number.isFinite(o.tolerance)) c.tolerance = o.tolerance
+  return c
+}
 export function coerceHypothesisItems(
   raw: unknown[],
   manifest: TrainerManifest,
-): { title: string; rationale: string; spec: ExperimentSpec }[] {
+): { title: string; rationale: string; spec: ExperimentSpec; comparison?: HypothesisComparison }[] {
   if (!Array.isArray(raw)) return []
   const leverKeys = new Set(Object.keys(manifest.levers))
-  const items: { title: string; rationale: string; spec: ExperimentSpec }[] = []
+  const scopedLevers = (scope: string) =>
+    new Set(
+      Object.entries(manifest.levers)
+        .filter(([, s]) => (s as TrainerLeverSpec).scope === scope)
+        .map(([k]) => k),
+    )
+  const envLevers = scopedLevers('environment')
+  const datasetLevers = scopedLevers('dataset')
+  // A context bundle array is valid iff every bundle is a non-empty object keyed ONLY by levers of the
+  // matching scope (environments hold environment levers; datasets hold dataset levers).
+  const coerceBundles = (
+    value: unknown,
+    allowed: Set<string>,
+  ): Record<string, unknown>[] | null => {
+    if (!Array.isArray(value)) return null
+    const out: Record<string, unknown>[] = []
+    for (const b of value) {
+      if (!b || typeof b !== 'object' || Array.isArray(b)) return null
+      const keys = Object.keys(b as Record<string, unknown>)
+      if (!keys.length || keys.some((k) => !allowed.has(k))) return null
+      out.push(b as Record<string, unknown>)
+    }
+    return out.length ? out : null
+  }
+  const items: {
+    title: string
+    rationale: string
+    spec: ExperimentSpec
+    comparison?: HypothesisComparison
+  }[] = []
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
     const obj = item as Record<string, unknown>
@@ -433,13 +482,31 @@ export function coerceHypothesisItems(
       }
       if (valid && entries.length > 0) spec.fixed = fixed
     }
-    if (!valid || (!spec.sweep && !spec.fixed)) continue
+    // Context-spanning bundles: environments/datasets must carry ONLY levers of the matching scope. An
+    // ill-scoped bundle invalidates the whole item (it's the wrong dimension for that lever).
+    if (valid && rawSpec.environments !== undefined) {
+      const envs = coerceBundles(rawSpec.environments, envLevers)
+      if (!envs) valid = false
+      else spec.environments = envs
+    }
+    if (valid && rawSpec.datasets !== undefined) {
+      const dss = coerceBundles(rawSpec.datasets, datasetLevers)
+      if (!dss) valid = false
+      else spec.datasets = dss
+    }
+    if (!valid || (!spec.sweep && !spec.fixed && !spec.environments && !spec.datasets)) continue
     if (Array.isArray(rawSpec.seeds)) {
       spec.seeds = rawSpec.seeds
         .filter((s): s is number => typeof s === 'number' && Number.isFinite(s))
         .map((s) => Math.trunc(s))
     }
-    items.push({ title: obj.title, rationale: obj.rationale, spec })
+    const comparison = coerceComparison(obj.comparison)
+    items.push({
+      title: obj.title,
+      rationale: obj.rationale,
+      spec,
+      ...(comparison ? { comparison } : {}),
+    })
   }
   return items
 }
@@ -477,6 +544,18 @@ const HYPOTHESIS_RULE =
   'tighten a confidence interval, reduce variance/noise, reproduce, or "establish a trustworthy interval" is ' +
   'NOT a hypothesis — that is handled separately (the min-runs threshold and the xAI tab). Every spec must ' +
   'introduce or compare a lever setting whose effect is what is being tested.'
+
+// How to express a CROSS-CONTEXT hypothesis. Some levers are held-fixed CONTEXT, not model knobs —
+// managed as bundles, never swept. A claim about the EFFECT OF THE CONTEXT uses these instead of sweep/fixed.
+const CONTEXT_SPANNING_RULE =
+  'Some levers are CONTEXT, not model knobs — those marked "scope":"environment" (the action space / market ' +
+  'mechanics) or "scope":"dataset" (which data). To test a claim that compares behaviour ACROSS contexts ' +
+  '(e.g. long-only vs long+short, or one asset vs another), do NOT put a context lever in sweep/fixed; ' +
+  'instead give "environments" and/or "datasets" as arrays of bundles (each bundle a set of context-lever ' +
+  'values applied together) plus a "comparison": {"kind":"beats-baseline"|"invariant"|"differs", ' +
+  '"baselineIndex"?: number, "tolerance"?: number}. beats-baseline = a non-baseline context beats the ' +
+  'baseline; invariant = the objective holds steady across contexts (robustness); differs = it changes ' +
+  '(sensitivity). Use this whenever the hypothesis is really about the effect of the context itself.'
 
 export function buildProposeSystemPrompt(
   manifest: TrainerManifest,
@@ -636,14 +715,16 @@ export function buildAnalyzePaperSystemPrompt(manifest: TrainerManifest, notes?:
     `You are given the TEXT of a paper/source (already fetched — DO NOT browse). Summarise it HONESTLY as a registry entry AND break it into the distinct, runnable HYPOTHESES it makes for this project.`,
     `The project's tunable levers (for the hypothesis specs) are: ${JSON.stringify(manifest.levers)}.`,
     HYPOTHESIS_RULE,
+    CONTEXT_SPANNING_RULE,
     notes ? `Extra guidance: ${notes}` : '',
     `Return ONLY a single JSON object (no prose, no code fence): {"title": string (required), "authors"?: string, ` +
       `"year"?: number, "claim": string (the source's headline claim in its own terms, required), "approach"?: string, ` +
       `"claimedMetrics"?: {"<name>": number}, "assumptions"?: {"fees"?: boolean, "netOfCosts"?: boolean, ` +
       `"frictionless"?: boolean, "multiAsset"?: boolean, "retrainCadence"?: string, "notes"?: string}, ` +
       `"verdictNote"?: string (skeptical — does it likely survive real costs + walk-forward OOS?), "tags"?: [string], ` +
-      `"hypotheses"?: [{"title": string, "rationale": string, "spec": {"fixed"?: {"<lever>": value}, ` +
-      `"sweep"?: {"<lever>": [values]}, "seeds"?: [number]}}] ` +
+      `"hypotheses"?: [{"title": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, ` +
+      `"spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, ` +
+      `"environments"?: [{"<environment-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}] ` +
       `(one per DISTINCT testable claim, each a runnable spec using ONLY declared lever names; [] if it maps to no runnable setup)}. ` +
       `Be honest about assumptions that inflate results (no fees, in-sample, single split).`,
   ]
@@ -702,6 +783,61 @@ export function coerceSuggestedHypotheses(
     manifest,
   )
   return { matchIds, newItems }
+}
+
+/** System prompt for "re-verify paper hypotheses": re-examine each linked hypothesis now that specs can
+ * span context (environments/datasets), rewriting the ones whose claim is really about the context. */
+export function buildRevisePaperHypothesesSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a research librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given a PAPER and the hypotheses currently linked to it. The project recently gained the ability to express CROSS-CONTEXT hypotheses. RE-EXAMINE each linked hypothesis: when its claim is really about the EFFECT OF A CONTEXT (environment / dataset), REWRITE its spec to the cross-context form; otherwise keep it as-is.`,
+    `The project's levers are: ${JSON.stringify(manifest.levers)}.`,
+    HYPOTHESIS_RULE,
+    CONTEXT_SPANNING_RULE,
+    `Return ONLY a JSON array — one entry per GIVEN hypothesis, preserving its "id" EXACTLY so each maps back: ` +
+      `[{"id": string, "title": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, ` +
+      `"spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "environments"?: [{"<environment-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]. ` +
+      `Use only declared lever names. No prose.`,
+  ].join('\n')
+}
+
+export function buildRevisePaperHypothesesUserContent(input: {
+  paper: Record<string, unknown>
+  hypotheses: Array<{ id: string; title?: string; rationale?: string; spec?: unknown }>
+}): string {
+  return JSON.stringify({ paper: input.paper, hypotheses: input.hypotheses })
+}
+
+/** Coerce the revise response: validate each entry's spec like {@link coerceHypothesisItems}, but keep the
+ * "id" so each maps back to the existing hypothesis it revises. Entries without an id, or with an invalid
+ * revised spec, are dropped. */
+export function coerceRevisedHypotheses(
+  raw: unknown,
+  manifest: TrainerManifest,
+): {
+  id: string
+  title: string
+  rationale: string
+  spec: ExperimentSpec
+  comparison?: HypothesisComparison
+}[] {
+  if (!Array.isArray(raw)) return []
+  const out: {
+    id: string
+    title: string
+    rationale: string
+    spec: ExperimentSpec
+    comparison?: HypothesisComparison
+  }[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const id = (item as Record<string, unknown>).id
+    if (typeof id !== 'string' || !id) continue
+    const coerced = coerceHypothesisItems([item], manifest)
+    if (coerced.length) out.push({ id, ...coerced[0] })
+  }
+  return out
 }
 
 /** Defensively coerce the model's JSON into a Paper draft — `undefined` unless title + claim are

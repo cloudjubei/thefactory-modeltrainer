@@ -17,6 +17,9 @@ import {
   migrateExperimentSpec,
   canonicalConfigString,
   coerceHypothesisItems,
+  coerceRevisedHypotheses,
+  buildRevisePaperHypothesesSystemPrompt,
+  buildRevisePaperHypothesesUserContent,
   coercePaperDraft,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
@@ -837,6 +840,161 @@ describe('coerceHypothesisItems', () => {
   })
 })
 
+describe('coerceHypothesisItems — context-spanning specs', () => {
+  const cm = manifest({
+    levers: {
+      algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+      allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
+      asset: { type: 'choice', choices: ['BTC', 'ETH'], default: 'BTC', scope: 'dataset' },
+    },
+  })
+  it('accepts environment bundles of environment-scoped levers (no sweep/fixed needed)', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 'long vs long+short',
+          rationale: 'shorting should help in down markets',
+          spec: { environments: [{ allow_shorting: false }, { allow_shorting: true }] },
+        },
+      ],
+      cm,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].spec.environments).toEqual([
+      { allow_shorting: false },
+      { allow_shorting: true },
+    ])
+  })
+  it('accepts dataset bundles of dataset-scoped levers', () => {
+    const items = coerceHypothesisItems(
+      [{ title: 't', rationale: 'r', spec: { datasets: [{ asset: 'BTC' }, { asset: 'ETH' }] } }],
+      cm,
+    )
+    expect(items[0].spec.datasets).toEqual([{ asset: 'BTC' }, { asset: 'ETH' }])
+  })
+  it('drops a spec whose environment bundle names a non-environment lever', () => {
+    expect(
+      coerceHypothesisItems(
+        [{ title: 't', rationale: 'r', spec: { environments: [{ algo: 'a' }] } }],
+        cm,
+      ),
+    ).toEqual([])
+  })
+  it('drops a spec whose dataset bundle names a non-dataset lever', () => {
+    expect(
+      coerceHypothesisItems(
+        [{ title: 't', rationale: 'r', spec: { datasets: [{ allow_shorting: true }] } }],
+        cm,
+      ),
+    ).toEqual([])
+  })
+  it('passes through a valid comparison criterion', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 't',
+          rationale: 'r',
+          spec: { environments: [{ allow_shorting: false }, { allow_shorting: true }] },
+          comparison: { kind: 'invariant', tolerance: 0.2 },
+        },
+      ],
+      cm,
+    )
+    expect(items[0].comparison).toEqual({ kind: 'invariant', tolerance: 0.2 })
+  })
+  it('omits an invalid comparison kind', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 't',
+          rationale: 'r',
+          spec: { environments: [{ allow_shorting: true }, { allow_shorting: false }] },
+          comparison: { kind: 'bogus' },
+        },
+      ],
+      cm,
+    )
+    expect(items[0].comparison).toBeUndefined()
+  })
+  it('combines a fixed model lever with environment bundles', () => {
+    const items = coerceHypothesisItems(
+      [
+        {
+          title: 't',
+          rationale: 'r',
+          spec: {
+            fixed: { algo: 'a' },
+            environments: [{ allow_shorting: false }, { allow_shorting: true }],
+          },
+        },
+      ],
+      cm,
+    )
+    expect(items[0].spec.fixed).toEqual({ algo: 'a' })
+    expect(items[0].spec.environments).toHaveLength(2)
+  })
+})
+
+describe('coerceRevisedHypotheses', () => {
+  const cm = manifest({
+    levers: {
+      algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+      allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
+    },
+  })
+  it('preserves the id and validates the revised context-spanning spec', () => {
+    const out = coerceRevisedHypotheses(
+      [
+        {
+          id: 'h1',
+          title: 't',
+          rationale: 'r',
+          spec: { environments: [{ allow_shorting: false }, { allow_shorting: true }] },
+          comparison: { kind: 'beats-baseline' },
+        },
+      ],
+      cm,
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].id).toBe('h1')
+    expect(out[0].spec.environments).toHaveLength(2)
+    expect(out[0].comparison).toEqual({ kind: 'beats-baseline' })
+  })
+  it('drops an entry with no id', () => {
+    expect(
+      coerceRevisedHypotheses([{ title: 't', rationale: 'r', spec: { fixed: { algo: 'a' } } }], cm),
+    ).toEqual([])
+  })
+  it('drops an entry whose revised spec is invalid', () => {
+    expect(
+      coerceRevisedHypotheses(
+        [{ id: 'h1', title: 't', rationale: 'r', spec: { environments: [{ algo: 'a' }] } }],
+        cm,
+      ),
+    ).toEqual([])
+  })
+  it('returns [] for a non-array', () => {
+    expect(coerceRevisedHypotheses('nope', cm)).toEqual([])
+  })
+})
+
+describe('buildRevisePaperHypothesesSystemPrompt', () => {
+  const m = manifest()
+  it('explains the cross-context rewrite and asks to preserve ids', () => {
+    const p = buildRevisePaperHypothesesSystemPrompt(m)
+    expect(p).toContain('environments')
+    expect(p).toContain('id')
+    expect(p).toMatch(/beats-baseline|invariant|differs/)
+  })
+  it('serializes the paper + hypotheses into the user content', () => {
+    const c = buildRevisePaperHypothesesUserContent({
+      paper: { id: 'p1', claim: 'shorting helps' },
+      hypotheses: [{ id: 'h1', title: 't', spec: {} }],
+    })
+    expect(JSON.parse(c)).toMatchObject({ paper: { id: 'p1' }, hypotheses: [{ id: 'h1' }] })
+  })
+})
+
 describe('looksLikeDataGathering', () => {
   it('flags add-more-seeds / establish-interval / reduce-noise phrasing', () => {
     expect(
@@ -1480,6 +1638,13 @@ describe('buildAnalyzePaperSystemPrompt', () => {
   it('requests the testable hypotheses array', () => {
     const p = buildAnalyzePaperSystemPrompt(m)
     expect(p).toContain('hypotheses')
+  })
+  it('teaches the cross-context form (environments/datasets bundles + comparison)', () => {
+    const p = buildAnalyzePaperSystemPrompt(m)
+    expect(p).toContain('environments')
+    expect(p).toContain('datasets')
+    expect(p).toContain('comparison')
+    expect(p).toMatch(/beats-baseline|invariant|differs/)
   })
 })
 

@@ -97,6 +97,15 @@ let proposingExperiments = false
 // Which scope the xAI tab analyses: 'all' (the whole-space bundle over EVERY run) or 'current' (one focused
 // run's deterministic digest). Both are computed on demand server-side and cached — never over the page.
 let xaiScope = 'all'
+// The active 2nd-level tab within the xAI view (a vertical icon-rail). Per-scope; reset if invalid.
+let xaiTab = 'environments'
+// The icon rail collapses to icons-only (like the main nav), persisted for the session.
+let xaiRailCollapsed = false
+// Environments tab: free-text filter + sort key, so a 100-environment list stays scannable.
+let xaiEnvSearch = ''
+let xaiEnvSort = 'best'
+// Which "configuration map" is shown in the Maps tab: 'pca' (cluster sketch) or 'parallel' (readable axes).
+let xaiMapKind = 'parallel'
 // Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
 // heavy surrogate/fANOVA/coupling/PCA work runs server-side over ALL runs; the cards render purely from this
 // — no browser fit, no page-limited picture.
@@ -1271,6 +1280,13 @@ function setupHome() {
   if (list) list.addEventListener('click', onHomeProjectsClick)
   const back = byId('back-btn')
   if (back) back.addEventListener('click', goHome)
+  const refresh = byId('dash-refresh')
+  if (refresh) {
+    refresh.addEventListener('click', (event) => {
+      if (event.target.closest('#dash-refresh-latest')) return void refreshLatestRunsDerived()
+      if (event.target.closest('#dash-refresh-all')) return void refreshAllRunsDerived()
+    })
+  }
 }
 
 // --- Compute Runners (home panel) --------------------------------------------
@@ -1603,6 +1619,8 @@ function resetDashboardState() {
   xaiSuggestionsCache = []
   proposingExperiments = false
   xaiScope = 'all'
+  xaiTab = 'environments'
+  xaiEnvSearch = ''
   xaiConfigSpaceCache = new Map()
   analyzingConfigSpace = false
   xaiRunAnalysisCache = new Map()
@@ -1695,6 +1713,7 @@ function applyManifestChrome() {
   document.title = `${name} — Model Trainer`
   const head = byId('dash-project-name')
   if (head) head.textContent = name
+  void initGlobalRefresh()
   const foot = byId('foot-label')
   if (foot) foot.textContent = `${name} — trainer viewer`
   const sub = byId('runs-sub')
@@ -1993,6 +2012,11 @@ function applyQuickDispatchState(item, busy) {
     if (busy) pendingPaperOps.add(key)
     else pendingPaperOps.delete(key)
     if (activeTabId === 'papers') updatePaperCard(pid)
+  } else if (item.activityType === 'revise-paper-hypotheses') {
+    const key = paperOpKey('revise-paper-hypotheses', '__all__')
+    if (busy) pendingPaperOps.add(key)
+    else pendingPaperOps.delete(key)
+    renderReverifyBtn()
   }
 }
 async function refreshAfterQuickDispatch(item, act) {
@@ -2035,6 +2059,24 @@ async function refreshAfterQuickDispatch(item, act) {
       showToast('Suggested + linked hypotheses — view', pid ? () => focusPaper(pid) : undefined)
     } else {
       setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
+    }
+  } else if (item.activityType === 'revise-paper-hypotheses') {
+    pendingPaperOps.delete(paperOpKey('revise-paper-hypotheses', '__all__'))
+    renderReverifyBtn()
+    if (act && act.status === 'completed') {
+      papersCache = await readPapers()
+      hypothesesCache = await readHypotheses()
+      await refreshHypothesisVerdicts(hypothesesCache)
+      const rec = await readLatestRecord('-paper-analysis')
+      const n = rec && Number(rec.hypothesesChanged)
+      if (activeTabId === 'papers') await renderPapers()
+      showToast(
+        n
+          ? `Re-verified — updated ${n} hypothesis${n === 1 ? '' : 'es'}.`
+          : 'Re-verified — all hypotheses already current.',
+      )
+    } else {
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Re-verify hypotheses'), true)
     }
   }
 }
@@ -2120,6 +2162,8 @@ async function processSettledCampaignEffects() {
   await refreshHypothesisVerdicts(await readHypotheses())
   if (activeTabId === 'hypotheses') await renderHypotheses()
   if (activeTabId === 'papers') await renderPapers()
+  // A settled campaign means new runs exist past the last aggregate — reflect that in the topbar control.
+  void checkModelStatsStale()
 }
 
 // --- Runs tab -----------------------------------------------------------------
@@ -4735,13 +4779,63 @@ function renderXai() {
     return
   }
   const criterion = currentXaiCriterion()
-  setHtml(
-    body,
-    [
-      xaiHeaderHtml(criterion),
-      xaiScope === 'current' ? xaiCurrentRunHtml(criterion) : xaiAllRunsHtml(criterion),
-    ].join(''),
-  )
+  setHtml(body, xaiHeaderHtml(criterion) + xaiScopeBodyHtml(criterion))
+}
+// Small inline icons for the xAI tab rail (kept self-contained so the rail doesn't depend on the nav set).
+function xaiSvg(inner) {
+  return (s) =>
+    `<svg width="${s || 16}" height="${s || 16}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
+}
+const xaiIconEnv = xaiSvg('<path d="M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5Z"/><path d="M1.5 8 8 11.5 14.5 8"/><path d="M1.5 11 8 14.5 14.5 11"/>')
+const xaiIconSliders = xaiSvg('<path d="M2 4h7"/><path d="M12 4h2"/><circle cx="10.5" cy="4" r="1.5"/><path d="M2 8h2"/><path d="M7 8h7"/><circle cx="5.5" cy="8" r="1.5"/><path d="M2 12h9"/><path d="M14 12h0.5"/><circle cx="12.5" cy="12" r="1.5"/>')
+const xaiIconSurrogate = xaiSvg('<circle cx="8" cy="3" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M8 4.6 4.8 10.6"/><path d="M8 4.6 11.2 10.6"/>')
+const xaiIconMap = xaiSvg('<circle cx="4" cy="11" r="1.3"/><circle cx="7.5" cy="6.5" r="1.3"/><circle cx="11" cy="9" r="1.3"/><circle cx="12.5" cy="4" r="1.3"/><path d="M2 14h12"/><path d="M2 14V2"/>')
+const xaiIconRank = xaiSvg('<path d="M3 14V8h3v6"/><path d="M6.5 14V4h3v10"/><path d="M10 14v-4h3v4"/>')
+// Render the body for the current scope: the tabbed shell, or a prompt when there's nothing yet.
+function xaiScopeBodyHtml(criterion) {
+  if (xaiScope === 'current') {
+    if (!xaiFocusKey) {
+      return `<div class="card"><div class="card-head card-head-row"><h3>Current run</h3></div>
+        <p class="card-sub">Focus a run (Runs → “Analyze in xAI”) to analyse one model in depth — its decisions, what drives them, and how it ranks among all runs.</p></div>`
+    }
+    if (!findRun(xaiFocusKey)) {
+      return `<div class="card"><div class="card-head card-head-row"><h3>Current run <span class="card-sub">— ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>
+        <button type="button" class="ghost-btn" data-xai-clear-focus>✕ Clear run</button></div>
+        <p class="card-sub">This run isn’t loaded — open it from the Runs tab and choose “Analyze in xAI”.</p></div>`
+    }
+    return xaiShellHtml(xaiCurrentTabs(criterion), criterion)
+  }
+  const bundle = xaiResolveBundle(criterion)
+  if (!bundle) return xaiNoBundleHtml(criterion)
+  return xaiShellHtml(xaiAllTabs(bundle, criterion), criterion)
+}
+// The collapsible left icon-rail + the active tab's content.
+function xaiShellHtml(tabs, criterion) {
+  if (!tabs.some((t) => t.id === xaiTab)) xaiTab = tabs[0] ? tabs[0].id : ''
+  const active = tabs.find((t) => t.id === xaiTab) || tabs[0]
+  const railBtn = (t) =>
+    `<button type="button" class="xai-rail-btn${t.id === xaiTab ? ' active' : ''}" data-xai-tab="${escapeHtml(t.id)}" title="${escapeHtml(t.label)}"><span class="xai-rail-ico" aria-hidden="true">${t.icon(16)}</span><span class="xai-rail-lbl">${escapeHtml(t.label)}</span></button>`
+  const toggle = `<button type="button" class="xai-rail-btn xai-rail-toggle" data-xai-rail-toggle title="${xaiRailCollapsed ? 'Expand' : 'Collapse'} panel"><span class="xai-rail-ico" aria-hidden="true">${xaiRailCollapsed ? '»' : '«'}</span><span class="xai-rail-lbl">Collapse</span></button>`
+  return `<div class="xai-shell${xaiRailCollapsed ? ' rail-collapsed' : ''}">
+    <nav class="xai-rail" aria-label="xAI views">${tabs.map(railBtn).join('')}${toggle}</nav>
+    <div class="xai-tab-content">${active ? active.render() : ''}</div>
+  </div>`
+}
+function xaiAllTabs(bundle, criterion) {
+  return [
+    { id: 'environments', label: 'Environments', icon: xaiIconEnv, render: () => xaiEnvironmentsTabHtml(bundle, criterion) },
+    { id: 'effects', label: 'Config effects', icon: xaiIconSliders, render: () => xaiConfigEffectsHtml(bundle, criterion) },
+    { id: 'surrogate', label: 'Surrogate', icon: xaiIconSurrogate, render: () => xaiSurrogateHtml(bundle, criterion) },
+    { id: 'maps', label: 'Maps', icon: xaiIconMap, render: () => xaiMapsTabHtml(bundle, criterion) },
+    { id: 'recommender', label: 'Suggested', icon: iconLightbulbSvg, render: () => xaiRecommenderHtml(criterion, bundle) },
+  ]
+}
+function xaiCurrentTabs(criterion) {
+  return [
+    { id: 'standing', label: 'Standing', icon: xaiIconRank, render: () => xaiRunStandingHtml(xaiFocusKey, criterion) },
+    { id: 'narrative', label: 'Narrative', icon: iconChatSvg, render: () => xaiNarrativeHtml(xaiTotalRuns(), criterion) },
+    { id: 'internals', label: 'Internals', icon: xaiIconSurrogate, render: () => xaiModelInternalsHtml(xaiFocusKey) },
+  ]
 }
 // The best total-run count the viewer knows without re-querying — the analysed bundle's count, else the
 // runs-tab total, else the loaded page. Used for the narrative's "N new runs since" hint.
@@ -4777,57 +4871,46 @@ function xaiAnalyzeAllBtnHtml(label) {
   return `<button type="button" class="ghost-btn" data-xai-refresh-analysis${disabled} title="Compute the whole-space surrogate / fANOVA / coupling / PCA / config-effects over EVERY completed run, server-side (runs in the activity queue)">${analyzingConfigSpace ? `${spinnerHtml()} Analysing…` : escapeHtml(label)}</button>`
 }
 // ALL-RUNS scope: render purely from the server-cached whole-space bundle — never the current page.
-function xaiAllRunsHtml(criterion) {
-  const bundle = xaiResolveBundle(criterion)
-  if (!bundle) {
-    return `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis</h3>${xaiAnalyzeAllBtnHtml('Run analysis')}</div>
-      <p class="card-sub">Runs the surrogate, fANOVA, coupling, PCA, config-effects and recommender over <strong>EVERY completed run</strong> (not just this page) — server-side, in the activity queue — and caches the result here. ${analyzingConfigSpace ? 'Analysing now…' : `Click <strong>Run analysis</strong> for the “${escapeHtml(criterion.label)}” criterion.`}</p>
-      <p id="xai-status" class="form-status" role="status" hidden></p></div>`
-  }
+// All-runs scope, nothing cached yet — the prompt to compute the whole-space analysis.
+function xaiNoBundleHtml(criterion) {
+  return `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis</h3>${xaiAnalyzeAllBtnHtml('Run analysis')}</div>
+    <p class="card-sub">Runs the surrogate, fANOVA, coupling, config-effects, maps and recommender over <strong>EVERY completed run</strong> (not just this page) — server-side, in the activity queue — and caches the result here. ${analyzingConfigSpace ? 'Analysing now…' : `Click <strong>Run analysis</strong> for the “${escapeHtml(criterion.label)}” criterion.`}</p>
+    <p id="xai-status" class="form-status" role="status" hidden></p></div>`
+}
+// ENVIRONMENTS tab: the analysis freshness + re-run, the scope note, and the (consolidated) environment list.
+function xaiEnvironmentsTabHtml(bundle, criterion) {
   const a = bundle.analysis
   const when = bundle.generatedAt ? formatWhen(bundle.generatedAt) : 'recently'
-  const envs = a.environments || []
   const scopeNote = a.environment
-    ? `Scoped to environment <strong>${escapeHtml(xaiEnvLabel(a.environment))}</strong> — <strong>model levers only</strong>; its environment/dataset settings are held fixed (never tuned).`
-    : `Computed over every completed run for the “${escapeHtml(criterion.label)}” criterion.`
+    ? `Scoped to <strong>${escapeHtml(xaiEnvLabel(a.environment))}</strong> — <strong>model levers only</strong>; its environment/dataset settings are held fixed (never tuned). The other tabs analyse THIS environment.`
+    : `No environment/dataset levers declared — the whole space is analysed together.`
   const status = `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis <span class="card-sub">— ${a.runCount} runs · ${a.setupCount} setups · analysed ${escapeHtml(when)}</span></h3>${xaiAnalyzeAllBtnHtml('Re-run analysis')}</div>
-    ${xaiEnvSelectorHtml(a)}
     <p class="card-sub">${scopeNote} Re-run to fold in runs added since.</p>
     <p id="xai-status" class="form-status" role="status" hidden></p></div>`
-  return [
-    status,
-    envs.length ? xaiCompareEnvironmentsHtml(a, criterion) : '',
-    xaiConfigEffectsHtml(bundle, criterion),
-    xaiSurrogateHtml(bundle, criterion),
-    xaiPcaHtml(bundle, criterion),
-    xaiRecommenderHtml(criterion, bundle),
-  ].join('')
+  return status + ((a.environments || []).length ? xaiCompareEnvironmentsHtml(a, criterion) : '')
 }
 // A human-readable label for an environment (its context-lever values).
 function xaiEnvLabel(values) {
   const parts = Object.entries(values || {}).map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
   return parts.length ? parts.join(' · ') : 'default'
 }
-// The environment picker — choosing one re-scopes the whole analysis to it (model levers only).
-function xaiEnvSelectorHtml(a) {
-  const envs = a.environments || []
-  if (envs.length < 2) return '' // 0 or 1 environment — nothing to switch between
-  const currentSig = window.Xai.canonicalConfigString(a.environment || {})
-  const opts = envs
-    .map(
-      (e) =>
-        `<option value="${escapeHtml(e.signature)}"${e.signature === currentSig ? ' selected' : ''}>${escapeHtml(xaiEnvLabel(e.values))} · ${e.runCount} run${e.runCount === 1 ? '' : 's'}</option>`,
-    )
-    .join('')
-  return `<p class="badges-row"><label class="card-sub">Environment <select id="xai-environment"${analyzingConfigSpace ? ' disabled' : ''}>${opts}</select></label> <span class="card-sub">market mechanics + data — analysed separately</span></p>`
-}
-// Cross-environment comparison: rank environments by best result + show which context settings matter most.
-// Context is held fixed within each environment and never recommended — these are 🔒, for comparison only.
+// Cross-environment comparison: a SCANNABLE list (filter + sort + scroll) so 100+ environments stay usable.
+// Each is analysed separately + never tuned; click one to scope the other tabs to it. The 🔒 list shows which
+// context settings move the score most.
 function xaiCompareEnvironmentsHtml(a, criterion) {
-  const envs = [...(a.environments || [])].sort((x, y) =>
-    criterion.direction === 'min' ? x.best - y.best : y.best - x.best,
-  )
+  const all = a.environments || []
   const currentSig = window.Xai.canonicalConfigString(a.environment || {})
+  const q = xaiEnvSearch.trim().toLowerCase()
+  let envs = q ? all.filter((e) => xaiEnvLabel(e.values).toLowerCase().includes(q)) : [...all]
+  envs.sort((x, y) =>
+    xaiEnvSort === 'runs'
+      ? y.runCount - x.runCount
+      : criterion.direction === 'min'
+        ? x.best - y.best
+        : y.best - x.best,
+  )
+  // Pin the currently-scoped environment to the top so it's always visible.
+  envs.sort((x, y) => Number(y.signature === currentSig) - Number(x.signature === currentSig))
   const rows = envs
     .map((e) => {
       const cur = e.signature === currentSig
@@ -4841,31 +4924,18 @@ function xaiCompareEnvironmentsHtml(a, criterion) {
     ? `<h4 class="card-sub">Which environment/dataset settings move the score most <span class="card-sub">(🔒 context — compare only, never tuned)</span></h4>
        <ul class="xai-coupling">${ctx.map((s) => `<li>🔒 <code>${escapeHtml(s.lever)}</code> <span class="num">${Math.round(s.importance * 100)}%</span> <span class="card-sub">best ${escapeHtml(String(s.bestValue))}</span></li>`).join('')}</ul>`
     : ''
-  return `<div class="card"><div class="card-head card-head-row"><h3>Compare environments <span class="card-sub">— ${envs.length} environments · context held fixed, never tuned</span></h3></div>
-    <div class="card-scroll">
-    <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended. Click an environment to scope the analysis below to it.</p>
-    <table class="kv-table report-table"><thead><tr><th>environment</th><th class="num">runs</th><th class="num">best ${escapeHtml(criterion.label)}</th></tr></thead><tbody>${rows}</tbody></table>
-    ${ctxList}
-    </div></div>`
-}
-// CURRENT-RUN scope: one focused run's deterministic analysis (its standing among ALL runs is computed on
-// demand + LRU-cached), plus its internals + the per-run LLM narrative.
-function xaiCurrentRunHtml(criterion) {
-  if (!xaiFocusKey) {
-    return `<div class="card"><div class="card-head card-head-row"><h3>Current run</h3></div>
-      <p class="card-sub">Focus a run (Runs → “Analyze in xAI”) to analyse one model in depth — its decisions, what drives them, and how it ranks among all runs.</p></div>`
-  }
-  const run = findRun(xaiFocusKey)
-  if (!run) {
-    return `<div class="card"><div class="card-head card-head-row"><h3>Current run <span class="card-sub">— ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>
-      <button type="button" class="ghost-btn" data-xai-clear-focus>✕ Clear run</button></div>
-      <p class="card-sub">This run isn’t loaded — open it from the Runs tab and choose “Analyze in xAI”.</p></div>`
-  }
-  return [
-    xaiRunStandingHtml(xaiFocusKey, criterion),
-    xaiNarrativeHtml(xaiTotalRuns(), criterion),
-    xaiModelInternalsHtml(xaiFocusKey),
-  ].join('')
+  return `<div class="card"><div class="card-head card-head-row"><h3>Compare environments <span class="card-sub">— ${all.length} environments · click one to scope to it</span></h3></div>
+    <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended.</p>
+    <div class="badges-row xai-env-controls">
+      <input type="search" id="xai-env-search" class="xai-env-search" placeholder="Filter environments…" value="${escapeHtml(xaiEnvSearch)}" aria-label="Filter environments" />
+      <label class="card-sub">Sort <select id="xai-env-sort">
+        <option value="best"${xaiEnvSort === 'best' ? ' selected' : ''}>best ${escapeHtml(criterion.label)}</option>
+        <option value="runs"${xaiEnvSort === 'runs' ? ' selected' : ''}>most runs</option>
+      </select></label>
+      <span class="card-sub">${envs.length} of ${all.length}</span>
+    </div>
+    <div class="xai-env-scroll"><table class="kv-table report-table"><thead><tr><th>environment</th><th class="num">runs</th><th class="num">best ${escapeHtml(criterion.label)}</th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="card-sub">no environments match “${escapeHtml(xaiEnvSearch)}”</td></tr>`}</tbody></table></div>
+    ${ctxList}</div>`
 }
 // The focused run's standing among ALL runs (rank + action mix + attribution sanity), from the on-demand
 // LRU-cached digest. The button computes/recomputes it server-side over every run.
@@ -5226,6 +5296,93 @@ function xaiCouplingHtml(couplings) {
     .join('')
   return `<h4 class="card-sub">Coupling <span class="card-sub">— lever PAIRS whose best value depends on each other (tune together, not one-at-a-time); % = interaction variance explained</span></h4>
     <ul class="xai-coupling">${items}</ul>`
+}
+// MAPS tab: pick a configuration-map view — parallel coordinates (readable axes) or PCA (cluster sketch).
+function xaiMapsTabHtml(bundle, criterion) {
+  const btn = (kind, label) =>
+    `<button type="button" class="xai-scope-btn${xaiMapKind === kind ? ' active' : ''}" data-xai-map="${kind}">${label}</button>`
+  const map =
+    xaiMapKind === 'pca' ? xaiPcaHtml(bundle, criterion) : xaiParallelCoordsHtml(bundle, criterion)
+  return `<div class="card"><div class="card-head card-head-row"><h3>Configuration maps <span class="card-sub">— two views of the same explored configs</span></h3>
+      <div class="xai-scope-switch">${btn('parallel', 'Parallel')}${btn('pca', 'PCA')}</div></div>
+    <p class="card-sub"><strong>Parallel</strong> = real, readable lever axes (best for "what does a good config look like?"). <strong>PCA</strong> = an abstract 2-D cluster sketch (best for spotting outliers).</p></div>${map}`
+}
+function xaiAbbrevLever(name) {
+  const s = String(name)
+  return s.length > 13 ? s.slice(0, 12) + '…' : s
+}
+// Parallel-coordinates "configuration map": every explored config is a line threading its lever values,
+// coloured by performance rank — readable axes, so you can SEE which lever values the good configs share.
+function xaiParallelCoordsHtml(bundle, criterion) {
+  const a = bundle.analysis
+  const setupVal = (s) =>
+    criterion.key === 'objective'
+      ? s.objective
+      : criterion.key === 'durationMs'
+        ? s.durationMs
+        : s.metrics && s.metrics[criterion.key]
+  const items = (a.setups || [])
+    .map((s) => ({ s, v: setupVal(s) }))
+    .filter((x) => typeof x.v === 'number' && Number.isFinite(x.v))
+  const card = (inner) =>
+    `<div class="card"><div class="card-head card-head-row"><h3>Parallel coordinates</h3></div><div class="card-scroll">${inner}</div></div>`
+  if (items.length < 3) return card(`<p class="card-sub">Need ≥3 explored configs to draw the parallel map.</p>`)
+  // Axes = the varying model levers, ordered by fANOVA total effect (most decisive first), capped for legibility.
+  const ranked = [...(a.importances || [])].sort((x, y) => (y.total || 0) - (x.total || 0)).map((f) => f.lever)
+  const ordered = [...ranked, ...(a.levers || []).filter((l) => !ranked.includes(l))]
+  const info = {}
+  for (const lev of ordered) {
+    const vals = items.map((x) => x.s.config[lev])
+    const distinct = [...new Set(vals.map((v) => String(v)))]
+    if (distinct.length < 2) continue // doesn't vary in this environment → no axis
+    const allNum = vals.every((v) => typeof v === 'number' || (v !== '' && v != null && Number.isFinite(Number(v))))
+    info[lev] = { allNum, sorted: distinct.sort(xaiCmpValues), nums: allNum ? vals.map(Number) : null }
+  }
+  const levers = Object.keys(info).slice(0, 8)
+  if (levers.length < 2) return card(`<p class="card-sub">Not enough <em>varying</em> model levers in this environment to draw a parallel map (try a different environment, or run more configs).</p>`)
+  // Performance rank → hue (green=best), like the PCA map, so the colour always spans the full range.
+  const vs = items.map((x) => x.v)
+  const order = vs.map((v, i) => [v, i]).sort((p, q) => (criterion.direction === 'min' ? q[0] - p[0] : p[0] - q[0]))
+  const rank = new Array(vs.length).fill(0.5)
+  order.forEach(([, idx], k) => (rank[idx] = vs.length > 1 ? k / (vs.length - 1) : 0.5))
+  const W = 660, H = 340, padL = 28, padR = 28, padT = 22, padB = 66
+  const plotW = W - padL - padR, plotH = H - padT - padB
+  const axisX = (i) => padL + (levers.length === 1 ? plotW / 2 : (i / (levers.length - 1)) * plotW)
+  const yOf = (lev, v) => {
+    const d = info[lev]
+    let t
+    if (d.allNum) {
+      const lo = Math.min(...d.nums), hi = Math.max(...d.nums)
+      t = hi === lo ? 0.5 : (Number(v) - lo) / (hi - lo)
+    } else {
+      const i = d.sorted.indexOf(String(v))
+      t = d.sorted.length === 1 ? 0.5 : i / (d.sorted.length - 1)
+    }
+    return padT + (1 - t) * plotH
+  }
+  const axes = levers
+    .map((lev, i) => {
+      const x = axisX(i)
+      const d = info[lev]
+      const ticks = d.allNum
+        ? `<text x="${x}" y="${padT - 6}" text-anchor="middle" class="xai-pc-tick">${escapeHtml(formatTickValue(Math.max(...d.nums)))}</text><text x="${x}" y="${padT + plotH + 13}" text-anchor="middle" class="xai-pc-tick">${escapeHtml(formatTickValue(Math.min(...d.nums)))}</text>`
+        : ''
+      return `<line x1="${x}" y1="${padT}" x2="${x}" y2="${padT + plotH}" class="xai-pc-axis-line" />${ticks}<text x="${x}" y="${H - padB + 20}" text-anchor="middle" class="xai-pc-axis"><title>${escapeHtml(lev)}</title>${escapeHtml(xaiAbbrevLever(lev))}</text>`
+    })
+    .join('')
+  const compactCfg = (cfg) =>
+    levers.map((l) => `${l}=${xaiFmtLeverValue(cfg[l])}`).join(' · ').slice(0, 160)
+  const polys = items
+    .map((x, i) => ({ x, r: rank[i] }))
+    .sort((p, q) => p.r - q.r) // draw best (green) last → on top
+    .map(({ x, r }) => {
+      const pts = levers.map((lev, j) => `${axisX(j).toFixed(1)},${yOf(lev, x.s.config[lev]).toFixed(1)}`).join(' ')
+      const tip = `${compactCfg(x.s.config)} · ${criterion.label} ${formatTickValue(x.v)} · top ${100 - Math.round(r * 100)}%`
+      return `<polyline points="${pts}" fill="none" stroke="hsl(${Math.round(r * 120)},70%,45%)" stroke-width="1.4" opacity="${(0.22 + r * 0.55).toFixed(2)}"><title>${escapeHtml(tip)}</title></polyline>`
+    })
+    .join('')
+  return card(`<p class="card-sub">Every line is one config threading its lever values; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>How to read it:</strong> where the green lines BUNCH at one value on an axis, that value is good; where they fan across the axis, that lever doesn't decide the outcome. Axes are ordered most-decisive-first (by fANOVA).</p>
+    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}</svg></div>`)
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
@@ -6332,9 +6489,25 @@ function setupRuns() {
       } else if (t.id === 'xai-inter-b') {
         xaiInterB = t.value
         renderXai()
-      } else if (t.id === 'xai-environment') {
-        xaiAnalyzeEnvironment(t.value)
+      } else if (t.id === 'xai-env-sort') {
+        xaiEnvSort = t.value
+        renderXai()
       }
+    })
+    // Live-filter the environment list in place (no re-render, so the search box keeps focus).
+    xaiBody.addEventListener('input', (event) => {
+      if (event.target.id !== 'xai-env-search') return
+      xaiEnvSearch = event.target.value
+      const q = xaiEnvSearch.trim().toLowerCase()
+      let shown = 0
+      xaiBody.querySelectorAll('.xai-env-scroll tbody tr').forEach((tr) => {
+        const btn = tr.querySelector('[data-xai-env]')
+        const match = !q || (btn && btn.textContent.toLowerCase().includes(q))
+        tr.hidden = !match
+        if (match && btn) shown++
+      })
+      const count = xaiBody.querySelector('.xai-env-controls .card-sub:last-child')
+      if (count) count.textContent = `${shown} of ${(xaiResolveBundle(currentXaiCriterion())?.analysis.environments || []).length}`
     })
     xaiBody.addEventListener('click', (event) => {
       const runsLink = event.target.closest('[data-xai-runs]')
@@ -6373,9 +6546,28 @@ function setupRuns() {
         xaiAnalyzeEnvironment(envBtn.dataset.xaiEnv)
         return
       }
+      const tabBtn = event.target.closest('[data-xai-tab]')
+      if (tabBtn) {
+        xaiTab = tabBtn.dataset.xaiTab
+        renderXai()
+        return
+      }
+      if (event.target.closest('[data-xai-rail-toggle]')) {
+        xaiRailCollapsed = !xaiRailCollapsed
+        renderXai()
+        return
+      }
+      const mapBtn = event.target.closest('[data-xai-map]')
+      if (mapBtn) {
+        xaiMapKind = mapBtn.dataset.xaiMap === 'pca' ? 'pca' : 'parallel'
+        renderXai()
+        return
+      }
       const scopeBtn = event.target.closest('[data-xai-scope]')
       if (scopeBtn) {
         xaiScope = scopeBtn.dataset.xaiScope === 'current' ? 'current' : 'all'
+        // Land on the first tab of the new scope (the old tab id may not exist there).
+        xaiTab = xaiScope === 'current' ? 'standing' : 'environments'
         renderXai()
         return
       }
@@ -8282,10 +8474,6 @@ function setupHypotheses() {
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
         event.preventDefault()
       }
-      if (event.target.closest('#hypotheses-refresh-btn')) {
-        refreshAllRunsDerived()
-        return
-      }
       const chip = event.target.closest('[data-action="goto-paper"]')
       if (chip) {
         showTab('papers')
@@ -8931,6 +9119,41 @@ async function launchPaperOp(activityType, paperId, label) {
 async function onSuggestPaperHypotheses(id) {
   await launchPaperOp('suggest-paper-hypotheses', id, 'Suggest hypotheses')
 }
+// TEMPORARY: re-verify EVERY paper's hypotheses against the cross-context capability (no paperId = all
+// papers); the backend auto-updates the stale specs in place. Tracked under one global '__all__' key.
+const REVERIFY_KEY = '__all__'
+function renderReverifyBtn() {
+  const btn = byId('papers-reverify-btn')
+  if (!btn) return
+  const busy = paperOpPending('revise-paper-hypotheses', REVERIFY_KEY)
+  btn.disabled = busy
+  btn.innerHTML = busy ? `${spinnerHtml()} Re-verifying…` : 'Re-verify hypotheses'
+}
+async function onReverifyPaperHypotheses() {
+  if (!embedded()) {
+    setStatusLine('papers-status', 'Open inside the Overseer to run this.', true)
+    return
+  }
+  if (paperOpPending('revise-paper-hypotheses', REVERIFY_KEY)) return
+  const epoch = projectEpoch
+  setStatusLine('papers-status', '')
+  pendingPaperOps.add(paperOpKey('revise-paper-hypotheses', REVERIFY_KEY))
+  renderReverifyBtn()
+  try {
+    const result = await startOrEnqueue(
+      'revise-paper-hypotheses',
+      trainerActivityParams({}),
+      'Re-verify hypotheses',
+    )
+    if (result.queued && epoch === projectEpoch)
+      setStatusLine('papers-status', queuedStatusText(result.ahead))
+  } catch {
+    pendingPaperOps.delete(paperOpKey('revise-paper-hypotheses', REVERIFY_KEY))
+    renderReverifyBtn()
+    if (epoch === projectEpoch)
+      setStatusLine('papers-status', 'Could not start — please try again.', true)
+  }
+}
 async function onFindPaperModels(id) {
   await launchPaperOp('analyze-paper-models', id, 'Find models')
 }
@@ -9010,6 +9233,8 @@ function setupPapers() {
       togglePaperForm(!!(form && form.hidden))
     })
   }
+  const reverify = byId('papers-reverify-btn')
+  if (reverify) reverify.addEventListener('click', onReverifyPaperHypotheses)
   const form = byId('paper-form')
   if (form) {
     form.addEventListener('submit', (event) => {
@@ -9323,22 +9548,17 @@ function modelRunRow(run) {
 // that scans EVERY run, so it spins); a stale flag appears when newer runs exist past the aggregate.
 function modelStatsControlsHtml() {
   const total = modelStatsCache ? modelStatsCache.totalRuns : null
-  const label = modelStatsRefreshing
-    ? `${spinnerHtml()} Refreshing…`
-    : modelStatsCache
-      ? 'Refresh stats'
-      : 'Compute run stats'
   const at =
     modelStatsCache && modelStatsCache.aggregatedAt
       ? ' · ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
       : ''
   const note = modelStatsCache
     ? `Run counts aggregated over ${total} run${total === 1 ? '' : 's'}${at}.`
-    : 'Run counts are computed over ALL runs (not the current page) — press to compute.'
+    : 'Run counts are computed over ALL runs (not the current page) — use Refresh, top right.'
   const stale = modelStatsStale
-    ? '<span class="model-stats-stale">newer runs exist — refresh to update</span>'
+    ? '<span class="model-stats-stale">newer runs exist — Refresh latest, top right</span>'
     : ''
-  return `<div class="model-stats-controls"><button type="button" id="models-refresh-btn" class="ghost-btn"${modelStatsRefreshing ? ' disabled' : ''}>${label}</button> <span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
+  return `<div class="model-stats-controls"><span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
 }
 // Runs whose model_name matches no catalog flavor — the "a flavor is missing" signal.
 function uncatalogedModelsHtml() {
@@ -9355,22 +9575,17 @@ function uncatalogedModelsHtml() {
 // The Refresh control row for the Hypotheses tab — same shared all-runs refresh, worded for verdicts.
 function hypothesisStatsControlsHtml() {
   const total = modelStatsCache ? modelStatsCache.totalRuns : null
-  const label = modelStatsRefreshing
-    ? `${spinnerHtml()} Refreshing…`
-    : modelStatsCache
-      ? 'Refresh from all runs'
-      : 'Evaluate over all runs'
   const at =
     modelStatsCache && modelStatsCache.aggregatedAt
       ? ' · ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
       : ''
   const note = modelStatsCache
     ? `Verdicts evaluated over ${total} run${total === 1 ? '' : 's'}${at}.`
-    : 'Verdicts are evaluated over ALL runs (not the current page) — press to evaluate.'
+    : 'Verdicts are evaluated over ALL runs (not the current page) — use Refresh, top right.'
   const stale = modelStatsStale
-    ? '<span class="model-stats-stale">newer runs exist — refresh to update</span>'
+    ? '<span class="model-stats-stale">newer runs exist — Refresh latest, top right</span>'
     : ''
-  return `<div class="model-stats-controls"><button type="button" id="hypotheses-refresh-btn" class="ghost-btn"${modelStatsRefreshing ? ' disabled' : ''}>${label}</button> <span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
+  return `<div class="model-stats-controls"><span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
 }
 // Re-render whichever run-derived tab is active (to repaint the spinner / fresh results).
 function rerenderRunDerivedTab() {
@@ -9378,50 +9593,162 @@ function rerenderRunDerivedTab() {
   if (activeTabId === 'papers') return renderPapers()
   return renderModels()
 }
-// ONE scan over EVERY run updates ALL run-derived data: the model-stats aggregate (persisted as a
-// `<recordType>-model-stats` record) AND every hypothesis verdict (persisted per record). Both tabs'
-// Refresh buttons call this; the in-memory `allRunsCache` is shared so a single scan feeds both.
-async function refreshAllRunsDerived() {
+// Run-derived data is refreshed through ONE registry of updaters, each consuming the shared run set and
+// refreshing one body of derived data. Add an entry here to make a new artifact participate in the global
+// Refresh (both the full scan and the latest-only path) — that's the single seam for "things that need
+// updating when runs land".
+const RUN_DERIVED_UPDATERS = [
+  { label: 'model stats', run: updateModelStatsFromRuns },
+  {
+    label: 'hypothesis verdicts',
+    run: async () => {
+      await refreshHypothesisVerdicts(await readHypotheses())
+    },
+  },
+]
+async function applyRunDerivedUpdaters(allRuns) {
+  for (const u of RUN_DERIVED_UPDATERS) await u.run(allRuns)
+}
+// Recompute + persist the model-stats aggregate (the `<recordType>-model-stats` record), the first
+// run-derived updater. `newestRunAt`/`totalRuns` it records are the frontier the latest-only path extends.
+async function updateModelStatsFromRuns(allRuns) {
+  const models = await readModels()
+  const stats = window.Models.computeModelStats(
+    models,
+    allRuns.map(modelRunRow),
+    objectiveDirection(),
+  )
+  const content = { ...stats, aggregatedAt: nowIso() }
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-model-stats',
+    key: 'latest',
+    content,
+  })
+  modelStatsCache = content
+}
+// The newer tail: page newest-first (ranAt desc) and collect runs past the last aggregate's frontier,
+// stopping at the first run that's already covered. The cheap path — it never re-pages the whole history.
+async function fetchRunsNewerThan(newestRunAt, onProgress) {
+  const PAGE = 500
+  const fresh = []
+  let offset = 0
+  for (let guard = 0; guard < 10000; guard++) {
+    const page = await queryRunRecords({
+      orderBy: [{ field: 'provenance.ranAt', direction: 'desc', numeric: false }],
+      limit: PAGE,
+      offset,
+    })
+    if (!page.length) break
+    let hitOld = false
+    for (const r of page) {
+      const ranAt = r.summary && r.summary.provenance && r.summary.provenance.ranAt
+      if (ranAt && newestRunAt && ranAt <= newestRunAt) {
+        hitOld = true
+        break
+      }
+      fresh.push(r)
+    }
+    if (onProgress) onProgress(fresh.length)
+    if (hitOld || page.length < PAGE) break
+    offset += PAGE
+  }
+  return fresh
+}
+function setRefreshProgress(text) {
+  const btn = byId('dash-refresh-all')
+  if (btn) setHtml(btn, `${spinnerHtml()} ${escapeHtml(text)}`)
+}
+// Shared refresh core. `mode` 'all' re-scans EVERY run; 'latest' fetches only the newer tail and merges it
+// into the in-memory cache (deduped by key) — both then run every run-derived updater over the full set.
+// Latest needs a prior aggregate (a base cache + a frontier) to extend; without one it falls back to all.
+async function runDerivedRefresh(mode) {
   if (!embedded() || !manifest || modelStatsRefreshing) return
+  const canLatest =
+    mode === 'latest' && allRunsCache.length && modelStatsCache && modelStatsCache.newestRunAt
   const epoch = projectEpoch
   modelStatsRefreshing = true
+  renderGlobalRefresh()
   await rerenderRunDerivedTab()
   let ok = false
   try {
-    // Page through EVERY run (the Runs-tab filter never applies here); show progress on the button.
-    const allRuns = await queryAllRunRecords((n) => {
-      const btn = byId('models-refresh-btn') || byId('hypotheses-refresh-btn')
-      if (btn) setHtml(btn, `${spinnerHtml()} Scanning ${n} runs…`)
-    })
+    let allRuns
+    if (canLatest) {
+      const fresh = await fetchRunsNewerThan(modelStatsCache.newestRunAt, (n) =>
+        setRefreshProgress(`Fetching ${n} new run${n === 1 ? '' : 's'}…`),
+      )
+      const byKey = new Map(allRunsCache.map((r) => [r.key, r]))
+      for (const r of fresh) byKey.set(r.key, r)
+      allRuns = [...byKey.values()]
+    } else {
+      allRuns = await queryAllRunRecords((n) => setRefreshProgress(`Scanning ${n} runs…`))
+    }
     allRunsCache = allRuns
-    const models = await readModels()
-    const stats = window.Models.computeModelStats(
-      models,
-      allRuns.map(modelRunRow),
-      objectiveDirection(),
-    )
-    const content = { ...stats, aggregatedAt: nowIso() }
-    await window.OverseerBridge.putData({
-      type: manifest.recordType + '-model-stats',
-      key: 'latest',
-      content,
-    })
-    modelStatsCache = content
-    await refreshHypothesisVerdicts(await readHypotheses())
+    await applyRunDerivedUpdaters(allRuns)
     modelStatsStale = false
     ok = true
   } catch {
     if (epoch === projectEpoch) {
       const id = activeTabId === 'hypotheses' ? 'hypotheses-status' : 'models-status'
-      setStatusLine(id, 'Could not refresh from all runs — please try again.', true)
+      setStatusLine(id, 'Could not refresh from runs — please try again.', true)
     }
   } finally {
     modelStatsRefreshing = false
     if (epoch === projectEpoch) {
+      renderGlobalRefresh()
       await rerenderRunDerivedTab()
-      if (ok) showToast('Refreshed over all runs.')
+      if (ok) showToast(canLatest ? 'Refreshed latest runs.' : 'Refreshed over all runs.')
     }
   }
+}
+// Both Refresh paths the topbar control exposes; the in-memory `allRunsCache` is shared so a single scan
+// feeds every updater.
+async function refreshAllRunsDerived() {
+  return runDerivedRefresh('all')
+}
+async function refreshLatestRunsDerived() {
+  return runDerivedRefresh('latest')
+}
+// On project open: load the persisted aggregate (so freshness shows from ANY tab, not just the run-derived
+// ones), render the topbar control, and run the cheap staleness check so "Refresh latest" can appear.
+async function initGlobalRefresh() {
+  renderGlobalRefresh()
+  if (!modelStatsCache) {
+    try {
+      modelStatsCache = await readModelStats()
+    } catch {
+      // no aggregate yet — the control just offers a full Refresh
+    }
+  }
+  renderGlobalRefresh()
+  await checkModelStatsStale()
+}
+// The global Refresh control (dashboard topbar, top-right): "Refresh" (full scan, always) + "Refresh
+// latest" (the newer-tail path, only when newer runs exist and there's a prior aggregate to extend).
+function renderGlobalRefresh() {
+  const el = byId('dash-refresh')
+  if (!el) return
+  if (!embedded() || !manifest) {
+    el.innerHTML = ''
+    return
+  }
+  const busy = modelStatsRefreshing
+  const canLatest = !busy && modelStatsStale && !!modelStatsCache && allRunsCache.length > 0
+  const at =
+    modelStatsCache && modelStatsCache.aggregatedAt
+      ? String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
+      : ''
+  const note = modelStatsStale
+    ? '<span class="dash-refresh-note is-stale">new runs since last refresh</span>'
+    : at
+      ? `<span class="dash-refresh-note">updated ${escapeHtml(at)}</span>`
+      : ''
+  const latestBtn = canLatest
+    ? `<button type="button" id="dash-refresh-latest" class="ghost-btn"${helpAttr('Fetch only the runs added since the last refresh and update — the fast path.')}>Refresh latest</button>`
+    : ''
+  el.innerHTML =
+    note +
+    `<button type="button" id="dash-refresh-all" class="ghost-btn"${busy ? ' disabled' : ''}${helpAttr('Re-scan EVERY run and recompute all run-derived data (model stats, hypothesis verdicts).')}>${busy ? `${spinnerHtml()} Refreshing…` : 'Refresh'}</button>` +
+    latestBtn
 }
 // Cheap freshness check: is the live newest run / count past what the aggregate covered? Updates ONLY the
 // control row in place (no full re-render) so it can run after each render without looping.
@@ -9448,6 +9775,7 @@ async function checkModelStatsStale() {
     }
   }
   if (modelStatsStale !== was) {
+    renderGlobalRefresh()
     const bodyId =
       activeTabId === 'hypotheses'
         ? 'hypotheses-body'
@@ -9696,10 +10024,6 @@ function setupModels() {
   body.addEventListener('click', (event) => {
     if (event.target.closest('summary') && event.target.closest('[data-action]')) {
       event.preventDefault()
-    }
-    if (event.target.closest('#models-refresh-btn')) {
-      refreshAllRunsDerived()
-      return
     }
     const filterBtn = event.target.closest('button[data-category]')
     if (filterBtn) {

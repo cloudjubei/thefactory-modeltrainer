@@ -189,6 +189,28 @@ button:focus-visible,
   font-size: 16px;
   font-weight: 700;
 }
+/* Global Refresh control: pushed to the right edge of the content area, so it sits just left of
+   Overseer's floated activity-model chip (the 160px gutter reserves that chip's space). */
+.dash-refresh {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.dash-refresh .ghost-btn {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.dash-refresh-note {
+  font-size: 12px;
+  color: var(--muted, #888);
+  white-space: nowrap;
+}
+.dash-refresh-note.is-stale {
+  color: var(--warn, #d97706);
+  font-weight: 600;
+}
 .app-scroll {
   flex: 1 1 auto;
   min-height: 0;
@@ -2911,6 +2933,100 @@ pre.json {
 .xai-env-current {
   background: rgba(37, 99, 235, 0.1);
   font-weight: 600;
+}
+/* xAI tabbed shell: a collapsible left icon-rail (like the main nav) + the active tab's content. */
+.xai-shell {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.xai-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: 168px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  position: sticky;
+  top: 12px;
+  align-self: flex-start;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+}
+.xai-shell.rail-collapsed .xai-rail {
+  width: auto;
+}
+.xai-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.xai-rail-btn:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+.xai-rail-btn.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+.xai-rail-ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.xai-shell.rail-collapsed .xai-rail-lbl {
+  display: none;
+}
+.xai-rail-toggle {
+  margin-top: 4px;
+  opacity: 0.65;
+}
+.xai-tab-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* Environments: keep a 100+ list scannable. */
+.xai-env-controls {
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0;
+}
+.xai-env-search {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 200px;
+}
+.xai-env-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+/* Parallel-coordinates configuration map. */
+.xai-pc {
+  max-width: 100%;
+  height: auto;
+}
+.xai-pc-axis-line {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.xai-pc-axis {
+  font-size: 10px;
+  fill: var(--muted);
+}
+.xai-pc-tick {
+  font-size: 9px;
+  fill: var(--muted);
 }
 /* fANOVA per-lever effect tags: inert (drop), interactive (coupled), direct (plain). */
 .fanova-inert {
