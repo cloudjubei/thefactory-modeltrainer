@@ -120,7 +120,7 @@ const HYPOTHESIS_VERDICT_BADGE = {
   disproved: 'is-failed',
 }
 const HYPOTHESIS_VERDICT_LABEL = { untested: 'untested', proven: 'proven', disproved: 'disproved' }
-const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds']
+const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds', 'environments', 'datasets']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
 const DEFAULT_HYPOTHESIS_MIN_RUNS = 3
 const HYPOTHESIS_CONFIG_SUFFIX = '-hypothesis-config'
@@ -1805,6 +1805,35 @@ async function onQueueRemove(id) {
     await clearHypothesisCampaign(item.params.recordType, item.hypothesisId, id)
     if (activeTabId === 'hypotheses') await renderHypotheses()
   }
+  await refreshQueue()
+}
+// Reorder a pending item within its OWN lane (experiments/tasks pump independently). `queuedAt` is the
+// sort-only, never-displayed order key, so a move re-stamps the whole lane to a fresh increasing
+// sequence — the cleanest way to persist the new order without timestamp-collision math.
+async function moveQueueItem(id, dir) {
+  const item = queueCache.find((q) => q.id === id)
+  if (!item) return
+  const lane = isExperimentActivityType(item.activityType)
+  const laneItems = queueCache
+    .filter((q) => !q.marker && isExperimentActivityType(q.activityType) === lane)
+    .sort(
+      (a, b) =>
+        String(a.queuedAt || '').localeCompare(String(b.queuedAt || '')) ||
+        String(a.id).localeCompare(String(b.id)),
+    )
+  const i = laneItems.findIndex((q) => q.id === id)
+  if (i < 0) return
+  const j = dir === 'top' ? 0 : dir === 'up' ? i - 1 : dir === 'down' ? i + 1 : i
+  if (j === i || j < 0 || j >= laneItems.length) return
+  laneItems.splice(i, 1)
+  laneItems.splice(j, 0, item)
+  const base = Date.now() - laneItems.length * 1000
+  await Promise.all(
+    laneItems.map((q, idx) => {
+      q.queuedAt = new Date(base + idx * 1000).toISOString()
+      return putQueueItem(q)
+    }),
+  )
   await refreshQueue()
 }
 // Drain BOTH lanes until each is full to its own budget. The lanes are independent: a full
@@ -3569,6 +3598,10 @@ function normalizeSpec(spec) {
   const fixed = (spec && spec.fixed) || {}
   if (Object.keys(sweep).length) out.sweep = sweep
   if (Object.keys(fixed).length) out.fixed = fixed
+  const environments = (spec && spec.environments) || []
+  if (Array.isArray(environments) && environments.length) out.environments = environments
+  const datasets = (spec && spec.datasets) || []
+  if (Array.isArray(datasets) && datasets.length) out.datasets = datasets
   const seeds = (spec && spec.seeds) || []
   if (Array.isArray(seeds) && seeds.length) out.seeds = seeds
   return out
@@ -5807,7 +5840,9 @@ async function reRunRuns(keys) {
   const runs = keys.map((k) => findRun(k)).filter(Boolean)
   if (!runs.length) return
   const params = trainerComputeParams({
-    spec: { configs: runs.map((run) => reRunConfigForRun(run.summary.config)) },
+    spec: {
+      configs: runs.map((run) => ({ config: reRunConfigForRun(run.summary.config), key: run.key })),
+    },
     refresh: true,
     concurrency: savedConcurrency(),
   })
@@ -7304,6 +7339,19 @@ function hypothesisMeasured(h) {
     return window.Hypothesis.measuredFromRuns(hypothesisMatchedRuns(h), objectiveDirection())
   return (h && h.evidence && h.evidence.measured) || null
 }
+// The verdict the runs imply IGNORING any manual override — the "auto suggests" hint. Context-aware: a
+// context-spanning hypothesis reads its cross-context comparison, not the pooled beats-hold.
+function autoSuggestedVerdict(h) {
+  if (allRunsCache.length && window.Hypothesis.contextCells((h && h.spec) || {}).length) {
+    return window.Hypothesis.compareContexts(
+      window.Hypothesis.measuredByContext(h.spec, allRunsCache, objectiveDirection()),
+      h.comparison,
+      objectiveDirection(),
+      hypothesisMinRuns,
+    )
+  }
+  return window.Hypothesis.autoVerdictFor(hypothesisMeasured(h), hypothesisMinRuns)
+}
 function effectiveHypothesisVerdict(h) {
   if (!h) return 'untested'
   if (allRunsCache.length)
@@ -7478,6 +7526,62 @@ function hypothesisVerdictFormHtml(h) {
     </div>
   </div>`
 }
+// Whether a hypothesis spans more than one context (environments/datasets) — its runs are compared
+// ACROSS contexts rather than pooled into one beats-hold read.
+function hypothesisIsContextSpanning(h) {
+  return !!(h && h.spec && window.Hypothesis.contextCells(h.spec).length)
+}
+function contextCellLabel(cell) {
+  const parts = Object.entries(cell || {}).map(
+    ([k, v]) => `${escapeHtml(k)}=${escapeHtml(String(v))}`,
+  )
+  return parts.length ? parts.join(', ') : '—'
+}
+function comparisonKindLabel(kind) {
+  return kind === 'invariant'
+    ? 'invariant across contexts'
+    : kind === 'differs'
+      ? 'differs across contexts'
+      : 'thesis beats baseline'
+}
+// The cross-context comparison behind a context-spanning hypothesis: one row per context cell (its
+// context values, run count, best objective, beats-hold) — never pooled — plus the criterion + verdict.
+function hypothesisComparisonHtml(h) {
+  const cmp = h.comparison || { kind: 'beats-baseline' }
+  const baselineIndex = cmp.baselineIndex || 0
+  const cellCount = window.Hypothesis.contextCells(h.spec).length
+  const perContext = allRunsCache.length
+    ? window.Hypothesis.measuredByContext(h.spec, allRunsCache, objectiveDirection())
+    : null
+  const cells = perContext || []
+  const verdict = effectiveHypothesisVerdict(h)
+  const tolNote =
+    cmp.kind === 'beats-baseline'
+      ? ''
+      : ` (tolerance ${cmp.tolerance != null ? cmp.tolerance : 0.1})`
+  const basis = `<strong>${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</strong> — comparison: ${escapeHtml(comparisonKindLabel(cmp.kind))}${escapeHtml(tolNote)}.`
+  const totalRuns = cells.reduce((n, c) => n + (c.measured ? c.measured.runs : 0), 0)
+  if (!totalRuns) {
+    return `<div class="hyp-evidence"><p class="card-sub">No matching runs yet across the ${cellCount} contexts — launch runs to test it.</p></div>`
+  }
+  const rows = cells
+    .map((c, i) => {
+      const m = c.measured
+      const obj = m && Number.isFinite(m.objective) ? formatObjective(m.objective) : '—'
+      const beats = m && m.beatsHold === true ? 'yes' : m && m.beatsHold === false ? 'no' : '—'
+      const tag =
+        cmp.kind === 'beats-baseline' && i === baselineIndex
+          ? ' <span class="badge">baseline</span>'
+          : ''
+      return `<tr><td>${contextCellLabel(c.context)}${tag}</td><td>${m ? m.runs : 0}</td><td>${escapeHtml(obj)}</td><td>${beats}</td></tr>`
+    })
+    .join('')
+  return `<div class="hyp-evidence">
+    <p class="card-sub hyp-basis">${basis}</p>
+    <table class="kv-table hyp-runs"><thead><tr><th>context</th><th>runs</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${rows}</tbody></table>
+    <button type="button" class="ghost-btn" data-action="view-runs" data-id="${escapeHtml(h.id)}"${helpAttr('Open the Runs tab filtered to these matching runs (grouped by environment there).')}>View runs in Runs</button>
+  </div>`
+}
 function hypothesisCardHtml(h, liveIds) {
   const verdict = effectiveHypothesisVerdict(h)
   const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</span>`
@@ -7495,7 +7599,7 @@ function hypothesisCardHtml(h, liveIds) {
   const by = h.proposedBy ? ` · ${escapeHtml(h.proposedBy)}` : ''
   const overrideNote =
     h.verdictSource === 'manual'
-      ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[window.Hypothesis.autoVerdictFor(hypothesisMeasured(h), hypothesisMinRuns)])}</p>`
+      ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[autoSuggestedVerdict(h)])}</p>`
       : ''
   const overrideForm = hypothesisOverrideId === h.id ? hypothesisVerdictFormHtml(h) : ''
   const open = hypothesisExpanded.has(h.id) ? ' open' : ''
@@ -7510,7 +7614,7 @@ function hypothesisCardHtml(h, liveIds) {
     <div class="hypothesis-body">
       ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
       ${specSummaryHtml(h.spec)}
-      ${hypothesisEvidenceHtml(h)}
+      ${hypothesisIsContextSpanning(h) ? hypothesisComparisonHtml(h) : hypothesisEvidenceHtml(h)}
       ${overrideNote}
       ${transitionsHtml(h.transitions)}
       ${linkedPaperChipsHtml(h)}
@@ -7927,7 +8031,7 @@ function validateHypothesisSpec(text) {
   const unknownKeys = Object.keys(parsed).filter((k) => !HYPOTHESIS_SPEC_KEYS.includes(k))
   if (unknownKeys.length) {
     return {
-      error: `Unknown spec ${unknownKeys.length === 1 ? 'key' : 'keys'} ${unknownKeys.join(', ')} — only sweep, fixed and seeds are allowed.`,
+      error: `Unknown spec ${unknownKeys.length === 1 ? 'key' : 'keys'} ${unknownKeys.join(', ')} — only sweep, fixed, seeds, environments and datasets are allowed.`,
     }
   }
   for (const part of ['sweep', 'fixed']) {
@@ -7940,6 +8044,16 @@ function validateHypothesisSpec(text) {
   if (parsed.seeds !== undefined && !Array.isArray(parsed.seeds)) {
     return { error: '"seeds" must be an array.' }
   }
+  for (const part of ['environments', 'datasets']) {
+    const value = parsed[part]
+    if (value === undefined) continue
+    if (
+      !Array.isArray(value) ||
+      value.some((b) => !b || typeof b !== 'object' || Array.isArray(b))
+    ) {
+      return { error: `"${part}" must be an array of context-lever bundles (objects).` }
+    }
+  }
   const known = new Set(Object.keys((manifest && manifest.levers) || {}))
   const unknownLevers = [
     ...Object.keys(parsed.sweep || {}),
@@ -7950,6 +8064,22 @@ function validateHypothesisSpec(text) {
       error: `Unknown ${unknownLevers.length === 1 ? 'lever' : 'levers'} ${unknownLevers.join(', ')} — this manifest declares: ${[...known].join(', ') || 'none'}.`,
     }
   }
+  // environments/datasets bundles must carry CONTEXT levers of the matching scope — they're held-fixed
+  // context (managed as named environments/datasets), not model knobs.
+  const scopeError = (part, wantScope) => {
+    const keys = (parsed[part] || []).flatMap((b) => Object.keys(b))
+    const offenders = keys.filter((k) => {
+      const spec = (manifest && manifest.levers && manifest.levers[k]) || null
+      return !spec || spec.scope !== wantScope
+    })
+    return offenders.length
+      ? `"${part}" may only set ${wantScope}-scoped levers — ${[...new Set(offenders)].join(', ')} ${offenders.length === 1 ? 'is' : 'are'} not.`
+      : ''
+  }
+  const envErr = scopeError('environments', 'environment')
+  if (envErr) return { error: envErr }
+  const dsErr = scopeError('datasets', 'dataset')
+  if (dsErr) return { error: dsErr }
   return { spec: parsed }
 }
 function renderHypothesisForm() {
@@ -7965,9 +8095,24 @@ function renderHypothesisForm() {
         <label class="field"><span>Rationale</span>
           <textarea name="rationale" rows="3"></textarea>
         </label>
-        <label class="field"><span>Spec <em>(JSON with sweep / fixed / seeds)</em></span>
+        <label class="field"><span>Spec <em>(JSON with sweep / fixed / seeds / environments / datasets)</em></span>
           <textarea name="spec" rows="3" spellcheck="false">${escapeHtml(HYPOTHESIS_SPEC_PLACEHOLDER)}</textarea>
         </label>
+        <div class="lever-grid" ${helpAttr('Applies only when the spec spans environments/datasets — its runs are compared ACROSS those contexts (never pooled).')}>
+          <label class="field"><span>Comparison <em>(context-spanning)</em></span>
+            <select name="comparison-kind">
+              <option value="beats-baseline">thesis beats baseline</option>
+              <option value="invariant">invariant across contexts</option>
+              <option value="differs">differs across contexts</option>
+            </select>
+          </label>
+          <label class="field"><span>Baseline cell #</span>
+            <input type="number" name="comparison-baseline" value="0" min="0" step="1" />
+          </label>
+          <label class="field"><span>Tolerance</span>
+            <input type="number" name="comparison-tolerance" value="0.1" min="0" step="any" />
+          </label>
+        </div>
       </div>
     </fieldset>
     <div class="form-actions">
@@ -8014,6 +8159,7 @@ async function onHypothesisSave(event) {
       title,
       rationale: String((form.elements.rationale && form.elements.rationale.value) || '').trim(),
       spec,
+      comparison: readComparisonFromForm(form, spec),
       source: 'human',
     })
   } catch {
@@ -8028,9 +8174,27 @@ async function onHypothesisSave(event) {
   toggleHypothesisForm(false)
   await renderHypotheses()
 }
+// The comparison criterion read off the form — only for a context-spanning spec (else undefined, so a
+// plain hypothesis carries no comparison block).
+function readComparisonFromForm(form, spec) {
+  const spans =
+    (spec.environments && spec.environments.length) || (spec.datasets && spec.datasets.length)
+  if (!spans) return undefined
+  const el = (name) => form.elements[name]
+  const kind = String((el('comparison-kind') && el('comparison-kind').value) || 'beats-baseline')
+  const baselineIndex = Math.max(
+    0,
+    Math.floor(Number((el('comparison-baseline') && el('comparison-baseline').value) || 0)) || 0,
+  )
+  const tolerance = Number(el('comparison-tolerance') && el('comparison-tolerance').value)
+  const comparison = { kind }
+  if (baselineIndex) comparison.baselineIndex = baselineIndex
+  if (kind !== 'beats-baseline' && Number.isFinite(tolerance)) comparison.tolerance = tolerance
+  return comparison
+}
 // Create a hypothesis (spec-hash identity, so an identical spec from any source dedupes to one record),
 // or link an EXISTING one — and, when `paperId` is given, link it to that paper. Returns the id.
-async function createOrLinkHypothesis({ title, rationale, spec, source, paperId }) {
+async function createOrLinkHypothesis({ title, rationale, spec, comparison, source, paperId }) {
   const norm = normalizeSpec(spec)
   const id = await hashTrainingConfig(norm)
   const now = nowIso()
@@ -8039,6 +8203,7 @@ async function createOrLinkHypothesis({ title, rationale, spec, source, paperId 
   const content = existing
     ? {
         ...existing,
+        comparison: comparison !== undefined ? comparison : existing.comparison,
         paperIds: paperId
           ? Array.from(new Set([...(existing.paperIds || []), paperId]))
           : existing.paperIds,
@@ -8049,6 +8214,7 @@ async function createOrLinkHypothesis({ title, rationale, spec, source, paperId 
         title: title || 'Hypothesis',
         rationale: rationale || '',
         spec: norm,
+        ...(comparison ? { comparison } : {}),
         status: 'untested',
         verdictSource: 'auto',
         source: source || 'human',
@@ -11092,17 +11258,32 @@ function bestLineHtml(campaign) {
   if (!campaign || !campaign.bestKey) return ''
   return `<p class="activity-best">Best: <code>${escapeHtml(shortKey(campaign.bestKey))}</code> @ ${escapeHtml(formatObjective(campaign.bestObjective))}</p>`
 }
-// A persisted queue for one lane: each waiting entry with its type chip and a remove button.
+// Queue-reorder glyphs: move up / down one slot, and move to the FRONT (an up arrow to a bar).
+const QUEUE_ICON_UP =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 12.5V4"/><path d="M4.5 7.5 8 4l3.5 3.5"/></svg>'
+const QUEUE_ICON_DOWN =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3.5V12"/><path d="M4.5 8.5 8 12l3.5-3.5"/></svg>'
+const QUEUE_ICON_TOP =
+  '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 3.2h8"/><path d="M8 13V6.4"/><path d="M5 9 8 6l3 3"/></svg>'
+
+// A persisted queue for one lane: each waiting entry with its type chip, reorder controls and a
+// remove button. `items` is the lane's dispatch order, so index 0 is next up.
 function queueSectionHtml(items, title) {
   if (!items.length) return ''
   const rows = items
-    .map(
-      (item) => `<li class="queue-item">
+    .map((item, idx) => {
+      const id = escapeHtml(item.id)
+      const first = idx === 0 ? ' disabled' : ''
+      const last = idx === items.length - 1 ? ' disabled' : ''
+      return `<li class="queue-item">
       <span class="badge queue-chip">${escapeHtml(item.activityType)}</span>
       <span class="queue-label">${escapeHtml(item.label || item.activityType)}</span>
-      <button type="button" class="queue-remove" data-queue-remove="${escapeHtml(item.id)}" aria-label="Remove from queue">✕</button>
-    </li>`,
-    )
+      <button type="button" class="queue-move" data-queue-up="${id}" aria-label="Move up"${first}>${QUEUE_ICON_UP}</button>
+      <button type="button" class="queue-move" data-queue-down="${id}" aria-label="Move down"${last}>${QUEUE_ICON_DOWN}</button>
+      <button type="button" class="queue-move" data-queue-top="${id}" aria-label="Move to top"${first}>${QUEUE_ICON_TOP}</button>
+      <button type="button" class="queue-remove" data-queue-remove="${id}" aria-label="Remove from queue">✕</button>
+    </li>`
+    })
     .join('')
   return `<div class="queue-section">
     <h3>${escapeHtml(title)} <span class="group-count">${items.length}</span></h3>
@@ -11312,6 +11493,21 @@ function setupActivity() {
       if (action === 'inspect') inspectFailedRun(key)
       else if (action === 'rerun') cloneRunToLaunch(key)
       else if (action === 'dismiss') dismissFailure(key)
+      return
+    }
+    const upBtn = event.target.closest('button[data-queue-up]')
+    if (upBtn) {
+      moveQueueItem(upBtn.dataset.queueUp, 'up')
+      return
+    }
+    const downBtn = event.target.closest('button[data-queue-down]')
+    if (downBtn) {
+      moveQueueItem(downBtn.dataset.queueDown, 'down')
+      return
+    }
+    const topBtn = event.target.closest('button[data-queue-top]')
+    if (topBtn) {
+      moveQueueItem(topBtn.dataset.queueTop, 'top')
       return
     }
     const removeBtn = event.target.closest('button[data-queue-remove]')

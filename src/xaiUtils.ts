@@ -116,7 +116,10 @@ export function aggregateRunValues(values: number[]): RunValueAggregate {
 }
 
 /** Read the criterion's numeric value off a run; `undefined` when absent/non-finite. */
-export function criterionValueOf(run: AnalysisRun, criterion: AnalysisCriterion): number | undefined {
+export function criterionValueOf(
+  run: AnalysisRun,
+  criterion: AnalysisCriterion,
+): number | undefined {
   let v: unknown
   if (criterion.key === 'objective') v = run.objective
   else if (criterion.key === 'durationMs') v = run.durationMs
@@ -133,7 +136,10 @@ function datasetSigOf(run: AnalysisRun): string {
     .join('|')
 }
 
-function configWithout(config: Record<string, unknown>, ...omit: string[]): Record<string, unknown> {
+function configWithout(
+  config: Record<string, unknown>,
+  ...omit: string[]
+): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(config)) if (!omit.includes(k)) out[k] = v
   return out
@@ -161,7 +167,9 @@ function bootstrapDiff(
     // significant (the N<5 pitfall) — report the point delta with pValue=1 (never significant).
     return { ci: [delta, delta], pValue: 1, delta }
   }
-  const rng = makeRng(seedFrom([...toValues, NaN, ...fromValues].map((v) => (Number.isNaN(v) ? 0 : v))))
+  const rng = makeRng(
+    seedFrom([...toValues, NaN, ...fromValues].map((v) => (Number.isNaN(v) ? 0 : v))),
+  )
   const diffs: number[] = []
   for (let i = 0; i < XAI_BOOTSTRAP_ITERATIONS; i++) {
     diffs.push(orient(iqm(resample(toValues, rng)), iqm(resample(fromValues, rng))))
@@ -193,7 +201,9 @@ function distinctValues(runs: AnalysisRun[], lever: string): Map<string, unknown
 }
 
 function validRunsFor(runs: AnalysisRun[], criterion: AnalysisCriterion): AnalysisRun[] {
-  return runs.filter((r) => r.status === 'completed' && criterionValueOf(r, criterion) !== undefined)
+  return runs.filter(
+    (r) => r.status === 'completed' && criterionValueOf(r, criterion) !== undefined,
+  )
 }
 
 function leversOf(runs: AnalysisRun[]): string[] {
@@ -233,7 +243,9 @@ export function ofatContrasts(
     const levelValues = new Map<string, number[]>()
     const levels: OfatLevel[] = []
     for (const [value, vruns] of byValue) {
-      const values = vruns.map((r) => criterionValueOf(r, criterion)!).filter((x) => x !== undefined)
+      const values = vruns
+        .map((r) => criterionValueOf(r, criterion)!)
+        .filter((x) => x !== undefined)
       levelValues.set(value, values)
       levels.push({
         value,
@@ -242,7 +254,9 @@ export function ofatContrasts(
         aggregate: aggregateRunValues(values),
       })
     }
-    levels.sort((a, b) => orientedBetterFirst(criterion.direction)(a.aggregate.iqm, b.aggregate.iqm))
+    levels.sort((a, b) =>
+      orientedBetterFirst(criterion.direction)(a.aggregate.iqm, b.aggregate.iqm),
+    )
     const baseline = levels[levels.length - 1]
     const baselineValues = levelValues.get(baseline.value)!
     const effects: OfatEffect[] = []
@@ -261,7 +275,10 @@ export function ofatContrasts(
         pValue,
       })
     }
-    const rejected = benjaminiHochberg(effects.map((e) => e.pValue), XAI_FDR_ALPHA)
+    const rejected = benjaminiHochberg(
+      effects.map((e) => e.pValue),
+      XAI_FDR_ALPHA,
+    )
     effects.forEach((e, i) => {
       e.significant = rejected[i] && (e.diffCi[0] > 0 || e.diffCi[1] < 0)
     })
@@ -480,9 +497,7 @@ function varianceOf(values: number[]): number {
 
 function leverKindsOf(runs: AnalysisRun[]): { name: string; kind: 'num' | 'cat' }[] {
   return leversOf(runs).map((name) => {
-    const allNumeric = runs.every(
-      (r) => !(name in r.config) || typeof r.config[name] === 'number',
-    )
+    const allNumeric = runs.every((r) => !(name in r.config) || typeof r.config[name] === 'number')
     return { name, kind: allNumeric ? 'num' : 'cat' }
   })
 }
@@ -490,7 +505,8 @@ function leverKindsOf(runs: AnalysisRun[]): { name: string; kind: 'num' | 'cat' 
 function sampleSubset<T>(items: T[], k: number, rng: () => number): T[] {
   const pool = [...items]
   const out: T[] = []
-  for (let i = 0; i < k && pool.length; i++) out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0])
+  for (let i = 0; i < k && pool.length; i++)
+    out.push(pool.splice(Math.floor(rng() * pool.length), 1)[0])
   return out
 }
 
@@ -507,8 +523,22 @@ function buildSurrogateTree(
   }
   const tried = sampleSubset(levers, Math.max(1, Math.round(Math.sqrt(levers.length))), rng)
   let best:
-    | { lever: string; kind: 'num'; threshold: number; left: SurrogateRow[]; right: SurrogateRow[]; score: number }
-    | { lever: string; kind: 'cat'; value: string; left: SurrogateRow[]; right: SurrogateRow[]; score: number }
+    | {
+        lever: string
+        kind: 'num'
+        threshold: number
+        left: SurrogateRow[]
+        right: SurrogateRow[]
+        score: number
+      }
+    | {
+        lever: string
+        kind: 'cat'
+        value: string
+        left: SurrogateRow[]
+        right: SurrogateRow[]
+        score: number
+      }
     | undefined
   const consider = (
     lever: { name: string; kind: 'num' | 'cat' },
@@ -520,7 +550,8 @@ function buildSurrogateTree(
     if (!left.length || !right.length) return
     const score =
       parentVar -
-      (left.length * varianceOf(left.map((r) => r.y)) + right.length * varianceOf(right.map((r) => r.y))) /
+      (left.length * varianceOf(left.map((r) => r.y)) +
+        right.length * varianceOf(right.map((r) => r.y))) /
         rows.length
     if (!best || score > best.score) {
       best = { lever: lever.name, kind: lever.kind, ...extra, left, right, score } as typeof best
@@ -528,9 +559,9 @@ function buildSurrogateTree(
   }
   for (const lever of tried) {
     if (lever.kind === 'num') {
-      const nums = [...new Set(rows.map((r) => Number(r.config[lever.name])).filter(Number.isFinite))].sort(
-        (a, b) => a - b,
-      )
+      const nums = [
+        ...new Set(rows.map((r) => Number(r.config[lever.name])).filter(Number.isFinite)),
+      ].sort((a, b) => a - b)
       for (let i = 0; i + 1 < nums.length; i++) {
         const threshold = (nums[i] + nums[i + 1]) / 2
         consider(lever, (r) => Number(r.config[lever.name]) <= threshold, { threshold })
@@ -555,7 +586,10 @@ export function fitConfigSurrogate(
   criterion: AnalysisCriterion,
 ): ConfigSurrogate {
   const valid = validRunsFor(runs, criterion)
-  const rows: SurrogateRow[] = valid.map((r) => ({ config: r.config, y: criterionValueOf(r, criterion)! }))
+  const rows: SurrogateRow[] = valid.map((r) => ({
+    config: r.config,
+    y: criterionValueOf(r, criterion)!,
+  }))
   const levers = leverKindsOf(valid)
   const mean = rows.length ? meanOf(rows.map((r) => r.y)) : 0
   if (rows.length < 2 || !levers.length) return { trees: [], levers, mean }
@@ -664,7 +698,11 @@ function cappedCartesian(lists: unknown[][], cap: number, rng: () => number): un
 }
 
 const fmtAcq = (x: number): string =>
-  !Number.isFinite(x) ? 'n/a' : Math.abs(x) >= 100 ? x.toFixed(1) : Number(x.toPrecision(3)).toString()
+  !Number.isFinite(x)
+    ? 'n/a'
+    : Math.abs(x) >= 100
+      ? x.toFixed(1)
+      : Number(x.toPrecision(3)).toString()
 
 /**
  * Acquisition recommendations (Phase 2): score every UNRUN config in the explored grid (cartesian product
@@ -788,7 +826,9 @@ export function leverCouplings(
       const residuals: number[] = []
       for (const [ka, va] of valsA) {
         for (const [kb, vb] of valsB) {
-          const joint = meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [lA]: va, [lB]: vb })))
+          const joint = meanOf(
+            configs.map((c) => predictConfig(surrogate, { ...c, [lA]: va, [lB]: vb })),
+          )
           residuals.push(joint - mainA.get(ka)! - mainB.get(kb)! + grand)
         }
       }
@@ -811,7 +851,10 @@ export function ablationPath(
   const valid = validRunsFor(runs, criterion)
   if (valid.length < 2) return undefined
   const sorted = [...valid].sort((a, b) =>
-    orientedBetterFirst(criterion.direction)(criterionValueOf(a, criterion)!, criterionValueOf(b, criterion)!),
+    orientedBetterFirst(criterion.direction)(
+      criterionValueOf(a, criterion)!,
+      criterionValueOf(b, criterion)!,
+    ),
   )
   const incumbent = sorted[0].config
   const baseline = sorted[sorted.length - 1].config
@@ -875,7 +918,11 @@ export function interactionGrid(
   for (const a of valuesA) {
     for (const b of valuesB) {
       cells.push(
-        meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [leverA]: valsA.get(a), [leverB]: valsB.get(b) }))),
+        meanOf(
+          configs.map((c) =>
+            predictConfig(surrogate, { ...c, [leverA]: valsA.get(a), [leverB]: valsB.get(b) }),
+          ),
+        ),
       )
     }
   }
@@ -1011,7 +1058,11 @@ export function aggregateToSetupRuns(
   for (const group of groups.values()) {
     const value = iqm(group.map((r) => criterionValueOf(r, criterion)!))
     const rep = group[0]
-    const setup: AnalysisRun = { ...rep, config: configWithout(rep.config, 'seed'), status: 'completed' }
+    const setup: AnalysisRun = {
+      ...rep,
+      config: configWithout(rep.config, 'seed'),
+      status: 'completed',
+    }
     // Store the aggregate where this criterion reads it, so the original criterion still works on setups.
     if (criterion.key === 'objective') setup.objective = value
     else if (criterion.key === 'durationMs') setup.durationMs = value
@@ -1090,7 +1141,12 @@ function summarizeEnvironments(
         ? Math.min(...setupValues)
         : Math.max(...setupValues)
       : 0
-    out.push({ signature, values: pickKeys(group[0].config, contextLevers), runCount: group.length, best })
+    out.push({
+      signature,
+      values: pickKeys(group[0].config, contextLevers),
+      runCount: group.length,
+      best,
+    })
   }
   return out.sort((a, b) => b.runCount - a.runCount)
 }

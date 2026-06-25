@@ -189,15 +189,6 @@ asset in the same data format to catch regime/asset overfit:
   activity writing a `<recordType>-regimetest` record per (run, set), surfaced as a per-set matrix in
   run-detail + a compare overlay. Keep it generic; BlackSwan is the first consumer.
 
-### Daily-step multi-fidelity (provider enhancement)
-
-`timeframe` (the agent's STEP) and `fidelity_set` (the LAYERS observed) are now decoupled + validated:
-an hourly step can observe coarser layers (the new `1d+1w` set), and incompatible combos fail fast.
-STILL UNSUPPORTED (fails fast for now): a DAILY step observing FINER layers (e.g. a 1d-step agent
-seeing 1h+1d) — `MultiTimelineDataProvider` has no `divider_run` mapping for `input=1h → run=1d`.
-Enable by adding that mapping + verifying the step/aggregation against a fixture + a live run. Then
-the full step × layers matrix is open.
-
 ### Environments — follow-ups
 
 The Environments tab + `scope: 'environment'` lever bundles ship; presets can now carry `environments`

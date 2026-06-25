@@ -2274,6 +2274,31 @@ pre.json {
   color: var(--bad);
   border-color: var(--bad);
 }
+.queue-move {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.queue-move svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+.queue-move:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.queue-move:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 
 /* ---- Hypotheses ----------------------------------------------------------------- */
 .hypothesis-form {

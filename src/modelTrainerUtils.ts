@@ -170,10 +170,11 @@ export function migrateExperimentSpec(
     }
   }
   if (spec.configs && spec.configs.length > 0) {
-    const migratedConfigs = spec.configs.map(
-      (config) => applyMigrationRules(config, migrations) ?? config,
-    )
-    if (migratedConfigs.some((config, i) => config !== spec.configs![i])) {
+    const migratedConfigs = spec.configs.map((entry) => {
+      const migrated = applyMigrationRules(entry.config, migrations)
+      return migrated ? { ...entry, config: migrated } : entry
+    })
+    if (migratedConfigs.some((entry, i) => entry !== spec.configs![i])) {
       next.configs = migratedConfigs
       changed = true
     }
@@ -227,8 +228,8 @@ export function expandExperimentMatrix(
     }
   }
   const explicitConfigs = spec.configs ?? []
-  for (const config of explicitConfigs) {
-    for (const key of Object.keys(config)) {
+  for (const entry of explicitConfigs) {
+    for (const key of Object.keys(entry.config)) {
       if (!leverKeys.includes(key)) {
         throw new Error(`config value "${key}" names no manifest lever`)
       }
@@ -243,8 +244,7 @@ export function expandExperimentMatrix(
 
   // Explicit configs run VERBATIM (merged onto defaults): when present they DEFINE the matrix, so the
   // sweep/bundle/seed expansion below starts from nothing and only they remain.
-  const explicit = explicitConfigs.map((config) => ({ ...base, ...config }))
-  let configs: Record<string, unknown>[] = explicit.length ? [] : [base]
+  let configs: Record<string, unknown>[] = explicitConfigs.length ? [] : [base]
   for (const [key, values] of Object.entries(sweep)) {
     configs = configs.flatMap((config) => values.map((value) => ({ ...config, [key]: value })))
   }
@@ -258,21 +258,27 @@ export function expandExperimentMatrix(
   if (spec.seeds && spec.seeds.length > 0) {
     configs = configs.flatMap((config) => spec.seeds!.map((seed) => ({ ...config, seed })))
   }
-  configs = configs.concat(explicit)
-
-  const cap = spec.maxItems ?? MAX_CAMPAIGN_ITEMS
-  if (configs.length > cap) {
-    throw new Error(`campaign plans ${configs.length} items, exceeding the cap of ${cap}`)
-  }
 
   const unitsLever = manifest.eta?.unitsLever
-  return configs.map((config) => {
+  const toItem = (key: string, config: Record<string, unknown>): PlannedTrainingItem => {
     const units =
       unitsLever && typeof config[unitsLever] === 'number'
         ? (config[unitsLever] as number)
         : undefined
-    return { key: hashConfig(config), config, ...(units !== undefined ? { units } : {}) }
-  })
+    return { key, config, ...(units !== undefined ? { units } : {}) }
+  }
+  // Swept items hash their config; explicit items honour a preassigned `key` (re-run identity) or hash.
+  const items = configs.map((config) => toItem(hashConfig(config), config))
+  for (const entry of explicitConfigs) {
+    const config = { ...base, ...entry.config }
+    items.push(toItem(entry.key ?? hashConfig(config), config))
+  }
+
+  const cap = spec.maxItems ?? MAX_CAMPAIGN_ITEMS
+  if (items.length > cap) {
+    throw new Error(`campaign plans ${items.length} items, exceeding the cap of ${cap}`)
+  }
+  return items
 }
 
 export function pickBestRun(

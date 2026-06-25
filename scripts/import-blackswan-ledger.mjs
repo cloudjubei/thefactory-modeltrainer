@@ -59,7 +59,10 @@ for tbl in root.iter('{%s}table'%NS['t']):
 print(json.dumps(rows))
 `,
   )
-  const out = execFileSync('python3', [py, odsPath], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const out = execFileSync('python3', [py, odsPath], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  })
   return JSON.parse(out)
 }
 
@@ -139,7 +142,8 @@ for (let r = 1; r < rows.length; r++) {
 
   const totalReturnPct = num(row[idx.pct]) * 100
   const nTrades = num(row[idx.trades])
-  const tradeGate = MIN_TRADES_FOR_FULL_CREDIT > 0 ? Math.min(1, nTrades / MIN_TRADES_FOR_FULL_CREDIT) : 1
+  const tradeGate =
+    MIN_TRADES_FOR_FULL_CREDIT > 0 ? Math.min(1, nTrades / MIN_TRADES_FOR_FULL_CREDIT) : 1
   const tradedReturn = totalReturnPct * tradeGate
 
   const config = {
@@ -185,14 +189,27 @@ for (let r = 1; r < rows.length; r++) {
 }
 
 // Summary
-const objs = records.map((r) => r.content.objective).filter(Number.isFinite).sort((a, b) => a - b)
+const objs = records
+  .map((r) => r.content.objective)
+  .filter(Number.isFinite)
+  .sort((a, b) => a - b)
 const med = objs.length ? objs[Math.floor(objs.length / 2)] : NaN
 const degenerate = records.filter((r) => r.content.health.flags.length).length
 const setupKeys = new Set(records.map((r) => r.content.setupKey))
-console.log(`Parsed ${rows.length - 1} data rows -> ${records.length} run records (${skipped.length} non-run rows skipped)`)
+console.log(
+  `Parsed ${rows.length - 1} data rows -> ${records.length} run records (${skipped.length} non-run rows skipped)`,
+)
 console.log(`  distinct setups: ${setupKeys.size}   degenerate/low-trade: ${degenerate}`)
-console.log(`  traded_return: min ${objs[0]?.toFixed(1)}  median ${med?.toFixed(1)}  max ${objs[objs.length - 1]?.toFixed(1)}`)
-if (skipped.length) console.log(`  skipped sample: ${skipped.slice(0, 4).map((s) => JSON.stringify(s.slice(0, 40))).join(', ')}`)
+console.log(
+  `  traded_return: min ${objs[0]?.toFixed(1)}  median ${med?.toFixed(1)}  max ${objs[objs.length - 1]?.toFixed(1)}`,
+)
+if (skipped.length)
+  console.log(
+    `  skipped sample: ${skipped
+      .slice(0, 4)
+      .map((s) => JSON.stringify(s.slice(0, 40)))
+      .join(', ')}`,
+  )
 console.log('  sample records:')
 for (const rec of records.slice(0, 3)) {
   const m = rec.content.metrics
@@ -208,19 +225,28 @@ console.log(`\nRecords written for inspection: ${outFile}`)
 
 if (!WRITE) {
   console.log('\nDRY-RUN (no hub write). To import into a file-backed hub store:')
-  console.log('  node scripts/import-blackswan-ledger.mjs --write --scope <projectId> --data-dir <overseerRepoPath>/.factory/data')
+  console.log(
+    '  node scripts/import-blackswan-ledger.mjs --write --scope <projectId> --data-dir <overseerRepoPath>/.factory/data',
+  )
   process.exit(0)
 }
 
 if (!SCOPE || !DATA_DIR) {
-  console.error('\n--write requires --scope <projectId> and --data-dir <path>. Aborting (nothing written).')
+  console.error(
+    '\n--write requires --scope <projectId> and --data-dir <path>. Aborting (nothing written).',
+  )
   process.exit(1)
 }
 const { FileDataStorage } = await import('thefactory-tools')
 const storage = new FileDataStorage(DATA_DIR)
 let n = 0
 for (const rec of records) {
-  await storage.upsertRecord({ scope: SCOPE, type: RECORD_TYPE, key: rec.key, content: rec.content })
+  await storage.upsertRecord({
+    scope: SCOPE,
+    type: RECORD_TYPE,
+    key: rec.key,
+    content: rec.content,
+  })
   n++
 }
 console.log(`\nWrote ${n} ${RECORD_TYPE} records to scope='${SCOPE}' under ${DATA_DIR}`)

@@ -94,7 +94,9 @@ describe('criterionValueOf', () => {
   })
 
   it('returns undefined for a missing/non-numeric metric', () => {
-    expect(criterionValueOf(run('a', {}, 0, { metrics: {} }), { key: 'ghost', direction: 'max' })).toBeUndefined()
+    expect(
+      criterionValueOf(run('a', {}, 0, { metrics: {} }), { key: 'ghost', direction: 'max' }),
+    ).toBeUndefined()
   })
 })
 
@@ -228,7 +230,9 @@ describe('leverImportances', () => {
 
   it('is confident when every value has at least the min-seeds bar of runs', () => {
     const runs = []
-    for (const lr of [0.1, 0.2]) for (let s = 0; s < 5; s++) runs.push(run(`${lr}_${s}`, { lr }, 10 + lr * 100 + s, { seed: s }))
+    for (const lr of [0.1, 0.2])
+      for (let s = 0; s < 5; s++)
+        runs.push(run(`${lr}_${s}`, { lr }, 10 + lr * 100 + s, { seed: s }))
     const imp = leverImportances(runs, MAX)[0]
     expect(imp.minRuns).toBe(5)
     expect(imp.confident).toBe(true)
@@ -402,7 +406,9 @@ describe('config surrogate (Phase 3)', () => {
   for (const lr of [0.1, 0.2, 0.3]) {
     for (const gamma of [0.9, 0.99]) {
       for (let s = 0; s < 3; s++) {
-        grid.push(run(`${lr}_${gamma}_${s}`, { lr, gamma }, lr * 100 + gamma + s * 0.5, { seed: s }))
+        grid.push(
+          run(`${lr}_${gamma}_${s}`, { lr, gamma }, lr * 100 + gamma + s * 0.5, { seed: s }),
+        )
       }
     }
   }
@@ -416,14 +422,18 @@ describe('config surrogate (Phase 3)', () => {
 
   it('learns the monotone lr relationship (higher lr ⇒ higher prediction)', () => {
     const s = fitConfigSurrogate(grid, MAX)
-    expect(predictConfig(s, { lr: 0.3, gamma: 0.9 })).toBeGreaterThan(predictConfig(s, { lr: 0.1, gamma: 0.9 }))
+    expect(predictConfig(s, { lr: 0.3, gamma: 0.9 })).toBeGreaterThan(
+      predictConfig(s, { lr: 0.1, gamma: 0.9 }),
+    )
   })
 
   it('handles categorical (string-valued) levers', () => {
     const runs: AnalysisRun[] = []
     for (const algo of ['ppo', 'dqn']) {
       for (let s = 0; s < 4; s++) {
-        runs.push(run(`${algo}_${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 + s : 10 + s, { seed: s }))
+        runs.push(
+          run(`${algo}_${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 + s : 10 + s, { seed: s }),
+        )
       }
     }
     const sur = fitConfigSurrogate(runs, MAX)
@@ -459,7 +469,13 @@ describe('config surrogate (Phase 3)', () => {
   })
 
   it('ablationPath is undefined with too few runs', () => {
-    expect(ablationPath(fitConfigSurrogate([run('a', { lr: 0.1 }, 1)], MAX), [run('a', { lr: 0.1 }, 1)], MAX)).toBeUndefined()
+    expect(
+      ablationPath(
+        fitConfigSurrogate([run('a', { lr: 0.1 }, 1)], MAX),
+        [run('a', { lr: 0.1 }, 1)],
+        MAX,
+      ),
+    ).toBeUndefined()
   })
 
   it('interactionGrid spans both levers and is deterministic', () => {
@@ -473,7 +489,9 @@ describe('config surrogate (Phase 3)', () => {
   })
 
   it('interactionGrid is undefined when a lever has a single value', () => {
-    expect(interactionGrid(fitConfigSurrogate(grid, MAX), grid, MAX, 'lr', 'missing')).toBeUndefined()
+    expect(
+      interactionGrid(fitConfigSurrogate(grid, MAX), grid, MAX, 'lr', 'missing'),
+    ).toBeUndefined()
   })
 
   it('fanovaImportances total-effect is ≥ the main effect for every lever', () => {
@@ -487,7 +505,8 @@ describe('coupling / total-effect (Phase 3)', () => {
   const additive: AnalysisRun[] = []
   for (const a of [0, 1, 2]) {
     for (const b of [0, 1]) {
-      for (let s = 0; s < 3; s++) additive.push(run(`add-${a}-${b}-${s}`, { a, b }, 10 * a + b, { seed: s }))
+      for (let s = 0; s < 3; s++)
+        additive.push(run(`add-${a}-${b}-${s}`, { a, b }, 10 * a + b, { seed: s }))
     }
   }
   // PURE INTERACTION (XOR): neither a nor b matters alone; only their combination does.
@@ -522,7 +541,13 @@ describe('coupling / total-effect (Phase 3)', () => {
     expect(leverCouplings(fitConfigSurrogate(xor, MAX), xor, MAX)).toEqual(
       leverCouplings(fitConfigSurrogate(xor, MAX), xor, MAX),
     )
-    expect(leverCouplings(fitConfigSurrogate([run('a', { a: 1 }, 1)], MAX), [run('a', { a: 1 }, 1)], MAX)).toEqual([])
+    expect(
+      leverCouplings(
+        fitConfigSurrogate([run('a', { a: 1 }, 1)], MAX),
+        [run('a', { a: 1 }, 1)],
+        MAX,
+      ),
+    ).toEqual([])
   })
 })
 
@@ -531,7 +556,8 @@ describe('pcaProjection (Phase 4)', () => {
   const runs: AnalysisRun[] = []
   for (const lr of [0, 5, 10]) {
     for (const gamma of [0.9, 0.91]) {
-      for (let s = 0; s < 2; s++) runs.push(run(`${lr}-${gamma}-${s}`, { lr, gamma }, lr + s * 0.1, { seed: s }))
+      for (let s = 0; s < 2; s++)
+        runs.push(run(`${lr}-${gamma}-${s}`, { lr, gamma }, lr + s * 0.1, { seed: s }))
     }
   }
 
@@ -554,9 +580,7 @@ describe('pcaProjection (Phase 4)', () => {
     const p = pcaProjection(runs, MAX)!
     // Mean PC1 coordinate per lr group should be monotone (the dominant axis spreads them out).
     const byLr = new Map<number, number[]>()
-    runs
-      .map((r) => r.config.lr as number)
-      .forEach((lr) => byLr.set(lr, []))
+    runs.map((r) => r.config.lr as number).forEach((lr) => byLr.set(lr, []))
     p.points.forEach((pt) => {
       // recover lr from the first run key "lr-gamma-seed"
       const lr = Number(pt.key.split('-')[0])
@@ -575,7 +599,8 @@ describe('pcaProjection (Phase 4)', () => {
   it('handles categorical (one-hot) levers and separates the algorithms on the plane', () => {
     const cat: AnalysisRun[] = []
     for (const algo of ['ppo', 'dqn', 'sac']) {
-      for (let s = 0; s < 2; s++) cat.push(run(`${algo}-${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 : 10, { seed: s }))
+      for (let s = 0; s < 2; s++)
+        cat.push(run(`${algo}-${s}`, { algo, lr: 0.1 }, algo === 'ppo' ? 90 : 10, { seed: s }))
     }
     const p = pcaProjection(cat, MAX)!
     expect(p).not.toBeNull()
@@ -594,7 +619,9 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     for (const lr of [0.1, 0.2, 0.5])
       for (const bs of [32, 64])
         for (const seed of [0, 1, 2])
-          runs.push(run(`r${k++}`, { lr, batch_size: bs }, lr * 100 + bs * 0.1 + seed * 0.01, { seed }))
+          runs.push(
+            run(`r${k++}`, { lr, batch_size: bs }, lr * 100 + bs * 0.1 + seed * 0.01, { seed }),
+          )
     return runs
   }
 
@@ -617,7 +644,7 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     expect(a.ofat.lr).toEqual(ofatContrasts(spaceRuns(), 'lr', MAX))
     // Setups (distinct configs) are shipped so the viewer can marginalise the surrogate for interactions.
     expect(a.setups).toHaveLength(6)
-    expect(a.setups.every((s) => 'lr' in s.config && 'batch_size' in s.config)) .toBe(true)
+    expect(a.setups.every((s) => 'lr' in s.config && 'batch_size' in s.config)).toBe(true)
     // The interaction grid the viewer will draw is reproducible from the embedded surrogate + setups.
     const grid = interactionGrid(a.surrogate, a.setups, MAX, 'lr', 'batch_size')
     expect(grid).not.toBeNull()
@@ -641,7 +668,9 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
   })
 
   it('is deterministic — identical runs give an identical bundle', () => {
-    expect(computeConfigSpaceAnalysis(spaceRuns(), MAX)).toEqual(computeConfigSpaceAnalysis(spaceRuns(), MAX))
+    expect(computeConfigSpaceAnalysis(spaceRuns(), MAX)).toEqual(
+      computeConfigSpaceAnalysis(spaceRuns(), MAX),
+    )
   })
 
   it('returns null when there are no valid runs', () => {
@@ -655,7 +684,14 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     for (const transaction_fee of [0.001, 0.01])
       for (const lr of [0.1, 0.5])
         for (const seed of [0, 1])
-          out.push(run(`r${k++}`, { transaction_fee, lr }, (transaction_fee === 0.001 ? 100 : 50) + lr * 10, { seed }))
+          out.push(
+            run(
+              `r${k++}`,
+              { transaction_fee, lr },
+              (transaction_fee === 0.001 ? 100 : 50) + lr * 10,
+              { seed },
+            ),
+          )
     return out
   }
 
@@ -700,9 +736,14 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
       for (const forward_horizon of [1, 3])
         for (const seed of [0, 1])
           runs.push(
-            run(`r${k++}`, { model_name, forward_horizon }, model_name === 'sup' ? forward_horizon * 10 : 5, {
-              seed,
-            }),
+            run(
+              `r${k++}`,
+              { model_name, forward_horizon },
+              model_name === 'sup' ? forward_horizon * 10 : 5,
+              {
+                seed,
+              },
+            ),
           )
     const a = computeConfigSpaceAnalysis(runs, MAX, {
       appliesWhen: { forward_horizon: { model_name: ['sup'] } },
@@ -711,7 +752,9 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     const rlSetups = a.setups.filter((s) => s.config.model_name === 'rl')
     expect(rlSetups.length).toBe(1)
     expect(rlSetups[0].config.forward_horizon).toBe('n/a')
-    const supHorizons = a.setups.filter((s) => s.config.model_name === 'sup').map((s) => s.config.forward_horizon)
+    const supHorizons = a.setups
+      .filter((s) => s.config.model_name === 'sup')
+      .map((s) => s.config.forward_horizon)
     expect(supHorizons.sort()).toEqual([1, 3])
     // a recommendation for an rl model never carries a real forward_horizon (the n/a placeholder is dropped)
     for (const rec of a.recommendations) {

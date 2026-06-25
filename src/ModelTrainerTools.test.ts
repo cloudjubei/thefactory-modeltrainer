@@ -438,6 +438,36 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs).toHaveLength(1)
   })
 
+  it('re-runs an existing run UNDER ITS KEY — updates that record in place, never a new one', async () => {
+    const runner = stubRunner()
+    const storage = memoryStorage()
+    const { tools } = makeTools(runner, storage)
+    // A pre-existing failed run keyed by an opaque id whose stored config does NOT re-hash to that key
+    // (the real case: non-lever fields / defaults / rewrites) — so reconstructing+rehashing would land
+    // on a DIFFERENT key and leak a new record. The batch re-run carries the run's key to prevent that.
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'orig-run-key',
+      content: { objective: 1, status: 'failed', config: { lr: 0.1 } },
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { configs: [{ config: { lr: 0.1 }, key: 'orig-run-key' }] },
+      refresh: true,
+    })
+    expect(result.planned).toBe(1)
+    expect(result.completed).toBe(1)
+    expect(runner.jobs).toHaveLength(1)
+    expect(runner.jobs[0].jobId).toBe('orig-run-key')
+    const records = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(records).toHaveLength(1) // NOT 2 — updated in place
+    expect(records[0].key).toBe('orig-run-key')
+    expect(records[0].content).toMatchObject({ status: 'completed' })
+  })
+
   it('records a failed job (no silent loss) and continues', async () => {
     const runner = stubRunner({
       jobResult: (job) =>

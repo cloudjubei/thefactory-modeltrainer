@@ -200,13 +200,15 @@ export interface ExperimentSpec {
   /** Per-lever pinned values overriding defaults. */
   fixed?: Record<string, unknown>
   /**
-   * Explicit, fully-resolved configs to run AS-IS (each merged onto the lever defaults), planned VERBATIM
-   * with no sweep/bundle/seed expansion. When present and non-empty it DEFINES the matrix (`sweep`/`seeds`
-   * are ignored). Used to re-run a specific SET of existing runs as ONE campaign/activity — e.g. a batch
-   * version-upgrade or failure-retry — instead of one activity per run. Each entry is migrated like
-   * {@link ExperimentSpec.fixed}.
+   * Explicit runs to plan VERBATIM (no sweep/bundle/seed expansion). When present and non-empty it DEFINES
+   * the matrix (`sweep`/`seeds` are ignored). Each entry's `config` is merged onto the lever defaults; its
+   * optional `key` becomes the planned item's record key UNCHANGED — so re-running an EXISTING run (passing
+   * its record key) updates that same record in place instead of hashing a fresh, divergent key (the stored
+   * config rarely re-hashes to the original key). Omit `key` to hash the merged config like the rest of the
+   * matrix. Used to re-run a SET of runs as ONE campaign/activity — batch version-upgrade or failure-retry.
+   * Each entry's `config` is migrated like {@link ExperimentSpec.fixed}; its `key` is preserved.
    */
-  configs?: Array<Record<string, unknown>>
+  configs?: Array<{ config: Record<string, unknown>; key?: string }>
   /**
    * Environment BUNDLES to run every configuration against — each is a set of (environment) lever
    * values applied together (NOT a cartesian product, unlike `sweep`). Used to test one model
@@ -1066,6 +1068,38 @@ export interface HypothesisTransition {
   measured: MeasuredSummary | null
 }
 
+/** What a context-spanning hypothesis CLAIMS about how the objective moves across its context cells. */
+export type HypothesisComparisonKind = 'beats-baseline' | 'invariant' | 'differs'
+
+/**
+ * How to read a context-spanning hypothesis (a `spec` with `environments`/`datasets` bundles) into a
+ * verdict. Its runs are grouped per context cell and compared ACROSS cells — never pooled, since runs in
+ * different environments/datasets are a different comparison (and the context levers are held-fixed
+ * context, never tuned). Absent ⇒ the default `beats-baseline`.
+ */
+export interface HypothesisComparison {
+  /**
+   * `beats-baseline` — the best non-baseline cell's objective beats the baseline cell's (e.g. long+short
+   * beats long-only). `invariant` — the objective is stable across cells (a robustness thesis).
+   * `differs` — the objective moves across cells (a sensitivity thesis).
+   */
+  kind: HypothesisComparisonKind
+  /** Index (into the spec's ordered context cells) of the baseline cell for `beats-baseline`; default 0. */
+  baselineIndex?: number
+  /** Fractional objective-spread tolerance for `invariant`/`differs` (relative to the baseline); default 0.1. */
+  tolerance?: number
+}
+
+/** One context cell's measured read — produced per environment/dataset cell a hypothesis spans, never pooled. */
+export interface ContextGroupMeasured {
+  /** The context-lever values defining this cell (e.g. `{ allow_shorting: true }`). */
+  context: Record<string, unknown>
+  /** Sorted keys of the runs that ran in this cell. */
+  runKeys: string[]
+  /** The aggregate read over this cell's runs only (`null` when the cell has no non-failed run). */
+  measured: MeasuredSummary | null
+}
+
 /**
  * A registry entry for a CLAIM that runs prove or disprove — an architecture, a paper's method, or an
  * ad-hoc idea. Its `spec` both LAUNCHES the runs that test it AND identifies them: a run is evidence iff
@@ -1082,6 +1116,11 @@ export interface TrainingHypothesis {
   spec: ExperimentSpec
   /** The verdict: auto-derived from matching runs, or pinned when `verdictSource` is `manual`. */
   status: HypothesisStatus
+  /**
+   * For a context-spanning `spec` (`environments`/`datasets` bundles), how the cross-context comparison is
+   * read into the verdict. Ignored for a single-context spec (which uses the pooled beats-hold rule).
+   */
+  comparison?: HypothesisComparison
   /** Whether `status` is auto-derived from runs or a manual override that refresh must not overwrite. */
   verdictSource: 'auto' | 'manual'
   /** Free-text note recorded with a manual verdict. */

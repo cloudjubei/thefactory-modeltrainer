@@ -796,7 +796,12 @@
       })
       .map(function (config) {
         var st = predictConfigStats(surrogate, config)
-        return { config: config, mean: st.mean, std: st.std, ei: expectedImprovement(st.mean, st.std, best, criterion.direction) }
+        return {
+          config: config,
+          mean: st.mean,
+          std: st.std,
+          ei: expectedImprovement(st.mean, st.std, best, criterion.direction),
+        }
       })
       .filter(function (s) {
         return s.ei > 0

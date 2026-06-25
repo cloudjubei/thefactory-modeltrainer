@@ -240,6 +240,186 @@ describe('evaluateHypothesis', () => {
   })
 })
 
+describe('contextCells', () => {
+  it('is empty for a single-context spec (no environments/datasets)', () => {
+    expect(H.contextCells({ fixed: { model_name: 'a' } })).toEqual([])
+  })
+  it('returns the environment bundles when only environments span', () => {
+    expect(
+      H.contextCells({ environments: [{ allow_shorting: false }, { allow_shorting: true }] }),
+    ).toEqual([{ allow_shorting: false }, { allow_shorting: true }])
+  })
+  it('returns the dataset bundles when only datasets span', () => {
+    expect(H.contextCells({ datasets: [{ asset: 'BTC' }, { asset: 'ETH' }] })).toEqual([
+      { asset: 'BTC' },
+      { asset: 'ETH' },
+    ])
+  })
+  it('crosses environments × datasets (env-major) when both span', () => {
+    expect(
+      H.contextCells({
+        environments: [{ allow_shorting: false }, { allow_shorting: true }],
+        datasets: [{ asset: 'BTC' }],
+      }),
+    ).toEqual([
+      { allow_shorting: false, asset: 'BTC' },
+      { allow_shorting: true, asset: 'BTC' },
+    ])
+  })
+})
+
+describe('groupRunsByContext', () => {
+  const spec = {
+    fixed: { model_name: 'a' },
+    environments: [{ allow_shorting: false }, { allow_shorting: true }],
+  }
+  it('returns null for a single-context spec', () => {
+    expect(H.groupRunsByContext({ fixed: { model_name: 'a' } }, [])).toBeNull()
+  })
+  it('splits matching runs into disjoint context cells (never pooled)', () => {
+    const runs = [
+      run('lo1', { model_name: 'a', allow_shorting: false }),
+      run('ls1', { model_name: 'a', allow_shorting: true }),
+      run('lo2', { model_name: 'a', allow_shorting: false }),
+    ]
+    const groups = H.groupRunsByContext(spec, runs)
+    expect(groups.map((g: any) => g.runs.map((r: any) => r.key))).toEqual([['lo1', 'lo2'], ['ls1']])
+  })
+  it('drops a run whose context matches no declared cell', () => {
+    const groups = H.groupRunsByContext(spec, [
+      run('x', { model_name: 'a', allow_shorting: 'maybe' }),
+    ])
+    expect(groups.every((g: any) => g.runs.length === 0)).toBe(true)
+  })
+  it('only considers runs consistent with the spec fixed/sweep', () => {
+    const groups = H.groupRunsByContext(spec, [
+      run('other', { model_name: 'b', allow_shorting: false }),
+    ])
+    expect(groups[0].runs).toHaveLength(0)
+  })
+})
+
+describe('measuredByContext', () => {
+  const spec = {
+    fixed: { model_name: 'a' },
+    environments: [{ allow_shorting: false }, { allow_shorting: true }],
+  }
+  it('returns null for a single-context spec', () => {
+    expect(H.measuredByContext({ fixed: { model_name: 'a' } }, [], 'max')).toBeNull()
+  })
+  it('measures each cell on its own runs, never bundling across cells', () => {
+    const runs = [
+      run('lo1', { model_name: 'a', allow_shorting: false }, { objective: 5, vh: -1 }),
+      run('ls1', { model_name: 'a', allow_shorting: true }, { objective: 9, vh: 3 }),
+      run('ls2', { model_name: 'a', allow_shorting: true }, { objective: 7, vh: 2 }),
+    ]
+    const m = H.measuredByContext(spec, runs, 'max')
+    expect(m[0]).toMatchObject({ context: { allow_shorting: false }, runKeys: ['lo1'] })
+    expect(m[0].measured).toMatchObject({ runs: 1, objective: 5, beatsHold: false })
+    expect(m[1]).toMatchObject({ context: { allow_shorting: true }, runKeys: ['ls1', 'ls2'] })
+    expect(m[1].measured).toMatchObject({ runs: 2, objective: 9, beatsHold: true })
+  })
+})
+
+describe('compareContexts', () => {
+  const cells = (a: number, b: number) => [
+    {
+      context: { allow_shorting: false },
+      runKeys: ['lo'],
+      measured: { runs: 1, objective: a, beatsHold: true },
+    },
+    {
+      context: { allow_shorting: true },
+      runKeys: ['ls'],
+      measured: { runs: 1, objective: b, beatsHold: true },
+    },
+  ]
+  it('untested with fewer than two cells', () => {
+    expect(H.compareContexts([cells(5, 9)[0]], { kind: 'beats-baseline' }, 'max')).toBe('untested')
+  })
+  it('untested when a cell has no measured read', () => {
+    const c = cells(5, 9)
+    c[1].measured = null as any
+    expect(H.compareContexts(c, { kind: 'beats-baseline' }, 'max')).toBe('untested')
+  })
+  it('untested when a cell has fewer than minRuns', () => {
+    expect(H.compareContexts(cells(5, 9), { kind: 'beats-baseline' }, 'max', 3)).toBe('untested')
+  })
+  it('beats-baseline: proven when the thesis cell beats the baseline (max)', () => {
+    expect(H.compareContexts(cells(5, 9), { kind: 'beats-baseline' }, 'max')).toBe('proven')
+  })
+  it('beats-baseline: disproved when the thesis cell does not beat the baseline', () => {
+    expect(H.compareContexts(cells(5, 3), { kind: 'beats-baseline' }, 'max')).toBe('disproved')
+  })
+  it('beats-baseline honours the min direction', () => {
+    expect(H.compareContexts(cells(5, 3), { kind: 'beats-baseline' }, 'min')).toBe('proven')
+  })
+  it('beats-baseline honours an explicit baselineIndex', () => {
+    expect(
+      H.compareContexts(cells(5, 9), { kind: 'beats-baseline', baselineIndex: 1 }, 'max'),
+    ).toBe('disproved')
+  })
+  it('invariant: proven when the objective spread is within tolerance', () => {
+    expect(H.compareContexts(cells(5, 5.2), { kind: 'invariant', tolerance: 0.1 }, 'max')).toBe(
+      'proven',
+    )
+  })
+  it('invariant: disproved when the spread exceeds tolerance', () => {
+    expect(H.compareContexts(cells(5, 9), { kind: 'invariant', tolerance: 0.1 }, 'max')).toBe(
+      'disproved',
+    )
+  })
+  it('differs: proven when the spread exceeds tolerance', () => {
+    expect(H.compareContexts(cells(5, 9), { kind: 'differs', tolerance: 0.1 }, 'max')).toBe(
+      'proven',
+    )
+  })
+  it('differs: disproved when the spread is within tolerance', () => {
+    expect(H.compareContexts(cells(5, 5.2), { kind: 'differs', tolerance: 0.1 }, 'max')).toBe(
+      'disproved',
+    )
+  })
+})
+
+describe('the verdict branches on a context-spanning spec', () => {
+  const spec = {
+    fixed: { model_name: 'a' },
+    environments: [{ allow_shorting: false }, { allow_shorting: true }],
+  }
+  const runs = [
+    run('lo', { model_name: 'a', allow_shorting: false }, { objective: 5, vh: -1 }),
+    run('ls', { model_name: 'a', allow_shorting: true }, { objective: 9, vh: 3 }),
+  ]
+  it('effectiveVerdict derives from the cross-context comparison (default beats-baseline)', () => {
+    const h = { spec, verdictSource: 'auto', status: 'untested' }
+    expect(H.effectiveVerdict(h, runs, 'max')).toBe('proven')
+  })
+  it('effectiveVerdict uses the declared comparison kind (invariant)', () => {
+    const h = {
+      spec,
+      verdictSource: 'auto',
+      status: 'untested',
+      comparison: { kind: 'invariant', tolerance: 0.1 },
+    }
+    expect(H.effectiveVerdict(h, runs, 'max')).toBe('disproved')
+  })
+  it('a manual override still wins on a context-spanning hypothesis', () => {
+    const h = {
+      spec,
+      verdictSource: 'manual',
+      status: 'untested',
+      comparison: { kind: 'beats-baseline' },
+    }
+    expect(H.effectiveVerdict(h, runs, 'max')).toBe('untested')
+  })
+  it('evaluateHypothesis sets the status from the comparison and matches runs across all cells', () => {
+    const h = { spec, verdictSource: 'auto', status: 'untested' }
+    const out = H.evaluateHypothesis(h, runs, { direction: 'max', at: 'T' })
+    expect(out.next.status).toBe('proven')
+    expect(out.next.evidence.matchedKeys).toEqual(['lo', 'ls'])
+  })
+})
+
 describe('rollupPaperVerdict', () => {
   const manual = (id: string, status: string) => ({ id, spec: {}, verdictSource: 'manual', status })
   it('untested when the paper links no hypotheses', () => {

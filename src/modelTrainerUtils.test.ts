@@ -138,15 +138,17 @@ describe('applyMigrationRules', () => {
 
   it('strips keys named by `unset` and is idempotent once they are gone', () => {
     const stripRules = [{ unset: ['position_mode', 'trade_gate_mode'] }]
-    const out = applyMigrationRules({ lr: 0.1, position_mode: 'x', trade_gate_mode: 'y' }, stripRules)
+    const out = applyMigrationRules(
+      { lr: 0.1, position_mode: 'x', trade_gate_mode: 'y' },
+      stripRules,
+    )
     expect(out).toEqual({ lr: 0.1 })
     // a config without any target key no longer matches the rule (no further rewrite)
     expect(applyMigrationRules({ lr: 0.1 }, stripRules)).toBeNull()
     // unset combines with set/match on the same rule
-    const combo = applyMigrationRules(
-      { reward_model: 'combo_unified', position_mode: 'x' },
-      [{ match: { reward_model: 'combo_unified' }, unset: ['position_mode'] }],
-    )
+    const combo = applyMigrationRules({ reward_model: 'combo_unified', position_mode: 'x' }, [
+      { match: { reward_model: 'combo_unified' }, unset: ['position_mode'] },
+    ])
     expect(combo).toEqual({ reward_model: 'combo_unified' })
   })
 
@@ -233,19 +235,24 @@ describe('migrateExperimentSpec', () => {
     expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
   })
 
-  it('migrates every entry in spec.configs (batch re-run rolls old configs forward)', () => {
+  it('migrates each spec.configs entry config while PRESERVING its key (re-run rolls old configs forward in place)', () => {
     const out = migrateExperimentSpec(
-      { configs: [{ reward_model: 'combo_all', lr: 0.1 }, { reward_model: 'combo_unified' }] },
+      {
+        configs: [
+          { config: { reward_model: 'combo_all', lr: 0.1 }, key: 'run-abc' },
+          { config: { reward_model: 'combo_unified' }, key: 'run-def' },
+        ],
+      },
       migrations,
     )
     expect(out.configs).toEqual([
-      { reward_model: 'combo_unified', lr: 0.1, combo_sell: 1000 },
-      { reward_model: 'combo_unified' },
+      { config: { reward_model: 'combo_unified', lr: 0.1, combo_sell: 1000 }, key: 'run-abc' },
+      { config: { reward_model: 'combo_unified' }, key: 'run-def' },
     ])
   })
 
   it('returns the SAME spec object when its configs need no migration', () => {
-    const spec = { configs: [{ reward_model: 'combo_unified' }] }
+    const spec = { configs: [{ config: { reward_model: 'combo_unified' }, key: 'run-def' }] }
     expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
   })
 })
@@ -496,7 +503,7 @@ describe('expandExperimentMatrix', () => {
   it('plans exactly the explicit configs (each merged onto defaults), with no default base item', () => {
     const items = expandExperimentMatrix(
       manifest(),
-      { configs: [{ lr: 0.7, algo: 'b' }, { lr: 0.9 }] },
+      { configs: [{ config: { lr: 0.7, algo: 'b' } }, { config: { lr: 0.9 } }] },
       hashByJson,
     )
     expect(items).toHaveLength(2)
@@ -504,10 +511,23 @@ describe('expandExperimentMatrix', () => {
     expect(items[1].config).toEqual({ lr: 0.9, algo: 'a', steps: 100 })
   })
 
+  it('uses an explicit config key VERBATIM (so a re-run updates the same record), else hashes', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      { configs: [{ config: { lr: 0.5 }, key: 'pinned-key-123' }, { config: { lr: 0.6 } }] },
+      hashByJson,
+    )
+    expect(items).toHaveLength(2)
+    expect(items[0].key).toBe('pinned-key-123')
+    expect(items[0].config).toEqual({ lr: 0.5, algo: 'a', steps: 100 })
+    // no key supplied -> falls back to the injected hash of the merged config
+    expect(items[1].key).toBe(hashByJson({ lr: 0.6, algo: 'a', steps: 100 }))
+  })
+
   it('ignores sweep/seeds when explicit configs are given (configs define the matrix verbatim)', () => {
     const items = expandExperimentMatrix(
       manifest(),
-      { sweep: { lr: [0.1, 0.2] }, seeds: [0, 1], configs: [{ lr: 0.5, algo: 'b' }] },
+      { sweep: { lr: [0.1, 0.2] }, seeds: [0, 1], configs: [{ config: { lr: 0.5, algo: 'b' } }] },
       hashByJson,
     )
     expect(items).toHaveLength(1)
@@ -516,7 +536,7 @@ describe('expandExperimentMatrix', () => {
 
   it('rejects an explicit config value that names no lever', () => {
     expect(() =>
-      expandExperimentMatrix(manifest(), { configs: [{ ghost: 1 }] }, hashByJson),
+      expandExperimentMatrix(manifest(), { configs: [{ config: { ghost: 1 } }] }, hashByJson),
     ).toThrow(/ghost/)
   })
 
