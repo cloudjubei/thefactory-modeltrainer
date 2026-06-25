@@ -1145,10 +1145,17 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const contextLevers = Object.entries(manifest.levers)
       .filter(([, spec]) => spec.scope === 'environment' || spec.scope === 'dataset')
       .map(([name]) => name)
+    // Conditional levers (e.g. forward_horizon only applies to supervised models) → pinned n/a where they
+    // don't apply, so they can't pollute the cross-model analysis.
+    const appliesWhen: Record<string, Record<string, unknown[]>> = {}
+    for (const [name, spec] of Object.entries(manifest.levers)) {
+      if (spec.appliesWhen) appliesWhen[name] = spec.appliesWhen
+    }
     const records = await listCompletedRuns(params.scope, recordType)
     const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion, {
       contextLevers,
       environment: params.environment,
+      appliesWhen,
     })
     return { recordType, criterion, analysis }
   }

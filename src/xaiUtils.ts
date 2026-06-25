@@ -1027,6 +1027,40 @@ function pickKeys(config: Record<string, unknown>, keys: string[]): Record<strin
   return out
 }
 
+// The value a conditional lever takes where it doesn't apply — a single sentinel so the surrogate sees it
+// as constant there (no spurious effect) and the UI can show "doesn't apply here".
+const CONDITIONAL_NA = 'n/a'
+
+/** A conditional lever applies to a config only when every one of its `appliesWhen` conditions is met. */
+function leverApplies(config: Record<string, unknown>, conds: Record<string, unknown[]>): boolean {
+  return Object.entries(conds).every(([k, vals]) => vals.map(String).includes(String(config[k])))
+}
+
+/**
+ * Normalise a config so any CONDITIONAL lever that doesn't apply (its `appliesWhen` isn't satisfied — e.g.
+ * `forward_horizon` on a non-supervised model) is pinned to {@link CONDITIONAL_NA}. The lever then has no
+ * variance where it's irrelevant, so the surrogate/fANOVA/interaction grid stop attributing noise to it.
+ */
+function normalizeConditionalLevers(
+  config: Record<string, unknown>,
+  appliesWhen: Record<string, Record<string, unknown[]>>,
+): Record<string, unknown> {
+  let out = config
+  for (const [lever, conds] of Object.entries(appliesWhen)) {
+    if (lever in out && !leverApplies(out, conds)) {
+      if (out === config) out = { ...config }
+      out[lever] = CONDITIONAL_NA
+    }
+  }
+  return out
+}
+
+function dropNaValues(config: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(config)) if (v !== CONDITIONAL_NA) out[k] = v
+  return out
+}
+
 /** A run is in an environment when every one of that environment's context-lever values matches its config. */
 function matchesContext(config: Record<string, unknown>, env: Record<string, unknown>): boolean {
   return Object.entries(env).every(([k, v]) => String(config[k]) === String(v))
@@ -1071,10 +1105,20 @@ function summarizeEnvironments(
 export function computeConfigSpaceAnalysis(
   runs: AnalysisRun[],
   criterion: AnalysisCriterion,
-  opts?: { contextLevers?: string[]; environment?: Record<string, unknown> },
+  opts?: {
+    contextLevers?: string[]
+    environment?: Record<string, unknown>
+    appliesWhen?: Record<string, Record<string, unknown[]>>
+  },
 ): ConfigSpaceAnalysis | null {
-  const valid0 = validRunsFor(runs, criterion)
-  if (!valid0.length) return null
+  const valid0base = validRunsFor(runs, criterion)
+  if (!valid0base.length) return null
+  // Pin each conditional lever to `n/a` wherever it doesn't apply, so it can't pollute the analysis (e.g.
+  // forward_horizon only varies among supervised models; it's inert for the rest).
+  const appliesWhen = opts?.appliesWhen
+  const valid0 = appliesWhen
+    ? valid0base.map((r) => ({ ...r, config: normalizeConditionalLevers(r.config, appliesWhen) }))
+    : valid0base
   const present = leversOf(valid0)
   const contextLevers = (opts?.contextLevers ?? []).filter((l) => present.includes(l))
   const environments = summarizeEnvironments(valid0, criterion, contextLevers)
@@ -1109,13 +1153,21 @@ export function computeConfigSpaceAnalysis(
   const ablation = ablationPath(surrogate, setups, criterion) ?? null
   const pca = pcaProjection(valid, criterion)
   const rawRecs = recommendExperiments(valid, criterion, { surrogate, setups })
-  // Stamp the environment's context values back onto each recommendation so the launched config is complete.
-  const recommendations = environment
-    ? rawRecs.map((r) => ({
-        ...r,
-        spec: { ...r.spec, fixed: { ...environment, ...(r.spec.fixed ?? {}) } },
-      }))
-    : rawRecs
+  // Make each recommendation launchable + honest: re-normalise its conditional levers (so it never proposes
+  // e.g. forward_horizon for an RL model), drop the inapplicable n/a placeholders, stamp the environment's
+  // context values back on, and dedupe configs that collapse to the same thing.
+  const recSeen = new Set<string>()
+  const recommendations: ExperimentRecommendation[] = []
+  for (const r of rawRecs) {
+    let fixed = r.spec.fixed ?? {}
+    if (appliesWhen) fixed = normalizeConditionalLevers(fixed, appliesWhen)
+    fixed = dropNaValues(fixed)
+    if (environment) fixed = { ...environment, ...fixed }
+    const key = canonicalConfigString(fixed)
+    if (recSeen.has(key)) continue
+    recSeen.add(key)
+    recommendations.push({ ...r, spec: { ...r.spec, fixed } })
+  }
 
   return {
     criterion: { key: criterion.key, direction: criterion.direction },

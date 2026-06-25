@@ -691,4 +691,33 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
     expect(a.environments).toEqual([])
     expect(a.contextImportances).toEqual([])
   })
+
+  it('honours appliesWhen — a conditional lever is pinned n/a where it does not apply', () => {
+    // forward_horizon applies only to model 'sup'; for 'rl' it's swept but inert. Objective ignores it for rl.
+    const runs: AnalysisRun[] = []
+    let k = 0
+    for (const model_name of ['rl', 'sup'])
+      for (const forward_horizon of [1, 3])
+        for (const seed of [0, 1])
+          runs.push(
+            run(`r${k++}`, { model_name, forward_horizon }, model_name === 'sup' ? forward_horizon * 10 : 5, {
+              seed,
+            }),
+          )
+    const a = computeConfigSpaceAnalysis(runs, MAX, {
+      appliesWhen: { forward_horizon: { model_name: ['sup'] } },
+    })!
+    // rl runs all collapse to forward_horizon='n/a' (one setup); sup keeps its real horizons
+    const rlSetups = a.setups.filter((s) => s.config.model_name === 'rl')
+    expect(rlSetups.length).toBe(1)
+    expect(rlSetups[0].config.forward_horizon).toBe('n/a')
+    const supHorizons = a.setups.filter((s) => s.config.model_name === 'sup').map((s) => s.config.forward_horizon)
+    expect(supHorizons.sort()).toEqual([1, 3])
+    // a recommendation for an rl model never carries a real forward_horizon (the n/a placeholder is dropped)
+    for (const rec of a.recommendations) {
+      if (rec.spec.fixed?.model_name === 'rl') {
+        expect('forward_horizon' in (rec.spec.fixed ?? {})).toBe(false)
+      }
+    }
+  })
 })

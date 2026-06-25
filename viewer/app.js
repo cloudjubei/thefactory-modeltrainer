@@ -245,10 +245,14 @@ let modelCategoryFilter = 'all'
 const modelExpanded = new Set()
 // The persisted all-runs aggregate (a `<recordType>-model-stats` record): per-model + per-flavor run
 // counts/best/failing computed over EVERY run, not the current Runs page. `modelStatsStale` flags that
-// newer runs exist past the aggregate; `modelStatsRefreshing` spins the Refresh button while recomputing.
+// newer runs exist past the aggregate; `modelStatsRefreshing` spins the Refresh buttons while recomputing.
 let modelStatsCache = null
 let modelStatsStale = false
 let modelStatsRefreshing = false
+// A SHARED in-memory snapshot of EVERY run, populated by the all-runs refresh. Both the Models stats and
+// the Hypotheses verdicts derive from it (one scan updates both). Empty until refreshed / after a reload —
+// the tabs then render from each record's PERSISTED result (model-stats record; hypothesis status/evidence).
+let allRunsCache = []
 // Missing-model proposals from the last "Find models" run, keyed by paperId — the Papers card turns
 // these into one-click "Add to catalog" buttons until the user acts on them.
 const paperMissingModels = new Map()
@@ -7282,16 +7286,34 @@ function specSummaryHtml(spec) {
   if (!items.length) return '<p class="card-sub">Default config.</p>'
   return `<ul class="spec-list">${items.join('')}</ul>`
 }
-// The runs that are evidence for a hypothesis (spec-consistent), and the measured read / effective
-// verdict derived from them — thin wrappers over the pure `window.Hypothesis` module.
+// The runs that are evidence for a hypothesis (spec-consistent), and the measured read / effective verdict
+// derived from them — thin wrappers over the pure `window.Hypothesis` module. They use the ALL-runs
+// snapshot when present (after a refresh); otherwise they fall back to the hypothesis's PERSISTED evidence
+// / status, so a paged Runs view (only the current page loaded) never undercounts a verdict.
 function hypothesisMatchedRuns(h) {
-  return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, runsCache)
+  return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, allRunsCache)
+}
+function hypothesisMatchedCount(h) {
+  if (allRunsCache.length) return hypothesisMatchedRuns(h).length
+  return h && h.evidence && Array.isArray(h.evidence.matchedKeys)
+    ? h.evidence.matchedKeys.length
+    : 0
 }
 function hypothesisMeasured(h) {
-  return window.Hypothesis.measuredFromRuns(hypothesisMatchedRuns(h), objectiveDirection())
+  if (allRunsCache.length)
+    return window.Hypothesis.measuredFromRuns(hypothesisMatchedRuns(h), objectiveDirection())
+  return (h && h.evidence && h.evidence.measured) || null
 }
 function effectiveHypothesisVerdict(h) {
-  return window.Hypothesis.effectiveVerdict(h, runsCache, objectiveDirection(), hypothesisMinRuns)
+  if (!h) return 'untested'
+  if (allRunsCache.length)
+    return window.Hypothesis.effectiveVerdict(
+      h,
+      allRunsCache,
+      objectiveDirection(),
+      hypothesisMinRuns,
+    )
+  return h.status || 'untested'
 }
 // Icon-only action buttons (same size, tooltips on hover) — shown in the card summary so they're
 // available collapsed AND expanded. "Launch more runs" is the play button; it stays enabled below
@@ -7310,7 +7332,7 @@ function hypothesisActionsHtml(h) {
 // The run-count chip shown next to the verdict — click to view the matching runs. Highlights "n/min"
 // when there aren't enough runs to judge it yet.
 function hypothesisRunChipHtml(h) {
-  const n = hypothesisMatchedRuns(h).length
+  const n = hypothesisMatchedCount(h)
   const enough = n >= hypothesisMinRuns
   const label = enough ? `${n} run${n === 1 ? '' : 's'}` : `${n}/${hypothesisMinRuns} runs`
   const help = enough
@@ -7333,7 +7355,7 @@ function hypothesisCampaignHtml(h, liveIds) {
   }
   const keys = Array.isArray(c.keys) ? c.keys : []
   const keySet = new Set(keys)
-  const own = runsCache.filter((r) => keySet.has(r.key))
+  const own = (allRunsCache.length ? allRunsCache : runsCache).filter((r) => keySet.has(r.key))
   const ownBest = bestObjectiveOf(own)
   const best = Number.isFinite(ownBest) ? ownBest : Number(c.bestObjective)
   const projectBest = bestObjectiveOf(runsCache)
@@ -7516,16 +7538,19 @@ function hypothesisSectionHtml(verdict, items, liveIds) {
     <div class="hypothesis-section-body">${cards}</div>
   </details>`
 }
-// Re-evaluate every hypothesis against the current runs, persisting only material changes (a new
-// matched-run set OR an auto-verdict flip), recording a transition on each flip. Runs on tab open + on
-// campaign settle — NOT the bare poll — so persistence is debounced.
+// Re-evaluate every hypothesis against the ALL-runs snapshot, persisting only material changes (a new
+// matched-run set OR an auto-verdict flip), recording a transition on each flip. Driven by the shared
+// all-runs refresh (`refreshAllRunsDerived`), so the verdict reflects EVERY run, not a page.
 async function refreshHypothesisVerdicts(hyps) {
   if (!manifest || !embedded() || !window.Hypothesis) return false
+  // Evaluate ONLY when the all-runs snapshot is loaded — never against an empty/partial set, which would
+  // wrongly zero every verdict to untested. Without a snapshot the persisted verdicts stand.
+  if (!allRunsCache.length) return false
   const direction = objectiveDirection()
   const at = nowIso()
   let wrote = false
   for (const h of hyps || []) {
-    const { next, changed } = window.Hypothesis.evaluateHypothesis(h, runsCache, {
+    const { next, changed } = window.Hypothesis.evaluateHypothesis(h, allRunsCache, {
       direction,
       at,
       minRuns: hypothesisMinRuns,
@@ -7569,13 +7594,16 @@ async function renderHypotheses() {
     body.innerHTML = '<div class="empty-hint">Open inside the Overseer to manage hypotheses.</div>'
     return
   }
-  ;[hypothesesCache, proposalSummary, papersCache, runsCache] = await Promise.all([
+  // Load the persisted aggregate (for the freshness note) + hypotheses (whose verdicts are persisted) +
+  // a page of runs (only for the per-campaign best display). Verdicts are NOT recomputed here from the
+  // page — the shared all-runs refresh (`refreshAllRunsDerived`) owns that.
+  ;[hypothesesCache, proposalSummary, papersCache, runsCache, modelStatsCache] = await Promise.all([
     readHypotheses(),
     readProposal(),
     readPapers(),
     readRuns(),
+    readModelStats(),
   ])
-  await refreshHypothesisVerdicts(hypothesesCache)
   const minRunsInput = byId('hypothesis-min-runs')
   if (minRunsInput && document.activeElement !== minRunsInput)
     minRunsInput.value = hypothesisMinRuns
@@ -7583,10 +7611,13 @@ async function renderHypotheses() {
     ? await readLiveActivityIds()
     : new Set()
   renderProposeControls()
+  const controls = hypothesisStatsControlsHtml()
   const visible = hypothesesCache.filter((h) => !h.dismissed)
   if (!visible.length) {
     body.innerHTML =
+      controls +
       '<div class="empty-hint">No hypotheses yet — propose some (the lightbulb above) or add your own.</div>'
+    void checkModelStatsStale()
     return
   }
   const sorted = [...visible].sort((a, b) =>
@@ -7598,9 +7629,9 @@ async function renderHypotheses() {
   if (hypothesisOpenSection === undefined) {
     hypothesisOpenSection = HYPOTHESIS_VERDICTS.find((v) => groups[v].length) || null
   }
-  body.innerHTML = HYPOTHESIS_VERDICTS.map((v) =>
-    hypothesisSectionHtml(v, groups[v], liveIds),
-  ).join('')
+  body.innerHTML =
+    controls + HYPOTHESIS_VERDICTS.map((v) => hypothesisSectionHtml(v, groups[v], liveIds)).join('')
+  void checkModelStatsStale()
 }
 async function onProposeClick() {
   if (proposing) return
@@ -7823,9 +7854,12 @@ async function stampHypothesisCampaignResults() {
 function viewHypothesisRuns(id) {
   const h = hypothesesCache.find((x) => x.id === id)
   if (!h) return
-  const runs = hypothesisMatchedRuns(h)
-  if (!runs.length) return
-  runsFilterKeys = new Set(runs.map((r) => r.key))
+  // Use the all-runs snapshot when loaded, else the hypothesis's persisted matched-run keys.
+  const keys = allRunsCache.length
+    ? hypothesisMatchedRuns(h).map((r) => r.key)
+    : (h.evidence && Array.isArray(h.evidence.matchedKeys) && h.evidence.matchedKeys) || []
+  if (!keys.length) return
+  runsFilterKeys = new Set(keys)
   runsFilterLabel = h.title || shortKey(id)
   showTab('runs')
 }
@@ -8082,6 +8116,10 @@ function setupHypotheses() {
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
         event.preventDefault()
       }
+      if (event.target.closest('#hypotheses-refresh-btn')) {
+        refreshAllRunsDerived()
+        return
+      }
       const chip = event.target.closest('[data-action="goto-paper"]')
       if (chip) {
         showTab('papers')
@@ -8146,15 +8184,16 @@ async function deletePaperRecord(id) {
     key: id,
   })
 }
-// A paper's verdict ROLLS UP from its linked hypotheses (any proven ⇒ holds-up; all disproved ⇒ fluff).
+// A paper's verdict ROLLS UP from its linked hypotheses' (persisted) verdicts: any proven ⇒ holds-up;
+// all disproved ⇒ fluff; else untested. Uses each hypothesis's effective (stored / all-runs) verdict.
 function paperVerdict(paper) {
-  return window.Hypothesis.rollupPaperVerdict(
-    paper,
-    hypothesesCache,
-    runsCache,
-    objectiveDirection(),
-    hypothesisMinRuns,
-  )
+  const ids = new Set((paper && paper.hypothesisIds) || [])
+  const linked = hypothesesCache.filter((h) => ids.has(h.id))
+  if (!linked.length) return 'untested'
+  const verdicts = linked.map((h) => effectiveHypothesisVerdict(h))
+  if (verdicts.indexOf('proven') >= 0) return 'holds-up'
+  if (verdicts.every((v) => v === 'disproved')) return 'fluff'
+  return 'untested'
 }
 // The linked hypotheses, each as a row (title + its live verdict badge + Unlink), with the add/link picker.
 function paperLinkedHypothesesHtml(paper) {
@@ -8440,15 +8479,13 @@ async function renderPapers() {
     )
     return
   }
-  // Load hypotheses + runs + models alongside papers so the linked-hypothesis verdicts, paper roll-up,
-  // and the per-paper linked-models section are all fresh.
-  ;[papersCache, hypothesesCache, runsCache, modelsCache] = await Promise.all([
+  // Load hypotheses + models alongside papers for the roll-up + linked-models section. The paper verdict
+  // rolls up from each hypothesis's PERSISTED verdict (the shared all-runs refresh keeps those fresh).
+  ;[papersCache, hypothesesCache, modelsCache] = await Promise.all([
     readPapers(),
     readHypotheses(),
-    readRuns(),
     readModels(),
   ])
-  await refreshHypothesisVerdicts(hypothesesCache)
   // Self-heal: a paper may reference hypotheses since deleted — drop those stale links (persisted) so the
   // count chip + rolled-up verdict reflect reality.
   await prunePaperHypothesisLinks()
@@ -9149,20 +9186,49 @@ function uncatalogedModelsHtml() {
     .join('')
   return `<div class="model-group"><h3 class="model-group-h">Unmapped runs — missing flavors</h3><p class="card-sub">These <code>model_name</code> values appear in runs but match no catalog flavor — add a flavor (or Scan) so they roll up to a model.</p><ul class="paper-hyp-list">${rows}</ul></div>`
 }
-// Recompute the all-runs aggregate (over EVERY run), persist it as `<recordType>-model-stats`, re-render.
-async function refreshModelStats() {
+// The Refresh control row for the Hypotheses tab — same shared all-runs refresh, worded for verdicts.
+function hypothesisStatsControlsHtml() {
+  const total = modelStatsCache ? modelStatsCache.totalRuns : null
+  const label = modelStatsRefreshing
+    ? `${spinnerHtml()} Refreshing…`
+    : modelStatsCache
+      ? 'Refresh from all runs'
+      : 'Evaluate over all runs'
+  const at =
+    modelStatsCache && modelStatsCache.aggregatedAt
+      ? ' · ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
+      : ''
+  const note = modelStatsCache
+    ? `Verdicts evaluated over ${total} run${total === 1 ? '' : 's'}${at}.`
+    : 'Verdicts are evaluated over ALL runs (not the current page) — press to evaluate.'
+  const stale = modelStatsStale
+    ? '<span class="model-stats-stale">newer runs exist — refresh to update</span>'
+    : ''
+  return `<div class="model-stats-controls"><button type="button" id="hypotheses-refresh-btn" class="ghost-btn"${modelStatsRefreshing ? ' disabled' : ''}>${label}</button> <span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
+}
+// Re-render whichever run-derived tab is active (to repaint the spinner / fresh results).
+function rerenderRunDerivedTab() {
+  if (activeTabId === 'hypotheses') return renderHypotheses()
+  if (activeTabId === 'papers') return renderPapers()
+  return renderModels()
+}
+// ONE scan over EVERY run updates ALL run-derived data: the model-stats aggregate (persisted as a
+// `<recordType>-model-stats` record) AND every hypothesis verdict (persisted per record). Both tabs'
+// Refresh buttons call this; the in-memory `allRunsCache` is shared so a single scan feeds both.
+async function refreshAllRunsDerived() {
   if (!embedded() || !manifest || modelStatsRefreshing) return
   const epoch = projectEpoch
   modelStatsRefreshing = true
-  await renderModels()
+  await rerenderRunDerivedTab()
   let ok = false
   try {
-    const models = await readModels()
     // Page through EVERY run (the Runs-tab filter never applies here); show progress on the button.
     const allRuns = await queryAllRunRecords((n) => {
-      const btn = byId('models-refresh-btn')
+      const btn = byId('models-refresh-btn') || byId('hypotheses-refresh-btn')
       if (btn) setHtml(btn, `${spinnerHtml()} Scanning ${n} runs…`)
     })
+    allRunsCache = allRuns
+    const models = await readModels()
     const stats = window.Models.computeModelStats(
       models,
       allRuns.map(modelRunRow),
@@ -9174,16 +9240,20 @@ async function refreshModelStats() {
       key: 'latest',
       content,
     })
+    modelStatsCache = content
+    await refreshHypothesisVerdicts(await readHypotheses())
+    modelStatsStale = false
     ok = true
   } catch {
     if (epoch === projectEpoch) {
-      setStatusLine('models-status', 'Could not compute run stats — please try again.', true)
+      const id = activeTabId === 'hypotheses' ? 'hypotheses-status' : 'models-status'
+      setStatusLine(id, 'Could not refresh from all runs — please try again.', true)
     }
   } finally {
     modelStatsRefreshing = false
     if (epoch === projectEpoch) {
-      await renderModels()
-      if (ok) showToast('Run stats refreshed over all runs.')
+      await rerenderRunDerivedTab()
+      if (ok) showToast('Refreshed over all runs.')
     }
   }
 }
@@ -9211,12 +9281,19 @@ async function checkModelStatsStale() {
       modelStatsStale = false
     }
   }
-  if (modelStatsStale !== was && activeTabId === 'models') {
-    const body = byId('models-body')
+  if (modelStatsStale !== was) {
+    const bodyId =
+      activeTabId === 'hypotheses'
+        ? 'hypotheses-body'
+        : activeTabId === 'models'
+          ? 'models-body'
+          : null
+    const body = bodyId && byId(bodyId)
     const el = body && body.querySelector('.model-stats-controls')
     if (el) {
       const tmp = document.createElement('div')
-      tmp.innerHTML = modelStatsControlsHtml()
+      tmp.innerHTML =
+        activeTabId === 'hypotheses' ? hypothesisStatsControlsHtml() : modelStatsControlsHtml()
       if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild)
     }
   }
@@ -9231,14 +9308,14 @@ async function renderModels() {
     )
     return
   }
-  // Load the persisted all-runs STATS (not a page of runs) + papers + hypotheses for the links.
+  // Load the persisted all-runs STATS (not a page of runs) + papers + hypotheses for the links. Hypothesis
+  // verdicts render from their PERSISTED status (refreshed by the shared all-runs refresh, not here).
   ;[modelsCache, modelStatsCache, papersCache, hypothesesCache] = await Promise.all([
     readModels(),
     readModelStats(),
     readPapers(),
     readHypotheses(),
   ])
-  await refreshHypothesisVerdicts(hypothesesCache)
   const seedBanner = pendingSeedModelsHtml()
   if (!modelsCache.length) {
     setHtml(
@@ -9455,7 +9532,7 @@ function setupModels() {
       event.preventDefault()
     }
     if (event.target.closest('#models-refresh-btn')) {
-      refreshModelStats()
+      refreshAllRunsDerived()
       return
     }
     const filterBtn = event.target.closest('button[data-category]')
