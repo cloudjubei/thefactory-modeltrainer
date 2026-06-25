@@ -1041,6 +1041,49 @@ export function datasetAlignmentSignature(summary: TrainingRunSummary): string {
   return parts.join('|')
 }
 
+/**
+ * Whether a run used BlackSwan's MULTI-timeline (resolved-from-fidelity) data provider rather than the
+ * SINGLE-timeline one — mirrors trainer/fidelity.py `resolve_fidelity` + data_factory's single-vs-multi
+ * routing. ONLY the multi path was hit by the observation/reward desync (fixed in pipeline v5); the single
+ * path (`1d`@`1d`, `1h`@`1h`) is unaffected. A run is SINGLE iff its (auto-resolved) `fidelity_set` equals
+ * its `timeframe` and is a base cadence (`1h`/`1d`); everything else — multi-layer (`1h+1d`, `1h+1d+1w`,
+ * `1d+1w`), a coarser single layer at a finer step (`1d`@`1h`), a finer base at a coarser step (`1h`@`1d`),
+ * or `auto`@`1h` (= `1h+1d`) — is MULTI and AFFECTED. Absent fields fall back to the lever defaults
+ * (`timeframe` `1d`, `fidelity_set` `auto`). Pure; returns false for a missing config (never invalidate the
+ * unknown).
+ */
+export function isRunAffectedByFidelityDesync(config: Record<string, unknown> | undefined): boolean {
+  if (!config || typeof config !== 'object') return false
+  const timeframe = String(config.timeframe ?? '1d')
+  const raw = config.fidelity_set
+  const isAuto = raw === undefined || raw === null || raw === '' || raw === 'auto'
+  // `auto` follows the step: an hourly step observes 1h+1d (MULTI), a daily step observes just 1d (SINGLE).
+  const fidelitySet = isAuto ? (timeframe === '1h' ? '1h+1d' : '1d') : String(raw)
+  const isSingle = fidelitySet === timeframe && (fidelitySet === '1h' || fidelitySet === '1d')
+  return !isSingle
+}
+
+/**
+ * Whether a PENDING launch spec (`{fixed, sweep}`) would produce ANY run on the affected multi-timeline
+ * path — so a queued campaign that SWEEPS `timeframe`/`fidelity_set` is caught even when its `fixed` base
+ * is on the single path. Builds the timeframe × fidelity_set candidates from fixed+sweep and defers to
+ * {@link isRunAffectedByFidelityDesync}. Conservative: any affected combination flags the whole item.
+ */
+export function isSpecAffectedByFidelityDesync(spec: Record<string, unknown> | undefined): boolean {
+  if (!spec || typeof spec !== 'object') return false
+  const fixed = (spec.fixed && typeof spec.fixed === 'object' ? spec.fixed : {}) as Record<string, unknown>
+  const sweep = (spec.sweep && typeof spec.sweep === 'object' ? spec.sweep : {}) as Record<string, unknown>
+  const timeframes = Array.isArray(sweep.timeframe) && sweep.timeframe.length ? sweep.timeframe : [fixed.timeframe]
+  const fidelitySets =
+    Array.isArray(sweep.fidelity_set) && sweep.fidelity_set.length ? sweep.fidelity_set : [fixed.fidelity_set]
+  for (const timeframe of timeframes) {
+    for (const fidelity_set of fidelitySets) {
+      if (isRunAffectedByFidelityDesync({ ...fixed, timeframe, fidelity_set })) return true
+    }
+  }
+  return false
+}
+
 function averageOf(values: number[]): number | undefined {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : undefined
 }

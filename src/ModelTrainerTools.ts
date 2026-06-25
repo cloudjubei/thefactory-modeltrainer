@@ -33,6 +33,8 @@ import type {
   JudgeTrainingRunsResult,
   MigrateTrainingRunsParams,
   MigrateTrainingRunsResult,
+  InvalidateRunsParams,
+  InvalidateRunsResult,
   ModelTrainerTools,
   ModelTrainerToolsDeps,
   PlannedTrainingItem,
@@ -1857,6 +1859,96 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function invalidateRuns(params: InvalidateRunsParams): Promise<InvalidateRunsResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const majorOf = (v: unknown) => parseInt(String(v ?? '1'), 10) || 1
+    let examinedRuns = 0
+    let invalidatedRuns = 0
+    let examinedQueue = 0
+    let cancelledQueue = 0
+
+    // Stamp affected, pre-fix runs as status='invalid'. Version-gated + skips already-invalid records, so
+    // this is idempotent and never re-flags a re-run produced at/after the fix major.
+    const runRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    for (const record of runRecords) {
+      examinedRuns++
+      const content = (record.content ?? {}) as Record<string, unknown>
+      const config = content.config as Record<string, unknown> | undefined
+      if (!record.key || !config || typeof config !== 'object') continue
+      if (content.status === 'invalid') continue
+      if (majorOf(content.pipelineVersion) >= params.beforePipelineMajor) continue
+      if (!params.affectsRun(config)) continue
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: recordType,
+        key: record.key,
+        content: {
+          ...content,
+          status: 'invalid',
+          invalidReason: params.reason,
+          invalidatedBy: params.invalidationId,
+          priorStatus: content.status ?? null,
+          invalidatedAt: now(),
+        },
+      })
+      invalidatedRuns++
+      params.onRecordWritten?.(recordType, record.key)
+    }
+
+    // One-time cancellation of affected PENDING items, guarded by a marker keyed on invalidationId so a
+    // post-fix reboot never cancels the re-runs the user has since queued.
+    let pendingAlreadyApplied = false
+    if (params.cancelPendingQueue && params.queueRecordType && params.affectsPending) {
+      const markerType = `${recordType}-invalidation`
+      const marker = await deps.storage.readRecord({
+        scope: params.scope,
+        type: markerType,
+        key: params.invalidationId,
+      })
+      if (marker) {
+        pendingAlreadyApplied = true
+      } else {
+        const queueRecords = await deps.storage.listRecords({
+          scope: params.scope,
+          type: params.queueRecordType,
+        })
+        for (const record of queueRecords) {
+          examinedQueue++
+          const content = (record.content ?? {}) as Record<string, unknown>
+          const spec = (content.params as Record<string, unknown> | undefined)?.spec as
+            | Record<string, unknown>
+            | undefined
+          if (!record.key || !spec || !params.affectsPending(spec)) continue
+          await deps.storage.deleteRecord({
+            scope: params.scope,
+            type: params.queueRecordType,
+            key: record.key,
+          })
+          cancelledQueue++
+          params.onRecordWritten?.(params.queueRecordType, record.key)
+        }
+        await deps.storage.upsertRecord({
+          scope: params.scope,
+          type: markerType,
+          key: params.invalidationId,
+          content: { invalidationId: params.invalidationId, appliedAt: now(), cancelledQueue },
+        })
+        params.onRecordWritten?.(markerType, params.invalidationId)
+      }
+    }
+
+    return {
+      recordType,
+      examinedRuns,
+      invalidatedRuns,
+      examinedQueue,
+      cancelledQueue,
+      pendingAlreadyApplied,
+    }
+  }
+
   return {
     readTrainerManifest: (projectRoot, manifestRelPath) =>
       readTrainerManifest(projectRoot, manifestRelPath),
@@ -1879,5 +1971,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     getRunXAI,
     analyzeConfigSpace,
     migrateTrainingRuns,
+    invalidateRuns,
   }
 }

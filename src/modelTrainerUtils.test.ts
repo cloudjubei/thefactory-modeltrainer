@@ -13,6 +13,8 @@ import {
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   applyMigrationRules,
+  isRunAffectedByFidelityDesync,
+  isSpecAffectedByFidelityDesync,
   findMigrationRule,
   migrateExperimentSpec,
   canonicalConfigString,
@@ -2007,5 +2009,74 @@ describe('buildAnalyzePaperModelsUserContent', () => {
     expect(parsed.paper.title).toBe('P')
     expect(parsed.existingModels[0].slug).toBe('ppo')
     expect(parsed.text).toBe('abstract')
+  })
+})
+
+describe('isRunAffectedByFidelityDesync', () => {
+  // SINGLE-timeline (SingleDataProvider) configs — UNAFFECTED by the observation/reward desync.
+  it('treats 1d@1d as not affected (single 1d base)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1d', fidelity_set: '1d' })).toBe(false)
+  })
+  it('treats 1h@1h as not affected (single 1h base)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1h', fidelity_set: '1h' })).toBe(false)
+  })
+  it('treats auto@1d as not affected (auto resolves to single 1d)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1d', fidelity_set: 'auto' })).toBe(false)
+  })
+  it('treats a missing fidelity_set at 1d as not affected (defaults to auto -> 1d)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1d' })).toBe(false)
+  })
+  it('treats a fully-defaulted config as not affected (timeframe 1d, fidelity auto -> 1d)', () => {
+    expect(isRunAffectedByFidelityDesync({ model_name: 'reppo-custom' })).toBe(false)
+  })
+
+  // MULTI-timeline (resolved-from-fidelity) configs — AFFECTED.
+  it('treats auto@1h as affected (auto resolves to 1h+1d, multi)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1h', fidelity_set: 'auto' })).toBe(true)
+  })
+  it('treats a missing fidelity_set at 1h as affected (defaults to auto -> 1h+1d)', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1h' })).toBe(true)
+  })
+  it.each(['1h+1d', '1h+1d+1w', '1d+1w'])('treats multi-layer set %s as affected', (fset) => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1h', fidelity_set: fset })).toBe(true)
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1d', fidelity_set: fset })).toBe(true)
+  })
+  it('treats a coarser single layer at a finer step (1d@1h) as affected', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1h', fidelity_set: '1d' })).toBe(true)
+  })
+  it('treats a finer base at a coarser step (1h@1d) as affected', () => {
+    expect(isRunAffectedByFidelityDesync({ timeframe: '1d', fidelity_set: '1h' })).toBe(true)
+  })
+
+  // Guards.
+  it('returns false for a missing/invalid config (never invalidate the unknown)', () => {
+    expect(isRunAffectedByFidelityDesync(undefined)).toBe(false)
+    expect(isRunAffectedByFidelityDesync(null as unknown as Record<string, unknown>)).toBe(false)
+  })
+})
+
+describe('isSpecAffectedByFidelityDesync', () => {
+  it('flags a fixed-only spec on the multi path', () => {
+    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1h', fidelity_set: '1h+1d' } })).toBe(true)
+  })
+  it('does not flag a fixed-only spec on the single path', () => {
+    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' } })).toBe(false)
+  })
+  it('flags a spec that SWEEPS fidelity_set into an affected value even when fixed is single', () => {
+    expect(
+      isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' }, sweep: { fidelity_set: ['1d', '1h+1d'] } }),
+    ).toBe(true)
+  })
+  it('flags a spec that SWEEPS timeframe into an affected combination', () => {
+    // fixed fidelity_set 1h; sweeping timeframe to 1d makes 1h@1d (a finer base at a coarser step) — affected.
+    expect(
+      isSpecAffectedByFidelityDesync({ fixed: { fidelity_set: '1h' }, sweep: { timeframe: ['1h', '1d'] } }),
+    ).toBe(true)
+  })
+  it('does not flag a sweep whose every combination stays single', () => {
+    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' }, sweep: { seed: [1, 2, 3] } })).toBe(false)
+  })
+  it('returns false for a missing spec', () => {
+    expect(isSpecAffectedByFidelityDesync(undefined)).toBe(false)
   })
 })

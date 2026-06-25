@@ -151,6 +151,28 @@ export interface TrainerManifest {
    * without re-running anything. Applying twice is a no-op (rules only match the OLD shape).
    */
   migrations?: TrainerMigrationRule[]
+  /**
+   * One-time run-validity invalidations applied by the host's boot sweep (see {@link RunInvalidationRule}
+   * and {@link ModelTrainerTools.invalidateRuns}): mark runs produced by a since-fixed code bug as
+   * `status: 'invalid'` (so they stop counting toward any aggregation/xAI) and optionally cancel matching
+   * pending-queue items. Gated by pipeline major, so re-runs with the fix are never re-flagged.
+   */
+  runInvalidations?: RunInvalidationRule[]
+}
+
+/**
+ * A declarative run-invalidation. Runs produced BEFORE a behaviour fix shipped (pipeline major <
+ * `beforePipelineMajor`) that ALSO match the bug's affected set (resolved from `kind` by the host to a
+ * predicate, e.g. `fidelityDesync`) are marked `status: 'invalid'` with `reason` — excluded from every
+ * aggregation thereafter. When `cancelPendingQueue` is set, matching pending-queue items are removed ONCE
+ * (guarded by a marker record keyed on `id`) so post-fix re-queued runs survive. Idempotent.
+ */
+export interface RunInvalidationRule {
+  id: string
+  kind: string
+  beforePipelineMajor: number
+  reason: string
+  cancelPendingQueue?: boolean
 }
 
 /**
@@ -1674,6 +1696,41 @@ export interface MigrateTrainingRunsResult {
   deletedQueue: number
 }
 
+export interface InvalidateRunsParams {
+  /** The HOST project scope the run + queue records live in. */
+  scope: string
+  projectRoot: string
+  /** Pre-loaded manifest (carries `recordType`); read from disk when omitted. */
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The invalidation id (from the manifest rule) — also the one-time pending-cancel marker key. */
+  invalidationId: string
+  /** Stamped onto each invalidated run as `invalidReason`. */
+  reason: string
+  /** Only runs whose pipeline major is BELOW this are stale (re-runs at/after it are never flagged). */
+  beforePipelineMajor: number
+  /** True for a stored run CONFIG produced by the bug. */
+  affectsRun: (config: Record<string, unknown>) => boolean
+  /** True for a pending launch SPEC (`{fixed, sweep}`) that would produce an affected run. */
+  affectsPending?: (spec: Record<string, unknown>) => boolean
+  /** Record type of the host's pending-run queue (e.g. `trainer-queue`). */
+  queueRecordType?: string
+  /** Remove affected pending-queue items ONCE (guarded by a marker keyed on `invalidationId`). */
+  cancelPendingQueue?: boolean
+  /** Fired after each record rewrite OR deletion so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface InvalidateRunsResult {
+  recordType: string
+  examinedRuns: number
+  invalidatedRuns: number
+  examinedQueue: number
+  cancelledQueue: number
+  /** True when the one-time pending cancellation was already applied (marker present) and so skipped. */
+  pendingAlreadyApplied: boolean
+}
+
 export interface GetRunXaiParams {
   scope: string
   runKey: string
@@ -1808,4 +1865,9 @@ export interface ModelTrainerTools {
    * no-op. Returns how many records were examined vs actually changed.
    */
   migrateTrainingRuns(params: MigrateTrainingRunsParams): Promise<MigrateTrainingRunsResult>
+  /**
+   * Mark runs produced by a since-fixed bug as `status: 'invalid'` (excluded from all aggregation) and,
+   * once, cancel matching pending-queue items. Version-gated so re-runs with the fix are never re-flagged.
+   */
+  invalidateRuns(params: InvalidateRunsParams): Promise<InvalidateRunsResult>
 }

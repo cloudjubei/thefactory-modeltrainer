@@ -106,6 +106,8 @@ let xaiEnvSearch = ''
 let xaiEnvSort = 'best'
 // Which "configuration map" is shown in the Maps tab: 'pca' (cluster sketch) or 'parallel' (readable axes).
 let xaiMapKind = 'parallel'
+// The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
+let xaiHelpOpen = null
 // Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
 // heavy surrogate/fANOVA/coupling/PCA work runs server-side over ALL runs; the cards render purely from this
 // — no browser fit, no page-limited picture.
@@ -454,9 +456,10 @@ function iconBanSvg(size) {
     '<circle cx="12" cy="12" r="9"/><line x1="5.6" y1="5.6" x2="18.4" y2="18.4"/></svg>'
   )
 }
-function iconChatSvg() {
+function iconChatSvg(size) {
+  const s = size || 18
   return (
-    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     '<path d="M21 11.5a8.38 8.38 0 0 1-8.5 8.5 8.5 8.5 0 0 1-3.9-.9L3 21l1.9-5.6a8.5 8.5 0 0 1-.9-3.9 8.38 8.38 0 0 1 8.5-8.5 8.38 8.38 0 0 1 8.5 8.5z"/></svg>'
   )
 }
@@ -4779,7 +4782,7 @@ function renderXai() {
     return
   }
   const criterion = currentXaiCriterion()
-  setHtml(body, xaiHeaderHtml(criterion) + xaiScopeBodyHtml(criterion))
+  setHtml(body, xaiShellHtml(criterion))
 }
 // Small inline icons for the xAI tab rail (kept self-contained so the rail doesn't depend on the nav set).
 function xaiSvg(inner) {
@@ -4791,42 +4794,89 @@ const xaiIconSliders = xaiSvg('<path d="M2 4h7"/><path d="M12 4h2"/><circle cx="
 const xaiIconSurrogate = xaiSvg('<circle cx="8" cy="3" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M8 4.6 4.8 10.6"/><path d="M8 4.6 11.2 10.6"/>')
 const xaiIconMap = xaiSvg('<circle cx="4" cy="11" r="1.3"/><circle cx="7.5" cy="6.5" r="1.3"/><circle cx="11" cy="9" r="1.3"/><circle cx="12.5" cy="4" r="1.3"/><path d="M2 14h12"/><path d="M2 14V2"/>')
 const xaiIconRank = xaiSvg('<path d="M3 14V8h3v6"/><path d="M6.5 14V4h3v10"/><path d="M10 14v-4h3v4"/>')
-// Render the body for the current scope: the tabbed shell, or a prompt when there's nothing yet.
-function xaiScopeBodyHtml(criterion) {
+// The xAI shell: a full-height left rail (scope + criterion + direction, then the view tabs), and the active
+// view filling the rest — each view a FIXED header (title + chat + "?" + its controls) over a body that
+// scrolls within itself, not the page.
+function xaiShellHtml(criterion) {
+  let tabs = []
+  let prompt = ''
   if (xaiScope === 'current') {
     if (!xaiFocusKey) {
-      return `<div class="card"><div class="card-head card-head-row"><h3>Current run</h3></div>
-        <p class="card-sub">Focus a run (Runs → “Analyze in xAI”) to analyse one model in depth — its decisions, what drives them, and how it ranks among all runs.</p></div>`
-    }
-    if (!findRun(xaiFocusKey)) {
-      return `<div class="card"><div class="card-head card-head-row"><h3>Current run <span class="card-sub">— ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>
-        <button type="button" class="ghost-btn" data-xai-clear-focus>✕ Clear run</button></div>
-        <p class="card-sub">This run isn’t loaded — open it from the Runs tab and choose “Analyze in xAI”.</p></div>`
-    }
-    return xaiShellHtml(xaiCurrentTabs(criterion), criterion)
+      prompt = `<div class="card"><p class="card-sub">Focus a run (Runs → “Analyze in xAI”) to analyse one model in depth — its decisions, what drives them, and how it ranks among all runs.</p></div>`
+    } else if (!findRun(xaiFocusKey)) {
+      prompt = `<div class="card"><div class="card-head card-head-row"><h3>Run ${escapeHtml(shortKey(xaiFocusKey))} not loaded</h3><button type="button" class="ghost-btn" data-xai-clear-focus>✕ Clear run</button></div>
+        <p class="card-sub">Open it from the Runs tab and choose “Analyze in xAI”.</p></div>`
+    } else tabs = xaiCurrentTabs(criterion)
+  } else {
+    const bundle = xaiResolveBundle(criterion)
+    if (!bundle) prompt = xaiNoBundleHtml(criterion)
+    else tabs = xaiAllTabs(bundle, criterion)
   }
-  const bundle = xaiResolveBundle(criterion)
-  if (!bundle) return xaiNoBundleHtml(criterion)
-  return xaiShellHtml(xaiAllTabs(bundle, criterion), criterion)
-}
-// The collapsible left icon-rail + the active tab's content.
-function xaiShellHtml(tabs, criterion) {
-  if (!tabs.some((t) => t.id === xaiTab)) xaiTab = tabs[0] ? tabs[0].id : ''
-  const active = tabs.find((t) => t.id === xaiTab) || tabs[0]
+  if (tabs.length && !tabs.some((t) => t.id === xaiTab)) xaiTab = tabs[0].id
+  const active = tabs.find((t) => t.id === xaiTab)
   const railBtn = (t) =>
     `<button type="button" class="xai-rail-btn${t.id === xaiTab ? ' active' : ''}" data-xai-tab="${escapeHtml(t.id)}" title="${escapeHtml(t.label)}"><span class="xai-rail-ico" aria-hidden="true">${t.icon(16)}</span><span class="xai-rail-lbl">${escapeHtml(t.label)}</span></button>`
-  const toggle = `<button type="button" class="xai-rail-btn xai-rail-toggle" data-xai-rail-toggle title="${xaiRailCollapsed ? 'Expand' : 'Collapse'} panel"><span class="xai-rail-ico" aria-hidden="true">${xaiRailCollapsed ? '»' : '«'}</span><span class="xai-rail-lbl">Collapse</span></button>`
-  return `<div class="xai-shell${xaiRailCollapsed ? ' rail-collapsed' : ''}">
-    <nav class="xai-rail" aria-label="xAI views">${tabs.map(railBtn).join('')}${toggle}</nav>
-    <div class="xai-tab-content">${active ? active.render() : ''}</div>
+  const rail = `<nav class="xai-rail" aria-label="xAI controls and views">
+    ${xaiRailControlsHtml(criterion)}
+    <div class="xai-rail-tabs">${tabs.map(railBtn).join('')}</div>
+    <button type="button" class="xai-rail-btn xai-rail-toggle" data-xai-rail-toggle title="${xaiRailCollapsed ? 'Expand panel' : 'Collapse panel'}"><span class="xai-rail-ico" aria-hidden="true">${xaiRailCollapsed ? '»' : '«'}</span><span class="xai-rail-lbl">Collapse</span></button>
+  </nav>`
+  return `<div class="xai-shell${xaiRailCollapsed ? ' rail-collapsed' : ''}">${rail}
+    <div class="xai-tab-content">${active ? xaiViewHtml(active) : prompt}</div></div>`
+}
+// The rail's top controls: scope toggle, then criterion + direction (hidden when the rail is collapsed).
+function xaiRailControlsHtml(criterion) {
+  const scopeBtn = (s, l) =>
+    `<button type="button" class="ghost-btn xai-scope-btn${xaiScope === s ? ' active' : ''}" data-xai-scope="${s}">${l}</button>`
+  const opts = xaiCriteria()
+    .map((c) => `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`)
+    .join('')
+  return `<div class="xai-rail-controls">
+    <div class="xai-scope-switch">${scopeBtn('all', 'All runs')}${scopeBtn('current', 'Current run')}</div>
+    <label class="card-sub xai-rail-sel">Criterion <select id="xai-criterion" class="app-select">${opts}</select></label>
+    <label class="card-sub xai-rail-sel">Better when <select id="xai-direction" class="app-select">
+      <option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option>
+      <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
+    </select></label>
+    <p id="xai-status" class="form-status" role="status" hidden></p>
   </div>`
+}
+// One view = a sticky header (title · the tab's own controls · Discuss · "?") over a body that scrolls within.
+function xaiViewHtml(tab) {
+  const controls = tab.controls ? tab.controls() : ''
+  const chatBtn = chatAboutRunAvailable()
+    ? `<button type="button" class="icon-btn" data-xai-chat="${escapeHtml(tab.id)}" title="Discuss what you see in “${escapeHtml(tab.label)}” with the AI" aria-label="Discuss this view">${iconChatSvg(15)}</button>`
+    : ''
+  const helpBtn = `<button type="button" class="icon-btn xai-help-btn${xaiHelpOpen === tab.id ? ' active' : ''}" data-xai-help="${escapeHtml(tab.id)}" title="${escapeHtml(xaiHelp(tab.id).title)}" aria-label="Explain this view">?</button>`
+  const callout =
+    xaiHelpOpen === tab.id ? `<div class="xai-help-callout"><p>${xaiHelp(tab.id).body}</p></div>` : ''
+  return `<section class="xai-view">
+    <header class="xai-view-head"><h3>${escapeHtml(tab.label)}</h3><div class="xai-view-actions">${controls}${chatBtn}${helpBtn}</div></header>
+    ${callout}
+    <div class="xai-view-body">${tab.render()}</div>
+  </section>`
 }
 function xaiAllTabs(bundle, criterion) {
   return [
     { id: 'environments', label: 'Environments', icon: xaiIconEnv, render: () => xaiEnvironmentsTabHtml(bundle, criterion) },
     { id: 'effects', label: 'Config effects', icon: xaiIconSliders, render: () => xaiConfigEffectsHtml(bundle, criterion) },
     { id: 'surrogate', label: 'Surrogate', icon: xaiIconSurrogate, render: () => xaiSurrogateHtml(bundle, criterion) },
-    { id: 'maps', label: 'Maps', icon: xaiIconMap, render: () => xaiMapsTabHtml(bundle, criterion) },
+    {
+      id: 'maps',
+      label: 'Maps',
+      icon: xaiIconMap,
+      controls: () =>
+        [
+          ['parallel', 'Parallel'],
+          ['pca', 'PCA'],
+        ]
+          .map(
+            ([k, l]) =>
+              `<button type="button" class="xai-map-tab${xaiMapKind === k ? ' active' : ''}" data-xai-map="${k}">${l}</button>`,
+          )
+          .join(''),
+      render: () => (xaiMapKind === 'pca' ? xaiPcaHtml(bundle, criterion) : xaiParallelCoordsHtml(bundle, criterion)),
+    },
     { id: 'recommender', label: 'Suggested', icon: iconLightbulbSvg, render: () => xaiRecommenderHtml(criterion, bundle) },
   ]
 }
@@ -4844,26 +4894,45 @@ function xaiTotalRuns() {
   for (const c of xaiConfigSpaceCache.values()) max = Math.max(max, c.runCount || 0)
   return max || runsTotalCount || runsCache.length
 }
-function xaiHeaderHtml(criterion) {
-  const opts = xaiCriteria()
-    .map(
-      (c) =>
-        `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
-    )
-    .join('')
-  const scopeBtn = (scope, label) =>
-    `<button type="button" class="ghost-btn xai-scope-btn${xaiScope === scope ? ' active' : ''}" data-xai-scope="${scope}">${label}</button>`
-  return `<div class="card">
-    <div class="card-head card-head-row"><h2>xAI <span class="card-sub">— deterministic, non-LLM</span></h2>
-      <div class="xai-scope-switch">${scopeBtn('all', 'All runs')}${scopeBtn('current', 'Current run')}</div></div>
-    <p class="badges-row">
-      <label class="card-sub">Criterion <select id="xai-criterion">${opts}</select></label>
-      <label class="card-sub">Better when <select id="xai-direction">
-        <option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option>
-        <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
-      </select></label>
-    </p>
-  </div>`
+// Plain-language explainer for each view's "?" button — title is the hover tooltip, body the click callout.
+// Maps explains the CURRENTLY-selected map (parallel vs PCA), per the user's ask.
+function xaiHelp(viewId) {
+  if (viewId === 'maps') {
+    return xaiMapKind === 'pca'
+      ? { title: 'What the PCA map shows', body: 'A 2-D <em>sketch</em> of every explored config: numeric levers z-scored, categorical one-hot, then squashed to two axes that capture the most variance. The axes are <em>blends</em> of levers, not knobs — so read it only for <strong>clusters</strong> (configs that behave alike sit together) and <strong>outliers</strong>. Colour = performance rank (green = top). It can’t tell you which lever to turn — use Parallel or the Surrogate for that.' }
+      : { title: 'What the Parallel map shows', body: 'Every line is one config threading its values across the lever axes (ordered most-decisive-first by fANOVA); colour = performance rank, green = top. <strong>Read it directly:</strong> where the green lines <em>bunch</em> at one value on an axis, that value is good; where they fan across the axis, that lever doesn’t decide the outcome. Real axes, so no "don’t read the directions" caveat.' }
+  }
+  const H = {
+    environments: {
+      title: 'What environments are',
+      body: 'An <strong>environment</strong> is a fixed combination of market-mechanics + dataset settings (fee, stop-loss, asset, walk-forward window, sizing…). Each is analysed <em>separately</em> and never tuned — a config that wins in one can lose in another, so they’re never blended. Click one to scope every other tab to it. The 🔒 list shows which context settings move the score most.',
+    },
+    effects: {
+      title: 'What Config effects show',
+      body: '<strong>Lever importance</strong> screens, model-free, how much each lever’s value swings the score (confounded — a hint, not proof). <strong>One-factor effect</strong> is the controlled read: it compares a lever’s values <em>holding everything else fixed</em>, with a bootstrap CI and significance, so you can trust it. Use importance to pick what to look at, the contrast to decide.',
+    },
+    surrogate: {
+      title: 'What the Surrogate model is',
+      body: 'A seeded random forest fit on every config → score, so it can predict the score of configs you <em>haven’t</em> run. From it: <strong>fANOVA</strong> (each lever’s global importance — main effect vs total, which includes interactions), <strong>coupling</strong> (lever pairs whose best value depends on each other), and the <strong>ablation tree</strong> (worst→best, the single change that helps most at each step). It’s a model — treat it as a hypothesis to confirm with real runs.',
+    },
+    recommender: {
+      title: 'What Suggested experiments are',
+      body: 'The next configs worth running — <strong>▲ climb</strong> picks are the surrogate’s highest Expected-Improvement unrun configs (toward the optimum), <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells, <strong>seeds</strong> firm up a thin top setup, and <strong>✦ AI</strong> are model-proposed ideas beyond the grid. They never change the environment’s settings — only model levers. Run a batch to close the analyse → run → re-analyse loop.',
+    },
+    standing: {
+      title: 'How this run ranks',
+      body: 'This run’s standing among <strong>every</strong> run (not just the page) by the chosen criterion, plus its action mix and whether its input-attribution passed its faithfulness check. Computed on demand server-side; only the 5 most-recently analysed runs are kept.',
+    },
+    narrative: {
+      title: 'About the narrative',
+      body: 'A one-shot LLM read of THIS run — what it’s doing, what drives its decisions, how trustworthy the explanation is, and what to try next. It synthesises the deterministic analysis; it doesn’t replace it.',
+    },
+    internals: {
+      title: 'About model internals',
+      body: 'This run’s own decision internals from its trace — decisiveness, policy entropy over time, a confidence-vs-realised-reward calibration table, and (vs its nearest comparable run) how its decisions differed, not just its score.',
+    },
+  }
+  return H[viewId] || { title: viewId, body: '' }
 }
 // The "Run/Re-run analysis" button for the whole-space scope — drives config-space-analyze.
 function xaiAnalyzeAllBtnHtml(label) {
@@ -4874,8 +4943,7 @@ function xaiAnalyzeAllBtnHtml(label) {
 // All-runs scope, nothing cached yet — the prompt to compute the whole-space analysis.
 function xaiNoBundleHtml(criterion) {
   return `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis</h3>${xaiAnalyzeAllBtnHtml('Run analysis')}</div>
-    <p class="card-sub">Runs the surrogate, fANOVA, coupling, config-effects, maps and recommender over <strong>EVERY completed run</strong> (not just this page) — server-side, in the activity queue — and caches the result here. ${analyzingConfigSpace ? 'Analysing now…' : `Click <strong>Run analysis</strong> for the “${escapeHtml(criterion.label)}” criterion.`}</p>
-    <p id="xai-status" class="form-status" role="status" hidden></p></div>`
+    <p class="card-sub">Runs the surrogate, fANOVA, coupling, config-effects, maps and recommender over <strong>EVERY completed run</strong> (not just this page) — server-side, in the activity queue — and caches the result here. ${analyzingConfigSpace ? 'Analysing now…' : `Click <strong>Run analysis</strong> for the “${escapeHtml(criterion.label)}” criterion.`}</p></div>`
 }
 // ENVIRONMENTS tab: the analysis freshness + re-run, the scope note, and the (consolidated) environment list.
 function xaiEnvironmentsTabHtml(bundle, criterion) {
@@ -4885,8 +4953,7 @@ function xaiEnvironmentsTabHtml(bundle, criterion) {
     ? `Scoped to <strong>${escapeHtml(xaiEnvLabel(a.environment))}</strong> — <strong>model levers only</strong>; its environment/dataset settings are held fixed (never tuned). The other tabs analyse THIS environment.`
     : `No environment/dataset levers declared — the whole space is analysed together.`
   const status = `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis <span class="card-sub">— ${a.runCount} runs · ${a.setupCount} setups · analysed ${escapeHtml(when)}</span></h3>${xaiAnalyzeAllBtnHtml('Re-run analysis')}</div>
-    <p class="card-sub">${scopeNote} Re-run to fold in runs added since.</p>
-    <p id="xai-status" class="form-status" role="status" hidden></p></div>`
+    <p class="card-sub">${scopeNote} Re-run to fold in runs added since.</p></div>`
   return status + ((a.environments || []).length ? xaiCompareEnvironmentsHtml(a, criterion) : '')
 }
 // A human-readable label for an environment (its context-lever values).
@@ -4928,7 +4995,7 @@ function xaiCompareEnvironmentsHtml(a, criterion) {
     <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended.</p>
     <div class="badges-row xai-env-controls">
       <input type="search" id="xai-env-search" class="xai-env-search" placeholder="Filter environments…" value="${escapeHtml(xaiEnvSearch)}" aria-label="Filter environments" />
-      <label class="card-sub">Sort <select id="xai-env-sort">
+      <label class="sort-control">Sort <select id="xai-env-sort" class="app-select">
         <option value="best"${xaiEnvSort === 'best' ? ' selected' : ''}>best ${escapeHtml(criterion.label)}</option>
         <option value="runs"${xaiEnvSort === 'runs' ? ' selected' : ''}>most runs</option>
       </select></label>
@@ -5003,7 +5070,6 @@ function xaiNarrativeHtml(nRuns, criterion) {
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Narrative <span class="card-sub">— run ${escapeHtml(shortKey(xaiFocusKey))}</span></h3>${btn}</div>
     ${body}
-    <p id="xai-status" class="form-status" role="status" hidden></p>
   </div>`
 }
 // Model internals for the focused run: the Explain panels + the decision-internals reads + a decision
@@ -5297,16 +5363,6 @@ function xaiCouplingHtml(couplings) {
   return `<h4 class="card-sub">Coupling <span class="card-sub">— lever PAIRS whose best value depends on each other (tune together, not one-at-a-time); % = interaction variance explained</span></h4>
     <ul class="xai-coupling">${items}</ul>`
 }
-// MAPS tab: pick a configuration-map view — parallel coordinates (readable axes) or PCA (cluster sketch).
-function xaiMapsTabHtml(bundle, criterion) {
-  const btn = (kind, label) =>
-    `<button type="button" class="xai-scope-btn${xaiMapKind === kind ? ' active' : ''}" data-xai-map="${kind}">${label}</button>`
-  const map =
-    xaiMapKind === 'pca' ? xaiPcaHtml(bundle, criterion) : xaiParallelCoordsHtml(bundle, criterion)
-  return `<div class="card"><div class="card-head card-head-row"><h3>Configuration maps <span class="card-sub">— two views of the same explored configs</span></h3>
-      <div class="xai-scope-switch">${btn('parallel', 'Parallel')}${btn('pca', 'PCA')}</div></div>
-    <p class="card-sub"><strong>Parallel</strong> = real, readable lever axes (best for "what does a good config look like?"). <strong>PCA</strong> = an abstract 2-D cluster sketch (best for spotting outliers).</p></div>${map}`
-}
 function xaiAbbrevLever(name) {
   const s = String(name)
   return s.length > 13 ? s.slice(0, 12) + '…' : s
@@ -5388,7 +5444,8 @@ function xaiParallelCoordsHtml(bundle, criterion) {
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
 function xaiPcaHtml(bundle, criterion) {
   const pca = bundle.analysis.pca
-  if (!pca || pca.points.length < 3) return ''
+  if (!pca || pca.points.length < 3)
+    return `<div class="card"><div class="card-head card-head-row"><h3>Configuration map (PCA)</h3></div><div class="card-scroll"><p class="card-sub">Need ≥3 explored configs to draw the PCA map.</p></div></div>`
   const values = pca.points.map((p) => p.value)
   // Colour by PERFORMANCE RANK, not raw value: sort points worst→best and map position to a red→green hue.
   // This always uses the full colour range — so a field where most configs perform similarly still shows a
@@ -6172,6 +6229,61 @@ async function chatAboutRunXai(key) {
     setStatusLine('xai-status', 'Could not open chat — please try again.', true)
   }
 }
+// Discuss the CURRENT xAI view with the AI — a topic-chat whose system prompt is preloaded with exactly the
+// data the user is looking at (per view), so the agent reasons from it without the user copying anything.
+async function xaiDiscussView(viewId) {
+  if (!chatAboutRunAvailable()) return
+  if (xaiScope === 'current') {
+    if (xaiFocusKey) await chatAboutRunXai(xaiFocusKey) // the focused run's full xAI covers standing/narrative/internals
+    return
+  }
+  const criterion = currentXaiCriterion()
+  const bundle = xaiResolveBundle(criterion)
+  if (!bundle) return
+  const a = bundle.analysis
+  const envLabel = a.environment ? xaiEnvLabel(a.environment) : 'the whole space (no environment levers)'
+  const J = (x) => JSON.stringify(x, null, 2)
+  const setupVal = (s) =>
+    criterion.key === 'objective' ? s.objective : criterion.key === 'durationMs' ? s.durationMs : s.metrics && s.metrics[criterion.key]
+  let label, seed, ctx
+  if (viewId === 'environments') {
+    label = 'Environments'
+    seed = 'Which environment looks most promising, and how much do the environment/dataset settings actually matter?'
+    ctx = `The user is comparing ENVIRONMENTS (each = a fixed combo of market-mechanics + data; analysed separately, never tuned).\nEnvironments (best ${criterion.label} + run count):\n${J((a.environments || []).slice(0, 40).map((e) => ({ env: xaiEnvLabel(e.values), runs: e.runCount, best: e.best })))}\nHow much each context (env/dataset) lever moves the score:\n${J((a.contextImportances || []).map((s) => ({ lever: s.lever, importance: s.importance, best: s.bestValue })))}`
+  } else if (viewId === 'effects') {
+    label = 'Config effects'
+    seed = 'Which model levers matter most here and which values should I prefer?'
+    ctx = `Scoped to environment: ${envLabel}.\nLever-importance screening (model-free, confounded):\n${J((a.screening || []).map((s) => ({ lever: s.lever, importance: s.importance, best: s.bestValue, worst: s.worstValue, minRuns: s.minRuns, confident: s.confident })))}`
+  } else if (viewId === 'surrogate') {
+    label = 'Surrogate'
+    seed = 'Read the surrogate — which levers matter, what interacts, and what the ablation path suggests?'
+    ctx = `Scoped to ${envLabel}.\nfANOVA importances (main vs total; total≫main ⇒ interactive, total≈0 ⇒ inert):\n${J((a.importances || []).map((f) => ({ lever: f.lever, main: f.importance, total: f.total })))}\nStrong couplings (lever pairs whose best value depends on each other):\n${J((a.couplings || []).slice(0, 8))}\nAblation path (worst→best, best single change each step):\n${a.ablation ? J(a.ablation) : 'none (too few runs for an ablation path)'}`
+  } else if (viewId === 'maps') {
+    label = 'Maps'
+    seed = 'What does the configuration map tell me about which configs are good?'
+    ctx = `Scoped to ${envLabel}. The user is viewing the ${xaiMapKind === 'pca' ? 'PCA cluster' : 'parallel-coordinates'} map of ${a.setupCount} distinct configs, coloured by ${criterion.label}.\nThe configs (config → ${criterion.label}):\n${J((a.setups || []).slice(0, 60).map((s) => ({ config: s.config, value: setupVal(s) })))}`
+  } else if (viewId === 'recommender') {
+    label = 'Suggested'
+    seed = 'Which of these suggested experiments should I run first, and why?'
+    ctx = `Scoped to ${envLabel}. Suggested next experiments:\n${J((a.recommendations || []).map((r) => ({ kind: r.kind, reason: r.reason, spec: r.spec })))}`
+  } else return
+  const systemPrompt = [
+    projectChatPreamble(),
+    `You are discussing the xAI "${label}" view of the DETERMINISTIC whole-space analysis for objective ${objectiveName()} / criterion "${criterion.label}" (better when ${criterion.direction === 'min' ? 'lower' : 'higher'}). Everything the user sees is given below — work directly from it, don't ask for it. These reads are heuristic; flag weak signals (e.g. low run counts) honestly.`,
+    ctx,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  try {
+    await window.OverseerBridge.discussTopic({
+      title: `xAI ${label}${a.environment ? ` · ${xaiEnvLabel(a.environment).slice(0, 40)}` : ''}`,
+      seed,
+      systemPrompt,
+    })
+  } catch {
+    setStatusLine('xai-status', 'Could not open chat — please try again.', true)
+  }
+}
 function busyButtonHtml(label) {
   return `${spinnerHtml()} ${escapeHtml(label)}`
 }
@@ -6561,6 +6673,18 @@ function setupRuns() {
       if (mapBtn) {
         xaiMapKind = mapBtn.dataset.xaiMap === 'pca' ? 'pca' : 'parallel'
         renderXai()
+        return
+      }
+      const helpBtn = event.target.closest('[data-xai-help]')
+      if (helpBtn) {
+        const id = helpBtn.dataset.xaiHelp
+        xaiHelpOpen = xaiHelpOpen === id ? null : id
+        renderXai()
+        return
+      }
+      const chatBtn2 = event.target.closest('[data-xai-chat]')
+      if (chatBtn2) {
+        xaiDiscussView(chatBtn2.dataset.xaiChat)
         return
       }
       const scopeBtn = event.target.closest('[data-xai-scope]')
@@ -8784,7 +8908,7 @@ function paperFilterBarHtml() {
   ]
     .map(([v, l]) => `<option value="${v}"${paperSortKey === v ? ' selected' : ''}>${l}</option>`)
     .join('')
-  const sort = `<label class="paper-sort">Sort <select id="paper-sort-select" aria-label="Sort papers">${sortOpts}</select></label>`
+  const sort = `<label class="sort-control">Sort <select id="paper-sort-select" class="app-select" aria-label="Sort papers">${sortOpts}</select></label>`
   return `<div class="paper-filter">${btns}${notWanted}${sort}</div>`
 }
 // Starter approaches the manifest ships (parallel to presets); imported into the registry once by id.
@@ -11865,7 +11989,7 @@ function showTab(id) {
   // Runs is the only full-width, own-scroll master-detail tab. Scope to the DASHBOARD's tab-main —
   // the home view has its own `.tab-main` that would otherwise match `querySelector` first.
   const main = document.querySelector('#view-dashboard .tab-main')
-  if (main) main.classList.toggle('is-fullwidth', target === 'runs')
+  if (main) main.classList.toggle('is-fullwidth', target === 'runs' || target === 'xai')
   try {
     sessionStorage.setItem(ACTIVE_TAB_SS, target)
   } catch {

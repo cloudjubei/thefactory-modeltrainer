@@ -3344,3 +3344,138 @@ describe('analyzeConfigSpace', () => {
     expect(result.analysis).toBeNull()
   })
 })
+
+describe('invalidateRuns', () => {
+  // Generic engine logic — exercised with simple injected predicates (the fidelity detector is tested in
+  // modelTrainerUtils.test.ts). affected = config.affected === true / spec.fixed.affected === true.
+  const affectsRun = (c: Record<string, unknown>) => c.affected === true
+  const affectsPending = (s: Record<string, unknown>) =>
+    (s.fixed as Record<string, unknown> | undefined)?.affected === true
+  const baseParams = {
+    scope: 'proj',
+    projectRoot: '/repo',
+    invalidationId: 'bug-v5',
+    reason: 'desync',
+    beforePipelineMajor: 5,
+    affectsRun,
+  }
+
+  it("marks an affected, pre-fix run status='invalid' (preserving priorStatus + reason)", async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, status: 'completed', pipelineVersion: '4.0', config: { affected: true } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
+    expect(result).toMatchObject({ examinedRuns: 1, invalidatedRuns: 1 })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    const c = rec?.content as Record<string, unknown>
+    expect(c.status).toBe('invalid')
+    expect(c.priorStatus).toBe('completed')
+    expect(c.invalidReason).toBe('desync')
+    expect(c.invalidatedBy).toBe('bug-v5')
+  })
+
+  it('does NOT mark an unaffected (single-path) run', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { status: 'completed', pipelineVersion: '4.0', config: { affected: false } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
+    expect(result.invalidatedRuns).toBe(0)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as Record<string, unknown>).status).toBe('completed')
+  })
+
+  it('does NOT mark a run at/after the fix major (a re-run with the fix is never re-flagged)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { status: 'completed', pipelineVersion: '5.0', config: { affected: true } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
+    expect(result.invalidatedRuns).toBe(0)
+  })
+
+  it('is idempotent — an already-invalid run is skipped (no churn)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { status: 'invalid', pipelineVersion: '4.0', config: { affected: true } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
+    expect(result.invalidatedRuns).toBe(0)
+  })
+
+  it('cancels affected pending-queue items ONCE and writes a marker; leaves unaffected ones', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-queue',
+      key: 'q-bad',
+      content: { params: { spec: { fixed: { affected: true } } } },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-queue',
+      key: 'q-good',
+      content: { params: { spec: { fixed: { affected: false } } } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({
+      ...baseParams,
+      manifest: manifest(),
+      affectsPending,
+      queueRecordType: 'trainer-queue',
+      cancelPendingQueue: true,
+    })
+    expect(result).toMatchObject({ examinedQueue: 2, cancelledQueue: 1, pendingAlreadyApplied: false })
+    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-bad' })).toBeUndefined()
+    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-good' })).toBeDefined()
+    const marker = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-invalidation',
+      key: 'bug-v5',
+    })
+    expect(marker).toBeDefined()
+  })
+
+  it('skips pending cancellation on a second run (marker present) so re-queued runs survive', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-invalidation',
+      key: 'bug-v5',
+      content: { invalidationId: 'bug-v5', appliedAt: 'earlier' },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-queue',
+      key: 'q-rerun',
+      content: { params: { spec: { fixed: { affected: true } } } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.invalidateRuns({
+      ...baseParams,
+      manifest: manifest(),
+      affectsPending,
+      queueRecordType: 'trainer-queue',
+      cancelPendingQueue: true,
+    })
+    expect(result).toMatchObject({ cancelledQueue: 0, pendingAlreadyApplied: true })
+    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-rerun' })).not.toBeNull()
+  })
+})
