@@ -1083,6 +1083,11 @@ button:focus-visible,
 .runs-table tr.is-failed-row td {
   opacity: 0.5;
 }
+.runs-table tr.is-invalid-row td {
+  opacity: 0.5;
+  text-decoration: line-through;
+  text-decoration-color: rgba(220, 80, 80, 0.5);
+}
 .runs-table tr.is-selected td {
   opacity: 1;
 }
@@ -3129,6 +3134,47 @@ select.app-select:focus-visible,
   color: #fff;
   font-weight: 600;
 }
+/* Reusable collapsible card: a clickable header (chevron + title) over a hideable body. */
+.xai-collapse-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.xai-collapse-head h3 {
+  margin: 0;
+}
+.xai-collapse-chevron {
+  flex: 0 0 auto;
+  opacity: 0.6;
+  font-size: 0.8em;
+}
+.xai-collapse-head:hover .xai-collapse-chevron {
+  opacity: 1;
+}
+.xai-collapse-body {
+  margin-top: 0.75rem;
+}
+/* Auto-generated "what this map shows" conclusions under the parallel / PCA maps. */
+.xai-conclusions {
+  margin-top: 0.85rem;
+  border-left: 3px solid var(--accent, #2563eb);
+  padding: 0.1rem 0 0.1rem 0.75rem;
+}
+.xai-conclusions ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.1rem;
+}
+.xai-conclusions li {
+  margin: 0.15rem 0;
+}
 /* Environments: keep a 100+ list scannable. */
 .xai-env-controls {
   align-items: center;
@@ -3142,8 +3188,15 @@ select.app-select:focus-visible,
   min-width: 200px;
 }
 .xai-env-scroll {
-  max-height: 320px;
-  overflow-y: auto;
+  max-height: 52vh;
+  overflow: auto;
+}
+/* Each environment row scopes the analysis on click (like a Runs row). */
+.xai-env-row {
+  cursor: pointer;
+}
+.xai-env-row:hover {
+  background: rgba(127, 127, 127, 0.1);
 }
 /* Parallel-coordinates configuration map. */
 .xai-pc {

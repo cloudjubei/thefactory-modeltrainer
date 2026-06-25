@@ -19,9 +19,6 @@ import {
   migrateExperimentSpec,
   canonicalConfigString,
   coerceHypothesisItems,
-  coerceRevisedHypotheses,
-  buildRevisePaperHypothesesSystemPrompt,
-  buildRevisePaperHypothesesUserContent,
   coercePaperDraft,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
@@ -934,66 +931,6 @@ describe('coerceHypothesisItems — context-spanning specs', () => {
     )
     expect(items[0].spec.fixed).toEqual({ algo: 'a' })
     expect(items[0].spec.environments).toHaveLength(2)
-  })
-})
-
-describe('coerceRevisedHypotheses', () => {
-  const cm = manifest({
-    levers: {
-      algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
-      allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
-    },
-  })
-  it('preserves the id and validates the revised context-spanning spec', () => {
-    const out = coerceRevisedHypotheses(
-      [
-        {
-          id: 'h1',
-          title: 't',
-          rationale: 'r',
-          spec: { environments: [{ allow_shorting: false }, { allow_shorting: true }] },
-          comparison: { kind: 'beats-baseline' },
-        },
-      ],
-      cm,
-    )
-    expect(out).toHaveLength(1)
-    expect(out[0].id).toBe('h1')
-    expect(out[0].spec.environments).toHaveLength(2)
-    expect(out[0].comparison).toEqual({ kind: 'beats-baseline' })
-  })
-  it('drops an entry with no id', () => {
-    expect(
-      coerceRevisedHypotheses([{ title: 't', rationale: 'r', spec: { fixed: { algo: 'a' } } }], cm),
-    ).toEqual([])
-  })
-  it('drops an entry whose revised spec is invalid', () => {
-    expect(
-      coerceRevisedHypotheses(
-        [{ id: 'h1', title: 't', rationale: 'r', spec: { environments: [{ algo: 'a' }] } }],
-        cm,
-      ),
-    ).toEqual([])
-  })
-  it('returns [] for a non-array', () => {
-    expect(coerceRevisedHypotheses('nope', cm)).toEqual([])
-  })
-})
-
-describe('buildRevisePaperHypothesesSystemPrompt', () => {
-  const m = manifest()
-  it('explains the cross-context rewrite and asks to preserve ids', () => {
-    const p = buildRevisePaperHypothesesSystemPrompt(m)
-    expect(p).toContain('environments')
-    expect(p).toContain('id')
-    expect(p).toMatch(/beats-baseline|invariant|differs/)
-  })
-  it('serializes the paper + hypotheses into the user content', () => {
-    const c = buildRevisePaperHypothesesUserContent({
-      paper: { id: 'p1', claim: 'shorting helps' },
-      hypotheses: [{ id: 'h1', title: 't', spec: {} }],
-    })
-    expect(JSON.parse(c)).toMatchObject({ paper: { id: 'p1' }, hypotheses: [{ id: 'h1' }] })
   })
 })
 
@@ -2057,24 +1994,39 @@ describe('isRunAffectedByFidelityDesync', () => {
 
 describe('isSpecAffectedByFidelityDesync', () => {
   it('flags a fixed-only spec on the multi path', () => {
-    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1h', fidelity_set: '1h+1d' } })).toBe(true)
+    expect(
+      isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1h', fidelity_set: '1h+1d' } }),
+    ).toBe(true)
   })
   it('does not flag a fixed-only spec on the single path', () => {
-    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' } })).toBe(false)
+    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' } })).toBe(
+      false,
+    )
   })
   it('flags a spec that SWEEPS fidelity_set into an affected value even when fixed is single', () => {
     expect(
-      isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' }, sweep: { fidelity_set: ['1d', '1h+1d'] } }),
+      isSpecAffectedByFidelityDesync({
+        fixed: { timeframe: '1d', fidelity_set: '1d' },
+        sweep: { fidelity_set: ['1d', '1h+1d'] },
+      }),
     ).toBe(true)
   })
   it('flags a spec that SWEEPS timeframe into an affected combination', () => {
     // fixed fidelity_set 1h; sweeping timeframe to 1d makes 1h@1d (a finer base at a coarser step) — affected.
     expect(
-      isSpecAffectedByFidelityDesync({ fixed: { fidelity_set: '1h' }, sweep: { timeframe: ['1h', '1d'] } }),
+      isSpecAffectedByFidelityDesync({
+        fixed: { fidelity_set: '1h' },
+        sweep: { timeframe: ['1h', '1d'] },
+      }),
     ).toBe(true)
   })
   it('does not flag a sweep whose every combination stays single', () => {
-    expect(isSpecAffectedByFidelityDesync({ fixed: { timeframe: '1d', fidelity_set: '1d' }, sweep: { seed: [1, 2, 3] } })).toBe(false)
+    expect(
+      isSpecAffectedByFidelityDesync({
+        fixed: { timeframe: '1d', fidelity_set: '1d' },
+        sweep: { seed: [1, 2, 3] },
+      }),
+    ).toBe(false)
   })
   it('returns false for a missing spec', () => {
     expect(isSpecAffectedByFidelityDesync(undefined)).toBe(false)

@@ -16,9 +16,6 @@ import type {
   AnalyzePaperFromUrlResult,
   AnalyzePaperModelsParams,
   AnalyzePaperModelsResult,
-  RevisePaperHypothesesParams,
-  RevisePaperHypothesesResult,
-  RevisePaperHypothesisChange,
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
   EvaluateTrainingRunResult,
@@ -89,8 +86,6 @@ import {
   buildJudgeUserContent,
   buildProposeSystemPrompt,
   buildProposeUserContent,
-  buildRevisePaperHypothesesSystemPrompt,
-  buildRevisePaperHypothesesUserContent,
   buildScanModelsSystemPrompt,
   buildScanModelsUserContent,
   buildSuggestHypothesesSystemPrompt,
@@ -100,7 +95,6 @@ import {
   coerceAnalyzedPaperModels,
   coerceHypothesisItems,
   coercePaperDraft,
-  coerceRevisedHypotheses,
   coerceScannedModels,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
@@ -975,151 +969,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, paper, hypotheses, linkedHypothesisIds, analyzedBy, analyzedAt }
   }
 
-  async function revisePaperHypotheses(
-    params: RevisePaperHypothesesParams,
-  ): Promise<RevisePaperHypothesesResult> {
-    const executor = requireInferenceExecutor()
-    const manifest =
-      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
-    const recordType = manifest.recordType
-    const revisedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
-    const revisedAt = now()
-    const paperType = `${recordType}-paper`
-    const hypothesisType = `${recordType}-hypothesis`
-
-    const paperRecs = await deps.storage.listRecords({ scope: params.scope, type: paperType })
-    const hypRecs = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
-    const hypById = new Map<string, TrainingHypothesis>()
-    for (const r of hypRecs) {
-      const c = r.content as unknown as TrainingHypothesis
-      if (c && typeof c.id === 'string') hypById.set(c.id, c)
-    }
-    const papers = paperRecs
-      .map((r) => r.content as unknown as TrainingPaperRecord)
-      .filter((p) => p && typeof p.id === 'string')
-    const targets = params.paperId ? papers.filter((p) => p.id === params.paperId) : papers
-
-    const changed: RevisePaperHypothesisChange[] = []
-    let unchanged = 0
-    // Re-point every paper that linked `fromId` at `toId` (a rewritten spec gets a new hash identity).
-    const repoint = async (fromId: string, toId: string) => {
-      for (const p of papers) {
-        const ids = p.hypothesisIds ?? []
-        if (!ids.includes(fromId)) continue
-        p.hypothesisIds = Array.from(new Set(ids.map((x) => (x === fromId ? toId : x))))
-        p.updatedAt = revisedAt
-        await deps.storage.upsertRecord({
-          scope: params.scope,
-          type: paperType,
-          key: p.id,
-          content: p as unknown as Record<string, unknown>,
-        })
-        params.onRecordWritten?.(paperType, p.id)
-      }
-    }
-
-    for (const paper of targets) {
-      const linked = (paper.hypothesisIds ?? [])
-        .map((id) => hypById.get(id))
-        .filter((h): h is TrainingHypothesis => !!h)
-      if (!linked.length) continue
-      const res = await executor.runInference({
-        systemPrompt: buildRevisePaperHypothesesSystemPrompt(manifest),
-        userContent: buildRevisePaperHypothesesUserContent({
-          paper: {
-            id: paper.id,
-            title: paper.title,
-            claim: paper.claim,
-            ...(paper.url ? { url: paper.url } : {}),
-          },
-          hypotheses: linked.map((h) => ({
-            id: h.id,
-            title: h.title,
-            rationale: h.rationale,
-            spec: h.spec,
-          })),
-        }),
-        model: { kind: 'api', llmConfig: params.llmConfig },
-        abortSignal: params.abortSignal,
-      })
-      const proposals = coerceRevisedHypotheses(parseStructuredItems(res.text), manifest)
-      for (const prop of proposals) {
-        const old = hypById.get(prop.id)
-        if (!old) continue
-        const newId = hashTrainingConfig(prop.spec as Record<string, unknown>)
-        const comparisonChanged =
-          JSON.stringify(prop.comparison ?? null) !== JSON.stringify(old.comparison ?? null)
-        if (newId === old.id) {
-          // The spec is unchanged; only the comparison criterion can move (no new identity).
-          if (!comparisonChanged) {
-            unchanged++
-            continue
-          }
-          const updated: TrainingHypothesis = {
-            ...old,
-            comparison: prop.comparison,
-            updatedAt: revisedAt,
-          }
-          if (!prop.comparison) delete updated.comparison
-          await deps.storage.upsertRecord({
-            scope: params.scope,
-            type: hypothesisType,
-            key: old.id,
-            content: updated as unknown as Record<string, unknown>,
-          })
-          params.onRecordWritten?.(hypothesisType, old.id)
-          hypById.set(old.id, updated)
-          changed.push({ paperId: paper.id, fromId: old.id, toId: old.id, title: updated.title })
-          continue
-        }
-        // A rewritten spec ⇒ new hash identity. Create the new record (merging into any identical existing
-        // one), delete the old, and re-point every paper that referenced it. The verdict resets to auto.
-        const priorAtNew = hypById.get(newId)
-        const next: TrainingHypothesis = priorAtNew
-          ? {
-              ...priorAtNew,
-              paperIds: Array.from(
-                new Set([...(priorAtNew.paperIds ?? []), ...(old.paperIds ?? [])]),
-              ),
-              updatedAt: revisedAt,
-            }
-          : {
-              ...old,
-              id: newId,
-              title: prop.title || old.title,
-              rationale: prop.rationale || old.rationale,
-              spec: prop.spec,
-              status: 'untested',
-              verdictSource: 'auto',
-              evidence: undefined,
-              transitions: undefined,
-              updatedAt: revisedAt,
-              ...(prop.comparison ? { comparison: prop.comparison } : {}),
-            }
-        await deps.storage.upsertRecord({
-          scope: params.scope,
-          type: hypothesisType,
-          key: newId,
-          content: next as unknown as Record<string, unknown>,
-        })
-        params.onRecordWritten?.(hypothesisType, newId)
-        await deps.storage.deleteRecord({ scope: params.scope, type: hypothesisType, key: old.id })
-        params.onRecordWritten?.(hypothesisType, old.id)
-        await repoint(old.id, newId)
-        hypById.delete(old.id)
-        hypById.set(newId, next)
-        changed.push({ paperId: paper.id, fromId: old.id, toId: newId, title: next.title })
-      }
-    }
-
-    logger?.info('revised paper hypotheses', {
-      recordType,
-      papers: targets.length,
-      changed: changed.length,
-    })
-    return { recordType, papers: targets.length, changed, unchanged, revisedBy, revisedAt }
-  }
-
   async function suggestPaperHypotheses(
     params: SuggestPaperHypothesesParams,
   ): Promise<SuggestPaperHypothesesResult> {
@@ -1962,7 +1811,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
     analyzePaperFromUrl,
-    revisePaperHypotheses,
     suggestPaperHypotheses,
     scanProjectModels,
     analyzePaperModels,

@@ -785,61 +785,6 @@ export function coerceSuggestedHypotheses(
   return { matchIds, newItems }
 }
 
-/** System prompt for "re-verify paper hypotheses": re-examine each linked hypothesis now that specs can
- * span context (environments/datasets), rewriting the ones whose claim is really about the context. */
-export function buildRevisePaperHypothesesSystemPrompt(manifest: TrainerManifest): string {
-  return [
-    `You are a research librarian for the "${manifest.name}" training project.`,
-    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-    `You are given a PAPER and the hypotheses currently linked to it. The project recently gained the ability to express CROSS-CONTEXT hypotheses. RE-EXAMINE each linked hypothesis: when its claim is really about the EFFECT OF A CONTEXT (environment / dataset), REWRITE its spec to the cross-context form; otherwise keep it as-is.`,
-    `The project's levers are: ${JSON.stringify(manifest.levers)}.`,
-    HYPOTHESIS_RULE,
-    CONTEXT_SPANNING_RULE,
-    `Return ONLY a JSON array — one entry per GIVEN hypothesis, preserving its "id" EXACTLY so each maps back: ` +
-      `[{"id": string, "title": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, ` +
-      `"spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "environments"?: [{"<environment-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]. ` +
-      `Use only declared lever names. No prose.`,
-  ].join('\n')
-}
-
-export function buildRevisePaperHypothesesUserContent(input: {
-  paper: Record<string, unknown>
-  hypotheses: Array<{ id: string; title?: string; rationale?: string; spec?: unknown }>
-}): string {
-  return JSON.stringify({ paper: input.paper, hypotheses: input.hypotheses })
-}
-
-/** Coerce the revise response: validate each entry's spec like {@link coerceHypothesisItems}, but keep the
- * "id" so each maps back to the existing hypothesis it revises. Entries without an id, or with an invalid
- * revised spec, are dropped. */
-export function coerceRevisedHypotheses(
-  raw: unknown,
-  manifest: TrainerManifest,
-): {
-  id: string
-  title: string
-  rationale: string
-  spec: ExperimentSpec
-  comparison?: HypothesisComparison
-}[] {
-  if (!Array.isArray(raw)) return []
-  const out: {
-    id: string
-    title: string
-    rationale: string
-    spec: ExperimentSpec
-    comparison?: HypothesisComparison
-  }[] = []
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue
-    const id = (item as Record<string, unknown>).id
-    if (typeof id !== 'string' || !id) continue
-    const coerced = coerceHypothesisItems([item], manifest)
-    if (coerced.length) out.push({ id, ...coerced[0] })
-  }
-  return out
-}
-
 /** Defensively coerce the model's JSON into a Paper draft — `undefined` unless title + claim are
  * present (mirrors {@link coerceHypothesisItems}). Drops unknown/ill-typed fields; the tool stamps
  * id/url/status/source/timestamps. */
@@ -1052,7 +997,9 @@ export function datasetAlignmentSignature(summary: TrainingRunSummary): string {
  * (`timeframe` `1d`, `fidelity_set` `auto`). Pure; returns false for a missing config (never invalidate the
  * unknown).
  */
-export function isRunAffectedByFidelityDesync(config: Record<string, unknown> | undefined): boolean {
+export function isRunAffectedByFidelityDesync(
+  config: Record<string, unknown> | undefined,
+): boolean {
   if (!config || typeof config !== 'object') return false
   const timeframe = String(config.timeframe ?? '1d')
   const raw = config.fidelity_set
@@ -1071,11 +1018,20 @@ export function isRunAffectedByFidelityDesync(config: Record<string, unknown> | 
  */
 export function isSpecAffectedByFidelityDesync(spec: Record<string, unknown> | undefined): boolean {
   if (!spec || typeof spec !== 'object') return false
-  const fixed = (spec.fixed && typeof spec.fixed === 'object' ? spec.fixed : {}) as Record<string, unknown>
-  const sweep = (spec.sweep && typeof spec.sweep === 'object' ? spec.sweep : {}) as Record<string, unknown>
-  const timeframes = Array.isArray(sweep.timeframe) && sweep.timeframe.length ? sweep.timeframe : [fixed.timeframe]
+  const fixed = (spec.fixed && typeof spec.fixed === 'object' ? spec.fixed : {}) as Record<
+    string,
+    unknown
+  >
+  const sweep = (spec.sweep && typeof spec.sweep === 'object' ? spec.sweep : {}) as Record<
+    string,
+    unknown
+  >
+  const timeframes =
+    Array.isArray(sweep.timeframe) && sweep.timeframe.length ? sweep.timeframe : [fixed.timeframe]
   const fidelitySets =
-    Array.isArray(sweep.fidelity_set) && sweep.fidelity_set.length ? sweep.fidelity_set : [fixed.fidelity_set]
+    Array.isArray(sweep.fidelity_set) && sweep.fidelity_set.length
+      ? sweep.fidelity_set
+      : [fixed.fidelity_set]
   for (const timeframe of timeframes) {
     for (const fidelity_set of fidelitySets) {
       if (isRunAffectedByFidelityDesync({ ...fixed, timeframe, fidelity_set })) return true

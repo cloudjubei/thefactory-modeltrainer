@@ -34,8 +34,8 @@ domain-oblivious: any further model is _data + the thin CLI contract_, not engin
 ### 1. BlackSwan Phase B — find ONE setup that trades well
 
 The OOS-honest lever matrix is in place: walk-forward windows (2022/2023/2024), shorting, vol-targeted
-sizing, the `trade_gate_mode`, multi-fidelity (`fidelity_set`), direct + differential-Sharpe rewards,
-regime/vol features, and the `obs_squash` normalization experiment. A setup counts only when it **beats
+sizing, multi-fidelity (`fidelity_set`), the unified `combo_unified` reward weights, regime/vol features,
+and the `obs_squash` normalization experiment. A setup counts only when it **beats
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
@@ -58,10 +58,12 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
   thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
   or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
   **Papers/Library card** (§2b) with claimed-vs-measured. Candidates: Moody & Saffell direct-recurrent
-  (RecurrentPPO already imported + log-return/diff-Sharpe reward + `lstm_hidden_size` lever);
+  (RecurrentPPO already imported + log-return reward; diff-Sharpe risk-adjustment and an `lstm_hidden_size`
+  lever still need adding — LSTM hidden size is hardcoded per-variant today);
   Zhang/Zohren/Roberts vol-scaling (reuses the Wave-1 vol); a trend-following + mean-reversion exit
-  overlay (`trend_filter`/`ma_period`/`reversion_threshold` levers, forced exit in `resolve_tpsl`); a
-  supervised-LSTM direction filter gating RL entries. Every replication runs under walk-forward + 0.1%
+  overlay (would add `trend_filter`/`ma_period`/`reversion_threshold` levers + a forced exit); a
+  supervised-LSTM direction filter gating RL entries (the supervised logreg/gbm line +
+  `forward_horizon`/`prob_threshold` already exist). Every replication runs under walk-forward + 0.1%
   fees; keep only OOS-beat-hold survivors.
 - **Wave 3 — multi-asset portfolio / cross-sectional long-short. PROJECT-SPLIT** (see Deferred).
 - **Phase C exploration.** Huge sweep from the first OOS-validated baseline; `skipExplored` + by-setup
@@ -132,40 +134,12 @@ The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is 
 
 - **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
   clean but has NOT been eyeballed in the running app — the one open verification.
-- **Configuration-space exploration push (N-D map) — build order.** Goal: from logged runs, see how the
-  config knobs combine + steer toward the optimum. Verdict from the deep-research: the "which way to explore"
-  intelligence belongs to a SURROGATE + ACQUISITION + SENSITIVITY stack (which the xAI engine already
-  half-owns), NOT to t-SNE — t-SNE is non-invertible (no 2-D→config map), distance/density/global-structure
-  distorting, and perplexity-fragile, so it can't yield a navigation direction or honest importance/coupling.
-  Don't try to grid-FILL an N-D space (curse of dimensionality); model it from sparse smart samples. Steps,
-  in order:
-  1. **Reward reconciliation → `combo_unified` (the enabler). DONE.** The categorical reward names are now
-     ONE `combo_unified` per-step weighted sum with continuous weight levers
-     (`combo_sell`/`combo_buy`/`combo_positionprofitpercentage`/`combo_direct`/`combo_noaction`/
-     `combo_wrongaction`/`combo_fee_penalty`/`combo_noop_penalty`), proven by byte-identical per-step
-     equivalence tests (`combo_all`/`_fee`/`_noop` any weights, `combo_all2` under `combo_noaction=0`, and
-     `profit_percentage_direct` ≡ `combo_direct=1` with the rest 0). `combo` (reward-side look-ahead) and
-     `differential_sharpe` removed; the named variants stay in the env only for byte-reproduction of old runs.
-     Migration mechanism re-added as a generic, idempotent, manifest-declared `migrations` engine
-     (`applyMigrationRules` + `ModelTrainerTools.migrateTrainingRuns` → backend `migrate-runs` activity →
-     Versions-tab "Migrate runs" button), rewriting every stored run AND pending-queue config in place.
-     Runs can't start un-migrated: `runTrainingCampaign` migrates each spec before planning
-     (`migrateExperimentSpec`), and a non-blocking backend boot sweep (`sweepTrainerMigrations`, gated like
-     the live-data scheduler) rolls all registered training projects' history + queue forward before the
-     viewer pumps its queue (whose pump is also held while a migration is in flight). Risk-adjustment (the
-     old `differential_sharpe` intent) can return LATER as a separate reward FAMILY facet.
-  2. **Surrogate acquisition = "next experiment toward the optimum."** Put an Expected-Improvement / UCB
-     acquisition on the existing seeded RF surrogate so the recommender actively climbs (sample-efficient),
-     not just fills factorial gaps. This is the real "which way to explore." Deterministic (seeded).
-  3. **fANOVA / Sobol importance + coupling** — main effects → which params matter (reject the flat ones);
-     interactions → which are coupled. Mostly already in the engine (fANOVA + interaction grid); surface the
-     "this dim's importance ≈ 0 across the explored range → stop sweeping it" call.
-  4. **PCA projection coloured by performance — a VISUALISATION/intuition layer only**, honestly labelled
-     ("a 2-D sketch for spotting clusters/outliers, NOT a map you navigate"). Prefer PCA (deterministic,
-     invertible, interpretable axes) over t-SNE; UMAP optional. t-SNE skipped or clearly caveated.
-  - Open follow-on: reward/metric NORMALISATION so cross-run/cross-setup comparison isn't distorted by raw
-    scale (which quantities, against what baseline) — fold into the surrogate/criterion layer when specced.
-    Deterministic + parity-mirrored like the rest of the engine. (Cited deep-research report pending.)
+- **Config-space exploration — reward/metric NORMALISATION (the one pending follow-on).** The
+  surrogate + EI acquisition (`acquisitionRecommendations`) + fANOVA/Sobol importance + lever-coupling +
+  PCA-projection stack is shipped (git + `docs/architecture.md`); its visual check folds into the VISUAL
+  pass above. Remaining: reward/metric NORMALISATION so cross-run/cross-setup comparison isn't distorted
+  by raw scale (which quantities, against what baseline) — fold into the surrogate/criterion layer,
+  deterministic + parity-mirrored like the rest of the engine. (Cited deep-research report pending.)
 - **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
   sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
   (attn-ppo only); generative counterfactual states (needs a GAN).

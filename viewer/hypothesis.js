@@ -43,7 +43,10 @@
   // The aggregate read of matching runs: count, best objective (per `direction`), and whether any beats
   // buy-and-hold OOS (`return_vs_hold_pct > 0`). Null when no non-failed run is present.
   function measuredFromRuns(runs, direction) {
-    const live = (runs || []).filter((r) => r.summary && r.summary.status !== 'failed')
+    // Exclude failed AND invalid runs — an invalid run (since-fixed bug) must never move a verdict.
+    const live = (runs || []).filter(
+      (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
+    )
     if (!live.length) return null
     const objectives = live
       .map((r) => Number(r.summary.objective))

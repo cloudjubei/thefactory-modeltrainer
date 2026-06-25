@@ -2333,119 +2333,6 @@ describe('analyzePaperFromUrl', () => {
   })
 })
 
-describe('revisePaperHypotheses', () => {
-  const cm = manifest({
-    levers: {
-      algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
-      allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
-    },
-  }) as TrainerManifest
-  const STALE_SPEC = { fixed: { algo: 'a' } }
-  const staleId = hashTrainingConfig(STALE_SPEC)
-  async function seed(storage: DataStorage, paperId = 'p1') {
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'demo-run-hypothesis',
-      key: staleId,
-      content: {
-        id: staleId,
-        title: 'shorting',
-        rationale: 'r',
-        spec: STALE_SPEC,
-        status: 'untested',
-        verdictSource: 'auto',
-        source: 'paper',
-        paperIds: [paperId],
-        createdAt: NOW,
-        updatedAt: NOW,
-      },
-    })
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'demo-run-paper',
-      key: paperId,
-      content: {
-        id: paperId,
-        title: 'P',
-        claim: 'shorting helps',
-        hypothesisIds: [staleId],
-        status: 'untested',
-        createdAt: NOW,
-        updatedAt: NOW,
-      },
-    })
-  }
-  const revisedResponse = JSON.stringify([
-    {
-      id: staleId,
-      title: 'long vs long+short',
-      rationale: 'shorting should help in down markets',
-      spec: {
-        fixed: { algo: 'a' },
-        environments: [{ allow_shorting: false }, { allow_shorting: true }],
-      },
-      comparison: { kind: 'beats-baseline' },
-    },
-  ])
-  const base = (o: Record<string, unknown> = {}) => ({
-    scope: 'proj',
-    projectRoot: '/repo',
-    manifest: cm,
-    llmConfig: LLM,
-    ...o,
-  })
-
-  it('rewrites a stale spec to context-spanning and auto-updates in place (new id replaces old, paper re-pointed)', async () => {
-    const storage = memoryStorage()
-    await seed(storage)
-    const { tools } = makeJudgeTools(stubExecutor(revisedResponse), storage)
-    const written: string[] = []
-    const result = await tools.revisePaperHypotheses(
-      base({ onRecordWritten: (t: string, k: string) => written.push(`${t}:${k}`) }),
-    )
-    expect(result.papers).toBe(1)
-    expect(result.changed).toHaveLength(1)
-    const newId = result.changed[0].toId
-    expect(newId).not.toBe(staleId)
-    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
-    expect(hyps.map((h) => h.key)).toEqual([newId])
-    const newHyp = hyps[0].content as unknown as {
-      spec: { environments?: unknown[] }
-      comparison?: unknown
-      status: string
-    }
-    expect(newHyp.spec.environments).toHaveLength(2)
-    expect(newHyp.comparison).toEqual({ kind: 'beats-baseline' })
-    expect(newHyp.status).toBe('untested')
-    const paper = (await storage.listRecords({ scope: 'proj', type: 'demo-run-paper' }))[0]
-      .content as unknown as { hypothesisIds: string[] }
-    expect(paper.hypothesisIds).toEqual([newId])
-  })
-
-  it('leaves an already-correct hypothesis unchanged when the revised spec hashes the same', async () => {
-    const storage = memoryStorage()
-    await seed(storage)
-    const same = JSON.stringify([
-      { id: staleId, title: 'shorting', rationale: 'r', spec: STALE_SPEC },
-    ])
-    const { tools } = makeJudgeTools(stubExecutor(same), storage)
-    const result = await tools.revisePaperHypotheses(base())
-    expect(result.changed).toHaveLength(0)
-    expect(result.unchanged).toBe(1)
-    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
-    expect(hyps.map((h) => h.key)).toEqual([staleId])
-  })
-
-  it('restricts the revision to the targeted paper when paperId is given', async () => {
-    const storage = memoryStorage()
-    await seed(storage, 'p1')
-    const { tools } = makeJudgeTools(stubExecutor(revisedResponse), storage)
-    const result = await tools.revisePaperHypotheses(base({ paperId: 'p2' }))
-    expect(result.papers).toBe(0)
-    expect(result.changed).toHaveLength(0)
-  })
-})
-
 describe('suggestPaperHypotheses', () => {
   const seedPaper = async (storage: DataStorage, overrides: Record<string, unknown> = {}) =>
     storage.upsertRecord({
@@ -3366,7 +3253,12 @@ describe('invalidateRuns', () => {
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 1, status: 'completed', pipelineVersion: '4.0', config: { affected: true } },
+      content: {
+        objective: 1,
+        status: 'completed',
+        pipelineVersion: '4.0',
+        config: { affected: true },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
@@ -3442,9 +3334,17 @@ describe('invalidateRuns', () => {
       queueRecordType: 'trainer-queue',
       cancelPendingQueue: true,
     })
-    expect(result).toMatchObject({ examinedQueue: 2, cancelledQueue: 1, pendingAlreadyApplied: false })
-    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-bad' })).toBeUndefined()
-    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-good' })).toBeDefined()
+    expect(result).toMatchObject({
+      examinedQueue: 2,
+      cancelledQueue: 1,
+      pendingAlreadyApplied: false,
+    })
+    expect(
+      await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-bad' }),
+    ).toBeUndefined()
+    expect(
+      await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-good' }),
+    ).toBeDefined()
     const marker = await storage.readRecord({
       scope: 'proj',
       type: 'demo-run-invalidation',
@@ -3476,6 +3376,8 @@ describe('invalidateRuns', () => {
       cancelPendingQueue: true,
     })
     expect(result).toMatchObject({ cancelledQueue: 0, pendingAlreadyApplied: true })
-    expect(await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-rerun' })).not.toBeNull()
+    expect(
+      await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q-rerun' }),
+    ).not.toBeNull()
   })
 })

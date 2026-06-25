@@ -101,13 +101,16 @@ let xaiScope = 'all'
 let xaiTab = 'environments'
 // The icon rail collapses to icons-only (like the main nav), persisted for the session.
 let xaiRailCollapsed = false
-// Environments tab: free-text filter + sort key, so a 100-environment list stays scannable.
+// Environments tab (a Runs-style columnar table): free-text filter + the sorted column + direction.
 let xaiEnvSearch = ''
-let xaiEnvSort = 'best'
+let xaiEnvSortKey = 'best'
+let xaiEnvSortDir = 'desc'
 // Which "configuration map" is shown in the Maps tab: 'pca' (cluster sketch) or 'parallel' (readable axes).
 let xaiMapKind = 'parallel'
 // The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
 let xaiHelpOpen = null
+// Ids of collapsed collapsible-cards (default = expanded); persists across re-renders.
+const xaiCollapsed = new Set(['surr-coupling', 'surr-interactions'])
 // Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
 // heavy surrogate/fANOVA/coupling/PCA work runs server-side over ALL runs; the cards render purely from this
 // — no browser fit, no page-limited picture.
@@ -233,6 +236,8 @@ let paperVerdictFilter = 'all'
 // How the Papers list is sorted: 'status' (rolled-up verdict, then creation date — the default), 'name',
 // or 'year'. User-picked via the sort dropdown; the list only re-sorts on a full render, not on each update.
 let paperSortKey = 'status'
+let hypothesisSortKey = 'updated'
+let modelSortKey = 'name'
 // Per-paper LLM ops in flight ('analyze-paper-models:<id>' / 'suggest-paper-hypotheses:<id>'), set at click
 // (covering the queued wait) and cleared when the activity settles — drives the per-button spinner so the
 // user can keep launching on OTHER papers while one is queued/running.
@@ -2015,11 +2020,6 @@ function applyQuickDispatchState(item, busy) {
     if (busy) pendingPaperOps.add(key)
     else pendingPaperOps.delete(key)
     if (activeTabId === 'papers') updatePaperCard(pid)
-  } else if (item.activityType === 'revise-paper-hypotheses') {
-    const key = paperOpKey('revise-paper-hypotheses', '__all__')
-    if (busy) pendingPaperOps.add(key)
-    else pendingPaperOps.delete(key)
-    renderReverifyBtn()
   }
 }
 async function refreshAfterQuickDispatch(item, act) {
@@ -2062,24 +2062,6 @@ async function refreshAfterQuickDispatch(item, act) {
       showToast('Suggested + linked hypotheses — view', pid ? () => focusPaper(pid) : undefined)
     } else {
       setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
-    }
-  } else if (item.activityType === 'revise-paper-hypotheses') {
-    pendingPaperOps.delete(paperOpKey('revise-paper-hypotheses', '__all__'))
-    renderReverifyBtn()
-    if (act && act.status === 'completed') {
-      papersCache = await readPapers()
-      hypothesesCache = await readHypotheses()
-      await refreshHypothesisVerdicts(hypothesesCache)
-      const rec = await readLatestRecord('-paper-analysis')
-      const n = rec && Number(rec.hypothesesChanged)
-      if (activeTabId === 'papers') await renderPapers()
-      showToast(
-        n
-          ? `Re-verified — updated ${n} hypothesis${n === 1 ? '' : 'es'}.`
-          : 'Re-verified — all hypotheses already current.',
-      )
-    } else {
-      setStatusLine('papers-status', quickActivityFailureText(act, 'Re-verify hypotheses'), true)
     }
   }
 }
@@ -2258,11 +2240,13 @@ function runRowHtml(run, cols) {
   const s = run.summary
   const rowClasses = [
     run.key === selectedRunKey ? 'is-selected' : '',
-    s.status === 'failed'
-      ? 'is-failed-row'
-      : s.health && s.health.status && s.health.status !== 'ok'
-        ? 'is-degenerate-row'
-        : '',
+    s.status === 'invalid'
+      ? 'is-invalid-row'
+      : s.status === 'failed'
+        ? 'is-failed-row'
+        : s.health && s.health.status && s.health.status !== 'ok'
+          ? 'is-degenerate-row'
+          : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -2487,7 +2471,10 @@ function runMetricKeys() {
 function statusDotHtml(s) {
   let cls = 'is-ok'
   let label = 'healthy'
-  if (s.status === 'failed') {
+  if (s.status === 'invalid') {
+    cls = 'is-bad'
+    label = s.invalidReason ? `invalid — ${s.invalidReason}` : 'invalid'
+  } else if (s.status === 'failed') {
     cls = 'is-bad'
     label = 'failed'
   } else if (s.health && s.health.status && s.health.status !== 'ok') {
@@ -2781,6 +2768,11 @@ const RUN_STATUS_FILTERS = {
     label: 'failed',
     where: { field: 'status', op: '=', value: 'failed' },
     test: (r) => (r.summary && r.summary.status) === 'failed',
+  },
+  invalid: {
+    label: 'invalid',
+    where: { field: 'status', op: '=', value: 'invalid' },
+    test: (r) => (r.summary && r.summary.status) === 'invalid',
   },
 }
 // The filters that push DOWN to the server query: lever-equals, pipeline version, status, and the pushable
@@ -3120,7 +3112,7 @@ function runsToolbarHtml(shownCount, total) {
       String((manifest && manifest.pipelineVersion) || '1'),
     ]),
   ].sort()
-  const versionFilter = `<select class="runs-filter-lever${runsVersionFilter ? ' is-changed' : ''}" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable. Set automatically when you open a version from the Versions tab.")}>
+  const versionFilter = `<select class="runs-filter-lever${runsVersionFilter ? ' is-changed' : ''}" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable.")}>
           <option value="">version: any</option>
           ${versions.map((v) => `<option value="${escapeHtml(v)}"${runsVersionFilter === v ? ' selected' : ''}>v${escapeHtml(v)}</option>`).join('')}
         </select>`
@@ -3322,7 +3314,7 @@ function aggregateRobustnessAcrossDatasets(runs) {
   const dir = objectiveDirection()
   const bySig = new Map()
   for (const r of runs) {
-    if (!r.summary || r.summary.status === 'failed') continue
+    if (!r.summary || r.summary.status === 'failed' || r.summary.status === 'invalid') continue
     const sig = modelSignatureOfRun(r)
     if (!bySig.has(sig)) bySig.set(sig, [])
     bySig.get(sig).push(r)
@@ -4789,11 +4781,21 @@ function xaiSvg(inner) {
   return (s) =>
     `<svg width="${s || 16}" height="${s || 16}" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`
 }
-const xaiIconEnv = xaiSvg('<path d="M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5Z"/><path d="M1.5 8 8 11.5 14.5 8"/><path d="M1.5 11 8 14.5 14.5 11"/>')
-const xaiIconSliders = xaiSvg('<path d="M2 4h7"/><path d="M12 4h2"/><circle cx="10.5" cy="4" r="1.5"/><path d="M2 8h2"/><path d="M7 8h7"/><circle cx="5.5" cy="8" r="1.5"/><path d="M2 12h9"/><path d="M14 12h0.5"/><circle cx="12.5" cy="12" r="1.5"/>')
-const xaiIconSurrogate = xaiSvg('<circle cx="8" cy="3" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M8 4.6 4.8 10.6"/><path d="M8 4.6 11.2 10.6"/>')
-const xaiIconMap = xaiSvg('<circle cx="4" cy="11" r="1.3"/><circle cx="7.5" cy="6.5" r="1.3"/><circle cx="11" cy="9" r="1.3"/><circle cx="12.5" cy="4" r="1.3"/><path d="M2 14h12"/><path d="M2 14V2"/>')
-const xaiIconRank = xaiSvg('<path d="M3 14V8h3v6"/><path d="M6.5 14V4h3v10"/><path d="M10 14v-4h3v4"/>')
+const xaiIconEnv = xaiSvg(
+  '<path d="M8 1.5 14.5 5 8 8.5 1.5 5 8 1.5Z"/><path d="M1.5 8 8 11.5 14.5 8"/><path d="M1.5 11 8 14.5 14.5 11"/>',
+)
+const xaiIconSliders = xaiSvg(
+  '<path d="M2 4h7"/><path d="M12 4h2"/><circle cx="10.5" cy="4" r="1.5"/><path d="M2 8h2"/><path d="M7 8h7"/><circle cx="5.5" cy="8" r="1.5"/><path d="M2 12h9"/><path d="M14 12h0.5"/><circle cx="12.5" cy="12" r="1.5"/>',
+)
+const xaiIconSurrogate = xaiSvg(
+  '<circle cx="8" cy="3" r="1.6"/><circle cx="4" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><path d="M8 4.6 4.8 10.6"/><path d="M8 4.6 11.2 10.6"/>',
+)
+const xaiIconMap = xaiSvg(
+  '<circle cx="4" cy="11" r="1.3"/><circle cx="7.5" cy="6.5" r="1.3"/><circle cx="11" cy="9" r="1.3"/><circle cx="12.5" cy="4" r="1.3"/><path d="M2 14h12"/><path d="M2 14V2"/>',
+)
+const xaiIconRank = xaiSvg(
+  '<path d="M3 14V8h3v6"/><path d="M6.5 14V4h3v10"/><path d="M10 14v-4h3v4"/>',
+)
 // The xAI shell: a full-height left rail (scope + criterion + direction, then the view tabs), and the active
 // view filling the rest — each view a FIXED header (title + chat + "?" + its controls) over a body that
 // scrolls within itself, not the page.
@@ -4829,7 +4831,10 @@ function xaiRailControlsHtml(criterion) {
   const scopeBtn = (s, l) =>
     `<button type="button" class="ghost-btn xai-scope-btn${xaiScope === s ? ' active' : ''}" data-xai-scope="${s}">${l}</button>`
   const opts = xaiCriteria()
-    .map((c) => `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`)
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
+    )
     .join('')
   return `<div class="xai-rail-controls">
     <div class="xai-scope-switch">${scopeBtn('all', 'All runs')}${scopeBtn('current', 'Current run')}</div>
@@ -4849,7 +4854,9 @@ function xaiViewHtml(tab) {
     : ''
   const helpBtn = `<button type="button" class="icon-btn xai-help-btn${xaiHelpOpen === tab.id ? ' active' : ''}" data-xai-help="${escapeHtml(tab.id)}" title="${escapeHtml(xaiHelp(tab.id).title)}" aria-label="Explain this view">?</button>`
   const callout =
-    xaiHelpOpen === tab.id ? `<div class="xai-help-callout"><p>${xaiHelp(tab.id).body}</p></div>` : ''
+    xaiHelpOpen === tab.id
+      ? `<div class="xai-help-callout"><p>${xaiHelp(tab.id).body}</p></div>`
+      : ''
   return `<section class="xai-view">
     <header class="xai-view-head"><h3>${escapeHtml(tab.label)}</h3><div class="xai-view-actions">${controls}${chatBtn}${helpBtn}</div></header>
     ${callout}
@@ -4858,9 +4865,24 @@ function xaiViewHtml(tab) {
 }
 function xaiAllTabs(bundle, criterion) {
   return [
-    { id: 'environments', label: 'Environments', icon: xaiIconEnv, render: () => xaiEnvironmentsTabHtml(bundle, criterion) },
-    { id: 'effects', label: 'Config effects', icon: xaiIconSliders, render: () => xaiConfigEffectsHtml(bundle, criterion) },
-    { id: 'surrogate', label: 'Surrogate', icon: xaiIconSurrogate, render: () => xaiSurrogateHtml(bundle, criterion) },
+    {
+      id: 'environments',
+      label: 'Environments',
+      icon: xaiIconEnv,
+      render: () => xaiEnvironmentsTabHtml(bundle, criterion),
+    },
+    {
+      id: 'effects',
+      label: 'Config effects',
+      icon: xaiIconSliders,
+      render: () => xaiConfigEffectsHtml(bundle, criterion),
+    },
+    {
+      id: 'surrogate',
+      label: 'Surrogate',
+      icon: xaiIconSurrogate,
+      render: () => xaiSurrogateHtml(bundle, criterion),
+    },
     {
       id: 'maps',
       label: 'Maps',
@@ -4875,16 +4897,40 @@ function xaiAllTabs(bundle, criterion) {
               `<button type="button" class="xai-map-tab${xaiMapKind === k ? ' active' : ''}" data-xai-map="${k}">${l}</button>`,
           )
           .join(''),
-      render: () => (xaiMapKind === 'pca' ? xaiPcaHtml(bundle, criterion) : xaiParallelCoordsHtml(bundle, criterion)),
+      render: () =>
+        xaiMapKind === 'pca'
+          ? xaiPcaHtml(bundle, criterion)
+          : xaiParallelCoordsHtml(bundle, criterion),
     },
-    { id: 'recommender', label: 'Suggested', icon: iconLightbulbSvg, render: () => xaiRecommenderHtml(criterion, bundle) },
+    {
+      id: 'recommender',
+      label: 'Suggested',
+      icon: iconLightbulbSvg,
+      controls: () => xaiRecommenderControlsHtml(bundle),
+      render: () => xaiRecommenderHtml(criterion, bundle),
+    },
   ]
 }
 function xaiCurrentTabs(criterion) {
   return [
-    { id: 'standing', label: 'Standing', icon: xaiIconRank, render: () => xaiRunStandingHtml(xaiFocusKey, criterion) },
-    { id: 'narrative', label: 'Narrative', icon: iconChatSvg, render: () => xaiNarrativeHtml(xaiTotalRuns(), criterion) },
-    { id: 'internals', label: 'Internals', icon: xaiIconSurrogate, render: () => xaiModelInternalsHtml(xaiFocusKey) },
+    {
+      id: 'standing',
+      label: 'Standing',
+      icon: xaiIconRank,
+      render: () => xaiRunStandingHtml(xaiFocusKey, criterion),
+    },
+    {
+      id: 'narrative',
+      label: 'Narrative',
+      icon: iconChatSvg,
+      render: () => xaiNarrativeHtml(xaiTotalRuns(), criterion),
+    },
+    {
+      id: 'internals',
+      label: 'Internals',
+      icon: xaiIconSurrogate,
+      render: () => xaiModelInternalsHtml(xaiFocusKey),
+    },
   ]
 }
 // The best total-run count the viewer knows without re-querying — the analysed bundle's count, else the
@@ -4899,8 +4945,14 @@ function xaiTotalRuns() {
 function xaiHelp(viewId) {
   if (viewId === 'maps') {
     return xaiMapKind === 'pca'
-      ? { title: 'What the PCA map shows', body: 'A 2-D <em>sketch</em> of every explored config: numeric levers z-scored, categorical one-hot, then squashed to two axes that capture the most variance. The axes are <em>blends</em> of levers, not knobs — so read it only for <strong>clusters</strong> (configs that behave alike sit together) and <strong>outliers</strong>. Colour = performance rank (green = top). It can’t tell you which lever to turn — use Parallel or the Surrogate for that.' }
-      : { title: 'What the Parallel map shows', body: 'Every line is one config threading its values across the lever axes (ordered most-decisive-first by fANOVA); colour = performance rank, green = top. <strong>Read it directly:</strong> where the green lines <em>bunch</em> at one value on an axis, that value is good; where they fan across the axis, that lever doesn’t decide the outcome. Real axes, so no "don’t read the directions" caveat.' }
+      ? {
+          title: 'What the PCA map shows',
+          body: 'A 2-D <em>sketch</em> of every explored config: numeric levers z-scored, categorical one-hot, then squashed to two axes that capture the most variance. The axes are <em>blends</em> of levers, not knobs — so read it only for <strong>clusters</strong> (configs that behave alike sit together) and <strong>outliers</strong>. Colour = performance rank (green = top). It can’t tell you which lever to turn — use Parallel or the Surrogate for that.',
+        }
+      : {
+          title: 'What the Parallel map shows',
+          body: 'Every line is one config threading its values across the lever axes (ordered most-decisive-first by fANOVA); colour = performance rank, green = top. <strong>Read it directly:</strong> where the green lines <em>bunch</em> at one value on an axis, that value is good; where they fan across the axis, that lever doesn’t decide the outcome. Real axes, so no "don’t read the directions" caveat.',
+        }
   }
   const H = {
     environments: {
@@ -4961,47 +5013,89 @@ function xaiEnvLabel(values) {
   const parts = Object.entries(values || {}).map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
   return parts.length ? parts.join(' · ') : 'default'
 }
-// Cross-environment comparison: a SCANNABLE list (filter + sort + scroll) so 100+ environments stay usable.
-// Each is analysed separately + never tuned; click one to scope the other tabs to it. The 🔒 list shows which
-// context settings move the score most.
+// The column model for the environment table: one column per context lever that VARIES across environments
+// (constant ones are dead columns), then runs + best. Mirrors runsColumns() so the table reads like Runs.
+function xaiEnvColumns(a, criterion) {
+  const envs = a.environments || []
+  const declared =
+    a.contextLevers && a.contextLevers.length
+      ? a.contextLevers
+      : Array.from(new Set(envs.flatMap((e) => Object.keys(e.values || {}))))
+  const varying = declared.filter(
+    (k) => new Set(envs.map((e) => xaiFmtLeverValue((e.values || {})[k]))).size > 1,
+  )
+  const constant = declared.filter((k) => !varying.includes(k))
+  const cols = varying.map((k) => ({
+    id: 'lv:' + k,
+    label: xaiAbbrevLever(k),
+    help: `Environment/dataset setting “${k}” (🔒 context — compared, never tuned).`,
+    num: false,
+    get: (e) => escapeHtml(xaiFmtLeverValue((e.values || {})[k])),
+    sort: (e) => (e.values || {})[k],
+  }))
+  cols.push({
+    id: 'runs',
+    label: 'runs',
+    num: true,
+    get: (e) => String(e.runCount),
+    sort: (e) => e.runCount,
+  })
+  cols.push({
+    id: 'best',
+    label: `best ${criterion.label}`,
+    num: true,
+    get: (e) => escapeHtml(formatTickValue(e.best)),
+    sort: (e) => e.best,
+  })
+  return { cols, constant }
+}
+// Cross-environment comparison as a Runs-style columnar table: context levers are columns, headers sort,
+// clicking a row scopes the other tabs to that environment. Each environment is analysed separately + never
+// tuned; the 🔒 list shows which context settings move the score most.
 function xaiCompareEnvironmentsHtml(a, criterion) {
   const all = a.environments || []
   const currentSig = window.Xai.canonicalConfigString(a.environment || {})
+  const { cols, constant } = xaiEnvColumns(a, criterion)
   const q = xaiEnvSearch.trim().toLowerCase()
   let envs = q ? all.filter((e) => xaiEnvLabel(e.values).toLowerCase().includes(q)) : [...all]
-  envs.sort((x, y) =>
-    xaiEnvSort === 'runs'
-      ? y.runCount - x.runCount
-      : criterion.direction === 'min'
-        ? x.best - y.best
-        : y.best - x.best,
-  )
-  // Pin the currently-scoped environment to the top so it's always visible.
-  envs.sort((x, y) => Number(y.signature === currentSig) - Number(x.signature === currentSig))
+  const col = cols.find((c) => c.id === xaiEnvSortKey) || cols[cols.length - 1]
+  const dir = xaiEnvSortDir === 'asc' ? 1 : -1
+  envs.sort((x, y) => {
+    const xv = col.sort(x)
+    const yv = col.sort(y)
+    if (typeof xv === 'number' && typeof yv === 'number') return (xv - yv) * dir
+    return String(xv).localeCompare(String(yv)) * dir
+  })
+  const header = cols
+    .map((c) => {
+      const arrow = xaiEnvSortKey === c.id ? (xaiEnvSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+      return `<th class="runs-th${c.num ? ' num' : ''}" data-xai-env-sort="${escapeHtml(c.id)}"${helpAttr(c.help)}>${escapeHtml(c.label)}${arrow}</th>`
+    })
+    .join('')
   const rows = envs
     .map((e) => {
       const cur = e.signature === currentSig
-      return `<tr class="${cur ? 'xai-env-current' : ''}">
-        <td><button type="button" class="link-btn" data-xai-env="${escapeHtml(e.signature)}" title="Scope the analysis to this environment">${cur ? '▸ ' : ''}${escapeHtml(xaiEnvLabel(e.values))}</button></td>
-        <td class="num">${e.runCount}</td><td class="num">${escapeHtml(formatTickValue(e.best))}</td></tr>`
+      const cells = cols.map((c) => `<td class="${c.num ? 'num' : ''}">${c.get(e)}</td>`).join('')
+      return `<tr class="xai-env-row${cur ? ' is-selected xai-env-current' : ''}" data-xai-env="${escapeHtml(e.signature)}" title="Scope the analysis to this environment">${cells}</tr>`
     })
     .join('')
+  const constNote = constant.length
+    ? `<p class="card-sub">Held the same across every environment: ${constant.map((k) => `<code>${escapeHtml(k)}</code>`).join(', ')}.</p>`
+    : ''
   const ctx = [...(a.contextImportances || [])].sort((x, y) => y.importance - x.importance)
   const ctxList = ctx.length
     ? `<h4 class="card-sub">Which environment/dataset settings move the score most <span class="card-sub">(🔒 context — compare only, never tuned)</span></h4>
        <ul class="xai-coupling">${ctx.map((s) => `<li>🔒 <code>${escapeHtml(s.lever)}</code> <span class="num">${Math.round(s.importance * 100)}%</span> <span class="card-sub">best ${escapeHtml(String(s.bestValue))}</span></li>`).join('')}</ul>`
     : ''
-  return `<div class="card"><div class="card-head card-head-row"><h3>Compare environments <span class="card-sub">— ${all.length} environments · click one to scope to it</span></h3></div>
-    <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended.</p>
+  return `<div class="card"><div class="card-head card-head-row"><h3>Compare environments <span class="card-sub">— ${all.length} environments · click a row to scope to it</span></h3></div>
+    <p class="card-sub">Each environment (market mechanics + which data) is analysed <em>separately</em> — a config that's great in one can be poor in another, so they're never blended. ${constNote}</p>
     <div class="badges-row xai-env-controls">
       <input type="search" id="xai-env-search" class="xai-env-search" placeholder="Filter environments…" value="${escapeHtml(xaiEnvSearch)}" aria-label="Filter environments" />
-      <label class="sort-control">Sort <select id="xai-env-sort" class="app-select">
-        <option value="best"${xaiEnvSort === 'best' ? ' selected' : ''}>best ${escapeHtml(criterion.label)}</option>
-        <option value="runs"${xaiEnvSort === 'runs' ? ' selected' : ''}>most runs</option>
-      </select></label>
-      <span class="card-sub">${envs.length} of ${all.length}</span>
+      <span class="card-sub">${envs.length} of ${all.length} · click a header to sort</span>
     </div>
-    <div class="xai-env-scroll"><table class="kv-table report-table"><thead><tr><th>environment</th><th class="num">runs</th><th class="num">best ${escapeHtml(criterion.label)}</th></tr></thead><tbody>${rows || `<tr><td colspan="3" class="card-sub">no environments match “${escapeHtml(xaiEnvSearch)}”</td></tr>`}</tbody></table></div>
+    <div class="xai-env-scroll table-wrap"><table class="runs-table">
+      <thead><tr>${header}</tr></thead>
+      <tbody>${rows || `<tr><td colspan="${cols.length}" class="card-sub">no environments match “${escapeHtml(xaiEnvSearch)}”</td></tr>`}</tbody></table></div>
     ${ctxList}</div>`
 }
 // The focused run's standing among ALL runs (rank + action mix + attribution sanity), from the on-demand
@@ -5167,11 +5261,24 @@ function calibrationTableHtml(trace) {
   return `<h4 class="card-sub">Confidence calibration — mean realised reward by confidence bin (heuristic)</h4>
     <table class="kv-table report-table"><thead><tr><th>confidence</th><th class="num">steps</th><th class="num">mean reward</th></tr></thead><tbody>${rows}</tbody></table>`
 }
+// A reusable collapsible card: a full-width clickable header (chevron + title) over a body that hides when
+// collapsed. State lives in xaiCollapsed so a collapse survives the next renderXai().
+function xaiCollapsibleCard(id, title, subHtml, bodyHtml) {
+  const collapsed = xaiCollapsed.has(id)
+  return `<div class="card xai-collapse-card${collapsed ? ' is-collapsed' : ''}" data-collapse-card="${escapeHtml(id)}">
+    <button type="button" class="xai-collapse-head" data-xai-collapse="${escapeHtml(id)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+      <span class="xai-collapse-chevron" aria-hidden="true">${collapsed ? '\u25b8' : '\u25be'}</span>
+      <h3>${escapeHtml(title)}${subHtml ? ` <span class="card-sub">\u2014 ${subHtml}</span>` : ''}</h3>
+    </button>
+    <div class="xai-collapse-body"${collapsed ? ' hidden' : ''}>${bodyHtml}</div>
+  </div>`
+}
+// CONFIG EFFECTS tab: two collapsible cards over the same data — Lever importance (model-free screening,
+// confounded) and One-factor effect (the controlled, CI-backed contrast).
 function xaiConfigEffectsHtml(bundle, criterion) {
   const importances = (bundle.analysis.screening || []).slice()
   if (!importances.length) {
-    return `<div class="card"><div class="card-head card-head-row"><h3>Config effects</h3></div>
-      <p class="card-sub">Need ≥2 runs that vary a lever (on the same data) to analyse config effects.</p></div>`
+    return `<div class="card"><p class="card-sub">Need \u22652 runs that vary a lever (on the same data) to analyse config effects.</p></div>`
   }
   if (!xaiLever || !importances.some((i) => i.lever === xaiLever)) xaiLever = importances[0].lever
   const leverOpts = importances
@@ -5183,16 +5290,12 @@ function xaiConfigEffectsHtml(bundle, criterion) {
   const contrasts = (bundle.analysis.ofat && bundle.analysis.ofat[xaiLever]) || []
   const contrastHtml = contrasts.length
     ? contrasts.map((c) => xaiOfatContrastHtml(c)).join('')
-    : `<p class="card-sub">No clean one-factor contrast for <code>${escapeHtml(xaiLever)}</code> yet — no runs vary only this lever with everything else fixed. The recommender below can fill the gap.</p>`
-  return `<div class="card">
-    <div class="card-head card-head-row"><h3>Config effects <span class="card-sub">— which levers move ${escapeHtml(criterion.label)}</span></h3></div>
-    <div class="card-scroll">
-    ${xaiMethodNoteHtml()}
-    <h4 class="card-sub">Lever importance <span class="card-sub">(screening — spread of each lever's marginal; confounded, use the contrast below for the controlled read)</span></h4>
-    ${xaiImportanceTableHtml(importances)}
-    <h4 class="card-sub">One-factor effect — <label>lever <select id="xai-lever">${leverOpts}</select></label> <span class="card-sub">holding everything else fixed</span></h4>
-    ${contrastHtml}
-    </div></div>`
+    : `<p class="card-sub">No clean one-factor contrast for <code>${escapeHtml(xaiLever)}</code> yet \u2014 no runs vary only this lever with everything else fixed. The <strong>Suggested</strong> tab can fill the gap.</p>`
+  const importanceBody = xaiImportanceTableHtml(importances)
+  const oneFactorBody = `<p class="card-sub"><label>Lever <select id="xai-lever" class="app-select">${leverOpts}</select></label> \u2014 its values compared with <strong>everything else held fixed</strong>.</p>${contrastHtml}`
+  return `${xaiMethodNoteHtml()}
+    ${xaiCollapsibleCard('effects-importance', 'Lever importance', `which levers move ${escapeHtml(criterion.label)} most \u2014 model-free screening, confounded`, importanceBody)}
+    ${xaiCollapsibleCard('effects-onefactor', 'One-factor effect', 'the controlled read \u2014 one lever varied, the rest held fixed', oneFactorBody)}`
 }
 // How the numbers are computed + the honesty caveat, so a user doesn't over-trust a 2-run estimate.
 function xaiMethodNoteHtml() {
@@ -5255,10 +5358,41 @@ function xaiOfatContrastHtml(c) {
 // pairwise coupling, the ablation TREE (worst→best, one change at a time), and a 2-lever interaction
 // heatmap — the across-the-whole-space view (predicts unobserved configs). Rendered + the grid marginalised
 // live from the server-cached surrogate + setups. Deterministic.
+// The one-line \u201cbottom line\u201d distilled from the surrogate: the most decisive lever, which act through
+// interactions, which are inert, and how many changes the ablation path needs.
+function xaiSurrogateTakeawayHtml(a, criterion) {
+  const imp = [...(a.importances || [])].sort((x, y) => (y.total || 0) - (x.total || 0))
+  if (!imp.length) return ''
+  const top = imp[0]
+  const inert = imp.filter((f) => (f.total || 0) < XAI_NEGLIGIBLE_TOTAL).map((f) => f.lever)
+  const interactive = imp
+    .filter((f) => {
+      const i = (f.total || 0) - f.importance
+      return i > f.importance && i > 0.05
+    })
+    .map((f) => f.lever)
+  const parts = [
+    `<strong>${escapeHtml(xaiAbbrevLever(top.lever))}</strong> moves ${escapeHtml(criterion.label)} most \u2014 ${Math.round((top.total || 0) * 100)}% of the variance.`,
+  ]
+  if (interactive.length)
+    parts.push(
+      `${interactive.slice(0, 3).map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`).join(', ')} act mainly through interactions \u2014 tune with their partner (see Coupling).`,
+    )
+  if (inert.length)
+    parts.push(
+      `${inert.slice(0, 4).map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`).join(', ')} ${inert.length === 1 ? 'is' : 'are'} inert \u2014 stop sweeping ${inert.length === 1 ? 'it' : 'them'}.`,
+    )
+  if (a.ablation && a.ablation.steps && a.ablation.steps.length)
+    parts.push(
+      `The ablation path reaches the predicted best in ${a.ablation.steps.length} change${a.ablation.steps.length === 1 ? '' : 's'}.`,
+    )
+  return `<div class="xai-conclusions"><strong class="card-sub">Bottom line</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
+}
 function xaiSurrogateHtml(bundle, criterion) {
   const a = bundle.analysis
   const surrogate = a.surrogate
-  if (!surrogate || !surrogate.trees.length) return '' // <2 runs or no levers — nothing to model
+  if (!surrogate || !surrogate.trees.length)
+    return `<div class="card"><p class="card-sub">Need \u22652 runs with varying levers to fit a surrogate model.</p></div>`
   const setups = a.setups || []
   const leverNames = surrogate.levers.map((l) => l.name)
   const ranked = a.importances.map((f) => f.lever)
@@ -5270,15 +5404,12 @@ function xaiSurrogateHtml(bundle, criterion) {
     xaiInterA && xaiInterB && setups.length
       ? window.Xai.interactionGrid(surrogate, setups, criterion, xaiInterA, xaiInterB)
       : null
-  return `<div class="card">
-    <div class="card-head card-head-row"><h3>Surrogate model <span class="card-sub">— global importance · coupling · ablation tree · interactions (predicts unobserved configs)</span></h3></div>
-    <div class="card-scroll">
-    <p class="card-sub">A seeded random forest fit on every run's (config → ${escapeHtml(criterion.label)}). It predicts the criterion for configs you HAVEN'T run, so it can rank levers globally and walk an ablation path — a model, so treat it as a hypothesis to confirm with real runs, not ground truth.</p>
-    ${xaiFanovaHtml(a.importances)}
-    ${xaiCouplingHtml(a.couplings)}
-    ${xaiAblationTreeHtml(a.ablation, criterion)}
-    ${xaiInteractionHtml(grid, leverNames, setups)}
-    </div></div>`
+  const na = '<p class="card-sub">Not enough data yet \u2014 run more configs.</p>'
+  return `${xaiSurrogateTakeawayHtml(a, criterion)}
+    ${xaiCollapsibleCard('surr-fanova', 'Global importance', 'each lever\u2019s share of the variance \u2014 main vs total', xaiFanovaHtml(a.importances) || na)}
+    ${xaiCollapsibleCard('surr-ablation', 'Ablation path', 'worst \u2192 best, the single best change at each step', xaiAblationTreeHtml(a.ablation, criterion) || na)}
+    ${xaiCollapsibleCard('surr-coupling', 'Coupling', 'lever pairs whose best value depends on each other', xaiCouplingHtml(a.couplings) || na)}
+    ${xaiCollapsibleCard('surr-interactions', 'Interactions', 'a 2-lever what-if heatmap from the surrogate', xaiInteractionHtml(grid, leverNames, setups) || na)}`
 }
 // Below this TOTAL-effect fraction a lever is effectively inert across the explored range ("stop sweeping").
 const XAI_NEGLIGIBLE_TOTAL = 0.03
@@ -5382,33 +5513,54 @@ function xaiParallelCoordsHtml(bundle, criterion) {
     .filter((x) => typeof x.v === 'number' && Number.isFinite(x.v))
   const card = (inner) =>
     `<div class="card"><div class="card-head card-head-row"><h3>Parallel coordinates</h3></div><div class="card-scroll">${inner}</div></div>`
-  if (items.length < 3) return card(`<p class="card-sub">Need ≥3 explored configs to draw the parallel map.</p>`)
+  if (items.length < 3)
+    return card(`<p class="card-sub">Need ≥3 explored configs to draw the parallel map.</p>`)
   // Axes = the varying model levers, ordered by fANOVA total effect (most decisive first), capped for legibility.
-  const ranked = [...(a.importances || [])].sort((x, y) => (y.total || 0) - (x.total || 0)).map((f) => f.lever)
+  const ranked = [...(a.importances || [])]
+    .sort((x, y) => (y.total || 0) - (x.total || 0))
+    .map((f) => f.lever)
   const ordered = [...ranked, ...(a.levers || []).filter((l) => !ranked.includes(l))]
   const info = {}
   for (const lev of ordered) {
     const vals = items.map((x) => x.s.config[lev])
     const distinct = [...new Set(vals.map((v) => String(v)))]
     if (distinct.length < 2) continue // doesn't vary in this environment → no axis
-    const allNum = vals.every((v) => typeof v === 'number' || (v !== '' && v != null && Number.isFinite(Number(v))))
-    info[lev] = { allNum, sorted: distinct.sort(xaiCmpValues), nums: allNum ? vals.map(Number) : null }
+    const allNum = vals.every(
+      (v) => typeof v === 'number' || (v !== '' && v != null && Number.isFinite(Number(v))),
+    )
+    info[lev] = {
+      allNum,
+      sorted: distinct.sort(xaiCmpValues),
+      nums: allNum ? vals.map(Number) : null,
+    }
   }
   const levers = Object.keys(info).slice(0, 8)
-  if (levers.length < 2) return card(`<p class="card-sub">Not enough <em>varying</em> model levers in this environment to draw a parallel map (try a different environment, or run more configs).</p>`)
+  if (levers.length < 2)
+    return card(
+      `<p class="card-sub">Not enough <em>varying</em> model levers in this environment to draw a parallel map (try a different environment, or run more configs).</p>`,
+    )
   // Performance rank → hue (green=best), like the PCA map, so the colour always spans the full range.
   const vs = items.map((x) => x.v)
-  const order = vs.map((v, i) => [v, i]).sort((p, q) => (criterion.direction === 'min' ? q[0] - p[0] : p[0] - q[0]))
+  const order = vs
+    .map((v, i) => [v, i])
+    .sort((p, q) => (criterion.direction === 'min' ? q[0] - p[0] : p[0] - q[0]))
   const rank = new Array(vs.length).fill(0.5)
   order.forEach(([, idx], k) => (rank[idx] = vs.length > 1 ? k / (vs.length - 1) : 0.5))
-  const W = 660, H = 340, padL = 28, padR = 28, padT = 22, padB = 66
-  const plotW = W - padL - padR, plotH = H - padT - padB
+  const W = 660,
+    H = 340,
+    padL = 28,
+    padR = 28,
+    padT = 22,
+    padB = 66
+  const plotW = W - padL - padR,
+    plotH = H - padT - padB
   const axisX = (i) => padL + (levers.length === 1 ? plotW / 2 : (i / (levers.length - 1)) * plotW)
   const yOf = (lev, v) => {
     const d = info[lev]
     let t
     if (d.allNum) {
-      const lo = Math.min(...d.nums), hi = Math.max(...d.nums)
+      const lo = Math.min(...d.nums),
+        hi = Math.max(...d.nums)
       t = hi === lo ? 0.5 : (Number(v) - lo) / (hi - lo)
     } else {
       const i = d.sorted.indexOf(String(v))
@@ -5427,18 +5579,24 @@ function xaiParallelCoordsHtml(bundle, criterion) {
     })
     .join('')
   const compactCfg = (cfg) =>
-    levers.map((l) => `${l}=${xaiFmtLeverValue(cfg[l])}`).join(' · ').slice(0, 160)
+    levers
+      .map((l) => `${l}=${xaiFmtLeverValue(cfg[l])}`)
+      .join(' · ')
+      .slice(0, 160)
   const polys = items
     .map((x, i) => ({ x, r: rank[i] }))
     .sort((p, q) => p.r - q.r) // draw best (green) last → on top
     .map(({ x, r }) => {
-      const pts = levers.map((lev, j) => `${axisX(j).toFixed(1)},${yOf(lev, x.s.config[lev]).toFixed(1)}`).join(' ')
+      const pts = levers
+        .map((lev, j) => `${axisX(j).toFixed(1)},${yOf(lev, x.s.config[lev]).toFixed(1)}`)
+        .join(' ')
       const tip = `${compactCfg(x.s.config)} · ${criterion.label} ${formatTickValue(x.v)} · top ${100 - Math.round(r * 100)}%`
       return `<polyline points="${pts}" fill="none" stroke="hsl(${Math.round(r * 120)},70%,45%)" stroke-width="1.4" opacity="${(0.22 + r * 0.55).toFixed(2)}"><title>${escapeHtml(tip)}</title></polyline>`
     })
     .join('')
   return card(`<p class="card-sub">Every line is one config threading its lever values; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>How to read it:</strong> where the green lines BUNCH at one value on an axis, that value is good; where they fan across the axis, that lever doesn't decide the outcome. Axes are ordered most-decisive-first (by fANOVA).</p>
-    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}</svg></div>`)
+    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}</svg></div>
+    ${xaiParallelConclusionsHtml(items, rank, levers, info, criterion)}`)
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
@@ -5491,7 +5649,83 @@ function xaiPcaHtml(bundle, criterion) {
     <div class="card-scroll">
     <p class="card-sub">A 2-D <em>sketch</em> of the explored configs (numeric levers z-scored, categorical one-hot), coloured by <strong>${escapeHtml(criterion.label)} rank</strong> — <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong>, evenly across all configs. <strong>How to use it:</strong> nearby points have similar configs, so look for a <em>region where the green points cluster</em> — that's a promising part of the space to explore more (use the recommender). Scattered green with no cluster means performance isn't driven by where you are in this 2-D mix (check the lever importances instead). The PC axes are blends of levers, not knobs — don't read them as directions. PC1+PC2 capture ${ev(0) + ev(1)}% of the configuration variance.</p>
     <div class="chart-wrap">${svg}</div>
+    ${xaiPcaConclusionsHtml(pca, rankFrac, criterion)}
     </div></div>`
+}
+// Deterministic \u201cwhat this map shows\u201d for the parallel map: the lever values the top configs concentrate
+// at, and the levers that don't separate good from bad (their lines fan across the axis).
+function xaiParallelConclusionsHtml(items, rank, levers, info, criterion) {
+  const n = items.length
+  let top = items.map((_, i) => i).filter((i) => rank[i] >= 0.67)
+  if (top.length < 3)
+    top = items
+      .map((_, i) => i)
+      .sort((x, y) => rank[y] - rank[x])
+      .slice(0, Math.max(3, Math.ceil(n / 3)))
+  const decisive = []
+  const neutral = []
+  for (const lev of levers) {
+    const counts = {}
+    for (const i of top) {
+      const v = xaiFmtLeverValue(items[i].s.config[lev])
+      counts[v] = (counts[v] || 0) + 1
+    }
+    const entries = Object.entries(counts).sort((x, y) => y[1] - x[1])
+    if (!entries.length) continue
+    const frac = entries[0][1] / top.length
+    if (frac >= 0.6) decisive.push({ lev, val: entries[0][0], pct: Math.round(frac * 100) })
+    else neutral.push(lev)
+  }
+  const parts = []
+  if (decisive.length)
+    parts.push(
+      `The top ${top.length} configs concentrate at ${decisive
+        .slice(0, 4)
+        .map((d) => `<code>${escapeHtml(xaiAbbrevLever(d.lev))}=${escapeHtml(String(d.val))}</code> (${d.pct}%)`)
+        .join(', ')} \u2014 good starting points.`,
+    )
+  if (neutral.length)
+    parts.push(
+      `${neutral
+        .slice(0, 5)
+        .map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`)
+        .join(', ')} ${neutral.length === 1 ? "doesn't" : "don't"} separate good from bad here (lines fan across the axis).`,
+    )
+  if (!decisive.length && !neutral.length)
+    parts.push(
+      'No axis clearly separates the top configs \u2014 performance is driven by interactions or by factors outside these levers.',
+    )
+  return `<div class="xai-conclusions"><strong class="card-sub">What this map shows</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
+}
+// Deterministic \u201cwhat this map shows\u201d for PCA: whether the top configs cluster in one region, plus how
+// faithful the 2-D sketch is (variance captured by PC1+PC2).
+function xaiPcaConclusionsHtml(pca, rankFrac, criterion) {
+  const pts = pca.points.map((pt, i) => ({ x: pt.x, y: pt.y, r: rankFrac[i] }))
+  const top = pts.filter((pt) => pt.r >= 0.67)
+  const std = (arr, sel) => {
+    if (arr.length < 2) return 0
+    const m = arr.reduce((a, pt) => a + sel(pt), 0) / arr.length
+    return Math.sqrt(arr.reduce((a, pt) => a + (sel(pt) - m) ** 2, 0) / arr.length)
+  }
+  const allSpread = Math.hypot(std(pts, (pt) => pt.x), std(pts, (pt) => pt.y))
+  const ev2 = Math.round(((pca.explainedVariance[0] || 0) + (pca.explainedVariance[1] || 0)) * 100)
+  const parts = []
+  if (top.length >= 3 && allSpread > 0) {
+    const ratio = Math.hypot(std(top, (pt) => pt.x), std(top, (pt) => pt.y)) / allSpread
+    if (ratio < 0.7)
+      parts.push(
+        `The top configs <strong>cluster</strong> in one region (~${Math.round((1 - ratio) * 100)}% tighter than the field) \u2014 a promising neighbourhood; use <strong>Suggested</strong> to explore around it.`,
+      )
+    else
+      parts.push(
+        'The top configs are <strong>scattered</strong>, not clustered \u2014 where a config sits in this 2-D mix doesn\u2019t drive performance; read the lever importances (Surrogate / Config effects) instead.',
+      )
+  } else parts.push('Too few top configs to judge clustering yet.')
+  if (ev2 < 55)
+    parts.push(
+      `This is a rough sketch \u2014 PC1+PC2 capture only ${ev2}% of the configuration variation, so distances are approximate.`,
+    )
+  return `<div class="xai-conclusions"><strong class="card-sub">What this map shows</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
 }
 function xaiAblationTreeHtml(path, criterion) {
   if (!path || !path.steps.length) return ''
@@ -5512,7 +5746,7 @@ function xaiAblationTreeHtml(path, criterion) {
 function xaiInteractionHtml(grid, leverNames, setups) {
   if (leverNames.length < 2) return ''
   const sel = (id, current) =>
-    `<select id="${id}">${leverNames.map((l) => `<option value="${escapeHtml(l)}"${l === current ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`
+    `<select id="${id}" class="app-select">${leverNames.map((l) => `<option value="${escapeHtml(l)}"${l === current ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('')}</select>`
   const picker = `<h4 class="card-sub">Interaction — <label>rows ${sel('xai-inter-a', xaiInterA)}</label> × <label>cols ${sel('xai-inter-b', xaiInterB)}</label> <span class="card-sub">does one help universally or only at some value of the other?</span></h4>`
   if (!grid)
     return `${picker}<p class="card-sub">Pick two different levers to see their interaction.</p>`
@@ -5601,26 +5835,27 @@ function xaiBuildRecs(bundle) {
   }
   return merged
 }
+// The Suggested view's header controls (Propose + Run-all) — concurrency is set in Activity, not here.
+function xaiRecommenderControlsHtml(bundle) {
+  const recs = xaiBuildRecs(bundle)
+  const total = recs.reduce((a, r) => a + r.runCount, 0)
+  const runAll = recs.length
+    ? `<button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>`
+    : ''
+  return `${xaiProposeButtonHtml()}${runAll}`
+}
 function xaiRecommenderHtml(criterion, bundle) {
   xaiRecsCache = xaiBuildRecs(bundle)
   if (!xaiRecsCache.length) {
-    return `<div class="card" id="xai-recommender"><div class="card-head card-head-row"><h3>Suggested experiments</h3>
-      ${xaiProposeButtonHtml()}</div>
-      <p class="card-sub">No deterministic gaps — the grids you've explored are complete and well-seeded. 🎉 Ask the AI to propose experiments beyond the explored grid.</p></div>`
+    return `<div class="card" id="xai-recommender"><p class="card-sub">No deterministic gaps — the grids you've explored are complete and well-seeded. 🎉 Use <strong>Propose</strong> (above) to ask the AI for experiments beyond the explored grid.</p></div>`
   }
   const total = xaiRecsCache.reduce((a, r) => a + r.runCount, 0)
   const climbs = xaiRecsCache.filter((r) => r.kind === 'acquisition').length
   const llms = xaiRecsCache.filter((r) => r.kind === 'llm').length
   const cards = xaiRecsCache.map((r, i) => xaiRecCardHtml(r, i)).join('')
   return `<div class="card" id="xai-recommender">
-    <div class="card-head card-head-row"><h3>Suggested experiments <span class="card-sub">— ${xaiRecsCache.length} suggestions · ${total} runs</span></h3>
-      <div class="head-actions">
-        <label class="card-sub">parallel <input type="number" id="xai-batch-concurrency" min="1" step="1" value="${savedConcurrency()}" style="width:3.2em" /></label>
-        ${xaiProposeButtonHtml()}
-        <button type="button" class="ghost-btn" data-xai-run-all>Run all (${total})</button>
-      </div></div>
-    <p class="card-sub">${climbs ? `<strong>▲ climb</strong> picks are the surrogate's highest Expected-Improvement unrun configs — the next steps toward the optimum. ` : ''}${llms ? `<strong>✦ AI</strong> picks are model-proposed experiments beyond the grid. ` : ''}<strong>seeds</strong> firm up a thin top setup; <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells.</p>
-    <div class="card-scroll">${cards}</div></div>`
+    <p class="card-sub"><strong>${xaiRecsCache.length} suggestions · ${total} runs.</strong> ${climbs ? `<strong>▲ climb</strong> picks are the surrogate's highest Expected-Improvement unrun configs — the next steps toward the optimum. ` : ''}${llms ? `<strong>✦ AI</strong> picks are model-proposed experiments beyond the grid. ` : ''}<strong>seeds</strong> firm up a thin top setup; <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells.</p>
+    ${cards}</div>`
 }
 // Friendly badge labels for each recommendation kind (the raw kind is kept as the badge's tooltip).
 const REC_KIND_LABELS = {
@@ -5656,8 +5891,7 @@ function xaiSpecKey(spec) {
   return `${window.Xai.canonicalConfigString(s.fixed || {})}#${window.Xai.canonicalConfigString(s.sweep || {})}`
 }
 async function xaiLaunchBatch(specs, label) {
-  const input = byId('xai-batch-concurrency')
-  const concurrency = Math.max(1, Math.floor(Number(input && input.value)) || savedConcurrency())
+  const concurrency = savedConcurrency()
   // Skip any batch already launched this session (its button is locked) so Run-all never double-fires.
   const pending = specs.filter((spec) => !xaiLaunchedSpecs.has(xaiSpecKey(spec)))
   if (!pending.length) {
@@ -5917,10 +6151,13 @@ function renderRunDetail(key) {
   }
   const s = run.summary
   const failed = s.status === 'failed'
-  const degenerate = !failed && !!(s.health && s.health.status && s.health.status !== 'ok')
-  // Verdict only makes sense for a healthy run (degenerate auto-rejects, failed has no
-  // result). Evaluation needs that AND a project that supports eval at all (not RL).
-  const showVerdict = !failed && !degenerate
+  const invalid = s.status === 'invalid'
+  const degenerate =
+    !failed && !invalid && !!(s.health && s.health.status && s.health.status !== 'ok')
+  // Verdict only makes sense for a healthy run (degenerate auto-rejects; failed has no result; an INVALID
+  // run was produced by a since-fixed bug and must not count toward anything). Evaluation needs that AND a
+  // project that supports eval at all (not RL).
+  const showVerdict = !failed && !invalid && !degenerate
   const showEval = showVerdict && evalEnabled()
   const flags = (s.health && Array.isArray(s.health.flags) && s.health.flags) || []
   const flagChips = flags.length
@@ -5944,9 +6181,11 @@ function renderRunDetail(key) {
   const datasetNameBit = hasDatasetLevers()
     ? ` · <span title="${escapeHtml(runDatasetSignature(run))}">dataset ${escapeHtml(runDatasetName(run))}</span>`
     : ''
-  const headline = failed
-    ? '<span class="badge is-bad">failed</span>'
-    : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
+  const headline = invalid
+    ? `<span class="badge is-bad" title="${escapeHtml(s.invalidReason || 'invalid')}">invalid</span>${s.invalidReason ? ` <span class="card-sub">${escapeHtml(s.invalidReason)}</span>` : ''}`
+    : failed
+      ? '<span class="badge is-bad">failed</span>'
+      : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
   const html = `
     <div class="card-head card-head-row">
       <div>
@@ -6091,10 +6330,11 @@ async function chatAboutRun(key) {
   if (!run || !chatAboutRunAvailable()) return
   const s = run.summary
   const failed = s.status === 'failed'
+  const invalid = s.status === 'invalid'
   const logTail = Array.isArray(s.logTail) ? s.logTail.slice(-40).join('\n') : ''
   const verdict = verdictsCache.get(key)
   const runContext = [
-    `You are discussing ONE specific, already-selected training run — run id "${shortKey(key)}"${failed ? ', which FAILED' : ''}. Its full configuration, metrics${verdict && verdict.why ? ', judge verdict' : ''}${failed ? ', error and recent logs' : ''} are all given below, so do NOT ask the user for the run id or any of these details — work directly from what follows.`,
+    `You are discussing ONE specific, already-selected training run — run id "${shortKey(key)}"${failed ? ', which FAILED' : ''}${invalid ? `, which is INVALID${s.invalidReason ? ` (${s.invalidReason})` : ''} and must NOT be treated as a real result` : ''}. Its full configuration, metrics${verdict && verdict.why ? ', judge verdict' : ''}${failed ? ', error and recent logs' : ''} are all given below, so do NOT ask the user for the run id or any of these details — work directly from what follows.`,
     `Pipeline v${String(s.pipelineVersion || '1')}.`,
     failed
       ? ''
@@ -6241,14 +6481,21 @@ async function xaiDiscussView(viewId) {
   const bundle = xaiResolveBundle(criterion)
   if (!bundle) return
   const a = bundle.analysis
-  const envLabel = a.environment ? xaiEnvLabel(a.environment) : 'the whole space (no environment levers)'
+  const envLabel = a.environment
+    ? xaiEnvLabel(a.environment)
+    : 'the whole space (no environment levers)'
   const J = (x) => JSON.stringify(x, null, 2)
   const setupVal = (s) =>
-    criterion.key === 'objective' ? s.objective : criterion.key === 'durationMs' ? s.durationMs : s.metrics && s.metrics[criterion.key]
+    criterion.key === 'objective'
+      ? s.objective
+      : criterion.key === 'durationMs'
+        ? s.durationMs
+        : s.metrics && s.metrics[criterion.key]
   let label, seed, ctx
   if (viewId === 'environments') {
     label = 'Environments'
-    seed = 'Which environment looks most promising, and how much do the environment/dataset settings actually matter?'
+    seed =
+      'Which environment looks most promising, and how much do the environment/dataset settings actually matter?'
     ctx = `The user is comparing ENVIRONMENTS (each = a fixed combo of market-mechanics + data; analysed separately, never tuned).\nEnvironments (best ${criterion.label} + run count):\n${J((a.environments || []).slice(0, 40).map((e) => ({ env: xaiEnvLabel(e.values), runs: e.runCount, best: e.best })))}\nHow much each context (env/dataset) lever moves the score:\n${J((a.contextImportances || []).map((s) => ({ lever: s.lever, importance: s.importance, best: s.bestValue })))}`
   } else if (viewId === 'effects') {
     label = 'Config effects'
@@ -6256,7 +6503,8 @@ async function xaiDiscussView(viewId) {
     ctx = `Scoped to environment: ${envLabel}.\nLever-importance screening (model-free, confounded):\n${J((a.screening || []).map((s) => ({ lever: s.lever, importance: s.importance, best: s.bestValue, worst: s.worstValue, minRuns: s.minRuns, confident: s.confident })))}`
   } else if (viewId === 'surrogate') {
     label = 'Surrogate'
-    seed = 'Read the surrogate — which levers matter, what interacts, and what the ablation path suggests?'
+    seed =
+      'Read the surrogate — which levers matter, what interacts, and what the ablation path suggests?'
     ctx = `Scoped to ${envLabel}.\nfANOVA importances (main vs total; total≫main ⇒ interactive, total≈0 ⇒ inert):\n${J((a.importances || []).map((f) => ({ lever: f.lever, main: f.importance, total: f.total })))}\nStrong couplings (lever pairs whose best value depends on each other):\n${J((a.couplings || []).slice(0, 8))}\nAblation path (worst→best, best single change each step):\n${a.ablation ? J(a.ablation) : 'none (too few runs for an ablation path)'}`
   } else if (viewId === 'maps') {
     label = 'Maps'
@@ -6601,25 +6849,22 @@ function setupRuns() {
       } else if (t.id === 'xai-inter-b') {
         xaiInterB = t.value
         renderXai()
-      } else if (t.id === 'xai-env-sort') {
-        xaiEnvSort = t.value
-        renderXai()
       }
     })
-    // Live-filter the environment list in place (no re-render, so the search box keeps focus).
+    // Live-filter the environment table in place (no re-render, so the search box keeps focus).
     xaiBody.addEventListener('input', (event) => {
       if (event.target.id !== 'xai-env-search') return
       xaiEnvSearch = event.target.value
       const q = xaiEnvSearch.trim().toLowerCase()
       let shown = 0
-      xaiBody.querySelectorAll('.xai-env-scroll tbody tr').forEach((tr) => {
-        const btn = tr.querySelector('[data-xai-env]')
-        const match = !q || (btn && btn.textContent.toLowerCase().includes(q))
+      xaiBody.querySelectorAll('.xai-env-scroll tbody tr[data-xai-env]').forEach((tr) => {
+        const match = !q || tr.textContent.toLowerCase().includes(q)
         tr.hidden = !match
-        if (match && btn) shown++
+        if (match) shown++
       })
+      const total = (xaiResolveBundle(currentXaiCriterion())?.analysis.environments || []).length
       const count = xaiBody.querySelector('.xai-env-controls .card-sub:last-child')
-      if (count) count.textContent = `${shown} of ${(xaiResolveBundle(currentXaiCriterion())?.analysis.environments || []).length}`
+      if (count) count.textContent = `${shown} of ${total} · click a header to sort`
     })
     xaiBody.addEventListener('click', (event) => {
       const runsLink = event.target.closest('[data-xai-runs]')
@@ -6651,6 +6896,17 @@ function setupRuns() {
         // Re-run keeps the currently-scoped environment (don't snap back to the default).
         const cur = xaiResolveBundle(currentXaiCriterion())
         onXaiRefreshAnalysisClick((cur && cur.analysis.environment) || undefined)
+        return
+      }
+      const envSortTh = event.target.closest('[data-xai-env-sort]')
+      if (envSortTh) {
+        const key = envSortTh.dataset.xaiEnvSort
+        if (xaiEnvSortKey === key) xaiEnvSortDir = xaiEnvSortDir === 'asc' ? 'desc' : 'asc'
+        else {
+          xaiEnvSortKey = key
+          xaiEnvSortDir = 'desc'
+        }
+        renderXai()
         return
       }
       const envBtn = event.target.closest('[data-xai-env]')
@@ -6687,6 +6943,23 @@ function setupRuns() {
         xaiDiscussView(chatBtn2.dataset.xaiChat)
         return
       }
+      const collapseBtn = event.target.closest('[data-xai-collapse]')
+      if (collapseBtn) {
+        const id = collapseBtn.dataset.xaiCollapse
+        const card = collapseBtn.closest('[data-collapse-card]')
+        const nowCollapsed = !xaiCollapsed.has(id)
+        if (nowCollapsed) xaiCollapsed.add(id)
+        else xaiCollapsed.delete(id)
+        if (card) {
+          card.classList.toggle('is-collapsed', nowCollapsed)
+          const body = card.querySelector('.xai-collapse-body')
+          if (body) body.hidden = nowCollapsed
+          const chev = collapseBtn.querySelector('.xai-collapse-chevron')
+          if (chev) chev.textContent = nowCollapsed ? '\u25b8' : '\u25be'
+        }
+        collapseBtn.setAttribute('aria-expanded', String(!nowCollapsed))
+        return
+      }
       const scopeBtn = event.target.closest('[data-xai-scope]')
       if (scopeBtn) {
         xaiScope = scopeBtn.dataset.xaiScope === 'current' ? 'current' : 'all'
@@ -6706,12 +6979,8 @@ function setupRuns() {
         return
       }
       if (event.target.closest('[data-xai-scroll-recs]')) {
-        const recs = byId('xai-recommender')
-        if (recs) {
-          recs.scrollIntoView({ behavior: 'smooth', block: 'start' })
-          recs.classList.add('xai-flash')
-          setTimeout(() => recs.classList.remove('xai-flash'), 1600)
-        }
+        xaiTab = 'recommender'
+        renderXai()
         return
       }
       if (event.target.closest('[data-xai-view-activity]')) {
@@ -7107,7 +7376,6 @@ async function renderVersions() {
     if (!byVersion.has(v)) byVersion.set(v, [])
     byVersion.get(v).push(r)
   }
-  const dir = objectiveDirection()
   const versions = [
     ...new Set([...changelog.map((e) => String(e.version)), ...byVersion.keys()]),
   ].sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
@@ -7121,9 +7389,6 @@ async function renderVersions() {
   const cards = versions
     .map((v) => {
       const entry = changelog.find((e) => String(e.version) === v)
-      const runs = byVersion.get(v) || []
-      const objs = runs.map((r) => Number(r.summary && r.summary.objective)).filter(Number.isFinite)
-      const best = objs.length ? (dir === 'min' ? Math.min(...objs) : Math.max(...objs)) : NaN
       const isCur = v === current
       const breaking = entry && entry.breaking ? '<span class="badge is-bad">breaking</span> ' : ''
       const date =
@@ -7131,27 +7396,13 @@ async function renderVersions() {
       const summary = entry
         ? escapeHtml(String(entry.summary || ''))
         : '<span class="card-sub">(no changelog entry for this version)</span>'
-      const stats = runs.length
-        ? `View ${runs.length} run${runs.length === 1 ? '' : 's'} · best ${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(best))} →`
-        : 'no runs'
       return `<div class="version-card${isCur ? ' is-current' : ''}">
         <p class="version-card-head"><strong>v${escapeHtml(v)}</strong>${isCur ? ' <span class="badge">current</span>' : ''} ${breaking}${date}</p>
         <p class="version-summary">${summary}</p>
-        <p class="card-sub">${runs.length ? `<button type="button" class="link-btn" data-version-filter="${escapeHtml(v)}">${stats}</button>` : stats}</p>
       </div>`
     })
     .join('')
   setHtml(body, `<div class="versions-list">${cards}</div>`)
-}
-function setupVersions() {
-  const body = byId('versions-body')
-  if (!body) return
-  body.addEventListener('click', (event) => {
-    const btn = event.target.closest('button[data-version-filter]')
-    if (!btn) return
-    runsVersionFilter = btn.dataset.versionFilter
-    showTab('runs')
-  })
 }
 
 // --- Environments tab ------------------------------------------------------------
@@ -8040,9 +8291,7 @@ async function renderHypotheses() {
     void checkModelStatsStale()
     return
   }
-  const sorted = [...visible].sort((a, b) =>
-    String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')),
-  )
+  const sorted = sortHypotheses(visible)
   const groups = { untested: [], proven: [], disproved: [] }
   for (const h of sorted) (groups[effectiveHypothesisVerdict(h)] || groups.untested).push(h)
   // First load (open section not yet chosen): default-open the first non-empty section so it isn't blank.
@@ -8593,6 +8842,13 @@ function setupHypotheses() {
       },
       true,
     )
+    body.addEventListener('change', (event) => {
+      const sort = event.target.closest('#hypothesis-sort-select')
+      if (sort) {
+        hypothesisSortKey = sort.value
+        renderHypotheses()
+      }
+    })
     body.addEventListener('click', (event) => {
       // A control inside a <summary> must not toggle the card — it runs its own action.
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
@@ -8886,6 +9142,43 @@ function sortPapers(list) {
     })
   }
   return arr
+}
+// Reusable labelled sort dropdown (the shared .app-select look) — "Sort <select>".
+function sortControlHtml(id, options, current) {
+  const opts = options
+    .map(([v, l]) => `<option value="${escapeHtml(v)}"${v === current ? ' selected' : ''}>${escapeHtml(l)}</option>`)
+    .join('')
+  return `<label class="sort-control">Sort <select id="${escapeHtml(id)}" class="app-select">${opts}</select></label>`
+}
+function sortHypotheses(list) {
+  const arr = [...list]
+  if (hypothesisSortKey === 'name')
+    arr.sort((a, b) => String(a.title || a.id).localeCompare(String(b.title || b.id)))
+  else if (hypothesisSortKey === 'oldest')
+    arr.sort((a, b) => String(a.updatedAt || '').localeCompare(String(b.updatedAt || '')))
+  else arr.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+  return arr
+}
+// Comparator for the model catalog (sorts WITHIN each category group).
+function modelSortComparator() {
+  const byName = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))
+  if (modelSortKey === 'runs')
+    return (a, b) => {
+      const ra = modelAgg(a)
+      const rb = modelAgg(b)
+      return ((rb ? rb.runs : 0) || 0) - ((ra ? ra.runs : 0) || 0) || byName(a, b)
+    }
+  if (modelSortKey === 'best')
+    return (a, b) => {
+      const aa = modelAgg(a)
+      const bb = modelAgg(b)
+      const va = aa && aa.best != null ? aa.best : -Infinity
+      const vb = bb && bb.best != null ? bb.best : -Infinity
+      return vb - va || byName(a, b)
+    }
+  if (modelSortKey === 'status')
+    return (a, b) => String(modelStatusOf(a)).localeCompare(String(modelStatusOf(b))) || byName(a, b)
+  return byName
 }
 function paperFilterBarHtml() {
   const opts = ['all', 'untested', 'holds-up', 'fluff']
@@ -9243,41 +9536,6 @@ async function launchPaperOp(activityType, paperId, label) {
 async function onSuggestPaperHypotheses(id) {
   await launchPaperOp('suggest-paper-hypotheses', id, 'Suggest hypotheses')
 }
-// TEMPORARY: re-verify EVERY paper's hypotheses against the cross-context capability (no paperId = all
-// papers); the backend auto-updates the stale specs in place. Tracked under one global '__all__' key.
-const REVERIFY_KEY = '__all__'
-function renderReverifyBtn() {
-  const btn = byId('papers-reverify-btn')
-  if (!btn) return
-  const busy = paperOpPending('revise-paper-hypotheses', REVERIFY_KEY)
-  btn.disabled = busy
-  btn.innerHTML = busy ? `${spinnerHtml()} Re-verifying…` : 'Re-verify hypotheses'
-}
-async function onReverifyPaperHypotheses() {
-  if (!embedded()) {
-    setStatusLine('papers-status', 'Open inside the Overseer to run this.', true)
-    return
-  }
-  if (paperOpPending('revise-paper-hypotheses', REVERIFY_KEY)) return
-  const epoch = projectEpoch
-  setStatusLine('papers-status', '')
-  pendingPaperOps.add(paperOpKey('revise-paper-hypotheses', REVERIFY_KEY))
-  renderReverifyBtn()
-  try {
-    const result = await startOrEnqueue(
-      'revise-paper-hypotheses',
-      trainerActivityParams({}),
-      'Re-verify hypotheses',
-    )
-    if (result.queued && epoch === projectEpoch)
-      setStatusLine('papers-status', queuedStatusText(result.ahead))
-  } catch {
-    pendingPaperOps.delete(paperOpKey('revise-paper-hypotheses', REVERIFY_KEY))
-    renderReverifyBtn()
-    if (epoch === projectEpoch)
-      setStatusLine('papers-status', 'Could not start — please try again.', true)
-  }
-}
 async function onFindPaperModels(id) {
   await launchPaperOp('analyze-paper-models', id, 'Find models')
 }
@@ -9357,8 +9615,6 @@ function setupPapers() {
       togglePaperForm(!!(form && form.hidden))
     })
   }
-  const reverify = byId('papers-reverify-btn')
-  if (reverify) reverify.addEventListener('click', onReverifyPaperHypotheses)
   const form = byId('paper-form')
   if (form) {
     form.addEventListener('submit', (event) => {
@@ -9651,7 +9907,17 @@ function modelCategoryFilterBarHtml() {
       return `<button type="button" class="paper-filter-btn${modelCategoryFilter === c ? ' is-active' : ''}" data-category="${escapeHtml(c)}">${escapeHtml(label)} (${count})</button>`
     })
     .join('')
-  return `<div class="paper-filter">${btns}</div>`
+  const sort = sortControlHtml(
+    'model-sort-select',
+    [
+      ['name', 'Name'],
+      ['runs', 'Runs'],
+      ['best', 'Best'],
+      ['status', 'Status'],
+    ],
+    modelSortKey,
+  )
+  return `<div class="paper-filter">${btns}${sort}</div>`
 }
 async function readModelStats() {
   return readLatestRecord('-model-stats')
@@ -9709,7 +9975,16 @@ function hypothesisStatsControlsHtml() {
   const stale = modelStatsStale
     ? '<span class="model-stats-stale">newer runs exist — Refresh latest, top right</span>'
     : ''
-  return `<div class="model-stats-controls"><span class="card-sub">${escapeHtml(note)}</span> ${stale}</div>`
+  const sort = sortControlHtml(
+    'hypothesis-sort-select',
+    [
+      ['updated', 'Recent'],
+      ['name', 'Name'],
+      ['oldest', 'Oldest'],
+    ],
+    hypothesisSortKey,
+  )
+  return `<div class="model-stats-controls"><span class="card-sub">${escapeHtml(note)}</span> ${stale} ${sort}</div>`
 }
 // Re-render whichever run-derived tab is active (to repaint the spinner / fresh results).
 function rerenderRunDerivedTab() {
@@ -9950,11 +10225,11 @@ async function renderModels() {
       ? modelsCache
       : modelsCache.filter((m) => m.category === modelCategoryFilter)
   const order = window.Models.MODEL_CATEGORIES
-  const byName = (a, b) => String(a.name || a.id).localeCompare(String(b.name || b.id))
+  const cmp = modelSortComparator()
   const groups = order
-    .map((cat) => ({ cat, models: shown.filter((m) => m.category === cat).sort(byName) }))
+    .map((cat) => ({ cat, models: shown.filter((m) => m.category === cat).sort(cmp) }))
     .filter((g) => g.models.length)
-  const other = shown.filter((m) => order.indexOf(m.category) < 0).sort(byName)
+  const other = shown.filter((m) => order.indexOf(m.category) < 0).sort(cmp)
   if (other.length) groups.push({ cat: 'other', models: other })
   const html = groups
     .map((g) => {
@@ -10143,7 +10418,15 @@ function setupModels() {
   )
   body.addEventListener('change', (event) => {
     const sel = event.target.closest('select[data-action="set-status"]')
-    if (sel) setModelStatus(sel.dataset.id, sel.value)
+    if (sel) {
+      setModelStatus(sel.dataset.id, sel.value)
+      return
+    }
+    const sort = event.target.closest('#model-sort-select')
+    if (sort) {
+      modelSortKey = sort.value
+      renderModels()
+    }
   })
   body.addEventListener('click', (event) => {
     if (event.target.closest('summary') && event.target.closest('[data-action]')) {
@@ -10404,7 +10687,13 @@ function leverBestSoFar(leverKey, selection) {
     const cfg = r.summary.config || {}
     const v = cfg[leverKey]
     const obj = Number(r.summary.objective)
-    if (v === undefined || !Number.isFinite(obj) || r.summary.status === 'failed') continue
+    if (
+      v === undefined ||
+      !Number.isFinite(obj) ||
+      r.summary.status === 'failed' ||
+      r.summary.status === 'invalid'
+    )
+      continue
     if (selection && !runMatchesSelection(cfg, selection, leverKey)) continue
     const k = String(v)
     if (!best.has(k) || (dir === 'min' ? obj < best.get(k) : obj > best.get(k))) best.set(k, obj)
@@ -12078,7 +12367,6 @@ async function init() {
   setupHome()
   setupRunners()
   setupRuns()
-  setupVersions()
   setupEnvironments()
   setupDatasets()
   setupHypotheses()

@@ -142,7 +142,13 @@
     const uncataloged = {}
     let newestRunAt = null
     const rows = runRows || []
+    let counted = 0
     for (const r of rows) {
+      // Invalid runs (produced by a since-fixed bug) are excluded from EVERY aggregation — run/flavor
+      // counts, best, failing, total, and staleness — so they never influence model stats, hypothesis
+      // verdicts, or xAI. They remain visible + filterable in the Runs tab via their status.
+      if (r && r.status === 'invalid') continue
+      counted += 1
       const config = (r && r.config) || {}
       const ranAt = (r && r.ranAt) || null
       if (ranAt && (!newestRunAt || ranAt > newestRunAt)) newestRunAt = ranAt
@@ -167,7 +173,7 @@
     return {
       perModel: perModel,
       uncataloged: Object.values(uncataloged).sort((a, b) => b.runs - a.runs),
-      totalRuns: rows.length,
+      totalRuns: counted,
       newestRunAt: newestRunAt,
     }
   }
