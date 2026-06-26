@@ -568,6 +568,73 @@ describe('runTrainingCampaign', () => {
     expect(result.completed).toBe(4)
   })
 
+  it('SPEEDUP: auto-parallelizes to floor(cpus/maxThreadsPerRun) and threads the thread-cap env into each run', async () => {
+    let active = 0
+    let peak = 0
+    const jobs: ComputeJob[] = []
+    const runner: ComputeRunner = {
+      async calibrate() {
+        return { secondsObserved: 1, unitsPerSecond: 100 }
+      },
+      runJob(job: ComputeJob): ComputeJobHandle {
+        jobs.push(job)
+        return {
+          jobId: job.jobId,
+          onLog: () => {},
+          abort: () => {},
+          done: (async (): Promise<ComputeJobResult> => {
+            active++
+            peak = Math.max(peak, active)
+            await Promise.resolve()
+            await Promise.resolve()
+            active--
+            return {
+              jobId: job.jobId,
+              status: 'completed',
+              exitCode: 0,
+              summary: { objective: 1 },
+              logTail: [],
+              durationMs: 1,
+            }
+          })(),
+        }
+      },
+    }
+    const m = manifest({ maxThreadsPerRun: 2 })
+    delete m.calibrate
+    // 8 cores / 2 threads-per-run -> the campaign should run 4 at once, NOT sequentially.
+    const tools = createModelTrainerTools({
+      computeRunner: runner,
+      storage: memoryStorage(),
+      logger: { info: vi.fn(), warn: vi.fn() },
+      now: () => NOW,
+      availableParallelism: () => 8,
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] } },
+    })
+    expect(result.completed).toBe(6)
+    expect(peak).toBe(4) // floor(8 / 2), not 1 (sequential)
+    expect(jobs[0].env).toMatchObject({ BS_NUM_THREADS: '2', OMP_NUM_THREADS: '2' })
+  })
+
+  it('keeps the sequential default and sets no per-run env when the manifest declares no thread appetite', async () => {
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, memoryStorage())
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2] } },
+    })
+    expect(runner.jobs[0].env).toBeUndefined()
+  })
+
   it('skips setups already run under any seed when skipExplored is set', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)

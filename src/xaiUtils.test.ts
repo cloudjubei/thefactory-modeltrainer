@@ -4,6 +4,7 @@ import {
   ablationPath,
   aggregateRunValues,
   computeConfigSpaceAnalysis,
+  paretoFrontier,
   criterionValueOf,
   expectedImprovement,
   fanovaImportances,
@@ -236,6 +237,104 @@ describe('leverImportances', () => {
     const imp = leverImportances(runs, MAX)[0]
     expect(imp.minRuns).toBe(5)
     expect(imp.confident).toBe(true)
+  })
+})
+
+describe('conditional levers — the "doesn\'t-apply" sentinel is excluded from importance', () => {
+  // A forward_horizon-style lever: 'n/a' on the models it doesn't apply to, a real value on the ones it does.
+  // The applicable (supervised) models are performance outliers but the lever has NO effect among them, so
+  // it must NOT inherit their between-model-class variance — i.e. it is scored only where it applies.
+  it('leverImportances scores a conditional lever only where it applies (not across the n/a boundary)', () => {
+    const runs = [
+      run('r1', { model_name: 'rl', forward_horizon: 'n/a' }, 100),
+      run('r2', { model_name: 'rl', forward_horizon: 'n/a' }, 100),
+      run('a1', { model_name: 'ars', forward_horizon: 'n/a' }, 100),
+      run('a2', { model_name: 'ars', forward_horizon: 'n/a' }, 100),
+      run('s1', { model_name: 'sup', forward_horizon: 1 }, 0),
+      run('s2', { model_name: 'sup', forward_horizon: 5 }, 0),
+    ]
+    const imp = leverImportances(runs, MAX)
+    const fh = imp.find((i) => i.lever === 'forward_horizon')!
+    expect(fh).toBeDefined()
+    expect(fh.importance).toBe(0) // no effect among supervised runs; NOT inflated by the n/a bucket
+    expect(fh.minRuns).toBe(1) // counted over the applicable (supervised) runs only
+    expect(imp[0].lever).toBe('model_name') // the real driver wins
+  })
+
+  it('ofatContrasts never forms a contrast level from the doesn\'t-apply sentinel', () => {
+    const runs = [
+      run('s1', { model_name: 'sup', forward_horizon: 1 }, 10),
+      run('s2', { model_name: 'sup', forward_horizon: 5 }, 20),
+      run('r1', { model_name: 'rl', forward_horizon: 'n/a' }, 99),
+    ]
+    const values = ofatContrasts(runs, 'forward_horizon', MAX).flatMap((c) =>
+      c.levels.map((l) => l.value),
+    )
+    expect(values).not.toContain('n/a')
+  })
+
+  it('computeConfigSpaceAnalysis: a conditional lever that only applies to outlier models is not a top driver', () => {
+    const runs: AnalysisRun[] = []
+    for (let i = 0; i < 5; i++) {
+      runs.push(run(`rl${i}`, { model_name: 'rl', lr: 0.1 }, 100, { seed: i }))
+      runs.push(run(`ars${i}`, { model_name: 'ars', lr: 0.1 }, 100, { seed: i }))
+    }
+    for (let i = 0; i < 3; i++) {
+      runs.push(run(`sa${i}`, { model_name: 'sup', lr: 0.1, forward_horizon: 1 }, 0, { seed: i }))
+      runs.push(run(`sb${i}`, { model_name: 'sup', lr: 0.1, forward_horizon: 5 }, 0, { seed: i }))
+    }
+    const a = computeConfigSpaceAnalysis(runs, MAX, {
+      appliesWhen: { forward_horizon: { model_name: ['sup'] } },
+    })!
+    const fh = a.screening.find((s) => s.lever === 'forward_horizon')!
+    expect(fh).toBeDefined()
+    expect(fh.importance).toBeLessThan(0.05) // not the top driver — model_name carries the real variance
+    const fhFanova = a.importances.find((f) => f.lever === 'forward_horizon')
+    if (fhFanova) expect(fhFanova.importance).toBeLessThan(0.05)
+  })
+})
+
+describe('paretoFrontier', () => {
+  it('keeps only the point that dominates the rest (max/max)', () => {
+    // [2,2] is >= every other on both axes and strictly better — it dominates them all.
+    expect(
+      paretoFrontier(
+        [
+          [1, 1],
+          [2, 2],
+          [2, 1],
+          [1, 2],
+        ],
+        ['max', 'max'],
+      ),
+    ).toEqual([1])
+  })
+
+  it('handles mixed directions (return up, drawdown down) and drops dominated points', () => {
+    // [return, drawdown]; idx3 [9,6] is dominated by idx0 [10,5] (>= return AND <= drawdown).
+    expect(
+      paretoFrontier(
+        [
+          [10, 5],
+          [8, 2],
+          [12, 8],
+          [9, 6],
+        ],
+        ['max', 'min'],
+      ),
+    ).toEqual([0, 1, 2])
+  })
+
+  it('keeps tied (equal) points — neither dominates the other', () => {
+    expect(
+      paretoFrontier(
+        [
+          [5, 5],
+          [5, 5],
+        ],
+        ['max', 'max'],
+      ),
+    ).toEqual([0, 1])
   })
 })
 

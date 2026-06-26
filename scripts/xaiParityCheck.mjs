@@ -49,6 +49,15 @@ const eq = (a, b, label) => {
   }
 }
 eq(ts.iqm([1, 2, 3, 4, 100]), mirror.iqm([1, 2, 3, 4, 100]), 'iqm')
+{
+  const pts = [
+    [10, 5],
+    [8, 2],
+    [12, 8],
+    [9, 6],
+  ]
+  eq(ts.paretoFrontier(pts, ['max', 'min']), mirror.paretoFrontier(pts, ['max', 'min']), 'pareto')
+}
 eq(
   ts.aggregateRunValues([5, 7, 9, 11, 13, 15]),
   mirror.aggregateRunValues([5, 7, 9, 11, 13, 15]),

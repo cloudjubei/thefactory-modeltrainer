@@ -218,6 +218,12 @@
     })
     return out
   }
+  function observedValues(runs, lever) {
+    // Exclude the doesn't-apply sentinel — a conditional lever is swept only over the values it really takes.
+    var values = distinctValues(runs, lever)
+    values.delete('n/a')
+    return values
+  }
 
   function validRunsFor(runs, criterion) {
     return runs.filter(function (r) {
@@ -248,7 +254,7 @@
 
   function ofatContrasts(runs, lever, criterion) {
     var valid = validRunsFor(runs, criterion).filter(function (r) {
-      return lever in r.config
+      return lever in r.config && String(r.config[lever]) !== 'n/a'
     })
     var groups = groupBy(valid, function (r) {
       return controlSignatureOf(r, lever)
@@ -323,6 +329,7 @@
       valid.forEach(function (r) {
         if (!(lever in r.config)) return
         var v = String(r.config[lever])
+        if (v === 'n/a') return // a conditional lever is scored only where it actually applies
         var cv = criterionValueOf(r, criterion)
         var b = byValue.get(v)
         if (b) b.push(cv)
@@ -843,11 +850,16 @@
       ) || 1
     var out = []
     surrogate.levers.forEach(function (lv) {
-      var values = Array.from(distinctValues(valid, lv.name).values())
+      var values = Array.from(observedValues(valid, lv.name).values())
       if (values.length < 2) return
+      // Score the lever only over the configs where it APPLIES (its value isn't the sentinel).
+      var applicable = configs.filter(function (c) {
+        return String(c[lv.name]) !== 'n/a'
+      })
+      if (!applicable.length) return
       var marginals = values.map(function (v) {
         return meanOf(
-          configs.map(function (c) {
+          applicable.map(function (c) {
             var next = Object.assign({}, c)
             next[lv.name] = v
             return predictConfig(surrogate, next)
@@ -855,7 +867,7 @@
         )
       })
       // TOTAL effect: per config, the variance from sweeping THIS lever (interactions count), averaged.
-      var perConfigVar = configs.map(function (c) {
+      var perConfigVar = applicable.map(function (c) {
         return varianceOf(
           values.map(function (v) {
             var next = Object.assign({}, c)
@@ -901,11 +913,11 @@
         return l.name
       })
       .filter(function (n) {
-        return distinctValues(valid, n).size >= 2
+        return observedValues(valid, n).size >= 2
       })
     var mainEffect = function (lever) {
       var m = new Map()
-      distinctValues(valid, lever).forEach(function (v, k) {
+      observedValues(valid, lever).forEach(function (v, k) {
         m.set(
           k,
           meanOf(
@@ -924,8 +936,8 @@
       for (var j = i + 1; j < swept.length; j++) {
         var lA = swept[i]
         var lB = swept[j]
-        var valsA = distinctValues(valid, lA)
-        var valsB = distinctValues(valid, lB)
+        var valsA = observedValues(valid, lA)
+        var valsB = observedValues(valid, lB)
         var mainA = mainEffect(lA)
         var mainB = mainEffect(lB)
         var residuals = []
@@ -1013,8 +1025,8 @@
     var configs = valid.map(function (r) {
       return r.config
     })
-    var valsA = distinctValues(valid, leverA)
-    var valsB = distinctValues(valid, leverB)
+    var valsA = observedValues(valid, leverA)
+    var valsB = observedValues(valid, leverB)
     if (valsA.size < 2 || valsB.size < 2 || !configs.length) return undefined
     var valuesA = Array.from(valsA.keys())
     var valuesB = Array.from(valsB.keys())
@@ -1167,8 +1179,40 @@
     }
   }
 
+  // Indices of the non-dominated points — the Pareto frontier. directions[k]: 'max' higher-better, 'min'
+  // lower-better. A point dominates another when it's >= on every axis and strictly better on one.
+  function paretoFrontier(points, directions) {
+    var atLeast = function (x, y, dir) {
+      return dir === 'min' ? x <= y : x >= y
+    }
+    var better = function (x, y, dir) {
+      return dir === 'min' ? x < y : x > y
+    }
+    var dominates = function (a, b) {
+      var strictly = false
+      for (var k = 0; k < directions.length; k++) {
+        if (!atLeast(a[k], b[k], directions[k])) return false
+        if (better(a[k], b[k], directions[k])) strictly = true
+      }
+      return strictly
+    }
+    var out = []
+    for (var i = 0; i < points.length; i++) {
+      var dominated = false
+      for (var j = 0; j < points.length; j++) {
+        if (i !== j && dominates(points[j], points[i])) {
+          dominated = true
+          break
+        }
+      }
+      if (!dominated) out.push(i)
+    }
+    return out
+  }
+
   var Xai = {
     iqm: iqm,
+    paretoFrontier: paretoFrontier,
     aggregateRunValues: aggregateRunValues,
     criterionValueOf: criterionValueOf,
     ofatContrasts: ofatContrasts,

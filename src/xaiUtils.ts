@@ -222,7 +222,9 @@ export function ofatContrasts(
   lever: string,
   criterion: AnalysisCriterion,
 ): OfatAnalysis[] {
-  const valid = validRunsFor(runs, criterion).filter((r) => lever in r.config)
+  const valid = validRunsFor(runs, criterion).filter(
+    (r) => lever in r.config && String(r.config[lever]) !== CONDITIONAL_NA,
+  )
   const groups = new Map<string, AnalysisRun[]>()
   for (const r of valid) {
     const sig = controlSignatureOf(r, lever)
@@ -310,6 +312,7 @@ export function leverImportances(
     for (const r of valid) {
       if (!(lever in r.config)) continue
       const v = String(r.config[lever])
+      if (v === CONDITIONAL_NA) continue // a conditional lever is scored only where it actually applies
       const cv = criterionValueOf(r, criterion)!
       const b = byValue.get(v)
       if (b) b.push(cv)
@@ -745,7 +748,12 @@ function acquisitionRecommendations(
 }
 
 function observedValues(runs: AnalysisRun[], lever: string): Map<string, unknown> {
-  return distinctValues(runs, lever)
+  // Exclude the "doesn't-apply" sentinel — a conditional lever is swept only over the values it really takes
+  // (otherwise its marginal conflates the lever's effect with the gap between models that use it and those
+  // that don't).
+  const values = distinctValues(runs, lever)
+  values.delete(CONDITIONAL_NA)
+  return values
 }
 
 /**
@@ -766,13 +774,17 @@ export function fanovaImportances(
   for (const { name } of surrogate.levers) {
     const values = [...observedValues(valid, name).values()]
     if (values.length < 2) continue
+    // Score the lever only over the configs where it APPLIES (its value isn't the sentinel), so a conditional
+    // lever's importance reflects its real effect among the models that use it — not the gap to those that don't.
+    const applicable = configs.filter((c) => String(c[name]) !== CONDITIONAL_NA)
+    if (!applicable.length) continue
     // MAIN effect: variance of the marginal (lever pinned, averaged over the other levers).
     const marginals = values.map((v) =>
-      meanOf(configs.map((c) => predictConfig(surrogate, { ...c, [name]: v }))),
+      meanOf(applicable.map((c) => predictConfig(surrogate, { ...c, [name]: v }))),
     )
     // TOTAL effect: at each observed config, the variance from sweeping THIS lever over its values
     // (so interactions count), averaged across configs. main ≤ total; total − main = interaction share.
-    const perConfigVar = configs.map((c) =>
+    const perConfigVar = applicable.map((c) =>
       varianceOf(values.map((v) => predictConfig(surrogate, { ...c, [name]: v }))),
     )
     out.push({
@@ -1109,6 +1121,36 @@ function normalizeConditionalLevers(
 function dropNaValues(config: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(config)) if (v !== CONDITIONAL_NA) out[k] = v
+  return out
+}
+
+/**
+ * Indices of the non-dominated points — the Pareto frontier. A point P dominates Q when P is at least as
+ * good as Q on EVERY objective and strictly better on at least one; `directions[k]` orients axis k
+ * (`'max'` = higher is better, `'min'` = lower is better). Tied/equal points are all kept. O(n²·d).
+ */
+export function paretoFrontier(points: number[][], directions: ('max' | 'min')[]): number[] {
+  const atLeast = (x: number, y: number, dir: 'max' | 'min') => (dir === 'min' ? x <= y : x >= y)
+  const better = (x: number, y: number, dir: 'max' | 'min') => (dir === 'min' ? x < y : x > y)
+  const dominates = (a: number[], b: number[]): boolean => {
+    let strictly = false
+    for (let k = 0; k < directions.length; k++) {
+      if (!atLeast(a[k], b[k], directions[k])) return false
+      if (better(a[k], b[k], directions[k])) strictly = true
+    }
+    return strictly
+  }
+  const out: number[] = []
+  for (let i = 0; i < points.length; i++) {
+    let dominated = false
+    for (let j = 0; j < points.length; j++) {
+      if (i !== j && dominates(points[j], points[i])) {
+        dominated = true
+        break
+      }
+    }
+    if (!dominated) out.push(i)
+  }
   return out
 }
 

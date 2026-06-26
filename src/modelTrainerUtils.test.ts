@@ -13,6 +13,8 @@ import {
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   applyMigrationRules,
+  resolveCampaignParallelism,
+  THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
   isSpecAffectedByFidelityDesync,
   findMigrationRule,
@@ -256,6 +258,45 @@ describe('migrateExperimentSpec', () => {
   it('returns the SAME spec object when its configs need no migration', () => {
     const spec = { configs: [{ config: { reward_model: 'combo_unified' }, key: 'run-def' }] }
     expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
+  })
+})
+
+describe('resolveCampaignParallelism', () => {
+  it('SPEEDUP: auto-packs floor(cpus / maxThreadsPerRun) runs when concurrency is unset', () => {
+    // 10 cores, 2 threads/run -> 5 parallel runs instead of the sequential default (8 idle cores).
+    const r = resolveCampaignParallelism({ maxThreadsPerRun: 2, availableParallelism: 10 })
+    expect(r.concurrency).toBe(5)
+  })
+
+  it('threads the per-run thread cap into every standard env knob (so a run cannot grab all cores)', () => {
+    const r = resolveCampaignParallelism({ maxThreadsPerRun: 2, availableParallelism: 10 })
+    for (const v of THREAD_ENV_VARS) expect(r.runEnv?.[v]).toBe('2')
+    expect(r.runEnv?.BS_NUM_THREADS).toBe('2')
+  })
+
+  it('honours an explicit concurrency (still capping per-run threads)', () => {
+    const r = resolveCampaignParallelism({
+      concurrency: 3,
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+    })
+    expect(r.concurrency).toBe(3)
+    expect(r.runEnv?.OMP_NUM_THREADS).toBe('2')
+  })
+
+  it('keeps the safe sequential default and sets no env when the manifest declares no thread appetite', () => {
+    const r = resolveCampaignParallelism({ availableParallelism: 10 })
+    expect(r.concurrency).toBe(1)
+    expect(r.runEnv).toBeUndefined()
+  })
+
+  it('never returns concurrency < 1 even on a single-core host with a multi-thread appetite', () => {
+    const r = resolveCampaignParallelism({ maxThreadsPerRun: 4, availableParallelism: 1 })
+    expect(r.concurrency).toBe(1)
+  })
+
+  it('floors a non-even cpu/threads ratio (10 cpus, 3 threads -> 3 runs)', () => {
+    expect(resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency).toBe(3)
   })
 })
 

@@ -98,6 +98,13 @@ export interface TrainerManifest {
    * project cannot re-evaluate saved checkpoints.
    */
   evaluate?: string
+  /**
+   * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
+   * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
+   * in parallel (instead of the safe sequential default that leaves cores idle), and exports this many
+   * threads into each run's process env so N runs × this ≈ host cores. Omit to keep the sequential default.
+   */
+  maxThreadsPerRun?: number
   objective: TrainerObjective
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
@@ -1006,6 +1013,8 @@ export interface ModelTrainerToolsDeps {
   logger?: TrainerLogger
   /** Injectable clock for deterministic tests; defaults to ISO now. */
   now?: () => string
+  /** Injectable host CPU count for deterministic tests; defaults to os.availableParallelism(). */
+  availableParallelism?: () => number
 }
 
 /** One judged run: the deterministic objective blended with the LLM's verdict. */

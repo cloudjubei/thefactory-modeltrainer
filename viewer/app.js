@@ -109,6 +109,8 @@ let xaiEnvSortDir = 'desc'
 let xaiMapKind = 'parallel'
 // The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
 let xaiHelpOpen = null
+// Whether the shared scope header (env + criterion + direction + Re-run) is expanded.
+let xaiScopeHeaderExpanded = true
 // Ids of collapsed collapsible-cards (default = expanded); persists across re-renders.
 const xaiCollapsed = new Set(['surr-coupling', 'surr-interactions'])
 // Cached whole-space analysis bundles ({recordType}-config-space records), keyed by criterion key. The
@@ -2274,6 +2276,18 @@ function renderRunsLive() {
   )
   el.hidden = !training
 }
+// Whether any runs filter is active — incl. active custom rules (which can be pushed SERVER-side and so
+// empty the loaded page). Used to keep the toolbar reachable + show the clear button.
+function hasActiveRunsFilters() {
+  return !!(
+    runsFilterKeys ||
+    runsTextFilter ||
+    runsVersionFilter ||
+    runsStatusFilter ||
+    Object.values(runsLeverFilter).some(Boolean) ||
+    customRulesCache.some((r) => r.active)
+  )
+}
 function clearRunsFilter() {
   runsFilterKeys = null
   runsFilterLabel = ''
@@ -2281,6 +2295,12 @@ function clearRunsFilter() {
   runsTextFilter = ''
   runsVersionFilter = ''
   runsStatusFilter = ''
+  for (const rule of customRulesCache) {
+    if (rule.active) {
+      rule.active = false
+      saveCustomRule(rule)
+    }
+  }
   runsPage = 0
   refreshRuns()
 }
@@ -3137,12 +3157,7 @@ function runsToolbarHtml(shownCount, total) {
     <div class="runs-dropdowns-body">${statusFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
-  const active =
-    runsFilterKeys ||
-    runsTextFilter ||
-    runsVersionFilter ||
-    runsStatusFilter ||
-    Object.values(runsLeverFilter).some(Boolean)
+  const active = hasActiveRunsFilters()
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
   const envViewBtn = hasEnvLevers()
     ? `<button type="button" class="runs-view-btn${runsViewMode === 'environment' ? ' is-active' : ''}" data-view="environment"${helpAttr('Group runs by the ENVIRONMENT they ran in (fee / TP-SL regime), so you can see how a model holds up across regimes.')}>By environment</button>`
@@ -3438,7 +3453,17 @@ function renderRunsTable() {
   if (!body) return
   if (!runsCache.length) {
     if (spark) spark.hidden = true
-    setHtml(body, '<div class="empty-hint">No runs yet — launch a campaign.</div>')
+    if (hasActiveRunsFilters()) {
+      // A filter (often a server-pushed custom rule) excluded everything on this page — keep the toolbar so
+      // the user can clear it, instead of stranding them on "No runs yet" with no way back.
+      const total = runsServerPaged() ? runsTotalCount : 0
+      setHtml(
+        body,
+        `${runsToolbarHtml(0, total)}<div class="empty-hint">No runs match the active filter — use \u201cclear\u201d (or untick the filter chip) above to see your runs.</div>`,
+      )
+    } else {
+      setHtml(body, '<div class="empty-hint">No runs yet — launch a campaign.</div>')
+    }
     closeRunDetail()
     return
   }
@@ -4844,34 +4869,86 @@ function xaiShellHtml(criterion) {
   const railBtn = (t) =>
     `<button type="button" class="xai-rail-btn${t.id === xaiTab ? ' active' : ''}" data-xai-tab="${escapeHtml(t.id)}" title="${escapeHtml(t.label)}"><span class="xai-rail-ico" aria-hidden="true">${t.icon(16)}</span><span class="xai-rail-lbl">${escapeHtml(t.label)}</span></button>`
   const rail = `<nav class="xai-rail" aria-label="xAI controls and views">
-    ${xaiRailControlsHtml(criterion)}
+    ${xaiRailControlsHtml()}
     <div class="xai-rail-tabs">${tabs.map(railBtn).join('')}</div>
     <button type="button" class="xai-rail-btn xai-rail-toggle" data-xai-rail-toggle title="${xaiRailCollapsed ? 'Expand panel' : 'Collapse panel'}"><span class="xai-rail-ico" aria-hidden="true">${xaiRailCollapsed ? '»' : '«'}</span><span class="xai-rail-lbl">Collapse</span></button>
   </nav>`
   return `<div class="xai-shell${xaiRailCollapsed ? ' rail-collapsed' : ''}">${rail}
-    <div class="xai-tab-content">${active ? xaiViewHtml(active) : prompt}</div></div>`
+    <div class="xai-tab-content">${xaiScopeHeaderHtml(criterion)}${active ? xaiViewHtml(active) : prompt}</div></div>`
 }
 // The rail's top controls: scope toggle, then criterion + direction (hidden when the rail is collapsed).
-function xaiRailControlsHtml(criterion) {
+function xaiRailControlsHtml() {
   const scopeBtn = (s, l) =>
     `<button type="button" class="ghost-btn xai-scope-btn${xaiScope === s ? ' active' : ''}" data-xai-scope="${s}">${l}</button>`
-  const opts = xaiCriteria()
-    .map(
-      (c) =>
-        `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
-    )
-    .join('')
   return `<div class="xai-rail-controls">
     <div class="xai-scope-switch">${scopeBtn('all', 'All runs')}${scopeBtn('current', 'Current run')}</div>
-    <label class="card-sub xai-rail-sel">Criterion <select id="xai-criterion" class="app-select">${opts}</select></label>
-    <label class="card-sub xai-rail-sel">Better when <select id="xai-direction" class="app-select">
-      <option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option>
-      <option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option>
-    </select></label>
     <p id="xai-status" class="form-status" role="status" hidden></p>
   </div>`
 }
 // One view = a sticky header (title · the tab's own controls · Discuss · "?") over a body that scrolls within.
+// The shared scope header shown above EVERY view: what is being analysed (environment + criterion +
+// direction, with Re-run) for the all-runs scope, or which run is in focus for the current scope — so the
+// analysis context is always visible, never hidden behind the Environments tab.
+function xaiScopeHeaderHtml(criterion) {
+  const critSel = `<label class="card-sub xai-scope-field">Criterion <select id="xai-criterion" class="app-select">${xaiCriteria()
+    .map(
+      (c) =>
+        `<option value="${escapeHtml(c.key)}"${c.key === xaiCriterionKey ? ' selected' : ''}>${escapeHtml(c.label)}</option>`,
+    )
+    .join('')}</select></label>`
+  const dirSel = `<label class="card-sub xai-scope-field">Better when <select id="xai-direction" class="app-select"><option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option><option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option></select></label>`
+  if (xaiScope === 'current') {
+    if (!xaiFocusKey) return ''
+    return `<div class="card xai-scope-header">
+      <div class="xai-scope-body">
+        <span class="xai-scope-tag">Run in focus</span><code class="xai-scope-value">${escapeHtml(shortKey(xaiFocusKey))}</code>
+        ${critSel}${dirSel}
+        <span class="xai-scope-spacer"></span>
+        <button type="button" class="ghost-btn" data-xai-clear-focus>\u2715 Clear run</button>
+      </div>
+    </div>`
+  }
+  const bundle = xaiResolveBundle(criterion)
+  if (!bundle) {
+    return `<div class="card xai-scope-header"><div class="xai-scope-body">
+      <span class="xai-scope-tag">No analysis yet</span>${critSel}${dirSel}
+      <span class="xai-scope-spacer"></span>${xaiAnalyzeAllBtnHtml('Run analysis')}
+    </div></div>`
+  }
+  const a = bundle.analysis
+  const when = bundle.generatedAt ? formatWhen(bundle.generatedAt) : 'recently'
+  const envs = a.environments || []
+  const currentSig = window.Xai.canonicalConfigString(a.environment || {})
+  const envLabel = a.environment ? xaiEnvLabel(a.environment) : 'the whole space'
+  const envControl =
+    envs.length > 1
+      ? `<label class="card-sub xai-scope-field">Environment <select id="xai-env-switch" class="app-select" title="Switch the environment being analysed">${envs
+          .map(
+            (e) =>
+              `<option value="${escapeHtml(e.signature)}"${e.signature === currentSig ? ' selected' : ''}>${escapeHtml(xaiEnvLabel(e.values))} (${e.runCount})</option>`,
+          )
+          .join('')}</select></label>`
+      : `<span class="xai-scope-tag">Analysing</span><code class="xai-scope-value">${escapeHtml(envLabel)}</code>`
+  const ctx = [...(a.contextImportances || [])].sort((x, y) => y.importance - x.importance).slice(0, 3)
+  const ctxBadge = ctx.length
+    ? `<span class="card-sub" title="Context (environment/dataset) levers that move the score most">\ud83d\udd12 ${ctx
+        .map((sc) => `<code>${escapeHtml(xaiAbbrevLever(sc.lever))}</code>`)
+        .join(', ')}</span>`
+    : ''
+  const expanded = xaiScopeHeaderExpanded
+  return `<div class="card xai-scope-header${expanded ? '' : ' is-collapsed'}">
+    <button type="button" class="xai-scope-toggle" data-xai-scope-header-toggle aria-expanded="${expanded ? 'true' : 'false'}">
+      <span class="xai-collapse-chevron" aria-hidden="true">\u25be</span>
+      <span class="xai-scope-tag">Analysing</span><span class="xai-scope-value-inline">${escapeHtml(envLabel)}</span>
+      <span class="card-sub">\u00b7 ${escapeHtml(criterion.label)} (${criterion.direction === 'min' ? 'lower' : 'higher'} better) \u00b7 ${a.runCount} runs \u00b7 ${escapeHtml(when)}</span>
+    </button>
+    <div class="xai-scope-body">
+      ${envControl}${critSel}${dirSel}${ctxBadge}
+      <span class="xai-scope-spacer"></span>
+      ${xaiAnalyzeAllBtnHtml('Re-run analysis')}
+    </div>
+  </div>`
+}
 function xaiViewHtml(tab) {
   const controls = tab.controls ? tab.controls() : ''
   const chatBtn = chatAboutRunAvailable()
@@ -5025,13 +5102,12 @@ function xaiNoBundleHtml(criterion) {
 // ENVIRONMENTS tab: the analysis freshness + re-run, the scope note, and the (consolidated) environment list.
 function xaiEnvironmentsTabHtml(bundle, criterion) {
   const a = bundle.analysis
-  const when = bundle.generatedAt ? formatWhen(bundle.generatedAt) : 'recently'
   const scopeNote = a.environment
     ? `Scoped to <strong>${escapeHtml(xaiEnvLabel(a.environment))}</strong> — <strong>model levers only</strong>; its environment/dataset settings are held fixed (never tuned). The other tabs analyse THIS environment.`
     : `No environment/dataset levers declared — the whole space is analysed together.`
-  const status = `<div class="card"><div class="card-head card-head-row"><h3>Whole-space analysis <span class="card-sub">— ${a.runCount} runs · ${a.setupCount} setups · analysed ${escapeHtml(when)}</span></h3>${xaiAnalyzeAllBtnHtml('Re-run analysis')}</div>
-    <p class="card-sub">${scopeNote} Re-run to fold in runs added since.</p></div>`
-  return status + ((a.environments || []).length ? xaiCompareEnvironmentsHtml(a, criterion) : '')
+  return (a.environments || []).length
+    ? `<p class="card-sub">${scopeNote}</p>${xaiCompareEnvironmentsHtml(a, criterion)}`
+    : `<div class="card"><p class="card-sub">${scopeNote}</p></div>`
 }
 // A human-readable label for an environment (its context-lever values).
 function xaiEnvLabel(values) {
@@ -5130,34 +5206,76 @@ function xaiRunStandingHtml(runKey, criterion) {
   const rec = xaiRunAnalysisCache.get(runKey)
   const digest = rec && rec.analysis ? rec.analysis : null
   const disabled = busy || !embedded() ? ' disabled' : ''
-  const btn = `<button type="button" class="ghost-btn" data-xai-analyze-run="${escapeHtml(runKey)}"${disabled} title="Compute this run's standing among EVERY run (rank, decisions, attribution), server-side">${busy ? `${spinnerHtml()} Analysing…` : digest ? 'Re-analyse' : 'Analyse among all runs'}</button>`
-  let bodyHtml
+  const btn = `<button type="button" class="ghost-btn" data-xai-analyze-run="${escapeHtml(runKey)}"${disabled} title="Compute this run's standing among EVERY run (rank, where it sits on each lever, its closest comparable run, what drove it), server-side">${busy ? `${spinnerHtml()} Analysing…` : digest ? 'Re-analyse' : 'Analyse among all runs'}</button>`
   if (!digest) {
-    bodyHtml = `<p class="card-sub">${busy ? 'Analysing this run against every other run…' : 'Compute how this run ranks among <strong>all</strong> runs (not just this page) and what drives its decisions — on demand, server-side. Only the 5 most-recently analysed runs are kept.'}</p>`
-  } else {
-    const rank = digest.rank ? `#${digest.rank.position} of ${digest.rank.total}` : '—'
-    const when = rec.generatedAt ? formatWhen(rec.generatedAt) : ''
-    const actions = digest.actionCounts
-      ? Object.entries(digest.actionCounts)
-          .map(([k, v]) => `${escapeHtml(k)} ${v}`)
-          .join(' · ')
-      : ''
-    const sanity =
-      digest.attribution && typeof digest.attribution.sanityPassed === 'boolean'
-        ? digest.attribution.sanityPassed
-          ? '<span class="delta-pos">attribution sanity ✓</span>'
-          : '<span class="delta-neg">attribution sanity ✗ (untrustworthy)</span>'
-        : ''
-    bodyHtml = `<table class="kv-table"><tbody>
-      <tr><th>Rank by ${escapeHtml(criterion.label)}</th><td>${escapeHtml(rank)}</td></tr>
-      ${actions ? `<tr><th>Action mix</th><td>${actions}</td></tr>` : ''}
-      ${sanity ? `<tr><th>Attribution</th><td>${sanity}</td></tr>` : ''}
-    </tbody></table>
-    <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p>`
+    return `<div class="card"><div class="card-head card-head-row"><h3>Why this run got this result</h3><div class="head-actions">${btn}</div></div>
+      <p class="card-sub">${busy ? 'Analysing this run against every other run…' : 'Compute, server-side, how this run ranks among <strong>all</strong> runs, where it sits on each decisive lever, its closest comparable run, and what drove its result — to explain why it worked (or did not).'}</p></div>`
   }
-  return `<div class="card"><div class="card-head card-head-row"><h3>Standing among all runs <span class="card-sub">— run ${escapeHtml(shortKey(runKey))}</span></h3>
-      <div class="head-actions">${btn}<button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button></div></div>
-    ${bodyHtml}</div>`
+  const when = rec.generatedAt ? formatWhen(rec.generatedAt) : ''
+  const pos = digest.rank ? digest.rank.position : null
+  const tot = digest.rank ? digest.rank.total : null
+  const topPct = pos && tot ? Math.max(1, Math.ceil((pos / tot) * 100)) : null
+  const objLine = digest.objective != null ? `${escapeHtml(criterion.label)} ${escapeHtml(formatTickValue(digest.objective))}` : ''
+  const actions = digest.actionCounts
+    ? Object.entries(digest.actionCounts).map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' · ')
+    : ''
+  const sanity =
+    digest.attribution && typeof digest.attribution.sanityPassed === 'boolean'
+      ? digest.attribution.sanityPassed
+        ? '<span class="delta-pos">attribution sanity ✓</span>'
+        : '<span class="delta-neg">attribution sanity ✗ (untrustworthy)</span>'
+      : ''
+  const standingCard = `<div class="card"><div class="card-head card-head-row"><h3>Standing${objLine ? ` <span class="card-sub">— ${objLine}</span>` : ''}</h3><div class="head-actions">${btn}</div></div>
+    <table class="kv-table"><tbody>
+      <tr><th>Rank by ${escapeHtml(criterion.label)}</th><td>${pos != null ? `#${pos} of ${tot}${topPct != null ? ` <span class="card-sub">(top ${topPct}%)</span>` : ''}` : '—'}</td></tr>
+      ${actions ? `<tr><th>Action mix</th><td>${actions}</td></tr>` : ''}
+    </tbody></table>
+    <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p></div>`
+  const leverRows = (digest.importances || [])
+    .slice(0, 6)
+    .map((i) => {
+      const mine = digest.config ? digest.config[i.lever] : undefined
+      const mineStr = mine === undefined ? '—' : xaiFmtLeverValue(mine)
+      const atBest = mine !== undefined && String(mine) === String(i.bestValue)
+      const verdict =
+        mine === undefined
+          ? ''
+          : atBest
+            ? '<span class="delta-pos">✓ at best-seen</span>'
+            : `<span class="delta-neg">→ try ${escapeHtml(String(i.bestValue))}</span>`
+      return `<tr><th><code>${escapeHtml(xaiAbbrevLever(i.lever))}</code></th><td class="num">${Math.round(i.importance * 100)}%</td><td>${escapeHtml(mineStr)}</td><td>${escapeHtml(String(i.bestValue))}</td><td>${verdict}</td></tr>`
+    })
+    .join('')
+  const leversCard = leverRows
+    ? `<div class="card"><div class="card-head card-head-row"><h3>Where this run sits <span class="card-sub">— the most decisive levers (screening, confounded) and whether this run uses the best-seen value</span></h3></div>
+      <table class="kv-table report-table"><thead><tr><th>lever</th><th class="num">importance</th><th>this run</th><th>best seen</th><th></th></tr></thead><tbody>${leverRows}</tbody></table></div>`
+    : ''
+  const sib = digest.sibling
+  const sibCard = sib
+    ? `<div class="card"><div class="card-head card-head-row"><h3>Closest comparable run <span class="card-sub">— ${escapeHtml(shortKey(sib.key))}</span></h3></div>
+      <p class="card-sub">Differs by <code>${escapeHtml(sib.changed)}</code>; their decisions diverged <strong>${Math.round(sib.divergencePct)}%</strong>${sib.qualityVerdict ? ` · ${escapeHtml(sib.qualityVerdict)}` : ''}.${sib.qualitySummary ? ` ${escapeHtml(sib.qualitySummary)}` : ''}</p></div>`
+    : ''
+  const reward = digest.rewardBreakdown
+    ? Object.entries(digest.rewardBreakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4)
+    : []
+  const rewardLine = reward.length
+    ? `<p class="card-sub"><strong>Reward drivers:</strong> ${reward.map(([k, v]) => `${escapeHtml(k)} ${v >= 0 ? '+' : ''}${escapeHtml(formatTickValue(v))}`).join(' · ')}</p>`
+    : ''
+  const attrLine =
+    digest.attribution && digest.attribution.topGroups && digest.attribution.topGroups.length
+      ? `<p class="card-sub"><strong>Decision drivers (saliency):</strong> ${digest.attribution.topGroups.slice(0, 4).map((g) => `<code>${escapeHtml(g[0])}</code>`).join(', ')} ${sanity}</p>`
+      : sanity
+        ? `<p class="card-sub">${sanity}</p>`
+        : ''
+  const latentLine =
+    digest.latent && digest.latent.probeAccuracy != null
+      ? `<p class="card-sub"><strong>Representation:</strong> probe accuracy ${escapeHtml(formatTickValue(digest.latent.probeAccuracy))}${digest.latent.probeBaseline != null ? ` (baseline ${escapeHtml(formatTickValue(digest.latent.probeBaseline))})` : ''}</p>`
+      : ''
+  const whyCard =
+    rewardLine || attrLine || latentLine
+      ? `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div>${rewardLine}${attrLine}${latentLine}</div>`
+      : ''
+  return `${standingCard}${leversCard}${sibCard}${whyCard}`
 }
 // The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
 // sibling, what to try next. Per run (keyed by run key); the button becomes "Refresh (N new runs)" as the
@@ -5288,14 +5406,24 @@ function calibrationTableHtml(trace) {
 }
 // A reusable collapsible card: a full-width clickable header (chevron + title) over a body that hides when
 // collapsed. State lives in xaiCollapsed so a collapse survives the next renderXai().
-function xaiCollapsibleCard(id, title, subHtml, bodyHtml) {
+function xaiCollapsibleCard(id, title, subHtml, bodyHtml, options) {
+  const opts = options || {}
+  const titleHtml = `<h3>${escapeHtml(title)}${subHtml ? ` <span class="card-sub">\u2014 ${subHtml}</span>` : ''}</h3>`
+  // Nothing to show \u2192 a static, non-interactive card (no expander to click into emptiness).
+  if (opts.isEmpty) {
+    return `<div class="card xai-collapse-card is-empty">
+      <div class="xai-collapse-head is-static">${titleHtml}</div>
+      <div class="xai-collapse-body is-empty-note">${bodyHtml}</div>
+    </div>`
+  }
   const collapsed = xaiCollapsed.has(id)
+  const summary = opts.collapsedSummary ? `<p class="xai-collapse-summary">${opts.collapsedSummary}</p>` : ''
   return `<div class="card xai-collapse-card${collapsed ? ' is-collapsed' : ''}" data-collapse-card="${escapeHtml(id)}">
     <button type="button" class="xai-collapse-head" data-xai-collapse="${escapeHtml(id)}" aria-expanded="${collapsed ? 'false' : 'true'}">
-      <span class="xai-collapse-chevron" aria-hidden="true">${collapsed ? '\u25b8' : '\u25be'}</span>
-      <h3>${escapeHtml(title)}${subHtml ? ` <span class="card-sub">\u2014 ${subHtml}</span>` : ''}</h3>
+      <span class="xai-collapse-chevron" aria-hidden="true">\u25be</span>
+      <div class="xai-collapse-headtext">${titleHtml}${summary}</div>
     </button>
-    <div class="xai-collapse-body"${collapsed ? ' hidden' : ''}>${bodyHtml}</div>
+    <div class="xai-collapse-body">${bodyHtml}</div>
   </div>`
 }
 // CONFIG EFFECTS tab: two collapsible cards over the same data — Lever importance (model-free screening,
@@ -5318,9 +5446,13 @@ function xaiConfigEffectsHtml(bundle, criterion) {
     : `<p class="card-sub">No clean one-factor contrast for <code>${escapeHtml(xaiLever)}</code> yet \u2014 no runs vary only this lever with everything else fixed. The <strong>Suggested</strong> tab can fill the gap.</p>`
   const importanceBody = xaiImportanceTableHtml(importances)
   const oneFactorBody = `<p class="card-sub"><label>Lever <select id="xai-lever" class="app-select">${leverOpts}</select></label> \u2014 its values compared with <strong>everything else held fixed</strong>.</p>${contrastHtml}`
+  const impSummary = importances
+    .slice(0, 3)
+    .map((i) => `${escapeHtml(xaiAbbrevLever(i.lever))} ${Math.round(i.importance * 100)}%`)
+    .join(' \u00b7 ')
   return `${xaiMethodNoteHtml()}
-    ${xaiCollapsibleCard('effects-importance', 'Lever importance', `which levers move ${escapeHtml(criterion.label)} most \u2014 model-free screening, confounded`, importanceBody)}
-    ${xaiCollapsibleCard('effects-onefactor', 'One-factor effect', 'the controlled read \u2014 one lever varied, the rest held fixed', oneFactorBody)}`
+    ${xaiCollapsibleCard('effects-importance', 'Lever importance', `which levers move ${escapeHtml(criterion.label)} most \u2014 model-free screening, confounded`, importanceBody, { collapsedSummary: impSummary })}
+    ${xaiCollapsibleCard('effects-onefactor', 'One-factor effect', 'the controlled read \u2014 one lever varied, the rest held fixed', oneFactorBody, { collapsedSummary: `lever: ${escapeHtml(xaiAbbrevLever(xaiLever))}${contrasts.length ? '' : ' \u2014 no clean contrast yet'}` })}`
 }
 // How the numbers are computed + the honesty caveat, so a user doesn't over-trust a 2-run estimate.
 function xaiMethodNoteHtml() {
@@ -5429,12 +5561,19 @@ function xaiSurrogateHtml(bundle, criterion) {
     xaiInterA && xaiInterB && setups.length
       ? window.Xai.interactionGrid(surrogate, setups, criterion, xaiInterA, xaiInterB)
       : null
-  const na = '<p class="card-sub">Not enough data yet \u2014 run more configs.</p>'
+  const na = 'Not enough data yet \u2014 run more configs.'
+  const fanovaBody = xaiFanovaHtml(a.importances)
+  const ablationBody = xaiAblationTreeHtml(a.ablation, criterion)
+  const couplingBody = xaiCouplingHtml(a.couplings)
+  const interBody = xaiInteractionHtml(grid, leverNames, setups)
+  const fanovaRanked = [...(a.importances || [])].sort((x, y) => (y.total || 0) - (x.total || 0))
+  const strongCoupling = (a.couplings || []).filter((c) => c.strength >= 0.05).length
+  const ablSteps = a.ablation && a.ablation.steps ? a.ablation.steps.length : 0
   return `${xaiSurrogateTakeawayHtml(a, criterion)}
-    ${xaiCollapsibleCard('surr-fanova', 'Global importance', 'each lever\u2019s share of the variance \u2014 main vs total', xaiFanovaHtml(a.importances) || na)}
-    ${xaiCollapsibleCard('surr-ablation', 'Ablation path', 'worst \u2192 best, the single best change at each step', xaiAblationTreeHtml(a.ablation, criterion) || na)}
-    ${xaiCollapsibleCard('surr-coupling', 'Coupling', 'lever pairs whose best value depends on each other', xaiCouplingHtml(a.couplings) || na)}
-    ${xaiCollapsibleCard('surr-interactions', 'Interactions', 'a 2-lever what-if heatmap from the surrogate', xaiInteractionHtml(grid, leverNames, setups) || na)}`
+    ${xaiCollapsibleCard('surr-fanova', 'Global importance', 'each lever\u2019s share of the variance \u2014 main vs total', fanovaBody || na, { isEmpty: !fanovaBody, collapsedSummary: fanovaRanked.length ? `${fanovaRanked.length} levers \u00b7 top ${escapeHtml(xaiAbbrevLever(fanovaRanked[0].lever))}` : '' })}
+    ${xaiCollapsibleCard('surr-ablation', 'Ablation path', 'worst \u2192 best, the single best change at each step', ablationBody || na, { isEmpty: !ablationBody, collapsedSummary: ablSteps ? `${ablSteps} step${ablSteps === 1 ? '' : 's'}` : '' })}
+    ${xaiCollapsibleCard('surr-coupling', 'Coupling', 'lever pairs whose best value depends on each other', couplingBody || na, { isEmpty: !couplingBody, collapsedSummary: strongCoupling ? `${strongCoupling} coupled pair${strongCoupling === 1 ? '' : 's'}` : 'levers act independently' })}
+    ${xaiCollapsibleCard('surr-interactions', 'Interactions', 'a 2-lever what-if heatmap from the surrogate', interBody || na, { isEmpty: !interBody, collapsedSummary: xaiInterA && xaiInterB ? `${escapeHtml(xaiAbbrevLever(xaiInterA))} \u00d7 ${escapeHtml(xaiAbbrevLever(xaiInterB))}` : '' })}`
 }
 // Below this TOTAL-effect fraction a lever is effectively inert across the explored range ("stop sweeping").
 const XAI_NEGLIGIBLE_TOTAL = 0.03
@@ -6860,7 +6999,9 @@ function setupRuns() {
   if (xaiBody) {
     xaiBody.addEventListener('change', (event) => {
       const t = event.target
-      if (t.id === 'xai-criterion') {
+      if (t.id === 'xai-env-switch') {
+        xaiAnalyzeEnvironment(t.value)
+      } else if (t.id === 'xai-criterion') {
         xaiCriterionKey = t.value
         xaiCriterionDir = null
         xaiLever = null
@@ -6971,6 +7112,11 @@ function setupRuns() {
         xaiDiscussView(chatBtn2.dataset.xaiChat)
         return
       }
+      if (event.target.closest('[data-xai-scope-header-toggle]')) {
+        xaiScopeHeaderExpanded = !xaiScopeHeaderExpanded
+        renderXai()
+        return
+      }
       const collapseBtn = event.target.closest('[data-xai-collapse]')
       if (collapseBtn) {
         const id = collapseBtn.dataset.xaiCollapse
@@ -6978,13 +7124,7 @@ function setupRuns() {
         const nowCollapsed = !xaiCollapsed.has(id)
         if (nowCollapsed) xaiCollapsed.add(id)
         else xaiCollapsed.delete(id)
-        if (card) {
-          card.classList.toggle('is-collapsed', nowCollapsed)
-          const body = card.querySelector('.xai-collapse-body')
-          if (body) body.hidden = nowCollapsed
-          const chev = collapseBtn.querySelector('.xai-collapse-chevron')
-          if (chev) chev.textContent = nowCollapsed ? '\u25b8' : '\u25be'
-        }
+        if (card) card.classList.toggle('is-collapsed', nowCollapsed)
         collapseBtn.setAttribute('aria-expanded', String(!nowCollapsed))
         return
       }

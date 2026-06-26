@@ -1,3 +1,4 @@
+import * as os from 'node:os'
 import type { ComputeRepoRef, ComputeRunner, InferenceExecutor } from 'thefactory-tools/types'
 import {
   deriveModelRef,
@@ -78,6 +79,7 @@ import {
   manifestDataFiles,
   migrateExperimentSpec,
   parseProgressMarker,
+  resolveCampaignParallelism,
   buildAnalyzePaperModelsSystemPrompt,
   buildAnalyzePaperModelsUserContent,
   buildAnalyzePaperSystemPrompt,
@@ -136,6 +138,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   const now = deps.now ?? (() => new Date().toISOString())
   const logger = deps.logger
 
+  const hostParallelism = (): number => {
+    if (deps.availableParallelism) return deps.availableParallelism()
+    try {
+      return typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length
+    } catch {
+      return 1
+    }
+  }
+
   function resolveRunner(target: string | undefined): ComputeRunner {
     if (!target) return deps.computeRunner
     const runner = deps.resolveComputeRunner?.(target)
@@ -181,6 +192,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const repoRef: ComputeRepoRef = { kind: 'local', localPath: params.projectRoot }
     const runner = resolveRunner(params.computeTarget)
     const dataFiles = manifestDataFiles(manifest)
+    // Pack runs to the host: a manifest declaring maxThreadsPerRun lets an unset concurrency default to
+    // floor(cpus / threadsPerRun) (vs the idle sequential default), and caps each run's threads so the
+    // pool can't oversubscribe. Remote targets keep the host's own CPU math (the runner re-caps as needed).
+    const { concurrency: runConcurrency, runEnv } = resolveCampaignParallelism({
+      concurrency: params.concurrency,
+      maxThreadsPerRun: manifest.maxThreadsPerRun,
+      availableParallelism: hostParallelism(),
+    })
     const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
     const thesisFields = {
       ...(params.thesis ? { thesis: params.thesis } : {}),
@@ -290,7 +309,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       { key: string; objective: number }
     >({
       items,
-      concurrency: params.concurrency,
+      concurrency: runConcurrency,
       abortSignal: params.abortSignal,
       isFresh: async (item) => {
         if (params.refresh) return false
@@ -314,6 +333,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           commandTemplate: manifest.run,
           config: item.config,
           dataFiles,
+          ...(runEnv ? { env: runEnv } : {}),
           abortSignal: params.abortSignal,
         })
         if (params.onItemProgress) {
@@ -482,12 +502,17 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       throw new Error(`run ${opts.runKey} has no checkpoint artifact to evaluate`)
     }
 
+    const { runEnv } = resolveCampaignParallelism({
+      maxThreadsPerRun: manifest.maxThreadsPerRun,
+      availableParallelism: hostParallelism(),
+    })
     const handle = resolveRunner(opts.computeTarget).runJob({
       jobId: `eval-${opts.runKey}`,
       repoRef: { kind: 'local', localPath: opts.projectRoot },
       commandTemplate: manifest.evaluate!,
       config: { ...(content.config ?? {}), checkpoint },
       dataFiles: manifestDataFiles(manifest),
+      ...(runEnv ? { env: runEnv } : {}),
       abortSignal: opts.abortSignal,
     })
     const result = await handle.done
@@ -535,10 +560,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       throw new Error('trainer manifest declares no evaluate command')
     }
     const recordType = manifest.recordType
+    const { concurrency: evalConcurrency } = resolveCampaignParallelism({
+      concurrency: params.concurrency,
+      maxThreadsPerRun: manifest.maxThreadsPerRun,
+      availableParallelism: hostParallelism(),
+    })
     const results: EvaluateTrainingRunResult[] = []
     const summary = await runActivityWorkItems<string, EvaluateTrainingRunResult>({
       items: params.runKeys,
-      concurrency: params.concurrency,
+      concurrency: evalConcurrency,
       abortSignal: params.abortSignal,
       runItem: async (runKey) => {
         const result = await evaluateOneRun(manifest, {

@@ -27,6 +27,47 @@ import {
 
 const LEVER_TYPES: ReadonlySet<string> = new Set(['number', 'choice', 'boolean'])
 
+/**
+ * Process-env keys that cap a run's math-thread count. The standard BLAS/OpenMP knobs are universal
+ * (any numpy/torch project honours them); BS_NUM_THREADS is the BlackSwan trainer's own knob, harmless
+ * for projects that ignore it. All are set to the same per-run thread count so a run can't grab every
+ * core out from under its siblings.
+ */
+export const THREAD_ENV_VARS: readonly string[] = [
+  'BS_NUM_THREADS',
+  'OMP_NUM_THREADS',
+  'MKL_NUM_THREADS',
+  'OPENBLAS_NUM_THREADS',
+  'NUMEXPR_NUM_THREADS',
+  'VECLIB_MAXIMUM_THREADS',
+]
+
+/**
+ * Resolve a campaign's run-pool size and per-run thread-cap env from the manifest + host.
+ *
+ * An explicit `concurrency` always wins. Otherwise, when the manifest declares `maxThreadsPerRun > 1`,
+ * default to `floor(availableParallelism / threadsPerRun)` so N runs × threadsPerRun ≈ host cores —
+ * instead of the safe-but-idle sequential default. Projects that don't declare `maxThreadsPerRun` keep
+ * the sequential default and get no env override (byte-compatible). `runEnv` caps every run's threads to
+ * `threadsPerRun` so an over-eager BLAS backend can't oversubscribe the host.
+ */
+export function resolveCampaignParallelism(opts: {
+  concurrency?: number
+  maxThreadsPerRun?: number
+  availableParallelism: number
+}): { concurrency: number; runEnv?: Record<string, string> } {
+  const threadsPerRun = Math.max(1, Math.floor(opts.maxThreadsPerRun ?? 1))
+  const cpus = Math.max(1, Math.floor(opts.availableParallelism))
+  const auto = threadsPerRun > 1 ? Math.max(1, Math.floor(cpus / threadsPerRun)) : 1
+  const concurrency =
+    opts.concurrency !== undefined ? Math.max(1, Math.floor(opts.concurrency)) : auto
+  const runEnv =
+    threadsPerRun > 1
+      ? Object.fromEntries(THREAD_ENV_VARS.map((v) => [v, String(threadsPerRun)]))
+      : undefined
+  return { concurrency, runEnv }
+}
+
 export function validateTrainerManifest(raw: unknown): TrainerManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('trainer manifest must be a JSON object')

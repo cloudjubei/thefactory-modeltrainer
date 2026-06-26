@@ -3035,6 +3035,75 @@ pre.json {
   min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
+}
+/* Shared scope header (env + criterion + direction + Re-run, or the focused run) above every view. */
+.xai-scope-header {
+  flex: 0 0 auto;
+  padding: 0;
+  margin-bottom: 0.85rem;
+  overflow: hidden;
+}
+.xai-scope-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.xai-scope-toggle:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+.xai-scope-toggle[aria-expanded='false'] .xai-collapse-chevron {
+  transform: rotate(-90deg);
+}
+.xai-scope-header:not(.is-collapsed) .xai-scope-toggle {
+  border-bottom: 1px solid var(--border);
+}
+.xai-scope-body {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem 0.9rem;
+  padding: 12px 14px;
+}
+.xai-scope-toggle ~ .xai-scope-body {
+  padding-top: 11px;
+}
+.xai-scope-header.is-collapsed .xai-scope-body {
+  display: none;
+}
+.xai-scope-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.xai-scope-tag {
+  font-weight: 600;
+  font-size: 0.82em;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.xai-scope-value,
+.xai-scope-value-inline {
+  font-family: var(--mono, ui-monospace, monospace);
+  background: rgba(127, 127, 127, 0.12);
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}
+.xai-scope-value-inline {
+  font-weight: 600;
+}
+.xai-scope-spacer {
+  flex: 1 1 auto;
 }
 /* A view: a sticky header over a body that scrolls within the view (not the page). */
 .xai-view {
@@ -3134,33 +3203,82 @@ select.app-select:focus-visible,
   color: #fff;
   font-weight: 600;
 }
-/* Reusable collapsible card: a clickable header (chevron + title) over a hideable body. */
+/* Reusable collapsible card — a big, full-width header bar (chevron + title + collapsed summary) over a
+   hideable body, modelled on the Overseer StoryDetailsView "Overview" card. */
+.xai-collapse-card {
+  padding: 0;
+  overflow: hidden;
+}
 .xai-collapse-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 12px;
   width: 100%;
-  padding: 0;
+  padding: 13px 16px;
   border: none;
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: left;
   cursor: pointer;
+  border-radius: 8px;
+}
+.xai-collapse-head:hover {
+  background: rgba(127, 127, 127, 0.08);
+}
+.xai-collapse-head:focus-visible {
+  outline: 2px solid var(--accent, #2563eb);
+  outline-offset: -2px;
+}
+.xai-collapse-head.is-static {
+  cursor: default;
+  opacity: 0.7;
+}
+.xai-collapse-head.is-static:hover {
+  background: transparent;
+}
+.xai-collapse-headtext {
+  flex: 1;
+  min-width: 0;
 }
 .xai-collapse-head h3 {
   margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 .xai-collapse-chevron {
   flex: 0 0 auto;
-  opacity: 0.6;
-  font-size: 0.8em;
+  font-size: 13px;
+  opacity: 0.65;
+  transition: transform 160ms ease;
 }
 .xai-collapse-head:hover .xai-collapse-chevron {
   opacity: 1;
 }
+.xai-collapse-head[aria-expanded='false'] .xai-collapse-chevron {
+  transform: rotate(-90deg);
+}
+.xai-collapse-summary {
+  margin: 3px 0 0;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  display: none;
+}
+.xai-collapse-card.is-collapsed .xai-collapse-summary {
+  display: block;
+}
 .xai-collapse-body {
-  margin-top: 0.75rem;
+  padding: 0 16px 14px 44px;
+}
+.xai-collapse-card.is-collapsed .xai-collapse-body {
+  display: none;
+}
+.xai-collapse-body.is-empty-note {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 13px;
 }
 /* Auto-generated "what this map shows" conclusions under the parallel / PCA maps. */
 .xai-conclusions {
