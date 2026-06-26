@@ -3645,6 +3645,30 @@ function normalizeSpec(spec) {
   if (Array.isArray(seeds) && seeds.length) out.seeds = seeds
   return out
 }
+// Compare-mode "Download audit": a JSON of the selected runs' FULL summaries (config, metrics,
+// top-level regimes + benchmark, health, decision trace) for an offline / hand-to-agent genuineness
+// audit. Browser Blob + anchor so it works inside the sandboxed iframe with no host bridge.
+function downloadRunsAudit(keys) {
+  const runs = (keys || []).map((k) => findRun(k)).filter(Boolean)
+  if (!runs.length) return
+  const payload = window.RunExport.buildRunsAuditExport(runs, {
+    exportedAt: new Date().toISOString(),
+    objective: (manifest && manifest.objective) || null,
+    project: (manifest && manifest.name) || null,
+  })
+  const stamp = new Date().toISOString().slice(0, 10)
+  const filename = `runs-audit-${runs.map((r) => shortKey(r.key)).join('-')}-${stamp}.json`
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 // Multi-select comparison: a config diff (only differing levers), metrics
 // side-by-side, and overlaid %-return curves (+ the buy-and-hold control) for the
 // runs ticked in the table. Hidden until ≥2 are selected; pruned of stale keys.
@@ -3730,6 +3754,7 @@ function renderCompare() {
         ${embedded() && allFailed ? `<button type="button" id="compare-rerun-all" class="ghost-btn" title="Queue all ${runs.length} failed runs again">Re-run all (${runs.length})</button>` : ''}
         ${embedded() && allOutdated ? `<button type="button" id="compare-rerun-latest" class="ghost-btn" title="Re-run all ${runs.length} runs under the current pipeline version (v${escapeHtml(String(currentPipelineVersion()))}) — they ran under an older, incomparable version">↻ Re-run all with latest version (${runs.length})</button>` : ''}
         ${runs.length === 2 && chatAboutRunAvailable() ? `<button type="button" id="compare-discuss" class="icon-btn" title="Discuss these two runs (incl. the decision diff)" aria-label="Discuss these two runs">${iconChatSvg()}</button>` : ''}
+        <button type="button" id="compare-download" class="icon-btn" title="Download a JSON audit export of these ${runs.length} runs (full config, metrics, regimes, health, decision trace)" aria-label="Download audit export">⬇</button>
         <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
       </div>
     </div>
@@ -6819,6 +6844,9 @@ function setupRuns() {
       if (event.target.closest('#compare-discuss')) {
         const keys = [...runsCompareKeys]
         if (keys.length === 2) chatAboutRuns(keys[0], keys[1])
+      }
+      if (event.target.closest('#compare-download')) {
+        downloadRunsAudit([...runsCompareKeys])
       }
       if (
         event.target.closest('#compare-rerun-all') ||
