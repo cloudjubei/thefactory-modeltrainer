@@ -635,6 +635,53 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs[0].env).toBeUndefined()
   })
 
+  it('auto-applies a benchmarked model preferredDevice — mps for a single run, but NOT for a parallel sweep', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'reppo-custom',
+      content: {
+        id: 'reppo-custom',
+        slug: 'reppo-custom',
+        flavors: [{ modelName: 'reppo-custom' }],
+        preferredDevice: 'mps',
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    })
+    const m = manifest({
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        steps: { type: 'number', default: 100 },
+        model_name: { type: 'choice', choices: ['reppo-custom', 'ppo'], default: 'reppo-custom' },
+      },
+    })
+    delete m.calibrate
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { configs: [{ config: { model_name: 'reppo-custom' } }] },
+      concurrency: 1,
+      refresh: true,
+    })
+    expect((runner.jobs[0].config as { device?: string }).device).toBe('mps')
+
+    runner.jobs.length = 0
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { configs: [{ config: { model_name: 'reppo-custom' } }] },
+      concurrency: 3, // parallel -> one GPU can't be shared -> mps NOT applied
+      refresh: true,
+    })
+    expect((runner.jobs[0].config as { device?: string }).device).toBeUndefined()
+  })
+
   it('benchmarkModelDevice runs the benchmark, persists the winning device, and passes the model via env', async () => {
     const storage = memoryStorage()
     await storage.upsertRecord({

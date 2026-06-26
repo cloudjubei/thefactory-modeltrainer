@@ -83,6 +83,7 @@ import {
   parseDeviceBenchmark,
   parseProgressMarker,
   resolveCampaignParallelism,
+  resolveModelDeviceForConfig,
   buildAnalyzePaperModelsSystemPrompt,
   buildAnalyzePaperModelsUserContent,
   buildAnalyzePaperSystemPrompt,
@@ -203,6 +204,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       maxThreadsPerRun: manifest.maxThreadsPerRun,
       availableParallelism: hostParallelism(),
     })
+    // Benchmarked models carry a `preferredDevice`; auto-apply it to each run's config (the device
+    // benchmark's whole point). Concurrency-aware: resolveModelDeviceForConfig keeps an mps preference
+    // OFF a parallel sweep (one shared GPU), and never overrides an explicit device.
+    const benchmarkedModels = (
+      await deps.storage.listRecords({ scope: params.scope, type: `${recordType}-model` })
+    )
+      .map((r) => r.content as { preferredDevice?: 'cpu' | 'mps'; flavors?: { modelName?: string }[]; modelNames?: string[] })
+      .filter((m) => !!m && !!m.preferredDevice)
     const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
     const thesisFields = {
       ...(params.thesis ? { thesis: params.thesis } : {}),
@@ -330,11 +339,17 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         return content?.status === 'completed' && versionOf(content) === pipelineMajor
       },
       runItem: async (item) => {
+        const device = resolveModelDeviceForConfig({
+          config: item.config,
+          models: benchmarkedModels,
+          concurrency: runConcurrency,
+        })
+        const runConfig = device ? { ...item.config, device } : item.config
         const handle = runner.runJob({
           jobId: item.key,
           repoRef,
           commandTemplate: manifest.run,
-          config: item.config,
+          config: runConfig,
           dataFiles,
           ...(runEnv ? { env: runEnv } : {}),
           abortSignal: params.abortSignal,

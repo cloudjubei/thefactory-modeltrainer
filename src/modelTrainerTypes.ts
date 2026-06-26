@@ -1264,14 +1264,17 @@ export type ModelCategory = 'rl' | 'supervised' | 'baseline' | 'component'
  * Lifecycle of a catalog Model. `proposed` = named (often by a paper) but not yet implemented;
  * `implemented` = present in the project and training healthily; `failing` = implemented but its runs
  * are health-flagged/degenerate; `needs-improvement` = works but a paper or result asks for more;
- * `deprecated` = retired. The first two/three auto-derive from runs (see `deriveModelStatus` in
- * `viewer/models.js`); `needs-improvement`/`deprecated` are manual pins.
+ * `deferred` = a real candidate, but deliberately NOT being built now (e.g. blocked on missing infra);
+ * `deprecated` = retired. `proposed`/`implemented`/`failing` auto-derive from runs (see `deriveModelStatus`
+ * in `viewer/models.js`); `needs-improvement`/`deferred`/`deprecated` are pins (manual OR manifest-seeded)
+ * that auto-derivation won't override.
  */
 export type ModelStatus =
   | 'proposed'
   | 'implemented'
   | 'failing'
   | 'needs-improvement'
+  | 'deferred'
   | 'deprecated'
 
 /** Where a catalog Model entry came from. */

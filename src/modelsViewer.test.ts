@@ -204,6 +204,16 @@ describe('aggForModel + deriveModelStatus', () => {
   it('is proposed when unimplemented with no runs', () => {
     expect(M.deriveModelStatus({ flavors: [] }, null, mani)).toBe('proposed')
   })
+  it('respects a PINNED status (deferred) even from an auto source, not just manual', () => {
+    // A manifest seed can declare a model deferred; auto-derivation must not flip it back to proposed.
+    expect(M.deriveModelStatus({ status: 'deferred', statusSource: 'auto', flavors: [] }, null, mani)).toBe(
+      'deferred',
+    )
+    // and even if (hypothetically) runs exist, the deliberate pin stands
+    expect(
+      M.deriveModelStatus({ status: 'deferred', statusSource: 'auto', flavors: [] }, { runs: 3, failing: 0 }, mani),
+    ).toBe('deferred')
+  })
   it('is implemented when lever-bound but unrun', () => {
     expect(M.deriveModelStatus(model(), null, mani)).toBe('implemented')
   })
@@ -276,10 +286,12 @@ describe('status + category metadata', () => {
       'implemented',
       'failing',
       'needs-improvement',
+      'deferred',
       'deprecated',
     ])
     expect(M.MODEL_STATUS_BADGE.implemented).toBe('is-done')
     expect(M.MODEL_STATUS_BADGE.failing).toBe('is-failed')
+    expect(M.MODEL_STATUS_LABEL.deferred).toBe('deferred')
   })
   it('orders categories for grouping', () => {
     expect(M.MODEL_CATEGORIES).toEqual(['rl', 'supervised', 'baseline', 'component'])

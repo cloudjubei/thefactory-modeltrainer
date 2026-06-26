@@ -14,6 +14,7 @@ import {
   buildXaiNarrateUserContent,
   applyMigrationRules,
   resolveCampaignParallelism,
+  resolveModelDeviceForConfig,
   parseDeviceBenchmark,
   THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
@@ -317,6 +318,42 @@ describe('resolveCampaignParallelism', () => {
 
   it('floors a non-even cpu/threads ratio (10 cpus, 3 threads -> 3 runs)', () => {
     expect(resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency).toBe(3)
+  })
+})
+
+describe('resolveModelDeviceForConfig', () => {
+  const models = [
+    { slug: 'reppo', flavors: [{ modelName: 'reppo-custom' }, { modelName: 'reppo' }], preferredDevice: 'mps' as const },
+    { slug: 'ppo', flavors: [{ modelName: 'ppo' }], preferredDevice: 'cpu' as const },
+    { slug: 'dqn', flavors: [{ modelName: 'dqn' }] }, // never benchmarked -> no preferredDevice
+  ]
+
+  it('applies a model mps preference to a SINGLE run', () => {
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom' }, models, concurrency: 1 }),
+    ).toBe('mps')
+  })
+
+  it('does NOT apply mps to a parallel sweep (one GPU cannot be shared)', () => {
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom' }, models, concurrency: 4 }),
+    ).toBeUndefined()
+  })
+
+  it('applies a cpu preference even in a parallel sweep (cpu parallelises)', () => {
+    expect(resolveModelDeviceForConfig({ config: { model_name: 'ppo' }, models, concurrency: 4 })).toBe('cpu')
+  })
+
+  it('respects an explicit device in the config over the model preference', () => {
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom', device: 'cpu' }, models, concurrency: 1 }),
+    ).toBeUndefined()
+  })
+
+  it('returns undefined when no model matches or the model was never benchmarked', () => {
+    expect(resolveModelDeviceForConfig({ config: { model_name: 'dqn' }, models, concurrency: 1 })).toBeUndefined()
+    expect(resolveModelDeviceForConfig({ config: { model_name: 'unknown' }, models, concurrency: 1 })).toBeUndefined()
+    expect(resolveModelDeviceForConfig({ config: {}, models, concurrency: 1 })).toBeUndefined()
   })
 })
 

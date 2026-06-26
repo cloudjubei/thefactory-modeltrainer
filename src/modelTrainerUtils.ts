@@ -76,6 +76,35 @@ export function resolveCampaignParallelism(opts: {
 }
 
 /**
+ * The device a benchmarked model wants for ONE run — or undefined to leave the run's device untouched.
+ *
+ * Applies a model's `preferredDevice` (set by the device benchmark) to a config that doesn't already name
+ * a device, matched by `config.model_name` against the model's flavor names. CRITICAL: an `mps` preference
+ * is NEVER applied to a PARALLEL sweep (concurrency > 1) — MPS is one shared GPU the runs would contend
+ * for, so a packed sweep stays on CPU (which parallelises). An explicit `config.device` always wins.
+ */
+export function resolveModelDeviceForConfig(opts: {
+  config: Record<string, unknown>
+  models: Array<{
+    preferredDevice?: 'cpu' | 'mps'
+    flavors?: { modelName?: string }[]
+    modelNames?: string[]
+  }>
+  concurrency: number
+}): 'cpu' | 'mps' | undefined {
+  if (opts.config.device !== undefined) return undefined
+  const modelName = opts.config.model_name
+  if (typeof modelName !== 'string') return undefined
+  const match = opts.models.find(
+    (m) => m.preferredDevice && modelBindingNames(m).includes(modelName),
+  )
+  const pref = match?.preferredDevice
+  if (!pref) return undefined
+  if (pref === 'mps' && opts.concurrency > 1) return undefined
+  return pref
+}
+
+/**
  * Coerce a `benchmarkDevice` command's `{summaryOut}` JSON (`{ deviceBenchmark: {...} }`) into a typed
  * {@link ModelDeviceBenchmark}, defaulting safely to CPU on anything malformed so a flaky benchmark can
  * never set a bogus device. `bestDevice` is `mps` only when the summary explicitly says so.

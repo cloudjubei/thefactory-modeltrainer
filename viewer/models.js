@@ -9,12 +9,13 @@
 ;(function (root) {
   'use strict'
 
-  const MODEL_STATUSES = ['proposed', 'implemented', 'failing', 'needs-improvement', 'deprecated']
+  const MODEL_STATUSES = ['proposed', 'implemented', 'failing', 'needs-improvement', 'deferred', 'deprecated']
   const MODEL_STATUS_LABEL = {
     proposed: 'proposed',
     implemented: 'implemented',
     failing: 'failing',
     'needs-improvement': 'needs work',
+    deferred: 'deferred',
     deprecated: 'deprecated',
   }
   // Reuse the run-badge classes the Runs/Papers tabs already style (is-queued/is-running/is-done/is-failed).
@@ -23,8 +24,12 @@
     implemented: 'is-done',
     failing: 'is-failed',
     'needs-improvement': 'is-running',
+    deferred: 'is-queued',
     deprecated: 'is-queued',
   }
+  // Statuses that are NOT auto-derivable from runs (a deliberate lifecycle pin) — authoritative regardless
+  // of statusSource, so a manifest seed can declare a model deferred/deprecated/needs-work and it sticks.
+  const MODEL_PINNED_STATUSES = ['deferred', 'deprecated', 'needs-improvement']
   const MODEL_CATEGORIES = ['rl', 'supervised', 'baseline', 'component']
   const MODEL_CATEGORY_LABEL = {
     rl: 'Reinforcement learning',
@@ -183,7 +188,10 @@
   }
   // The auto-derived (or manually pinned) lifecycle status of a model, given its all-runs aggregate.
   function deriveModelStatus(model, agg, manifest) {
-    if (model && model.statusSource === 'manual') return model.status
+    // A manual override OR a pinned (non-auto-derivable) status is authoritative — otherwise derive from
+    // whether the flavors bind a lever choice + the run health.
+    if (model && (model.statusSource === 'manual' || MODEL_PINNED_STATUSES.indexOf(model.status) >= 0))
+      return model.status
     const implemented = isModelImplemented(model, manifest)
     if (!agg || !agg.runs) return implemented ? 'implemented' : 'proposed'
     return agg.failing >= agg.runs ? 'failing' : 'implemented'
