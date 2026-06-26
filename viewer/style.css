@@ -3190,7 +3190,15 @@ select.app-select:focus-visible,
   font-size: 0.9em;
   color: var(--muted);
 }
-/* Map sub-tabs (Parallel / PCA) in the view header. */
+/* Trade-off (Pareto) map: the X/Y metric + direction pickers. */
+.xai-pareto-pickers {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 0.7rem;
+}
+/* Map sub-tabs (Parallel / PCA / Trade-off) in the view header. */
 .xai-map-tab {
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -3332,6 +3340,32 @@ select.app-select:focus-visible,
 .xai-pc-tick {
   font-size: 9px;
   fill: var(--muted);
+}
+/* Interactive parallel map: a line highlights on hover (and is clickable to open the run). */
+.xai-pc-line {
+  cursor: pointer;
+  transition:
+    stroke-width 80ms ease,
+    opacity 80ms ease;
+}
+.xai-pc-line:hover {
+  stroke-width: 3.5;
+  opacity: 1;
+}
+/* Clickable per-axis value ticks: click one to filter the configs to that value. */
+.xai-pc-pick {
+  fill: rgba(120, 120, 120, 0.5);
+  stroke: rgba(255, 255, 255, 0.45);
+  stroke-width: 0.5;
+  cursor: pointer;
+}
+.xai-pc-pick:hover {
+  fill: var(--accent, #2563eb);
+}
+.xai-pc-pick.is-picked {
+  fill: var(--accent, #2563eb);
+  stroke: #fff;
+  stroke-width: 1;
 }
 /* fANOVA per-lever effect tags: inert (drop), interactive (coupled), direct (plain). */
 .fanova-inert {

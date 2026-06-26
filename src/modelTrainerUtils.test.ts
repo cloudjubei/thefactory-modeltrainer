@@ -14,6 +14,7 @@ import {
   buildXaiNarrateUserContent,
   applyMigrationRules,
   resolveCampaignParallelism,
+  parseDeviceBenchmark,
   THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
   isSpecAffectedByFidelityDesync,
@@ -274,14 +275,33 @@ describe('resolveCampaignParallelism', () => {
     expect(r.runEnv?.BS_NUM_THREADS).toBe('2')
   })
 
-  it('honours an explicit concurrency (still capping per-run threads)', () => {
+  it('honours an explicit concurrency and gives each run its fair share of cores', () => {
     const r = resolveCampaignParallelism({
       concurrency: 3,
       maxThreadsPerRun: 2,
       availableParallelism: 10,
     })
     expect(r.concurrency).toBe(3)
-    expect(r.runEnv?.OMP_NUM_THREADS).toBe('2')
+    expect(r.runEnv?.OMP_NUM_THREADS).toBe('3') // floor(10/3) — more than the appetite, host fully used
+  })
+
+  it('SPEEDUP: a single/final run (concurrency 1) uses the WHOLE host, not the per-run appetite', () => {
+    const r = resolveCampaignParallelism({
+      concurrency: 1,
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+    })
+    expect(r.concurrency).toBe(1)
+    for (const v of THREAD_ENV_VARS) expect(r.runEnv?.[v]).toBe('10') // all 10 cores, not 2
+  })
+
+  it('caps per-run threads BELOW the appetite when over-packed, to avoid oversubscription', () => {
+    const r = resolveCampaignParallelism({
+      concurrency: 8,
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+    })
+    expect(r.runEnv?.OMP_NUM_THREADS).toBe('1') // floor(10/8) — 8 runs share 10 cores, 1 thread each
   })
 
   it('keeps the safe sequential default and sets no env when the manifest declares no thread appetite', () => {
@@ -297,6 +317,45 @@ describe('resolveCampaignParallelism', () => {
 
   it('floors a non-even cpu/threads ratio (10 cpus, 3 threads -> 3 runs)', () => {
     expect(resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency).toBe(3)
+  })
+})
+
+describe('parseDeviceBenchmark', () => {
+  it('coerces a well-formed deviceBenchmark summary into a typed record', () => {
+    const b = parseDeviceBenchmark(
+      {
+        deviceBenchmark: {
+          bestDevice: 'mps',
+          speedup: 1.45,
+          usPerStep: { cpu: 100, mps: 69 },
+          availableDevices: ['cpu', 'mps'],
+        },
+      },
+      'T0',
+    )
+    expect(b).toEqual({
+      bestDevice: 'mps',
+      speedup: 1.45,
+      usPerStep: { cpu: 100, mps: 69 },
+      availableDevices: ['cpu', 'mps'],
+      benchmarkedAt: 'T0',
+    })
+  })
+
+  it('defaults safely to cpu on a missing/malformed summary (never sets a bogus device)', () => {
+    expect(parseDeviceBenchmark(undefined, 'T').bestDevice).toBe('cpu')
+    expect(parseDeviceBenchmark({}, 'T').bestDevice).toBe('cpu')
+    expect(parseDeviceBenchmark({ deviceBenchmark: { bestDevice: 'gpu' } }, 'T').bestDevice).toBe('cpu')
+  })
+
+  it('drops non-positive usPerStep, clamps speedup to >= 1, derives availableDevices from usPerStep', () => {
+    const b = parseDeviceBenchmark(
+      { deviceBenchmark: { bestDevice: 'cpu', speedup: 0.4, usPerStep: { cpu: 100, mps: 0 } } },
+      'T',
+    )
+    expect(b.speedup).toBe(1)
+    expect(b.usPerStep).toEqual({ cpu: 100 })
+    expect(b.availableDevices).toEqual(['cpu'])
   })
 })
 
@@ -347,6 +406,20 @@ describe('validateTrainerManifest', () => {
     const m = { ...manifest() }
     delete m.calibrate
     expect(validateTrainerManifest(m).calibrate).toBeUndefined()
+  })
+
+  it('rejects a benchmarkDevice template without {summaryOut}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), benchmarkDevice: 'python -m trainer.bench_device' }),
+    ).toThrow(/summaryOut/)
+  })
+
+  it('accepts a valid benchmarkDevice template and preserves it', () => {
+    const m = validateTrainerManifest({
+      ...manifest(),
+      benchmarkDevice: 'python -m trainer.bench_device --summary-out {summaryOut}',
+    })
+    expect(m.benchmarkDevice).toContain('bench_device')
   })
 
   it('accepts a valid evaluate template', () => {

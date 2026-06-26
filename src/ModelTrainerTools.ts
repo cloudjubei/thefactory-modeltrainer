@@ -40,6 +40,8 @@ import type {
   ProposeTrainingExperimentsResult,
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
+  BenchmarkModelDeviceParams,
+  BenchmarkModelDeviceResult,
   RunXaiDigest,
   ScanProjectModelsParams,
   ScanProjectModelsResult,
@@ -78,6 +80,7 @@ import {
   findMigrationRule,
   manifestDataFiles,
   migrateExperimentSpec,
+  parseDeviceBenchmark,
   parseProgressMarker,
   resolveCampaignParallelism,
   buildAnalyzePaperModelsSystemPrompt,
@@ -1329,6 +1332,55 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return out
   }
 
+  async function benchmarkModelDevice(
+    params: BenchmarkModelDeviceParams,
+  ): Promise<BenchmarkModelDeviceResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.benchmarkDevice) {
+      throw new Error('trainer manifest declares no benchmarkDevice command')
+    }
+    const recordType = manifest.recordType
+    const modelType = `${recordType}-model`
+    const record = await deps.storage.readRecord({
+      scope: params.scope,
+      type: modelType,
+      key: params.modelId,
+    })
+    if (!record) throw new Error(`no model record for id ${params.modelId}`)
+    const model = record.content as unknown as TrainingModel
+    const modelName = params.modelName ?? model.flavors?.[0]?.modelName ?? model.slug
+    // Reuse the calibrate runner contract: one probe runs the benchmark command (which times BOTH devices
+    // itself) with the model named via env, and returns the parsed {summaryOut} for us to read back.
+    const probe = await resolveRunner(params.computeTarget).calibrate({
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.benchmarkDevice,
+      dataFiles: manifestDataFiles(manifest),
+      env: { BENCH_MODEL_NAME: modelName },
+      abortSignal: params.abortSignal,
+    })
+    const deviceBenchmark = parseDeviceBenchmark(probe.summary, now())
+    const updated: TrainingModel = {
+      ...model,
+      preferredDevice: deviceBenchmark.bestDevice,
+      deviceBenchmark,
+      updatedAt: now(),
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: modelType,
+      key: params.modelId,
+      content: updated as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(modelType, params.modelId)
+    return {
+      recordType,
+      modelId: params.modelId,
+      preferredDevice: deviceBenchmark.bestDevice,
+      deviceBenchmark,
+    }
+  }
+
   async function scanProjectModels(
     params: ScanProjectModelsParams,
   ): Promise<ScanProjectModelsResult> {
@@ -1843,6 +1895,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzePaperFromUrl,
     suggestPaperHypotheses,
     scanProjectModels,
+    benchmarkModelDevice,
     analyzePaperModels,
     xaiNarrate,
     getRunData,

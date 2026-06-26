@@ -105,8 +105,15 @@ let xaiRailCollapsed = false
 let xaiEnvSearch = ''
 let xaiEnvSortKey = 'best'
 let xaiEnvSortDir = 'desc'
-// Which "configuration map" is shown in the Maps tab: 'pca' (cluster sketch) or 'parallel' (readable axes).
+// Which "configuration map" is shown in the Maps tab: 'parallel', 'pca', or 'pareto' (trade-off frontier).
 let xaiMapKind = 'parallel'
+// Pareto (trade-off) map axes: which two metrics + the better-direction for each.
+let xaiParetoX = null
+let xaiParetoXDir = 'max'
+let xaiParetoY = null
+let xaiParetoYDir = 'max'
+// Parallel-map axis filter: lever -> the picked value (a config must match every pick to stay highlit).
+let xaiPcPick = {}
 // The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
 let xaiHelpOpen = null
 // Whether the shared scope header (env + criterion + direction + Re-run) is expanded.
@@ -261,6 +268,8 @@ let paperSubform = null
 let modelsCache = []
 let modelCategoryFilter = 'all'
 const modelExpanded = new Set()
+// Models whose CPU-vs-MPS device benchmark is currently running (disables the per-model button).
+const benchmarkingModels = new Set()
 // The persisted all-runs aggregate (a `<recordType>-model-stats` record): per-model + per-flavor run
 // counts/best/failing computed over EVERY run, not the current Runs page. `modelStatsStale` flags that
 // newer runs exist past the aggregate; `modelStatsRefreshing` spins the Refresh buttons while recomputing.
@@ -4993,6 +5002,7 @@ function xaiAllTabs(bundle, criterion) {
         [
           ['parallel', 'Parallel'],
           ['pca', 'PCA'],
+          ['pareto', 'Trade-off'],
         ]
           .map(
             ([k, l]) =>
@@ -5000,9 +5010,11 @@ function xaiAllTabs(bundle, criterion) {
           )
           .join(''),
       render: () =>
-        xaiMapKind === 'pca'
-          ? xaiPcaHtml(bundle, criterion)
-          : xaiParallelCoordsHtml(bundle, criterion),
+        xaiMapKind === 'pareto'
+          ? xaiParetoHtml(bundle, criterion)
+          : xaiMapKind === 'pca'
+            ? xaiPcaHtml(bundle, criterion)
+            : xaiParallelCoordsHtml(bundle, criterion),
     },
     {
       id: 'recommender',
@@ -5046,6 +5058,11 @@ function xaiTotalRuns() {
 // Maps explains the CURRENTLY-selected map (parallel vs PCA), per the user's ask.
 function xaiHelp(viewId) {
   if (viewId === 'maps') {
+    if (xaiMapKind === 'pareto')
+      return {
+        title: 'What the Trade-off (Pareto) map shows',
+        body: 'Every point is a config plotted on TWO metrics you choose (e.g. return vs drawdown). A config is on the <strong>Pareto frontier</strong> (green) when no other config beats it on <em>both</em> axes at once; grey points are <em>dominated</em> (something is better on both, so never pick them). There is no single "best" \u2014 choose from the green frontier by how much of one metric you\u2019ll trade for the other. Set each axis\u2019s metric + whether higher or lower is better.',
+      }
     return xaiMapKind === 'pca'
       ? {
           title: 'What the PCA map shows',
@@ -5747,6 +5764,10 @@ function xaiParallelCoordsHtml(bundle, criterion) {
       .map((l) => `${l}=${xaiFmtLeverValue(cfg[l])}`)
       .join(' · ')
       .slice(0, 160)
+  // Drop any picked lever that isn't an axis here (env/criterion changed) so a stale filter can't dim everything.
+  for (const lev of Object.keys(xaiPcPick)) if (!levers.includes(lev)) delete xaiPcPick[lev]
+  const anyPick = Object.keys(xaiPcPick).length > 0
+  const lineMatches = (cfg) => Object.entries(xaiPcPick).every(([lev, val]) => String(cfg[lev]) === val)
   const polys = items
     .map((x, i) => ({ x, r: rank[i] }))
     .sort((p, q) => p.r - q.r) // draw best (green) last → on top
@@ -5754,12 +5775,36 @@ function xaiParallelCoordsHtml(bundle, criterion) {
       const pts = levers
         .map((lev, j) => `${axisX(j).toFixed(1)},${yOf(lev, x.s.config[lev]).toFixed(1)}`)
         .join(' ')
+      const matched = !anyPick || lineMatches(x.s.config)
+      const op = matched ? (0.22 + r * 0.55).toFixed(2) : '0.05'
       const tip = `${compactCfg(x.s.config)} · ${criterion.label} ${formatTickValue(x.v)} · top ${100 - Math.round(r * 100)}%`
-      return `<polyline points="${pts}" fill="none" stroke="hsl(${Math.round(r * 120)},70%,45%)" stroke-width="1.4" opacity="${(0.22 + r * 0.55).toFixed(2)}"><title>${escapeHtml(tip)}</title></polyline>`
+      return `<polyline class="xai-pc-line" data-xai-focus-config="${escapeHtml(x.s.key)}" points="${pts}" fill="none" stroke="hsl(${Math.round(r * 120)},70%,45%)" stroke-width="${matched ? '1.4' : '0.8'}" opacity="${op}"><title>${escapeHtml(tip)} · click to open this run</title></polyline>`
     })
     .join('')
-  return card(`<p class="card-sub">Every line is one config threading its lever values; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>How to read it:</strong> where the green lines BUNCH at one value on an axis, that value is good; where they fan across the axis, that lever doesn't decide the outcome. Axes are ordered most-decisive-first (by fANOVA).</p>
-    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}</svg></div>
+  // Clickable value ticks on each low-cardinality axis: click one to keep only the configs at that value.
+  const valueMarkers = levers
+    .map((lev, i) => {
+      const d = info[lev]
+      if (d.sorted.length > 10) return ''
+      const x = axisX(i)
+      return d.sorted
+        .map((val) => {
+          const y = yOf(lev, d.allNum ? Number(val) : val)
+          const picked = xaiPcPick[lev] === String(val)
+          return `<circle class="xai-pc-pick${picked ? ' is-picked' : ''}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${picked ? 5 : 3.2}" data-xai-pc-pick="${escapeHtml(lev)}|||${escapeHtml(String(val))}"><title>${escapeHtml(xaiAbbrevLever(lev))}=${escapeHtml(String(val))} — click to filter</title></circle>`
+        })
+        .join('')
+    })
+    .join('')
+  const matchedCount = anyPick ? items.filter((x) => lineMatches(x.s.config)).length : items.length
+  const clearBar = anyPick
+    ? `<p class="card-sub">Filtered to <strong>${matchedCount}</strong> of ${items.length} configs (${Object.entries(xaiPcPick)
+        .map(([l, v]) => `<code>${escapeHtml(xaiAbbrevLever(l))}=${escapeHtml(v)}</code>`)
+        .join(', ')}). <button type="button" class="ghost-btn" data-xai-pc-clear>✕ Clear axis filter</button></p>`
+    : ''
+  return card(`<p class="card-sub">Every line is one config; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>Hover</strong> a line to read its config, <strong>click</strong> it to open that run, or <strong>click a tick</strong> on an axis to keep only the configs at that value. Axes are ordered most-decisive-first (by fANOVA).</p>
+    ${clearBar}
+    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}${valueMarkers}</svg></div>
     ${xaiParallelConclusionsHtml(items, rank, levers, info, criterion)}`)
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
@@ -5890,6 +5935,86 @@ function xaiPcaConclusionsHtml(pca, rankFrac, criterion) {
       `This is a rough sketch \u2014 PC1+PC2 capture only ${ev2}% of the configuration variation, so distances are approximate.`,
     )
   return `<div class="xai-conclusions"><strong class="card-sub">What this map shows</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
+}
+// A metric's value on a setup: the criterion 'objective', 'durationMs', or a named entry in metrics.
+function xaiMetricVal(s, key) {
+  return key === 'objective' ? s.objective : key === 'durationMs' ? s.durationMs : s.metrics && s.metrics[key]
+}
+// Guess a sensible better-direction from a metric's name (risk/drawdown/error \u2192 lower is better).
+function xaiInferMetricDir(key) {
+  return /draw|risk|loss|vol|cost|\bdd\b|error|mae|rmse|slippage/i.test(String(key)) ? 'min' : 'max'
+}
+// TRADE-OFF (Pareto) map: every config on two chosen metrics, with the non-dominated frontier highlighted.
+function xaiParetoHtml(bundle, criterion) {
+  const a = bundle.analysis
+  const setups = a.setups || []
+  const card = (inner) =>
+    `<div class="card"><div class="card-head card-head-row"><h3>Trade-off frontier <span class="card-sub">\u2014 the best achievable balance across two metrics</span></h3></div><div class="card-scroll">${inner}</div></div>`
+  const metricKeys = ['objective'].concat(
+    Array.from(new Set(setups.flatMap((s) => Object.keys(s.metrics || {})))).sort(),
+  )
+  if (metricKeys.length < 2 || setups.length < 3)
+    return card(
+      `<p class="card-sub">Need \u22653 configs with at least two recorded metrics to draw a trade-off frontier.</p>`,
+    )
+  if (!xaiParetoX || !metricKeys.includes(xaiParetoX)) {
+    xaiParetoX = 'objective'
+    xaiParetoXDir = criterion.direction
+  }
+  if (!xaiParetoY || !metricKeys.includes(xaiParetoY) || xaiParetoY === xaiParetoX) {
+    xaiParetoY = metricKeys.find((k) => k !== xaiParetoX) || metricKeys[0]
+    xaiParetoYDir = xaiInferMetricDir(xaiParetoY)
+  }
+  const compactCfg = (cfg) =>
+    Object.entries(cfg || {})
+      .filter(([k]) => k !== 'seed')
+      .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
+      .join(' ')
+      .slice(0, 120)
+  const pts = []
+  const owner = []
+  for (const sp of setups) {
+    const x = xaiMetricVal(sp, xaiParetoX)
+    const y = xaiMetricVal(sp, xaiParetoY)
+    if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)) {
+      pts.push([x, y])
+      owner.push(sp)
+    }
+  }
+  const sel = (id, cur) =>
+    `<select id="${id}" class="app-select">${metricKeys.map((k) => `<option value="${escapeHtml(k)}"${k === cur ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>`
+  const dirSel = (id, cur) =>
+    `<select id="${id}" class="app-select"><option value="max"${cur === 'max' ? ' selected' : ''}>higher better</option><option value="min"${cur === 'min' ? ' selected' : ''}>lower better</option></select>`
+  const pickers = `<div class="xai-pareto-pickers">
+    <label class="card-sub xai-scope-field">X ${sel('xai-pareto-x', xaiParetoX)} ${dirSel('xai-pareto-xdir', xaiParetoXDir)}</label>
+    <label class="card-sub xai-scope-field">Y ${sel('xai-pareto-y', xaiParetoY)} ${dirSel('xai-pareto-ydir', xaiParetoYDir)}</label>
+  </div>`
+  if (pts.length < 3)
+    return card(
+      `${pickers}<p class="card-sub">Need \u22653 configs with both <code>${escapeHtml(xaiParetoX)}</code> and <code>${escapeHtml(xaiParetoY)}</code> recorded \u2014 pick different metrics or run more configs.</p>`,
+    )
+  const frontier = new Set(window.Xai.paretoFrontier(pts, [xaiParetoXDir, xaiParetoYDir]))
+  const points = pts.map((pp, i) => ({
+    x: pp[0],
+    y: pp[1],
+    color: frontier.has(i) ? 'hsl(140, 70%, 42%)' : 'rgba(127,127,127,0.45)',
+    label: `${compactCfg(owner[i].config)} \u00b7 ${escapeHtml(xaiParetoX)} ${formatTickValue(pp[0])} \u00b7 ${escapeHtml(xaiParetoY)} ${formatTickValue(pp[1])}${frontier.has(i) ? ' \u00b7 Pareto-optimal' : ''}`,
+  }))
+  const svg = buildScatterChart({
+    points,
+    xLabel: `${xaiParetoX} (${xaiParetoXDir === 'min' ? 'lower' : 'higher'} better)`,
+    yLabel: `${xaiParetoY} (${xaiParetoYDir === 'min' ? 'lower' : 'higher'} better)`,
+    width: 520,
+    height: 320,
+    ariaLabel: 'Pareto trade-off scatter coloured by frontier membership',
+  })
+  const concl = `<div class="xai-conclusions"><strong class="card-sub">What this shows</strong><ul class="card-sub">
+    <li><strong style="color:hsl(140,70%,38%)">${frontier.size}</strong> of ${pts.length} configs are <strong>Pareto-optimal</strong> (green) \u2014 no other config beats them on <em>both</em> ${escapeHtml(xaiParetoX)} and ${escapeHtml(xaiParetoY)}. Grey points are dominated (something is better on both), so never pick them.</li>
+    <li>There is no single best \u2014 choose along the green frontier by how much ${escapeHtml(xaiParetoY)} you\u2019ll trade for ${escapeHtml(xaiParetoX)}.</li>
+  </ul></div>`
+  return card(
+    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}`,
+  )
 }
 function xaiAblationTreeHtml(path, criterion) {
   if (!path || !path.steps.length) return ''
@@ -7001,6 +7126,18 @@ function setupRuns() {
       const t = event.target
       if (t.id === 'xai-env-switch') {
         xaiAnalyzeEnvironment(t.value)
+      } else if (t.id === 'xai-pareto-x') {
+        xaiParetoX = t.value
+        renderXai()
+      } else if (t.id === 'xai-pareto-y') {
+        xaiParetoY = t.value
+        renderXai()
+      } else if (t.id === 'xai-pareto-xdir') {
+        xaiParetoXDir = t.value === 'min' ? 'min' : 'max'
+        renderXai()
+      } else if (t.id === 'xai-pareto-ydir') {
+        xaiParetoYDir = t.value === 'min' ? 'min' : 'max'
+        renderXai()
       } else if (t.id === 'xai-criterion') {
         xaiCriterionKey = t.value
         xaiCriterionDir = null
@@ -7094,9 +7231,34 @@ function setupRuns() {
         renderXai()
         return
       }
+      const pcPick = event.target.closest('[data-xai-pc-pick]')
+      if (pcPick) {
+        const raw = pcPick.dataset.xaiPcPick
+        const sep = raw.indexOf('|||')
+        const lev = raw.slice(0, sep)
+        const val = raw.slice(sep + 3)
+        if (xaiPcPick[lev] === val) delete xaiPcPick[lev]
+        else xaiPcPick[lev] = val
+        renderXai()
+        return
+      }
+      if (event.target.closest('[data-xai-pc-clear]')) {
+        xaiPcPick = {}
+        renderXai()
+        return
+      }
+      const pcFocus = event.target.closest('[data-xai-focus-config]')
+      if (pcFocus) {
+        xaiFocusKey = pcFocus.dataset.xaiFocusConfig
+        xaiScope = 'current'
+        xaiTab = 'standing'
+        renderXai()
+        return
+      }
       const mapBtn = event.target.closest('[data-xai-map]')
       if (mapBtn) {
-        xaiMapKind = mapBtn.dataset.xaiMap === 'pca' ? 'pca' : 'parallel'
+        const k = mapBtn.dataset.xaiMap
+        xaiMapKind = k === 'pca' || k === 'pareto' ? k : 'parallel'
         renderXai()
         return
       }
@@ -10029,6 +10191,21 @@ function modelStatusSelectHtml(model) {
     .join('')
   return `<label class="field model-status-field"><span>Status</span><select data-action="set-status" data-id="${escapeHtml(model.id)}">${sel}</select></label>`
 }
+// The per-model device-benchmark line: which device the last CPU-vs-MPS benchmark picked + the margin.
+function modelDevicePrefHtml(model) {
+  const b = model.deviceBenchmark
+  if (!model.preferredDevice && !b) return ''
+  const dev = String(model.preferredDevice || (b && b.bestDevice) || 'cpu').toUpperCase()
+  const margin =
+    b && b.speedup && b.speedup > 1.01 ? ` (${b.speedup}× faster than ${dev === 'MPS' ? 'CPU' : 'MPS'})` : ''
+  const per =
+    b && b.usPerStep
+      ? Object.entries(b.usPerStep)
+          .map(([d, us]) => `${d} ${Math.round(us)}µs/step`)
+          .join(', ')
+      : ''
+  return `<p class="card-sub">Preferred device: <strong>${escapeHtml(dev)}</strong>${escapeHtml(margin)}${per ? ` — ${escapeHtml(per)}` : ''}</p>`
+}
 function modelCardHtml(model) {
   const id = escapeHtml(model.id)
   const open = modelExpanded.has(model.id) ? ' open' : ''
@@ -10040,7 +10217,12 @@ function modelCardHtml(model) {
       : st === 'proposed'
         ? 'Discuss implementing this model with the AI'
         : 'Discuss / improve this model with the AI'
+  const benchmarking = benchmarkingModels.has(model.id)
+  const deviceBtn = embedded()
+    ? `<button type="button" class="card-btn" data-action="benchmark-device" data-id="${id}"${benchmarking ? ' disabled' : ''}${helpAttr('Benchmark this model on CPU vs MPS and set its faster device')}>${benchmarking ? '…' : '⚡'}</button>`
+    : ''
   const actions =
+    deviceBtn +
     (chatAboutRunAvailable()
       ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
       : '') +
@@ -10057,6 +10239,7 @@ function modelCardHtml(model) {
       ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
       ${flavorCount ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
       ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
+      ${modelDevicePrefHtml(model)}
       ${modelFlavorsHtml(model)}
       ${modelStatusSelectHtml(model)}
       ${modelLinkedPapersHtml(model)}
@@ -10495,6 +10678,48 @@ async function onScanModels() {
     if (btn) btn.disabled = false
   }
 }
+// Benchmark ONE model on CPU vs MPS (the backend trains it briefly on each device) and persist + show the
+// faster device. Mirrors onScanModels' enqueue/observe/re-render flow.
+async function onBenchmarkModelDevice(id) {
+  if (!embedded()) {
+    setStatusLine('models-status', 'Open inside the Overseer to benchmark devices.', true)
+    return
+  }
+  if (benchmarkingModels.has(id)) return
+  const epoch = projectEpoch
+  benchmarkingModels.add(id)
+  setStatusLine('models-status', 'Benchmarking CPU vs MPS — trains the model briefly on each device…')
+  await renderModels()
+  try {
+    const result = await startOrEnqueue(
+      'benchmark-model-device',
+      trainerActivityParams({ modelId: id }),
+      'Benchmark device',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('models-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      modelsCache = await readModels()
+      const m = modelsCache.find((x) => x.id === id)
+      const dev = m && m.preferredDevice
+      showToast(dev ? `Best device for ${m.name || id}: ${String(dev).toUpperCase()}.` : 'Device benchmark complete.')
+      setStatusLine('models-status', '')
+    } else {
+      setStatusLine('models-status', quickActivityFailureText(act, 'Benchmark'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('models-status', 'Could not benchmark — please try again.', true)
+    }
+  } finally {
+    benchmarkingModels.delete(id)
+    if (epoch === projectEpoch) await renderModels()
+  }
+}
 async function onDeleteModel(id) {
   try {
     await deleteModelRecord(id)
@@ -10621,6 +10846,7 @@ function setupModels() {
     const { action, id } = btn.dataset
     if (action === 'import-seeds') importSeedModels()
     else if (action === 'discuss-model') chatAboutModel(id)
+    else if (action === 'benchmark-device') onBenchmarkModelDevice(id)
     else if (action === 'delete-model') onDeleteModel(id)
   })
 }

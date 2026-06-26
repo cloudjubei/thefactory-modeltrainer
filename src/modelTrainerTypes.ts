@@ -99,6 +99,12 @@ export interface TrainerManifest {
    */
   evaluate?: string
   /**
+   * Command template (only `{summaryOut}`) that benchmarks ONE model on CPU vs MPS and writes a
+   * `deviceBenchmark` summary (best device + per-device us/step). The model to benchmark is passed via the
+   * `BENCH_MODEL_NAME` env var. Powers the Models tab's per-model "Benchmark device" button.
+   */
+  benchmarkDevice?: string
+  /**
    * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
    * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
    * in parallel (instead of the safe sequential default that leaves cores idle), and exports this many
@@ -1303,6 +1309,19 @@ export interface ModelFlavor {
  * record (key = `id`, which is the `slug`). Distinct from a hypothesis (a falsifiable claim): a Model is
  * the thing a claim, paper or run is ABOUT.
  */
+/**
+ * The result of benchmarking a model on the available compute devices (CPU vs Apple MPS) — what backs a
+ * model's {@link TrainingModel.preferredDevice}. `usPerStep` is per device; `speedup` is the winner's
+ * margin over the runner-up (>= 1).
+ */
+export interface ModelDeviceBenchmark {
+  bestDevice: 'cpu' | 'mps'
+  speedup: number
+  usPerStep: Record<string, number>
+  availableDevices: string[]
+  benchmarkedAt: string
+}
+
 export interface TrainingModel {
   /** Stable id — equals `slug`; identical slugs dedupe across scan/paper/manual/seed sources. */
   id: string
@@ -1340,6 +1359,10 @@ export interface TrainingModel {
   notes?: string
   /** Hidden from the default view (a rejected/irrelevant candidate) without deleting it. */
   dismissed?: boolean
+  /** The device the last benchmark found fastest for this model (the cpu-vs-mps winner). */
+  preferredDevice?: 'cpu' | 'mps'
+  /** The last device-benchmark measurement backing `preferredDevice`. */
+  deviceBenchmark?: ModelDeviceBenchmark
   createdAt: string
   updatedAt: string
 }
@@ -1513,6 +1536,30 @@ export interface ScanProjectModelsParams {
   abortSignal?: AbortSignal
   /** Fired after each model record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface BenchmarkModelDeviceParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** The model record key (slug) to benchmark + update with its preferred device. */
+  modelId: string
+  /** Override the benchmarked `model_name` (defaults to the model's first flavor's modelName, else its slug). */
+  modelName?: string
+  /** Named compute target to benchmark on; omit for the default (local) runner. */
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  /** Fired after the model record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface BenchmarkModelDeviceResult {
+  recordType: string
+  modelId: string
+  preferredDevice: 'cpu' | 'mps'
+  deviceBenchmark: ModelDeviceBenchmark
 }
 
 export interface ScanProjectModelsResult {
@@ -1792,6 +1839,12 @@ export interface ModelTrainerTools {
    * never duplicates. Powers the Models tab's "Scan Project" button.
    */
   scanProjectModels(params: ScanProjectModelsParams): Promise<ScanProjectModelsResult>
+  /**
+   * Benchmark ONE catalog model on CPU vs MPS (via the manifest's `benchmarkDevice` command) and persist
+   * the winner as the model's `preferredDevice` (+ the `deviceBenchmark` numbers). Powers the Models
+   * tab's per-model "Benchmark device" button.
+   */
+  benchmarkModelDevice(params: BenchmarkModelDeviceParams): Promise<BenchmarkModelDeviceResult>
   /**
    * Analyse ONE paper for the MODELS it introduces/improves: an LLM matches it against the existing
    * catalog (linking the models it is about, updating the paper's `modelIds` and each model's

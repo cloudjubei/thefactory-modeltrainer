@@ -635,6 +635,72 @@ describe('runTrainingCampaign', () => {
     expect(runner.jobs[0].env).toBeUndefined()
   })
 
+  it('benchmarkModelDevice runs the benchmark, persists the winning device, and passes the model via env', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'reppo-custom',
+      content: {
+        id: 'reppo-custom',
+        slug: 'reppo-custom',
+        name: 'Reppo (custom)',
+        flavors: [{ modelName: 'reppo-custom' }],
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    })
+    const runner = stubRunner({
+      calibration: {
+        secondsObserved: 90,
+        summary: {
+          deviceBenchmark: {
+            modelName: 'reppo-custom',
+            bestDevice: 'mps',
+            speedup: 1.45,
+            usPerStep: { cpu: 67712, mps: 46647 },
+            availableDevices: ['cpu', 'mps'],
+          },
+        },
+      },
+    })
+    const { tools } = makeTools(runner, storage)
+    const m = manifest({
+      benchmarkDevice: 'bin/python -m trainer.bench_device --summary-out {summaryOut}',
+    })
+    const res = await tools.benchmarkModelDevice({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      modelId: 'reppo-custom',
+    })
+    expect(res.preferredDevice).toBe('mps')
+    expect(res.deviceBenchmark.speedup).toBe(1.45)
+    // the benchmark command received the model to run via env
+    expect(runner.probes[0].env).toMatchObject({ BENCH_MODEL_NAME: 'reppo-custom' })
+    // the winner is persisted onto the model record for the viewer to read
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-model', key: 'reppo-custom' })
+    const content = rec!.content as Record<string, unknown>
+    expect(content.preferredDevice).toBe('mps')
+    expect((content.deviceBenchmark as { bestDevice: string }).bestDevice).toBe('mps')
+  })
+
+  it('benchmarkModelDevice throws when the manifest declares no benchmarkDevice command', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'm',
+      content: { id: 'm', slug: 'm', flavors: [{ modelName: 'dqn' }], createdAt: NOW, updatedAt: NOW },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest()
+    delete m.benchmarkDevice
+    await expect(
+      tools.benchmarkModelDevice({ scope: 'proj', projectRoot: '/repo', manifest: m, modelId: 'm' }),
+    ).rejects.toThrow(/benchmarkDevice/)
+  })
+
   it('skips setups already run under any seed when skipExplored is set', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)

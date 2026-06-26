@@ -9,6 +9,7 @@ import type {
   HypothesisComparison,
   HypothesisComparisonKind,
   ModelCategory,
+  ModelDeviceBenchmark,
   PlannedTrainingItem,
   ProposedModel,
   RunXaiDigest,
@@ -46,10 +47,15 @@ export const THREAD_ENV_VARS: readonly string[] = [
  * Resolve a campaign's run-pool size and per-run thread-cap env from the manifest + host.
  *
  * An explicit `concurrency` always wins. Otherwise, when the manifest declares `maxThreadsPerRun > 1`,
- * default to `floor(availableParallelism / threadsPerRun)` so N runs × threadsPerRun ≈ host cores —
- * instead of the safe-but-idle sequential default. Projects that don't declare `maxThreadsPerRun` keep
- * the sequential default and get no env override (byte-compatible). `runEnv` caps every run's threads to
- * `threadsPerRun` so an over-eager BLAS backend can't oversubscribe the host.
+ * default the pool to `floor(cpus / threadsPerRun)` so N runs × threadsPerRun ≈ host cores — instead of
+ * the safe-but-idle sequential default. Projects that don't declare `maxThreadsPerRun` keep the
+ * sequential default and get NO env override (byte-compatible).
+ *
+ * The per-run thread cap is each run's FAIR SHARE of cores, `floor(cpus / concurrency)` — NOT a fixed
+ * `threadsPerRun`. So a lone/final run (concurrency 1) uses the WHOLE host (measured ~1.24× faster for the
+ * LSTM model at 6 vs 2 threads) instead of idling 8 cores, a packed auto sweep still lands on
+ * `threadsPerRun` each, and an over-packed sweep (concurrency > auto) caps below it to avoid
+ * oversubscription. The MLP models don't scale with threads but aren't harmed by the extra.
  */
 export function resolveCampaignParallelism(opts: {
   concurrency?: number
@@ -61,11 +67,38 @@ export function resolveCampaignParallelism(opts: {
   const auto = threadsPerRun > 1 ? Math.max(1, Math.floor(cpus / threadsPerRun)) : 1
   const concurrency =
     opts.concurrency !== undefined ? Math.max(1, Math.floor(opts.concurrency)) : auto
+  const perRunThreads = Math.max(1, Math.floor(cpus / concurrency))
   const runEnv =
     threadsPerRun > 1
-      ? Object.fromEntries(THREAD_ENV_VARS.map((v) => [v, String(threadsPerRun)]))
+      ? Object.fromEntries(THREAD_ENV_VARS.map((v) => [v, String(perRunThreads)]))
       : undefined
   return { concurrency, runEnv }
+}
+
+/**
+ * Coerce a `benchmarkDevice` command's `{summaryOut}` JSON (`{ deviceBenchmark: {...} }`) into a typed
+ * {@link ModelDeviceBenchmark}, defaulting safely to CPU on anything malformed so a flaky benchmark can
+ * never set a bogus device. `bestDevice` is `mps` only when the summary explicitly says so.
+ */
+export function parseDeviceBenchmark(summary: unknown, benchmarkedAt: string): ModelDeviceBenchmark {
+  const db = (summary as { deviceBenchmark?: Record<string, unknown> } | undefined)?.deviceBenchmark
+  const bestDevice = db?.bestDevice === 'mps' ? 'mps' : 'cpu'
+  const speedup =
+    typeof db?.speedup === 'number' && Number.isFinite(db.speedup) && db.speedup >= 1 ? db.speedup : 1
+  const usPerStep: Record<string, number> = {}
+  const rawUs = (db?.usPerStep ?? {}) as Record<string, unknown>
+  for (const [device, value] of Object.entries(rawUs)) {
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) usPerStep[device] = value
+  }
+  const rawDevices = Array.isArray(db?.availableDevices) ? (db?.availableDevices as unknown[]) : []
+  const availableDevices = rawDevices.filter((d): d is string => typeof d === 'string')
+  return {
+    bestDevice,
+    speedup,
+    usPerStep,
+    availableDevices: availableDevices.length ? availableDevices : Object.keys(usPerStep).length ? Object.keys(usPerStep) : ['cpu'],
+    benchmarkedAt,
+  }
 }
 
 export function validateTrainerManifest(raw: unknown): TrainerManifest {
@@ -86,6 +119,11 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
   if (m.calibrate !== undefined) {
     if (typeof m.calibrate !== 'string' || !m.calibrate.includes('{summaryOut}')) {
       throw new Error('trainer manifest calibrate template must contain {summaryOut}')
+    }
+  }
+  if (m.benchmarkDevice !== undefined) {
+    if (typeof m.benchmarkDevice !== 'string' || !m.benchmarkDevice.includes('{summaryOut}')) {
+      throw new Error('trainer manifest benchmarkDevice template must contain {summaryOut}')
     }
   }
   if (m.evaluate !== undefined) {
