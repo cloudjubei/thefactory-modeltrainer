@@ -87,65 +87,21 @@ hypotheses; Models = the catalog aggregating runs + papers + hypotheses, with `s
   `model_name` fixed — today runs launch from Launch/Hypotheses; the catalog focuses on cataloguing +
   agent work + chat.
 
-### 2b. Models to implement / expose (the catalog backlog)
+### 2b. Models — remaining backlog
 
-The Models catalog seeds the families that have runs or lever choices; the items below exist in BlackSwan
-code but are NOT exposed in the active `model_name` lever (so they don't sweep), or are genuinely new. We
-will want to add them soon — wiring a code-only model is just adding its `model_name` to the lever (+ a
-catalog `modelNames` binding); a proposed one is a real build. (Inventory from `src/model/model_factory.py`.)
+Still PENDING (the rest of the code/paper model catalog is already exposed):
 
-**Proposed (new — build):**
+- **EIIE (Jiang 2017) — deferred, blocked.** A multi-asset PORTFOLIO architecture (one weight-shared
+  evaluator per asset → softmax allocation); it cannot be faithful in the single-asset, discrete-action env
+  (it degenerates to a position sizer). Build the **Wave-3 multi-asset / portfolio env first**, then EIIE
+  (and cross-sectional long-short) become possible. Catalogued `deferred`.
+- **GRU recurrent core + SSM (S4D).** A custom `RecurrentActorCriticPolicy` subclass (recurrent state in the
+  policy, not a features-extractor; expected ~wash vs LSTM) and an SSM falsification arm. Both low value.
+- **Non-RL `model_type` paths still unexposed:** `technical` (`TechnicalStrategyModel`) and regression `mlp`
+  (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
+  existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).
 
-- **iTransformer-PPO — BUILT + exposed (2026-06-26).** `SequenceFeaturesExtractor` gained an
-  `encoder='itransformer'` (Liu et al. 2024 inverted attention: each VARIATE is a token embedding its whole
-  lookback series, attention across variates, no positional embedding); `model_factory` routes
-  `itransformer-ppo` through the shared PPO+extractor branch; catalogued `implemented`, paper
-  `itransformer-inverted-2024` (arXiv 2310.06625) added with an A/B replicate spec vs attn-ppo/tcn-ppo.
-  Unit + create_model + end-to-end smoke green.
-- **GRU recurrent core** — a custom `RecurrentActorCriticPolicy` subclass (state in the policy, not a
-  features-extractor); expected ~wash vs LSTM. **SSM (S4D)** falsification arm. Both deferred (lower value).
-
-**Paper-derived proposed models — resolved (2026-06-26).** The catalog's paper→model proposals:
-
-- **RRL — BUILT.** Moody & Saffell (2001) direct recurrent RL, a non-SB3 `AbstractModel`
-  (`src/model/custom/rrl/rrl_model.py`): recurrent linear policy `F_t = tanh(w·φ(x)+u·F_{t-1})` → continuous
-  position, trained by gradient ASCENT on the strategy-return Sharpe (truncated BPTT), discretised to the
-  env's long/flat/short actions at eval. Factory branch + lever + catalog + tests + smoke.
-- **ESN-RRL — BUILT.** Borrageiro (2022): subclasses RRL, overriding the feature hook φ with a fixed
-  Echo State Network reservoir (sub-unit spectral radius; only the RRL readout trains). Tests + smoke.
-- **TDQN — BUILT** as a faithful config (Théate & Ernst 2021). `tdqn` shares the custom-double-DQN
-  construction; its identity (deep net, gamma≈0.4, long/short, indicators) is the launch config carried by
-  the paper's replicate spec. Lever + catalog + smoke.
-- **Policy Gradient — mapped to A2C/PPO** (already exposed; vanilla REINFORCE is strictly weaker). The
-  Zhang et al 2020 paper already sweeps `a2c`.
-- **EIIE — DEFERRED.** A multi-asset PORTFOLIO architecture (one evaluator per asset → weight vector); it
-  can't be faithful in the single-asset discrete env. Revisit with the Wave-3 multi-asset/portfolio env.
-
-**Code-only models — EXPOSED + verified (2026-06-26).** All 22 code-only `model_name`s were smoke-tested
-through the real pipeline (1d single, episodes=1, cpu). 19 construct/train/test/summarize cleanly and are
-now in the active `model_name` lever (+ catalogued): `reppo`, `trpo`, `ppo-sbx`, `dqn-sbx`, `a2c-custom`,
-`dqn-custom`, `dqn-lstm`, `duel-dqn`, `duel-dqn-custom-lstm3`, `duel-dqn-lstm`, `munchausen-dqn`,
-`munchausen-duel-dqn-custom`, `munchausen-duel-dqn-custom-lstm`, `rainbow-dqn`, `iqn`, `iqn-custom`,
-`qrdqn`, `ars`, `ars-mlp`. New catalog families added: **A2C** (`a2c`/`a2c-custom`), **QR-DQN**
-(`qrdqn`/`qrdqn-custom`), **ARS** (`ars`/`ars-mlp`, `baseline`). (The first batch showed a spurious
-12-model `IndexError` cluster — a resource flake after RecurrentPPO; all passed on individual recheck.)
-
-- **2 of the 3 broken — FIXED + exposed (2026-06-26), now `implemented`:**
-  - `ensemble` — reimplemented as a plain duck-typed model (learn/predict/save/policy/device) that trains
-    each member and predicts by AVERAGING member Q-values then argmax (was an unfinished `OffPolicyAlgorithm`
-    subclass with no `device`). Hermetic test + smoke green.
-  - `agent57` — `CustomAgent57ReplayBuffer` now records the sampled positions (`last_sampled_indices`) so
-    `compute_intrinsic_rewards` looks the per-sample bonus up (SB3 samples carry no indices). Test + smoke green.
-  - **`rainbow-dqn-old` — REMOVED (2026-06-26).** Deleted the factory branch + import, the catalog flavor,
-    its two factory tests, and the whole dead `src/model/rainbow/` dir (agent + its own segment-tree PER —
-    reachable only via this model; the working SB3 `rainbow-dqn` uses the separate `rainbow_dqn/`). Verified
-    no dangling refs and `rainbow-dqn`/`rainbow-dqn-custom` still build.
-- **Non-RL `model_type` paths (not yet exposed):** `mlp` (regression — `regression` still missing from the
-  documented `model_type` choices despite `create_regression_model` existing), `technical`
-  (`TechnicalStrategyModel`), `time` (`TimeStrategyModel`). Exposing these is a `model_type` lever change,
-  not a `model_name` one — separate follow-up.
-
-**Reusable components (surface as `component` catalog entries / building blocks):**
+**Reusable components (surface as `component` catalog entries / building blocks) — low priority:**
 
 - Features-extractors: `SequenceFeaturesExtractor` (attn/tcn, `custom/sequence_extractor.py`), `LSTMFCE`
   (`dqn_lstm_policy.py`), `CustomMlpExtractor` (`custom/custommlpextractor.py`).

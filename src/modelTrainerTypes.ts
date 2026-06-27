@@ -527,6 +527,12 @@ export interface AnalysisRun {
   dataset?: TrainingRunDataset
   /** Only `completed` runs are analysed. */
   status?: string
+  /** When the run completed (ISO), for the time-ordered convergence series. */
+  ranAt?: string
+  /** On an AGGREGATED setup (from {@link aggregateToSetupRuns}): bootstrap CI of the criterion's IQM. */
+  ci?: [number, number]
+  /** On an AGGREGATED setup: how many distinct seeds were folded in. */
+  seeds?: number
 }
 
 /**
@@ -774,6 +780,17 @@ export interface ConfigSpaceAnalysis {
   contextImportances: LeverImportance[]
   /** The environment + dataset levers (context); the rest are model levers. */
   contextLevers: string[]
+  /** Best-so-far over the environment's runs in time order — for the "is the search still improving?" view. */
+  convergence: ConvergencePoint[]
+}
+
+export interface ConvergencePoint {
+  /** 1-based run count (x-axis). */
+  index: number
+  /** Best criterion value among the first `index` runs (oriented by the criterion's direction). */
+  best: number
+  /** When that run completed (ISO), when known. */
+  at?: string
 }
 
 /** One distinct environment (a combination of environment+dataset lever values) across the runs. */

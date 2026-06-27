@@ -759,6 +759,20 @@ button:focus-visible,
   background: var(--surface-subtle);
   border: 1px solid var(--border);
 }
+/* The clickable device chip (measured CPU/MPS winner, or a "check device" trigger) — a button styled as a
+   badge: reset native chrome, show it's interactive. The measured state has no status class, so give it a
+   neutral surface; the unmeasured trigger carries .is-queued for its own look. */
+button.run-badge.model-device-chip {
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid var(--border);
+  background: var(--surface-subtle);
+  color: var(--text);
+}
+button.run-badge.model-device-chip:hover {
+  filter: brightness(1.15);
+  border-color: var(--accent);
+}
 .runs-live {
   margin-top: 6px;
 }
@@ -3316,6 +3330,13 @@ select.app-select:focus-visible,
 .xai-env-scroll {
   max-height: 52vh;
   overflow: auto;
+}
+/* Top-configs leaderboard rows open the run on click. */
+.xai-lb-row {
+  cursor: pointer;
+}
+.xai-lb-row:hover {
+  background: rgba(127, 127, 127, 0.1);
 }
 /* Each environment row scopes the analysis on click (like a Runs row). */
 .xai-env-row {

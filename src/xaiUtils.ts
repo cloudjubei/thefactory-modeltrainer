@@ -4,6 +4,7 @@ import type {
   AnalysisCriterion,
   AnalysisRun,
   ConfigSpaceAnalysis,
+  ConvergencePoint,
   EnvironmentSummary,
   ConfigSurrogate,
   ExperimentRecommendation,
@@ -1068,12 +1069,15 @@ export function aggregateToSetupRuns(
   }
   const out: AnalysisRun[] = []
   for (const group of groups.values()) {
-    const value = iqm(group.map((r) => criterionValueOf(r, criterion)!))
+    const agg = aggregateRunValues(group.map((r) => criterionValueOf(r, criterion)!))
+    const value = agg.iqm
     const rep = group[0]
     const setup: AnalysisRun = {
       ...rep,
       config: configWithout(rep.config, 'seed'),
       status: 'completed',
+      ci: agg.ci,
+      seeds: new Set(group.map((r) => r.seed ?? 0)).size,
     }
     // Store the aggregate where this criterion reads it, so the original criterion still works on setups.
     if (criterion.key === 'objective') setup.objective = value
@@ -1151,6 +1155,23 @@ export function paretoFrontier(points: number[][], directions: ('max' | 'min')[]
     }
     if (!dominated) out.push(i)
   }
+  return out
+}
+
+/** Best criterion value so far over the runs in time order — the "is the search still improving?" curve. */
+function buildConvergence(runs: AnalysisRun[], criterion: AnalysisCriterion): ConvergencePoint[] {
+  // Only TIMESTAMPED runs have a real temporal position — untimestamped (legacy) runs are dropped so the
+  // curve never presents an arbitrary input order as a time sequence (which would mislead the plateau read).
+  const dated = runs
+    .map((r) => ({ at: r.ranAt, v: criterionValueOf(r, criterion) }))
+    .filter((x): x is { at: string; v: number } => x.v !== undefined && !!x.at)
+    .sort((a, b) => a.at.localeCompare(b.at))
+  const out: ConvergencePoint[] = []
+  let best: number | null = null
+  dated.forEach((x, i) => {
+    best = best === null ? x.v : criterion.direction === 'min' ? Math.min(best, x.v) : Math.max(best, x.v)
+    out.push({ index: i + 1, best, at: x.at })
+  })
   return out
 }
 
@@ -1286,5 +1307,6 @@ export function computeConfigSpaceAnalysis(
     environments,
     contextImportances,
     contextLevers,
+    convergence: buildConvergence(envRuns, criterion),
   }
 }

@@ -3,6 +3,7 @@ import type { AnalysisCriterion, AnalysisRun } from './modelTrainerTypes.js'
 import {
   ablationPath,
   aggregateRunValues,
+  aggregateToSetupRuns,
   computeConfigSpaceAnalysis,
   paretoFrontier,
   criterionValueOf,
@@ -291,6 +292,43 @@ describe('conditional levers — the "doesn\'t-apply" sentinel is excluded from 
     expect(fh.importance).toBeLessThan(0.05) // not the top driver — model_name carries the real variance
     const fhFanova = a.importances.find((f) => f.lever === 'forward_horizon')
     if (fhFanova) expect(fhFanova.importance).toBeLessThan(0.05)
+  })
+})
+
+describe('convergence (best-so-far)', () => {
+  it('emits a time-ordered best-so-far series over the runs', () => {
+    const runs = [
+      run('c', { lr: 0.3 }, 20, { seed: 0, ranAt: '2026-01-03' }),
+      run('a', { lr: 0.1 }, 10, { seed: 0, ranAt: '2026-01-01' }),
+      run('b', { lr: 0.2 }, 30, { seed: 0, ranAt: '2026-01-02' }),
+    ]
+    const a = computeConfigSpaceAnalysis(runs, MAX)!
+    expect(a.convergence.map((p) => p.best)).toEqual([10, 30, 30]) // sorted by time, running max
+    expect(a.convergence.map((p) => p.index)).toEqual([1, 2, 3])
+  })
+
+  it('excludes untimestamped runs (they have no valid temporal position)', () => {
+    const runs = [
+      run('a', { lr: 0.1 }, 10, { seed: 0, ranAt: '2026-01-01' }),
+      run('b', { lr: 0.2 }, 99, { seed: 0 }), // no ranAt → not part of the time-ordered series
+      run('c', { lr: 0.3 }, 20, { seed: 0, ranAt: '2026-01-02' }),
+    ]
+    const a = computeConfigSpaceAnalysis(runs, MAX)!
+    expect(a.convergence.map((p) => p.best)).toEqual([10, 20])
+  })
+})
+
+describe('aggregateToSetupRuns', () => {
+  it('folds seeds to one setup and retains the bootstrap CI + seed count', () => {
+    const runs = []
+    for (let s = 0; s < 5; s++) runs.push(run(`a${s}`, { lr: 0.1 }, 10 + s, { seed: s }))
+    const setups = aggregateToSetupRuns(runs, MAX)
+    expect(setups).toHaveLength(1)
+    expect(setups[0].seeds).toBe(5)
+    expect(Array.isArray(setups[0].ci)).toBe(true)
+    // the IQM the criterion reads must sit within its own CI
+    expect(setups[0].ci![0]).toBeLessThanOrEqual(setups[0].objective!)
+    expect(setups[0].ci![1]).toBeGreaterThanOrEqual(setups[0].objective!)
   })
 })
 

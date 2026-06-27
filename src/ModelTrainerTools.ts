@@ -1177,6 +1177,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       seed: r.content.seed as number | undefined,
       dataset: r.content.dataset as AnalysisRun['dataset'],
       status: 'completed',
+      ranAt:
+        ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
+          (r.content.ranAt as string | undefined)) ||
+        undefined,
     }))
   }
 

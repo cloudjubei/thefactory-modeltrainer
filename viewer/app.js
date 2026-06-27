@@ -326,7 +326,13 @@ function byId(id) {
 // CSS animation, e.g. the indeterminate bar) every tick — which flashes. Only
 // touch the DOM when the markup actually changed.
 function setHtml(el, html) {
-  if (!el || el.innerHTML === html) return
+  // Skip when the markup is unchanged (anti-flash: re-assigning innerHTML restarts CSS animations like the
+  // spinner). Compare against the LAST STRING WE SET, cached on the node — NOT `el.innerHTML`, because
+  // reading innerHTML forces a full DOM-subtree SERIALIZATION on every call (the dominant main-thread cost
+  // on the 3s live-poll for the big Activities/Runs subtrees), and the browser normalizes parsed HTML so
+  // `el.innerHTML === html` almost never matched anyway — paying the serialization for nothing.
+  if (!el || el.__lastHtml === html) return
+  el.__lastHtml = html
   el.innerHTML = html
 }
 function shortKey(key) {
@@ -1661,22 +1667,24 @@ function resetDashboardState() {
   setStatusLine('hypotheses-status', '')
   const live = byId('runs-live')
   if (live) {
-    live.innerHTML = ''
+    setHtml(live, '') // via setHtml so the __lastHtml cache stays consistent with the DOM
     live.hidden = true
   }
   const runsBody = byId('runs-body')
-  if (runsBody) runsBody.innerHTML = ''
+  if (runsBody) setHtml(runsBody, '')
   const spark = byId('runs-sparkline')
   if (spark) {
-    spark.innerHTML = ''
+    setHtml(spark, '')
     spark.hidden = true
   }
+  // Clear via setHtml so the __lastHtml cache stays in sync with the DOM (these bodies are re-rendered
+  // through setHtml, which would otherwise skip a later identical re-render after a direct innerHTML reset).
   const hypothesesBody = byId('hypotheses-body')
-  if (hypothesesBody) hypothesesBody.innerHTML = ''
+  if (hypothesesBody) setHtml(hypothesesBody, '')
   const versionsBody = byId('versions-body')
-  if (versionsBody) versionsBody.innerHTML = ''
+  if (versionsBody) setHtml(versionsBody, '')
   const environmentsBody = byId('environments-body')
-  if (environmentsBody) environmentsBody.innerHTML = ''
+  if (environmentsBody) setHtml(environmentsBody, '')
   environmentsCache = []
   datasetsCache = []
   papersCache = []
@@ -1684,7 +1692,7 @@ function resetDashboardState() {
   launchPresetDatasets = []
   launchPresetEnvironments = []
   const activityBody = byId('activity-body')
-  if (activityBody) activityBody.innerHTML = ''
+  if (activityBody) setHtml(activityBody, '')
 }
 async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
@@ -2031,6 +2039,12 @@ function applyQuickDispatchState(item, busy) {
     if (busy) pendingPaperOps.add(key)
     else pendingPaperOps.delete(key)
     if (activeTabId === 'papers') updatePaperCard(pid)
+  } else if (item.activityType === 'benchmark-model-device') {
+    const mid = item.params && item.params.modelId
+    if (!mid) return
+    if (busy) benchmarkingModels.add(mid)
+    else benchmarkingModels.delete(mid)
+    if (activeTabId === 'models') renderModels()
   }
 }
 async function refreshAfterQuickDispatch(item, act) {
@@ -2074,6 +2088,11 @@ async function refreshAfterQuickDispatch(item, act) {
     } else {
       setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
     }
+  } else if (item.activityType === 'benchmark-model-device') {
+    // Re-read the model record so its newly-measured preferredDevice chip replaces the spinner.
+    if (act && act.status === 'completed') modelsCache = await readModels()
+    else setStatusLine('models-status', quickActivityFailureText(act, 'Benchmark'), true)
+    if (activeTabId === 'models') await renderModels()
   }
 }
 // The auto-eval intent survives reloads as a hidden marker record in the queue:
@@ -5016,6 +5035,7 @@ function xaiAllTabs(bundle, criterion) {
             ? xaiPcaHtml(bundle, criterion)
             : xaiParallelCoordsHtml(bundle, criterion),
     },
+    { id: 'progress', label: 'Progress', icon: xaiIconRank, render: () => xaiConvergenceHtml(bundle, criterion) + xaiLeaderboardHtml(bundle, criterion) },
     {
       id: 'recommender',
       label: 'Suggested',
@@ -5074,6 +5094,10 @@ function xaiHelp(viewId) {
         }
   }
   const H = {
+    progress: {
+      title: 'About Search progress',
+      body: 'The <strong>best score</strong> reached so far plotted against how many runs you have done, in <em>time order</em>. Each step up is a new best config. A long <strong>flat tail</strong> means more runs of the same kind are unlikely to help \u2014 time to stop, widen the search, or try a different approach. A still-rising curve means keep going. The <strong>Top configs</strong> table below ranks the best configs with confidence intervals, flags which are statistically tied (overlapping CIs), and flags any that score implausibly well (a leakage guardrail).',
+    },
     environments: {
       title: 'What environments are',
       body: 'An <strong>environment</strong> is a fixed combination of market-mechanics + dataset settings (fee, stop-loss, asset, walk-forward window, sizing…). Each is analysed <em>separately</em> and never tuned — a config that wins in one can lose in another, so they’re never blended. Click one to scope every other tab to it. The 🔒 list shows which context settings move the score most.',
@@ -5218,6 +5242,72 @@ function xaiCompareEnvironmentsHtml(a, criterion) {
 }
 // The focused run's standing among ALL runs (rank + action mix + attribution sanity), from the on-demand
 // LRU-cached digest. The button computes/recomputes it server-side over every run.
+// The closest runs to the focused one IN ITS ENVIRONMENT (from the whole-space bundle's setups), with the
+// one or two levers that differ + their score delta — \u201cwhy did this run land here vs its neighbours\u201d.
+// Returns '' when the cached bundle is for a different environment than this run (so it never misleads).
+function xaiNeighboursHtml(digest, bundle, criterion) {
+  const a = bundle.analysis
+  if (!digest || !digest.config) return ''
+  const env = a.environment
+  const inEnv = !env || (a.contextLevers || []).every((lev) => String(digest.config[lev]) === String(env[lev]))
+  if (!inEnv) return ''
+  const focus = digest.config
+  const all = (a.setups || []).filter((sp) => sp.config)
+  if (!all.length) return ''
+  const leverKeys = (a.levers && a.levers.length ? a.levers : Object.keys(all[0].config)).filter((k) => k !== 'seed')
+  const ranges = {}
+  for (const k of leverKeys) {
+    const nums = [focus[k]].concat(all.map((sp) => sp.config[k])).map(Number).filter((x) => Number.isFinite(x))
+    if (nums.length) {
+      const lo = Math.min.apply(null, nums)
+      const hi = Math.max.apply(null, nums)
+      ranges[k] = hi > lo ? hi - lo : 0
+    }
+  }
+  const dist = (cfg) => {
+    let d = 0
+    for (const k of leverKeys) {
+      const rng = ranges[k]
+      const fk = Number(focus[k])
+      const ck = Number(cfg[k])
+      if (rng && Number.isFinite(fk) && Number.isFinite(ck)) d += Math.abs((fk - ck) / rng)
+      else if (String(focus[k]) !== String(cfg[k])) d += 1
+    }
+    return d
+  }
+  const val = (sp) => xaiMetricVal(sp, criterion.key)
+  const scored = all.map((sp) => ({ sp, d: dist(sp.config) }))
+  // The focus run's OWN setup has distance 0 (identical model levers) \u2014 use it for the baseline value and
+  // exclude it from the neighbour list. (Setups are keyed by their first seed, so a key compare misses it.)
+  const self = scored.find((x) => x.d <= 1e-9)
+  const fval =
+    self && typeof val(self.sp) === 'number'
+      ? val(self.sp)
+      : typeof digest.objective === 'number'
+        ? digest.objective
+        : null
+  const neigh = scored
+    .filter((x) => x.d > 1e-9)
+    .sort((x, y) => x.d - y.d)
+    .slice(0, 5)
+  const diffOf = (cfg) =>
+    leverKeys
+      .filter((k) => String(focus[k]) !== String(cfg[k]))
+      .map((k) => `<code>${escapeHtml(xaiAbbrevLever(k))}: ${escapeHtml(xaiFmtLeverValue(focus[k]))}\u2192${escapeHtml(xaiFmtLeverValue(cfg[k]))}</code>`)
+      .join(' ') || '<span class="card-sub">same levers (seed only)</span>'
+  const rows = neigh
+    .map(({ sp }) => {
+      const sv = val(sp)
+      const delta = fval != null && typeof sv === 'number' ? sv - fval : null
+      const dcls = delta == null ? '' : (criterion.direction === 'min' ? delta < 0 : delta > 0) ? 'delta-pos' : 'delta-neg'
+      const dstr = delta == null ? '\u2014' : `<span class="${dcls}">${delta >= 0 ? '+' : ''}${escapeHtml(formatTickValue(delta))}</span>`
+      return `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(sp.key)}" title="Open this run"><td>${diffOf(sp.config)}</td><td class="num">${escapeHtml(formatTickValue(sv))}</td><td class="num">${dstr}</td></tr>`
+    })
+    .join('')
+  return `<div class="card"><div class="card-head card-head-row"><h3>Nearest configs <span class="card-sub">\u2014 the closest runs in this environment + how they differ</span></h3></div>
+    <p class="card-sub">The runs whose settings are most similar to this one, the lever(s) that differ, and their score vs this run \u2014 a controlled view of what moved the result.</p>
+    <table class="kv-table report-table"><thead><tr><th>differs by</th><th class="num">${escapeHtml(criterion.label)}</th><th class="num">vs this run</th></tr></thead><tbody>${rows}</tbody></table></div>`
+}
 function xaiRunStandingHtml(runKey, criterion) {
   const busy = analyzingRunKey === runKey
   const rec = xaiRunAnalysisCache.get(runKey)
@@ -5292,7 +5382,9 @@ function xaiRunStandingHtml(runKey, criterion) {
     rewardLine || attrLine || latentLine
       ? `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div>${rewardLine}${attrLine}${latentLine}</div>`
       : ''
-  return `${standingCard}${leversCard}${sibCard}${whyCard}`
+  const nbBundle = xaiResolveBundle(criterion)
+  const neighboursCard = nbBundle ? xaiNeighboursHtml(digest, nbBundle, criterion) : ''
+  return `${standingCard}${leversCard}${neighboursCard}${sibCard}${whyCard}`
 }
 // The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
 // sibling, what to try next. Per run (keyed by run key); the button becomes "Refresh (N new runs)" as the
@@ -6014,6 +6106,108 @@ function xaiParetoHtml(bundle, criterion) {
   </ul></div>`
   return card(
     `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}`,
+  )
+}
+// Top configs by the criterion, with bootstrap CIs — flags which are within seed-noise of #1 (tied) and
+// which score implausibly well (a leakage/degenerate guardrail). Both read from the per-setup CI the engine
+// now retains.
+function xaiLeaderboardHtml(bundle, criterion) {
+  const a = bundle.analysis
+  const val = (sp) => xaiMetricVal(sp, criterion.key)
+  const setups = (a.setups || []).filter((sp) => typeof val(sp) === 'number' && Number.isFinite(val(sp)))
+  if (setups.length < 2) return ''
+  const sorted = setups.slice().sort((x, y) => (criterion.direction === 'min' ? val(x) - val(y) : val(y) - val(x)))
+  const top = sorted.slice(0, 12)
+  const bestCi = top[0].ci
+  const overlapsBest = (ci) => !!(ci && bestCi && ci[0] <= bestCi[1] && ci[1] >= bestCi[0])
+  // direction-aware robust outlier fence for a "too-good-to-be-true" flag.
+  const vals = setups.map(val).slice().sort((m, n) => m - n)
+  const qAt = (pp) => vals[Math.max(0, Math.min(vals.length - 1, Math.floor(pp * (vals.length - 1))))]
+  const iqr = qAt(0.75) - qAt(0.25)
+  const suspicious = (v) =>
+    iqr > 0 && (criterion.direction === 'min' ? v < qAt(0.25) - 3 * iqr : v > qAt(0.75) + 3 * iqr)
+  const compactCfg = (cfg) =>
+    Object.entries(cfg || {})
+      .filter(([k]) => k !== 'seed')
+      .map(([k, v]) => `${escapeHtml(xaiAbbrevLever(k))}=${escapeHtml(xaiFmtLeverValue(v))}`)
+      .join(' ')
+      .slice(0, 90)
+  const rows = top
+    .map((sp, i) => {
+      const v = val(sp)
+      const tied = i > 0 && overlapsBest(sp.ci)
+      const ciStr = sp.ci ? `[${escapeHtml(formatTickValue(sp.ci[0]))}, ${escapeHtml(formatTickValue(sp.ci[1]))}]` : '\u2014'
+      const flags = [
+        tied ? '<span class="badge">tied #1</span>' : '',
+        suspicious(v) ? '<span class="delta-neg" title="Strong outlier \u2014 verify it is not leaking future info or a degenerate result">\u26a0 verify</span>' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')
+      return `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(sp.key)}" title="Open this run"><td class="num">${i + 1}</td><td><code>${compactCfg(sp.config)}</code></td><td class="num">${escapeHtml(formatTickValue(v))}</td><td class="num card-sub">${ciStr}</td><td class="num">${sp.seeds || 1}</td><td>${flags}</td></tr>`
+    })
+    .join('')
+  let tiedTop = 1
+  for (let i = 1; i < top.length; i++) {
+    if (overlapsBest(top[i].ci)) tiedTop++
+    else break
+  }
+  const notes = []
+  if (tiedTop > 1)
+    notes.push(
+      `<strong>#1\u2013#${tiedTop} are statistically tied</strong> \u2014 their 95% CIs overlap, so the ranking among them is within seed-noise. Add seeds (Suggested) to separate them.`,
+    )
+  const suspCount = setups.filter((sp) => suspicious(val(sp))).length
+  if (suspCount)
+    notes.push(
+      `\u26a0 <strong>${suspCount} config${suspCount === 1 ? '' : 's'} score implausibly ${criterion.direction === 'min' ? 'low' : 'high'}</strong> \u2014 verify they are not leaking future information or degenerate (a recurring trap).`,
+    )
+  const noteHtml = notes.length
+    ? `<div class="xai-conclusions"><strong class="card-sub">Read</strong><ul class="card-sub">${notes.map((n) => `<li>${n}</li>`).join('')}</ul></div>`
+    : ''
+  return `<div class="card"><div class="card-head card-head-row"><h3>Top configs <span class="card-sub">\u2014 best ${escapeHtml(criterion.label)}, with confidence intervals</span></h3></div><div class="card-scroll">
+    <table class="kv-table report-table"><thead><tr><th class="num">#</th><th>config</th><th class="num">${escapeHtml(criterion.label)}</th><th class="num">95% CI</th><th class="num">seeds</th><th>flags</th></tr></thead><tbody>${rows}</tbody></table>
+    ${noteHtml}</div></div>`
+}
+// PROGRESS tab: the best-so-far convergence curve over the environment's runs in time order, with a
+// plateau read so the user knows whether to keep going or stop.
+function xaiConvergenceHtml(bundle, criterion) {
+  const a = bundle.analysis
+  const conv = a.convergence || []
+  const card = (inner) =>
+    `<div class="card"><div class="card-head card-head-row"><h3>Search progress <span class="card-sub">\u2014 best ${escapeHtml(criterion.label)} so far vs runs</span></h3></div><div class="card-scroll">${inner}</div></div>`
+  if (conv.length < 2)
+    return card(
+      `<p class="card-sub">Need \u22652 timestamped runs to chart progress${conv.length === 0 ? ' \u2014 these runs may predate run timestamps (re-run to record them)' : ''}.</p>`,
+    )
+  const points = conv.map((pt) => ({ x: pt.index, y: pt.best }))
+  const svg = buildXyChart({
+    points,
+    line: true,
+    xLabel: 'runs',
+    yLabel: `best ${criterion.label}`,
+    width: 540,
+    height: 300,
+    ariaLabel: 'Best-so-far convergence over runs',
+  })
+  const finalBest = conv[conv.length - 1].best
+  let sinceImproved = 0
+  for (let i = conv.length - 1; i > 0; i--) {
+    if (conv[i].best === conv[i - 1].best) sinceImproved++
+    else break
+  }
+  const frac = sinceImproved / conv.length
+  const verdict =
+    sinceImproved === 0
+      ? 'The most recent run set a new best \u2014 the search is <strong>still improving</strong>, keep going.'
+      : frac >= 0.3
+        ? `No improvement for the last <strong>${sinceImproved}</strong> runs (${Math.round(frac * 100)}% of the search) \u2014 likely <strong>plateaued</strong>; consider stopping or changing the approach.`
+        : `No improvement for the last ${sinceImproved} run${sinceImproved === 1 ? '' : 's'} \u2014 watch for a plateau.`
+  const concl = `<div class="xai-conclusions"><strong class="card-sub">When to stop</strong><ul class="card-sub">
+    <li>Best ${escapeHtml(criterion.label)} so far: <strong>${escapeHtml(formatTickValue(finalBest))}</strong> after ${conv.length} runs.</li>
+    <li>${verdict}</li>
+  </ul></div>`
+  return card(
+    `<p class="card-sub">Each step up is a new best config found as you ran more experiments (in time order). A long flat tail means you\u2019ve likely converged.</p><div class="chart-wrap">${svg}</div>${concl}`,
   )
 }
 function xaiAblationTreeHtml(path, criterion) {
@@ -10191,20 +10385,42 @@ function modelStatusSelectHtml(model) {
     .join('')
   return `<label class="field model-status-field"><span>Status</span><select data-action="set-status" data-id="${escapeHtml(model.id)}">${sel}</select></label>`
 }
-// The per-model device-benchmark line: which device the last CPU-vs-MPS benchmark picked + the margin.
-function modelDevicePrefHtml(model) {
-  const b = model.deviceBenchmark
-  if (!model.preferredDevice && !b) return ''
-  const dev = String(model.preferredDevice || (b && b.bestDevice) || 'cpu').toUpperCase()
-  const margin =
-    b && b.speedup && b.speedup > 1.01 ? ` (${b.speedup}× faster than ${dev === 'MPS' ? 'CPU' : 'MPS'})` : ''
-  const per =
-    b && b.usPerStep
-      ? Object.entries(b.usPerStep)
-          .map(([d, us]) => `${d} ${Math.round(us)}µs/step`)
-          .join(', ')
+// Whether this model has a CPU-vs-MPS device benchmark in flight — RUNNING (busy, set by the activity
+// lifecycle in applyQuickDispatchState) OR still QUEUED (waiting for a slot). Both must spin the chip.
+function modelBenchmarkPending(modelId) {
+  if (benchmarkingModels.has(modelId)) return true
+  return queueCache.some(
+    (q) => q.activityType === 'benchmark-model-device' && q.params && q.params.modelId === modelId,
+  )
+}
+// The device chip shown next to the implementation-status badge: the measured CPU-vs-MPS winner, a
+// spinner while a benchmark is queued/running, or a "check" affordance when never measured. The chip IS
+// the trigger (click to (re-)benchmark) — there is no separate button.
+function modelDeviceChipHtml(model) {
+  const id = escapeHtml(model.id)
+  if (modelBenchmarkPending(model.id)) {
+    return `<span class="run-badge is-running" title="Benchmarking CPU vs MPS…">${spinnerHtml()} device</span>`
+  }
+  if (!embedded()) {
+    return model.preferredDevice
+      ? `<span class="run-badge">${escapeHtml(String(model.preferredDevice).toUpperCase())}</span>`
       : ''
-  return `<p class="card-sub">Preferred device: <strong>${escapeHtml(dev)}</strong>${escapeHtml(margin)}${per ? ` — ${escapeHtml(per)}` : ''}</p>`
+  }
+  const b = model.deviceBenchmark
+  if (model.preferredDevice) {
+    const dev = String(model.preferredDevice).toUpperCase()
+    const margin = b && b.speedup && b.speedup > 1.01 ? `, ${b.speedup}× faster` : ''
+    const per =
+      b && b.usPerStep
+        ? ' — ' +
+          Object.entries(b.usPerStep)
+            .map(([d, us]) => `${d} ${Math.round(us)}µs/step`)
+            .join(', ')
+        : ''
+    const title = `Fastest device (measured): ${dev}${margin}.${per} Click to re-benchmark.`
+    return `<button type="button" class="run-badge model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr(title)}>${escapeHtml(dev)}</button>`
+  }
+  return `<button type="button" class="run-badge is-queued model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr('Benchmark this model on CPU vs MPS to set its faster device')}>⚡ check device</button>`
 }
 function modelCardHtml(model) {
   const id = escapeHtml(model.id)
@@ -10217,12 +10433,7 @@ function modelCardHtml(model) {
       : st === 'proposed'
         ? 'Discuss implementing this model with the AI'
         : 'Discuss / improve this model with the AI'
-  const benchmarking = benchmarkingModels.has(model.id)
-  const deviceBtn = embedded()
-    ? `<button type="button" class="card-btn" data-action="benchmark-device" data-id="${id}"${benchmarking ? ' disabled' : ''}${helpAttr('Benchmark this model on CPU vs MPS and set its faster device')}>${benchmarking ? '…' : '⚡'}</button>`
-    : ''
   const actions =
-    deviceBtn +
     (chatAboutRunAvailable()
       ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
       : '') +
@@ -10230,6 +10441,7 @@ function modelCardHtml(model) {
   return `<details class="paper-card model-card" data-id="${id}"${open}>
     <summary class="paper-summary">
       ${modelStatusBadgeHtml(model)}
+      ${modelDeviceChipHtml(model)}
       ${modelRunChipHtml(model)}
       <span class="paper-summary-title">${escapeHtml(model.name || model.id)}</span>
       <span class="card-actions">${actions}</span>
@@ -10239,7 +10451,6 @@ function modelCardHtml(model) {
       ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
       ${flavorCount ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
       ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
-      ${modelDevicePrefHtml(model)}
       ${modelFlavorsHtml(model)}
       ${modelStatusSelectHtml(model)}
       ${modelLinkedPapersHtml(model)}
@@ -10678,46 +10889,34 @@ async function onScanModels() {
     if (btn) btn.disabled = false
   }
 }
-// Benchmark ONE model on CPU vs MPS (the backend trains it briefly on each device) and persist + show the
-// faster device. Mirrors onScanModels' enqueue/observe/re-render flow.
+// Benchmark ONE model on CPU vs MPS — enqueue the activity and show the spinner immediately. The activity
+// lifecycle (applyQuickDispatchState / refreshAfterQuickDispatch) owns the rest: it spins the chip while
+// RUNNING and re-reads the model record (the new preferredDevice chip) on completion. queueCache covers
+// the QUEUED-but-not-yet-running window. So the chip spins from click → through queue → run → result.
 async function onBenchmarkModelDevice(id) {
   if (!embedded()) {
     setStatusLine('models-status', 'Open inside the Overseer to benchmark devices.', true)
     return
   }
-  if (benchmarkingModels.has(id)) return
+  if (modelBenchmarkPending(id)) return
   const epoch = projectEpoch
-  benchmarkingModels.add(id)
-  setStatusLine('models-status', 'Benchmarking CPU vs MPS — trains the model briefly on each device…')
-  await renderModels()
   try {
     const result = await startOrEnqueue(
       'benchmark-model-device',
       trainerActivityParams({ modelId: id }),
       'Benchmark device',
     )
-    if (result.queued) {
-      if (epoch === projectEpoch) setStatusLine('models-status', queuedStatusText(result.ahead))
-      return
-    }
-    const act = await observeQuickActivity(result.activityId)
     if (epoch !== projectEpoch) return
-    if (act && act.status === 'completed') {
-      modelsCache = await readModels()
-      const m = modelsCache.find((x) => x.id === id)
-      const dev = m && m.preferredDevice
-      showToast(dev ? `Best device for ${m.name || id}: ${String(dev).toUpperCase()}.` : 'Device benchmark complete.')
-      setStatusLine('models-status', '')
-    } else {
-      setStatusLine('models-status', quickActivityFailureText(act, 'Benchmark'), true)
-    }
+    setStatusLine(
+      'models-status',
+      result.queued ? queuedStatusText(result.ahead) : 'Benchmarking CPU vs MPS…',
+    )
+    await refreshQueue() // so queueCache reflects a queued benchmark and the chip spins right away
+    await renderModels()
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('models-status', 'Could not benchmark — please try again.', true)
     }
-  } finally {
-    benchmarkingModels.delete(id)
-    if (epoch === projectEpoch) await renderModels()
   }
 }
 async function onDeleteModel(id) {
@@ -10846,8 +11045,10 @@ function setupModels() {
     const { action, id } = btn.dataset
     if (action === 'import-seeds') importSeedModels()
     else if (action === 'discuss-model') chatAboutModel(id)
-    else if (action === 'benchmark-device') onBenchmarkModelDevice(id)
-    else if (action === 'delete-model') onDeleteModel(id)
+    else if (action === 'benchmark-device') {
+      event.preventDefault() // the chip lives in <summary>; don't toggle the card open/closed on click
+      onBenchmarkModelDevice(id)
+    } else if (action === 'delete-model') onDeleteModel(id)
   })
 }
 
@@ -12547,7 +12748,19 @@ function taskColumnHtml(entries, queue, collapsed) {
     ${collapsed ? '' : `<div class="activity-col-body">${bodyContent}</div>`}
   </section>`
 }
+let _activityRenderRaf = 0
+// Coalesce renders: each live campaign runs its OWN 3s observe loop (plus the 1s ticker), and every one
+// calls renderActivity() — which rebuilds the entire experiment+task columns. Collapse all the calls in a
+// frame into ONE render of the latest state (and none while the tab is hidden — rAF pauses; onViewerVisible
+// re-renders on return). Without this, K concurrent campaigns = K full HTML builds every poll.
 function renderActivity() {
+  if (_activityRenderRaf) return
+  _activityRenderRaf = requestAnimationFrame(() => {
+    _activityRenderRaf = 0
+    renderActivityNow()
+  })
+}
+function renderActivityNow() {
   const body = byId('activity-body')
   if (!body) return
   renderRunsLive()
