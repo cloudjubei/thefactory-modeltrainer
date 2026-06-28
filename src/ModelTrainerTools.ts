@@ -16,6 +16,8 @@ import type {
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
   AnalyzePaperModelsParams,
+  ConsolidateModelsParams,
+  ConsolidateModelsResult,
   AnalyzePaperModelsResult,
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
@@ -99,6 +101,9 @@ import {
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   coerceAnalyzedPaperModels,
+  buildConsolidateModelsSystemPrompt,
+  buildConsolidateModelsUserContent,
+  coerceConsolidationGroups,
   coerceHypothesisItems,
   coercePaperDraft,
   coerceScannedModels,
@@ -1610,6 +1615,56 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function consolidateModels(
+    params: ConsolidateModelsParams,
+  ): Promise<ConsolidateModelsResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const modelType = `${recordType}-model`
+    const proposedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const proposedAt = now()
+
+    const records = await deps.storage.listRecords({ scope: params.scope, type: modelType })
+    const models: TrainingModel[] = []
+    for (const r of records) {
+      const content = r.content as unknown as TrainingModel
+      if (content && typeof content.id === 'string' && !content.dismissed) models.push(content)
+    }
+    // Nothing to merge with fewer than two models — skip the LLM call entirely.
+    if (models.length < 2) {
+      return { recordType, groups: [], modelCount: models.length, proposedBy, proposedAt }
+    }
+
+    const res = await executor.runInference({
+      systemPrompt: buildConsolidateModelsSystemPrompt(manifest),
+      userContent: buildConsolidateModelsUserContent({
+        models: models.map((m) => ({
+          id: m.id,
+          name: m.name,
+          slug: m.slug,
+          category: m.category,
+          description: m.description,
+          modelNames: modelBindingNames(m),
+        })),
+      }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const groups = coerceConsolidationGroups(
+      parseFirstValidJson(res.text),
+      models.map((m) => m.id),
+    )
+    logger?.info('proposed model consolidations', {
+      recordType,
+      modelCount: models.length,
+      groups: groups.length,
+    })
+    return { recordType, groups, modelCount: models.length, proposedBy, proposedAt }
+  }
+
   async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
     const executor = requireInferenceExecutor()
     const manifest =
@@ -1914,6 +1969,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzePaperFromUrl,
     suggestPaperHypotheses,
     scanProjectModels,
+    consolidateModels,
     benchmarkModelDevice,
     analyzePaperModels,
     xaiNarrate,

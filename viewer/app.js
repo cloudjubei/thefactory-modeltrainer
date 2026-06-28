@@ -268,6 +268,9 @@ let paperSubform = null
 let modelsCache = []
 let modelCategoryFilter = 'all'
 const modelExpanded = new Set()
+// Proposed model-consolidation groups (near-duplicates the LLM found), resolved to catalog models, while
+// the review modal is open. Each: { canonicalId, duplicateIds, reason, members:[model] }.
+let consolidationGroups = []
 // Models whose CPU-vs-MPS device benchmark is currently running (disables the per-model button).
 const benchmarkingModels = new Set()
 // The persisted all-runs aggregate (a `<recordType>-model-stats` record): per-model + per-flavor run
@@ -7289,6 +7292,7 @@ function setupRuns() {
       if (event.key === 'Escape') {
         closeChartModal()
         closeCustomRulePopup()
+        closeConsolidateModal()
       }
     })
   }
@@ -10889,6 +10893,206 @@ async function onScanModels() {
     if (btn) btn.disabled = false
   }
 }
+// Consolidate: ask the LLM to find near-duplicate models (often the same model proposed from several
+// papers) and review merging each group into ONE canonical model — the rest fold in as flavors and are
+// deleted. Triggers the backend `consolidate-models` activity, then opens the review modal.
+async function onConsolidateModels() {
+  if (!embedded()) {
+    setStatusLine('models-status', 'Open inside the Overseer to consolidate models.', true)
+    return
+  }
+  const epoch = projectEpoch
+  setStatusLine('models-status', '')
+  const btn = byId('models-consolidate-btn')
+  if (btn) btn.disabled = true
+  try {
+    const result = await startOrEnqueue(
+      'consolidate-models',
+      trainerActivityParams({}),
+      'Consolidate models',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('models-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      const groups = await loadConsolidationGroups()
+      if (!groups.length) {
+        showToast('No near-duplicate models to consolidate.')
+        return
+      }
+      openConsolidateModal(groups)
+    } else {
+      setStatusLine('models-status', quickActivityFailureText(act, 'Consolidate'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      setStatusLine('models-status', 'Could not consolidate — please try again.', true)
+    }
+  } finally {
+    if (btn) btn.disabled = false
+  }
+}
+// Read the latest `-consolidation` proposal, resolve each group's ids to live catalog models (dropping any
+// that no longer exist), and keep only groups that still have a canonical + at least one duplicate.
+async function loadConsolidationGroups() {
+  modelsCache = await readModels()
+  const byModelId = new Map(modelsCache.map((m) => [m.id, m]))
+  const recs = await queryRecords(manifest.recordType + '-consolidation', 'latest')
+  const content = recs && recs[0] && recs[0].content
+  const groups = content && Array.isArray(content.groups) ? content.groups : []
+  const resolved = []
+  for (const g of groups) {
+    const canonical = byModelId.get(g.canonicalId)
+    if (!canonical) continue
+    const duplicates = (g.duplicateIds || []).map((id) => byModelId.get(id)).filter(Boolean)
+    if (!duplicates.length) continue
+    resolved.push({
+      canonicalId: g.canonicalId,
+      duplicateIds: duplicates.map((d) => d.id),
+      reason: g.reason || '',
+      members: [canonical, ...duplicates],
+    })
+  }
+  return resolved
+}
+function openConsolidateModal(groups) {
+  consolidationGroups = groups
+  renderConsolidateModal()
+}
+function closeConsolidateModal() {
+  const m = byId('consolidate-modal')
+  if (m) m.hidden = true
+  consolidationGroups = []
+}
+// One member row: a radio to pick THIS entry as the canonical to keep, and (for non-canonical members) a
+// checkbox to fold it in. The canonical keeps its identity, runs, papers + flavors; the others are deleted.
+function consolidateMemberHtml(gi, model, canonicalId) {
+  const isCanon = model.id === canonicalId
+  const names = window.Models.flavorModelNames(model)
+  const sub = names.length ? ` <span class="card-sub">(${names.map(escapeHtml).join(', ')})</span>` : ''
+  const control = isCanon
+    ? '<span class="consolidate-keep">keeps its runs &amp; flavors</span>'
+    : `<label class="consolidate-merge"><input type="checkbox" data-consolidate-merge value="${escapeHtml(model.id)}" checked /> merge in</label>`
+  return (
+    `<li class="consolidate-member${isCanon ? ' is-canonical' : ''}">` +
+    `<label class="consolidate-canon"><input type="radio" name="consolidate-canon-${gi}" value="${escapeHtml(model.id)}"${isCanon ? ' checked' : ''} /> canonical</label>` +
+    `<span class="consolidate-member-name"><strong>${escapeHtml(model.name || model.id)}</strong>${sub}</span>` +
+    `<span class="consolidate-member-ctl">${control}</span>` +
+    `</li>`
+  )
+}
+function consolidateGroupHtml(group, gi) {
+  const list = group.members.map((m) => consolidateMemberHtml(gi, m, group.canonicalId)).join('')
+  return (
+    `<div class="consolidate-group" data-index="${gi}">` +
+    (group.reason ? `<p class="consolidate-reason">${escapeHtml(group.reason)}</p>` : '') +
+    `<ul class="consolidate-members">${list}</ul>` +
+    `<div class="consolidate-actions">` +
+    `<button type="button" class="consolidate-merge-btn" data-consolidate-accept="${gi}">Merge</button>` +
+    `<button type="button" class="ghost-btn" data-consolidate-reject="${gi}">Reject</button>` +
+    `</div></div>`
+  )
+}
+function renderConsolidateModal() {
+  let modal = byId('consolidate-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'consolidate-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-consolidate-close]'))
+        return closeConsolidateModal()
+      const accept = event.target.closest('[data-consolidate-accept]')
+      if (accept) return onAcceptConsolidation(Number(accept.dataset.consolidateAccept))
+      const reject = event.target.closest('[data-consolidate-reject]')
+      if (reject) return onRejectConsolidation(Number(reject.dataset.consolidateReject))
+    })
+    modal.addEventListener('change', (event) => {
+      const radio = event.target.closest('input[type="radio"][name^="consolidate-canon-"]')
+      if (radio)
+        onChangeConsolidationCanonical(
+          Number(radio.name.replace('consolidate-canon-', '')),
+          radio.value,
+        )
+    })
+  }
+  const groups = consolidationGroups
+  const body = groups.length
+    ? groups.map((g, i) => consolidateGroupHtml(g, i)).join('')
+    : '<p class="consolidate-empty">All suggestions handled.</p>'
+  modal.innerHTML =
+    `<div class="chart-modal__backdrop" data-consolidate-close></div>` +
+    `<div class="chart-modal__panel consolidate-panel" role="dialog" aria-label="Consolidate models">` +
+    `<div class="chart-modal__head">` +
+    `<strong>Consolidate models <span class="card-sub">— ${groups.length} suggestion${groups.length === 1 ? '' : 's'}</span></strong>` +
+    `<button type="button" class="icon-btn" data-consolidate-close title="Close (Esc)" aria-label="Close">✕</button>` +
+    `</div>` +
+    `<p class="card-sub consolidate-help">Each group is, per the LLM, the same model proposed more than once. Pick the entry to KEEP as canonical; the ones you "merge in" fold into it as flavors (their papers/hypotheses are preserved) and are then deleted.</p>` +
+    `<div class="chart-modal__scroll">${body}</div>` +
+    `</div>`
+  modal.hidden = false
+}
+// Re-render one group when its canonical changes so the new canonical loses its "merge in" checkbox.
+function onChangeConsolidationCanonical(gi, modelId) {
+  const group = consolidationGroups[gi]
+  if (!group) return
+  group.canonicalId = modelId
+  const modal = byId('consolidate-modal')
+  const el = modal && modal.querySelector(`.consolidate-group[data-index="${gi}"]`)
+  if (!el) return
+  const tmp = document.createElement('div')
+  tmp.innerHTML = consolidateGroupHtml(group, gi)
+  const fresh = tmp.firstElementChild
+  if (fresh) el.replaceWith(fresh)
+}
+function onRejectConsolidation(gi) {
+  consolidationGroups.splice(gi, 1)
+  renderConsolidateModal()
+}
+// Apply one accepted merge: fold the checked duplicates into the chosen canonical (flavors + paper/hyp
+// links unioned), persist the canonical, delete the duplicates, and repoint papers that referenced them.
+async function onAcceptConsolidation(gi) {
+  const modal = byId('consolidate-modal')
+  const group = consolidationGroups[gi]
+  const el = modal && modal.querySelector(`.consolidate-group[data-index="${gi}"]`)
+  if (!group || !el) return
+  const checkedRadio = el.querySelector('input[type="radio"]:checked')
+  const canonicalId = (checkedRadio && checkedRadio.value) || group.canonicalId
+  const duplicateIds = [...el.querySelectorAll('input[type="checkbox"][data-consolidate-merge]:checked')]
+    .map((c) => c.value)
+    .filter((id) => id !== canonicalId)
+  if (!duplicateIds.length) {
+    setStatusLine('models-status', 'Select at least one model to merge in (or Reject).', true)
+    return
+  }
+  const canonical = modelsCache.find((m) => m.id === canonicalId)
+  const duplicates = duplicateIds.map((id) => modelsCache.find((m) => m.id === id)).filter(Boolean)
+  if (!canonical || !duplicates.length) return
+  try {
+    const merged = window.Models.mergeModelsForConsolidation(canonical, duplicates, nowIso())
+    await putModel(merged)
+    for (const d of duplicates) await deleteModelRecord(d.id)
+    const changedPapers = window.Models.repointPaperModelIds(
+      await readPapers(),
+      duplicateIds,
+      canonicalId,
+    )
+    for (const p of changedPapers) await putPaper(p)
+  } catch {
+    setStatusLine('models-status', 'Could not merge — please try again.', true)
+    return
+  }
+  consolidationGroups.splice(gi, 1)
+  showToast(
+    `Merged ${duplicates.length} model${duplicates.length === 1 ? '' : 's'} into ${canonical.name || canonicalId}.`,
+  )
+  renderConsolidateModal()
+  await renderModels()
+}
 // Benchmark ONE model on CPU vs MPS — enqueue the activity and show the spinner immediately. The activity
 // lifecycle (applyQuickDispatchState / refreshAfterQuickDispatch) owns the rest: it spins the chip while
 // RUNNING and re-reads the model record (the new preferredDevice chip) on completion. queueCache covers
@@ -10995,6 +11199,8 @@ function paperModelsHtml(paper) {
 function setupModels() {
   const scanBtn = byId('models-scan-btn')
   if (scanBtn) scanBtn.addEventListener('click', onScanModels)
+  const consolidateBtn = byId('models-consolidate-btn')
+  if (consolidateBtn) consolidateBtn.addEventListener('click', onConsolidateModels)
   const body = byId('models-body')
   if (!body) return
   // Track expand/collapse so it survives re-render (the `toggle` event doesn't bubble — capture it).

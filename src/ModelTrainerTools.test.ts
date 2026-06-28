@@ -3561,3 +3561,128 @@ describe('invalidateRuns', () => {
     ).not.toBeNull()
   })
 })
+
+describe('consolidateModels', () => {
+  async function seedModel(
+    storage: DataStorage,
+    id: string,
+    extra: Record<string, unknown> = {},
+  ) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: id,
+      content: {
+        id,
+        slug: id,
+        name: id,
+        description: '',
+        category: 'rl',
+        status: 'implemented',
+        statusSource: 'auto',
+        flavors: [{ modelName: id }],
+        source: 'paper',
+        createdAt: NOW,
+        updatedAt: NOW,
+        ...extra,
+      },
+    })
+  }
+
+  it('proposes LLM-found groups, validated against the catalog ids', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'itransformer-ppo')
+    await seedModel(storage, 'inverted-transformer-ppo')
+    await seedModel(storage, 'dqn')
+    const executor = stubExecutor(
+      JSON.stringify({
+        groups: [
+          { canonicalId: 'itransformer-ppo', duplicateIds: ['inverted-transformer-ppo'], reason: 'same' },
+          { canonicalId: 'ghost', duplicateIds: ['dqn'], reason: 'bogus' }, // unknown canonical -> dropped
+        ],
+      }),
+    )
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.consolidateModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.groups).toEqual([
+      { canonicalId: 'itransformer-ppo', duplicateIds: ['inverted-transformer-ppo'], reason: 'same' },
+    ])
+    expect(result.modelCount).toBe(3)
+    expect(result.recordType).toBe('demo-run')
+    expect(result.proposedAt).toBe(NOW)
+  })
+
+  it('excludes dismissed models from the candidate set', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'a')
+    await seedModel(storage, 'b')
+    await seedModel(storage, 'old', { dismissed: true })
+    const executor = stubExecutor(JSON.stringify({ groups: [] }))
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.consolidateModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.modelCount).toBe(2)
+    const sent = JSON.parse(executor.requests[0].userContent)
+    expect(sent.models.map((m: { id: string }) => m.id).sort()).toEqual(['a', 'b'])
+  })
+
+  it('does NOT mutate or merge any model record (propose-only)', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'a')
+    await seedModel(storage, 'b')
+    const executor = stubExecutor(
+      JSON.stringify({ groups: [{ canonicalId: 'a', duplicateIds: ['b'], reason: 'same' }] }),
+    )
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.consolidateModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const a = await storage.readRecord({ scope: 'proj', type: 'demo-run-model', key: 'a' })
+    const b = await storage.readRecord({ scope: 'proj', type: 'demo-run-model', key: 'b' })
+    expect((a!.content as { flavors: unknown[] }).flavors).toEqual([{ modelName: 'a' }])
+    expect(b).not.toBeNull()
+    expect((b!.content as { dismissed?: boolean }).dismissed).toBeUndefined()
+  })
+
+  it('returns empty groups without calling the LLM when there are fewer than 2 models', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'only')
+    const executor = stubExecutor(JSON.stringify({ groups: [] }))
+    const { tools } = makeJudgeTools(executor, storage)
+    const result = await tools.consolidateModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    expect(result.groups).toEqual([])
+    expect(result.modelCount).toBe(1)
+    expect(executor.requests.length).toBe(0)
+  })
+
+  it('throws without an inference executor', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'a')
+    const { tools } = makeJudgeTools(undefined, storage)
+    await expect(
+      tools.consolidateModels({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        llmConfig: LLM,
+      }),
+    ).rejects.toThrow()
+  })
+})

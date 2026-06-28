@@ -366,3 +366,122 @@ describe('seed re-sync (flavors)', () => {
     expect(merged.statusSource).toBe('auto')
   })
 })
+
+describe('mergeModelsForConsolidation', () => {
+  const canonical = (over: Record<string, unknown> = {}) => ({
+    id: 'itransformer-ppo',
+    slug: 'itransformer-ppo',
+    name: 'iTransformer-PPO',
+    description: 'Inverted-attention PPO.',
+    category: 'rl',
+    status: 'needs-improvement',
+    statusSource: 'manual',
+    statusNote: 'pin',
+    notes: 'mine',
+    source: 'manual',
+    flavors: [{ name: 'base', modelName: 'itransformer-ppo' }],
+    paperIds: ['p-itransf'],
+    hypothesisIds: ['h-a'],
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:00.000Z',
+    ...over,
+  })
+  const dup = (over: Record<string, unknown> = {}) => ({
+    id: 'inverted-transformer-ppo',
+    slug: 'inverted-transformer-ppo',
+    name: 'Inverted Transformer PPO',
+    description: 'Same thing, other paper.',
+    category: 'rl',
+    status: 'implemented',
+    statusSource: 'auto',
+    source: 'paper',
+    flavors: [{ name: 'variant', modelName: 'itransformer-ppo-v2' }],
+    paperIds: ['p-inv'],
+    hypothesisIds: ['h-b'],
+    createdAt: '2026-06-02T00:00:00.000Z',
+    updatedAt: '2026-06-02T00:00:00.000Z',
+    ...over,
+  })
+  const NOW = '2026-06-27T00:00:00.000Z'
+
+  it("unions flavors (canonical first) and de-dupes by flavorKey", () => {
+    const merged = M.mergeModelsForConsolidation(
+      canonical(),
+      [dup(), dup({ id: 'x', slug: 'x', flavors: [{ modelName: 'itransformer-ppo' }] })],
+      NOW,
+    )
+    // canonical's flavor first, dup's distinct flavor next, the third dup's flavor collides with
+    // canonical's flavorKey so it is dropped.
+    expect(merged.flavors.map((f: any) => f.modelName)).toEqual([
+      'itransformer-ppo',
+      'itransformer-ppo-v2',
+    ])
+  })
+
+  it('unions paperIds + hypothesisIds across canonical and duplicates', () => {
+    const merged = M.mergeModelsForConsolidation(canonical(), [dup()], NOW)
+    expect(merged.paperIds.sort()).toEqual(['p-inv', 'p-itransf'])
+    expect(merged.hypothesisIds.sort()).toEqual(['h-a', 'h-b'])
+  })
+
+  it('keeps the canonical identity + manual status/notes, refreshes updatedAt', () => {
+    const merged = M.mergeModelsForConsolidation(canonical(), [dup()], NOW)
+    expect(merged.id).toBe('itransformer-ppo')
+    expect(merged.slug).toBe('itransformer-ppo')
+    expect(merged.name).toBe('iTransformer-PPO')
+    expect(merged.status).toBe('needs-improvement')
+    expect(merged.statusSource).toBe('manual')
+    expect(merged.statusNote).toBe('pin')
+    expect(merged.notes).toBe('mine')
+    expect(merged.createdAt).toBe('2026-06-01T00:00:00.000Z')
+    expect(merged.updatedAt).toBe(NOW)
+  })
+
+  it('ignores a duplicate that is actually the canonical (same id)', () => {
+    const merged = M.mergeModelsForConsolidation(canonical(), [canonical()], NOW)
+    expect(merged.flavors.map((f: any) => f.modelName)).toEqual(['itransformer-ppo'])
+    expect(merged.paperIds).toEqual(['p-itransf'])
+  })
+
+  it('derives flavors from legacy modelNames when flavors[] is absent', () => {
+    const merged = M.mergeModelsForConsolidation(
+      canonical({ flavors: undefined, modelNames: ['itransformer-ppo'] }),
+      [dup({ flavors: undefined, modelNames: ['legacy-name'] })],
+      NOW,
+    )
+    expect(merged.flavors.map((f: any) => f.modelName)).toEqual(['itransformer-ppo', 'legacy-name'])
+    expect(merged.modelNames).toBeUndefined()
+  })
+
+  it('omits paperIds/hypothesisIds when none exist anywhere', () => {
+    const merged = M.mergeModelsForConsolidation(
+      canonical({ paperIds: undefined, hypothesisIds: undefined }),
+      [dup({ paperIds: [], hypothesisIds: [] })],
+      NOW,
+    )
+    expect(merged.paperIds).toBeUndefined()
+    expect(merged.hypothesisIds).toBeUndefined()
+  })
+})
+
+describe('repointPaperModelIds', () => {
+  const paper = (id: string, modelIds: string[]) => ({ id, modelIds })
+
+  it('replaces duplicate ids with the canonical id, only returning changed papers', () => {
+    const papers = [
+      paper('p1', ['inverted-transformer-ppo']),
+      paper('p2', ['something-else']),
+      paper('p3', ['itransformer-ppo', 'inverted-transformer-ppo']),
+    ]
+    const changed = M.repointPaperModelIds(papers, ['inverted-transformer-ppo'], 'itransformer-ppo')
+    // p2 is untouched (not returned); p1 repointed; p3 de-duped to a single canonical id.
+    expect(changed.map((p: any) => p.id)).toEqual(['p1', 'p3'])
+    expect(changed[0].modelIds).toEqual(['itransformer-ppo'])
+    expect(changed[1].modelIds).toEqual(['itransformer-ppo'])
+  })
+
+  it('handles papers with no modelIds and an empty fromIds set', () => {
+    expect(M.repointPaperModelIds([{ id: 'p' }], ['a'], 'b')).toEqual([])
+    expect(M.repointPaperModelIds([paper('p', ['a'])], [], 'b')).toEqual([])
+  })
+})

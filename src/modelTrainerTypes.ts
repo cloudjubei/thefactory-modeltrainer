@@ -1623,6 +1623,43 @@ export interface AnalyzePaperModelsResult {
   analyzedAt: string
 }
 
+/**
+ * One proposed CONSOLIDATION: a group of catalog models that are really the same approach (often the same
+ * model proposed from several papers), to be merged into ONE canonical model — the others fold into it as
+ * flavors. Produced by {@link ModelTrainerTools.consolidateModels}; the viewer reviews each group and, on
+ * accept, folds the `duplicateIds` into `canonicalId`. Never auto-applied.
+ */
+export interface ConsolidationGroup {
+  /** Slug id of the model to KEEP — the duplicates fold into it as flavors. */
+  canonicalId: string
+  /** Slug ids of the near-duplicate models to merge into the canonical (excludes `canonicalId`). */
+  duplicateIds: string[]
+  /** One sentence: why these are the same model (what was matched on). */
+  reason: string
+}
+
+export interface ConsolidateModelsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  llmConfig: LLMConfig
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface ConsolidateModelsResult {
+  recordType: string
+  /** The proposed merges (empty when the catalog has no near-duplicates). */
+  groups: ConsolidationGroup[]
+  /** How many non-dismissed catalog models were considered. */
+  modelCount: number
+  /** Provenance label of the proposing model. */
+  proposedBy: string
+  proposedAt: string
+}
+
 export interface XaiNarrateParams {
   scope: string
   projectRoot: string
@@ -1873,6 +1910,8 @@ export interface ModelTrainerTools {
    * tab's "Find models" + the per-paper "add missing model" affordance.
    */
   analyzePaperModels(params: AnalyzePaperModelsParams): Promise<AnalyzePaperModelsResult>
+  /** LLM pass over the catalog that proposes groups of near-duplicate models to merge into one canonical (the rest become flavors). Proposes only — accepting a group is a separate viewer action. */
+  consolidateModels(params: ConsolidateModelsParams): Promise<ConsolidateModelsResult>
   /**
    * Synthesise the campaign's DETERMINISTIC xAI analysis (lever importances, the surrogate ablation
    * path, the recommender's gaps) into a short LLM narrative — "what's been learned + what to try next" —

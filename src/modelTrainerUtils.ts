@@ -1,4 +1,5 @@
 import type {
+  ConsolidationGroup,
   DecisionFeatureAttribution,
   DecisionQualitySignal,
   DecisionStep,
@@ -1573,4 +1574,67 @@ export function buildAnalyzePaperModelsUserContent(input: {
     existingModels: input.existingModels,
     ...(input.text ? { text: input.text } : {}),
   })
+}
+
+/**
+ * Validate the LLM's consolidation proposal against the REAL catalog ids: keep only groups whose
+ * `canonicalId` is a known model, drop `duplicateIds` that are unknown / equal the canonical / repeat, and
+ * drop a group left with no duplicates. A model id appears in at most ONE group (first wins) so the
+ * proposed merges never conflict. Accepts either `{groups:[...]}` or a bare array.
+ */
+export function coerceConsolidationGroups(
+  raw: unknown,
+  validIds: Iterable<string>,
+): ConsolidationGroup[] {
+  const valid = validIds instanceof Set ? validIds : new Set(validIds)
+  const o =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const list = Array.isArray(raw) ? raw : Array.isArray(o.groups) ? o.groups : []
+  const used = new Set<string>()
+  const out: ConsolidationGroup[] = []
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue
+    const g = item as Record<string, unknown>
+    const canonicalId = typeof g.canonicalId === 'string' ? g.canonicalId : ''
+    if (!valid.has(canonicalId) || used.has(canonicalId)) continue
+    const seen = new Set<string>()
+    const duplicateIds: string[] = []
+    for (const d of Array.isArray(g.duplicateIds) ? g.duplicateIds : []) {
+      if (typeof d !== 'string') continue
+      if (d === canonicalId || !valid.has(d) || used.has(d) || seen.has(d)) continue
+      seen.add(d)
+      duplicateIds.push(d)
+    }
+    if (!duplicateIds.length) continue
+    used.add(canonicalId)
+    for (const d of duplicateIds) used.add(d)
+    out.push({ canonicalId, duplicateIds, reason: typeof g.reason === 'string' ? g.reason.trim() : '' })
+  }
+  return out
+}
+
+/** System prompt for "Consolidate": find groups of catalog models that are really the SAME approach. */
+export function buildConsolidateModelsSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a model librarian for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `You are given the project's catalog MODELS (each with id, name, the model_name bindings it trains as, and a description).`,
+    `Find groups of entries that are REALLY THE SAME model/algorithm — typically the same approach proposed from several papers under slightly different names — and should be ONE catalog entry (the duplicates fold into a canonical model as flavors).`,
+    `Be conservative: group only genuine duplicates of the same method, NOT merely related or same-family-but-distinct models (e.g. "DQN" and "Dueling DQN" are DIFFERENT). When unsure, do not group.`,
+    `For each group pick the best-named, most-complete entry as the canonical and list the rest as duplicates.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"groups": [{"canonicalId": string, "duplicateIds": [string], "reason": string}]}. Use {"groups": []} when there is nothing to merge. Every id MUST be one of the given model ids.`,
+  ].join('\n')
+}
+
+export function buildConsolidateModelsUserContent(input: {
+  models: {
+    id: string
+    name: string
+    slug: string
+    category: string
+    description?: string
+    modelNames?: string[]
+  }[]
+}): string {
+  return JSON.stringify({ models: input.models })
 }

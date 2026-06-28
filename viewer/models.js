@@ -309,6 +309,80 @@
     return merged
   }
 
+  // De-dupe a flavor list by flavorKey (model_name + config signature), keeping first occurrence.
+  function dedupeFlavors(flavors) {
+    const seen = {}
+    const out = []
+    for (const fl of flavors || []) {
+      const k = flavorKey(fl)
+      if (!seen[k]) {
+        seen[k] = true
+        out.push(fl)
+      }
+    }
+    return out
+  }
+  // Order-preserving union of id lists (skips falsy + duplicates).
+  function unionIds(lists) {
+    const seen = {}
+    const out = []
+    for (const list of lists || []) {
+      for (const id of list || []) {
+        if (id && !seen[id]) {
+          seen[id] = true
+          out.push(id)
+        }
+      }
+    }
+    return out
+  }
+  // Fold one or more DUPLICATE models into the CANONICAL one (a consolidation): the canonical keeps its
+  // identity + user pins (status/statusSource/notes/createdAt), and absorbs the duplicates' flavors (deduped
+  // by flavorKey, canonical's first) and paper/hypothesis links (unioned). A duplicate that IS the canonical
+  // (same id) is ignored. Legacy `modelNames[]` records resolve via modelFlavors and the stale field is
+  // dropped. Pure: the viewer persists the result + deletes the duplicate records.
+  function mergeModelsForConsolidation(canonical, duplicates, nowIso) {
+    const dups = (duplicates || []).filter((d) => d && d.id !== canonical.id)
+    const flavors = dedupeFlavors(
+      modelFlavors(canonical).concat.apply(
+        modelFlavors(canonical),
+        dups.map((d) => modelFlavors(d)),
+      ),
+    )
+    const paperIds = unionIds([canonical.paperIds].concat(dups.map((d) => d.paperIds)))
+    const hypothesisIds = unionIds([canonical.hypothesisIds].concat(dups.map((d) => d.hypothesisIds)))
+    const merged = Object.assign({}, canonical, { flavors: flavors, updatedAt: nowIso })
+    delete merged.modelNames
+    if (paperIds.length) merged.paperIds = paperIds
+    else delete merged.paperIds
+    if (hypothesisIds.length) merged.hypothesisIds = hypothesisIds
+    else delete merged.hypothesisIds
+    return merged
+  }
+  // Repoint papers that referenced any of `fromIds` (the duplicates being merged away) to `toId` (the
+  // canonical) in their `modelIds`, de-duping. Returns ONLY the papers that changed (the viewer persists
+  // those). Papers without modelIds — or with no reference to a duplicate — are left untouched.
+  function repointPaperModelIds(papers, fromIds, toId) {
+    const from = {}
+    for (const id of fromIds || []) from[id] = true
+    const changed = []
+    for (const p of papers || []) {
+      const ids = p && Array.isArray(p.modelIds) ? p.modelIds : null
+      if (!ids || !ids.some((id) => from[id])) continue
+      const seen = {}
+      const next = []
+      for (const id of ids) {
+        const mapped = from[id] ? toId : id
+        if (mapped && !seen[mapped]) {
+          seen[mapped] = true
+          next.push(mapped)
+        }
+      }
+      changed.push(Object.assign({}, p, { modelIds: next }))
+    }
+    return changed
+  }
+
   const Models = {
     MODEL_STATUSES: MODEL_STATUSES,
     MODEL_STATUS_LABEL: MODEL_STATUS_LABEL,
@@ -332,6 +406,8 @@
     hypothesesForModel: hypothesesForModel,
     seedDiffersFromModel: seedDiffersFromModel,
     mergeSeedIntoModel: mergeSeedIntoModel,
+    mergeModelsForConsolidation: mergeModelsForConsolidation,
+    repointPaperModelIds: repointPaperModelIds,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Models

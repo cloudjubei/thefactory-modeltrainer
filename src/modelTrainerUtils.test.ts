@@ -50,6 +50,9 @@ import {
   detectMissingPaperModels,
   buildAnalyzePaperModelsSystemPrompt,
   buildAnalyzePaperModelsUserContent,
+  coerceConsolidationGroups,
+  buildConsolidateModelsSystemPrompt,
+  buildConsolidateModelsUserContent,
 } from './modelTrainerUtils.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
 
@@ -2181,5 +2184,83 @@ describe('isSpecAffectedByFidelityDesync', () => {
   })
   it('returns false for a missing spec', () => {
     expect(isSpecAffectedByFidelityDesync(undefined)).toBe(false)
+  })
+})
+
+describe('coerceConsolidationGroups', () => {
+  const ids = ['a', 'b', 'c', 'd']
+
+  it('parses a {groups:[...]} object and keeps valid groups', () => {
+    const groups = coerceConsolidationGroups(
+      { groups: [{ canonicalId: 'a', duplicateIds: ['b', 'c'], reason: ' same thing ' }] },
+      ids,
+    )
+    expect(groups).toEqual([{ canonicalId: 'a', duplicateIds: ['b', 'c'], reason: 'same thing' }])
+  })
+
+  it('also accepts a bare array of groups', () => {
+    const groups = coerceConsolidationGroups([{ canonicalId: 'a', duplicateIds: ['b'] }], ids)
+    expect(groups).toEqual([{ canonicalId: 'a', duplicateIds: ['b'], reason: '' }])
+  })
+
+  it('drops a group whose canonicalId is not a real model', () => {
+    expect(coerceConsolidationGroups([{ canonicalId: 'zzz', duplicateIds: ['b'] }], ids)).toEqual([])
+  })
+
+  it('filters out duplicateIds that are unknown, self, or repeated', () => {
+    const groups = coerceConsolidationGroups(
+      [{ canonicalId: 'a', duplicateIds: ['a', 'b', 'b', 'zzz', 'c'] }],
+      ids,
+    )
+    expect(groups[0].duplicateIds).toEqual(['b', 'c'])
+  })
+
+  it('drops a group that has no valid duplicates left', () => {
+    expect(coerceConsolidationGroups([{ canonicalId: 'a', duplicateIds: ['zzz', 'a'] }], ids)).toEqual(
+      [],
+    )
+  })
+
+  it('never lets one model appear in two groups (cross-group de-dup)', () => {
+    const groups = coerceConsolidationGroups(
+      [
+        { canonicalId: 'a', duplicateIds: ['b'] }, // consumes a, b
+        { canonicalId: 'b', duplicateIds: ['c'] }, // b already consumed -> whole group dropped
+        { canonicalId: 'c', duplicateIds: ['d'] }, // c + d still free -> kept
+      ],
+      ids,
+    )
+    expect(groups).toEqual([
+      { canonicalId: 'a', duplicateIds: ['b'], reason: '' },
+      { canonicalId: 'c', duplicateIds: ['d'], reason: '' },
+    ])
+  })
+
+  it('returns [] for non-object / null / malformed input', () => {
+    expect(coerceConsolidationGroups(null, ids)).toEqual([])
+    expect(coerceConsolidationGroups('nope', ids)).toEqual([])
+    expect(coerceConsolidationGroups({ groups: 'x' }, ids)).toEqual([])
+    expect(coerceConsolidationGroups([{ canonicalId: 'a' }], ids)).toEqual([])
+  })
+})
+
+describe('buildConsolidateModelsSystemPrompt', () => {
+  it('asks for a single JSON object with the group schema + names the objective', () => {
+    const prompt = buildConsolidateModelsSystemPrompt(manifest())
+    expect(prompt).toContain('canonicalId')
+    expect(prompt).toContain('duplicateIds')
+    expect(prompt).toContain('groups')
+    expect(prompt).toMatch(/JSON object/i)
+    expect(prompt).toContain(manifest().objective.name)
+  })
+})
+
+describe('buildConsolidateModelsUserContent', () => {
+  it('round-trips the model summaries as JSON', () => {
+    const models = [
+      { id: 'a', name: 'A', slug: 'a', category: 'rl', description: 'x', modelNames: ['a-name'] },
+    ]
+    const parsed = JSON.parse(buildConsolidateModelsUserContent({ models }))
+    expect(parsed.models).toEqual(models)
   })
 })

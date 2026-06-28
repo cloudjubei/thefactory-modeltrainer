@@ -1065,6 +1065,86 @@ button.run-badge.model-device-chip:hover {
   overflow: auto;
   padding: 10px 14px 16px;
 }
+/* Consolidate-models review modal: a narrower panel with one card per proposed merge group. */
+.consolidate-panel {
+  width: min(94vw, 640px);
+}
+.consolidate-help {
+  padding: 8px 14px 0;
+  margin: 0;
+}
+.consolidate-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  margin-top: 12px;
+}
+.consolidate-group:first-child {
+  margin-top: 4px;
+}
+.consolidate-reason {
+  margin: 0 0 8px;
+  font-style: italic;
+  color: var(--muted, var(--text));
+}
+.consolidate-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.consolidate-member {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--radius);
+  background: var(--surface-2, transparent);
+}
+.consolidate-member.is-canonical {
+  background: var(--surface-3, rgba(99, 102, 241, 0.08));
+}
+.consolidate-member-name {
+  flex: 1;
+  min-width: 0;
+}
+.consolidate-canon,
+.consolidate-merge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.consolidate-keep {
+  color: var(--muted, var(--text));
+  font-size: 0.85em;
+  white-space: nowrap;
+}
+.consolidate-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.consolidate-merge-btn {
+  padding: 5px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.consolidate-merge-btn:hover {
+  filter: brightness(1.07);
+}
+.consolidate-empty {
+  padding: 16px;
+  text-align: center;
+  color: var(--muted, var(--text));
+}
 .chart-modal .run-mark-legend {
   padding: 6px 14px 0;
 }
