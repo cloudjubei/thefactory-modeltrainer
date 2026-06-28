@@ -462,6 +462,68 @@ describe('mergeModelsForConsolidation', () => {
     expect(merged.paperIds).toBeUndefined()
     expect(merged.hypothesisIds).toBeUndefined()
   })
+
+  it('records the merged-away models (slug, name, their aliases) as aliases on the canonical', () => {
+    const merged = M.mergeModelsForConsolidation(
+      canonical(),
+      [dup({ id: 'inv-tf-ppo', slug: 'inv-tf-ppo', name: 'Inverted Transformer PPO', aliases: ['itpo'] })],
+      NOW,
+    )
+    expect(merged.aliases).toContain('inv-tf-ppo') // the duplicate's slug/id
+    expect(merged.aliases).toContain('inverted-transformer-ppo') // the duplicate's name, slugified
+    expect(merged.aliases).toContain('itpo') // the duplicate's own alias (transitive)
+  })
+
+  it('preserves the canonical existing aliases, de-dupes, and never aliases the canonical to itself', () => {
+    const merged = M.mergeModelsForConsolidation(
+      canonical({ aliases: ['old-name'] }),
+      [dup({ id: 'b', slug: 'b', name: 'iTransformer-PPO' })], // dup name == canonical name
+      NOW,
+    )
+    expect(merged.aliases).toContain('old-name') // preserved
+    expect(merged.aliases).toContain('b') // the duplicate's slug
+    // the duplicate's name slugifies to the canonical's own slug -> must NOT be added as a self-alias
+    expect(merged.aliases).not.toContain('itransformer-ppo')
+  })
+})
+
+describe('consolidation selection helpers', () => {
+  const grp = () => ({
+    canonicalId: 'a',
+    members: [{ id: 'a' }, { id: 'b' }, { id: 'c' }],
+    checkedDuplicateIds: new Set(['b', 'c']),
+  })
+
+  it('selectedDuplicateIds returns the checked non-canonical members', () => {
+    expect(M.selectedDuplicateIds(grp())).toEqual(['b', 'c'])
+  })
+
+  it('selectedDuplicateIds excludes an unchecked duplicate', () => {
+    const g = grp()
+    g.checkedDuplicateIds.delete('b')
+    expect(M.selectedDuplicateIds(g)).toEqual(['c'])
+  })
+
+  it('selectedDuplicateIds never returns the canonical even if it is in the checked set', () => {
+    const g = grp()
+    g.checkedDuplicateIds.add('a')
+    expect(M.selectedDuplicateIds(g)).toEqual(['b', 'c'])
+  })
+
+  it('swapConsolidationCanonical demotes the old canonical to a checked duplicate and promotes the new', () => {
+    const g = grp()
+    M.swapConsolidationCanonical(g, 'b')
+    expect(g.canonicalId).toBe('b')
+    expect(g.checkedDuplicateIds.has('a')).toBe(true) // old canonical -> a checked duplicate
+    expect(g.checkedDuplicateIds.has('b')).toBe(false) // new canonical -> no longer a duplicate
+  })
+
+  it('swapConsolidationCanonical PRESERVES a duplicate the user had unchecked (the critical fix)', () => {
+    const g = grp()
+    g.checkedDuplicateIds.delete('c') // user excluded c
+    M.swapConsolidationCanonical(g, 'b') // then changed the canonical
+    expect(M.selectedDuplicateIds(g)).toEqual(['a']) // c stays excluded; b is now canonical
+  })
 })
 
 describe('repointPaperModelIds', () => {
@@ -483,5 +545,127 @@ describe('repointPaperModelIds', () => {
   it('handles papers with no modelIds and an empty fromIds set', () => {
     expect(M.repointPaperModelIds([{ id: 'p' }], ['a'], 'b')).toEqual([])
     expect(M.repointPaperModelIds([paper('p', ['a'])], [], 'b')).toEqual([])
+  })
+})
+
+describe('alias-aware seed sync', () => {
+  const NOW2 = '2026-06-29T00:00:00.000Z'
+  const a2c = (over: Record<string, unknown> = {}) => ({
+    id: 'a2c',
+    slug: 'a2c',
+    name: 'A2C',
+    aliases: ['policy-gradient'],
+    flavors: [{ modelName: 'a2c' }],
+    ...over,
+  })
+  const pgSeed = {
+    id: 'policy-gradient',
+    slug: 'policy-gradient',
+    name: 'Policy Gradient',
+    flavors: [{ modelName: 'a2c' }],
+  }
+
+  it('seedClaimedByAlias: a merged-away seed (alias of a live model, no own record) is claimed', () => {
+    expect(M.seedClaimedByAlias(pgSeed, [a2c()])).toBe(true)
+  })
+  it('seedClaimedByAlias: a seed that still has its own live record is NOT claimed', () => {
+    const ownRec = { id: 'policy-gradient', slug: 'policy-gradient', name: 'Policy Gradient' }
+    expect(M.seedClaimedByAlias(pgSeed, [a2c(), ownRec])).toBe(false)
+  })
+  it('seedClaimedByAlias: a dismissed model does not claim a seed', () => {
+    expect(M.seedClaimedByAlias(pgSeed, [a2c({ dismissed: true })])).toBe(false)
+  })
+  it('seedClaimedByAlias: an unaliased seed is not claimed', () => {
+    expect(M.seedClaimedByAlias({ id: 'x', slug: 'x', name: 'X' }, [a2c()])).toBe(false)
+  })
+
+  it('seedDiffersFromModel: a flavor only the RECORD has (consolidation-absorbed) is not a re-sync trigger', () => {
+    const seed = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }] }
+    const rec = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }, { modelName: 'absorbed' }] }
+    expect(M.seedDiffersFromModel(seed, rec)).toBe(false)
+  })
+  it('seedDiffersFromModel: a NEW manifest flavor triggers a re-sync', () => {
+    const seed = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }, { modelName: 'new' }] }
+    const rec = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }] }
+    expect(M.seedDiffersFromModel(seed, rec)).toBe(true)
+  })
+  it('seedDiffersFromModel: a manifest-declared alias the record lacks triggers a re-sync', () => {
+    const seed = { id: 'a2c', slug: 'a2c', name: 'A2C', flavors: [{ modelName: 'a2c' }], aliases: ['policy-gradient'] }
+    const rec = { id: 'a2c', slug: 'a2c', name: 'A2C', flavors: [{ modelName: 'a2c' }] }
+    expect(M.seedDiffersFromModel(seed, rec)).toBe(true)
+  })
+
+  it('mergeSeedIntoModel: unions record + seed aliases and preserves consolidation-absorbed flavors', () => {
+    const seed = { id: 'a2c', slug: 'a2c', name: 'A2C', category: 'rl', flavors: [{ modelName: 'a2c' }], aliases: ['vpg'] }
+    const rec = {
+      id: 'a2c',
+      slug: 'a2c',
+      name: 'A2C',
+      flavors: [{ modelName: 'a2c' }, { modelName: 'a2c-custom' }],
+      aliases: ['policy-gradient'],
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const merged = M.mergeSeedIntoModel(seed, rec, NOW2)
+    expect(merged.flavors.map((f: any) => f.modelName)).toEqual(['a2c', 'a2c-custom'])
+    expect(merged.aliases.slice().sort()).toEqual(['policy-gradient', 'vpg'])
+  })
+})
+
+describe('consolidation durability across a later seed-sync (the whole point)', () => {
+  it('a merged-away model is neither re-added nor reverted when the manifest still seeds both', () => {
+    const NOW = '2026-06-29T00:00:00.000Z'
+    const a2cRec = {
+      id: 'a2c',
+      slug: 'a2c',
+      name: 'A2C',
+      category: 'rl',
+      status: 'implemented',
+      statusSource: 'auto',
+      flavors: [{ modelName: 'a2c' }, { modelName: 'a2c-custom' }],
+      source: 'manual',
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    const pgRec = {
+      id: 'policy-gradient',
+      slug: 'policy-gradient',
+      name: 'Policy Gradient',
+      category: 'rl',
+      status: 'implemented',
+      statusSource: 'auto',
+      flavors: [{ modelName: 'a2c' }],
+      paperIds: ['zhang'],
+      source: 'manual',
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    // 1. user merges policy-gradient into a2c (UI) -> a2c records the alias, pg is deleted
+    const merged = M.mergeModelsForConsolidation(a2cRec, [pgRec], NOW)
+    expect(merged.aliases).toContain('policy-gradient')
+    expect(merged.paperIds).toContain('zhang') // pg's paper folded in
+    const catalog = [merged] // pg deleted
+
+    // 2. the manifest STILL seeds both a2c and policy-gradient
+    const a2cSeed = {
+      id: 'a2c',
+      slug: 'a2c',
+      name: 'A2C',
+      category: 'rl',
+      flavors: [{ modelName: 'a2c' }, { modelName: 'a2c-custom' }],
+      source: 'manual',
+    }
+    const pgSeed = {
+      id: 'policy-gradient',
+      slug: 'policy-gradient',
+      name: 'Policy Gradient',
+      category: 'rl',
+      flavors: [{ modelName: 'a2c' }],
+      source: 'manual',
+    }
+
+    // 3. seed-sync: pg seed is alias-claimed (skipped) and a2c does NOT differ (not re-synced)
+    expect(M.seedClaimedByAlias(pgSeed, catalog)).toBe(true)
+    expect(M.seedClaimedByAlias(a2cSeed, catalog)).toBe(false)
+    expect(M.seedDiffersFromModel(a2cSeed, merged)).toBe(false)
   })
 })

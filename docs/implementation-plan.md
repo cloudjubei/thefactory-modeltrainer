@@ -269,6 +269,8 @@ CI-failing) — a calibrated signal to gate review effort. Gathering labelled da
 
 Depends on the data mine.
 
+_Further out — **FastContext-style repository explorer** (a candidate fourth trainer-conformant consumer): a trained 4B–30B repo-exploration subagent, objective = file-recovery accuracy, trained via an SFT-bootstrap→task-grounded-RL ladder (reward broad-first-turn search / multi-turn evidence / precise citations). The reward-sweep + xAI config-effect engine is the right tool to tune the shaping. Gated by the same deep-research go/no-go and by LLM-training compute the current ComputeRunner has never exercised. Ref: microsoft/fastcontext (hf.co/papers/2606.14066), captured in thefactory-references._
+
 ### Optional phases
 
 - **Phase 8 — Autopilot + live handoff.** Scheduled meta-activity (propose → run → judge → promote,

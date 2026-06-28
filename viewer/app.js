@@ -269,8 +269,11 @@ let modelsCache = []
 let modelCategoryFilter = 'all'
 const modelExpanded = new Set()
 // Proposed model-consolidation groups (near-duplicates the LLM found), resolved to catalog models, while
-// the review modal is open. Each: { canonicalId, duplicateIds, reason, members:[model] }.
+// the review modal is open. Each: { canonicalId, reason, members:[model], checkedDuplicateIds:Set } — the
+// group object is the source of truth for which member is canonical + which are checked to merge in.
 let consolidationGroups = []
+// The project epoch captured when the consolidation modal opened — accepting aborts if the project changed.
+let consolidationModalEpoch = null
 // Models whose CPU-vs-MPS device benchmark is currently running (disables the per-model button).
 const benchmarkingModels = new Set()
 // The persisted all-runs aggregate (a `<recordType>-model-stats` record): per-model + per-flavor run
@@ -3703,8 +3706,10 @@ function normalizeSpec(spec) {
 }
 // Compare-mode "Download audit": a JSON of the selected runs' FULL summaries (config, metrics,
 // top-level regimes + benchmark, health, decision trace) for an offline / hand-to-agent genuineness
-// audit. Browser Blob + anchor so it works inside the sandboxed iframe with no host bridge.
-function downloadRunsAudit(keys) {
+// audit. The viewer is a sandboxed iframe: a Blob+anchor download is a SILENT no-op unless the host
+// grants `allow-downloads` (and the click never throws), so we always ALSO copy the JSON to the
+// clipboard — the reliable in-sandbox path via allow-same-origin — and confirm on the button.
+function downloadRunsAudit(keys, button) {
   const runs = (keys || []).map((k) => findRun(k)).filter(Boolean)
   if (!runs.length) return
   const payload = window.RunExport.buildRunsAuditExport(runs, {
@@ -3712,17 +3717,23 @@ function downloadRunsAudit(keys) {
     objective: (manifest && manifest.objective) || null,
     project: (manifest && manifest.name) || null,
   })
+  const text = JSON.stringify(payload, null, 2)
   const stamp = new Date().toISOString().slice(0, 10)
   const filename = `runs-audit-${runs.map((r) => shortKey(r.key)).join('-')}-${stamp}.json`
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
+  try {
+    const blob = new Blob([text], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch {
+    // sandbox / API gap — the clipboard copy below still delivers the data
+  }
+  copyText(text, button)
 }
 
 // Multi-select comparison: a config diff (only differing levers), metrics
@@ -3810,7 +3821,7 @@ function renderCompare() {
         ${embedded() && allFailed ? `<button type="button" id="compare-rerun-all" class="ghost-btn" title="Queue all ${runs.length} failed runs again">Re-run all (${runs.length})</button>` : ''}
         ${embedded() && allOutdated ? `<button type="button" id="compare-rerun-latest" class="ghost-btn" title="Re-run all ${runs.length} runs under the current pipeline version (v${escapeHtml(String(currentPipelineVersion()))}) — they ran under an older, incomparable version">↻ Re-run all with latest version (${runs.length})</button>` : ''}
         ${runs.length === 2 && chatAboutRunAvailable() ? `<button type="button" id="compare-discuss" class="icon-btn" title="Discuss these two runs (incl. the decision diff)" aria-label="Discuss these two runs">${iconChatSvg()}</button>` : ''}
-        <button type="button" id="compare-download" class="icon-btn" title="Download a JSON audit export of these ${runs.length} runs (full config, metrics, regimes, health, decision trace)" aria-label="Download audit export">⬇</button>
+        <button type="button" id="compare-download" class="icon-btn" title="Download + copy to clipboard a JSON audit of these ${runs.length} runs (config, metrics, regimes, health, decision trace)" aria-label="Download audit export">⬇</button>
         <button type="button" id="compare-clear" class="icon-btn" title="Clear selection" aria-label="Clear selection">✕</button>
       </div>
     </div>
@@ -5342,6 +5353,7 @@ function xaiRunStandingHtml(runKey, criterion) {
     </tbody></table>
     <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p></div>`
   const leverRows = (digest.importances || [])
+    .filter((i) => (i.lever === 'model_name' || i.importance >= 0.02) && String(digest.config[i.lever]) !== 'n/a')
     .slice(0, 6)
     .map((i) => {
       const mine = digest.config ? digest.config[i.lever] : undefined
@@ -5792,10 +5804,12 @@ function xaiParallelCoordsHtml(bundle, criterion) {
   if (items.length < 3)
     return card(`<p class="card-sub">Need ≥3 explored configs to draw the parallel map.</p>`)
   // Axes = the varying model levers, ordered by fANOVA total effect (most decisive first), capped for legibility.
+  const relevant = xaiRelevantLevers(bundle)
   const ranked = [...(a.importances || [])]
     .sort((x, y) => (y.total || 0) - (x.total || 0))
     .map((f) => f.lever)
-  const ordered = [...ranked, ...(a.levers || []).filter((l) => !ranked.includes(l))]
+    .filter((l) => relevant.has(l))
+  const ordered = [...ranked, ...(a.levers || []).filter((l) => relevant.has(l) && !ranked.includes(l))]
   const info = {}
   for (const lev of ordered) {
     const vals = items.map((x) => x.s.config[lev])
@@ -5922,9 +5936,10 @@ function xaiPcaHtml(bundle, criterion) {
   // Each PCA point's representative key matches a setup's key (both the first run of the setup group), so
   // we can label points with their config from the bundle's setups.
   const setupByKey = new Map((bundle.analysis.setups || []).map((s) => [s.key, s]))
+  const relevant = xaiRelevantLevers(bundle)
   const compactConfig = (cfg) =>
     Object.entries(cfg || {})
-      .filter(([k]) => k !== 'seed')
+      .filter(([k, v]) => relevant.has(k) && String(v) !== 'n/a')
       .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
       .join(' ')
       .slice(0, 140)
@@ -6060,9 +6075,10 @@ function xaiParetoHtml(bundle, criterion) {
     xaiParetoY = metricKeys.find((k) => k !== xaiParetoX) || metricKeys[0]
     xaiParetoYDir = xaiInferMetricDir(xaiParetoY)
   }
+  const relevant = xaiRelevantLevers(bundle)
   const compactCfg = (cfg) =>
     Object.entries(cfg || {})
-      .filter(([k]) => k !== 'seed')
+      .filter(([k, v]) => relevant.has(k) && String(v) !== 'n/a')
       .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
       .join(' ')
       .slice(0, 120)
@@ -6111,6 +6127,30 @@ function xaiParetoHtml(bundle, criterion) {
     `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}`,
   )
 }
+// The levers worth showing: model_name (the identity) + any NOT classified inert by fANOVA (falls back to
+// screening when no surrogate). Drops noise like gamma and \u2014 per config \u2014 conditional levers pinned to n/a.
+// Smallest non-negative seed numbers not already used \u2014 for stabilize/explore launches.
+function xaiFreshSeeds(used, need) {
+  const u = new Set(used || [])
+  const out = []
+  let v = 0
+  while (out.length < Math.max(0, need)) {
+    if (!u.has(v)) out.push(v)
+    v++
+  }
+  return out
+}
+function xaiRelevantLevers(bundle) {
+  const a = bundle.analysis
+  const set = new Set(['model_name'])
+  const fanova = a.importances || []
+  if (fanova.length) {
+    for (const f of fanova) if ((f.total || 0) >= 0.03) set.add(f.lever)
+  } else {
+    for (const sc of a.screening || []) if (sc.importance >= 0.02) set.add(sc.lever)
+  }
+  return set
+}
 // Top configs by the criterion, with bootstrap CIs — flags which are within seed-noise of #1 (tied) and
 // which score implausibly well (a leakage/degenerate guardrail). Both read from the per-setup CI the engine
 // now retains.
@@ -6129,9 +6169,10 @@ function xaiLeaderboardHtml(bundle, criterion) {
   const iqr = qAt(0.75) - qAt(0.25)
   const suspicious = (v) =>
     iqr > 0 && (criterion.direction === 'min' ? v < qAt(0.25) - 3 * iqr : v > qAt(0.75) + 3 * iqr)
+  const relevant = xaiRelevantLevers(bundle)
   const compactCfg = (cfg) =>
     Object.entries(cfg || {})
-      .filter(([k]) => k !== 'seed')
+      .filter(([k, v]) => relevant.has(k) && String(v) !== 'n/a')
       .map(([k, v]) => `${escapeHtml(xaiAbbrevLever(k))}=${escapeHtml(xaiFmtLeverValue(v))}`)
       .join(' ')
       .slice(0, 90)
@@ -6142,7 +6183,9 @@ function xaiLeaderboardHtml(bundle, criterion) {
       const ciStr = sp.ci ? `[${escapeHtml(formatTickValue(sp.ci[0]))}, ${escapeHtml(formatTickValue(sp.ci[1]))}]` : '\u2014'
       const flags = [
         tied ? '<span class="badge">tied #1</span>' : '',
-        suspicious(v) ? '<span class="delta-neg" title="Strong outlier \u2014 verify it is not leaking future info or a degenerate result">\u26a0 verify</span>' : '',
+        suspicious(v)
+          ? `<button type="button" class="ghost-btn xai-stabilize-btn" data-xai-stabilize="${escapeHtml(sp.key)}" title="Strong outlier \u2014 run more seeds to confirm it is real, not a fluke or leak">\u26a0 verify \u2192 run seeds</button>`
+          : '',
       ]
         .filter(Boolean)
         .join(' ')
@@ -7307,8 +7350,9 @@ function setupRuns() {
         const keys = [...runsCompareKeys]
         if (keys.length === 2) chatAboutRuns(keys[0], keys[1])
       }
-      if (event.target.closest('#compare-download')) {
-        downloadRunsAudit([...runsCompareKeys])
+      const downloadBtn = event.target.closest('#compare-download')
+      if (downloadBtn) {
+        downloadRunsAudit([...runsCompareKeys], downloadBtn)
       }
       if (
         event.target.closest('#compare-rerun-all') ||
@@ -7443,6 +7487,19 @@ function setupRuns() {
       if (event.target.closest('[data-xai-pc-clear]')) {
         xaiPcPick = {}
         renderXai()
+        return
+      }
+      const stab = event.target.closest('[data-xai-stabilize]')
+      if (stab) {
+        const bundle = xaiResolveBundle(currentXaiCriterion())
+        const setup = bundle && (bundle.analysis.setups || []).find((sp) => sp.key === stab.dataset.xaiStabilize)
+        if (setup) {
+          const cur = setup.seeds || 1
+          const target = Math.max(5, cur + 3) // enough seeds for a trustworthy interval (+a few for outliers)
+          const fresh = xaiFreshSeeds(setup.seedList || [], target - cur)
+          const fixed = { ...(bundle.analysis.environment || {}), ...setup.config }
+          xaiLaunchBatch([{ fixed, seeds: fresh }], `Stabilize ${shortKey(setup.key)}`)
+        }
         return
       }
       const pcFocus = event.target.closest('[data-xai-focus-config]')
@@ -10272,7 +10329,12 @@ function manifestModelSeeds() {
 function pendingSeedModels() {
   const byId = new Map(modelsCache.map((m) => [m.id, m]))
   return manifestModelSeeds().filter(
-    (s) => s && s.id && window.Models.seedDiffersFromModel(s, byId.get(s.id)),
+    (s) =>
+      s &&
+      s.id &&
+      // A seed merged away into another model (now one of its aliases) is never re-added.
+      !window.Models.seedClaimedByAlias(s, modelsCache) &&
+      window.Models.seedDiffersFromModel(s, byId.get(s.id)),
   )
 }
 function pendingSeedModelsHtml() {
@@ -10951,15 +11013,16 @@ async function loadConsolidationGroups() {
     if (!duplicates.length) continue
     resolved.push({
       canonicalId: g.canonicalId,
-      duplicateIds: duplicates.map((d) => d.id),
       reason: g.reason || '',
       members: [canonical, ...duplicates],
+      checkedDuplicateIds: new Set(duplicates.map((d) => d.id)),
     })
   }
   return resolved
 }
 function openConsolidateModal(groups) {
   consolidationGroups = groups
+  consolidationModalEpoch = projectEpoch
   renderConsolidateModal()
 }
 function closeConsolidateModal() {
@@ -10969,13 +11032,14 @@ function closeConsolidateModal() {
 }
 // One member row: a radio to pick THIS entry as the canonical to keep, and (for non-canonical members) a
 // checkbox to fold it in. The canonical keeps its identity, runs, papers + flavors; the others are deleted.
-function consolidateMemberHtml(gi, model, canonicalId) {
-  const isCanon = model.id === canonicalId
+function consolidateMemberHtml(gi, model, group) {
+  const isCanon = model.id === group.canonicalId
   const names = window.Models.flavorModelNames(model)
   const sub = names.length ? ` <span class="card-sub">(${names.map(escapeHtml).join(', ')})</span>` : ''
+  const checked = group.checkedDuplicateIds.has(model.id) ? ' checked' : ''
   const control = isCanon
     ? '<span class="consolidate-keep">keeps its runs &amp; flavors</span>'
-    : `<label class="consolidate-merge"><input type="checkbox" data-consolidate-merge value="${escapeHtml(model.id)}" checked /> merge in</label>`
+    : `<label class="consolidate-merge"><input type="checkbox" data-consolidate-merge value="${escapeHtml(model.id)}"${checked} /> merge in</label>`
   return (
     `<li class="consolidate-member${isCanon ? ' is-canonical' : ''}">` +
     `<label class="consolidate-canon"><input type="radio" name="consolidate-canon-${gi}" value="${escapeHtml(model.id)}"${isCanon ? ' checked' : ''} /> canonical</label>` +
@@ -10985,7 +11049,7 @@ function consolidateMemberHtml(gi, model, canonicalId) {
   )
 }
 function consolidateGroupHtml(group, gi) {
-  const list = group.members.map((m) => consolidateMemberHtml(gi, m, group.canonicalId)).join('')
+  const list = group.members.map((m) => consolidateMemberHtml(gi, m, group)).join('')
   return (
     `<div class="consolidate-group" data-index="${gi}">` +
     (group.reason ? `<p class="consolidate-reason">${escapeHtml(group.reason)}</p>` : '') +
@@ -11013,11 +11077,21 @@ function renderConsolidateModal() {
     })
     modal.addEventListener('change', (event) => {
       const radio = event.target.closest('input[type="radio"][name^="consolidate-canon-"]')
-      if (radio)
+      if (radio) {
         onChangeConsolidationCanonical(
           Number(radio.name.replace('consolidate-canon-', '')),
           radio.value,
         )
+        return
+      }
+      const check = event.target.closest('input[type="checkbox"][data-consolidate-merge]')
+      if (check) {
+        const groupEl = check.closest('.consolidate-group')
+        const group = groupEl && consolidationGroups[Number(groupEl.dataset.index)]
+        if (!group) return
+        if (check.checked) group.checkedDuplicateIds.add(check.value)
+        else group.checkedDuplicateIds.delete(check.value)
+      }
     })
   }
   const groups = consolidationGroups
@@ -11036,11 +11110,13 @@ function renderConsolidateModal() {
     `</div>`
   modal.hidden = false
 }
-// Re-render one group when its canonical changes so the new canonical loses its "merge in" checkbox.
+// Re-render one group when its canonical changes so the new canonical loses its "merge in" checkbox. The
+// user's per-duplicate checks live in `group.checkedDuplicateIds` (kept current by the change listener), so
+// they survive the re-render; the newly-demoted old canonical defaults to checked, the new one drops out.
 function onChangeConsolidationCanonical(gi, modelId) {
   const group = consolidationGroups[gi]
   if (!group) return
-  group.canonicalId = modelId
+  window.Models.swapConsolidationCanonical(group, modelId)
   const modal = byId('consolidate-modal')
   const el = modal && modal.querySelector(`.consolidate-group[data-index="${gi}"]`)
   if (!el) return
@@ -11056,15 +11132,18 @@ function onRejectConsolidation(gi) {
 // Apply one accepted merge: fold the checked duplicates into the chosen canonical (flavors + paper/hyp
 // links unioned), persist the canonical, delete the duplicates, and repoint papers that referenced them.
 async function onAcceptConsolidation(gi) {
-  const modal = byId('consolidate-modal')
   const group = consolidationGroups[gi]
-  const el = modal && modal.querySelector(`.consolidate-group[data-index="${gi}"]`)
-  if (!group || !el) return
-  const checkedRadio = el.querySelector('input[type="radio"]:checked')
-  const canonicalId = (checkedRadio && checkedRadio.value) || group.canonicalId
-  const duplicateIds = [...el.querySelectorAll('input[type="checkbox"][data-consolidate-merge]:checked')]
-    .map((c) => c.value)
-    .filter((id) => id !== canonicalId)
+  if (!group) return
+  // Abort if the project changed under the open modal — the group ids belong to the old project.
+  if (consolidationModalEpoch !== projectEpoch) {
+    closeConsolidateModal()
+    setStatusLine('models-status', 'Project changed — reopen Consolidate to continue.', true)
+    return
+  }
+  const canonicalId = group.canonicalId
+  // The selection lives in the group object (the source of truth), not the DOM — so changing the canonical
+  // never silently re-checks a duplicate the user excluded.
+  const duplicateIds = window.Models.selectedDuplicateIds(group)
   if (!duplicateIds.length) {
     setStatusLine('models-status', 'Select at least one model to merge in (or Reject).', true)
     return
@@ -11074,14 +11153,16 @@ async function onAcceptConsolidation(gi) {
   if (!canonical || !duplicates.length) return
   try {
     const merged = window.Models.mergeModelsForConsolidation(canonical, duplicates, nowIso())
-    await putModel(merged)
-    for (const d of duplicates) await deleteModelRecord(d.id)
+    // Order matters: repoint papers + write the (un-deleted) canonical BEFORE deleting any duplicate, so a
+    // mid-sequence failure can never leave a paper or the catalog pointing at a model that's already gone.
     const changedPapers = window.Models.repointPaperModelIds(
       await readPapers(),
       duplicateIds,
       canonicalId,
     )
     for (const p of changedPapers) await putPaper(p)
+    await putModel(merged)
+    for (const d of duplicates) await deleteModelRecord(d.id)
   } catch {
     setStatusLine('models-status', 'Could not merge — please try again.', true)
     return

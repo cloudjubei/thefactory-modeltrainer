@@ -244,39 +244,37 @@
   // dismissed, hypothesisIds, createdAt.
   const MODEL_SEED_FIELDS = ['name', 'description', 'category', 'implPath', 'proposal', 'source']
 
-  function flavorsEqual(a, b) {
-    const x = a || []
-    const y = b || []
-    if (x.length !== y.length) return false
-    for (let i = 0; i < x.length; i++) {
-      if ((x[i].modelName || '') !== (y[i].modelName || '')) return false
-      if ((x[i].name || '') !== (y[i].name || '')) return false
-      if (configSignature(x[i].config) !== configSignature(y[i].config)) return false
-    }
-    return true
-  }
-  // True iff importing this seed would CHANGE the catalog — no existing record, or a manifest-owned field
-  // (esp. the flavors / bindings — the consolidation) differs. Drives the "import / re-sync" banner.
+  // True iff importing this seed would CHANGE the catalog: no existing record, a manifest-owned scalar
+  // differs, the seed introduces a NEW flavor binding, or it declares an alias the record lacks. Flavors +
+  // aliases UNION on sync, so a flavor/alias the user or a consolidation added is NOT a reason to re-sync —
+  // only something the manifest adds is. Drives the "import / re-sync" banner.
   function seedDiffersFromModel(seed, existing) {
     if (!existing) return true
-    if (!flavorsEqual(modelFlavors(seed), modelFlavors(existing))) return true
     for (let i = 0; i < MODEL_SEED_FIELDS.length; i++) {
       const f = MODEL_SEED_FIELDS[i]
       if ((seed[f] || '') !== (existing[f] || '')) return true
     }
+    const have = {}
+    for (const fl of modelFlavors(existing)) have[flavorKey(fl)] = true
+    for (const fl of modelFlavors(seed)) if (!have[flavorKey(fl)]) return true
+    const ident = modelIdentitySlugs(existing)
+    for (const a of seed.aliases || []) if (!ident.has(slugify(a))) return true
     return false
   }
-  // The record to persist when syncing a manifest seed: manifest-owned fields (incl. flavors) from the
-  // seed, user-owned fields preserved from any existing record. A manual status pin is never overwritten.
+  // The record to persist when syncing a manifest seed: manifest-owned scalars from the seed; flavors +
+  // aliases UNIONED with the existing record (so a consolidation's absorbed bindings/aliases survive a
+  // re-sync — the trade-off is the manifest cannot REMOVE a flavor this way); other user-owned fields
+  // preserved. A manual status pin is never overwritten.
   function mergeSeedIntoModel(seed, existing, nowIso) {
     const slug = seed.slug || seed.id
+    const seedFlavors = Array.isArray(seed.flavors) ? seed.flavors : modelFlavors(seed)
     const merged = {
       id: seed.id || slug,
       slug: slug,
       name: seed.name,
       description: seed.description || '',
       category: seed.category,
-      flavors: Array.isArray(seed.flavors) ? seed.flavors : modelFlavors(seed),
+      flavors: dedupeFlavors(seedFlavors.concat(modelFlavors(existing))),
       source: seed.source || 'manual',
     }
     if (seed.implPath) merged.implPath = seed.implPath
@@ -291,6 +289,19 @@
       }
     }
     if (paperIds.length) merged.paperIds = paperIds
+    const own = modelIdentitySlugs({ id: merged.id, slug: merged.slug, name: merged.name })
+    const aliases = []
+    const seenAlias = {}
+    const addAlias = (raw) => {
+      const s = slugify(raw)
+      if (s && !own.has(s) && !seenAlias[s]) {
+        seenAlias[s] = true
+        aliases.push(s)
+      }
+    }
+    for (const a of (existing && existing.aliases) || []) addAlias(a)
+    for (const a of seed.aliases || []) addAlias(a)
+    if (aliases.length) merged.aliases = aliases
     if (existing && existing.hypothesisIds && existing.hypothesisIds.length) {
       merged.hypothesisIds = existing.hypothesisIds
     }
@@ -308,7 +319,39 @@
     merged.updatedAt = nowIso
     return merged
   }
+  // True iff this manifest seed should be SKIPPED on sync because it is an alias of another (non-dismissed)
+  // model — i.e. it was merged away by a consolidation. A seed that still has its own live record is a model
+  // in its own right and is never claimed. Stops "Sync" from re-adding a model the user merged.
+  function seedClaimedByAlias(seed, models) {
+    if (!seed || !seed.id) return false
+    for (const m of models || []) if (m && !m.dismissed && m.id === seed.id) return false
+    const tokens = modelIdentitySlugs(seed)
+    for (const m of models || []) {
+      if (!m || m.dismissed) continue
+      for (const a of m.aliases || []) if (tokens.has(slugify(a))) return true
+    }
+    return false
+  }
 
+  // Kebab-normalize a slug/name for loose identity matching ("Inverted Transformer PPO" -> "inverted-transformer-ppo").
+  function slugify(s) {
+    return String(s == null ? '' : s)
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+  }
+  // The slug-normalized identity tokens a model answers to: its slug, id, name, and declared aliases.
+  function modelIdentitySlugs(model) {
+    const out = new Set()
+    if (!model) return out
+    out.add(slugify(model.slug))
+    out.add(slugify(model.id))
+    out.add(slugify(model.name))
+    for (const a of model.aliases || []) out.add(slugify(a))
+    out.delete('')
+    return out
+  }
   // De-dupe a flavor list by flavorKey (model_name + config signature), keeping first occurrence.
   function dedupeFlavors(flavors) {
     const seen = {}
@@ -351,13 +394,53 @@
     )
     const paperIds = unionIds([canonical.paperIds].concat(dups.map((d) => d.paperIds)))
     const hypothesisIds = unionIds([canonical.hypothesisIds].concat(dups.map((d) => d.hypothesisIds)))
+    // Record every name the merged-away models were known by as an alias of the canonical (skipping the
+    // canonical's own identity), so a future paper/scan/seed referring to a duplicate resolves here and the
+    // seed-sync never re-adds it.
+    // Core identity only (slug/id/name, NOT the existing aliases) — so the canonical's own aliases are
+    // preserved below, while we still never alias the canonical to itself.
+    const own = new Set([slugify(canonical.slug), slugify(canonical.id), slugify(canonical.name)])
+    own.delete('')
+    const aliases = []
+    const seenAlias = new Set()
+    const addAlias = (raw) => {
+      const s = slugify(raw)
+      if (!s || own.has(s) || seenAlias.has(s)) return
+      seenAlias.add(s)
+      aliases.push(s)
+    }
+    for (const a of canonical.aliases || []) addAlias(a)
+    for (const d of dups) {
+      addAlias(d.slug)
+      addAlias(d.id)
+      addAlias(d.name)
+      for (const a of d.aliases || []) addAlias(a)
+    }
     const merged = Object.assign({}, canonical, { flavors: flavors, updatedAt: nowIso })
     delete merged.modelNames
     if (paperIds.length) merged.paperIds = paperIds
     else delete merged.paperIds
     if (hypothesisIds.length) merged.hypothesisIds = hypothesisIds
     else delete merged.hypothesisIds
+    if (aliases.length) merged.aliases = aliases
+    else delete merged.aliases
     return merged
+  }
+  // The ids of the members the user has checked to merge into the canonical — every member except the
+  // canonical that is still in `checkedDuplicateIds`. The group object (not the DOM) is the source of truth,
+  // so changing the canonical can never silently re-include a duplicate the user excluded.
+  function selectedDuplicateIds(group) {
+    return (group.members || [])
+      .map((m) => m.id)
+      .filter((id) => id !== group.canonicalId && group.checkedDuplicateIds.has(id))
+  }
+  // Make `newCanonicalId` the canonical of a group: the old canonical becomes a checked duplicate (default
+  // include) and the new one drops out of the duplicate set — every other check the user made is preserved.
+  function swapConsolidationCanonical(group, newCanonicalId) {
+    group.checkedDuplicateIds.add(group.canonicalId)
+    group.checkedDuplicateIds.delete(newCanonicalId)
+    group.canonicalId = newCanonicalId
+    return group
   }
   // Repoint papers that referenced any of `fromIds` (the duplicates being merged away) to `toId` (the
   // canonical) in their `modelIds`, de-duping. Returns ONLY the papers that changed (the viewer persists
@@ -408,6 +491,11 @@
     mergeSeedIntoModel: mergeSeedIntoModel,
     mergeModelsForConsolidation: mergeModelsForConsolidation,
     repointPaperModelIds: repointPaperModelIds,
+    selectedDuplicateIds: selectedDuplicateIds,
+    swapConsolidationCanonical: swapConsolidationCanonical,
+    slugify: slugify,
+    modelIdentitySlugs: modelIdentitySlugs,
+    seedClaimedByAlias: seedClaimedByAlias,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Models

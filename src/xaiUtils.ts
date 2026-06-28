@@ -1078,6 +1078,7 @@ export function aggregateToSetupRuns(
       status: 'completed',
       ci: agg.ci,
       seeds: new Set(group.map((r) => r.seed ?? 0)).size,
+      seedList: [...new Set(group.map((r) => r.seed ?? 0))].sort((a, b) => a - b),
     }
     // Store the aggregate where this criterion reads it, so the original criterion still works on setups.
     if (criterion.key === 'objective') setup.objective = value
@@ -1228,9 +1229,14 @@ export function computeConfigSpaceAnalysis(
     contextLevers?: string[]
     environment?: Record<string, unknown>
     appliesWhen?: Record<string, Record<string, unknown[]>>
+    /** Levers excluded from ALL analysis (e.g. `device` — infrastructure, never a model knob). */
+    ignoreLevers?: string[]
   },
 ): ConfigSpaceAnalysis | null {
-  const valid0base = validRunsFor(runs, criterion)
+  const ignore = opts?.ignoreLevers ?? []
+  const valid0base = ignore.length
+    ? validRunsFor(runs, criterion).map((r) => ({ ...r, config: configWithout(r.config, ...ignore) }))
+    : validRunsFor(runs, criterion)
   if (!valid0base.length) return null
   // Pin each conditional lever to `n/a` wherever it doesn't apply, so it can't pollute the analysis (e.g.
   // forward_horizon only varies among supervised models; it's inert for the rest).

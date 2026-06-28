@@ -295,6 +295,22 @@ describe('conditional levers — the "doesn\'t-apply" sentinel is excluded from 
   })
 })
 
+describe('ignoreLevers (device is never a lever)', () => {
+  it('strips ignored levers from the whole-space analysis', () => {
+    const runs = [
+      run('a', { lr: 0.1, device: 'cpu' }, 10),
+      run('b', { lr: 0.2, device: 'mps' }, 90),
+      run('c', { lr: 0.1, device: 'mps' }, 11),
+      run('d', { lr: 0.2, device: 'cpu' }, 89),
+    ]
+    const a = computeConfigSpaceAnalysis(runs, MAX, { ignoreLevers: ['device'] })!
+    expect(a.screening.some((s) => s.lever === 'device')).toBe(false)
+    expect(a.levers).not.toContain('device')
+    expect(a.setups.every((s) => !('device' in s.config))).toBe(true)
+    expect(a.screening.some((s) => s.lever === 'lr')).toBe(true) // real levers survive
+  })
+})
+
 describe('convergence (best-so-far)', () => {
   it('emits a time-ordered best-so-far series over the runs', () => {
     const runs = [
@@ -319,6 +335,15 @@ describe('convergence (best-so-far)', () => {
 })
 
 describe('aggregateToSetupRuns', () => {
+  it('records the distinct used seed numbers (sorted) on each setup', () => {
+    const runs = [
+      run('a', { lr: 0.1 }, 10, { seed: 2 }),
+      run('b', { lr: 0.1 }, 11, { seed: 0 }),
+      run('c', { lr: 0.1 }, 12, { seed: 0 }),
+    ]
+    expect(aggregateToSetupRuns(runs, MAX)[0].seedList).toEqual([0, 2])
+  })
+
   it('folds seeds to one setup and retains the bootstrap CI + seed count', () => {
     const runs = []
     for (let s = 0; s < 5; s++) runs.push(run(`a${s}`, { lr: 0.1 }, 10 + s, { seed: s }))

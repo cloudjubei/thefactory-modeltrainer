@@ -1535,6 +1535,7 @@ export function detectMissingPaperModels(
     name?: string
     modelNames?: string[]
     flavors?: { modelName?: string }[]
+    aliases?: string[]
   }>,
 ): ProposedModel[] {
   const slugs = new Set<string>()
@@ -1542,6 +1543,8 @@ export function detectMissingPaperModels(
   for (const m of catalog) {
     if (m.slug) slugs.add(m.slug)
     if (m.name) slugs.add(modelSlug(m.name))
+    // A model also answers to its aliases — so "Policy Gradient" is not "missing" when a2c lists it.
+    for (const a of m.aliases ?? []) slugs.add(modelSlug(a))
     for (const n of modelBindingNames(m)) bindings.add(n)
   }
   return proposed.filter((p) => !slugs.has(p.slug) && !bindings.has(p.slug))
@@ -1553,7 +1556,8 @@ export function buildAnalyzePaperModelsSystemPrompt(manifest: TrainerManifest): 
     `You are a model librarian for the "${manifest.name}" training project.`,
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
     `You are given a PAPER (its fields, and its text when available) and the project's EXISTING catalog models.`,
-    `Do TWO things: (1) MATCH — the ids of existing models this paper INTRODUCES or IMPROVES (a genuine "this paper is about that model" link, not a passing mention); (2) PROPOSE — any models the paper introduces or requires that are NOT in the catalog, each with what to add.`,
+    `Each existing model lists its aliases (other names it is known by) — MATCH a paper to an existing model when it refers to it by any alias (e.g. a paper on "Policy Gradient" matches the model whose aliases include "policy-gradient"), and do NOT propose it as missing.`,
+    `Do TWO things: (1) MATCH — the ids of existing models this paper INTRODUCES or IMPROVES (a genuine "this paper is about that model" link, not a passing mention); (2) PROPOSE — any models the paper introduces or requires that are NOT in the catalog (nor an alias of one), each with what to add.`,
     `Return ONLY a single JSON object (no prose, no code fence): {"matchModelIds": [string], "proposedModels": [{"name": string, "slug": string, "description": string, "category": "rl|supervised|baseline|component", "proposal": string}]}. Use [] for either when there is nothing to add.`,
   ].join('\n')
 }
@@ -1566,6 +1570,7 @@ export function buildAnalyzePaperModelsUserContent(input: {
     slug: string
     category: string
     modelNames?: string[]
+    aliases?: string[]
   }[]
   text?: string
 }): string {

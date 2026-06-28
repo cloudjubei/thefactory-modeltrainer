@@ -1210,11 +1210,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     for (const [name, spec] of Object.entries(manifest.levers)) {
       if (spec.appliesWhen) appliesWhen[name] = spec.appliesWhen
     }
+    const ignoreLevers = Object.entries(manifest.levers)
+      .filter(([, spec]) => spec.scope === 'ignore')
+      .map(([name]) => name)
     const records = await listCompletedRuns(params.scope, recordType)
     const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion, {
       contextLevers,
       environment: params.environment,
       appliesWhen,
+      ignoreLevers,
     })
     return { recordType, criterion, analysis }
   }
@@ -1232,9 +1236,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const records = await listCompletedRuns(scope, manifest.recordType)
     const focus = records.find((r) => r.key === runKey)
     if (!focus) throw new Error(`run "${runKey}" is not a completed run of this project`)
-    const focusConfig = (focus.content.config as Record<string, unknown>) || {}
+    const ignoreLevers = Object.entries(manifest.levers)
+      .filter(([, spec]) => spec.scope === 'ignore')
+      .map(([name]) => name)
+    const stripIgnored = (cfg: Record<string, unknown>): Record<string, unknown> => {
+      if (!ignoreLevers.length) return cfg
+      const out = { ...cfg }
+      for (const k of ignoreLevers) delete out[k]
+      return out
+    }
+    const focusConfig = stripIgnored((focus.content.config as Record<string, unknown>) || {})
 
-    const runs = recordsToAnalysisRuns(records)
+    const runs = recordsToAnalysisRuns(records).map((r) => ({ ...r, config: stripIgnored(r.config) }))
     const ranked = runs
       .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
       .filter((x): x is { key: string; value: number } => x.value !== undefined)
@@ -1561,6 +1574,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           slug: m.slug,
           category: m.category,
           modelNames: modelBindingNames(m),
+          aliases: m.aliases,
         })),
         text,
       }),

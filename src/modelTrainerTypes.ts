@@ -29,9 +29,10 @@ export interface TrainerLeverSpec {
    * Whether this lever configures the MODEL (default), the ENVIRONMENT the agent acts in (market
    * mechanics — e.g. fees, take-profit/stop-loss), or the DATASET it trains/tests on (asset, time
    * window, fidelity). Environment and dataset levers are managed as named bundles the hub runs
-   * models against, not as ordinary model knobs. Omitted ⇒ `model`.
+   * models against, not as ordinary model knobs. `ignore` levers (e.g. `device`) are infrastructure —
+   * excluded from ALL config-space analysis, never treated as a tunable knob. Omitted ⇒ `model`.
    */
-  scope?: 'model' | 'environment' | 'dataset'
+  scope?: 'model' | 'environment' | 'dataset' | 'ignore'
   /**
    * Conditional applicability: this lever only applies when ANOTHER lever holds one of the listed
    * values — e.g. `{ reward_model: ['combo_all_noop'] }` means the lever is relevant only for that
@@ -533,6 +534,8 @@ export interface AnalysisRun {
   ci?: [number, number]
   /** On an AGGREGATED setup: how many distinct seeds were folded in. */
   seeds?: number
+  /** On an AGGREGATED setup: the distinct seed numbers used (sorted) — for fresh-seed/stabilize launches. */
+  seedList?: number[]
 }
 
 /**
@@ -1349,6 +1352,14 @@ export interface TrainingModel {
   name: string
   /** Canonical kebab identity, e.g. `rainbow-dqn-custom`. */
   slug: string
+  /**
+   * Other slugs/names this model is ALSO known by — so a paper, scan or manifest seed that refers to it
+   * under a different name resolves to THIS entry instead of creating a duplicate (e.g. `a2c` is also
+   * `policy-gradient`). Consolidation records the merged-away models' slugs here; a manifest seed may
+   * declare them; the seed-sync skips a seed that is an alias of an existing model (so a merge survives
+   * re-sync). Matched loosely (slug-normalized).
+   */
+  aliases?: string[]
   /** One or two sentences: what the model is + how it differs. */
   description: string
   category: ModelCategory
