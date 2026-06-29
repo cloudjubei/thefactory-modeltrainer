@@ -70,6 +70,36 @@ describe('modelFlavors', () => {
   })
 })
 
+describe('computeRunDurationsByModel', () => {
+  const r = (model_name: string, durationMs: unknown) => ({ config: { model_name }, durationMs })
+  it('groups by model_name with runs / mean / min / max in ms', () => {
+    const out = M.computeRunDurationsByModel([r('dqn', 100), r('dqn', 300), r('ppo', 200)])
+    const dqn = out.find((d: any) => d.modelName === 'dqn')
+    expect(dqn).toEqual({ modelName: 'dqn', runs: 2, meanMs: 200, minMs: 100, maxMs: 300 })
+    const ppo = out.find((d: any) => d.modelName === 'ppo')
+    expect(ppo).toEqual({ modelName: 'ppo', runs: 1, meanMs: 200, minMs: 200, maxMs: 200 })
+  })
+  it('ignores non-positive / non-numeric durations and drops a model with none valid', () => {
+    const out = M.computeRunDurationsByModel([
+      r('dqn', 100),
+      r('dqn', 0),
+      r('dqn', -5),
+      r('dqn', 'x'),
+      r('ppo', undefined),
+    ])
+    expect(out.map((d: any) => d.modelName)).toEqual(['dqn'])
+    expect(out[0]).toEqual({ modelName: 'dqn', runs: 1, meanMs: 100, minMs: 100, maxMs: 100 })
+  })
+  it('sorts ascending by mean duration (fastest first)', () => {
+    const out = M.computeRunDurationsByModel([r('slow', 900), r('fast', 100), r('mid', 500)])
+    expect(out.map((d: any) => d.modelName)).toEqual(['fast', 'mid', 'slow'])
+  })
+  it('labels a missing model_name as "?" and returns [] for no rows', () => {
+    expect(M.computeRunDurationsByModel([{ config: {}, durationMs: 50 }])[0].modelName).toBe('?')
+    expect(M.computeRunDurationsByModel([])).toEqual([])
+  })
+})
+
 describe('flavorMatchesConfig', () => {
   it('matches by model_name alone', () => {
     expect(M.flavorMatchesConfig({ modelName: 'duel-dqn' }, { model_name: 'duel-dqn' })).toBe(true)
@@ -364,6 +394,95 @@ describe('seed re-sync (flavors)', () => {
     const merged = M.mergeSeedIntoModel(seed, undefined, '2026-06-24T00:00:00.000Z')
     expect(merged.status).toBe('implemented')
     expect(merged.statusSource).toBe('auto')
+  })
+})
+
+describe('flavorComponents + modelsUsingComponent (block composition)', () => {
+  const comps = [
+    {
+      id: 'prioritized-replay-buffer',
+      slug: 'prioritized-replay-buffer',
+      name: 'Prioritized Replay Buffer',
+      category: 'component',
+      flavors: [],
+    },
+    {
+      id: 'custom-policies',
+      slug: 'custom-policies',
+      name: 'Custom Policies & Q-Nets',
+      category: 'component',
+      flavors: [],
+    },
+  ]
+  const rainbow = {
+    id: 'rainbow-dqn',
+    slug: 'rainbow-dqn',
+    name: 'Rainbow DQN',
+    category: 'rl',
+    flavors: [
+      {
+        modelName: 'rainbow-dqn-custom',
+        components: ['custom-policies', 'prioritized-replay-buffer', 'custom-policies'],
+      },
+    ],
+  }
+  const all = [rainbow, ...comps]
+
+  it("resolves a flavor's component slugs to catalog entries, deduped, order-preserving", () => {
+    const got = M.flavorComponents(rainbow.flavors[0], all)
+    expect(got.map((c: any) => c.slug)).toEqual(['custom-policies', 'prioritized-replay-buffer'])
+    expect(got.map((c: any) => c.name)).toEqual([
+      'Custom Policies & Q-Nets',
+      'Prioritized Replay Buffer',
+    ])
+    expect(got.every((c: any) => c.found)).toBe(true)
+  })
+  it('marks an unknown component slug as not found, keeping the raw slug', () => {
+    expect(M.flavorComponents({ modelName: 'x', components: ['ghost-block'] }, all)).toEqual([
+      { slug: 'ghost-block', name: 'ghost-block', found: false },
+    ])
+  })
+  it('returns [] for a flavor with no components', () => {
+    expect(M.flavorComponents({ modelName: 'x' }, all)).toEqual([])
+  })
+  it('modelsUsingComponent finds the models whose flavors reference a component', () => {
+    expect(M.modelsUsingComponent('prioritized-replay-buffer', all).map((m: any) => m.slug)).toEqual(
+      ['rainbow-dqn'],
+    )
+  })
+  it('modelsUsingComponent excludes the component itself + returns [] when unused', () => {
+    expect(M.modelsUsingComponent('custom-policies', comps).map((m: any) => m.slug)).toEqual([])
+  })
+})
+
+describe('seed re-sync (flavor components)', () => {
+  const base = {
+    id: 'rainbow-dqn',
+    slug: 'rainbow-dqn',
+    name: 'Rainbow DQN',
+    description: '',
+    category: 'rl',
+    status: 'implemented',
+    flavors: [
+      { modelName: 'rainbow-dqn-custom', components: ['custom-policies', 'prioritized-replay-buffer'] },
+    ],
+    source: 'manual',
+  }
+  it('flags a components change on an existing flavor as differing', () => {
+    const existing = {
+      ...base,
+      flavors: [{ modelName: 'rainbow-dqn-custom', components: ['custom-policies'] }],
+    }
+    expect(M.seedDiffersFromModel(base, existing)).toBe(true)
+  })
+  it('is false when flavor components already match', () => {
+    expect(M.seedDiffersFromModel(base, { ...base, statusSource: 'auto' })).toBe(false)
+  })
+  it('mergeSeedIntoModel keeps the seed flavor components', () => {
+    const existing = { ...base, flavors: [{ modelName: 'rainbow-dqn-custom' }] }
+    const merged = M.mergeSeedIntoModel(base, existing, '2026-06-29T00:00:00.000Z')
+    const fl = merged.flavors.find((f: any) => f.modelName === 'rainbow-dqn-custom')
+    expect(fl.components).toEqual(['custom-policies', 'prioritized-replay-buffer'])
   })
 })
 

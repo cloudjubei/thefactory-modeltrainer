@@ -1469,6 +1469,16 @@ button.run-badge.model-device-chip:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* The Datasets / Environments add-edit-clone popup (reuses .chart-modal positioning). */
+.bundle-form-panel {
+  width: min(94vw, 540px);
+  margin: 8vh auto;
+}
+.bundle-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
 .versions-list {
   display: flex;
   flex-direction: column;
@@ -1521,6 +1531,7 @@ button.run-badge.model-device-chip:hover {
   white-space: nowrap;
 }
 .bundle-table .bundle-actions-cell .head-actions {
+  flex-wrap: nowrap;
   justify-content: flex-end;
   gap: 4px;
 }
@@ -1678,6 +1689,44 @@ button.run-badge.model-device-chip:hover {
 }
 .flavor-runs.is-empty {
   opacity: 0.55;
+}
+/* The building blocks a flavor is composed of — linked chips under the flavor row. */
+.flavor-components {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 0 2px;
+}
+.block-chip-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted, #888);
+  margin-right: 2px;
+}
+.block-chip {
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--text, #222);
+  background: var(--chip-bg, rgba(127, 127, 127, 0.12));
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 10px;
+  padding: 1px 8px;
+  cursor: pointer;
+  line-height: 1.5;
+}
+button.block-chip:hover {
+  border-color: var(--accent, #6366f1);
+  color: var(--accent, #6366f1);
+}
+.block-chip.is-missing {
+  opacity: 0.6;
+  cursor: default;
+  border-style: dashed;
+}
+.model-used-by {
+  margin: 8px 0 4px;
 }
 .paper-cvm {
   margin: 6px 0;
@@ -3142,6 +3191,13 @@ pre.json {
 .xai-cell-link:hover {
   outline: 2px solid var(--accent, #3b82f6);
   outline-offset: -2px;
+}
+/* A combination that can't occur (a conditional lever is inert here) — shown as a muted "n/a", not a guess. */
+.xai-cell-na {
+  color: var(--muted);
+  font-style: italic;
+  background: var(--surface-subtle);
+  opacity: 0.65;
 }
 /* The acquisition ("climb toward the optimum") recommendation badge — accented to stand out. */
 .badge.xai-rec-climb {

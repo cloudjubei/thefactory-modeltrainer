@@ -152,7 +152,12 @@ project by its manifest's `recordType`.
   returned, not persisted, so the card offers a one-click "Add to catalog" that writes a `proposed`
   record). "Discuss" seeds a project chat (the `discussTopic` seam, like a run) whose seed adapts to
   status — implement (proposed), fix (failing), or improve — so an agent can be put to work on any
-  model. The engine stays domain-oblivious: a model is data + the `model_name` binding.
+  model. A model's `category` (`rl` / `supervised` / `baseline` / `component`) groups the tab;
+  `component` entries catalog the reusable BUILDING BLOCKS (feature extractors, policies/Q-nets, replay
+  buffers, optimizers, NN blocks) and each model flavor declares the `components` it is composed of,
+  rendered as linked chips with a reverse "used by" on the component card (`flavorComponents` /
+  `modelsUsingComponent`; `components` is descriptive only — it never affects run matching). The engine
+  stays domain-oblivious: a model is data + the `model_name` binding.
 - **Datasets/environments are user-managed bundles with a settable default**: levers tagged
   `scope: "dataset"`/`"environment"` aren't model knobs — they're managed in their own tabs as
   named `{recordType}-dataset`/`-environment` records (`{id, name, settings, default}`). One record

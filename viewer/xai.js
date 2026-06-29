@@ -1020,7 +1020,7 @@
     }
   }
 
-  function interactionGrid(surrogate, runs, criterion, leverA, leverB) {
+  function interactionGrid(surrogate, runs, criterion, leverA, leverB, appliesWhen) {
     var valid = validRunsFor(runs, criterion)
     var configs = valid.map(function (r) {
       return r.config
@@ -1030,19 +1030,46 @@
     if (valsA.size < 2 || valsB.size < 2 || !configs.length) return undefined
     var valuesA = Array.from(valsA.keys())
     var valuesB = Array.from(valsB.keys())
+    var conditionApplies = function (cfg, conds) {
+      for (var k in conds) {
+        if (conds[k].map(String).indexOf(String(cfg[k])) === -1) return false
+      }
+      return true
+    }
+    var normAW = function (cfg) {
+      var out = cfg
+      var changed = true
+      while (changed) {
+        changed = false
+        for (var lever in appliesWhen) {
+          if (lever in out && out[lever] !== 'n/a' && !conditionApplies(out, appliesWhen[lever])) {
+            if (out === cfg) out = Object.assign({}, cfg)
+            out[lever] = 'n/a'
+            changed = true
+          }
+        }
+      }
+      return out
+    }
+    // A cell whose (leverA=a, leverB=b) combination can't occur (a conditional lever gets pinned to 'n/a'
+    // once the what-if config is normalized) is left null, not a misleading surrogate extrapolation.
     var cells = []
     valuesA.forEach(function (a) {
       valuesB.forEach(function (b) {
-        cells.push(
-          meanOf(
-            configs.map(function (c) {
-              var next = Object.assign({}, c)
-              next[leverA] = valsA.get(a)
-              next[leverB] = valsB.get(b)
-              return predictConfig(surrogate, next)
-            }),
-          ),
-        )
+        var av = valsA.get(a)
+        var bv = valsB.get(b)
+        var preds = []
+        configs.forEach(function (c) {
+          var next = Object.assign({}, c)
+          next[leverA] = av
+          next[leverB] = bv
+          if (appliesWhen) {
+            next = normAW(next)
+            if (String(next[leverA]) !== String(av) || String(next[leverB]) !== String(bv)) return
+          }
+          preds.push(predictConfig(surrogate, next))
+        })
+        cells.push(preds.length ? meanOf(preds) : null)
       })
     })
     return { leverA: leverA, leverB: leverB, valuesA: valuesA, valuesB: valuesB, cells: cells }
@@ -1229,10 +1256,17 @@
     if (!config || !levers) return config || {}
     var out = {}
     for (var key in config) out[key] = config[key]
-    for (var name in levers) {
-      var spec = levers[name]
-      if (name in out && spec && spec.appliesWhen && !leverConfigApplies(spec, config)) {
-        out[name] = 'n/a'
+    // Fixpoint cascade (see normalizeConditionalLevers in xaiUtils.ts): a conditional lever controlled by
+    // another conditional lever pins to 'n/a' once its controller does, regardless of key order.
+    var changed = true
+    while (changed) {
+      changed = false
+      for (var name in levers) {
+        var spec = levers[name]
+        if (name in out && out[name] !== 'n/a' && spec && spec.appliesWhen && !leverConfigApplies(spec, out)) {
+          out[name] = 'n/a'
+          changed = true
+        }
       }
     }
     return out

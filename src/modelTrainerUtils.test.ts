@@ -55,6 +55,7 @@ import {
   coerceConsolidationGroups,
   buildConsolidateModelsSystemPrompt,
   buildConsolidateModelsUserContent,
+  appliesWhenMap,
 } from './modelTrainerUtils.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
 
@@ -2469,5 +2470,37 @@ describe('buildConsolidateModelsUserContent', () => {
     ]
     const parsed = JSON.parse(buildConsolidateModelsUserContent({ models }))
     expect(parsed.models).toEqual(models)
+  })
+})
+
+describe('appliesWhenMap', () => {
+  const manifest = {
+    recordType: 'r',
+    objective: { name: 'objective', direction: 'max' as const },
+    run: 'x',
+    levers: {
+      model_name: { type: 'string' as const },
+      forward_horizon: { type: 'number' as const, appliesWhen: { model_name: ['supervised-logreg', 'supervised-gbm'] } },
+      momentum_lookback: { type: 'number' as const, appliesWhen: { model_name: ['momentum'] } },
+      lr: { type: 'number' as const },
+    },
+  } as unknown as Parameters<typeof appliesWhenMap>[0]
+
+  it('extracts only the levers that declare appliesWhen', () => {
+    expect(appliesWhenMap(manifest)).toEqual({
+      forward_horizon: { model_name: ['supervised-logreg', 'supervised-gbm'] },
+      momentum_lookback: { model_name: ['momentum'] },
+    })
+  })
+
+  it('is empty when no lever is conditional', () => {
+    const m = { recordType: 'r', levers: { lr: { type: 'number' as const } } } as unknown as Parameters<
+      typeof appliesWhenMap
+    >[0]
+    expect(appliesWhenMap(m)).toEqual({})
+  })
+
+  it('tolerates a manifest with no levers', () => {
+    expect(appliesWhenMap({ recordType: 'r' } as unknown as Parameters<typeof appliesWhenMap>[0])).toEqual({})
   })
 })

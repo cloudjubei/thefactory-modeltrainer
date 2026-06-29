@@ -105,6 +105,25 @@ for (const crit of [MAX, MIN]) {
     mirror.interactionGrid(sJs, runs, crit, 'lr', 'batch_size'),
     'interaction ' + crit.key,
   )
+  if (crit === MAX) {
+    // Conditional-lever interaction: forward_horizon applies only to the 'sup' model; the appliesWhen-aware
+    // grid must null out the inapplicable (rl) cells identically in TS + mirror.
+    const condRuns = []
+    let ck = 0
+    for (const fh of [1, 5])
+      for (const seed of [0, 1, 2])
+        condRuns.push(run('c' + ck++, { model_name: 'sup', forward_horizon: fh }, 10 + fh + seed, { seed }))
+    for (const seed of [0, 1, 2])
+      condRuns.push(run('c' + ck++, { model_name: 'rl', forward_horizon: 'n/a' }, 50 + seed, { seed }))
+    const aw = { forward_horizon: { model_name: ['sup'] } }
+    const cTs = ts.fitConfigSurrogate(condRuns, crit)
+    const cJs = mirror.fitConfigSurrogate(condRuns, crit)
+    eq(
+      ts.interactionGrid(cTs, condRuns, crit, 'forward_horizon', 'model_name', aw),
+      mirror.interactionGrid(cJs, condRuns, crit, 'forward_horizon', 'model_name', aw),
+      'interaction conditional ' + crit.key,
+    )
+  }
   // Phase 2/3/4: acquisition stats, coupling, and the PCA projection (rng/order sensitive).
   for (const cfg of [
     { lr: 0.2, batch_size: 128 },

@@ -919,6 +919,7 @@ export function interactionGrid(
   criterion: AnalysisCriterion,
   leverA: string,
   leverB: string,
+  appliesWhen?: Record<string, Record<string, unknown[]>>,
 ): InteractionGrid | undefined {
   const valid = validRunsFor(runs, criterion)
   const configs = valid.map((r) => r.config)
@@ -927,16 +928,24 @@ export function interactionGrid(
   if (valsA.size < 2 || valsB.size < 2 || !configs.length) return undefined
   const valuesA = [...valsA.keys()]
   const valuesB = [...valsB.keys()]
-  const cells: number[] = []
+  // A cell whose (leverA=a, leverB=b) combination can't actually occur — because a conditional lever's value
+  // is pinned to `n/a` once the what-if config is normalized (e.g. forward_horizon crossed with an RL model
+  // that ignores it) — is left `null` rather than a misleading surrogate extrapolation.
+  const cells: (number | null)[] = []
   for (const a of valuesA) {
     for (const b of valuesB) {
-      cells.push(
-        meanOf(
-          configs.map((c) =>
-            predictConfig(surrogate, { ...c, [leverA]: valsA.get(a), [leverB]: valsB.get(b) }),
-          ),
-        ),
-      )
+      const av = valsA.get(a)
+      const bv = valsB.get(b)
+      const preds: number[] = []
+      for (const c of configs) {
+        let whatIf: Record<string, unknown> = { ...c, [leverA]: av, [leverB]: bv }
+        if (appliesWhen) {
+          whatIf = normalizeConditionalLevers(whatIf, appliesWhen)
+          if (String(whatIf[leverA]) !== String(av) || String(whatIf[leverB]) !== String(bv)) continue
+        }
+        preds.push(predictConfig(surrogate, whatIf))
+      }
+      cells.push(preds.length ? meanOf(preds) : null)
     }
   }
   return { leverA, leverB, valuesA, valuesB, cells }
@@ -1097,10 +1106,10 @@ function pickKeys(config: Record<string, unknown>, keys: string[]): Record<strin
 
 // The value a conditional lever takes where it doesn't apply — a single sentinel so the surrogate sees it
 // as constant there (no spurious effect) and the UI can show "doesn't apply here".
-const CONDITIONAL_NA = 'n/a'
+export const CONDITIONAL_NA = 'n/a'
 
 /** A conditional lever applies to a config only when every one of its `appliesWhen` conditions is met. */
-function leverApplies(config: Record<string, unknown>, conds: Record<string, unknown[]>): boolean {
+export function leverApplies(config: Record<string, unknown>, conds: Record<string, unknown[]>): boolean {
   return Object.entries(conds).every(([k, vals]) => vals.map(String).includes(String(config[k])))
 }
 
@@ -1109,15 +1118,22 @@ function leverApplies(config: Record<string, unknown>, conds: Record<string, unk
  * `forward_horizon` on a non-supervised model) is pinned to {@link CONDITIONAL_NA}. The lever then has no
  * variance where it's irrelevant, so the surrogate/fANOVA/interaction grid stop attributing noise to it.
  */
-function normalizeConditionalLevers(
+export function normalizeConditionalLevers(
   config: Record<string, unknown>,
   appliesWhen: Record<string, Record<string, unknown[]>>,
 ): Record<string, unknown> {
   let out = config
-  for (const [lever, conds] of Object.entries(appliesWhen)) {
-    if (lever in out && !leverApplies(out, conds)) {
-      if (out === config) out = { ...config }
-      out[lever] = CONDITIONAL_NA
+  // Fixpoint: a conditional lever controlled by ANOTHER conditional lever must cascade to 'n/a' once its
+  // controller is pinned — independent of iteration order. Each lever pins at most once, so this terminates.
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const [lever, conds] of Object.entries(appliesWhen)) {
+      if (lever in out && out[lever] !== CONDITIONAL_NA && !leverApplies(out, conds)) {
+        if (out === config) out = { ...config }
+        out[lever] = CONDITIONAL_NA
+        changed = true
+      }
     }
   }
   return out

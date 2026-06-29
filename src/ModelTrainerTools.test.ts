@@ -3703,3 +3703,160 @@ describe('consolidateModels', () => {
     ).rejects.toThrow()
   })
 })
+
+describe('conditional-lever normalization (n/a hygiene)', () => {
+  // forward_horizon applies only to the supervised model; on any other model it must read 'n/a'.
+  const condManifest = (overrides: Partial<TrainerManifest> = {}) =>
+    manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['rl', 'sup'], default: 'rl' },
+        lr: { type: 'number', default: 0.01 },
+        forward_horizon: { type: 'number', default: 1, appliesWhen: { model_name: ['sup'] } },
+      },
+      ...overrides,
+    })
+  // A runner that echoes the executed config back in its summary, like a real trainer.
+  const echoRunner = () =>
+    stubRunner({ jobResult: (job) => ({ summary: { objective: 1, config: job.config } }) })
+
+  it('pins an inapplicable conditional lever to n/a in a COMPLETED run record (executor still gets the raw value)', async () => {
+    const storage = memoryStorage()
+    const runner = echoRunner()
+    const { tools } = makeTools(runner, storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+      spec: { fixed: { model_name: 'rl', forward_horizon: 5, lr: 0.1 } },
+    })
+    const [rec] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect((rec.content as { config: Record<string, unknown> }).config.forward_horizon).toBe('n/a')
+    // the executor received the raw value (it only ignores it) — normalization is storage-only
+    expect((runner.jobs[0].config as { forward_horizon: unknown }).forward_horizon).toBe(5)
+  })
+
+  it('keeps an APPLICABLE conditional lever as its real value', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(echoRunner(), storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+      spec: { fixed: { model_name: 'sup', forward_horizon: 5, lr: 0.1 } },
+    })
+    const [rec] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect((rec.content as { config: Record<string, unknown> }).config.forward_horizon).toBe(5)
+  })
+
+  it('pins n/a in a FAILED run record too', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: () => ({ status: 'failed', error: 'boom' }) })
+    const { tools } = makeTools(runner, storage)
+    await tools
+      .runTrainingCampaign({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: condManifest(),
+        spec: { fixed: { model_name: 'rl', forward_horizon: 7, lr: 0.1 } },
+      })
+      .catch(() => {})
+    const [rec] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect((rec.content as { status: string; config: Record<string, unknown> }).status).toBe('failed')
+    expect((rec.content as { config: Record<string, unknown> }).config.forward_horizon).toBe('n/a')
+  })
+
+  it('migrates EXISTING completed runs to n/a even with no rule-based migrations, and is idempotent', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, status: 'completed', config: { model_name: 'rl', forward_horizon: 5, lr: 0.1 } },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r2',
+      content: { objective: 1, status: 'completed', config: { model_name: 'sup', forward_horizon: 5, lr: 0.1 } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+    })
+    expect(result).toMatchObject({ examinedRuns: 2, migratedRuns: 1 })
+    expect(
+      ((await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' }))!.content as {
+        config: Record<string, unknown>
+      }).config.forward_horizon,
+    ).toBe('n/a')
+    // the supervised run is untouched (the lever applies there)
+    expect(
+      ((await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r2' }))!.content as {
+        config: Record<string, unknown>
+      }).config.forward_horizon,
+    ).toBe(5)
+    // second pass converges — nothing left to migrate
+    const again = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+    })
+    expect(again.migratedRuns).toBe(0)
+  })
+
+  it('does NOT pin a pending queue spec to n/a (the spec drives execution; the trainer must get a real value)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-queue',
+      key: 'q1',
+      content: {
+        id: 'q1',
+        activityType: 'train',
+        params: { spec: { fixed: { model_name: 'rl', forward_horizon: 9, lr: 0.1 }, seeds: [0] } },
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(), // conditional levers but NO rule-based migrations
+      queueRecordType: 'trainer-queue',
+    })
+    expect(result).toMatchObject({ examinedQueue: 1, migratedQueue: 0 })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q1' })
+    const fixed = (rec?.content as { params: { spec: { fixed: Record<string, unknown> } } }).params.spec.fixed
+    expect(fixed.forward_horizon).toBe(9) // untouched — a pending run is canonicalised in STORAGE on completion
+  })
+
+  it('migration keeps setupKey RAW so a canonicalised completed run still dedups against a fresh campaign', async () => {
+    const storage = memoryStorage()
+    const rawConfig = { model_name: 'rl', forward_horizon: 5, lr: 0.1, seed: 0 }
+    const rawKey = setupKeyOf(rawConfig)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, status: 'completed', config: rawConfig, setupKey: rawKey },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: condManifest() })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    const content = rec?.content as { config: Record<string, unknown>; setupKey: string }
+    expect(content.config.forward_horizon).toBe('n/a') // stored config canonicalised
+    expect(content.setupKey).toBe(rawKey) // …but setupKey stays RAW, matching setupKeyOf(item.config) in isFresh
+    // A fresh skipExplored campaign for the SAME setup must therefore dedup it (no re-run).
+    const runner = stubRunner({ jobResult: (job) => ({ summary: { objective: 1, config: job.config } }) })
+    const { tools: tools2 } = makeTools(runner, storage)
+    await tools2.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+      spec: { fixed: { model_name: 'rl', forward_horizon: 5, lr: 0.1 }, seeds: [0] },
+      skipExplored: true,
+    })
+    expect(runner.jobs).toHaveLength(0) // already explored — not re-run
+  })
+})

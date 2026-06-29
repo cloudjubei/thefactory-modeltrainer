@@ -14,6 +14,7 @@ import {
   iqm,
   leverCouplings,
   leverImportances,
+  normalizeConditionalLevers,
   pcaProjection,
   ofatContrasts,
   predictConfig,
@@ -656,6 +657,40 @@ describe('config surrogate (Phase 3)', () => {
     ).toBeUndefined()
   })
 
+  it('interactionGrid suppresses cells for an inapplicable conditional lever (n/a, not extrapolated)', () => {
+    // forward_horizon applies only to the supervised model; rl runs carry the 'n/a' sentinel.
+    const condRuns: AnalysisRun[] = []
+    for (const fh of [1, 5]) {
+      for (let s = 0; s < 3; s++)
+        condRuns.push(run(`sup-${fh}-${s}`, { model_name: 'sup', forward_horizon: fh }, 10 + fh, { seed: s }))
+    }
+    for (let s = 0; s < 3; s++)
+      condRuns.push(run(`rl-${s}`, { model_name: 'rl', forward_horizon: 'n/a' }, 50, { seed: s }))
+    const s = fitConfigSurrogate(condRuns, MAX)
+    const applies = { forward_horizon: { model_name: ['sup'] } }
+    const g = interactionGrid(s, condRuns, MAX, 'forward_horizon', 'model_name', applies)!
+    expect(g.valuesA).toEqual(['1', '5']) // observedValues strips the 'n/a' sentinel
+    const rlCol = g.valuesB.indexOf('rl')
+    const supCol = g.valuesB.indexOf('sup')
+    expect(rlCol).toBeGreaterThanOrEqual(0)
+    // Every forward_horizon value crossed with the rl model is invalid → null (not a surrogate guess).
+    for (let ai = 0; ai < g.valuesA.length; ai++) {
+      expect(g.cells[ai * g.valuesB.length + rlCol]).toBeNull()
+      expect(typeof g.cells[ai * g.valuesB.length + supCol]).toBe('number')
+    }
+    // The reverse axis order is suppressed symmetrically.
+    const g2 = interactionGrid(s, condRuns, MAX, 'model_name', 'forward_horizon', applies)!
+    const rlRow = g2.valuesA.indexOf('rl')
+    for (let bj = 0; bj < g2.valuesB.length; bj++)
+      expect(g2.cells[rlRow * g2.valuesB.length + bj]).toBeNull()
+  })
+
+  it('interactionGrid without appliesWhen keeps every cell numeric (back-compat)', () => {
+    const s = fitConfigSurrogate(grid, MAX)
+    const g = interactionGrid(s, grid, MAX, 'lr', 'gamma')!
+    expect(g.cells.every((c) => typeof c === 'number')).toBe(true)
+  })
+
   it('fanovaImportances total-effect is ≥ the main effect for every lever', () => {
     const imp = fanovaImportances(fitConfigSurrogate(grid, MAX), grid, MAX)
     for (const f of imp) expect(f.total).toBeGreaterThanOrEqual(f.importance - 1e-9)
@@ -924,5 +959,33 @@ describe('computeConfigSpaceAnalysis (whole-space bundle)', () => {
         expect('forward_horizon' in (rec.spec.fixed ?? {})).toBe(false)
       }
     }
+  })
+})
+
+describe('normalizeConditionalLevers', () => {
+  it('pins an inapplicable conditional lever to n/a and leaves applicable ones', () => {
+    const aw = { forward_horizon: { model_name: ['sup'] } }
+    expect(normalizeConditionalLevers({ model_name: 'rl', forward_horizon: 5 }, aw)).toEqual({
+      model_name: 'rl',
+      forward_horizon: 'n/a',
+    })
+    expect(normalizeConditionalLevers({ model_name: 'sup', forward_horizon: 5 }, aw)).toEqual({
+      model_name: 'sup',
+      forward_horizon: 5,
+    })
+  })
+
+  it('does not add an ABSENT conditional lever (only pins present ones)', () => {
+    const aw = { forward_horizon: { model_name: ['sup'] } }
+    expect(normalizeConditionalLevers({ model_name: 'rl' }, aw)).toEqual({ model_name: 'rl' })
+  })
+
+  it('cascades CHAINED conditionals to n/a regardless of key order (fixpoint)', () => {
+    // C applies only when B='on'; B applies only when A='x'. With A='other', B→n/a, so C must also →n/a —
+    // even though C is listed BEFORE its controller B (the order that exposed the old single-pass bug).
+    const cfg = { A: 'other', B: 'on', C: 5 }
+    const aw = { C: { B: ['on'] }, B: { A: ['x'] } }
+    expect(normalizeConditionalLevers(cfg, aw)).toEqual({ A: 'other', B: 'n/a', C: 'n/a' })
+    expect(cfg).toEqual({ A: 'other', B: 'on', C: 5 }) // input not mutated
   })
 })

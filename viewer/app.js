@@ -148,8 +148,14 @@ const HYPOTHESIS_VERDICT_BADGE = {
   untested: 'is-queued',
   proven: 'is-done',
   disproved: 'is-failed',
+  hidden: 'is-queued',
 }
-const HYPOTHESIS_VERDICT_LABEL = { untested: 'untested', proven: 'proven', disproved: 'disproved' }
+const HYPOTHESIS_VERDICT_LABEL = {
+  untested: 'untested',
+  proven: 'proven',
+  disproved: 'disproved',
+  hidden: 'hidden',
+}
 const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds', 'environments', 'datasets', 'compare']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
 const DEFAULT_HYPOTHESIS_MIN_RUNS = 3
@@ -5961,9 +5967,15 @@ function xaiSurrogateHtml(bundle, criterion) {
   if (!xaiInterB || !leverNames.includes(xaiInterB) || xaiInterB === xaiInterA)
     xaiInterB =
       ranked.find((l) => l !== xaiInterA) || leverNames.find((l) => l !== xaiInterA) || null
+  // Conditional levers (those with `appliesWhen`) must not be crossed against the values they don't apply to
+  // (e.g. forward_horizon × an RL model that ignores it) — pass the map so those cells read 'n/a', not a guess.
+  const appliesWhen = {}
+  if (manifest && manifest.levers)
+    for (const [ln, spec] of Object.entries(manifest.levers))
+      if (spec && spec.appliesWhen) appliesWhen[ln] = spec.appliesWhen
   const grid =
     xaiInterA && xaiInterB && setups.length
-      ? window.Xai.interactionGrid(surrogate, setups, criterion, xaiInterA, xaiInterB)
+      ? window.Xai.interactionGrid(surrogate, setups, criterion, xaiInterA, xaiInterB, appliesWhen)
       : null
   const na = 'Not enough data yet \u2014 run more configs.'
   const fanovaBody = xaiFanovaHtml(a.importances)
@@ -6789,6 +6801,9 @@ function xaiInteractionHtml(grid, leverNames, setups) {
         .map((b, j) => {
           const v = cellAt(i, j)
           const where = `${escapeHtml(grid.leverA)}=${escapeHtml(String(a))}, ${escapeHtml(grid.leverB)}=${escapeHtml(String(b))}`
+          if (v == null) {
+            return `<td class="num xai-cell-na" title="${where} — these levers don\u2019t apply together (a conditional lever is inert here)">n/a</td>`
+          }
           if (!explored(a, b)) {
             return `<td class="num" style="${shade(v)}" title="${where} (surrogate-predicted; not yet run)">${escapeHtml(formatTickValue(v))}</td>`
           }
@@ -6799,7 +6814,7 @@ function xaiInteractionHtml(grid, leverNames, setups) {
     })
     .join('')
   return `${picker}<div class="compare-table-wrap"><table class="kv-table report-table xai-heat"><thead>${head}</thead><tbody>${body}</tbody></table></div>
-    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value. Click an explored cell to see its runs.</p>`
+    <p class="card-sub">cells = surrogate-predicted ${escapeHtml(grid.leverA)} (rows) × ${escapeHtml(grid.leverB)} (cols); greener = higher predicted value; <strong>n/a</strong> cells are combinations that can\u2019t occur (a conditional lever doesn\u2019t apply there). Click an explored cell to see its runs.</p>`
 }
 // The "Propose with AI" button — shared by the empty + populated recommender. Drives the
 // propose-experiments activity; results land as runnable ✦ AI suggestions in THIS list.
@@ -8667,20 +8682,14 @@ function bundleTableHtml(rows, leverEntries, sort, sortAttr, actionsFn) {
 
 // --- Environments tab ------------------------------------------------------------
 function environmentActionsHtml(env, editable, isDefault) {
+  const cloneBtn = `<button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Clone to a new environment" aria-label="Clone">⧉</button>`
   const setDefaultBtn =
     editable && !isDefault
       ? `<button type="button" class="icon-btn" data-env-default="${escapeHtml(env.id)}" title="Set as default environment" aria-label="Set as default">☆</button>`
       : ''
-  // Shorting is an environment property: a one-click "clone to a long+short variant" on any long-only
-  // env, so each existing environment gets a shorting counterpart without hand-editing the field.
-  const shortingOn = String(env.settings.allow_shorting) === 'true'
-  const cloneShortBtn =
-    'allow_shorting' in ((manifest && manifest.levers) || {}) && !shortingOn
-      ? `<button type="button" class="icon-btn" data-env-clone-short="${escapeHtml(env.id)}" title="Clone to a long+short variant (shorting on)" aria-label="Clone with shorting">⇅</button>`
-      : ''
   return editable
-    ? `${cloneShortBtn}${setDefaultBtn}<button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
-    : `${cloneShortBtn}<button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button>`
+    ? `${cloneBtn}${setDefaultBtn}<button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
+    : cloneBtn
 }
 function environmentRows() {
   const defId = defaultEnvironmentId()
@@ -8728,9 +8737,16 @@ async function renderEnvironments() {
 }
 // The create/edit form: a name + a typed field per environment lever (checkbox for boolean levers like
 // allow_shorting, a select for choices, else a number).
-function environmentFormHtml(env) {
-  const isNew = !env || env.id === 'default'
+function environmentFormHtml(env, isClone) {
+  const isNew = isClone || !env || env.id === 'default'
   const settings = (env && env.settings) || defaultEnvironment().settings
+  const nameVal = isClone
+    ? env && env.name
+      ? `${env.name} (copy)`
+      : ''
+    : isNew
+      ? ''
+      : env.name
   const fields = envLeverEntries()
     .map(([k, spec]) => {
       const cur = settings[k]
@@ -8758,30 +8774,66 @@ function environmentFormHtml(env) {
     .join('')
   return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : env.id)}" />
     <label class="field"><span>Name</span>
-      <input type="text" name="name" value="${escapeHtml(isNew ? '' : env.name)}" placeholder="e.g. Low fee · tight SL" /></label>
+      <input type="text" name="name" value="${escapeHtml(nameVal)}" placeholder="e.g. Low fee · tight SL" /></label>
     <div class="lever-grid">${fields}</div>
     <div class="form-actions">
       <button type="submit">Save environment</button>
-      <button type="button" id="environment-cancel" class="ghost-btn">Cancel</button>
+      <button type="button" class="ghost-btn" data-env-form-cancel>Cancel</button>
     </div>`
 }
-function toggleEnvironmentForm(show, env) {
-  const form = byId('environment-form')
-  if (!form) return
-  setStatusLine('environments-status', '')
-  if (show) {
-    form.innerHTML = environmentFormHtml(env)
-    form.hidden = false
-  } else {
-    form.innerHTML = ''
-    form.hidden = true
+// The add/edit/clone form lives in a modal (built lazily, mirrors the custom-filter popup) so it overlays
+// the table instead of pushing it down. Backdrop / ✕ / Cancel all close it.
+function environmentModal() {
+  let modal = byId('environment-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'environment-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-env-form-cancel]')) {
+        toggleEnvironmentForm(false)
+      }
+    })
+    modal.addEventListener('submit', (event) => {
+      const form = event.target.closest('#environment-form')
+      if (form) {
+        event.preventDefault()
+        onSaveEnvironment(form)
+      }
+    })
   }
+  return modal
+}
+function toggleEnvironmentForm(show, env, isClone) {
+  const modal = environmentModal()
+  if (!show) {
+    modal.hidden = true
+    modal.innerHTML = ''
+    return
+  }
+  const editing = !!(env && env.id && env.id !== 'default' && !isClone)
+  const title = editing ? 'Edit environment' : isClone ? 'Clone environment' : 'Add environment'
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-env-form-cancel></div>
+    <div class="chart-modal__panel bundle-form-panel" role="dialog" aria-label="${title}">
+      <div class="chart-modal__head">
+        <strong>${title}</strong>
+        <button type="button" class="icon-btn" data-env-form-cancel title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="chart-modal__scroll">
+        <p id="environment-form-status" class="form-status" role="status" hidden></p>
+        <form id="environment-form" class="bundle-form" autocomplete="off">${environmentFormHtml(env, isClone)}</form>
+      </div>
+    </div>`
+  modal.hidden = false
+  const nameInput = modal.querySelector('input[name="name"]')
+  if (nameInput) nameInput.focus()
 }
 async function onSaveEnvironment(form) {
   const id = form.elements.id.value
   const name = String(form.elements.name.value || '').trim()
   if (!name) {
-    setStatusLine('environments-status', 'Give the environment a name.', true)
+    setStatusLine('environment-form-status', 'Give the environment a name.', true)
     return
   }
   const settings = {}
@@ -8795,7 +8847,7 @@ async function onSaveEnvironment(form) {
   }
   if (environmentDuplicateOf(name, settings, id)) {
     setStatusLine(
-      'environments-status',
+      'environment-form-status',
       'An environment with the same name or settings already exists.',
       true,
     )
@@ -8807,7 +8859,7 @@ async function onSaveEnvironment(form) {
   try {
     await putEnvironment({ id, name, settings, default: isDefault })
   } catch {
-    setStatusLine('environments-status', 'Could not save — please try again.', true)
+    setStatusLine('environment-form-status', 'Could not save — please try again.', true)
     return
   }
   toggleEnvironmentForm(false)
@@ -8833,48 +8885,9 @@ async function onDeleteEnvironment(id) {
   await renderEnvironments()
   renderLaunchForm()
 }
-// Clone an environment (named record OR the synthetic Default) to a new long+short variant — copies its
-// settings, flips allow_shorting on, names it "<env> (long+short)". The pair is how long-only vs long+short
-// is compared: run a model across both environments.
-async function cloneEnvironmentWithShorting(id) {
-  const env =
-    id && id !== 'default' && id !== defaultEnvironmentId()
-      ? environmentsCache.find((e) => e.id === id)
-      : defaultEnvironment()
-  if (!env) return
-  const baseName = String(env.name || 'Environment').replace(/\s*\(long\+short\)\s*$/i, '')
-  try {
-    await putEnvironment({
-      id: randomHexId(),
-      name: `${baseName} (long+short)`,
-      settings: { ...env.settings, allow_shorting: true },
-      default: false,
-    })
-  } catch {
-    setStatusLine(
-      'environments-status',
-      'Could not clone the environment — please try again.',
-      true,
-    )
-    return
-  }
-  setStatusLine('environments-status', `Created “${baseName} (long+short)”.`, false)
-  await renderEnvironments()
-  renderLaunchForm()
-}
 function setupEnvironments() {
   const addToggle = byId('environment-add-toggle')
   if (addToggle) addToggle.addEventListener('click', () => toggleEnvironmentForm(true))
-  const form = byId('environment-form')
-  if (form) {
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      onSaveEnvironment(form)
-    })
-    form.addEventListener('click', (event) => {
-      if (event.target.closest('#environment-cancel')) toggleEnvironmentForm(false)
-    })
-  }
   const body = byId('environments-body')
   if (body) {
     body.addEventListener('click', (event) => {
@@ -8895,14 +8908,11 @@ function setupEnvironments() {
         if (env) toggleEnvironmentForm(true, env)
         return
       }
-      const cloneShort = event.target.closest('button[data-env-clone-short]')
-      if (cloneShort) {
-        cloneEnvironmentWithShorting(cloneShort.dataset.envCloneShort)
-        return
-      }
       const clone = event.target.closest('button[data-env-clone]')
       if (clone) {
-        toggleEnvironmentForm(true)
+        const env =
+          environmentsCache.find((x) => x.id === clone.dataset.envClone) || defaultEnvironment()
+        toggleEnvironmentForm(true, env, true)
         return
       }
       const setDef = event.target.closest('button[data-env-default]')
@@ -8918,13 +8928,14 @@ function setupEnvironments() {
 
 // --- Datasets tab (named dataset-lever bundles — asset / window / fidelity) ------
 function datasetActionsHtml(ds, editable, isDefault) {
+  const cloneBtn = `<button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Clone to a new dataset" aria-label="Clone">⧉</button>`
   const setDefaultBtn =
     editable && !isDefault
       ? `<button type="button" class="icon-btn" data-ds-default="${escapeHtml(ds.id)}" title="Set as default dataset" aria-label="Set as default">☆</button>`
       : ''
   return editable
-    ? `${setDefaultBtn}<button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
-    : `<button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Duplicate to a new dataset" aria-label="Duplicate">⧉</button>`
+    ? `${cloneBtn}${setDefaultBtn}<button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
+    : cloneBtn
 }
 function datasetRows() {
   const defId = defaultDatasetId()
@@ -9015,38 +9026,75 @@ function datasetFieldHtml(key, spec, value) {
   }
   return `<label class="field"><span${helpAttr(spec.description || '')}>${escapeHtml(key)}</span>${input}</label>`
 }
-function datasetFormHtml(ds) {
-  const isNew = !ds || ds.id === 'default'
+function datasetFormHtml(ds, isClone) {
+  const isNew = isClone || !ds || ds.id === 'default'
   const settings = (ds && ds.settings) || defaultDataset().settings
+  const nameVal = isClone ? (ds && ds.name ? `${ds.name} (copy)` : '') : isNew ? '' : ds.name
   const fields = datasetLeverEntries()
     .map(([k, spec]) => datasetFieldHtml(k, spec, settings[k]))
     .join('')
   return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : ds.id)}" />
     <label class="field"><span>Name</span>
-      <input type="text" name="name" value="${escapeHtml(isNew ? '' : ds.name)}" placeholder="e.g. 1h+1d · 2024" /></label>
+      <input type="text" name="name" value="${escapeHtml(nameVal)}" placeholder="e.g. 1h+1d · 2024" /></label>
     <div class="lever-grid">${fields}</div>
     <div class="form-actions">
       <button type="submit">Save dataset</button>
-      <button type="button" id="dataset-cancel" class="ghost-btn">Cancel</button>
+      <button type="button" class="ghost-btn" data-ds-form-cancel>Cancel</button>
     </div>`
 }
-function toggleDatasetForm(show, ds) {
-  const form = byId('dataset-form')
-  if (!form) return
-  setStatusLine('datasets-status', '')
-  if (show) {
-    form.innerHTML = datasetFormHtml(ds)
-    form.hidden = false
-  } else {
-    form.innerHTML = ''
-    form.hidden = true
+// The add/edit/clone form lives in a modal (mirrors the Environments popup) so it overlays the table
+// instead of pushing it down. Backdrop / ✕ / Cancel all close it.
+function datasetModal() {
+  let modal = byId('dataset-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'dataset-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-ds-form-cancel]')) {
+        toggleDatasetForm(false)
+      }
+    })
+    modal.addEventListener('submit', (event) => {
+      const form = event.target.closest('#dataset-form')
+      if (form) {
+        event.preventDefault()
+        onSaveDataset(form)
+      }
+    })
   }
+  return modal
+}
+function toggleDatasetForm(show, ds, isClone) {
+  const modal = datasetModal()
+  if (!show) {
+    modal.hidden = true
+    modal.innerHTML = ''
+    return
+  }
+  const editing = !!(ds && ds.id && ds.id !== 'default' && !isClone)
+  const title = editing ? 'Edit dataset' : isClone ? 'Clone dataset' : 'Add dataset'
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-ds-form-cancel></div>
+    <div class="chart-modal__panel bundle-form-panel" role="dialog" aria-label="${title}">
+      <div class="chart-modal__head">
+        <strong>${title}</strong>
+        <button type="button" class="icon-btn" data-ds-form-cancel title="Close" aria-label="Close">✕</button>
+      </div>
+      <div class="chart-modal__scroll">
+        <p id="dataset-form-status" class="form-status" role="status" hidden></p>
+        <form id="dataset-form" class="bundle-form" autocomplete="off">${datasetFormHtml(ds, isClone)}</form>
+      </div>
+    </div>`
+  modal.hidden = false
+  const nameInput = modal.querySelector('input[name="name"]')
+  if (nameInput) nameInput.focus()
 }
 async function onSaveDataset(form) {
   const id = form.elements.id.value
   const name = String(form.elements.name.value || '').trim()
   if (!name) {
-    setStatusLine('datasets-status', 'Give the dataset a name.', true)
+    setStatusLine('dataset-form-status', 'Give the dataset a name.', true)
     return
   }
   const settings = {}
@@ -9062,7 +9110,7 @@ async function onSaveDataset(form) {
   }
   if (datasetDuplicateOf(name, settings, id)) {
     setStatusLine(
-      'datasets-status',
+      'dataset-form-status',
       'A dataset with the same name or settings already exists.',
       true,
     )
@@ -9074,7 +9122,7 @@ async function onSaveDataset(form) {
   try {
     await putDataset({ id, name, settings, default: isDefault })
   } catch {
-    setStatusLine('datasets-status', 'Could not save — please try again.', true)
+    setStatusLine('dataset-form-status', 'Could not save — please try again.', true)
     return
   }
   toggleDatasetForm(false)
@@ -9103,16 +9151,6 @@ async function onDeleteDataset(id) {
 function setupDatasets() {
   const addToggle = byId('dataset-add-toggle')
   if (addToggle) addToggle.addEventListener('click', () => toggleDatasetForm(true))
-  const form = byId('dataset-form')
-  if (form) {
-    form.addEventListener('submit', (event) => {
-      event.preventDefault()
-      onSaveDataset(form)
-    })
-    form.addEventListener('click', (event) => {
-      if (event.target.closest('#dataset-cancel')) toggleDatasetForm(false)
-    })
-  }
   const body = byId('datasets-body')
   if (body) {
     body.addEventListener('click', (event) => {
@@ -9135,7 +9173,8 @@ function setupDatasets() {
       }
       const clone = event.target.closest('button[data-ds-clone]')
       if (clone) {
-        toggleDatasetForm(true)
+        const ds = datasetsCache.find((x) => x.id === clone.dataset.dsClone) || defaultDataset()
+        toggleDatasetForm(true, ds, true)
         return
       }
       const setDef = event.target.closest('button[data-ds-default]')
@@ -9610,7 +9649,8 @@ async function renderHypotheses() {
   renderProposeControls()
   const controls = hypothesisStatsControlsHtml()
   const visible = hypothesesCache.filter((h) => !h.dismissed)
-  if (!visible.length) {
+  const hidden = hypothesesCache.filter((h) => h.dismissed)
+  if (!visible.length && !hidden.length) {
     body.innerHTML =
       controls +
       '<div class="empty-hint">No hypotheses yet — propose some (the lightbulb above) or add your own.</div>'
@@ -9620,12 +9660,21 @@ async function renderHypotheses() {
   const sorted = sortHypotheses(visible)
   const groups = { untested: [], proven: [], disproved: [] }
   for (const h of sorted) (groups[effectiveHypothesisVerdict(h)] || groups.untested).push(h)
-  // First load (open section not yet chosen): default-open the first non-empty section so it isn't blank.
+  // First load (open section not yet chosen): default-open the first non-empty verdict section so it isn't
+  // blank — falling back to Hidden when everything has been dismissed.
   if (hypothesisOpenSection === undefined) {
-    hypothesisOpenSection = HYPOTHESIS_VERDICTS.find((v) => groups[v].length) || null
+    hypothesisOpenSection =
+      HYPOTHESIS_VERDICTS.find((v) => groups[v].length) || (hidden.length ? 'hidden' : null)
   }
+  // Hidden (dismissed) hypotheses get their own collapsed section at the bottom, so they stay viewable +
+  // restorable without cluttering the live verdict sections.
+  const hiddenSection = hidden.length
+    ? hypothesisSectionHtml('hidden', sortHypotheses(hidden), liveIds)
+    : ''
   body.innerHTML =
-    controls + HYPOTHESIS_VERDICTS.map((v) => hypothesisSectionHtml(v, groups[v], liveIds)).join('')
+    controls +
+    HYPOTHESIS_VERDICTS.map((v) => hypothesisSectionHtml(v, groups[v], liveIds)).join('') +
+    hiddenSection
   void checkModelStatsStale()
 }
 async function onProposeClick() {
@@ -11015,6 +11064,24 @@ function focusPaper(pid) {
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }
 }
+// Bring a model card into view: clear any category filter (so a component card isn't hidden), expand it,
+// re-render the Models tab + scroll to it. Used by the flavor block chips / component "used by" chips.
+async function focusModel(slug) {
+  modelExpanded.add(slug)
+  if (activeTabId !== 'models') {
+    showTab('models')
+    return
+  }
+  modelCategoryFilter = 'all'
+  await renderModels()
+  const body = byId('models-body')
+  const el =
+    body && [...body.querySelectorAll('details.model-card')].find((e) => e.dataset.id === slug)
+  if (el) {
+    el.open = true
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+}
 async function onToggleDismissPaper(id) {
   const p = papersCache.find((x) => x.id === id)
   if (!p) return
@@ -11228,6 +11295,9 @@ function modelStatusBadgeHtml(model) {
   return `<span class="run-badge ${cls}">${escapeHtml(label)}</span>`
 }
 function modelRunChipHtml(model) {
+  // A component's runs are attributed to the models that compose it, never to the component itself — so it
+  // carries no runs chip (use the model card's "used by" to see where it's consumed).
+  if (model.category === 'component') return ''
   const s = modelAgg(model)
   if (!modelStatsCache) {
     return `<span class="hyp-count-chip is-empty"${helpAttr('Run counts are computed over ALL runs — press Refresh.')}>— runs</span>`
@@ -11262,10 +11332,37 @@ function modelFlavorsHtml(model) {
             )})</span>`
           : ''
       const label = escapeHtml(fl.name || fl.modelName)
-      return `<li><code>${escapeHtml(fl.modelName)}</code> ${label}${cfg}${chip}</li>`
+      return `<li><code>${escapeHtml(fl.modelName)}</code> ${label}${cfg}${chip}${flavorComponentsHtml(fl)}</li>`
     })
     .join('')
   return `<div class="model-flavors"><span class="card-sub">Flavors</span><ul class="paper-hyp-list">${rows}</ul></div>`
+}
+// The building blocks a flavor is composed of, as chips — known components link to their catalog entry,
+// unknown slugs render as a plain chip. Empty when the flavor declares no `components`.
+function flavorComponentsHtml(flavor) {
+  const comps = window.Models.flavorComponents(flavor, modelsCache)
+  if (!comps.length) return ''
+  const chips = comps
+    .map((c) =>
+      c.found
+        ? `<button type="button" class="block-chip" data-action="open-model" data-id="${escapeHtml(c.slug)}"${helpAttr('Building block — open its catalog entry')}>${escapeHtml(c.name)}</button>`
+        : `<span class="block-chip is-missing"${helpAttr('Declared block with no catalog entry')}>${escapeHtml(c.name)}</span>`,
+    )
+    .join('')
+  return `<div class="flavor-components"><span class="block-chip-label">blocks</span>${chips}</div>`
+}
+// On a component card: the models whose flavors are built from it (reverse of the flavor block chips).
+function modelUsedByHtml(model) {
+  if (!model || model.category !== 'component') return ''
+  const users = window.Models.modelsUsingComponent(model.slug, modelsCache)
+  if (!users.length) return ''
+  const chips = users
+    .map(
+      (m) =>
+        `<button type="button" class="block-chip" data-action="open-model" data-id="${escapeHtml(m.slug)}"${helpAttr('Open this model')}>${escapeHtml(m.name || m.slug)}</button>`,
+    )
+    .join('')
+  return `<div class="model-used-by"><span class="card-sub">Used by</span><div class="flavor-components">${chips}</div></div>`
 }
 function modelLinkedPapersHtml(model) {
   const papers = window.Models.papersForModel(model, papersCache)
@@ -11314,6 +11411,9 @@ function modelBenchmarkPending(modelId) {
 // spinner while a benchmark is queued/running, or a "check" affordance when never measured. The chip IS
 // the trigger (click to (re-)benchmark) — there is no separate button.
 function modelDeviceChipHtml(model) {
+  // A component is a building block composed INTO models — it has no run/device of its own (those belong to
+  // the models/baselines that use it), so it shows no device chip.
+  if (model.category === 'component') return ''
   const id = escapeHtml(model.id)
   if (modelBenchmarkPending(model.id)) {
     return `<span class="run-badge is-running" title="Benchmarking CPU vs MPS…">${spinnerHtml()} device</span>`
@@ -11377,9 +11477,10 @@ function modelCardHtml(model) {
       ${model.description ? `<p class="paper-claim">${escapeHtml(model.description)}</p>` : ''}
       ${modelAliasesHtml(model)}
       ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
-      ${flavorCount ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
+      ${flavorCount || model.category === 'component' ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
       ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
       ${modelFlavorsHtml(model)}
+      ${modelUsedByHtml(model)}
       ${modelStatusSelectHtml(model)}
       ${modelLinkedPapersHtml(model)}
       ${modelLinkedHypothesesHtml(model)}
@@ -11421,6 +11522,7 @@ function modelRunRow(run) {
     objective: s.objective,
     status: s.status,
     health: s.health,
+    durationMs: s.durationMs,
     ranAt: (s.provenance && s.provenance.ranAt) || s.ranAt,
   }
 }
@@ -11480,6 +11582,7 @@ function hypothesisStatsControlsHtml() {
 function rerenderRunDerivedTab() {
   if (activeTabId === 'hypotheses') return renderHypotheses()
   if (activeTabId === 'papers') return renderPapers()
+  if (activeTabId === 'speed') return renderSpeed()
   return renderModels()
 }
 // Run-derived data is refreshed through ONE registry of updaters, each consuming the shared run set and
@@ -11502,12 +11605,15 @@ async function applyRunDerivedUpdaters(allRuns) {
 // run-derived updater. `newestRunAt`/`totalRuns` it records are the frontier the latest-only path extends.
 async function updateModelStatsFromRuns(allRuns) {
   const models = await readModels()
-  const stats = window.Models.computeModelStats(
-    models,
-    allRuns.map(modelRunRow),
-    objectiveDirection(),
-  )
-  const content = { ...stats, aggregatedAt: nowIso() }
+  const rows = allRuns.map(modelRunRow)
+  const stats = window.Models.computeModelStats(models, rows, objectiveDirection())
+  // Per-model run durations ride along in the same persisted record so the Speed tab reflects EVERY run
+  // (refreshed through this one all-runs scan), not just the current Runs page.
+  const content = {
+    ...stats,
+    durations: window.Models.computeRunDurationsByModel(rows),
+    aggregatedAt: nowIso(),
+  }
   await window.OverseerBridge.putData({
     type: manifest.recordType + '-model-stats',
     key: 'latest',
@@ -11698,7 +11804,8 @@ async function renderSpeed() {
       if (row) showDeviceTimingsModal(row.dataset.id)
     })
   }
-  ;[modelsCache, runsCache] = await Promise.all([readModels(), readRuns()])
+  ;[modelsCache, modelStatsCache] = await Promise.all([readModels(), readModelStats()])
+  void checkModelStatsStale()
   const benchmarked = (modelsCache || []).filter(
     (m) => m.deviceBenchmark && (m.deviceBenchmark.usPerStep || m.deviceBenchmark.errors),
   )
@@ -11742,24 +11849,35 @@ async function renderSpeed() {
     ? `<div class="card"><div class="card-head card-head-row"><h3>Device benchmark <span class="card-sub">\u2014 \u00b5s/step per device (lower = faster); click a row for exact timings</span></h3></div>
       <table class="kv-table report-table device-table"><thead><tr><th>model</th>${deviceHeaders}<th>best</th><th class="num">speedup</th><th>benchmarked</th></tr></thead><tbody>${benchRows}</tbody></table></div>`
     : `<div class="card"><p class="card-sub">No device benchmarks yet \u2014 run \u201cBenchmark device\u201d on a model (Models tab) to measure cpu vs mps speed.</p></div>`
-  const durBy = {}
-  for (const r of runsCache || []) {
-    const mn = String((r.summary.config || {}).model_name ?? '?')
-    const d = r.summary.durationMs
-    if (typeof d === 'number' && d > 0) (durBy[mn] = durBy[mn] || []).push(d)
-  }
-  const durRows = Object.entries(durBy)
-    .map(([mn, ds]) => ({ mn, ds, mean: ds.reduce((a, b) => a + b, 0) / ds.length }))
-    .sort((a, b) => a.mean - b.mean)
+  // Durations come from the persisted all-runs aggregate (refreshed through the shared global Refresh, like
+  // model stats + hypothesis verdicts) so the table reflects EVERY run. Before the first refresh of this
+  // record we fall back to whatever runs are in memory (the all-runs snapshot, else the current page) and
+  // say so, so the scope is never misread as "all" when it isn't.
+  const persistedDur =
+    modelStatsCache && Array.isArray(modelStatsCache.durations) ? modelStatsCache.durations : null
+  const durList =
+    persistedDur ||
+    window.Models.computeRunDurationsByModel((allRunsCache.length ? allRunsCache : []).map(modelRunRow))
+  const durAt =
+    persistedDur && modelStatsCache.aggregatedAt
+      ? ' \u00b7 updated ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
+      : ''
+  const durScope = persistedDur
+    ? `wall-clock per training run \u2014 over ${modelStatsCache.totalRuns} run${modelStatsCache.totalRuns === 1 ? '' : 's'}${durAt}`
+    : allRunsCache.length
+      ? 'wall-clock per training run \u2014 all loaded runs'
+      : 'wall-clock per training run \u2014 Refresh (top right) to aggregate over all runs'
+  const durStale = persistedDur && modelStatsStale ? ' <span class="model-stats-stale">newer runs exist</span>' : ''
+  const durRows = durList
     .map(
-      ({ mn, ds, mean }) =>
-        `<tr><th>${escapeHtml(mn)}</th><td class="num">${ds.length}</td><td class="num">${escapeHtml(formatDuration(Math.round(mean)))}</td><td class="num">${escapeHtml(formatDuration(Math.min(...ds)))}</td><td class="num">${escapeHtml(formatDuration(Math.max(...ds)))}</td></tr>`,
+      (d) =>
+        `<tr><th>${escapeHtml(d.modelName)}</th><td class="num">${d.runs}</td><td class="num">${escapeHtml(formatDuration(Math.round(d.meanMs)))}</td><td class="num">${escapeHtml(formatDuration(d.minMs))}</td><td class="num">${escapeHtml(formatDuration(d.maxMs))}</td></tr>`,
     )
     .join('')
   const durCard = durRows
-    ? `<div class="card"><div class="card-head card-head-row"><h3>Run duration by model <span class="card-sub">\u2014 wall-clock per training run (loaded runs)</span></h3></div>
+    ? `<div class="card"><div class="card-head card-head-row"><h3>Run duration by model <span class="card-sub">\u2014 ${durScope}</span>${durStale}</h3></div>
       <table class="kv-table report-table"><thead><tr><th>model</th><th class="num">runs</th><th class="num">mean</th><th class="num">fastest</th><th class="num">slowest</th></tr></thead><tbody>${durRows}</tbody></table></div>`
-    : ''
+    : `<div class="card"><div class="card-head card-head-row"><h3>Run duration by model</h3></div><p class="card-sub">${escapeHtml(durScope)}</p></div>`
   setHtml(body, benchCard + durCard)
 }
 async function renderModels() {
@@ -12332,6 +12450,7 @@ function setupModels() {
     if (!btn) return
     const { action, id } = btn.dataset
     if (action === 'import-seeds') importSeedModels()
+    else if (action === 'open-model') focusModel(id)
     else if (action === 'discuss-model') chatAboutModel(id)
     else if (action === 'benchmark-device') {
       event.preventDefault() // the chip lives in <summary>; don't toggle the card open/closed on click

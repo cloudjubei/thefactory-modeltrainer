@@ -81,6 +81,7 @@ import {
 } from './modelTrainerHelpers.js'
 import {
   applyMigrationRules,
+  appliesWhenMap,
   blendJudgeScore,
   findMigrationRule,
   manifestDataFiles,
@@ -126,7 +127,12 @@ import {
   validateDecisionTrace,
   validateTrainingRunSummary,
 } from './modelTrainerUtils.js'
-import { computeConfigSpaceAnalysis, criterionValueOf, leverImportances } from './xaiUtils.js'
+import {
+  computeConfigSpaceAnalysis,
+  criterionValueOf,
+  leverImportances,
+  normalizeConditionalLevers,
+} from './xaiUtils.js'
 
 /**
  * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
@@ -204,6 +210,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const spec = migrateExperimentSpec(params.spec, manifest.migrations)
     const items = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
     const total = items.length
+    // Pin conditional levers that don't apply (e.g. forward_horizon on a non-supervised model) to the
+    // 'n/a' sentinel in the STORED config — so a record never carries a value for a lever it ignores and
+    // xAI can't draw conclusions from it. The executor still receives the raw config (item.config); only
+    // what we persist is canonicalised. `setupKey` is left as-is (an opaque dedup key, re-derived by the
+    // analysis layer; canonicalising it would ripple into unrunnable/explored markers).
+    const runAppliesWhen = appliesWhenMap(manifest)
+    const canonicalRunConfig = (cfg: unknown): Record<string, unknown> | undefined =>
+      cfg && typeof cfg === 'object'
+        ? normalizeConditionalLevers(cfg as Record<string, unknown>, runAppliesWhen)
+        : (cfg as undefined)
     const repoRef: ComputeRepoRef = { kind: 'local', localPath: params.projectRoot }
     const runner = resolveRunner(params.computeTarget)
     const dataFiles = manifestDataFiles(manifest)
@@ -391,7 +407,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 status: 'failed',
                 error,
                 ...(result.logTail?.length ? { logTail: result.logTail } : {}),
-                config: item.config,
+                config: canonicalRunConfig(item.config),
                 setupKey: setupKeyOf(item.config),
                 pipelineVersion,
                 ...thesisFields,
@@ -412,6 +428,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           key: item.key,
           content: {
             ...runSummary,
+            config: canonicalRunConfig(runSummary.config),
             ...(artifacts ? { artifacts } : {}),
             status: 'completed',
             setupKey: setupKeyOf(item.config),
@@ -1872,13 +1889,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const rules = manifest.migrations ?? []
+    // Conditional levers that don't apply (e.g. forward_horizon on a non-supervised model) are pinned to
+    // 'n/a' on EVERY run/queue config — independently of the manifest's rule-based migrations — so stored
+    // data stays canonical and xAI never reasons over a value a model ignores.
+    const appliesWhen = appliesWhenMap(manifest)
+    const hasConditional = Object.keys(appliesWhen).length > 0
     let examinedRuns = 0
     let migratedRuns = 0
     let deletedRuns = 0
     let examinedQueue = 0
     let migratedQueue = 0
     let deletedQueue = 0
-    if (rules.length === 0) {
+    if (rules.length === 0 && !hasConditional) {
       return {
         recordType,
         examinedRuns,
@@ -1920,25 +1942,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const content = (record.content ?? {}) as Record<string, unknown>
       const config = content.config
       if (!record.key || !config || typeof config !== 'object') continue
-      const rule = findMigrationRule(config as Record<string, unknown>, rules)
-      if (!rule) continue
-      if (rule.delete) {
+      const cfg = config as Record<string, unknown>
+      const rule = findMigrationRule(cfg, rules)
+      if (rule?.delete) {
         await deleteRunAndDerived(record.key, content.setupKey)
         deletedRuns++
         continue
       }
-      const migrated = applyMigrationRules(config as Record<string, unknown>, rules)
-      if (!migrated) continue
-      // A rule that resolves to an identical config (e.g. a keepOrDefault backfill on an already-set
-      // field) is a no-op — skip the rewrite so the sweep converges and doesn't churn every boot.
-      if (hashTrainingConfig(migrated) === hashTrainingConfig(config as Record<string, unknown>)) {
-        continue
-      }
+      // Apply any matching rule, then pin inapplicable conditional levers to 'n/a'. Both passes converge,
+      // so a config that's already migrated + normalised hashes identically and is left untouched.
+      const ruled = rule ? (applyMigrationRules(cfg, rules) ?? cfg) : cfg
+      const next = normalizeConditionalLevers(ruled, appliesWhen)
+      if (hashTrainingConfig(next) === hashTrainingConfig(cfg)) continue
+      // setupKey stays RAW (from the pre-normalize config), exactly as the write path + isFresh compute it,
+      // so canonicalising a run's stored config never desyncs it from the skipExplored / unrunnable dedup.
       await deps.storage.upsertRecord({
         scope: params.scope,
         type: recordType,
         key: record.key,
-        content: { ...content, config: migrated, setupKey: setupKeyOf(migrated) },
+        content: { ...content, config: next, setupKey: setupKeyOf(ruled) },
       })
       migratedRuns++
       params.onRecordWritten?.(recordType, record.key)

@@ -715,8 +715,12 @@ export interface InteractionGrid {
   leverB: string
   valuesA: string[]
   valuesB: string[]
-  /** Surrogate-predicted criterion per (a, b) cell, row-major over valuesA × valuesB. */
-  cells: number[]
+  /**
+   * Surrogate-predicted criterion per (a, b) cell, row-major over valuesA × valuesB. A cell is `null` when
+   * that (a, b) combination is invalid — a conditional lever's value doesn't apply there — so it's shown as
+   * "n/a" rather than a misleading extrapolation.
+   */
+  cells: (number | null)[]
 }
 
 /** One setup projected onto the 2-D PCA plane, coloured by its criterion value. */
@@ -1338,6 +1342,13 @@ export interface ModelFlavor {
   paperIds?: string[]
   /** Hypotheses specific to THIS flavor. */
   hypothesisIds?: string[]
+  /**
+   * Slugs of the `component` catalog entries (feature extractor, policy/Q-net, replay buffer, optimizer,
+   * NN blocks) this flavor is composed of — the building blocks the viewer renders as linked chips so a
+   * flavor's composition is visible. Purely descriptive: it does not affect run matching (flavors bind
+   * runs by `modelName`/`config` only).
+   */
+  components?: string[]
   notes?: string
 }
 

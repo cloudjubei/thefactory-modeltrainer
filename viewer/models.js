@@ -186,6 +186,32 @@
   function aggForModel(stats, slug) {
     return (stats && stats.perModel && stats.perModel[slug]) || null
   }
+  // Per-model wall-clock training-run durations over the given run rows ({config.model_name, durationMs}),
+  // for the Speed tab. Groups by raw model_name, ignores non-positive / non-numeric durations, and returns
+  // [{ modelName, runs, meanMs, minMs, maxMs }] sorted fastest-first. A model with no valid duration is
+  // dropped. Computed over EVERY run by the all-runs refresh + persisted in the model-stats record, so the
+  // Speed table reflects all runs rather than the current page.
+  function computeRunDurationsByModel(rows) {
+    const by = {}
+    for (const row of Array.isArray(rows) ? rows : []) {
+      const d = row && row.durationMs
+      if (typeof d !== 'number' || !(d > 0)) continue
+      const mn = String((row.config || {}).model_name == null ? '?' : (row.config || {}).model_name)
+      ;(by[mn] = by[mn] || []).push(d)
+    }
+    return Object.keys(by)
+      .map((mn) => {
+        const ds = by[mn]
+        return {
+          modelName: mn,
+          runs: ds.length,
+          meanMs: ds.reduce((a, b) => a + b, 0) / ds.length,
+          minMs: Math.min.apply(null, ds),
+          maxMs: Math.max.apply(null, ds),
+        }
+      })
+      .sort((a, b) => a.meanMs - b.meanMs)
+  }
   // The auto-derived (or manually pinned) lifecycle status of a model, given its all-runs aggregate.
   function deriveModelStatus(model, agg, manifest) {
     // A manual override OR a pinned (non-auto-derivable) status is authoritative — otherwise derive from
@@ -239,6 +265,42 @@
     return (hyps || []).filter((h) => direct[h.id])
   }
 
+  // The component catalog entries a FLAVOR is composed of: its `components` slugs resolved to catalog
+  // models (deduped, order-preserving). An unknown slug is returned as `{found:false}` so a typo still
+  // shows (as a non-link chip) instead of vanishing. Pure.
+  function flavorComponents(flavor, models) {
+    const slugs = flavor && Array.isArray(flavor.components) ? flavor.components : []
+    if (!slugs.length) return []
+    const bySlug = {}
+    for (const m of models || []) if (m && m.slug) bySlug[m.slug] = m
+    const seen = {}
+    const out = []
+    for (const raw of slugs) {
+      const s = slugify(raw)
+      if (!s || seen[s]) continue
+      seen[s] = true
+      const m = bySlug[raw] || bySlug[s]
+      out.push({ slug: m ? m.slug : raw, name: m ? m.name || m.slug : raw, found: !!m })
+    }
+    return out
+  }
+
+  // The catalog models that LIST this component slug in any flavor's `components` — the reverse of
+  // flavorComponents, for a component entry's "used by". Excludes the component itself. Pure.
+  function modelsUsingComponent(componentSlug, models) {
+    const target = slugify(componentSlug)
+    if (!target) return []
+    const out = []
+    for (const m of models || []) {
+      if (!m || slugify(m.slug) === target) continue
+      const used = modelFlavors(m).some(
+        (fl) => Array.isArray(fl.components) && fl.components.some((c) => slugify(c) === target),
+      )
+      if (used) out.push(m)
+    }
+    return out
+  }
+
   // Manifest-owned SCALAR fields a seed re-sync overwrites onto an existing record (flavors compared
   // separately, deeply). The rest are user-owned: statusSource:manual status + statusNote, notes,
   // dismissed, hypothesisIds, createdAt.
@@ -254,9 +316,14 @@
       const f = MODEL_SEED_FIELDS[i]
       if ((seed[f] || '') !== (existing[f] || '')) return true
     }
+    const compKey = (fl) => (Array.isArray(fl.components) ? fl.components : []).map(slugify).join(',')
     const have = {}
-    for (const fl of modelFlavors(existing)) have[flavorKey(fl)] = true
-    for (const fl of modelFlavors(seed)) if (!have[flavorKey(fl)]) return true
+    for (const fl of modelFlavors(existing)) have[flavorKey(fl)] = fl
+    for (const fl of modelFlavors(seed)) {
+      const ex = have[flavorKey(fl)]
+      if (!ex) return true
+      if (compKey(fl) !== compKey(ex)) return true
+    }
     const ident = modelIdentitySlugs(existing)
     for (const a of seed.aliases || []) if (!ident.has(slugify(a))) return true
     return false
@@ -524,11 +591,14 @@
     runIsUnhealthy: runIsUnhealthy,
     computeModelStats: computeModelStats,
     aggForModel: aggForModel,
+    computeRunDurationsByModel: computeRunDurationsByModel,
     deriveModelStatus: deriveModelStatus,
     buildProposedModelRecord: buildProposedModelRecord,
     modelsForPaper: modelsForPaper,
     papersForModel: papersForModel,
     hypothesesForModel: hypothesesForModel,
+    flavorComponents: flavorComponents,
+    modelsUsingComponent: modelsUsingComponent,
     seedDiffersFromModel: seedDiffersFromModel,
     mergeSeedIntoModel: mergeSeedIntoModel,
     mergeModelsForConsolidation: mergeModelsForConsolidation,

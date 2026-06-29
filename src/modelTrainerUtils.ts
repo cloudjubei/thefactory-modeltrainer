@@ -320,6 +320,22 @@ export function canonicalConfigString(value: unknown): string {
   return JSON.stringify(value)
 }
 
+/**
+ * The conditional-applicability map for a manifest: lever name → its `appliesWhen` conditions, for the
+ * levers that declare one. Feeds {@link normalizeConditionalLevers} so a conditional lever (e.g.
+ * `forward_horizon`, which only applies to the supervised models) can be pinned to the `n/a` sentinel
+ * wherever it doesn't apply — keeping stored configs, the interaction grid, and fANOVA honest.
+ */
+export function appliesWhenMap(
+  manifest: TrainerManifest,
+): Record<string, Record<string, unknown[]>> {
+  const out: Record<string, Record<string, unknown[]>> = {}
+  for (const [name, spec] of Object.entries(manifest.levers ?? {})) {
+    if (spec.appliesWhen) out[name] = spec.appliesWhen
+  }
+  return out
+}
+
 export function expandExperimentMatrix(
   manifest: TrainerManifest,
   spec: ExperimentSpec,

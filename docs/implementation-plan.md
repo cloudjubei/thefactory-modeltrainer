@@ -100,24 +100,15 @@ Still PENDING (the rest of the code/paper model catalog is already exposed):
 - **Non-RL `model_type` paths still unexposed:** `technical` (`TechnicalStrategyModel`) and regression `mlp`
   (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
   existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).
-
-**Reusable components (surface as `component` catalog entries / building blocks) — low priority.**
-`scanProjectModels` discovers only `model_name` lever choices, so NONE of these are auto-catalogued —
-surfacing them needs a source-scan discovery path or hand-authored `component` entries. Most are already
-represented INDIRECTLY by the trainable model that wraps them, so confirm a block is genuinely unrepresented
-before adding it:
-
-- Features-extractors (wrapped by catalogued models): `SequenceFeaturesExtractor`
-  (attn/tcn/itransformer, `custom/sequence_extractor.py`; via `attn-ppo`/`tcn-ppo`/`itransformer-ppo`),
-  `LSTMFCE` (`dqn_lstm_policy.py`; via the `*-lstm` models), `CustomMlpExtractor` (`custom/custommlpextractor.py`).
-- Custom policies / Q-nets (wrapped by the `*-custom` models): `custom/policies.py` (ActorCritic /
-  RecurrentActorCritic / DQN / Dueling / Rainbow / QRDQN), `custom/policy_iqn.py` (`CustomIQNPolicy`),
-  `custom/customqnetwork.py` (`create_mlp_custom`), `dueling_dqn/policies.py`.
-- Replay buffers (wrapped by `rainbow-dqn`/`agent57`): `rainbow_dqn/prioritized_replay_buffer.py`,
-  `custom/agent57/agent57.py` (`CustomAgent57ReplayBuffer` / `EpisodicMemory`).
-- GENUINELY UNREPRESENTED (no parent model entry — the real target if ever worth doing): the `DGWO`
-  grey-wolf optimizer (`custom/dgwo.py`, today only an `optimizer_class` lever value) + the NN blocks
-  `custom/{attention,noisylinear,dropconnect,residualblock,denseblock,memorymodels}.py`.
+- **Reusable components — surfaced + composed.** BlackSwan's manifest seeds the building blocks (feature
+  extractors, custom policies/Q-nets, replay buffers, attention + NN blocks, the `DGWO` optimizer) as 12
+  `component` catalog entries; each model flavor declares its `components`, rendered in the Models tab as
+  linked chips with reverse "used by" on component cards (`flavorComponents` / `modelsUsingComponent` in
+  `viewer/models.js`). `DGWO` was rewritten into a working gradient optimizer (it previously crashed —
+  required a closure SB3 never passes) and is now a live `optimizer_class` choice. Optional follow-on: the
+  literal `custom_net_arch` block recipe per `-custom` flavor (which attention/NN-block layers a recipe
+  uses) is not yet surfaced — derive it from the source rather than hand-declaring (today
+  `attention-blocks`/`nn-building-blocks` show no "used by" because recipe wiring isn't asserted).
 
 ### 3. xAI — explain WHY the model acted (parallel track)
 
@@ -283,10 +274,6 @@ _Further out — **FastContext-style repository explorer** (a candidate fourth t
 - **Other single assets** — running the SAME single-asset model on ETH/SOL/etc. is just the `asset`
   lever + an altcoin 1d/1h backfill (lever + per-symbol globs + `data_inventory` gating already
   correct, no code change). NOT multi-asset portfolio — that is the project split above.
-- **Runs column-condense on select** — today the list pane narrows + scrolls horizontally; a true
-  fewer-columns-when-selected mode is a follow-up.
-- **Per-version leaderboard** — today: the Versions tab + per-run version + by-setup/by-experiment
-  groupings; a dedicated per-version leaderboard is a follow-up.
 - **Runner-channel WebSocket upgrade** — job dispatch is already ~instant (long-poll `wake()`); a WS only
   shaves ~1.5s log-batch latency, invisible until a live-log UI consumes it.
 - **Remote git repoRefs** — the engine emits local paths only; wire git refs + project bootstrap when a
