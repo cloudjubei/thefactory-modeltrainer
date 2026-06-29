@@ -18,6 +18,7 @@ const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
+const LAUNCH_DEVICE_SS = 'trainer.launchDevice'
 const CONCURRENCY_SS = 'trainer.concurrency'
 // Input-only convenience lever values that are NEVER stored on a run (e.g. fidelity_set 'auto', which
 // resolves to a concrete value at run time). The dataset form + runs filter drop these so a named dataset
@@ -57,7 +58,7 @@ const PAPER_RECORD_SUFFIX = '-paper'
 const MODEL_RECORD_SUFFIX = '-model'
 // Approach/paper verdict lifecycle (matches TrainingPaperRecord.status). Drives the verdict badge,
 // the verdict filter, and the auto-suggested verdict from measured-vs-hold.
-const PAPER_STATUSES = ['untested', 'replicating', 'holds-up', 'fluff']
+const PAPER_STATUSES = ['untested', 'replicating', 'holds-up', 'shaky', 'fluff']
 const QUEUE_RECORD_TYPE = 'trainer-queue'
 const SEEN_RECORD_TYPE = 'trainer-seen'
 const CHART_PALETTE = ['#3b82f6', '#f59e0b', '#10b981', '#ef4444', '#8b5cf6', '#14b8a6']
@@ -67,16 +68,17 @@ const PROPOSE_HELP_TEXT =
   "Sends the manifest's levers, the run history and the verdicts to the LLM and asks for new experiment specs likely to beat the best run. Proposals are validated against the levers, deduped by spec, and land below as untested hypotheses that auto-verify against your runs."
 const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runners panel.'
 const TABS = [
-  { id: 'runs', label: 'Runs' },
+  { id: 'runs', label: 'Runs', icon: iconRunsSvg },
   { id: 'hypotheses', label: 'Hypotheses', icon: iconHypothesisSvg },
-  { id: 'papers', label: 'Papers' },
-  { id: 'models', label: 'Models' },
-  { id: 'versions', label: 'Versions' },
-  { id: 'datasets', label: 'Datasets' },
-  { id: 'environments', label: 'Environments' },
-  { id: 'launch', label: 'Launch' },
+  { id: 'papers', label: 'Papers', icon: iconPaperSvg },
+  { id: 'models', label: 'Models', icon: iconModelSvg },
+  { id: 'versions', label: 'Versions', icon: iconVersionSvg },
+  { id: 'datasets', label: 'Datasets', icon: iconDatasetSvg },
+  { id: 'environments', label: 'Environments', icon: iconEnvironmentSvg },
+  { id: 'launch', label: 'Launch', icon: iconRunSvg },
+  { id: 'speed', label: 'Speed', icon: iconSpeedSvg },
+  { id: 'xai', label: 'xAI', icon: iconXaiSvg },
   { id: 'activity', label: 'Activity' },
-  { id: 'xai', label: 'xAI' },
 ]
 // xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
 // OFAT lever, and the last recommendation set (so a Run-batch click can launch it by index).
@@ -109,11 +111,14 @@ let xaiEnvSortDir = 'desc'
 let xaiMapKind = 'parallel'
 // PCA colour mode: 'rank' (performance) or 'model' (cluster by model_name).
 let xaiPcaColor = 'rank'
-// Pareto (trade-off) map axes: which two metrics + the better-direction for each.
+// Pareto (trade-off) map axes: which two metrics + the better-direction for each. An optional 3rd metric
+// (xaiParetoZ, null = off) turns the map 3-D with a true 3-D Pareto frontier; it stays 2-D when unset.
 let xaiParetoX = null
 let xaiParetoXDir = 'max'
 let xaiParetoY = null
 let xaiParetoYDir = 'max'
+let xaiParetoZ = null
+let xaiParetoZDir = 'max'
 // Parallel-map axis filter: lever -> the picked value (a config must match every pick to stay highlit).
 let xaiPcPick = {}
 // The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
@@ -145,7 +150,7 @@ const HYPOTHESIS_VERDICT_BADGE = {
   disproved: 'is-failed',
 }
 const HYPOTHESIS_VERDICT_LABEL = { untested: 'untested', proven: 'proven', disproved: 'disproved' }
-const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds', 'environments', 'datasets']
+const HYPOTHESIS_SPEC_KEYS = ['sweep', 'fixed', 'seeds', 'environments', 'datasets', 'compare']
 const HYPOTHESIS_SPEC_PLACEHOLDER = '{"sweep":{},"fixed":{},"seeds":[0]}'
 const DEFAULT_HYPOTHESIS_MIN_RUNS = 3
 const HYPOTHESIS_CONFIG_SUFFIX = '-hypothesis-config'
@@ -216,6 +221,7 @@ let runsDropdownsCollapsed = true
 // recordType + '-filter-rule' records so they survive reloads. Each: { id, field, op,
 // value, active }. Rendered as toggle chips alongside "Hide bad runs".
 let customRulesCache = []
+let favoritesCache = new Set()
 // When the add/edit custom-rule popup is open, the id being edited (null = creating new).
 let editingCustomRuleId = null
 // The flat Runs table renders one page at a time so a large run set doesn't build thousands of
@@ -244,6 +250,8 @@ let datasetsCache = []
 // Approach/paper library records + the active rolled-up-verdict filter ('all' | a paper verdict).
 let papersCache = []
 let paperVerdictFilter = 'all'
+// Free-text papers filter (name/title/authors/claim/abstract/tags); applied on top of the verdict filter.
+let paperSearch = ''
 // How the Papers list is sorted: 'status' (rolled-up verdict, then creation date — the default), 'name',
 // or 'year'. User-picked via the sort dropdown; the list only re-sorts on a full render, not on each update.
 let paperSortKey = 'status'
@@ -346,6 +354,19 @@ function setHtml(el, html) {
 function shortKey(key) {
   const k = String(key || '')
   return k.length > 10 ? k.slice(0, 10) : k
+}
+// The favorites picker option label: "model · dataset · profit%" (e.g. "duel-dqn-custom · BTCUSDT · 1h ·
+// +12.5%"), so a favorite reads by what it IS, not an opaque run key. Falls back to the short key when the
+// run isn't in the loaded page (favorites can outlive a page of results).
+function favoriteOptionLabel(key) {
+  const run = runsCache.find((r) => r.key === key)
+  const s = run && run.summary
+  if (!s) return shortKey(key)
+  const model = (s.config && s.config.model_name) || shortKey(key)
+  const ds = datasetLabel(s)
+  const p = Number(s.metrics && s.metrics.total_return_pct)
+  const profit = Number.isFinite(p) ? `${p >= 0 ? '+' : ''}${p.toFixed(1)}%` : '—'
+  return `${model} · ${ds} · ${profit}`
 }
 function formatObjective(value) {
   const v = Number(value)
@@ -552,6 +573,68 @@ function iconEditSvg(size) {
   return (
     `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
     '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'
+  )
+}
+// --- Tab icons -------------------------------------------------------------------
+// One glyph per section in the tab bar (Activity stays text-only). Stroke=currentColor so each inherits
+// the tab's active/idle colour; sized from the tab bar via icon(14).
+// A list of result rows — the Runs tab (every run is a row in the table).
+function iconRunsSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<line x1="9" y1="6" x2="21" y2="6"/><line x1="9" y1="12" x2="21" y2="12"/><line x1="9" y1="18" x2="21" y2="18"/>' +
+    '<circle cx="4" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="4" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>'
+  )
+}
+// A document with text lines — the Papers tab.
+function iconPaperSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>' +
+    '<line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="14" y2="17"/></svg>'
+  )
+}
+// A price-tag — the Versions tab (each pipeline version is a tagged release).
+function iconVersionSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.83 0L3 13V3h10l7.59 7.59a2 2 0 0 1 0 2.82z"/>' +
+    '<circle cx="7.5" cy="7.5" r="1.4" fill="currentColor" stroke="none"/></svg>'
+  )
+}
+// A database cylinder — the Datasets tab (named data bundles).
+function iconDatasetSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>'
+  )
+}
+// A globe — the Environments tab (the market a model trades in).
+function iconEnvironmentSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/></svg>'
+  )
+}
+// A gauge/speedometer — the Speed tab (device benchmarks).
+function iconSpeedSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M4 18a8 8 0 0 1 16 0"/><path d="M12 18l5-3.5"/><circle cx="12" cy="18" r="1.4" fill="currentColor" stroke="none"/></svg>'
+  )
+}
+// Sparkles — the xAI tab (model-explanation / insight).
+function iconXaiSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M12 3l1.7 4.6L18 9l-4.3 1.4L12 15l-1.7-4.6L6 9l4.3-1.4z"/><path d="M18 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>'
   )
 }
 // Small circular "?" button with a styled hover/focus callout (no native title).
@@ -926,6 +1009,27 @@ async function saveCustomRule(rule) {
     content: rule,
   })
   customRulesCache = await readCustomRules()
+}
+// Favorite runs: a single record holding the set of favorited run keys, so they can be quick-picked in xAI.
+async function readFavorites() {
+  if (!manifest) return new Set()
+  const recs = await queryRecords(`${manifest.recordType}-favorites`, 'favorites')
+  const keys = recs && recs[0] && recs[0].content && Array.isArray(recs[0].content.keys) ? recs[0].content.keys : []
+  return new Set(keys)
+}
+async function toggleFavorite(runKey) {
+  if (!manifest || !runKey) return
+  const next = new Set(favoritesCache)
+  if (next.has(runKey)) next.delete(runKey)
+  else next.add(runKey)
+  favoritesCache = next
+  await window.OverseerBridge.putData({
+    type: `${manifest.recordType}-favorites`,
+    key: 'favorites',
+    content: { keys: [...next] },
+  })
+  if (selectedRunKey === runKey) renderRunDetail(runKey)
+  if (activeTabId === 'xai') renderXai()
 }
 async function deleteCustomRule(id) {
   if (!manifest || !id) return
@@ -2047,7 +2151,8 @@ function applyQuickDispatchState(item, busy) {
     if (selectedRunKey && keys.includes(selectedRunKey)) renderRunDetail(selectedRunKey)
   } else if (
     item.activityType === 'analyze-paper-models' ||
-    item.activityType === 'suggest-paper-hypotheses'
+    item.activityType === 'suggest-paper-hypotheses' ||
+    item.activityType === 'weigh-paper-hypotheses'
   ) {
     const pid = item.params && item.params.paperId
     if (!pid) return
@@ -2103,6 +2208,18 @@ async function refreshAfterQuickDispatch(item, act) {
       showToast('Suggested + linked hypotheses — view', pid ? () => focusPaper(pid) : undefined)
     } else {
       setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
+    }
+  } else if (item.activityType === 'weigh-paper-hypotheses') {
+    if (act && act.status === 'completed') {
+      // The weights are written onto the PAPER (hypothesisWeights) — re-read papers so the roll-up reflects them.
+      papersCache = await readPapers()
+      const pid = item.params && item.params.paperId
+      showToast(
+        'Re-weighed hypotheses by importance — view',
+        pid ? () => focusPaper(pid) : undefined,
+      )
+    } else {
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Re-weigh hypotheses'), true)
     }
   } else if (item.activityType === 'benchmark-model-device') {
     // Re-read the model record so its newly-measured preferredDevice chip replaces the spinner.
@@ -2457,6 +2574,14 @@ const METRIC_INFO = {
     'Total trading fees paid over the run, in basis points of the stake (1 bp = 0.01%). Each round-trip pays the per-trade fee twice, so more trading means more fee drag. Lower is better.',
   blocked_signal_ratio:
     "Share of the agent's buy/sell signals that were NO-OPS — a buy emitted while already in position, or a sell while flat — that the environment could not act on. High means the raw per-step signal stream is mostly unusable even when the executed trades are good. Lower is better (0% = every emitted signal was actionable).",
+  oos_sharpe:
+    'Sharpe ratio of the per-bar equity returns over the out-of-sample test window (mean / stdev of returns). A skill-vs-noise yardstick that feeds the Wave-2 PSR/DSR verdict layer — NOT the optimisation target. Higher is better.',
+  oos_n_obs:
+    'Number of out-of-sample return observations (equity steps) the OOS statistics are computed over — more observations make the Sharpe/skew/kurtosis more reliable.',
+  oos_ret_skew:
+    'Skew of the out-of-sample per-bar returns. Positive = a few large gains; negative = a fat left tail (a few large losses).',
+  oos_ret_kurt:
+    'Excess kurtosis of the out-of-sample per-bar returns — tail-heaviness. High = more frequent extreme moves than a normal distribution.',
 }
 const VSHOLD_INFO =
   'Run return minus buy-and-hold over the same window. Positive = beat just holding. Hold is a control to judge against — never the optimisation target.'
@@ -2506,6 +2631,12 @@ const TABLE_HIDDEN_METRICS = new Set([
   'blocked_signals',
   'executed_signals',
   'signal_noise_pct',
+  // OOS return statistics (Sharpe/skew/kurtosis/n) feed the Wave-2 PSR/DSR verdict layer — detail-only,
+  // too granular for the table.
+  'oos_sharpe',
+  'oos_n_obs',
+  'oos_ret_skew',
+  'oos_ret_kurt',
   ...RETIRED_METRICS,
 ])
 function metricLabel(mk) {
@@ -2596,6 +2727,14 @@ function runsColumns() {
       num: false,
       get: (r) => escapeHtml(datasetLabel(r.summary)),
       sort: (r) => datasetLabel(r.summary),
+    },
+    {
+      id: 'model',
+      label: 'Model',
+      num: false,
+      help: 'The model architecture this run trained — its model_name lever.',
+      get: (r) => escapeHtml(String((r.summary.config || {}).model_name ?? '—')),
+      sort: (r) => String((r.summary.config || {}).model_name ?? ''),
     },
     {
       id: 'version',
@@ -2893,13 +3032,24 @@ function runsServerOrderBy() {
   if (runsSortKey.startsWith('m:')) field = 'metrics.' + runsSortKey.slice(2)
   else if (runsSortKey === 'version') field = 'pipelineVersion'
   else if (runsSortKey === 'durationMs') field = 'durationMs'
+  else if (runsSortKey === 'model') field = 'config.model_name'
   if (!field) return undefined
-  return [{ field, direction: runsSortDir, numeric: field !== 'pipelineVersion' }]
+  const numeric = field !== 'pipelineVersion' && field !== 'config.model_name'
+  return [{ field, direction: runsSortDir, numeric }]
 }
 // The flat Runs view paginates server-side; the group-by views and a setup/experiment drill need
 // the full matching set in memory, so they fetch unpaginated.
+// Filters applied ONLY on the client (the text search + any custom rule whose field can't be pushed
+// server-side via customRuleServerField) trim the page AFTER the server has counted + sliced it, so the
+// server count/pager no longer matches the rows shown (phantom/short pages once ≥1 such filter is active).
+// When any is present, fall back to the unpaged client-paginated path (the one the group-by views use),
+// which filters the full matching set THEN slices — keeping pages + rows consistent.
+function hasClientOnlyRunsFilter() {
+  if (runsTextFilter && runsTextFilter.trim()) return true
+  return customRulesCache.some((rule) => rule.active && !customRuleServerField(rule.field))
+}
 function runsServerPaged() {
-  return runsViewMode === 'runs' && !runsFilterKeys
+  return runsViewMode === 'runs' && !runsFilterKeys && !hasClientOnlyRunsFilter()
 }
 // Resolve a run by key from the current page cache, falling back to records stashed when a run was
 // opened/selected (so detail + compare survive paging away from the run).
@@ -3657,6 +3807,7 @@ async function renderRuns() {
   if (!byId('runs-body')) return
   // Custom rules drive the server-side `where`, so they must be loaded BEFORE readRuns builds it.
   customRulesCache = await readCustomRules()
+  favoritesCache = await readFavorites()
   ;[
     runsCache,
     verdictsCache,
@@ -3902,7 +4053,7 @@ function metricsTableHtml(metrics) {
   const rows = entries
     .map(
       ([k, v]) =>
-        `<tr><th>${escapeHtml(k)}</th><td class="num">${escapeHtml(typeof v === 'number' ? formatObjective(v) : String(v))}</td></tr>`,
+        `<tr><th${helpAttr(METRIC_INFO[k])}>${escapeHtml(k)}</th><td class="num">${escapeHtml(typeof v === 'number' ? formatObjective(v) : String(v))}</td></tr>`,
     )
     .join('')
   return `<table class="kv-table"><tbody>${rows}</tbody></table>`
@@ -4950,11 +5101,18 @@ function xaiScopeHeaderHtml(criterion) {
     .join('')}</select></label>`
   const dirSel = `<label class="card-sub xai-scope-field">Better when <select id="xai-direction" class="app-select"><option value="max"${criterion.direction === 'max' ? ' selected' : ''}>higher</option><option value="min"${criterion.direction === 'min' ? ' selected' : ''}>lower</option></select></label>`
   if (xaiScope === 'current') {
-    if (!xaiFocusKey) return ''
+    const favs = [...favoritesCache]
+    const favPicker = favs.length
+      ? `<label class="card-sub xai-scope-field">\u2605 Favorites <select id="xai-favorite-pick" class="app-select"><option value="">jump to a favorite\u2026</option>${favs.map((k) => `<option value="${escapeHtml(k)}"${k === xaiFocusKey ? ' selected' : ''}>${escapeHtml(favoriteOptionLabel(k))}</option>`).join('')}</select></label>`
+      : ''
+    if (!xaiFocusKey)
+      return favPicker
+        ? `<div class="card xai-scope-header"><div class="xai-scope-body"><span class="xai-scope-tag">No run focused</span>${favPicker}<span class="xai-scope-spacer"></span></div></div>`
+        : ''
     return `<div class="card xai-scope-header">
       <div class="xai-scope-body">
         <span class="xai-scope-tag">Run in focus</span><code class="xai-scope-value">${escapeHtml(shortKey(xaiFocusKey))}</code>
-        ${critSel}${dirSel}
+        ${favPicker}${critSel}${dirSel}
         <span class="xai-scope-spacer"></span>
         <button type="button" class="ghost-btn" data-xai-clear-focus>\u2715 Clear run</button>
       </div>
@@ -5078,6 +5236,13 @@ function xaiCurrentTabs(criterion) {
       render: () => xaiRunStandingHtml(xaiFocusKey, criterion),
     },
     {
+      id: 'map',
+      label: 'Map',
+      icon: xaiIconMap,
+      controls: () => xaiCurrentMapControlsHtml(),
+      render: () => xaiCurrentMapHtml(xaiFocusKey, criterion),
+    },
+    {
       id: 'narrative',
       label: 'Narrative',
       icon: iconChatSvg,
@@ -5090,6 +5255,68 @@ function xaiCurrentTabs(criterion) {
       render: () => xaiModelInternalsHtml(xaiFocusKey),
     },
   ]
+}
+// CURRENT-RUN map: the same configuration maps as All-runs, scoped to the focused run's environment, with
+// THIS run ringed so you can see where it sits among similar runs. Falls back to hints when the whole-space
+// analysis hasn't been computed, or is scoped to a different environment than this run.
+function xaiCurrentMapHtml(focusKey, criterion) {
+  const run = findRun(focusKey)
+  const rec = xaiRunAnalysisCache.get(focusKey)
+  // The digest config (rec.analysis.config) only strips ignore levers; the run-summary fallback is already
+  // conditional-normalized (recordToRun). Normalize here too so present-but-inactive conditional levers read
+  // 'n/a' exactly as the bundle's setup configs do — otherwise the "this run" match silently fails.
+  let focusCfg =
+    (rec && rec.analysis && rec.analysis.config) || (run && run.summary && run.summary.config) || null
+  if (focusCfg && manifest && manifest.levers)
+    focusCfg = window.Xai.normalizeConditionalConfig(focusCfg, manifest.levers)
+  const bundle = xaiResolveBundle(criterion)
+  const card = (inner, head) =>
+    `<div class="card"><div class="card-head card-head-row"><h3>Map <span class="card-sub">\u2014 where this run sits among similar runs</span></h3>${head || ''}</div>${inner}</div>`
+  if (!focusCfg)
+    return card(`<p class="card-sub">This run isn\u2019t loaded \u2014 open it from the <strong>Runs</strong> tab.</p>`)
+  if (!bundle)
+    return card(
+      `<p class="card-sub">Run the whole-space analysis to place this run on the configuration map among every other run.</p>`,
+      xaiAnalyzeAllBtnHtml('Run analysis'),
+    )
+  const a = bundle.analysis
+  const env = a.environment
+  const inEnv = !env || (a.contextLevers || []).every((lev) => String(focusCfg[lev]) === String(env[lev]))
+  if (!inEnv) {
+    const envVals = {}
+    for (const lev of a.contextLevers || []) if (focusCfg[lev] !== undefined) envVals[lev] = focusCfg[lev]
+    const sig = window.Xai.canonicalConfigString(envVals)
+    const match = (a.environments || []).find((e) => e.signature === sig)
+    const switchBtn = match
+      ? `<button type="button" class="ghost-btn" data-xai-env="${escapeHtml(sig)}">Scope analysis to this run\u2019s environment</button>`
+      : ''
+    return card(
+      `<p class="card-sub">The whole-space analysis is currently scoped to <strong>${escapeHtml(xaiEnvLabel(env))}</strong>, but this run is in <strong>${escapeHtml(xaiEnvLabel(envVals))}</strong>. ${match ? 'Scope it to this run\u2019s environment to place it on the map.' : 'Re-run the analysis scoped to this run\u2019s environment to place it on the map.'}</p>`,
+      switchBtn,
+    )
+  }
+  const intro = `<p class="card-sub">The same configuration maps as <strong>All runs</strong>, scoped to this run\u2019s environment, with <strong style="color:#1d4ed8">this run ringed in blue</strong>. Switch the map type at the top-right; on the trade-off map you can add a 3rd metric for a 3-D view.</p>`
+  const body =
+    xaiMapKind === 'pareto'
+      ? xaiParetoHtml(bundle, criterion, focusCfg)
+      : xaiMapKind === 'pca'
+        ? xaiPcaHtml(bundle, criterion, focusCfg)
+        : xaiParallelCoordsHtml(bundle, criterion, focusCfg)
+  return `${card(intro)}${body}`
+}
+// The map-kind switch (Parallel / PCA / Trade-off) for the current-run Map tab \u2014 shares xaiMapKind +
+// the data-xai-map handler with the All-runs Maps tab, so the chosen map type stays consistent across scopes.
+function xaiCurrentMapControlsHtml() {
+  return [
+    ['parallel', 'Parallel'],
+    ['pca', 'PCA'],
+    ['pareto', 'Trade-off'],
+  ]
+    .map(
+      ([k, l]) =>
+        `<button type="button" class="xai-map-tab${xaiMapKind === k ? ' active' : ''}" data-xai-map="${k}">${l}</button>`,
+    )
+    .join('')
 }
 // The best total-run count the viewer knows without re-querying — the analysed bundle's count, else the
 // runs-tab total, else the loaded page. Used for the narrative's "N new runs since" hint.
@@ -5105,7 +5332,7 @@ function xaiHelp(viewId) {
     if (xaiMapKind === 'pareto')
       return {
         title: 'What the Trade-off (Pareto) map shows',
-        body: 'Every point is a config plotted on TWO metrics you choose (e.g. return vs drawdown). A config is on the <strong>Pareto frontier</strong> (green) when no other config beats it on <em>both</em> axes at once; grey points are <em>dominated</em> (something is better on both, so never pick them). There is no single "best" \u2014 choose from the green frontier by how much of one metric you\u2019ll trade for the other. Set each axis\u2019s metric + whether higher or lower is better.',
+        body: 'Every point is a config plotted on TWO metrics you choose (e.g. return vs drawdown). A config is on the <strong>Pareto frontier</strong> (green) when no other config beats it on <em>both</em> axes at once; grey points are <em>dominated</em> (something is better on both, so never pick them). There is no single "best" \u2014 choose from the green frontier by how much of one metric you\u2019ll trade for the other. Set each axis\u2019s metric + whether higher or lower is better. Add an optional <strong>Z</strong> metric to make it a 3-D trade-off (the frontier then needs no config to beat it on all three axes); leave Z on \u201cnone\u201d to stay 2-D.',
       }
     return xaiMapKind === 'pca'
       ? {
@@ -5137,6 +5364,10 @@ function xaiHelp(viewId) {
     recommender: {
       title: 'What Suggested experiments are',
       body: 'The next configs worth running — <strong>▲ climb</strong> picks are the surrogate’s highest Expected-Improvement unrun configs (toward the optimum), <strong>gap</strong>/<strong>pair</strong> fill untested factorial cells, <strong>seeds</strong> firm up a thin top setup, and <strong>✦ AI</strong> are model-proposed ideas beyond the grid. They never change the environment’s settings — only model levers. Run a batch to close the analyse → run → re-analyse loop.',
+    },
+    map: {
+      title: 'Where this run sits',
+      body: 'The same configuration maps as <strong>All runs</strong> (Parallel / PCA / Trade-off), scoped to this run\u2019s environment, with <strong>this run ringed in blue</strong> so you can see where it sits among similar runs \u2014 and, on the trade-off map, whether it\u2019s on the frontier or dominated. Needs the whole-space analysis computed for this run\u2019s environment.',
     },
     standing: {
       title: 'How this run ranks',
@@ -5377,12 +5608,12 @@ function xaiRunStandingHtml(runKey, criterion) {
           ? ''
           : atBest
             ? '<span class="delta-pos">✓ at best-seen</span>'
-            : `<span class="delta-neg">→ try ${escapeHtml(String(i.bestValue))}</span>`
+            : `<span class="delta-neg">→ try ${escapeHtml(xaiFmtLeverValue(i.bestValue))}</span>`
       const explore =
         i.lever === 'model_name'
           ? ''
           : `<button type="button" class="ghost-btn xai-explore-btn" data-xai-explore-lever="${escapeHtml(i.lever)}" title="Launch a campaign sweeping ${escapeHtml(i.lever)} across its values, holding this run's other settings fixed">sweep \u2197</button>`
-      return `<tr><th><code>${escapeHtml(xaiAbbrevLever(i.lever))}</code></th><td class="num">${Math.round(i.importance * 100)}%</td><td>${escapeHtml(mineStr)}</td><td>${escapeHtml(String(i.bestValue))}</td><td>${verdict} ${explore}</td></tr>`
+      return `<tr><th><code>${escapeHtml(xaiAbbrevLever(i.lever))}</code></th><td class="num">${Math.round(i.importance * 100)}%</td><td>${escapeHtml(mineStr)}</td><td>${escapeHtml(xaiFmtLeverValue(i.bestValue))}</td><td>${verdict} ${explore}</td></tr>`
     })
     .join('')
   const leversCard = leverRows
@@ -5413,10 +5644,35 @@ function xaiRunStandingHtml(runKey, criterion) {
   const whyCard =
     rewardLine || attrLine || latentLine
       ? `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div>${rewardLine}${attrLine}${latentLine}</div>`
-      : ''
+      : `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div><p class="card-sub">This run didn\u2019t record decision attribution, a reward breakdown, or a latent probe, so the deterministic \u201cwhy\u201d is limited \u2014 the <strong>Internals</strong> tab still shows its decision trace, regimes, exits, and trade ledger. To check the result is real (not seed luck), use <strong>Verify seeds</strong> above; the trustworthiness flag in the narrative reflects this missing attribution.</p></div>`
   const nbBundle = xaiResolveBundle(criterion)
   const neighboursCard = nbBundle ? xaiNeighboursHtml(digest, nbBundle, criterion) : ''
-  return `${standingCard}${leversCard}${neighboursCard}${sibCard}${whyCard}`
+  // Seed robustness: is this exact config repeatable, or does the score swing with the seed?
+  let seedCard = ''
+  const selfSetup =
+    nbBundle && digest.config
+      ? (nbBundle.analysis.setups || []).find((sp) =>
+          Object.keys(sp.config).every((k) => String(sp.config[k]) === String(digest.config[k])),
+        )
+      : null
+  if (selfSetup) {
+    const n = selfSetup.seeds || 1
+    if (n < 2) {
+      seedCard = `<div class="card"><div class="card-head card-head-row"><h3>Seed robustness <span class="card-sub">— 1 seed</span></h3></div><p class="card-sub">Only <strong>one seed</strong> has run this config — you can't tell skill from initialisation luck. Use <strong>Verify seeds</strong> above to run more and get a confidence interval.</p></div>`
+    } else if (selfSetup.ci) {
+      const ci = selfSetup.ci
+      const span = Math.abs(ci[1] - ci[0])
+      const rel = digest.objective ? span / Math.max(1e-9, Math.abs(digest.objective)) : span
+      const verdict =
+        rel < 0.1
+          ? 'tight — the result looks <strong>repeatable</strong>'
+          : rel < 0.3
+            ? 'moderate — somewhat seed-sensitive'
+            : '<strong>wide — seed-sensitive</strong> (the score swings with the seed; treat the ranking cautiously)'
+      seedCard = `<div class="card"><div class="card-head card-head-row"><h3>Seed robustness <span class="card-sub">— ${n} seeds</span></h3></div><p class="card-sub">95% CI across seeds: <strong>[${escapeHtml(formatTickValue(ci[0]))}, ${escapeHtml(formatTickValue(ci[1]))}]</strong> — ${verdict}.</p></div>`
+    }
+  }
+  return `${standingCard}${seedCard}${leversCard}${neighboursCard}${sibCard}${whyCard}`
 }
 // The one-shot LLM narrative of the FOCUSED run — what this model does, why, how trustworthy, vs its
 // sibling, what to try next. Per run (keyed by run key); the button becomes "Refresh (N new runs)" as the
@@ -5454,18 +5710,25 @@ function xaiNarrativeHtml(nRuns, criterion) {
 // diff against the nearest comparable run (same data, differs by a lever).
 function xaiModelInternalsHtml(focusKey) {
   const run = findRun(focusKey)
-  if (!run) return ''
+  if (!run)
+    return `<div class="card"><p class="card-sub">This run isn't loaded \u2014 open it from the <strong>Runs</strong> tab (it may be off the current page).</p></div>`
   const s = run.summary
   const sibling = xaiBestSibling(run)
   return `<div class="card">
     <div class="card-head card-head-row"><h3>Model internals <span class="card-sub">— run ${escapeHtml(shortKey(focusKey))}</span></h3>
       <div class="head-actions">
         ${chatAboutRunAvailable() ? `<button type="button" class="ghost-btn" data-xai-discuss="${escapeHtml(focusKey)}" title="Discuss the FULL xAI analysis of this run with the AI">${iconChatSvg()} Discuss xAI</button>` : ''}
-        <button type="button" class="ghost-btn" data-xai-clear-focus title="Stop focusing this run">✕ Clear run</button>
       </div></div>
     <div class="card-scroll">
+    <h3>Metrics</h3>
+    ${metricsTableHtml(s.metrics)}
+    ${priceActionSectionHtml(s, run.key)}
+    ${exitsSectionHtml(s)}
+    ${regimesSectionHtml(s)}
+    ${equityVsHoldSectionHtml(s) || trainingCurveSectionHtml(s)}
     ${explainSectionHtml(s)}
     ${decisionInternalsHtml(readDecisionTrace(s))}
+    ${ledgerSectionHtml(s)}
     ${sibling ? decisionDiffSectionHtml(sibling.summary, s) : ''}
     </div></div>`
 }
@@ -5805,7 +6068,7 @@ function xaiAbbrevLever(name) {
 }
 // Parallel-coordinates "configuration map": every explored config is a line threading its lever values,
 // coloured by performance rank — readable axes, so you can SEE which lever values the good configs share.
-function xaiParallelCoordsHtml(bundle, criterion) {
+function xaiParallelCoordsHtml(bundle, criterion, focusConfig) {
   const a = bundle.analysis
   const setupVal = (s) =>
     criterion.key === 'objective'
@@ -5907,6 +6170,18 @@ function xaiParallelCoordsHtml(bundle, criterion) {
       return `<polyline class="xai-pc-line" data-xai-focus-config="${escapeHtml(x.s.key)}" points="${pts}" fill="none" stroke="hsl(${Math.round(r * 120)},70%,45%)" stroke-width="${matched ? '1.4' : '0.8'}" opacity="${op}"><title>${escapeHtml(tip)} · click to open this run</title></polyline>`
     })
     .join('')
+  // The focused run (current-run scope): a bold blue halo + white core line drawn last, so it reads as
+  // "this run" against the field. Reuses the same click-to-open behaviour as the other lines.
+  let focusOverlay = ''
+  if (focusConfig) {
+    const fi = items.find((x) => xaiSetupMatchesConfig(x.s.config, focusConfig))
+    if (fi) {
+      const fpts = levers
+        .map((lev, j) => `${axisX(j).toFixed(1)},${yOf(lev, fi.s.config[lev]).toFixed(1)}`)
+        .join(' ')
+      focusOverlay = `<polyline points="${fpts}" fill="none" stroke="#1d4ed8" stroke-width="4.5" opacity="0.85"/><polyline class="xai-pc-line" data-xai-focus-config="${escapeHtml(fi.s.key)}" points="${fpts}" fill="none" stroke="#fff" stroke-width="1.6" opacity="0.95"><title>THIS RUN · ${escapeHtml(compactCfg(fi.s.config))} · click to open</title></polyline>`
+    }
+  }
   // Clickable value ticks on each low-cardinality axis: click one to keep only the configs at that value.
   const valueMarkers = levers
     .map((lev, i) => {
@@ -5930,12 +6205,12 @@ function xaiParallelCoordsHtml(bundle, criterion) {
     : ''
   return card(`<p class="card-sub">Every line is one config; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>Hover</strong> a line to read its config, <strong>click</strong> it to open that run, or <strong>click a tick</strong> on an axis to keep only the configs at that value. Axes are ordered most-decisive-first (by fANOVA).</p>
     ${clearBar}
-    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}${valueMarkers}</svg></div>
+    <div class="chart-wrap"><svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" class="xai-pc" role="img" aria-label="Parallel-coordinates configuration map">${axes}${polys}${focusOverlay}${valueMarkers}</svg></div>
     ${xaiParallelConclusionsHtml(items, rank, levers, info, criterion)}`)
 }
 // PCA "configuration map": a 2-D sketch of the explored setups coloured by performance (green=better).
 // Intuition only — the PC axes are lever mixes, not knobs. Reuses the shared scatter builder.
-function xaiPcaHtml(bundle, criterion) {
+function xaiPcaHtml(bundle, criterion, focusConfig) {
   const pca = bundle.analysis.pca
   if (!pca || pca.points.length < 3)
     return `<div class="card"><div class="card-head card-head-row"><h3>Configuration map (PCA)</h3></div><div class="card-scroll"><p class="card-sub">Need ≥3 explored configs to draw the PCA map.</p></div></div>`
@@ -5971,14 +6246,16 @@ function xaiPcaHtml(bundle, criterion) {
     const cfg = setup ? compactConfig(setup.config) : ''
     const seeds = p.runKeys.length > 1 ? ` (${p.runKeys.length} seeds)` : ''
     const pct = Math.round(rankFrac[i] * 100)
+    const isFocus = !!(focusConfig && setup && xaiSetupMatchesConfig(setup.config, focusConfig))
     return {
       x: p.x,
       y: p.y,
+      focus: isFocus,
       color:
         colorMode === 'model'
           ? `hsl(${xaiModelHue(modelOf(i))}, 62%, 50%)`
           : `hsl(${Math.round(rankFrac[i] * 120)}, 70%, 45%)`,
-      label: `${modelOf(i)} · ${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)} · top ${100 - pct}%${seeds}`,
+      label: `${isFocus ? '▶ THIS RUN · ' : ''}${modelOf(i)} · ${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)} · top ${100 - pct}%${seeds}`,
     }
   })
   const ev = (i) => Math.round((pca.explainedVariance[i] || 0) * 100)
@@ -6136,18 +6413,27 @@ function xaiMetricVal(s, key) {
 function xaiInferMetricDir(key) {
   return /draw|risk|loss|vol|cost|\bdd\b|error|mae|rmse|slippage/i.test(String(key)) ? 'min' : 'max'
 }
-// TRADE-OFF (Pareto) map: every config on two chosen metrics, with the non-dominated frontier highlighted.
-function xaiParetoHtml(bundle, criterion) {
+// Does a bundle setup's config match the focused run's config? Setups carry only the model levers (context
+// stripped), so compare on the setup's own keys, ignoring seed. Used to ring "this run" on the maps.
+function xaiSetupMatchesConfig(setupConfig, focusConfig) {
+  if (!setupConfig || !focusConfig) return false
+  const keys = Object.keys(setupConfig).filter((k) => k !== 'seed')
+  if (!keys.length) return false
+  return keys.every((k) => String(setupConfig[k]) === String(focusConfig[k]))
+}
+// TRADE-OFF (Pareto) map: every config on two (or, with an optional 3rd axis, three) chosen metrics, with
+// the non-dominated frontier highlighted. `focusConfig` (current-run scope) rings "this run" on the map.
+function xaiParetoHtml(bundle, criterion, focusConfig) {
   const a = bundle.analysis
   const setups = a.setups || []
   const card = (inner) =>
-    `<div class="card"><div class="card-head card-head-row"><h3>Trade-off frontier <span class="card-sub">\u2014 the best achievable balance across two metrics</span></h3></div><div class="card-scroll">${inner}</div></div>`
+    `<div class="card"><div class="card-head card-head-row"><h3>Trade-off frontier <span class="card-sub">— the best achievable balance across two or three metrics</span></h3></div><div class="card-scroll">${inner}</div></div>`
   const metricKeys = ['objective'].concat(
     Array.from(new Set(setups.flatMap((s) => Object.keys(s.metrics || {})))).sort(),
   )
   if (metricKeys.length < 2 || setups.length < 3)
     return card(
-      `<p class="card-sub">Need \u22653 configs with at least two recorded metrics to draw a trade-off frontier.</p>`,
+      `<p class="card-sub">Need ≥3 configs with at least two recorded metrics to draw a trade-off frontier.</p>`,
     )
   if (!xaiParetoX || !metricKeys.includes(xaiParetoX)) {
     xaiParetoX = 'objective'
@@ -6157,6 +6443,14 @@ function xaiParetoHtml(bundle, criterion) {
     xaiParetoY = metricKeys.find((k) => k !== xaiParetoX) || metricKeys[0]
     xaiParetoYDir = xaiInferMetricDir(xaiParetoY)
   }
+  // The 3rd axis is active only when it names a real metric distinct from X and Y. Drop a stale/colliding Z
+  // outright (not just hide it) so the 2-D/3-D mode always matches the Z control and can't resurrect later.
+  if (
+    xaiParetoZ &&
+    (!metricKeys.includes(xaiParetoZ) || xaiParetoZ === xaiParetoX || xaiParetoZ === xaiParetoY)
+  )
+    xaiParetoZ = null
+  const is3d = !!xaiParetoZ
   const relevant = xaiRelevantLevers(bundle)
   const compactCfg = (cfg) =>
     Object.entries(cfg || {})
@@ -6164,64 +6458,154 @@ function xaiParetoHtml(bundle, criterion) {
       .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
       .join(' ')
       .slice(0, 120)
-  const pts = []
+  const dims = is3d ? [xaiParetoX, xaiParetoY, xaiParetoZ] : [xaiParetoX, xaiParetoY]
+  const dirs = is3d
+    ? [xaiParetoXDir, xaiParetoYDir, xaiParetoZDir]
+    : [xaiParetoXDir, xaiParetoYDir]
+  const rows = []
   const owner = []
   for (const sp of setups) {
-    const x = xaiMetricVal(sp, xaiParetoX)
-    const y = xaiMetricVal(sp, xaiParetoY)
-    if (typeof x === 'number' && Number.isFinite(x) && typeof y === 'number' && Number.isFinite(y)) {
-      pts.push([x, y])
+    const vals = dims.map((d) => xaiMetricVal(sp, d))
+    if (vals.every((v) => typeof v === 'number' && Number.isFinite(v))) {
+      rows.push(vals)
       owner.push(sp)
     }
   }
   const sel = (id, cur) =>
     `<select id="${id}" class="app-select">${metricKeys.map((k) => `<option value="${escapeHtml(k)}"${k === cur ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('')}</select>`
+  const zSel = `<select id="xai-pareto-z" class="app-select"><option value="">— none (2-D)</option>${metricKeys
+    .filter((k) => k !== xaiParetoX && k !== xaiParetoY)
+    .map(
+      (k) =>
+        `<option value="${escapeHtml(k)}"${k === xaiParetoZ ? ' selected' : ''}>${escapeHtml(k)}</option>`,
+    )
+    .join('')}</select>`
   const dirSel = (id, cur) =>
     `<select id="${id}" class="app-select"><option value="max"${cur === 'max' ? ' selected' : ''}>higher better</option><option value="min"${cur === 'min' ? ' selected' : ''}>lower better</option></select>`
   const pickers = `<div class="xai-pareto-pickers">
     <label class="card-sub xai-scope-field">X ${sel('xai-pareto-x', xaiParetoX)} ${dirSel('xai-pareto-xdir', xaiParetoXDir)}</label>
     <label class="card-sub xai-scope-field">Y ${sel('xai-pareto-y', xaiParetoY)} ${dirSel('xai-pareto-ydir', xaiParetoYDir)}</label>
+    <label class="card-sub xai-scope-field">Z ${zSel} ${is3d ? dirSel('xai-pareto-zdir', xaiParetoZDir) : ''}</label>
   </div>`
-  if (pts.length < 3)
+  if (rows.length < 3)
     return card(
-      `${pickers}<p class="card-sub">Need \u22653 configs with both <code>${escapeHtml(xaiParetoX)}</code> and <code>${escapeHtml(xaiParetoY)}</code> recorded \u2014 pick different metrics or run more configs.</p>`,
+      `${pickers}<p class="card-sub">Need ≥3 configs with ${is3d ? 'all three' : 'both'} of <code>${escapeHtml(dims.join('</code>, <code>'))}</code> recorded — pick different metrics or run more configs.</p>`,
     )
-  const frontier = new Set(window.Xai.paretoFrontier(pts, [xaiParetoXDir, xaiParetoYDir]))
-  const points = pts.map((pp, i) => ({
-    x: pp[0],
-    y: pp[1],
-    color: frontier.has(i) ? 'hsl(140, 70%, 42%)' : 'rgba(127,127,127,0.45)',
-    label: `${compactCfg(owner[i].config)} \u00b7 ${escapeHtml(xaiParetoX)} ${formatTickValue(pp[0])} \u00b7 ${escapeHtml(xaiParetoY)} ${formatTickValue(pp[1])}${frontier.has(i) ? ' \u00b7 Pareto-optimal' : ''}`,
-  }))
-  const svg = buildScatterChart({
-    points,
-    xLabel: `${xaiParetoX} (${xaiParetoXDir === 'min' ? 'lower' : 'higher'} better)`,
-    yLabel: `${xaiParetoY} (${xaiParetoYDir === 'min' ? 'lower' : 'higher'} better)`,
-    width: 520,
-    height: 320,
-    ariaLabel: 'Pareto trade-off scatter coloured by frontier membership',
-  })
+  const frontier = new Set(window.Xai.paretoFrontier(rows, dirs))
+  const focusIdx = focusConfig
+    ? owner.findIndex((sp) => xaiSetupMatchesConfig(sp.config, focusConfig))
+    : -1
+  const dirWord = (d) => (d === 'min' ? 'lower' : 'higher')
+  const valStr = (i) => dims.map((d, k) => `${escapeHtml(d)} ${formatTickValue(rows[i][k])}`).join(' · ')
+  const labelFor = (i) =>
+    `${i === focusIdx ? '▶ THIS RUN · ' : ''}${compactCfg(owner[i].config)} · ${valStr(i)}${frontier.has(i) ? ' · Pareto-optimal' : ''}`
+  let svg
+  if (is3d) {
+    const points = rows.map((r, i) => ({
+      x: r[0],
+      y: r[1],
+      z: r[2],
+      color: frontier.has(i) ? 'hsl(140, 70%, 42%)' : 'rgba(127,127,127,0.5)',
+      label: labelFor(i),
+      key: owner[i].key,
+      frontier: frontier.has(i),
+      focus: i === focusIdx,
+    }))
+    svg = buildScatter3dChart({
+      points,
+      xLabel: `${xaiParetoX} (${dirWord(xaiParetoXDir)})`,
+      yLabel: `${xaiParetoY} (${dirWord(xaiParetoYDir)})`,
+      zLabel: `${xaiParetoZ} (${dirWord(xaiParetoZDir)})`,
+      width: 560,
+      height: 440,
+      ariaLabel: '3-D Pareto trade-off scatter coloured by frontier membership',
+    })
+  } else {
+    const points = rows.map((r, i) => ({
+      x: r[0],
+      y: r[1],
+      color: frontier.has(i) ? 'hsl(140, 70%, 42%)' : 'rgba(127,127,127,0.45)',
+      label: labelFor(i),
+      focus: i === focusIdx,
+    }))
+    svg = buildScatterChart({
+      points,
+      xLabel: `${xaiParetoX} (${dirWord(xaiParetoXDir)} better)`,
+      yLabel: `${xaiParetoY} (${dirWord(xaiParetoYDir)} better)`,
+      width: 520,
+      height: 320,
+      ariaLabel: 'Pareto trade-off scatter coloured by frontier membership',
+    })
+  }
+  const focusLine =
+    focusIdx >= 0
+      ? `<li><strong style="color:#1d4ed8">This run</strong> ${frontier.has(focusIdx) ? 'is <strong>on the frontier</strong> — nothing beats it across these metrics.' : 'is <strong>dominated</strong> — a frontier config beats it on every axis; compare it to the green configs below.'}</li>`
+      : ''
   const concl = `<div class="xai-conclusions"><strong class="card-sub">What this shows</strong><ul class="card-sub">
-    <li><strong style="color:hsl(140,70%,38%)">${frontier.size}</strong> of ${pts.length} configs are <strong>Pareto-optimal</strong> (green) \u2014 no other config beats them on <em>both</em> ${escapeHtml(xaiParetoX)} and ${escapeHtml(xaiParetoY)}. Grey points are dominated (something is better on both), so never pick them.</li>
-    <li>There is no single best \u2014 choose along the green frontier by how much ${escapeHtml(xaiParetoY)} you\u2019ll trade for ${escapeHtml(xaiParetoX)}.</li>
+    <li><strong style="color:hsl(140,70%,38%)">${frontier.size}</strong> of ${rows.length} configs are <strong>Pareto-optimal</strong> (green) — no other config beats them on <em>${is3d ? 'all three' : 'both'}</em> of ${escapeHtml(dims.join(', '))}. Grey points are dominated (something is better on every axis), so never pick them.</li>
+    <li>There is no single best — choose along the green frontier by how much of one metric you’ll trade for another.</li>
+    ${focusLine}
   </ul></div>`
   const frontierRows = [...frontier]
-    .map((i) => ({ i, x: pts[i][0], y: pts[i][1] }))
-    .sort((m, n) => (xaiParetoXDir === 'min' ? m.x - n.x : n.x - m.x))
+    .sort((m, n) => (xaiParetoXDir === 'min' ? rows[m][0] - rows[n][0] : rows[n][0] - rows[m][0]))
     .map(
-      ({ i, x, y }) =>
-        `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(owner[i].key)}" title="Open this run"><td><code>${compactCfg(owner[i].config)}</code></td><td class="num">${escapeHtml(formatTickValue(x))}</td><td class="num">${escapeHtml(formatTickValue(y))}</td></tr>`,
+      (i) =>
+        `<tr class="xai-lb-row${i === focusIdx ? ' is-focus' : ''}" data-xai-focus-config="${escapeHtml(owner[i].key)}" title="Open this run"><td><code>${compactCfg(owner[i].config)}</code>${i === focusIdx ? ' <span class="card-sub" style="color:#1d4ed8">◀ this run</span>' : ''}</td>${dims.map((d, k) => `<td class="num">${escapeHtml(formatTickValue(rows[i][k]))}</td>`).join('')}</tr>`,
     )
     .join('')
-  const frontierTable = `<h4 class="card-sub">The ${frontier.size} Pareto-optimal config${frontier.size === 1 ? '' : 's'} (green) \u2014 click one to open it</h4>
-    <div class="xai-env-scroll"><table class="runs-table"><thead><tr><th>config</th><th class="num">${escapeHtml(xaiParetoX)}</th><th class="num">${escapeHtml(xaiParetoY)}</th></tr></thead><tbody>${frontierRows}</tbody></table></div>`
+  const frontierTable = `<h4 class="card-sub">The ${frontier.size} Pareto-optimal config${frontier.size === 1 ? '' : 's'} (green) — click one to open it</h4>
+    <div class="xai-env-scroll"><table class="runs-table"><thead><tr><th>config</th>${dims.map((d) => `<th class="num">${escapeHtml(d)}</th>`).join('')}</tr></thead><tbody>${frontierRows}</tbody></table></div>`
   return card(
-    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}${frontierTable}`,
+    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.${is3d ? ' Isometric 3-D — drop-lines show each config’s height on the vertical axis.' : ' Add a <strong>Z</strong> metric to make it 3-D.'}${focusIdx >= 0 ? ' <strong style="color:#1d4ed8">This run is ringed in blue.</strong>' : ''}</p><div class="chart-wrap">${svg}</div>${concl}${frontierTable}`,
   )
 }
 // The levers worth showing: model_name + levers with real impact (fANOVA total >= 0.03, else screening
 // importance >= 0.02). scope:'ignore' levers (device) are already stripped by the engine; low-impact noise
 // (e.g. gamma) falls below threshold; per-config 'n/a' conditional levers are dropped by the callers.
+// 1-2-5 \u201cnice\u201d values within [lo, hi] for a log-friendly numeric sweep (e.g. learning_rate \u2192 5e-5, 1e-4, 2e-4, ...).
+function xaiNiceLogValues(lo, hi) {
+  const out = []
+  if (!(lo > 0) || !(hi > lo)) return out
+  for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++)
+    for (const m of [1, 2, 5]) {
+      const v = m * Math.pow(10, e)
+      if (v >= lo * 0.999 && v <= hi * 1.001) out.push(Number(v.toPrecision(4)))
+    }
+  return out
+}
+// Sane values to sweep a lever over: its declared choices, else a 1-2-5 (or linear) spread across its range
+// (or, with no range, two orders of magnitude around the current value), always including the current value.
+function xaiSweepValues(lever, current, observed) {
+  const spec = manifest && manifest.levers ? manifest.levers[lever] : null
+  const m = new Map()
+  const add = (v) => {
+    if (v === undefined || v === null || String(v) === 'n/a') return
+    if (!m.has(String(v))) m.set(String(v), v)
+  }
+  if (spec && Array.isArray(spec.choices)) {
+    for (const c of spec.choices) add(c)
+  } else {
+    const cur = Number(current)
+    let lo, hi
+    if (spec && Array.isArray(spec.range) && spec.range.length === 2) {
+      lo = Number(spec.range[0])
+      hi = Number(spec.range[1])
+    } else if (Number.isFinite(cur) && cur !== 0) {
+      lo = Math.abs(cur) / 50
+      hi = Math.abs(cur) * 50
+    }
+    if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
+      let vals = lo > 0 ? xaiNiceLogValues(lo, hi) : []
+      if (!vals.length) for (let k = 0; k <= 6; k++) vals.push(lo + ((hi - lo) * k) / 6)
+      if (Number.isInteger(cur) && Number.isInteger(lo) && Number.isInteger(hi))
+        vals = [...new Set(vals.map((v) => Math.round(v)))].filter((v) => v >= lo && v <= hi)
+      for (const v of vals.slice(0, 12)) add(v)
+    }
+  }
+  for (const v of observed || []) add(v)
+  add(typeof current === 'number' ? current : Number.isFinite(Number(current)) ? Number(current) : current)
+  return [...m.values()]
+}
 // Smallest non-negative seed numbers not already used \u2014 for stabilize/explore launches.
 function xaiFreshSeeds(used, need) {
   const u = new Set(used || [])
@@ -6811,7 +7195,7 @@ function renderRunDetail(key) {
   const html = `
     <div class="card-head card-head-row">
       <div>
-        <h2>Run <code>${escapeHtml(shortKey(run.key))}</code></h2>
+        <h2>Run <code>${escapeHtml(shortKey(run.key))}</code>${s.config && s.config.model_name ? ` · <span class="run-detail-model">${escapeHtml(String(s.config.model_name))}</span>` : ''}</h2>
         <p class="card-sub">${headline} · seed ${escapeHtml(s.seed === undefined ? '—' : String(s.seed))}
           · ${escapeHtml(formatWhen(runRanAt(s)))}${datasetBadge ? ` · ${datasetBadge}` : ''}${versionBit}${datasetNameBit}${envBit}${unrunnableBadge}</p>
       </div>
@@ -6819,6 +7203,7 @@ function renderRunDetail(key) {
         ${embedded() && outdated ? `<button type="button" data-action="rerun" data-key="${escapeHtml(run.key)}" class="ghost-btn" title="Re-run this exact config under the current pipeline version (v${escapeHtml(String(currentPipelineVersion()))}) — a breaking version has landed since, so its scores are outdated">↻ Re-run with latest version</button>` : ''}
         <button type="button" data-action="clone" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Clone to Launch" aria-label="Clone to Launch">⧉</button>
         <button type="button" data-action="xai" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Analyze in xAI — internals, config effects, suggested experiments" aria-label="Analyze in xAI">🔬</button>
+        <button type="button" data-action="toggle-favorite" data-key="${escapeHtml(run.key)}" class="icon-btn${favoritesCache.has(run.key) ? ' is-fav' : ''}" title="${favoritesCache.has(run.key) ? 'Remove from favorites' : 'Mark as favorite — quick-pick it in xAI'}" aria-label="Toggle favorite">${favoritesCache.has(run.key) ? '★' : '☆'}</button>
         <button type="button" data-action="chat" data-key="${escapeHtml(run.key)}" class="icon-btn"${chatAboutRunAvailable() ? '' : ' disabled'} title="Discuss this run with the AI" aria-label="Discuss this run">${iconChatSvg()}</button>
         <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
         <button type="button" data-action="delete-run" data-key="${escapeHtml(run.key)}" class="icon-btn icon-btn-danger" title="Delete this run (and its evaluation/verdict)" aria-label="Delete run">${iconDeleteSvg()}</button>
@@ -7189,7 +7574,10 @@ async function observeQuickActivity(activityId) {
     // the check while backgrounded stalls the whole queue until the user re-opens the app.
     const act = await getActivity(activityId)
     if (act && act.status && act.status !== 'running') return act
-    if (!act && ++missing >= 3) return null
+    // Only bail on 3 CONSECUTIVE misses (the activity genuinely vanished) — a transient null mid-run (e.g.
+    // a just-queued activity not yet visible) must not accumulate into a spurious "did not settle".
+    if (act) missing = 0
+    else if (++missing >= 3) return null
     await sleep(POLL_MS)
   }
   return null
@@ -7417,6 +7805,8 @@ function setupRuns() {
       if (chatBtn) chatAboutRun(chatBtn.dataset.key)
       const xaiBtn = event.target.closest('button[data-action="xai"]')
       if (xaiBtn) analyzeInXai(xaiBtn.dataset.key)
+      const favBtn = event.target.closest('button[data-action="toggle-favorite"]')
+      if (favBtn) toggleFavorite(favBtn.dataset.key)
       const unrunBtn = event.target.closest('button[data-action="toggle-unrunnable"]')
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
       const delBtn = event.target.closest('button[data-action="delete-run"]')
@@ -7429,6 +7819,7 @@ function setupRuns() {
         closeChartModal()
         closeCustomRulePopup()
         closeConsolidateModal()
+        closeDeviceTimingsModal()
       }
     })
   }
@@ -7459,7 +7850,14 @@ function setupRuns() {
   if (xaiBody) {
     xaiBody.addEventListener('change', (event) => {
       const t = event.target
-      if (t.id === 'xai-env-switch') {
+      if (t.id === 'xai-favorite-pick') {
+        if (t.value) {
+          xaiFocusKey = t.value
+          xaiScope = 'current'
+          xaiTab = 'standing'
+          renderXai()
+        }
+      } else if (t.id === 'xai-env-switch') {
         xaiAnalyzeEnvironment(t.value)
       } else if (t.id === 'xai-pareto-x') {
         xaiParetoX = t.value
@@ -7472,6 +7870,13 @@ function setupRuns() {
         renderXai()
       } else if (t.id === 'xai-pareto-ydir') {
         xaiParetoYDir = t.value === 'min' ? 'min' : 'max'
+        renderXai()
+      } else if (t.id === 'xai-pareto-z') {
+        xaiParetoZ = t.value || null
+        if (xaiParetoZ) xaiParetoZDir = xaiInferMetricDir(xaiParetoZ)
+        renderXai()
+      } else if (t.id === 'xai-pareto-zdir') {
+        xaiParetoZDir = t.value === 'min' ? 'min' : 'max'
         renderXai()
       } else if (t.id === 'xai-criterion') {
         xaiCriterionKey = t.value
@@ -7588,26 +7993,11 @@ function setupRuns() {
         const rec = xaiRunAnalysisCache.get(xaiFocusKey)
         const cfg = rec && rec.analysis ? rec.analysis.config : null
         if (cfg) {
-          // Gather distinct candidate values: the run's current value, the best-seen value (from the digest),
-          // and any observed values when a matching bundle is loaded. Dedupe by string, keep original types.
-          const byStr = new Map()
-          const add = (v) => {
-            if (v === undefined || String(v) === 'n/a') return
-            const k = String(v)
-            if (!byStr.has(k)) byStr.set(k, v)
-          }
-          add(cfg[lever])
-          const imp = (rec.analysis.importances || []).find((x) => x.lever === lever)
-          if (imp && imp.bestValue !== undefined && imp.bestValue !== '')
-            add(typeof cfg[lever] === 'number' ? Number(imp.bestValue) : imp.bestValue)
           const bundle = xaiResolveBundle(currentXaiCriterion())
-          if (bundle) for (const sp of bundle.analysis.setups || []) add(sp.config[lever])
-          const manSpec = manifest && manifest.levers ? manifest.levers[lever] : null
-          if (byStr.size < 2 && manSpec && Array.isArray(manSpec.choices))
-            for (const c of manSpec.choices) add(c)
-          const values = [...byStr.values()]
+          const observed = bundle ? (bundle.analysis.setups || []).map((sp) => sp.config[lever]) : []
+          const values = xaiSweepValues(lever, cfg[lever], observed)
           if (values.length < 2) {
-            setStatusLine('xai-status', `Can't sweep ${lever} — only one value is available to try.`, true)
+            setStatusLine('xai-status', `Can't sweep ${lever} — it has no declared range or choices to vary.`, true)
           } else {
             const fixed = {}
             for (const [k, v] of Object.entries(cfg)) if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
@@ -7930,7 +8320,97 @@ function buildXyChart(opts) {
         )
       }
     }
+    // Focus rings drawn last so the highlighted point (e.g. "this run") always sits on top.
+    for (const p of points.filter((q) => q.focus)) {
+      parts.push(
+        `<circle class="chart-focus-ring" cx="${px(p.x)}" cy="${py(p.y)}" r="7.5" fill="none">${p.label ? `<title>${escapeHtml(p.label)}</title>` : ''}</circle>`,
+      )
+    }
   }
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(opts.ariaLabel || '')}">${parts.join('')}</svg>`
+}
+// A 3-D scatter rendered with an isometric projection: a faint wireframe cube for orientation, faint
+// drop-lines to the floor for height, and points coloured by the caller. Each point = {x,y,z,color,label,
+// key?,focus?}. Clickable when it carries a `key` (data-xai-focus-config). Used by the 3-D trade-off map.
+function buildScatter3dChart(opts) {
+  const pts = (opts.points || []).filter(
+    (p) => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
+  )
+  if (!pts.length) return ''
+  const W = opts.width || 560
+  const H = opts.height || 440
+  const pad = 52
+  const plotW = W - 2 * pad
+  const plotH = H - 2 * pad
+  const axis = (sel) => {
+    const vs = pts.map(sel)
+    const lo = Math.min(...vs)
+    const hi = Math.max(...vs)
+    return { lo, hi, n: (v) => (hi > lo ? (v - lo) / (hi - lo) : 0.5) }
+  }
+  const AX = axis((p) => p.x)
+  const AY = axis((p) => p.y)
+  const AZ = axis((p) => p.z)
+  const a = Math.PI / 6
+  const cos = Math.cos(a)
+  const sin = Math.sin(a)
+  // Isometric: x → right+down, z → left+down, y (height) → up. The 8 unit-cube corners bound the screen
+  // extents to [-cos, cos] × [-1, 1], so the projection auto-fits with fixed padding.
+  const iso = (nx, ny, nz) => [(nx - nz) * cos, (nx + nz) * sin - ny]
+  const sx = (ix) => pad + ((ix + cos) / (2 * cos)) * plotW
+  const sy = (iy) => pad + ((iy + 1) / 2) * plotH
+  const project = (nx, ny, nz) => {
+    const [ix, iy] = iso(nx, ny, nz)
+    return [sx(ix), sy(iy)]
+  }
+  const corner = (cx, cy, cz) => project(cx, cy, cz)
+  const line = (p, q, cls) => `<line class="${cls}" x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${q[0].toFixed(1)}" y2="${q[1].toFixed(1)}" />`
+  const corners = [
+    [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
+    [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1],
+  ]
+  const parts = []
+  // Floor (y=0) parallelogram, faint, to ground the cube.
+  const floor = [corner(0, 0, 0), corner(1, 0, 0), corner(1, 0, 1), corner(0, 0, 1)]
+  parts.push(`<polygon class="chart3d-floor" points="${floor.map((c) => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ')}" />`)
+  // All 12 cube edges (corners one unit-step apart), faint.
+  for (let i = 0; i < corners.length; i++)
+    for (let j = i + 1; j < corners.length; j++) {
+      const d = corners[i].reduce((s, v, k) => s + Math.abs(v - corners[j][k]), 0)
+      if (d === 1) parts.push(line(corner(...corners[i]), corner(...corners[j]), 'chart3d-edge'))
+    }
+  // The three labelled axes from the origin corner + their min/max ticks.
+  const O = corner(0, 0, 0)
+  const axEnd = corner(1, 0, 0)
+  const ayEnd = corner(0, 1, 0)
+  const azEnd = corner(0, 0, 1)
+  parts.push(line(O, axEnd, 'chart3d-axis'), line(O, ayEnd, 'chart3d-axis'), line(O, azEnd, 'chart3d-axis'))
+  const tick = (c, txt, anchor, dy) => `<text class="chart-tick" x="${(c[0]).toFixed(1)}" y="${(c[1] + (dy || 0)).toFixed(1)}" text-anchor="${anchor}">${escapeHtml(formatTickValue(txt))}</text>`
+  const axisLabel = (c, txt, anchor, dy) => `<text class="chart3d-axis-label" x="${(c[0]).toFixed(1)}" y="${(c[1] + (dy || 0)).toFixed(1)}" text-anchor="${anchor}">${escapeHtml(txt)}</text>`
+  parts.push(
+    tick(axEnd, AX.hi, 'start', 14), tick(O, AX.lo, 'end', 14), axisLabel(axEnd, opts.xLabel || 'X', 'start', 27),
+    tick(azEnd, AZ.hi, 'end', 14), axisLabel(azEnd, opts.zLabel || 'Z', 'end', 27),
+    tick(ayEnd, AY.hi, 'middle', -8), axisLabel(ayEnd, opts.yLabel || 'Y', 'middle', -20),
+  )
+  // Drop-lines from each point to the floor (height cue); stronger for frontier points.
+  const placed = pts.map((p) => {
+    const nx = AX.n(p.x)
+    const ny = AY.n(p.y)
+    const nz = AZ.n(p.z)
+    return { p, nx, ny, nz, top: project(nx, ny, nz), foot: project(nx, 0, nz) }
+  })
+  // Draw far points (smaller nx+nz) first so nearer ones sit on top.
+  placed.sort((m, n) => m.nx + m.nz - (n.nx + n.nz))
+  for (const it of placed)
+    parts.push(`<line class="chart3d-drop${it.p.frontier ? ' is-frontier' : ''}" x1="${it.top[0].toFixed(1)}" y1="${it.top[1].toFixed(1)}" x2="${it.foot[0].toFixed(1)}" y2="${it.foot[1].toFixed(1)}" />`)
+  for (const it of placed) {
+    const [x, y] = it.top
+    const title = it.p.label ? `<title>${escapeHtml(it.p.label)}</title>` : ''
+    const open = it.p.key ? ` data-xai-focus-config="${escapeHtml(it.p.key)}" style="cursor:pointer;fill:${it.p.color}"` : ` style="fill:${it.p.color}"`
+    parts.push(`<circle class="chart3d-point" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${it.p.frontier ? 5 : 3.4}"${open}>${title}</circle>`)
+  }
+  for (const it of placed.filter((q) => q.p.focus))
+    parts.push(`<circle class="chart-focus-ring" cx="${it.top[0].toFixed(1)}" cy="${it.top[1].toFixed(1)}" r="8.5" fill="none">${it.p.label ? `<title>${escapeHtml(it.p.label)}</title>` : ''}</circle>`)
   return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(opts.ariaLabel || '')}">${parts.join('')}</svg>`
 }
 function buildLineChart(opts) {
@@ -8140,14 +8620,53 @@ async function renderVersions() {
   setHtml(body, `<div class="versions-list">${cards}</div>`)
 }
 
-// --- Environments tab ------------------------------------------------------------
-function environmentCardHtml(env, editable, isDefault) {
-  const rows = envLeverEntries()
-    .map(
-      ([k]) =>
-        `<tr><th>${escapeHtml(k)}</th><td class="num">${escapeHtml(env.settings[k] === undefined ? '—' : String(env.settings[k]))}</td></tr>`,
-    )
+// --- Datasets / Environments tables ----------------------------------------------
+// Both tabs render their named lever bundles as the reusable Runs-style sortable table (one column per
+// lever + a trailing actions column), so values line up and any column sorts on a header click. State is
+// a {key, dir} per tab, defaulting to name ascending.
+let environmentsSort = { key: 'name', dir: 'asc' }
+let datasetsSort = { key: 'name', dir: 'asc' }
+// A sortable Runs-style table for named lever bundles. `rows` are normalised
+// ({ id, name, default, editable, values, raw }); `leverEntries` is [k, spec] pairs (the columns, in
+// manifest order); `actionsFn(row)` supplies the trailing buttons. Header cells carry data-<sortAttr> so
+// the tab's click handler can re-sort; the default row is highlighted + badged.
+function bundleTableHtml(rows, leverEntries, sort, sortAttr, actionsFn) {
+  const cols = [{ id: 'name', label: 'Name', num: false, help: 'The name you gave this bundle.' }].concat(
+    leverEntries.map(([k, spec]) => ({
+      id: k,
+      label: k,
+      num: spec.type === 'number',
+      help: spec.description || '',
+    })),
+  )
+  const sorted = window.BundleTable.sortRows(rows, sort.key, sort.dir)
+  const header =
+    cols
+      .map((c) => {
+        const arrow = sort.key === c.id ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''
+        return `<th class="runs-th${c.num ? ' num' : ''}" data-${sortAttr}="${escapeHtml(c.id)}"${helpAttr(c.help)}>${escapeHtml(c.label)}${arrow}</th>`
+      })
+      .join('') + '<th class="runs-th bundle-actions-col" aria-label="Actions"></th>'
+  const body = sorted
+    .map((r) => {
+      const note = r.editable
+        ? ''
+        : ' <span class="card-sub">(manifest defaults — clone to start)</span>'
+      const star = r.default ? ' <span class="badge">★ default</span>' : ''
+      const leverCells = leverEntries
+        .map(
+          ([k, spec]) =>
+            `<td class="${spec.type === 'number' ? 'num' : ''}">${escapeHtml(r.values[k] === undefined ? '—' : String(r.values[k]))}</td>`,
+        )
+        .join('')
+      return `<tr class="bundle-row${r.default ? ' is-selected' : ''}"><td class="bundle-name-cell">${escapeHtml(r.name)}${star}${note}</td>${leverCells}<td class="bundle-actions-cell"><div class="head-actions">${actionsFn(r)}</div></td></tr>`
+    })
     .join('')
+  return `<div class="table-wrap"><table class="runs-table bundle-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+}
+
+// --- Environments tab ------------------------------------------------------------
+function environmentActionsHtml(env, editable, isDefault) {
   const setDefaultBtn =
     editable && !isDefault
       ? `<button type="button" class="icon-btn" data-env-default="${escapeHtml(env.id)}" title="Set as default environment" aria-label="Set as default">☆</button>`
@@ -8159,29 +8678,36 @@ function environmentCardHtml(env, editable, isDefault) {
     'allow_shorting' in ((manifest && manifest.levers) || {}) && !shortingOn
       ? `<button type="button" class="icon-btn" data-env-clone-short="${escapeHtml(env.id)}" title="Clone to a long+short variant (shorting on)" aria-label="Clone with shorting">⇅</button>`
       : ''
-  const actions = editable
-    ? `<div class="head-actions">
-        ${cloneShortBtn}
-        ${setDefaultBtn}
-        <button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button>
-        <button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
-      </div>`
-    : `<div class="head-actions">
-        ${cloneShortBtn}
-        <button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button>
-      </div>`
-  const note = isDefault
-    ? ' <span class="badge">★ default</span>'
-    : editable
-      ? ''
-      : ' <span class="card-sub">(manifest defaults — clone to start)</span>'
-  return `<div class="environment-card">
-    <div class="card-head card-head-row">
-      <h3>${escapeHtml(env.name)}${note}</h3>
-      ${actions}
-    </div>
-    <table class="kv-table"><tbody>${rows}</tbody></table>
-  </div>`
+  return editable
+    ? `${cloneShortBtn}${setDefaultBtn}<button type="button" class="icon-btn" data-env-edit="${escapeHtml(env.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-env-delete="${escapeHtml(env.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
+    : `${cloneShortBtn}<button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Duplicate to a new environment" aria-label="Duplicate">⧉</button>`
+}
+function environmentRows() {
+  const defId = defaultEnvironmentId()
+  // The manifest-defaults row is only a clone-to-start SEED for a project with no environments yet; once
+  // the user has defined any, it's hidden (the chosen default lives among their records).
+  if (!environmentsCache.length) {
+    const d = defaultEnvironment()
+    return [{ id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d }]
+  }
+  return environmentsCache.map((e) => ({
+    id: e.id,
+    name: e.name,
+    default: e.id === defId,
+    editable: true,
+    values: e.settings || {},
+    raw: e,
+  }))
+}
+function renderEnvironmentsTable() {
+  const body = byId('environments-body')
+  if (!body) return
+  setHtml(
+    body,
+    bundleTableHtml(environmentRows(), envLeverEntries(), environmentsSort, 'env-sort', (r) =>
+      environmentActionsHtml(r.raw, r.editable, r.default),
+    ),
+  )
 }
 async function renderEnvironments() {
   const body = byId('environments-body')
@@ -8198,14 +8724,7 @@ async function renderEnvironments() {
     return
   }
   environmentsCache = await readEnvironments()
-  const defId = defaultEnvironmentId()
-  // The manifest-defaults card is only a clone-to-start SEED for a project with no environments yet; once
-  // the user has defined any, it's hidden (the chosen default lives among their records).
-  const seed = environmentsCache.length ? '' : environmentCardHtml(defaultEnvironment(), false)
-  setHtml(
-    body,
-    seed + environmentsCache.map((e) => environmentCardHtml(e, true, e.id === defId)).join(''),
-  )
+  renderEnvironmentsTable()
 }
 // The create/edit form: a name + a typed field per environment lever (checkbox for boolean levers like
 // allow_shorting, a select for choices, else a number).
@@ -8359,6 +8878,17 @@ function setupEnvironments() {
   const body = byId('environments-body')
   if (body) {
     body.addEventListener('click', (event) => {
+      const th = event.target.closest('.runs-th[data-env-sort]')
+      if (th) {
+        environmentsSort = window.BundleTable.nextSort(
+          environmentsSort.key,
+          environmentsSort.dir,
+          th.dataset.envSort,
+          'asc',
+        )
+        renderEnvironmentsTable()
+        return
+      }
       const edit = event.target.closest('button[data-env-edit]')
       if (edit) {
         const env = environmentsCache.find((x) => x.id === edit.dataset.envEdit)
@@ -8387,36 +8917,41 @@ function setupEnvironments() {
 }
 
 // --- Datasets tab (named dataset-lever bundles — asset / window / fidelity) ------
-function datasetCardHtml(ds, editable, isDefault) {
-  const rows = datasetLeverEntries()
-    .map(
-      ([k]) =>
-        `<tr><th>${escapeHtml(k)}</th><td>${escapeHtml(ds.settings[k] === undefined ? '—' : String(ds.settings[k]))}</td></tr>`,
-    )
-    .join('')
+function datasetActionsHtml(ds, editable, isDefault) {
   const setDefaultBtn =
     editable && !isDefault
       ? `<button type="button" class="icon-btn" data-ds-default="${escapeHtml(ds.id)}" title="Set as default dataset" aria-label="Set as default">☆</button>`
       : ''
-  const actions = editable
-    ? `<div class="head-actions">
-        ${setDefaultBtn}
-        <button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button>
-        <button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>
-      </div>`
-    : `<div class="head-actions"><button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Duplicate to a new dataset" aria-label="Duplicate">⧉</button></div>`
-  const note = isDefault
-    ? ' <span class="badge">★ default</span>'
-    : editable
-      ? ''
-      : ' <span class="card-sub">(manifest defaults — clone to start)</span>'
-  return `<div class="environment-card">
-    <div class="card-head card-head-row">
-      <h3>${escapeHtml(ds.name)}${note}</h3>
-      ${actions}
-    </div>
-    <table class="kv-table"><tbody>${rows}</tbody></table>
-  </div>`
+  return editable
+    ? `${setDefaultBtn}<button type="button" class="icon-btn" data-ds-edit="${escapeHtml(ds.id)}" title="Edit" aria-label="Edit">✎</button><button type="button" class="icon-btn icon-btn-danger" data-ds-delete="${escapeHtml(ds.id)}" title="Delete" aria-label="Delete">${iconDeleteSvg()}</button>`
+    : `<button type="button" class="icon-btn" data-ds-clone="${escapeHtml(ds.id)}" title="Duplicate to a new dataset" aria-label="Duplicate">⧉</button>`
+}
+function datasetRows() {
+  const defId = defaultDatasetId()
+  // The manifest-defaults row is only a clone-to-start SEED for a project with no datasets yet; once the
+  // user has defined any, it's hidden (the chosen default lives among their records, not this synthetic one).
+  if (!datasetsCache.length) {
+    const d = defaultDataset()
+    return [{ id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d }]
+  }
+  return datasetsCache.map((d) => ({
+    id: d.id,
+    name: d.name,
+    default: d.id === defId,
+    editable: true,
+    values: d.settings || {},
+    raw: d,
+  }))
+}
+function renderDatasetsTable() {
+  const body = byId('datasets-body')
+  if (!body) return
+  setHtml(
+    body,
+    bundleTableHtml(datasetRows(), datasetLeverEntries(), datasetsSort, 'ds-sort', (r) =>
+      datasetActionsHtml(r.raw, r.editable, r.default),
+    ),
+  )
 }
 async function renderDatasets() {
   const body = byId('datasets-body')
@@ -8433,11 +8968,7 @@ async function renderDatasets() {
     return
   }
   datasetsCache = await readDatasets()
-  const defId = defaultDatasetId()
-  // The manifest-defaults card is only a clone-to-start SEED for a project with no datasets yet; once the
-  // user has defined any, it's hidden (the chosen default lives among their records, not this synthetic one).
-  const seed = datasetsCache.length ? '' : datasetCardHtml(defaultDataset(), false)
-  setHtml(body, seed + datasetsCache.map((d) => datasetCardHtml(d, true, d.id === defId)).join(''))
+  renderDatasetsTable()
 }
 // A single-value, type-aware field for one dataset lever (choice → select, number → number input,
 // boolean → true/false select), pre-filled with the dataset's saved value. "" = use the default.
@@ -8585,6 +9116,17 @@ function setupDatasets() {
   const body = byId('datasets-body')
   if (body) {
     body.addEventListener('click', (event) => {
+      const th = event.target.closest('.runs-th[data-ds-sort]')
+      if (th) {
+        datasetsSort = window.BundleTable.nextSort(
+          datasetsSort.key,
+          datasetsSort.dir,
+          th.dataset.dsSort,
+          'asc',
+        )
+        renderDatasetsTable()
+        return
+      }
       const edit = event.target.closest('button[data-ds-edit]')
       if (edit) {
         const ds = datasetsCache.find((x) => x.id === edit.dataset.dsEdit)
@@ -8617,6 +9159,11 @@ function specSummaryHtml(spec) {
   }
   for (const [lever, value] of Object.entries(s.fixed || {})) {
     items.push(`<li><code>${escapeHtml(lever)}</code> = ${escapeHtml(String(value))}</li>`)
+  }
+  if (s.compare && s.compare.lever && Array.isArray(s.compare.values)) {
+    items.push(
+      `<li>compare <code>${escapeHtml(String(s.compare.lever))}</code>: ${escapeHtml(s.compare.values.map((v) => String(v)).join(' vs '))}</li>`,
+    )
   }
   const seeds = Array.isArray(s.seeds) ? s.seeds.length : 0
   if (seeds) items.push(`<li>${seeds} seed${seeds === 1 ? '' : 's'}</li>`)
@@ -8721,8 +9268,31 @@ function hypothesisCampaignHtml(h, liveIds) {
 // The EVIDENCE behind a hypothesis's verdict: a plain-language basis line (on what grounds it's
 // proven/disproved/untested), the source's claimed metrics if any, and the list of matching runs (each
 // with its objective + return-vs-hold) with a link that opens the Runs tab filtered to exactly them.
+// The plain-language rule the auto-verdict applies, so an "untested"/"disproved" card explains itself.
+function hypothesisCriteriaText() {
+  const m = hypothesisMinRuns
+  return `How it's judged: among the runs whose config MATCHES this spec, PROVEN if the best beats buy-and-hold out-of-sample (a positive return-vs-hold), DISPROVED if at least ${m} report a result and none beat it, otherwise UNTESTED — which also holds while fewer than ${m} matching runs REPORT return-vs-hold (older runs that don't are skipped).`
+}
+// The verdict basis from the PERSISTED evidence — used when the full run snapshot isn't loaded on this tab,
+// so the view stays consistent with the run-count chip + verdict badge (which also read persisted state).
+function hypothesisPersistedBasis(h) {
+  const ev = (h && h.evidence) || {}
+  const n = Array.isArray(ev.matchedKeys) ? ev.matchedKeys.length : 0
+  const m = ev.measured || {}
+  const verdict = (h && h.status) || 'untested'
+  if (!n) return 'No matching runs recorded yet — launch runs to test it.'
+  const runs = `${n} matching run${n === 1 ? '' : 's'}`
+  if (m.beatsHold === null || m.beatsHold === undefined)
+    return `${runs}, but none report return-vs-hold — can't judge against buy-and-hold yet, so it stays <strong>untested</strong>.`
+  if (verdict === 'proven')
+    return `<strong>Proven</strong> — the best of ${runs} beats buy-and-hold out-of-sample.`
+  if (verdict === 'disproved')
+    return `<strong>Disproved</strong> — none of ${runs} beat buy-and-hold out-of-sample.`
+  if (Number(m.runs || n) < hypothesisMinRuns)
+    return `<strong>Untested</strong> — only ${Number(m.runs || n)}/${hypothesisMinRuns} matching runs report a result.`
+  return `<strong>${escapeHtml(verdict)}</strong> — ${runs}.`
+}
 function hypothesisEvidenceHtml(h) {
-  const runs = hypothesisMatchedRuns(h)
   const id = escapeHtml(h.id)
   const claimed = h.claimedMetrics && Object.keys(h.claimedMetrics).length ? h.claimedMetrics : null
   const claimedRow = claimed
@@ -8732,8 +9302,20 @@ function hypothesisEvidenceHtml(h) {
           .join(' · '),
       )}</p>`
     : ''
+  const criteria = `<p class="card-sub hyp-criteria">${hypothesisCriteriaText()}</p>`
+  // The full run snapshot is loaded by the shared Refresh, not on this tab. When it isn't loaded, show the
+  // PERSISTED evidence (consistent with the chip + badge) rather than recomputing against an empty cache —
+  // which would wrongly read "no matching runs" even though the verdict was computed over thousands.
+  if (!allRunsCache.length) {
+    return `<div class="hyp-evidence">${claimedRow}
+      <p class="card-sub hyp-basis">${hypothesisPersistedBasis(h)}</p>
+      ${criteria}
+      <p class="card-sub hyp-stale-note">This reflects the last full <strong>Refresh</strong>. After launching runs, click <strong>Refresh</strong> (top-right) to re-evaluate the verdict against them.</p>
+    </div>`
+  }
+  const runs = hypothesisMatchedRuns(h)
   if (!runs.length) {
-    return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No matching runs yet — verdict stays <strong>untested</strong>. Launch runs to test it.</p></div>`
+    return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No runs match this spec yet — launch runs to test it.</p>${criteria}</div>`
   }
   const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
   const rows = runs
@@ -8773,6 +9355,7 @@ function hypothesisEvidenceHtml(h) {
   return `<div class="hyp-evidence">
     ${claimedRow}
     <p class="card-sub hyp-basis">${basis}</p>
+    ${criteria}
     <table class="kv-table hyp-runs"><thead><tr><th>run</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${runRows}</tbody></table>
     ${more}
     <button type="button" class="ghost-btn" data-action="view-runs" data-id="${id}"${helpAttr('Open the Runs tab filtered to exactly these matching runs.')}>View ${rows.length} run${rows.length === 1 ? '' : 's'} in Runs</button>
@@ -8883,6 +9466,14 @@ function hypothesisComparisonHtml(h) {
     <table class="kv-table hyp-runs"><thead><tr><th>context</th><th>runs</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${rows}</tbody></table>
     <button type="button" class="ghost-btn" data-action="view-runs" data-id="${escapeHtml(h.id)}"${helpAttr('Open the Runs tab filtered to these matching runs (grouped by environment there).')}>View runs in Runs</button>
   </div>`
+}
+// A small chip showing THIS PAPER's importance weight for a linked hypothesis (1 = minor … 5 = central) —
+// shown in the paper's linked-hypotheses list once the paper has assigned weights (via "Re-weigh
+// hypotheses"). The weight is per-paper, so it never appears on a standalone hypothesis card.
+function hypothesisWeightChipHtml(weight) {
+  const w = typeof weight === 'number' && isFinite(weight) ? weight : null
+  if (w === null) return ''
+  return `<span class="hyp-weight-chip"${helpAttr('THIS paper’s importance weight for the hypothesis (1 = minor / supporting … 5 = the paper’s central claim) — used when the paper verdict rolls up. Set via "Re-weigh hypotheses".')}>⚖ ${escapeHtml(String(w))}</span>`
 }
 function hypothesisCardHtml(h, liveIds) {
   const verdict = effectiveHypothesisVerdict(h)
@@ -9331,7 +9922,7 @@ function validateHypothesisSpec(text) {
   const unknownKeys = Object.keys(parsed).filter((k) => !HYPOTHESIS_SPEC_KEYS.includes(k))
   if (unknownKeys.length) {
     return {
-      error: `Unknown spec ${unknownKeys.length === 1 ? 'key' : 'keys'} ${unknownKeys.join(', ')} — only sweep, fixed, seeds, environments and datasets are allowed.`,
+      error: `Unknown spec ${unknownKeys.length === 1 ? 'key' : 'keys'} ${unknownKeys.join(', ')} — only sweep, fixed, seeds, environments, datasets and compare are allowed.`,
     }
   }
   for (const part of ['sweep', 'fixed']) {
@@ -9380,6 +9971,19 @@ function validateHypothesisSpec(text) {
   if (envErr) return { error: envErr }
   const dsErr = scopeError('datasets', 'dataset')
   if (dsErr) return { error: dsErr }
+  // `compare` pits the values of ONE lever against each other (the judgeable form of "A vs B").
+  if (parsed.compare !== undefined) {
+    const c = parsed.compare
+    if (!c || typeof c !== 'object' || Array.isArray(c) || typeof c.lever !== 'string' || !c.lever) {
+      return { error: '"compare" must be an object { lever, values }.' }
+    }
+    if (!Array.isArray(c.values) || c.values.length < 2) {
+      return { error: '"compare" needs a "values" array with at least two values to compare.' }
+    }
+    if (!known.has(c.lever)) {
+      return { error: `compare lever "${c.lever}" is not a lever this manifest declares.` }
+    }
+  }
   return { spec: parsed }
 }
 function renderHypothesisForm() {
@@ -9395,10 +9999,18 @@ function renderHypothesisForm() {
         <label class="field"><span>Rationale</span>
           <textarea name="rationale" rows="3"></textarea>
         </label>
-        <label class="field"><span>Spec <em>(JSON with sweep / fixed / seeds / environments / datasets)</em></span>
+        <label class="field"><span>Spec <em>(JSON with sweep / fixed / seeds / environments / datasets / compare)</em></span>
           <textarea name="spec" rows="3" spellcheck="false">${escapeHtml(HYPOTHESIS_SPEC_PLACEHOLDER)}</textarea>
         </label>
-        <div class="lever-grid" ${helpAttr('Applies only when the spec spans environments/datasets — its runs are compared ACROSS those contexts (never pooled).')}>
+        <div class="lever-grid" ${helpAttr('Optional — COMPARE values of one lever (A vs B) holding the rest of the spec fixed; the runs are partitioned by value and judged against each other by the Comparison below (baseline = the FIRST value). Leave blank for a plain beats-hold hypothesis.')}>
+          <label class="field"><span>Compare lever <em>(optional A-vs-B)</em></span>
+            <input type="text" name="compare-lever" placeholder="e.g. model_name" />
+          </label>
+          <label class="field"><span>Compare values <em>(comma-separated, ≥2)</em></span>
+            <input type="text" name="compare-values" placeholder="e.g. ppo-custom, reppo-custom" />
+          </label>
+        </div>
+        <div class="lever-grid" ${helpAttr('How a context-spanning (environments/datasets) OR a compare hypothesis is judged across its cells.')}>
           <label class="field"><span>Comparison <em>(context-spanning)</em></span>
             <select name="comparison-kind">
               <option value="beats-baseline">thesis beats baseline</option>
@@ -9452,6 +10064,11 @@ async function onHypothesisSave(event) {
     setStatusLine('hypothesis-form-error', error, true)
     return
   }
+  const compareErr = applyCompareFromForm(form, spec)
+  if (compareErr) {
+    setStatusLine('hypothesis-form-error', compareErr, true)
+    return
+  }
   const saveBtn = byId('hypothesis-save-btn')
   if (saveBtn) saveBtn.disabled = true
   try {
@@ -9474,11 +10091,34 @@ async function onHypothesisSave(event) {
   toggleHypothesisForm(false)
   await renderHypotheses()
 }
-// The comparison criterion read off the form — only for a context-spanning spec (else undefined, so a
-// plain hypothesis carries no comparison block).
+// Merge the dedicated "Compare" inputs into the spec (so a comparison needn't be hand-written as JSON).
+// Returns an error string, or null on success (mutating spec.compare). No-op when both fields are blank.
+function applyCompareFromForm(form, spec) {
+  const lever = String((form.elements['compare-lever'] && form.elements['compare-lever'].value) || '').trim()
+  const valuesRaw = String(
+    (form.elements['compare-values'] && form.elements['compare-values'].value) || '',
+  ).trim()
+  if (!lever && !valuesRaw) return null
+  if (!lever) return 'Compare values given but no compare lever — name the lever to compare.'
+  const lv = manifest && manifest.levers && manifest.levers[lever]
+  if (!lv) return `Compare lever "${lever}" is not a lever this manifest declares.`
+  const coerce = (v) => (lv.type === 'number' ? Number(v) : lv.type === 'boolean' ? v === 'true' : v)
+  const values = valuesRaw
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .map(coerce)
+  if (values.length < 2) return 'Compare needs at least two comma-separated values.'
+  spec.compare = { lever, values }
+  return null
+}
+// The comparison criterion read off the form — for a context-spanning OR compare spec (else undefined, so
+// a plain beats-hold hypothesis carries no comparison block).
 function readComparisonFromForm(form, spec) {
   const spans =
-    (spec.environments && spec.environments.length) || (spec.datasets && spec.datasets.length)
+    (spec.environments && spec.environments.length) ||
+    (spec.datasets && spec.datasets.length) ||
+    (spec.compare && spec.compare.lever)
   if (!spans) return undefined
   const el = (name) => form.elements[name]
   const kind = String((el('comparison-kind') && el('comparison-kind').value) || 'beats-baseline')
@@ -9627,12 +10267,14 @@ const PAPER_VERDICT_BADGE = {
   untested: 'is-queued',
   replicating: 'is-running',
   'holds-up': 'is-done',
+  shaky: 'is-shaky',
   fluff: 'is-failed',
 }
 const PAPER_VERDICT_LABEL = {
   untested: 'untested',
   replicating: 'replicating',
   'holds-up': 'holds up',
+  shaky: 'shaky',
   fluff: 'fluff',
 }
 async function readPapers() {
@@ -9653,16 +10295,21 @@ async function deletePaperRecord(id) {
     key: id,
   })
 }
-// A paper's verdict ROLLS UP from its linked hypotheses' (persisted) verdicts: any proven ⇒ holds-up;
-// all disproved ⇒ fluff; else untested. Uses each hypothesis's effective (stored / all-runs) verdict.
-function paperVerdict(paper) {
+// A paper's verdict ROLLS UP from the WEIGHTED balance of its linked hypotheses' (effective) verdicts —
+// holds-up / shaky / fluff / untested via the shared scorer (one set of thresholds for viewer + tests).
+// `paperVerdictInfo` returns the full {status, score, counts, why} the card explains; `paperVerdict` the
+// status alone (filtering + badge). The PAPER's per-hypothesis weight (default 1) lets a central claim
+// dominate — weight lives on the paper, not the (shared, standalone) hypothesis.
+function paperVerdictInfo(paper) {
   const ids = new Set((paper && paper.hypothesisIds) || [])
-  const linked = hypothesesCache.filter((h) => ids.has(h.id))
-  if (!linked.length) return 'untested'
-  const verdicts = linked.map((h) => effectiveHypothesisVerdict(h))
-  if (verdicts.indexOf('proven') >= 0) return 'holds-up'
-  if (verdicts.every((v) => v === 'disproved')) return 'fluff'
-  return 'untested'
+  const weights = (paper && paper.hypothesisWeights) || {}
+  const linked = hypothesesCache
+    .filter((h) => ids.has(h.id))
+    .map((h) => ({ verdict: effectiveHypothesisVerdict(h), weight: weights[h.id] }))
+  return window.Hypothesis.scorePaperVerdict(linked)
+}
+function paperVerdict(paper) {
+  return paperVerdictInfo(paper).status
 }
 // The linked hypotheses, each as a row (title + its live verdict badge + Unlink), with the add/link picker.
 function paperLinkedHypothesesHtml(paper) {
@@ -9674,7 +10321,7 @@ function paperLinkedHypothesesHtml(paper) {
       if (!h) return ''
       const v = effectiveHypothesisVerdict(h)
       const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[v]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[v])}</span>`
-      return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${id}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
+      return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} ${hypothesisWeightChipHtml(paper.hypothesisWeights && paper.hypothesisWeights[hid])} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${id}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
     })
     .join('')
   const list = rows
@@ -9810,8 +10457,9 @@ function paperHypCountChipHtml(paper) {
   return `<span class="hyp-count-chip${n ? '' : ' is-empty'}"${helpAttr(help)}>${iconHypothesisSvg(12)} ${label}</span>`
 }
 function paperCardHtml(paper) {
-  const verdict = paperVerdict(paper)
-  const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}">${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
+  const info = paperVerdictInfo(paper)
+  const verdict = info.status
+  const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}"${helpAttr(info.why)}>${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
   const title = paper.url
     ? `<a href="${escapeHtml(paper.url)}" target="_blank" rel="noopener">${escapeHtml(paper.title || 'Untitled')}</a>`
     : escapeHtml(paper.title || 'Untitled')
@@ -9824,11 +10472,15 @@ function paperCardHtml(paper) {
   const open = paperExpanded.has(paper.id) ? ' open' : ''
   const suggestPending = paperOpPending('suggest-paper-hypotheses', paper.id)
   const findPending = paperOpPending('analyze-paper-models', paper.id)
+  const reweighPending = paperOpPending('weigh-paper-hypotheses', paper.id)
   // Icon-only action buttons (verb + hypothesis glyph), shown collapsed AND expanded; tooltips on hover.
-  // A per-paper LLM op (suggest / find-models) shows a spinner + disables ITS button until it settles — the
-  // user can still launch the other op, or the same op on other papers (those queue past the running limit).
+  // A per-paper LLM op (suggest / find-models / re-weigh) shows a spinner + disables ITS button until it
+  // settles — the user can still launch the other ops, or the same op on other papers (those queue).
   const actions =
     `<button type="button" class="card-btn combo" data-action="suggest-hyp" data-id="${id}"${suggestPending ? ' disabled' : ''}${helpAttr('Suggest hypotheses — an LLM matches existing ones to this paper and proposes new ones, all auto-linked.')}>${suggestPending ? spinnerHtml() : iconLightbulbSvg(13) + iconHypothesisSvg(14)}</button>` +
+    (linkedCount
+      ? `<button type="button" class="card-btn combo" data-action="reweigh-hyps" data-id="${id}"${reweighPending ? ' disabled' : ''}${helpAttr('Re-weigh hypotheses — an LLM rates each linked hypothesis by importance (the paper’s central claim heavy, supporting ones light); the verdict then rolls up by weight.')}>${reweighPending ? spinnerHtml() : '<span class="card-btn-glyph">⚖</span>' + iconHypothesisSvg(14)}</button>`
+      : '') +
     `<button type="button" class="card-btn combo" data-action="add-hyp" data-id="${id}"${helpAttr('Add a hypothesis manually and link it to this paper.')}>${iconPlusSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="link-existing" data-id="${id}"${helpAttr('Link an existing hypothesis to this paper.')}>${iconLinkSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${findPending ? ' disabled' : ''}${helpAttr('Find models — an LLM links this paper to the catalog models it introduces/improves and proposes any missing ones to add.')}>${findPending ? spinnerHtml() : iconModelSvg(14)}</button>` +
@@ -9849,6 +10501,7 @@ function paperCardHtml(paper) {
       ${meta ? `<p class="card-sub">${meta}</p>` : ''}
       ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
       ${paperAssumptionChips(paper.assumptions)}
+      ${info.counts.total ? `<p class="card-sub paper-verdict-why">${escapeHtml(info.why)}</p>` : ''}
       ${paperLinkedHypothesesHtml(paper)}
       ${paperModelsHtml(paper)}
       ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
@@ -9857,7 +10510,7 @@ function paperCardHtml(paper) {
 }
 // Order papers for a FULL render. Default 'status' = rolled-up verdict bucket, then newest-first within it
 // (stable across an update, so a changed card never jumps); 'name' / 'year' are explicit user picks.
-const PAPER_VERDICT_SORT = { 'holds-up': 0, replicating: 1, untested: 2, fluff: 3 }
+const PAPER_VERDICT_SORT = { 'holds-up': 0, shaky: 1, replicating: 2, untested: 3, fluff: 4 }
 function sortPapers(list) {
   const arr = [...list]
   if (paperSortKey === 'name') {
@@ -9916,7 +10569,7 @@ function modelSortComparator() {
   return byName
 }
 function paperFilterBarHtml() {
-  const opts = ['all', 'untested', 'holds-up', 'fluff']
+  const opts = ['all', 'untested', 'holds-up', 'shaky', 'fluff']
   const active = papersCache.filter((p) => !p.dismissed)
   const btns = opts
     .map((s) => {
@@ -9937,7 +10590,8 @@ function paperFilterBarHtml() {
     .map(([v, l]) => `<option value="${v}"${paperSortKey === v ? ' selected' : ''}>${l}</option>`)
     .join('')
   const sort = `<label class="sort-control">Sort <select id="paper-sort-select" class="app-select" aria-label="Sort papers">${sortOpts}</select></label>`
-  return `<div class="paper-filter">${btns}${notWanted}${sort}</div>`
+  const search = `<input type="search" id="paper-search-text" class="paper-search-text" placeholder="Search name, title, abstract…" value="${escapeHtml(paperSearch)}" aria-label="Search papers" />`
+  return `<div class="paper-filter">${search}${btns}${notWanted}${sort}</div>`
 }
 // Starter approaches the manifest ships (parallel to presets); imported into the registry once by id.
 function manifestPaperSeeds() {
@@ -9995,6 +10649,31 @@ async function renderPapers() {
   // Self-heal: a paper may reference hypotheses since deleted — drop those stale links (persisted) so the
   // count chip + rolled-up verdict reflect reality.
   await prunePaperHypothesisLinks()
+  renderPapersList()
+}
+// The blob a paper is searched against — id (so "bysik" finds it), title, authors, year, claim/abstract,
+// approach, verdict note, tags, and the assumptions notes.
+function paperSearchText(p) {
+  return [
+    p.id,
+    p.title,
+    p.authors,
+    p.year,
+    p.claim,
+    p.approach,
+    p.verdictNote,
+    Array.isArray(p.tags) ? p.tags.join(' ') : '',
+    (p.assumptions && p.assumptions.notes) || '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+// Render the list from the CURRENT caches (no fetch) — used by renderPapers, the verdict filter, and the
+// live search box, so typing re-filters instantly without re-querying the store.
+function renderPapersList() {
+  const body = byId('papers-body')
+  if (!body) return
   const seedBanner = pendingSeedPapersHtml()
   if (!papersCache.length) {
     setHtml(
@@ -10004,8 +10683,10 @@ async function renderPapers() {
     )
     return
   }
+  const q = paperSearch.trim().toLowerCase()
+  const matchesSearch = (p) => !q || paperSearchText(p).indexOf(q) >= 0
   // "not wanted" papers are hidden from every verdict view except the dedicated 'dismissed' filter.
-  const shown =
+  const shown = (
     paperVerdictFilter === 'dismissed'
       ? papersCache.filter((p) => p.dismissed)
       : papersCache.filter(
@@ -10013,6 +10694,7 @@ async function renderPapers() {
             !p.dismissed &&
             (paperVerdictFilter === 'all' || paperVerdict(p) === paperVerdictFilter),
         )
+  ).filter(matchesSearch)
   const sorted = sortPapers(shown)
   setHtml(
     body,
@@ -10020,7 +10702,7 @@ async function renderPapers() {
       paperFilterBarHtml() +
       (sorted.length
         ? sorted.map(paperCardHtml).join('')
-        : '<div class="empty-hint">No approaches match this view.</div>'),
+        : `<div class="empty-hint">${q ? 'No approaches match your search.' : 'No approaches match this view.'}</div>`),
   )
 }
 // New entries open as a CHOOSER: just the link + two paths. "Manual Entry" reveals the full form;
@@ -10271,6 +10953,9 @@ async function launchPaperOp(activityType, paperId, label) {
 async function onSuggestPaperHypotheses(id) {
   await launchPaperOp('suggest-paper-hypotheses', id, 'Suggest hypotheses')
 }
+async function onReweighPaperHypotheses(id) {
+  await launchPaperOp('weigh-paper-hypotheses', id, 'Re-weigh hypotheses')
+}
 async function onFindPaperModels(id) {
   await launchPaperOp('analyze-paper-models', id, 'Find models')
 }
@@ -10382,6 +11067,21 @@ function setupPapers() {
         renderPapers()
       }
     })
+    body.addEventListener('input', (event) => {
+      if (event.target.id !== 'paper-search-text') return
+      paperSearch = event.target.value
+      const pos = event.target.selectionStart
+      renderPapersList()
+      const el = byId('paper-search-text')
+      if (el) {
+        el.focus()
+        try {
+          el.setSelectionRange(pos, pos)
+        } catch {
+          // some input types disallow setSelectionRange — focus alone is fine
+        }
+      }
+    })
     body.addEventListener('click', (event) => {
       // A control inside a <summary> must not toggle the card — it runs its own action.
       if (event.target.closest('summary') && event.target.closest('[data-action]')) {
@@ -10390,7 +11090,7 @@ function setupPapers() {
       const filterBtn = event.target.closest('button[data-verdict]')
       if (filterBtn) {
         paperVerdictFilter = filterBtn.dataset.verdict
-        renderPapers()
+        renderPapersList()
         return
       }
       const chip = event.target.closest('[data-action="goto-hyp"]')
@@ -10413,6 +11113,7 @@ function setupPapers() {
       else if (action === 'add-model') addProposedModelToCatalog(paperId, id)
       else if (action === 'toggle-dismiss') onToggleDismissPaper(id)
       else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id)
+      else if (action === 'reweigh-hyps') onReweighPaperHypotheses(id)
       else if (action === 'add-hyp') {
         // Open the add sub-form AND expand the card so it's visible from the collapsed state.
         if (paperSubform && paperSubform.paperId === id && paperSubform.mode === 'add') {
@@ -10625,6 +11326,7 @@ function modelDeviceChipHtml(model) {
   const b = model.deviceBenchmark
   if (model.preferredDevice) {
     const dev = String(model.preferredDevice).toUpperCase()
+    const cls = window.Models.deviceChipClass(model.preferredDevice)
     const margin = b && b.speedup && b.speedup > 1.01 ? `, ${b.speedup}× faster` : ''
     const per =
       b && b.usPerStep
@@ -10633,8 +11335,8 @@ function modelDeviceChipHtml(model) {
             .map(([d, us]) => `${d} ${Math.round(us)}µs/step`)
             .join(', ')
         : ''
-    const title = `Fastest device (measured): ${dev}${margin}.${per} Click to re-benchmark.`
-    return `<button type="button" class="run-badge model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr(title)}>${escapeHtml(dev)}</button>`
+    const title = `Fastest device (measured): ${dev}${margin}.${per} Click for the exact per-device timings.`
+    return `<button type="button" class="run-badge model-device-chip ${cls}" data-action="device-timings" data-id="${id}"${helpAttr(title)}>${escapeHtml(dev)}</button>`
   }
   return `<button type="button" class="run-badge is-queued model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr('Benchmark this model on CPU vs MPS to set its faster device')}>⚡ check device</button>`
 }
@@ -10978,6 +11680,87 @@ async function checkModelStatsStale() {
       if (tmp.firstElementChild) el.replaceWith(tmp.firstElementChild)
     }
   }
+}
+// SPEED tab: per-model device benchmark (cpu vs mps µs/step + speedup) and wall-clock run durations by
+// model. device is used here only — never as an analysis lever.
+async function renderSpeed() {
+  const body = byId('speed-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to see speed data.</div>')
+    return
+  }
+  // Delegated once (the body's innerHTML is replaced each render): a benchmark row opens its exact timings.
+  if (!body.dataset.timingsWired) {
+    body.dataset.timingsWired = '1'
+    body.addEventListener('click', (event) => {
+      const row = event.target.closest('.device-row[data-action="device-timings"]')
+      if (row) showDeviceTimingsModal(row.dataset.id)
+    })
+  }
+  ;[modelsCache, runsCache] = await Promise.all([readModels(), readRuns()])
+  const benchmarked = (modelsCache || []).filter(
+    (m) => m.deviceBenchmark && (m.deviceBenchmark.usPerStep || m.deviceBenchmark.errors),
+  )
+  // One column per device that appears across all benchmarks (cpu/mps/cuda first, others after).
+  const colSet = {}
+  for (const m of benchmarked) {
+    for (const d of Object.keys(m.deviceBenchmark.usPerStep || {})) colSet[d] = true
+    for (const d of Object.keys(m.deviceBenchmark.errors || {})) colSet[d] = true
+  }
+  const stdOrder = ['cpu', 'mps', 'cuda']
+  const deviceCols = stdOrder
+    .filter((d) => colSet[d])
+    .concat(
+      Object.keys(colSet)
+        .filter((d) => stdOrder.indexOf(d) < 0)
+        .sort(),
+    )
+  const benchRows = benchmarked
+    .map((m) => {
+      const view = window.Models.deviceBenchmarkView(m.deviceBenchmark, deviceCols)
+      const byDev = {}
+      for (const pd of view.perDevice) byDev[pd.device] = pd
+      const cells = deviceCols
+        .map((d) => {
+          const pd = byDev[d]
+          if (pd && pd.usPerStep != null)
+            return `<td class="num device-cell${pd.isBest ? ' is-best' : ''}">${Math.round(pd.usPerStep)}</td>`
+          if (pd && pd.error)
+            return `<td class="num device-cell device-slow"${helpAttr(pd.error)}>slow</td>`
+          return `<td class="num device-cell">\u2014</td>`
+        })
+        .join('')
+      const bestChip = view.best
+        ? `<span class="run-badge ${view.bestClass}">${escapeHtml(String(view.best).toUpperCase())}</span>`
+        : '\u2014'
+      return `<tr class="device-row" data-action="device-timings" data-id="${escapeHtml(m.id)}"${helpAttr('Click for the exact per-device timings')}><th>${escapeHtml(m.name || m.id)}</th>${cells}<td>${bestChip}</td><td class="num">${view.speedup && view.speedup > 1.01 ? view.speedup.toFixed(2) + '\u00d7' : '\u2014'}</td><td class="card-sub">${escapeHtml(view.benchmarkedAt ? formatWhen(view.benchmarkedAt) : '\u2014')}</td></tr>`
+    })
+    .join('')
+  const deviceHeaders = deviceCols.map((d) => `<th class="num">${escapeHtml(d)}</th>`).join('')
+  const benchCard = benchRows
+    ? `<div class="card"><div class="card-head card-head-row"><h3>Device benchmark <span class="card-sub">\u2014 \u00b5s/step per device (lower = faster); click a row for exact timings</span></h3></div>
+      <table class="kv-table report-table device-table"><thead><tr><th>model</th>${deviceHeaders}<th>best</th><th class="num">speedup</th><th>benchmarked</th></tr></thead><tbody>${benchRows}</tbody></table></div>`
+    : `<div class="card"><p class="card-sub">No device benchmarks yet \u2014 run \u201cBenchmark device\u201d on a model (Models tab) to measure cpu vs mps speed.</p></div>`
+  const durBy = {}
+  for (const r of runsCache || []) {
+    const mn = String((r.summary.config || {}).model_name ?? '?')
+    const d = r.summary.durationMs
+    if (typeof d === 'number' && d > 0) (durBy[mn] = durBy[mn] || []).push(d)
+  }
+  const durRows = Object.entries(durBy)
+    .map(([mn, ds]) => ({ mn, ds, mean: ds.reduce((a, b) => a + b, 0) / ds.length }))
+    .sort((a, b) => a.mean - b.mean)
+    .map(
+      ({ mn, ds, mean }) =>
+        `<tr><th>${escapeHtml(mn)}</th><td class="num">${ds.length}</td><td class="num">${escapeHtml(formatDuration(Math.round(mean)))}</td><td class="num">${escapeHtml(formatDuration(Math.min(...ds)))}</td><td class="num">${escapeHtml(formatDuration(Math.max(...ds)))}</td></tr>`,
+    )
+    .join('')
+  const durCard = durRows
+    ? `<div class="card"><div class="card-head card-head-row"><h3>Run duration by model <span class="card-sub">\u2014 wall-clock per training run (loaded runs)</span></h3></div>
+      <table class="kv-table report-table"><thead><tr><th>model</th><th class="num">runs</th><th class="num">mean</th><th class="num">fastest</th><th class="num">slowest</th></tr></thead><tbody>${durRows}</tbody></table></div>`
+    : ''
+  setHtml(body, benchCard + durCard)
 }
 async function renderModels() {
   const body = byId('models-body')
@@ -11334,6 +12117,64 @@ async function onAcceptConsolidation(gi) {
   renderConsolidateModal()
   await renderModels()
 }
+// The exact per-device timings behind a model's benchmark (µs/step + measured seconds + why a device was
+// skipped) — opened from the device chip (Models tab) or a Speed-tab row, with a Re-benchmark affordance.
+function closeDeviceTimingsModal() {
+  const m = byId('device-timings-modal')
+  if (m) m.hidden = true
+}
+function showDeviceTimingsModal(id) {
+  const model = (modelsCache || []).find((m) => m.id === id)
+  if (!model || !model.deviceBenchmark) return
+  const view = window.Models.deviceBenchmarkView(model.deviceBenchmark)
+  let modal = byId('device-timings-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'device-timings-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-timings-close]'))
+        return closeDeviceTimingsModal()
+      const rerun = event.target.closest('[data-timings-rerun]')
+      if (rerun) {
+        closeDeviceTimingsModal()
+        onBenchmarkModelDevice(rerun.dataset.timingsRerun)
+      }
+    })
+  }
+  const rows = view.perDevice
+    .map((pd) => {
+      const us = pd.usPerStep != null ? `${Math.round(pd.usPerStep)} µs` : '—'
+      const secs = pd.seconds != null ? `${pd.seconds.toFixed(2)} s` : '—'
+      const status = pd.isBest
+        ? `<span class="run-badge ${pd.chipClass}">fastest</span>`
+        : pd.error
+          ? `<span class="card-sub">${escapeHtml(pd.error)}</span>`
+          : pd.usPerStep != null
+            ? ''
+            : '<span class="card-sub">not measured</span>'
+      return `<tr><th><span class="run-badge ${pd.chipClass}">${escapeHtml(pd.device.toUpperCase())}</span></th><td class="num">${us}</td><td class="num">${secs}</td><td>${status}</td></tr>`
+    })
+    .join('')
+  const meta = [
+    view.budget ? `${view.budget} steps` : '',
+    view.benchmarkedAt ? `benchmarked ${escapeHtml(formatWhen(view.benchmarkedAt))}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  modal.innerHTML =
+    `<div class="chart-modal__backdrop" data-timings-close></div>` +
+    `<div class="chart-modal__panel device-timings-panel" role="dialog" aria-label="Device timings">` +
+    `<div class="chart-modal__head"><strong>${escapeHtml(model.name || model.id)} <span class="card-sub">— device timings</span></strong>` +
+    `<button type="button" class="icon-btn" data-timings-close title="Close (Esc)" aria-label="Close">✕</button></div>` +
+    `<div class="chart-modal__scroll">` +
+    `<table class="kv-table"><thead><tr><th>device</th><th class="num">µs/step</th><th class="num">seconds</th><th>status</th></tr></thead><tbody>${rows}</tbody></table>` +
+    (meta ? `<p class="card-sub device-timings-meta">${meta} · µs/step lower = faster.</p>` : '') +
+    `<div class="device-timings-actions"><button type="button" class="ghost-btn" data-timings-rerun="${escapeHtml(model.id)}">Re-benchmark</button></div>` +
+    `</div></div>`
+  modal.hidden = false
+}
 // Benchmark ONE model on CPU vs MPS — enqueue the activity and show the spinner immediately. The activity
 // lifecycle (applyQuickDispatchState / refreshAfterQuickDispatch) owns the rest: it spins the chip while
 // RUNNING and re-reads the model record (the new preferredDevice chip) on completion. queueCache covers
@@ -11495,6 +12336,9 @@ function setupModels() {
     else if (action === 'benchmark-device') {
       event.preventDefault() // the chip lives in <summary>; don't toggle the card open/closed on click
       onBenchmarkModelDevice(id)
+    } else if (action === 'device-timings') {
+      event.preventDefault()
+      showDeviceTimingsModal(id)
     } else if (action === 'delete-model') onDeleteModel(id)
   })
 }
@@ -12055,6 +12899,36 @@ function computeTargetFieldHtml(runners, selected) {
     <select name="computeTarget">${computeTargetOptionsHtml(list, selected)}</select>
     <em class="field-hint">${escapeHtml(hint)}</em>`
 }
+// The compute DEVICE the whole campaign trains on. "auto" (default) leaves each run unpinned, so the
+// per-model benchmarked `preferredDevice` applies; picking cpu/mps/cuda forces it for every run (the engine
+// never overrides an explicit `device`). The list is fixed (not the local machine's) since the campaign can
+// run on a remote runner with a different device.
+const LAUNCH_DEVICES = ['auto', 'cpu', 'mps', 'cuda']
+function savedLaunchDevice() {
+  try {
+    const v = sessionStorage.getItem(LAUNCH_DEVICE_SS)
+    return v && LAUNCH_DEVICES.indexOf(v) >= 0 ? v : 'auto'
+  } catch {
+    return 'auto'
+  }
+}
+function saveLaunchDevice(value) {
+  try {
+    sessionStorage.setItem(LAUNCH_DEVICE_SS, LAUNCH_DEVICES.indexOf(value) >= 0 ? value : 'auto')
+  } catch {
+    /* sessionStorage unavailable — non-fatal */
+  }
+}
+function launchDeviceFieldHtml(selected) {
+  const sel = LAUNCH_DEVICES.indexOf(String(selected)) >= 0 ? String(selected) : 'auto'
+  const opts = LAUNCH_DEVICES.map((d) => {
+    const label = d === 'auto' ? 'Auto (per-model best)' : d.toUpperCase()
+    return `<option value="${d}"${d === sel ? ' selected' : ''}>${label}</option>`
+  }).join('')
+  return `<span>Device</span>
+    <select name="device">${opts}</select>
+    <em class="field-hint">Auto uses each model&rsquo;s benchmarked fastest device; pick one to force it for the whole campaign.</em>`
+}
 // Refresh the Launch tab's "Run on" select from the live runner list, rebuilding
 // it in place via setHtml so it never flashes. Guarded by projectEpoch so a slow
 // list never paints over an unloaded or navigated-away launch form.
@@ -12215,6 +13089,7 @@ function renderLaunchForm() {
             : ''
         }
         <label class="field launch-target" id="launch-target-field">${computeTargetFieldHtml(launchRunnersCache, savedComputeTarget())}</label>
+        <label class="field launch-device" id="launch-device-field">${launchDeviceFieldHtml(savedLaunchDevice())}</label>
       </div>
     </fieldset>
     <p class="launch-summary" id="launch-summary"></p>
@@ -12435,6 +13310,11 @@ function buildSpecFromForm(form) {
     if (values.length) sweep[key] = values
     else fixed[key] = readFixedValue(form, key, spec)
   }
+  // Campaign-wide compute device: pin every run's config when a specific device is chosen; "auto" leaves it
+  // unset so each model's benchmarked preferredDevice applies. Held FIXED (a single choice, never swept).
+  const deviceEl = form.elements.device
+  const device = deviceEl && deviceEl.value
+  if (device && device !== 'auto') fixed.device = device
   const seedCount = readSeedCount(form)
   const out = { sweep, fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
   if (hasEnvLevers()) {
@@ -12619,6 +13499,7 @@ function setupLaunch() {
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
     }
+    if (event.target && event.target.name === 'device') saveLaunchDevice(event.target.value)
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
     refreshLeverAnnotations(form)
     refreshLeverApplicability(form)
@@ -13346,6 +14227,7 @@ function showTab(id) {
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'papers') renderPapers()
   if (target === 'models') renderModels()
+  if (target === 'speed') renderSpeed()
   if (target === 'launch') refreshLaunchRunners()
   if (target === 'activity') {
     renderActivity()

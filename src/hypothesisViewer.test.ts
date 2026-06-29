@@ -48,6 +48,20 @@ describe('specMatchesConfig', () => {
   it('tolerates a non-array sweep value', () => {
     expect(H.specMatchesConfig({ sweep: { steps: 100 } }, { steps: 100 })).toBe(true)
   })
+  it('restricts the compare lever to its values (so the partition is well-defined)', () => {
+    const spec = {
+      fixed: { timeframe: '1h' },
+      compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+    }
+    expect(H.specMatchesConfig(spec, { timeframe: '1h', model_name: 'reppo-custom' })).toBe(true)
+    expect(H.specMatchesConfig(spec, { timeframe: '1h', model_name: 'dqn' })).toBe(false) // not a compared value
+    expect(H.specMatchesConfig(spec, { timeframe: '1d', model_name: 'ppo-custom' })).toBe(false) // fixed differs
+  })
+  it('a compare-only spec is a real constraint (not empty)', () => {
+    expect(
+      H.specMatchesConfig({ compare: { lever: 'model_name', values: ['a'] } }, { model_name: 'a' }),
+    ).toBe(true)
+  })
   it('combines fixed AND sweep constraints', () => {
     const spec = { fixed: { model_name: 'a' }, sweep: { lr: [0.1, 0.2] } }
     expect(H.specMatchesConfig(spec, { model_name: 'a', lr: 0.2 })).toBe(true)
@@ -266,6 +280,31 @@ describe('contextCells', () => {
       { allow_shorting: true, asset: 'BTC' },
     ])
   })
+  it('turns a `compare` lever into one cell per value', () => {
+    expect(
+      H.contextCells({
+        fixed: { timeframe: '1h' },
+        compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+      }),
+    ).toEqual([{ model_name: 'ppo-custom' }, { model_name: 'reppo-custom' }])
+  })
+  it('crosses compare × datasets (compare-major)', () => {
+    expect(
+      H.contextCells({
+        compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+        datasets: [{ asset: 'BTC' }, { asset: 'ETH' }],
+      }),
+    ).toEqual([
+      { model_name: 'ppo-custom', asset: 'BTC' },
+      { model_name: 'ppo-custom', asset: 'ETH' },
+      { model_name: 'reppo-custom', asset: 'BTC' },
+      { model_name: 'reppo-custom', asset: 'ETH' },
+    ])
+  })
+  it('ignores an empty/malformed compare', () => {
+    expect(H.contextCells({ fixed: { a: 1 }, compare: { lever: 'model_name', values: [] } })).toEqual([])
+    expect(H.contextCells({ compare: { values: ['x'] } })).toEqual([])
+  })
 })
 
 describe('groupRunsByContext', () => {
@@ -421,21 +460,88 @@ describe('the verdict branches on a context-spanning spec', () => {
 })
 
 describe('rollupPaperVerdict', () => {
-  const manual = (id: string, status: string) => ({ id, spec: {}, verdictSource: 'manual', status })
+  const manual = (id: string, status: string, weight?: number) => ({
+    id,
+    spec: {},
+    verdictSource: 'manual',
+    status,
+    ...(weight ? { weight } : {}),
+  })
   it('untested when the paper links no hypotheses', () => {
     expect(H.rollupPaperVerdict({ hypothesisIds: [] }, [], [], 'max')).toBe('untested')
   })
-  it('holds-up when any linked hypothesis is proven', () => {
-    const hyps = [manual('a', 'proven'), manual('b', 'disproved')]
+  it('holds-up when every DECIDED hypothesis is proven (untested ignored)', () => {
+    const hyps = [manual('a', 'proven'), manual('b', 'untested')]
     expect(H.rollupPaperVerdict({ hypothesisIds: ['a', 'b'] }, hyps, [], 'max')).toBe('holds-up')
   })
-  it('fluff when every linked hypothesis is disproved', () => {
+  it('shaky — NOT holds-up — when proven and disproved are mixed', () => {
+    const hyps = [manual('a', 'proven'), manual('b', 'disproved')]
+    expect(H.rollupPaperVerdict({ hypothesisIds: ['a', 'b'] }, hyps, [], 'max')).toBe('shaky')
+  })
+  it('shaky for the 2-proven / 4-disproved case at equal weight (was wrongly holds-up)', () => {
+    const hyps = ['p1', 'p2']
+      .map((i) => manual(i, 'proven'))
+      .concat(['d1', 'd2', 'd3', 'd4'].map((i) => manual(i, 'disproved')))
+      .concat(['u1', 'u2', 'u3', 'u4', 'u5'].map((i) => manual(i, 'untested')))
+    expect(H.rollupPaperVerdict({ hypothesisIds: hyps.map((h) => h.id) }, hyps, [], 'max')).toBe('shaky')
+  })
+  it('fluff when every decided hypothesis is disproved', () => {
     const hyps = [manual('a', 'disproved'), manual('b', 'disproved')]
     expect(H.rollupPaperVerdict({ hypothesisIds: ['a', 'b'] }, hyps, [], 'max')).toBe('fluff')
   })
-  it('untested for a mix of untested and disproved', () => {
+  it('fluff when the only decided hypothesis is disproved (rest untested)', () => {
     const hyps = [manual('a', 'untested'), manual('b', 'disproved')]
+    expect(H.rollupPaperVerdict({ hypothesisIds: ['a', 'b'] }, hyps, [], 'max')).toBe('fluff')
+  })
+  it('untested when nothing is decided yet', () => {
+    const hyps = [manual('a', 'untested'), manual('b', 'untested')]
     expect(H.rollupPaperVerdict({ hypothesisIds: ['a', 'b'] }, hyps, [], 'max')).toBe('untested')
+  })
+  it('weighting (paper-assigned): a proven CENTRAL hypothesis outweighs a minor disproved one -> holds-up', () => {
+    const hyps = [manual('central', 'proven'), manual('minor', 'disproved')]
+    const paper = { hypothesisIds: ['central', 'minor'], hypothesisWeights: { central: 5 } }
+    expect(H.rollupPaperVerdict(paper, hyps, [], 'max')).toBe('holds-up')
+  })
+  it('weighting (paper-assigned): a disproved CENTRAL hypothesis outweighs a minor proven one -> fluff', () => {
+    const hyps = [manual('central', 'disproved'), manual('minor', 'proven')]
+    const paper = { hypothesisIds: ['central', 'minor'], hypothesisWeights: { central: 5 } }
+    expect(H.rollupPaperVerdict(paper, hyps, [], 'max')).toBe('fluff')
+  })
+})
+
+describe('paperVerdictDetail', () => {
+  const manual = (id: string, status: string, weight?: number) => ({
+    id,
+    spec: {},
+    verdictSource: 'manual',
+    status,
+    ...(weight ? { weight } : {}),
+  })
+  it('reports counts, weighted score and a human explanation', () => {
+    const hyps = [
+      manual('a', 'proven'),
+      manual('b', 'disproved'),
+      manual('c', 'disproved'),
+      manual('d', 'untested'),
+    ]
+    const d = H.paperVerdictDetail({ hypothesisIds: ['a', 'b', 'c', 'd'] }, hyps, [], 'max')
+    expect(d.status).toBe('shaky')
+    expect(d.counts).toEqual({ proven: 1, disproved: 2, untested: 1, total: 4 })
+    expect(d.score).toBeCloseTo(1 / 3, 5)
+    expect(d.hasWeights).toBe(false)
+    expect(typeof d.why).toBe('string')
+    expect(d.why.length).toBeGreaterThan(0)
+  })
+  it('flags weighting in the detail when the PAPER assigns non-default weights', () => {
+    const hyps = [manual('a', 'proven'), manual('b', 'disproved')]
+    const d = H.paperVerdictDetail(
+      { hypothesisIds: ['a', 'b'], hypothesisWeights: { a: 5 } },
+      hyps,
+      [],
+      'max',
+    )
+    expect(d.hasWeights).toBe(true)
+    expect(d.status).toBe('holds-up')
   })
   it('rolls up from a live auto verdict', () => {
     const hyps = [

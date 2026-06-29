@@ -260,6 +260,14 @@ export interface ExperimentSpec {
   datasets?: Array<Record<string, unknown>>
   /** Seeds to repeat every configuration with (sets `config.seed`); omit to run each config once. */
   seeds?: number[]
+  /**
+   * Compare VALUES of a single ordinary lever (e.g. `model_name`: reppo-custom vs ppo-custom) holding the
+   * rest of the config fixed. Unlike `sweep` (whose values are POOLED into one beats-hold verdict), a
+   * `compare` PARTITIONS matching runs by the lever's value into one context cell per value, so the
+   * hypothesis's `comparison` (beats-baseline / invariant / differs) judges the values AGAINST each other —
+   * the judgeable form of an "A outperforms B" claim. Expands like a sweep when launched (runs every value).
+   */
+  compare?: { lever: string; values: unknown[] }
   /** Safety cap overriding the default maximum planned items. */
   maxItems?: number
 }
@@ -1253,10 +1261,20 @@ export interface TrainingPaperRecord {
   approach?: string
   /** Ids of the hypotheses this paper creates/links; the paper's verdict ROLLS UP from theirs. */
   hypothesisIds?: string[]
+  /**
+   * THIS paper's importance weight for each linked hypothesis (hypothesisId → weight, default 1). The
+   * weight lives on the PAPER, not the hypothesis, because a hypothesis is shared across papers and stands
+   * on its own — it can be central to one paper and minor to another. The paper's verdict roll-up
+   * (`paperVerdictDetail`) uses THESE weights; `weighPaperHypotheses` assigns them.
+   */
+  hypothesisWeights?: Record<string, number>
   /** Slug ids of the catalog Models this paper introduces or improves (set by `analyzePaperModels`). */
   modelIds?: string[]
-  /** Lifecycle: untested → replicating → holds-up | fluff (legacy/manual; the card badge rolls up from `hypothesisIds`). */
-  status: 'untested' | 'replicating' | 'holds-up' | 'fluff'
+  /**
+   * Lifecycle: untested → replicating → holds-up | shaky | fluff (legacy/manual; the card badge rolls up
+   * from `hypothesisIds` via `paperVerdictDetail`). `shaky` = decided hypotheses are genuinely mixed.
+   */
+  status: 'untested' | 'replicating' | 'holds-up' | 'shaky' | 'fluff'
   /** Free-text verdict / notes recorded by the user. */
   verdictNote?: string
   /** Hidden from the default Papers view (marked "not wanted") without deleting it. */
@@ -1337,10 +1355,19 @@ export interface ModelFlavor {
  * model's {@link TrainingModel.preferredDevice}. `usPerStep` is per device; `speedup` is the winner's
  * margin over the runner-up (>= 1).
  */
+export type ComputeDevice = 'cpu' | 'mps' | 'cuda'
+
 export interface ModelDeviceBenchmark {
-  bestDevice: 'cpu' | 'mps'
+  bestDevice: ComputeDevice
   speedup: number
+  /** Per-device microseconds/step (lower = faster) — the headline speed shown per device column. */
   usPerStep: Record<string, number>
+  /** Per-device measured wall-clock seconds for the timed budget (the raw "exact timings"). */
+  seconds?: Record<string, number>
+  /** The step budget the per-device times were measured over. */
+  budget?: number
+  /** Per-device reason a device produced no time (e.g. "too slow / timed out", "unsupported op"). */
+  errors?: Record<string, string>
   availableDevices: string[]
   benchmarkedAt: string
 }
@@ -1390,8 +1417,8 @@ export interface TrainingModel {
   notes?: string
   /** Hidden from the default view (a rejected/irrelevant candidate) without deleting it. */
   dismissed?: boolean
-  /** The device the last benchmark found fastest for this model (the cpu-vs-mps winner). */
-  preferredDevice?: 'cpu' | 'mps'
+  /** The device the last benchmark found fastest for this model (the cpu/mps/cuda winner). */
+  preferredDevice?: ComputeDevice
   /** The last device-benchmark measurement backing `preferredDevice`. */
   deviceBenchmark?: ModelDeviceBenchmark
   createdAt: string
@@ -1555,6 +1582,42 @@ export interface SuggestPaperHypothesesResult {
   suggestedAt: string
 }
 
+export interface WeighPaperHypothesesParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** The paper whose LINKED hypotheses get importance weights — read from `{recordType}-paper`. */
+  paperId: string
+  llmConfig: LLMConfig
+  abortSignal?: AbortSignal
+  /** Fired after each hypothesis record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Injectable URL→text fetcher (for tests); a fetch failure is non-fatal. */
+  fetchPaperText?: (url: string, abortSignal?: AbortSignal) => Promise<string>
+}
+
+export interface WeighedHypothesis {
+  id: string
+  /** Importance weight 1 (minor / supporting) … 5 (the paper's CENTRAL claim) — the weight the paper
+   * verdict roll-up uses (`scorePaperVerdict`). */
+  weight: number
+  /** One-line reason the model gave for the weight. */
+  reason: string
+  title?: string
+}
+
+export interface WeighPaperHypothesesResult {
+  recordType: string
+  paperId: string
+  /** Per-linked-hypothesis weight the model assigned and persisted. */
+  weighted: WeighedHypothesis[]
+  /** Provenance label of the weighing model. */
+  weighedBy: string
+  weighedAt: string
+}
+
 export interface ScanProjectModelsParams {
   scope: string
   projectRoot: string
@@ -1589,7 +1652,7 @@ export interface BenchmarkModelDeviceParams {
 export interface BenchmarkModelDeviceResult {
   recordType: string
   modelId: string
-  preferredDevice: 'cpu' | 'mps'
+  preferredDevice: ComputeDevice
   deviceBenchmark: ModelDeviceBenchmark
 }
 
@@ -1900,6 +1963,14 @@ export interface ModelTrainerTools {
   suggestPaperHypotheses(
     params: SuggestPaperHypothesesParams,
   ): Promise<SuggestPaperHypothesesResult>
+  /**
+   * Re-assess the IMPORTANCE WEIGHTS of a paper's LINKED hypotheses with an LLM: read the paper's claim
+   * and each linked hypothesis, assign each an integer weight 1 (minor) … 5 (central), and persist the
+   * weight onto each `<recordType>-hypothesis` record so the paper verdict re-rolls-up by importance.
+   */
+  weighPaperHypotheses(
+    params: WeighPaperHypothesesParams,
+  ): Promise<WeighPaperHypothesesResult>
   /**
    * Discover MODELS the project declares (its `model_name` lever choices) that the catalog does not yet
    * cover, optionally enrich each with an LLM (category, description, paper links), and persist them as

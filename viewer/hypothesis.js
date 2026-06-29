@@ -16,9 +16,11 @@
   function specMatchesConfig(spec, config) {
     const fixed = (spec && spec.fixed) || {}
     const sweep = (spec && spec.sweep) || {}
+    const cmp = spec && spec.compare
+    const hasCompare = !!(cmp && cmp.lever && Array.isArray(cmp.values) && cmp.values.length)
     const fixedKeys = Object.keys(fixed)
     const sweepKeys = Object.keys(sweep)
-    if (!fixedKeys.length && !sweepKeys.length) return false
+    if (!fixedKeys.length && !sweepKeys.length && !hasCompare) return false
     const cfg = config || {}
     for (let i = 0; i < fixedKeys.length; i++) {
       const k = fixedKeys[i]
@@ -30,6 +32,8 @@
       const opts = Array.isArray(raw) ? raw : [raw]
       if (!opts.map(String).includes(String(cfg[k]))) return false
     }
+    // A `compare` restricts its lever to the compared values, so matching runs partition cleanly by value.
+    if (hasCompare && !cmp.values.map(String).includes(String(cfg[cmp.lever]))) return false
     return true
   }
 
@@ -81,13 +85,23 @@
   function contextCells(spec) {
     const envs = (spec && spec.environments) || []
     const dss = (spec && spec.datasets) || []
-    if (!envs.length && !dss.length) return []
+    const cmp = spec && spec.compare
+    // A `compare` lever contributes one cell per value — the judgeable form of "A vs B" — crossing the
+    // environment/dataset bundles like another context dimension (compare-major).
+    const cmpCells =
+      cmp && cmp.lever && Array.isArray(cmp.values) && cmp.values.length
+        ? cmp.values.map((v) => ({ [cmp.lever]: v }))
+        : []
+    if (!envs.length && !dss.length && !cmpCells.length) return []
+    const compareCells = cmpCells.length ? cmpCells : [{}]
     const envCells = envs.length ? envs : [{}]
     const dsCells = dss.length ? dss : [{}]
     const cells = []
-    for (let i = 0; i < envCells.length; i++) {
-      for (let j = 0; j < dsCells.length; j++) {
-        cells.push(Object.assign({}, envCells[i], dsCells[j]))
+    for (let c = 0; c < compareCells.length; c++) {
+      for (let i = 0; i < envCells.length; i++) {
+        for (let j = 0; j < dsCells.length; j++) {
+          cells.push(Object.assign({}, compareCells[c], envCells[i], dsCells[j]))
+        }
       }
     }
     return cells
@@ -230,18 +244,91 @@
     return { next, transition, changed: true }
   }
 
-  // A paper's verdict rolls up from its linked hypotheses: any proven ⇒ holds-up, all disproved ⇒ fluff,
-  // else untested (no links, or a mix of untested/disproved).
-  function rollupPaperVerdict(paper, hyps, runs, direction, minRuns) {
+  // A paper's verdict rolls up from the WEIGHTED balance of its linked hypotheses' DECIDED verdicts —
+  // not "any proven ⇒ holds-up" (which wrongly passed a paper with more disproved than proven). Over the
+  // decided (proven|disproved) hypotheses, score = provenWeight / decidedWeight: ≥0.75 holds-up, ≤0.25
+  // fluff, in between SHAKY (genuinely mixed), nothing decided ⇒ untested. Untested hypotheses are not yet
+  // evidence (ignored in the score, surfaced in the explanation). A per-hypothesis `weight` (default 1)
+  // lets ONE central claim outweigh minor ones. `paperVerdictDetail` returns the counts/score/explanation
+  // the card shows; `rollupPaperVerdict` returns just the status (badge + back-compat).
+  const PAPER_HOLDS_UP_AT = 0.75
+  const PAPER_FLUFF_AT = 0.25
+  // Score a paper from its linked hypotheses' verdicts+weights. `linked` is [{verdict, weight}] — the
+  // ONE place the holds-up/shaky/fluff thresholds live, so the viewer (which derives per-hypothesis
+  // verdicts its own way) and `paperVerdictDetail` agree.
+  function scorePaperVerdict(linked) {
+    let proven = 0,
+      disproved = 0,
+      untested = 0,
+      provenW = 0,
+      disprovedW = 0,
+      hasWeights = false
+    for (let i = 0; i < (linked || []).length; i++) {
+      const it = linked[i]
+      const w = typeof it.weight === 'number' && isFinite(it.weight) && it.weight > 0 ? it.weight : 1
+      if (w !== 1) hasWeights = true
+      if (it.verdict === 'proven') {
+        proven++
+        provenW += w
+      } else if (it.verdict === 'disproved') {
+        disproved++
+        disprovedW += w
+      } else untested++
+    }
+    const decidedW = provenW + disprovedW
+    const score = decidedW > 0 ? provenW / decidedW : null
+    let status
+    if (decidedW === 0) status = 'untested'
+    else if (score >= PAPER_HOLDS_UP_AT) status = 'holds-up'
+    else if (score <= PAPER_FLUFF_AT) status = 'fluff'
+    else status = 'shaky'
+    const detail = {
+      status: status,
+      score: score,
+      counts: { proven: proven, disproved: disproved, untested: untested, total: (linked || []).length },
+      hasWeights: hasWeights,
+      weighted: { proven: provenW, disproved: disprovedW, decided: decidedW },
+    }
+    detail.why = paperVerdictWhy(detail)
+    return detail
+  }
+  function paperVerdictDetail(paper, hyps, runs, direction, minRuns) {
     const ids = {}
     const linkIds = (paper && paper.hypothesisIds) || []
     for (let i = 0; i < linkIds.length; i++) ids[linkIds[i]] = true
-    const linked = (hyps || []).filter((h) => ids[h.id])
-    if (!linked.length) return 'untested'
-    const verdicts = linked.map((h) => effectiveVerdict(h, runs, direction, minRuns))
-    if (verdicts.indexOf('proven') >= 0) return 'holds-up'
-    if (verdicts.every((v) => v === 'disproved')) return 'fluff'
-    return 'untested'
+    // Weight is the PAPER's per-hypothesis importance (default 1) — NOT a property of the shared hypothesis.
+    const weights = (paper && paper.hypothesisWeights) || {}
+    const linked = (hyps || [])
+      .filter((h) => ids[h.id])
+      .map((h) => ({ verdict: effectiveVerdict(h, runs, direction, minRuns), weight: weights[h.id] }))
+    return scorePaperVerdict(linked)
+  }
+
+  function paperVerdictWhy(d) {
+    const c = d.counts
+    if (!c.total) return 'No hypotheses linked yet.'
+    if (d.status === 'untested') return c.untested + ' of ' + c.total + ' hypotheses not yet decided.'
+    const pct = Math.round(d.score * 100)
+    const wnote = d.hasWeights ? ', weighted by importance' : ''
+    const tail = c.untested ? ' (' + c.untested + ' still untested)' : ''
+    const evidence =
+      c.proven +
+      ' proven, ' +
+      c.disproved +
+      ' disproved' +
+      wnote +
+      ' — ' +
+      pct +
+      '% of the decided evidence supports the claim' +
+      tail +
+      '.'
+    if (d.status === 'holds-up') return 'Holds up: ' + evidence
+    if (d.status === 'fluff') return 'Fluff: ' + evidence
+    return 'Shaky: ' + evidence + ' Mixed — neither side dominates.'
+  }
+
+  function rollupPaperVerdict(paper, hyps, runs, direction, minRuns) {
+    return paperVerdictDetail(paper, hyps, runs, direction, minRuns).status
   }
 
   const Hypothesis = {
@@ -258,6 +345,8 @@
     effectiveVerdict: effectiveVerdict,
     evaluateHypothesis: evaluateHypothesis,
     rollupPaperVerdict: rollupPaperVerdict,
+    paperVerdictDetail: paperVerdictDetail,
+    scorePaperVerdict: scorePaperVerdict,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Hypothesis

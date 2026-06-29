@@ -669,3 +669,50 @@ describe('consolidation durability across a later seed-sync (the whole point)', 
     expect(M.seedDiffersFromModel(a2cSeed, merged)).toBe(false)
   })
 })
+
+describe('device benchmark view helpers', () => {
+  it('deviceChipClass maps a device to its colour class (cpu default)', () => {
+    expect(M.deviceChipClass('cpu')).toBe('device-chip-cpu')
+    expect(M.deviceChipClass('MPS')).toBe('device-chip-mps')
+    expect(M.deviceChipClass('cuda')).toBe('device-chip-cuda')
+    expect(M.deviceChipClass('weird')).toBe('device-chip-cpu')
+  })
+
+  const db = () => ({
+    bestDevice: 'cpu',
+    speedup: 4,
+    usPerStep: { cpu: 53000 },
+    seconds: { cpu: 16 },
+    budget: 300,
+    errors: { mps: 'too slow / timed out' },
+    availableDevices: ['cpu'],
+    benchmarkedAt: '2026-06-29T00:00:00.000Z',
+  })
+
+  it('deviceBenchmarkView gives a row per standard device with best flagged + per-device timings', () => {
+    const v = M.deviceBenchmarkView(db())
+    expect(v.perDevice.map((d: any) => d.device)).toEqual(['cpu', 'mps', 'cuda'])
+    expect(v.perDevice[0]).toMatchObject({
+      device: 'cpu',
+      usPerStep: 53000,
+      seconds: 16,
+      isBest: true,
+      chipClass: 'device-chip-cpu',
+    })
+    expect(v.perDevice[1]).toMatchObject({ device: 'mps', usPerStep: null, error: 'too slow / timed out', isBest: false })
+    expect(v.perDevice[2]).toMatchObject({ device: 'cuda', usPerStep: null, error: null })
+    expect(v.best).toBe('cpu')
+    expect(v.bestClass).toBe('device-chip-cpu')
+    expect(v.budget).toBe(300)
+  })
+
+  it('deviceBenchmarkView appends a non-standard device present in the data', () => {
+    const v = M.deviceBenchmarkView({ ...db(), bestDevice: 'cuda', usPerStep: { cuda: 47, tpu: 9 } })
+    expect(v.perDevice.map((d: any) => d.device)).toContain('tpu')
+    expect(v.bestClass).toBe('device-chip-cuda')
+  })
+
+  it('deviceBenchmarkView returns null when there is no benchmark', () => {
+    expect(M.deviceBenchmarkView(null)).toBeNull()
+  })
+})

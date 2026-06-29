@@ -101,17 +101,23 @@ Still PENDING (the rest of the code/paper model catalog is already exposed):
   (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
   existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).
 
-**Reusable components (surface as `component` catalog entries / building blocks) — low priority:**
+**Reusable components (surface as `component` catalog entries / building blocks) — low priority.**
+`scanProjectModels` discovers only `model_name` lever choices, so NONE of these are auto-catalogued —
+surfacing them needs a source-scan discovery path or hand-authored `component` entries. Most are already
+represented INDIRECTLY by the trainable model that wraps them, so confirm a block is genuinely unrepresented
+before adding it:
 
-- Features-extractors: `SequenceFeaturesExtractor` (attn/tcn, `custom/sequence_extractor.py`), `LSTMFCE`
-  (`dqn_lstm_policy.py`), `CustomMlpExtractor` (`custom/custommlpextractor.py`).
-- Custom policies / Q-nets: `custom/policies.py` (ActorCritic / RecurrentActorCritic / DQN / Dueling /
-  Rainbow / QRDQN), `custom/policy_iqn.py` (`CustomIQNPolicy`), `custom/customqnetwork.py`
-  (`create_mlp_custom`), `dueling_dqn/policies.py`.
-- Replay buffers: `rainbow_dqn/prioritized_replay_buffer.py`, `rainbow/replay_buffer.py` (+ `segment_tree.py`),
+- Features-extractors (wrapped by catalogued models): `SequenceFeaturesExtractor`
+  (attn/tcn/itransformer, `custom/sequence_extractor.py`; via `attn-ppo`/`tcn-ppo`/`itransformer-ppo`),
+  `LSTMFCE` (`dqn_lstm_policy.py`; via the `*-lstm` models), `CustomMlpExtractor` (`custom/custommlpextractor.py`).
+- Custom policies / Q-nets (wrapped by the `*-custom` models): `custom/policies.py` (ActorCritic /
+  RecurrentActorCritic / DQN / Dueling / Rainbow / QRDQN), `custom/policy_iqn.py` (`CustomIQNPolicy`),
+  `custom/customqnetwork.py` (`create_mlp_custom`), `dueling_dqn/policies.py`.
+- Replay buffers (wrapped by `rainbow-dqn`/`agent57`): `rainbow_dqn/prioritized_replay_buffer.py`,
   `custom/agent57/agent57.py` (`CustomAgent57ReplayBuffer` / `EpisodicMemory`).
-- Optimizer: `custom/dgwo.py` (`DGWO`, grey-wolf). NN blocks: `custom/attention.py`, `custom/noisylinear.py`,
-  `custom/dropconnect.py`, `custom/residualblock.py`, `custom/denseblock.py`, `custom/memorymodels.py`.
+- GENUINELY UNREPRESENTED (no parent model entry — the real target if ever worth doing): the `DGWO`
+  grey-wolf optimizer (`custom/dgwo.py`, today only an `optimizer_class` lever value) + the NN blocks
+  `custom/{attention,noisylinear,dropconnect,residualblock,denseblock,memorymodels}.py`.
 
 ### 3. xAI — explain WHY the model acted (parallel track)
 
@@ -149,15 +155,6 @@ asset in the same data format to catch regime/asset overfit:
   activity writing a `<recordType>-regimetest` record per (run, set), surfaced as a per-set matrix in
   run-detail + a compare overlay. Keep it generic; BlackSwan is the first consumer.
 
-### Environments — follow-ups
-
-The Environments tab + `scope: 'environment'` lever bundles ship; presets can now carry `environments`
-bundles (the SL/TP/trailing sweep uses them, rendered read-only in the launch picker so the swept
-profiles are visible) and the top-3 best-run presets reproduce a run's env values. Remaining: a unified
-**test matrix** surface (model × environment × dataset, folding in cross-asset testing); the fixed-only
-clone-to-launch path (`applyPresetFixed`) still pins model levers only; an optional "save this preset's
-profile as a named environment" promote affordance (deferred — these are git-authored experiment
-constants, not user-tuned regimes).
 
 ### Activity concurrency — server-side pass
 

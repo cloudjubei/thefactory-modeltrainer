@@ -1,4 +1,5 @@
 import type {
+  ComputeDevice,
   ConsolidationGroup,
   DecisionFeatureAttribution,
   DecisionQualitySignal,
@@ -112,23 +113,36 @@ export function resolveModelDeviceForConfig(opts: {
  */
 export function parseDeviceBenchmark(summary: unknown, benchmarkedAt: string): ModelDeviceBenchmark {
   const db = (summary as { deviceBenchmark?: Record<string, unknown> } | undefined)?.deviceBenchmark
-  const bestDevice = db?.bestDevice === 'mps' ? 'mps' : 'cpu'
+  const bestDevice: ComputeDevice =
+    db?.bestDevice === 'mps' || db?.bestDevice === 'cuda' ? db.bestDevice : 'cpu'
   const speedup =
     typeof db?.speedup === 'number' && Number.isFinite(db.speedup) && db.speedup >= 1 ? db.speedup : 1
-  const usPerStep: Record<string, number> = {}
-  const rawUs = (db?.usPerStep ?? {}) as Record<string, unknown>
-  for (const [device, value] of Object.entries(rawUs)) {
-    if (typeof value === 'number' && Number.isFinite(value) && value > 0) usPerStep[device] = value
+  const numberMap = (raw: unknown): Record<string, number> => {
+    const out: Record<string, number> = {}
+    for (const [d, v] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
+      if (typeof v === 'number' && Number.isFinite(v) && v > 0) out[d] = v
+    }
+    return out
+  }
+  const usPerStep = numberMap(db?.usPerStep)
+  const seconds = numberMap(db?.seconds)
+  const errors: Record<string, string> = {}
+  for (const [d, v] of Object.entries((db?.errors ?? {}) as Record<string, unknown>)) {
+    if (typeof v === 'string' && v) errors[d] = v
   }
   const rawDevices = Array.isArray(db?.availableDevices) ? (db?.availableDevices as unknown[]) : []
   const availableDevices = rawDevices.filter((d): d is string => typeof d === 'string')
-  return {
+  const result: ModelDeviceBenchmark = {
     bestDevice,
     speedup,
     usPerStep,
     availableDevices: availableDevices.length ? availableDevices : Object.keys(usPerStep).length ? Object.keys(usPerStep) : ['cpu'],
     benchmarkedAt,
   }
+  if (Object.keys(seconds).length) result.seconds = seconds
+  if (typeof db?.budget === 'number' && Number.isFinite(db.budget) && db.budget > 0) result.budget = db.budget
+  if (Object.keys(errors).length) result.errors = errors
+  return result
 }
 
 export function validateTrainerManifest(raw: unknown): TrainerManifest {
@@ -322,6 +336,15 @@ export function expandExperimentMatrix(
       throw new Error(`sweep "${key}" must be a non-empty array`)
     }
   }
+  const compare = spec.compare
+  if (compare && compare.lever !== undefined) {
+    if (!leverKeys.includes(compare.lever)) {
+      throw new Error(`compare lever "${compare.lever}" names no manifest lever`)
+    }
+    if (!Array.isArray(compare.values) || compare.values.length === 0) {
+      throw new Error(`compare "${compare.lever}" must list values to compare`)
+    }
+  }
   const environments = spec.environments ?? []
   for (const bundle of environments) {
     for (const key of Object.keys(bundle)) {
@@ -358,6 +381,13 @@ export function expandExperimentMatrix(
   let configs: Record<string, unknown>[] = explicitConfigs.length ? [] : [base]
   for (const [key, values] of Object.entries(sweep)) {
     configs = configs.flatMap((config) => values.map((value) => ({ ...config, [key]: value })))
+  }
+  // A `compare` runs every value of its lever (like a sweep) — the verdict then PARTITIONS the resulting
+  // runs by that value (via contextCells) to judge the values against each other.
+  if (compare && compare.lever !== undefined && Array.isArray(compare.values) && compare.values.length) {
+    configs = configs.flatMap((config) =>
+      compare.values.map((value) => ({ ...config, [compare.lever]: value })),
+    )
   }
   // Dataset + environment bundles apply TOGETHER (not cartesian): each crosses the whole model matrix.
   if (datasets.length > 0) {
@@ -521,20 +551,56 @@ function coerceComparison(raw: unknown): HypothesisComparison | undefined {
   if (typeof o.tolerance === 'number' && Number.isFinite(o.tolerance)) c.tolerance = o.tolerance
   return c
 }
-export function coerceHypothesisItems(
-  raw: unknown[],
-  manifest: TrainerManifest,
-): { title: string; rationale: string; spec: ExperimentSpec; comparison?: HypothesisComparison }[] {
-  if (!Array.isArray(raw)) return []
-  const leverKeys = new Set(Object.keys(manifest.levers))
+// Resolve the lever ROLES used by the suggestion prompt + the precision guards: the config-DEFINING
+// (model-scope or unscoped) levers, the context-scoped sets, and the model-IDENTITY lever (`model_name`
+// when declared, else none — keyed on model_name specifically so generic manifests without it never get
+// false-dropped by the under-pinned guard).
+export function resolveModelLevers(manifest: TrainerManifest): {
+  identityLever: string | undefined
+  modelLevers: Set<string>
+  envLevers: Set<string>
+  datasetLevers: Set<string>
+} {
   const scopedLevers = (scope: string) =>
     new Set(
       Object.entries(manifest.levers)
         .filter(([, s]) => (s as TrainerLeverSpec).scope === scope)
         .map(([k]) => k),
     )
-  const envLevers = scopedLevers('environment')
-  const datasetLevers = scopedLevers('dataset')
+  const modelLevers = new Set(
+    Object.entries(manifest.levers)
+      .filter(([, s]) => {
+        const sc = (s as TrainerLeverSpec).scope
+        return sc === 'model' || sc === undefined
+      })
+      .map(([k]) => k),
+  )
+  return {
+    identityLever: manifest.levers.model_name ? 'model_name' : undefined,
+    modelLevers,
+    envLevers: scopedLevers('environment'),
+    datasetLevers: scopedLevers('dataset'),
+  }
+}
+
+// A title/rationale that asserts a COMPARISON between configs ("A outperforms B", "X is necessary",
+// "recurrent beats non-recurrent") — used to reject the unjudgeable comparative-as-pooled-model-sweep form.
+// "beats hold"/"beats buy" is NOT comparative (that's the verdict itself).
+export function looksComparative(title: string, rationale: string): boolean {
+  // No trailing \b — so conjugations match (outperform/outperforms/outperformed). The beats? lookahead
+  // excludes "beats hold/buy" (that's the verdict itself, not a config-vs-config comparison).
+  return /\b(outperform|out-perform|better than|worse than|superior|necessity of|necessary|versus|vs\.?|compared? (?:to|with)|more effective|beats?\b(?!\s+(?:hold|buy)))/i.test(
+    `${title} ${rationale}`,
+  )
+}
+
+export function coerceHypothesisItems(
+  raw: unknown[],
+  manifest: TrainerManifest,
+): { title: string; rationale: string; spec: ExperimentSpec; comparison?: HypothesisComparison }[] {
+  if (!Array.isArray(raw)) return []
+  const leverKeys = new Set(Object.keys(manifest.levers))
+  const { identityLever, modelLevers, envLevers, datasetLevers } = resolveModelLevers(manifest)
   // A context bundle array is valid iff every bundle is a non-empty object keyed ONLY by levers of the
   // matching scope (environments hold environment levers; datasets hold dataset levers).
   const coerceBundles = (
@@ -603,7 +669,42 @@ export function coerceHypothesisItems(
       if (!dss) valid = false
       else spec.datasets = dss
     }
-    if (!valid || (!spec.sweep && !spec.fixed && !spec.environments && !spec.datasets)) continue
+    // `compare` pits a single lever's values against each other (the judgeable "A vs B" form) —
+    // require {lever: a declared lever, values: an array of >= 2}.
+    const compareRaw = rawSpec.compare as Record<string, unknown> | undefined
+    if (valid && compareRaw !== undefined) {
+      if (
+        !compareRaw ||
+        typeof compareRaw !== 'object' ||
+        Array.isArray(compareRaw) ||
+        typeof compareRaw.lever !== 'string' ||
+        !leverKeys.has(compareRaw.lever) ||
+        !Array.isArray(compareRaw.values) ||
+        (compareRaw.values as unknown[]).length < 2
+      ) {
+        valid = false
+      } else {
+        spec.compare = { lever: compareRaw.lever, values: compareRaw.values as unknown[] }
+      }
+    }
+    if (
+      !valid ||
+      (!spec.sweep && !spec.fixed && !spec.environments && !spec.datasets && !spec.compare)
+    )
+      continue
+    // PRECISION GUARDS (deterministic backstop — the prompt rules are advisory).
+    // GUARD A: a COMPARATIVE claim must NOT be a pooled multi-value sweep over a model lever — that pools
+    // the arms and never compares them (the canonical failure). Drop it; the model must use `compare`.
+    const hasMultiValueModelSweep =
+      !!spec.sweep &&
+      Object.entries(spec.sweep).some(
+        ([k, vals]) => modelLevers.has(k) && Array.isArray(vals) && vals.length > 1,
+      )
+    if (looksComparative(obj.title, obj.rationale) && hasMultiValueModelSweep) continue
+    // GUARD B: a SINGLE-CONTEXT spec (no environments/datasets/compare) is judged as a pooled beats-hold
+    // over its matched runs — so it MUST pin the model-identity lever, else it matches the whole backlog.
+    const isSingleContext = !spec.environments && !spec.datasets && !spec.compare
+    if (isSingleContext && identityLever && !(spec.fixed && identityLever in spec.fixed)) continue
     if (Array.isArray(rawSpec.seeds)) {
       spec.seeds = rawSpec.seeds
         .filter((s): s is number => typeof s === 'number' && Number.isFinite(s))
@@ -647,12 +748,18 @@ export function buildJudgeUserContent(
 // The bar every proposed/extracted/suggested hypothesis must clear, shared by all three prompts: a
 // FALSIFIABLE test-claim, never "gather more data for a known setup" (that's the min-runs gate + xAI tab).
 const HYPOTHESIS_RULE =
-  'Each hypothesis MUST be a FALSIFIABLE claim a run can PROVE OR DISPROVE — that a specific lever value, ' +
-  'or a comparison against a baseline, CHANGES the objective in a stated direction. It must be able to turn ' +
-  'out FALSE. Do NOT propose pure DATA-GATHERING: running more seeds/runs of an already-identified config to ' +
-  'tighten a confidence interval, reduce variance/noise, reproduce, or "establish a trustworthy interval" is ' +
-  'NOT a hypothesis — that is handled separately (the min-runs threshold and the xAI tab). Every spec must ' +
-  'introduce or compare a lever setting whose effect is what is being tested.'
+  'Each hypothesis MUST be a FALSIFIABLE claim a run can PROVE OR DISPROVE, and it MUST match how the verdict ' +
+  'is computed. A SINGLE-CONTEXT hypothesis (just fixed/sweep) is judged ONLY as "does the BEST matching run ' +
+  'beat buy-and-hold OOS net of fees" — NOT an A-vs-B comparison — so frame it as "THIS one fully-pinned ' +
+  'configuration beats buy-and-hold" and pin in spec.fixed EVERY defining lever (the model-identity lever plus ' +
+  'the other model and data/market levers) so it matches a small coherent run family, not the backlog. For a ' +
+  'COMPARATIVE claim ("A outperforms B", "X is necessary"), use a "compare" block (the contrasted lever + its ' +
+  'values, with the shared config pinned in fixed) plus a "comparison" kind — NEVER a pooled sweep over the ' +
+  'comparison axis, which cannot test which value wins. Reserve cross-CONTEXT comparison (environment/dataset ' +
+  'bundles + comparison) for claims about the effect of the context. Do NOT propose pure DATA-GATHERING ' +
+  '(more seeds/runs of a known config to tighten an interval, reduce variance, or reproduce) — that is the ' +
+  'min-runs gate + the xAI tab, not a hypothesis. Every spec must introduce a configuration whose beats-hold ' +
+  'outcome (or, for a comparison, whose cross-value/context comparison) is what is being tested.'
 
 // How to express a CROSS-CONTEXT hypothesis. Some levers are held-fixed CONTEXT, not model knobs —
 // managed as bundles, never swept. A claim about the EFFECT OF THE CONTEXT uses these instead of sweep/fixed.
@@ -852,27 +959,50 @@ export function buildAnalyzePaperUserContent(input: {
 /** System prompt for "Suggest hypotheses": match the paper against EXISTING hypotheses (link the ones
  * that test its claims) AND propose NEW testable hypotheses not already covered. */
 export function buildSuggestHypothesesSystemPrompt(manifest: TrainerManifest): string {
+  const idName = resolveModelLevers(manifest).identityLever || 'the model-identity lever'
   return [
     `You are a research librarian for the "${manifest.name}" training project.`,
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-    `You are given a PAPER (its fields, and its text when available) and the project's EXISTING hypotheses.`,
-    `The project's tunable levers (for any new hypothesis spec) are: ${JSON.stringify(manifest.levers)}.`,
-    `Do TWO things: (1) MATCH — pick the existing hypotheses (by id) that are genuine tests of THIS paper's claims; (2) SUGGEST — propose NEW testable hypotheses for the paper's claims that NO existing hypothesis already covers (each a runnable spec using ONLY declared lever names). Do not duplicate an existing hypothesis as a new one.`,
+    `You are given a PAPER (its fields, and its text when available), the project's EXISTING hypotheses, and a leverGuide naming each lever's ROLE.`,
+    `Levers carry a "scope": MODEL levers (scope "model" or unscoped) DEFINE a run (e.g. ${idName}, reward_model, net_arch, learning_rate, lookback_window); ENVIRONMENT levers are the action space / market mechanics; DATASET levers are which data (asset, timeframe, fidelity_set). Levers marked "ignore" are infrastructure — NEVER pin or sweep them. Levers: ${JSON.stringify(manifest.levers)}.`,
+    `Do TWO things: (1) MATCH — pick the EXISTING hypotheses (by id) that genuinely test THIS paper's claims; (2) SUGGEST — propose NEW testable hypotheses the existing ones don't cover, each a runnable spec using ONLY declared lever names. Never duplicate an existing hypothesis as a new one.`,
+    ``,
+    `HOW A SUGGESTED HYPOTHESIS IS JUDGED — every spec MUST fit one of these or its verdict is meaningless:`,
+    `• SINGLE-CONTEXT (just fixed/sweep): a POOLED beats-buy-and-hold test — PROVEN iff the BEST matching run beats buy-and-hold OOS net of fees (return_vs_hold_pct > 0) over enough matching runs that report it; else DISPROVED/UNTESTED. It NEVER compares two configs. A run is evidence IFF it equals every "fixed" lever AND each "sweep" value is among the options — so MORE fixed levers = a narrow coherent match; too few = a flood of unrelated runs (a spec pinning only "timeframe" once matched ~4968 runs and was meaningless).`,
+    `• COMPARISON (a "compare" block): partitions the matching runs by ONE lever's values and judges them AGAINST each other — the ONLY judgeable form of "A vs B".`,
+    ``,
+    `RULE 1 — PRECISION: "fixed" MUST pin EVERY lever that DEFINES the configuration — the identity lever (${idName}) PLUS the other model levers PLUS the data/market context (timeframe, fidelity_set, asset) — so the match is one coherent family (single digits to low tens). A single-context spec that omits ${idName} is almost always too broad and will be rejected.`,
+    `RULE 2 — SWEEP IS THE RARE EXCEPTION: prefer ONE fully-pinned config with NO sweep (the tightest verdict, your default). If you sweep, vary AT MOST the ONE tuning dimension under test (e.g. learning_rate) with everything else pinned. NEVER put ${idName}/reward_model/net_arch in "sweep".`,
+    `RULE 3 — COMPARATIVE CLAIMS ("A outperforms B", "X is necessary", "recurrent beats feedforward"): use a "compare" block — pin the SHARED config in "fixed" and put the contrasted lever + its values in "compare": {"lever": "<lever>", "values": [a, b]}, with "comparison": {"kind": "beats-baseline", "baselineIndex": 0} (index 0 = the value the others must beat). This judges the values against each other. NEVER express a comparison as a pooled sweep — it WILL be rejected.`,
+    `RULE 4 — TRUE CROSS-CONTEXT CLAIMS (about the EFFECT OF THE CONTEXT — long-only vs long+short, one asset vs another): ${CONTEXT_SPANNING_RULE}`,
+    `RULE 5 — PIN TO CONFIGS THAT PLAUSIBLY RUN: a spec matching no completed, metric-bearing run stays UNTESTED forever. Use lever values the paper maps onto that real runs would instantiate.`,
     HYPOTHESIS_RULE,
-    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], ` +
-      `"newHypotheses": [{"title": string, "rationale": string, "spec": {"fixed"?: {"<lever>": value}, ` +
-      `"sweep"?: {"<lever>": [values]}, "seeds"?: [number]}}]}. Use [] for either when there is nothing to add.`,
+    ``,
+    `WORKED EXAMPLE — BAD: {"title":"Recurrent outperforms non-recurrent","spec":{"sweep":{"model_name":["ppo-custom","reppo-custom"]},"fixed":{"timeframe":"1h"}}} — only timeframe pinned (matches the whole backlog) AND a comparison as a pooled sweep (never compares the arms). GOOD: {"title":"Recurrence beats a feedforward policy on 1h","rationale":"Comparative claim -> a compare over the identity lever with the shared config pinned; beats-baseline judges the recurrent value against the baseline.","comparison":{"kind":"beats-baseline","baselineIndex":0},"spec":{"fixed":{"timeframe":"1h","reward_model":"combo_unified","lookback_window":64},"compare":{"lever":"model_name","values":["ppo-custom","reppo-custom"]}}}`,
+    ``,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], "newHypotheses": [{"title": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, "spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "compare"?: {"lever": "<lever>", "values": [v1, v2]}, "environments"?: [{"<env-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]}. ONLY declared lever names; a single-context spec MUST pin ${idName}; use [] for either list when empty.`,
   ].join('\n')
 }
 
 export function buildSuggestHypothesesUserContent(input: {
+  manifest: TrainerManifest
   paper: Record<string, unknown>
   existingHypotheses: Array<{ id: string; title?: string; rationale?: string; spec?: unknown }>
   text?: string
 }): string {
+  // Surface lever ROLES so the prompt's "pin the defining levers / route comparisons correctly" rules are
+  // grounded in THIS manifest — resolved identically to the coercion guard so prompt + guard agree.
+  const { identityLever, modelLevers, envLevers, datasetLevers } = resolveModelLevers(input.manifest)
+  const leverGuide = {
+    identityLever: identityLever ?? null,
+    modelLevers: [...modelLevers],
+    environmentLevers: [...envLevers],
+    datasetLevers: [...datasetLevers],
+  }
   return JSON.stringify({
     paper: input.paper,
     existingHypotheses: input.existingHypotheses,
+    leverGuide,
     ...(input.text ? { text: input.text } : {}),
   })
 }
@@ -892,6 +1022,76 @@ export function coerceSuggestedHypotheses(
     manifest,
   )
   return { matchIds, newItems }
+}
+
+export const HYPOTHESIS_WEIGHT_MIN = 1
+export const HYPOTHESIS_WEIGHT_MAX = 5
+
+export function buildWeighHypothesesSystemPrompt(manifest: TrainerManifest): string {
+  return [
+    `You are a research librarian for the "${manifest.name}" training project.`,
+    `You are given a PAPER (its claim and fields, plus its text when available) and the hypotheses currently LINKED to it.`,
+    `A paper's overall verdict ROLLS UP from its hypotheses WEIGHTED by importance. Assign each linked hypothesis an integer importance WEIGHT from ${HYPOTHESIS_WEIGHT_MIN} (a minor / supporting detail) to ${HYPOTHESIS_WEIGHT_MAX} (the paper's CENTRAL claim — the thing the paper most stands or falls on).`,
+    `Weigh by how central each hypothesis is TO THIS PAPER specifically. The SAME hypothesis can be the central claim of one paper and a minor supporting detail in another, so judge it against THIS paper's argument — not its general scientific merit.`,
+    `Most papers have ONE or a few central claims (4–5) and several supporting ones (1–2). Do NOT give everything the same weight unless they truly are equally central — the whole point is to distinguish the load-bearing claim from the peripheral ones.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"weights": [{"index": number, "id": string, "weight": number, "reason": string}]}. Use the "index" shown for each hypothesis below (copy the "id" too if you can); include EVERY linked hypothesis exactly once; "reason" is one short clause explaining the weight.`,
+  ].join('\n')
+}
+
+export function buildWeighHypothesesUserContent(input: {
+  paper: {
+    title?: string
+    claim?: string
+    approach?: string
+    assumptions?: unknown
+    url?: string
+  }
+  hypotheses: { id: string; title?: string; rationale?: string }[]
+  text?: string
+}): string {
+  // Number the hypotheses (1-based) so the model can refer to each by a stable INDEX even if it doesn't
+  // echo the hash id — coerceHypothesisWeights resolves either back to the id.
+  const linkedHypotheses = input.hypotheses.map((h, i) => ({ index: i + 1, ...h }))
+  return JSON.stringify(
+    { paper: input.paper, linkedHypotheses, paperText: input.text },
+    null,
+    2,
+  )
+}
+
+// Parse the model's weight response into {id, weight, reason} rows. Resolve each row to a hypothesis by its
+// `id` (when in the linked set) or its 1-based `index` into `linkedIds` — robust to a model that doesn't
+// echo the hash id. Each hypothesis once, weight rounded + clamped to [MIN, MAX]; tolerant of a bare array.
+export function coerceHypothesisWeights(
+  raw: unknown,
+  linkedIds: string[],
+): { id: string; weight: number; reason: string }[] {
+  const allow = new Set(linkedIds)
+  const o =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const rows = Array.isArray((o as { weights?: unknown }).weights)
+    ? ((o as { weights: unknown[] }).weights as unknown[])
+    : Array.isArray(raw)
+      ? (raw as unknown[])
+      : []
+  const seen = new Set<string>()
+  const out: { id: string; weight: number; reason: string }[] = []
+  for (const r of rows) {
+    if (!r || typeof r !== 'object') continue
+    const rec = r as Record<string, unknown>
+    let id = typeof rec.id === 'string' && allow.has(rec.id) ? rec.id : ''
+    if (!id) {
+      const idx = Number(rec.index)
+      if (Number.isInteger(idx) && idx >= 1 && idx <= linkedIds.length) id = linkedIds[idx - 1]
+    }
+    if (!id || seen.has(id)) continue
+    const n = Number(rec.weight)
+    if (!Number.isFinite(n)) continue
+    const weight = Math.min(HYPOTHESIS_WEIGHT_MAX, Math.max(HYPOTHESIS_WEIGHT_MIN, Math.round(n)))
+    seen.add(id)
+    out.push({ id, weight, reason: typeof rec.reason === 'string' ? rec.reason : '' })
+  }
+  return out
 }
 
 /** Defensively coerce the model's JSON into a Paper draft — `undefined` unless title + claim are

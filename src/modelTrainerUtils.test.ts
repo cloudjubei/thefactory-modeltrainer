@@ -23,8 +23,10 @@ import {
   migrateExperimentSpec,
   canonicalConfigString,
   coerceHypothesisItems,
+  looksComparative,
   coercePaperDraft,
   coerceSuggestedHypotheses,
+  coerceHypothesisWeights,
   coerceVerdictRows,
   looksLikeDataGathering,
   extractPaperText,
@@ -397,6 +399,34 @@ describe('parseDeviceBenchmark', () => {
     expect(b.usPerStep).toEqual({ cpu: 100 })
     expect(b.availableDevices).toEqual(['cpu'])
   })
+
+  it('keeps seconds/budget/errors when present and accepts cuda as best', () => {
+    const b = parseDeviceBenchmark(
+      {
+        deviceBenchmark: {
+          bestDevice: 'cuda',
+          speedup: 2.1,
+          usPerStep: { cpu: 100, cuda: 47 },
+          seconds: { cpu: 15.5, cuda: 7.4, mps: 0 },
+          budget: 300,
+          errors: { mps: 'too slow / timed out' },
+          availableDevices: ['cpu', 'cuda'],
+        },
+      },
+      'T1',
+    )
+    expect(b.bestDevice).toBe('cuda')
+    expect(b.budget).toBe(300)
+    expect(b.seconds).toEqual({ cpu: 15.5, cuda: 7.4 }) // non-positive mps:0 dropped
+    expect(b.errors).toEqual({ mps: 'too slow / timed out' })
+  })
+
+  it('omits seconds/budget/errors entirely when the summary lacks them', () => {
+    const b = parseDeviceBenchmark({ deviceBenchmark: { bestDevice: 'cpu', usPerStep: { cpu: 50 } } }, 'T')
+    expect(b.seconds).toBeUndefined()
+    expect(b.budget).toBeUndefined()
+    expect(b.errors).toBeUndefined()
+  })
 })
 
 describe('validateTrainerManifest', () => {
@@ -571,6 +601,23 @@ describe('expandExperimentMatrix', () => {
     expect(items).toHaveLength(6)
     const pairs = items.map((i) => `${i.config.lr}:${i.config.algo}`)
     expect(new Set(pairs).size).toBe(6)
+  })
+
+  it('runs every value of a `compare` lever, holding the rest fixed', () => {
+    const items = expandExperimentMatrix(
+      manifest(),
+      { fixed: { lr: 0.5 }, compare: { lever: 'algo', values: ['a', 'b'] } },
+      hashByJson,
+    )
+    expect(items).toHaveLength(2)
+    expect(items.map((i) => i.config.algo).sort()).toEqual(['a', 'b'])
+    expect(items.every((i) => i.config.lr === 0.5)).toBe(true)
+  })
+
+  it('rejects a compare lever that names no manifest lever', () => {
+    expect(() =>
+      expandExperimentMatrix(manifest(), { compare: { lever: 'nope', values: ['a', 'b'] } }, hashByJson),
+    ).toThrow(/compare lever/)
   })
 
   it('multiplies configurations by seeds, setting config.seed', () => {
@@ -990,6 +1037,91 @@ describe('coerceHypothesisItems', () => {
     )
     expect(items).toHaveLength(1)
     expect(items[0].title).toBe('Higher lr beats the baseline')
+  })
+})
+
+describe('looksComparative', () => {
+  it('flags comparative phrasing', () => {
+    expect(looksComparative('A outperforms B', '')).toBe(true)
+    expect(looksComparative('Necessity of recurrent architectures', '')).toBe(true)
+    expect(looksComparative('reppo vs ppo', '')).toBe(true)
+  })
+  it('does NOT flag a plain beats-buy-and-hold claim', () => {
+    expect(looksComparative('reppo-custom beats buy-and-hold', 'tests one config')).toBe(false)
+  })
+})
+
+describe('coerceHypothesisItems — precision guards + compare', () => {
+  const mfModel = (): TrainerManifest =>
+    manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['ppo-custom', 'reppo-custom', 'dqn'], default: 'ppo-custom' },
+        timeframe: { type: 'choice', choices: ['1h', '1d'], default: '1h' },
+        lr: { type: 'number', default: 0.01 },
+        allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
+      },
+    })
+  it('GUARD A: drops a comparative claim expressed as a pooled model_name sweep', () => {
+    expect(
+      coerceHypothesisItems(
+        [
+          {
+            title: 'reppo outperforms ppo',
+            rationale: 'recurrence is better',
+            spec: { fixed: { timeframe: '1h' }, sweep: { model_name: ['ppo-custom', 'reppo-custom'] } },
+          },
+        ],
+        mfModel(),
+      ),
+    ).toEqual([])
+  })
+  it('GUARD B: drops a single-context spec that does not pin model_name (too broad)', () => {
+    expect(
+      coerceHypothesisItems(
+        [{ title: 'beats hold', rationale: 'only timeframe pinned', spec: { fixed: { timeframe: '1h' } } }],
+        mfModel(),
+      ),
+    ).toEqual([])
+  })
+  it('keeps a single-context spec that pins the model-identity lever', () => {
+    const out = coerceHypothesisItems(
+      [
+        {
+          title: 'reppo beats hold',
+          rationale: 'one fully-pinned config',
+          spec: { fixed: { model_name: 'reppo-custom', timeframe: '1h' } },
+        },
+      ],
+      mfModel(),
+    )
+    expect(out).toHaveLength(1)
+  })
+  it('keeps + passes a `compare` spec through (exempt from the single-context guard)', () => {
+    const out = coerceHypothesisItems(
+      [
+        {
+          title: 'reppo vs ppo',
+          rationale: 'compare the arms',
+          comparison: { kind: 'beats-baseline' },
+          spec: { fixed: { timeframe: '1h' }, compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] } },
+        },
+      ],
+      mfModel(),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].spec.compare).toEqual({ lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] })
+  })
+  it('drops a compare naming an unknown lever or with fewer than two values', () => {
+    const mf = mfModel()
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { compare: { lever: 'nope', values: ['a', 'b'] } } }], mf),
+    ).toEqual([])
+    expect(
+      coerceHypothesisItems(
+        [{ title: 't', rationale: 'r', spec: { fixed: { model_name: 'ppo-custom' }, compare: { lever: 'model_name', values: ['ppo-custom'] } } }],
+        mf,
+      ),
+    ).toEqual([])
   })
 })
 
@@ -1801,15 +1933,16 @@ describe('the hypothesis prompts forbid data-gathering', () => {
     ]) {
       expect(p).toMatch(/FALSIFIABLE/)
       expect(p).toMatch(/DATA-GATHERING/)
-      expect(p).toMatch(/trustworthy interval/)
+      expect(p).toMatch(/more seeds|tighten an interval|reduce variance/)
     }
   })
 })
 
 describe('buildSuggestHypothesesUserContent', () => {
-  it('serializes the paper + existing hypotheses, and text only when present', () => {
+  it('serializes the paper + existing hypotheses + leverGuide, and text only when present', () => {
     const withText = JSON.parse(
       buildSuggestHypothesesUserContent({
+        manifest: manifest(),
         paper: { title: 'P' },
         existingHypotheses: [{ id: 'h1', title: 'X' }],
         text: 'body',
@@ -1817,8 +1950,11 @@ describe('buildSuggestHypothesesUserContent', () => {
     )
     expect(withText).toMatchObject({ paper: { title: 'P' }, text: 'body' })
     expect(withText.existingHypotheses).toHaveLength(1)
+    // leverGuide names the lever roles so the prompt's precision rules are grounded in the manifest.
+    expect(withText.leverGuide).toMatchObject({ identityLever: null }) // demo manifest has no model_name
+    expect(Array.isArray(withText.leverGuide.modelLevers)).toBe(true)
     const noText = JSON.parse(
-      buildSuggestHypothesesUserContent({ paper: { title: 'P' }, existingHypotheses: [] }),
+      buildSuggestHypothesesUserContent({ manifest: manifest(), paper: { title: 'P' }, existingHypotheses: [] }),
     )
     expect('text' in noText).toBe(false)
   })
@@ -1843,6 +1979,61 @@ describe('coerceSuggestedHypotheses', () => {
   it('defaults to empty for a malformed response', () => {
     expect(coerceSuggestedHypotheses('nope', manifest())).toEqual({ matchIds: [], newItems: [] })
     expect(coerceSuggestedHypotheses({}, manifest())).toEqual({ matchIds: [], newItems: [] })
+  })
+})
+
+describe('coerceHypothesisWeights', () => {
+  const linked = ['a', 'b', 'c']
+  it('keeps only linked ids, rounds + clamps weight to 1..5, dedups', () => {
+    const out = coerceHypothesisWeights(
+      {
+        weights: [
+          { id: 'a', weight: 5, reason: 'central' },
+          { id: 'b', weight: 9, reason: 'too high -> clamp 5' },
+          { id: 'c', weight: 0, reason: 'too low -> clamp 1' },
+          { id: 'a', weight: 2, reason: 'dup id ignored' },
+          { id: 'x', weight: 3, reason: 'not linked -> dropped' },
+        ],
+      },
+      linked,
+    )
+    expect(out).toEqual([
+      { id: 'a', weight: 5, reason: 'central' },
+      { id: 'b', weight: 5, reason: 'too high -> clamp 5' },
+      { id: 'c', weight: 1, reason: 'too low -> clamp 1' },
+    ])
+  })
+  it('rounds fractional weights and skips non-finite ones', () => {
+    const out = coerceHypothesisWeights(
+      { weights: [{ id: 'a', weight: 3.4 }, { id: 'b', weight: 'nope' }] },
+      linked,
+    )
+    expect(out).toEqual([{ id: 'a', weight: 3, reason: '' }])
+  })
+  it('resolves rows by 1-based index when the id is missing or wrong', () => {
+    const out = coerceHypothesisWeights(
+      {
+        weights: [
+          { index: 1, weight: 5, reason: 'by index' },
+          { id: 'b', weight: 2, reason: 'by id' },
+          { index: 3, id: 'wrong-id', weight: 4, reason: 'index resolves despite bad id' },
+          { index: 99, weight: 1, reason: 'out of range -> dropped' },
+        ],
+      },
+      linked,
+    )
+    expect(out).toEqual([
+      { id: 'a', weight: 5, reason: 'by index' },
+      { id: 'b', weight: 2, reason: 'by id' },
+      { id: 'c', weight: 4, reason: 'index resolves despite bad id' },
+    ])
+  })
+  it('accepts a bare array and defaults to empty on garbage', () => {
+    expect(coerceHypothesisWeights([{ id: 'a', weight: 4, reason: 'r' }], linked)).toEqual([
+      { id: 'a', weight: 4, reason: 'r' },
+    ])
+    expect(coerceHypothesisWeights('nope', linked)).toEqual([])
+    expect(coerceHypothesisWeights({}, linked)).toEqual([])
   })
 })
 

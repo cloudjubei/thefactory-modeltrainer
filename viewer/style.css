@@ -239,6 +239,8 @@ button:focus-visible,
 }
 .tab-btn {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
   appearance: none;
   border: 0;
   border-radius: 999px;
@@ -250,6 +252,16 @@ button:focus-visible,
   color: var(--muted);
   cursor: pointer;
   white-space: nowrap;
+}
+/* Per-tab glyph, inheriting the tab's colour; spaced from the label without
+   widening tabs that have no live spinner. */
+.tab-icon {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+}
+.tab-icon svg {
+  display: block;
 }
 .tab-btn:hover {
   background: var(--accent-soft);
@@ -759,6 +771,10 @@ button:focus-visible,
   background: var(--surface-subtle);
   border: 1px solid var(--border);
 }
+.run-badge.is-shaky {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
 /* The clickable device chip (measured CPU/MPS winner, or a "check device" trigger) — a button styled as a
    badge: reset native chrome, show it's interactive. The measured state has no status class, so give it a
    neutral surface; the unmeasured trigger carries .is-queued for its own look. */
@@ -890,6 +906,52 @@ button.run-badge.model-device-chip:hover {
   stroke: var(--muted);
   stroke-width: 1;
   stroke-dasharray: 4 4;
+}
+/* The "this run" highlight ring, shared by the 2-D and 3-D scatter maps. */
+.chart-focus-ring {
+  stroke: #1d4ed8;
+  stroke-width: 2.2;
+  pointer-events: none;
+}
+/* 3-D isometric scatter (trade-off map with a 3rd axis): a faint wireframe cube + drop-lines for height. */
+.chart3d-floor {
+  fill: var(--surface-subtle);
+  fill-opacity: 0.5;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart3d-edge {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-opacity: 0.7;
+}
+.chart3d-axis {
+  stroke: var(--muted);
+  stroke-width: 1.4;
+}
+.chart3d-axis-label {
+  fill: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.chart3d-drop {
+  stroke: var(--muted);
+  stroke-width: 0.8;
+  stroke-opacity: 0.25;
+}
+.chart3d-drop.is-frontier {
+  stroke: hsl(140, 70%, 42%);
+  stroke-opacity: 0.5;
+}
+.chart3d-point {
+  fill-opacity: 0.9;
+}
+.chart3d-point:hover {
+  fill-opacity: 1;
+}
+.xai-lb-row.is-focus {
+  outline: 2px solid #1d4ed8;
+  outline-offset: -2px;
 }
 .chart-multiples {
   display: grid;
@@ -1144,6 +1206,49 @@ button.run-badge.model-device-chip:hover {
   padding: 16px;
   text-align: center;
   color: var(--muted, var(--text));
+}
+/* Device chips — cpu (blue) / mps (gray) / cuda (green) — colour the benchmark "best" + the model-card chip. */
+.run-badge.device-chip-cpu {
+  background: rgba(59, 130, 246, 0.16);
+  color: #2f6fed;
+  border-color: rgba(59, 130, 246, 0.45);
+}
+.run-badge.device-chip-mps {
+  background: rgba(100, 116, 139, 0.2);
+  color: #6b7a90;
+  border-color: rgba(100, 116, 139, 0.45);
+}
+.run-badge.device-chip-cuda {
+  background: rgba(34, 197, 94, 0.16);
+  color: #1f9d52;
+  border-color: rgba(34, 197, 94, 0.5);
+}
+/* Device-benchmark table: clickable rows, the fastest per-device cell emphasised, a slow/timed-out one dimmed. */
+.device-row {
+  cursor: pointer;
+}
+.device-row:hover {
+  background: var(--accent-soft);
+}
+.device-table .device-cell.is-best {
+  font-weight: 600;
+  color: var(--text);
+}
+.device-table .device-cell.device-slow {
+  color: var(--muted, #94a3b8);
+  font-style: italic;
+}
+.device-timings-panel {
+  width: min(94vw, 460px);
+}
+.device-timings-meta {
+  padding: 8px 14px 0;
+  margin: 0;
+}
+.device-timings-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 12px 14px 4px;
 }
 .chart-modal .run-mark-legend {
   padding: 6px 14px 0;
@@ -1402,17 +1507,22 @@ button.run-badge.model-device-chip:hover {
   flex-direction: column;
   gap: 10px;
 }
-.environment-card {
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
+/* Datasets / Environments render as the reusable Runs-style table. The trailing actions column hugs the
+   right edge and holds the per-row buttons (set-default / edit / delete / clone). */
+.bundle-table .bundle-name-cell {
+  font-weight: 600;
+  white-space: nowrap;
 }
-.environment-card h3 {
-  margin: 0;
+.bundle-table .bundle-actions-col {
+  width: 1%;
 }
-.environment-card .kv-table {
-  margin-top: 8px;
+.bundle-table .bundle-actions-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+.bundle-table .bundle-actions-cell .head-actions {
+  justify-content: flex-end;
+  gap: 4px;
 }
 .papers-body {
   display: flex;
@@ -1616,6 +1726,16 @@ button.run-badge.model-device-chip:hover {
   margin: 0;
   font-style: italic;
 }
+/* The "how it's judged" rule + the "verdict reflects last Refresh" hint under a hypothesis's basis. */
+.hyp-criteria {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+.hyp-stale-note {
+  margin: 0;
+  color: var(--warn);
+}
 .hyp-runs {
   font-size: 12px;
 }
@@ -1647,6 +1767,33 @@ button.run-badge.model-device-chip:hover {
   border-color: var(--accent);
   color: var(--accent);
   background: var(--accent-soft);
+}
+.paper-search-text {
+  font-size: 12px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: inherit;
+  background: transparent;
+  min-width: 180px;
+}
+.paper-search-text:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+/* The one-line rationale under a paper's verdict badge — explains how its hypotheses rolled up. */
+.paper-verdict-why {
+  font-style: italic;
+}
+/* A hypothesis's importance-weight chip (⚖ 1…5) shown beside its verdict badge. */
+.hyp-weight-chip {
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 .paper-assumptions {
   border: 1px solid var(--border);
@@ -2556,6 +2703,11 @@ pre.json {
 .card-btn.combo {
   min-width: 40px;
 }
+/* The ⚖ glyph in the Re-weigh button — sized to sit beside the inline hypothesis icon. */
+.card-btn-glyph {
+  font-size: 14px;
+  line-height: 1;
+}
 .card-btn-danger:hover:not(:disabled) {
   border-color: #ef4444;
   color: #ef4444;
@@ -3410,6 +3562,10 @@ select.app-select:focus-visible,
 .xai-env-scroll {
   max-height: 52vh;
   overflow: auto;
+}
+/* A favourited run's star, in the run-detail header. */
+.icon-btn.is-fav {
+  color: #f5a623;
 }
 /* Top-configs leaderboard rows open the run on click. */
 .xai-lb-row {

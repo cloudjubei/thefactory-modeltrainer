@@ -49,6 +49,9 @@ import type {
   ScanProjectModelsResult,
   SuggestPaperHypothesesParams,
   SuggestPaperHypothesesResult,
+  WeighPaperHypothesesParams,
+  WeighPaperHypothesesResult,
+  WeighedHypothesis,
   TrainerLeverSpec,
   TrainerManifest,
   TrainingModel,
@@ -98,6 +101,9 @@ import {
   buildScanModelsUserContent,
   buildSuggestHypothesesSystemPrompt,
   buildSuggestHypothesesUserContent,
+  buildWeighHypothesesSystemPrompt,
+  buildWeighHypothesesUserContent,
+  coerceHypothesisWeights,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   coerceAnalyzedPaperModels,
@@ -1066,6 +1072,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const res = await executor.runInference({
       systemPrompt: buildSuggestHypothesesSystemPrompt(manifest),
       userContent: buildSuggestHypothesesUserContent({
+        manifest,
         paper: {
           title: paper.title,
           claim: paper.claim,
@@ -1169,6 +1176,103 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Re-assess the IMPORTANCE WEIGHTS of a paper's linked hypotheses with the LLM and persist them, so the
+  // paper verdict re-rolls-up by importance (a central claim outweighs minor ones). Mirrors the read →
+  // infer → coerce → upsert shape of suggestPaperHypotheses; only edits `weight` on existing records.
+  async function weighPaperHypotheses(
+    params: WeighPaperHypothesesParams,
+  ): Promise<WeighPaperHypothesesResult> {
+    const executor = requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const weighedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const weighedAt = now()
+    const paperType = `${recordType}-paper`
+    const hypothesisType = `${recordType}-hypothesis`
+
+    const paperRecord = await deps.storage.readRecord({
+      scope: params.scope,
+      type: paperType,
+      key: params.paperId,
+    })
+    if (!paperRecord) throw new Error(`no paper "${params.paperId}" in this project`)
+    const paper = paperRecord.content as unknown as TrainingPaperRecord
+
+    const linkedIds = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds : []
+    const linked: TrainingHypothesis[] = []
+    for (const id of linkedIds) {
+      const r = await deps.storage.readRecord({ scope: params.scope, type: hypothesisType, key: id })
+      if (r) linked.push(r.content as unknown as TrainingHypothesis)
+    }
+    if (!linked.length)
+      return { recordType, paperId: params.paperId, weighted: [], weighedBy, weighedAt }
+
+    // Paper text is helpful extra context but optional — a fetch failure must not abort.
+    let text: string | undefined
+    if (typeof paper.url === 'string' && paper.url) {
+      const fetchText = params.fetchPaperText ?? fetchPaperText
+      try {
+        text = await fetchText(paper.url, params.abortSignal)
+      } catch {
+        text = undefined
+      }
+    }
+
+    const res = await executor.runInference({
+      systemPrompt: buildWeighHypothesesSystemPrompt(manifest),
+      userContent: buildWeighHypothesesUserContent({
+        paper: {
+          title: paper.title,
+          claim: paper.claim,
+          approach: paper.approach,
+          assumptions: paper.assumptions,
+          url: paper.url,
+        },
+        hypotheses: linked.map((h) => ({ id: h.id, title: h.title, rationale: h.rationale })),
+        text,
+      }),
+      model: { kind: 'api', llmConfig: params.llmConfig },
+      abortSignal: params.abortSignal,
+    })
+
+    const rows = coerceHypothesisWeights(
+      parseFirstValidJson(res.text),
+      linked.map((h) => h.id),
+    )
+    const byId = new Map(linked.map((h) => [h.id, h]))
+    const weighted: WeighedHypothesis[] = []
+    const weights: Record<string, number> = { ...(paper.hypothesisWeights ?? {}) }
+    for (const row of rows) {
+      const base = byId.get(row.id)
+      if (!base) continue
+      weights[row.id] = row.weight
+      weighted.push({ id: row.id, weight: row.weight, reason: row.reason, title: base.title })
+    }
+    // Persist the weights on THIS PAPER (its per-hypothesis importance), NOT the shared hypothesis records
+    // — the same hypothesis can be central to one paper and minor to another. One paper upsert.
+    if (weighted.length) {
+      const updatedPaper: TrainingPaperRecord = {
+        ...paper,
+        hypothesisWeights: weights,
+        updatedAt: weighedAt,
+      }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: paperType,
+        key: params.paperId,
+        content: updatedPaper as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(paperType, params.paperId)
+    }
+    logger?.info('weighed paper hypotheses', {
+      recordType,
+      paperId: params.paperId,
+      weighed: weighted.length,
+    })
+    return { recordType, paperId: params.paperId, weighted, weighedBy, weighedAt }
+  }
+
   // Map completed-run records to the engine's AnalysisRun shape (shared by the digest + whole-space bundle).
   function recordsToAnalysisRuns(
     records: { key: string; content: Record<string, unknown> }[],
@@ -1239,15 +1343,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const ignoreLevers = Object.entries(manifest.levers)
       .filter(([, spec]) => spec.scope === 'ignore')
       .map(([name]) => name)
-    const stripIgnored = (cfg: Record<string, unknown>): Record<string, unknown> => {
-      if (!ignoreLevers.length) return cfg
+    // Environment/dataset levers (e.g. transaction_fee, asset) DEFINE the environment — crucial constants,
+    // never tunable knobs. They're excluded from the run's lever-importance analysis (you compare
+    // environments, you don't tune them); `ignore` levers (device) are excluded everywhere.
+    const nonModelLevers = Object.entries(manifest.levers)
+      .filter(
+        ([, spec]) => spec.scope === 'environment' || spec.scope === 'dataset' || spec.scope === 'ignore',
+      )
+      .map(([name]) => name)
+    const stripBy = (cfg: Record<string, unknown>, levers: string[]): Record<string, unknown> => {
+      if (!levers.length) return cfg
       const out = { ...cfg }
-      for (const k of ignoreLevers) delete out[k]
+      for (const k of levers) delete out[k]
       return out
     }
-    const focusConfig = stripIgnored((focus.content.config as Record<string, unknown>) || {})
+    // focusConfig keeps context levers (so a lever sweep can hold this run's environment fixed); drop only `ignore`.
+    const focusConfig = stripBy((focus.content.config as Record<string, unknown>) || {}, ignoreLevers)
 
-    const runs = recordsToAnalysisRuns(records).map((r) => ({ ...r, config: stripIgnored(r.config) }))
+    // The analysed run set drops context + ignore levers, so importances reflect only tunable MODEL knobs.
+    const runs = recordsToAnalysisRuns(records).map((r) => ({ ...r, config: stripBy(r.config, nonModelLevers) }))
     const ranked = runs
       .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
       .filter((x): x is { key: string; value: number } => x.value !== undefined)
@@ -1273,7 +1387,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         focus.content as unknown as TrainingRunSummary,
       )
       if (diff && diff.aligned) {
-        const sibConfig = stripIgnored((sib.content.config as Record<string, unknown>) || {})
+        const sibConfig = stripBy((sib.content.config as Record<string, unknown>) || {}, ignoreLevers)
         const changed =
           Object.keys(manifest.levers)
             .filter((lk) => String(sibConfig[lk]) !== String(focusConfig[lk]))
@@ -1983,6 +2097,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingExperiments,
     analyzePaperFromUrl,
     suggestPaperHypotheses,
+    weighPaperHypotheses,
     scanProjectModels,
     consolidateModels,
     benchmarkModelDevice,

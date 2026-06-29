@@ -471,6 +471,43 @@
     return changed
   }
 
+  // The colour class for a device chip — cpu (blue) / mps (gray) / cuda (green); cpu is the default.
+  function deviceChipClass(device) {
+    const d = String(device == null ? '' : device).toLowerCase()
+    return d === 'mps' ? 'device-chip-mps' : d === 'cuda' ? 'device-chip-cuda' : 'device-chip-cpu'
+  }
+  // A render-ready view of a model's deviceBenchmark: one row per standard device (cpu/mps/cuda, plus any
+  // non-standard device the data carries), each with its µs/step + measured seconds + a per-device error
+  // (e.g. "too slow / timed out") and whether it's the winner. Pure: both the Speed table and the model
+  // card render from this, and the timings modal shows the raw per-device fields. null when not benchmarked.
+  function deviceBenchmarkView(db, deviceOrder) {
+    if (!db) return null
+    const devices = (deviceOrder && deviceOrder.length ? deviceOrder : ['cpu', 'mps', 'cuda']).slice()
+    const us = db.usPerStep || {}
+    const secs = db.seconds || {}
+    const errs = db.errors || {}
+    for (const d of Object.keys(us).concat(Object.keys(secs), Object.keys(errs))) {
+      if (devices.indexOf(d) < 0) devices.push(d)
+    }
+    const num = (m, d) => (typeof m[d] === 'number' && m[d] > 0 ? m[d] : null)
+    const perDevice = devices.map((d) => ({
+      device: d,
+      usPerStep: num(us, d),
+      seconds: num(secs, d),
+      error: typeof errs[d] === 'string' && errs[d] ? errs[d] : null,
+      isBest: d === db.bestDevice,
+      chipClass: deviceChipClass(d),
+    }))
+    return {
+      perDevice: perDevice,
+      best: db.bestDevice || null,
+      bestClass: deviceChipClass(db.bestDevice),
+      speedup: typeof db.speedup === 'number' ? db.speedup : null,
+      budget: typeof db.budget === 'number' ? db.budget : null,
+      benchmarkedAt: db.benchmarkedAt || null,
+    }
+  }
+
   const Models = {
     MODEL_STATUSES: MODEL_STATUSES,
     MODEL_STATUS_LABEL: MODEL_STATUS_LABEL,
@@ -501,6 +538,8 @@
     slugify: slugify,
     modelIdentitySlugs: modelIdentitySlugs,
     seedClaimedByAlias: seedClaimedByAlias,
+    deviceChipClass: deviceChipClass,
+    deviceBenchmarkView: deviceBenchmarkView,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Models
