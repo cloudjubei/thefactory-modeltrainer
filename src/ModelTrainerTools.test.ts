@@ -3635,6 +3635,23 @@ describe('consolidateModels', () => {
     expect(sent.models.map((m: { id: string }) => m.id).sort()).toEqual(['a', 'b'])
   })
 
+  it('sends each model aliases to the LLM so a re-run is aware of prior merges', async () => {
+    const storage = memoryStorage()
+    await seedModel(storage, 'a2c', { aliases: ['policy-gradient'] })
+    await seedModel(storage, 'ppo')
+    const executor = stubExecutor(JSON.stringify({ groups: [] }))
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.consolidateModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
+    const sent = JSON.parse(executor.requests[0].userContent)
+    const a2c = sent.models.find((m: { id: string }) => m.id === 'a2c')
+    expect(a2c.aliases).toEqual(['policy-gradient'])
+  })
+
   it('does NOT mutate or merge any model record (propose-only)', async () => {
     const storage = memoryStorage()
     await seedModel(storage, 'a')

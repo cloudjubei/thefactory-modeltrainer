@@ -1210,8 +1210,37 @@
     return out
   }
 
+  // A conditional lever (one with `appliesWhen`) applies to a config only when EVERY named control lever
+  // currently holds one of its allowed values (AND). Mirrors the launch form's `leverApplies`.
+  function leverConfigApplies(spec, config) {
+    if (!spec || !spec.appliesWhen) return true
+    for (var k in spec.appliesWhen) {
+      var allowed = spec.appliesWhen[k]
+      var arr = (Array.isArray(allowed) ? allowed : [allowed]).map(String)
+      if (arr.indexOf(String(config[k])) === -1) return false
+    }
+    return true
+  }
+
+  // Pin each conditional model lever to the 'n/a' sentinel on configs where it doesn't apply (e.g.
+  // forward_horizon on a PPO run), so it reads n/a in compare/detail and is excluded from importance —
+  // matching the server-side config-space analysis. Returns a COPY; never mutates the input.
+  function normalizeConditionalConfig(config, levers) {
+    if (!config || !levers) return config || {}
+    var out = {}
+    for (var key in config) out[key] = config[key]
+    for (var name in levers) {
+      var spec = levers[name]
+      if (name in out && spec && spec.appliesWhen && !leverConfigApplies(spec, config)) {
+        out[name] = 'n/a'
+      }
+    }
+    return out
+  }
+
   var Xai = {
     iqm: iqm,
+    normalizeConditionalConfig: normalizeConditionalConfig,
     paretoFrontier: paretoFrontier,
     aggregateRunValues: aggregateRunValues,
     criterionValueOf: criterionValueOf,

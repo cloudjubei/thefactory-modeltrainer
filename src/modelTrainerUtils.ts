@@ -1541,7 +1541,8 @@ export function detectMissingPaperModels(
   const slugs = new Set<string>()
   const bindings = new Set<string>()
   for (const m of catalog) {
-    if (m.slug) slugs.add(m.slug)
+    // Normalize on compare (a proposal's slug is already modelSlug'd) so an un-kebab manifest slug still matches.
+    if (m.slug) slugs.add(modelSlug(m.slug))
     if (m.name) slugs.add(modelSlug(m.name))
     // A model also answers to its aliases — so "Policy Gradient" is not "missing" when a2c lists it.
     for (const a of m.aliases ?? []) slugs.add(modelSlug(a))
@@ -1623,8 +1624,9 @@ export function buildConsolidateModelsSystemPrompt(manifest: TrainerManifest): s
   return [
     `You are a model librarian for the "${manifest.name}" training project.`,
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-    `You are given the project's catalog MODELS (each with id, name, the model_name bindings it trains as, and a description).`,
+    `You are given the project's catalog MODELS (each with id, name, the model_name bindings it trains as, a description, and any aliases — other names it is ALREADY known by from prior merges).`,
     `Find groups of entries that are REALLY THE SAME model/algorithm — typically the same approach proposed from several papers under slightly different names — and should be ONE catalog entry (the duplicates fold into a canonical model as flavors).`,
+    `Treat aliases as already-consolidated names: never propose merging an entry into another whose aliases already cover it, and prefer the entry that already carries aliases (it has absorbed others) as the canonical.`,
     `Be conservative: group only genuine duplicates of the same method, NOT merely related or same-family-but-distinct models (e.g. "DQN" and "Dueling DQN" are DIFFERENT). When unsure, do not group.`,
     `For each group pick the best-named, most-complete entry as the canonical and list the rest as duplicates.`,
     `Return ONLY a single JSON object (no prose, no code fence): {"groups": [{"canonicalId": string, "duplicateIds": [string], "reason": string}]}. Use {"groups": []} when there is nothing to merge. Every id MUST be one of the given model ids.`,
@@ -1639,6 +1641,7 @@ export function buildConsolidateModelsUserContent(input: {
     category: string
     description?: string
     modelNames?: string[]
+    aliases?: string[]
   }[]
 }): string {
   return JSON.stringify({ models: input.models })

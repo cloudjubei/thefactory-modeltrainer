@@ -263,8 +263,12 @@
   }
   // The record to persist when syncing a manifest seed: manifest-owned scalars from the seed; flavors +
   // aliases UNIONED with the existing record (so a consolidation's absorbed bindings/aliases survive a
-  // re-sync — the trade-off is the manifest cannot REMOVE a flavor this way); other user-owned fields
-  // preserved. A manual status pin is never overwritten.
+  // re-sync); other user-owned fields preserved. A manual status pin is never overwritten.
+  // KNOWN LIMITATION of the union: the manifest can ADD a flavor but not REMOVE/RENAME one through sync —
+  // a binding the record already has persists. This is intentional (it's what keeps a merge durable); for a
+  // consolidation-absorbed flavor, continuing to attribute its runs to the canonical is the CORRECT result.
+  // To truly drop a binding, delete the model and re-import. A run never matches two models (first flavor
+  // wins in computeModelStats), so a lingering flavor cannot double-count.
   function mergeSeedIntoModel(seed, existing, nowIso) {
     const slug = seed.slug || seed.id
     const seedFlavors = Array.isArray(seed.flavors) ? seed.flavors : modelFlavors(seed)
@@ -397,8 +401,9 @@
     // Record every name the merged-away models were known by as an alias of the canonical (skipping the
     // canonical's own identity), so a future paper/scan/seed referring to a duplicate resolves here and the
     // seed-sync never re-adds it.
-    // Core identity only (slug/id/name, NOT the existing aliases) — so the canonical's own aliases are
-    // preserved below, while we still never alias the canonical to itself.
+    // `own` is the canonical's CORE identity (slug/id/name) only — deliberately NOT its existing aliases,
+    // so those are re-added (preserved) below alongside each duplicate's slug/id/name + transitive aliases,
+    // while we still never alias the canonical to its own slug/id/name.
     const own = new Set([slugify(canonical.slug), slugify(canonical.id), slugify(canonical.name)])
     own.delete('')
     const aliases = []

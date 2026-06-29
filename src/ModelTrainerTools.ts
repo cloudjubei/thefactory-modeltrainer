@@ -1273,7 +1273,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         focus.content as unknown as TrainingRunSummary,
       )
       if (diff && diff.aligned) {
-        const sibConfig = (sib.content.config as Record<string, unknown>) || {}
+        const sibConfig = stripIgnored((sib.content.config as Record<string, unknown>) || {})
         const changed =
           Object.keys(manifest.levers)
             .filter((lk) => String(sibConfig[lk]) !== String(focusConfig[lk]))
@@ -1661,6 +1661,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           category: m.category,
           description: m.description,
           modelNames: modelBindingNames(m),
+          aliases: m.aliases,
         })),
       }),
       model: { kind: 'api', llmConfig: params.llmConfig },

@@ -2077,6 +2077,13 @@ describe('detectMissingPaperModels', () => {
   it('returns all when the catalog is empty', () => {
     expect(detectMissingPaperModels(proposed, [])).toHaveLength(2)
   })
+  it('matches a proposal against an un-kebab catalog slug (slug normalized on compare)', () => {
+    const out = detectMissingPaperModels(
+      [{ name: 'A2C', slug: 'a2c', description: '', category: 'rl', proposal: '' }],
+      [{ slug: 'A2C', name: 'Different Name', modelNames: [] }],
+    )
+    expect(out).toHaveLength(0)
+  })
   it('drops a proposal whose slug matches a catalog ALIAS (e.g. policy-gradient -> a2c)', () => {
     const pg: ProposedModel[] = [
       { name: 'Policy Gradient', slug: 'policy-gradient', description: '', category: 'rl', proposal: '' },

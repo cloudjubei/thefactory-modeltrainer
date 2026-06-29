@@ -107,6 +107,8 @@ let xaiEnvSortKey = 'best'
 let xaiEnvSortDir = 'desc'
 // Which "configuration map" is shown in the Maps tab: 'parallel', 'pca', or 'pareto' (trade-off frontier).
 let xaiMapKind = 'parallel'
+// PCA colour mode: 'rank' (performance) or 'model' (cluster by model_name).
+let xaiPcaColor = 'rank'
 // Pareto (trade-off) map axes: which two metrics + the better-direction for each.
 let xaiParetoX = null
 let xaiParetoXDir = 'max'
@@ -658,9 +660,17 @@ async function queryRecords(type, key) {
   }
 }
 function recordToRun(r) {
-  const summary = r.content || {}
+  const content = r.content || {}
   const key =
-    r.key || (summary.provenance && summary.provenance.configHash) || summary.configHash || ''
+    r.key || (content.provenance && content.provenance.configHash) || content.configHash || ''
+  // Pin conditional levers that don't apply to this run's model (e.g. forward_horizon on a PPO run) to
+  // the 'n/a' sentinel, so compare/detail show n/a and xAI importance excludes them — matching the
+  // server-side config-space analysis. The stored record is untouched; only this view is normalised.
+  const levers = (manifest && manifest.levers) || null
+  const summary =
+    levers && content.config
+      ? { ...content, config: window.Xai.normalizeConditionalConfig(content.config, levers) }
+      : content
   return { key, summary }
 }
 // Run records via the bridge, with the server-side filter/sort/pagination passed through (`extra` =
@@ -5346,7 +5356,10 @@ function xaiRunStandingHtml(runKey, criterion) {
         ? '<span class="delta-pos">attribution sanity ✓</span>'
         : '<span class="delta-neg">attribution sanity ✗ (untrustworthy)</span>'
       : ''
-  const standingCard = `<div class="card"><div class="card-head card-head-row"><h3>Standing${objLine ? ` <span class="card-sub">— ${objLine}</span>` : ''}</h3><div class="head-actions">${btn}</div></div>
+  const stabBtn = chatAboutRunAvailable()
+    ? `<button type="button" class="ghost-btn" data-xai-stabilize-current title="Run more seeds of this exact config to check the result is repeatable, not seed luck">Verify seeds \u21bb</button>`
+    : ''
+  const standingCard = `<div class="card"><div class="card-head card-head-row"><h3>Standing${objLine ? ` <span class="card-sub">— ${objLine}</span>` : ''}</h3><div class="head-actions">${stabBtn}${btn}</div></div>
     <table class="kv-table"><tbody>
       <tr><th>Rank by ${escapeHtml(criterion.label)}</th><td>${pos != null ? `#${pos} of ${tot}${topPct != null ? ` <span class="card-sub">(top ${topPct}%)</span>` : ''}` : '—'}</td></tr>
       ${actions ? `<tr><th>Action mix</th><td>${actions}</td></tr>` : ''}
@@ -5365,7 +5378,11 @@ function xaiRunStandingHtml(runKey, criterion) {
           : atBest
             ? '<span class="delta-pos">✓ at best-seen</span>'
             : `<span class="delta-neg">→ try ${escapeHtml(String(i.bestValue))}</span>`
-      return `<tr><th><code>${escapeHtml(xaiAbbrevLever(i.lever))}</code></th><td class="num">${Math.round(i.importance * 100)}%</td><td>${escapeHtml(mineStr)}</td><td>${escapeHtml(String(i.bestValue))}</td><td>${verdict}</td></tr>`
+      const explore =
+        i.lever === 'model_name'
+          ? ''
+          : `<button type="button" class="ghost-btn xai-explore-btn" data-xai-explore-lever="${escapeHtml(i.lever)}" title="Launch a campaign sweeping ${escapeHtml(i.lever)} across its values, holding this run's other settings fixed">sweep \u2197</button>`
+      return `<tr><th><code>${escapeHtml(xaiAbbrevLever(i.lever))}</code></th><td class="num">${Math.round(i.importance * 100)}%</td><td>${escapeHtml(mineStr)}</td><td>${escapeHtml(String(i.bestValue))}</td><td>${verdict} ${explore}</td></tr>`
     })
     .join('')
   const leversCard = leverRows
@@ -5943,6 +5960,12 @@ function xaiPcaHtml(bundle, criterion) {
       .map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`)
       .join(' ')
       .slice(0, 140)
+  const colorMode = xaiPcaColor === 'model' ? 'model' : 'rank'
+  const modelOf = (i) => {
+    const sp = setupByKey.get(pca.points[i].key)
+    return sp ? String(sp.config.model_name ?? '?') : '?'
+  }
+  const models = [...new Set(pca.points.map((_, i) => modelOf(i)))].sort()
   const points = pca.points.map((p, i) => {
     const setup = setupByKey.get(p.key)
     const cfg = setup ? compactConfig(setup.config) : ''
@@ -5951,8 +5974,11 @@ function xaiPcaHtml(bundle, criterion) {
     return {
       x: p.x,
       y: p.y,
-      color: `hsl(${Math.round(rankFrac[i] * 120)}, 70%, 45%)`,
-      label: `${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)} · top ${100 - pct}%${seeds}`,
+      color:
+        colorMode === 'model'
+          ? `hsl(${xaiModelHue(modelOf(i))}, 62%, 50%)`
+          : `hsl(${Math.round(rankFrac[i] * 120)}, 70%, 45%)`,
+      label: `${modelOf(i)} · ${cfg ? cfg + ' · ' : ''}${criterion.label} ${formatTickValue(p.value)} · top ${100 - pct}%${seeds}`,
     }
   })
   const ev = (i) => Math.round((pca.explainedVariance[i] || 0) * 100)
@@ -5967,9 +5993,58 @@ function xaiPcaHtml(bundle, criterion) {
   return `<div class="card"><div class="card-head card-head-row"><h3>Configuration map (PCA) <span class="card-sub">— ${pca.points.length} setups · ${pca.features} features</span></h3></div>
     <div class="card-scroll">
     <p class="card-sub">A 2-D <em>sketch</em> of the explored configs (numeric levers z-scored, categorical one-hot), coloured by <strong>${escapeHtml(criterion.label)} rank</strong> — <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong>, evenly across all configs. <strong>How to use it:</strong> nearby points have similar configs, so look for a <em>region where the green points cluster</em> — that's a promising part of the space to explore more (use the recommender). Scattered green with no cluster means performance isn't driven by where you are in this 2-D mix (check the lever importances instead). The PC axes are blends of levers, not knobs — don't read them as directions. PC1+PC2 capture ${ev(0) + ev(1)}% of the configuration variance.</p>
+    ${(() => {
+      const cb = (m, l) =>
+        `<button type="button" class="xai-map-tab${colorMode === m ? ' active' : ''}" data-xai-pca-color="${m}">${l}</button>`
+      return `<div class="badges-row" style="gap:.4rem;align-items:center;margin:.2rem 0 .5rem"><span class="card-sub">Colour by</span>${cb('rank', 'Performance')}${cb('model', 'Model')}</div>`
+    })()}
+    ${
+      colorMode === 'model'
+        ? `<div class="badges-row" style="gap:.6rem;flex-wrap:wrap;margin-bottom:.4rem">${models
+            .map(
+              (m) =>
+                `<span class="card-sub"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:hsl(${xaiModelHue(m)},62%,50%);margin-right:4px;vertical-align:middle"></span>${escapeHtml(xaiAbbrevLever(m))}</span>`,
+            )
+            .join('')}</div>`
+        : ''
+    }
     <div class="chart-wrap">${svg}</div>
-    ${xaiPcaConclusionsHtml(pca, rankFrac, criterion)}
+    ${colorMode === 'model' ? xaiPcaModelClustersHtml(pca, modelOf) : xaiPcaConclusionsHtml(pca, rankFrac, criterion)}
     </div></div>`
+}
+// Which models cluster tightly (consistent configs) vs spread across the PCA map (config-sensitive).
+function xaiPcaModelClustersHtml(pca, modelOf) {
+  const byModel = {}
+  pca.points.forEach((p, i) => {
+    const m = modelOf(i)
+    ;(byModel[m] = byModel[m] || []).push(p)
+  })
+  const std = (arr, sel) => {
+    if (arr.length < 2) return 0
+    const mn = arr.reduce((a, p) => a + sel(p), 0) / arr.length
+    return Math.sqrt(arr.reduce((a, p) => a + (sel(p) - mn) ** 2, 0) / arr.length)
+  }
+  const allSpread = Math.hypot(std(pca.points, (p) => p.x), std(pca.points, (p) => p.y)) || 1
+  const tight = []
+  const spread = []
+  for (const [m, ps] of Object.entries(byModel)) {
+    if (ps.length < 2) continue
+    const sp = Math.hypot(std(ps, (p) => p.x), std(ps, (p) => p.y)) / allSpread
+    if (sp < 0.5) tight.push(m)
+    else spread.push(m)
+  }
+  const parts = []
+  if (tight.length)
+    parts.push(
+      `${tight.slice(0, 5).map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`).join(', ')} form <strong>tight clusters</strong> \u2014 their configs behave consistently (a clear model signature).`,
+    )
+  if (spread.length)
+    parts.push(
+      `${spread.slice(0, 5).map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`).join(', ')} are <strong>spread out</strong> \u2014 highly sensitive to their config.`,
+    )
+  if (!parts.length)
+    parts.push('Each model has too few configs to judge clustering \u2014 run more to see model groupings.')
+  return `<div class="xai-conclusions"><strong class="card-sub">Model clusters</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
 }
 // Deterministic \u201cwhat this map shows\u201d for the parallel map: the lever values the top configs concentrate
 // at, and the levers that don't separate good from bad (their lines fan across the axis).
@@ -6047,6 +6122,13 @@ function xaiPcaConclusionsHtml(pca, rankFrac, criterion) {
   return `<div class="xai-conclusions"><strong class="card-sub">What this map shows</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
 }
 // A metric's value on a setup: the criterion 'objective', 'durationMs', or a named entry in metrics.
+// Deterministic hue [0,360) from a model name, so each model gets a stable colour in the PCA model view.
+function xaiModelHue(name) {
+  let h = 0
+  const str = String(name)
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) % 360
+  return h
+}
 function xaiMetricVal(s, key) {
   return key === 'objective' ? s.objective : key === 'durationMs' ? s.durationMs : s.metrics && s.metrics[key]
 }
@@ -6123,12 +6205,23 @@ function xaiParetoHtml(bundle, criterion) {
     <li><strong style="color:hsl(140,70%,38%)">${frontier.size}</strong> of ${pts.length} configs are <strong>Pareto-optimal</strong> (green) \u2014 no other config beats them on <em>both</em> ${escapeHtml(xaiParetoX)} and ${escapeHtml(xaiParetoY)}. Grey points are dominated (something is better on both), so never pick them.</li>
     <li>There is no single best \u2014 choose along the green frontier by how much ${escapeHtml(xaiParetoY)} you\u2019ll trade for ${escapeHtml(xaiParetoX)}.</li>
   </ul></div>`
+  const frontierRows = [...frontier]
+    .map((i) => ({ i, x: pts[i][0], y: pts[i][1] }))
+    .sort((m, n) => (xaiParetoXDir === 'min' ? m.x - n.x : n.x - m.x))
+    .map(
+      ({ i, x, y }) =>
+        `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(owner[i].key)}" title="Open this run"><td><code>${compactCfg(owner[i].config)}</code></td><td class="num">${escapeHtml(formatTickValue(x))}</td><td class="num">${escapeHtml(formatTickValue(y))}</td></tr>`,
+    )
+    .join('')
+  const frontierTable = `<h4 class="card-sub">The ${frontier.size} Pareto-optimal config${frontier.size === 1 ? '' : 's'} (green) \u2014 click one to open it</h4>
+    <div class="xai-env-scroll"><table class="runs-table"><thead><tr><th>config</th><th class="num">${escapeHtml(xaiParetoX)}</th><th class="num">${escapeHtml(xaiParetoY)}</th></tr></thead><tbody>${frontierRows}</tbody></table></div>`
   return card(
-    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}`,
+    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.</p><div class="chart-wrap">${svg}</div>${concl}${frontierTable}`,
   )
 }
-// The levers worth showing: model_name (the identity) + any NOT classified inert by fANOVA (falls back to
-// screening when no surrogate). Drops noise like gamma and \u2014 per config \u2014 conditional levers pinned to n/a.
+// The levers worth showing: model_name + levers with real impact (fANOVA total >= 0.03, else screening
+// importance >= 0.02). scope:'ignore' levers (device) are already stripped by the engine; low-impact noise
+// (e.g. gamma) falls below threshold; per-config 'n/a' conditional levers are dropped by the callers.
 // Smallest non-negative seed numbers not already used \u2014 for stabilize/explore launches.
 function xaiFreshSeeds(used, need) {
   const u = new Set(used || [])
@@ -7489,6 +7582,57 @@ function setupRuns() {
         renderXai()
         return
       }
+      const exLev = event.target.closest('[data-xai-explore-lever]')
+      if (exLev) {
+        const lever = exLev.dataset.xaiExploreLever
+        const rec = xaiRunAnalysisCache.get(xaiFocusKey)
+        const cfg = rec && rec.analysis ? rec.analysis.config : null
+        if (cfg) {
+          // Gather distinct candidate values: the run's current value, the best-seen value (from the digest),
+          // and any observed values when a matching bundle is loaded. Dedupe by string, keep original types.
+          const byStr = new Map()
+          const add = (v) => {
+            if (v === undefined || String(v) === 'n/a') return
+            const k = String(v)
+            if (!byStr.has(k)) byStr.set(k, v)
+          }
+          add(cfg[lever])
+          const imp = (rec.analysis.importances || []).find((x) => x.lever === lever)
+          if (imp && imp.bestValue !== undefined && imp.bestValue !== '')
+            add(typeof cfg[lever] === 'number' ? Number(imp.bestValue) : imp.bestValue)
+          const bundle = xaiResolveBundle(currentXaiCriterion())
+          if (bundle) for (const sp of bundle.analysis.setups || []) add(sp.config[lever])
+          const manSpec = manifest && manifest.levers ? manifest.levers[lever] : null
+          if (byStr.size < 2 && manSpec && Array.isArray(manSpec.choices))
+            for (const c of manSpec.choices) add(c)
+          const values = [...byStr.values()]
+          if (values.length < 2) {
+            setStatusLine('xai-status', `Can't sweep ${lever} — only one value is available to try.`, true)
+          } else {
+            const fixed = {}
+            for (const [k, v] of Object.entries(cfg)) if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+            xaiLaunchBatch([{ fixed, sweep: { [lever]: values }, seeds: [0] }], `Sweep ${lever}`)
+          }
+        }
+        return
+      }
+      if (event.target.closest('[data-xai-stabilize-current]')) {
+        const rec = xaiRunAnalysisCache.get(xaiFocusKey)
+        const cfg = rec && rec.analysis ? rec.analysis.config : null
+        const bundle = xaiResolveBundle(currentXaiCriterion())
+        if (cfg && bundle) {
+          const setup = (bundle.analysis.setups || []).find((sp) =>
+            Object.keys(sp.config).every((k) => String(sp.config[k]) === String(cfg[k])),
+          )
+          const usedList = setup ? setup.seedList || [] : []
+          const cur = usedList.length || 1
+          const fresh = xaiFreshSeeds(usedList, Math.max(2, Math.max(5, cur + 2) - cur))
+          const fixed = {}
+          for (const [k, v] of Object.entries(cfg)) if (k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+          xaiLaunchBatch([{ fixed, seeds: fresh }], 'Verify seeds')
+        }
+        return
+      }
       const stab = event.target.closest('[data-xai-stabilize]')
       if (stab) {
         const bundle = xaiResolveBundle(currentXaiCriterion())
@@ -7507,6 +7651,12 @@ function setupRuns() {
         xaiFocusKey = pcFocus.dataset.xaiFocusConfig
         xaiScope = 'current'
         xaiTab = 'standing'
+        renderXai()
+        return
+      }
+      const pcaColor = event.target.closest('[data-xai-pca-color]')
+      if (pcaColor) {
+        xaiPcaColor = pcaColor.dataset.xaiPcaColor === 'model' ? 'model' : 'rank'
         renderXai()
         return
       }
@@ -10488,6 +10638,15 @@ function modelDeviceChipHtml(model) {
   }
   return `<button type="button" class="run-badge is-queued model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr('Benchmark this model on CPU vs MPS to set its faster device')}>⚡ check device</button>`
 }
+// The other names this model is known by (from a merge or a manifest seed) — papers/scans/seeds that refer
+// to one resolve to this model instead of creating a duplicate.
+function modelAliasesHtml(model) {
+  const aliases = Array.isArray(model.aliases) ? model.aliases.filter(Boolean) : []
+  if (!aliases.length) return ''
+  return `<p class="card-sub model-aliases"><strong>Also known as:</strong> ${aliases
+    .map((a) => `<code>${escapeHtml(a)}</code>`)
+    .join(' ')}</p>`
+}
 function modelCardHtml(model) {
   const id = escapeHtml(model.id)
   const open = modelExpanded.has(model.id) ? ' open' : ''
@@ -10514,6 +10673,7 @@ function modelCardHtml(model) {
     </summary>
     <div class="paper-body">
       ${model.description ? `<p class="paper-claim">${escapeHtml(model.description)}</p>` : ''}
+      ${modelAliasesHtml(model)}
       ${model.proposal ? `<p class="card-sub paper-note"><strong>To add:</strong> ${escapeHtml(model.proposal)}</p>` : ''}
       ${flavorCount ? '' : '<p class="card-sub">No flavor yet — a proposal not wired into any run config.</p>'}
       ${model.implPath ? `<p class="card-sub">Code: <code>${escapeHtml(model.implPath)}</code></p>` : ''}
