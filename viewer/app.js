@@ -243,6 +243,20 @@ let runsTotalCount = 0
 // Full records for runs that scrolled off the current server page while still open/selected, so a
 // detail/compare view resolves them even though they aren't in the page cache.
 const runExtraCache = new Map()
+// Heavy per-bar / per-step / per-trade content fields a LIST/aggregate fetch never reads. They are
+// omitted server-side (projection) so a page of run records can't blow the JSON response past V8's
+// max-string limit. Detail / compare / xAI / audit DO need them, so they re-fetch the FULL record by
+// key via ensureRunFull. `artifacts.checkpoint` / `artifacts.decisionTraceFile` are small and kept.
+const HEAVY_RUN_FIELDS = [
+  'series',
+  'ledger',
+  'regimes',
+  'artifacts.runChart',
+  'artifacts.decisionTrace',
+]
+// Keys whose `runExtraCache` entry holds the FULL (un-projected) record — so findRun prefers it over a
+// lean page entry, and rememberRun won't downgrade it.
+const fullRunKeys = new Set()
 let runsCompareKeys = new Set()
 // First click on Delete arms it (in-app confirm — window.confirm is blocked in the
 // embedding iframe sandbox); the second click within the timeout performs the delete.
@@ -767,7 +781,8 @@ function recordToRun(r) {
 async function queryRunRecords(extra) {
   if (!embedded() || !manifest) return []
   try {
-    const payload = { type: manifest.recordType }
+    // Every list/aggregate fetch drops the heavy per-bar fields — they're re-fetched by key on demand.
+    const payload = { type: manifest.recordType, omit: HEAVY_RUN_FIELDS }
     if (extra && extra.where) payload.where = extra.where
     if (extra && extra.orderBy) payload.orderBy = extra.orderBy
     if (extra && extra.limit !== undefined) payload.limit = extra.limit
@@ -791,15 +806,16 @@ async function countRunRecords(where) {
     return null
   }
 }
-// EVERY run record — independent of the Runs-tab filter (no `where`) and of any page cap. An unbounded
-// query returns nothing for a large set, so page through with a fixed limit until exhausted, deduped by
-// key. `onProgress(n)` fires after each page so a long scan can show how far it's got.
-async function queryAllRunRecords(onProgress) {
+// EVERY run record matching `where` (omit it for all) — independent of any page cap. An unbounded query
+// can't be served (a single oversized page would blow the response), so page through with a fixed limit
+// until exhausted, deduped by key. `onProgress(n)` fires after each page so a long scan shows progress.
+async function queryAllRunRecords(onProgress, where) {
   const PAGE = 500
   const byKey = new Map()
   let offset = 0
   for (let guard = 0; guard < 10000; guard++) {
-    const page = await queryRunRecords({ limit: PAGE, offset })
+    const extra = where ? { where, limit: PAGE, offset } : { limit: PAGE, offset }
+    const page = await queryRunRecords(extra)
     if (!page.length) break
     for (const r of page) byKey.set(r.key, r)
     if (onProgress) onProgress(byKey.size)
@@ -824,7 +840,8 @@ async function readRuns() {
     runsTotalCount = total === null ? page.length : total
     return page
   }
-  const all = await queryRunRecords({ where })
+  // Group-by / drill mode wants every matching run — page through it rather than one unbounded fetch.
+  const all = await queryAllRunRecords(undefined, where)
   runsTotalCount = all.length
   return all
 }
@@ -1341,7 +1358,11 @@ async function refreshProjectManifest(project) {
     manifest = rec.manifest
     applyManifestChrome()
     renderLaunchForm()
-    if (activeTabId === 'runs') refreshRuns()
+    // The manifest's lever SCOPES drive the Datasets/Environments/Hypotheses classification, so a changed
+    // manifest must re-render the ACTIVE tab (not just Launch) — otherwise the tab keeps classifying against
+    // the stale snapshot (e.g. a lever that just gained scope:'dataset' stays invisible to the Datasets tab,
+    // collapsing datasets that differ only by it). showTab reloads that tab's caches from the fresh manifest.
+    if (activeTabId) showTab(activeTabId)
   } catch {
     // best-effort — a stale manifest just persists until the next Re-inspect
   }
@@ -1759,6 +1780,10 @@ function showView(view) {
 }
 function resetDashboardState() {
   runsCache = []
+  runExtraCache.clear()
+  fullRunKeys.clear()
+  fullRunFetches.clear()
+  fullRunFetchFailed.clear()
   verdictsCache = new Map()
   evaluationsCache = new Map()
   evaluatingKeys.clear()
@@ -2212,6 +2237,13 @@ async function refreshAfterQuickDispatch(item, act) {
       await refreshHypothesisVerdicts(hypothesesCache)
       const pid = item.params && item.params.paperId
       showToast('Suggested + linked hypotheses — view', pid ? () => focusPaper(pid) : undefined)
+      // Suggesting LINKS hypotheses to the paper but assigns NO weights — so the verdict roll-up would stay
+      // unweighted (and no ⚖ chips show). Chain a weigh pass so the paper's hypotheses get importance weights
+      // immediately, without the user having to click Re-weigh separately.
+      const paper = pid && papersCache.find((p) => p.id === pid)
+      if (paper && Array.isArray(paper.hypothesisIds) && paper.hypothesisIds.length) {
+        void onReweighPaperHypotheses(pid)
+      }
     } else {
       setStatusLine('papers-status', quickActivityFailureText(act, 'Suggest hypotheses'), true)
     }
@@ -3060,11 +3092,75 @@ function runsServerPaged() {
 // Resolve a run by key from the current page cache, falling back to records stashed when a run was
 // opened/selected (so detail + compare survive paging away from the run).
 function findRun(key) {
-  return runsCache.find((r) => r.key === key) || runExtraCache.get(key)
+  // Prefer a cached FULL record (has the heavy fields) over the lean page/off-page copy.
+  const extra = runExtraCache.get(key)
+  if (extra && fullRunKeys.has(key)) return extra
+  return runsCache.find((r) => r.key === key) || extra
 }
 function rememberRun(key) {
+  // Don't downgrade an already-full cache entry to the lean page copy.
+  if (fullRunKeys.has(key)) return
   const run = runsCache.find((r) => r.key === key)
   if (run) runExtraCache.set(key, run)
+}
+// In-flight keyed full-fetches (key → Promise), so concurrent callers share one request.
+const fullRunFetches = new Map()
+// Keys we've already attempted to fully fetch but that did NOT upgrade (empty/error). Tracked so a
+// resolves-but-never-upgrades key can't drive an unbounded warm→fetch→re-render loop; cleared on an
+// explicit user re-trigger (rearmRunFull) and on data refresh / project reset.
+const fullRunFetchFailed = new Set()
+// Fetch a run's FULL content by key (a single keyed query, no `omit`) and cache it so findRun and the
+// heavy views resolve it. Falls back to whatever (lean) copy exists if the fetch can't run or fails.
+async function ensureRunFull(key) {
+  if (!key) return null
+  if (fullRunKeys.has(key)) return runExtraCache.get(key) || findRun(key)
+  if (!embedded() || !manifest) return findRun(key)
+  if (fullRunFetches.has(key)) return fullRunFetches.get(key)
+  const p = (async () => {
+    try {
+      const recs = await window.OverseerBridge.queryData({ type: manifest.recordType, key })
+      const rec = (recs || [])[0]
+      if (rec) {
+        const run = recordToRun(rec)
+        runExtraCache.set(key, run)
+        fullRunKeys.add(key)
+        fullRunFetchFailed.delete(key)
+        return run
+      }
+      fullRunFetchFailed.add(key) // no such record (e.g. deleted) — don't keep retrying on re-render
+    } catch {
+      fullRunFetchFailed.add(key) // transient failure — rearmed on the next data refresh / re-trigger
+    } finally {
+      fullRunFetches.delete(key)
+    }
+    return findRun(key)
+  })()
+  fullRunFetches.set(key, p)
+  return p
+}
+// Clear the "already attempted, didn't upgrade" mark for a key so an explicit user action re-arms a
+// fresh full-fetch (e.g. re-opening a run after a transient error).
+function rearmRunFull(key) {
+  fullRunFetchFailed.delete(key)
+}
+// Drop every cache trace of a run (used when it's deleted) so a stale full/lean entry can't resolve via findRun.
+function forgetRun(key) {
+  runExtraCache.delete(key)
+  fullRunKeys.delete(key)
+  fullRunFetchFailed.delete(key)
+  fullRunFetches.delete(key)
+}
+// Render-time seam for the synchronous heavy views: fetch any of `keys` that isn't full yet (and hasn't
+// already failed to upgrade), then re-render — but ONLY if a key actually became full, so a key that
+// resolves-but-never-upgrades can't loop. The caller renders with the lean copy now and upgrades on arrival.
+function warmRunsForRender(keys, rerender) {
+  const missing = (keys || []).filter(
+    (k) => k && !fullRunKeys.has(k) && !fullRunFetchFailed.has(k) && !fullRunFetches.has(k),
+  )
+  if (!missing.length) return
+  Promise.all(missing.map((k) => ensureRunFull(k).then(() => fullRunKeys.has(k)))).then((becameFull) => {
+    if (becameFull.some(Boolean)) rerender()
+  })
 }
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
@@ -3667,9 +3763,19 @@ function renderRunsTable() {
     closeRunDetail()
     return
   }
-  // Keep the off-page run cache bounded to runs still referenced by an open detail / compare set.
+  // Keep the off-page run cache bounded to runs still referenced by an open detail / compare / xAI view.
+  // Skip keys with an in-flight full-fetch — it would re-populate the cache right after eviction.
   for (const k of [...runExtraCache.keys()]) {
-    if (k !== selectedRunKey && !runsCompareKeys.has(k)) runExtraCache.delete(k)
+    if (
+      k !== selectedRunKey &&
+      k !== xaiFocusKey &&
+      !runsCompareKeys.has(k) &&
+      !fullRunFetches.has(k)
+    ) {
+      runExtraCache.delete(k)
+      fullRunKeys.delete(k)
+      fullRunFetchFailed.delete(k)
+    }
   }
   const serverPaged = runsServerPaged()
   // Server total when the flat view paginates server-side; otherwise the loaded set's size.
@@ -3863,6 +3969,9 @@ function normalizeSpec(spec) {
   const fixed = (spec && spec.fixed) || {}
   if (Object.keys(sweep).length) out.sweep = sweep
   if (Object.keys(fixed).length) out.fixed = fixed
+  const compare = spec && spec.compare
+  if (compare && compare.lever && Array.isArray(compare.values) && compare.values.length)
+    out.compare = { lever: compare.lever, values: compare.values }
   const environments = (spec && spec.environments) || []
   if (Array.isArray(environments) && environments.length) out.environments = environments
   const datasets = (spec && spec.datasets) || []
@@ -3876,7 +3985,10 @@ function normalizeSpec(spec) {
 // audit. The viewer is a sandboxed iframe: a Blob+anchor download is a SILENT no-op unless the host
 // grants `allow-downloads` (and the click never throws), so we always ALSO copy the JSON to the
 // clipboard — the reliable in-sandbox path via allow-same-origin — and confirm on the button.
-function downloadRunsAudit(keys, button) {
+async function downloadRunsAudit(keys, button) {
+  // The audit carries each run's FULL summary verbatim (regimes, decision trace, runChart) — fetch the
+  // full records by key before assembling it, since the list cache is lean.
+  await Promise.all((keys || []).map(ensureRunFull))
   const runs = (keys || []).map((k) => findRun(k)).filter(Boolean)
   if (!runs.length) return
   const payload = window.RunExport.buildRunsAuditExport(runs, {
@@ -3917,6 +4029,8 @@ function renderCompare() {
     syncRunsMdLayout()
     return
   }
+  // The equity overlay + decision diff need the heavy fields; warm the compared runs and re-render.
+  warmRunsForRender([...runsCompareKeys], renderCompare)
   // Selecting ≥2 runs is a COMPARE gesture — collapse any single-run detail (and its
   // row highlight) so only the compare pane shows.
   if (selectedRunKey) closeRunDetail()
@@ -4299,8 +4413,8 @@ function priceActionSectionHtml(summary, key) {
 // dense marker runs separate) and horizontal scroll. Uses the run's downsampled chart data.
 let chartModalData = null
 let chartModalZoom = 1
-function expandPriceActionChart(key) {
-  const run = findRun(key)
+async function expandPriceActionChart(key) {
+  const run = await ensureRunFull(key)
   const chart = run && run.summary && run.summary.artifacts && run.summary.artifacts.runChart
   if (!chart || !Array.isArray(chart.price) || chart.price.length < 2) return
   chartModalData = chart
@@ -5032,6 +5146,16 @@ function renderXai() {
     setHtml(body, '<div class="card"><p class="card-sub">xAI engine failed to load.</p></div>')
     return
   }
+  // The current-run internals (price/equity/explain/decision-diff) need the heavy fields for the focus
+  // run and its compared sibling; warm them and re-render once they arrive.
+  if (xaiScope === 'current' && xaiFocusKey) {
+    const focusRun = findRun(xaiFocusKey)
+    const sibling = focusRun ? xaiBestSibling(focusRun) : null
+    const keys = sibling ? [xaiFocusKey, sibling.key] : [xaiFocusKey]
+    warmRunsForRender(keys, () => {
+      if (xaiScope === 'current' && xaiFocusKey) renderXai()
+    })
+  }
   const criterion = currentXaiCriterion()
   setHtml(body, xaiShellHtml(criterion))
 }
@@ -5738,8 +5862,10 @@ function xaiModelInternalsHtml(focusKey) {
     ${sibling ? decisionDiffSectionHtml(sibling.summary, s) : ''}
     </div></div>`
 }
-// The nearest comparable run for a decision diff: same dataset/window (step-alignable), has a trace,
-// differs in config — the best such by objective.
+// The nearest comparable run for a decision diff: same dataset/window (step-alignable), differs in
+// config — the best such by objective. Selected from the LEAN list cache (the trace can't be required
+// here — it's omitted from list records — so the caller warms the chosen sibling's full record before
+// reading its trace; the diff degrades to empty if that sibling has no trace).
 function xaiBestSibling(run) {
   const sig = datasetAlignmentSignature(run.summary)
   if (!sig) return null
@@ -5748,16 +5874,18 @@ function xaiBestSibling(run) {
       r.key !== run.key &&
       r.summary &&
       r.summary.status !== 'failed' &&
-      datasetAlignmentSignature(r.summary) === sig &&
-      readDecisionTrace(r.summary),
+      datasetAlignmentSignature(r.summary) === sig,
   )
   if (!candidates.length) return null
   const dir = objectiveDirection()
-  return candidates.sort((a, b) =>
+  const best = candidates.sort((a, b) =>
     dir === 'max'
       ? b.summary.objective - a.summary.objective
       : a.summary.objective - b.summary.objective,
   )[0]
+  // Resolve through findRun so that, once the chosen sibling's full record is warmed, callers reading
+  // its decisionTrace get the FULL copy rather than this lean runsCache entry.
+  return findRun(best.key) || best
 }
 // Decision INTERNALS from the trace: decisiveness (top-2 action-value gap), policy entropy over time
 // (normalised), and a confidence-vs-realised-reward calibration table ("is its confidence trustworthy?").
@@ -7132,6 +7260,7 @@ async function onXaiAnalyzeRunClick(runKey) {
 // Open the xAI tab focused on ONE run (the current-run scope) — the run-detail entry point.
 function analyzeInXai(key) {
   xaiFocusKey = key
+  rearmRunFull(key) // an explicit re-focus retries a previously-failed full-fetch
   xaiScope = 'current'
   showTab('xai')
 }
@@ -7170,6 +7299,11 @@ function renderRunDetail(key) {
     closeRunDetail()
     return
   }
+  // The list copy is lean (heavy chart/trace fields omitted); pull the full record and re-render the
+  // detail once it arrives so the price/equity/explain charts populate.
+  warmRunsForRender([key], () => {
+    if (selectedRunKey === key) renderRunDetail(key)
+  })
   const s = run.summary
   const failed = s.status === 'failed'
   const invalid = s.status === 'invalid'
@@ -7264,6 +7398,7 @@ function openRunDetail(key) {
   if (runsCompareKeys.size >= 2) return
   selectedRunKey = key
   rememberRun(key)
+  rearmRunFull(key) // an explicit re-open retries a previously-failed full-fetch
   for (const row of document.querySelectorAll('#runs-body tr[data-key]')) {
     row.classList.toggle('is-selected', row.dataset.key === key)
   }
@@ -7348,7 +7483,7 @@ function projectChatPreamble() {
 // everything about THIS run — config, metrics, health, objective, and (for a failure) the error +
 // log tail — so the user can discuss or diagnose ANY run, grounded in the project, without copying.
 async function chatAboutRun(key) {
-  const run = findRun(key)
+  const run = await ensureRunFull(key)
   if (!run || !chatAboutRunAvailable()) return
   const s = run.summary
   const failed = s.status === 'failed'
@@ -7387,8 +7522,9 @@ async function chatAboutRun(key) {
 // objective/metrics, and the DECISION DIFF — so the agent can reason about whether the tweak's decision
 // changes look good even when the score hasn't moved.
 async function chatAboutRuns(keyA, keyB) {
-  const a = runsCache.find((r) => r.key === keyA)
-  const b = runsCache.find((r) => r.key === keyB)
+  await Promise.all([ensureRunFull(keyA), ensureRunFull(keyB)])
+  const a = findRun(keyA)
+  const b = findRun(keyB)
   if (!a || !b || !chatAboutRunAvailable()) return
   const configDiff = Object.keys((manifest && manifest.levers) || {})
     .map((lk) => [lk, (a.summary.config || {})[lk], (b.summary.config || {})[lk]])
@@ -7417,7 +7553,7 @@ async function chatAboutRuns(keyA, keyB) {
 // The comprehensive xAI seed for ONE run — far more than the Runs-detail chat: the decision-trace digest
 // PLUS the attribution faithfulness (sanity check), the latent representation + probe, the run's standing
 // + lever importances among all runs, and the decision diff vs its nearest comparable run.
-function xaiRunChatSummary(run) {
+function xaiRunChatSummary(run, presuppliedSibling) {
   const s = run.summary
   const parts = []
   const traceSummary = decisionTraceChatSummary(s)
@@ -7461,7 +7597,9 @@ function xaiRunChatSummary(run) {
       )
     }
   }
-  const sibling = xaiBestSibling(run)
+  // Use the sibling the caller already warmed (so its decision trace is the full record), falling back
+  // to a fresh pick only when none was supplied.
+  const sibling = presuppliedSibling || xaiBestSibling(run)
   if (sibling) {
     const dd = decisionDiffChatSummary(sibling.summary, s)
     if (dd) parts.push(`Vs the nearest comparable run ${shortKey(sibling.key)} — ${dd}`)
@@ -7470,15 +7608,20 @@ function xaiRunChatSummary(run) {
 }
 // Discuss the FULL xAI analysis of one run (the xAI-tab entry point — richer than the Runs-detail chat).
 async function chatAboutRunXai(key) {
-  const run = findRun(key)
+  const run = await ensureRunFull(key)
   if (!run || !chatAboutRunAvailable()) return
+  // xaiRunChatSummary reads the nearest sibling's decision trace too — warm it, then re-resolve so the
+  // sibling we hand it is the FULL record (and the same one we warmed, not a re-picked lean candidate).
+  const leanSibling = xaiBestSibling(run)
+  if (leanSibling) await ensureRunFull(leanSibling.key)
+  const sibling = leanSibling ? findRun(leanSibling.key) : null
   const s = run.summary
   const ctx = [
     `You are discussing the FULL xAI analysis of ONE training run — id "${shortKey(key)}". Everything below is provided (config, metrics, the decision trace, input attribution + its faithfulness check, the reward breakdown, the latent representation + probe, the run's standing + lever importances among all runs, and the decision diff vs its nearest comparable run), so work directly from it — don't ask for the run id or these details. The xAI computations are DETERMINISTIC + heuristic; treat the attribution and decision-quality reads as EVIDENCE, not proof, and say so when a signal is weak (e.g. an attribution that FAILED its sanity check).`,
     `Pipeline v${String(s.pipelineVersion || '1')}. Objective (${objectiveName()}): ${formatObjective(s.objective)} · health: ${(s.health && s.health.status) || 'unknown'}.`,
     s.metrics ? `Metrics:\n${JSON.stringify(s.metrics, null, 2)}` : '',
     `Config:\n${JSON.stringify(s.config || {}, null, 2)}`,
-    xaiRunChatSummary(run),
+    xaiRunChatSummary(run, sibling),
   ].filter(Boolean)
   const systemPrompt = [projectChatPreamble(), ...ctx].filter(Boolean).join('\n\n')
   try {
@@ -9484,9 +9627,18 @@ function hypothesisComparisonHtml(h) {
       ? ''
       : ` (tolerance ${cmp.tolerance != null ? cmp.tolerance : 0.1})`
   const basis = `<strong>${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</strong> — comparison: ${escapeHtml(comparisonKindLabel(cmp.kind))}${escapeHtml(tolNote)}.`
+  // Spell out EXACTLY what proves/disproves this comparison (which value beats which baseline, the spread
+  // tolerance, the readiness gate) — mirrors compareContexts, shown whether or not runs exist yet.
+  const criterion = `<p class="card-sub hyp-criteria">How it's judged: ${escapeHtml(
+    window.Hypothesis.comparisonCriterion(h.spec, cmp, {
+      objectiveName: objectiveName(),
+      direction: objectiveDirection(),
+      minRuns: hypothesisMinRuns,
+    }),
+  )}</p>`
   const totalRuns = cells.reduce((n, c) => n + (c.measured ? c.measured.runs : 0), 0)
   if (!totalRuns) {
-    return `<div class="hyp-evidence"><p class="card-sub">No matching runs yet across the ${cellCount} contexts — launch runs to test it.</p></div>`
+    return `<div class="hyp-evidence"><p class="card-sub">No matching runs yet across the ${cellCount} contexts — launch runs to test it.</p>${criterion}</div>`
   }
   const rows = cells
     .map((c, i) => {
@@ -9502,6 +9654,7 @@ function hypothesisComparisonHtml(h) {
     .join('')
   return `<div class="hyp-evidence">
     <p class="card-sub hyp-basis">${basis}</p>
+    ${criterion}
     <table class="kv-table hyp-runs"><thead><tr><th>context</th><th>runs</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${rows}</tbody></table>
     <button type="button" class="ghost-btn" data-action="view-runs" data-id="${escapeHtml(h.id)}"${helpAttr('Open the Runs tab filtered to these matching runs (grouped by environment there).')}>View runs in Runs</button>
   </div>`
@@ -9801,6 +9954,7 @@ async function deleteRun(key) {
   await deleteRelatedRunRecords(key, run ? setupKeyForRun(run) : undefined)
   runsCache = runsCache.filter((r) => r.key !== key)
   runsCompareKeys.delete(key)
+  forgetRun(key)
   if (selectedRunKey === key) closeRunDetail()
   await renderRuns()
 }
@@ -9830,7 +9984,10 @@ async function deleteSelectedRuns() {
   }
   const removed = new Set(keys)
   runsCache = runsCache.filter((r) => !removed.has(r.key))
-  for (const k of keys) runsCompareKeys.delete(k)
+  for (const k of keys) {
+    runsCompareKeys.delete(k)
+    forgetRun(k)
+  }
   if (selectedRunKey && removed.has(selectedRunKey)) closeRunDetail()
   await renderRuns()
 }
@@ -11807,7 +11964,10 @@ async function renderSpeed() {
   ;[modelsCache, modelStatsCache] = await Promise.all([readModels(), readModelStats()])
   void checkModelStatsStale()
   const benchmarked = (modelsCache || []).filter(
-    (m) => m.deviceBenchmark && (m.deviceBenchmark.usPerStep || m.deviceBenchmark.errors),
+    (m) =>
+      m.deviceBenchmark &&
+      (m.deviceBenchmark.usPerStep || m.deviceBenchmark.errors) &&
+      window.Models.isSpeedEligibleModel(m, modelStatusOf(m)),
   )
   // One column per device that appears across all benchmarks (cpu/mps/cuda first, others after).
   const colSet = {}
@@ -12056,6 +12216,65 @@ async function onConsolidateModels() {
     }
   } finally {
     if (btn) btn.disabled = false
+  }
+}
+// Consolidate hypotheses: DETERMINISTIC (no LLM) — fold hypotheses sharing the same main parameters into one
+// wider hypothesis (unioning their sweeps). Applied server-side by the activity (repoints paper/model links +
+// per-paper weights, deletes absorbed records); we re-read + report. Conflicting manual verdicts are left.
+async function onConsolidateHypotheses() {
+  if (!embedded()) {
+    setStatusLine('hypotheses-status', 'Open inside the Overseer to consolidate hypotheses.', true)
+    return
+  }
+  const epoch = projectEpoch
+  setStatusLine('hypotheses-status', '')
+  const btn = byId('hypotheses-consolidate-btn')
+  if (btn) btn.disabled = true
+  try {
+    const result = await startOrEnqueue(
+      'consolidate-hypotheses',
+      trainerActivityParams({}),
+      'Consolidate hypotheses',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      const summary = await loadHypothesisConsolidationResult()
+      hypothesesCache = await readHypotheses()
+      papersCache = await readPapers()
+      await refreshHypothesisVerdicts(hypothesesCache)
+      if (activeTabId === 'hypotheses') await renderHypotheses()
+      const groups = (summary && summary.merged) || []
+      const absorbed = groups.reduce((n, g) => n + ((g.absorbedIds && g.absorbedIds.length) || 0), 0)
+      const conflicts = ((summary && summary.conflicts) || []).length
+      if (!groups.length && !conflicts) {
+        showToast('No similar hypotheses to consolidate.')
+      } else {
+        showToast(
+          `Consolidated ${absorbed} hypothes${absorbed === 1 ? 'is' : 'es'} into ${groups.length} wider one${groups.length === 1 ? '' : 's'}${conflicts ? ` — ${conflicts} left (conflicting manual verdicts)` : ''}.`,
+        )
+      }
+    } else {
+      setStatusLine('hypotheses-status', quickActivityFailureText(act, 'Consolidate'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch)
+      setStatusLine('hypotheses-status', 'Could not consolidate — please try again.', true)
+  } finally {
+    const b = byId('hypotheses-consolidate-btn')
+    if (b) b.disabled = false
+  }
+}
+async function loadHypothesisConsolidationResult() {
+  try {
+    const recs = await queryRecords(manifest.recordType + '-hypothesis-consolidation', 'latest')
+    return (recs && recs[0] && recs[0].content) || null
+  } catch {
+    return null
   }
 }
 // Read the latest `-consolidation` proposal, resolve each group's ids to live catalog models (dropping any
@@ -12401,6 +12620,8 @@ function setupModels() {
   if (scanBtn) scanBtn.addEventListener('click', onScanModels)
   const consolidateBtn = byId('models-consolidate-btn')
   if (consolidateBtn) consolidateBtn.addEventListener('click', onConsolidateModels)
+  const hypConsolidateBtn = byId('hypotheses-consolidate-btn')
+  if (hypConsolidateBtn) hypConsolidateBtn.addEventListener('click', onConsolidateHypotheses)
   const body = byId('models-body')
   if (!body) return
   // Track expand/collapse so it survives re-render (the `toggle` event doesn't bubble — capture it).
@@ -12617,13 +12838,7 @@ async function setDefaultDataset(id) {
 // Another saved dataset with the same name (case-insensitive) or the exact same settings already exists
 // — used to refuse a duplicate. `exceptId` skips the record being edited.
 function datasetDuplicateOf(name, settings, exceptId) {
-  const sig = datasetSettingsSignature(settings)
-  const lower = name.trim().toLowerCase()
-  return datasetsCache.find(
-    (d) =>
-      d.id !== exceptId &&
-      (d.name.trim().toLowerCase() === lower || datasetSettingsSignature(d.settings) === sig),
-  )
+  return window.Datasets.findDuplicateDataset(manifest, datasetsCache, name, settings, exceptId)
 }
 async function readDatasets() {
   if (!manifest) return []
@@ -12643,23 +12858,17 @@ async function deleteDatasetRecord(id) {
     key: id,
   })
 }
-// Canonical signature of a run's dataset (its dataset-lever values), for grouping + naming.
+// Dataset identity lives in viewer/datasets.js (pure + unit-tested); these bind the module-global manifest
+// + dataset list. Identity is keyed on the manifest's scope:'dataset' levers — so the manifest must be
+// fresh (see refreshProjectManifest) or a newly-scoped lever like walk_forward_window stays invisible.
 function runDatasetSignature(run) {
-  const cfg = (run && run.summary && run.summary.config) || {}
-  return datasetLeverEntries()
-    .map(([key]) => `${key}=${cfg[key] === undefined ? '' : String(cfg[key])}`)
-    .join(' · ')
+  return window.Datasets.runDatasetSignature(manifest, run)
 }
 function datasetSettingsSignature(settings) {
-  return datasetLeverEntries()
-    .map(([key]) => `${key}=${settings[key] === undefined ? '' : String(settings[key])}`)
-    .join(' · ')
+  return window.Datasets.datasetSettingsSignature(manifest, settings)
 }
-// The named dataset a run matches (by dataset-value signature), else 'Custom'.
 function runDatasetName(run) {
-  const sig = runDatasetSignature(run)
-  const match = allDatasets().find((d) => datasetSettingsSignature(d.settings) === sig)
-  return match ? match.name : 'Custom'
+  return window.Datasets.runDatasetName(manifest, allDatasets(), run)
 }
 function leverRange(spec) {
   const r = spec.range

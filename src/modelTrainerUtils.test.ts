@@ -56,7 +56,13 @@ import {
   buildConsolidateModelsSystemPrompt,
   buildConsolidateModelsUserContent,
   appliesWhenMap,
+  hypothesisConsolidationKey,
+  mergeHypothesisSpecs,
+  pickCanonicalHypothesis,
+  groupHypothesesForConsolidation,
+  planHypothesisConsolidation,
 } from './modelTrainerUtils.js'
+import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
 
 const hashByJson = (config: Record<string, unknown>): string => canonicalConfigString(config)
@@ -2502,5 +2508,220 @@ describe('appliesWhenMap', () => {
 
   it('tolerates a manifest with no levers', () => {
     expect(appliesWhenMap({ recordType: 'r' } as unknown as Parameters<typeof appliesWhenMap>[0])).toEqual({})
+  })
+})
+
+describe('hypothesisConsolidationKey', () => {
+  const k = (spec: any) => hypothesisConsolidationKey(spec)
+  it('two specs identical except sweep VALUES (one wider) share a key', () => {
+    expect(k({ fixed: { model_name: 'ppo' }, sweep: { lr: [0.1] } })).toBe(
+      k({ fixed: { model_name: 'ppo' }, sweep: { lr: [0.1, 0.2] } }),
+    )
+  })
+  it('different sweep-KEY SETS differ', () => {
+    expect(k({ fixed: { model_name: 'ppo' }, sweep: { lr: [0.1] } })).not.toBe(
+      k({ fixed: { model_name: 'ppo' }, sweep: { batch: [32] } }),
+    )
+  })
+  it('different fixed VALUES differ', () => {
+    expect(k({ fixed: { model_name: 'ppo' } })).not.toBe(k({ fixed: { model_name: 'reppo' } }))
+  })
+  it('compare same lever but different VALUES share a key; present vs absent differ', () => {
+    expect(k({ compare: { lever: 'model_name', values: ['a', 'b'] } })).toBe(
+      k({ compare: { lever: 'model_name', values: ['a', 'b', 'c'] } }),
+    )
+    expect(k({ compare: { lever: 'model_name', values: ['a', 'b'] } })).not.toBe(k({ fixed: {} }))
+  })
+  it('same bundles in DIFFERENT order differ (bundle order is semantic)', () => {
+    expect(k({ environments: [{ shorting: true }, { shorting: false }] })).not.toBe(
+      k({ environments: [{ shorting: false }, { shorting: true }] }),
+    )
+  })
+  it('seeds are NOT part of the key (wider seed set is the same hypothesis)', () => {
+    expect(k({ fixed: { model_name: 'ppo' }, seeds: [0] })).toBe(
+      k({ fixed: { model_name: 'ppo' }, seeds: [0, 1, 2] }),
+    )
+  })
+})
+
+describe('mergeHypothesisSpecs', () => {
+  it('unions sweep values (deduped + sorted), keeps fixed exact, drops configs/maxItems', () => {
+    const merged = mergeHypothesisSpecs([
+      { fixed: { model_name: 'ppo' }, sweep: { lr: [0.2, 0.1] }, maxItems: 5 },
+      { fixed: { model_name: 'ppo' }, sweep: { lr: [0.1, 0.3] }, configs: [{ config: {} }] },
+    ] as any)
+    expect(merged.fixed).toEqual({ model_name: 'ppo' })
+    expect(merged.sweep!.lr).toEqual([0.1, 0.2, 0.3])
+    expect('maxItems' in merged).toBe(false)
+    expect('configs' in merged).toBe(false)
+  })
+  it('is ORDER-INDEPENDENT: merging in either order yields the same id', () => {
+    const a = { fixed: { m: 'x' }, sweep: { lr: [0.1] }, seeds: [1] }
+    const b = { fixed: { m: 'x' }, sweep: { lr: [0.2] }, seeds: [0] }
+    expect(hashTrainingConfig(mergeHypothesisSpecs([a, b] as any) as any)).toBe(
+      hashTrainingConfig(mergeHypothesisSpecs([b, a] as any) as any),
+    )
+  })
+  it('unions compare values keeping the lever; unions seeds ascending', () => {
+    const merged = mergeHypothesisSpecs([
+      { compare: { lever: 'model_name', values: ['b', 'a'] }, seeds: [2] },
+      { compare: { lever: 'model_name', values: ['a', 'c'] }, seeds: [0, 1] },
+    ] as any)
+    expect(merged.compare!.lever).toBe('model_name')
+    expect(merged.compare!.values).toEqual(['a', 'b', 'c'])
+    expect(merged.seeds).toEqual([0, 1, 2])
+  })
+  it('idempotent fixed point: merging the merged spec again is a no-op (same id)', () => {
+    const merged = mergeHypothesisSpecs([
+      { fixed: { m: 'x' }, sweep: { lr: [0.1] } },
+      { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+    ] as any)
+    expect(hashTrainingConfig(mergeHypothesisSpecs([merged]) as any)).toBe(
+      hashTrainingConfig(merged as any),
+    )
+  })
+})
+
+describe('pickCanonicalHypothesis', () => {
+  const h = (o: any) => ({ id: o.id, spec: {}, status: 'untested', verdictSource: 'auto', source: 'llm', ...o })
+  it('a single manual member wins', () => {
+    const r = pickCanonicalHypothesis([
+      h({ id: 'a', source: 'human' }),
+      h({ id: 'b', verdictSource: 'manual', status: 'proven' }),
+    ] as any)
+    expect(r.conflict).toBe(false)
+    expect(r.canonical!.id).toBe('b')
+  })
+  it('no manual: source priority human>paper>llm, then earliest createdAt', () => {
+    const r = pickCanonicalHypothesis([
+      h({ id: 'a', source: 'llm', createdAt: '2026-01-01' }),
+      h({ id: 'b', source: 'paper', createdAt: '2026-02-01' }),
+      h({ id: 'c', source: 'human', createdAt: '2026-03-01' }),
+    ] as any)
+    expect(r.canonical!.id).toBe('c')
+  })
+  it('conflicting manual statuses -> conflict signal, no silent pick', () => {
+    const r = pickCanonicalHypothesis([
+      h({ id: 'a', verdictSource: 'manual', status: 'proven' }),
+      h({ id: 'b', verdictSource: 'manual', status: 'disproved' }),
+    ] as any)
+    expect(r.conflict).toBe(true)
+    expect(r.canonical).toBeNull()
+  })
+})
+
+describe('groupHypothesesForConsolidation', () => {
+  const h = (id: string, spec: any, o: any = {}) => ({ id, spec, status: 'untested', verdictSource: 'auto', source: 'llm', ...o })
+  it('groups genuine widening pairs; drops singletons + dismissed + already-shared-id', () => {
+    const hyps = [
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+      h('lonely', { fixed: { m: 'y' } }),
+      h('d1', { fixed: { m: 'z' }, sweep: { lr: [0.1] } }, { dismissed: true }),
+      h('d2', { fixed: { m: 'z' }, sweep: { lr: [0.2] } }, { dismissed: true }),
+    ]
+    const groups = groupHypothesesForConsolidation(hyps as any, hashTrainingConfig)
+    expect(groups.length).toBe(1)
+    expect(new Set(groups[0].members.map((m: any) => m.id))).toEqual(new Set(['h1', 'h2']))
+  })
+  it('defers a group while a member has an in-flight (running) campaign', () => {
+    const hyps = [
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { campaign: { status: 'running' } }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+    ]
+    expect(groupHypothesesForConsolidation(hyps as any, hashTrainingConfig).length).toBe(0)
+  })
+})
+
+describe('planHypothesisConsolidation', () => {
+  const h = (id: string, spec: any, o: any = {}) => ({
+    id, spec, title: id, rationale: '', status: 'untested', verdictSource: 'auto',
+    source: 'llm', createdAt: '2026-01-01', updatedAt: '2026-01-01', paperIds: [], ...o,
+  })
+  const plan = (members: any[], papers: any[] = [], models: any[] = []) =>
+    planHypothesisConsolidation({ members } as any, papers, models, '2026-06-30T00:00:00Z', hashTrainingConfig)
+
+  it('builds a union record at the merged-spec id, lists the others as deleted, unions paperIds', () => {
+    const p = plan([
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { paperIds: ['pA'] }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { paperIds: ['pB'] }),
+    ])
+    expect(p).not.toBeNull()
+    const newId = hashTrainingConfig(mergeHypothesisSpecs([
+      { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+    ]) as any)
+    expect(p!.unionRecord.id).toBe(newId)
+    expect(p!.unionRecord.spec.sweep.lr).toEqual([0.1, 0.2])
+    expect(new Set(p!.unionRecord.paperIds)).toEqual(new Set(['pA', 'pB']))
+    expect(new Set(p!.deletedIds)).toEqual(new Set(['h1', 'h2']))
+    expect(p!.unionRecord.verdictSource).toBe('auto')
+    expect('evidence' in p!.unionRecord).toBe(false)
+    expect('transitions' in p!.unionRecord).toBe(false)
+  })
+
+  it('repoints paper.hypothesisIds and PRESERVES the weight onto the survivor (max on collision)', () => {
+    const paper = { id: 'pA', hypothesisIds: ['h1', 'h2', 'other'], hypothesisWeights: { h1: 2, h2: 5, other: 1 } }
+    const p = plan(
+      [h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { paperIds: ['pA'] }),
+       h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { paperIds: ['pA'] })],
+      [paper],
+    )
+    expect(p!.changedPapers.length).toBe(1)
+    const cp = p!.changedPapers[0]
+    const newId = p!.unionRecord.id
+    expect(cp.hypothesisIds).toContain(newId)
+    expect(cp.hypothesisIds).toContain('other')
+    expect(cp.hypothesisIds).not.toContain('h1')
+    // weight PRESERVED: max(2,5)=5 moved to the survivor, absorbed keys gone
+    expect(cp.hypothesisWeights[newId]).toBe(5)
+    expect('h1' in cp.hypothesisWeights).toBe(false)
+    expect('h2' in cp.hypothesisWeights).toBe(false)
+    expect(cp.hypothesisWeights.other).toBe(1)
+  })
+
+  it('repoints model + flavor hypothesisIds', () => {
+    const model = { id: 'm1', hypothesisIds: ['h1'], flavors: [{ key: 'f', hypothesisIds: ['h2'] }] }
+    const p = plan(
+      [h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }), h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } })],
+      [], [model],
+    )
+    expect(p!.changedModels.length).toBe(1)
+    const newId = p!.unionRecord.id
+    expect(p!.changedModels[0].hypothesisIds).toEqual([newId])
+    expect(p!.changedModels[0].flavors[0].hypothesisIds).toEqual([newId])
+  })
+
+  it('carries a manual canonical verdict onto the union but NO evidence/transitions', () => {
+    const p = plan([
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { verdictSource: 'manual', status: 'disproved', verdictNote: 'fails OOS', evidence: { matchedKeys: ['r1'] }, transitions: [{ at: 't', from: 'untested', to: 'disproved' }] }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+    ])
+    expect(p!.unionRecord.verdictSource).toBe('manual')
+    expect(p!.unionRecord.status).toBe('disproved')
+    expect(p!.unionRecord.verdictNote).toBe('fails OOS')
+    expect('evidence' in p!.unionRecord).toBe(false)
+    expect('transitions' in p!.unionRecord).toBe(false)
+  })
+
+  it('returns a conflict skip when members carry conflicting manual verdicts', () => {
+    const p = plan([
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { verdictSource: 'manual', status: 'proven' }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { verdictSource: 'manual', status: 'disproved' }),
+    ])
+    expect(p && (p as any).skipped).toBe('conflict')
+  })
+
+  it('union-id collision: merges INTO an existing member that already equals the union (not deleted)', () => {
+    const unionSpec = mergeHypothesisSpecs([
+      { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+    ])
+    const unionId = hashTrainingConfig(unionSpec as any)
+    const p = plan([
+      h(unionId, unionSpec, { paperIds: ['pA'] }),
+      h('narrow', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { paperIds: ['pB'] }),
+    ])
+    expect(p!.unionRecord.id).toBe(unionId)
+    expect(p!.deletedIds).toEqual(['narrow'])
+    expect(new Set(p!.unionRecord.paperIds)).toEqual(new Set(['pA', 'pB']))
   })
 })

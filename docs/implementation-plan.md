@@ -95,8 +95,6 @@ Still PENDING (the rest of the code/paper model catalog is already exposed):
   evaluator per asset → softmax allocation); it cannot be faithful in the single-asset, discrete-action env
   (it degenerates to a position sizer). Build the **Wave-3 multi-asset / portfolio env first**, then EIIE
   (and cross-sectional long-short) become possible. Catalogued `deferred`.
-- **GRU recurrent core + SSM (S4D).** A custom `RecurrentActorCriticPolicy` subclass (recurrent state in the
-  policy, not a features-extractor; expected ~wash vs LSTM) and an SSM falsification arm. Both low value.
 - **Non-RL `model_type` paths still unexposed:** `technical` (`TechnicalStrategyModel`) and regression `mlp`
   (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
   existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).

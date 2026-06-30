@@ -48,6 +48,11 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
+            'ipt src="datasets.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
             'ipt src="app.js' +
             v +
             '" defer></scr' +
@@ -279,6 +284,14 @@
                     <span>Min runs</span>
                     <input type="number" id="hypothesis-min-runs" min="1" step="1" />
                   </label>
+                  <button
+                    type="button"
+                    id="hypotheses-consolidate-btn"
+                    class="ghost-btn"
+                    title="Fold hypotheses that share the same main parameters into one wider hypothesis (unioning their sweeps) — no LLM, deterministic. Repoints paper/model links and per-paper weights; conflicting manual verdicts are left untouched."
+                  >
+                    Consolidate
+                  </button>
                   <button
                     type="button"
                     id="propose-btn"

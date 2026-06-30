@@ -835,3 +835,21 @@ describe('device benchmark view helpers', () => {
     expect(M.deviceBenchmarkView(null)).toBeNull()
   })
 })
+
+describe('isSpeedEligibleModel (only implemented, runnable models belong in the Speed table)', () => {
+  it('includes implemented RL / supervised / baseline models', () => {
+    expect(M.isSpeedEligibleModel({ category: 'rl' }, 'implemented')).toBe(true)
+    expect(M.isSpeedEligibleModel({ category: 'supervised' }, 'failing')).toBe(true)
+    expect(M.isSpeedEligibleModel({ category: 'baseline' }, 'needs-improvement')).toBe(true)
+  })
+  it('excludes components (no runs/timings of their own)', () => {
+    expect(M.isSpeedEligibleModel({ category: 'component' }, 'implemented')).toBe(false)
+  })
+  it('excludes not-yet-implemented models (proposed / deferred) — they cannot run', () => {
+    expect(M.isSpeedEligibleModel({ category: 'rl' }, 'proposed')).toBe(false)
+    expect(M.isSpeedEligibleModel({ category: 'baseline' }, 'deferred')).toBe(false)
+  })
+  it('is null-safe', () => {
+    expect(M.isSpeedEligibleModel(null, 'implemented')).toBe(false)
+  })
+})

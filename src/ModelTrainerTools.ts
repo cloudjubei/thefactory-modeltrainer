@@ -18,6 +18,9 @@ import type {
   AnalyzePaperModelsParams,
   ConsolidateModelsParams,
   ConsolidateModelsResult,
+  ConsolidateHypothesesParams,
+  ConsolidateHypothesesResult,
+  ConsolidatedHypothesisGroup,
   AnalyzePaperModelsResult,
   CalibrateTrainingParams,
   EvaluateTrainingRunParams,
@@ -111,6 +114,8 @@ import {
   buildConsolidateModelsSystemPrompt,
   buildConsolidateModelsUserContent,
   coerceConsolidationGroups,
+  groupHypothesesForConsolidation,
+  planHypothesisConsolidation,
   coerceHypothesisItems,
   coercePaperDraft,
   coerceScannedModels,
@@ -1182,6 +1187,21 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       matched: linkedExistingIds.length,
       created: newHypotheses.length,
     })
+    // Auto-consolidate the suggestion's OWN near-duplicates: if a suggested spec shares the same main
+    // parameters as an existing hypothesis (differing only in sweep breadth), fold them into one wider
+    // hypothesis instead of leaving a duplicate. Scoped to THIS suggestion's hypotheses so it never silently
+    // merges unrelated registry entries.
+    if (linkedIds.size) {
+      await applyHypothesisConsolidation({
+        scope: params.scope,
+        projectRoot: params.projectRoot,
+        manifestRelPath: params.manifestRelPath,
+        manifest,
+        restrictToIds: [...linkedIds],
+        onRecordWritten: params.onRecordWritten,
+      })
+    }
+
     return {
       recordType,
       paper: updatedPaper,
@@ -1811,6 +1831,141 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, groups, modelCount: models.length, proposedBy, proposedAt }
   }
 
+  // Deterministically fold hypotheses that share the same MAIN PARAMETERS (and differ only in sweep breadth)
+  // into one wider hypothesis — repointing paper/model links + per-paper weights, deleting the absorbed
+  // records. Shared by the manual "Consolidate" action and the auto-pass after suggest (the latter scoped via
+  // `restrictToIds`). Pure grouping/planning in modelTrainerUtils; this performs the ordered writes.
+  async function applyHypothesisConsolidation(
+    params: ConsolidateHypothesesParams,
+  ): Promise<ConsolidateHypothesesResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const hypothesisType = `${recordType}-hypothesis`
+    const paperType = `${recordType}-paper`
+    const modelType = `${recordType}-model`
+    const consolidatedAt = now()
+
+    const hyps = (await deps.storage.listRecords({ scope: params.scope, type: hypothesisType }))
+      .map((r) => r.content as unknown as TrainingHypothesis)
+      .filter((h) => h && typeof h.id === 'string')
+    const hypsById = new Map(hyps.map((h) => [h.id, h]))
+    const papersById = new Map(
+      (await deps.storage.listRecords({ scope: params.scope, type: paperType }))
+        .map((r) => r.content as unknown as TrainingPaperRecord)
+        .filter((p) => p && typeof p.id === 'string')
+        .map((p) => [p.id, p] as const),
+    )
+    const modelsById = new Map(
+      (await deps.storage.listRecords({ scope: params.scope, type: modelType }))
+        .map((r) => r.content as unknown as TrainingModel)
+        .filter((m) => m && typeof m.id === 'string')
+        .map((m) => [m.id, m] as const),
+    )
+
+    const restrict = params.restrictToIds ? new Set(params.restrictToIds) : null
+    const groups = groupHypothesesForConsolidation(hyps, hashTrainingConfig).filter(
+      (g) => !restrict || g.members.some((m) => restrict.has(m.id)),
+    )
+
+    const merged: ConsolidatedHypothesisGroup[] = []
+    const conflicts: { ids: string[] }[] = []
+    const changedHyps = new Map<string, TrainingHypothesis>()
+    const changedPapers = new Map<string, TrainingPaperRecord>()
+    const changedModels = new Map<string, TrainingModel>()
+    const toDelete = new Set<string>()
+
+    for (const group of groups) {
+      const members = group.members
+        .map((m) => hypsById.get(m.id))
+        .filter((m): m is TrainingHypothesis => !!m)
+      if (members.length < 2) continue
+      const plan = planHypothesisConsolidation(
+        { members },
+        [...papersById.values()],
+        [...modelsById.values()],
+        consolidatedAt,
+        hashTrainingConfig,
+      )
+      if (!plan) continue
+      if ('skipped' in plan) {
+        conflicts.push({ ids: plan.members })
+        continue
+      }
+      // Apply to the in-memory state so a later group sees the already-repointed papers/models.
+      hypsById.set(plan.unionRecord.id, plan.unionRecord)
+      changedHyps.set(plan.unionRecord.id, plan.unionRecord)
+      toDelete.delete(plan.unionRecord.id)
+      for (const p of plan.changedPapers) {
+        papersById.set(p.id, p)
+        changedPapers.set(p.id, p)
+      }
+      for (const m of plan.changedModels) {
+        modelsById.set(m.id, m)
+        changedModels.set(m.id, m)
+      }
+      for (const id of plan.deletedIds) {
+        hypsById.delete(id)
+        changedHyps.delete(id)
+        toDelete.add(id)
+      }
+      merged.push({
+        mergedId: plan.unionRecord.id,
+        absorbedIds: plan.deletedIds,
+        title: plan.unionRecord.title,
+      })
+    }
+
+    // Write papers + models (the repoints) FIRST, then the union hypotheses, then DELETE absorbed records
+    // last — so a mid-sequence failure never leaves a paper/model pointing at a deleted hypothesis.
+    for (const p of changedPapers.values()) {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: paperType,
+        key: p.id,
+        content: p as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(paperType, p.id)
+    }
+    for (const m of changedModels.values()) {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: modelType,
+        key: m.id,
+        content: m as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(modelType, m.id)
+    }
+    for (const h of changedHyps.values()) {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: hypothesisType,
+        key: h.id,
+        content: h as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(hypothesisType, h.id)
+    }
+    for (const id of toDelete) {
+      if (changedHyps.has(id)) continue
+      await deps.storage.deleteRecord({ scope: params.scope, type: hypothesisType, key: id })
+      params.onRecordWritten?.(hypothesisType, id)
+    }
+
+    logger?.info('consolidated hypotheses', {
+      recordType,
+      merged: merged.length,
+      absorbed: merged.reduce((n, g) => n + g.absorbedIds.length, 0),
+      conflicts: conflicts.length,
+    })
+    return { recordType, merged, conflicts, hypothesisCount: hyps.length, consolidatedAt }
+  }
+
+  async function consolidateHypotheses(
+    params: ConsolidateHypothesesParams,
+  ): Promise<ConsolidateHypothesesResult> {
+    return applyHypothesisConsolidation(params)
+  }
+
   async function xaiNarrate(params: XaiNarrateParams): Promise<XaiNarrateResult> {
     const executor = requireInferenceExecutor()
     const manifest =
@@ -2122,6 +2277,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     weighPaperHypotheses,
     scanProjectModels,
     consolidateModels,
+    consolidateHypotheses,
     benchmarkModelDevice,
     analyzePaperModels,
     xaiNarrate,

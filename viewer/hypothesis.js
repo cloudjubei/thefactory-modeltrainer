@@ -173,6 +173,35 @@
     return 'untested'
   }
 
+  // Plain-language success/failure criterion for a context-spanning (environments / datasets / compare)
+  // hypothesis — mirrors compareContexts EXACTLY, so the card states precisely how the verdict is decided
+  // instead of just "no matching runs yet". opts: { objectiveName, direction:'min'|'max', minRuns }.
+  function comparisonCriterion(spec, comparison, opts) {
+    const o = opts || {}
+    const objName = o.objectiveName || 'the objective'
+    const minRuns = o.minRuns || 3
+    const cells = contextCells(spec || {})
+    const n = cells.length
+    const kind = (comparison && comparison.kind) || 'beats-baseline'
+    const cellLabel = (cell) =>
+      Object.keys(cell || {})
+        .map((k) => `${k}=${cell[k]}`)
+        .join(', ') || 'the baseline'
+    const gate = `Each of the ${n} contexts is run SEPARATELY (never pooled), and it stays UNTESTED until every context has at least ${minRuns} runs reporting ${objName}.`
+    if (kind === 'invariant') {
+      const tol = comparison && comparison.tolerance != null ? comparison.tolerance : 0.1
+      return `${gate} PROVEN if ${objName} is INVARIANT across them — the spread (max−min, relative to the baseline) is ≤ ${tol}; DISPROVED if it exceeds ${tol}.`
+    }
+    if (kind === 'differs') {
+      const tol = comparison && comparison.tolerance != null ? comparison.tolerance : 0.1
+      return `${gate} PROVEN if ${objName} DIFFERS across them — the spread (max−min, relative to the baseline) exceeds ${tol}; DISPROVED if it is within ${tol}.`
+    }
+    const baselineIndex = (comparison && comparison.baselineIndex) || 0
+    const baseLabel = cellLabel(cells[baselineIndex])
+    const dir = o.direction === 'min' ? 'lowest' : 'highest'
+    return `${gate} PROVEN if the ${dir} ${objName} among the other context${n - 1 === 1 ? '' : 's'} beats the baseline (${baseLabel}); DISPROVED if none beat it.`
+  }
+
   // The auto-verdict for a hypothesis: a context-spanning spec reads its cross-context comparison; a
   // single-context spec uses the pooled beats-hold rule.
   function autoVerdictForHypothesis(h, runs, direction, minRuns) {
@@ -342,6 +371,7 @@
     groupRunsByContext: groupRunsByContext,
     measuredByContext: measuredByContext,
     compareContexts: compareContexts,
+    comparisonCriterion: comparisonCriterion,
     effectiveVerdict: effectiveVerdict,
     evaluateHypothesis: evaluateHypothesis,
     rollupPaperVerdict: rollupPaperVerdict,

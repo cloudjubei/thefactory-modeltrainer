@@ -75,5 +75,15 @@
     // Open the docked chat sidebar seeded with a topic + first message, and
     // auto-send the seed. Used by "Ask AI for help" on a failed run.
     discussTopic: (payload) => call('chat.discuss', payload, 30000),
+    // Tell the host which model kinds this app's background activities can run on, so the activity
+    // model chip can disable unsupported options (e.g. CLI for API-only judge/propose/analyze).
+    reportCapabilities: (payload) => call('app.capabilities', payload),
+  }
+
+  // The trainer's LLM activities (judge/propose/analyze-paper/consolidate/xai-narrate/…) run API-only
+  // (`requiresApi`). Declare it once on load so the host's activity chip disables the CLI toggle and
+  // never sends a CLI model for this app. Fire-and-forget — a failure just leaves CLI enabled.
+  if (window.OverseerBridge.embedded) {
+    window.OverseerBridge.reportCapabilities({ activitiesApiOnly: true }).catch(function () {})
   }
 })()

@@ -12,6 +12,7 @@ import type {
   HypothesisComparisonKind,
   ModelCategory,
   ModelDeviceBenchmark,
+  ModelFlavor,
   PlannedTrainingItem,
   ProposedModel,
   RunXaiDigest,
@@ -19,6 +20,8 @@ import type {
   TrainerLeverSpec,
   TrainerManifest,
   TrainerMigrationRule,
+  TrainingHypothesis,
+  TrainingModel,
   TrainingPaperRecord,
   TrainingRunSummary,
 } from './modelTrainerTypes.js'
@@ -318,6 +321,264 @@ export function canonicalConfigString(value: unknown): string {
     return `{${entries.join(',')}}`
   }
   return JSON.stringify(value)
+}
+
+// ── Hypothesis consolidation ──────────────────────────────────────────────────────────────────────────
+// Two hypotheses are the "same" when they share the same MAIN PARAMETERS and differ only in how WIDE their
+// sweep is — so an LLM re-suggesting an existing setup (or a wider sweep of it) folds into the original
+// instead of spawning a near-duplicate. The id IS the spec hash, so "extend the sweep" means a new id: the
+// group merges to one wider hypothesis and the others are ABSORBED (links + per-paper weights repointed,
+// records deleted). Deterministic — no LLM, unlike model consolidation. Used by both the manual
+// "Consolidate" action and the auto-pass after suggest.
+
+type HypothesisLike = Pick<
+  TrainingHypothesis,
+  | 'id'
+  | 'spec'
+  | 'title'
+  | 'rationale'
+  | 'status'
+  | 'verdictSource'
+  | 'verdictNote'
+  | 'source'
+  | 'comparison'
+  | 'claimedMetrics'
+  | 'proposedBy'
+  | 'paperIds'
+  | 'createdAt'
+  | 'dismissed'
+  | 'campaign'
+>
+
+/** Union a list of lever VALUES (which may be objects/arrays): dedupe by canonical string, sort stably. */
+function unionLeverValues(values: unknown[]): unknown[] {
+  const seen = new Map<string, unknown>()
+  for (const v of values) {
+    const k = canonicalConfigString(v)
+    if (!seen.has(k)) seen.set(k, v)
+  }
+  return [...seen.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, v]) => v)
+}
+
+/**
+ * The consolidation KEY: the spec's identity IGNORING sweep BREADTH — its fixed lever values, which levers
+ * are swept (keys only, so a wider sweep collides), the compare lever, and the env/dataset bundles (order
+ * preserved — bundle order is semantic). Seeds, sweep/compare VALUES, configs and maxItems are excluded.
+ */
+export function hypothesisConsolidationKey(spec: ExperimentSpec | undefined): string {
+  const s = spec || {}
+  return canonicalConfigString({
+    fixed: s.fixed ?? {},
+    sweepLevers: Object.keys(s.sweep ?? {}).sort(),
+    compareLever: s.compare?.lever ?? null,
+    environments: s.environments ?? [],
+    datasets: s.datasets ?? [],
+  })
+}
+
+/**
+ * Merge a group of specs that share a consolidation key into ONE wider spec: fixed/environments/datasets
+ * kept verbatim (identical by the key), sweep values / compare values / seeds UNIONED (deduped + sorted, so
+ * the merged spec hashes deterministically regardless of member order — idempotent). configs/maxItems are
+ * dropped (not part of a hypothesis's identity).
+ */
+export function mergeHypothesisSpecs(specs: ExperimentSpec[]): ExperimentSpec {
+  const first = specs[0] || {}
+  const out: ExperimentSpec = {}
+  if (first.fixed && Object.keys(first.fixed).length) out.fixed = first.fixed
+  const sweepLevers = new Set<string>()
+  for (const s of specs) for (const k of Object.keys(s.sweep ?? {})) sweepLevers.add(k)
+  if (sweepLevers.size) {
+    const sweep: Record<string, unknown[]> = {}
+    for (const lever of [...sweepLevers].sort())
+      sweep[lever] = unionLeverValues(specs.flatMap((s) => s.sweep?.[lever] ?? []))
+    out.sweep = sweep
+  }
+  const compareLever = first.compare?.lever
+  if (compareLever)
+    out.compare = {
+      lever: compareLever,
+      values: unionLeverValues(specs.flatMap((s) => s.compare?.values ?? [])),
+    }
+  if (first.environments && first.environments.length) out.environments = first.environments
+  if (first.datasets && first.datasets.length) out.datasets = first.datasets
+  const seeds = [...new Set(specs.flatMap((s) => s.seeds ?? []))].sort((a, b) => a - b)
+  if (seeds.length) out.seeds = seeds
+  return out
+}
+
+const HYP_SOURCE_PRIORITY: Record<string, number> = { human: 0, paper: 1, llm: 2, 'migrated-model': 3 }
+
+function rankHypothesesForCanonical<T extends HypothesisLike>(members: T[]): T[] {
+  return [...members].sort((a, b) => {
+    const pa = HYP_SOURCE_PRIORITY[a.source] ?? 9
+    const pb = HYP_SOURCE_PRIORITY[b.source] ?? 9
+    if (pa !== pb) return pa - pb
+    const ta = a.createdAt || ''
+    const tb = b.createdAt || ''
+    if (ta !== tb) return ta < tb ? -1 : 1
+    return a.id < b.id ? -1 : 1
+  })
+}
+
+/**
+ * Which member's metadata (title/rationale/verdict pin/comparison…) the merged hypothesis inherits — the id
+ * is always the merged-spec hash, so this governs metadata ONLY. A lone manual-verdict member wins; else
+ * rank by source (human > paper > llm > migrated-model) then earliest createdAt. CONFLICTING manual
+ * verdicts (proven vs disproved) return `conflict` so the caller skips the group rather than silently
+ * pinning one (a manual verdict is returned verbatim by the viewer — a wrong inherited pin is invisible).
+ */
+export function pickCanonicalHypothesis<T extends HypothesisLike>(
+  members: T[],
+): { canonical: T | null; conflict: boolean } {
+  const manual = members.filter((m) => m.verdictSource === 'manual')
+  if (manual.length === 1) return { canonical: manual[0], conflict: false }
+  if (manual.length > 1) {
+    if (new Set(manual.map((m) => m.status)).size > 1) return { canonical: null, conflict: true }
+    return { canonical: rankHypothesesForCanonical(manual)[0], conflict: false }
+  }
+  return { canonical: rankHypothesesForCanonical(members)[0] ?? null, conflict: false }
+}
+
+/**
+ * Bucket hypotheses by consolidation key into the groups worth merging: skips dismissed members, singleton
+ * buckets, and buckets whose members already share a single id (already consolidated — so a re-run is a
+ * no-op and the auto-pass cannot loop).
+ */
+export function groupHypothesesForConsolidation<T extends HypothesisLike>(
+  hypotheses: T[],
+  _hashFn?: (config: Record<string, unknown>) => string,
+): { key: string; members: T[] }[] {
+  const buckets = new Map<string, T[]>()
+  for (const h of hypotheses) {
+    if (h.dismissed) continue
+    const key = hypothesisConsolidationKey(h.spec)
+    const bucket = buckets.get(key)
+    if (bucket) bucket.push(h)
+    else buckets.set(key, [h])
+  }
+  const groups: { key: string; members: T[] }[] = []
+  for (const [key, members] of buckets) {
+    if (members.length < 2) continue
+    if (new Set(members.map((m) => m.id)).size < 2) continue
+    // Defer a group while any member has an in-flight campaign — absorbing (deleting) it would orphan the
+    // campaign's pending results write. It consolidates on the next pass once the campaign settles.
+    if (members.some((m) => m.campaign && (m.campaign.status === 'running' || m.campaign.status === 'queued')))
+      continue
+    groups.push({ key, members })
+  }
+  return groups
+}
+
+export interface HypothesisConsolidationPlan {
+  unionRecord: TrainingHypothesis
+  changedPapers: TrainingPaperRecord[]
+  changedModels: TrainingModel[]
+  deletedIds: string[]
+  mergedFrom: string[]
+}
+
+function unionStrings(...lists: (string[] | undefined)[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const list of lists)
+    for (const s of list || [])
+      if (s && !seen.has(s)) {
+        seen.add(s)
+        out.push(s)
+      }
+  return out
+}
+
+/**
+ * Plan one group's consolidation: the union hypothesis (at the merged-spec id, inheriting the canonical's
+ * metadata, with NO evidence/transitions so the wider verdict recomputes cleanly), plus every record that
+ * must be repointed off the absorbed ids — papers (`hypothesisIds` + the per-paper `hypothesisWeights` map,
+ * max on collision so the user's stated importance is PRESERVED onto the survivor) and models/flavors
+ * (`hypothesisIds`). Returns `{ skipped: 'conflict' }` for conflicting manual verdicts, or `null` when the
+ * group is already consolidated. The caller performs the writes (papers/models first, delete absorbed last).
+ */
+export function planHypothesisConsolidation(
+  group: { members: HypothesisLike[] },
+  papers: TrainingPaperRecord[],
+  models: TrainingModel[],
+  nowIso: string,
+  hashFn: (config: Record<string, unknown>) => string,
+): HypothesisConsolidationPlan | { skipped: 'conflict'; members: string[] } | null {
+  const members = group.members
+  const { canonical, conflict } = pickCanonicalHypothesis(members)
+  if (conflict || !canonical) return { skipped: 'conflict', members: members.map((m) => m.id) }
+  const mergedSpec = mergeHypothesisSpecs(members.map((m) => m.spec || {}))
+  const newId = hashFn(mergedSpec as unknown as Record<string, unknown>)
+  const absorbed = members.filter((m) => m.id !== newId)
+  if (!absorbed.length) return null // already consolidated to one id
+  const absorbedIds = new Set(absorbed.map((m) => m.id))
+  const existingUnion = members.find((m) => m.id === newId)
+  const base = existingUnion || canonical
+  const earliest = members
+    .map((m) => m.createdAt)
+    .filter(Boolean)
+    .sort()[0]
+  const keepManual = canonical.verdictSource === 'manual'
+  const unionRecord: TrainingHypothesis = {
+    id: newId,
+    title: (base.title as string) || 'Hypothesis',
+    rationale: (base.rationale as string) || '',
+    spec: mergedSpec,
+    status: keepManual ? canonical.status : 'untested',
+    verdictSource: keepManual ? 'manual' : 'auto',
+    source: (base.source as TrainingHypothesis['source']) || 'llm',
+    paperIds: unionStrings(...members.map((m) => m.paperIds)),
+    createdAt: earliest || nowIso,
+    updatedAt: nowIso,
+  }
+  if (keepManual && canonical.verdictNote) unionRecord.verdictNote = canonical.verdictNote
+  if (canonical.comparison) unionRecord.comparison = canonical.comparison
+  if (canonical.claimedMetrics) unionRecord.claimedMetrics = canonical.claimedMetrics
+  if (base.proposedBy) unionRecord.proposedBy = base.proposedBy as string
+
+  const changedPapers: TrainingPaperRecord[] = []
+  for (const p of papers) {
+    const ids = p.hypothesisIds || []
+    if (!ids.some((id) => absorbedIds.has(id))) continue
+    const nextIds = unionStrings(ids.map((id) => (absorbedIds.has(id) ? newId : id)))
+    const weights = { ...(p.hypothesisWeights || {}) }
+    for (const aid of absorbedIds) {
+      if (!(aid in weights)) continue
+      const w = weights[aid]
+      weights[newId] = newId in weights ? Math.max(weights[newId], w) : w
+      delete weights[aid]
+    }
+    const next: TrainingPaperRecord = { ...p, hypothesisIds: nextIds, updatedAt: nowIso }
+    if (Object.keys(weights).length) next.hypothesisWeights = weights
+    else delete next.hypothesisWeights
+    changedPapers.push(next)
+  }
+
+  const repoint = (ids: string[] | undefined): { ids: string[]; touched: boolean } => {
+    const list = ids || []
+    if (!list.some((id) => absorbedIds.has(id))) return { ids: list, touched: false }
+    return { ids: unionStrings(list.map((id) => (absorbedIds.has(id) ? newId : id))), touched: true }
+  }
+  const changedModels: TrainingModel[] = []
+  for (const m of models) {
+    const top = repoint(m.hypothesisIds)
+    let touched = top.touched
+    const flavors = (m.flavors || []).map((f: ModelFlavor) => {
+      const r = repoint(f.hypothesisIds)
+      if (r.touched) touched = true
+      return r.touched ? { ...f, hypothesisIds: r.ids } : f
+    })
+    if (touched) changedModels.push({ ...m, hypothesisIds: top.ids, flavors, updatedAt: nowIso })
+  }
+
+  return {
+    unionRecord,
+    changedPapers,
+    changedModels,
+    deletedIds: [...absorbedIds],
+    mergedFrom: members.map((m) => m.id),
+  }
 }
 
 /**

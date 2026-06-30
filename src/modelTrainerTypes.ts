@@ -1745,6 +1745,39 @@ export interface ConsolidateModelsResult {
   proposedAt: string
 }
 
+export interface ConsolidateHypothesesParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /**
+   * When set, only consolidate GROUPS that contain at least one of these hypothesis ids — used by the
+   * auto-pass after `suggestPaperHypotheses` so suggesting on one paper only folds the suggestion's own
+   * near-duplicates, never the whole registry. Omit for the manual "Consolidate" action (all groups).
+   */
+  restrictToIds?: string[]
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+/** One applied hypothesis merge: the surviving (widened) hypothesis + the absorbed ids that were deleted. */
+export interface ConsolidatedHypothesisGroup {
+  mergedId: string
+  absorbedIds: string[]
+  title: string
+}
+
+export interface ConsolidateHypothesesResult {
+  recordType: string
+  /** Groups that were merged (each folds `absorbedIds` into `mergedId`, unioning their sweeps). */
+  merged: ConsolidatedHypothesisGroup[]
+  /** Groups skipped because members carry CONFLICTING manual verdicts — the user must resolve them first. */
+  conflicts: { ids: string[] }[]
+  /** How many non-dismissed hypotheses were considered. */
+  hypothesisCount: number
+  consolidatedAt: string
+}
+
 export interface XaiNarrateParams {
   scope: string
   projectRoot: string
@@ -2005,6 +2038,8 @@ export interface ModelTrainerTools {
   analyzePaperModels(params: AnalyzePaperModelsParams): Promise<AnalyzePaperModelsResult>
   /** LLM pass over the catalog that proposes groups of near-duplicate models to merge into one canonical (the rest become flavors). Proposes only — accepting a group is a separate viewer action. */
   consolidateModels(params: ConsolidateModelsParams): Promise<ConsolidateModelsResult>
+  /** DETERMINISTIC (no LLM) pass that folds hypotheses sharing the same main parameters into one wider hypothesis (unioning their sweeps), repointing paper/model links + per-paper weights and deleting the absorbed records. Applied directly. */
+  consolidateHypotheses(params: ConsolidateHypothesesParams): Promise<ConsolidateHypothesesResult>
   /**
    * Synthesise the campaign's DETERMINISTIC xAI analysis (lever importances, the surrogate ablation
    * path, the recommender's gaps) into a short LLM narrative — "what's been learned + what to try next" —

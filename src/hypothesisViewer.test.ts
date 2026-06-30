@@ -551,3 +551,44 @@ describe('paperVerdictDetail', () => {
     expect(H.rollupPaperVerdict({ hypothesisIds: ['a'] }, hyps, runs, 'max')).toBe('holds-up')
   })
 })
+
+describe('comparisonCriterion (the success/failure rule for a context-spanning hypothesis)', () => {
+  const spec = { fixed: { timeframe: '1d' }, compare: { lever: 'day_buy', values: [0, 2] } }
+  it('beats-baseline: names the baseline value, what must beat it, the objective + the readiness gate', () => {
+    const txt = H.comparisonCriterion(
+      spec,
+      { kind: 'beats-baseline', baselineIndex: 0 },
+      { objectiveName: 'traded_return', direction: 'max', minRuns: 3 },
+    )
+    expect(txt).toContain('day_buy=0') // the baseline cell
+    expect(txt).toContain('traded_return') // the objective
+    expect(txt).toMatch(/at least 3 runs/) // the readiness gate matches compareContexts' minRuns check
+    expect(txt).toMatch(/PROVEN/)
+    expect(txt).toMatch(/DISPROVED/)
+    expect(txt).toMatch(/highest/) // max direction
+  })
+  it('beats-baseline: respects a non-zero baselineIndex and min direction', () => {
+    const txt = H.comparisonCriterion(
+      spec,
+      { kind: 'beats-baseline', baselineIndex: 1 },
+      { objectiveName: 'loss', direction: 'min', minRuns: 5 },
+    )
+    expect(txt).toContain('day_buy=2') // baseline is index 1 now
+    expect(txt).toMatch(/lowest/)
+    expect(txt).toMatch(/at least 5 runs/)
+  })
+  it('invariant: states the relative-spread tolerance', () => {
+    const txt = H.comparisonCriterion(
+      spec,
+      { kind: 'invariant', tolerance: 0.2 },
+      { objectiveName: 'sharpe', minRuns: 3 },
+    )
+    expect(txt).toMatch(/INVARIANT/)
+    expect(txt).toContain('0.2')
+  })
+  it('differs: defaults the tolerance to 0.1 when unspecified', () => {
+    const txt = H.comparisonCriterion(spec, { kind: 'differs' }, { objectiveName: 'sharpe', minRuns: 3 })
+    expect(txt).toMatch(/DIFFERS/)
+    expect(txt).toContain('0.1')
+  })
+})

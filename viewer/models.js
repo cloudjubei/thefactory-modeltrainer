@@ -223,6 +223,14 @@
     return agg.failing >= agg.runs ? 'failing' : 'implemented'
   }
 
+  // Whether a model belongs in the Speed table: only IMPLEMENTED, runnable models have meaningful timings.
+  // A component is a building block (no runs of its own), and a not-yet-implemented model (proposed/deferred)
+  // can't run — so neither belongs. `status` is the derived lifecycle status (deriveModelStatus).
+  function isSpeedEligibleModel(model, status) {
+    if (!model || model.category === 'component') return false
+    return status !== 'proposed' && status !== 'deferred'
+  }
+
   // Build a `proposed` catalog record from a paper's ProposedModel (the "Add to catalog" click). It has no
   // flavors yet (unimplemented); auto status-source so it tracks its lifecycle once flavors + runs land.
   function buildProposedModelRecord(proposed, paperId, nowIso) {
@@ -593,6 +601,7 @@
     aggForModel: aggForModel,
     computeRunDurationsByModel: computeRunDurationsByModel,
     deriveModelStatus: deriveModelStatus,
+    isSpeedEligibleModel: isSpeedEligibleModel,
     buildProposedModelRecord: buildProposedModelRecord,
     modelsForPaper: modelsForPaper,
     papersForModel: papersForModel,
