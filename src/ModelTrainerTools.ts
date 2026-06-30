@@ -108,6 +108,7 @@ import {
   buildWeighHypothesesSystemPrompt,
   buildWeighHypothesesUserContent,
   coerceHypothesisWeights,
+  coerceHypothesisCoverage,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
   coerceAnalyzedPaperModels,
@@ -126,6 +127,7 @@ import {
   discoverManifestModelCandidates,
   modelBindingNames,
   expandExperimentMatrix,
+  estimateRemainingCampaignSeconds,
   normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
@@ -332,10 +334,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
 
     let lastKey: string | undefined
-    // Wall-clock anchor for an ETA fallback: when there's no calibration (most projects
-    // declare no `calibrate`), estimate remaining time from how long the completed items
-    // have actually taken — so the UI shows a moving estimate instead of just a sweeping bar.
-    const campaignStartMs = Date.parse(now())
+    // Real per-run durations of items completed THIS session — the basis for the remaining-time ETA. Runs
+    // over the same data+model take a similar time, so the average × remaining concurrency waves is a stable
+    // total estimate. NOT elapsed/done (which is diluted toward zero by instantly-skipped completed runs).
+    const itemDurationsMs: number[] = []
     // Progress is a best-effort side-channel: a host's sink throwing synchronously or
     // rejecting (e.g. a transient progress-record write conflict under concurrency) must
     // never abort a training run, drop the terminal signal's siblings, or escape as an
@@ -446,20 +448,24 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         })
         params.onRecordWritten?.(recordType, item.key)
         lastKey = item.key
+        if (typeof result.durationMs === 'number') itemDurationsMs.push(result.durationMs)
         return { key: item.key, objective: runSummary.objective }
       },
       onProgress: (progress) => {
-        // Prefer the calibration-derived ETA; otherwise fall back to a wall-clock estimate
-        // from elapsed-per-completed-item once at least one item has finished.
+        // Prefer the calibration-derived ETA; otherwise estimate the remaining wall-clock from the ACTUAL
+        // durations of runs completed this session (avg per-run × remaining concurrency waves) — the total
+        // predicted time for all remaining runs to finish.
         const calibratedEta =
           calibration?.etaSeconds !== undefined && progress.total > 0
             ? calibration.etaSeconds * ((progress.total - progress.done) / progress.total)
             : undefined
-        const elapsedSec = (Date.parse(now()) - campaignStartMs) / 1000
-        const remaining = progress.total - progress.done
         const wallClockEta =
-          calibratedEta === undefined && progress.done > 0 && remaining > 0 && elapsedSec > 0
-            ? (elapsedSec / progress.done) * remaining
+          calibratedEta === undefined
+            ? estimateRemainingCampaignSeconds({
+                durationsMs: itemDurationsMs,
+                remaining: progress.total - progress.done,
+                concurrency: runConcurrency,
+              })
             : undefined
         const etaSeconds = calibratedEta ?? wallClockEta
         void emit({
@@ -1139,6 +1145,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         title: item.title,
         rationale: item.rationale,
         spec: item.spec,
+        // Carry the LLM's comparison criterion (else a context-spanning compare hypothesis silently defaults
+        // to beats-baseline) and its thesis label (which paper claim this tests, for multi-thesis scoring).
+        ...(item.comparison ? { comparison: item.comparison } : {}),
+        ...(item.thesis ? { thesis: item.thesis } : {}),
         status: 'untested',
         verdictSource: 'auto',
         source: 'paper',
@@ -1264,34 +1274,42 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           claim: paper.claim,
           approach: paper.approach,
           assumptions: paper.assumptions,
+          claimedMetrics: paper.claimedMetrics,
           url: paper.url,
         },
-        hypotheses: linked.map((h) => ({ id: h.id, title: h.title, rationale: h.rationale })),
+        hypotheses: linked.map((h) => ({
+          id: h.id,
+          title: h.title,
+          rationale: h.rationale,
+          spec: h.spec,
+        })),
         text,
       }),
       model: { kind: 'api', llmConfig: params.llmConfig },
       abortSignal: params.abortSignal,
     })
 
-    const rows = coerceHypothesisWeights(
+    const coverage = coerceHypothesisCoverage(
       parseFirstValidJson(res.text),
       linked.map((h) => h.id),
     )
     const byId = new Map(linked.map((h) => [h.id, h]))
     const weighted: WeighedHypothesis[] = []
     const weights: Record<string, number> = { ...(paper.hypothesisWeights ?? {}) }
-    for (const row of rows) {
+    for (const row of coverage.weights) {
       const base = byId.get(row.id)
       if (!base) continue
       weights[row.id] = row.weight
       weighted.push({ id: row.id, weight: row.weight, reason: row.reason, title: base.title })
     }
     // Persist the weights on THIS PAPER (its per-hypothesis importance), NOT the shared hypothesis records
-    // — the same hypothesis can be central to one paper and minor to another. One paper upsert.
-    if (weighted.length) {
+    // — the same hypothesis can be central to one paper and minor to another — PLUS the coverage gaps (claims
+    // no hypothesis covers, a warning signal). Persist if EITHER changed, so a gaps-only result isn't dropped.
+    if (weighted.length || coverage.uncoveredClaims.length) {
       const updatedPaper: TrainingPaperRecord = {
         ...paper,
         hypothesisWeights: weights,
+        coverageGaps: coverage.uncoveredClaims,
         updatedAt: weighedAt,
       }
       await deps.storage.upsertRecord({
@@ -1306,8 +1324,17 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       recordType,
       paperId: params.paperId,
       weighed: weighted.length,
+      gaps: coverage.uncoveredClaims.length,
     })
-    return { recordType, paperId: params.paperId, weighted, weighedBy, weighedAt }
+    return {
+      recordType,
+      paperId: params.paperId,
+      weighted,
+      coverageGaps: coverage.uncoveredClaims,
+      coverageByClaim: coverage.coverageByClaim,
+      weighedBy,
+      weighedAt,
+    }
   }
 
   // Map completed-run records to the engine's AnalysisRun shape (shared by the digest + whole-space bundle).

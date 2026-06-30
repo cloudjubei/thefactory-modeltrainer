@@ -2804,6 +2804,71 @@ pre.json {
   border-color: #f59e0b;
   color: #b45309;
 }
+/* "N proposals" — hypotheses blocked on an unimplemented model. */
+.hyp-count-chip.is-proposed {
+  border-color: #6366f1;
+  color: #4338ca;
+  background: #eef2ff;
+}
+/* The thesis (paper claim) a hypothesis tests — shown on flat hypothesis rows + the standalone card. */
+.hyp-thesis-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-2, #f8fafc);
+  font-size: 11px;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The per-paper verdict explainer: the proven÷decided formula + the threshold ladder. */
+.paper-verdict-explain {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--border);
+  background: var(--surface-2, #f8fafc);
+  border-radius: 4px;
+}
+.paper-verdict-formula {
+  font-variant-numeric: tabular-nums;
+}
+.paper-verdict-ladder {
+  margin-top: 2px;
+  opacity: 0.8;
+}
+/* Multi-thesis breakdown: one bordered section per distinct paper thesis. */
+.paper-theses-intro {
+  margin: 4px 0 6px;
+  font-weight: 600;
+}
+.paper-thesis {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.paper-thesis-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.paper-thesis-label {
+  font-weight: 600;
+}
+.paper-thesis .paper-verdict-explain {
+  border-left: none;
+  background: transparent;
+  padding: 0;
+  margin: 2px 0 6px;
+}
 /* The min-runs-to-judge setting in the Hypotheses tab header. */
 .min-runs-field {
   display: inline-flex;

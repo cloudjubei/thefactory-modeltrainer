@@ -146,12 +146,14 @@ let xaiInterB = null
 const HYPOTHESIS_VERDICTS = ['untested', 'proven', 'disproved']
 const HYPOTHESIS_VERDICT_BADGE = {
   untested: 'is-queued',
+  proposed: 'is-running',
   proven: 'is-done',
   disproved: 'is-failed',
   hidden: 'is-queued',
 }
 const HYPOTHESIS_VERDICT_LABEL = {
   untested: 'untested',
+  proposed: 'proposed',
   proven: 'proven',
   disproved: 'disproved',
   hidden: 'hidden',
@@ -9372,16 +9374,25 @@ function hypothesisMeasured(h) {
 }
 // The verdict the runs imply IGNORING any manual override — the "auto suggests" hint. Context-aware: a
 // context-spanning hypothesis reads its cross-context comparison, not the pooled beats-hold.
+// Resolver for the 'proposed' derivation: is the catalog model bound to `name` implemented? Returns
+// true (implemented) | false (a known catalog model that isn't implemented) | null (catalog not loaded, or
+// no/ambiguous model). null SUPPRESSES the derivation, so an unloaded catalog never spuriously flips a
+// verdict ('proposed' is display-derived, never persisted — refresh never writes it).
+function modelNameImplemented(name) {
+  if (!modelsCache || !modelsCache.length) return null
+  const cfg = { model_name: String(name) }
+  const model = modelsCache.find((m) => window.Models.runMatchesModel(m, cfg))
+  if (!model) return null
+  return window.Models.isModelImplemented(model, manifest)
+}
 function autoSuggestedVerdict(h) {
-  if (allRunsCache.length && window.Hypothesis.contextCells((h && h.spec) || {}).length) {
-    return window.Hypothesis.compareContexts(
-      window.Hypothesis.measuredByContext(h.spec, allRunsCache, objectiveDirection()),
-      h.comparison,
-      objectiveDirection(),
-      hypothesisMinRuns,
-    )
-  }
-  return window.Hypothesis.autoVerdictFor(hypothesisMeasured(h), hypothesisMinRuns)
+  return window.Hypothesis.autoVerdictForHypothesis(
+    h,
+    allRunsCache,
+    objectiveDirection(),
+    hypothesisMinRuns,
+    modelNameImplemented,
+  )
 }
 function effectiveHypothesisVerdict(h) {
   if (!h) return 'untested'
@@ -9391,8 +9402,18 @@ function effectiveHypothesisVerdict(h) {
       allRunsCache,
       objectiveDirection(),
       hypothesisMinRuns,
+      modelNameImplemented,
     )
-  return h.status || 'untested'
+  // No run snapshot loaded: use the persisted status, but still surface 'proposed' for an auto hypothesis
+  // whose required model isn't implemented (it depends on the model lifecycle, not on runs).
+  const base = h.status || 'untested'
+  if (
+    h.verdictSource !== 'manual' &&
+    base === 'untested' &&
+    window.Hypothesis.requiresUnimplementedModel(h.spec, modelNameImplemented)
+  )
+    return 'proposed'
+  return base
 }
 // Icon-only action buttons (same size, tooltips on hover) — shown in the card summary so they're
 // available collapsed AND expanded. "Launch more runs" is the play button; it stays enabled below
@@ -9693,6 +9714,7 @@ function hypothesisCardHtml(h, liveIds) {
       ${badge}
       ${hypothesisRunChipHtml(h)}
       <span class="hyp-title">${escapeHtml(h.title || h.id)}</span>
+      ${hypothesisThesisChipHtml(h)}
       ${running}
       <span class="card-actions">${hypothesisActionsHtml(h)}</span>
     </summary>
@@ -9786,13 +9808,15 @@ async function renderHypotheses() {
   // Load the persisted aggregate (for the freshness note) + hypotheses (whose verdicts are persisted) +
   // a page of runs (only for the per-campaign best display). Verdicts are NOT recomputed here from the
   // page — the shared all-runs refresh (`refreshAllRunsDerived`) owns that.
-  ;[hypothesesCache, proposalSummary, papersCache, runsCache, modelStatsCache] = await Promise.all([
-    readHypotheses(),
-    readProposal(),
-    readPapers(),
-    readRuns(),
-    readModelStats(),
-  ])
+  ;[hypothesesCache, proposalSummary, papersCache, runsCache, modelStatsCache, modelsCache] =
+    await Promise.all([
+      readHypotheses(),
+      readProposal(),
+      readPapers(),
+      readRuns(),
+      readModelStats(),
+      readModels(),
+    ])
   const minRunsInput = byId('hypothesis-min-runs')
   if (minRunsInput && document.activeElement !== minRunsInput)
     minRunsInput.value = hypothesisMinRuns
@@ -10511,29 +10535,101 @@ function paperVerdictInfo(paper) {
   const weights = (paper && paper.hypothesisWeights) || {}
   const linked = hypothesesCache
     .filter((h) => ids.has(h.id))
-    .map((h) => ({ verdict: effectiveHypothesisVerdict(h), weight: weights[h.id] }))
+    .map((h) => ({ verdict: effectiveHypothesisVerdict(h), weight: weights[h.id], thesis: h.thesis }))
   return window.Hypothesis.scorePaperVerdict(linked)
 }
 function paperVerdict(paper) {
   return paperVerdictInfo(paper).status
 }
+// One linked-hypothesis row: title + its live verdict badge + the paper's weight chip + Unlink. `showThesis`
+// adds the thesis chip (on for the flat list, off in the grouped multi-thesis view where the heading is it).
+function paperHypRowHtml(paper, hid, showThesis) {
+  const h = hypothesesCache.find((x) => x.id === hid)
+  if (!h) return ''
+  const v = effectiveHypothesisVerdict(h)
+  const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[v]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[v])}</span>`
+  const thesis = showThesis === false ? '' : hypothesisThesisChipHtml(h)
+  return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} ${hypothesisWeightChipHtml(paper.hypothesisWeights && paper.hypothesisWeights[hid])} ${thesis} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${escapeHtml(paper.id)}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
+}
 // The linked hypotheses, each as a row (title + its live verdict badge + Unlink), with the add/link picker.
 function paperLinkedHypothesesHtml(paper) {
   const ids = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds : []
-  const id = escapeHtml(paper.id)
-  const rows = ids
-    .map((hid) => {
-      const h = hypothesesCache.find((x) => x.id === hid)
-      if (!h) return ''
-      const v = effectiveHypothesisVerdict(h)
-      const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[v]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[v])}</span>`
-      return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} ${hypothesisWeightChipHtml(paper.hypothesisWeights && paper.hypothesisWeights[hid])} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${id}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
-    })
-    .join('')
+  const rows = ids.map((hid) => paperHypRowHtml(paper, hid, true)).join('')
   const list = rows
     ? `<ul class="paper-hyp-list">${rows}</ul>`
     : '<p class="card-sub">No hypotheses linked yet — Extract from the link, add one, or link an existing one.</p>'
   return `<div class="paper-hyps">${list}${paperSubformHtml(paper)}</div>`
+}
+// The per-paper verdict EXPLAINER: this paper's current weighted balance + the threshold ladder (what flips
+// it). Pure logic in hypothesis.js (paperVerdictExplain); this wraps it. Gated by the caller on counts.total.
+function paperVerdictExplainHtml(info) {
+  const ex = window.Hypothesis.paperVerdictExplain(info)
+  return `<div class="paper-verdict-explain card-sub"><div class="paper-verdict-formula">${escapeHtml(ex.formula)}</div><div class="paper-verdict-ladder">${escapeHtml(ex.ladder)}</div></div>`
+}
+// A chip flagging hypotheses blocked on an unimplemented model ("N proposals") — they can't be tested until
+// the model is built, so they don't yet count toward the verdict.
+function paperProposalsChipHtml(info) {
+  const n = (info && info.counts && info.counts.proposed) || 0
+  if (!n) return ''
+  return `<span class="hyp-count-chip is-proposed"${helpAttr('Hypotheses whose required model is NOT implemented yet — they can’t be tested (or counted in the score) until it’s built.')}>${n} proposal${n === 1 ? '' : 's'}</span>`
+}
+// A small chip naming the PAPER thesis (claim) a hypothesis tests — so the thesis↔hypothesis link is visible
+// in the flat list + the standalone Hypotheses card (the multi-thesis view groups by it instead).
+function hypothesisThesisChipHtml(h) {
+  const t = h && typeof h.thesis === 'string' && h.thesis.trim() ? h.thesis.trim() : ''
+  if (!t) return ''
+  return `<span class="hyp-thesis-chip"${helpAttr('Paper thesis this hypothesis tests: ' + t)}>◆ ${escapeHtml(t)}</span>`
+}
+// A warning listing paper claims NO linked hypothesis covers — found by the scrutinous re-weigh pass. A
+// signal only (never gates the verdict); the user can Suggest more hypotheses to close the gap.
+function paperCoverageGapsHtml(paper) {
+  const gaps = Array.isArray(paper.coverageGaps) ? paper.coverageGaps.filter(Boolean) : []
+  if (!gaps.length) return ''
+  const items = gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join('')
+  return `<div class="paper-coverage-gaps card-sub"${helpAttr('Paper claims with no covering hypothesis (found when re-weighing). Use Suggest to add hypotheses that close the gap — coherent coverage makes the verdict trustworthy.')}><strong>⚠ Coverage gaps</strong> — claims no hypothesis tests yet:<ul>${items}</ul></div>`
+}
+// A chip flagging a MULTI-THESIS paper (the paper makes >1 distinct claim — see the per-thesis breakdown).
+function paperMultiThesisChipHtml(info) {
+  if (!info || !info.multiThesis) return ''
+  const n = (info.theses || []).filter((t) => t.thesis).length
+  return `<span class="hyp-count-chip"${helpAttr('This paper makes several distinct theses — each is scored separately below.')}>${n} theses</span>`
+}
+// The multi-thesis inner view: the paper's hypotheses partitioned by thesis, each group with its own verdict
+// badge + why, plus an "Other (untagged)" section so no hypothesis is hidden. Only rendered for a
+// multi-thesis paper; single-thesis/untagged papers use the flat paperLinkedHypothesesHtml.
+function paperThesesHtml(paper, info) {
+  const order = []
+  const byKey = {}
+  for (const hid of Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds : []) {
+    const h = hypothesesCache.find((x) => x.id === hid)
+    if (!h) continue
+    const label = typeof h.thesis === 'string' && h.thesis.trim() ? h.thesis.trim() : null
+    const key = label === null ? ' untagged' : label
+    if (!byKey[key]) {
+      byKey[key] = { label, hids: [] }
+      order.push(key)
+    }
+    byKey[key].hids.push(hid)
+  }
+  const detailByKey = {}
+  for (const t of info.theses || [])
+    detailByKey[t.thesis === null ? ' untagged' : t.thesis] = t.detail
+  const sections = order
+    .map((key) => {
+      const g = byKey[key]
+      const detail = detailByKey[key]
+      const verdict = detail ? detail.status : 'untested'
+      const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}"${detail ? helpAttr(detail.why) : ''}>${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
+      const heading = g.label || 'Other (untagged hypotheses)'
+      // The per-thesis weighted score (its own hypotheses only) — the same proven÷decided formula as the paper.
+      const score =
+        detail && detail.counts && detail.counts.total ? paperVerdictExplainHtml(detail) : ''
+      // Rows WITHOUT the thesis chip — the heading already names the thesis.
+      const rows = g.hids.map((hid) => paperHypRowHtml(paper, hid, false)).join('')
+      return `<div class="paper-thesis"><div class="paper-thesis-head"><span class="paper-thesis-label">${escapeHtml(heading)}</span> ${badge}</div>${score}<ul class="paper-hyp-list">${rows}</ul></div>`
+    })
+    .join('')
+  return `<div class="paper-hyps paper-theses"><p class="card-sub paper-theses-intro">This paper makes ${order.filter((k) => byKey[k].label).length} distinct theses — each scored separately below:</p>${sections}${paperSubformHtml(paper)}</div>`
 }
 // The per-card inline sub-form: add a NEW hypothesis, or pick an EXISTING one to link.
 function paperSubformHtml(paper) {
@@ -10699,7 +10795,9 @@ function paperCardHtml(paper) {
   return `<details class="paper-card" data-id="${id}"${open}>
     <summary class="paper-summary">
       ${badge}
+      ${paperMultiThesisChipHtml(info)}
       ${paperHypCountChipHtml(paper)}
+      ${paperProposalsChipHtml(info)}
       <span class="paper-summary-title">${title}</span>
       <span class="card-actions">${actions}</span>
     </summary>
@@ -10708,7 +10806,9 @@ function paperCardHtml(paper) {
       ${paper.claim ? `<p class="paper-claim">${escapeHtml(paper.claim)}</p>` : ''}
       ${paperAssumptionChips(paper.assumptions)}
       ${info.counts.total ? `<p class="card-sub paper-verdict-why">${escapeHtml(info.why)}</p>` : ''}
-      ${paperLinkedHypothesesHtml(paper)}
+      ${info.counts.total ? paperVerdictExplainHtml(info) : ''}
+      ${paperCoverageGapsHtml(paper)}
+      ${info.multiThesis ? paperThesesHtml(paper, info) : paperLinkedHypothesesHtml(paper)}
       ${paperModelsHtml(paper)}
       ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
     </div>

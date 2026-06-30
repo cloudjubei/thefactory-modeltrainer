@@ -202,25 +202,49 @@
     return `${gate} PROVEN if the ${dir} ${objName} among the other context${n - 1 === 1 ? '' : 's'} beats the baseline (${baseLabel}); DISPROVED if none beat it.`
   }
 
+  // Whether a hypothesis can't yet be TESTED because a model it requires isn't implemented. `modelImplemented`
+  // is an injected resolver name -> true (implemented) | false (known but unimplemented) | null (unknown), so
+  // this module stays pure (no Models dependency). A fixed model_name is required; a compare over model_name
+  // can run if ANY arm is implemented, so it's blocked only when none is and at least one is unimplemented.
+  function requiresUnimplementedModel(spec, modelImplemented) {
+    if (!spec || typeof modelImplemented !== 'function') return false
+    if (
+      spec.fixed &&
+      spec.fixed.model_name != null &&
+      modelImplemented(String(spec.fixed.model_name)) === false
+    )
+      return true
+    if (spec.compare && spec.compare.lever === 'model_name' && Array.isArray(spec.compare.values)) {
+      const states = spec.compare.values.map((v) => modelImplemented(String(v)))
+      if (!states.some((s) => s === true) && states.some((s) => s === false)) return true
+    }
+    return false
+  }
+
   // The auto-verdict for a hypothesis: a context-spanning spec reads its cross-context comparison; a
-  // single-context spec uses the pooled beats-hold rule.
-  function autoVerdictForHypothesis(h, runs, direction, minRuns) {
+  // single-context spec uses the pooled beats-hold rule. Precedence: decided (proven/disproved) > proposed
+  // (blocked on an unimplemented model) > untested.
+  function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented) {
     const spec = h && h.spec
+    let verdict
     if (contextCells(spec).length) {
-      return compareContexts(
+      verdict = compareContexts(
         measuredByContext(spec, runs, direction),
         h && h.comparison,
         direction,
         minRuns,
       )
+    } else {
+      verdict = autoVerdictFor(measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction), minRuns)
     }
-    return autoVerdictFor(measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction), minRuns)
+    if (verdict === 'untested' && requiresUnimplementedModel(spec, modelImplemented)) return 'proposed'
+    return verdict
   }
 
   // The verdict to SHOW: a manual override wins; otherwise the live auto-verdict from matching runs.
-  function effectiveVerdict(h, runs, direction, minRuns) {
+  function effectiveVerdict(h, runs, direction, minRuns, modelImplemented) {
     if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0) return h.status
-    return autoVerdictForHypothesis(h, runs, direction, minRuns)
+    return autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented)
   }
 
   // Sorted keys of the runs matching a hypothesis (the evidence-set identity used to detect new runs).
@@ -242,10 +266,11 @@
     const direction = (opts && opts.direction) || 'max'
     const at = (opts && opts.at) || ''
     const minRuns = (opts && opts.minRuns) || 0
+    const modelImplemented = opts && opts.modelImplemented
     if (h && h.verdictSource === 'manual') return { next: h, transition: null, changed: false }
     const matchedKeys = matchedKeysOf(h && h.spec, runs)
     const measured = measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction)
-    const nextStatus = autoVerdictForHypothesis(h, runs, direction, minRuns)
+    const nextStatus = autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented)
     const prev = (h && h.evidence) || { matchedKeys: [], status: 'untested' }
     const prevKeys = prev.matchedKeys || []
     const keysChanged =
@@ -282,13 +307,15 @@
   // the card shows; `rollupPaperVerdict` returns just the status (badge + back-compat).
   const PAPER_HOLDS_UP_AT = 0.75
   const PAPER_FLUFF_AT = 0.25
-  // Score a paper from its linked hypotheses' verdicts+weights. `linked` is [{verdict, weight}] — the
-  // ONE place the holds-up/shaky/fluff thresholds live, so the viewer (which derives per-hypothesis
-  // verdicts its own way) and `paperVerdictDetail` agree.
-  function scorePaperVerdict(linked) {
+  // Score a set of linked hypotheses' verdicts+weights into a paper-style detail. `linked` is
+  // [{verdict, weight, thesis?}] — the ONE place the holds-up/shaky/fluff thresholds live. A `proposed`
+  // hypothesis (blocked on an unimplemented model) is COUNTED but EXCLUDED from the decided score, so it
+  // signals pending work without diluting the verdict.
+  function scoreLinkedBase(linked) {
     let proven = 0,
       disproved = 0,
       untested = 0,
+      proposed = 0,
       provenW = 0,
       disprovedW = 0,
       hasWeights = false
@@ -302,7 +329,8 @@
       } else if (it.verdict === 'disproved') {
         disproved++
         disprovedW += w
-      } else untested++
+      } else if (it.verdict === 'proposed') proposed++
+      else untested++
     }
     const decidedW = provenW + disprovedW
     const score = decidedW > 0 ? provenW / decidedW : null
@@ -314,14 +342,53 @@
     const detail = {
       status: status,
       score: score,
-      counts: { proven: proven, disproved: disproved, untested: untested, total: (linked || []).length },
+      counts: {
+        proven: proven,
+        disproved: disproved,
+        untested: untested,
+        proposed: proposed,
+        total: (linked || []).length,
+      },
       hasWeights: hasWeights,
       weighted: { proven: provenW, disproved: disprovedW, decided: decidedW },
     }
     detail.why = paperVerdictWhy(detail)
     return detail
   }
-  function paperVerdictDetail(paper, hyps, runs, direction, minRuns) {
+  // Group linked rows by their `thesis` label (trimmed; null/empty = one untagged bucket), first-seen order.
+  function groupHypothesesByThesis(linked) {
+    const order = []
+    const byKey = {}
+    for (let i = 0; i < (linked || []).length; i++) {
+      const it = linked[i]
+      const label = typeof it.thesis === 'string' && it.thesis.trim() ? it.thesis.trim() : null
+      const key = label === null ? ' untagged' : label
+      if (!byKey[key]) {
+        byKey[key] = { thesis: label, items: [] }
+        order.push(key)
+      }
+      byKey[key].items.push(it)
+    }
+    return order.map((k) => byKey[k])
+  }
+  // The per-thesis breakdown for a paper — an ADDITIVE lens. multiThesis when >1 DISTINCT non-empty label.
+  function scorePaperTheses(linked) {
+    const groups = groupHypothesesByThesis(linked)
+    return {
+      theses: groups.map((g) => ({ thesis: g.thesis, detail: scoreLinkedBase(g.items) })),
+      multiThesis: groups.filter((g) => g.thesis).length > 1,
+    }
+  }
+  // The overall paper verdict (pooled over ALL linked hypotheses) PLUS the additive per-thesis lens, so the
+  // viewer's `paperVerdictInfo` (which calls this directly) gets `multiThesis`/`theses` too.
+  function scorePaperVerdict(linked) {
+    const detail = scoreLinkedBase(linked)
+    const t = scorePaperTheses(linked)
+    detail.multiThesis = t.multiThesis
+    if (t.multiThesis) detail.theses = t.theses
+    return detail
+  }
+  function paperVerdictDetail(paper, hyps, runs, direction, minRuns, modelImplemented) {
     const ids = {}
     const linkIds = (paper && paper.hypothesisIds) || []
     for (let i = 0; i < linkIds.length; i++) ids[linkIds[i]] = true
@@ -329,17 +396,24 @@
     const weights = (paper && paper.hypothesisWeights) || {}
     const linked = (hyps || [])
       .filter((h) => ids[h.id])
-      .map((h) => ({ verdict: effectiveVerdict(h, runs, direction, minRuns), weight: weights[h.id] }))
+      .map((h) => ({
+        verdict: effectiveVerdict(h, runs, direction, minRuns, modelImplemented),
+        weight: weights[h.id],
+        thesis: h.thesis,
+      }))
     return scorePaperVerdict(linked)
   }
 
   function paperVerdictWhy(d) {
     const c = d.counts
     if (!c.total) return 'No hypotheses linked yet.'
-    if (d.status === 'untested') return c.untested + ' of ' + c.total + ' hypotheses not yet decided.'
+    const propNote = c.proposed ? ', ' + c.proposed + ' awaiting model implementation' : ''
+    if (d.status === 'untested')
+      return c.untested + c.proposed + ' of ' + c.total + ' hypotheses not yet decided' + propNote + '.'
     const pct = Math.round(d.score * 100)
     const wnote = d.hasWeights ? ', weighted by importance' : ''
-    const tail = c.untested ? ' (' + c.untested + ' still untested)' : ''
+    const undecided = c.untested + c.proposed
+    const tail = undecided ? ' (' + undecided + ' still undecided' + propNote + ')' : ''
     const evidence =
       c.proven +
       ' proven, ' +
@@ -354,6 +428,51 @@
     if (d.status === 'holds-up') return 'Holds up: ' + evidence
     if (d.status === 'fluff') return 'Fluff: ' + evidence
     return 'Shaky: ' + evidence + ' Mixed — neither side dominates.'
+  }
+  // A structured explainer for the expanded paper card: THIS paper's current weighted balance + the
+  // threshold ladder (what balance flips the verdict). Pure → app.js wraps the strings in markup.
+  function paperVerdictExplain(d) {
+    const holdsPct = Math.round(PAPER_HOLDS_UP_AT * 100)
+    const fluffPct = Math.round(PAPER_FLUFF_AT * 100)
+    const c = d.counts || {}
+    const w = d.weighted || { proven: 0, decided: 0 }
+    const hasW = d.hasWeights
+    const round2 = (n) => Math.round(n * 100) / 100
+    const undecided = (c.untested || 0) + (c.proposed || 0)
+    const notCounted = undecided
+      ? ' ' +
+        undecided +
+        ' undecided' +
+        (c.proposed ? ' (' + c.proposed + ' awaiting model implementation)' : '') +
+        ' — not counted yet.'
+      : ''
+    let formula
+    if (!w.decided) {
+      formula =
+        'No decided evidence yet — a hypothesis must be PROVEN or DISPROVED before there is a score.' +
+        notCounted
+    } else {
+      const pct = Math.round((w.proven / w.decided) * 100)
+      // Each hypothesis contributes its weight when proven, 0 when disproved; score = proven ÷ decided.
+      const num = hasW ? round2(w.proven) + ' proven weight' : c.proven + ' proven'
+      const den = hasW ? round2(w.decided) + ' decided weight' : c.proven + c.disproved + ' decided'
+      formula =
+        'Score = ' +
+        num +
+        ' ÷ ' +
+        den +
+        ' = ' +
+        pct +
+        '% (each hypothesis adds its weight when proven, 0 when disproved).' +
+        notCounted
+    }
+    const ladder =
+      '≥ ' +
+      holdsPct +
+      '% → Holds up · ≤ ' +
+      fluffPct +
+      '% → Fluff · in between → Shaky · nothing decided → Untested.'
+    return { formula: formula, ladder: ladder }
   }
 
   function rollupPaperVerdict(paper, hyps, runs, direction, minRuns) {
@@ -373,10 +492,17 @@
     compareContexts: compareContexts,
     comparisonCriterion: comparisonCriterion,
     effectiveVerdict: effectiveVerdict,
+    autoVerdictForHypothesis: autoVerdictForHypothesis,
+    requiresUnimplementedModel: requiresUnimplementedModel,
     evaluateHypothesis: evaluateHypothesis,
     rollupPaperVerdict: rollupPaperVerdict,
     paperVerdictDetail: paperVerdictDetail,
     scorePaperVerdict: scorePaperVerdict,
+    scorePaperTheses: scorePaperTheses,
+    groupHypothesesByThesis: groupHypothesesByThesis,
+    paperVerdictExplain: paperVerdictExplain,
+    PAPER_HOLDS_UP_AT: PAPER_HOLDS_UP_AT,
+    PAPER_FLUFF_AT: PAPER_FLUFF_AT,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Hypothesis

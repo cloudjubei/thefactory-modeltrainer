@@ -39,62 +39,21 @@ and the `obs_squash` normalization experiment. A setup counts only when it **bea
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
-- **Run the Exp campaigns.** Exp 6–15 on the 1h winner — walk-forward robustness, shorting, vol-target,
-  equity-path rewards, fidelity stack, obs-squash, **Exp 12 exit-mechanic sweep (SL × TP × trailing)**,
-  **Exp 13 the supervised baseline (logreg/gbm vs RL vs hold)**, **Exp 14 architecture A/B (LSTM vs
-  attn-ppo vs tcn-ppo)**, **Exp 15 no-op/wrong-action × reward-scale sweep**. Read the cross-window OOS
-  distributions (the By-dataset robustness table), then lock in the first config that clears the bar. (The
-  supervised+rules baseline trades through the unchanged env, so its RunSummary is directly comparable.)
-  Keep RL alive while the other approaches run in parallel.
-  - **Exp 15 reads the new `blocked_signal_ratio` metric** (summary.py: share of the agent's buy/sell
-    output that was a no-op it couldn't act on; ~0.95 on the current great-return runs). The sweep crosses
-    `combo_noop_penalty` × `combo_sell` × `combo_wrongaction` to test that a penalty drives
-    `blocked_signal_ratio` → 0 WITHOUT collapsing `traded_return`, and that it only bites as `combo_sell`
-    shrinks (a ≤0.5 penalty is washed out at the baked `combo_sell=1000`). If even the favourable cells
-    (low `combo_sell`, high penalty) show no suppression, raise `episodes` next — `episodes=1` may be too
-    few to learn the penalty. NOTE: this only ever SILENCES out-of-position output (pushes it to hold); it
-    cannot make a flat-state signal meaningful — that needs the position-blind objective (Deferred).
-- **Wave 2 — replicate + falsify published methods under real costs. MEDIUM.** Pre-register the
-  thesis that most papers omit fees and won't replicate — value is rigorous falsification plus the one
-  or two that align with "direct/recurrent RL on a risk-adjusted utility". Each becomes a
-  **Papers/Library card** (§2b) with claimed-vs-measured. Candidates: Moody & Saffell direct-recurrent
-  (RecurrentPPO already imported + log-return reward; diff-Sharpe risk-adjustment and an `lstm_hidden_size`
-  lever still need adding — LSTM hidden size is hardcoded per-variant today);
-  Zhang/Zohren/Roberts vol-scaling (reuses the Wave-1 vol); a trend-following + mean-reversion exit
-  overlay (would add `trend_filter`/`ma_period`/`reversion_threshold` levers + a forced exit); a
-  supervised-LSTM direction filter gating RL entries (the supervised logreg/gbm line +
-  `forward_horizon`/`prob_threshold` already exist). Every replication runs under walk-forward + 0.1%
-  fees; keep only OOS-beat-hold survivors.
 - **Wave 3 — multi-asset portfolio / cross-sectional long-short. PROJECT-SPLIT** (see Deferred).
-- **Phase C exploration.** Huge sweep from the first OOS-validated baseline; `skipExplored` + by-setup
-  aggregation self-prune; fold in **RB1b/2** (more indicators) + **RB5** (causal `dip_score` into the
-  env) ONLY if an experiment says they help.
 
 ### 2. Model-trainer app
 
 The **Hypotheses registry**, **Papers library**, and **Models catalog** are built — how they fit lives in
 `docs/architecture.md` (Hypotheses = falsifiable claims runs prove/disprove; Papers = containers of
-hypotheses; Models = the catalog aggregating runs + papers + hypotheses, with `scanProjectModels` /
-`analyzePaperModels` and a Discuss-to-work chat). Pending:
+hypotheses; Models = the catalog of implemented/proposed models). Pending:
 
 - Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
   (find → web-verify → synthesize). Deferred.
-- **Models catalog — live VISUAL pass in the Overseer.** The Models tab + the Papers "Find models" /
-  add-missing flow are reference-clean and logic-tested but have NOT been eyeballed in the running app
-  (parity is automatic — one embedded viewer across web/desktop/mobile — but the visual/device check is
-  still open).
-- **Per-model launch (optional).** A "Launch" affordance on a model card that prefills the Launch tab with
-  `model_name` fixed — today runs launch from Launch/Hypotheses; the catalog focuses on cataloguing +
-  agent work + chat.
 
 ### 2b. Models — remaining backlog
 
 Still PENDING (the rest of the code/paper model catalog is already exposed):
 
-- **EIIE (Jiang 2017) — deferred, blocked.** A multi-asset PORTFOLIO architecture (one weight-shared
-  evaluator per asset → softmax allocation); it cannot be faithful in the single-asset, discrete-action env
-  (it degenerates to a position sizer). Build the **Wave-3 multi-asset / portfolio env first**, then EIIE
-  (and cross-sectional long-short) become possible. Catalogued `deferred`.
 - **Non-RL `model_type` paths still unexposed:** `technical` (`TechnicalStrategyModel`) and regression `mlp`
   (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
   existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).
@@ -102,8 +61,7 @@ Still PENDING (the rest of the code/paper model catalog is already exposed):
   extractors, custom policies/Q-nets, replay buffers, attention + NN blocks, the `DGWO` optimizer) as 12
   `component` catalog entries; each model flavor declares its `components`, rendered in the Models tab as
   linked chips with reverse "used by" on component cards (`flavorComponents` / `modelsUsingComponent` in
-  `viewer/models.js`). `DGWO` was rewritten into a working gradient optimizer (it previously crashed —
-  required a closure SB3 never passes) and is now a live `optimizer_class` choice. Optional follow-on: the
+  `viewer/models.js`). Optional follow-on: the
   literal `custom_net_arch` block recipe per `-custom` flavor (which attention/NN-block layers a recipe
   uses) is not yet surfaced — derive it from the source rather than hand-declaring (today
   `attention-blocks`/`nn-building-blocks` show no "used by" because recipe wiring isn't asserted).
@@ -113,8 +71,6 @@ Still PENDING (the rest of the code/paper model catalog is already exposed):
 The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is shipped (git +
 `docs/architecture.md`); the model-trainer side stays domain-oblivious. Pending:
 
-- **Live VISUAL pass in the Overseer.** The whole xAI viewer is engine-parity-tested + syntax/reference
-  clean but has NOT been eyeballed in the running app — the one open verification.
 - **Config-space exploration — reward/metric NORMALISATION (the one pending follow-on).** The
   surrogate + EI acquisition (`acquisitionRecommendations`) + fANOVA/Sobol importance + lever-coupling +
   PCA-projection stack is shipped (git + `docs/architecture.md`); its visual check folds into the VISUAL

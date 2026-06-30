@@ -1098,8 +1098,13 @@ export interface JudgeTrainingRunsResult {
   judgedAt: string
 }
 
-/** Whether a hypothesis is proven/disproved by its matching runs — `untested` until evidence exists. */
-export type HypothesisStatus = 'untested' | 'proven' | 'disproved'
+/**
+ * Whether a hypothesis is proven/disproved by its matching runs — `untested` until evidence exists, or
+ * `proposed` when it CAN'T yet be tested because a model it requires isn't implemented (auto-derived from the
+ * catalog, never a manual override). A `proposed` hypothesis is counted but excluded from a paper's decided
+ * verdict score, signalling pending implementation work.
+ */
+export type HypothesisStatus = 'untested' | 'proposed' | 'proven' | 'disproved'
 
 /** The aggregate read of a hypothesis's matching runs — the numbers behind a verdict. */
 export interface MeasuredSummary {
@@ -1182,6 +1187,13 @@ export interface TrainingHypothesis {
   id: string
   title: string
   rationale: string
+  /**
+   * Optional short label of the PAPER claim/thesis this hypothesis tests (assigned by the suggest LLM). A
+   * paper's theses = the distinct labels among its linked hypotheses (derived, never stored on the paper);
+   * >1 distinct label makes the paper multi-thesis. Intrinsic metadata — NEVER part of the spec hash, so
+   * identical specs still dedupe. (Distinct from the campaign-level `thesis` concept.)
+   */
+  thesis?: string
   spec: ExperimentSpec
   /** The verdict: auto-derived from matching runs, or pinned when `verdictSource` is `manual`. */
   status: HypothesisStatus
@@ -1272,6 +1284,12 @@ export interface TrainingPaperRecord {
    * (`paperVerdictDetail`) uses THESE weights; `weighPaperHypotheses` assigns them.
    */
   hypothesisWeights?: Record<string, number>
+  /**
+   * Paper claims that NO linked hypothesis covers — set by the scrutinous `weighPaperHypotheses` coverage
+   * pass. A WARNING signal only (the Papers card flags it + offers suggest-for-gap); it never gates the
+   * verdict or auto-creates hypotheses.
+   */
+  coverageGaps?: string[]
   /** Slug ids of the catalog Models this paper introduces or improves (set by `analyzePaperModels`). */
   modelIds?: string[]
   /**
@@ -1624,6 +1642,10 @@ export interface WeighPaperHypothesesResult {
   paperId: string
   /** Per-linked-hypothesis weight the model assigned and persisted. */
   weighted: WeighedHypothesis[]
+  /** Paper claims with NO covering hypothesis (the coherence gap), persisted on the paper as `coverageGaps`. */
+  coverageGaps?: string[]
+  /** How the model mapped each paper claim to the covering hypotheses (for display / suggest-for-gap). */
+  coverageByClaim?: { claim: string; hypothesisIds: string[] }[]
   /** Provenance label of the weighing model. */
   weighedBy: string
   weighedAt: string

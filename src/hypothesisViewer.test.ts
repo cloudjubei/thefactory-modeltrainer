@@ -526,7 +526,7 @@ describe('paperVerdictDetail', () => {
     ]
     const d = H.paperVerdictDetail({ hypothesisIds: ['a', 'b', 'c', 'd'] }, hyps, [], 'max')
     expect(d.status).toBe('shaky')
-    expect(d.counts).toEqual({ proven: 1, disproved: 2, untested: 1, total: 4 })
+    expect(d.counts).toEqual({ proven: 1, disproved: 2, untested: 1, proposed: 0, total: 4 })
     expect(d.score).toBeCloseTo(1 / 3, 5)
     expect(d.hasWeights).toBe(false)
     expect(typeof d.why).toBe('string')
@@ -590,5 +590,131 @@ describe('comparisonCriterion (the success/failure rule for a context-spanning h
     const txt = H.comparisonCriterion(spec, { kind: 'differs' }, { objectiveName: 'sharpe', minRuns: 3 })
     expect(txt).toMatch(/DIFFERS/)
     expect(txt).toContain('0.1')
+  })
+})
+
+describe('paper scoring: proposed counter + explain + theses (additive lens)', () => {
+  const row = (verdict: string, weight?: number, thesis?: string) => ({ verdict, weight, thesis })
+
+  it('exports the holds-up / fluff thresholds (single source for the explainer)', () => {
+    expect(H.PAPER_HOLDS_UP_AT).toBe(0.75)
+    expect(H.PAPER_FLUFF_AT).toBe(0.25)
+  })
+
+  it('counts proposed hypotheses but EXCLUDES them from the decided score', () => {
+    const d = H.scorePaperVerdict([row('proven'), row('proposed'), row('proposed')])
+    expect(d.counts.proposed).toBe(2)
+    expect(d.counts.proven).toBe(1)
+    expect(d.status).toBe('holds-up') // proposed don't dilute: 1/1 decided proven
+    expect(d.weighted.decided).toBe(1)
+    expect(d.why).toMatch(/awaiting model implementation|to implement|implementation/i)
+  })
+
+  it('a paper with only proposed hypotheses stays untested (nothing decided)', () => {
+    const d = H.scorePaperVerdict([row('proposed'), row('proposed')])
+    expect(d.status).toBe('untested')
+    expect(d.counts.proposed).toBe(2)
+  })
+
+  describe('paperVerdictExplain', () => {
+    it('untested: says it needs a decided hypothesis (no NaN/pct math)', () => {
+      const d = H.scorePaperVerdict([row('untested'), row('proposed')])
+      const ex = H.paperVerdictExplain(d)
+      expect(typeof ex.formula).toBe('string')
+      expect(typeof ex.ladder).toBe('string')
+      expect(ex.formula).toMatch(/no decided|proven or disproved/i)
+      expect(ex.ladder).toMatch(/75%|holds up/i)
+    })
+    it('decided: shows the EXPLICIT weighted division (proven weight ÷ decided weight = %)', () => {
+      const d = H.scorePaperVerdict([row('proven', 3), row('disproved', 1)])
+      const ex = H.paperVerdictExplain(d)
+      // 3 proven weight ÷ 4 decided weight = 75%
+      expect(ex.formula).toMatch(/3/)
+      expect(ex.formula).toMatch(/4/)
+      expect(ex.formula).toMatch(/75%/)
+      expect(ex.formula).toMatch(/÷|\/|divided/)
+      expect(ex.ladder).toMatch(/75%/)
+      expect(ex.ladder).toMatch(/25%/)
+    })
+    it('no weights: phrases the division in plain hypothesis counts', () => {
+      const d = H.scorePaperVerdict([row('proven'), row('proven'), row('disproved')])
+      const ex = H.paperVerdictExplain(d)
+      expect(ex.formula).toMatch(/2/) // 2 proven
+      expect(ex.formula).toMatch(/3/) // of 3 decided
+      expect(ex.formula).toMatch(/67%|66%/)
+    })
+    it('flags undecided + proposed as not-counted', () => {
+      const d = H.scorePaperVerdict([row('proven', 2), row('untested'), row('proposed')])
+      const ex = H.paperVerdictExplain(d)
+      expect(ex.formula).toMatch(/not counted|undecided|awaiting/i)
+      expect(ex.formula).toMatch(/awaiting model implementation/i)
+    })
+  })
+
+  describe('theses lens', () => {
+    it('groupHypothesesByThesis groups by trimmed label, untagged into one bucket, first-seen order', () => {
+      const groups = H.groupHypothesesByThesis([
+        row('proven', 1, 'A'),
+        row('disproved', 1, 'B'),
+        row('proven', 1, ' A '),
+        row('untested', 1),
+      ])
+      const byLabel = Object.fromEntries(groups.map((g: any) => [g.thesis ?? '_', g.items.length]))
+      expect(byLabel.A).toBe(2)
+      expect(byLabel.B).toBe(1)
+      expect(byLabel._).toBe(1) // untagged
+    })
+    it('scorePaperVerdict attaches multiThesis + per-thesis details when >1 distinct label', () => {
+      const d = H.scorePaperVerdict([
+        row('proven', 1, 'Momentum holds'),
+        row('proven', 1, 'Momentum holds'),
+        row('disproved', 1, 'Vol-sizing helps'),
+      ])
+      expect(d.multiThesis).toBe(true)
+      const theses = d.theses.map((t: any) => [t.thesis, t.detail.status])
+      expect(theses).toContainEqual(['Momentum holds', 'holds-up'])
+      expect(theses).toContainEqual(['Vol-sizing helps', 'fluff'])
+    })
+    it('single-thesis / untagged papers are NOT multi-thesis (unchanged behaviour)', () => {
+      expect(H.scorePaperVerdict([row('proven'), row('disproved')]).multiThesis).toBe(false)
+      expect(H.scorePaperVerdict([row('proven', 1, 'X'), row('disproved', 1, 'X')]).multiThesis).toBe(false)
+    })
+  })
+})
+
+describe('proposed status derivation (blocked on an unimplemented model)', () => {
+  const impl =
+    (map: Record<string, boolean | null>) =>
+    (name: string) =>
+      name in map ? map[name] : null
+  it('requiresUnimplementedModel: a fixed model_name that is known-but-unimplemented', () => {
+    expect(H.requiresUnimplementedModel({ fixed: { model_name: 'eiie' } }, impl({ eiie: false }))).toBe(true)
+    expect(H.requiresUnimplementedModel({ fixed: { model_name: 'ppo' } }, impl({ ppo: true }))).toBe(false)
+    expect(H.requiresUnimplementedModel({ fixed: { model_name: 'who' } }, impl({}))).toBe(false) // unknown
+  })
+  it('requiresUnimplementedModel: no model_name -> false', () => {
+    expect(H.requiresUnimplementedModel({ fixed: { timeframe: '1d' } }, impl({}))).toBe(false)
+  })
+  it('requiresUnimplementedModel: compare over model_name -> proposed only when NO arm is implemented', () => {
+    const spec = { compare: { lever: 'model_name', values: ['ppo', 'eiie'] } }
+    expect(H.requiresUnimplementedModel(spec, impl({ ppo: true, eiie: false }))).toBe(false) // ppo runnable
+    expect(H.requiresUnimplementedModel(spec, impl({ ppo: false, eiie: false }))).toBe(true)
+    expect(H.requiresUnimplementedModel(spec, impl({}))).toBe(false) // all unknown
+  })
+  it('autoVerdictForHypothesis: untested + unimplemented model -> proposed; a decided run wins', () => {
+    const h = { spec: { fixed: { model_name: 'eiie' } } }
+    expect(H.autoVerdictForHypothesis(h, [], 'max', 0, impl({ eiie: false }))).toBe('proposed')
+    const winner = [run('r', { model_name: 'eiie' }, { vh: 5 })]
+    expect(H.autoVerdictForHypothesis(h, winner, 'max', 1, impl({ eiie: false }))).toBe('proven')
+  })
+  it('effectiveVerdict threads the resolver; a manual override still wins', () => {
+    const auto = { spec: { fixed: { model_name: 'eiie' } }, verdictSource: 'auto', status: 'untested' }
+    expect(H.effectiveVerdict(auto, [], 'max', 0, impl({ eiie: false }))).toBe('proposed')
+    const manual = { spec: { fixed: { model_name: 'eiie' } }, verdictSource: 'manual', status: 'proven' }
+    expect(H.effectiveVerdict(manual, [], 'max', 0, impl({ eiie: false }))).toBe('proven')
+  })
+  it('without a resolver, behaviour is unchanged (no proposed)', () => {
+    const h = { spec: { fixed: { model_name: 'eiie' } }, verdictSource: 'auto', status: 'untested' }
+    expect(H.effectiveVerdict(h, [], 'max', 0)).toBe('untested')
   })
 })

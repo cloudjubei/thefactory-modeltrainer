@@ -310,6 +310,26 @@ export function migrateExperimentSpec(
   return changed ? next : spec
 }
 
+/**
+ * Predicted wall-clock SECONDS for the campaign's REMAINING runs, from the ACTUAL durations of runs that
+ * have completed THIS session — not elapsed/done (which is diluted toward zero by instantly-skipped, already
+ * completed runs). Runs over the same data+model take a similar time, so the average per-run duration × the
+ * number of remaining concurrency "waves" (ceil(remaining / concurrency)) is a stable total estimate.
+ * Returns undefined until at least one real run has finished (an honest "no estimate yet").
+ */
+export function estimateRemainingCampaignSeconds(input: {
+  durationsMs: number[]
+  remaining: number
+  concurrency: number
+}): number | undefined {
+  const durs = (input.durationsMs || []).filter((d) => typeof d === 'number' && isFinite(d) && d > 0)
+  if (!durs.length || input.remaining <= 0) return undefined
+  const avgMs = durs.reduce((a, b) => a + b, 0) / durs.length
+  const conc = Math.max(1, Math.min(Math.floor(input.concurrency) || 1, input.remaining))
+  const waves = Math.ceil(input.remaining / conc)
+  return (avgMs / 1000) * waves
+}
+
 export function canonicalConfigString(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalConfigString).join(',')}]`
@@ -874,7 +894,13 @@ export function looksComparative(title: string, rationale: string): boolean {
 export function coerceHypothesisItems(
   raw: unknown[],
   manifest: TrainerManifest,
-): { title: string; rationale: string; spec: ExperimentSpec; comparison?: HypothesisComparison }[] {
+): {
+  title: string
+  rationale: string
+  spec: ExperimentSpec
+  comparison?: HypothesisComparison
+  thesis?: string
+}[] {
   if (!Array.isArray(raw)) return []
   const leverKeys = new Set(Object.keys(manifest.levers))
   const { identityLever, modelLevers, envLevers, datasetLevers } = resolveModelLevers(manifest)
@@ -899,6 +925,7 @@ export function coerceHypothesisItems(
     rationale: string
     spec: ExperimentSpec
     comparison?: HypothesisComparison
+    thesis?: string
   }[] = []
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
@@ -988,11 +1015,13 @@ export function coerceHypothesisItems(
         .map((s) => Math.trunc(s))
     }
     const comparison = coerceComparison(obj.comparison)
+    const thesis = typeof obj.thesis === 'string' && obj.thesis.trim() ? obj.thesis.trim() : undefined
     items.push({
       title: obj.title,
       rationale: obj.rationale,
       spec,
       ...(comparison ? { comparison } : {}),
+      ...(thesis ? { thesis } : {}),
     })
   }
   return items
@@ -1254,10 +1283,11 @@ export function buildSuggestHypothesesSystemPrompt(manifest: TrainerManifest): s
     `RULE 4 — TRUE CROSS-CONTEXT CLAIMS (about the EFFECT OF THE CONTEXT — long-only vs long+short, one asset vs another): ${CONTEXT_SPANNING_RULE}`,
     `RULE 5 — PIN TO CONFIGS THAT PLAUSIBLY RUN: a spec matching no completed, metric-bearing run stays UNTESTED forever. Use lever values the paper maps onto that real runs would instantiate.`,
     HYPOTHESIS_RULE,
+    `THESIS LABEL — give EACH new hypothesis a short "thesis": the SPECIFIC paper claim it tests (e.g. "Momentum predicts returns" vs "Vol-targeting lifts Sharpe"). Hypotheses that test the SAME claim share the SAME thesis string verbatim; a paper that argues several distinct things will have several distinct theses — that is how the paper is scored claim-by-claim. Use the SAME wording for the same claim so they group.`,
     ``,
-    `WORKED EXAMPLE — BAD: {"title":"Recurrent outperforms non-recurrent","spec":{"sweep":{"model_name":["ppo-custom","reppo-custom"]},"fixed":{"timeframe":"1h"}}} — only timeframe pinned (matches the whole backlog) AND a comparison as a pooled sweep (never compares the arms). GOOD: {"title":"Recurrence beats a feedforward policy on 1h","rationale":"Comparative claim -> a compare over the identity lever with the shared config pinned; beats-baseline judges the recurrent value against the baseline.","comparison":{"kind":"beats-baseline","baselineIndex":0},"spec":{"fixed":{"timeframe":"1h","reward_model":"combo_unified","lookback_window":64},"compare":{"lever":"model_name","values":["ppo-custom","reppo-custom"]}}}`,
+    `WORKED EXAMPLE — BAD: {"title":"Recurrent outperforms non-recurrent","spec":{"sweep":{"model_name":["ppo-custom","reppo-custom"]},"fixed":{"timeframe":"1h"}}} — only timeframe pinned (matches the whole backlog) AND a comparison as a pooled sweep (never compares the arms). GOOD: {"title":"Recurrence beats a feedforward policy on 1h","thesis":"Recurrent policies beat feedforward","rationale":"Comparative claim -> a compare over the identity lever with the shared config pinned; beats-baseline judges the recurrent value against the baseline.","comparison":{"kind":"beats-baseline","baselineIndex":0},"spec":{"fixed":{"timeframe":"1h","reward_model":"combo_unified","lookback_window":64},"compare":{"lever":"model_name","values":["ppo-custom","reppo-custom"]}}}`,
     ``,
-    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], "newHypotheses": [{"title": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, "spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "compare"?: {"lever": "<lever>", "values": [v1, v2]}, "environments"?: [{"<env-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]}. ONLY declared lever names; a single-context spec MUST pin ${idName}; use [] for either list when empty.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], "newHypotheses": [{"title": string, "thesis": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, "spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "compare"?: {"lever": "<lever>", "values": [v1, v2]}, "environments"?: [{"<env-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]}. ONLY declared lever names; a single-context spec MUST pin ${idName}; use [] for either list when empty.`,
   ].join('\n')
 }
 
@@ -1288,7 +1318,16 @@ export function buildSuggestHypothesesUserContent(input: {
 export function coerceSuggestedHypotheses(
   raw: unknown,
   manifest: TrainerManifest,
-): { matchIds: string[]; newItems: { title: string; rationale: string; spec: ExperimentSpec }[] } {
+): {
+  matchIds: string[]
+  newItems: {
+    title: string
+    rationale: string
+    spec: ExperimentSpec
+    comparison?: HypothesisComparison
+    thesis?: string
+  }[]
+} {
   const o =
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
   const matchIds = Array.isArray(o.matchExistingIds)
@@ -1306,12 +1345,14 @@ export const HYPOTHESIS_WEIGHT_MAX = 5
 
 export function buildWeighHypothesesSystemPrompt(manifest: TrainerManifest): string {
   return [
-    `You are a research librarian for the "${manifest.name}" training project.`,
-    `You are given a PAPER (its claim and fields, plus its text when available) and the hypotheses currently LINKED to it.`,
-    `A paper's overall verdict ROLLS UP from its hypotheses WEIGHTED by importance. Assign each linked hypothesis an integer importance WEIGHT from ${HYPOTHESIS_WEIGHT_MIN} (a minor / supporting detail) to ${HYPOTHESIS_WEIGHT_MAX} (the paper's CENTRAL claim — the thing the paper most stands or falls on).`,
-    `Weigh by how central each hypothesis is TO THIS PAPER specifically. The SAME hypothesis can be the central claim of one paper and a minor supporting detail in another, so judge it against THIS paper's argument — not its general scientific merit.`,
-    `Most papers have ONE or a few central claims (4–5) and several supporting ones (1–2). Do NOT give everything the same weight unless they truly are equally central — the whole point is to distinguish the load-bearing claim from the peripheral ones.`,
-    `Return ONLY a single JSON object (no prose, no code fence): {"weights": [{"index": number, "id": string, "weight": number, "reason": string}]}. Use the "index" shown for each hypothesis below (copy the "id" too if you can); include EVERY linked hypothesis exactly once; "reason" is one short clause explaining the weight.`,
+    `You are a rigorous research librarian for the "${manifest.name}" training project.`,
+    `You are given a PAPER (its claim and fields, plus its text when available) and the hypotheses currently LINKED to it (each with its compact spec).`,
+    `Your job is a SCRUTINOUS COVERAGE + WEIGHT pass: make sure the linked hypotheses, TAKEN TOGETHER, coherently PROVE OR DISPROVE the paper.`,
+    `STEP 1 — DECOMPOSE: break the paper into its distinct testable CLAIMS (the things it argues).`,
+    `STEP 2 — MAP: for each claim, list the linked hypotheses that would PROVE OR DISPROVE it. A hypothesis only COVERS a claim if its spec, WHEN RUN, actually settles that claim under how a verdict is computed: a single-context spec is judged "does the best matching run beat buy-and-hold OOS net of fees"; a compare spec judges its contrasted lever's arms against each other. Do NOT count a loosely-related hypothesis as covering a claim it can't actually settle.`,
+    `STEP 3 — GAPS: any claim with NO covering hypothesis goes in "uncoveredClaims" (verbatim claim text). Do NOT inflate an unrelated hypothesis's weight to paper over a gap — an honest gap is more useful than a fake cover.`,
+    `STEP 4 — WEIGH: assign each linked hypothesis an integer importance WEIGHT from ${HYPOTHESIS_WEIGHT_MIN} (a minor / supporting detail) to ${HYPOTHESIS_WEIGHT_MAX} (the paper's CENTRAL claim — what it most stands or falls on), reflecting how LOAD-BEARING the claim it covers is FOR THIS PAPER. The same hypothesis can be central to one paper and peripheral in another — judge against THIS paper's argument, not general merit. Most papers have ONE or a few central claims (4–5) and several supporting ones (1–2); do NOT flatten everything to the same weight.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"claims": [{"claim": string, "hypothesisIds": [string-or-1-based-index]}], "weights": [{"index": number, "id": string, "weight": number, "reason": string}], "uncoveredClaims": [string]}. In "weights" use the "index" shown for each hypothesis below (copy the "id" too if you can), include EVERY linked hypothesis exactly once, and give a one-clause "reason". Use [] for "uncoveredClaims" when every claim is covered.`,
   ].join('\n')
 }
 
@@ -1321,19 +1362,65 @@ export function buildWeighHypothesesUserContent(input: {
     claim?: string
     approach?: string
     assumptions?: unknown
+    claimedMetrics?: unknown
     url?: string
   }
-  hypotheses: { id: string; title?: string; rationale?: string }[]
+  hypotheses: { id: string; title?: string; rationale?: string; spec?: unknown }[]
   text?: string
 }): string {
   // Number the hypotheses (1-based) so the model can refer to each by a stable INDEX even if it doesn't
-  // echo the hash id — coerceHypothesisWeights resolves either back to the id.
+  // echo the hash id — coerceHypothesisCoverage resolves either back to the id. Include each hypothesis's
+  // spec so the model can judge what each WOULD actually settle (coverage), not just its title.
   const linkedHypotheses = input.hypotheses.map((h, i) => ({ index: i + 1, ...h }))
-  return JSON.stringify(
-    { paper: input.paper, linkedHypotheses, paperText: input.text },
-    null,
-    2,
-  )
+  return JSON.stringify({ paper: input.paper, linkedHypotheses, paperText: input.text }, null, 2)
+}
+
+/**
+ * Coerce the scrutinous weigh response into the per-hypothesis weights PLUS the coverage signal: claims with
+ * no covering hypothesis (`uncoveredClaims`) and the claim→hypotheses map (`coverageByClaim`). Tolerant of the
+ * legacy weights-only shape (a bare array or `{weights:[...]}`), in which case coverage is simply unknown
+ * (empty), never "no gaps". Reuses {@link coerceHypothesisWeights}' id-or-1-based-index resolution.
+ */
+export function coerceHypothesisCoverage(
+  raw: unknown,
+  linkedIds: string[],
+): {
+  weights: { id: string; weight: number; reason: string }[]
+  uncoveredClaims: string[]
+  coverageByClaim: { claim: string; hypothesisIds: string[] }[]
+} {
+  const o =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
+  const weights = coerceHypothesisWeights(raw, linkedIds)
+  const uncoveredClaims = Array.isArray(o.uncoveredClaims)
+    ? (o.uncoveredClaims as unknown[])
+        .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+        .map((c) => c.trim())
+    : []
+  const allow = new Set(linkedIds)
+  const resolveId = (v: unknown): string => {
+    if (typeof v === 'string' && allow.has(v)) return v
+    const idx = Number(v)
+    if (Number.isInteger(idx) && idx >= 1 && idx <= linkedIds.length) return linkedIds[idx - 1]
+    return ''
+  }
+  const coverageByClaim: { claim: string; hypothesisIds: string[] }[] = []
+  if (Array.isArray(o.claims)) {
+    for (const c of o.claims as unknown[]) {
+      if (!c || typeof c !== 'object') continue
+      const rec = c as Record<string, unknown>
+      const claim = typeof rec.claim === 'string' ? rec.claim.trim() : ''
+      if (!claim) continue
+      const ids: string[] = []
+      const list = Array.isArray(rec.hypothesisIds) ? (rec.hypothesisIds as unknown[]) : []
+      for (const v of list) {
+        const id = resolveId(v)
+        if (id && ids.indexOf(id) < 0) ids.push(id)
+      }
+      coverageByClaim.push({ claim, hypothesisIds: ids })
+    }
+  }
+  return { weights, uncoveredClaims, coverageByClaim }
 }
 
 // Parse the model's weight response into {id, weight, reason} rows. Resolve each row to a hypothesis by its

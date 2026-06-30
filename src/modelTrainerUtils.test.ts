@@ -22,11 +22,13 @@ import {
   findMigrationRule,
   migrateExperimentSpec,
   canonicalConfigString,
+  estimateRemainingCampaignSeconds,
   coerceHypothesisItems,
   looksComparative,
   coercePaperDraft,
   coerceSuggestedHypotheses,
   coerceHypothesisWeights,
+  coerceHypothesisCoverage,
   coerceVerdictRows,
   looksLikeDataGathering,
   extractPaperText,
@@ -2723,5 +2725,62 @@ describe('planHypothesisConsolidation', () => {
     expect(p!.unionRecord.id).toBe(unionId)
     expect(p!.deletedIds).toEqual(['narrow'])
     expect(new Set(p!.unionRecord.paperIds)).toEqual(new Set(['pA', 'pB']))
+  })
+})
+
+describe('coerceHypothesisCoverage (scrutinous weigh: weights + coverage gaps)', () => {
+  const ids = ['h1', 'h2']
+  it('extracts weights, uncovered claims, and the claim->hypotheses map (id or 1-based index)', () => {
+    const out = coerceHypothesisCoverage(
+      {
+        claims: [
+          { claim: 'Momentum predicts returns', hypothesisIds: ['h1'] },
+          { claim: 'Vol-sizing lifts Sharpe', hypothesisIds: [2] },
+        ],
+        weights: [
+          { id: 'h1', weight: 5, reason: 'central' },
+          { index: 2, weight: 2, reason: 'supporting' },
+        ],
+        uncoveredClaims: ['Transaction costs are negligible', '  '],
+      },
+      ids,
+    )
+    expect(out.weights).toEqual([
+      { id: 'h1', weight: 5, reason: 'central' },
+      { id: 'h2', weight: 2, reason: 'supporting' },
+    ])
+    expect(out.uncoveredClaims).toEqual(['Transaction costs are negligible'])
+    expect(out.coverageByClaim).toEqual([
+      { claim: 'Momentum predicts returns', hypothesisIds: ['h1'] },
+      { claim: 'Vol-sizing lifts Sharpe', hypothesisIds: ['h2'] },
+    ])
+  })
+  it('is legacy-tolerant: a bare weights array yields weights with UNKNOWN coverage (not "no gaps")', () => {
+    const out = coerceHypothesisCoverage([{ id: 'h1', weight: 3 }], ids)
+    expect(out.weights).toEqual([{ id: 'h1', weight: 3, reason: '' }])
+    expect(out.uncoveredClaims).toEqual([])
+    expect(out.coverageByClaim).toEqual([])
+  })
+})
+
+describe('estimateRemainingCampaignSeconds (remaining wall-clock from real per-run durations)', () => {
+  it('returns undefined with no completed runs yet, or nothing remaining', () => {
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [], remaining: 5, concurrency: 1 })).toBeUndefined()
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 0, concurrency: 1 })).toBeUndefined()
+  })
+  it('serial (concurrency 1): avg per-run × remaining', () => {
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 1 })).toBe(50)
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000, 20000], remaining: 2, concurrency: 1 })).toBe(30)
+  })
+  it('concurrency divides the wall-clock into waves (ceil)', () => {
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 5 })).toBe(10)
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 6, concurrency: 5 })).toBe(20)
+    // concurrency never exceeds remaining
+    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 3, concurrency: 8 })).toBe(10)
+  })
+  it('ignores non-finite / non-positive durations (skipped runs reporting 0)', () => {
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [0, NaN, -5, 10000], remaining: 2, concurrency: 1 }),
+    ).toBe(20)
   })
 })
