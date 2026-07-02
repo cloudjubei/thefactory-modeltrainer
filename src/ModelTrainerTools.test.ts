@@ -729,7 +729,11 @@ describe('runTrainingCampaign', () => {
     // the benchmark command received the model to run via env
     expect(runner.probes[0].env).toMatchObject({ BENCH_MODEL_NAME: 'reppo-custom' })
     // the winner is persisted onto the model record for the viewer to read
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-model', key: 'reppo-custom' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'reppo-custom',
+    })
     const content = rec!.content as Record<string, unknown>
     expect(content.preferredDevice).toBe('mps')
     expect((content.deviceBenchmark as { bestDevice: string }).bestDevice).toBe('mps')
@@ -741,13 +745,24 @@ describe('runTrainingCampaign', () => {
       scope: 'proj',
       type: 'demo-run-model',
       key: 'm',
-      content: { id: 'm', slug: 'm', flavors: [{ modelName: 'dqn' }], createdAt: NOW, updatedAt: NOW },
+      content: {
+        id: 'm',
+        slug: 'm',
+        flavors: [{ modelName: 'dqn' }],
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const m = manifest()
     delete m.benchmarkDevice
     await expect(
-      tools.benchmarkModelDevice({ scope: 'proj', projectRoot: '/repo', manifest: m, modelId: 'm' }),
+      tools.benchmarkModelDevice({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        modelId: 'm',
+      }),
     ).rejects.toThrow(/benchmarkDevice/)
   })
 
@@ -3291,7 +3306,11 @@ describe('analyzePaperModels', () => {
       ],
       proposedImprovements: [
         { title: 'C51 Distributional DQN', detail: 'add C51 head', kind: 'model' },
-        { title: 'Order-book depth feature', detail: 'ingest L2 to test the microstructure claim', kind: 'data' },
+        {
+          title: 'Order-book depth feature',
+          detail: 'ingest L2 to test the microstructure claim',
+          kind: 'data',
+        },
       ],
     })
     const { tools } = makeJudgeTools(stubExecutor(resp), storage)
@@ -3576,11 +3595,7 @@ describe('invalidateRuns', () => {
 })
 
 describe('consolidateModels', () => {
-  async function seedModel(
-    storage: DataStorage,
-    id: string,
-    extra: Record<string, unknown> = {},
-  ) {
+  async function seedModel(storage: DataStorage, id: string, extra: Record<string, unknown> = {}) {
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run-model',
@@ -3610,7 +3625,11 @@ describe('consolidateModels', () => {
     const executor = stubExecutor(
       JSON.stringify({
         groups: [
-          { canonicalId: 'itransformer-ppo', duplicateIds: ['inverted-transformer-ppo'], reason: 'same' },
+          {
+            canonicalId: 'itransformer-ppo',
+            duplicateIds: ['inverted-transformer-ppo'],
+            reason: 'same',
+          },
           { canonicalId: 'ghost', duplicateIds: ['dqn'], reason: 'bogus' }, // unknown canonical -> dropped
         ],
       }),
@@ -3623,7 +3642,11 @@ describe('consolidateModels', () => {
       llmConfig: LLM,
     })
     expect(result.groups).toEqual([
-      { canonicalId: 'itransformer-ppo', duplicateIds: ['inverted-transformer-ppo'], reason: 'same' },
+      {
+        canonicalId: 'itransformer-ppo',
+        duplicateIds: ['inverted-transformer-ppo'],
+        reason: 'same',
+      },
     ])
     expect(result.modelCount).toBe(3)
     expect(result.recordType).toBe('demo-run')
@@ -3774,7 +3797,9 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
       })
       .catch(() => {})
     const [rec] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
-    expect((rec.content as { status: string; config: Record<string, unknown> }).status).toBe('failed')
+    expect((rec.content as { status: string; config: Record<string, unknown> }).status).toBe(
+      'failed',
+    )
     expect((rec.content as { config: Record<string, unknown> }).config.forward_horizon).toBe('n/a')
   })
 
@@ -3784,13 +3809,21 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 1, status: 'completed', config: { model_name: 'rl', forward_horizon: 5, lr: 0.1 } },
+      content: {
+        objective: 1,
+        status: 'completed',
+        config: { model_name: 'rl', forward_horizon: 5, lr: 0.1 },
+      },
     })
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
       key: 'r2',
-      content: { objective: 1, status: 'completed', config: { model_name: 'sup', forward_horizon: 5, lr: 0.1 } },
+      content: {
+        objective: 1,
+        status: 'completed',
+        config: { model_name: 'sup', forward_horizon: 5, lr: 0.1 },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.migrateTrainingRuns({
@@ -3800,15 +3833,19 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
     })
     expect(result).toMatchObject({ examinedRuns: 2, migratedRuns: 1 })
     expect(
-      ((await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' }))!.content as {
-        config: Record<string, unknown>
-      }).config.forward_horizon,
+      (
+        (await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' }))!.content as {
+          config: Record<string, unknown>
+        }
+      ).config.forward_horizon,
     ).toBe('n/a')
     // the supervised run is untouched (the lever applies there)
     expect(
-      ((await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r2' }))!.content as {
-        config: Record<string, unknown>
-      }).config.forward_horizon,
+      (
+        (await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r2' }))!.content as {
+          config: Record<string, unknown>
+        }
+      ).config.forward_horizon,
     ).toBe(5)
     // second pass converges — nothing left to migrate
     const again = await tools.migrateTrainingRuns({
@@ -3840,7 +3877,8 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
     })
     expect(result).toMatchObject({ examinedQueue: 1, migratedQueue: 0 })
     const rec = await storage.readRecord({ scope: 'proj', type: 'trainer-queue', key: 'q1' })
-    const fixed = (rec?.content as { params: { spec: { fixed: Record<string, unknown> } } }).params.spec.fixed
+    const fixed = (rec?.content as { params: { spec: { fixed: Record<string, unknown> } } }).params
+      .spec.fixed
     expect(fixed.forward_horizon).toBe(9) // untouched — a pending run is canonicalised in STORAGE on completion
   })
 
@@ -3855,13 +3893,19 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
       content: { objective: 1, status: 'completed', config: rawConfig, setupKey: rawKey },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: condManifest() })
+    await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: condManifest(),
+    })
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
     const content = rec?.content as { config: Record<string, unknown>; setupKey: string }
     expect(content.config.forward_horizon).toBe('n/a') // stored config canonicalised
     expect(content.setupKey).toBe(rawKey) // …but setupKey stays RAW, matching setupKeyOf(item.config) in isFresh
     // A fresh skipExplored campaign for the SAME setup must therefore dedup it (no re-run).
-    const runner = stubRunner({ jobResult: (job) => ({ summary: { objective: 1, config: job.config } }) })
+    const runner = stubRunner({
+      jobResult: (job) => ({ summary: { objective: 1, config: job.config } }),
+    })
     const { tools: tools2 } = makeTools(runner, storage)
     await tools2.runTrainingCampaign({
       scope: 'proj',
@@ -3957,7 +4001,10 @@ describe('researchTrainingPapers', () => {
     const storage = memoryStorage()
     const executor = stubExecutor(PAPER_DRAFT)
     const dr = stubDeepResearch({
-      discovered: [src('Paper One', 'https://arxiv.org/abs/1'), src('Paper Two', 'https://arxiv.org/abs/2')],
+      discovered: [
+        src('Paper One', 'https://arxiv.org/abs/1'),
+        src('Paper Two', 'https://arxiv.org/abs/2'),
+      ],
     })
     const { tools } = makeResearchTools(executor, storage, dr)
     const written: string[] = []
@@ -4021,10 +4068,19 @@ describe('researchTrainingPapers', () => {
       scope: 'proj',
       type: 'demo-run-paper',
       key: 'existing',
-      content: { id: 'existing', title: 'Old', url: 'https://arxiv.org/abs/1', status: 'untested', source: 'manual' },
+      content: {
+        id: 'existing',
+        title: 'Old',
+        url: 'https://arxiv.org/abs/1',
+        status: 'untested',
+        source: 'manual',
+      },
     })
     const dr = stubDeepResearch({
-      discovered: [src('Dup', 'https://arxiv.org/pdf/1v2'), src('Fresh', 'https://arxiv.org/abs/2')],
+      discovered: [
+        src('Dup', 'https://arxiv.org/pdf/1v2'),
+        src('Fresh', 'https://arxiv.org/abs/2'),
+      ],
     })
     const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), storage, dr)
     const result = await tools.researchTrainingPapers(base())

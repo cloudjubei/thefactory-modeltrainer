@@ -189,7 +189,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   const hostParallelism = (): number => {
     if (deps.availableParallelism) return deps.availableParallelism()
     try {
-      return typeof os.availableParallelism === 'function' ? os.availableParallelism() : os.cpus().length
+      return typeof os.availableParallelism === 'function'
+        ? os.availableParallelism()
+        : os.cpus().length
     } catch {
       return 1
     }
@@ -264,7 +266,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const benchmarkedModels = (
       await deps.storage.listRecords({ scope: params.scope, type: `${recordType}-model` })
     )
-      .map((r) => r.content as { preferredDevice?: 'cpu' | 'mps'; flavors?: { modelName?: string }[]; modelNames?: string[] })
+      .map(
+        (r) =>
+          r.content as {
+            preferredDevice?: 'cpu' | 'mps'
+            flavors?: { modelName?: string }[]
+            modelNames?: string[]
+          },
+      )
       .filter((m) => !!m && !!m.preferredDevice)
     const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
     const thesisFields = {
@@ -1505,7 +1514,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const linkedIds = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds : []
     const linked: TrainingHypothesis[] = []
     for (const id of linkedIds) {
-      const r = await deps.storage.readRecord({ scope: params.scope, type: hypothesisType, key: id })
+      const r = await deps.storage.readRecord({
+        scope: params.scope,
+        type: hypothesisType,
+        key: id,
+      })
       if (r) linked.push(r.content as unknown as TrainingHypothesis)
     }
     if (!linked.length)
@@ -1668,7 +1681,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // environments, you don't tune them); `ignore` levers (device) are excluded everywhere.
     const nonModelLevers = Object.entries(manifest.levers)
       .filter(
-        ([, spec]) => spec.scope === 'environment' || spec.scope === 'dataset' || spec.scope === 'ignore',
+        ([, spec]) =>
+          spec.scope === 'environment' || spec.scope === 'dataset' || spec.scope === 'ignore',
       )
       .map(([name]) => name)
     const stripBy = (cfg: Record<string, unknown>, levers: string[]): Record<string, unknown> => {
@@ -1678,10 +1692,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       return out
     }
     // focusConfig keeps context levers (so a lever sweep can hold this run's environment fixed); drop only `ignore`.
-    const focusConfig = stripBy((focus.content.config as Record<string, unknown>) || {}, ignoreLevers)
+    const focusConfig = stripBy(
+      (focus.content.config as Record<string, unknown>) || {},
+      ignoreLevers,
+    )
 
     // The analysed run set drops context + ignore levers, so importances reflect only tunable MODEL knobs.
-    const runs = recordsToAnalysisRuns(records).map((r) => ({ ...r, config: stripBy(r.config, nonModelLevers) }))
+    const runs = recordsToAnalysisRuns(records).map((r) => ({
+      ...r,
+      config: stripBy(r.config, nonModelLevers),
+    }))
     const ranked = runs
       .map((r) => ({ key: r.key, value: criterionValueOf(r, criterion) }))
       .filter((x): x is { key: string; value: number } => x.value !== undefined)
@@ -1707,7 +1727,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         focus.content as unknown as TrainingRunSummary,
       )
       if (diff && diff.aligned) {
-        const sibConfig = stripBy((sib.content.config as Record<string, unknown>) || {}, ignoreLevers)
+        const sibConfig = stripBy(
+          (sib.content.config as Record<string, unknown>) || {},
+          ignoreLevers,
+        )
         const changed =
           Object.keys(manifest.levers)
             .filter((lk) => String(sibConfig[lk]) !== String(focusConfig[lk]))

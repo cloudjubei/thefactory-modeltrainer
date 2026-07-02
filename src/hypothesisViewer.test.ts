@@ -302,7 +302,9 @@ describe('contextCells', () => {
     ])
   })
   it('ignores an empty/malformed compare', () => {
-    expect(H.contextCells({ fixed: { a: 1 }, compare: { lever: 'model_name', values: [] } })).toEqual([])
+    expect(
+      H.contextCells({ fixed: { a: 1 }, compare: { lever: 'model_name', values: [] } }),
+    ).toEqual([])
     expect(H.contextCells({ compare: { values: ['x'] } })).toEqual([])
   })
 })
@@ -483,7 +485,9 @@ describe('rollupPaperVerdict', () => {
       .map((i) => manual(i, 'proven'))
       .concat(['d1', 'd2', 'd3', 'd4'].map((i) => manual(i, 'disproved')))
       .concat(['u1', 'u2', 'u3', 'u4', 'u5'].map((i) => manual(i, 'untested')))
-    expect(H.rollupPaperVerdict({ hypothesisIds: hyps.map((h) => h.id) }, hyps, [], 'max')).toBe('shaky')
+    expect(H.rollupPaperVerdict({ hypothesisIds: hyps.map((h) => h.id) }, hyps, [], 'max')).toBe(
+      'shaky',
+    )
   })
   it('fluff when every decided hypothesis is disproved', () => {
     const hyps = [manual('a', 'disproved'), manual('b', 'disproved')]
@@ -587,7 +591,11 @@ describe('comparisonCriterion (the success/failure rule for a context-spanning h
     expect(txt).toContain('0.2')
   })
   it('differs: defaults the tolerance to 0.1 when unspecified', () => {
-    const txt = H.comparisonCriterion(spec, { kind: 'differs' }, { objectiveName: 'sharpe', minRuns: 3 })
+    const txt = H.comparisonCriterion(
+      spec,
+      { kind: 'differs' },
+      { objectiveName: 'sharpe', minRuns: 3 },
+    )
     expect(txt).toMatch(/DIFFERS/)
     expect(txt).toContain('0.1')
   })
@@ -677,9 +685,9 @@ describe('paper scoring: proposed counter + explain + theses (additive lens)', (
     })
     it('single-claim / untagged papers are NOT multi-claim (unchanged behaviour)', () => {
       expect(H.scorePaperVerdict([row('proven'), row('disproved')]).multiClaim).toBe(false)
-      expect(H.scorePaperVerdict([row('proven', 1, 'X'), row('disproved', 1, 'X')]).multiClaim).toBe(
-        false,
-      )
+      expect(
+        H.scorePaperVerdict([row('proven', 1, 'X'), row('disproved', 1, 'X')]).multiClaim,
+      ).toBe(false)
     })
     it('exposes passedClaims / totalClaims counts for the multi-claim status chip', () => {
       const d = H.scorePaperVerdict([
@@ -694,13 +702,15 @@ describe('paper scoring: proposed counter + explain + theses (additive lens)', (
 })
 
 describe('proposed status derivation (blocked on an unimplemented model)', () => {
-  const impl =
-    (map: Record<string, boolean | null>) =>
-    (name: string) =>
-      name in map ? map[name] : null
+  const impl = (map: Record<string, boolean | null>) => (name: string) =>
+    name in map ? map[name] : null
   it('requiresUnimplementedModel: a fixed model_name that is known-but-unimplemented', () => {
-    expect(H.requiresUnimplementedModel({ fixed: { model_name: 'eiie' } }, impl({ eiie: false }))).toBe(true)
-    expect(H.requiresUnimplementedModel({ fixed: { model_name: 'ppo' } }, impl({ ppo: true }))).toBe(false)
+    expect(
+      H.requiresUnimplementedModel({ fixed: { model_name: 'eiie' } }, impl({ eiie: false })),
+    ).toBe(true)
+    expect(
+      H.requiresUnimplementedModel({ fixed: { model_name: 'ppo' } }, impl({ ppo: true })),
+    ).toBe(false)
     expect(H.requiresUnimplementedModel({ fixed: { model_name: 'who' } }, impl({}))).toBe(false) // unknown
   })
   it('requiresUnimplementedModel: no model_name -> false', () => {
@@ -719,9 +729,17 @@ describe('proposed status derivation (blocked on an unimplemented model)', () =>
     expect(H.autoVerdictForHypothesis(h, winner, 'max', 1, impl({ eiie: false }))).toBe('proven')
   })
   it('effectiveVerdict threads the resolver; a manual override still wins', () => {
-    const auto = { spec: { fixed: { model_name: 'eiie' } }, verdictSource: 'auto', status: 'untested' }
+    const auto = {
+      spec: { fixed: { model_name: 'eiie' } },
+      verdictSource: 'auto',
+      status: 'untested',
+    }
     expect(H.effectiveVerdict(auto, [], 'max', 0, impl({ eiie: false }))).toBe('proposed')
-    const manual = { spec: { fixed: { model_name: 'eiie' } }, verdictSource: 'manual', status: 'proven' }
+    const manual = {
+      spec: { fixed: { model_name: 'eiie' } },
+      verdictSource: 'manual',
+      status: 'proven',
+    }
     expect(H.effectiveVerdict(manual, [], 'max', 0, impl({ eiie: false }))).toBe('proven')
   })
   it('without a resolver, behaviour is unchanged (no proposed)', () => {

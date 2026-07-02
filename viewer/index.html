@@ -210,7 +210,7 @@
                   prior runs' scores incomparable; runs are tagged with the version they ran under.
                 </p>
               </div>
-              <div id="versions-body" class="versions-body"></div>
+              <div id="versions-body" class="versions-body tab-scroll"></div>
             </section>
           </section>
 
@@ -240,7 +240,7 @@
                 </div>
               </div>
               <p id="datasets-status" class="form-status" role="status" hidden></p>
-              <div id="datasets-body" class="environments-body"></div>
+              <div id="datasets-body" class="environments-body tab-scroll"></div>
             </section>
           </section>
 
@@ -269,7 +269,7 @@
                 </div>
               </div>
               <p id="environments-status" class="form-status" role="status" hidden></p>
-              <div id="environments-body" class="environments-body"></div>
+              <div id="environments-body" class="environments-body tab-scroll"></div>
             </section>
           </section>
 
@@ -317,8 +317,7 @@
                 </div>
               </div>
               <p id="hypotheses-status" class="form-status" role="status" hidden></p>
-              <form id="hypothesis-form" class="hypothesis-form" autocomplete="off" hidden></form>
-              <div id="hypotheses-body" class="hypotheses-body"></div>
+              <div id="hypotheses-body" class="hypotheses-body tab-scroll"></div>
             </section>
           </section>
 
@@ -348,8 +347,7 @@
                 </div>
               </div>
               <p id="papers-status" class="form-status" role="status" hidden></p>
-              <form id="paper-form" class="hypothesis-form" autocomplete="off" hidden></form>
-              <div id="papers-body" class="papers-body"></div>
+              <div id="papers-body" class="papers-body tab-scroll"></div>
             </section>
           </section>
 
@@ -386,7 +384,7 @@
                 </div>
               </div>
               <p id="models-status" class="form-status" role="status" hidden></p>
-              <div id="models-body" class="papers-body"></div>
+              <div id="models-body" class="papers-body tab-scroll"></div>
             </section>
           </section>
 
@@ -399,20 +397,20 @@
                   Sweep lever values or fix them — every combination runs once per seed.
                 </p>
               </div>
-              <form id="launch-form" class="launch-form" autocomplete="off"></form>
+              <form id="launch-form" class="launch-form tab-scroll" autocomplete="off"></form>
             </section>
           </section>
 
           <!-- Activity (the current / last campaign) -->
           <section id="tab-activity" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-label="Activity">
-              <div id="activity-body" class="activity-body"></div>
+              <div id="activity-body" class="activity-body tab-scroll"></div>
             </section>
           </section>
 
           <!-- Speed — per-model device benchmark + run durations -->
           <section id="tab-speed" class="tab-panel" role="tabpanel" hidden>
-            <div id="speed-body"></div>
+            <div id="speed-body" class="tab-scroll"></div>
           </section>
 
           <!-- xAI — model internals + cross-run config effects + the experiment recommender -->
@@ -424,6 +422,49 @@
         <footer class="page-foot">
           <span id="foot-label">Trainer viewer</span>
         </footer>
+      </div>
+
+      <!-- Add/edit forms open as modals (like Datasets/Environments), not inline at the top of the tab. -->
+      <div id="hypothesis-modal" class="chart-modal" hidden>
+        <div class="chart-modal__backdrop" data-hyp-form-cancel></div>
+        <div class="chart-modal__panel bundle-form-panel" role="dialog" aria-label="Add hypothesis">
+          <div class="chart-modal__head">
+            <strong>Add a hypothesis</strong>
+            <button
+              type="button"
+              class="icon-btn"
+              data-hyp-form-cancel
+              title="Close"
+              aria-label="Close"
+            >
+              &#10005;
+            </button>
+          </div>
+          <div class="chart-modal__scroll">
+            <form id="hypothesis-form" class="hypothesis-form" autocomplete="off"></form>
+          </div>
+        </div>
+      </div>
+
+      <div id="paper-modal" class="chart-modal" hidden>
+        <div class="chart-modal__backdrop" data-paper-form-cancel></div>
+        <div class="chart-modal__panel bundle-form-panel" role="dialog" aria-label="Add approach">
+          <div class="chart-modal__head">
+            <strong>Add an approach / paper</strong>
+            <button
+              type="button"
+              class="icon-btn"
+              data-paper-form-cancel
+              title="Close"
+              aria-label="Close"
+            >
+              &#10005;
+            </button>
+          </div>
+          <div class="chart-modal__scroll">
+            <form id="paper-form" class="hypothesis-form" autocomplete="off"></form>
+          </div>
+        </div>
       </div>
     </div>
   </body>

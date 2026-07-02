@@ -235,9 +235,13 @@
         minRuns,
       )
     } else {
-      verdict = autoVerdictFor(measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction), minRuns)
+      verdict = autoVerdictFor(
+        measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction),
+        minRuns,
+      )
     }
-    if (verdict === 'untested' && requiresUnimplementedModel(spec, modelImplemented)) return 'proposed'
+    if (verdict === 'untested' && requiresUnimplementedModel(spec, modelImplemented))
+      return 'proposed'
     return verdict
   }
 
@@ -321,7 +325,8 @@
       hasWeights = false
     for (let i = 0; i < (linked || []).length; i++) {
       const it = linked[i]
-      const w = typeof it.weight === 'number' && isFinite(it.weight) && it.weight > 0 ? it.weight : 1
+      const w =
+        typeof it.weight === 'number' && isFinite(it.weight) && it.weight > 0 ? it.weight : 1
       if (w !== 1) hasWeights = true
       if (it.verdict === 'proven') {
         proven++
@@ -413,7 +418,9 @@
     if (!c.total) return 'No hypotheses linked yet.'
     const propNote = c.proposed ? ', ' + c.proposed + ' awaiting model implementation' : ''
     if (d.status === 'untested')
-      return c.untested + c.proposed + ' of ' + c.total + ' hypotheses not yet decided' + propNote + '.'
+      return (
+        c.untested + c.proposed + ' of ' + c.total + ' hypotheses not yet decided' + propNote + '.'
+      )
     const pct = Math.round(d.score * 100)
     const wnote = d.hasWeights ? ', weighted by importance' : ''
     const undecided = c.untested + c.proposed

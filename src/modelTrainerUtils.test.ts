@@ -337,42 +337,66 @@ describe('resolveCampaignParallelism', () => {
   })
 
   it('floors a non-even cpu/threads ratio (10 cpus, 3 threads -> 3 runs)', () => {
-    expect(resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency).toBe(3)
+    expect(
+      resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency,
+    ).toBe(3)
   })
 })
 
 describe('resolveModelDeviceForConfig', () => {
   const models = [
-    { slug: 'reppo', flavors: [{ modelName: 'reppo-custom' }, { modelName: 'reppo' }], preferredDevice: 'mps' as const },
+    {
+      slug: 'reppo',
+      flavors: [{ modelName: 'reppo-custom' }, { modelName: 'reppo' }],
+      preferredDevice: 'mps' as const,
+    },
     { slug: 'ppo', flavors: [{ modelName: 'ppo' }], preferredDevice: 'cpu' as const },
     { slug: 'dqn', flavors: [{ modelName: 'dqn' }] }, // never benchmarked -> no preferredDevice
   ]
 
   it('applies a model mps preference to a SINGLE run', () => {
     expect(
-      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom' }, models, concurrency: 1 }),
+      resolveModelDeviceForConfig({
+        config: { model_name: 'reppo-custom' },
+        models,
+        concurrency: 1,
+      }),
     ).toBe('mps')
   })
 
   it('does NOT apply mps to a parallel sweep (one GPU cannot be shared)', () => {
     expect(
-      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom' }, models, concurrency: 4 }),
+      resolveModelDeviceForConfig({
+        config: { model_name: 'reppo-custom' },
+        models,
+        concurrency: 4,
+      }),
     ).toBeUndefined()
   })
 
   it('applies a cpu preference even in a parallel sweep (cpu parallelises)', () => {
-    expect(resolveModelDeviceForConfig({ config: { model_name: 'ppo' }, models, concurrency: 4 })).toBe('cpu')
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'ppo' }, models, concurrency: 4 }),
+    ).toBe('cpu')
   })
 
   it('respects an explicit device in the config over the model preference', () => {
     expect(
-      resolveModelDeviceForConfig({ config: { model_name: 'reppo-custom', device: 'cpu' }, models, concurrency: 1 }),
+      resolveModelDeviceForConfig({
+        config: { model_name: 'reppo-custom', device: 'cpu' },
+        models,
+        concurrency: 1,
+      }),
     ).toBeUndefined()
   })
 
   it('returns undefined when no model matches or the model was never benchmarked', () => {
-    expect(resolveModelDeviceForConfig({ config: { model_name: 'dqn' }, models, concurrency: 1 })).toBeUndefined()
-    expect(resolveModelDeviceForConfig({ config: { model_name: 'unknown' }, models, concurrency: 1 })).toBeUndefined()
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'dqn' }, models, concurrency: 1 }),
+    ).toBeUndefined()
+    expect(
+      resolveModelDeviceForConfig({ config: { model_name: 'unknown' }, models, concurrency: 1 }),
+    ).toBeUndefined()
     expect(resolveModelDeviceForConfig({ config: {}, models, concurrency: 1 })).toBeUndefined()
   })
 })
@@ -402,7 +426,9 @@ describe('parseDeviceBenchmark', () => {
   it('defaults safely to cpu on a missing/malformed summary (never sets a bogus device)', () => {
     expect(parseDeviceBenchmark(undefined, 'T').bestDevice).toBe('cpu')
     expect(parseDeviceBenchmark({}, 'T').bestDevice).toBe('cpu')
-    expect(parseDeviceBenchmark({ deviceBenchmark: { bestDevice: 'gpu' } }, 'T').bestDevice).toBe('cpu')
+    expect(parseDeviceBenchmark({ deviceBenchmark: { bestDevice: 'gpu' } }, 'T').bestDevice).toBe(
+      'cpu',
+    )
   })
 
   it('drops non-positive usPerStep, clamps speedup to >= 1, derives availableDevices from usPerStep', () => {
@@ -437,7 +463,10 @@ describe('parseDeviceBenchmark', () => {
   })
 
   it('omits seconds/budget/errors entirely when the summary lacks them', () => {
-    const b = parseDeviceBenchmark({ deviceBenchmark: { bestDevice: 'cpu', usPerStep: { cpu: 50 } } }, 'T')
+    const b = parseDeviceBenchmark(
+      { deviceBenchmark: { bestDevice: 'cpu', usPerStep: { cpu: 50 } } },
+      'T',
+    )
     expect(b.seconds).toBeUndefined()
     expect(b.budget).toBeUndefined()
     expect(b.errors).toBeUndefined()
@@ -631,7 +660,11 @@ describe('expandExperimentMatrix', () => {
 
   it('rejects a compare lever that names no manifest lever', () => {
     expect(() =>
-      expandExperimentMatrix(manifest(), { compare: { lever: 'nope', values: ['a', 'b'] } }, hashByJson),
+      expandExperimentMatrix(
+        manifest(),
+        { compare: { lever: 'nope', values: ['a', 'b'] } },
+        hashByJson,
+      ),
     ).toThrow(/compare lever/)
   })
 
@@ -1013,7 +1046,14 @@ describe('coerceHypothesisItems', () => {
 
   it('carries the paper CLAIM label (the specific claim a hypothesis tests)', () => {
     const items = coerceHypothesisItems(
-      [{ title: 't', rationale: 'r', claim: '  Momentum predicts returns  ', spec: { fixed: { lr: 0.9 } } }],
+      [
+        {
+          title: 't',
+          rationale: 'r',
+          claim: '  Momentum predicts returns  ',
+          spec: { fixed: { lr: 0.9 } },
+        },
+      ],
       m,
     )
     expect(items[0].claim).toBe('Momentum predicts returns')
@@ -1090,7 +1130,11 @@ describe('coerceHypothesisItems — precision guards + compare', () => {
   const mfModel = (): TrainerManifest =>
     manifest({
       levers: {
-        model_name: { type: 'choice', choices: ['ppo-custom', 'reppo-custom', 'dqn'], default: 'ppo-custom' },
+        model_name: {
+          type: 'choice',
+          choices: ['ppo-custom', 'reppo-custom', 'dqn'],
+          default: 'ppo-custom',
+        },
         timeframe: { type: 'choice', choices: ['1h', '1d'], default: '1h' },
         lr: { type: 'number', default: 0.01 },
         allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
@@ -1103,7 +1147,10 @@ describe('coerceHypothesisItems — precision guards + compare', () => {
           {
             title: 'reppo outperforms ppo',
             rationale: 'recurrence is better',
-            spec: { fixed: { timeframe: '1h' }, sweep: { model_name: ['ppo-custom', 'reppo-custom'] } },
+            spec: {
+              fixed: { timeframe: '1h' },
+              sweep: { model_name: ['ppo-custom', 'reppo-custom'] },
+            },
           },
         ],
         mfModel(),
@@ -1113,7 +1160,13 @@ describe('coerceHypothesisItems — precision guards + compare', () => {
   it('GUARD B: drops a single-context spec that does not pin model_name (too broad)', () => {
     expect(
       coerceHypothesisItems(
-        [{ title: 'beats hold', rationale: 'only timeframe pinned', spec: { fixed: { timeframe: '1h' } } }],
+        [
+          {
+            title: 'beats hold',
+            rationale: 'only timeframe pinned',
+            spec: { fixed: { timeframe: '1h' } },
+          },
+        ],
         mfModel(),
       ),
     ).toEqual([])
@@ -1138,22 +1191,40 @@ describe('coerceHypothesisItems — precision guards + compare', () => {
           title: 'reppo vs ppo',
           rationale: 'compare the arms',
           comparison: { kind: 'beats-baseline' },
-          spec: { fixed: { timeframe: '1h' }, compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] } },
+          spec: {
+            fixed: { timeframe: '1h' },
+            compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+          },
         },
       ],
       mfModel(),
     )
     expect(out).toHaveLength(1)
-    expect(out[0].spec.compare).toEqual({ lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] })
+    expect(out[0].spec.compare).toEqual({
+      lever: 'model_name',
+      values: ['ppo-custom', 'reppo-custom'],
+    })
   })
   it('drops a compare naming an unknown lever or with fewer than two values', () => {
     const mf = mfModel()
     expect(
-      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { compare: { lever: 'nope', values: ['a', 'b'] } } }], mf),
+      coerceHypothesisItems(
+        [{ title: 't', rationale: 'r', spec: { compare: { lever: 'nope', values: ['a', 'b'] } } }],
+        mf,
+      ),
     ).toEqual([])
     expect(
       coerceHypothesisItems(
-        [{ title: 't', rationale: 'r', spec: { fixed: { model_name: 'ppo-custom' }, compare: { lever: 'model_name', values: ['ppo-custom'] } } }],
+        [
+          {
+            title: 't',
+            rationale: 'r',
+            spec: {
+              fixed: { model_name: 'ppo-custom' },
+              compare: { lever: 'model_name', values: ['ppo-custom'] },
+            },
+          },
+        ],
         mf,
       ),
     ).toEqual([])
@@ -1989,7 +2060,11 @@ describe('buildSuggestHypothesesUserContent', () => {
     expect(withText.leverGuide).toMatchObject({ identityLever: null }) // demo manifest has no model_name
     expect(Array.isArray(withText.leverGuide.modelLevers)).toBe(true)
     const noText = JSON.parse(
-      buildSuggestHypothesesUserContent({ manifest: manifest(), paper: { title: 'P' }, existingHypotheses: [] }),
+      buildSuggestHypothesesUserContent({
+        manifest: manifest(),
+        paper: { title: 'P' },
+        existingHypotheses: [],
+      }),
     )
     expect('text' in noText).toBe(false)
   })
@@ -2040,7 +2115,12 @@ describe('coerceHypothesisWeights', () => {
   })
   it('rounds fractional weights and skips non-finite ones', () => {
     const out = coerceHypothesisWeights(
-      { weights: [{ id: 'a', weight: 3.4 }, { id: 'b', weight: 'nope' }] },
+      {
+        weights: [
+          { id: 'a', weight: 3.4 },
+          { id: 'b', weight: 'nope' },
+        ],
+      },
       linked,
     )
     expect(out).toEqual([{ id: 'a', weight: 3, reason: '' }])
@@ -2338,7 +2418,13 @@ describe('detectMissingPaperModels', () => {
   })
   it('drops a proposal whose slug matches a catalog ALIAS (e.g. policy-gradient -> a2c)', () => {
     const pg: ProposedModel[] = [
-      { name: 'Policy Gradient', slug: 'policy-gradient', description: '', category: 'rl', proposal: '' },
+      {
+        name: 'Policy Gradient',
+        slug: 'policy-gradient',
+        description: '',
+        category: 'rl',
+        proposal: '',
+      },
     ]
     const out = detectMissingPaperModels(pg, [
       { slug: 'a2c', name: 'A2C', modelNames: ['a2c'], aliases: ['policy-gradient'] },
@@ -2472,7 +2558,9 @@ describe('coerceConsolidationGroups', () => {
   })
 
   it('drops a group whose canonicalId is not a real model', () => {
-    expect(coerceConsolidationGroups([{ canonicalId: 'zzz', duplicateIds: ['b'] }], ids)).toEqual([])
+    expect(coerceConsolidationGroups([{ canonicalId: 'zzz', duplicateIds: ['b'] }], ids)).toEqual(
+      [],
+    )
   })
 
   it('filters out duplicateIds that are unknown, self, or repeated', () => {
@@ -2484,9 +2572,9 @@ describe('coerceConsolidationGroups', () => {
   })
 
   it('drops a group that has no valid duplicates left', () => {
-    expect(coerceConsolidationGroups([{ canonicalId: 'a', duplicateIds: ['zzz', 'a'] }], ids)).toEqual(
-      [],
-    )
+    expect(
+      coerceConsolidationGroups([{ canonicalId: 'a', duplicateIds: ['zzz', 'a'] }], ids),
+    ).toEqual([])
   })
 
   it('never lets one model appear in two groups (cross-group de-dup)', () => {
@@ -2540,7 +2628,10 @@ describe('appliesWhenMap', () => {
     run: 'x',
     levers: {
       model_name: { type: 'string' as const },
-      forward_horizon: { type: 'number' as const, appliesWhen: { model_name: ['supervised-logreg', 'supervised-gbm'] } },
+      forward_horizon: {
+        type: 'number' as const,
+        appliesWhen: { model_name: ['supervised-logreg', 'supervised-gbm'] },
+      },
       momentum_lookback: { type: 'number' as const, appliesWhen: { model_name: ['momentum'] } },
       lr: { type: 'number' as const },
     },
@@ -2554,14 +2645,17 @@ describe('appliesWhenMap', () => {
   })
 
   it('is empty when no lever is conditional', () => {
-    const m = { recordType: 'r', levers: { lr: { type: 'number' as const } } } as unknown as Parameters<
-      typeof appliesWhenMap
-    >[0]
+    const m = {
+      recordType: 'r',
+      levers: { lr: { type: 'number' as const } },
+    } as unknown as Parameters<typeof appliesWhenMap>[0]
     expect(appliesWhenMap(m)).toEqual({})
   })
 
   it('tolerates a manifest with no levers', () => {
-    expect(appliesWhenMap({ recordType: 'r' } as unknown as Parameters<typeof appliesWhenMap>[0])).toEqual({})
+    expect(
+      appliesWhenMap({ recordType: 'r' } as unknown as Parameters<typeof appliesWhenMap>[0]),
+    ).toEqual({})
   })
 })
 
@@ -2637,7 +2731,14 @@ describe('mergeHypothesisSpecs', () => {
 })
 
 describe('pickCanonicalHypothesis', () => {
-  const h = (o: any) => ({ id: o.id, spec: {}, status: 'untested', verdictSource: 'auto', source: 'llm', ...o })
+  const h = (o: any) => ({
+    id: o.id,
+    spec: {},
+    status: 'untested',
+    verdictSource: 'auto',
+    source: 'llm',
+    ...o,
+  })
   it('a single manual member wins', () => {
     const r = pickCanonicalHypothesis([
       h({ id: 'a', source: 'human' }),
@@ -2665,7 +2766,14 @@ describe('pickCanonicalHypothesis', () => {
 })
 
 describe('groupHypothesesForConsolidation', () => {
-  const h = (id: string, spec: any, o: any = {}) => ({ id, spec, status: 'untested', verdictSource: 'auto', source: 'llm', ...o })
+  const h = (id: string, spec: any, o: any = {}) => ({
+    id,
+    spec,
+    status: 'untested',
+    verdictSource: 'auto',
+    source: 'llm',
+    ...o,
+  })
   it('groups genuine widening pairs; drops singletons + dismissed + already-shared-id', () => {
     const hyps = [
       h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }),
@@ -2689,11 +2797,26 @@ describe('groupHypothesesForConsolidation', () => {
 
 describe('planHypothesisConsolidation', () => {
   const h = (id: string, spec: any, o: any = {}) => ({
-    id, spec, title: id, rationale: '', status: 'untested', verdictSource: 'auto',
-    source: 'llm', createdAt: '2026-01-01', updatedAt: '2026-01-01', paperIds: [], ...o,
+    id,
+    spec,
+    title: id,
+    rationale: '',
+    status: 'untested',
+    verdictSource: 'auto',
+    source: 'llm',
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+    paperIds: [],
+    ...o,
   })
   const plan = (members: any[], papers: any[] = [], models: any[] = []) =>
-    planHypothesisConsolidation({ members } as any, papers, models, '2026-06-30T00:00:00Z', hashTrainingConfig)
+    planHypothesisConsolidation(
+      { members } as any,
+      papers,
+      models,
+      '2026-06-30T00:00:00Z',
+      hashTrainingConfig,
+    )
 
   it('builds a union record at the merged-spec id, lists the others as deleted, unions paperIds', () => {
     const p = plan([
@@ -2701,9 +2824,12 @@ describe('planHypothesisConsolidation', () => {
       h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { paperIds: ['pB'] }),
     ])
     expect(p).not.toBeNull()
-    const newId = hashTrainingConfig(mergeHypothesisSpecs([
-      { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
-    ]) as any)
+    const newId = hashTrainingConfig(
+      mergeHypothesisSpecs([
+        { fixed: { m: 'x' }, sweep: { lr: [0.1] } },
+        { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+      ]) as any,
+    )
     expect(p!.unionRecord.id).toBe(newId)
     expect(p!.unionRecord.spec.sweep.lr).toEqual([0.1, 0.2])
     expect(new Set(p!.unionRecord.paperIds)).toEqual(new Set(['pA', 'pB']))
@@ -2714,10 +2840,16 @@ describe('planHypothesisConsolidation', () => {
   })
 
   it('repoints paper.hypothesisIds and PRESERVES the weight onto the survivor (max on collision)', () => {
-    const paper = { id: 'pA', hypothesisIds: ['h1', 'h2', 'other'], hypothesisWeights: { h1: 2, h2: 5, other: 1 } }
+    const paper = {
+      id: 'pA',
+      hypothesisIds: ['h1', 'h2', 'other'],
+      hypothesisWeights: { h1: 2, h2: 5, other: 1 },
+    }
     const p = plan(
-      [h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { paperIds: ['pA'] }),
-       h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { paperIds: ['pA'] })],
+      [
+        h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { paperIds: ['pA'] }),
+        h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { paperIds: ['pA'] }),
+      ],
       [paper],
     )
     expect(p!.changedPapers.length).toBe(1)
@@ -2734,10 +2866,18 @@ describe('planHypothesisConsolidation', () => {
   })
 
   it('repoints model + flavor hypothesisIds', () => {
-    const model = { id: 'm1', hypothesisIds: ['h1'], flavors: [{ key: 'f', hypothesisIds: ['h2'] }] }
+    const model = {
+      id: 'm1',
+      hypothesisIds: ['h1'],
+      flavors: [{ key: 'f', hypothesisIds: ['h2'] }],
+    }
     const p = plan(
-      [h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }), h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } })],
-      [], [model],
+      [
+        h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }),
+        h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+      ],
+      [],
+      [model],
     )
     expect(p!.changedModels.length).toBe(1)
     const newId = p!.unionRecord.id
@@ -2745,9 +2885,27 @@ describe('planHypothesisConsolidation', () => {
     expect(p!.changedModels[0].flavors[0].hypothesisIds).toEqual([newId])
   })
 
+  it('carries the canonical hypothesis CLAIM label onto the union (so the paper still groups it by claim)', () => {
+    const p = plan([
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { claim: 'Momentum predicts returns' }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+    ])
+    expect(p!.unionRecord.claim).toBe('Momentum predicts returns')
+  })
+
   it('carries a manual canonical verdict onto the union but NO evidence/transitions', () => {
     const p = plan([
-      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { verdictSource: 'manual', status: 'disproved', verdictNote: 'fails OOS', evidence: { matchedKeys: ['r1'] }, transitions: [{ at: 't', from: 'untested', to: 'disproved' }] }),
+      h(
+        'h1',
+        { fixed: { m: 'x' }, sweep: { lr: [0.1] } },
+        {
+          verdictSource: 'manual',
+          status: 'disproved',
+          verdictNote: 'fails OOS',
+          evidence: { matchedKeys: ['r1'] },
+          transitions: [{ at: 't', from: 'untested', to: 'disproved' }],
+        },
+      ),
       h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
     ])
     expect(p!.unionRecord.verdictSource).toBe('manual')
@@ -2759,15 +2917,24 @@ describe('planHypothesisConsolidation', () => {
 
   it('returns a conflict skip when members carry conflicting manual verdicts', () => {
     const p = plan([
-      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { verdictSource: 'manual', status: 'proven' }),
-      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }, { verdictSource: 'manual', status: 'disproved' }),
+      h(
+        'h1',
+        { fixed: { m: 'x' }, sweep: { lr: [0.1] } },
+        { verdictSource: 'manual', status: 'proven' },
+      ),
+      h(
+        'h2',
+        { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+        { verdictSource: 'manual', status: 'disproved' },
+      ),
     ])
     expect(p && (p as any).skipped).toBe('conflict')
   })
 
   it('union-id collision: merges INTO an existing member that already equals the union (not deleted)', () => {
     const unionSpec = mergeHypothesisSpecs([
-      { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
+      { fixed: { m: 'x' }, sweep: { lr: [0.1] } },
+      { fixed: { m: 'x' }, sweep: { lr: [0.2] } },
     ])
     const unionId = hashTrainingConfig(unionSpec as any)
     const p = plan([
@@ -2817,22 +2984,44 @@ describe('coerceHypothesisCoverage (scrutinous weigh: weights + coverage gaps)',
 
 describe('estimateRemainingCampaignSeconds (remaining wall-clock from real per-run durations)', () => {
   it('returns undefined with no completed runs yet, or nothing remaining', () => {
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [], remaining: 5, concurrency: 1 })).toBeUndefined()
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 0, concurrency: 1 })).toBeUndefined()
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [], remaining: 5, concurrency: 1 }),
+    ).toBeUndefined()
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 0, concurrency: 1 }),
+    ).toBeUndefined()
   })
   it('serial (concurrency 1): avg per-run × remaining', () => {
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 1 })).toBe(50)
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000, 20000], remaining: 2, concurrency: 1 })).toBe(30)
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 1 }),
+    ).toBe(50)
+    expect(
+      estimateRemainingCampaignSeconds({
+        durationsMs: [10000, 20000],
+        remaining: 2,
+        concurrency: 1,
+      }),
+    ).toBe(30)
   })
   it('concurrency divides the wall-clock into waves (ceil)', () => {
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 5 })).toBe(10)
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 6, concurrency: 5 })).toBe(20)
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 5 }),
+    ).toBe(10)
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 6, concurrency: 5 }),
+    ).toBe(20)
     // concurrency never exceeds remaining
-    expect(estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 3, concurrency: 8 })).toBe(10)
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 3, concurrency: 8 }),
+    ).toBe(10)
   })
   it('ignores non-finite / non-positive durations (skipped runs reporting 0)', () => {
     expect(
-      estimateRemainingCampaignSeconds({ durationsMs: [0, NaN, -5, 10000], remaining: 2, concurrency: 1 }),
+      estimateRemainingCampaignSeconds({
+        durationsMs: [0, NaN, -5, 10000],
+        remaining: 2,
+        concurrency: 1,
+      }),
     ).toBe(20)
   })
 })
@@ -2880,10 +3069,12 @@ describe('buildPaperResearchGoal', () => {
   })
 
   it('appends notes verbatim when provided, and adds no trailing whitespace when absent', () => {
-    expect(buildPaperResearchGoal(withFamilies(), { notes: 'focus on transformer policies' })).toContain(
-      'focus on transformer policies',
+    expect(
+      buildPaperResearchGoal(withFamilies(), { notes: 'focus on transformer policies' }),
+    ).toContain('focus on transformer policies')
+    expect(buildPaperResearchGoal(withFamilies())).toBe(
+      buildPaperResearchGoal(withFamilies()).trim(),
     )
-    expect(buildPaperResearchGoal(withFamilies())).toBe(buildPaperResearchGoal(withFamilies()).trim())
   })
 
   it('renders the objective direction (min is better) rather than hardcoding max', () => {
@@ -2896,7 +3087,9 @@ describe('buildPaperResearchGoal', () => {
 
 describe('normalizeResearchUrl', () => {
   it('lowercases host and strips trailing slash, fragment, and utm params', () => {
-    expect(normalizeResearchUrl('https://Example.COM/Path/#section')).toBe('https://example.com/Path')
+    expect(normalizeResearchUrl('https://Example.COM/Path/#section')).toBe(
+      'https://example.com/Path',
+    )
     expect(normalizeResearchUrl('https://example.com/p/?utm_source=x&utm_medium=y')).toBe(
       'https://example.com/p',
     )
@@ -2939,7 +3132,10 @@ describe('coercePaperCandidates', () => {
 
   it('drops records with an empty/whitespace title', () => {
     expect(
-      coercePaperCandidates([{ title: '   ', url: 'https://x/1' }, { name: '', url: 'https://x/2' }]),
+      coercePaperCandidates([
+        { title: '   ', url: 'https://x/1' },
+        { name: '', url: 'https://x/2' },
+      ]),
     ).toEqual([])
   })
 
@@ -2986,8 +3182,17 @@ describe('dedupePaperCandidates', () => {
 
   it('falls back to url-only matching when a candidate title is empty', () => {
     expect(
-      dedupePaperCandidates([{ title: '', url: 'https://x/1' }, { title: '', url: 'https://x/2' }], []),
-    ).toEqual([{ title: '', url: 'https://x/1' }, { title: '', url: 'https://x/2' }])
+      dedupePaperCandidates(
+        [
+          { title: '', url: 'https://x/1' },
+          { title: '', url: 'https://x/2' },
+        ],
+        [],
+      ),
+    ).toEqual([
+      { title: '', url: 'https://x/1' },
+      { title: '', url: 'https://x/2' },
+    ])
   })
 })
 

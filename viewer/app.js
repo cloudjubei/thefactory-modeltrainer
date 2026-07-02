@@ -3759,7 +3759,10 @@ function renderComparisonView(body) {
     const why = runsHideBad
       ? 'No completed runs to compare — every loaded run failed or was dropped by Hide-bad. Untick Hide bad runs, or run some.'
       : 'No completed runs to compare yet — every loaded run failed or is invalid.'
-    setHtml(body, `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">${why}</div>`)
+    setHtml(
+      body,
+      `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">${why}</div>`,
+    )
     return
   }
   const lockValues = window.Comparison.distinctLockValues(manifest, axis, eligible)
@@ -8202,6 +8205,8 @@ function setupRuns() {
         closeBadRunEditor()
         closeConsolidateModal()
         closeDeviceTimingsModal()
+        toggleHypothesisForm(false)
+        togglePaperForm(false)
       }
     })
   }
@@ -8235,6 +8240,9 @@ function setupRuns() {
     let xai3dDrag = null
     let xai3dSuppressClick = false
     xaiBody.addEventListener('pointerdown', (event) => {
+      // Any fresh pointer interaction clears a stale drag-suppress, so a browser that skips the post-drag
+      // click can never leave the flag set to swallow a later legitimate click.
+      xai3dSuppressClick = false
       const wrap = event.target.closest('[data-chart3d]')
       if (!wrap || event.button !== 0) return
       event.preventDefault()
@@ -10137,18 +10145,15 @@ function renderProposeControls() {
     last.hidden = true
   }
 }
-// Snapshot the hypotheses tab's scroll positions (the page + each accordion section's inner scroll) so a
-// re-render after an action doesn't yank the view to the top — the source of the "jumpy / unusable" feel.
+// Snapshot the hypotheses tab's scroll positions so a re-render after an action doesn't yank the view to the
+// top — the source of the "jumpy / unusable" feel. The tab inner-scrolls on #hypotheses-body (see the
+// is-fullwidth layout); the outer .app-scroll is captured too as a belt-and-braces fallback.
 function captureHypScroll() {
-  const snap = { page: 0, sections: {} }
+  const snap = { page: 0, body: 0 }
   const scroller = document.querySelector('#view-dashboard .app-scroll')
   if (scroller) snap.page = scroller.scrollTop
   const bodyEl = byId('hypotheses-body')
   if (bodyEl) snap.body = bodyEl.scrollTop
-  for (const el of document.querySelectorAll('#hypotheses-body .hypothesis-section-body')) {
-    const sec = el.closest('[data-section]')
-    if (sec) snap.sections[sec.dataset.section] = el.scrollTop
-  }
   return snap
 }
 function restoreHypScroll(snap) {
@@ -10157,11 +10162,6 @@ function restoreHypScroll(snap) {
   if (scroller && snap.page) scroller.scrollTop = snap.page
   const bodyEl = byId('hypotheses-body')
   if (bodyEl && snap.body) bodyEl.scrollTop = snap.body
-  for (const el of document.querySelectorAll('#hypotheses-body .hypothesis-section-body')) {
-    const sec = el.closest('[data-section]')
-    const v = sec && snap.sections[sec.dataset.section]
-    if (v) el.scrollTop = v
-  }
 }
 async function renderHypotheses() {
   const body = byId('hypotheses-body')
@@ -10385,6 +10385,10 @@ async function deleteSelectedRuns() {
 }
 // Stamp a hypothesis record's `campaign` block (preserving every other field),
 // keyed by the explicit recordType so queue dispatches survive navigation.
+// Campaign stamps are TRANSIENT run-state (queued → running → completed), NOT a content edit — so they
+// PRESERVE `updatedAt`. Bumping it would reorder the card to the top under the default "Recent" sort every
+// time you launch/queue a run, which is exactly the "jumps around" jerkiness. Genuine changes (verdict
+// flips, overrides, edits) still bump updatedAt via putHypothesis.
 async function stampHypothesisCampaign(recordType, hypothesisId, campaign) {
   const recs = await queryRecords(recordType + '-hypothesis', hypothesisId)
   const existing = (recs[0] && recs[0].content) || null
@@ -10392,10 +10396,10 @@ async function stampHypothesisCampaign(recordType, hypothesisId, campaign) {
   await window.OverseerBridge.putData({
     type: recordType + '-hypothesis',
     key: hypothesisId,
-    content: { ...existing, campaign, updatedAt: nowIso() },
+    content: { ...existing, campaign, updatedAt: existing.updatedAt || nowIso() },
   })
 }
-// Removing a queued campaign from the queue clears its hypothesis stamp again.
+// Removing a queued campaign from the queue clears its hypothesis stamp again (also transient — no bump).
 async function clearHypothesisCampaign(recordType, hypothesisId, queueId) {
   const recs = await queryRecords(recordType + '-hypothesis', hypothesisId)
   const existing = (recs[0] && recs[0].content) || null
@@ -10405,7 +10409,7 @@ async function clearHypothesisCampaign(recordType, hypothesisId, queueId) {
   await window.OverseerBridge.putData({
     type: recordType + '-hypothesis',
     key: hypothesisId,
-    content: { ...rest, updatedAt: nowIso() },
+    content: { ...rest, updatedAt: existing.updatedAt || nowIso() },
   })
 }
 // Finalise hypotheses whose campaign has settled: copy the campaign record's
@@ -10639,8 +10643,9 @@ function renderHypothesisForm() {
 }
 function toggleHypothesisForm(show) {
   const form = byId('hypothesis-form')
-  if (!form) return
-  form.hidden = !show
+  const modal = byId('hypothesis-modal')
+  if (!form || !modal) return
+  modal.hidden = !show
   if (show) {
     renderHypothesisForm()
     if (form.elements.title) form.elements.title.focus()
@@ -10784,8 +10789,8 @@ function setupHypotheses() {
     addToggle.innerHTML = iconPlusSvg(13) + iconHypothesisSvg(14)
     addToggle.setAttribute('data-help', 'Add a hypothesis manually.')
     addToggle.addEventListener('click', () => {
-      const form = byId('hypothesis-form')
-      toggleHypothesisForm(!!(form && form.hidden))
+      const modal = byId('hypothesis-modal')
+      toggleHypothesisForm(!!(modal && modal.hidden))
     })
   }
   const minRunsInput = byId('hypothesis-min-runs')
@@ -10800,6 +10805,12 @@ function setupHypotheses() {
     form.addEventListener('submit', onHypothesisSave)
     form.addEventListener('click', (event) => {
       if (event.target.closest('#hypothesis-cancel-btn')) toggleHypothesisForm(false)
+    })
+  }
+  const hypModal = byId('hypothesis-modal')
+  if (hypModal) {
+    hypModal.addEventListener('click', (event) => {
+      if (event.target.closest('[data-hyp-form-cancel]')) toggleHypothesisForm(false)
     })
   }
   const body = byId('hypotheses-body')
@@ -11014,8 +11025,7 @@ function paperClaimsHtml(paper, info) {
     byKey[key].hids.push(hid)
   }
   const detailByKey = {}
-  for (const t of info.claims || [])
-    detailByKey[t.claim === null ? ' untagged' : t.claim] = t.detail
+  for (const t of info.claims || []) detailByKey[t.claim === null ? ' untagged' : t.claim] = t.detail
   const sections = order
     .map((key) => {
       const g = byKey[key]
@@ -11527,7 +11537,10 @@ async function onResearchPapers() {
   }
   const actions = byId('paper-research-actions')
   if (actions)
-    setHtml(actions, `<span class="paper-autofill-busy">${spinnerHtml()} Researching papers…</span>`)
+    setHtml(
+      actions,
+      `<span class="paper-autofill-busy">${spinnerHtml()} Researching papers…</span>`,
+    )
   setStatusLine('papers-status', '')
   const epoch = projectEpoch
   try {
@@ -11593,14 +11606,15 @@ function paperFullFormHtml(paper) {
 }
 function togglePaperForm(show, paper) {
   const form = byId('paper-form')
-  if (!form) return
+  const modal = byId('paper-modal')
+  if (!form || !modal) return
   setStatusLine('papers-status', '')
   if (show) {
     form.innerHTML = paperFormHtml(paper)
-    form.hidden = false
+    modal.hidden = false
   } else {
     form.innerHTML = ''
-    form.hidden = true
+    modal.hidden = true
   }
 }
 // Parse an optional JSON-object form field: '' → undefined (cleared); invalid → null (signals error).
@@ -11829,8 +11843,8 @@ function setupPapers() {
   const addToggle = byId('paper-add-toggle')
   if (addToggle) {
     addToggle.addEventListener('click', () => {
-      const form = byId('paper-form')
-      togglePaperForm(!!(form && form.hidden))
+      const modal = byId('paper-modal')
+      togglePaperForm(!!(modal && modal.hidden))
     })
   }
   const form = byId('paper-form')
@@ -11844,6 +11858,12 @@ function setupPapers() {
       else if (event.target.closest('#paper-manual-entry')) showPaperManualForm()
       else if (event.target.closest('#paper-auto-fill')) onPaperAutoFill()
       else if (event.target.closest('#paper-research')) onResearchPapers()
+    })
+  }
+  const paperModal = byId('paper-modal')
+  if (paperModal) {
+    paperModal.addEventListener('click', (event) => {
+      if (event.target.closest('[data-paper-form-cancel]')) togglePaperForm(false)
     })
   }
   const body = byId('papers-body')
@@ -14026,8 +14046,6 @@ function launchPresets() {
           datasets: p.datasets,
           environments: p.environments,
           seeds: p.seeds,
-          thesis: p.thesis,
-          thesisTarget: p.thesisTarget,
           isExperiment: !!(p.sweep || p.datasets || p.environments),
         })
   }
@@ -14104,15 +14122,15 @@ function presetsSelectHtml() {
     )
   return `<fieldset class="lever launch-presets">
     <legend>Load a setup or experiment</legend>
-    <label class="field"><span>Presets <em>(an experiment fills a whole sweep + seeds + thesis; a setup pins one config to seed your own sweep)</em></span>
+    <label class="field"><span>Presets <em>(an experiment fills a whole sweep + seeds; a setup pins one config to seed your own sweep)</em></span>
       <select id="launch-preset-select"><option value="">— choose —</option>${groups.join('')}</select>
     </label>
   </fieldset>`
 }
 // Load the launch form from a preset. A preset may set `fixed` lever values, a `sweep`
-// (lever → candidate list, for a full experiment), a `seeds` count, and a `thesis`/`thesisTarget`
-// tag. The form is first reset to defaults so the preset fully determines it, then the preset's
-// fixed values, sweep selections, seeds and thesis are applied.
+// (lever → candidate list, for a full experiment), and a `seeds` count. The form is first reset to
+// defaults so the preset fully determines it, then the preset's fixed values, sweep selections and
+// seeds are applied.
 function applyPreset(preset) {
   const form = byId('launch-form')
   if (!form || !preset) return
@@ -15101,10 +15119,11 @@ function showTab(id) {
       btn.setAttribute('aria-selected', String(tab.id === target))
     }
   }
-  // Runs is the only full-width, own-scroll master-detail tab. Scope to the DASHBOARD's tab-main —
-  // the home view has its own `.tab-main` that would otherwise match `querySelector` first.
+  // Every dashboard tab is full-width with its OWN inner scroll (a fixed header + a scrolling body), so the
+  // controls never scroll away. Scope to the DASHBOARD's tab-main — the home view has its own `.tab-main`
+  // that would otherwise match `querySelector` first.
   const main = document.querySelector('#view-dashboard .tab-main')
-  if (main) main.classList.toggle('is-fullwidth', target === 'runs' || target === 'xai')
+  if (main) main.classList.add('is-fullwidth')
   try {
     sessionStorage.setItem(ACTIVE_TAB_SS, target)
   } catch {

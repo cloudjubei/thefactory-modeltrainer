@@ -118,12 +118,17 @@ export function resolveModelDeviceForConfig(opts: {
  * {@link ModelDeviceBenchmark}, defaulting safely to CPU on anything malformed so a flaky benchmark can
  * never set a bogus device. `bestDevice` is `mps` only when the summary explicitly says so.
  */
-export function parseDeviceBenchmark(summary: unknown, benchmarkedAt: string): ModelDeviceBenchmark {
+export function parseDeviceBenchmark(
+  summary: unknown,
+  benchmarkedAt: string,
+): ModelDeviceBenchmark {
   const db = (summary as { deviceBenchmark?: Record<string, unknown> } | undefined)?.deviceBenchmark
   const bestDevice: ComputeDevice =
     db?.bestDevice === 'mps' || db?.bestDevice === 'cuda' ? db.bestDevice : 'cpu'
   const speedup =
-    typeof db?.speedup === 'number' && Number.isFinite(db.speedup) && db.speedup >= 1 ? db.speedup : 1
+    typeof db?.speedup === 'number' && Number.isFinite(db.speedup) && db.speedup >= 1
+      ? db.speedup
+      : 1
   const numberMap = (raw: unknown): Record<string, number> => {
     const out: Record<string, number> = {}
     for (const [d, v] of Object.entries((raw ?? {}) as Record<string, unknown>)) {
@@ -143,11 +148,16 @@ export function parseDeviceBenchmark(summary: unknown, benchmarkedAt: string): M
     bestDevice,
     speedup,
     usPerStep,
-    availableDevices: availableDevices.length ? availableDevices : Object.keys(usPerStep).length ? Object.keys(usPerStep) : ['cpu'],
+    availableDevices: availableDevices.length
+      ? availableDevices
+      : Object.keys(usPerStep).length
+        ? Object.keys(usPerStep)
+        : ['cpu'],
     benchmarkedAt,
   }
   if (Object.keys(seconds).length) result.seconds = seconds
-  if (typeof db?.budget === 'number' && Number.isFinite(db.budget) && db.budget > 0) result.budget = db.budget
+  if (typeof db?.budget === 'number' && Number.isFinite(db.budget) && db.budget > 0)
+    result.budget = db.budget
   if (Object.keys(errors).length) result.errors = errors
   return result
 }
@@ -326,7 +336,9 @@ export function estimateRemainingCampaignSeconds(input: {
   remaining: number
   concurrency: number
 }): number | undefined {
-  const durs = (input.durationsMs || []).filter((d) => typeof d === 'number' && isFinite(d) && d > 0)
+  const durs = (input.durationsMs || []).filter(
+    (d) => typeof d === 'number' && isFinite(d) && d > 0,
+  )
   if (!durs.length || input.remaining <= 0) return undefined
   const avgMs = durs.reduce((a, b) => a + b, 0) / durs.length
   const conc = Math.max(1, Math.min(Math.floor(input.concurrency) || 1, input.remaining))
@@ -366,6 +378,7 @@ type HypothesisLike = Pick<
   | 'verdictNote'
   | 'source'
   | 'comparison'
+  | 'claim'
   | 'claimedMetrics'
   | 'proposedBy'
   | 'paperIds'
@@ -431,7 +444,12 @@ export function mergeHypothesisSpecs(specs: ExperimentSpec[]): ExperimentSpec {
   return out
 }
 
-const HYP_SOURCE_PRIORITY: Record<string, number> = { human: 0, paper: 1, llm: 2, 'migrated-model': 3 }
+const HYP_SOURCE_PRIORITY: Record<string, number> = {
+  human: 0,
+  paper: 1,
+  llm: 2,
+  'migrated-model': 3,
+}
 
 function rankHypothesesForCanonical<T extends HypothesisLike>(members: T[]): T[] {
   return [...members].sort((a, b) => {
@@ -487,7 +505,11 @@ export function groupHypothesesForConsolidation<T extends HypothesisLike>(
     if (new Set(members.map((m) => m.id)).size < 2) continue
     // Defer a group while any member has an in-flight campaign — absorbing (deleting) it would orphan the
     // campaign's pending results write. It consolidates on the next pass once the campaign settles.
-    if (members.some((m) => m.campaign && (m.campaign.status === 'running' || m.campaign.status === 'queued')))
+    if (
+      members.some(
+        (m) => m.campaign && (m.campaign.status === 'running' || m.campaign.status === 'queued'),
+      )
+    )
       continue
     groups.push({ key, members })
   }
@@ -558,6 +580,8 @@ export function planHypothesisConsolidation(
   }
   if (keepManual && canonical.verdictNote) unionRecord.verdictNote = canonical.verdictNote
   if (canonical.comparison) unionRecord.comparison = canonical.comparison
+  // Carry the paper-claim label so a consolidated union still groups under its claim in the paper view.
+  if (canonical.claim) unionRecord.claim = canonical.claim
   if (canonical.claimedMetrics) unionRecord.claimedMetrics = canonical.claimedMetrics
   if (base.proposedBy) unionRecord.proposedBy = base.proposedBy as string
 
@@ -582,7 +606,10 @@ export function planHypothesisConsolidation(
   const repoint = (ids: string[] | undefined): { ids: string[]; touched: boolean } => {
     const list = ids || []
     if (!list.some((id) => absorbedIds.has(id))) return { ids: list, touched: false }
-    return { ids: unionStrings(list.map((id) => (absorbedIds.has(id) ? newId : id))), touched: true }
+    return {
+      ids: unionStrings(list.map((id) => (absorbedIds.has(id) ? newId : id))),
+      touched: true,
+    }
   }
   const changedModels: TrainingModel[] = []
   for (const m of models) {
@@ -685,7 +712,12 @@ export function expandExperimentMatrix(
   }
   // A `compare` runs every value of its lever (like a sweep) — the verdict then PARTITIONS the resulting
   // runs by that value (via contextCells) to judge the values against each other.
-  if (compare && compare.lever !== undefined && Array.isArray(compare.values) && compare.values.length) {
+  if (
+    compare &&
+    compare.lever !== undefined &&
+    Array.isArray(compare.values) &&
+    compare.values.length
+  ) {
     configs = configs.flatMap((config) =>
       compare.values.map((value) => ({ ...config, [compare.lever]: value })),
     )
@@ -1303,7 +1335,9 @@ export function buildSuggestHypothesesUserContent(input: {
 }): string {
   // Surface lever ROLES so the prompt's "pin the defining levers / route comparisons correctly" rules are
   // grounded in THIS manifest — resolved identically to the coercion guard so prompt + guard agree.
-  const { identityLever, modelLevers, envLevers, datasetLevers } = resolveModelLevers(input.manifest)
+  const { identityLever, modelLevers, envLevers, datasetLevers } = resolveModelLevers(
+    input.manifest,
+  )
   const leverGuide = {
     identityLever: identityLever ?? null,
     modelLevers: [...modelLevers],
@@ -1528,11 +1562,11 @@ export function buildPaperResearchGoal(
   const parts: string[] = []
   const desc = typeof manifest.description === 'string' ? manifest.description.trim() : ''
   parts.push(desc ? `${manifest.name}: ${desc}` : manifest.name)
-  parts.push(
-    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
-  )
+  parts.push(`Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`)
   if (families.length) parts.push(`Candidate model families: ${families.join(', ')}.`)
-  parts.push('Find recent research papers (arXiv, OpenReview, peer-reviewed) proposing methods to improve this.')
+  parts.push(
+    'Find recent research papers (arXiv, OpenReview, peer-reviewed) proposing methods to improve this.',
+  )
   const notes = opts?.notes?.trim()
   if (notes) parts.push(notes)
   return parts.join(' ')
@@ -1566,9 +1600,7 @@ export function normalizeResearchUrl(url: string): string {
   }
   let path = parsed.pathname.replace(/\/+$/, '')
   const search = [...parsed.searchParams.entries()].filter(([k]) => !/^utm_/i.test(k))
-  const query = search.length
-    ? '?' + search.map(([k, v]) => `${k}=${v}`).join('&')
-    : ''
+  const query = search.length ? '?' + search.map(([k, v]) => `${k}=${v}`).join('&') : ''
   return `${parsed.protocol}//${host}${path}${query}`
 }
 
@@ -2364,7 +2396,11 @@ export function coerceConsolidationGroups(
     if (!duplicateIds.length) continue
     used.add(canonicalId)
     for (const d of duplicateIds) used.add(d)
-    out.push({ canonicalId, duplicateIds, reason: typeof g.reason === 'string' ? g.reason.trim() : '' })
+    out.push({
+      canonicalId,
+      duplicateIds,
+      reason: typeof g.reason === 'string' ? g.reason.trim() : '',
+    })
   }
   return out
 }

@@ -61,13 +61,6 @@ verify verdict/provenance onto the draft for reviewer trust; a paper-biased disc
 
 Still PENDING (the rest of the code/paper model catalog is already exposed):
 
-- **Regression MLP = the PREDICTION line, not a trading lever (deferred with that line).** `create_regression_model`
-  (`mlp`) drives `RegressionModel`, which requires `regression_predict_env` (its `get_dataloader`) + an f1-style
-  objective — it does NOT run on the trading `trade_all` env (crashes at `model.train`). Exposing it means a
-  dedicated prediction `TrainerManifest` (own env + objective + verdict rule), the same split the dip/trend line
-  already takes (model-training-standard §3) — NOT a `model_name` choice on the trading manifest. (The `technical`
-  baseline IS now exposed — it emits BUY/SELL/HOLD on the trading env like `momentum`/`time`/`weekday`; its stale
-  obs-slicing was rewritten to read indicators via the providers' look-ahead-safe `get_feature`.)
 - **Reusable components — surfaced + composed.** BlackSwan's manifest seeds the building blocks (feature
   extractors, custom policies/Q-nets, replay buffers, attention + NN blocks, the `DGWO` optimizer) as 12
   `component` catalog entries; each model flavor declares its `components`, rendered in the Models tab as

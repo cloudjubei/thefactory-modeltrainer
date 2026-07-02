@@ -2155,9 +2155,7 @@ export interface ModelTrainerTools {
    * and each linked hypothesis, assign each an integer weight 1 (minor) … 5 (central), and persist the
    * weight onto each `<recordType>-hypothesis` record so the paper verdict re-rolls-up by importance.
    */
-  weighPaperHypotheses(
-    params: WeighPaperHypothesesParams,
-  ): Promise<WeighPaperHypothesesResult>
+  weighPaperHypotheses(params: WeighPaperHypothesesParams): Promise<WeighPaperHypothesesResult>
   /**
    * Discover MODELS the project declares (its `model_name` lever choices) that the catalog does not yet
    * cover, optionally enrich each with an LLM (category, description, paper links), and persist them as
