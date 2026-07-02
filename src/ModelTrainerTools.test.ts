@@ -12,6 +12,9 @@ import type {
   DataRecord,
   DataRecordInput,
   DataStorage,
+  DeepResearchTools,
+  DiscoveredSource,
+  ClaimVerdict,
   InferenceExecutor,
   InferenceRequest,
   LLMConfig,
@@ -3286,6 +3289,10 @@ describe('analyzePaperModels', () => {
         },
         { name: 'Rainbow DQN', slug: 'rainbow-dqn', description: '', category: 'rl', proposal: '' },
       ],
+      proposedImprovements: [
+        { title: 'C51 Distributional DQN', detail: 'add C51 head', kind: 'model' },
+        { title: 'Order-book depth feature', detail: 'ingest L2 to test the microstructure claim', kind: 'data' },
+      ],
     })
     const { tools } = makeJudgeTools(stubExecutor(resp), storage)
     const written: string[] = []
@@ -3300,6 +3307,12 @@ describe('analyzePaperModels', () => {
     expect(result.linkedModelIds).toEqual(['rainbow-dqn-custom'])
     expect(result.missingModels.map((p) => p.slug)).toEqual(['c51-distributional-dqn'])
     expect(result.paper.modelIds).toEqual(['rainbow-dqn-custom'])
+    // The general improvements ride back on the result AND persist on the paper for the Coverage-gaps panel.
+    expect(result.proposedImprovements.map((p) => p.kind)).toEqual(['model', 'data'])
+    expect(result.paper.proposedImprovements?.map((p) => p.title)).toEqual([
+      'C51 Distributional DQN',
+      'Order-book depth feature',
+    ])
     const m = (await storage.readRecord({
       scope: 'proj',
       type: 'demo-run-model',
@@ -3858,5 +3871,216 @@ describe('conditional-lever normalization (n/a hygiene)', () => {
       skipExplored: true,
     })
     expect(runner.jobs).toHaveLength(0) // already explored — not re-run
+  })
+})
+
+// ── researchTrainingPapers ────────────────────────────────────────────────
+interface StubDeepResearch extends DeepResearchTools {
+  discoverCalls: unknown[]
+  verifyCalls: unknown[]
+}
+
+function stubDeepResearch(opts: {
+  discovered?: DiscoveredSource[]
+  verdict?: (claim: string) => Partial<ClaimVerdict>
+}): StubDeepResearch {
+  const discoverCalls: unknown[] = []
+  const verifyCalls: unknown[] = []
+  const okVerdict: ClaimVerdict = {
+    status: 'confirmed',
+    confidence: 0.9,
+    evidence: [],
+    methodology: 'stub',
+    sourcesAttempted: [],
+  }
+  return {
+    discoverCalls,
+    verifyCalls,
+    async planResearch(p) {
+      return { goal: (p as { goal: string }).goal, subQuestions: [] }
+    },
+    async discoverSources(p) {
+      discoverCalls.push(p)
+      return opts.discovered ?? []
+    },
+    async gather() {
+      return []
+    },
+    async extract() {
+      return { items: [], sources: [] }
+    },
+    async verifyClaim(p) {
+      verifyCalls.push(p)
+      const claim = (p as { claim: string }).claim
+      return { ...okVerdict, ...(opts.verdict ? opts.verdict(claim) : {}) }
+    },
+  }
+}
+
+function makeResearchTools(
+  executor: InferenceExecutor | undefined,
+  storage: DataStorage,
+  deepResearch: DeepResearchTools | undefined,
+) {
+  const logger = { info: vi.fn(), warn: vi.fn() }
+  return {
+    tools: createModelTrainerTools({
+      computeRunner: stubRunner(),
+      storage,
+      inferenceExecutor: executor,
+      deepResearch,
+      logger,
+      now: () => NOW,
+    }),
+    logger,
+  }
+}
+
+describe('researchTrainingPapers', () => {
+  const PAPER_DRAFT = JSON.stringify({
+    title: 'A Discovered Paper',
+    claim: 'method X beats baseline',
+    approach: 'X over features',
+    hypotheses: [{ title: 'X helps', rationale: 'because X', spec: { fixed: { lr: 0.5 } } }],
+  })
+  const src = (title: string, url: string): DiscoveredSource => ({ name: title, url })
+  const base = (overrides = {}) => ({
+    scope: 'proj',
+    projectRoot: '/repo',
+    manifest: manifest(),
+    llmConfig: LLM,
+    fetchPaperText: async () => 'the real fetched paper page text',
+    ...overrides,
+  })
+
+  it('discovers, verifies, and drafts a research paper per admitted candidate', async () => {
+    const storage = memoryStorage()
+    const executor = stubExecutor(PAPER_DRAFT)
+    const dr = stubDeepResearch({
+      discovered: [src('Paper One', 'https://arxiv.org/abs/1'), src('Paper Two', 'https://arxiv.org/abs/2')],
+    })
+    const { tools } = makeResearchTools(executor, storage, dr)
+    const written: string[] = []
+    const result = await tools.researchTrainingPapers(
+      base({ onRecordWritten: (t: string) => written.push(t) }),
+    )
+    expect(result).toMatchObject({
+      recordType: 'demo-run',
+      discovered: 2,
+      skippedDuplicate: 0,
+      rejected: 0,
+      failed: 0,
+      researchedBy: 'openai/m',
+      researchedAt: NOW,
+    })
+    expect(result.papers).toHaveLength(2)
+    for (const p of result.papers) {
+      expect(p).toMatchObject({ status: 'untested', source: 'research', createdAt: NOW })
+    }
+    // every deep-research call carried a model (the required ModelSelection)
+    expect((dr.discoverCalls[0] as { model?: unknown }).model).toBeTruthy()
+    expect((dr.verifyCalls[0] as { model?: unknown }).model).toBeTruthy()
+    // synthesis was grounded in the fetched page text
+    expect(executor.requests[0].userContent).toContain('the real fetched paper page text')
+    const papers = await storage.listRecords({ scope: 'proj', type: 'demo-run-paper' })
+    expect(papers).toHaveLength(2)
+    expect(written).toContain('demo-run-paper')
+  })
+
+  it('throws when no deepResearch seam is injected', async () => {
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), undefined)
+    await expect(tools.researchTrainingPapers(base())).rejects.toThrow(/deepResearch/i)
+  })
+
+  it('returns an empty result and never calls the model when discovery finds nothing', async () => {
+    const executor = stubExecutor(PAPER_DRAFT)
+    const dr = stubDeepResearch({ discovered: [] })
+    const { tools } = makeResearchTools(executor, memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(base())
+    expect(result.discovered).toBe(0)
+    expect(result.papers).toEqual([])
+    expect(executor.requests).toHaveLength(0)
+  })
+
+  it('rejects (does not draft) a candidate the verify gate does not admit', async () => {
+    const executor = stubExecutor(PAPER_DRAFT)
+    const dr = stubDeepResearch({
+      discovered: [src('Bogus', 'https://x/1')],
+      verdict: () => ({ status: 'unverifiable', confidence: 0.99 }),
+    })
+    const { tools } = makeResearchTools(executor, memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(base())
+    expect(result).toMatchObject({ discovered: 1, rejected: 1 })
+    expect(result.papers).toEqual([])
+    expect(executor.requests).toHaveLength(0) // no synthesis for a rejected candidate
+  })
+
+  it('skips a candidate already present in the papers registry (dedup)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'existing',
+      content: { id: 'existing', title: 'Old', url: 'https://arxiv.org/abs/1', status: 'untested', source: 'manual' },
+    })
+    const dr = stubDeepResearch({
+      discovered: [src('Dup', 'https://arxiv.org/pdf/1v2'), src('Fresh', 'https://arxiv.org/abs/2')],
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), storage, dr)
+    const result = await tools.researchTrainingPapers(base())
+    expect(result).toMatchObject({ discovered: 2, skippedDuplicate: 1 })
+    expect(result.papers).toHaveLength(1)
+    expect(result.papers[0].url).toBe('https://arxiv.org/abs/2')
+  })
+
+  it('counts a candidate whose synthesis yields no usable draft as failed, without aborting the run', async () => {
+    const executor = stubExecutor((req: InferenceRequest) =>
+      req.userContent.includes('page-A') ? 'not json at all' : PAPER_DRAFT,
+    )
+    const dr = stubDeepResearch({
+      discovered: [src('A', 'https://x/a'), src('B', 'https://x/b')],
+    })
+    const { tools } = makeResearchTools(executor, memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(
+      base({ fetchPaperText: async (u: string) => (u.endsWith('/a') ? 'page-A' : 'page-B') }),
+    )
+    expect(result).toMatchObject({ discovered: 2, failed: 1 })
+    expect(result.papers).toHaveLength(1)
+  })
+
+  it('counts a candidate whose page cannot be fetched as failed, without aborting the run', async () => {
+    const dr = stubDeepResearch({
+      discovered: [src('A', 'https://x/a'), src('B', 'https://x/b')],
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(
+      base({
+        fetchPaperText: async (u: string) => {
+          if (u.endsWith('/a')) throw new Error('404')
+          return 'good page'
+        },
+      }),
+    )
+    expect(result).toMatchObject({ discovered: 2, failed: 1 })
+    expect(result.papers).toHaveLength(1)
+  })
+
+  it('re-throws when aborted mid-run', async () => {
+    const controller = new AbortController()
+    const dr = stubDeepResearch({
+      discovered: [src('A', 'https://x/a'), src('B', 'https://x/b')],
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), dr)
+    await expect(
+      tools.researchTrainingPapers(
+        base({
+          abortSignal: controller.signal,
+          fetchPaperText: async () => {
+            controller.abort()
+            return 'page'
+          },
+        }),
+      ),
+    ).rejects.toThrow()
   })
 })

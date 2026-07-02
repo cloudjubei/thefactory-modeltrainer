@@ -355,37 +355,41 @@
     detail.why = paperVerdictWhy(detail)
     return detail
   }
-  // Group linked rows by their `thesis` label (trimmed; null/empty = one untagged bucket), first-seen order.
-  function groupHypothesesByThesis(linked) {
+  // Group linked rows by their `claim` label (trimmed; null/empty = one untagged bucket), first-seen order.
+  function groupHypothesesByClaim(linked) {
     const order = []
     const byKey = {}
     for (let i = 0; i < (linked || []).length; i++) {
       const it = linked[i]
-      const label = typeof it.thesis === 'string' && it.thesis.trim() ? it.thesis.trim() : null
+      const label = typeof it.claim === 'string' && it.claim.trim() ? it.claim.trim() : null
       const key = label === null ? ' untagged' : label
       if (!byKey[key]) {
-        byKey[key] = { thesis: label, items: [] }
+        byKey[key] = { claim: label, items: [] }
         order.push(key)
       }
       byKey[key].items.push(it)
     }
     return order.map((k) => byKey[k])
   }
-  // The per-thesis breakdown for a paper — an ADDITIVE lens. multiThesis when >1 DISTINCT non-empty label.
-  function scorePaperTheses(linked) {
-    const groups = groupHypothesesByThesis(linked)
+  // The per-claim breakdown for a paper — an ADDITIVE lens. multiClaim when >1 DISTINCT non-empty label.
+  function scorePaperClaims(linked) {
+    const groups = groupHypothesesByClaim(linked)
     return {
-      theses: groups.map((g) => ({ thesis: g.thesis, detail: scoreLinkedBase(g.items) })),
-      multiThesis: groups.filter((g) => g.thesis).length > 1,
+      claims: groups.map((g) => ({ claim: g.claim, detail: scoreLinkedBase(g.items) })),
+      multiClaim: groups.filter((g) => g.claim).length > 1,
     }
   }
-  // The overall paper verdict (pooled over ALL linked hypotheses) PLUS the additive per-thesis lens, so the
-  // viewer's `paperVerdictInfo` (which calls this directly) gets `multiThesis`/`theses` too.
+  // The overall paper verdict (pooled over ALL linked hypotheses) PLUS the additive per-claim lens, so the
+  // viewer's `paperVerdictInfo` (which calls this directly) gets `multiClaim`/`claims` too. For the status
+  // chip, `totalClaims` counts the DISTINCT (labelled) claims and `passedClaims` those that hold up.
   function scorePaperVerdict(linked) {
     const detail = scoreLinkedBase(linked)
-    const t = scorePaperTheses(linked)
-    detail.multiThesis = t.multiThesis
-    if (t.multiThesis) detail.theses = t.theses
+    const t = scorePaperClaims(linked)
+    detail.multiClaim = t.multiClaim
+    if (t.multiClaim) detail.claims = t.claims
+    const labelled = t.claims.filter((c) => c.claim)
+    detail.totalClaims = labelled.length
+    detail.passedClaims = labelled.filter((c) => c.detail.status === 'holds-up').length
     return detail
   }
   function paperVerdictDetail(paper, hyps, runs, direction, minRuns, modelImplemented) {
@@ -399,7 +403,7 @@
       .map((h) => ({
         verdict: effectiveVerdict(h, runs, direction, minRuns, modelImplemented),
         weight: weights[h.id],
-        thesis: h.thesis,
+        claim: h.claim,
       }))
     return scorePaperVerdict(linked)
   }
@@ -498,8 +502,8 @@
     rollupPaperVerdict: rollupPaperVerdict,
     paperVerdictDetail: paperVerdictDetail,
     scorePaperVerdict: scorePaperVerdict,
-    scorePaperTheses: scorePaperTheses,
-    groupHypothesesByThesis: groupHypothesesByThesis,
+    scorePaperClaims: scorePaperClaims,
+    groupHypothesesByClaim: groupHypothesesByClaim,
     paperVerdictExplain: paperVerdictExplain,
     PAPER_HOLDS_UP_AT: PAPER_HOLDS_UP_AT,
     PAPER_FLUFF_AT: PAPER_FLUFF_AT,

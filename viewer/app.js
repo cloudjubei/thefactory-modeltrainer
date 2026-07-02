@@ -119,6 +119,11 @@ let xaiParetoY = null
 let xaiParetoYDir = 'max'
 let xaiParetoZ = null
 let xaiParetoZDir = 'max'
+// 3-D map camera: yaw (drag left/right) + pitch (drag up/down), persisted across renders. xaiPareto3dLast
+// holds the last 3-D render inputs so a rotate-drag can re-project the SVG in place without a full re-render.
+let xaiPareto3dYaw = Math.PI / 4
+let xaiPareto3dPitch = Math.PI / 7
+let xaiPareto3dLast = null
 // Parallel-map axis filter: lever -> the picked value (a config must match every pick to stay highlit).
 let xaiPcPick = {}
 // The view whose "?" explainer callout is open (null = none), toggled by the per-view "?" button.
@@ -219,7 +224,21 @@ let runsSortDir = 'desc'
 let runsLeverFilter = {}
 let runsTextFilter = ''
 let runsHideBad = false
+// The persisted "bad run" DEFINITION (which criteria the Hide-bad toggle drops). Loaded per project from a
+// `<recordType>-bad-run-def` record; defaults to failed + degenerate + under-traded. Editable via the chip.
+let badRunDefCache = window.BadRuns.defaultBadRunDefinition()
 let runsVersionFilter = ''
+// The By dataset / By environment COMPARISON views lock every non-axis lever so the same setup is compared
+// across the varying axis. `comparisonLock` holds the chosen locked-lever values per axis (set to the best
+// run's setup on first entry); `comparisonAgg` picks how each cell reduces its seeds ('avg' | 'full' =
+// min·avg·max); `comparisonSortKey`/`Dir` drive the sortable table.
+let comparisonLock = { dataset: null, environment: null }
+let comparisonAgg = 'avg'
+let comparisonSortKey = 'axis'
+let comparisonSortDir = 'asc'
+// The last-rendered comparison rows, keyed by axis signature → { keys, label }, so a row click can drill
+// into exactly those runs.
+let comparisonGroupsCache = new Map()
 // Status filter: '' (any), or one of the keys in RUN_STATUS_FILTERS (completed / degenerate / failed).
 let runsStatusFilter = ''
 // The lever/version dropdowns collapse under a single header; collapsed, only the
@@ -842,10 +861,14 @@ async function readRuns() {
     runsTotalCount = total === null ? page.length : total
     return page
   }
-  // Group-by / drill mode wants every matching run — page through it rather than one unbounded fetch.
-  const all = await queryAllRunRecords(undefined, where)
-  runsTotalCount = all.length
-  return all
+  // Group-by / drill mode: reuse the all-runs snapshot when loaded to avoid a full DB scan on each render.
+  // Without a snapshot (allRunsCache empty), return empty — renderRunsTable shows a "Refresh first" hint.
+  if (allRunsCache.length) {
+    runsTotalCount = allRunsCache.length
+    return allRunsCache
+  }
+  runsTotalCount = 0
+  return []
 }
 // Latest-record contents get the record-level timestamps merged in (when the
 // content does not carry its own), so observers can anchor time estimates on
@@ -981,7 +1004,13 @@ async function readHypotheses() {
   return recs
     .map((r) => {
       const content = r.content || {}
-      return { ...content, id: content.id || r.key || '' }
+      // Migration: the paper-claim label was persisted as `thesis` before the rename to `claim`. Fold an
+      // old record's `thesis` into `claim` on read so grouping/scoring see one field (re-persisted as claim).
+      const claim = content.claim ?? content.thesis
+      const migrated = { ...content, id: content.id || r.key || '' }
+      if (claim !== undefined) migrated.claim = claim
+      delete migrated.thesis
+      return migrated
     })
     .filter((h) => h.id)
 }
@@ -1039,7 +1068,10 @@ async function saveCustomRule(rule) {
 async function readFavorites() {
   if (!manifest) return new Set()
   const recs = await queryRecords(`${manifest.recordType}-favorites`, 'favorites')
-  const keys = recs && recs[0] && recs[0].content && Array.isArray(recs[0].content.keys) ? recs[0].content.keys : []
+  const keys =
+    recs && recs[0] && recs[0].content && Array.isArray(recs[0].content.keys)
+      ? recs[0].content.keys
+      : []
   return new Set(keys)
 }
 async function toggleFavorite(runKey) {
@@ -1055,6 +1087,24 @@ async function toggleFavorite(runKey) {
   })
   if (selectedRunKey === runKey) renderRunDetail(runKey)
   if (activeTabId === 'xai') renderXai()
+  if (activeTabId === 'runs' && (runsViewMode === 'favorites' || selectedRunKey === runKey))
+    renderRunsTable()
+}
+// The persisted "bad run" definition (one record per project). Missing ⇒ the default definition.
+async function readBadRunDefinition() {
+  if (!manifest) return window.BadRuns.defaultBadRunDefinition()
+  const recs = await queryRecords(`${manifest.recordType}-bad-run-def`, 'bad-run-def')
+  const content = recs && recs[0] && recs[0].content
+  return window.BadRuns.normalizeBadRunDefinition(content)
+}
+async function saveBadRunDefinition(def) {
+  badRunDefCache = window.BadRuns.normalizeBadRunDefinition(def)
+  if (!manifest) return
+  await window.OverseerBridge.putData({
+    type: `${manifest.recordType}-bad-run-def`,
+    key: 'bad-run-def',
+    content: badRunDefCache,
+  })
 }
 async function deleteCustomRule(id) {
   if (!manifest || !id) return
@@ -1812,6 +1862,20 @@ function resetDashboardState() {
   queueCache = []
   runsFilterKeys = null
   runsFilterLabel = ''
+  // The Runs lens + the all-runs snapshot are per-project: reset them so a comparison/favorites view (both
+  // read allRunsCache directly) can't paint the PREVIOUS project's runs, and the lock re-initialises to the
+  // new project's best run. modelStatsCache/Stale reset so the freshness note + latest-refresh frontier are
+  // per-project too (badRunDefCache/favoritesCache reload in renderRuns).
+  runsViewMode = 'runs'
+  runsHideBad = false
+  allRunsCache = []
+  comparisonLock = { dataset: null, environment: null }
+  comparisonGroupsCache = new Map()
+  comparisonSortKey = 'axis'
+  comparisonSortDir = 'asc'
+  comparisonAgg = 'avg'
+  modelStatsCache = null
+  modelStatsStale = false
   launchRunnersCache = []
   syncInFlightTimer([])
   closeRunDetail()
@@ -2505,35 +2569,26 @@ function clearRunsFilter() {
   runsPage = 0
   refreshRuns()
 }
-// Drill from a by-experiment row into that thesis's individual runs.
-function drillIntoExperiment(thesis) {
-  const group = aggregateByExperiment(applyRunsFilters(runsCache)).find((g) => g.thesis === thesis)
-  if (!group) return
-  runsFilterKeys = new Set(group.runs.map((r) => r.key))
-  runsFilterLabel = thesis
+// Drill from a comparison row (one dataset/environment under the locked setup) into its individual runs:
+// pin the flat Runs view to exactly those run keys.
+function drillIntoComparison(sig) {
+  const group = comparisonGroupsCache.get(sig)
+  if (!group || !group.keys.length) return
+  runsFilterKeys = new Set(group.keys)
+  runsFilterLabel = group.label
   runsViewMode = 'runs'
   runsPage = 0
   refreshRuns()
 }
-// Drill from a by-environment row into that environment's runs.
-function drillIntoEnvironment(sig) {
-  const group = aggregateByEnvironment(applyRunsFilters(runsCache)).find((g) => g.sig === sig)
-  if (!group) return
-  runsFilterKeys = new Set(group.runs.map((r) => r.key))
-  runsFilterLabel = group.name
-  runsViewMode = 'runs'
-  runsPage = 0
-  refreshRuns()
-}
-// Drill from a by-dataset row into that dataset's runs.
-function drillIntoDataset(sig) {
-  const group = aggregateByDataset(applyRunsFilters(runsCache)).find((g) => g.sig === sig)
-  if (!group) return
-  runsFilterKeys = new Set(group.runs.map((r) => r.key))
-  runsFilterLabel = group.name
-  runsViewMode = 'runs'
-  runsPage = 0
-  refreshRuns()
+// Header-click sort for the comparison table: re-clicking the active column flips direction; a new column
+// starts descending (best-first) except the axis label, which starts ascending.
+function toggleComparisonSort(key) {
+  if (comparisonSortKey === key) comparisonSortDir = comparisonSortDir === 'asc' ? 'desc' : 'asc'
+  else {
+    comparisonSortKey = key
+    comparisonSortDir = key === 'axis' ? 'asc' : 'desc'
+  }
+  renderRunsTable()
 }
 // Viewing the Runs tab clears the project's unseen badge: mark every current run
 // key as seen, persisting the union when any are new. No-op when nothing changed,
@@ -2575,7 +2630,8 @@ const RUN_METRIC_ORDER = [
   'simple_ratio',
 ]
 // Threshold below which a trade count reads as degenerate (≈ buy-and-hold); mirrors
-// summary.py's DEGENERATE_TRADE_COUNT. Used for the #trades colour + the bad-run filter.
+// summary.py's DEGENERATE_TRADE_COUNT. Used for the #trades colour (the bad-run filter's
+// own under-trade threshold lives in the editable definition — see badRuns.js).
 const DEGENERATE_TRADE_COUNT = 2
 // vs-hold-style green/red for the lead metrics: %return by sign, #trades by whether the
 // run actually traded (more than a near-hold count).
@@ -2884,14 +2940,10 @@ function sortRuns(runs) {
     return String(va).localeCompare(String(vb)) * dir
   })
 }
-// A run is "bad" — failed/errored, or a degenerate result (health-flagged: zero/few
-// trades ≤ DEGENERATE_TRADE_COUNT, degenerate policy, NaN). The Hide-bad toggle drops these.
+// A run is "bad" per the user-editable definition (which criteria to drop: failed / health-flagged /
+// under-traded). The Hide-bad toggle drops these; the definition is edited via the chip and persisted.
 function runIsBad(r) {
-  const s = r.summary || {}
-  if (s.status === 'failed') return true
-  if (runIsDegenerate(r)) return true
-  const n = s.metrics && Number(s.metrics.n_trades)
-  return Number.isFinite(n) && n <= DEGENERATE_TRADE_COUNT
+  return window.BadRuns.isBadRun(badRunDefCache, r)
 }
 function runVersionOf(r) {
   return String((r.summary && r.summary.pipelineVersion) || '1.0')
@@ -3035,26 +3087,17 @@ function buildRunsServerWhere() {
     if (field) preds.push({ field, op: rule.op, value: rule.value })
   }
   // Hide-bad is an internal criterion, pushed server-side like the custom rules so each page stays
-  // full instead of being thinned after the fact.
-  if (runsHideBad) preds.push(runsHideBadWhere())
+  // full instead of being thinned after the fact. An all-disabled definition yields no predicate.
+  if (runsHideBad) {
+    const bad = runsHideBadWhere()
+    if (bad) preds.push(bad)
+  }
   return preds.length ? { and: preds } : undefined
 }
-// The server-side negation of runIsBad: keep runs that did NOT fail, are NOT health-flagged, and
-// did NOT under-trade (n_trades > DEGENERATE_TRADE_COUNT). `not(<=)` also keeps runs whose n_trades
-// is absent/non-numeric — matching the client's "finite n and n<=2" badness test.
+// The server-side negation of the bad-run definition: keep the good runs so each page stays full instead
+// of being thinned client-side. Built from the SAME definition as runIsBad (shared badRuns.js module).
 function runsHideBadWhere() {
-  return {
-    and: [
-      { not: { field: 'status', op: '=', value: 'failed' } },
-      {
-        or: [
-          { not: { field: 'health.status', op: 'exists' } },
-          { field: 'health.status', op: '=', value: 'ok' },
-        ],
-      },
-      { not: { field: 'metrics.n_trades', op: '<=', value: DEGENERATE_TRADE_COUNT } },
-    ],
-  }
+  return window.BadRuns.badRunWhere(badRunDefCache)
 }
 // Server ordering for the flat view. The "Ran at" column must sort by the run's actual ran-at (what
 // it displays: provenance.ranAt, else ranAt) — NOT the entity's updated_at, which a later judge/eval
@@ -3160,9 +3203,11 @@ function warmRunsForRender(keys, rerender) {
     (k) => k && !fullRunKeys.has(k) && !fullRunFetchFailed.has(k) && !fullRunFetches.has(k),
   )
   if (!missing.length) return
-  Promise.all(missing.map((k) => ensureRunFull(k).then(() => fullRunKeys.has(k)))).then((becameFull) => {
-    if (becameFull.some(Boolean)) rerender()
-  })
+  Promise.all(missing.map((k) => ensureRunFull(k).then(() => fullRunKeys.has(k)))).then(
+    (becameFull) => {
+      if (becameFull.some(Boolean)) rerender()
+    },
+  )
 }
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
@@ -3248,32 +3293,6 @@ function quantile(xs, q) {
 function runIsDegenerate(r) {
   const h = r && r.summary && r.summary.health
   return !!(h && h.status && h.status !== 'ok')
-}
-// Group runs by the THESIS they tested (set at launch) so experiments compare
-// head-to-head — including theses outside the levers (data prep, code changes).
-function aggregateByExperiment(runs) {
-  const groups = new Map()
-  for (const r of runs) {
-    const t = (r.summary && r.summary.thesis) || '(untagged)'
-    if (!groups.has(t)) groups.set(t, [])
-    groups.get(t).push(r)
-  }
-  const out = []
-  for (const [thesis, rs] of groups) {
-    const objs = rs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
-    const targets = [...new Set(rs.map((r) => r.summary && r.summary.thesisTarget).filter(Boolean))]
-    out.push({
-      thesis,
-      target: targets.join(', '),
-      runs: rs,
-      count: rs.length,
-      setups: new Set(rs.map(setupKeyOfRun)).size,
-      objMin: objs.length ? Math.min(...objs) : NaN,
-      objMax: objs.length ? Math.max(...objs) : NaN,
-      objAvg: mean(objs),
-    })
-  }
-  return out
 }
 // The project's pipeline version + changelog. A BREAKING version changed how data is
 // fed/scored, so runs across versions are NOT comparable; each run is tagged with the
@@ -3392,6 +3411,71 @@ async function submitCustomRulePopup() {
   runsPage = 0
   refreshRuns()
 }
+// The editor for the bad-run DEFINITION — the list of criteria the Hide-bad toggle drops. Each is a
+// checkbox; the under-trade criterion also carries its threshold. Persisted per project on Save.
+function openBadRunEditor() {
+  renderBadRunEditor()
+}
+function closeBadRunEditor() {
+  const m = byId('bad-run-modal')
+  if (m) m.hidden = true
+}
+function renderBadRunEditor() {
+  const def = window.BadRuns.normalizeBadRunDefinition(badRunDefCache)
+  let modal = byId('bad-run-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'bad-run-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-bad-cancel]'))
+        return closeBadRunEditor()
+    })
+    modal.addEventListener('submit', (event) => {
+      if (event.target.closest('#bad-run-form')) {
+        event.preventDefault()
+        submitBadRunEditor()
+      }
+    })
+  }
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-bad-cancel></div>
+    <div class="chart-modal__panel custom-rule-panel" role="dialog" aria-label="Edit bad-run definition">
+      <div class="chart-modal__head">
+        <strong>What counts as a bad run</strong>
+        <button type="button" class="icon-btn" data-bad-cancel title="Close" aria-label="Close">✕</button>
+      </div>
+      <form id="bad-run-form" class="custom-rule-form">
+        <p class="card-sub">The Hide-bad toggle drops runs matching any ticked criterion. These aren't a real test of a setup.</p>
+        <label class="bad-run-crit"><input type="checkbox" id="bad-failed"${def.failed ? ' checked' : ''} /> Failed / errored runs</label>
+        <label class="bad-run-crit"><input type="checkbox" id="bad-degenerate"${def.degenerate ? ' checked' : ''} /> Health-flagged (degenerate — degenerate policy, NaN metrics)</label>
+        <label class="bad-run-crit"><input type="checkbox" id="bad-mintrades-on"${def.minTrades !== null ? ' checked' : ''} /> Under-traded — fewer than or equal to
+          <input type="number" id="bad-mintrades" min="0" step="1" value="${escapeHtml(String(def.minTrades === null ? window.BadRuns.DEFAULT_MIN_TRADES : def.minTrades))}" aria-label="Minimum trades threshold" /> trades</label>
+        <div class="custom-rule-actions">
+          <button type="button" class="ghost-btn" data-bad-cancel>Cancel</button>
+          <button type="submit" class="ghost-btn is-primary">Save</button>
+        </div>
+      </form>
+    </div>`
+  modal.hidden = false
+}
+async function submitBadRunEditor() {
+  const minOn = byId('bad-mintrades-on')
+  const minEl = byId('bad-mintrades')
+  const minVal =
+    minEl && Number.isFinite(Number(minEl.value))
+      ? Number(minEl.value)
+      : window.BadRuns.DEFAULT_MIN_TRADES
+  const def = {
+    failed: !!(byId('bad-failed') && byId('bad-failed').checked),
+    degenerate: !!(byId('bad-degenerate') && byId('bad-degenerate').checked),
+    minTrades: minOn && minOn.checked ? minVal : null,
+  }
+  await saveBadRunDefinition(def)
+  closeBadRunEditor()
+  runsPage = 0
+  refreshRuns()
+}
 function runsToolbarHtml(shownCount, total) {
   // Lever choice dropdowns + the pipeline-version dropdown live in the collapsible panel.
   // Each carries `is-changed` (highlighted) when it has a non-default selection; collapsed,
@@ -3457,29 +3541,54 @@ function runsToolbarHtml(shownCount, total) {
 
   const active = hasActiveRunsFilters()
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
-  const envViewBtn = hasEnvLevers()
-    ? `<button type="button" class="runs-view-btn${runsViewMode === 'environment' ? ' is-active' : ''}" data-view="environment"${helpAttr('Group runs by the ENVIRONMENT they ran in (fee / TP-SL regime), so you can see how a model holds up across regimes.')}>By environment</button>`
-    : ''
-  const datasetViewBtn = hasDatasetLevers()
-    ? `<button type="button" class="runs-view-btn${runsViewMode === 'dataset' ? ' is-active' : ''}" data-view="dataset"${helpAttr('Group runs by the DATASET they ran on (asset / walk-forward window / fidelity stack), so you can see how a model holds up across datasets.')}>By dataset</button>`
-    : ''
-  const toggle = `<div class="runs-viewmode">
-    <button type="button" class="runs-view-btn${runsViewMode === 'runs' ? ' is-active' : ''}" data-view="runs">Runs</button><button type="button" class="runs-view-btn${runsViewMode === 'experiment' ? ' is-active' : ''}" data-view="experiment"${helpAttr('Group runs by the THESIS set at launch, so experiments compare head-to-head (incl. theses outside the levers).')}>By experiment</button>${datasetViewBtn}${envViewBtn}
-  </div>`
-  const hideBad = `<label class="runs-hidebad" title="Hide failed/errored runs and degenerate results (≤${DEGENERATE_TRADE_COUNT} trades or health-flagged).">
-    <input type="checkbox" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} /> Hide bad runs
-  </label>`
   return `<div class="runs-toolbar">
-    ${toggle}
+    ${runsViewModeHtml()}
     ${dropdownsPanel}
     <div class="runs-filters">
       <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
-      ${hideBad}
+      ${hideBadChipHtml()}
       ${customTogglesHtml()}
       <span class="runs-count">${shownCount}/${total} runs${label}</span>
       ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
     </div>
   </div>`
+}
+// The Runs / Favorites / By dataset / By environment selector — shared by the flat toolbar and the
+// comparison toolbar. The By-dataset / By-environment buttons only appear when the project HAS those levers.
+function runsViewModeHtml() {
+  const btn = (view, text, help) =>
+    `<button type="button" class="runs-view-btn${runsViewMode === view ? ' is-active' : ''}" data-view="${view}"${help ? helpAttr(help) : ''}>${text}</button>`
+  const favBtn = btn('favorites', '★ Favorites', 'Show only the runs you’ve starred.')
+  const datasetBtn = hasDatasetLevers()
+    ? btn(
+        'dataset',
+        'By dataset',
+        'Compare ONE setup across datasets: lock every other lever, vary the dataset (asset / window / fidelity). Rows = datasets.',
+      )
+    : ''
+  const envBtn = hasEnvLevers()
+    ? btn(
+        'environment',
+        'By environment',
+        'Compare ONE setup across environments: lock every other lever, vary the environment (fee / TP-SL regime). Rows = environments.',
+      )
+    : ''
+  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}</div>`
+}
+// The Hide-bad control: a chip like the custom-filter chips — the checkbox toggles it on/off; clicking the
+// chip body opens the editor for WHAT counts as bad (failed / health-flagged / under-traded), since badness
+// is a LIST of criteria, not a single rule.
+function hideBadChipHtml() {
+  const def = window.BadRuns.normalizeBadRunDefinition(badRunDefCache)
+  const parts = []
+  if (def.failed) parts.push('failed')
+  if (def.degenerate) parts.push('degenerate')
+  if (def.minTrades !== null) parts.push(`≤${def.minTrades} trades`)
+  const summary = parts.length ? parts.join(' · ') : 'no criteria'
+  return `<span class="filter-chip${runsHideBad ? ' is-on' : ''}" data-bad-edit title="Click to edit what counts as a bad run">
+      <input type="checkbox" class="filter-chip-cb" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} aria-label="Hide bad runs" />
+      <span class="filter-chip-text">Hide bad runs <span class="filter-chip-sub">(${escapeHtml(summary)})</span></span>
+    </span>`
 }
 function toggleRunsSort(id) {
   if (runsSortKey === id) runsSortDir = runsSortDir === 'asc' ? 'desc' : 'asc'
@@ -3490,257 +3599,242 @@ function toggleRunsSort(id) {
   runsPage = 0
   refreshRuns()
 }
-// One row per EXPERIMENT/thesis: how many runs + setups it spans + its objective
-// spread, so theses compare head-to-head. Click a row to drill into its runs.
-function byExperimentTableHtml(filtered) {
-  const dir = objectiveDirection()
-  const groups = aggregateByExperiment(filtered).sort((a, b) => {
-    const fa = Number.isFinite(a.objMax)
-    const fb = Number.isFinite(b.objMax)
-    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
-    return fa ? -1 : fb ? 1 : 0
-  })
-  const on = escapeHtml(objectiveName())
-  const rows = groups
-    .map((g) => {
-      const range = Number.isFinite(g.objMin)
-        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
-        : '—'
-      return `<tr data-experiment-key="${escapeHtml(g.thesis)}" class="setup-row">
-        <td>${escapeHtml(g.thesis)}</td>
-        <td>${escapeHtml(g.target || '—')}</td>
-        <td class="num">${g.count}</td>
-        <td class="num">${g.setups}</td>
-        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
-        <td class="num">${range}</td>
-      </tr>`
-    })
-    .join('')
-  return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Experiment / thesis</th><th>Target</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`
-}
-// Group runs by the ENVIRONMENT (fee / TP-SL regime) they ran in — so one model can be compared
-// across regimes. The environment is matched from each run's env-lever values to a named environment.
-function aggregateByEnvironment(runs) {
-  const groups = new Map()
-  for (const r of runs) {
-    const sig = runEnvSignature(r)
-    if (!groups.has(sig)) groups.set(sig, { name: runEnvName(r), sig, runs: [] })
-    groups.get(sig).runs.push(r)
-  }
-  const out = []
-  for (const g of groups.values()) {
-    const objs = g.runs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
-    out.push({
-      name: g.name,
-      sig: g.sig,
-      runs: g.runs,
-      count: g.runs.length,
-      setups: new Set(g.runs.map(setupKeyOfRun)).size,
-      objMin: objs.length ? Math.min(...objs) : NaN,
-      objMax: objs.length ? Math.max(...objs) : NaN,
-      objAvg: mean(objs),
-    })
-  }
-  return out
-}
-function byEnvironmentTableHtml(filtered) {
-  const dir = objectiveDirection()
-  const groups = aggregateByEnvironment(filtered).sort((a, b) => {
-    const fa = Number.isFinite(a.objMax)
-    const fb = Number.isFinite(b.objMax)
-    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
-    return fa ? -1 : fb ? 1 : 0
-  })
-  const on = escapeHtml(objectiveName())
-  const rows = groups
-    .map((g) => {
-      const range = Number.isFinite(g.objMin)
-        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
-        : '—'
-      return `<tr data-environment-sig="${escapeHtml(g.sig)}" class="setup-row">
-        <td>${escapeHtml(g.name)}</td>
-        <td class="card-sub">${escapeHtml(g.sig)}</td>
-        <td class="num">${g.count}</td>
-        <td class="num">${g.setups}</td>
-        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
-        <td class="num">${range}</td>
-      </tr>`
-    })
-    .join('')
-  return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Environment</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`
-}
 function runMetricValue(run, key) {
   const v = Number(((run && run.summary && run.summary.metrics) || {})[key])
   return Number.isFinite(v) ? v : NaN
 }
-function formatSignedPct(v) {
-  if (!Number.isFinite(v)) return '—'
-  return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%`
-}
-function aggregateByDataset(runs) {
-  const groups = new Map()
-  for (const r of runs) {
-    const sig = runDatasetSignature(r)
-    if (!groups.has(sig)) groups.set(sig, { name: runDatasetName(r), sig, runs: [] })
-    groups.get(sig).runs.push(r)
-  }
-  const out = []
-  for (const g of groups.values()) {
-    const objs = g.runs.map((r) => Number(r.summary.objective)).filter(Number.isFinite)
-    const vh = g.runs.map((r) => runMetricValue(r, 'return_vs_hold_pct')).filter(Number.isFinite)
-    out.push({
-      name: g.name,
-      sig: g.sig,
-      runs: g.runs,
-      count: g.runs.length,
-      setups: new Set(g.runs.map(setupKeyOfRun)).size,
-      objMin: objs.length ? Math.min(...objs) : NaN,
-      objMax: objs.length ? Math.max(...objs) : NaN,
-      objAvg: mean(objs),
-      vhAvg: vh.length ? mean(vh) : NaN,
-      vhWorst: vh.length ? Math.min(...vh) : NaN,
+// --- By dataset / By environment COMPARISON view --------------------------------------------------------
+// The numeric columns the comparison table aggregates — the SAME values the Runs table shows (objective,
+// metrics, vs-hold, judge, eval, took), each as a per-cell {min,avg,max} over the setup's seeds. `valueOf`
+// pulls the run's number; `format` renders a stat; `color` (optional) picks the delta class.
+function comparisonColumns() {
+  const cols = [
+    {
+      id: 'objective',
+      label: objectiveName(),
+      help: `The run objective (${objectiveName()}), aggregated across the setup's seeds.`,
+      valueOf: (r) => Number(r.summary.objective),
+      format: (v) => formatObjective(v),
+      color: null,
+    },
+  ]
+  for (const mk of runMetricKeys()) {
+    cols.push({
+      id: 'm:' + mk,
+      label: metricLabel(mk),
+      help: METRIC_INFO[mk],
+      valueOf: (r) => {
+        const v = r.summary.metrics && r.summary.metrics[mk]
+        return typeof v === 'number' ? v : NaN
+      },
+      format: (v) => formatMetricValue(mk, v),
+      color: (v) => metricColorClass(mk, v),
     })
   }
-  return out
-}
-// A run's MODEL signature: its config minus seed AND minus dataset levers, so the same model config
-// run across several datasets (e.g. walk-forward windows) shares one signature — the key for judging
-// how a config holds up ACROSS datasets rather than being tuned to one lucky one.
-function modelSignatureOfRun(run) {
-  const cfg = { ...((run.summary && run.summary.config) || {}) }
-  delete cfg.seed
-  for (const [key] of datasetLeverEntries()) delete cfg[key]
-  return JSON.stringify(
-    Object.keys(cfg)
-      .sort()
-      .map((k) => [k, cfg[k]]),
-  )
-}
-// Per model-config robustness ACROSS the datasets it ran on: each dataset is averaged first (so seed
-// counts don't bias), then reduced to a mean and a WORST dataset. Only configs spanning ≥2 datasets
-// are returned. "worst" follows the objective direction (the weakest window for a max objective).
-function aggregateRobustnessAcrossDatasets(runs) {
-  const dir = objectiveDirection()
-  const bySig = new Map()
-  for (const r of runs) {
-    if (!r.summary || r.summary.status === 'failed' || r.summary.status === 'invalid') continue
-    const sig = modelSignatureOfRun(r)
-    if (!bySig.has(sig)) bySig.set(sig, [])
-    bySig.get(sig).push(r)
-  }
-  const out = []
-  for (const rs of bySig.values()) {
-    const byDataset = new Map()
-    for (const r of rs) {
-      const ds = runDatasetSignature(r)
-      if (!byDataset.has(ds)) byDataset.set(ds, { objs: [], vh: [] })
-      const obj = Number(r.summary.objective)
-      if (Number.isFinite(obj)) byDataset.get(ds).objs.push(obj)
-      const v = runMetricValue(r, 'return_vs_hold_pct')
-      if (Number.isFinite(v)) byDataset.get(ds).vh.push(v)
-    }
-    if (byDataset.size < 2) continue
-    const objMeans = [...byDataset.values()].map((d) => mean(d.objs)).filter(Number.isFinite)
-    const vhMeans = [...byDataset.values()].map((d) => mean(d.vh)).filter(Number.isFinite)
-    out.push({
-      config: (rs[0].summary && rs[0].summary.config) || {},
-      datasets: byDataset.size,
-      runs: rs.length,
-      objMean: mean(objMeans),
-      objWorst: objMeans.length
-        ? dir === 'min'
-          ? Math.max(...objMeans)
-          : Math.min(...objMeans)
-        : NaN,
-      vhMean: vhMeans.length ? mean(vhMeans) : NaN,
-      vhWorst: vhMeans.length ? Math.min(...vhMeans) : NaN,
+  if (anyBenchmark()) {
+    cols.push({
+      id: 'vshold',
+      label: 'vs hold',
+      help: VSHOLD_INFO,
+      valueOf: (r) => vsHoldValue(r.summary),
+      format: (v) => `${v >= 0 ? '+' : ''}${v.toFixed(1)}`,
+      color: (v) => (v >= 0 ? 'delta-pos' : 'delta-neg'),
     })
   }
-  out.sort((a, b) => {
-    const fa = Number.isFinite(a.objWorst)
-    const fb = Number.isFinite(b.objWorst)
-    if (fa && fb) return dir === 'min' ? a.objWorst - b.objWorst : b.objWorst - a.objWorst
-    return fa ? -1 : fb ? 1 : 0
+  cols.push({
+    id: 'judge',
+    label: 'Judge',
+    help: "The LLM judge's blended score (0–100), averaged across the setup's seeds.",
+    valueOf: (r) => {
+      const v = verdictsCache.get(r.key)
+      return v ? Number(v.score) : NaN
+    },
+    format: (v) => formatObjective(v),
+    color: null,
   })
-  return out
+  if (evalEnabled()) {
+    cols.push({
+      id: 'eval',
+      label: 'Eval',
+      help: 'Re-test objective (saved checkpoint), averaged across the seeds.',
+      valueOf: (r) => {
+        const e = evaluationsCache.get(r.key)
+        return e ? Number(e.objective) : NaN
+      },
+      format: (v) => formatObjective(v),
+      color: null,
+    })
+  }
+  cols.push({
+    id: 'took',
+    label: 'Took',
+    help: 'Wall-clock training time, averaged across the seeds.',
+    valueOf: (r) => Number(r.summary.durationMs),
+    format: (v) => formatDuration(v),
+    color: null,
+  })
+  return cols
 }
-// A warning shown when the runs in view span more than one dataset (e.g. several walk-forward
-// windows): they are separate out-of-sample samples and must not be read as a single number.
-function mixedDatasetBannerHtml(filtered) {
-  if (!hasDatasetLevers()) return ''
-  const withSummary = filtered.filter((r) => r.summary)
-  const sigs = new Set(withSummary.map(runDatasetSignature))
-  if (sigs.size < 2) return ''
-  const names = [...new Set(withSummary.map(runDatasetName))]
-  const shown = names.slice(0, 6).join(', ') + (names.length > 6 ? '…' : '')
-  return `<p class="mixed-dataset-banner">⚠ These runs span ${sigs.size} datasets (${escapeHtml(shown)}) — each is a separate out-of-sample sample. Compare per-dataset; don't read across them as one number.</p>`
+// A row's identity label: the axis-lever values (unique per row) plus the named dataset/environment when the
+// run matches one (else just the values). e.g. "2024 window (walk_forward_window=2024)" or "BTC · 1d".
+function comparisonAxisLabel(axis, run) {
+  const cfg = (run.summary && run.summary.config) || {}
+  const valStr = window.Comparison.axisLeverKeys(manifest, axis)
+    .map((k) => cfg[k])
+    .filter((v) => v !== undefined && v !== null)
+    .map(String)
+    .join(' · ')
+  const name = axis === 'dataset' ? runDatasetName(run) : runEnvName(run)
+  return name && name !== 'Custom' ? `${name} (${valStr})` : valStr || '(unset)'
 }
-// Compact "how robust is each config across datasets" table for the By-dataset view.
-function robustnessAcrossDatasetsHtml(filtered) {
-  const rows = aggregateRobustnessAcrossDatasets(filtered)
-  if (!rows.length) return ''
-  const on = escapeHtml(objectiveName())
-  const hasVh = rows.some((r) => Number.isFinite(r.vhMean))
-  const vhHead = hasVh ? '<th class="num">vs hold avg</th><th class="num">vs hold worst</th>' : ''
-  const body = rows
-    .slice(0, 12)
-    .map((r) => {
-      const vhCells = hasVh
-        ? `<td class="num ${metricColorClass('return_vs_hold_pct', r.vhMean)}">${escapeHtml(formatSignedPct(r.vhMean))}</td><td class="num ${metricColorClass('return_vs_hold_pct', r.vhWorst)}">${escapeHtml(formatSignedPct(r.vhWorst))}</td>`
-        : ''
-      return `<tr>
-        <td class="card-sub">${escapeHtml(setupConfigLabel(r.config))}</td>
-        <td class="num">${r.datasets}</td>
-        <td class="num">${escapeHtml(formatObjective(r.objMean))}</td>
-        <td class="num">${escapeHtml(formatObjective(r.objWorst))}</td>
-        ${vhCells}</tr>`
+// One aggregated cell: '—' when the column has no finite value; otherwise the average (coloured), or — in
+// FULL mode — min · avg · max stacked vertically.
+function comparisonCellHtml(col, stat) {
+  if (!stat || !Number.isFinite(stat.avg)) return '—'
+  const fmt = (v) => (Number.isFinite(v) ? escapeHtml(col.format(v)) : '—')
+  const colorOf = (v) => (col.color && Number.isFinite(v) ? col.color(v) : '')
+  if (comparisonAgg === 'full') {
+    return `<div class="cmp-full">
+        <span class="cmp-stat cmp-min" title="min">${fmt(stat.min)}</span>
+        <span class="cmp-stat cmp-avg ${colorOf(stat.avg)}" title="avg">${fmt(stat.avg)}</span>
+        <span class="cmp-stat cmp-max" title="max">${fmt(stat.max)}</span>
+      </div>`
+  }
+  const cls = colorOf(stat.avg)
+  return cls ? `<span class="${cls}">${fmt(stat.avg)}</span>` : fmt(stat.avg)
+}
+// The comparison toolbar: the shared view-mode selector, the LOCKED-lever dropdowns (concrete values only —
+// there is deliberately no "any", so the comparison is always apples-to-apples), the Averages/Full control,
+// and the Hide-bad chip. No text/criteria filters — the whole point is a pinned setup.
+function comparisonToolbarHtml(axis, lock, lockValues, lockedKeys, groupCount, runCount) {
+  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const locks = lockedKeys
+    .map((key) => {
+      const opts = lockValues[key]
+        .map(
+          (v) =>
+            `<option value="${escapeHtml(v)}"${String(lock[key]) === v ? ' selected' : ''}>${escapeHtml(v)}</option>`,
+        )
+        .join('')
+      return `<label class="cmp-lock-label"><span class="cmp-lock-key">${escapeHtml(key)}</span><select class="cmp-lock" data-lever="${escapeHtml(key)}">${opts}</select></label>`
     })
     .join('')
-  return `<div class="robustness-block">
-    <h4 class="robustness-title">Robustness across datasets</h4>
-    <p class="runs-legend">Each row is one model config aggregated across the datasets it ran on (each dataset averaged first, so seed counts don't bias). "worst" = its weakest dataset — a config tuned to one lucky window shows a strong avg but a weak worst.</p>
-    <div class="table-wrap"><table class="runs-table">
-      <thead><tr><th>Config</th><th class="num">datasets</th><th class="num">${on} avg</th><th class="num">${on} worst</th>${vhHead}</tr></thead>
-      <tbody>${body}</tbody></table></div>
+  const agg = `<div class="cmp-agg" role="group" aria-label="Cell aggregation">
+      <button type="button" class="cmp-agg-btn${comparisonAgg === 'avg' ? ' is-active' : ''}" data-agg="avg"${helpAttr('Each cell shows the AVERAGE across the setup’s seeds.')}>Averages</button>
+      <button type="button" class="cmp-agg-btn${comparisonAgg === 'full' ? ' is-active' : ''}" data-agg="full"${helpAttr('Each cell shows min · avg · max across the setup’s seeds, stacked.')}>Full</button>
+    </div>`
+  return `<div class="runs-toolbar cmp-toolbar">
+    ${runsViewModeHtml()}
+    <div class="cmp-controls">
+      <div class="cmp-locks"${helpAttr('Locked levers — pinned so every row compares the SAME setup across the ' + axisNoun + '. Change one to compare a different setup.')}>${locks || '<span class="card-sub">No lockable levers for this project.</span>'}</div>
+      ${agg}
+      ${hideBadChipHtml()}
+    </div>
+    <span class="runs-count">${groupCount} ${escapeHtml(axisNoun)}${groupCount === 1 ? '' : 's'} · ${runCount} runs</span>
   </div>`
 }
-function byDatasetTableHtml(filtered) {
-  const dir = objectiveDirection()
-  const groups = aggregateByDataset(filtered).sort((a, b) => {
-    const fa = Number.isFinite(a.objMax)
-    const fb = Number.isFinite(b.objMax)
-    if (fa && fb) return dir === 'min' ? a.objMin - b.objMin : b.objMax - a.objMax
-    return fa ? -1 : fb ? 1 : 0
-  })
-  const on = escapeHtml(objectiveName())
-  const hasVh = groups.some((g) => Number.isFinite(g.vhAvg))
+// Render the whole comparison view: lock the non-axis levers (best-run defaults on first entry), group the
+// matching runs by the axis value, aggregate each group's seeds, and paint a sortable table.
+function renderComparisonView(body) {
+  const axis = runsViewMode
+  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  closeRunDetail()
+  renderCompare()
+  if (!runsCache.length) {
+    setHtml(
+      body,
+      `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">Click <strong>Refresh</strong> (top right) to load all runs for this comparison.</div>`,
+    )
+    return
+  }
+  // Only real completed runs are comparable (failed/invalid carry no metrics); Hide-bad drops more when on.
+  const eligible = runsCache.filter(
+    (r) =>
+      r.summary &&
+      r.summary.status !== 'failed' &&
+      r.summary.status !== 'invalid' &&
+      (!runsHideBad || !runIsBad(r)),
+  )
+  if (!eligible.length) {
+    const why = runsHideBad
+      ? 'No completed runs to compare — every loaded run failed or was dropped by Hide-bad. Untick Hide bad runs, or run some.'
+      : 'No completed runs to compare yet — every loaded run failed or is invalid.'
+    setHtml(body, `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">${why}</div>`)
+    return
+  }
+  const lockValues = window.Comparison.distinctLockValues(manifest, axis, eligible)
+  const lockedKeys = window.Comparison.lockedLeverKeys(manifest, axis).filter(
+    (k) => (lockValues[k] || []).length,
+  )
+  if (!comparisonLock[axis])
+    comparisonLock[axis] = window.Comparison.bestRunLock(
+      manifest,
+      axis,
+      eligible,
+      objectiveDirection(),
+    )
+  const lock = comparisonLock[axis]
+  // Never allow an unlocked lever: default any missing/stale value to the first present one; drop dead keys.
+  for (const k of lockedKeys)
+    if (lock[k] === undefined || !lockValues[k].includes(String(lock[k])))
+      lock[k] = lockValues[k][0]
+  for (const k of Object.keys(lock)) if (!lockedKeys.includes(k)) delete lock[k]
+  const matched = eligible.filter((r) => window.Comparison.matchesLock(lock, r))
+  const cols = comparisonColumns()
+  const items = matched.map((r) => ({
+    key: r.key,
+    axisSig: window.Comparison.runAxisSignature(manifest, axis, r),
+    axisLabel: comparisonAxisLabel(axis, r),
+    values: Object.fromEntries(cols.map((c) => [c.id, c.valueOf(r)])),
+  }))
+  let groups = window.Comparison.groupComparison(items)
+  groups = window.Comparison.sortComparisonGroups(groups, comparisonSortKey, comparisonSortDir)
+  comparisonGroupsCache = new Map(
+    groups.map((g) => [g.axisSig, { keys: g.keys, label: g.axisLabel }]),
+  )
+  const toolbar = comparisonToolbarHtml(
+    axis,
+    lock,
+    lockValues,
+    lockedKeys,
+    groups.length,
+    matched.length,
+  )
+  if (!groups.length) {
+    setHtml(
+      body,
+      `${toolbar}<div class="empty-hint">No runs match this locked setup — change a locked lever above, or Refresh after running it.</div>`,
+    )
+    return
+  }
+  const arrow = (key) =>
+    comparisonSortKey === key ? (comparisonSortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  const axisHead = `<th class="cmp-th" data-cmp-sort="axis">${axis === 'dataset' ? 'Dataset' : 'Environment'}${arrow('axis')}</th>`
+  const runsHead = `<th class="cmp-th num" data-cmp-sort="#runs"${helpAttr('How many runs (seeds) back this row.')}># runs${arrow('#runs')}</th>`
+  const colHead = cols
+    .map(
+      (c) =>
+        `<th class="cmp-th num" data-cmp-sort="${escapeHtml(c.id)}"${helpAttr(c.help)}>${escapeHtml(c.label)}${arrow(c.id)}</th>`,
+    )
+    .join('')
   const rows = groups
     .map((g) => {
-      const range = Number.isFinite(g.objMin)
-        ? `${escapeHtml(formatObjective(g.objMin))} – ${escapeHtml(formatObjective(g.objMax))}`
-        : '—'
-      const vhCell = hasVh
-        ? `<td class="num ${metricColorClass('return_vs_hold_pct', g.vhAvg)}">${escapeHtml(formatSignedPct(g.vhAvg))}</td>`
-        : ''
-      return `<tr data-dataset-sig="${escapeHtml(g.sig)}" class="setup-row">
-        <td>${escapeHtml(g.name)}</td>
-        <td class="card-sub">${escapeHtml(g.sig)}</td>
+      const cells = cols
+        .map((c) => `<td class="num">${comparisonCellHtml(c, g.stats[c.id])}</td>`)
+        .join('')
+      return `<tr class="setup-row" data-cmp-sig="${escapeHtml(g.axisSig)}" title="Open these runs in the Runs view">
+        <td>${escapeHtml(g.axisLabel)}</td>
         <td class="num">${g.count}</td>
-        <td class="num">${g.setups}</td>
-        <td class="num">${escapeHtml(formatObjective(g.objAvg))}</td>
-        <td class="num">${range}</td>
-        ${vhCell}
+        ${cells}
       </tr>`
     })
     .join('')
-  const vhHead = hasVh ? `<th class="num"${helpAttr(VSHOLD_INFO)}>vs hold avg</th>` : ''
-  return `<div class="table-wrap"><table class="runs-table">
-    <thead><tr><th>Dataset</th><th>Settings</th><th class="num">runs</th><th class="num">setups</th><th class="num">${on} avg</th><th class="num">${on} best–worst</th>${vhHead}</tr></thead>
-    <tbody>${rows}</tbody></table></div>`
+  const lockDesc = lockedKeys.map((k) => `${k}=${lock[k]}`).join(' · ')
+  const legend = `<p class="runs-legend">Each row is one ${escapeHtml(axisNoun)} for the locked setup${lockDesc ? ` (${escapeHtml(lockDesc)})` : ''}; cells aggregate that setup's seeds (${comparisonAgg === 'full' ? 'min · avg · max, stacked' : 'average'}). Click a header to sort, or a row to open its runs.</p>`
+  setHtml(
+    body,
+    `${toolbar}<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>${axisHead}${runsHead}${colHead}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
+  )
 }
 // When drilled into a single setup, an editor for that setup's conclusion note —
 // the user half of the ledger (LLM verdict + score being the other halves).
@@ -3749,8 +3843,22 @@ function renderRunsTable() {
   const body = byId('runs-body')
   const spark = byId('runs-sparkline')
   if (!body) return
+  // By dataset / By environment are self-contained comparison views (own toolbar + aggregated table).
+  if (runsViewMode === 'dataset' || runsViewMode === 'environment') {
+    if (spark) spark.hidden = true
+    renderComparisonView(body)
+    return
+  }
   if (!runsCache.length) {
     if (spark) spark.hidden = true
+    if (runsViewMode !== 'runs') {
+      setHtml(
+        body,
+        `${runsToolbarHtml(0, 0)}<div class="empty-hint">Click <strong>Refresh</strong> (top right) to load all runs for this view.</div>`,
+      )
+      closeRunDetail()
+      return
+    }
     if (hasActiveRunsFilters()) {
       // A filter (often a server-pushed custom rule) excluded everything on this page — keep the toolbar so
       // the user can clear it, instead of stranding them on "No runs yet" with no way back.
@@ -3780,53 +3888,27 @@ function renderRunsTable() {
     }
   }
   const serverPaged = runsServerPaged()
+  // The Favorites view reuses the standard flat table over the starred runs (client-side; needs the
+  // all-runs snapshot, so it's never server-paged).
+  const favoritesView = runsViewMode === 'favorites'
+  const base = favoritesView ? runsCache.filter((r) => favoritesCache.has(r.key)) : runsCache
   // Server total when the flat view paginates server-side; otherwise the loaded set's size.
-  const total = serverPaged ? runsTotalCount : runsCache.length
-  const filtered = applyRunsFilters(runsCache)
+  const total = serverPaged ? runsTotalCount : base.length
+  const filtered = applyRunsFilters(base)
   if (spark) {
     const svg = sparklineSvg(filtered)
     setHtml(spark, svg)
     spark.hidden = !svg
   }
   if (!filtered.length) {
-    setHtml(
-      body,
-      `${runsToolbarHtml(0, total)}<div class="empty-hint">No runs match the filter.</div>`,
-    )
+    const empty = favoritesView
+      ? 'No favorites yet — click ☆ on any run (in the Runs view or a run’s detail) to star it.'
+      : 'No runs match the filter.'
+    setHtml(body, `${runsToolbarHtml(0, total)}<div class="empty-hint">${empty}</div>`)
+    closeRunDetail()
     return
   }
   const toolbar = runsToolbarHtml(filtered.length, total)
-  if (runsViewMode === 'experiment') {
-    const groups = aggregateByExperiment(filtered)
-    const onlyUntagged = groups.length <= 1 && (!groups[0] || groups[0].thesis === '(untagged)')
-    if (onlyUntagged) {
-      setHtml(
-        body,
-        `${toolbar}<div class="empty-hint">No experiments tagged yet. Set a <strong>Thesis</strong> when you launch a campaign (e.g. "fee-penalty reward" or "1m data prep") — its runs group here so you can compare theses head-to-head, even ones that don't map to a lever.</div>`,
-      )
-      renderCompare()
-      return
-    }
-    const legend = `<p class="runs-legend">Each row is an EXPERIMENT — the thesis set at launch. Click one to drill into its runs. Untagged runs group under "(untagged)".</p>`
-    setHtml(body, `${toolbar}${byExperimentTableHtml(filtered)}${legend}`)
-    renderCompare()
-    return
-  }
-  if (runsViewMode === 'environment') {
-    const legend = `<p class="runs-legend">Each row is an ENVIRONMENT (fee / TP-SL regime) a run trained in. Click one to drill into its runs. "Custom" = env values matching no saved environment.</p>`
-    setHtml(body, `${toolbar}${byEnvironmentTableHtml(filtered)}${legend}`)
-    renderCompare()
-    return
-  }
-  if (runsViewMode === 'dataset') {
-    const legend = `<p class="runs-legend">Each row is a DATASET (asset / walk-forward window / fidelity stack) a run trained on. Click one to drill into its runs. "Custom" = dataset values matching no saved dataset.</p>`
-    setHtml(
-      body,
-      `${toolbar}${mixedDatasetBannerHtml(filtered)}${robustnessAcrossDatasetsHtml(filtered)}${byDatasetTableHtml(filtered)}${legend}`,
-    )
-    renderCompare()
-    return
-  }
   // Server-paged: the backend already filtered + sorted + sliced this page, so render it as-is
   // (client text/Hide-bad already refined `filtered`). Otherwise (group-by drill) sort + slice here.
   let shown
@@ -3918,10 +4000,14 @@ function disarmRunsDelete() {
   }
 }
 async function renderRuns() {
-  if (!byId('runs-body')) return
-  // Custom rules drive the server-side `where`, so they must be loaded BEFORE readRuns builds it.
-  customRulesCache = await readCustomRules()
-  favoritesCache = await readFavorites()
+  if (!byId('runs-body'))
+    return // Custom rules + the bad-run definition drive the server-side `where`, so they must be loaded BEFORE
+    // readRuns builds it.
+  ;[customRulesCache, favoritesCache, badRunDefCache] = await Promise.all([
+    readCustomRules(),
+    readFavorites(),
+    readBadRunDefinition(),
+  ])
   ;[
     runsCache,
     verdictsCache,
@@ -5271,7 +5357,9 @@ function xaiScopeHeaderHtml(criterion) {
           )
           .join('')}</select></label>`
       : `<span class="xai-scope-tag">Analysing</span><code class="xai-scope-value">${escapeHtml(envLabel)}</code>`
-  const ctx = [...(a.contextImportances || [])].sort((x, y) => y.importance - x.importance).slice(0, 3)
+  const ctx = [...(a.contextImportances || [])]
+    .sort((x, y) => y.importance - x.importance)
+    .slice(0, 3)
   const ctxBadge = ctx.length
     ? `<span class="card-sub" title="Context (environment/dataset) levers that move the score most">\ud83d\udd12 ${ctx
         .map((sc) => `<code>${escapeHtml(xaiAbbrevLever(sc.lever))}</code>`)
@@ -5349,7 +5437,12 @@ function xaiAllTabs(bundle, criterion) {
             ? xaiPcaHtml(bundle, criterion)
             : xaiParallelCoordsHtml(bundle, criterion),
     },
-    { id: 'progress', label: 'Progress', icon: xaiIconRank, render: () => xaiConvergenceHtml(bundle, criterion) + xaiLeaderboardHtml(bundle, criterion) },
+    {
+      id: 'progress',
+      label: 'Progress',
+      icon: xaiIconRank,
+      render: () => xaiConvergenceHtml(bundle, criterion) + xaiLeaderboardHtml(bundle, criterion),
+    },
     {
       id: 'recommender',
       label: 'Suggested',
@@ -5398,14 +5491,18 @@ function xaiCurrentMapHtml(focusKey, criterion) {
   // conditional-normalized (recordToRun). Normalize here too so present-but-inactive conditional levers read
   // 'n/a' exactly as the bundle's setup configs do — otherwise the "this run" match silently fails.
   let focusCfg =
-    (rec && rec.analysis && rec.analysis.config) || (run && run.summary && run.summary.config) || null
+    (rec && rec.analysis && rec.analysis.config) ||
+    (run && run.summary && run.summary.config) ||
+    null
   if (focusCfg && manifest && manifest.levers)
     focusCfg = window.Xai.normalizeConditionalConfig(focusCfg, manifest.levers)
   const bundle = xaiResolveBundle(criterion)
   const card = (inner, head) =>
     `<div class="card"><div class="card-head card-head-row"><h3>Map <span class="card-sub">\u2014 where this run sits among similar runs</span></h3>${head || ''}</div>${inner}</div>`
   if (!focusCfg)
-    return card(`<p class="card-sub">This run isn\u2019t loaded \u2014 open it from the <strong>Runs</strong> tab.</p>`)
+    return card(
+      `<p class="card-sub">This run isn\u2019t loaded \u2014 open it from the <strong>Runs</strong> tab.</p>`,
+    )
   if (!bundle)
     return card(
       `<p class="card-sub">Run the whole-space analysis to place this run on the configuration map among every other run.</p>`,
@@ -5413,10 +5510,12 @@ function xaiCurrentMapHtml(focusKey, criterion) {
     )
   const a = bundle.analysis
   const env = a.environment
-  const inEnv = !env || (a.contextLevers || []).every((lev) => String(focusCfg[lev]) === String(env[lev]))
+  const inEnv =
+    !env || (a.contextLevers || []).every((lev) => String(focusCfg[lev]) === String(env[lev]))
   if (!inEnv) {
     const envVals = {}
-    for (const lev of a.contextLevers || []) if (focusCfg[lev] !== undefined) envVals[lev] = focusCfg[lev]
+    for (const lev of a.contextLevers || [])
+      if (focusCfg[lev] !== undefined) envVals[lev] = focusCfg[lev]
     const sig = window.Xai.canonicalConfigString(envVals)
     const match = (a.environments || []).find((e) => e.signature === sig)
     const switchBtn = match
@@ -5636,15 +5735,21 @@ function xaiNeighboursHtml(digest, bundle, criterion) {
   const a = bundle.analysis
   if (!digest || !digest.config) return ''
   const env = a.environment
-  const inEnv = !env || (a.contextLevers || []).every((lev) => String(digest.config[lev]) === String(env[lev]))
+  const inEnv =
+    !env || (a.contextLevers || []).every((lev) => String(digest.config[lev]) === String(env[lev]))
   if (!inEnv) return ''
   const focus = digest.config
   const all = (a.setups || []).filter((sp) => sp.config)
   if (!all.length) return ''
-  const leverKeys = (a.levers && a.levers.length ? a.levers : Object.keys(all[0].config)).filter((k) => k !== 'seed')
+  const leverKeys = (a.levers && a.levers.length ? a.levers : Object.keys(all[0].config)).filter(
+    (k) => k !== 'seed',
+  )
   const ranges = {}
   for (const k of leverKeys) {
-    const nums = [focus[k]].concat(all.map((sp) => sp.config[k])).map(Number).filter((x) => Number.isFinite(x))
+    const nums = [focus[k]]
+      .concat(all.map((sp) => sp.config[k]))
+      .map(Number)
+      .filter((x) => Number.isFinite(x))
     if (nums.length) {
       const lo = Math.min.apply(null, nums)
       const hi = Math.max.apply(null, nums)
@@ -5680,14 +5785,25 @@ function xaiNeighboursHtml(digest, bundle, criterion) {
   const diffOf = (cfg) =>
     leverKeys
       .filter((k) => String(focus[k]) !== String(cfg[k]))
-      .map((k) => `<code>${escapeHtml(xaiAbbrevLever(k))}: ${escapeHtml(xaiFmtLeverValue(focus[k]))}\u2192${escapeHtml(xaiFmtLeverValue(cfg[k]))}</code>`)
+      .map(
+        (k) =>
+          `<code>${escapeHtml(xaiAbbrevLever(k))}: ${escapeHtml(xaiFmtLeverValue(focus[k]))}\u2192${escapeHtml(xaiFmtLeverValue(cfg[k]))}</code>`,
+      )
       .join(' ') || '<span class="card-sub">same levers (seed only)</span>'
   const rows = neigh
     .map(({ sp }) => {
       const sv = val(sp)
       const delta = fval != null && typeof sv === 'number' ? sv - fval : null
-      const dcls = delta == null ? '' : (criterion.direction === 'min' ? delta < 0 : delta > 0) ? 'delta-pos' : 'delta-neg'
-      const dstr = delta == null ? '\u2014' : `<span class="${dcls}">${delta >= 0 ? '+' : ''}${escapeHtml(formatTickValue(delta))}</span>`
+      const dcls =
+        delta == null
+          ? ''
+          : (criterion.direction === 'min' ? delta < 0 : delta > 0)
+            ? 'delta-pos'
+            : 'delta-neg'
+      const dstr =
+        delta == null
+          ? '\u2014'
+          : `<span class="${dcls}">${delta >= 0 ? '+' : ''}${escapeHtml(formatTickValue(delta))}</span>`
       return `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(sp.key)}" title="Open this run"><td>${diffOf(sp.config)}</td><td class="num">${escapeHtml(formatTickValue(sv))}</td><td class="num">${dstr}</td></tr>`
     })
     .join('')
@@ -5709,9 +5825,14 @@ function xaiRunStandingHtml(runKey, criterion) {
   const pos = digest.rank ? digest.rank.position : null
   const tot = digest.rank ? digest.rank.total : null
   const topPct = pos && tot ? Math.max(1, Math.ceil((pos / tot) * 100)) : null
-  const objLine = digest.objective != null ? `${escapeHtml(criterion.label)} ${escapeHtml(formatTickValue(digest.objective))}` : ''
+  const objLine =
+    digest.objective != null
+      ? `${escapeHtml(criterion.label)} ${escapeHtml(formatTickValue(digest.objective))}`
+      : ''
   const actions = digest.actionCounts
-    ? Object.entries(digest.actionCounts).map(([k, v]) => `${escapeHtml(k)} ${v}`).join(' · ')
+    ? Object.entries(digest.actionCounts)
+        .map(([k, v]) => `${escapeHtml(k)} ${v}`)
+        .join(' · ')
     : ''
   const sanity =
     digest.attribution && typeof digest.attribution.sanityPassed === 'boolean'
@@ -5729,7 +5850,11 @@ function xaiRunStandingHtml(runKey, criterion) {
     </tbody></table>
     <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p></div>`
   const leverRows = (digest.importances || [])
-    .filter((i) => (i.lever === 'model_name' || i.importance >= 0.02) && String(digest.config[i.lever]) !== 'n/a')
+    .filter(
+      (i) =>
+        (i.lever === 'model_name' || i.importance >= 0.02) &&
+        String(digest.config[i.lever]) !== 'n/a',
+    )
     .slice(0, 6)
     .map((i) => {
       const mine = digest.config ? digest.config[i.lever] : undefined
@@ -5758,14 +5883,19 @@ function xaiRunStandingHtml(runKey, criterion) {
       <p class="card-sub">Differs by <code>${escapeHtml(sib.changed)}</code>; their decisions diverged <strong>${Math.round(sib.divergencePct)}%</strong>${sib.qualityVerdict ? ` · ${escapeHtml(sib.qualityVerdict)}` : ''}.${sib.qualitySummary ? ` ${escapeHtml(sib.qualitySummary)}` : ''}</p></div>`
     : ''
   const reward = digest.rewardBreakdown
-    ? Object.entries(digest.rewardBreakdown).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1])).slice(0, 4)
+    ? Object.entries(digest.rewardBreakdown)
+        .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+        .slice(0, 4)
     : []
   const rewardLine = reward.length
     ? `<p class="card-sub"><strong>Reward drivers:</strong> ${reward.map(([k, v]) => `${escapeHtml(k)} ${v >= 0 ? '+' : ''}${escapeHtml(formatTickValue(v))}`).join(' · ')}</p>`
     : ''
   const attrLine =
     digest.attribution && digest.attribution.topGroups && digest.attribution.topGroups.length
-      ? `<p class="card-sub"><strong>Decision drivers (saliency):</strong> ${digest.attribution.topGroups.slice(0, 4).map((g) => `<code>${escapeHtml(g[0])}</code>`).join(', ')} ${sanity}</p>`
+      ? `<p class="card-sub"><strong>Decision drivers (saliency):</strong> ${digest.attribution.topGroups
+          .slice(0, 4)
+          .map((g) => `<code>${escapeHtml(g[0])}</code>`)
+          .join(', ')} ${sanity}</p>`
       : sanity
         ? `<p class="card-sub">${sanity}</p>`
         : ''
@@ -5957,7 +6087,9 @@ function xaiCollapsibleCard(id, title, subHtml, bodyHtml, options) {
     </div>`
   }
   const collapsed = xaiCollapsed.has(id)
-  const summary = opts.collapsedSummary ? `<p class="xai-collapse-summary">${opts.collapsedSummary}</p>` : ''
+  const summary = opts.collapsedSummary
+    ? `<p class="xai-collapse-summary">${opts.collapsedSummary}</p>`
+    : ''
   return `<div class="card xai-collapse-card${collapsed ? ' is-collapsed' : ''}" data-collapse-card="${escapeHtml(id)}">
     <button type="button" class="xai-collapse-head" data-xai-collapse="${escapeHtml(id)}" aria-expanded="${collapsed ? 'false' : 'true'}">
       <span class="xai-collapse-chevron" aria-hidden="true">\u25be</span>
@@ -6073,11 +6205,21 @@ function xaiSurrogateTakeawayHtml(a, criterion) {
   ]
   if (interactive.length)
     parts.push(
-      `${interactive.slice(0, 3).map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`).join(', ')} act mainly through interactions \u2014 tune with their partner (see Coupling).`,
+      `${interactive
+        .slice(0, 3)
+        .map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`)
+        .join(
+          ', ',
+        )} act mainly through interactions \u2014 tune with their partner (see Coupling).`,
     )
   if (inert.length)
     parts.push(
-      `${inert.slice(0, 4).map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`).join(', ')} ${inert.length === 1 ? 'is' : 'are'} inert \u2014 stop sweeping ${inert.length === 1 ? 'it' : 'them'}.`,
+      `${inert
+        .slice(0, 4)
+        .map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`)
+        .join(
+          ', ',
+        )} ${inert.length === 1 ? 'is' : 'are'} inert \u2014 stop sweeping ${inert.length === 1 ? 'it' : 'them'}.`,
     )
   if (a.ablation && a.ablation.steps && a.ablation.steps.length)
     parts.push(
@@ -6231,7 +6373,10 @@ function xaiParallelCoordsHtml(bundle, criterion, focusConfig) {
     .sort((x, y) => (y.total || 0) - (x.total || 0))
     .map((f) => f.lever)
     .filter((l) => relevant.has(l))
-  const ordered = [...ranked, ...(a.levers || []).filter((l) => relevant.has(l) && !ranked.includes(l))]
+  const ordered = [
+    ...ranked,
+    ...(a.levers || []).filter((l) => relevant.has(l) && !ranked.includes(l)),
+  ]
   const info = {}
   for (const lev of ordered) {
     const vals = items.map((x) => x.s.config[lev])
@@ -6298,7 +6443,8 @@ function xaiParallelCoordsHtml(bundle, criterion, focusConfig) {
   // Drop any picked lever that isn't an axis here (env/criterion changed) so a stale filter can't dim everything.
   for (const lev of Object.keys(xaiPcPick)) if (!levers.includes(lev)) delete xaiPcPick[lev]
   const anyPick = Object.keys(xaiPcPick).length > 0
-  const lineMatches = (cfg) => Object.entries(xaiPcPick).every(([lev, val]) => String(cfg[lev]) === val)
+  const lineMatches = (cfg) =>
+    Object.entries(xaiPcPick).every(([lev, val]) => String(cfg[lev]) === val)
   const polys = items
     .map((x, i) => ({ x, r: rank[i] }))
     .sort((p, q) => p.r - q.r) // draw best (green) last → on top
@@ -6341,9 +6487,13 @@ function xaiParallelCoordsHtml(bundle, criterion, focusConfig) {
     .join('')
   const matchedCount = anyPick ? items.filter((x) => lineMatches(x.s.config)).length : items.length
   const clearBar = anyPick
-    ? `<p class="card-sub">Filtered to <strong>${matchedCount}</strong> of ${items.length} configs (${Object.entries(xaiPcPick)
+    ? `<p class="card-sub">Filtered to <strong>${matchedCount}</strong> of ${items.length} configs (${Object.entries(
+        xaiPcPick,
+      )
         .map(([l, v]) => `<code>${escapeHtml(xaiAbbrevLever(l))}=${escapeHtml(v)}</code>`)
-        .join(', ')}). <button type="button" class="ghost-btn" data-xai-pc-clear>✕ Clear axis filter</button></p>`
+        .join(
+          ', ',
+        )}). <button type="button" class="ghost-btn" data-xai-pc-clear>✕ Clear axis filter</button></p>`
     : ''
   return card(`<p class="card-sub">Every line is one config; <strong style="color:hsl(120,70%,40%)">green = top</strong>, <strong style="color:hsl(0,70%,45%)">red = bottom</strong> by ${escapeHtml(criterion.label)}. <strong>Hover</strong> a line to read its config, <strong>click</strong> it to open that run, or <strong>click a tick</strong> on an axis to keep only the configs at that value. Axes are ordered most-decisive-first (by fANOVA).</p>
     ${clearBar}
@@ -6443,26 +6593,44 @@ function xaiPcaModelClustersHtml(pca, modelOf) {
     const mn = arr.reduce((a, p) => a + sel(p), 0) / arr.length
     return Math.sqrt(arr.reduce((a, p) => a + (sel(p) - mn) ** 2, 0) / arr.length)
   }
-  const allSpread = Math.hypot(std(pca.points, (p) => p.x), std(pca.points, (p) => p.y)) || 1
+  const allSpread =
+    Math.hypot(
+      std(pca.points, (p) => p.x),
+      std(pca.points, (p) => p.y),
+    ) || 1
   const tight = []
   const spread = []
   for (const [m, ps] of Object.entries(byModel)) {
     if (ps.length < 2) continue
-    const sp = Math.hypot(std(ps, (p) => p.x), std(ps, (p) => p.y)) / allSpread
+    const sp =
+      Math.hypot(
+        std(ps, (p) => p.x),
+        std(ps, (p) => p.y),
+      ) / allSpread
     if (sp < 0.5) tight.push(m)
     else spread.push(m)
   }
   const parts = []
   if (tight.length)
     parts.push(
-      `${tight.slice(0, 5).map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`).join(', ')} form <strong>tight clusters</strong> \u2014 their configs behave consistently (a clear model signature).`,
+      `${tight
+        .slice(0, 5)
+        .map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`)
+        .join(
+          ', ',
+        )} form <strong>tight clusters</strong> \u2014 their configs behave consistently (a clear model signature).`,
     )
   if (spread.length)
     parts.push(
-      `${spread.slice(0, 5).map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`).join(', ')} are <strong>spread out</strong> \u2014 highly sensitive to their config.`,
+      `${spread
+        .slice(0, 5)
+        .map((m) => `<code>${escapeHtml(xaiAbbrevLever(m))}</code>`)
+        .join(', ')} are <strong>spread out</strong> \u2014 highly sensitive to their config.`,
     )
   if (!parts.length)
-    parts.push('Each model has too few configs to judge clustering \u2014 run more to see model groupings.')
+    parts.push(
+      'Each model has too few configs to judge clustering \u2014 run more to see model groupings.',
+    )
   return `<div class="xai-conclusions"><strong class="card-sub">Model clusters</strong><ul class="card-sub">${parts.map((x) => `<li>${x}</li>`).join('')}</ul></div>`
 }
 // Deterministic \u201cwhat this map shows\u201d for the parallel map: the lever values the top configs concentrate
@@ -6494,7 +6662,10 @@ function xaiParallelConclusionsHtml(items, rank, levers, info, criterion) {
     parts.push(
       `The top ${top.length} configs concentrate at ${decisive
         .slice(0, 4)
-        .map((d) => `<code>${escapeHtml(xaiAbbrevLever(d.lev))}=${escapeHtml(String(d.val))}</code> (${d.pct}%)`)
+        .map(
+          (d) =>
+            `<code>${escapeHtml(xaiAbbrevLever(d.lev))}=${escapeHtml(String(d.val))}</code> (${d.pct}%)`,
+        )
         .join(', ')} \u2014 good starting points.`,
     )
   if (neutral.length)
@@ -6502,7 +6673,9 @@ function xaiParallelConclusionsHtml(items, rank, levers, info, criterion) {
       `${neutral
         .slice(0, 5)
         .map((l) => `<code>${escapeHtml(xaiAbbrevLever(l))}</code>`)
-        .join(', ')} ${neutral.length === 1 ? "doesn't" : "don't"} separate good from bad here (lines fan across the axis).`,
+        .join(
+          ', ',
+        )} ${neutral.length === 1 ? "doesn't" : "don't"} separate good from bad here (lines fan across the axis).`,
     )
   if (!decisive.length && !neutral.length)
     parts.push(
@@ -6520,11 +6693,18 @@ function xaiPcaConclusionsHtml(pca, rankFrac, criterion) {
     const m = arr.reduce((a, pt) => a + sel(pt), 0) / arr.length
     return Math.sqrt(arr.reduce((a, pt) => a + (sel(pt) - m) ** 2, 0) / arr.length)
   }
-  const allSpread = Math.hypot(std(pts, (pt) => pt.x), std(pts, (pt) => pt.y))
+  const allSpread = Math.hypot(
+    std(pts, (pt) => pt.x),
+    std(pts, (pt) => pt.y),
+  )
   const ev2 = Math.round(((pca.explainedVariance[0] || 0) + (pca.explainedVariance[1] || 0)) * 100)
   const parts = []
   if (top.length >= 3 && allSpread > 0) {
-    const ratio = Math.hypot(std(top, (pt) => pt.x), std(top, (pt) => pt.y)) / allSpread
+    const ratio =
+      Math.hypot(
+        std(top, (pt) => pt.x),
+        std(top, (pt) => pt.y),
+      ) / allSpread
     if (ratio < 0.7)
       parts.push(
         `The top configs <strong>cluster</strong> in one region (~${Math.round((1 - ratio) * 100)}% tighter than the field) \u2014 a promising neighbourhood; use <strong>Suggested</strong> to explore around it.`,
@@ -6549,7 +6729,11 @@ function xaiModelHue(name) {
   return h
 }
 function xaiMetricVal(s, key) {
-  return key === 'objective' ? s.objective : key === 'durationMs' ? s.durationMs : s.metrics && s.metrics[key]
+  return key === 'objective'
+    ? s.objective
+    : key === 'durationMs'
+      ? s.durationMs
+      : s.metrics && s.metrics[key]
 }
 // Guess a sensible better-direction from a metric's name (risk/drawdown/error \u2192 lower is better).
 function xaiInferMetricDir(key) {
@@ -6601,9 +6785,7 @@ function xaiParetoHtml(bundle, criterion, focusConfig) {
       .join(' ')
       .slice(0, 120)
   const dims = is3d ? [xaiParetoX, xaiParetoY, xaiParetoZ] : [xaiParetoX, xaiParetoY]
-  const dirs = is3d
-    ? [xaiParetoXDir, xaiParetoYDir, xaiParetoZDir]
-    : [xaiParetoXDir, xaiParetoYDir]
+  const dirs = is3d ? [xaiParetoXDir, xaiParetoYDir, xaiParetoZDir] : [xaiParetoXDir, xaiParetoYDir]
   const rows = []
   const owner = []
   for (const sp of setups) {
@@ -6638,7 +6820,8 @@ function xaiParetoHtml(bundle, criterion, focusConfig) {
     ? owner.findIndex((sp) => xaiSetupMatchesConfig(sp.config, focusConfig))
     : -1
   const dirWord = (d) => (d === 'min' ? 'lower' : 'higher')
-  const valStr = (i) => dims.map((d, k) => `${escapeHtml(d)} ${formatTickValue(rows[i][k])}`).join(' · ')
+  const valStr = (i) =>
+    dims.map((d, k) => `${escapeHtml(d)} ${formatTickValue(rows[i][k])}`).join(' · ')
   const labelFor = (i) =>
     `${i === focusIdx ? '▶ THIS RUN · ' : ''}${compactCfg(owner[i].config)} · ${valStr(i)}${frontier.has(i) ? ' · Pareto-optimal' : ''}`
   let svg
@@ -6698,7 +6881,7 @@ function xaiParetoHtml(bundle, criterion, focusConfig) {
   const frontierTable = `<h4 class="card-sub">The ${frontier.size} Pareto-optimal config${frontier.size === 1 ? '' : 's'} (green) — click one to open it</h4>
     <div class="xai-env-scroll"><table class="runs-table"><thead><tr><th>config</th>${dims.map((d) => `<th class="num">${escapeHtml(d)}</th>`).join('')}</tr></thead><tbody>${frontierRows}</tbody></table></div>`
   return card(
-    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.${is3d ? ' Isometric 3-D — drop-lines show each config’s height on the vertical axis.' : ' Add a <strong>Z</strong> metric to make it 3-D.'}${focusIdx >= 0 ? ' <strong style="color:#1d4ed8">This run is ringed in blue.</strong>' : ''}</p><div class="chart-wrap">${svg}</div>${concl}${frontierTable}`,
+    `${pickers}<p class="card-sub">Each point is a config. <strong style="color:hsl(140,70%,38%)">Green</strong> = on the trade-off frontier (best achievable); grey = dominated.${is3d ? ' 3-D — <strong>drag to rotate</strong>; drop-lines show each config’s height on the vertical axis.' : ' Add a <strong>Z</strong> metric to make it 3-D.'}${focusIdx >= 0 ? ' <strong style="color:#1d4ed8">This run is ringed in blue.</strong>' : ''}</p>${is3d ? `<div class="chart3d-wrap" data-chart3d title="Drag to rotate">${svg}<div class="chart3d-hint card-sub">Drag to rotate · click a point to open its run</div></div>` : `<div class="chart-wrap">${svg}</div>`}${concl}${frontierTable}`,
   )
 }
 // The levers worth showing: model_name + levers with real impact (fANOVA total >= 0.03, else screening
@@ -6745,7 +6928,13 @@ function xaiSweepValues(lever, current, observed) {
     }
   }
   for (const v of observed || []) add(v)
-  add(typeof current === 'number' ? current : Number.isFinite(Number(current)) ? Number(current) : current)
+  add(
+    typeof current === 'number'
+      ? current
+      : Number.isFinite(Number(current))
+        ? Number(current)
+        : current,
+  )
   return [...m.values()]
 }
 // Smallest non-negative seed numbers not already used \u2014 for stabilize/explore launches.
@@ -6776,15 +6965,23 @@ function xaiRelevantLevers(bundle) {
 function xaiLeaderboardHtml(bundle, criterion) {
   const a = bundle.analysis
   const val = (sp) => xaiMetricVal(sp, criterion.key)
-  const setups = (a.setups || []).filter((sp) => typeof val(sp) === 'number' && Number.isFinite(val(sp)))
+  const setups = (a.setups || []).filter(
+    (sp) => typeof val(sp) === 'number' && Number.isFinite(val(sp)),
+  )
   if (setups.length < 2) return ''
-  const sorted = setups.slice().sort((x, y) => (criterion.direction === 'min' ? val(x) - val(y) : val(y) - val(x)))
+  const sorted = setups
+    .slice()
+    .sort((x, y) => (criterion.direction === 'min' ? val(x) - val(y) : val(y) - val(x)))
   const top = sorted.slice(0, 12)
   const bestCi = top[0].ci
   const overlapsBest = (ci) => !!(ci && bestCi && ci[0] <= bestCi[1] && ci[1] >= bestCi[0])
   // direction-aware robust outlier fence for a "too-good-to-be-true" flag.
-  const vals = setups.map(val).slice().sort((m, n) => m - n)
-  const qAt = (pp) => vals[Math.max(0, Math.min(vals.length - 1, Math.floor(pp * (vals.length - 1))))]
+  const vals = setups
+    .map(val)
+    .slice()
+    .sort((m, n) => m - n)
+  const qAt = (pp) =>
+    vals[Math.max(0, Math.min(vals.length - 1, Math.floor(pp * (vals.length - 1))))]
   const iqr = qAt(0.75) - qAt(0.25)
   const suspicious = (v) =>
     iqr > 0 && (criterion.direction === 'min' ? v < qAt(0.25) - 3 * iqr : v > qAt(0.75) + 3 * iqr)
@@ -6799,7 +6996,9 @@ function xaiLeaderboardHtml(bundle, criterion) {
     .map((sp, i) => {
       const v = val(sp)
       const tied = i > 0 && overlapsBest(sp.ci)
-      const ciStr = sp.ci ? `[${escapeHtml(formatTickValue(sp.ci[0]))}, ${escapeHtml(formatTickValue(sp.ci[1]))}]` : '\u2014'
+      const ciStr = sp.ci
+        ? `[${escapeHtml(formatTickValue(sp.ci[0]))}, ${escapeHtml(formatTickValue(sp.ci[1]))}]`
+        : '\u2014'
       const flags = [
         tied ? '<span class="badge">tied #1</span>' : '',
         suspicious(v)
@@ -7844,11 +8043,34 @@ function setupRuns() {
         openCustomRulePopup(editChip.dataset.ruleEdit)
         return
       }
+      // The Hide-bad chip: the checkbox toggles it (handled below); a click on the chip BODY edits the def.
+      const badChip = event.target.closest('[data-bad-edit]')
+      if (badChip && !event.target.closest('.filter-chip-cb')) {
+        openBadRunEditor()
+        return
+      }
       const viewBtn = event.target.closest('.runs-view-btn')
       if (viewBtn) {
+        // Picking a lens is a fresh start — clear any drill (a comparison-row / group drill pins
+        // runsFilterKeys), so it can't leak into the newly-chosen view.
+        if (runsViewMode !== viewBtn.dataset.view) {
+          runsFilterKeys = null
+          runsFilterLabel = ''
+        }
         runsViewMode = viewBtn.dataset.view
         runsPage = 0
         refreshRuns()
+        return
+      }
+      const aggBtn = event.target.closest('.cmp-agg-btn')
+      if (aggBtn) {
+        comparisonAgg = aggBtn.dataset.agg
+        renderRunsTable()
+        return
+      }
+      const cmpTh = event.target.closest('.cmp-th[data-cmp-sort]')
+      if (cmpTh) {
+        toggleComparisonSort(cmpTh.dataset.cmpSort)
         return
       }
       const th = event.target.closest('.runs-th[data-sort]')
@@ -7857,19 +8079,9 @@ function setupRuns() {
         return
       }
       if (event.target.closest('.run-compare-cb')) return // checkbox toggles compare, not detail
-      const expRow = event.target.closest('tr[data-experiment-key]')
-      if (expRow) {
-        drillIntoExperiment(expRow.dataset.experimentKey)
-        return
-      }
-      const envRow = event.target.closest('tr[data-environment-sig]')
-      if (envRow) {
-        drillIntoEnvironment(envRow.dataset.environmentSig)
-        return
-      }
-      const dsRow = event.target.closest('tr[data-dataset-sig]')
-      if (dsRow) {
-        drillIntoDataset(dsRow.dataset.datasetSig)
+      const cmpRow = event.target.closest('tr[data-cmp-sig]')
+      if (cmpRow) {
+        drillIntoComparison(cmpRow.dataset.cmpSig)
         return
       }
       const row = event.target.closest('tr[data-key]')
@@ -7916,6 +8128,15 @@ function setupRuns() {
         runsLeverFilter[sel.dataset.lever] = sel.value
         runsPage = 0
         refreshRuns()
+        return
+      }
+      // A comparison-view lock dropdown: re-aggregate from the in-memory snapshot (no server refetch).
+      const lockSel = event.target.closest('.cmp-lock')
+      if (lockSel) {
+        const axis = runsViewMode
+        if (!comparisonLock[axis]) comparisonLock[axis] = {}
+        comparisonLock[axis][lockSel.dataset.lever] = lockSel.value
+        renderRunsTable()
         return
       }
       if (event.target.id === 'runs-hide-bad') {
@@ -7978,6 +8199,7 @@ function setupRuns() {
       if (event.key === 'Escape') {
         closeChartModal()
         closeCustomRulePopup()
+        closeBadRunEditor()
         closeConsolidateModal()
         closeDeviceTimingsModal()
       }
@@ -8008,6 +8230,51 @@ function setupRuns() {
   }
   const xaiBody = byId('xai-body')
   if (xaiBody) {
+    // Drag-to-rotate for the 3-D trade-off map. Re-projects the SVG in place on each move (no full
+    // renderXai), and swallows the click that a drag would otherwise fire (so it doesn't open a run).
+    let xai3dDrag = null
+    let xai3dSuppressClick = false
+    xaiBody.addEventListener('pointerdown', (event) => {
+      const wrap = event.target.closest('[data-chart3d]')
+      if (!wrap || event.button !== 0) return
+      event.preventDefault()
+      xai3dDrag = {
+        wrap,
+        startX: event.clientX,
+        startY: event.clientY,
+        yaw: xaiPareto3dYaw,
+        pitch: xaiPareto3dPitch,
+        moved: false,
+      }
+      wrap.classList.add('is-dragging')
+      if (wrap.setPointerCapture) wrap.setPointerCapture(event.pointerId)
+    })
+    xaiBody.addEventListener('pointermove', (event) => {
+      if (!xai3dDrag) return
+      const dx = event.clientX - xai3dDrag.startX
+      const dy = event.clientY - xai3dDrag.startY
+      if (Math.abs(dx) + Math.abs(dy) > 3) xai3dDrag.moved = true
+      xaiPareto3dYaw = xai3dDrag.yaw + dx * 0.01
+      xaiPareto3dPitch = Math.max(-1.45, Math.min(1.45, xai3dDrag.pitch + dy * 0.01))
+      if (xaiPareto3dLast) {
+        const oldSvg = xai3dDrag.wrap.querySelector('svg')
+        if (oldSvg) oldSvg.outerHTML = buildScatter3dChart(xaiPareto3dLast)
+      }
+    })
+    const xai3dEndDrag = (event) => {
+      if (!xai3dDrag) return
+      const wrap = xai3dDrag.wrap
+      wrap.classList.remove('is-dragging')
+      if (wrap.releasePointerCapture && event.pointerId != null) {
+        try {
+          wrap.releasePointerCapture(event.pointerId)
+        } catch (_) {}
+      }
+      if (xai3dDrag.moved) xai3dSuppressClick = true
+      xai3dDrag = null
+    }
+    xaiBody.addEventListener('pointerup', xai3dEndDrag)
+    xaiBody.addEventListener('pointercancel', xai3dEndDrag)
     xaiBody.addEventListener('change', (event) => {
       const t = event.target
       if (t.id === 'xai-favorite-pick') {
@@ -8073,6 +8340,11 @@ function setupRuns() {
       if (count) count.textContent = `${shown} of ${total} · click a header to sort`
     })
     xaiBody.addEventListener('click', (event) => {
+      // A just-finished rotate-drag fires a trailing click — swallow it so the map doesn't open a run.
+      if (xai3dSuppressClick) {
+        xai3dSuppressClick = false
+        return
+      }
       const runsLink = event.target.closest('[data-xai-runs]')
       if (runsLink) {
         const d = runsLink.dataset
@@ -8154,13 +8426,20 @@ function setupRuns() {
         const cfg = rec && rec.analysis ? rec.analysis.config : null
         if (cfg) {
           const bundle = xaiResolveBundle(currentXaiCriterion())
-          const observed = bundle ? (bundle.analysis.setups || []).map((sp) => sp.config[lever]) : []
+          const observed = bundle
+            ? (bundle.analysis.setups || []).map((sp) => sp.config[lever])
+            : []
           const values = xaiSweepValues(lever, cfg[lever], observed)
           if (values.length < 2) {
-            setStatusLine('xai-status', `Can't sweep ${lever} — it has no declared range or choices to vary.`, true)
+            setStatusLine(
+              'xai-status',
+              `Can't sweep ${lever} — it has no declared range or choices to vary.`,
+              true,
+            )
           } else {
             const fixed = {}
-            for (const [k, v] of Object.entries(cfg)) if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+            for (const [k, v] of Object.entries(cfg))
+              if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
             xaiLaunchBatch([{ fixed, sweep: { [lever]: values }, seeds: [0] }], `Sweep ${lever}`)
           }
         }
@@ -8178,7 +8457,8 @@ function setupRuns() {
           const cur = usedList.length || 1
           const fresh = xaiFreshSeeds(usedList, Math.max(2, Math.max(5, cur + 2) - cur))
           const fixed = {}
-          for (const [k, v] of Object.entries(cfg)) if (k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+          for (const [k, v] of Object.entries(cfg))
+            if (k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
           xaiLaunchBatch([{ fixed, seeds: fresh }], 'Verify seeds')
         }
         return
@@ -8186,7 +8466,9 @@ function setupRuns() {
       const stab = event.target.closest('[data-xai-stabilize]')
       if (stab) {
         const bundle = xaiResolveBundle(currentXaiCriterion())
-        const setup = bundle && (bundle.analysis.setups || []).find((sp) => sp.key === stab.dataset.xaiStabilize)
+        const setup =
+          bundle &&
+          (bundle.analysis.setups || []).find((sp) => sp.key === stab.dataset.xaiStabilize)
         if (setup) {
           const cur = setup.seeds || 1
           const target = Math.max(5, cur + 3) // enough seeds for a trustworthy interval (+a few for outliers)
@@ -8497,9 +8779,10 @@ function buildScatter3dChart(opts) {
     (p) => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z),
   )
   if (!pts.length) return ''
+  xaiPareto3dLast = opts
   const W = opts.width || 560
   const H = opts.height || 440
-  const pad = 52
+  const pad = 56
   const plotW = W - 2 * pad
   const plotH = H - 2 * pad
   const axis = (sel) => {
@@ -8511,67 +8794,124 @@ function buildScatter3dChart(opts) {
   const AX = axis((p) => p.x)
   const AY = axis((p) => p.y)
   const AZ = axis((p) => p.z)
-  const a = Math.PI / 6
-  const cos = Math.cos(a)
-  const sin = Math.sin(a)
-  // Isometric: x → right+down, z → left+down, y (height) → up. The 8 unit-cube corners bound the screen
-  // extents to [-cos, cos] × [-1, 1], so the projection auto-fits with fixed padding.
-  const iso = (nx, ny, nz) => [(nx - nz) * cos, (nx + nz) * sin - ny]
-  const sx = (ix) => pad + ((ix + cos) / (2 * cos)) * plotW
-  const sy = (iy) => pad + ((iy + 1) / 2) * plotH
-  const project = (nx, ny, nz) => {
-    const [ix, iy] = iso(nx, ny, nz)
-    return [sx(ix), sy(iy)]
+  const yaw = opts.yaw != null ? opts.yaw : xaiPareto3dYaw
+  const pitch = opts.pitch != null ? opts.pitch : xaiPareto3dPitch
+  const cy = Math.cos(yaw)
+  const sinY = Math.sin(yaw)
+  const cp = Math.cos(pitch)
+  const sinP = Math.sin(pitch)
+  // Rotate a unit-cube coord (centred to [-0.5, 0.5]) by yaw (around the vertical Y) then pitch (around X),
+  // into camera space: rx = screen right, ry = up (screenY negates it), depth = toward the viewer (paint order).
+  const rot = (nx, ny, nz) => {
+    const x = nx - 0.5
+    const y = ny - 0.5
+    const z = nz - 0.5
+    const x1 = x * cy + z * sinY
+    const z1 = -x * sinY + z * cy
+    const upY = y * cp - z1 * sinP
+    const depth = y * sinP + z1 * cp
+    return { rx: x1, ry: -upY, depth }
   }
-  const corner = (cx, cy, cz) => project(cx, cy, cz)
-  const line = (p, q, cls) => `<line class="${cls}" x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${q[0].toFixed(1)}" y2="${q[1].toFixed(1)}" />`
   const corners = [
-    [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1],
-    [1, 1, 0], [1, 0, 1], [0, 1, 1], [1, 1, 1],
+    [0, 0, 0],
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 1, 0],
+    [1, 0, 1],
+    [0, 1, 1],
+    [1, 1, 1],
   ]
+  // Auto-fit: bound the ROTATED cube's screen extent so it fills the plot at any angle without clipping.
+  const rc = corners.map(([a, b, c]) => rot(a, b, c))
+  const minX = Math.min(...rc.map((r) => r.rx))
+  const maxX = Math.max(...rc.map((r) => r.rx))
+  const minY = Math.min(...rc.map((r) => r.ry))
+  const maxY = Math.max(...rc.map((r) => r.ry))
+  const spanX = maxX - minX || 1
+  const spanY = maxY - minY || 1
+  const scale = Math.min(plotW / spanX, plotH / spanY)
+  const offX = pad + (plotW - spanX * scale) / 2
+  const offY = pad + (plotH - spanY * scale) / 2
+  const toScreen = (r) => [offX + (r.rx - minX) * scale, offY + (r.ry - minY) * scale]
+  const project = (nx, ny, nz) => toScreen(rot(nx, ny, nz))
+  const center = project(0.5, 0.5, 0.5)
+  const corner = (a, b, c) => project(a, b, c)
+  const line = (p, q, cls) =>
+    `<line class="${cls}" x1="${p[0].toFixed(1)}" y1="${p[1].toFixed(1)}" x2="${q[0].toFixed(1)}" y2="${q[1].toFixed(1)}" />`
   const parts = []
   // Floor (y=0) parallelogram, faint, to ground the cube.
   const floor = [corner(0, 0, 0), corner(1, 0, 0), corner(1, 0, 1), corner(0, 0, 1)]
-  parts.push(`<polygon class="chart3d-floor" points="${floor.map((c) => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ')}" />`)
+  parts.push(
+    `<polygon class="chart3d-floor" points="${floor.map((c) => `${c[0].toFixed(1)},${c[1].toFixed(1)}`).join(' ')}" />`,
+  )
   // All 12 cube edges (corners one unit-step apart), faint.
   for (let i = 0; i < corners.length; i++)
     for (let j = i + 1; j < corners.length; j++) {
       const d = corners[i].reduce((s, v, k) => s + Math.abs(v - corners[j][k]), 0)
       if (d === 1) parts.push(line(corner(...corners[i]), corner(...corners[j]), 'chart3d-edge'))
     }
-  // The three labelled axes from the origin corner + their min/max ticks.
+  // The three labelled axes from the origin corner; ticks + names pushed OUTWARD from the cube centre so
+  // they stay legible at any rotation.
   const O = corner(0, 0, 0)
   const axEnd = corner(1, 0, 0)
   const ayEnd = corner(0, 1, 0)
   const azEnd = corner(0, 0, 1)
-  parts.push(line(O, axEnd, 'chart3d-axis'), line(O, ayEnd, 'chart3d-axis'), line(O, azEnd, 'chart3d-axis'))
-  const tick = (c, txt, anchor, dy) => `<text class="chart-tick" x="${(c[0]).toFixed(1)}" y="${(c[1] + (dy || 0)).toFixed(1)}" text-anchor="${anchor}">${escapeHtml(formatTickValue(txt))}</text>`
-  const axisLabel = (c, txt, anchor, dy) => `<text class="chart3d-axis-label" x="${(c[0]).toFixed(1)}" y="${(c[1] + (dy || 0)).toFixed(1)}" text-anchor="${anchor}">${escapeHtml(txt)}</text>`
   parts.push(
-    tick(axEnd, AX.hi, 'start', 14), tick(O, AX.lo, 'end', 14), axisLabel(axEnd, opts.xLabel || 'X', 'start', 27),
-    tick(azEnd, AZ.hi, 'end', 14), axisLabel(azEnd, opts.zLabel || 'Z', 'end', 27),
-    tick(ayEnd, AY.hi, 'middle', -8), axisLabel(ayEnd, opts.yLabel || 'Y', 'middle', -20),
+    line(O, axEnd, 'chart3d-axis'),
+    line(O, ayEnd, 'chart3d-axis'),
+    line(O, azEnd, 'chart3d-axis'),
+  )
+  const outward = (pt, dist) => {
+    const dx = pt[0] - center[0]
+    const dy = pt[1] - center[1]
+    const m = Math.hypot(dx, dy) || 1
+    return [pt[0] + (dx / m) * dist, pt[1] + (dy / m) * dist]
+  }
+  const anchorFor = (pt) =>
+    pt[0] - center[0] > 14 ? 'start' : pt[0] - center[0] < -14 ? 'end' : 'middle'
+  const label3d = (pt, txt, cls, dist) => {
+    const o = outward(pt, dist)
+    return `<text class="${cls}" x="${o[0].toFixed(1)}" y="${(o[1] + 4).toFixed(1)}" text-anchor="${anchorFor(o)}">${escapeHtml(txt)}</text>`
+  }
+  parts.push(
+    label3d(axEnd, formatTickValue(AX.hi), 'chart-tick', 11),
+    label3d(axEnd, opts.xLabel || 'X', 'chart3d-axis-label', 26),
+    label3d(O, formatTickValue(AX.lo), 'chart-tick', 11),
+    label3d(azEnd, formatTickValue(AZ.hi), 'chart-tick', 11),
+    label3d(azEnd, opts.zLabel || 'Z', 'chart3d-axis-label', 26),
+    label3d(ayEnd, formatTickValue(AY.hi), 'chart-tick', 11),
+    label3d(ayEnd, opts.yLabel || 'Y', 'chart3d-axis-label', 26),
   )
   // Drop-lines from each point to the floor (height cue); stronger for frontier points.
   const placed = pts.map((p) => {
     const nx = AX.n(p.x)
     const ny = AY.n(p.y)
     const nz = AZ.n(p.z)
-    return { p, nx, ny, nz, top: project(nx, ny, nz), foot: project(nx, 0, nz) }
+    const r = rot(nx, ny, nz)
+    return { p, depth: r.depth, top: toScreen(r), foot: project(nx, 0, nz) }
   })
-  // Draw far points (smaller nx+nz) first so nearer ones sit on top.
-  placed.sort((m, n) => m.nx + m.nz - (n.nx + n.nz))
+  // Draw far points (smaller depth) first so nearer ones sit on top.
+  placed.sort((m, n) => m.depth - n.depth)
   for (const it of placed)
-    parts.push(`<line class="chart3d-drop${it.p.frontier ? ' is-frontier' : ''}" x1="${it.top[0].toFixed(1)}" y1="${it.top[1].toFixed(1)}" x2="${it.foot[0].toFixed(1)}" y2="${it.foot[1].toFixed(1)}" />`)
+    parts.push(
+      `<line class="chart3d-drop${it.p.frontier ? ' is-frontier' : ''}" x1="${it.top[0].toFixed(1)}" y1="${it.top[1].toFixed(1)}" x2="${it.foot[0].toFixed(1)}" y2="${it.foot[1].toFixed(1)}" />`,
+    )
   for (const it of placed) {
     const [x, y] = it.top
     const title = it.p.label ? `<title>${escapeHtml(it.p.label)}</title>` : ''
-    const open = it.p.key ? ` data-xai-focus-config="${escapeHtml(it.p.key)}" style="cursor:pointer;fill:${it.p.color}"` : ` style="fill:${it.p.color}"`
-    parts.push(`<circle class="chart3d-point" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${it.p.frontier ? 5 : 3.4}"${open}>${title}</circle>`)
+    const open = it.p.key
+      ? ` data-xai-focus-config="${escapeHtml(it.p.key)}" style="cursor:pointer;fill:${it.p.color}"`
+      : ` style="fill:${it.p.color}"`
+    parts.push(
+      `<circle class="chart3d-point" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${it.p.frontier ? 5 : 3.4}"${open}>${title}</circle>`,
+    )
   }
   for (const it of placed.filter((q) => q.p.focus))
-    parts.push(`<circle class="chart-focus-ring" cx="${it.top[0].toFixed(1)}" cy="${it.top[1].toFixed(1)}" r="8.5" fill="none">${it.p.label ? `<title>${escapeHtml(it.p.label)}</title>` : ''}</circle>`)
-  return `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(opts.ariaLabel || '')}">${parts.join('')}</svg>`
+    parts.push(
+      `<circle class="chart-focus-ring" cx="${it.top[0].toFixed(1)}" cy="${it.top[1].toFixed(1)}" r="8.5" fill="none">${it.p.label ? `<title>${escapeHtml(it.p.label)}</title>` : ''}</circle>`,
+    )
+  return `<svg class="chart chart3d-svg" viewBox="0 0 ${W} ${H}" role="img" aria-label="${escapeHtml(opts.ariaLabel || '')}">${parts.join('')}</svg>`
 }
 function buildLineChart(opts) {
   return buildXyChart({ ...opts, line: true })
@@ -8791,7 +9131,9 @@ let datasetsSort = { key: 'name', dir: 'asc' }
 // manifest order); `actionsFn(row)` supplies the trailing buttons. Header cells carry data-<sortAttr> so
 // the tab's click handler can re-sort; the default row is highlighted + badged.
 function bundleTableHtml(rows, leverEntries, sort, sortAttr, actionsFn) {
-  const cols = [{ id: 'name', label: 'Name', num: false, help: 'The name you gave this bundle.' }].concat(
+  const cols = [
+    { id: 'name', label: 'Name', num: false, help: 'The name you gave this bundle.' },
+  ].concat(
     leverEntries.map(([k, spec]) => ({
       id: k,
       label: k,
@@ -8842,7 +9184,9 @@ function environmentRows() {
   // the user has defined any, it's hidden (the chosen default lives among their records).
   if (!environmentsCache.length) {
     const d = defaultEnvironment()
-    return [{ id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d }]
+    return [
+      { id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d },
+    ]
   }
   return environmentsCache.map((e) => ({
     id: e.id,
@@ -8885,13 +9229,7 @@ async function renderEnvironments() {
 function environmentFormHtml(env, isClone) {
   const isNew = isClone || !env || env.id === 'default'
   const settings = (env && env.settings) || defaultEnvironment().settings
-  const nameVal = isClone
-    ? env && env.name
-      ? `${env.name} (copy)`
-      : ''
-    : isNew
-      ? ''
-      : env.name
+  const nameVal = isClone ? (env && env.name ? `${env.name} (copy)` : '') : isNew ? '' : env.name
   const fields = envLeverEntries()
     .map(([k, spec]) => {
       const cur = settings[k]
@@ -9088,7 +9426,9 @@ function datasetRows() {
   // user has defined any, it's hidden (the chosen default lives among their records, not this synthetic one).
   if (!datasetsCache.length) {
     const d = defaultDataset()
-    return [{ id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d }]
+    return [
+      { id: d.id, name: d.name, default: false, editable: false, values: d.settings || {}, raw: d },
+    ]
   }
   return datasetsCache.map((d) => ({
     id: d.id,
@@ -9630,7 +9970,7 @@ function comparisonKindLabel(kind) {
     ? 'invariant across contexts'
     : kind === 'differs'
       ? 'differs across contexts'
-      : 'thesis beats baseline'
+      : 'claim beats baseline'
 }
 // The cross-context comparison behind a context-spanning hypothesis: one row per context cell (its
 // context values, run count, best objective, beats-hold) — never pooled — plus the criterion + verdict.
@@ -9714,7 +10054,7 @@ function hypothesisCardHtml(h, liveIds) {
       ${badge}
       ${hypothesisRunChipHtml(h)}
       <span class="hyp-title">${escapeHtml(h.title || h.id)}</span>
-      ${hypothesisThesisChipHtml(h)}
+      ${hypothesisClaimChipHtml(h)}
       ${running}
       <span class="card-actions">${hypothesisActionsHtml(h)}</span>
     </summary>
@@ -9797,6 +10137,32 @@ function renderProposeControls() {
     last.hidden = true
   }
 }
+// Snapshot the hypotheses tab's scroll positions (the page + each accordion section's inner scroll) so a
+// re-render after an action doesn't yank the view to the top — the source of the "jumpy / unusable" feel.
+function captureHypScroll() {
+  const snap = { page: 0, sections: {} }
+  const scroller = document.querySelector('#view-dashboard .app-scroll')
+  if (scroller) snap.page = scroller.scrollTop
+  const bodyEl = byId('hypotheses-body')
+  if (bodyEl) snap.body = bodyEl.scrollTop
+  for (const el of document.querySelectorAll('#hypotheses-body .hypothesis-section-body')) {
+    const sec = el.closest('[data-section]')
+    if (sec) snap.sections[sec.dataset.section] = el.scrollTop
+  }
+  return snap
+}
+function restoreHypScroll(snap) {
+  if (!snap) return
+  const scroller = document.querySelector('#view-dashboard .app-scroll')
+  if (scroller && snap.page) scroller.scrollTop = snap.page
+  const bodyEl = byId('hypotheses-body')
+  if (bodyEl && snap.body) bodyEl.scrollTop = snap.body
+  for (const el of document.querySelectorAll('#hypotheses-body .hypothesis-section-body')) {
+    const sec = el.closest('[data-section]')
+    const v = sec && snap.sections[sec.dataset.section]
+    if (v) el.scrollTop = v
+  }
+}
 async function renderHypotheses() {
   const body = byId('hypotheses-body')
   if (!body) return
@@ -9805,6 +10171,7 @@ async function renderHypotheses() {
     body.innerHTML = '<div class="empty-hint">Open inside the Overseer to manage hypotheses.</div>'
     return
   }
+  const scrollSnap = captureHypScroll()
   // Load the persisted aggregate (for the freshness note) + hypotheses (whose verdicts are persisted) +
   // a page of runs (only for the per-campaign best display). Verdicts are NOT recomputed here from the
   // page — the shared all-runs refresh (`refreshAllRunsDerived`) owns that.
@@ -9852,6 +10219,7 @@ async function renderHypotheses() {
     controls +
     HYPOTHESIS_VERDICTS.map((v) => hypothesisSectionHtml(v, groups[v], liveIds)).join('') +
     hiddenSection
+  restoreHypScroll(scrollSnap)
   void checkModelStatsStale()
 }
 async function onProposeClick() {
@@ -10204,7 +10572,13 @@ function validateHypothesisSpec(text) {
   // `compare` pits the values of ONE lever against each other (the judgeable form of "A vs B").
   if (parsed.compare !== undefined) {
     const c = parsed.compare
-    if (!c || typeof c !== 'object' || Array.isArray(c) || typeof c.lever !== 'string' || !c.lever) {
+    if (
+      !c ||
+      typeof c !== 'object' ||
+      Array.isArray(c) ||
+      typeof c.lever !== 'string' ||
+      !c.lever
+    ) {
       return { error: '"compare" must be an object { lever, values }.' }
     }
     if (!Array.isArray(c.values) || c.values.length < 2) {
@@ -10243,7 +10617,7 @@ function renderHypothesisForm() {
         <div class="lever-grid" ${helpAttr('How a context-spanning (environments/datasets) OR a compare hypothesis is judged across its cells.')}>
           <label class="field"><span>Comparison <em>(context-spanning)</em></span>
             <select name="comparison-kind">
-              <option value="beats-baseline">thesis beats baseline</option>
+              <option value="beats-baseline">claim beats baseline</option>
               <option value="invariant">invariant across contexts</option>
               <option value="differs">differs across contexts</option>
             </select>
@@ -10324,7 +10698,9 @@ async function onHypothesisSave(event) {
 // Merge the dedicated "Compare" inputs into the spec (so a comparison needn't be hand-written as JSON).
 // Returns an error string, or null on success (mutating spec.compare). No-op when both fields are blank.
 function applyCompareFromForm(form, spec) {
-  const lever = String((form.elements['compare-lever'] && form.elements['compare-lever'].value) || '').trim()
+  const lever = String(
+    (form.elements['compare-lever'] && form.elements['compare-lever'].value) || '',
+  ).trim()
   const valuesRaw = String(
     (form.elements['compare-values'] && form.elements['compare-values'].value) || '',
   ).trim()
@@ -10332,7 +10708,8 @@ function applyCompareFromForm(form, spec) {
   if (!lever) return 'Compare values given but no compare lever — name the lever to compare.'
   const lv = manifest && manifest.levers && manifest.levers[lever]
   if (!lv) return `Compare lever "${lever}" is not a lever this manifest declares.`
-  const coerce = (v) => (lv.type === 'number' ? Number(v) : lv.type === 'boolean' ? v === 'true' : v)
+  const coerce = (v) =>
+    lv.type === 'number' ? Number(v) : lv.type === 'boolean' ? v === 'true' : v
   const values = valuesRaw
     .split(',')
     .map((v) => v.trim())
@@ -10535,21 +10912,25 @@ function paperVerdictInfo(paper) {
   const weights = (paper && paper.hypothesisWeights) || {}
   const linked = hypothesesCache
     .filter((h) => ids.has(h.id))
-    .map((h) => ({ verdict: effectiveHypothesisVerdict(h), weight: weights[h.id], thesis: h.thesis }))
+    .map((h) => ({
+      verdict: effectiveHypothesisVerdict(h),
+      weight: weights[h.id],
+      claim: h.claim,
+    }))
   return window.Hypothesis.scorePaperVerdict(linked)
 }
 function paperVerdict(paper) {
   return paperVerdictInfo(paper).status
 }
-// One linked-hypothesis row: title + its live verdict badge + the paper's weight chip + Unlink. `showThesis`
-// adds the thesis chip (on for the flat list, off in the grouped multi-thesis view where the heading is it).
-function paperHypRowHtml(paper, hid, showThesis) {
+// One linked-hypothesis row: title + its live verdict badge + the paper's weight chip + Unlink. `showClaim`
+// adds the claim chip (on for the flat list, off in the grouped multi-claim view where the heading is it).
+function paperHypRowHtml(paper, hid, showClaim) {
   const h = hypothesesCache.find((x) => x.id === hid)
   if (!h) return ''
   const v = effectiveHypothesisVerdict(h)
   const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[v]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[v])}</span>`
-  const thesis = showThesis === false ? '' : hypothesisThesisChipHtml(h)
-  return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} ${hypothesisWeightChipHtml(paper.hypothesisWeights && paper.hypothesisWeights[hid])} ${thesis} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${escapeHtml(paper.id)}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
+  const claimChip = showClaim === false ? '' : hypothesisClaimChipHtml(h)
+  return `<li><span class="paper-hyp-title" data-action="goto-hyp" data-id="${escapeHtml(hid)}">${escapeHtml(h.title || hid)}</span> ${badge} ${hypothesisWeightChipHtml(paper.hypothesisWeights && paper.hypothesisWeights[hid])} ${claimChip} <button type="button" class="icon-btn" data-action="unlink-hyp" data-paper="${escapeHtml(paper.id)}" data-id="${escapeHtml(hid)}" title="Unlink" aria-label="Unlink">×</button></li>`
 }
 // The linked hypotheses, each as a row (title + its live verdict badge + Unlink), with the add/link picker.
 function paperLinkedHypothesesHtml(paper) {
@@ -10573,12 +10954,12 @@ function paperProposalsChipHtml(info) {
   if (!n) return ''
   return `<span class="hyp-count-chip is-proposed"${helpAttr('Hypotheses whose required model is NOT implemented yet — they can’t be tested (or counted in the score) until it’s built.')}>${n} proposal${n === 1 ? '' : 's'}</span>`
 }
-// A small chip naming the PAPER thesis (claim) a hypothesis tests — so the thesis↔hypothesis link is visible
-// in the flat list + the standalone Hypotheses card (the multi-thesis view groups by it instead).
-function hypothesisThesisChipHtml(h) {
-  const t = h && typeof h.thesis === 'string' && h.thesis.trim() ? h.thesis.trim() : ''
+// A small chip naming the PAPER claim a hypothesis tests — so the claim↔hypothesis link is visible in the
+// flat list + the standalone Hypotheses card (the multi-claim view groups by it instead).
+function hypothesisClaimChipHtml(h) {
+  const t = h && typeof h.claim === 'string' && h.claim.trim() ? h.claim.trim() : ''
   if (!t) return ''
-  return `<span class="hyp-thesis-chip"${helpAttr('Paper thesis this hypothesis tests: ' + t)}>◆ ${escapeHtml(t)}</span>`
+  return `<span class="hyp-thesis-chip"${helpAttr('Paper claim this hypothesis tests: ' + t)}>◆ ${escapeHtml(t)}</span>`
 }
 // A warning listing paper claims NO linked hypothesis covers — found by the scrutinous re-weigh pass. A
 // signal only (never gates the verdict); the user can Suggest more hypotheses to close the gap.
@@ -10588,22 +10969,43 @@ function paperCoverageGapsHtml(paper) {
   const items = gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join('')
   return `<div class="paper-coverage-gaps card-sub"${helpAttr('Paper claims with no covering hypothesis (found when re-weighing). Use Suggest to add hypotheses that close the gap — coherent coverage makes the verdict trustworthy.')}><strong>⚠ Coverage gaps</strong> — claims no hypothesis tests yet:<ul>${items}</ul></div>`
 }
-// A chip flagging a MULTI-THESIS paper (the paper makes >1 distinct claim — see the per-thesis breakdown).
-function paperMultiThesisChipHtml(info) {
-  if (!info || !info.multiThesis) return ''
-  const n = (info.theses || []).filter((t) => t.thesis).length
-  return `<span class="hyp-count-chip"${helpAttr('This paper makes several distinct theses — each is scored separately below.')}>${n} theses</span>`
+// The short label + glyph for each proposed-improvement kind, shown as a leading tag on the list item.
+const IMPROVEMENT_KIND_TAG = {
+  model: '◆ model',
+  data: '⛁ data',
+  metric: '📏 metric',
+  environment: '🎚 env',
+  capability: '⚙ capability',
+  other: '• other',
 }
-// The multi-thesis inner view: the paper's hypotheses partitioned by thesis, each group with its own verdict
+// "Proposed improvements" — project functionality (models, data, metrics, env mechanics, capabilities) that,
+// if built, would let this paper's currently-untestable claims be tested. Found by "Find models" (which now
+// proposes general improvements, not just catalog models) and persisted on the paper. Sits under Coverage
+// gaps: the gaps are the untested claims; these are what to BUILD to close them.
+function paperProposedImprovementsHtml(paper) {
+  const items = Array.isArray(paper.proposedImprovements)
+    ? paper.proposedImprovements.filter((p) => p && p.title)
+    : []
+  if (!items.length) return ''
+  const rows = items
+    .map((p) => {
+      const tag = IMPROVEMENT_KIND_TAG[p.kind] || IMPROVEMENT_KIND_TAG.other
+      const detail = p.detail ? ` — ${escapeHtml(p.detail)}` : ''
+      return `<li><span class="improvement-kind">${escapeHtml(tag)}</span> <strong>${escapeHtml(p.title)}</strong>${detail}</li>`
+    })
+    .join('')
+  return `<div class="paper-proposed-improvements card-sub"${helpAttr('Functionality this paper implies is missing — build it and the untested claims above become testable. Found by "Find models" (which proposes general improvements, not just catalog models).')}><strong>🛠 Proposed improvements</strong> — build these to test the above:<ul>${rows}</ul></div>`
+}
+// The multi-claim inner view: the paper's hypotheses partitioned by claim, each group with its own verdict
 // badge + why, plus an "Other (untagged)" section so no hypothesis is hidden. Only rendered for a
-// multi-thesis paper; single-thesis/untagged papers use the flat paperLinkedHypothesesHtml.
-function paperThesesHtml(paper, info) {
+// multi-claim paper; single-claim/untagged papers use the flat paperLinkedHypothesesHtml.
+function paperClaimsHtml(paper, info) {
   const order = []
   const byKey = {}
   for (const hid of Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds : []) {
     const h = hypothesesCache.find((x) => x.id === hid)
     if (!h) continue
-    const label = typeof h.thesis === 'string' && h.thesis.trim() ? h.thesis.trim() : null
+    const label = typeof h.claim === 'string' && h.claim.trim() ? h.claim.trim() : null
     const key = label === null ? ' untagged' : label
     if (!byKey[key]) {
       byKey[key] = { label, hids: [] }
@@ -10612,8 +11014,8 @@ function paperThesesHtml(paper, info) {
     byKey[key].hids.push(hid)
   }
   const detailByKey = {}
-  for (const t of info.theses || [])
-    detailByKey[t.thesis === null ? ' untagged' : t.thesis] = t.detail
+  for (const t of info.claims || [])
+    detailByKey[t.claim === null ? ' untagged' : t.claim] = t.detail
   const sections = order
     .map((key) => {
       const g = byKey[key]
@@ -10621,15 +11023,15 @@ function paperThesesHtml(paper, info) {
       const verdict = detail ? detail.status : 'untested'
       const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}"${detail ? helpAttr(detail.why) : ''}>${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
       const heading = g.label || 'Other (untagged hypotheses)'
-      // The per-thesis weighted score (its own hypotheses only) — the same proven÷decided formula as the paper.
+      // The per-claim weighted score (its own hypotheses only) — the same proven÷decided formula as the paper.
       const score =
         detail && detail.counts && detail.counts.total ? paperVerdictExplainHtml(detail) : ''
-      // Rows WITHOUT the thesis chip — the heading already names the thesis.
+      // Rows WITHOUT the claim chip — the heading already names the claim.
       const rows = g.hids.map((hid) => paperHypRowHtml(paper, hid, false)).join('')
       return `<div class="paper-thesis"><div class="paper-thesis-head"><span class="paper-thesis-label">${escapeHtml(heading)}</span> ${badge}</div>${score}<ul class="paper-hyp-list">${rows}</ul></div>`
     })
     .join('')
-  return `<div class="paper-hyps paper-theses"><p class="card-sub paper-theses-intro">This paper makes ${order.filter((k) => byKey[k].label).length} distinct theses — each scored separately below:</p>${sections}${paperSubformHtml(paper)}</div>`
+  return `<div class="paper-hyps paper-theses"><p class="card-sub paper-theses-intro">This paper makes ${order.filter((k) => byKey[k].label).length} distinct claims — each scored separately below:</p>${sections}${paperSubformHtml(paper)}</div>`
 }
 // The per-card inline sub-form: add a NEW hypothesis, or pick an EXISTING one to link.
 function paperSubformHtml(paper) {
@@ -10761,7 +11163,12 @@ function paperHypCountChipHtml(paper) {
 function paperCardHtml(paper) {
   const info = paperVerdictInfo(paper)
   const verdict = info.status
-  const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}"${helpAttr(info.why)}>${escapeHtml(PAPER_VERDICT_LABEL[verdict])}</span>`
+  // A multi-claim paper's status chip carries a {passed/total} fraction (how many distinct claims hold up);
+  // a single-claim paper shows the status word alone. This replaces the old separate "N claims" count chip.
+  const claimFrac = info.multiClaim
+    ? ` <span class="paper-claims-frac" title="${info.passedClaims} of ${info.totalClaims} claims hold up">${info.passedClaims}/${info.totalClaims}</span>`
+    : ''
+  const badge = `<span class="run-badge ${PAPER_VERDICT_BADGE[verdict]}"${helpAttr(info.why)}>${escapeHtml(PAPER_VERDICT_LABEL[verdict])}${claimFrac}</span>`
   const title = paper.url
     ? `<a href="${escapeHtml(paper.url)}" target="_blank" rel="noopener">${escapeHtml(paper.title || 'Untitled')}</a>`
     : escapeHtml(paper.title || 'Untitled')
@@ -10785,7 +11192,7 @@ function paperCardHtml(paper) {
       : '') +
     `<button type="button" class="card-btn combo" data-action="add-hyp" data-id="${id}"${helpAttr('Add a hypothesis manually and link it to this paper.')}>${iconPlusSvg(13)}${iconHypothesisSvg(14)}</button>` +
     `<button type="button" class="card-btn combo" data-action="link-existing" data-id="${id}"${helpAttr('Link an existing hypothesis to this paper.')}>${iconLinkSvg(13)}${iconHypothesisSvg(14)}</button>` +
-    `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${findPending ? ' disabled' : ''}${helpAttr('Find models — an LLM links this paper to the catalog models it introduces/improves and proposes any missing ones to add.')}>${findPending ? spinnerHtml() : iconModelSvg(14)}</button>` +
+    `<button type="button" class="card-btn" data-action="find-models" data-id="${id}"${findPending ? ' disabled' : ''}${helpAttr('Find models & improvements — an LLM links this paper to the catalog models it introduces/improves, proposes any missing ones to add, and lists the project functionality (data, metrics, env mechanics, capabilities) needed to test its claims (shown under Coverage gaps).')}>${findPending ? spinnerHtml() : iconModelSvg(14)}</button>` +
     (linkedCount
       ? `<button type="button" class="card-btn" data-action="replicate" data-id="${id}"${helpAttr('Replicate — launch every linked hypothesis’s spec.')}>${iconRunSvg(15)}</button>`
       : '') +
@@ -10795,7 +11202,6 @@ function paperCardHtml(paper) {
   return `<details class="paper-card" data-id="${id}"${open}>
     <summary class="paper-summary">
       ${badge}
-      ${paperMultiThesisChipHtml(info)}
       ${paperHypCountChipHtml(paper)}
       ${paperProposalsChipHtml(info)}
       <span class="paper-summary-title">${title}</span>
@@ -10808,7 +11214,8 @@ function paperCardHtml(paper) {
       ${info.counts.total ? `<p class="card-sub paper-verdict-why">${escapeHtml(info.why)}</p>` : ''}
       ${info.counts.total ? paperVerdictExplainHtml(info) : ''}
       ${paperCoverageGapsHtml(paper)}
-      ${info.multiThesis ? paperThesesHtml(paper, info) : paperLinkedHypothesesHtml(paper)}
+      ${paperProposedImprovementsHtml(paper)}
+      ${info.multiClaim ? paperClaimsHtml(paper, info) : paperLinkedHypothesesHtml(paper)}
       ${paperModelsHtml(paper)}
       ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
     </div>
@@ -10840,7 +11247,10 @@ function sortPapers(list) {
 // Reusable labelled sort dropdown (the shared .app-select look) — "Sort <select>".
 function sortControlHtml(id, options, current) {
   const opts = options
-    .map(([v, l]) => `<option value="${escapeHtml(v)}"${v === current ? ' selected' : ''}>${escapeHtml(l)}</option>`)
+    .map(
+      ([v, l]) =>
+        `<option value="${escapeHtml(v)}"${v === current ? ' selected' : ''}>${escapeHtml(l)}</option>`,
+    )
     .join('')
   return `<label class="sort-control">Sort <select id="${escapeHtml(id)}" class="app-select">${opts}</select></label>`
 }
@@ -10871,7 +11281,8 @@ function modelSortComparator() {
       return vb - va || byName(a, b)
     }
   if (modelSortKey === 'status')
-    return (a, b) => String(modelStatusOf(a)).localeCompare(String(modelStatusOf(b))) || byName(a, b)
+    return (a, b) =>
+      String(modelStatusOf(a)).localeCompare(String(modelStatusOf(b))) || byName(a, b)
   return byName
 }
 function paperFilterBarHtml() {
@@ -11018,11 +11429,22 @@ function paperChooserButtonsHtml() {
     <button type="button" id="paper-auto-fill" class="ghost-btn"${helpAttr('Read the link with an LLM, draft the paper, and extract its testable hypotheses.')}>Extract hypotheses</button>
     <button type="button" id="paper-cancel" class="ghost-btn">Cancel</button>`
 }
+// Open-ended discovery: no link needed — the backend derives a research goal from this project's domain,
+// finds candidate papers on the web, verifies each is a real relevant paper, and drafts the survivors.
+function paperResearchActionsHtml() {
+  return `<label class="field paper-research-count"><span>How many</span>
+      <input type="number" id="paper-research-count" min="1" max="12" value="6" /></label>
+    <button type="button" id="paper-research" class="ghost-btn"${helpAttr('Search the web for papers relevant to this project, verify each is a real relevant paper against its own page, and draft the survivors with their hypotheses.')}>Research papers</button>`
+}
 function paperChooserHtml() {
   return `<label class="field"><span>Paper / source link</span>
     <input type="text" name="url" id="paper-chooser-url" placeholder="https://arxiv.org/abs/… (optional for manual entry)" /></label>
   <p class="card-sub">Enter a link, then extract its hypotheses automatically — or skip the link and enter it manually.</p>
-  <div id="paper-chooser-actions" class="form-actions">${paperChooserButtonsHtml()}</div>`
+  <div id="paper-chooser-actions" class="form-actions">${paperChooserButtonsHtml()}</div>
+  <div class="paper-research-row">
+    <p class="card-sub">Or discover papers automatically from this project's domain — no link needed:</p>
+    <div id="paper-research-actions" class="form-actions">${paperResearchActionsHtml()}</div>
+  </div>`
 }
 function paperFormHtml(paper) {
   return paper ? paperFullFormHtml(paper) : paperChooserHtml()
@@ -11086,6 +11508,58 @@ async function onPaperAutoFill() {
     if (epoch === projectEpoch) {
       restore()
       setStatusLine('papers-status', 'Extract failed — please try again or use Manual Entry.', true)
+    }
+  }
+}
+// Research papers: the backend 'research-training-papers' activity derives a research goal from the
+// project's domain, discovers N candidates, verifies each against its own page, and writes DRAFT
+// <recordType>-paper + <recordType>-hypothesis records; on completion we re-render Papers for review.
+async function onResearchPapers() {
+  if (!embedded()) {
+    setStatusLine('papers-status', 'Open inside the Overseer to research papers.', true)
+    return
+  }
+  const countEl = byId('paper-research-count')
+  const count = Math.max(1, Math.min(Number((countEl && countEl.value) || 6) || 6, 12))
+  const restore = () => {
+    const a = byId('paper-research-actions')
+    if (a) setHtml(a, paperResearchActionsHtml())
+  }
+  const actions = byId('paper-research-actions')
+  if (actions)
+    setHtml(actions, `<span class="paper-autofill-busy">${spinnerHtml()} Researching papers…</span>`)
+  setStatusLine('papers-status', '')
+  const epoch = projectEpoch
+  try {
+    const result = await startOrEnqueue(
+      'research-training-papers',
+      trainerActivityParams({ count }),
+      'Research papers',
+    )
+    if (result.queued) {
+      if (epoch === projectEpoch) {
+        restore()
+        setStatusLine(
+          'papers-status',
+          queuedStatusText(result.ahead) + ' — the drafts will appear here when it finishes.',
+        )
+      }
+      return
+    }
+    const act = await observeQuickActivity(result.activityId)
+    if (epoch !== projectEpoch) return
+    if (act && act.status === 'completed') {
+      togglePaperForm(false)
+      await renderPapers()
+      showToast('Researched papers — review the new drafts below (marked “untested”).')
+    } else {
+      restore()
+      setStatusLine('papers-status', quickActivityFailureText(act, 'Research papers'), true)
+    }
+  } catch {
+    if (epoch === projectEpoch) {
+      restore()
+      setStatusLine('papers-status', 'Research failed — please try again.', true)
     }
   }
 }
@@ -11369,6 +11843,7 @@ function setupPapers() {
       if (event.target.closest('#paper-cancel')) togglePaperForm(false)
       else if (event.target.closest('#paper-manual-entry')) showPaperManualForm()
       else if (event.target.closest('#paper-auto-fill')) onPaperAutoFill()
+      else if (event.target.closest('#paper-research')) onResearchPapers()
     })
   }
   const body = byId('papers-body')
@@ -11837,6 +12312,9 @@ function hypothesisStatsControlsHtml() {
 }
 // Re-render whichever run-derived tab is active (to repaint the spinner / fresh results).
 function rerenderRunDerivedTab() {
+  // The Favorites / By dataset / By environment views read the all-runs snapshot, so a global Refresh (which
+  // repopulates it) must re-pull the Runs table too — refreshRuns re-reads readRuns (= the fresh snapshot).
+  if (activeTabId === 'runs') return refreshRuns()
   if (activeTabId === 'hypotheses') return renderHypotheses()
   if (activeTabId === 'papers') return renderPapers()
   if (activeTabId === 'speed') return renderSpeed()
@@ -11984,7 +12462,7 @@ function renderGlobalRefresh() {
     return
   }
   const busy = modelStatsRefreshing
-  const canLatest = !busy && modelStatsStale && !!modelStatsCache && allRunsCache.length > 0
+  const canLatest = !busy && modelStatsStale && !!modelStatsCache && !!modelStatsCache.newestRunAt
   const at =
     modelStatsCache && modelStatsCache.aggregatedAt
       ? String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
@@ -12117,7 +12595,9 @@ async function renderSpeed() {
     modelStatsCache && Array.isArray(modelStatsCache.durations) ? modelStatsCache.durations : null
   const durList =
     persistedDur ||
-    window.Models.computeRunDurationsByModel((allRunsCache.length ? allRunsCache : []).map(modelRunRow))
+    window.Models.computeRunDurationsByModel(
+      (allRunsCache.length ? allRunsCache : []).map(modelRunRow),
+    )
   const durAt =
     persistedDur && modelStatsCache.aggregatedAt
       ? ' \u00b7 updated ' + String(modelStatsCache.aggregatedAt).slice(0, 16).replace('T', ' ')
@@ -12127,7 +12607,10 @@ async function renderSpeed() {
     : allRunsCache.length
       ? 'wall-clock per training run \u2014 all loaded runs'
       : 'wall-clock per training run \u2014 Refresh (top right) to aggregate over all runs'
-  const durStale = persistedDur && modelStatsStale ? ' <span class="model-stats-stale">newer runs exist</span>' : ''
+  const durStale =
+    persistedDur && modelStatsStale
+      ? ' <span class="model-stats-stale">newer runs exist</span>'
+      : ''
   const durRows = durList
     .map(
       (d) =>
@@ -12349,7 +12832,10 @@ async function onConsolidateHypotheses() {
       await refreshHypothesisVerdicts(hypothesesCache)
       if (activeTabId === 'hypotheses') await renderHypotheses()
       const groups = (summary && summary.merged) || []
-      const absorbed = groups.reduce((n, g) => n + ((g.absorbedIds && g.absorbedIds.length) || 0), 0)
+      const absorbed = groups.reduce(
+        (n, g) => n + ((g.absorbedIds && g.absorbedIds.length) || 0),
+        0,
+      )
       const conflicts = ((summary && summary.conflicts) || []).length
       if (!groups.length && !conflicts) {
         showToast('No similar hypotheses to consolidate.')
@@ -12415,7 +12901,9 @@ function closeConsolidateModal() {
 function consolidateMemberHtml(gi, model, group) {
   const isCanon = model.id === group.canonicalId
   const names = window.Models.flavorModelNames(model)
-  const sub = names.length ? ` <span class="card-sub">(${names.map(escapeHtml).join(', ')})</span>` : ''
+  const sub = names.length
+    ? ` <span class="card-sub">(${names.map(escapeHtml).join(', ')})</span>`
+    : ''
   const checked = group.checkedDuplicateIds.has(model.id) ? ' checked' : ''
   const control = isCanon
     ? '<span class="consolidate-keep">keeps its runs &amp; flavors</span>'
@@ -13486,19 +13974,8 @@ function renderLaunchForm() {
     <fieldset class="lever">
       <legend>Campaign</legend>
       <div class="lever-grid">
-        <label class="field"><span${helpAttr('What this campaign tests, e.g. "fee-penalty reward" or "1m data prep". Stamped on every run so you can group + compare by experiment in the By-experiment view. Optional.')}>Thesis</span>
-          <input type="text" name="thesis" placeholder="what are you testing? (optional)" />
-        </label>
-        <label class="field"><span${helpAttr('Optional: the lever this thesis varies, so the by-experiment view can highlight it. Leave blank for theses outside the levers (e.g. a new data prep or code change).')}>Testing which setting?</span>
-          <select name="thesisTarget"><option value="">—</option>${modelLeverEntries()
-            .map(([k]) => `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`)
-            .join('')}</select>
-        </label>
         <label class="field"><span${helpAttr('How many seeds to run per config (0…N−1). Keep at 1 while exploring; raise it when homing in to measure variance across seeds (the by-setup view then shows the spread).')}>Seeds</span>
           <input type="number" name="seeds" min="1" step="1" value="1" />
-        </label>
-        <label class="field"><span${helpAttr('How many runs of this campaign train at once (a bounded worker pool). Higher finishes the sweep faster but uses more CPU/RAM. 1 = strictly sequential.')}>Max parallel runs</span>
-          <input type="number" name="concurrency" min="1" step="1" value="${savedConcurrency()}" />
         </label>
         <label class="check-row launch-refresh">
           <input type="checkbox" name="refresh" />
@@ -13676,8 +14153,6 @@ function applyPreset(preset) {
     }
   }
   if (preset.seeds && form.elements.seeds) form.elements.seeds.value = String(preset.seeds)
-  if (form.elements.thesis) form.elements.thesis.value = preset.thesis || ''
-  if (form.elements.thesisTarget) form.elements.thesisTarget.value = preset.thesisTarget || ''
   // A preset may sweep DATASETS (walk-forward windows / fidelity stacks) and/or ENVIRONMENTS (exit/fee
   // regimes) as bundles; those override the pickers for this launch. Re-render the pickers so the
   // swept bundles show read-only (and Default unchecks) — the count alone isn't enough to see them.
@@ -13842,16 +14317,9 @@ async function onLaunchSubmit(event) {
   const spec = buildSpecFromForm(form)
   const refresh = !!(form.elements.refresh && form.elements.refresh.checked)
   const autoEval = !!(form.elements.autoEval && form.elements.autoEval.checked)
-  const concurrency = Math.max(
-    1,
-    Math.floor(Number(form.elements.concurrency && form.elements.concurrency.value)) || 1,
-  )
-  rememberConcurrency(concurrency)
+  // Max parallel runs is set in the Activity tab (one place), not per-launch — read the saved value.
+  const concurrency = savedConcurrency()
   const skipExplored = !!(form.elements.skipExplored && form.elements.skipExplored.checked)
-  const thesis = String((form.elements.thesis && form.elements.thesis.value) || '').trim()
-  const thesisTarget = String(
-    (form.elements.thesisTarget && form.elements.thesisTarget.value) || '',
-  ).trim()
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
@@ -13860,8 +14328,6 @@ async function onLaunchSubmit(event) {
       refresh,
       concurrency,
       ...(skipExplored ? { skipExplored: true } : {}),
-      ...(thesis ? { thesis } : {}),
-      ...(thesis && thesisTarget ? { thesisTarget } : {}),
     })
     const extra = {
       ...(autoEval ? { autoEval: true } : {}),
@@ -13895,9 +14361,6 @@ function setupLaunch() {
   form.addEventListener('input', (event) => {
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)
-    }
-    if (event.target && event.target.name === 'concurrency') {
-      rememberConcurrency(event.target.value)
     }
     updateLaunchSummary()
   })

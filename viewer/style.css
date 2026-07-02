@@ -913,7 +913,26 @@ button.run-badge.model-device-chip:hover {
   stroke-width: 2.2;
   pointer-events: none;
 }
-/* 3-D isometric scatter (trade-off map with a 3rd axis): a faint wireframe cube + drop-lines for height. */
+/* 3-D scatter (trade-off map with a 3rd axis): a faint wireframe cube + drop-lines for height, rotatable. */
+.chart3d-wrap {
+  position: relative;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.chart3d-wrap.is-dragging {
+  cursor: grabbing;
+}
+.chart3d-svg {
+  display: block;
+}
+.chart3d-hint {
+  position: absolute;
+  top: 6px;
+  right: 10px;
+  pointer-events: none;
+  opacity: 0.7;
+}
 .chart3d-floor {
   fill: var(--surface-subtle);
   fill-opacity: 0.5;
@@ -1558,6 +1577,17 @@ button.run-badge.model-device-chip:hover {
   font-size: 13px;
   color: var(--muted);
 }
+.paper-research-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.paper-research-row .form-actions {
+  align-items: flex-end;
+}
+.field.paper-research-count {
+  max-width: 7rem;
+}
 .paper-link-row {
   display: flex;
   flex-wrap: wrap;
@@ -1833,6 +1863,31 @@ button.block-chip:hover {
 /* The one-line rationale under a paper's verdict badge — explains how its hypotheses rolled up. */
 .paper-verdict-why {
   font-style: italic;
+}
+/* "Proposed improvements" — the functionality to build to test a paper's uncovered claims (under Coverage
+   gaps). Each row leads with a small kind tag (model / data / metric / env / capability). */
+.paper-proposed-improvements {
+  margin-top: 6px;
+}
+.paper-proposed-improvements ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+.paper-proposed-improvements li {
+  margin: 2px 0;
+}
+.improvement-kind {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-right: 4px;
+  white-space: nowrap;
 }
 /* A hypothesis's importance-weight chip (⚖ 1…5) shown beside its verdict badge. */
 .hyp-weight-chip {
@@ -2145,6 +2200,81 @@ button.block-chip:hover {
 }
 .setup-row:hover td {
   background: var(--accent-soft);
+}
+
+/* ---- Hide-bad chip sub-label + bad-run editor --------------------------------- */
+.filter-chip-sub {
+  opacity: 0.7;
+  font-weight: 400;
+}
+.bad-run-crit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.bad-run-crit input[type='number'] {
+  width: 56px;
+}
+
+/* ---- By dataset / By environment comparison view ------------------------------ */
+.cmp-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.cmp-locks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.cmp-lock-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.cmp-lock-key {
+  white-space: nowrap;
+}
+.cmp-agg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.cmp-agg-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}
+.cmp-agg-btn.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.cmp-th {
+  cursor: pointer;
+}
+.cmp-full {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.25;
+}
+.cmp-stat.cmp-min,
+.cmp-stat.cmp-max {
+  font-size: 11px;
+  opacity: 0.65;
+}
+.cmp-stat.cmp-avg {
+  font-weight: 600;
 }
 
 /* ---- Run detail --------------------------------------------------------------- */
@@ -2809,6 +2939,15 @@ pre.json {
   border-color: #6366f1;
   color: #4338ca;
   background: #eef2ff;
+}
+/* The {passed/total} claim fraction carried INSIDE a multi-claim paper's status chip (no separate chip). */
+.paper-claims-frac {
+  margin-left: 5px;
+  padding-left: 5px;
+  border-left: 1px solid currentColor;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  opacity: 0.85;
 }
 /* The thesis (paper claim) a hypothesis tests — shown on flat hypothesis rows + the standalone card. */
 .hyp-thesis-chip {

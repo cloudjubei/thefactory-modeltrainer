@@ -594,7 +594,7 @@ describe('comparisonCriterion (the success/failure rule for a context-spanning h
 })
 
 describe('paper scoring: proposed counter + explain + theses (additive lens)', () => {
-  const row = (verdict: string, weight?: number, thesis?: string) => ({ verdict, weight, thesis })
+  const row = (verdict: string, weight?: number, claim?: string) => ({ verdict, weight, claim })
 
   it('exports the holds-up / fluff thresholds (single source for the explainer)', () => {
     expect(H.PAPER_HOLDS_UP_AT).toBe(0.75)
@@ -651,33 +651,44 @@ describe('paper scoring: proposed counter + explain + theses (additive lens)', (
     })
   })
 
-  describe('theses lens', () => {
-    it('groupHypothesesByThesis groups by trimmed label, untagged into one bucket, first-seen order', () => {
-      const groups = H.groupHypothesesByThesis([
+  describe('claims lens', () => {
+    it('groupHypothesesByClaim groups by trimmed label, untagged into one bucket, first-seen order', () => {
+      const groups = H.groupHypothesesByClaim([
         row('proven', 1, 'A'),
         row('disproved', 1, 'B'),
         row('proven', 1, ' A '),
         row('untested', 1),
       ])
-      const byLabel = Object.fromEntries(groups.map((g: any) => [g.thesis ?? '_', g.items.length]))
+      const byLabel = Object.fromEntries(groups.map((g: any) => [g.claim ?? '_', g.items.length]))
       expect(byLabel.A).toBe(2)
       expect(byLabel.B).toBe(1)
       expect(byLabel._).toBe(1) // untagged
     })
-    it('scorePaperVerdict attaches multiThesis + per-thesis details when >1 distinct label', () => {
+    it('scorePaperVerdict attaches multiClaim + per-claim details when >1 distinct label', () => {
       const d = H.scorePaperVerdict([
         row('proven', 1, 'Momentum holds'),
         row('proven', 1, 'Momentum holds'),
         row('disproved', 1, 'Vol-sizing helps'),
       ])
-      expect(d.multiThesis).toBe(true)
-      const theses = d.theses.map((t: any) => [t.thesis, t.detail.status])
-      expect(theses).toContainEqual(['Momentum holds', 'holds-up'])
-      expect(theses).toContainEqual(['Vol-sizing helps', 'fluff'])
+      expect(d.multiClaim).toBe(true)
+      const claims = d.claims.map((t: any) => [t.claim, t.detail.status])
+      expect(claims).toContainEqual(['Momentum holds', 'holds-up'])
+      expect(claims).toContainEqual(['Vol-sizing helps', 'fluff'])
     })
-    it('single-thesis / untagged papers are NOT multi-thesis (unchanged behaviour)', () => {
-      expect(H.scorePaperVerdict([row('proven'), row('disproved')]).multiThesis).toBe(false)
-      expect(H.scorePaperVerdict([row('proven', 1, 'X'), row('disproved', 1, 'X')]).multiThesis).toBe(false)
+    it('single-claim / untagged papers are NOT multi-claim (unchanged behaviour)', () => {
+      expect(H.scorePaperVerdict([row('proven'), row('disproved')]).multiClaim).toBe(false)
+      expect(H.scorePaperVerdict([row('proven', 1, 'X'), row('disproved', 1, 'X')]).multiClaim).toBe(
+        false,
+      )
+    })
+    it('exposes passedClaims / totalClaims counts for the multi-claim status chip', () => {
+      const d = H.scorePaperVerdict([
+        row('proven', 1, 'Momentum holds'),
+        row('disproved', 1, 'Vol-sizing helps'),
+        row('proven', 1, 'Carry works'),
+      ])
+      expect(d.totalClaims).toBe(3)
+      expect(d.passedClaims).toBe(2)
     })
   })
 })

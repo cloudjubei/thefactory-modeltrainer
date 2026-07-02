@@ -13,7 +13,10 @@ import type {
   ModelCategory,
   ModelDeviceBenchmark,
   ModelFlavor,
+  PaperCandidate,
   PlannedTrainingItem,
+  ProposedImprovement,
+  ProposedImprovementKind,
   ProposedModel,
   RunXaiDigest,
   TrainerDataFile,
@@ -25,6 +28,7 @@ import type {
   TrainingPaperRecord,
   TrainingRunSummary,
 } from './modelTrainerTypes.js'
+import type { ClaimVerdict } from 'thefactory-tools/types'
 import {
   DECISION_QUALITY_MIN_SCORED_STEPS,
   DECISION_QUALITY_REWARD_EPSILON,
@@ -899,7 +903,7 @@ export function coerceHypothesisItems(
   rationale: string
   spec: ExperimentSpec
   comparison?: HypothesisComparison
-  thesis?: string
+  claim?: string
 }[] {
   if (!Array.isArray(raw)) return []
   const leverKeys = new Set(Object.keys(manifest.levers))
@@ -925,7 +929,7 @@ export function coerceHypothesisItems(
     rationale: string
     spec: ExperimentSpec
     comparison?: HypothesisComparison
-    thesis?: string
+    claim?: string
   }[] = []
   for (const item of raw) {
     if (!item || typeof item !== 'object') continue
@@ -1015,13 +1019,13 @@ export function coerceHypothesisItems(
         .map((s) => Math.trunc(s))
     }
     const comparison = coerceComparison(obj.comparison)
-    const thesis = typeof obj.thesis === 'string' && obj.thesis.trim() ? obj.thesis.trim() : undefined
+    const claim = typeof obj.claim === 'string' && obj.claim.trim() ? obj.claim.trim() : undefined
     items.push({
       title: obj.title,
       rationale: obj.rationale,
       spec,
       ...(comparison ? { comparison } : {}),
-      ...(thesis ? { thesis } : {}),
+      ...(claim ? { claim } : {}),
     })
   }
   return items
@@ -1283,11 +1287,11 @@ export function buildSuggestHypothesesSystemPrompt(manifest: TrainerManifest): s
     `RULE 4 — TRUE CROSS-CONTEXT CLAIMS (about the EFFECT OF THE CONTEXT — long-only vs long+short, one asset vs another): ${CONTEXT_SPANNING_RULE}`,
     `RULE 5 — PIN TO CONFIGS THAT PLAUSIBLY RUN: a spec matching no completed, metric-bearing run stays UNTESTED forever. Use lever values the paper maps onto that real runs would instantiate.`,
     HYPOTHESIS_RULE,
-    `THESIS LABEL — give EACH new hypothesis a short "thesis": the SPECIFIC paper claim it tests (e.g. "Momentum predicts returns" vs "Vol-targeting lifts Sharpe"). Hypotheses that test the SAME claim share the SAME thesis string verbatim; a paper that argues several distinct things will have several distinct theses — that is how the paper is scored claim-by-claim. Use the SAME wording for the same claim so they group.`,
+    `CLAIM LABEL — give EACH new hypothesis a short "claim": the SPECIFIC paper claim it tests (e.g. "Momentum predicts returns" vs "Vol-targeting lifts Sharpe"). Hypotheses that test the SAME claim share the SAME claim string verbatim; a paper that argues several distinct things will have several distinct claims — that is how the paper is scored claim-by-claim. Use the SAME wording for the same claim so they group.`,
     ``,
-    `WORKED EXAMPLE — BAD: {"title":"Recurrent outperforms non-recurrent","spec":{"sweep":{"model_name":["ppo-custom","reppo-custom"]},"fixed":{"timeframe":"1h"}}} — only timeframe pinned (matches the whole backlog) AND a comparison as a pooled sweep (never compares the arms). GOOD: {"title":"Recurrence beats a feedforward policy on 1h","thesis":"Recurrent policies beat feedforward","rationale":"Comparative claim -> a compare over the identity lever with the shared config pinned; beats-baseline judges the recurrent value against the baseline.","comparison":{"kind":"beats-baseline","baselineIndex":0},"spec":{"fixed":{"timeframe":"1h","reward_model":"combo_unified","lookback_window":64},"compare":{"lever":"model_name","values":["ppo-custom","reppo-custom"]}}}`,
+    `WORKED EXAMPLE — BAD: {"title":"Recurrent outperforms non-recurrent","spec":{"sweep":{"model_name":["ppo-custom","reppo-custom"]},"fixed":{"timeframe":"1h"}}} — only timeframe pinned (matches the whole backlog) AND a comparison as a pooled sweep (never compares the arms). GOOD: {"title":"Recurrence beats a feedforward policy on 1h","claim":"Recurrent policies beat feedforward","rationale":"Comparative claim -> a compare over the identity lever with the shared config pinned; beats-baseline judges the recurrent value against the baseline.","comparison":{"kind":"beats-baseline","baselineIndex":0},"spec":{"fixed":{"timeframe":"1h","reward_model":"combo_unified","lookback_window":64},"compare":{"lever":"model_name","values":["ppo-custom","reppo-custom"]}}}`,
     ``,
-    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], "newHypotheses": [{"title": string, "thesis": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, "spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "compare"?: {"lever": "<lever>", "values": [v1, v2]}, "environments"?: [{"<env-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]}. ONLY declared lever names; a single-context spec MUST pin ${idName}; use [] for either list when empty.`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchExistingIds": [string], "newHypotheses": [{"title": string, "claim": string, "rationale": string, "comparison"?: {"kind": "beats-baseline"|"invariant"|"differs", "baselineIndex"?: number, "tolerance"?: number}, "spec": {"fixed"?: {"<lever>": value}, "sweep"?: {"<lever>": [values]}, "compare"?: {"lever": "<lever>", "values": [v1, v2]}, "environments"?: [{"<env-lever>": value}], "datasets"?: [{"<dataset-lever>": value}], "seeds"?: [number]}}]}. ONLY declared lever names; a single-context spec MUST pin ${idName}; use [] for either list when empty.`,
   ].join('\n')
 }
 
@@ -1325,7 +1329,7 @@ export function coerceSuggestedHypotheses(
     rationale: string
     spec: ExperimentSpec
     comparison?: HypothesisComparison
-    thesis?: string
+    claim?: string
   }[]
 } {
   const o =
@@ -1495,6 +1499,165 @@ export function coercePaperDraft(raw: unknown): Partial<TrainingPaperRecord> | u
     if (tags.length) draft.tags = tags
   }
   return draft
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Open-ended paper research (ModelTrainerTools.researchTrainingPapers). These pure helpers shape the
+// discover → verify → synthesize pipeline: the discovery query, candidate coercion/dedup, the domain
+// relevance claim, and the admission rule. The impure orchestration (deep-research seam + storage)
+// lives in ModelTrainerTools; these stay node-free and directly tested.
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compose the open-ended discovery query for `researchTrainingPapers` from the same manifest
+ * ingredients {@link buildAnalyzePaperSystemPrompt} uses — the project name, its plain-language domain
+ * description, the objective (name + direction), and the candidate model families (the identity
+ * lever's choices) — then steer the search toward scholarly sources. Missing pieces are omitted so no
+ * dangling label or `undefined` leaks into the query.
+ */
+export function buildPaperResearchGoal(
+  manifest: TrainerManifest,
+  opts?: { notes?: string },
+): string {
+  const { identityLever } = resolveModelLevers(manifest)
+  const families = identityLever
+    ? (manifest.levers[identityLever]?.choices ?? []).filter(
+        (c): c is string => typeof c === 'string' && c.trim().length > 0,
+      )
+    : []
+  const parts: string[] = []
+  const desc = typeof manifest.description === 'string' ? manifest.description.trim() : ''
+  parts.push(desc ? `${manifest.name}: ${desc}` : manifest.name)
+  parts.push(
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+  )
+  if (families.length) parts.push(`Candidate model families: ${families.join(', ')}.`)
+  parts.push('Find recent research papers (arXiv, OpenReview, peer-reviewed) proposing methods to improve this.')
+  const notes = opts?.notes?.trim()
+  if (notes) parts.push(notes)
+  return parts.join(' ')
+}
+
+/**
+ * Canonicalize a paper URL for identity comparison: lowercase host, drop the fragment and `utm_*`
+ * tracking params, strip a trailing slash, and collapse arxiv `abs`/`pdf`/`vN`/`.pdf` variants of the
+ * SAME paper to one key (so a paper added as `/abs/ID` and re-discovered as `/pdf/IDv2` dedupes). An
+ * unparseable string degrades to its trimmed, lowercased self rather than throwing.
+ */
+export function normalizeResearchUrl(url: string): string {
+  const raw = (url ?? '').trim()
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return raw.toLowerCase()
+  }
+  const host = parsed.host.toLowerCase()
+  const arxiv = /(?:^|\.)arxiv\.org$/.test(host)
+  if (arxiv) {
+    // Collapse abs/pdf/version/.pdf variants of the SAME paper (e.g. /abs/2401.12345, /pdf/2401.12345v2,
+    // /pdf/2401.12345.pdf) to one id, preserving old-style category ids (hep-th/9901001).
+    const id = parsed.pathname
+      .replace(/^\/+/, '')
+      .replace(/^(?:abs|pdf)\//, '')
+      .replace(/\.pdf$/i, '')
+      .replace(/v\d+$/i, '')
+    if (id) return `arxiv:${id.toLowerCase()}`
+  }
+  let path = parsed.pathname.replace(/\/+$/, '')
+  const search = [...parsed.searchParams.entries()].filter(([k]) => !/^utm_/i.test(k))
+  const query = search.length
+    ? '?' + search.map(([k, v]) => `${k}=${v}`).join('&')
+    : ''
+  return `${parsed.protocol}//${host}${path}${query}`
+}
+
+/**
+ * Coerce the raw discovery seam output ({@link import('thefactory-tools/types').DiscoveredSource}[] or
+ * loose records) into validated {@link PaperCandidate}s. A candidate must have a non-empty title
+ * (`title` or the seam's `name`) AND a well-formed http(s) URL — the identity requirement; anything
+ * else is dropped so nothing untitled/unlinkable enters the pipeline.
+ */
+export function coercePaperCandidates(raw: unknown[]): PaperCandidate[] {
+  if (!Array.isArray(raw)) return []
+  const out: PaperCandidate[] = []
+  for (const r of raw) {
+    if (!r || typeof r !== 'object') continue
+    const o = r as Record<string, unknown>
+    const title =
+      typeof o.title === 'string' && o.title.trim()
+        ? o.title.trim()
+        : typeof o.name === 'string' && o.name.trim()
+          ? o.name.trim()
+          : ''
+    const url = typeof o.url === 'string' ? o.url.trim() : ''
+    if (!title || !/^https?:\/\/\S+/i.test(url)) continue
+    const candidate: PaperCandidate = { title, url }
+    if (Array.isArray(o.hints)) {
+      const hints = o.hints.filter((h): h is string => typeof h === 'string')
+      if (hints.length) candidate.hints = hints
+    }
+    out.push(candidate)
+  }
+  return out
+}
+
+/**
+ * Drop candidates already represented in the papers registry (by normalized URL OR normalized title)
+ * and intra-batch duplicates, preserving the input order of the survivors. A candidate with an empty
+ * title matches on URL only. This is what guarantees a research run never re-drafts a paper already
+ * present — whether added manually, via `analyzePaperFromUrl`, or by an earlier research run.
+ */
+export function dedupePaperCandidates(
+  candidates: PaperCandidate[],
+  existing: { url?: string; title?: string }[],
+): PaperCandidate[] {
+  const titleKey = (t?: string) => (t ?? '').trim().toLowerCase()
+  const urlKeys = new Set<string>()
+  const titleKeys = new Set<string>()
+  for (const e of existing) {
+    if (typeof e.url === 'string' && e.url.trim()) urlKeys.add(normalizeResearchUrl(e.url))
+    const tk = titleKey(e.title)
+    if (tk) titleKeys.add(tk)
+  }
+  const out: PaperCandidate[] = []
+  for (const c of candidates) {
+    const uk = normalizeResearchUrl(c.url)
+    const tk = titleKey(c.title)
+    if (urlKeys.has(uk)) continue
+    if (tk && titleKeys.has(tk)) continue
+    out.push(c)
+    urlKeys.add(uk)
+    if (tk) titleKeys.add(tk)
+  }
+  return out
+}
+
+/**
+ * The natural-language claim the deep-research verify gate judges a discovered candidate against —
+ * grounded in the project DOMAIN (name + description + objective), not merely the metric, so an
+ * off-domain paper that is trivially "relevant to <metric>" is rejected. The verdict on the paper's
+ * real fetched page is what admits or rejects it.
+ */
+export function paperRelevanceClaim(candidate: PaperCandidate, manifest: TrainerManifest): string {
+  const desc = typeof manifest.description === 'string' ? manifest.description.trim() : ''
+  const domain = desc ? `${manifest.name}: ${desc}` : manifest.name
+  return (
+    `"${candidate.title}" (${candidate.url}) is a real research paper whose method is applicable to ` +
+    `${domain} (objective: ${manifest.objective.name}).`
+  )
+}
+
+/**
+ * Admission rule for a candidate: the verify verdict must sit on the supported side of the ladder
+ * (`confirmed` or `implied`) AND meet the confidence floor. `unverifiable`/`refuted` are rejected at
+ * any confidence — so a hallucinated or off-domain paper (no supporting evidence on its own page) is
+ * never drafted.
+ */
+export function isPaperVerdictAdmitted(verdict: ClaimVerdict, minConfidence: number): boolean {
+  if (!verdict) return false
+  const ok = verdict.status === 'confirmed' || verdict.status === 'implied'
+  return ok && typeof verdict.confidence === 'number' && verdict.confidence >= minConfidence
 }
 
 const PROGRESS_MARKER = '@@PROGRESS '
@@ -1865,6 +2028,14 @@ export function diffDecisionTraces(
 // --- Models catalog ----------------------------------------------------------
 
 const MODEL_CATEGORIES: ReadonlySet<string> = new Set(['rl', 'supervised', 'baseline', 'component'])
+const PROPOSED_IMPROVEMENT_KINDS: ReadonlySet<string> = new Set([
+  'model',
+  'data',
+  'metric',
+  'environment',
+  'capability',
+  'other',
+])
 
 /** Tokens rendered verbatim (uppercased acronym or expanded alias) when humanizing a model_name. */
 const MODEL_NAME_ACRONYMS: Record<string, string> = {
@@ -2064,6 +2235,7 @@ export function buildScanModelsUserContent(input: {
 export function coerceAnalyzedPaperModels(raw: unknown): {
   matchModelIds: string[]
   proposedModels: ProposedModel[]
+  proposedImprovements: ProposedImprovement[]
 } {
   const o =
     raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}
@@ -2087,7 +2259,21 @@ export function coerceAnalyzedPaperModels(raw: unknown): {
     const proposal = typeof p.proposal === 'string' ? p.proposal.trim() : ''
     proposedModels.push({ name, slug, description, category, proposal })
   }
-  return { matchModelIds, proposedModels }
+  const proposedImprovements: ProposedImprovement[] = []
+  const rawImprovements = Array.isArray(o.proposedImprovements) ? o.proposedImprovements : []
+  for (const item of rawImprovements) {
+    if (!item || typeof item !== 'object') continue
+    const p = item as Record<string, unknown>
+    const title = typeof p.title === 'string' && p.title.trim() ? p.title.trim() : ''
+    if (!title) continue
+    const detail = typeof p.detail === 'string' ? p.detail.trim() : ''
+    const kind =
+      typeof p.kind === 'string' && PROPOSED_IMPROVEMENT_KINDS.has(p.kind)
+        ? (p.kind as ProposedImprovementKind)
+        : 'capability'
+    proposedImprovements.push({ title, detail, kind })
+  }
+  return { matchModelIds, proposedModels, proposedImprovements }
 }
 
 /** Of `proposed`, the models with NO catalog entry — matched by slug, by a catalog model's name slug, or
@@ -2122,8 +2308,8 @@ export function buildAnalyzePaperModelsSystemPrompt(manifest: TrainerManifest): 
     `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
     `You are given a PAPER (its fields, and its text when available) and the project's EXISTING catalog models.`,
     `Each existing model lists its aliases (other names it is known by) — MATCH a paper to an existing model when it refers to it by any alias (e.g. a paper on "Policy Gradient" matches the model whose aliases include "policy-gradient"), and do NOT propose it as missing.`,
-    `Do TWO things: (1) MATCH — the ids of existing models this paper INTRODUCES or IMPROVES (a genuine "this paper is about that model" link, not a passing mention); (2) PROPOSE — any models the paper introduces or requires that are NOT in the catalog (nor an alias of one), each with what to add.`,
-    `Return ONLY a single JSON object (no prose, no code fence): {"matchModelIds": [string], "proposedModels": [{"name": string, "slug": string, "description": string, "category": "rl|supervised|baseline|component", "proposal": string}]}. Use [] for either when there is nothing to add.`,
+    `Do THREE things: (1) MATCH — the ids of existing models this paper INTRODUCES or IMPROVES (a genuine "this paper is about that model" link, not a passing mention); (2) PROPOSE MODELS — any models the paper introduces or requires that are NOT in the catalog (nor an alias of one), each with what to add; (3) PROPOSE IMPROVEMENTS — the project FUNCTIONALITY that is missing for this paper's claims to be TESTED here. A proposed model is one KIND of improvement (kind:"model"); the others are new input features / data streams (kind:"data"), evaluation metrics (kind:"metric"), environment/market mechanics like fees or funding (kind:"environment"), or general capabilities (kind:"capability"). Only list functionality that genuinely BLOCKS testing a claim — if everything needed already exists, return [].`,
+    `Return ONLY a single JSON object (no prose, no code fence): {"matchModelIds": [string], "proposedModels": [{"name": string, "slug": string, "description": string, "category": "rl|supervised|baseline|component", "proposal": string}], "proposedImprovements": [{"title": string, "detail": string, "kind": "model|data|metric|environment|capability|other"}]}. Use [] for any list when there is nothing to add. Every proposedModel should also appear as a proposedImprovement with kind:"model".`,
   ].join('\n')
 }
 

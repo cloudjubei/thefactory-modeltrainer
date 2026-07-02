@@ -16,6 +16,19 @@ export const MAX_JUDGE_RUNS = 100
 /** Proposals requested from the LLM when the caller names no count. */
 export const DEFAULT_HYPOTHESIS_COUNT = 5
 
+/** Candidate papers `researchTrainingPapers` discovers when the caller names no count. */
+export const DEFAULT_RESEARCH_PAPER_COUNT = 8
+
+/** Hard ceiling on candidate papers per research run (each costs a fetch + verify panel + synthesis). */
+export const MAX_RESEARCH_PAPER_COUNT = 12
+
+/**
+ * Minimum verify confidence for a discovered candidate to be admitted as a draft. The verdict must also
+ * sit on the supported side of the ladder (`confirmed`/`implied`); below this floor it is rejected so a
+ * weakly-supported (possibly hallucinated or off-domain) paper is never drafted.
+ */
+export const PAPER_VERIFY_MIN_CONFIDENCE = 0.5
+
 /**
  * Fewest divergent steps that carry a reward in both runs before a decision-trace diff will assert a
  * `better`/`worse` quality verdict; below it the read is `insufficient`. Guards against reading too much

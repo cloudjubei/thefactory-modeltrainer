@@ -63,6 +63,12 @@ import {
   pickCanonicalHypothesis,
   groupHypothesesForConsolidation,
   planHypothesisConsolidation,
+  buildPaperResearchGoal,
+  normalizeResearchUrl,
+  coercePaperCandidates,
+  dedupePaperCandidates,
+  paperRelevanceClaim,
+  isPaperVerdictAdmitted,
 } from './modelTrainerUtils.js'
 import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
@@ -1003,6 +1009,26 @@ describe('coerceHypothesisItems', () => {
     )
     expect(items[0].spec.fixed).toEqual({ lr: 0.9 })
     expect(items[0].spec.seeds).toEqual([0, 1])
+  })
+
+  it('carries the paper CLAIM label (the specific claim a hypothesis tests)', () => {
+    const items = coerceHypothesisItems(
+      [{ title: 't', rationale: 'r', claim: '  Momentum predicts returns  ', spec: { fixed: { lr: 0.9 } } }],
+      m,
+    )
+    expect(items[0].claim).toBe('Momentum predicts returns')
+  })
+
+  it('omits the claim when blank or absent', () => {
+    const items = coerceHypothesisItems(
+      [
+        { title: 'a', rationale: 'r', claim: '   ', spec: { fixed: { lr: 0.9 } } },
+        { title: 'b', rationale: 'r', spec: { fixed: { lr: 0.9 } } },
+      ],
+      m,
+    )
+    expect(items[0].claim).toBeUndefined()
+    expect(items[1].claim).toBeUndefined()
   })
 
   it('drops items missing a title or rationale', () => {
@@ -2248,8 +2274,34 @@ describe('coerceAnalyzedPaperModels', () => {
       { name: 'NoisyNet', slug: 'noisynet', description: '', category: 'rl', proposal: '' },
     ])
   })
+  it('coerces general proposedImprovements (functionality to build), classifying the kind', () => {
+    const out = coerceAnalyzedPaperModels({
+      proposedImprovements: [
+        { title: 'Order-book feature stream', detail: 'ingest L2 depth', kind: 'data' },
+        { title: '  Sortino metric  ', detail: '', kind: 'metric' },
+        { title: 'Funding-rate env mechanic' }, // no kind → default capability, detail ''
+        { detail: 'no title — dropped' },
+        'not an object',
+      ],
+    })
+    expect(out.proposedImprovements).toEqual([
+      { title: 'Order-book feature stream', detail: 'ingest L2 depth', kind: 'data' },
+      { title: 'Sortino metric', detail: '', kind: 'metric' },
+      { title: 'Funding-rate env mechanic', detail: '', kind: 'capability' },
+    ])
+  })
+  it('falls back to the capability kind for an unknown kind string', () => {
+    const out = coerceAnalyzedPaperModels({
+      proposedImprovements: [{ title: 'X', kind: 'bogus-kind' }],
+    })
+    expect(out.proposedImprovements[0].kind).toBe('capability')
+  })
   it('defaults to empty for a malformed response', () => {
-    expect(coerceAnalyzedPaperModels('nope')).toEqual({ matchModelIds: [], proposedModels: [] })
+    expect(coerceAnalyzedPaperModels('nope')).toEqual({
+      matchModelIds: [],
+      proposedModels: [],
+      proposedImprovements: [],
+    })
   })
 })
 
@@ -2782,5 +2834,197 @@ describe('estimateRemainingCampaignSeconds (remaining wall-clock from real per-r
     expect(
       estimateRemainingCampaignSeconds({ durationsMs: [0, NaN, -5, 10000], remaining: 2, concurrency: 1 }),
     ).toBe(20)
+  })
+})
+
+describe('buildPaperResearchGoal', () => {
+  const withFamilies = (overrides: Partial<TrainerManifest> = {}) =>
+    manifest({
+      name: 'BlackSwan',
+      description: 'Trains an RL agent to trade BTCUSDT crypto and beat buy-and-hold.',
+      objective: { name: 'traded_return', direction: 'max' },
+      levers: {
+        model_name: { type: 'choice', scope: 'model', choices: ['ppo-custom', 'reppo-custom'] },
+        lr: { type: 'number' },
+      },
+      ...overrides,
+    })
+
+  it('composes a discovery goal from name, description, objective, and model families', () => {
+    const goal = buildPaperResearchGoal(withFamilies())
+    expect(goal).toContain('BlackSwan')
+    expect(goal).toContain('beat buy-and-hold')
+    expect(goal).toContain('traded_return')
+    expect(goal).toMatch(/max is better/)
+    expect(goal).toContain('ppo-custom')
+    expect(goal).toContain('reppo-custom')
+    // steers toward scholarly sources, single line
+    expect(goal.toLowerCase()).toContain('research paper')
+    expect(goal).not.toContain('\n')
+  })
+
+  it('omits the description clause when absent, without leaving dangling separators', () => {
+    const goal = buildPaperResearchGoal(withFamilies({ description: undefined }))
+    expect(goal).toContain('BlackSwan')
+    expect(goal).toContain('traded_return')
+    expect(goal).not.toContain('undefined')
+    expect(goal).not.toMatch(/\s{2,}/)
+  })
+
+  it('omits the model-families clause when there is no identity lever / no choices', () => {
+    const goal = buildPaperResearchGoal(
+      manifest({ name: 'Demo', levers: { lr: { type: 'number' }, steps: { type: 'number' } } }),
+    )
+    expect(goal.toLowerCase()).not.toContain('model families')
+    expect(goal).not.toContain('undefined')
+  })
+
+  it('appends notes verbatim when provided, and adds no trailing whitespace when absent', () => {
+    expect(buildPaperResearchGoal(withFamilies(), { notes: 'focus on transformer policies' })).toContain(
+      'focus on transformer policies',
+    )
+    expect(buildPaperResearchGoal(withFamilies())).toBe(buildPaperResearchGoal(withFamilies()).trim())
+  })
+
+  it('renders the objective direction (min is better) rather than hardcoding max', () => {
+    const goal = buildPaperResearchGoal(
+      withFamilies({ objective: { name: 'drawdown', direction: 'min' } }),
+    )
+    expect(goal).toMatch(/min is better/)
+  })
+})
+
+describe('normalizeResearchUrl', () => {
+  it('lowercases host and strips trailing slash, fragment, and utm params', () => {
+    expect(normalizeResearchUrl('https://Example.COM/Path/#section')).toBe('https://example.com/Path')
+    expect(normalizeResearchUrl('https://example.com/p/?utm_source=x&utm_medium=y')).toBe(
+      'https://example.com/p',
+    )
+  })
+
+  it('canonicalizes arxiv abs/pdf/versioned/.pdf variants to one key', () => {
+    const canon = normalizeResearchUrl('https://arxiv.org/abs/2401.12345')
+    expect(normalizeResearchUrl('https://arxiv.org/pdf/2401.12345')).toBe(canon)
+    expect(normalizeResearchUrl('https://arxiv.org/pdf/2401.12345v2')).toBe(canon)
+    expect(normalizeResearchUrl('https://arxiv.org/pdf/2401.12345.pdf')).toBe(canon)
+    expect(normalizeResearchUrl('http://arxiv.org/abs/2401.12345v3')).toBe(canon)
+  })
+
+  it('leaves an unparseable string as a trimmed lowercase fallback', () => {
+    expect(normalizeResearchUrl('  not a url  ')).toBe('not a url')
+  })
+})
+
+describe('coercePaperCandidates', () => {
+  it('maps well-formed records, accepting either name or title', () => {
+    const out = coercePaperCandidates([
+      { name: 'Deep RL Trading', url: 'https://arxiv.org/abs/1', hints: ['pdf'] },
+      { title: 'Momentum Works', url: 'https://arxiv.org/abs/2' },
+    ])
+    expect(out).toEqual([
+      { title: 'Deep RL Trading', url: 'https://arxiv.org/abs/1', hints: ['pdf'] },
+      { title: 'Momentum Works', url: 'https://arxiv.org/abs/2' },
+    ])
+  })
+
+  it('drops records missing a url or with a non-http url', () => {
+    expect(
+      coercePaperCandidates([
+        { title: 'No url' },
+        { title: 'Bad scheme', url: 'ftp://x/y' },
+        { title: 'Ok', url: 'https://ok/1' },
+      ]),
+    ).toEqual([{ title: 'Ok', url: 'https://ok/1' }])
+  })
+
+  it('drops records with an empty/whitespace title', () => {
+    expect(
+      coercePaperCandidates([{ title: '   ', url: 'https://x/1' }, { name: '', url: 'https://x/2' }]),
+    ).toEqual([])
+  })
+
+  it('returns [] for a non-array or empty input', () => {
+    expect(coercePaperCandidates([])).toEqual([])
+    expect(coercePaperCandidates(undefined as unknown as unknown[])).toEqual([])
+  })
+})
+
+describe('dedupePaperCandidates', () => {
+  const c = (title: string, url: string) => ({ title, url })
+
+  it('drops a candidate whose url matches an existing paper', () => {
+    expect(
+      dedupePaperCandidates(
+        [c('A', 'https://arxiv.org/abs/1'), c('B', 'https://arxiv.org/abs/2')],
+        [{ url: 'https://arxiv.org/pdf/1v2', title: 'Whatever' }],
+      ),
+    ).toEqual([c('B', 'https://arxiv.org/abs/2')])
+  })
+
+  it('drops a candidate whose title matches an existing one (case/space-insensitive)', () => {
+    expect(
+      dedupePaperCandidates(
+        [c('Attention Is All You Need', 'https://x/new')],
+        [{ url: 'https://other', title: '  attention is all you need ' }],
+      ),
+    ).toEqual([])
+  })
+
+  it('drops an intra-batch duplicate by normalized url', () => {
+    expect(
+      dedupePaperCandidates(
+        [c('A', 'https://arxiv.org/abs/1'), c('A2', 'https://arxiv.org/pdf/1')],
+        [],
+      ),
+    ).toEqual([c('A', 'https://arxiv.org/abs/1')])
+  })
+
+  it('returns all candidates unchanged (order preserved) when nothing matches', () => {
+    const list = [c('A', 'https://x/1'), c('B', 'https://x/2')]
+    expect(dedupePaperCandidates(list, [])).toEqual(list)
+  })
+
+  it('falls back to url-only matching when a candidate title is empty', () => {
+    expect(
+      dedupePaperCandidates([{ title: '', url: 'https://x/1' }, { title: '', url: 'https://x/2' }], []),
+    ).toEqual([{ title: '', url: 'https://x/1' }, { title: '', url: 'https://x/2' }])
+  })
+})
+
+describe('paperRelevanceClaim', () => {
+  it('grounds the claim in the project DOMAIN (name + description), not just the metric', () => {
+    const claim = paperRelevanceClaim(
+      { title: 'Deep RL for Trading', url: 'https://arxiv.org/abs/1' },
+      manifest({
+        name: 'BlackSwan',
+        description: 'RL agent that trades BTCUSDT crypto.',
+        objective: { name: 'traded_return', direction: 'max' },
+      }),
+    )
+    expect(claim).toContain('Deep RL for Trading')
+    expect(claim).toContain('BlackSwan')
+    expect(claim).toContain('trades BTCUSDT crypto')
+    expect(claim.toLowerCase()).toContain('research paper')
+  })
+})
+
+describe('isPaperVerdictAdmitted', () => {
+  const v = (status: string, confidence: number) =>
+    ({ status, confidence, evidence: [], methodology: '', sourcesAttempted: [] }) as Parameters<
+      typeof isPaperVerdictAdmitted
+    >[0]
+
+  it('admits confirmed/implied at or above the confidence floor', () => {
+    expect(isPaperVerdictAdmitted(v('confirmed', 0.9), 0.5)).toBe(true)
+    expect(isPaperVerdictAdmitted(v('implied', 0.5), 0.5)).toBe(true)
+  })
+
+  it('rejects unverifiable/refuted regardless of confidence', () => {
+    expect(isPaperVerdictAdmitted(v('unverifiable', 0.99), 0.5)).toBe(false)
+    expect(isPaperVerdictAdmitted(v('refuted', 0.99), 0.5)).toBe(false)
+  })
+
+  it('rejects a confirmed verdict below the confidence floor', () => {
+    expect(isPaperVerdictAdmitted(v('confirmed', 0.49), 0.5)).toBe(false)
   })
 })

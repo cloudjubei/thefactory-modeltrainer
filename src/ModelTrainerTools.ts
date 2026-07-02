@@ -1,5 +1,14 @@
 import * as os from 'node:os'
-import type { ComputeRepoRef, ComputeRunner, InferenceExecutor } from 'thefactory-tools/types'
+import type {
+  ClaimVerdict,
+  ComputeRepoRef,
+  ComputeRunner,
+  DeepResearchTools,
+  EvidencePassage,
+  InferenceExecutor,
+  LLMConfig,
+  ResearchBudget,
+} from 'thefactory-tools/types'
 import {
   deriveModelRef,
   estimateCampaignEtaSeconds,
@@ -15,6 +24,9 @@ import type {
   AnalyzeConfigSpaceResult,
   AnalyzePaperFromUrlParams,
   AnalyzePaperFromUrlResult,
+  ResearchTrainingPapersParams,
+  ResearchTrainingPapersResult,
+  ResearchPapersProgressEvent,
   AnalyzePaperModelsParams,
   ConsolidateModelsParams,
   ConsolidateModelsResult,
@@ -73,6 +85,9 @@ import type {
 import {
   DEFAULT_HYPOTHESIS_COUNT,
   DEFAULT_RAN_BY,
+  DEFAULT_RESEARCH_PAPER_COUNT,
+  MAX_RESEARCH_PAPER_COUNT,
+  PAPER_VERIFY_MIN_CONFIDENCE,
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
 } from './modelTrainerConstants.js'
@@ -119,6 +134,11 @@ import {
   planHypothesisConsolidation,
   coerceHypothesisItems,
   coercePaperDraft,
+  buildPaperResearchGoal,
+  coercePaperCandidates,
+  dedupePaperCandidates,
+  paperRelevanceClaim,
+  isPaperVerdictAdmitted,
   coerceScannedModels,
   coerceSuggestedHypotheses,
   coerceVerdictRows,
@@ -665,6 +685,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return deps.inferenceExecutor
   }
 
+  function requireDeepResearch(): DeepResearchTools {
+    if (!deps.deepResearch) {
+      throw new Error('researchTrainingPapers requires a deepResearch seam')
+    }
+    return deps.deepResearch
+  }
+
   async function listCompletedRuns(scope: string, recordType: string) {
     const records = await deps.storage.listRecords({ scope, type: recordType })
     return records
@@ -946,10 +973,141 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Shared paper-synthesis core, used by BOTH analyzePaperFromUrl (single pasted link) and
+  // researchTrainingPapers (open-ended discovery): given the paper's fetched page TEXT, summarise it
+  // into a draft record + its testable hypotheses. Returns undefined when the model produced no usable
+  // draft (title+claim) — the caller decides whether that is fatal (analyze) or a skip (research).
+  async function synthesizePaperFromText(input: {
+    manifest: TrainerManifest
+    url: string
+    text: string
+    notes?: string
+    llmConfig: LLMConfig
+    abortSignal?: AbortSignal
+  }): Promise<
+    | {
+        paperDraft: Partial<TrainingPaperRecord>
+        hypothesisItems: ReturnType<typeof coerceHypothesisItems>
+      }
+    | undefined
+  > {
+    const executor = requireInferenceExecutor()
+    const res = await executor.runInference({
+      systemPrompt: buildAnalyzePaperSystemPrompt(input.manifest, input.notes),
+      userContent: buildAnalyzePaperUserContent({
+        url: input.url,
+        text: input.text,
+        notes: input.notes,
+      }),
+      model: { kind: 'api', llmConfig: input.llmConfig },
+      abortSignal: input.abortSignal,
+    })
+    const parsed = parseFirstValidJson(res.text)
+    const paperDraft = coercePaperDraft(parsed)
+    if (!paperDraft) return undefined
+    const rawHyps =
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray((parsed as Record<string, unknown>).hypotheses)
+        ? ((parsed as Record<string, unknown>).hypotheses as unknown[])
+        : []
+    return { paperDraft, hypothesisItems: coerceHypothesisItems(rawHyps, input.manifest) }
+  }
+
+  // Persist a synthesised paper draft + its hypotheses. Hypotheses dedup by spec hash so identical specs
+  // from any source (propose / manual / another paper) link to the ONE existing record rather than
+  // duplicate; the paper is written as a DRAFT (status 'untested', source 'research') for the user to
+  // verify. Shared by analyzePaperFromUrl + researchTrainingPapers.
+  async function persistPaperWithHypotheses(input: {
+    scope: string
+    recordType: string
+    paperDraft: Partial<TrainingPaperRecord>
+    hypothesisItems: ReturnType<typeof coerceHypothesisItems>
+    url: string
+    proposedBy: string
+    at: string
+    onRecordWritten?: (type: string, key: string) => void
+  }): Promise<{
+    paper: TrainingPaperRecord
+    hypotheses: TrainingHypothesis[]
+    linkedHypothesisIds: string[]
+  }> {
+    const paperId = uuidv4()
+    const paperType = `${input.recordType}-paper`
+    const hypothesisType = `${input.recordType}-hypothesis`
+    const existing = await deps.storage.listRecords({ scope: input.scope, type: hypothesisType })
+    const byId = new Map<string, TrainingHypothesis>()
+    for (const r of existing) {
+      const content = r.content as unknown as TrainingHypothesis
+      if (content && typeof content.id === 'string') byId.set(content.id, content)
+    }
+    const hypotheses: TrainingHypothesis[] = []
+    const linkedHypothesisIds: string[] = []
+    const seen = new Set<string>()
+    for (const item of input.hypothesisItems) {
+      const hid = hashTrainingConfig(item.spec as Record<string, unknown>)
+      if (seen.has(hid)) continue
+      seen.add(hid)
+      const prior = byId.get(hid)
+      const hypothesis: TrainingHypothesis = prior
+        ? {
+            ...prior,
+            paperIds: Array.from(new Set([...(prior.paperIds ?? []), paperId])),
+            updatedAt: input.at,
+          }
+        : {
+            id: hid,
+            title: item.title,
+            rationale: item.rationale,
+            spec: item.spec,
+            // Carry the criterion + claim the coercer extracted so a comparison/context hypothesis
+            // keeps its success/failure definition (else it silently defaults to a pooled test).
+            ...(item.comparison ? { comparison: item.comparison } : {}),
+            ...(item.claim ? { claim: item.claim } : {}),
+            status: 'untested',
+            verdictSource: 'auto',
+            source: 'paper',
+            proposedBy: input.proposedBy,
+            paperIds: [paperId],
+            createdAt: input.at,
+            updatedAt: input.at,
+          }
+      await deps.storage.upsertRecord({
+        scope: input.scope,
+        type: hypothesisType,
+        key: hid,
+        content: hypothesis as unknown as Record<string, unknown>,
+      })
+      input.onRecordWritten?.(hypothesisType, hid)
+      hypotheses.push(hypothesis)
+      linkedHypothesisIds.push(hid)
+    }
+    const paper: TrainingPaperRecord = {
+      ...input.paperDraft,
+      id: paperId,
+      title: input.paperDraft.title as string,
+      claim: input.paperDraft.claim as string,
+      url: input.url,
+      hypothesisIds: linkedHypothesisIds,
+      status: 'untested',
+      source: 'research',
+      createdAt: input.at,
+      updatedAt: input.at,
+    }
+    await deps.storage.upsertRecord({
+      scope: input.scope,
+      type: paperType,
+      key: paperId,
+      content: paper as unknown as Record<string, unknown>,
+    })
+    input.onRecordWritten?.(paperType, paperId)
+    return { paper, hypotheses, linkedHypothesisIds }
+  }
+
   async function analyzePaperFromUrl(
     params: AnalyzePaperFromUrlParams,
   ): Promise<AnalyzePaperFromUrlResult> {
-    const executor = requireInferenceExecutor()
+    requireInferenceExecutor()
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
@@ -960,100 +1118,198 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const fetchText = params.fetchPaperText ?? fetchPaperText
     const text = await fetchText(params.url, params.abortSignal)
 
-    const res = await executor.runInference({
-      systemPrompt: buildAnalyzePaperSystemPrompt(manifest, params.notes),
-      userContent: buildAnalyzePaperUserContent({ url: params.url, text, notes: params.notes }),
-      model: { kind: 'api', llmConfig: params.llmConfig },
+    const synth = await synthesizePaperFromText({
+      manifest,
+      url: params.url,
+      text,
+      notes: params.notes,
+      llmConfig: params.llmConfig,
       abortSignal: params.abortSignal,
     })
+    if (!synth) throw new Error('the model did not return a usable paper summary for this link')
 
-    const parsed = parseFirstValidJson(res.text)
-    const draft = coercePaperDraft(parsed)
-    if (!draft) throw new Error('the model did not return a usable paper summary for this link')
-
-    const paperId = uuidv4()
-    const paperType = `${recordType}-paper`
-    const hypothesisType = `${recordType}-hypothesis`
-
-    // Extract the paper's testable hypotheses; dedup by spec hash so identical specs from any source
-    // (propose / manual / another paper) link to the ONE existing record rather than duplicate.
-    const rawHyps =
-      parsed &&
-      typeof parsed === 'object' &&
-      Array.isArray((parsed as Record<string, unknown>).hypotheses)
-        ? ((parsed as Record<string, unknown>).hypotheses as unknown[])
-        : []
-    const items = coerceHypothesisItems(rawHyps, manifest)
-    const existing = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
-    const byId = new Map<string, TrainingHypothesis>()
-    for (const r of existing) {
-      const content = r.content as unknown as TrainingHypothesis
-      if (content && typeof content.id === 'string') byId.set(content.id, content)
-    }
-    const hypotheses: TrainingHypothesis[] = []
-    const linkedHypothesisIds: string[] = []
-    const seen = new Set<string>()
-    for (const item of items) {
-      const hid = hashTrainingConfig(item.spec as Record<string, unknown>)
-      if (seen.has(hid)) continue
-      seen.add(hid)
-      const prior = byId.get(hid)
-      const hypothesis: TrainingHypothesis = prior
-        ? {
-            ...prior,
-            paperIds: Array.from(new Set([...(prior.paperIds ?? []), paperId])),
-            updatedAt: analyzedAt,
-          }
-        : {
-            id: hid,
-            title: item.title,
-            rationale: item.rationale,
-            spec: item.spec,
-            status: 'untested',
-            verdictSource: 'auto',
-            source: 'paper',
-            proposedBy: analyzedBy,
-            paperIds: [paperId],
-            createdAt: analyzedAt,
-            updatedAt: analyzedAt,
-          }
-      await deps.storage.upsertRecord({
-        scope: params.scope,
-        type: hypothesisType,
-        key: hid,
-        content: hypothesis as unknown as Record<string, unknown>,
-      })
-      params.onRecordWritten?.(hypothesisType, hid)
-      hypotheses.push(hypothesis)
-      linkedHypothesisIds.push(hid)
-    }
-
-    const paper: TrainingPaperRecord = {
-      ...draft,
-      id: paperId,
-      title: draft.title as string,
-      claim: draft.claim as string,
-      url: params.url,
-      hypothesisIds: linkedHypothesisIds,
-      status: 'untested',
-      source: 'research',
-      createdAt: analyzedAt,
-      updatedAt: analyzedAt,
-    }
-    await deps.storage.upsertRecord({
+    const persisted = await persistPaperWithHypotheses({
       scope: params.scope,
-      type: paperType,
-      key: paperId,
-      content: paper as unknown as Record<string, unknown>,
+      recordType,
+      paperDraft: synth.paperDraft,
+      hypothesisItems: synth.hypothesisItems,
+      url: params.url,
+      proposedBy: analyzedBy,
+      at: analyzedAt,
+      onRecordWritten: params.onRecordWritten,
     })
-    params.onRecordWritten?.(paperType, paperId)
     logger?.info('analyzed paper from url', {
       recordType,
       url: params.url,
-      id: paperId,
-      hypotheses: hypotheses.length,
+      id: persisted.paper.id,
+      hypotheses: persisted.hypotheses.length,
     })
-    return { recordType, paper, hypotheses, linkedHypothesisIds, analyzedBy, analyzedAt }
+    return {
+      recordType,
+      paper: persisted.paper,
+      hypotheses: persisted.hypotheses,
+      linkedHypothesisIds: persisted.linkedHypothesisIds,
+      analyzedBy,
+      analyzedAt,
+    }
+  }
+
+  // Open-ended paper discovery: derive a domain research goal, discover N candidates via the deep-research
+  // seam, then per candidate — fetch its REAL page, verify (against that page) it is a real paper relevant
+  // to this project, and synthesise the survivor into a DRAFT record + hypotheses. Reality/relevance is
+  // grounded in the paper's own fetched text (like analyzePaperFromUrl), so nothing is fabricated; a
+  // candidate that fails discovery/verify/fetch/synthesis is SKIPPED (counted), never invented.
+  async function researchTrainingPapers(
+    params: ResearchTrainingPapersParams,
+  ): Promise<ResearchTrainingPapersResult> {
+    const dr = requireDeepResearch()
+    requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const researchedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const researchedAt = now()
+    const model = { kind: 'api' as const, llmConfig: params.llmConfig }
+    const budgetOpt = params.researchBudget ? { budget: params.researchBudget } : {}
+    const emit = (event: ResearchPapersProgressEvent) => {
+      try {
+        params.onProgress?.(event)
+      } catch {
+        // progress is best-effort — a bad sink must never fail the run.
+      }
+    }
+    const throwIfAborted = () => {
+      if (params.abortSignal?.aborted) throw new Error('research aborted')
+    }
+
+    const goal = buildPaperResearchGoal(manifest, { notes: params.notes })
+    const limit = Math.max(
+      1,
+      Math.min(params.count ?? DEFAULT_RESEARCH_PAPER_COUNT, MAX_RESEARCH_PAPER_COUNT),
+    )
+    emit({ phase: 'discover', message: `Searching for up to ${limit} papers…` })
+    const discoveredRaw = await dr.discoverSources({
+      query: goal,
+      limit,
+      model,
+      abortSignal: params.abortSignal,
+      ...budgetOpt,
+    })
+    const candidates0 = coercePaperCandidates(discoveredRaw as unknown[])
+
+    // Dedup against the registry so a research run never re-drafts a paper already present (manual,
+    // analyzePaperFromUrl, or an earlier research run).
+    const existingPapers = await deps.storage.listRecords({
+      scope: params.scope,
+      type: `${recordType}-paper`,
+    })
+    const existing = existingPapers.map((r) => {
+      const c = r.content as unknown as TrainingPaperRecord
+      return { url: c?.url, title: c?.title }
+    })
+    const candidates = dedupePaperCandidates(candidates0, existing)
+    const skippedDuplicate = candidates0.length - candidates.length
+
+    const papers: TrainingPaperRecord[] = []
+    const hypotheses: TrainingHypothesis[] = []
+    let rejected = 0
+    let failed = 0
+    const fetchText = params.fetchPaperText ?? fetchPaperText
+
+    emit({
+      phase: 'verify',
+      message: `${candidates.length} candidate paper(s) to verify.`,
+      total: candidates.length,
+    })
+    for (let i = 0; i < candidates.length; i++) {
+      throwIfAborted()
+      const candidate = candidates[i]
+      try {
+        // Fetch the candidate's real page — it grounds BOTH the verify gate and the synthesis. A page
+        // that won't fetch (404 / PDF) or reads empty is a failed candidate, not a fabricated one.
+        const text = await fetchText(candidate.url, params.abortSignal)
+        if (!text || !text.trim()) {
+          failed++
+          continue
+        }
+        throwIfAborted()
+        emit({
+          phase: 'verify',
+          message: `Verifying "${candidate.title}"…`,
+          index: i + 1,
+          total: candidates.length,
+        })
+        const evidence: EvidencePassage[] = [
+          { source: { title: candidate.title, url: candidate.url }, text },
+        ]
+        const verdict = await dr.verifyClaim({
+          claim: paperRelevanceClaim(candidate, manifest),
+          evidence,
+          model,
+          abortSignal: params.abortSignal,
+          ...budgetOpt,
+        })
+        if (!isPaperVerdictAdmitted(verdict, PAPER_VERIFY_MIN_CONFIDENCE)) {
+          rejected++
+          continue
+        }
+        throwIfAborted()
+        emit({
+          phase: 'synthesize',
+          message: `Summarising "${candidate.title}"…`,
+          index: i + 1,
+          total: candidates.length,
+        })
+        const synth = await synthesizePaperFromText({
+          manifest,
+          url: candidate.url,
+          text,
+          notes: params.notes,
+          llmConfig: params.llmConfig,
+          abortSignal: params.abortSignal,
+        })
+        if (!synth) {
+          failed++
+          continue
+        }
+        const persisted = await persistPaperWithHypotheses({
+          scope: params.scope,
+          recordType,
+          paperDraft: synth.paperDraft,
+          hypothesisItems: synth.hypothesisItems,
+          url: candidate.url,
+          proposedBy: researchedBy,
+          at: researchedAt,
+          onRecordWritten: params.onRecordWritten,
+        })
+        papers.push(persisted.paper)
+        hypotheses.push(...persisted.hypotheses)
+      } catch (err) {
+        if (params.abortSignal?.aborted) throw err
+        failed++
+        logger?.warn('research candidate failed', { url: candidate.url, error: String(err) })
+      }
+    }
+
+    logger?.info('researched training papers', {
+      recordType,
+      discovered: candidates0.length,
+      drafted: papers.length,
+      skippedDuplicate,
+      rejected,
+      failed,
+    })
+    return {
+      recordType,
+      papers,
+      hypotheses,
+      discovered: candidates0.length,
+      skippedDuplicate,
+      rejected,
+      failed,
+      researchedBy,
+      researchedAt,
+    }
   }
 
   async function suggestPaperHypotheses(
@@ -1146,9 +1402,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         rationale: item.rationale,
         spec: item.spec,
         // Carry the LLM's comparison criterion (else a context-spanning compare hypothesis silently defaults
-        // to beats-baseline) and its thesis label (which paper claim this tests, for multi-thesis scoring).
+        // to beats-baseline) and its claim label (which paper claim this tests, for multi-claim scoring).
         ...(item.comparison ? { comparison: item.comparison } : {}),
-        ...(item.thesis ? { thesis: item.thesis } : {}),
+        ...(item.claim ? { claim: item.claim } : {}),
         status: 'untested',
         verdictSource: 'auto',
         source: 'paper',
@@ -1760,7 +2016,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
     })
 
-    const { matchModelIds, proposedModels } = coerceAnalyzedPaperModels(
+    const { matchModelIds, proposedModels, proposedImprovements } = coerceAnalyzedPaperModels(
       parseFirstValidJson(res.text),
     )
     const linkedModelIds = matchModelIds.filter((id) => existing.has(id))
@@ -1783,7 +2039,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const missingModels = detectMissingPaperModels(proposedModels, [...existing.values()])
 
     const modelIds = Array.from(new Set([...(paper.modelIds ?? []), ...linkedModelIds]))
-    const updatedPaper: TrainingPaperRecord = { ...paper, modelIds, updatedAt: analyzedAt }
+    const updatedPaper: TrainingPaperRecord = {
+      ...paper,
+      modelIds,
+      ...(proposedImprovements.length ? { proposedImprovements } : { proposedImprovements: [] }),
+      updatedAt: analyzedAt,
+    }
     await deps.storage.upsertRecord({
       scope: params.scope,
       type: paperType,
@@ -1802,6 +2063,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       paper: updatedPaper,
       linkedModelIds,
       missingModels,
+      proposedImprovements,
       analyzedBy,
       analyzedAt,
     }
@@ -2300,6 +2562,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
     analyzePaperFromUrl,
+    researchTrainingPapers,
     suggestPaperHypotheses,
     weighPaperHypotheses,
     scanProjectModels,

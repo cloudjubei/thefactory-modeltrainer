@@ -1,8 +1,10 @@
 import type {
   ComputeRunner,
   DataStorage,
+  DeepResearchTools,
   InferenceExecutor,
   LLMConfig,
+  ResearchBudget,
 } from 'thefactory-tools/types'
 
 /** Throughput measured by a calibrate run, plus the campaign ETA derived from it. */
@@ -1048,6 +1050,12 @@ export interface ModelTrainerToolsDeps {
   storage: DataStorage
   /** Required for judging/proposing; the train/calibrate surface works without it. */
   inferenceExecutor?: InferenceExecutor
+  /**
+   * The generic deep-research seam (discover → gather → verify) — required only by
+   * {@link ModelTrainerTools.researchTrainingPapers}; every other surface works without it. The backend
+   * injects the SAME `DeepResearchEngine` instance it builds for the recommend engine.
+   */
+  deepResearch?: DeepResearchTools
   logger?: TrainerLogger
   /** Injectable clock for deterministic tests; defaults to ISO now. */
   now?: () => string
@@ -1188,12 +1196,13 @@ export interface TrainingHypothesis {
   title: string
   rationale: string
   /**
-   * Optional short label of the PAPER claim/thesis this hypothesis tests (assigned by the suggest LLM). A
-   * paper's theses = the distinct labels among its linked hypotheses (derived, never stored on the paper);
-   * >1 distinct label makes the paper multi-thesis. Intrinsic metadata — NEVER part of the spec hash, so
-   * identical specs still dedupe. (Distinct from the campaign-level `thesis` concept.)
+   * Optional short label of the PAPER claim this hypothesis tests (assigned by the suggest LLM). A paper's
+   * claims = the distinct labels among its linked hypotheses (derived, never stored on the paper); >1
+   * distinct label makes the paper multi-claim. Intrinsic metadata — NEVER part of the spec hash, so
+   * identical specs still dedupe. (Distinct from the campaign-level experiment `thesis` tag.) Older records
+   * persisted this as `thesis`; the viewer migrates them on read.
    */
-  thesis?: string
+  claim?: string
   spec: ExperimentSpec
   /** The verdict: auto-derived from matching runs, or pinned when `verdictSource` is `manual`. */
   status: HypothesisStatus
@@ -1290,6 +1299,12 @@ export interface TrainingPaperRecord {
    * verdict or auto-creates hypotheses.
    */
   coverageGaps?: string[]
+  /**
+   * Project FUNCTIONALITY the paper implies is missing (models, data streams, metrics, environment mechanics,
+   * capabilities) — building it would make currently-untestable claims testable. Set by `analyzePaperModels`;
+   * shown under Coverage gaps as "Proposed improvements".
+   */
+  proposedImprovements?: ProposedImprovement[]
   /** Slug ids of the catalog Models this paper introduces or improves (set by `analyzePaperModels`). */
   modelIds?: string[]
   /**
@@ -1315,6 +1330,19 @@ export interface TrainingPaperRecord {
  */
 export type TrainingPaperSeed = Omit<TrainingPaperRecord, 'createdAt' | 'updatedAt' | 'status'> & {
   status?: TrainingPaperRecord['status']
+}
+
+/**
+ * A discovered-but-not-yet-verified paper the open-ended {@link ModelTrainerTools.researchTrainingPapers}
+ * pipeline yields from the deep-research `discoverSources` seam — a candidate to fetch, verify, and (if
+ * it survives the reality/relevance gate) synthesize into a DRAFT {@link TrainingPaperRecord}. It is an
+ * internal shuttle between discovery and synthesis, never persisted as-is.
+ */
+export interface PaperCandidate {
+  title: string
+  url: string
+  /** Free-form hints the discovery seam attached (e.g. `pdf`, `official`) — carried through, not required. */
+  hints?: string[]
 }
 
 /** What KIND of model a catalog entry is — drives grouping + the heuristic category guess in a scan. */
@@ -1477,6 +1505,30 @@ export interface ProposedModel {
   proposal: string
 }
 
+/** The kind of capability a {@link ProposedImprovement} would add. `model` overlaps the catalog (the
+ *  proposal is also surfaced as a ProposedModel/missing model); the rest are project functionality. */
+export type ProposedImprovementKind =
+  | 'model'
+  | 'data'
+  | 'metric'
+  | 'environment'
+  | 'capability'
+  | 'other'
+
+/**
+ * A piece of project FUNCTIONALITY a paper implies is missing — build it and the paper's currently-untestable
+ * claims become testable. A superset of {@link ProposedModel} (a new model is one KIND of improvement); the
+ * others are data streams, metrics, environment mechanics, or general capabilities. Found by
+ * {@link ModelTrainerTools.analyzePaperModels} and persisted on the paper for the Coverage-gaps panel.
+ */
+export interface ProposedImprovement {
+  /** Short imperative name of the capability to add (e.g. "Order-book depth feature stream"). */
+  title: string
+  /** How it unlocks the untested claims — one or two sentences. */
+  detail: string
+  kind: ProposedImprovementKind
+}
+
 export interface ProposeTrainingHypothesesParams {
   scope: string
   projectRoot: string
@@ -1574,6 +1626,62 @@ export interface AnalyzePaperFromUrlResult {
   /** Provenance label of the summarising model. */
   analyzedBy: string
   analyzedAt: string
+}
+
+export interface ResearchTrainingPapersParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** How many candidate papers to discover (the `discoverSources` limit). Clamped; default 8. */
+  count?: number
+  /** Extra steering folded into the discovery goal AND each synthesis (e.g. "focus on execution costs"). */
+  notes?: string
+  llmConfig: LLMConfig
+  /** Per-call deep-research budget override, spread over the engine's construction-time budget. */
+  researchBudget?: Partial<ResearchBudget>
+  abortSignal?: AbortSignal
+  /** Fired after each paper/hypothesis record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Coarse progress sink for the discover/verify/synthesize phases (never throws). */
+  onProgress?: (event: ResearchPapersProgressEvent) => void
+  /**
+   * Injectable URL→text fetcher (for tests); defaults to the real HTTP fetch + abstract extraction used
+   * by `analyzePaperFromUrl`. Each surviving candidate's page is fetched and synthesised from — so a
+   * research draft is grounded in the paper's real text exactly like the single-link path.
+   */
+  fetchPaperText?: (url: string, abortSignal?: AbortSignal) => Promise<string>
+}
+
+/** One coarse phase marker the research pipeline emits so the host can show live progress. */
+export interface ResearchPapersProgressEvent {
+  phase: 'discover' | 'verify' | 'synthesize'
+  /** Human-readable one-liner. */
+  message: string
+  /** 1-based index of the candidate being processed (for verify/synthesize). */
+  index?: number
+  /** Total candidates under consideration (after dedup). */
+  total?: number
+}
+
+export interface ResearchTrainingPapersResult {
+  recordType: string
+  /** Papers drafted this run (each `source:'research'`, `status:'untested'`) for the user to review. */
+  papers: TrainingPaperRecord[]
+  /** New/linked hypotheses created across all drafted papers. */
+  hypotheses: TrainingHypothesis[]
+  /** How many distinct candidates discovery surfaced (before dedup). */
+  discovered: number
+  /** Candidates skipped because they were already in the registry (dedup). */
+  skippedDuplicate: number
+  /** Candidates rejected by the reality/relevance verify gate. */
+  rejected: number
+  /** Candidates that failed to fetch/synthesize (non-abort) and were skipped. */
+  failed: number
+  /** Provenance label of the researching model. */
+  researchedBy: string
+  researchedAt: string
 }
 
 export interface SuggestPaperHypothesesParams {
@@ -1725,6 +1833,9 @@ export interface AnalyzePaperModelsResult {
   linkedModelIds: string[]
   /** Models the paper proposes that have NO catalog entry yet — the "Add to catalog" candidates. */
   missingModels: ProposedModel[]
+  /** General project functionality the paper implies is missing (models included) — build it and the
+   *  paper's untested claims become testable. Persisted on the paper for the Coverage-gaps panel. */
+  proposedImprovements: ProposedImprovement[]
   /** Provenance label of the analysing model. */
   analyzedBy: string
   analyzedAt: string
@@ -2020,6 +2131,16 @@ export interface ModelTrainerTools {
    * to verify. Powers the Papers tab's "Automatic Fill".
    */
   analyzePaperFromUrl(params: AnalyzePaperFromUrlParams): Promise<AnalyzePaperFromUrlResult>
+  /**
+   * OPEN-ENDED paper discovery: derive a research goal from the manifest domain, DISCOVER N candidate
+   * papers via the deep-research seam, VERIFY each is a real paper relevant to this project (against its
+   * own fetched page), then SYNTHESIZE the survivors into DRAFT `{recordType}-paper` records + their
+   * hypotheses — deduped against the existing registry. Candidates that fail discovery/verify/fetch are
+   * SKIPPED, never fabricated. Requires the `deepResearch` dep. Powers the Papers tab's "Research papers".
+   */
+  researchTrainingPapers(
+    params: ResearchTrainingPapersParams,
+  ): Promise<ResearchTrainingPapersResult>
   /**
    * Enrich an EXISTING paper with hypotheses: an LLM matches the paper against the project's existing
    * hypotheses (linking the ones that test its claims) AND proposes any NEW testable hypotheses not yet

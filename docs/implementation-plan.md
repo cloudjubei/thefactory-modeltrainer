@@ -45,18 +45,29 @@ buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentra
 
 The **Hypotheses registry**, **Papers library**, and **Models catalog** are built — how they fit lives in
 `docs/architecture.md` (Hypotheses = falsifiable claims runs prove/disprove; Papers = containers of
-hypotheses; Models = the catalog of implemented/proposed models). Pending:
+hypotheses; Models = the catalog of implemented/proposed models).
 
-- Open-ended `researchTrainingPapers` (discover N papers) + the heavy auto-seed/verify pipeline
-  (find → web-verify → synthesize). Deferred.
+Open-ended `researchTrainingPapers` is now shipped: it derives a domain research goal from the manifest,
+discovers N candidate papers via the shared `DeepResearchTools` seam, verifies each is a real, relevant
+paper **against its own fetched page** (the same grounded `fetchPaperText` → synthesize path as
+`analyzePaperFromUrl`, reused via the extracted `synthesizePaperFromText`/`persistPaperWithHypotheses`
+core), and drafts the survivors (`source:'research'`, `status:'untested'`) + their hypotheses, deduped
+against the registry (arxiv abs/pdf/version-collapsing url key). Candidates that fail discovery/verify/
+fetch/synthesis are SKIPPED and counted, never fabricated. Backend `research-training-papers` activity +
+the Papers-tab "Research papers" button (count 1–12) drive it. Follow-ons (optional): persist the
+verify verdict/provenance onto the draft for reviewer trust; a paper-biased discovery query.
 
 ### 2b. Models — remaining backlog
 
 Still PENDING (the rest of the code/paper model catalog is already exposed):
 
-- **Non-RL `model_type` paths still unexposed:** `technical` (`TechnicalStrategyModel`) and regression `mlp`
-  (`regression` is missing from the documented `model_type` choices despite `create_regression_model`
-  existing). A `model_type`-lever change (the `time`/`momentum`/`hodl`/`supervised` non-RL paths are wired).
+- **Regression MLP = the PREDICTION line, not a trading lever (deferred with that line).** `create_regression_model`
+  (`mlp`) drives `RegressionModel`, which requires `regression_predict_env` (its `get_dataloader`) + an f1-style
+  objective — it does NOT run on the trading `trade_all` env (crashes at `model.train`). Exposing it means a
+  dedicated prediction `TrainerManifest` (own env + objective + verdict rule), the same split the dip/trend line
+  already takes (model-training-standard §3) — NOT a `model_name` choice on the trading manifest. (The `technical`
+  baseline IS now exposed — it emits BUY/SELL/HOLD on the trading env like `momentum`/`time`/`weekday`; its stale
+  obs-slicing was rewritten to read indicators via the providers' look-ahead-safe `get_feature`.)
 - **Reusable components — surfaced + composed.** BlackSwan's manifest seeds the building blocks (feature
   extractors, custom policies/Q-nets, replay buffers, attention + NN blocks, the `DGWO` optimizer) as 12
   `component` catalog entries; each model flavor declares its `components`, rendered in the Models tab as
