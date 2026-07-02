@@ -69,6 +69,8 @@ import {
   dedupePaperCandidates,
   paperRelevanceClaim,
   isPaperVerdictAdmitted,
+  paperHostAffinity,
+  rankPaperCandidates,
 } from './modelTrainerUtils.js'
 import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
@@ -3231,5 +3233,57 @@ describe('isPaperVerdictAdmitted', () => {
 
   it('rejects a confirmed verdict below the confidence floor', () => {
     expect(isPaperVerdictAdmitted(v('confirmed', 0.49), 0.5)).toBe(false)
+  })
+})
+
+describe('paperHostAffinity', () => {
+  it('scores known paper venues highest', () => {
+    expect(paperHostAffinity('https://arxiv.org/abs/2401.1')).toBeGreaterThan(
+      paperHostAffinity('https://medium.com/some-post'),
+    )
+    expect(paperHostAffinity('https://openreview.net/forum?id=x')).toBeGreaterThan(0)
+    expect(paperHostAffinity('https://proceedings.mlr.press/v1/x.html')).toBeGreaterThan(0)
+    expect(paperHostAffinity('https://cs.stanford.edu/~x/paper')).toBeGreaterThan(0)
+  })
+
+  it('scores a bare .pdf link above a generic html page but below a paper venue', () => {
+    const pdf = paperHostAffinity('https://someblog.com/report.pdf')
+    const html = paperHostAffinity('https://someblog.com/report')
+    const venue = paperHostAffinity('https://arxiv.org/pdf/2401.1')
+    expect(pdf).toBeGreaterThan(html)
+    expect(venue).toBeGreaterThan(pdf)
+  })
+
+  it('scores a generic host at zero and never throws on a bad url', () => {
+    expect(paperHostAffinity('https://example.com/x')).toBe(0)
+    expect(paperHostAffinity('not a url')).toBe(0)
+  })
+})
+
+describe('rankPaperCandidates', () => {
+  const c = (title: string, url: string) => ({ title, url })
+
+  it('orders paper-venue candidates before generic ones', () => {
+    const out = rankPaperCandidates([
+      c('Blog', 'https://medium.com/p'),
+      c('Paper', 'https://arxiv.org/abs/1'),
+    ])
+    expect(out.map((x) => x.title)).toEqual(['Paper', 'Blog'])
+  })
+
+  it('is stable — preserves input order within the same affinity tier', () => {
+    const out = rankPaperCandidates([
+      c('A', 'https://arxiv.org/abs/1'),
+      c('B', 'https://openreview.net/forum?id=2'),
+      c('C', 'https://blog.com/a'),
+      c('D', 'https://blog.com/b'),
+    ])
+    expect(out.map((x) => x.title)).toEqual(['A', 'B', 'C', 'D'])
+  })
+
+  it('returns an all-generic list unchanged and never drops a candidate', () => {
+    const list = [c('A', 'https://x.com/1'), c('B', 'https://y.com/2')]
+    expect(rankPaperCandidates(list)).toEqual(list)
+    expect(rankPaperCandidates([...list])).toHaveLength(2)
   })
 })

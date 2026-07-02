@@ -19,8 +19,15 @@ export const DEFAULT_HYPOTHESIS_COUNT = 5
 /** Candidate papers `researchTrainingPapers` discovers when the caller names no count. */
 export const DEFAULT_RESEARCH_PAPER_COUNT = 8
 
-/** Hard ceiling on candidate papers per research run (each costs a fetch + verify panel + synthesis). */
+/** Hard ceiling on the number of papers a research run will DRAFT (the target `count`). */
 export const MAX_RESEARCH_PAPER_COUNT = 12
+
+/**
+ * How many candidates to discover per DRAFTED paper target — an over-scan so the paper-host ranker has a
+ * pool to prefer from. The run verifies ranked candidates until it hits the target, so the low-affinity
+ * tail (blogs/marketing) is only fetched+verified when the target can't be met from paper-venue hits.
+ */
+export const RESEARCH_DISCOVERY_OVERSCAN = 3
 
 /**
  * Minimum verify confidence for a discovered candidate to be admitted as a draft. The verdict must also

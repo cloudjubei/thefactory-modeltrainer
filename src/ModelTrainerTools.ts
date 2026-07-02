@@ -27,6 +27,7 @@ import type {
   ResearchTrainingPapersParams,
   ResearchTrainingPapersResult,
   ResearchPapersProgressEvent,
+  PaperResearchVerdict,
   AnalyzePaperModelsParams,
   ConsolidateModelsParams,
   ConsolidateModelsResult,
@@ -87,6 +88,7 @@ import {
   DEFAULT_RAN_BY,
   DEFAULT_RESEARCH_PAPER_COUNT,
   MAX_RESEARCH_PAPER_COUNT,
+  RESEARCH_DISCOVERY_OVERSCAN,
   PAPER_VERIFY_MIN_CONFIDENCE,
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
@@ -137,6 +139,7 @@ import {
   buildPaperResearchGoal,
   coercePaperCandidates,
   dedupePaperCandidates,
+  rankPaperCandidates,
   paperRelevanceClaim,
   isPaperVerdictAdmitted,
   coerceScannedModels,
@@ -1035,6 +1038,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     url: string
     proposedBy: string
     at: string
+    /** Provenance of a research draft (why the verify gate admitted it); omitted for analyze/manual. */
+    researchVerdict?: PaperResearchVerdict
     onRecordWritten?: (type: string, key: string) => void
   }): Promise<{
     paper: TrainingPaperRecord
@@ -1100,6 +1105,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       hypothesisIds: linkedHypothesisIds,
       status: 'untested',
       source: 'research',
+      ...(input.researchVerdict ? { researchVerdict: input.researchVerdict } : {}),
       createdAt: input.at,
       updatedAt: input.at,
     }
@@ -1192,19 +1198,23 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
 
     const goal = buildPaperResearchGoal(manifest, { notes: params.notes })
-    const limit = Math.max(
+    // `count` is the target number of DRAFTED papers; over-scan discovery so the paper-host ranker has a
+    // pool to prefer from, then verify ranked candidates only until the target is hit (§ stop-at-target).
+    const targetCount = Math.max(
       1,
       Math.min(params.count ?? DEFAULT_RESEARCH_PAPER_COUNT, MAX_RESEARCH_PAPER_COUNT),
     )
-    emit({ phase: 'discover', message: `Searching for up to ${limit} papers…` })
+    const discoverLimit = targetCount * RESEARCH_DISCOVERY_OVERSCAN
+    emit({ phase: 'discover', message: `Searching for papers (target ${targetCount})…` })
     const discoveredRaw = await dr.discoverSources({
       query: goal,
-      limit,
+      limit: discoverLimit,
       model,
       abortSignal: params.abortSignal,
       ...budgetOpt,
     })
-    const candidates0 = coercePaperCandidates(discoveredRaw as unknown[])
+    // Rank paper-venue hosts first so the target is met from real papers before any blog/marketing tail.
+    const candidates0 = rankPaperCandidates(coercePaperCandidates(discoveredRaw as unknown[]))
 
     // Dedup against the registry so a research run never re-drafts a paper already present (manual,
     // analyzePaperFromUrl, or an earlier research run).
@@ -1231,6 +1241,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       total: candidates.length,
     })
     for (let i = 0; i < candidates.length; i++) {
+      // Stop once the target is drafted — the low-affinity tail is never fetched/verified (the cost win).
+      if (papers.length >= targetCount) break
       throwIfAborted()
       const candidate = candidates[i]
       try {
@@ -1281,6 +1293,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           failed++
           continue
         }
+        // Stamp the admitting verdict onto the draft so a reviewer sees WHY it was accepted.
+        const researchVerdict: PaperResearchVerdict = {
+          status: verdict.status,
+          confidence: verdict.confidence,
+          ...(Array.isArray(verdict.evidence) && verdict.evidence.length
+            ? { quotes: verdict.evidence.slice(0, 3) }
+            : {}),
+        }
         const persisted = await persistPaperWithHypotheses({
           scope: params.scope,
           recordType,
@@ -1289,6 +1309,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           url: candidate.url,
           proposedBy: researchedBy,
           at: researchedAt,
+          researchVerdict,
           onRecordWritten: params.onRecordWritten,
         })
         papers.push(persisted.paper)

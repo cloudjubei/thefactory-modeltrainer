@@ -47,20 +47,6 @@ The **Hypotheses registry**, **Papers library**, and **Models catalog** are buil
 `docs/architecture.md` (Hypotheses = falsifiable claims runs prove/disprove; Papers = containers of
 hypotheses; Models = the catalog of implemented/proposed models).
 
-Open-ended `researchTrainingPapers` is now shipped: it derives a domain research goal from the manifest,
-discovers N candidate papers via the shared `DeepResearchTools` seam, verifies each is a real, relevant
-paper **against its own fetched page** (the same grounded `fetchPaperText` → synthesize path as
-`analyzePaperFromUrl`, reused via the extracted `synthesizePaperFromText`/`persistPaperWithHypotheses`
-core), and drafts the survivors (`source:'research'`, `status:'untested'`) + their hypotheses, deduped
-against the registry (arxiv abs/pdf/version-collapsing url key). Candidates that fail discovery/verify/
-fetch/synthesis are SKIPPED and counted, never fabricated. Backend `research-training-papers` activity +
-the Papers-tab "Research papers" button (count 1–12) drive it. Follow-ons (optional): persist the
-verify verdict/provenance onto the draft for reviewer trust; a paper-biased discovery query.
-
-### 2b. Models — remaining backlog
-
-Still PENDING (the rest of the code/paper model catalog is already exposed):
-
 - **Reusable components — surfaced + composed.** BlackSwan's manifest seeds the building blocks (feature
   extractors, custom policies/Q-nets, replay buffers, attention + NN blocks, the `DGWO` optimizer) as 12
   `component` catalog entries; each model flavor declares its `components`, rendered in the Models tab as

@@ -1318,9 +1318,26 @@ export interface TrainingPaperRecord {
   dismissed?: boolean
   /** Where the entry came from. */
   source: 'manual' | 'research'
+  /**
+   * Provenance of an OPEN-ENDED research draft: WHY the verify gate admitted it (the verdict + confidence
+   * + cited quotes from the paper's own page). Set only by `researchTrainingPapers`; absent on manual /
+   * `analyzePaperFromUrl` papers. Purely informational — surfaced on the card so a reviewer can see the
+   * evidence trail behind an auto-discovered draft.
+   */
+  researchVerdict?: PaperResearchVerdict
   tags?: string[]
   createdAt: string
   updatedAt: string
+}
+
+/** The trimmed verify verdict stamped onto a research-discovered paper draft (see `researchVerdict`). */
+export interface PaperResearchVerdict {
+  /** Where the admitting verdict sat on the evidence ladder (`confirmed`/`implied` for a drafted paper). */
+  status: 'confirmed' | 'implied' | 'unverifiable' | 'refuted'
+  /** Verify confidence, 0–1. */
+  confidence: number
+  /** Up to a few cited quotes from the paper's own page that supported admission. */
+  quotes?: { quote: string; url: string }[]
 }
 
 /**

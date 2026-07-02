@@ -1692,6 +1692,59 @@ export function isPaperVerdictAdmitted(verdict: ClaimVerdict, minConfidence: num
   return ok && typeof verdict.confidence === 'number' && verdict.confidence >= minConfidence
 }
 
+/**
+ * Known scholarly/paper-venue host patterns. `discoverSources` is domain-blind (it ranks by generic
+ * richness, not paper-ness), so a candidate on one of these hosts is far more likely to be a real paper
+ * than a blog/marketing page. Used only to ORDER candidates — never to drop them (the verify gate stays
+ * the real filter).
+ */
+const PAPER_HOST_PATTERNS: readonly RegExp[] = [
+  /(^|\.)arxiv\.org$/,
+  /(^|\.)openreview\.net$/,
+  /(^|\.)aclanthology\.org$/,
+  /(^|\.)semanticscholar\.org$/,
+  /(^|\.)doi\.org$/,
+  /(^|\.)biorxiv\.org$/,
+  /(^|\.)mlr\.press$/,
+  /(^|\.)neurips\.cc$/,
+  /(^|\.)nature\.com$/,
+  /(^|\.)sciencedirect\.com$/,
+  /(^|\.)springer\.com$/,
+  /(^|\.)ieee\.org$/,
+  /(^|\.)acm\.org$/,
+  /\.edu$/,
+]
+
+/**
+ * Paper-likeness score for a discovered candidate URL: `2` for a known paper venue, `1` for a bare
+ * PDF link on any host, `0` for a generic page. Never throws on a malformed URL (scores `0`). Higher =
+ * try it sooner within the discovery budget.
+ */
+export function paperHostAffinity(url: string): number {
+  let parsed: URL
+  try {
+    parsed = new URL((url ?? '').trim())
+  } catch {
+    return 0
+  }
+  const host = parsed.host.toLowerCase()
+  if (PAPER_HOST_PATTERNS.some((re) => re.test(host))) return 2
+  if (/\.pdf$/i.test(parsed.pathname)) return 1
+  return 0
+}
+
+/**
+ * Stable re-rank of discovered candidates: paper-venue hosts first, bare PDFs next, generic pages last,
+ * preserving input order within each tier. Never drops a candidate — it only decides who is TRIED first,
+ * so with an over-scanned discovery pool the low-affinity tail is verified only if the target isn't hit.
+ */
+export function rankPaperCandidates(candidates: PaperCandidate[]): PaperCandidate[] {
+  return candidates
+    .map((candidate, index) => ({ candidate, index, score: paperHostAffinity(candidate.url) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map((entry) => entry.candidate)
+}
+
 const PROGRESS_MARKER = '@@PROGRESS '
 
 /**

@@ -10965,6 +10965,19 @@ function paperProposalsChipHtml(info) {
   if (!n) return ''
   return `<span class="hyp-count-chip is-proposed"${helpAttr('Hypotheses whose required model is NOT implemented yet — they can’t be tested (or counted in the score) until it’s built.')}>${n} proposal${n === 1 ? '' : 's'}</span>`
 }
+// Provenance chip for an OPEN-ENDED research draft: WHY the verify gate admitted it (verdict + confidence),
+// with the cited quotes from the paper's own page on hover. Absent on manual / Extract papers.
+function paperResearchChipHtml(paper) {
+  const rv = paper && paper.researchVerdict
+  if (!rv || typeof rv.confidence !== 'number') return ''
+  const pct = Math.round(rv.confidence * 100)
+  const label = rv.status === 'implied' ? 'inferred' : 'verified'
+  const quotes =
+    Array.isArray(rv.quotes) && rv.quotes.length
+      ? rv.quotes.map((q) => '“' + String((q && q.quote) || '') + '”').join(' · ')
+      : 'no quotes cited'
+  return `<span class="paper-research-chip"${helpAttr('Auto-discovered draft — the verify step judged this a real, relevant paper (' + label + ' @ ' + pct + '% confidence) against its own page. Cited: ' + quotes)}>✓ ${label} ${pct}%</span>`
+}
 // A small chip naming the PAPER claim a hypothesis tests — so the claim↔hypothesis link is visible in the
 // flat list + the standalone Hypotheses card (the multi-claim view groups by it instead).
 function hypothesisClaimChipHtml(h) {
@@ -11214,6 +11227,7 @@ function paperCardHtml(paper) {
       ${badge}
       ${paperHypCountChipHtml(paper)}
       ${paperProposalsChipHtml(info)}
+      ${paperResearchChipHtml(paper)}
       <span class="paper-summary-title">${title}</span>
       <span class="card-actions">${actions}</span>
     </summary>

@@ -2983,6 +2983,20 @@ pre.json {
   color: #4338ca;
   background: #eef2ff;
 }
+/* Provenance chip on an auto-discovered research draft (verify verdict + confidence). */
+.paper-research-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border: 1px solid #5eae8f;
+  border-radius: 999px;
+  background: #e8f5ef;
+  color: #216e51;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: help;
+}
 /* The {passed/total} claim fraction carried INSIDE a multi-claim paper's status chip (no separate chip). */
 .paper-claims-frac {
   margin-left: 5px;

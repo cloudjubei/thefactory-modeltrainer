@@ -4023,6 +4023,8 @@ describe('researchTrainingPapers', () => {
     expect(result.papers).toHaveLength(2)
     for (const p of result.papers) {
       expect(p).toMatchObject({ status: 'untested', source: 'research', createdAt: NOW })
+      // the admitting verify verdict is stamped on the draft as provenance
+      expect(p.researchVerdict).toMatchObject({ status: 'confirmed', confidence: 0.9 })
     }
     // every deep-research call carried a model (the required ModelSelection)
     expect((dr.discoverCalls[0] as { model?: unknown }).model).toBeTruthy()
@@ -4138,5 +4140,57 @@ describe('researchTrainingPapers', () => {
         }),
       ),
     ).rejects.toThrow()
+  })
+
+  it('captures up to 3 cited quotes from the verify verdict onto the draft', async () => {
+    const dr = stubDeepResearch({
+      discovered: [src('Paper', 'https://arxiv.org/abs/1')],
+      verdict: () => ({
+        status: 'confirmed',
+        confidence: 0.8,
+        evidence: [
+          { quote: 'q1', url: 'u1' },
+          { quote: 'q2', url: 'u2' },
+          { quote: 'q3', url: 'u3' },
+          { quote: 'q4', url: 'u4' },
+        ],
+      }),
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(base())
+    expect(result.papers[0].researchVerdict?.quotes).toEqual([
+      { quote: 'q1', url: 'u1' },
+      { quote: 'q2', url: 'u2' },
+      { quote: 'q3', url: 'u3' },
+    ])
+  })
+
+  it('verifies paper-venue hosts before generic ones (ranking)', async () => {
+    const dr = stubDeepResearch({
+      discovered: [src('Blog', 'https://medium.com/p'), src('Paper', 'https://arxiv.org/abs/1')],
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(base())
+    // the arxiv candidate is verified + drafted first despite being discovered second
+    expect(result.papers[0].url).toBe('https://arxiv.org/abs/1')
+    expect((dr.verifyCalls[0] as { claim: string }).claim).toContain('https://arxiv.org/abs/1')
+  })
+
+  it('stops once the target count is drafted — the low-affinity tail is never verified', async () => {
+    const dr = stubDeepResearch({
+      discovered: [
+        src('A', 'https://x/a'),
+        src('B', 'https://x/b'),
+        src('C', 'https://x/c'),
+        src('D', 'https://x/d'),
+        src('E', 'https://x/e'),
+      ],
+    })
+    const { tools } = makeResearchTools(stubExecutor(PAPER_DRAFT), memoryStorage(), dr)
+    const result = await tools.researchTrainingPapers(base({ count: 2 }))
+    expect(result.papers).toHaveLength(2)
+    expect(result.discovered).toBe(5)
+    // only the first two candidates were fetched + verified; the rest were never touched
+    expect(dr.verifyCalls).toHaveLength(2)
   })
 })
