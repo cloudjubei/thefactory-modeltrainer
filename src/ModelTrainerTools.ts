@@ -7,6 +7,7 @@ import type {
   EvidencePassage,
   InferenceExecutor,
   LLMConfig,
+  ModelSelection,
   ResearchBudget,
 } from 'thefactory-tools/types'
 import {
@@ -146,7 +147,9 @@ import {
   coerceSuggestedHypotheses,
   coerceVerdictRows,
   detectMissingPaperModels,
+  mergeProposedImprovements,
   diffDecisionTraces,
+  summarizeStepAttribution,
   discoverManifestModelCandidates,
   modelBindingNames,
   expandExperimentMatrix,
@@ -994,7 +997,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     url: string
     text: string
     notes?: string
-    llmConfig: LLMConfig
+    model: ModelSelection
     abortSignal?: AbortSignal
   }): Promise<
     | {
@@ -1011,7 +1014,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         text: input.text,
         notes: input.notes,
       }),
-      model: { kind: 'api', llmConfig: input.llmConfig },
+      model: input.model,
       abortSignal: input.abortSignal,
     })
     const parsed = parseFirstValidJson(res.text)
@@ -1138,7 +1141,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       url: params.url,
       text,
       notes: params.notes,
-      llmConfig: params.llmConfig,
+      model: { kind: 'api', llmConfig: params.llmConfig },
       abortSignal: params.abortSignal,
     })
     if (!synth) throw new Error('the model did not return a usable paper summary for this link')
@@ -1182,9 +1185,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
-    const researchedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
+    const researchedBy = deriveModelRef(params.model).label
     const researchedAt = now()
-    const model = { kind: 'api' as const, llmConfig: params.llmConfig }
+    const model = params.model
     const budgetOpt = params.researchBudget ? { budget: params.researchBudget } : {}
     const emit = (event: ResearchPapersProgressEvent) => {
       try {
@@ -1286,7 +1289,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           url: candidate.url,
           text,
           notes: params.notes,
-          llmConfig: params.llmConfig,
+          model,
           abortSignal: params.abortSignal,
         })
         if (!synth) {
@@ -1738,6 +1741,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
           .slice(0, 5)
       : []
+    const stepAttribution = trace ? summarizeStepAttribution(trace) : undefined
+    const driverCounts: [string, number][] | undefined = stepAttribution
+      ? Object.entries(stepAttribution.dominanceCounts)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+      : undefined
     const probe = trace?.latentMap?.probe
 
     let sibling: RunXaiDigest['sibling']
@@ -1774,14 +1783,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       criterion,
       rank: rankPos >= 0 ? { position: rankPos + 1, total: ranked.length } : undefined,
       actionCounts: trace?.actionCounts,
-      attribution: fa
-        ? {
-            topGroups,
-            method: fa.method,
-            sanityPassed: fa.sanityCheck?.passed,
-            sanityRankCorr: fa.sanityCheck?.rankCorrelation,
-          }
-        : undefined,
+      attribution:
+        fa || (driverCounts && driverCounts.length)
+          ? {
+              topGroups,
+              ...(fa
+                ? {
+                    method: fa.method,
+                    sanityPassed: fa.sanityCheck?.passed,
+                    sanityRankCorr: fa.sanityCheck?.rankCorrelation,
+                  }
+                : {}),
+              ...(driverCounts && driverCounts.length ? { driverCounts } : {}),
+            }
+          : undefined,
       rewardBreakdown: trace?.rewardBreakdown,
       latent: trace?.latentMap
         ? {
@@ -2082,11 +2097,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
     const missingModels = detectMissingPaperModels(proposedModels, [...existing.values()])
 
+    // Merge (not overwrite) so a user's `inapplicable` mark survives a re-run: a re-proposed item stays
+    // inapplicable, and an inapplicable item this run dropped is kept + still listed for reference.
+    const mergedImprovements = mergeProposedImprovements(
+      paper.proposedImprovements,
+      proposedImprovements,
+    )
+
     const modelIds = Array.from(new Set([...(paper.modelIds ?? []), ...linkedModelIds]))
     const updatedPaper: TrainingPaperRecord = {
       ...paper,
       modelIds,
-      ...(proposedImprovements.length ? { proposedImprovements } : { proposedImprovements: [] }),
+      proposedImprovements: mergedImprovements,
       updatedAt: analyzedAt,
     }
     await deps.storage.upsertRecord({
@@ -2107,7 +2129,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       paper: updatedPaper,
       linkedModelIds,
       missingModels,
-      proposedImprovements,
+      proposedImprovements: mergedImprovements,
       analyzedBy,
       analyzedAt,
     }

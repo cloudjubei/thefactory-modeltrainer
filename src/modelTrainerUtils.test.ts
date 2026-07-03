@@ -38,6 +38,7 @@ import {
   totalCampaignUnits,
   datasetAlignmentSignature,
   diffDecisionTraces,
+  summarizeStepAttribution,
   validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
@@ -51,6 +52,7 @@ import {
   buildScanModelsSystemPrompt,
   buildScanModelsUserContent,
   coerceAnalyzedPaperModels,
+  mergeProposedImprovements,
   detectMissingPaperModels,
   buildAnalyzePaperModelsSystemPrompt,
   buildAnalyzePaperModelsUserContent,
@@ -1479,6 +1481,25 @@ describe('prompt builders', () => {
     expect(content).toMatch(/linear probe.*70% vs a 0% majority baseline\./)
     expect(content).not.toContain('variance')
   })
+
+  it('surfaces per-step driver counts when present, and omits the line when absent', () => {
+    const withDrivers = buildXaiNarrateUserContent({
+      runKey: 'feed',
+      config: {},
+      criterion: { key: 'objective', direction: 'max' },
+      attribution: { topGroups: [['layer:1d', 0.4]], driverCounts: [['layer:1d', 12], ['layer:1h', 3]] },
+      importances: [],
+    })
+    expect(withDrivers).toMatch(/Per-step drivers.*layer:1d=12, layer:1h=3\./)
+    const without = buildXaiNarrateUserContent({
+      runKey: 'feed',
+      config: {},
+      criterion: { key: 'objective', direction: 'max' },
+      attribution: { topGroups: [['layer:1d', 0.4]] },
+      importances: [],
+    })
+    expect(without).not.toContain('Per-step drivers')
+  })
 })
 
 describe('parseProgressMarker', () => {
@@ -1602,6 +1623,17 @@ describe('validateDecisionTrace', () => {
       ],
     })
     expect(trace?.steps[0]).toEqual({ step: 0, action: 'hold' })
+  })
+
+  it('carries per-step saliencyByGroup, keeping only finite entries', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'buy', saliencyByGroup: { 'layer:1d': 1, 'layer:1h': 'x' } }],
+    })
+    expect(trace?.steps[0]).toEqual({
+      step: 0,
+      action: 'buy',
+      saliencyByGroup: { 'layer:1d': 1 },
+    })
   })
 
   it('coerces actionCounts, totalSteps and featureAttribution', () => {
@@ -1751,6 +1783,41 @@ describe('datasetAlignmentSignature', () => {
 
   it('differs when the window differs', () => {
     expect(datasetAlignmentSignature(ds())).not.toBe(datasetAlignmentSignature(ds({ to: 'c' })))
+  })
+})
+
+describe('summarizeStepAttribution', () => {
+  it('returns undefined when no step carries per-step group saliency', () => {
+    expect(
+      summarizeStepAttribution({ steps: [{ step: 0, action: 'buy' }, { step: 1, action: 'hold' }] }),
+    ).toBeUndefined()
+  })
+
+  it('summarizes groups, per-step dominant driver, dominance counts and sample count', () => {
+    const summary = summarizeStepAttribution({
+      steps: [
+        { step: 0, action: 'buy', saliencyByGroup: { 'layer:1d': 3, 'layer:1h': 1 } },
+        { step: 1, action: 'hold' },
+        { step: 2, action: 'sell', saliencyByGroup: { 'layer:1d': 1, 'engineered:drawdown': 4 } },
+      ],
+    })
+    expect(summary).toEqual({
+      groups: ['engineered:drawdown', 'layer:1d', 'layer:1h'],
+      perStep: [
+        { step: 0, dominantGroup: 'layer:1d', byGroup: { 'layer:1d': 3, 'layer:1h': 1 } },
+        { step: 2, dominantGroup: 'engineered:drawdown', byGroup: { 'layer:1d': 1, 'engineered:drawdown': 4 } },
+      ],
+      dominanceCounts: { 'layer:1d': 1, 'engineered:drawdown': 1 },
+      samples: 2,
+    })
+  })
+
+  it('breaks a dominance tie by group name for determinism', () => {
+    const summary = summarizeStepAttribution({
+      steps: [{ step: 0, action: 'buy', saliencyByGroup: { 'layer:1h': 2, 'layer:1d': 2 } }],
+    })
+    expect(summary?.perStep[0].dominantGroup).toBe('layer:1d')
+    expect(summary?.dominanceCounts).toEqual({ 'layer:1d': 1 })
   })
 })
 
@@ -2384,6 +2451,46 @@ describe('coerceAnalyzedPaperModels', () => {
       proposedModels: [],
       proposedImprovements: [],
     })
+  })
+})
+
+describe('mergeProposedImprovements', () => {
+  const imp = (title, kind = 'model', inapplicable) => ({
+    title,
+    detail: '',
+    kind,
+    ...(inapplicable ? { inapplicable: true } : {}),
+  })
+
+  it('returns the incoming list unchanged when nothing was marked inapplicable', () => {
+    const incoming = [imp('A'), imp('B')]
+    expect(mergeProposedImprovements([imp('A')], incoming)).toEqual(incoming)
+  })
+
+  it('re-applies an existing inapplicable mark to a matching incoming item (case/space-insensitive)', () => {
+    const existing = [imp("White's  Reality Check", 'model', true)]
+    const incoming = [imp("white's reality check"), imp('B')]
+    const out = mergeProposedImprovements(existing, incoming)
+    expect(out.find((i) => i.title === "white's reality check").inapplicable).toBe(true)
+    expect(out.find((i) => i.title === 'B').inapplicable).toBeUndefined()
+  })
+
+  it('keeps an inapplicable item the new run dropped, so it stays listed + referable', () => {
+    const existing = [imp('Gone', 'model', true)]
+    const incoming = [imp('Fresh')]
+    const out = mergeProposedImprovements(existing, incoming)
+    expect(out.map((i) => i.title)).toEqual(['Fresh', 'Gone'])
+    expect(out.find((i) => i.title === 'Gone').inapplicable).toBe(true)
+  })
+
+  it('drops an existing APPLICABLE item absent from the incoming list (fresh list wins)', () => {
+    const out = mergeProposedImprovements([imp('Stale')], [imp('New')])
+    expect(out.map((i) => i.title)).toEqual(['New'])
+  })
+
+  it('tolerates missing/empty existing', () => {
+    expect(mergeProposedImprovements(undefined, [imp('A')])).toEqual([imp('A')])
+    expect(mergeProposedImprovements([], [imp('A')])).toEqual([imp('A')])
   })
 })
 

@@ -273,6 +273,31 @@
     return (hyps || []).filter((h) => direct[h.id])
   }
 
+  // Normalized identity for a proposed improvement / model name — case- and whitespace-insensitive.
+  function improvementKey(title) {
+    return String(title || '')
+      .trim()
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+  }
+  // Normalized titles of the paper's kind:'model' proposed improvements the user marked INAPPLICABLE.
+  function inapplicableModelTitles(paper) {
+    const out = {}
+    const items = (paper && paper.proposedImprovements) || []
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i]
+      if (it && it.inapplicable && it.kind === 'model' && it.title) out[improvementKey(it.title)] = true
+    }
+    return out
+  }
+  // Missing (not-in-catalog) proposed models to still OFFER as "add to catalog": drop any that matches an
+  // inapplicable model-kind improvement, so its "+" CTA + the duplicate row are suppressed. The item stays
+  // LISTED (greyed) under Proposed improvements, where the applicable/inapplicable toggle lives. Pure.
+  function visibleMissingModels(missing, paper) {
+    const skip = inapplicableModelTitles(paper)
+    return (missing || []).filter((m) => !(m && m.name && skip[improvementKey(m.name)]))
+  }
+
   // The component catalog entries a FLAVOR is composed of: its `components` slugs resolved to catalog
   // models (deduped, order-preserving). An unknown slug is returned as `{found:false}` so a typo still
   // shows (as a non-link chip) instead of vanishing. Pure.
@@ -606,6 +631,8 @@
     modelsForPaper: modelsForPaper,
     papersForModel: papersForModel,
     hypothesesForModel: hypothesesForModel,
+    inapplicableModelTitles: inapplicableModelTitles,
+    visibleMissingModels: visibleMissingModels,
     flavorComponents: flavorComponents,
     modelsUsingComponent: modelsUsingComponent,
     seedDiffersFromModel: seedDiffersFromModel,

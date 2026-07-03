@@ -4914,6 +4914,56 @@ function decisionAttributionHtml(trace) {
     ${xaiSanityBadgeHtml(fa.sanityCheck)}
     <table class="kv-table report-table"><thead><tr><th>${label}</th><th class="num">saliency</th></tr></thead><tbody>${rows}</tbody></table>`
 }
+// Per-step drivers: which INPUT GROUP drove each attributed decision over the rollout — the temporal
+// companion to the run-aggregate attribution above. A line per group (|saliency| over the step axis)
+// plus a dominance table (how many decisions each group led). Mirrors the tested engine
+// summarizeStepAttribution (modelTrainerUtils.ts) — that stays the source of truth.
+function decisionStepAttributionHtml(trace) {
+  const perStep = trace.steps
+    .map((s) => {
+      const entries = Object.entries((s && s.saliencyByGroup) || {}).filter(([, v]) =>
+        Number.isFinite(Number(v)),
+      )
+      return entries.length ? { step: Number(s.step), entries } : null
+    })
+    .filter(Boolean)
+  if (perStep.length < 2) return ''
+  const groups = []
+  const seen = new Set()
+  const dominance = new Map()
+  for (const { entries } of perStep) {
+    let dominant = entries[0][0]
+    let best = Math.abs(Number(entries[0][1]))
+    for (const [g, v] of entries) {
+      if (!seen.has(g)) {
+        seen.add(g)
+        groups.push(g)
+      }
+      const mag = Math.abs(Number(v))
+      if (mag > best || (mag === best && g < dominant)) {
+        best = mag
+        dominant = g
+      }
+    }
+    dominance.set(dominant, (dominance.get(dominant) || 0) + 1)
+  }
+  groups.sort()
+  const points = []
+  perStep.forEach(({ step, entries }, i) => {
+    const mags = new Map(entries.map(([g, v]) => [g, Math.abs(Number(v))]))
+    const x = Number.isFinite(step) ? step : i
+    for (const g of groups) points.push({ x, y: mags.get(g) || 0, group: g })
+  })
+  const groupColors = new Map(groups.map((g, i) => [g, CHART_PALETTE[i % CHART_PALETTE.length]]))
+  const chart = `<div class="chart-wrap">${buildLineChart({ points, xLabel: 'step', yLabel: '|saliency|', width: 640, height: 160, markers: false, groupColors, ariaLabel: 'per-step input-group saliency over time' })}</div>`
+  const rows = [...dominance.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([g, c]) => `<tr><th>${escapeHtml(g)}</th><td class="num">${c}</td></tr>`)
+    .join('')
+  return `<h4 class="card-sub">Per-step drivers — which input group drove each decision (${perStep.length} attributed)</h4>
+    ${chart}
+    <table class="kv-table report-table"><thead><tr><th>group</th><th class="num">decisions led</th></tr></thead><tbody>${rows}</tbody></table>`
+}
 // The Adebayo saliency sanity-check verdict: a faithful map CHANGES when the model's weights are
 // randomized (low rank correlation). A failed/absent check tells the user not to over-trust the map.
 function xaiSanityBadgeHtml(sc) {
@@ -4936,6 +4986,7 @@ function explainSectionHtml(summary) {
     decisionValueChartHtml(trace, digest),
     decisionConfidenceChartHtml(trace),
     decisionAttributionHtml(trace),
+    decisionStepAttributionHtml(trace),
     decisionLatentMapHtml(trace),
   ]
     .filter(Boolean)
@@ -4980,6 +5031,31 @@ function decisionTraceChatSummary(summary) {
       .map(([i, v]) => `f${i}(${formatTickValue(v)})`)
       .join(', ')
     if (top) parts.push(`Top input features by saliency: ${top}.`)
+  }
+  const dominance = new Map()
+  for (const s of trace.steps) {
+    const entries = Object.entries((s && s.saliencyByGroup) || {}).filter(([, v]) =>
+      Number.isFinite(Number(v)),
+    )
+    if (!entries.length) continue
+    let dominant = entries[0][0]
+    let best = Math.abs(Number(entries[0][1]))
+    for (const [g, v] of entries) {
+      const mag = Math.abs(Number(v))
+      if (mag > best || (mag === best && g < dominant)) {
+        best = mag
+        dominant = g
+      }
+    }
+    dominance.set(dominant, (dominance.get(dominant) || 0) + 1)
+  }
+  if (dominance.size) {
+    const drivers = [...dominance.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([g, c]) => `${g}=${c}`)
+      .join(', ')
+    parts.push(`Per-step drivers (dominant input group by decision count): ${drivers}.`)
   }
   const bd = trace.rewardBreakdown
   if (bd && typeof bd === 'object') {
@@ -11194,18 +11270,22 @@ const IMPROVEMENT_KIND_TAG = {
 // proposes general improvements, not just catalog models) and persisted on the paper. Sits under Coverage
 // gaps: the gaps are the untested claims; these are what to BUILD to close them.
 function paperProposedImprovementsHtml(paper) {
-  const items = Array.isArray(paper.proposedImprovements)
-    ? paper.proposedImprovements.filter((p) => p && p.title)
-    : []
+  const all = Array.isArray(paper.proposedImprovements) ? paper.proposedImprovements : []
+  // Keep the ORIGINAL index so the applicable/inapplicable toggle targets the right item after filtering.
+  const items = all.map((p, idx) => ({ p, idx })).filter((x) => x.p && x.p.title)
   if (!items.length) return ''
+  const pid = escapeHtml(paper.id)
   const rows = items
-    .map((p) => {
+    .map(({ p, idx }) => {
       const tag = IMPROVEMENT_KIND_TAG[p.kind] || IMPROVEMENT_KIND_TAG.other
       const detail = p.detail ? ` — ${escapeHtml(p.detail)}` : ''
-      return `<li><span class="improvement-kind">${escapeHtml(tag)}</span> <strong>${escapeHtml(p.title)}</strong>${detail}</li>`
+      const off = !!p.inapplicable
+      const toggle = `<button type="button" class="improvement-toggle" data-action="toggle-improvement" data-paper="${pid}" data-index="${idx}"${helpAttr(off ? 'Marked NOT APPLICABLE to this project — kept for reference but excluded from counts and the “add to catalog” list. Click to mark applicable again.' : 'Mark NOT APPLICABLE — keep it listed for reference but exclude it from counts and the “add to catalog” list (e.g. a proposed model that is really a methodology, not something to train here).')}>${off ? '↩ applicable' : '✕ not applicable'}</button>`
+      const tagEl = off ? ' <span class="improvement-inapplicable-tag">not applicable</span>' : ''
+      return `<li class="${off ? 'improvement-inapplicable' : ''}"><span class="improvement-kind">${escapeHtml(tag)}</span> <strong>${escapeHtml(p.title)}</strong>${detail}${tagEl} ${toggle}</li>`
     })
     .join('')
-  return `<div class="paper-proposed-improvements card-sub"${helpAttr('Functionality this paper implies is missing — build it and the untested claims above become testable. Found by "Find models" (which proposes general improvements, not just catalog models).')}><strong>🛠 Proposed improvements</strong> — build these to test the above:<ul>${rows}</ul></div>`
+  return `<div class="paper-proposed-improvements card-sub"${helpAttr('Functionality this paper implies is missing — build it and the untested claims above become testable. Found by "Find models" (which proposes general improvements, not just catalog models). Mark any item “not applicable” to keep it for reference but exclude it everywhere.')}><strong>🛠 Proposed improvements</strong> — build these to test the above:<ul>${rows}</ul></div>`
 }
 // The multi-claim inner view: the paper's hypotheses partitioned by claim, each group with its own verdict
 // badge + why, plus an "Other (untagged)" section so no hypothesis is hidden. Only rendered for a
@@ -12046,6 +12126,23 @@ async function onToggleDismissPaper(id) {
   p.dismissed = !p.dismissed
   await renderPapers()
 }
+// Flip a proposed improvement's "not applicable" mark: it stays listed (greyed) for reference but is
+// excluded from counts + the "add to catalog" list, and the mark survives a Find-models re-run (merged).
+async function onToggleImprovementApplicable(paperId, index) {
+  const p = papersCache.find((x) => x.id === paperId)
+  if (!p || !Array.isArray(p.proposedImprovements) || !p.proposedImprovements[index]) return
+  const next = p.proposedImprovements.map((imp, i) =>
+    i === index ? { ...imp, inapplicable: !imp.inapplicable } : imp,
+  )
+  try {
+    await putPaper({ ...p, proposedImprovements: next })
+  } catch {
+    setStatusLine('papers-status', 'Could not update — please try again.', true)
+    return
+  }
+  p.proposedImprovements = next
+  updatePaperCard(paperId)
+}
 function setupPapers() {
   const addToggle = byId('paper-add-toggle')
   if (addToggle) {
@@ -12138,6 +12235,8 @@ function setupPapers() {
       else if (action === 'find-models') onFindPaperModels(id)
       else if (action === 'add-model') addProposedModelToCatalog(paperId, id)
       else if (action === 'toggle-dismiss') onToggleDismissPaper(id)
+      else if (action === 'toggle-improvement')
+        onToggleImprovementApplicable(paperId, Number(btn.dataset.index))
       else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id)
       else if (action === 'reweigh-hyps') onReweighPaperHypotheses(id)
       else if (action === 'add-hyp') {
@@ -13414,7 +13513,9 @@ async function addProposedModelToCatalog(paperId, slug) {
 function paperModelsHtml(paper) {
   if (!window.Models) return ''
   const linked = window.Models.modelsForPaper(paper, modelsCache)
-  const missing = paperMissingModels.get(paper.id) || []
+  // Suppress the "add to catalog" CTA for a proposed model the user marked not-applicable (it stays
+  // listed, greyed, under Proposed improvements where the toggle lives).
+  const missing = window.Models.visibleMissingModels(paperMissingModels.get(paper.id) || [], paper)
   if (!linked.length && !missing.length) return ''
   const linkedRows = linked
     .map(

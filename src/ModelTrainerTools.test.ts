@@ -2176,6 +2176,33 @@ describe('xaiNarrate', () => {
     expect(uc).toMatch(/ranks #1 of 2/) // bbb's objective (90) is best under max
   })
 
+  it('surfaces per-step drivers in the narration when steps carry saliencyByGroup', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'ccc', 50, {
+      config: { lr: 0.5 },
+      artifacts: {
+        decisionTrace: {
+          steps: [
+            { step: 0, action: 'buy', saliencyByGroup: { 'layer:1d': 3, 'layer:1h': 1 } },
+            { step: 1, action: 'sell', saliencyByGroup: { 'layer:1d': 2, 'layer:1h': 1 } },
+          ],
+          totalSteps: 2,
+          actionCounts: { buy: 1, sell: 1 },
+        },
+      },
+    })
+    const executor = stubExecutor('attends to 1d.')
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      runKey: 'ccc',
+    })
+    expect(executor.requests[0].userContent).toMatch(/Per-step drivers.*layer:1d=2/)
+  })
+
   it('includes the sibling decision-diff when siblingKey is given', async () => {
     const aligned = (action: string) => ({
       steps: [{ step: 0, action, reward: 1 }],
@@ -3992,9 +4019,23 @@ describe('researchTrainingPapers', () => {
     scope: 'proj',
     projectRoot: '/repo',
     manifest: manifest(),
-    llmConfig: LLM,
+    model: { kind: 'api' as const, llmConfig: LLM },
     fetchPaperText: async () => 'the real fetched paper page text',
     ...overrides,
+  })
+
+  it('runs discovery, verify, and synthesis on the SELECTED model (e.g. a CLI agent)', async () => {
+    const storage = memoryStorage()
+    const executor = stubExecutor(PAPER_DRAFT)
+    const dr = stubDeepResearch({ discovered: [src('Paper One', 'https://arxiv.org/abs/1')] })
+    const { tools } = makeResearchTools(executor, storage, dr)
+    const cliModel = { kind: 'cli' as const, cli: 'claude' as const }
+    const result = await tools.researchTrainingPapers(base({ model: cliModel }))
+    expect(result.papers).toHaveLength(1)
+    // the CLI selection is threaded into every deep-research call AND the synthesis inference
+    expect((dr.discoverCalls[0] as { model?: unknown }).model).toEqual(cliModel)
+    expect((dr.verifyCalls[0] as { model?: unknown }).model).toEqual(cliModel)
+    expect(executor.requests[0].model).toEqual(cliModel)
   })
 
   it('discovers, verifies, and drafts a research paper per admitted candidate', async () => {

@@ -81,9 +81,14 @@
   }
 
   // The trainer's LLM activities (judge/propose/analyze-paper/consolidate/xai-narrate/…) run API-only
-  // (`requiresApi`). Declare it once on load so the host's activity chip disables the CLI toggle and
-  // never sends a CLI model for this app. Fire-and-forget — a failure just leaves CLI enabled.
+  // (`requiresApi`) — EXCEPT `research-training-papers` (Papers → Research papers), whose deep-research
+  // discovery + verify + synthesis can run on the more capable CLI agents. Declare both once on load so
+  // the host offers CLI in the activity chip and sends the CLI model for JUST that launch, while every
+  // other trainer activity still runs API-only. Fire-and-forget — a failure just leaves CLI enabled.
   if (window.OverseerBridge.embedded) {
-    window.OverseerBridge.reportCapabilities({ activitiesApiOnly: true }).catch(function () {})
+    window.OverseerBridge.reportCapabilities({
+      activitiesApiOnly: true,
+      cliActivities: ['research-training-papers'],
+    }).catch(function () {})
   }
 })()

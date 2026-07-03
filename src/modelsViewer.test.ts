@@ -309,6 +309,43 @@ describe('modelsForPaper / papersForModel', () => {
   })
 })
 
+describe('visibleMissingModels / inapplicableModelTitles', () => {
+  const paper = (improvements: any[]) => ({ id: 'p1', proposedImprovements: improvements })
+  const impModel = (title: string, inapplicable?: boolean) => ({
+    title,
+    detail: '',
+    kind: 'model',
+    ...(inapplicable ? { inapplicable: true } : {}),
+  })
+
+  it('collects only kind:model titles marked inapplicable', () => {
+    const p = paper([
+      impModel("White's Reality Check", true),
+      impModel('Applicable Model'),
+      { title: 'Some data', detail: '', kind: 'data', inapplicable: true },
+    ])
+    const keys = M.inapplicableModelTitles(p)
+    expect(keys["white's reality check"]).toBe(true)
+    expect(keys['applicable model']).toBeUndefined()
+    expect(keys['some data']).toBeUndefined()
+  })
+
+  it('drops a missing model matching an inapplicable improvement (case/space-insensitive)', () => {
+    const p = paper([impModel("White's  Reality Check", true)])
+    const missing = [
+      { name: "white's reality check", slug: 'wrc' },
+      { name: 'Technical Rules', slug: 'tr' },
+    ]
+    expect(M.visibleMissingModels(missing, p).map((m: any) => m.slug)).toEqual(['tr'])
+  })
+
+  it('returns every missing model when nothing is inapplicable', () => {
+    const missing = [{ name: 'A', slug: 'a' }, { name: 'B', slug: 'b' }]
+    expect(M.visibleMissingModels(missing, paper([impModel('A')])).length).toBe(2)
+    expect(M.visibleMissingModels(missing, undefined).length).toBe(2)
+  })
+})
+
 describe('status + category metadata', () => {
   it('labels and badges every status', () => {
     expect(M.MODEL_STATUSES).toEqual([

@@ -19,6 +19,7 @@ import type {
   ProposedImprovementKind,
   ProposedModel,
   RunXaiDigest,
+  StepAttributionSummary,
   TrainerDataFile,
   TrainerLeverSpec,
   TrainerManifest,
@@ -1195,6 +1196,10 @@ export function buildXaiNarrateUserContent(input: RunXaiDigest): string {
           : ` — sanity check FAILED (rank corr ${round2(input.attribution.sanityRankCorr ?? 0)}): the attribution barely changes under weight randomization, so it likely reflects the input/architecture, NOT what the model learned`
     lines.push(`Input attribution (${input.attribution.method || 'saliency'}): ${top}${sanity}.`)
   }
+  if (input.attribution?.driverCounts && input.attribution.driverCounts.length) {
+    const drivers = input.attribution.driverCounts.map(([k, c]) => `${k}=${c}`).join(', ')
+    lines.push(`Per-step drivers (dominant input group by decision count): ${drivers}.`)
+  }
   if (input.rewardBreakdown && Object.keys(input.rewardBreakdown).length) {
     lines.push(
       `Reward breakdown (why this reward): ` +
@@ -1812,6 +1817,8 @@ function coerceDecisionStep(raw: unknown): DecisionStep | undefined {
   if (typeof raw.state === 'string') step.state = raw.state
   const features = coerceNumberArray(raw.features)
   if (features && features.length) step.features = features
+  const saliencyByGroup = coerceNumberMap(raw.saliencyByGroup)
+  if (saliencyByGroup) step.saliencyByGroup = saliencyByGroup
   return step
 }
 
@@ -2110,6 +2117,38 @@ export function diffDecisionTraces(
   }
 }
 
+/**
+ * Summarize a trace's per-step {@link DecisionStep.saliencyByGroup} into which input GROUP drove each
+ * attributed decision over the rollout — the temporal companion to the run-aggregate `byGroup`. The
+ * dominant group per step is the largest |saliency| (ties broken by group name for determinism). Returns
+ * `undefined` when no step carries per-step group saliency (a run without it ingests normally). Pure.
+ */
+export function summarizeStepAttribution(
+  trace: Pick<DecisionTrace, 'steps'>,
+): StepAttributionSummary | undefined {
+  const perStep: StepAttributionSummary['perStep'] = []
+  const groups = new Set<string>()
+  const dominanceCounts: Record<string, number> = {}
+  for (const step of trace.steps) {
+    const entries = Object.entries(step.saliencyByGroup ?? {}).filter(([, v]) => isFiniteNumber(v))
+    if (!entries.length) continue
+    let dominantGroup = entries[0][0]
+    let best = Math.abs(entries[0][1])
+    for (const [group, value] of entries) {
+      groups.add(group)
+      const magnitude = Math.abs(value)
+      if (magnitude > best || (magnitude === best && group < dominantGroup)) {
+        best = magnitude
+        dominantGroup = group
+      }
+    }
+    dominanceCounts[dominantGroup] = (dominanceCounts[dominantGroup] ?? 0) + 1
+    perStep.push({ step: step.step, dominantGroup, byGroup: Object.fromEntries(entries) })
+  }
+  if (!perStep.length) return undefined
+  return { groups: [...groups].sort(), perStep, dominanceCounts, samples: perStep.length }
+}
+
 // --- Models catalog ----------------------------------------------------------
 
 const MODEL_CATEGORIES: ReadonlySet<string> = new Set(['rl', 'supervised', 'baseline', 'component'])
@@ -2359,6 +2398,42 @@ export function coerceAnalyzedPaperModels(raw: unknown): {
     proposedImprovements.push({ title, detail, kind })
   }
   return { matchModelIds, proposedModels, proposedImprovements }
+}
+
+/** Normalized identity for a proposed improvement — title, case- and whitespace-insensitive. */
+export function proposedImprovementKey(title: string): string {
+  return (title || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+/**
+ * Merge a fresh `incoming` list of proposed improvements (from a Find-models re-run) with the `existing`
+ * persisted ones, so a user's `inapplicable` mark SURVIVES: an incoming item matching an existing
+ * inapplicable one (by {@link proposedImprovementKey}) inherits `inapplicable:true` (never resurrected as
+ * active), and an inapplicable item the new run DROPPED is kept (appended) so it stays listed + referable.
+ * Applicable items follow the fresh list (dropped ones go, exactly as an overwrite would).
+ */
+export function mergeProposedImprovements(
+  existing: ProposedImprovement[] | undefined,
+  incoming: ProposedImprovement[],
+): ProposedImprovement[] {
+  const inapplicable = new Map<string, ProposedImprovement>()
+  for (const e of existing ?? []) {
+    if (e && e.inapplicable) {
+      const k = proposedImprovementKey(e.title)
+      if (k) inapplicable.set(k, e)
+    }
+  }
+  const out: ProposedImprovement[] = []
+  const seen = new Set<string>()
+  for (const item of incoming) {
+    const k = proposedImprovementKey(item.title)
+    if (k) seen.add(k)
+    out.push(k && inapplicable.has(k) ? { ...item, inapplicable: true } : item)
+  }
+  for (const [k, e] of inapplicable) {
+    if (!seen.has(k)) out.push(e)
+  }
+  return out
 }
 
 /** Of `proposed`, the models with NO catalog entry — matched by slug, by a catalog model's name slug, or

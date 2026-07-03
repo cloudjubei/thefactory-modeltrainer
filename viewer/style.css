@@ -1929,6 +1929,39 @@ button.block-chip:hover {
   margin-right: 4px;
   white-space: nowrap;
 }
+/* A proposed improvement the user marked "not applicable": kept for reference, visibly de-emphasised. */
+.paper-proposed-improvements li.improvement-inapplicable {
+  opacity: 0.55;
+}
+.paper-proposed-improvements li.improvement-inapplicable strong {
+  text-decoration: line-through;
+}
+.improvement-inapplicable-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.improvement-toggle {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 5px;
+  margin-left: 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.improvement-toggle:hover {
+  color: var(--fg);
+  border-color: var(--muted);
+}
 /* A hypothesis's importance-weight chip (⚖ 1…5) shown beside its verdict badge. */
 .hyp-weight-chip {
   font-size: 11px;

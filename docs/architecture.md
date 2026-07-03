@@ -82,9 +82,12 @@ project by its manifest's `recordType`.
   a completed-but-malformed summary is a failure (never silently ingested).
 - **Explainability is an opt-in artifact, not a code path**: a project may attach a domain-oblivious
   `artifacts.decisionTrace` (`DecisionTrace`) the hub's Explain view renders (action distribution,
-  per-action value over time, confidence, input attribution). The engine never computes it — each
-  project emits its own (BlackSwan replays its deterministic test once more to capture per-step
-  confidence/Q-values + saliency); the engine only soft-validates it (`validateDecisionTrace`,
+  per-action value over time, confidence, input attribution — run-aggregate AND per-step by input GROUP,
+  the temporal `saliencyByGroup` companion summarised by `summarizeStepAttribution`). The engine never
+  computes it — each project emits its own (BlackSwan replays its deterministic test once more to capture
+  per-step confidence/Q-values + saliency by a pluggable method: gradient-saliency, integrated-gradients,
+  occlusion, or permutation `tabular-shap`, each Adebayo model-randomization sanity-checked); the engine
+  only soft-validates it (`validateDecisionTrace`,
   dropping an unusable trace) so a run without one ingests normally. Two runs that share a
   dataset/window are diffable step-by-step (`diffDecisionTraces`) — the viewer's Compare pane reads how
   a lever tweak changed the model's DECISIONS, with a "heuristic, not causal" decision-quality verdict

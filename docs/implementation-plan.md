@@ -58,28 +58,26 @@ hypotheses; Models = the catalog of implemented/proposed models).
 
 ### 3. xAI — explain WHY the model acted (parallel track)
 
-The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is shipped (git +
-`docs/architecture.md`); the model-trainer side stays domain-oblivious. Pending:
+The xAI track is shipped (git + `docs/architecture.md`); the model-trainer side stays domain-oblivious.
+Shipped: the decision-trace spine + the full xAI tab (Phases 1–5); config-space exploration (surrogate +
+EI `acquisitionRecommendations` + fANOVA/Sobol + lever-coupling + PCA-projection); and reward/metric
+NORMALISATION (`normalizeByEnvironment` re-expressing each run as a robust z-score within its OWN
+environment, consumed by the Runs "By dataset/By environment" pooled view and the xAI current-run
+"By dataset"/"By environment" standing + `robustnessVerdict` tabs — pure logic in `comparison.js`,
+tested in `comparisonViewer.test.ts`); per-step group-saliency (**C1**) + permutation-SHAP attribution
+(**B1**, `decision_trace_method="tabular-shap"`, Adebayo-checked, no new dep). Remaining, in order:
 
-- **Config-space exploration.** The surrogate + EI acquisition (`acquisitionRecommendations`) +
-  fANOVA/Sobol importance + lever-coupling + PCA-projection stack is shipped (git + `docs/architecture.md`);
-  its visual check folds into the VISUAL pass above. Reward/metric NORMALISATION — the engine primitive is
-  shipped: `normalizeByEnvironment` (xaiUtils.ts + `xai.js` mirror + parity) re-expresses each run as a
-  robust z-score within its OWN environment (median centre / MAD scale over seed-folded setups, oriented
-  higher-better), so raw regime scale is stripped and a config is comparable ACROSS environments/datasets.
-  CONSUMED by the redesigned by-dataset/by-environment surfaces: (a) the Runs tab "By dataset/By environment"
-  view now POOLS every filtered run and groups by axis value, showing each group's [min·avg·max] of the
-  standard columns ranked by a chosen criterion (filters on) — "which dataset/environment wins"; (b) new xAI
-  current-run "By dataset"/"By environment" tabs pin THIS config across the axis, showing its raw
-  [min·avg·max] per axis value PLUS its normalised STANDING (robust z) + a `robustnessVerdict` (robust /
-  mixed / weak). Pure logic in `comparison.js` (`groupComparison`, `robustnessVerdict`), tested in
-  `comparisonViewer.test.ts`.
-- **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
-  sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
-  (attn-ppo only); generative counterfactual states (needs a GAN).
-- **Data-influence follow-ons (parked).** Per-step group-saliency + a mid-training-checkpoint trace —
-  both reuse the shipped `DecisionTraceDiff` spine but need a NEW BlackSwan emission first.
-- **PARKED — step-by-step ANIMATION replay** + scrubber. No trace-artifact change needed.
+- **B2 — attention-weight viz (attn/custom-net recipes only).** Attention modules compute the weight
+  matrices but discard them (`src/model/custom/attention.py`). Surface them into the trace on the BlackSwan
+  side, then add a 2-D matrix attribution type + heatmap renderer (the current renderer is 1-D only).
+- **C2 — mid-training-checkpoint trace.** Only one final checkpoint is saved today (`src/model/rl_model.py`;
+  the supervised path overwrites one best file). Add periodic retained checkpoints, emit a trace per
+  snapshot, then diff them via the shipped `DecisionTraceDiff` spine.
+
+Parked (real blocker / low value):
+
+- **Generative counterfactual states** — needs a net-new GAN/VAE over the observation space; none exists.
+- **Step-by-step ANIMATION replay** + scrubber. No trace-artifact change needed.
 
 ---
 

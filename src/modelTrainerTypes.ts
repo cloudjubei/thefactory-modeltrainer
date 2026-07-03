@@ -4,6 +4,7 @@ import type {
   DeepResearchTools,
   InferenceExecutor,
   LLMConfig,
+  ModelSelection,
   ResearchBudget,
 } from 'thefactory-tools/types'
 
@@ -387,6 +388,28 @@ export interface DecisionStep {
   state?: string
   /** Raw observation the policy saw; usually only in the full sidecar, omitted from the embedded trace. */
   features?: number[]
+  /**
+   * This step's saliency aggregated into the same named input GROUPS as {@link DecisionFeatureAttribution.byGroup}
+   * (e.g. the trading line groups by fidelity layer). Present only on attributed decisions, so the Explain view
+   * can show WHICH input group drove each decision over time — not just the run aggregate.
+   */
+  saliencyByGroup?: Record<string, number>
+}
+
+/**
+ * A temporal read of the per-step {@link DecisionStep.saliencyByGroup} across a rollout: which input GROUP
+ * drove each attributed decision, and how often each was the dominant driver. Summarized from the trace by
+ * {@link summarizeStepAttribution}; `undefined` when no step carries per-step group saliency.
+ */
+export interface StepAttributionSummary {
+  /** Sorted union of every input-group name that drove at least one attributed step. */
+  groups: string[]
+  /** Per attributed step: its group saliency and the dominant (highest |saliency|) group. */
+  perStep: Array<{ step: number; dominantGroup: string; byGroup: Record<string, number> }>
+  /** How many attributed steps each group was the dominant driver of. */
+  dominanceCounts: Record<string, number>
+  /** Number of attributed steps (steps carrying per-step group saliency). */
+  samples: number
 }
 
 /**
@@ -1544,6 +1567,13 @@ export interface ProposedImprovement {
   /** How it unlocks the untested claims — one or two sentences. */
   detail: string
   kind: ProposedImprovementKind
+  /**
+   * Marked NOT APPLICABLE to this project by the user (e.g. a proposed model that is really a statistical
+   * methodology, not something to train here). It stays LISTED for reference but is excluded from every
+   * count, coverage-gap, and "add to catalog" affordance — and the mark SURVIVES re-running Find models
+   * (the analyze merges rather than overwrites). Omitted/false ⇒ an active proposal.
+   */
+  inapplicable?: boolean
 }
 
 export interface ProposeTrainingHypothesesParams {
@@ -1655,7 +1685,12 @@ export interface ResearchTrainingPapersParams {
   count?: number
   /** Extra steering folded into the discovery goal AND each synthesis (e.g. "focus on execution costs"). */
   notes?: string
-  llmConfig: LLMConfig
+  /**
+   * Which model runs the research inferences — an API config OR a CLI agent. Discovery ranking, the
+   * verify panel, and the paper synthesis all run on THIS selection, so picking a CLI agent puts the
+   * more capable model on the whole research pipeline (the web SEARCH still uses the engine's webTools).
+   */
+  model: ModelSelection
   /** Per-call deep-research budget override, spread over the engine's construction-time budget. */
   researchBudget?: Partial<ResearchBudget>
   abortSignal?: AbortSignal
@@ -1973,12 +2008,18 @@ export interface RunXaiDigest {
   /** Full-rollout action label counts. */
   actionCounts?: Record<string, number>
   attribution?: {
-    /** Top input GROUPS by absolute saliency, `[group, value]`. */
+    /** Top input GROUPS by absolute saliency over the whole run, `[group, value]`. */
     topGroups: [string, number][]
     method?: string
     /** The Adebayo sanity-check verdict — a FAILED check means the attribution is untrustworthy. */
     sanityPassed?: boolean
     sanityRankCorr?: number
+    /**
+     * Per-step read: how many attributed decisions each input group was the DOMINANT driver of, `[group,
+     * count]` (top first) — the temporal companion to `topGroups`, present only when steps carry per-step
+     * group saliency. Answers "did the model's attention shift across the rollout, not just on average".
+     */
+    driverCounts?: [string, number][]
   }
   /** Named additive reward contributions ("why this reward"). */
   rewardBreakdown?: Record<string, number>
