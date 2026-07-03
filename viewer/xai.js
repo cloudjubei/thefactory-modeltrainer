@@ -391,6 +391,66 @@
     return canonicalConfigString(configWithout(run.config, ['seed'])) + '||' + datasetSigOf(run)
   }
 
+  // Mirror of xaiUtils.ts normalizeByEnvironment — per-environment robust standardisation of the criterion
+  // (median centre / MAD scale over the environment's seed-folded setups, oriented higher-better), so a
+  // config is comparable ACROSS environments/datasets. Kept byte-for-byte behavioural with the TS engine.
+  function robustScaleOf(values, center) {
+    var mad = medianOf(
+      values.map(function (v) {
+        return Math.abs(v - center)
+      }),
+    )
+    return mad > 0 ? 1.4826 * mad : stdOf(values)
+  }
+
+  function pickKeysXai(config, keys) {
+    var out = {}
+    keys.forEach(function (k) {
+      if (config[k] !== undefined) out[k] = config[k]
+    })
+    return out
+  }
+
+  function normalizeByEnvironment(runs, criterion, contextLevers) {
+    var valid = validRunsFor(runs, criterion)
+    var groups = new Map()
+    valid.forEach(function (r) {
+      var sig = contextLevers.length ? canonicalConfigString(pickKeysXai(r.config, contextLevers)) : ''
+      var g = groups.get(sig)
+      if (g) g.push(r)
+      else groups.set(sig, [r])
+    })
+    var orient = criterion.direction === 'min' ? -1 : 1
+    var out = {}
+    groups.forEach(function (group) {
+      var setups = groupBy(group, setupSignatureOf)
+      var setupVal = new Map()
+      setups.forEach(function (rs, sig) {
+        var vals = rs
+          .map(function (r) {
+            return criterionValueOf(r, criterion)
+          })
+          .filter(function (v) {
+            return v !== undefined
+          })
+        if (vals.length) setupVal.set(sig, iqm(vals))
+      })
+      var vals = Array.from(setupVal.values())
+      if (!vals.length) return
+      var center = medianOf(vals)
+      var scale = robustScaleOf(vals, center)
+      var zBySetup = new Map()
+      setupVal.forEach(function (v, sig) {
+        zBySetup.set(sig, scale > 0 ? (orient * (v - center)) / scale : 0)
+      })
+      group.forEach(function (r) {
+        var z = zBySetup.get(setupSignatureOf(r))
+        if (z !== undefined) out[r.key] = z
+      })
+    })
+    return out
+  }
+
   function freshSeeds(used, need) {
     var out = []
     var s = 0
@@ -1289,6 +1349,7 @@
     ablationPath: ablationPath,
     interactionGrid: interactionGrid,
     pcaProjection: pcaProjection,
+    normalizeByEnvironment: normalizeByEnvironment,
     recommendExperiments: recommendExperiments,
     // Exposed so the viewer can recompute a setup key with the SAME canonicalisation the engine uses.
     canonicalConfigString: canonicalConfigString,

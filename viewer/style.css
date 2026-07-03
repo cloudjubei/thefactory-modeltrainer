@@ -2303,6 +2303,72 @@ button.block-chip:hover {
 .cmp-th {
   cursor: pointer;
 }
+/* Pooled by-dataset/by-environment "rank by criterion" control row (below the standard Runs filter bar). */
+.cmp-rank-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 8px 0 4px;
+}
+.cmp-rank {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cmp-rank-dir {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+/* Robustness verdict badge (xAI "this config across datasets/environments" tab) + the this-run marker. */
+.cmp-verdict {
+  display: inline-block;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+.cmp-verdict.is-robust {
+  color: hsl(140, 70%, 32%);
+  background: hsl(140, 70%, 42%, 0.12);
+  border-color: hsl(140, 70%, 42%, 0.4);
+}
+.cmp-verdict.is-mixed {
+  color: hsl(38, 80%, 38%);
+  background: hsl(38, 90%, 50%, 0.12);
+  border-color: hsl(38, 90%, 50%, 0.4);
+}
+.cmp-verdict.is-weak {
+  color: hsl(0, 65%, 45%);
+  background: hsl(0, 70%, 50%, 0.1);
+  border-color: hsl(0, 70%, 50%, 0.35);
+}
+.xai-here {
+  color: #1d4ed8;
+  font-weight: 600;
+  font-size: 11px;
+}
+/* Two-line dataset/environment row in the xAI By-dataset/By-environment tabs: bold name, config beneath. */
+.cmp-axis-name {
+  font-size: 13px;
+}
+.cmp-axis-config {
+  font-size: 11px;
+  margin-top: 1px;
+  word-break: break-word;
+}
+.xai-axis-runs-btn {
+  white-space: nowrap;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+/* Immediate tab-switch loading state (painted before an async render's awaited reads resolve). */
+.tab-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+}
 .cmp-full {
   display: flex;
   flex-direction: column;

@@ -1,11 +1,11 @@
-// Pure logic behind the Runs tab's "By dataset" / "By environment" COMPARISON views. The point of these
-// views is to compare the SAME setup across the varying axis: to see how one model holds up across datasets
-// (or across environments), every OTHER lever must be pinned, else you'd be reading incomparable setups as
-// one number. So an axis (the levers with scope === the axis) VARIES down the rows, while the LOCKED levers
-// (every other lever except the ignored ones, e.g. seed) are held fixed via the toolbar dropdowns. Within a
-// row (one axis value, all locks satisfied) the remaining runs are the seeds; they aggregate to min/avg/max.
-// Pure + dual-loaded (browser `window.Comparison` + node `module.exports`) so the ACTUAL viewer logic is
-// unit-tested directly (see src/comparisonViewer.test.ts), matching datasets.js / bundleTable.js / badRuns.js.
+// Pure logic behind the "By dataset" / "By environment" views. An AXIS is the levers whose scope IS the axis
+// ('dataset' | 'environment'); a run's axis SIGNATURE is those levers' values. Two consumers share this:
+//   • the Runs tab POOLS every filtered run and groups by axis signature (which dataset/environment wins);
+//   • the xAI current-run tabs LOCK the non-axis levers to one config (matchesLock) and group by axis (how
+//     that one config holds up across the axis).
+// groupComparison reduces each group's per-column values to { min, avg, max }; robustnessVerdict classifies a
+// config's per-environment standings. Pure + dual-loaded (browser `window.Comparison` + node
+// `module.exports`) so the ACTUAL viewer logic is unit-tested directly (see src/comparisonViewer.test.ts).
 ;(function (root) {
   'use strict'
 
@@ -62,61 +62,6 @@
       if (String(cfg[k]) !== String(want)) return false
     }
     return true
-  }
-
-  // Numeric-aware ascending compare (both numeric ⇒ numeric order; else case-insensitive string order).
-  function compareValues(a, b) {
-    var an = typeof a === 'number' ? a : Number(typeof a === 'string' ? a.trim() : a)
-    var bn = typeof b === 'number' ? b : Number(typeof b === 'string' ? b.trim() : b)
-    if (Number.isFinite(an) && Number.isFinite(bn)) return an - bn
-    return String(a).toLowerCase().localeCompare(String(b).toLowerCase())
-  }
-
-  // Per locked lever, the distinct values actually PRESENT across the runs (string-coerced, numeric-aware
-  // sorted) — the options each lock dropdown offers, so numeric levers (no manifest `choices`) work too.
-  function distinctLockValues(manifest, axis, runs) {
-    var out = {}
-    var keys = lockedLeverKeys(manifest, axis)
-    for (var i = 0; i < keys.length; i++) {
-      var key = keys[i]
-      var seen = new Set()
-      for (var j = 0; j < (runs || []).length; j++) {
-        var cfg = (runs[j] && runs[j].summary && runs[j].summary.config) || {}
-        var v = cfg[key]
-        if (v !== undefined && v !== null && v !== '') seen.add(String(v))
-      }
-      out[key] = Array.from(seen).sort(compareValues)
-    }
-    return out
-  }
-
-  // The locked-lever values of the BEST run (by objective, honouring the direction) — the initial lock, so
-  // the view opens comparing today's champion setup across the axis. Falls back to the first run; {} if none.
-  function bestRunLock(manifest, axis, runs, direction) {
-    var list = (runs || []).filter(function (r) {
-      return r && r.summary
-    })
-    if (!list.length) return {}
-    var withObj = list.filter(function (r) {
-      return Number.isFinite(Number(r.summary.objective))
-    })
-    var best
-    if (withObj.length) {
-      best = withObj.reduce(function (acc, r) {
-        var v = Number(r.summary.objective)
-        var av = Number(acc.summary.objective)
-        if (direction === 'min') return v < av ? r : acc
-        return v > av ? r : acc
-      })
-    } else {
-      best = list[0]
-    }
-    var cfg = best.summary.config || {}
-    var lock = {}
-    lockedLeverKeys(manifest, axis).forEach(function (key) {
-      if (cfg[key] !== undefined && cfg[key] !== null) lock[key] = String(cfg[key])
-    })
-    return lock
   }
 
   function mean(nums) {
@@ -200,13 +145,27 @@
     })
   }
 
+  // Classify a config's ROBUSTNESS from its per-environment standings (robust z from
+  // Xai.normalizeByEnvironment — how far it stands above/below each environment's TYPICAL config, higher
+  // better). 'robust' = never below typical (min >= 0); 'weak' = never above typical (max <= 0); 'mixed' =
+  // strong in some, below typical in others. Needs >= 2 environments to mean anything, else 'n/a'.
+  function robustnessVerdict(standings) {
+    var vals = (standings || []).filter(function (v) {
+      return typeof v === 'number' && isFinite(v)
+    })
+    if (vals.length < 2) return { label: 'n/a', n: vals.length, min: NaN, max: NaN }
+    var min = Math.min.apply(null, vals)
+    var max = Math.max.apply(null, vals)
+    var label = min >= 0 ? 'robust' : max <= 0 ? 'weak' : 'mixed'
+    return { label: label, n: vals.length, min: min, max: max }
+  }
+
   var api = {
     axisLeverKeys: axisLeverKeys,
+    robustnessVerdict: robustnessVerdict,
     lockedLeverKeys: lockedLeverKeys,
     runAxisSignature: runAxisSignature,
     matchesLock: matchesLock,
-    distinctLockValues: distinctLockValues,
-    bestRunLock: bestRunLock,
     groupComparison: groupComparison,
     sortComparisonGroups: sortComparisonGroups,
   }

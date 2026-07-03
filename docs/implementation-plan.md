@@ -61,12 +61,19 @@ hypotheses; Models = the catalog of implemented/proposed models).
 The xAI track — decision-trace spine + the full xAI tab (Phases 1–5) — is shipped (git +
 `docs/architecture.md`); the model-trainer side stays domain-oblivious. Pending:
 
-- **Config-space exploration — reward/metric NORMALISATION (the one pending follow-on).** The
-  surrogate + EI acquisition (`acquisitionRecommendations`) + fANOVA/Sobol importance + lever-coupling +
-  PCA-projection stack is shipped (git + `docs/architecture.md`); its visual check folds into the VISUAL
-  pass above. Remaining: reward/metric NORMALISATION so cross-run/cross-setup comparison isn't distorted
-  by raw scale (which quantities, against what baseline) — fold into the surrogate/criterion layer,
-  deterministic + parity-mirrored like the rest of the engine. (Cited deep-research report pending.)
+- **Config-space exploration.** The surrogate + EI acquisition (`acquisitionRecommendations`) +
+  fANOVA/Sobol importance + lever-coupling + PCA-projection stack is shipped (git + `docs/architecture.md`);
+  its visual check folds into the VISUAL pass above. Reward/metric NORMALISATION — the engine primitive is
+  shipped: `normalizeByEnvironment` (xaiUtils.ts + `xai.js` mirror + parity) re-expresses each run as a
+  robust z-score within its OWN environment (median centre / MAD scale over seed-folded setups, oriented
+  higher-better), so raw regime scale is stripped and a config is comparable ACROSS environments/datasets.
+  CONSUMED by the redesigned by-dataset/by-environment surfaces: (a) the Runs tab "By dataset/By environment"
+  view now POOLS every filtered run and groups by axis value, showing each group's [min·avg·max] of the
+  standard columns ranked by a chosen criterion (filters on) — "which dataset/environment wins"; (b) new xAI
+  current-run "By dataset"/"By environment" tabs pin THIS config across the axis, showing its raw
+  [min·avg·max] per axis value PLUS its normalised STANDING (robust z) + a `robustnessVerdict` (robust /
+  mixed / weak). Pure logic in `comparison.js` (`groupComparison`, `robustnessVerdict`), tested in
+  `comparisonViewer.test.ts`.
 - **Deeper attribution (parked — lower value / heavier).** TabularSHAP/DeepSHAP (likely fails the
   sanity-check like IG — input-magnitude-dominated — + needs a tree-surrogate dep); attention-weight viz
   (attn-ppo only); generative counterfactual states (needs a GAN).

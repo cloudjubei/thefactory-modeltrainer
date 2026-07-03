@@ -94,77 +94,6 @@ describe('matchesLock', () => {
     expect(C.matchesLock({}, r)).toBe(true)
   })
 })
-
-describe('distinctLockValues', () => {
-  it('lists the present values per locked lever, numeric-aware sorted', () => {
-    const runs = [
-      mkRun(
-        { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', stop_loss: 0.1 },
-        5,
-      ),
-      mkRun(
-        {
-          model_name: 'dqn',
-          net_arch: '[256,256]',
-          asset: 'ETH',
-          timeframe: '1h',
-          stop_loss: 0.02,
-        },
-        8,
-      ),
-      mkRun(
-        { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', stop_loss: 0.05 },
-        6,
-      ),
-    ]
-    const vals = C.distinctLockValues(manifest, 'dataset', runs)
-    expect(vals.model_name).toEqual(['dqn', 'ppo'])
-    expect(vals.net_arch).toEqual(['[128]', '[256,256]'])
-    expect(vals.stop_loss).toEqual(['0.02', '0.05', '0.1'])
-    expect(vals.asset).toBeUndefined()
-  })
-})
-
-describe('bestRunLock', () => {
-  const runs = [
-    mkRun(
-      {
-        model_name: 'ppo',
-        net_arch: '[128]',
-        asset: 'BTC',
-        timeframe: '1d',
-        stop_loss: 0.1,
-        seed: 1,
-      },
-      5,
-    ),
-    mkRun(
-      {
-        model_name: 'dqn',
-        net_arch: '[256,256]',
-        asset: 'ETH',
-        timeframe: '1h',
-        stop_loss: 0.02,
-        seed: 2,
-      },
-      20,
-    ),
-  ]
-  it('locks to the best run by objective (max direction), locked levers only', () => {
-    expect(C.bestRunLock(manifest, 'dataset', runs, 'max')).toEqual({
-      model_name: 'dqn',
-      net_arch: '[256,256]',
-      stop_loss: '0.02',
-    })
-  })
-  it('honours a min-direction objective', () => {
-    expect(C.bestRunLock(manifest, 'dataset', runs, 'min').model_name).toBe('ppo')
-  })
-  it('returns {} for no runs', () => {
-    expect(C.bestRunLock(manifest, 'dataset', [], 'max')).toEqual({})
-  })
-})
-
 describe('groupComparison', () => {
   const items = [
     {
@@ -241,5 +170,35 @@ describe('sortComparisonGroups', () => {
     const copy = groups.slice()
     C.sortComparisonGroups(groups, 'objective', 'asc')
     expect(groups).toEqual(copy)
+  })
+})
+
+describe('robustnessVerdict', () => {
+  it('is robust when the config is at/above its environments’ typical config everywhere (min standing >= 0)', () => {
+    const v = C.robustnessVerdict([1.2, 0.4, 0.1])
+    expect(v.label).toBe('robust')
+    expect(v.min).toBeCloseTo(0.1)
+    expect(v.max).toBeCloseTo(1.2)
+  })
+
+  it('is mixed when strong in some environments but below typical in others', () => {
+    const v = C.robustnessVerdict([1.5, -0.8])
+    expect(v.label).toBe('mixed')
+  })
+
+  it('is weak when below its environments’ typical config everywhere (max standing <= 0)', () => {
+    const v = C.robustnessVerdict([-0.3, -1.1])
+    expect(v.label).toBe('weak')
+  })
+
+  it('is n/a with fewer than two environments (nothing to compare across)', () => {
+    expect(C.robustnessVerdict([0.9]).label).toBe('n/a')
+    expect(C.robustnessVerdict([]).label).toBe('n/a')
+  })
+
+  it('ignores non-finite standings', () => {
+    const v = C.robustnessVerdict([NaN, 0.5, 0.2, undefined as any])
+    expect(v.label).toBe('robust')
+    expect(v.n).toBe(2)
   })
 })

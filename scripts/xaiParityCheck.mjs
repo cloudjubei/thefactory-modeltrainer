@@ -50,6 +50,30 @@ const eq = (a, b, label) => {
 }
 eq(ts.iqm([1, 2, 3, 4, 100]), mirror.iqm([1, 2, 3, 4, 100]), 'iqm')
 {
+  // normalizeByEnvironment: two environments (context lever `wf`) at VERY different raw scales + a seeded
+  // config, exercising the seed-fold, orientation, and whole-space (no context lever) paths.
+  const nr = [
+    run('nA1', { wf: '2022', lr: 0.1 }, 10, { durationMs: 30 }),
+    run('nA2', { wf: '2022', lr: 0.2 }, 20, { durationMs: 20 }),
+    run('nA3', { wf: '2022', lr: 0.3 }, 30, { durationMs: 10 }),
+    run('nB1', { wf: '2023', lr: 0.1 }, 100, { durationMs: 300 }),
+    run('nB2', { wf: '2023', lr: 0.2 }, 200, { durationMs: 200, seed: 0 }),
+    run('nB2b', { wf: '2023', lr: 0.2 }, 240, { durationMs: 210, seed: 1 }),
+    run('nB3', { wf: '2023', lr: 0.3 }, 300, { durationMs: 100 }),
+  ]
+  for (const crit of [MAX, MIN])
+    eq(
+      ts.normalizeByEnvironment(nr, crit, ['wf']),
+      mirror.normalizeByEnvironment(nr, crit, ['wf']),
+      'normalizeByEnvironment ' + crit.key,
+    )
+  eq(
+    ts.normalizeByEnvironment(nr, MAX, []),
+    mirror.normalizeByEnvironment(nr, MAX, []),
+    'normalizeByEnvironment whole-space',
+  )
+}
+{
   const pts = [
     [10, 5],
     [8, 2],

@@ -1231,6 +1231,63 @@ function summarizeEnvironments(
   return out.sort((a, b) => b.runCount - a.runCount)
 }
 
+/** Robust scale for standardisation: 1.4826·MAD (≈ σ for normal data), falling back to the sample std
+ * when the MAD is 0 (a majority of tied values). 0 only when the values have no spread at all. */
+function robustScaleOf(values: number[], center: number): number {
+  const mad = medianOf(values.map((v) => Math.abs(v - center)))
+  return mad > 0 ? 1.4826 * mad : stdOf(values)
+}
+
+/**
+ * Per-environment robust standardisation of a criterion — the reward/metric NORMALISATION lens. Each run
+ * is re-expressed as how far its CONFIG stands above (positive) or below (negative) its OWN environment's
+ * typical setup, in robust z-units (median centre / MAD scale over the environment's seed-folded setups),
+ * oriented so higher is ALWAYS better. This strips raw regime scale — a bull window's returns dwarf a bear
+ * window's — so a config becomes comparable ACROSS environments/datasets: "robustly top-of-distribution"
+ * vs "lucky in one regime". The baseline each run is measured against is its environment's median config.
+ *
+ * `contextLevers` are the environment/dataset levers that partition runs into environments (none ⇒ the
+ * whole set is one implicit environment). Deterministic. Returns `run.key → standardised value`; runs with
+ * no criterion value are omitted, and a zero-spread environment maps every run to a neutral 0.
+ */
+export function normalizeByEnvironment(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+  contextLevers: string[],
+): Record<string, number> {
+  const valid = validRunsFor(runs, criterion)
+  const groups = new Map<string, AnalysisRun[]>()
+  for (const r of valid) {
+    const sig = contextLevers.length ? canonicalConfigString(pickKeys(r.config, contextLevers)) : ''
+    const g = groups.get(sig)
+    if (g) g.push(r)
+    else groups.set(sig, [r])
+  }
+  const orient = criterion.direction === 'min' ? -1 : 1
+  const out: Record<string, number> = {}
+  for (const group of groups.values()) {
+    // Set the scale from seed-folded SETUPS so a many-seeded config can't skew it; standardise each setup,
+    // then share that config's standing with every run (seed) behind it.
+    const setups = aggregateToSetupRuns(group, criterion)
+    const setupVals = setups
+      .map((s) => criterionValueOf(s, criterion))
+      .filter((v): v is number => v !== undefined)
+    if (!setupVals.length) continue
+    const center = medianOf(setupVals)
+    const scale = robustScaleOf(setupVals, center)
+    const zBySetup = new Map<string, number>()
+    for (const s of setups) {
+      const v = criterionValueOf(s, criterion)
+      if (v !== undefined) zBySetup.set(setupSignatureOf(s), scale > 0 ? (orient * (v - center)) / scale : 0)
+    }
+    for (const r of group) {
+      const z = zBySetup.get(setupSignatureOf(r))
+      if (z !== undefined) out[r.key] = z
+    }
+  }
+  return out
+}
+
 /**
  * The whole-space bundle, scoped to ONE environment over the MODEL levers. `opts.contextLevers` are the
  * environment + dataset levers (market mechanics + which data): the analysis filters to a single

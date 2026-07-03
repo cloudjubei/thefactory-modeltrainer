@@ -14,6 +14,7 @@ import {
   iqm,
   leverCouplings,
   leverImportances,
+  normalizeByEnvironment,
   normalizeConditionalLevers,
   pcaProjection,
   ofatContrasts,
@@ -987,5 +988,83 @@ describe('normalizeConditionalLevers', () => {
     const aw = { C: { B: ['on'] }, B: { A: ['x'] } }
     expect(normalizeConditionalLevers(cfg, aw)).toEqual({ A: 'other', B: 'n/a', C: 'n/a' })
     expect(cfg).toEqual({ A: 'other', B: 'on', C: 5 }) // input not mutated
+  })
+})
+
+describe('normalizeByEnvironment', () => {
+  const CTX = ['env']
+
+  it('re-expresses each run relative to its OWN environment so cross-environment comparison is scale-fair', () => {
+    // env A raw [10,20,30], env B raw [100,200,300]: B dwarfs A on RAW scale, but the relative structure is
+    // identical. The top config of each env must standardise to the SAME value; the median config to ~0.
+    const runs = [
+      run('a-lo', { env: 'A', lr: 1 }, 10),
+      run('a-mid', { env: 'A', lr: 2 }, 20),
+      run('a-hi', { env: 'A', lr: 3 }, 30),
+      run('b-lo', { env: 'B', lr: 1 }, 100),
+      run('b-mid', { env: 'B', lr: 2 }, 200),
+      run('b-hi', { env: 'B', lr: 3 }, 300),
+    ]
+    const z = normalizeByEnvironment(runs, MAX, CTX)
+    expect(z['a-mid']).toBeCloseTo(0)
+    expect(z['b-mid']).toBeCloseTo(0)
+    expect(z['a-hi']).toBeCloseTo(z['b-hi']) // scale-fair across the two very-different-magnitude environments
+    expect(z['a-hi']).toBeGreaterThan(0)
+    expect(z['a-lo']).toBeCloseTo(z['b-lo'])
+    expect(z['a-lo']).toBeLessThan(0)
+  })
+
+  it('orients so higher is always better — for a min criterion a LOWER raw value scores HIGHER', () => {
+    const MIN: AnalysisCriterion = { key: 'durationMs', direction: 'min' }
+    const runs = [
+      run('fast', { env: 'A', lr: 1 }, 0, { durationMs: 10 }),
+      run('mid', { env: 'A', lr: 2 }, 0, { durationMs: 20 }),
+      run('slow', { env: 'A', lr: 3 }, 0, { durationMs: 30 }),
+    ]
+    const z = normalizeByEnvironment(runs, MIN, CTX)
+    expect(z['fast']).toBeGreaterThan(0)
+    expect(z['slow']).toBeLessThan(0)
+  })
+
+  it('maps a zero-spread environment (all setups equal) to neutral 0', () => {
+    const runs = [run('x', { env: 'A', lr: 1 }, 5), run('y', { env: 'A', lr: 2 }, 5)]
+    const z = normalizeByEnvironment(runs, MAX, CTX)
+    expect(z['x']).toBe(0)
+    expect(z['y']).toBe(0)
+  })
+
+  it('omits runs with no criterion value', () => {
+    const runs = [
+      run('a', { env: 'A', lr: 1 }, 10),
+      run('b', { env: 'A', lr: 2 }, 20),
+      run('c', { env: 'A', lr: 3 }, NaN),
+    ]
+    const z = normalizeByEnvironment(runs, MAX, CTX)
+    expect('c' in z).toBe(false)
+    expect('a' in z).toBe(true)
+  })
+
+  it('sets the environment scale from seed-folded SETUPS, so a many-seeded config cannot skew it', () => {
+    // Two configs (setups): lr=1 at 10 (3 seeds), lr=2 at 30 (1 seed). Scale is set by the 2 setups, not 4
+    // runs; median 20, so the two setups land symmetric around 0 and every seed of a config shares its z.
+    const runs = [
+      run('a1', { env: 'A', lr: 1 }, 10, { seed: 0 }),
+      run('a2', { env: 'A', lr: 1 }, 10, { seed: 1 }),
+      run('a3', { env: 'A', lr: 1 }, 10, { seed: 2 }),
+      run('b1', { env: 'A', lr: 2 }, 30, { seed: 0 }),
+    ]
+    const z = normalizeByEnvironment(runs, MAX, CTX)
+    expect(z['a1']).toBe(z['a2'])
+    expect(z['a2']).toBe(z['a3'])
+    expect(z['b1']).toBeCloseTo(-z['a1'])
+    expect(z['a1']).toBeLessThan(0)
+  })
+
+  it('with no context levers, standardises over the whole set as one implicit environment', () => {
+    const runs = [run('a', { lr: 1 }, 10), run('b', { lr: 2 }, 20), run('c', { lr: 3 }, 30)]
+    const z = normalizeByEnvironment(runs, MAX, [])
+    expect(z['b']).toBeCloseTo(0)
+    expect(z['c']).toBeGreaterThan(0)
+    expect(z['a']).toBeLessThan(0)
   })
 })

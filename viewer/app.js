@@ -228,14 +228,12 @@ let runsHideBad = false
 // `<recordType>-bad-run-def` record; defaults to failed + degenerate + under-traded. Editable via the chip.
 let badRunDefCache = window.BadRuns.defaultBadRunDefinition()
 let runsVersionFilter = ''
-// The By dataset / By environment COMPARISON views lock every non-axis lever so the same setup is compared
-// across the varying axis. `comparisonLock` holds the chosen locked-lever values per axis (set to the best
-// run's setup on first entry); `comparisonAgg` picks how each cell reduces its seeds ('avg' | 'full' =
-// min·avg·max); `comparisonSortKey`/`Dir` drive the sortable table.
-let comparisonLock = { dataset: null, environment: null }
-let comparisonAgg = 'avg'
-let comparisonSortKey = 'axis'
-let comparisonSortDir = 'asc'
+// The By dataset / By environment views POOL every filtered run and group it by the axis value.
+// `comparisonAgg` picks how each cell reduces the group ('avg' | 'full' = min·avg·max); `comparisonSortKey`/
+// `Dir` drive the sortable table + the "rank by criterion" control.
+let comparisonAgg = 'full'
+let comparisonSortKey = 'objective'
+let comparisonSortDir = 'desc'
 // The last-rendered comparison rows, keyed by axis signature → { keys, label }, so a row click can drill
 // into exactly those runs.
 let comparisonGroupsCache = new Map()
@@ -1869,10 +1867,9 @@ function resetDashboardState() {
   runsViewMode = 'runs'
   runsHideBad = false
   allRunsCache = []
-  comparisonLock = { dataset: null, environment: null }
   comparisonGroupsCache = new Map()
-  comparisonSortKey = 'axis'
-  comparisonSortDir = 'asc'
+  comparisonSortKey = 'objective'
+  comparisonSortDir = 'desc'
   comparisonAgg = 'avg'
   modelStatsCache = null
   modelStatsStale = false
@@ -3563,14 +3560,14 @@ function runsViewModeHtml() {
     ? btn(
         'dataset',
         'By dataset',
-        'Compare ONE setup across datasets: lock every other lever, vary the dataset (asset / window / fidelity). Rows = datasets.',
+        'Which DATASET produces the best results: pool every filtered run by dataset (asset / window / fidelity) and rank by a criterion. Rows = datasets, cells = min · avg · max.',
       )
     : ''
   const envBtn = hasEnvLevers()
     ? btn(
         'environment',
         'By environment',
-        'Compare ONE setup across environments: lock every other lever, vary the environment (fee / TP-SL regime). Rows = environments.',
+        'Which ENVIRONMENT produces the best results: pool every filtered run by environment (fee / TP-SL regime) and rank by a criterion. Rows = environments, cells = min · avg · max.',
       )
     : ''
   return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}</div>`
@@ -3703,117 +3700,92 @@ function comparisonCellHtml(col, stat) {
   const cls = colorOf(stat.avg)
   return cls ? `<span class="${cls}">${fmt(stat.avg)}</span>` : fmt(stat.avg)
 }
-// The comparison toolbar: the shared view-mode selector, the LOCKED-lever dropdowns (concrete values only —
-// there is deliberately no "any", so the comparison is always apples-to-apples), the Averages/Full control,
-// and the Hide-bad chip. No text/criteria filters — the whole point is a pinned setup.
-function comparisonToolbarHtml(axis, lock, lockValues, lockedKeys, groupCount, runCount) {
+// The pooled-comparison control row: pick which criterion RANKS the datasets/environments (and its
+// direction), plus the Averages/Full cell toggle. The standard Runs filter bar (runsToolbarHtml) is rendered
+// ABOVE this, so every Runs filter — search, lever/status/version dropdowns, hide-bad — narrows the pool.
+function comparisonRankControlsHtml(axis, cols) {
   const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
-  const locks = lockedKeys
-    .map((key) => {
-      const opts = lockValues[key]
-        .map(
-          (v) =>
-            `<option value="${escapeHtml(v)}"${String(lock[key]) === v ? ' selected' : ''}>${escapeHtml(v)}</option>`,
-        )
-        .join('')
-      return `<label class="cmp-lock-label"><span class="cmp-lock-key">${escapeHtml(key)}</span><select class="cmp-lock" data-lever="${escapeHtml(key)}">${opts}</select></label>`
-    })
+  const rankOpts = [
+    { id: 'axis', label: `${axisNoun} name` },
+    { id: '#runs', label: '# runs' },
+  ].concat(cols.map((c) => ({ id: c.id, label: c.label })))
+  const sel = rankOpts
+    .map(
+      (o) =>
+        `<option value="${escapeHtml(o.id)}"${comparisonSortKey === o.id ? ' selected' : ''}>${escapeHtml(o.label)}</option>`,
+    )
     .join('')
+  const dirLabel = comparisonSortDir === 'asc' ? '▲ lowest first' : '▼ highest first'
   const agg = `<div class="cmp-agg" role="group" aria-label="Cell aggregation">
-      <button type="button" class="cmp-agg-btn${comparisonAgg === 'avg' ? ' is-active' : ''}" data-agg="avg"${helpAttr('Each cell shows the AVERAGE across the setup’s seeds.')}>Averages</button>
-      <button type="button" class="cmp-agg-btn${comparisonAgg === 'full' ? ' is-active' : ''}" data-agg="full"${helpAttr('Each cell shows min · avg · max across the setup’s seeds, stacked.')}>Full</button>
+      <button type="button" class="cmp-agg-btn${comparisonAgg === 'avg' ? ' is-active' : ''}" data-agg="avg"${helpAttr('Each cell shows the AVERAGE across the ' + axisNoun + '’s runs.')}>Averages</button>
+      <button type="button" class="cmp-agg-btn${comparisonAgg === 'full' ? ' is-active' : ''}" data-agg="full"${helpAttr('Each cell shows min · avg · max across the ' + axisNoun + '’s runs, stacked.')}>Full</button>
     </div>`
-  return `<div class="runs-toolbar cmp-toolbar">
-    ${runsViewModeHtml()}
-    <div class="cmp-controls">
-      <div class="cmp-locks"${helpAttr('Locked levers — pinned so every row compares the SAME setup across the ' + axisNoun + '. Change one to compare a different setup.')}>${locks || '<span class="card-sub">No lockable levers for this project.</span>'}</div>
-      ${agg}
-      ${hideBadChipHtml()}
-    </div>
-    <span class="runs-count">${groupCount} ${escapeHtml(axisNoun)}${groupCount === 1 ? '' : 's'} · ${runCount} runs</span>
+  return `<div class="cmp-rank-bar">
+    <label class="cmp-rank"${helpAttr('Which criterion decides the best ' + axisNoun + ' — ranks the rows by that column’s average.')}><span class="card-sub">Rank ${escapeHtml(axisNoun)}s by</span>
+      <select id="cmp-rank-key" class="app-select">${sel}</select>
+      <button type="button" id="cmp-rank-dir" class="ghost-btn cmp-rank-dir">${dirLabel}</button>
+    </label>
+    ${agg}
   </div>`
 }
-// Render the whole comparison view: lock the non-axis levers (best-run defaults on first entry), group the
-// matching runs by the axis value, aggregate each group's seeds, and paint a sortable table.
+// Render the Runs "By dataset / By environment" view: POOL every run the standard Runs filters keep, group by
+// the axis value, and show each group's [min · avg · max] of the standard Runs columns — "which
+// dataset/environment produces the best results", ranked by a chosen criterion.
 function renderComparisonView(body) {
   const axis = runsViewMode
   const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
   closeRunDetail()
   renderCompare()
+  const cols = comparisonColumns()
   if (!runsCache.length) {
     setHtml(
       body,
-      `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">Click <strong>Refresh</strong> (top right) to load all runs for this comparison.</div>`,
+      `${runsToolbarHtml(0, 0)}<div class="empty-hint">Click <strong>Refresh</strong> (top right) to load all runs for this view.</div>`,
     )
     return
   }
-  // Only real completed runs are comparable (failed/invalid carry no metrics); Hide-bad drops more when on.
-  const eligible = runsCache.filter(
+  // Pool every run the standard filters keep, minus the non-comparable (failed/invalid, or missing this
+  // axis's levers so it can't be placed). Hide-bad + the filter dropdowns/search flow through applyRunsFilters.
+  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
+  const filtered = applyRunsFilters(runsCache).filter(
     (r) =>
       r.summary &&
       r.summary.status !== 'failed' &&
       r.summary.status !== 'invalid' &&
-      (!runsHideBad || !runIsBad(r)),
+      axisKeys.some((k) => (r.summary.config || {})[k] !== undefined),
   )
-  if (!eligible.length) {
-    const why = runsHideBad
-      ? 'No completed runs to compare — every loaded run failed or was dropped by Hide-bad. Untick Hide bad runs, or run some.'
-      : 'No completed runs to compare yet — every loaded run failed or is invalid.'
-    setHtml(
-      body,
-      `${comparisonToolbarHtml(axis, {}, {}, [], 0, 0)}<div class="empty-hint">${why}</div>`,
-    )
+  const toolbar = runsToolbarHtml(filtered.length, runsCache.length)
+  const controls = comparisonRankControlsHtml(axis, cols)
+  if (!filtered.length) {
+    const why = hasActiveRunsFilters()
+      ? 'No runs match the active filters — clear a filter above, or Refresh.'
+      : `No completed runs with a ${escapeHtml(axisNoun)} to compare yet — run some, then Refresh.`
+    setHtml(body, `${toolbar}${controls}<div class="empty-hint">${why}</div>`)
     return
   }
-  const lockValues = window.Comparison.distinctLockValues(manifest, axis, eligible)
-  const lockedKeys = window.Comparison.lockedLeverKeys(manifest, axis).filter(
-    (k) => (lockValues[k] || []).length,
-  )
-  if (!comparisonLock[axis])
-    comparisonLock[axis] = window.Comparison.bestRunLock(
-      manifest,
-      axis,
-      eligible,
-      objectiveDirection(),
-    )
-  const lock = comparisonLock[axis]
-  // Never allow an unlocked lever: default any missing/stale value to the first present one; drop dead keys.
-  for (const k of lockedKeys)
-    if (lock[k] === undefined || !lockValues[k].includes(String(lock[k])))
-      lock[k] = lockValues[k][0]
-  for (const k of Object.keys(lock)) if (!lockedKeys.includes(k)) delete lock[k]
-  const matched = eligible.filter((r) => window.Comparison.matchesLock(lock, r))
-  const cols = comparisonColumns()
-  const items = matched.map((r) => ({
-    key: r.key,
-    axisSig: window.Comparison.runAxisSignature(manifest, axis, r),
-    axisLabel: comparisonAxisLabel(axis, r),
-    values: Object.fromEntries(cols.map((c) => [c.id, c.valueOf(r)])),
-  }))
+  // Label is a pure function of the axis-lever values, so resolve it ONCE per distinct axis signature — never
+  // per run. comparisonAxisLabel → runDatasetName rebuilds the dataset table on each call, so calling it per
+  // run over a big pool froze the tab for tens of seconds; this collapses it to O(distinct datasets).
+  const labelCache = new Map()
+  const items = filtered.map((r) => {
+    const axisSig = window.Comparison.runAxisSignature(manifest, axis, r)
+    if (!labelCache.has(axisSig)) labelCache.set(axisSig, comparisonAxisLabel(axis, r))
+    return {
+      key: r.key,
+      axisSig,
+      axisLabel: labelCache.get(axisSig),
+      values: Object.fromEntries(cols.map((c) => [c.id, c.valueOf(r)])),
+    }
+  })
   let groups = window.Comparison.groupComparison(items)
   groups = window.Comparison.sortComparisonGroups(groups, comparisonSortKey, comparisonSortDir)
   comparisonGroupsCache = new Map(
     groups.map((g) => [g.axisSig, { keys: g.keys, label: g.axisLabel }]),
   )
-  const toolbar = comparisonToolbarHtml(
-    axis,
-    lock,
-    lockValues,
-    lockedKeys,
-    groups.length,
-    matched.length,
-  )
-  if (!groups.length) {
-    setHtml(
-      body,
-      `${toolbar}<div class="empty-hint">No runs match this locked setup — change a locked lever above, or Refresh after running it.</div>`,
-    )
-    return
-  }
   const arrow = (key) =>
     comparisonSortKey === key ? (comparisonSortDir === 'asc' ? ' ▲' : ' ▼') : ''
   const axisHead = `<th class="cmp-th" data-cmp-sort="axis">${axis === 'dataset' ? 'Dataset' : 'Environment'}${arrow('axis')}</th>`
-  const runsHead = `<th class="cmp-th num" data-cmp-sort="#runs"${helpAttr('How many runs (seeds) back this row.')}># runs${arrow('#runs')}</th>`
+  const runsHead = `<th class="cmp-th num" data-cmp-sort="#runs"${helpAttr('How many runs (all configs, all seeds) sit in this ' + axisNoun + '.')}># runs${arrow('#runs')}</th>`
   const colHead = cols
     .map(
       (c) =>
@@ -3832,11 +3804,10 @@ function renderComparisonView(body) {
       </tr>`
     })
     .join('')
-  const lockDesc = lockedKeys.map((k) => `${k}=${lock[k]}`).join(' · ')
-  const legend = `<p class="runs-legend">Each row is one ${escapeHtml(axisNoun)} for the locked setup${lockDesc ? ` (${escapeHtml(lockDesc)})` : ''}; cells aggregate that setup's seeds (${comparisonAgg === 'full' ? 'min · avg · max, stacked' : 'average'}). Click a header to sort, or a row to open its runs.</p>`
+  const legend = `<p class="runs-legend">Each row pools <strong>every filtered run</strong> in one ${escapeHtml(axisNoun)} (all configs + seeds); cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across them. Rank by a criterion above (or click a header); click a row to open its runs. Use the filters to drop bad runs first.</p>`
   setHtml(
     body,
-    `${toolbar}<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>${axisHead}${runsHead}${colHead}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
+    `${toolbar}${controls}<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>${axisHead}${runsHead}${colHead}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
   )
 }
 // When drilled into a single setup, an editor for that setup's conclusion note —
@@ -5456,6 +5427,8 @@ function xaiAllTabs(bundle, criterion) {
   ]
 }
 function xaiCurrentTabs(criterion) {
+  const hasDataset = window.Comparison.axisLeverKeys(manifest, 'dataset').length > 0
+  const hasEnv = window.Comparison.axisLeverKeys(manifest, 'environment').length > 0
   return [
     {
       id: 'standing',
@@ -5470,6 +5443,28 @@ function xaiCurrentTabs(criterion) {
       controls: () => xaiCurrentMapControlsHtml(),
       render: () => xaiCurrentMapHtml(xaiFocusKey, criterion),
     },
+    // This exact config across the DATASET / ENVIRONMENT it was run in — does it hold up, or was it lucky
+    // in one regime? Only offered when the project actually varies that axis.
+    ...(hasDataset
+      ? [
+          {
+            id: 'byDataset',
+            label: 'By dataset',
+            icon: xaiIconMap,
+            render: () => xaiCurrentAxisHtml(xaiFocusKey, criterion, 'dataset'),
+          },
+        ]
+      : []),
+    ...(hasEnv
+      ? [
+          {
+            id: 'byEnv',
+            label: 'By environment',
+            icon: xaiIconEnv,
+            render: () => xaiCurrentAxisHtml(xaiFocusKey, criterion, 'environment'),
+          },
+        ]
+      : []),
     {
       id: 'narrative',
       label: 'Narrative',
@@ -5483,6 +5478,107 @@ function xaiCurrentTabs(criterion) {
       render: () => xaiModelInternalsHtml(xaiFocusKey),
     },
   ]
+}
+// CURRENT-RUN across an AXIS (dataset or environment): pin THIS run's exact model config and show how it
+// performs across each dataset/environment it was run in — the raw [min·avg·max] over seeds PLUS its
+// normalised STANDING within each (robust-z among all configs run there), so "robustly good" is told apart
+// from "lucky in one regime". The parallel of the Runs-tab pooled view, but for ONE config.
+function xaiCurrentAxisHtml(focusKey, criterion, axis) {
+  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const focusRun = findRun(focusKey)
+  if (!focusRun || !focusRun.summary)
+    return `<div class="card"><p class="card-sub">Run ${escapeHtml(shortKey(focusKey))} isn’t loaded — Refresh, or open it from the Runs tab.</p></div>`
+  const focusCfg = focusRun.summary.config || {}
+  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
+  // Pin every NON-axis lever to this run's config, so every row is the SAME model across the axis.
+  const lock = {}
+  for (const k of window.Comparison.lockedLeverKeys(manifest, axis))
+    if (focusCfg[k] !== undefined && focusCfg[k] !== null) lock[k] = String(focusCfg[k])
+  const eligible = runsCache.filter(
+    (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
+  )
+  const matched = eligible.filter((r) => window.Comparison.matchesLock(lock, r))
+  const cols = comparisonColumns()
+  const labelCache = new Map()
+  const items = matched.map((r) => {
+    const axisSig = window.Comparison.runAxisSignature(manifest, axis, r)
+    if (!labelCache.has(axisSig)) labelCache.set(axisSig, comparisonAxisLabel(axis, r))
+    return {
+      key: r.key,
+      axisSig,
+      axisLabel: labelCache.get(axisSig),
+      values: Object.fromEntries(cols.map((c) => [c.id, c.valueOf(r)])),
+    }
+  })
+  let groups = window.Comparison.groupComparison(items)
+  groups = window.Comparison.sortComparisonGroups(groups, 'axis', 'asc')
+  if (groups.length < 2) {
+    const only = groups.length === 1 ? ` — only <code>${escapeHtml(groups[0].axisLabel)}</code> so far` : ''
+    return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s</h3></div>
+      <p class="card-sub">This exact config has run in fewer than two ${escapeHtml(axisNoun)}s${only}. Re-run it on other ${escapeHtml(axisNoun)}s (sweep the ${escapeHtml(axisNoun)} levers) to see whether it holds up across regimes.</p></div>`
+  }
+  // Normalised standing: how this config ranks WITHIN each axis value, among ALL configs run there.
+  const standingByKey = window.Xai.normalizeByEnvironment(xaiRuns(), criterion, axisKeys)
+  const standingOf = (g) => {
+    for (const k of g.keys) if (k in standingByKey) return standingByKey[k]
+    return NaN
+  }
+  const verdict = window.Comparison.robustnessVerdict(groups.map(standingOf))
+  const focusSig = window.Comparison.runAxisSignature(manifest, axis, focusRun)
+  const zCell = (z) => {
+    if (!Number.isFinite(z)) return '<td class="num card-sub">—</td>'
+    const cls = z > 0.15 ? 'delta-pos' : z < -0.15 ? 'delta-neg' : ''
+    return `<td class="num ${cls}" title="Robust z within this ${axisNoun} — how far above/below the typical config run here">${z >= 0 ? '+' : ''}${z.toFixed(2)}</td>`
+  }
+  const colHead = cols
+    .map((c) => `<th class="cmp-th num"${helpAttr(c.help)}>${escapeHtml(c.label)}</th>`)
+    .join('')
+  // Split each row's identity into a bold NAME line + a config line, and give every row a "runs ↗" button
+  // that opens all runs in that dataset/environment. Computed once per group (few) off a representative run.
+  const runByKey = new Map(matched.map((r) => [r.key, r]))
+  const axisInfoOf = (g) => {
+    const rep = runByKey.get(g.keys[0])
+    const cfg = (rep && rep.summary && rep.summary.config) || {}
+    const name = rep ? (axis === 'dataset' ? runDatasetName(rep) : runEnvName(rep)) : ''
+    const pairs = axisKeys
+      .map((k) => [k, cfg[k]])
+      .filter(([, v]) => v !== undefined && v !== null)
+    const valStr = pairs.map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`).join(' · ')
+    return { name: name && name !== 'Custom' ? name : `(${axisNoun})`, pairs, valStr }
+  }
+  const rows = groups
+    .map((g) => {
+      const cur = g.axisSig === focusSig
+      const info = axisInfoOf(g)
+      const cells = cols
+        .map((c) => `<td class="num">${comparisonCellHtml(c, g.stats[c.id])}</td>`)
+        .join('')
+      const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-runs="${escapeHtml(JSON.stringify(info.pairs))}" data-xai-axis-label="${escapeHtml(info.name)}" title="Open all runs in this ${escapeHtml(axisNoun)}">runs ↗</button>`
+      return `<tr class="${cur ? 'is-selected' : ''}">
+        <td><div class="cmp-axis-name">${cur ? '<span class="xai-here">◀ this run</span> ' : ''}<strong>${escapeHtml(info.name)}</strong></div><div class="card-sub cmp-axis-config">${escapeHtml(info.valStr || '—')}</div></td>
+        <td class="num">${g.count}</td>
+        ${zCell(standingOf(g))}
+        ${cells}
+        <td>${runsBtn}</td>
+      </tr>`
+    })
+    .join('')
+  const vmap = {
+    robust: `<span class="cmp-verdict is-robust">Robust</span> — at or above the typical config in every ${escapeHtml(axisNoun)}.`,
+    mixed: `<span class="cmp-verdict is-mixed">Mixed</span> — strong in some ${escapeHtml(axisNoun)}s, below the typical config in others.`,
+    weak: `<span class="cmp-verdict is-weak">Weak</span> — below the typical config in every ${escapeHtml(axisNoun)}.`,
+    'n/a': `<span class="cmp-verdict">n/a</span>`,
+  }
+  return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s <span class="card-sub">— ${groups.length} ${escapeHtml(axisNoun)}s · same model, varying the ${escapeHtml(axisNoun)}</span></h3></div>
+    <p class="card-sub">${vmap[verdict.label] || vmap['n/a']} <span class="card-sub">(“standing” = robust z of <strong>${escapeHtml(criterion.label)}</strong> within each ${escapeHtml(axisNoun)}, so regime scale is removed and the ${escapeHtml(axisNoun)}s are comparable.)</span></p>
+    <div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>
+      <th class="cmp-th">${axis === 'dataset' ? 'Dataset' : 'Environment'}</th>
+      <th class="cmp-th num"${helpAttr('Seeds of this config in this ' + axisNoun + '.')}># runs</th>
+      <th class="cmp-th num"${helpAttr('Standing: this config’s robust z within the ' + axisNoun + ' — how far above/below the typical config run there. Regime scale removed, so it’s comparable across ' + axisNoun + 's.')}>standing</th>
+      ${colHead}
+      <th class="cmp-th"></th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="runs-legend">Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across this config’s seeds. A <strong>positive standing</strong> in every ${escapeHtml(axisNoun)} = the config beats the field regardless of regime.</p></div>`
 }
 // CURRENT-RUN map: the same configuration maps as All-runs, scoped to the focused run's environment, with
 // THIS run ringed so you can see where it sits among similar runs. Falls back to hints when the whole-space
@@ -5852,15 +5948,21 @@ function xaiRunStandingHtml(runKey, criterion) {
       ${actions ? `<tr><th>Action mix</th><td>${actions}</td></tr>` : ''}
     </tbody></table>
     <p class="card-sub">Analysed ${escapeHtml(when)} over ${rec.runCount || 0} runs.</p></div>`
+  // Pin this run's inapplicable CONDITIONAL levers to 'n/a' before listing them, so a lever tied to another
+  // model (e.g. day_buy/day_sell for the weekday model, prob_threshold for supervised) never shows — with a
+  // seeded default value OR a meaningless "sweep" — for a run whose model ignores it. Defensive: works even
+  // if the stored/analysed config predates the conditional-lever migration.
+  const stCfg =
+    digest.config && manifest && manifest.levers
+      ? window.Xai.normalizeConditionalConfig(digest.config, manifest.levers)
+      : digest.config || {}
   const leverRows = (digest.importances || [])
     .filter(
-      (i) =>
-        (i.lever === 'model_name' || i.importance >= 0.02) &&
-        String(digest.config[i.lever]) !== 'n/a',
+      (i) => (i.lever === 'model_name' || i.importance >= 0.02) && String(stCfg[i.lever]) !== 'n/a',
     )
     .slice(0, 6)
     .map((i) => {
-      const mine = digest.config ? digest.config[i.lever] : undefined
+      const mine = stCfg[i.lever]
       const mineStr = mine === undefined ? '—' : xaiFmtLeverValue(mine)
       const atBest = mine !== undefined && String(mine) === String(i.bestValue)
       const verdict =
@@ -6924,7 +7026,14 @@ function xaiSweepValues(lever, current, observed) {
     }
     if (Number.isFinite(lo) && Number.isFinite(hi) && hi > lo) {
       let vals = lo > 0 ? xaiNiceLogValues(lo, hi) : []
-      if (!vals.length) for (let k = 0; k <= 6; k++) vals.push(lo + ((hi - lo) * k) / 6)
+      // The 1-2-5 log grid is too coarse for a NARROW or non-log range (e.g. prob_threshold 0.5–0.9 →
+      // only [0.5]); fall back to an even linear spread whenever it yields fewer than 3 points, so EVERY
+      // lever with a range is sweepable — not just log-scaled ones.
+      if (vals.length < 3) {
+        vals = []
+        for (let k = 0; k <= 6; k++)
+          vals.push(Number((lo + ((hi - lo) * k) / 6).toPrecision(4)))
+      }
       if (Number.isInteger(cur) && Number.isInteger(lo) && Number.isInteger(hi))
         vals = [...new Set(vals.map((v) => Math.round(v)))].filter((v) => v >= lo && v <= hi)
       for (const v of vals.slice(0, 12)) add(v)
@@ -7623,11 +7732,38 @@ function closeRunDetail() {
 }
 // Pre-fill the Launch form with a run's exact settings, so it's easy to sweep NEAR
 // a known result (tweak one lever, run the neighbours).
+// The dataset / environment BUNDLE a run belongs to — the named one whose settings match its config, else a
+// synthetic "From run" bundle built from the run's dataset/environment-lever values. Cloning needs these
+// because dataset + environment are chosen as BUNDLES in the launch pickers, NOT as `fixed:<lever>` inputs.
+function runDatasetBundle(run) {
+  const cfg = (run && run.summary && run.summary.config) || {}
+  const sig = runDatasetSignature(run)
+  const named = allDatasets().find((d) => datasetSettingsSignature(d.settings) === sig)
+  if (named) return named
+  const settings = {}
+  for (const [k] of datasetLeverEntries()) if (cfg[k] !== undefined) settings[k] = cfg[k]
+  return { id: `run-${run.key}-dataset`, name: 'From run', settings }
+}
+function runEnvBundle(run) {
+  const cfg = (run && run.summary && run.summary.config) || {}
+  const sig = runEnvSignature(run)
+  const named = allEnvironments().find((e) => envSettingsSignature(e.settings) === sig)
+  if (named) return named
+  const settings = {}
+  for (const [k] of envLeverEntries()) if (cfg[k] !== undefined) settings[k] = cfg[k]
+  return { id: `run-${run.key}-env`, name: 'From run', settings }
+}
 function cloneRunToLaunch(key) {
   const run = findRun(key)
   if (!run) return
   showTab('launch')
-  applyPresetFixed(run.summary.config || {})
+  // Fill the MODEL levers from the config, AND select the run's exact dataset + environment in the pickers
+  // (matched to a named bundle, else reconstructed) — so a clone reproduces the WHOLE run, not just its model
+  // knobs. The dataset/env-lever keys in `fixed` have no form element and are harmlessly ignored.
+  const preset = { fixed: run.summary.config || {} }
+  if (datasetLeverEntries().length) preset.datasets = [runDatasetBundle(run)]
+  if (envLeverEntries().length) preset.environments = [runEnvBundle(run)]
+  applyPreset(preset)
 }
 // Build a one-config campaign spec that reproduces a run EXACTLY: every manifest lever it
 // carried, fixed (non-lever keys dropped so the planner doesn't reject them; seed is itself a
@@ -8071,6 +8207,11 @@ function setupRuns() {
         renderRunsTable()
         return
       }
+      if (event.target.closest('#cmp-rank-dir')) {
+        comparisonSortDir = comparisonSortDir === 'asc' ? 'desc' : 'asc'
+        renderRunsTable()
+        return
+      }
       const cmpTh = event.target.closest('.cmp-th[data-cmp-sort]')
       if (cmpTh) {
         toggleComparisonSort(cmpTh.dataset.cmpSort)
@@ -8133,12 +8274,11 @@ function setupRuns() {
         refreshRuns()
         return
       }
-      // A comparison-view lock dropdown: re-aggregate from the in-memory snapshot (no server refetch).
-      const lockSel = event.target.closest('.cmp-lock')
-      if (lockSel) {
-        const axis = runsViewMode
-        if (!comparisonLock[axis]) comparisonLock[axis] = {}
-        comparisonLock[axis][lockSel.dataset.lever] = lockSel.value
+      // The by-dataset/by-environment "rank by" criterion: re-rank from the in-memory snapshot (no refetch).
+      // Best-first by default (lower-is-better for 'took'); the ▲/▼ button flips it.
+      if (event.target.id === 'cmp-rank-key') {
+        comparisonSortKey = event.target.value
+        comparisonSortDir = event.target.value === 'took' ? 'asc' : 'desc'
         renderRunsTable()
         return
       }
@@ -8398,6 +8538,18 @@ function setupRuns() {
       const envBtn = event.target.closest('[data-xai-env]')
       if (envBtn) {
         xaiAnalyzeEnvironment(envBtn.dataset.xaiEnv)
+        return
+      }
+      // "runs ↗" on a current-run By-dataset/By-environment row: open ALL runs in that dataset/environment.
+      const axisRunsBtn = event.target.closest('[data-xai-axis-runs]')
+      if (axisRunsBtn) {
+        let pairs = []
+        try {
+          pairs = JSON.parse(axisRunsBtn.dataset.xaiAxisRuns || '[]')
+        } catch {
+          pairs = []
+        }
+        if (pairs.length) viewRunsByLeverValues(pairs, axisRunsBtn.dataset.xaiAxisLabel || '')
         return
       }
       const tabBtn = event.target.closest('[data-xai-tab]')
@@ -9706,8 +9858,25 @@ function specSummaryHtml(spec) {
 // derived from them — thin wrappers over the pure `window.Hypothesis` module. They use the ALL-runs
 // snapshot when present (after a refresh); otherwise they fall back to the hypothesis's PERSISTED evidence
 // / status, so a paged Runs view (only the current page loaded) never undercounts a verdict.
+// Verdicts + matched-runs are re-derived by EVERY hypothesis card and EVERY paper card (via
+// paperVerdictInfo), each a full scan of allRunsCache — O(items × runs), which froze the Hypotheses/Papers
+// tabs. Memoise per (allRunsCache snapshot). Keyed by the array REFERENCE via a WeakMap, so replacing the
+// snapshot (a refresh) transparently invalidates it — no manual reset, no stale verdicts.
+const hypMatchedMemo = new WeakMap()
+const hypVerdictMemo = new WeakMap()
+function hypScanMemoFor(wm) {
+  let m = wm.get(allRunsCache)
+  if (!m) {
+    m = new Map()
+    wm.set(allRunsCache, m)
+  }
+  return m
+}
 function hypothesisMatchedRuns(h) {
-  return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, allRunsCache)
+  if (!h || !h.id) return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, allRunsCache)
+  const m = hypScanMemoFor(hypMatchedMemo)
+  if (!m.has(h.id)) m.set(h.id, window.Hypothesis.hypothesisMatchingRuns(h.spec, allRunsCache))
+  return m.get(h.id)
 }
 function hypothesisMatchedCount(h) {
   if (allRunsCache.length) return hypothesisMatchedRuns(h).length
@@ -9744,14 +9913,22 @@ function autoSuggestedVerdict(h) {
 }
 function effectiveHypothesisVerdict(h) {
   if (!h) return 'untested'
-  if (allRunsCache.length)
-    return window.Hypothesis.effectiveVerdict(
+  if (allRunsCache.length) {
+    // Memoised per snapshot; keyed by the min-runs threshold too, since it changes the verdict without
+    // replacing allRunsCache. (Direction / model-implemented only change alongside a data refresh.)
+    const key = h.id ? `${h.id}|${hypothesisMinRuns}` : null
+    const m = key ? hypScanMemoFor(hypVerdictMemo) : null
+    if (m && m.has(key)) return m.get(key)
+    const v = window.Hypothesis.effectiveVerdict(
       h,
       allRunsCache,
       objectiveDirection(),
       hypothesisMinRuns,
       modelNameImplemented,
     )
+    if (m) m.set(key, v)
+    return v
+  }
   // No run snapshot loaded: use the persisted status, but still surface 'proposed' for an auto hypothesis
   // whose required model isn't implemented (it depends on the model lifecycle, not on runs).
   const base = h.status || 'untested'
@@ -10481,7 +10658,14 @@ async function runHypothesisCampaign(id, button) {
   const epoch = projectEpoch
   const recordType = manifest.recordType
   setStatusLine('hypotheses-status', '')
-  if (button) button.disabled = true
+  // Immediate spinner feedback — the launch is a bridge round-trip (up to a few seconds); disabling alone
+  // read as a freeze. Any later re-render replaces the button, so we only restore it on the error path.
+  let btnLabel
+  if (button) {
+    button.disabled = true
+    btnLabel = button.innerHTML
+    button.innerHTML = `${spinnerHtml()} Launching…`
+  }
   try {
     const result = await startOrEnqueue(
       'train',
@@ -10508,7 +10692,10 @@ async function runHypothesisCampaign(id, button) {
       setStatusLine('hypotheses-status', 'Could not start the campaign — please try again.', true)
     }
   } finally {
-    if (button) button.disabled = false
+    if (button && document.body.contains(button)) {
+      button.disabled = false
+      if (btnLabel !== undefined) button.innerHTML = btnLabel
+    }
   }
 }
 function validateHypothesisSpec(text) {
@@ -11163,17 +11350,20 @@ function paperAssumptionChips(a) {
 // + updating papersCache so the count chip + rolled-up verdict are correct. Idempotent (a no-op once clean).
 async function prunePaperHypothesisLinks() {
   const live = new Set(hypothesesCache.map((h) => h.id))
+  let changed = false
   for (const p of papersCache) {
     const ids = Array.isArray(p.hypothesisIds) ? p.hypothesisIds : []
     const kept = ids.filter((id) => live.has(id))
     if (kept.length === ids.length) continue
     p.hypothesisIds = kept
+    changed = true
     try {
       await putPaper({ ...p, hypothesisIds: kept })
     } catch {
       // best-effort: a failed cleanup write just retries next render
     }
   }
+  return changed
 }
 function paperHypCountChipHtml(paper) {
   const n = Array.isArray(paper.hypothesisIds) ? paper.hypothesisIds.length : 0
@@ -11387,10 +11577,13 @@ async function renderPapers() {
     readHypotheses(),
     readModels(),
   ])
-  // Self-heal: a paper may reference hypotheses since deleted — drop those stale links (persisted) so the
-  // count chip + rolled-up verdict reflect reality.
-  await prunePaperHypothesisLinks()
+  // Paint the list FIRST so the tab is responsive immediately. Then self-heal stale hypothesis links (a paper
+  // may reference since-deleted hypotheses) in the BACKGROUND — an N+1 write loop that must never block the
+  // paint; it re-renders only if it actually pruned something (usually a no-op).
   renderPapersList()
+  void prunePaperHypothesisLinks().then((changed) => {
+    if (changed && activeTabId === 'papers') renderPapersList()
+  })
 }
 // The blob a paper is searched against — id (so "bysik" finds it), title, authors, year, claim/abstract,
 // approach, verdict note, tags, and the assumptions notes.
@@ -14197,10 +14390,6 @@ function applyPreset(preset) {
   refreshLeverApplicability(form)
   updateLaunchSummary()
 }
-// Clone-to-Launch and other fixed-only callers: a preset that only pins lever values.
-function applyPresetFixed(fixed) {
-  applyPreset({ fixed: fixed || {} })
-}
 function parseNumberList(text) {
   return String(text || '')
     .split(',')
@@ -15121,8 +15310,30 @@ function setupActivity() {
 }
 
 // --- Tabs --------------------------------------------------------------------
+// The data tabs whose render awaits bridge reads — paint an immediate spinner so the switch is never a
+// blank/stale freeze while the reads (and the first heavy render) run. Keyed by the `<tab>-body` element id.
+const TAB_LOADING_LABEL = {
+  runs: 'Loading runs…',
+  hypotheses: 'Loading hypotheses…',
+  papers: 'Loading papers…',
+  models: 'Loading models…',
+  environments: 'Loading environments…',
+  datasets: 'Loading datasets…',
+  versions: 'Loading versions…',
+  speed: 'Loading…',
+}
+function paintTabLoading(tabId) {
+  const label = TAB_LOADING_LABEL[tabId]
+  const body = label && byId(`${tabId}-body`)
+  if (!body) return
+  // Write directly (renders mix setHtml + raw innerHTML) and INVALIDATE setHtml's anti-flash cache, so the
+  // following render always repaints over the spinner — even if its content is byte-identical to last time.
+  body.innerHTML = `<div class="tab-loading card-sub">${spinnerHtml()} ${escapeHtml(label)}</div>`
+  body.__lastHtml = undefined
+}
 function showTab(id) {
   const target = TABS.some((t) => t.id === id) ? id : TABS[0].id
+  const switching = target !== activeTabId
   activeTabId = target
   for (const tab of TABS) {
     const panel = byId(`tab-${tab.id}`)
@@ -15144,6 +15355,9 @@ function showTab(id) {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
   renderTabLiveIndicator()
+  // Show a loading state the instant we switch (before the render's awaited reads), so the tab is never a
+  // frozen blank. Skipped when re-selecting the current tab so an in-place refresh doesn't flash.
+  if (switching) paintTabLoading(target)
   if (target === 'runs') renderRuns()
   if (target === 'versions') renderVersions()
   if (target === 'environments') renderEnvironments()
