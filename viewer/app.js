@@ -107,6 +107,14 @@ let xaiRailCollapsed = false
 let xaiEnvSearch = ''
 let xaiEnvSortKey = 'best'
 let xaiEnvSortDir = 'desc'
+// The current-run "By dataset"/"By environment" table: clickable-column sort (null = default axis-asc) +
+// direction, plus the set of selected axis signatures (for the "Add Runs" verify batch).
+let xaiAxisSortKey = null
+let xaiAxisSortDir = 'desc'
+let xaiAxisSelected = new Set()
+// Per-render map: axis signature → { config, seeds } for the visible groups, so the Sweep/Add-runs handlers
+// can rebuild launch specs without re-deriving the grouping.
+let xaiAxisRowCache = new Map()
 // Which "configuration map" is shown in the Maps tab: 'parallel', 'pca', or 'pareto' (trade-off frontier).
 let xaiMapKind = 'parallel'
 // PCA colour mode: 'rank' (performance) or 'model' (cluster by model_name).
@@ -1847,6 +1855,10 @@ function resetDashboardState() {
   xaiScope = 'all'
   xaiTab = 'environments'
   xaiEnvSearch = ''
+  xaiAxisSortKey = null
+  xaiAxisSortDir = 'desc'
+  xaiAxisSelected = new Set()
+  xaiAxisRowCache = new Map()
   xaiConfigSpaceCache = new Map()
   analyzingConfigSpace = false
   xaiRunAnalysisCache = new Map()
@@ -5587,17 +5599,42 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
     }
   })
   let groups = window.Comparison.groupComparison(items)
-  groups = window.Comparison.sortComparisonGroups(groups, 'axis', 'asc')
-  if (groups.length < 2) {
-    const only = groups.length === 1 ? ` — only <code>${escapeHtml(groups[0].axisLabel)}</code> so far` : ''
-    return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s</h3></div>
-      <p class="card-sub">This exact config has run in fewer than two ${escapeHtml(axisNoun)}s${only}. Re-run it on other ${escapeHtml(axisNoun)}s (sweep the ${escapeHtml(axisNoun)} levers) to see whether it holds up across regimes.</p></div>`
-  }
-  // Normalised standing: how this config ranks WITHIN each axis value, among ALL configs run there.
+  const runByKey = new Map(matched.map((r) => [r.key, r]))
+  // Normalised standing per group: how this config ranks WITHIN each axis value, among ALL configs run there.
   const standingByKey = window.Xai.normalizeByEnvironment(xaiRuns(), criterion, axisKeys)
   const standingOf = (g) => {
     for (const k of g.keys) if (k in standingByKey) return standingByKey[k]
     return NaN
+  }
+  for (const g of groups) g.standing = standingOf(g)
+  // Cache each group's representative config + observed seeds so the Sweep / Add-runs handlers can rebuild
+  // launch specs without re-deriving the grouping. Keyed by the axis signature (what the checkboxes carry).
+  xaiAxisRowCache = new Map(
+    groups.map((g) => {
+      const rep = runByKey.get(g.keys[0])
+      const cfg = (rep && rep.summary && rep.summary.config) || {}
+      const seeds = g.keys
+        .map((k) => runByKey.get(k))
+        .map((r) => (r && r.summary && r.summary.config ? Number(r.summary.config.seed) : NaN))
+        .filter((s) => Number.isFinite(s))
+      return [g.axisSig, { config: cfg, seeds }]
+    }),
+  )
+  // Drop any prior selection that no longer matches a visible group (config/scope changed).
+  for (const sig of [...xaiAxisSelected]) if (!xaiAxisRowCache.has(sig)) xaiAxisSelected.delete(sig)
+  // Sort: default alphabetical by axis, else the user's clicked column (axis / #runs / standing / metric avg).
+  groups = window.Comparison.sortComparisonGroups(
+    groups,
+    xaiAxisSortKey || 'axis',
+    xaiAxisSortKey ? xaiAxisSortDir : 'asc',
+  )
+  if (groups.length < 2) {
+    const only = groups.length === 1 ? ` — only <code>${escapeHtml(groups[0].axisLabel)}</code> so far` : ''
+    const sweepBtn = embedded()
+      ? `<div class="head-actions"><button type="button" class="ghost-btn" data-xai-axis-sweep="${escapeHtml(axis)}" title="Launch this exact config on every ${escapeHtml(axisNoun)} value it hasn't run yet (first-time experiments only)">Sweep all ${escapeHtml(axisNoun)}s ↗</button></div>`
+      : ''
+    return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s</h3>${sweepBtn}</div>
+      <p class="card-sub">This exact config has run in fewer than two ${escapeHtml(axisNoun)}s${only}. Use <strong>Sweep</strong> to run it on every other ${escapeHtml(axisNoun)} value and see whether it holds up across regimes.</p></div>`
   }
   const verdict = window.Comparison.robustnessVerdict(groups.map(standingOf))
   const focusSig = window.Comparison.runAxisSignature(manifest, axis, focusRun)
@@ -5606,12 +5643,15 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
     const cls = z > 0.15 ? 'delta-pos' : z < -0.15 ? 'delta-neg' : ''
     return `<td class="num ${cls}" title="Robust z within this ${axisNoun} — how far above/below the typical config run here">${z >= 0 ? '+' : ''}${z.toFixed(2)}</td>`
   }
-  const colHead = cols
-    .map((c) => `<th class="cmp-th num"${helpAttr(c.help)}>${escapeHtml(c.label)}</th>`)
-    .join('')
+  // Clickable-column sort — mirrors the Runs table: the active column shows ▲/▼, a click toggles asc/desc.
+  const effSortKey = xaiAxisSortKey || 'axis'
+  const effSortDir = xaiAxisSortKey ? xaiAxisSortDir : 'asc'
+  const sortArrow = (key) => (effSortKey === key ? (effSortDir === 'asc' ? ' ▲' : ' ▼') : '')
+  const sortTh = (key, label, numCls, help) =>
+    `<th class="cmp-th${numCls ? ' num' : ''}" data-xai-axis-sort="${escapeHtml(key)}"${help ? helpAttr(help) : ''}>${label}${sortArrow(key)}</th>`
+  const colHead = cols.map((c) => sortTh(c.id, escapeHtml(c.label), true, c.help)).join('')
   // Split each row's identity into a bold NAME line + a config line, and give every row a "runs ↗" button
   // that opens all runs in that dataset/environment. Computed once per group (few) off a representative run.
-  const runByKey = new Map(matched.map((r) => [r.key, r]))
   const axisInfoOf = (g) => {
     const rep = runByKey.get(g.keys[0])
     const cfg = (rep && rep.summary && rep.summary.config) || {}
@@ -5631,6 +5671,7 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
         .join('')
       const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-runs="${escapeHtml(JSON.stringify(info.pairs))}" data-xai-axis-label="${escapeHtml(info.name)}" title="Open all runs in this ${escapeHtml(axisNoun)}">runs ↗</button>`
       return `<tr class="${cur ? 'is-selected' : ''}">
+        <td><input type="checkbox" class="xai-axis-cb" data-sig="${escapeHtml(g.axisSig)}"${xaiAxisSelected.has(g.axisSig) ? ' checked' : ''} aria-label="select ${escapeHtml(info.name)}"></td>
         <td><div class="cmp-axis-name">${cur ? '<span class="xai-here">◀ this run</span> ' : ''}<strong>${escapeHtml(info.name)}</strong></div><div class="card-sub cmp-axis-config">${escapeHtml(info.valStr || '—')}</div></td>
         <td class="num">${g.count}</td>
         ${zCell(standingOf(g))}
@@ -5645,16 +5686,25 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
     weak: `<span class="cmp-verdict is-weak">Weak</span> — below the typical config in every ${escapeHtml(axisNoun)}.`,
     'n/a': `<span class="cmp-verdict">n/a</span>`,
   }
-  return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s <span class="card-sub">— ${groups.length} ${escapeHtml(axisNoun)}s · same model, varying the ${escapeHtml(axisNoun)}</span></h3></div>
+  const selCount = groups.filter((g) => xaiAxisSelected.has(g.axisSig)).length
+  const allSelected = groups.length > 0 && groups.every((g) => xaiAxisSelected.has(g.axisSig))
+  const headActions = embedded()
+    ? `<div class="head-actions">
+        <button type="button" class="ghost-btn" data-xai-axis-sweep="${escapeHtml(axis)}" title="Launch this exact config on every ${escapeHtml(axisNoun)} value it hasn't run yet (first-time experiments only)">Sweep all ${escapeHtml(axisNoun)}s ↗</button>
+        <button type="button" class="ghost-btn" data-xai-axis-addruns="${escapeHtml(axis)}"${selCount ? '' : ' disabled'} title="Re-run the selected ${escapeHtml(axisNoun)}s with fresh seeds to verify the result isn't seed luck (non-exploration — never skipped)">Add runs${selCount ? ` (${selCount})` : ''} ↻</button>
+      </div>`
+    : ''
+  return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s <span class="card-sub">— ${groups.length} ${escapeHtml(axisNoun)}s · same model, varying the ${escapeHtml(axisNoun)}</span></h3>${headActions}</div>
     <p class="card-sub">${vmap[verdict.label] || vmap['n/a']} <span class="card-sub">(“standing” = robust z of <strong>${escapeHtml(criterion.label)}</strong> within each ${escapeHtml(axisNoun)}, so regime scale is removed and the ${escapeHtml(axisNoun)}s are comparable.)</span></p>
     <div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>
-      <th class="cmp-th">${axis === 'dataset' ? 'Dataset' : 'Environment'}</th>
-      <th class="cmp-th num"${helpAttr('Seeds of this config in this ' + axisNoun + '.')}># runs</th>
-      <th class="cmp-th num"${helpAttr('Standing: this config’s robust z within the ' + axisNoun + ' — how far above/below the typical config run there. Regime scale removed, so it’s comparable across ' + axisNoun + 's.')}>standing</th>
+      <th class="cmp-th"><input type="checkbox" class="xai-axis-select-all"${allSelected ? ' checked' : ''} title="Select every ${escapeHtml(axisNoun)}"></th>
+      ${sortTh('axis', axis === 'dataset' ? 'Dataset' : 'Environment', false, null)}
+      ${sortTh('#runs', '# runs', true, 'Seeds of this config in this ' + axisNoun + '.')}
+      ${sortTh('standing', 'standing', true, 'Standing: this config’s robust z within the ' + axisNoun + ' — how far above/below the typical config run there. Regime scale removed, so it’s comparable across ' + axisNoun + 's.')}
       ${colHead}
       <th class="cmp-th"></th>
     </tr></thead><tbody>${rows}</tbody></table></div>
-    <p class="runs-legend">Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across this config’s seeds. A <strong>positive standing</strong> in every ${escapeHtml(axisNoun)} = the config beats the field regardless of regime.</p></div>`
+    <p class="runs-legend">Click a column to sort. Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across this config’s seeds. A <strong>positive standing</strong> in every ${escapeHtml(axisNoun)} = the config beats the field regardless of regime. Tick ${escapeHtml(axisNoun)}s and use <strong>Add runs</strong> to re-verify with fresh seeds.</p></div>`
 }
 // CURRENT-RUN map: the same configuration maps as All-runs, scoped to the focused run's environment, with
 // THIS run ringed so you can see where it sits among similar runs. Falls back to hints when the whole-space
@@ -5986,6 +6036,87 @@ function xaiNeighboursHtml(digest, bundle, criterion) {
     <p class="card-sub">The runs whose settings are most similar to this one, the lever(s) that differ, and their score vs this run \u2014 a controlled view of what moved the result.</p>
     <table class="kv-table report-table"><thead><tr><th>differs by</th><th class="num">${escapeHtml(criterion.label)}</th><th class="num">vs this run</th></tr></thead><tbody>${rows}</tbody></table></div>`
 }
+// A controlled ONE-FACTOR view for the Standing tab: runs that differ from the focus run by EXACTLY ONE
+// non-axis lever (same dataset AND environment), grouped by that lever, so each row's score delta isolates
+// that lever's effect. Each lever section carries a "sweep ↗" to fill in its curve; "Verify seeds ↻" (in the
+// head) tops up seeds to rule out luck. Returns '' when the cached bundle is a different environment, or no
+// single-lever sibling exists (the caller falls back to the distance-based Nearest configs card).
+function xaiOneChangeHtml(digest, bundle, criterion) {
+  if (!digest || !digest.config || !bundle || !bundle.analysis) return ''
+  const a = bundle.analysis
+  const env = a.environment
+  const focus = digest.config
+  const inEnv =
+    !env || (a.contextLevers || []).every((lev) => String(focus[lev]) === String(env[lev]))
+  if (!inEnv) return ''
+  const all = (a.setups || []).filter((sp) => sp.config)
+  if (!all.length) return ''
+  // Hold the regime fixed: vary every lever EXCEPT seed and the dataset/environment axis levers.
+  const axisKeys = new Set([
+    ...window.Comparison.axisLeverKeys(manifest, 'dataset'),
+    ...window.Comparison.axisLeverKeys(manifest, 'environment'),
+  ])
+  const leverKeys = (a.levers && a.levers.length ? a.levers : Object.keys(all[0].config)).filter(
+    (k) => k !== 'seed' && !axisKeys.has(k),
+  )
+  const sameAxis = (cfg) => [...axisKeys].every((k) => String(focus[k]) === String(cfg[k]))
+  const val = (sp) => xaiMetricVal(sp, criterion.key)
+  const self = all.find(
+    (sp) =>
+      sameAxis(sp.config) && leverKeys.every((k) => String(sp.config[k]) === String(focus[k])),
+  )
+  const fval =
+    self && typeof val(self) === 'number'
+      ? val(self)
+      : typeof digest.objective === 'number'
+        ? digest.objective
+        : null
+  const byLever = new Map()
+  for (const sp of all) {
+    if (!sameAxis(sp.config)) continue
+    const diffs = leverKeys.filter((k) => String(sp.config[k]) !== String(focus[k]))
+    if (diffs.length !== 1) continue
+    if (!byLever.has(diffs[0])) byLever.set(diffs[0], [])
+    byLever.get(diffs[0]).push(sp)
+  }
+  if (!byLever.size) return ''
+  const dirBetter = (delta) => (criterion.direction === 'min' ? delta < 0 : delta > 0)
+  const sections = [...byLever.entries()]
+    .map(([lever, sps]) => {
+      const rows = sps
+        .map((sp) => {
+          const sv = val(sp)
+          return { sp, sv, delta: fval != null && typeof sv === 'number' ? sv - fval : null }
+        })
+        .sort((x, y) => Math.abs(y.delta || 0) - Math.abs(x.delta || 0))
+      const bestAbs = rows.reduce((m, r) => Math.max(m, Math.abs(r.delta || 0)), 0)
+      const rowHtml = rows
+        .map(({ sp, sv, delta }) => {
+          const dcls = delta == null ? '' : dirBetter(delta) ? 'delta-pos' : 'delta-neg'
+          const dstr =
+            delta == null
+              ? '—'
+              : `<span class="${dcls}">${delta >= 0 ? '+' : ''}${escapeHtml(formatTickValue(delta))}</span>`
+          return `<tr class="xai-lb-row" data-xai-focus-config="${escapeHtml(sp.key)}" title="Open this run"><td><code>${escapeHtml(xaiFmtLeverValue(focus[lever]))}→${escapeHtml(xaiFmtLeverValue(sp.config[lever]))}</code></td><td class="num">${escapeHtml(formatTickValue(sv))}</td><td class="num">${dstr}</td></tr>`
+        })
+        .join('')
+      const sweepBtn = embedded()
+        ? `<button type="button" class="ghost-btn xai-explore-btn" data-xai-explore-lever="${escapeHtml(lever)}" title="Sweep ${escapeHtml(lever)} across its values, holding this run's other settings fixed">sweep ↗</button>`
+        : ''
+      return {
+        bestAbs,
+        html: `<div class="card-head card-head-row"><h4 class="card-sub"><code>${escapeHtml(xaiAbbrevLever(lever))}</code> — ${rows.length} one-change run${rows.length === 1 ? '' : 's'}</h4><div class="head-actions">${sweepBtn}</div></div>
+        <table class="kv-table report-table"><thead><tr><th>change</th><th class="num">${escapeHtml(criterion.label)}</th><th class="num">vs this run</th></tr></thead><tbody>${rowHtml}</tbody></table>`,
+      }
+    })
+    .sort((x, y) => y.bestAbs - x.bestAbs)
+  const seedBtn = chatAboutRunAvailable()
+    ? `<button type="button" class="ghost-btn" data-xai-stabilize-current title="Run more seeds of THIS config to check a difference is real, not seed luck">Verify seeds ↻</button>`
+    : ''
+  return `<div class="card"><div class="card-head card-head-row"><h3>Effect of one change <span class="card-sub">— runs differing from this one by a single lever (same dataset &amp; environment)</span></h3><div class="head-actions">${seedBtn}</div></div>
+    <p class="card-sub">A controlled one-factor view: each run changes <strong>exactly one</strong> setting from this run (same data + environment), so its score delta isolates that lever's effect. <strong>Sweep</strong> a lever to fill in its curve, or <strong>Verify seeds</strong> to rule out seed luck.</p>
+    ${sections.map((s) => s.html).join('')}</div>`
+}
 function xaiRunStandingHtml(runKey, criterion) {
   const busy = analyzingRunKey === runKey
   const rec = xaiRunAnalysisCache.get(runKey)
@@ -6089,7 +6220,10 @@ function xaiRunStandingHtml(runKey, criterion) {
       ? `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div>${rewardLine}${attrLine}${latentLine}</div>`
       : `<div class="card"><div class="card-head card-head-row"><h3>Why this result</h3></div><p class="card-sub">This run didn\u2019t record decision attribution, a reward breakdown, or a latent probe, so the deterministic \u201cwhy\u201d is limited \u2014 the <strong>Internals</strong> tab still shows its decision trace, regimes, exits, and trade ledger. To check the result is real (not seed luck), use <strong>Verify seeds</strong> above; the trustworthiness flag in the narrative reflects this missing attribution.</p></div>`
   const nbBundle = xaiResolveBundle(criterion)
-  const neighboursCard = nbBundle ? xaiNeighboursHtml(digest, nbBundle, criterion) : ''
+  // Prefer the controlled one-lever-change view; fall back to the distance-based Nearest configs when no
+  // single-lever sibling exists for this run.
+  const oneChangeCard = nbBundle ? xaiOneChangeHtml(digest, nbBundle, criterion) : ''
+  const neighboursCard = oneChangeCard || (nbBundle ? xaiNeighboursHtml(digest, nbBundle, criterion) : '')
   // Seed robustness: is this exact config repeatable, or does the score swing with the seed?
   let seedCard = ''
   const selfSetup =
@@ -7447,6 +7581,62 @@ async function xaiLaunchBatch(specs, label) {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
   }
 }
+// Toggle the current-run by-axis table sort — mirrors toggleComparisonSort: same key flips asc/desc, a new
+// key defaults to asc for the text axis column and desc for the numeric ones.
+function toggleXaiAxisSort(key) {
+  if (xaiAxisSortKey === key) {
+    xaiAxisSortDir = xaiAxisSortDir === 'asc' ? 'desc' : 'asc'
+  } else {
+    xaiAxisSortKey = key
+    xaiAxisSortDir = key === 'axis' ? 'asc' : 'desc'
+  }
+  renderXai()
+}
+// Sweep the CURRENT screen's axis: launch the focused config on every value of the axis levers it hasn't run
+// yet (first-time experiments only — no refresh, so existing cells are skipped). Fills the axis for this config.
+function xaiAxisSweep(axis) {
+  const focusRun = findRun(xaiFocusKey)
+  const cfg = focusRun && focusRun.summary ? focusRun.summary.config : null
+  if (!cfg) return
+  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
+  const observedByLever = {}
+  for (const r of xaiRuns()) {
+    const rc = (r && r.summary && r.summary.config) || {}
+    for (const k of axisKeys) (observedByLever[k] = observedByLever[k] || []).push(rc[k])
+  }
+  const valuesByLever = {}
+  for (const k of axisKeys) valuesByLever[k] = xaiSweepValues(k, cfg[k], observedByLever[k] || [])
+  const spec = window.Comparison.axisSweepSpec(manifest, axis, cfg, valuesByLever)
+  if (!spec) {
+    setStatusLine('xai-status', `Can't sweep the ${axisNoun} — its levers declare no range or choices to vary.`, true)
+    return
+  }
+  const combos = Object.values(spec.sweep).reduce((n, vals) => n * vals.length, 1)
+  xaiLaunchBatch([{ fixed: spec.fixed, sweep: spec.sweep, seeds: [0] }], `Sweep all ${axisNoun}s`)
+  showToast(`Sweeping this config across ${combos} ${axisNoun} combination${combos === 1 ? '' : 's'} — new cells run, existing ones are skipped. See the Activity tab.`)
+}
+// Add runs for the SELECTED axis groups with FRESH seeds — a non-exploration verify pass (fresh seeds are
+// never skipped as "already explored"), to confirm a good result isn't seed luck. Tops each config up to ~5 seeds.
+function xaiAxisAddRuns(axis) {
+  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const specs = []
+  for (const sig of xaiAxisSelected) {
+    const entry = xaiAxisRowCache.get(sig)
+    if (!entry || !entry.config) continue
+    const cur = (entry.seeds || []).length || 1
+    const fresh = xaiFreshSeeds(entry.seeds || [], Math.max(2, Math.max(5, cur + 2) - cur))
+    const fixed = {}
+    for (const [k, v] of Object.entries(entry.config))
+      if (k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+    specs.push({ fixed, seeds: fresh })
+  }
+  if (!specs.length) return
+  const n = specs.length
+  xaiAxisSelected = new Set()
+  xaiLaunchBatch(specs, `Verify ${n} ${axisNoun}${n === 1 ? '' : 's'}`)
+  showToast(`Queued ${n} ${axisNoun}${n === 1 ? '' : 's'} to re-run with fresh seeds — see the Activity tab.`)
+}
 // Load ONE run's narrative record into the cache (or drop it when none).
 async function loadXaiNarrative(runKey) {
   if (!manifest || !runKey) return
@@ -8546,6 +8736,15 @@ function setupRuns() {
       } else if (t.id === 'xai-inter-b') {
         xaiInterB = t.value
         renderXai()
+      } else if (t.classList && t.classList.contains('xai-axis-select-all')) {
+        if (t.checked) for (const sig of xaiAxisRowCache.keys()) xaiAxisSelected.add(sig)
+        else xaiAxisSelected.clear()
+        renderXai()
+      } else if (t.classList && t.classList.contains('xai-axis-cb')) {
+        const sig = t.dataset.sig
+        if (t.checked) xaiAxisSelected.add(sig)
+        else xaiAxisSelected.delete(sig)
+        renderXai()
       }
     })
     // Live-filter the environment table in place (no re-render, so the search box keeps focus).
@@ -8626,6 +8825,24 @@ function setupRuns() {
           pairs = []
         }
         if (pairs.length) viewRunsByLeverValues(pairs, axisRunsBtn.dataset.xaiAxisLabel || '')
+        return
+      }
+      // A tick in the by-axis selection column: the 'change' listener owns it — swallow the click so it
+      // doesn't fall through to any row/tab handler.
+      if (event.target.closest('.xai-axis-cb, .xai-axis-select-all')) return
+      const axisSortTh = event.target.closest('[data-xai-axis-sort]')
+      if (axisSortTh) {
+        toggleXaiAxisSort(axisSortTh.dataset.xaiAxisSort)
+        return
+      }
+      const axisSweepBtn = event.target.closest('[data-xai-axis-sweep]')
+      if (axisSweepBtn) {
+        xaiAxisSweep(axisSweepBtn.dataset.xaiAxisSweep)
+        return
+      }
+      const axisAddRunsBtn = event.target.closest('[data-xai-axis-addruns]')
+      if (axisAddRunsBtn) {
+        xaiAxisAddRuns(axisAddRunsBtn.dataset.xaiAxisAddruns)
         return
       }
       const tabBtn = event.target.closest('[data-xai-tab]')

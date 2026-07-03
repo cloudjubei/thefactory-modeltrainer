@@ -166,10 +166,62 @@ describe('sortComparisonGroups', () => {
     const out = C.sortComparisonGroups(groups, 'axis', 'asc')
     expect(out.map((g: any) => g.axisLabel)).toEqual(['Alpha', 'Beta'])
   })
+  it('sorts by the attached per-group standing (robust z), NaN last', () => {
+    const withStanding = [
+      { axisSig: 'a', axisLabel: 'A', count: 1, stats: {}, standing: -0.3 },
+      { axisSig: 'b', axisLabel: 'B', count: 1, stats: {}, standing: 1.2 },
+      { axisSig: 'c', axisLabel: 'C', count: 1, stats: {}, standing: NaN },
+    ]
+    expect(C.sortComparisonGroups(withStanding, 'standing', 'desc').map((g: any) => g.axisSig)).toEqual([
+      'b',
+      'a',
+      'c',
+    ])
+    expect(C.sortComparisonGroups(withStanding, 'standing', 'asc').map((g: any) => g.axisSig)).toEqual([
+      'a',
+      'b',
+      'c',
+    ])
+  })
   it('does not mutate the input array', () => {
     const copy = groups.slice()
     C.sortComparisonGroups(groups, 'objective', 'asc')
     expect(groups).toEqual(copy)
+  })
+})
+
+describe('axisSweepSpec', () => {
+  const focus = {
+    model_name: 'ppo',
+    net_arch: '[128]',
+    asset: 'BTC',
+    timeframe: '1d',
+    stop_loss: 0.05,
+    seed: 0,
+  }
+  it('By dataset: pins the locked (model+env) levers to the focus config and sweeps the dataset axis', () => {
+    const spec = C.axisSweepSpec(manifest, 'dataset', focus, {
+      asset: ['BTC', 'ETH'],
+      timeframe: ['1d', '1h'],
+    })
+    expect(spec).toEqual({
+      fixed: { model_name: 'ppo', net_arch: '[128]', stop_loss: 0.05 },
+      sweep: { asset: ['BTC', 'ETH'], timeframe: ['1d', '1h'] },
+    })
+  })
+  it('omits an inapplicable (n/a) locked lever from fixed', () => {
+    const spec = C.axisSweepSpec(
+      manifest,
+      'environment',
+      { ...focus, net_arch: 'n/a' },
+      { stop_loss: [0.02, 0.05, 0.1] },
+    )
+    expect(spec.fixed).toEqual({ model_name: 'ppo', asset: 'BTC', timeframe: '1d' })
+    expect(spec.sweep).toEqual({ stop_loss: [0.02, 0.05, 0.1] })
+  })
+  it('returns null when no axis lever has values to sweep', () => {
+    expect(C.axisSweepSpec(manifest, 'dataset', focus, { asset: [] })).toBeNull()
+    expect(C.axisSweepSpec(manifest, 'dataset', focus, {})).toBeNull()
   })
 })
 

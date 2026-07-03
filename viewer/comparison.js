@@ -121,6 +121,8 @@
     function valueOf(g) {
       if (sortKey === 'axis') return String(g.axisLabel == null ? '' : g.axisLabel).toLowerCase()
       if (sortKey === '#runs') return g.count
+      // 'standing' is a per-group robust-z the caller attaches (not a min/avg/max stat), so read it directly.
+      if (sortKey === 'standing') return typeof g.standing === 'number' ? g.standing : NaN
       var s = g.stats && g.stats[sortKey]
       return s ? s.avg : NaN
     }
@@ -160,8 +162,35 @@
     return { label: label, n: vals.length, min: min, max: max }
   }
 
+  // Build a launch spec that PINS the non-axis levers to one config and SWEEPS an axis across supplied
+  // values — the "fill the axis for this config" sweep. `fixed` = every locked lever the focus config sets
+  // (skipping 'n/a'/blank); `sweep` = each axis lever mapped to its values (levers with no values dropped).
+  // Returns null when nothing on the axis can be swept, so the caller can message instead of firing an empty
+  // campaign. Pure — the seed strategy + first-time-only (refresh) behaviour is the caller's concern.
+  function axisSweepSpec(manifest, axis, focusConfig, valuesByLever) {
+    var cfg = focusConfig || {}
+    var vals = valuesByLever || {}
+    var fixed = {}
+    var lockKeys = lockedLeverKeys(manifest, axis)
+    for (var i = 0; i < lockKeys.length; i++) {
+      var lk = lockKeys[i]
+      var v = cfg[lk]
+      if (v === undefined || v === null || v === '' || String(v) === 'n/a') continue
+      fixed[lk] = v
+    }
+    var sweep = {}
+    var axisKeys = axisLeverKeys(manifest, axis)
+    for (var j = 0; j < axisKeys.length; j++) {
+      var ak = axisKeys[j]
+      var list = vals[ak]
+      if (Array.isArray(list) && list.length) sweep[ak] = list
+    }
+    return Object.keys(sweep).length ? { fixed: fixed, sweep: sweep } : null
+  }
+
   var api = {
     axisLeverKeys: axisLeverKeys,
+    axisSweepSpec: axisSweepSpec,
     robustnessVerdict: robustnessVerdict,
     lockedLeverKeys: lockedLeverKeys,
     runAxisSignature: runAxisSignature,
