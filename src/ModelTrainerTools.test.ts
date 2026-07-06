@@ -9,6 +9,7 @@ import type {
   ComputeJobHandle,
   ComputeJobResult,
   ComputeRunner,
+  DataQuery,
   DataRecord,
   DataRecordInput,
   DataStorage,
@@ -22,6 +23,7 @@ import type {
 import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
+import { HEAVY_RUN_FIELDS } from './modelTrainerConstants.js'
 
 const NOW = '2026-06-10T12:00:00.000Z'
 
@@ -43,14 +45,35 @@ function manifest(overrides: Partial<TrainerManifest> = {}): TrainerManifest {
 
 interface MemoryStorage extends DataStorage {
   rows: Map<string, DataRecord>
+  queries: DataQuery[]
+}
+
+// Faithfully drop `omit` paths (incl. nested `a.b`) from record content, so the fake mirrors the real
+// backends' projection — a list that omits heavy fields genuinely lacks them, which is what forces the
+// trace-dependent read paths to re-fetch the full record by key.
+function applyOmit(content: unknown, omit: string[] | undefined): unknown {
+  if (!omit?.length || !content || typeof content !== 'object') return content
+  const out: Record<string, unknown> = { ...(content as Record<string, unknown>) }
+  const nested = new Map<string, string[]>()
+  for (const path of omit) {
+    const dot = path.indexOf('.')
+    if (dot === -1) delete out[path]
+    else nested.set(path.slice(0, dot), [...(nested.get(path.slice(0, dot)) ?? []), path.slice(dot + 1)])
+  }
+  for (const [head, subs] of nested) {
+    if (out[head] && typeof out[head] === 'object') out[head] = applyOmit(out[head], subs)
+  }
+  return out
 }
 
 function memoryStorage(): MemoryStorage {
   const rows = new Map<string, DataRecord>()
+  const queries: DataQuery[] = []
   const keyOf = (scope: string, type: string, key: string | null | undefined) =>
     `${scope}|${type}|${key ?? ''}`
   return {
     rows,
+    queries,
     async upsertRecord(input: DataRecordInput): Promise<DataRecord> {
       const record: DataRecord = {
         scope: input.scope,
@@ -68,9 +91,10 @@ function memoryStorage(): MemoryStorage {
       return rows.get(keyOf(ref.scope, ref.type, ref.key))
     },
     async listRecords(query) {
-      return [...rows.values()].filter(
-        (r) => r.scope === query.scope && (!query.type || r.type === query.type),
-      )
+      queries.push(query)
+      return [...rows.values()]
+        .filter((r) => r.scope === query.scope && (!query.type || r.type === query.type))
+        .map((r) => (query.omit ? { ...r, content: applyOmit(r.content, query.omit) } : r))
     },
     async deleteRecord(ref) {
       return rows.delete(keyOf(ref.scope, ref.type, ref.key))
@@ -852,6 +876,50 @@ describe('runTrainingCampaign', () => {
     })
     expect(result.skipped).toBe(2)
     expect(result.completed).toBe(0)
+  })
+
+  it('MEMORY-SAFETY: caps a runaway series in the persisted run record (producer safety valve)', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: { objective: 5, series: { equity: Array.from({ length: 40000 }, (_, i) => i) } },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { fixed: { lr: 0.1 } },
+    })
+    const [record] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect((record.content as { series: { equity: number[] } }).series.equity.length).toBeLessThanOrEqual(
+      10000,
+    )
+  })
+
+  it('MEMORY-SAFETY: the campaign dedup + pick-best scans omit heavy run fields (no full-content re-materialization)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2] } },
+      skipExplored: true,
+    })
+    // The dedup scan (skipExplored) and the end-of-campaign pick-best scan both list the run type; neither
+    // renders a chart, so both must shed the unbounded per-step fields — else 10 concurrent campaigns each
+    // re-materialize the whole growing run-set into the Node heap.
+    const runScans = storage.queries.filter((q) => q.type === 'demo-run')
+    expect(runScans.length).toBeGreaterThan(0)
+    for (const q of runScans) {
+      expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
+    }
   })
 
   it('runs a fresh seed of an explored setup when skipExplored is off', async () => {
@@ -1671,6 +1739,22 @@ describe('evaluateTrainingRun', () => {
       }
     })
 
+    it('stamps the originating activityId on each evaluation record (Run→Activity link)', async () => {
+      const storage = memoryStorage()
+      await seedCompletedRun(storage, 'run1')
+      const runner = stubRunner({ jobResult: () => ({ summary: { objective: 7 } }) })
+      const { tools } = makeTools(runner, storage)
+      await tools.evaluateTrainingRuns({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: evalManifest(),
+        runKeys: ['run1'],
+        activityId: 'act-eval-1',
+      })
+      const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key: 'run1' })
+      expect(rec?.content).toMatchObject({ runKey: 'run1', activityId: 'act-eval-1' })
+    })
+
     it('reports cumulative progress and notifies onRecordWritten per run', async () => {
       const storage = memoryStorage()
       await seedCompletedRun(storage, 'run1')
@@ -1770,6 +1854,35 @@ describe('judgeTrainingRuns', () => {
       judgedBy: 'openai/m',
       judgedAt: NOW,
     })
+  })
+
+  it('MEMORY-SAFETY: reads the completed runs with heavy fields omitted (judging never needs the trace)', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 50)
+    const executor = stubExecutor(JSON.stringify([{ key: 'a', score: 70, why: 'ok' }]))
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.judgeTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
+    const runScans = storage.queries.filter((q) => q.type === 'demo-run')
+    expect(runScans.length).toBeGreaterThan(0)
+    for (const q of runScans) {
+      expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
+    }
+  })
+
+  it('stamps the originating activityId on each verdict record (Run→Activity link)', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 50)
+    const executor = stubExecutor(JSON.stringify([{ key: 'a', score: 70, why: 'ok' }]))
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      activityId: 'act-judge-1',
+    })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-verdict', key: 'a' })
+    expect(rec?.content).toMatchObject({ key: 'a', activityId: 'act-judge-1' })
   })
 
   it('judges only the selected runKeys when provided', async () => {
@@ -2407,6 +2520,25 @@ describe('getRunData / getRunXAI (agent read tools)', () => {
     expect(result.analysis?.rank).toEqual({ position: 1, total: 2 }) // hi (90) is best under max
     expect(result.analysis?.criterion.key).toBe('objective')
     expect(Array.isArray(result.analysis?.importances)).toBe(true)
+  })
+
+  it('MEMORY-SAFETY: getRunXAI reads the focus trace via a by-key full read, not by bulk-loading every run trace', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'lo', 10, { config: { lr: 0.1 } })
+    await seedRun(storage, 'hi', 90, {
+      config: { lr: 0.9 },
+      artifacts: { decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5, buy: 2 } } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunXAI({ scope: 'proj', runKey: 'hi' })
+    expect(result.found).toBe(true)
+    // The trace lives in the omitted `artifacts.decisionTrace`; the digest can only show it if the focus
+    // record was re-fetched IN FULL — the multi-run ranking list must never carry every run's trace.
+    expect(result.analysis?.actionCounts).toEqual({ hold: 5, buy: 2 })
+    const listScans = storage.queries.filter((q) => q.type === 'demo-run' && q.key === undefined)
+    expect(listScans.length).toBeGreaterThan(0)
+    for (const q of listScans) expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
   })
 
   it('both return found:false for an unknown run id', async () => {

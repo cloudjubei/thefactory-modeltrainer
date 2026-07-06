@@ -65,7 +65,13 @@ NORMALISATION (`normalizeByEnvironment` re-expressing each run as a robust z-sco
 environment, consumed by the Runs "By dataset/By environment" pooled view and the xAI current-run
 "By dataset"/"By environment" standing + `robustnessVerdict` tabs — pure logic in `comparison.js`,
 tested in `comparisonViewer.test.ts`); per-step group-saliency (**C1**) + permutation-SHAP attribution
-(**B1**, `decision_trace_method="tabular-shap"`, Adebayo-checked, no new dep). Remaining, in order:
+(**B1**, `decision_trace_method="tabular-shap"`, Adebayo-checked, no new dep). Also shipped: the current-run
+across-axis UX — favorites resolved against the full snapshot (`findRunAnywhere` + fetch-by-key, exploratory
+filters never drop a pin, **View in Runs** jump), `seed` excluded from locked/axis levers in `comparison.js`
+(pools over seeds), regime slice toggles (dataset by `timeframe`, environment by `allow_shorting`/`no_sell_action`;
+unused env levers hidden), the **By value** one-factor sub-tab (any tunable lever, sortable, Add-runs + Sweep-
+with-recommended-values popup), and xAI launches that toast-and-stay (no auto-switch to Activity). Remaining,
+in order:
 
 - **B2 — attention-weight viz (attn/custom-net recipes only).** Attention modules compute the weight
   matrices but discard them (`src/model/custom/attention.py`). Surface them into the trace on the BlackSwan
@@ -78,6 +84,9 @@ Parked (real blocker / low value):
 
 - **Generative counterfactual states** — needs a net-new GAN/VAE over the observation space; none exists.
 - **Step-by-step ANIMATION replay** + scrubber. No trace-artifact change needed.
+- **`seed` still counts as a model lever in the engine's fANOVA importance** (a separate path from the viewer
+  axis logic; needs a manifest scope change to `ignore` + a re-analysis to take effect) — flag, don't
+  silently change.
 
 ---
 

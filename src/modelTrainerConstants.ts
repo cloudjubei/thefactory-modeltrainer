@@ -7,6 +7,35 @@ export const MAX_CAMPAIGN_ITEMS = 500
 /** Provenance label stamped on run records when the caller names no compute target. */
 export const DEFAULT_RAN_BY = 'local'
 
+/**
+ * Content paths on a run record that hold the unbounded per-step arrays (chart series, ledger, regime
+ * spans, the full decision trace). Every list/aggregate scan that does NOT render a chart passes these to
+ * `listRecords({ omit })` so the DB backend never reads the heavy subtrees off the socket — detail / xAI
+ * views re-fetch the FULL record by key. Mirrors the viewer's `HEAVY_RUN_FIELDS` (a separate runtime).
+ */
+export const HEAVY_RUN_FIELDS = [
+  'series',
+  'ledger',
+  'regimes',
+  'artifacts.runChart',
+  'artifacts.decisionTrace',
+]
+
+/**
+ * Safety valve: most points a single `series` metric array is stored with. The trainer downsamples charts
+ * for display anyway, so this only clamps a producer that streams a per-timestep metric without bound —
+ * beyond it the array is uniformly downsampled (first + last preserved). Generous, so real runs never hit it.
+ */
+export const MAX_SERIES_POINTS = 10000
+
+/**
+ * Safety valve: most steps a stored `artifacts.decisionTrace.steps` is kept with. The embedded trace is
+ * meant to be producer-downsampled already (the full rollout lives in the `decisionTraceFile` sidecar), so
+ * this only clamps a runaway trace — the kept steps are a contiguous prefix (adjacency preserved for the
+ * trace diff) and `totalSteps` records the true pre-cap rollout length.
+ */
+export const MAX_DECISION_TRACE_STEPS = 20000
+
 /** How much the LLM verdict weighs against the normalised objective in a blended score. */
 export const JUDGE_LLM_WEIGHT = 0.5
 

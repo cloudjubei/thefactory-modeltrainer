@@ -103,6 +103,19 @@ project by its manifest's `recordType`.
   surrogate (`fitConfigSurrogate`) over (config → criterion) adds the global view — fANOVA importance, a
   greedy ablation tree, and a 2-lever interaction grid — predicting unobserved configs (the determinism is
   load-bearing: the forest is seeded from the data, so analysis never drifts between runs).
+- **Current-run across-axis views pool over an axis, hold everything else fixed** (`viewer/comparison.js`,
+  pure, tested in `comparisonViewer.test.ts`): pin the focus run's config on every LOCKED lever and pool the
+  matching runs by an AXIS — the dataset levers ("By dataset"), the environment levers ("By environment"), or
+  a single chosen tunable lever ("By value", the one-factor-at-a-time view). Each row shows the metric
+  [min·avg·max] over seeds plus its normalised STANDING (robust-z within that axis value), and
+  `robustnessVerdict` classifies robust/mixed/weak across the axis. `seed` is never a locked or axis lever (a
+  nuisance param pooled over, matching `setupKeyOfRun`). Regime slice toggles narrow the pool (dataset by
+  `timeframe`, environment by the `allow_shorting`/`no_sell_action` booleans); unused env levers
+  (`position_sizing`/`transaction_fee`/`vol_target`) are hidden from the value line. Every view sorts by any
+  column, selects rows to **Add runs** with fresh seeds (a non-exploration verify pass), and **Sweep**s the
+  axis for first-time-only cells (By value via a recommended-values popup) — all through `xaiLaunchBatch`,
+  which stays on the xAI tab. Favorites are resolved from the full-runs snapshot (`findRunAnywhere`, fetched
+  by key) so a pin never vanishes off-page; the picker jumps to the run in Runs via **View in Runs**.
 - **LLM only synthesises the xAI, never computes it**: a thin layer sits on top of the deterministic engine.
   `xaiNarrate` (tool) digests ONE run's own deterministic xAI server-side (its action mix, input attribution
   - the Adebayo sanity verdict, reward breakdown, latent probe, the decision-diff vs a passed-in sibling,

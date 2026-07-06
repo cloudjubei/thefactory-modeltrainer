@@ -8,6 +8,12 @@
 // train/judge/propose/evaluate activity.
 
 const POLL_MS = 3000
+// A faster cadence while an activity is actively RUNNING (calibrating/training/quick task) so phase
+// + per-run status changes surface promptly. Idle/queued/paused states keep the slower POLL_MS.
+const ACTIVE_POLL_MS = 900
+// Every campaign's observe loop reads status through one shared `listActivities` snapshot cached for
+// this long, so N concurrent observers cost ~one list fetch per interval, not N.
+const ACTIVITIES_CACHE_MS = 800
 const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
 // How long an activity must read as not-live (controller gone) AND show no progress
 // advancement before we treat it as genuinely dead. `isLive` is an in-memory flag with
@@ -33,12 +39,14 @@ function autoFidelity(timeframe) {
 // Two independent concurrency lanes. EXPERIMENT activities (training campaigns + checkpoint
 // evaluations) execute the project's training code on compute and share one budget; the lighter
 // TASK activities (judge / propose / analyze-paper) get their own budget so a quick judge or paper
-// import is never blocked behind a long campaign. The experiment key is kept stable so an existing
-// 'activityBudget' setting carries over as the experiment budget.
-const EXPERIMENT_BUDGET_SS = 'trainer.activityBudget'
+// import is never blocked behind a long campaign. The caps live server-side (the host queue enforces
+// them); the viewer edits a per-project `trainer-activity-limits` record, defaulting to these.
 const DEFAULT_EXPERIMENT_BUDGET = 3
-const TASK_BUDGET_SS = 'trainer.taskBudget'
 const DEFAULT_TASK_BUDGET = 3
+const LANE_LIMITS_RECORD_TYPE = 'trainer-activity-limits'
+// The viewer-set queue drain order — a per-project `{order: [activityId, …]}` record the host's
+// drain reads so the user can reorder which queued campaign runs next (the Activity tab's ↑/↓/⤒).
+const QUEUE_ORDER_RECORD_TYPE = 'trainer-queue-order'
 // Activity types that run on compute — the experiment lane. Everything else is a task.
 const EXPERIMENT_ACTIVITY_TYPES = new Set(['train', 'evaluate'])
 // Whether the 2nd ('Tasks') column is collapsed (persisted per session).
@@ -115,6 +123,11 @@ let xaiAxisSelected = new Set()
 // Per-render map: axis signature → { config, seeds } for the visible groups, so the Sweep/Add-runs handlers
 // can rebuild launch specs without re-deriving the grouping.
 let xaiAxisRowCache = new Map()
+// Regime SLICE per axis ('all' or a slice id from xaiAxisSliceOptions) — pool only 1d/1h datasets, or only
+// shorting / no-sell environments. Keyed by axis; a lever axis ('By value') carries its own entry.
+let xaiAxisSlice = {}
+// The lever chosen in the "By value" tab — one lever varies, every other lever is held to the focus config.
+let xaiByValueLever = ''
 // Which "configuration map" is shown in the Maps tab: 'parallel', 'pca', or 'pareto' (trade-off frontier).
 let xaiMapKind = 'parallel'
 // PCA colour mode: 'rank' (performance) or 'model' (cluster by model_name).
@@ -222,9 +235,9 @@ let lastSettledCampaign = null
 let judging = false
 let proposing = false
 let queueCache = []
-// In-memory double-dispatch guard for the persisted queue: only one pump loop drains it
-// at a time (it dispatches up to the budget, then returns).
-let queuePumping = false
+// Mirror of the host's queue drain order (activityIds). Drives the Activity tab's queued ordering
+// + the ↑/↓/⤒ reorder controls; persisted to the QUEUE_ORDER_RECORD_TYPE record the drain reads.
+let queueOrder = []
 let runsFilterKeys = null
 let runsFilterLabel = ''
 let runsSortKey = null
@@ -406,7 +419,7 @@ function shortKey(key) {
 // +12.5%"), so a favorite reads by what it IS, not an opaque run key. Falls back to the short key when the
 // run isn't in the loaded page (favorites can outlive a page of results).
 function favoriteOptionLabel(key) {
-  const run = runsCache.find((r) => r.key === key)
+  const run = findRunAnywhere(key)
   const s = run && run.summary
   if (!s) return shortKey(key)
   const model = (s.config && s.config.model_name) || shortKey(key)
@@ -950,7 +963,7 @@ async function readVerdicts() {
   return map
 }
 async function readJudgement() {
-  return readLatestRecord('-judgement')
+  return readMostRecentRecord('-judgement')
 }
 async function readEvaluations() {
   if (!manifest) return new Map()
@@ -964,7 +977,7 @@ async function readEvaluations() {
   return map
 }
 async function readProposal() {
-  return readLatestRecord('-proposal')
+  return readMostRecentRecord('-proposal')
 }
 // Failures the user dismissed from the Activity list, persisted as one record per
 // dismissed run key so the dismissal survives reloads + other clients.
@@ -1214,9 +1227,8 @@ async function readProjectRunKeys(projectKey) {
     })
     .filter(Boolean)
 }
-// Queue records are global ('trainer-queue') but project-scoped through the
-// stored params.recordType; marker items (auto-eval intents) ride the same
-// record type and are filtered out of the visible queue.
+// Auto-eval intents persist as marker records on the 'trainer-queue' type (project-scoped through
+// the stored params.recordType); the concurrency queue itself now lives host-side.
 async function readQueueRecords() {
   if (!manifest) return []
   const recs = await queryRecords(QUEUE_RECORD_TYPE)
@@ -1226,16 +1238,6 @@ async function readQueueRecords() {
       return { ...content, id: content.id || r.key || '' }
     })
     .filter((q) => q.id && q.params && q.params.recordType === manifest.recordType)
-}
-async function readQueue() {
-  const items = await readQueueRecords()
-  return items
-    .filter((q) => !q.marker)
-    .sort(
-      (a, b) =>
-        String(a.queuedAt || '').localeCompare(String(b.queuedAt || '')) ||
-        a.id.localeCompare(b.id),
-    )
 }
 async function putQueueItem(item) {
   await window.OverseerBridge.putData({ type: QUEUE_RECORD_TYPE, key: item.id, content: item })
@@ -1900,6 +1902,8 @@ function resetDashboardState() {
   xaiAxisSortDir = 'desc'
   xaiAxisSelected = new Set()
   xaiAxisRowCache = new Map()
+  xaiAxisSlice = {}
+  xaiByValueLever = ''
   xaiConfigSpaceCache = new Map()
   analyzingConfigSpace = false
   xaiRunAnalysisCache = new Map()
@@ -1977,6 +1981,8 @@ async function openProject(projectKey) {
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
   await loadHypothesisMinRuns()
+  await loadServerLaneLimits()
+  await loadQueueOrder()
   if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
@@ -1987,7 +1993,6 @@ async function openProject(projectKey) {
   await refreshQueue()
   await processSettledCampaignEffects()
   if (epoch !== projectEpoch) return
-  pumpQueue()
   // Pick up any edit to the project's trainer.json (e.g. removing the `evaluate` command)
   // without a manual Re-inspect — refreshes the cached manifest record in the background.
   void refreshProjectManifest(project)
@@ -2062,138 +2067,93 @@ async function readLiveActivityIds() {
 function isExperimentActivityType(type) {
   return EXPERIMENT_ACTIVITY_TYPES.has(type)
 }
-// How many slots one lane is using — only RUNNING/starting activities count (a paused or
-// stalled-waiting-to-resume entry isn't consuming compute, so it shouldn't block new launches).
-function laneSlotCount(experiment) {
-  let n = 0
-  for (const a of liveActivities.values()) {
-    if (a.status !== 'running' && a.status !== 'starting') continue
-    if (isExperimentActivityType(a.activityType) === experiment) n++
-  }
-  return n
-}
-function experimentSlotCount() {
-  return laneSlotCount(true)
-}
-function taskSlotCount() {
-  return laneSlotCount(false)
-}
 function anyActivityRunning() {
   for (const a of liveActivities.values())
     if (a.status === 'running' || a.status === 'starting') return true
   return false
 }
-// Start now if a slot is free (up to the activity budget), else enqueue. The caller only
-// handles the queued message + its own status line — launchActivity owns dispatch + observe.
+// Launch every request straight to the host — the SERVER-SIDE activity queue owns concurrency now
+// (it runs the activity if its lane is under the configured limit, else persists a `queued` run it
+// drains later, even with the app closed). launchActivity observes whatever status the host assigns.
 async function startOrEnqueue(activityType, params, label, extra) {
+  // Carry the display label INTO the params so it persists in the host's resumeToken — otherwise a
+  // reload (or a server-queued item re-tracked from the host) loses it and shows the generic type.
+  const withLabel = label ? { ...(params || {}), _label: label } : params
   const item = {
     id: randomHexId(),
     activityType,
-    params,
+    params: withLabel,
     label,
     queuedAt: nowIso(),
     ...(extra || {}),
   }
-  const experiment = isExperimentActivityType(activityType)
-  const slots = experiment ? experimentSlotCount() : taskSlotCount()
-  const budget = experiment ? savedExperimentBudget() : savedTaskBudget()
-  if (slots < budget) {
-    const activityId = await launchActivity(item)
-    if (activityId) return { started: true, activityId }
-  }
-  await putQueueItem(item)
-  await refreshQueue()
-  const queue = await readQueue()
-  const ahead = queue.filter((q) => isExperimentActivityType(q.activityType) === experiment).length
-  return { queued: true, id: item.id, ahead }
+  const activityId = await launchActivity(item)
+  return activityId ? { started: true, activityId } : { started: false }
 }
+// The client-side concurrency queue is retired (the host queue owns it); queued activities now
+// surface as their own blocks. Kept as a thin re-render so existing call sites need no change.
 async function refreshQueue() {
-  queueCache = await readQueue()
   renderActivity()
 }
-async function onQueueRemove(id) {
-  const item = queueCache.find((q) => q.id === id)
-  await deleteQueueItem(id)
-  if (item && item.hypothesisId && item.params && item.params.recordType) {
-    await clearHypothesisCampaign(item.params.recordType, item.hypothesisId, id)
-    if (activeTabId === 'hypotheses') await renderHypotheses()
-  }
-  await refreshQueue()
-}
-// Reorder a pending item within its OWN lane (experiments/tasks pump independently). `queuedAt` is the
-// sort-only, never-displayed order key, so a move re-stamps the whole lane to a fresh increasing
-// sequence — the cleanest way to persist the new order without timestamp-collision math.
-async function moveQueueItem(id, dir) {
-  const item = queueCache.find((q) => q.id === id)
-  if (!item) return
-  const lane = isExperimentActivityType(item.activityType)
-  const laneItems = queueCache
-    .filter((q) => !q.marker && isExperimentActivityType(q.activityType) === lane)
-    .sort(
-      (a, b) =>
-        String(a.queuedAt || '').localeCompare(String(b.queuedAt || '')) ||
-        String(a.id).localeCompare(String(b.id)),
-    )
-  const i = laneItems.findIndex((q) => q.id === id)
-  if (i < 0) return
-  const j = dir === 'top' ? 0 : dir === 'up' ? i - 1 : dir === 'down' ? i + 1 : i
-  if (j === i || j < 0 || j >= laneItems.length) return
-  laneItems.splice(i, 1)
-  laneItems.splice(j, 0, item)
-  const base = Date.now() - laneItems.length * 1000
-  await Promise.all(
-    laneItems.map((q, idx) => {
-      q.queuedAt = new Date(base + idx * 1000).toISOString()
-      return putQueueItem(q)
-    }),
-  )
-  await refreshQueue()
-}
-// Drain BOTH lanes until each is full to its own budget. The lanes are independent: a full
-// experiment lane never holds back a queued task, and vice versa. Each dispatched activity
-// observes itself (non-blocking) and re-pumps when it settles, freeing its slot for the next item.
-async function pumpQueue() {
-  if (queuePumping || !embedded() || !manifest) return
-  const epoch = projectEpoch
-  queuePumping = true
+// Hydrate `queueOrder` from the host's order record (on project open) so the queued list + the
+// drain agree on ordering.
+async function loadQueueOrder() {
   try {
-    // A lane that hits a transient launch failure is skipped for the rest of this pump so we
-    // never lose the queue or hammer a failing launch; a later pump (settle / focus) retries.
-    const lanes = [
-      {
-        isExp: true,
-        slotCount: experimentSlotCount,
-        budget: savedExperimentBudget,
-        blocked: false,
-      },
-      { isExp: false, slotCount: taskSlotCount, budget: savedTaskBudget, blocked: false },
-    ]
-    let progressing = true
-    while (progressing && epoch === projectEpoch) {
-      progressing = false
-      const queue = await readQueue()
-      if (epoch !== projectEpoch || !queue.length) break
-      for (const lane of lanes) {
-        if (epoch !== projectEpoch || lane.blocked) continue
-        if (lane.slotCount() >= lane.budget()) continue
-        const head = queue.find((q) => isExperimentActivityType(q.activityType) === lane.isExp)
-        if (!head) continue
-        await deleteQueueItem(head.id)
-        queueCache = queueCache.filter((q) => q.id !== head.id)
-        const activityId = await launchActivity(head)
-        if (activityId) {
-          progressing = true
-        } else {
-          await putQueueItem(head)
-          queueCache = await readQueue()
-          lane.blocked = true
-        }
-      }
-    }
-  } finally {
-    queuePumping = false
+    const recs = await queryRecords(QUEUE_ORDER_RECORD_TYPE, 'latest')
+    const order = recs[0] && recs[0].content && recs[0].content.order
+    queueOrder = Array.isArray(order) ? order.filter((id) => typeof id === 'string') : []
+  } catch {
+    queueOrder = []
   }
 }
+// The QUEUED activities (host status 'queued'), in the user's drain order — position in `queueOrder`
+// first, then enqueue time for anything not yet listed.
+function queuedEntriesInOrder() {
+  const pos = (id) => {
+    const i = queueOrder.indexOf(id)
+    return i < 0 ? queueOrder.length : i
+  }
+  return [...liveActivities.values()]
+    .filter((e) => e.status === 'queued')
+    .sort((a, b) => pos(a.activityId) - pos(b.activityId) || a.startedAt - b.startedAt)
+}
+// Remove a queued activity = abort it (the host drops it from the queue).
+async function onQueueRemove(activityId) {
+  await abortActivityById(activityId)
+}
+// Reorder a queued activity within its OWN lane. Rebuilds `queueOrder` (this lane's new order + the
+// other lane's order preserved) and persists it — the host drain reads the record on the next tick.
+async function moveQueuedActivity(activityId, dir) {
+  const ordered = queuedEntriesInOrder()
+  const entry = ordered.find((e) => e.activityId === activityId)
+  if (!entry) return
+  const lane = isExperimentActivityType(entry.activityType)
+  const laneIds = ordered
+    .filter((e) => isExperimentActivityType(e.activityType) === lane)
+    .map((e) => e.activityId)
+  const i = laneIds.indexOf(activityId)
+  const j = dir === 'top' ? 0 : dir === 'up' ? i - 1 : dir === 'down' ? i + 1 : i
+  if (j === i || j < 0 || j >= laneIds.length) return
+  laneIds.splice(i, 1)
+  laneIds.splice(j, 0, activityId)
+  const otherIds = ordered
+    .filter((e) => isExperimentActivityType(e.activityType) !== lane)
+    .map((e) => e.activityId)
+  queueOrder = lane ? [...laneIds, ...otherIds] : [...otherIds, ...laneIds]
+  renderActivity()
+  try {
+    await window.OverseerBridge.putData({
+      type: QUEUE_ORDER_RECORD_TYPE,
+      key: 'latest',
+      content: { order: queueOrder },
+    })
+  } catch {
+    // best-effort — the drain falls back to enqueue order until the write lands
+  }
+}
+// The host now drains the queue server-side (on every activity settle + at boot), so the client no
+// longer pumps. Kept as a no-op so the settle/focus/resume call sites need no change.
+async function pumpQueue() {}
 // Start one activity and observe it CONCURRENTLY. The entry is registered immediately (so
 // the budget + Activity tab reflect it before the backend confirms), then its own observe
 // loop runs and untracks + re-pumps on settle.
@@ -2216,6 +2176,7 @@ async function launchActivity(item) {
     const started = await window.OverseerBridge.startActivity(item.activityType, item.params)
     entry.activityId = started && started.activityId
     if (!entry.activityId) throw new Error('no activity id')
+    invalidateActivitiesCache() // the new run must appear on the next status poll
   } catch {
     liveActivities.delete(localId)
     renderActivity()
@@ -2242,14 +2203,14 @@ async function launchActivity(item) {
 }
 // Re-attach an observe loop to an ALREADY-RUNNING backend activity (on reload / resume) by
 // registering a tracking entry for it and observing — without starting anything new.
-function trackExistingActivity(activityId, activityType, label) {
+function trackExistingActivity(activityId, activityType, label, status) {
   for (const a of liveActivities.values()) if (a.activityId === activityId) return a
   const entry = {
     localId: randomHexId(),
     activityId,
     activityType,
     label: label || activityType,
-    status: 'running',
+    status: status || 'running',
     progress: null,
     campaign: null,
     startedAt: Date.now(),
@@ -2419,15 +2380,18 @@ async function processAutoEvalMarkers() {
   }
   await refreshQueue()
 }
-// Queue an evaluate for each completed run still missing one. `keys` scopes it to a
+// Launch an evaluate for each completed run still missing one. `keys` scopes it to a
 // campaign's runs; when null (its campaign record was never found — e.g. aborted early) it
 // falls back to ALL completed runs missing an eval, so auto-eval is never silently lost.
 async function enqueueMissingEvaluations(keys, baseParams) {
   if (!evalEnabled()) return
-  const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
+  const [runs, evaluations] = await Promise.all([readRuns(), readEvaluations()])
   const scope = Array.isArray(keys) && keys.length ? keys : runs.map((r) => r.key)
-  const queuedKeys = new Set(
-    queue.filter((q) => q.activityType === 'evaluate').flatMap(evaluateKeysOf),
+  // Runs already covered by an in-flight evaluate (queued OR running) on the host — don't double-launch.
+  const inFlightKeys = new Set(
+    [...liveActivities.values()]
+      .filter((a) => a.item && a.item.activityType === 'evaluate')
+      .flatMap((a) => evaluateKeysOf(a.item)),
   )
   const pending = []
   for (const key of scope) {
@@ -2438,21 +2402,18 @@ async function enqueueMissingEvaluations(keys, baseParams) {
     // Degenerate runs (zero/few trades, NaN, etc.) have no result worth re-testing — auto-eval skips them.
     if (runIsDegenerate(run)) continue
     if (!(s.artifacts && s.artifacts.checkpoint)) continue
-    if (evaluations.has(key) || queuedKeys.has(key) || evaluatingKeys.has(key)) continue
+    if (evaluations.has(key) || inFlightKeys.has(key) || evaluatingKeys.has(key)) continue
     pending.push(key)
   }
   if (!pending.length) return
-  // One batch activity re-tests every checkpoint in parallel (a bounded pool),
-  // instead of one serial activity per run.
+  // One batch activity re-tests every checkpoint in parallel (a bounded pool), instead of one serial
+  // activity per run. The host queue gates it — it runs now if the experiment lane has a slot, else queues.
   const concurrency = savedConcurrency()
-  await putQueueItem({
-    id: randomHexId(),
-    activityType: 'evaluate',
-    params: { ...baseParams, runKeys: pending, concurrency },
-    label:
-      pending.length === 1 ? `Evaluate ${shortKey(pending[0])}` : `Evaluate ${pending.length} runs`,
-    queuedAt: nowIso(),
-  })
+  await startOrEnqueue(
+    'evaluate',
+    { ...baseParams, runKeys: pending, concurrency },
+    pending.length === 1 ? `Evaluate ${shortKey(pending[0])}` : `Evaluate ${pending.length} runs`,
+  )
 }
 // Settle-time bookkeeping shared by the observe loop and project open: stamp finished campaigns into
 // their hypotheses, consume auto-eval markers, then re-evaluate every hypothesis against the now-current
@@ -3192,6 +3153,12 @@ function findRun(key) {
   if (extra && fullRunKeys.has(key)) return extra
   return runsCache.find((r) => r.key === key) || extra
 }
+// Resolve a run from the WIDEST set: the paged/full cache (findRun), then the all-runs snapshot. Favorites +
+// the xAI picker use this so a pinned run resolves by NAME regardless of which page is loaded — findRun alone
+// only sees the current page + explicitly-cached keys, so off-page favorites would fall back to a raw key.
+function findRunAnywhere(key) {
+  return findRun(key) || allRunsCache.find((r) => r.key === key) || null
+}
 function rememberRun(key) {
   // Don't downgrade an already-full cache entry to the lean page copy.
   if (fullRunKeys.has(key)) return
@@ -3271,17 +3238,20 @@ function applyRunsFilters(runs) {
   for (const rule of customRulesCache) {
     if (rule.active) out = out.filter((r) => runMatchesCustomRule(r, rule))
   }
+  return applyRunsTextFilter(out)
+}
+// The free-text search over key + config JSON — split out so the curated Favorites view can search WITHOUT
+// the exploratory filters (Hide-bad / status / lever / custom rules) that must never drop an explicit pin.
+function applyRunsTextFilter(runs) {
   const q = runsTextFilter.trim().toLowerCase()
-  if (q) {
-    out = out.filter(
-      (r) =>
-        r.key.toLowerCase().includes(q) ||
-        JSON.stringify(r.summary.config || {})
-          .toLowerCase()
-          .includes(q),
-    )
-  }
-  return out
+  if (!q) return runs
+  return runs.filter(
+    (r) =>
+      r.key.toLowerCase().includes(q) ||
+      JSON.stringify(r.summary.config || {})
+        .toLowerCase()
+        .includes(q),
+  )
 }
 // --- Per-setup aggregation (a SETUP = config minus seed; a result is a setup, not a
 // single run). Group runs by setup and report min/avg/max across its seeds. ---------
@@ -3589,15 +3559,18 @@ function runsToolbarHtml(shownCount, total) {
     <div class="runs-dropdowns-body">${statusFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
-  const active = hasActiveRunsFilters()
+  // Favorites is a CURATED pin list — the exploratory filters (Hide-bad / status / lever / custom rules) don't
+  // apply there (they'd hide pins), so only the text search shows; everywhere else the full filter row shows.
+  const curated = runsViewMode === 'favorites'
+  const active = curated ? Boolean(runsTextFilter.trim()) : hasActiveRunsFilters()
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
   return `<div class="runs-toolbar">
     ${runsViewModeHtml()}
-    ${dropdownsPanel}
+    ${curated ? '' : dropdownsPanel}
     <div class="runs-filters">
       <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
-      ${hideBadChipHtml()}
-      ${customTogglesHtml()}
+      ${curated ? '' : hideBadChipHtml()}
+      ${curated ? '' : customTogglesHtml()}
       <span class="runs-count">${shownCount}/${total} runs${label}</span>
       ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
     </div>
@@ -3734,6 +3707,8 @@ function comparisonAxisLabel(axis, run) {
     .filter((v) => v !== undefined && v !== null)
     .map(String)
     .join(' · ')
+  // A single-lever ("By value") axis is named by the lever value alone; scope axes prepend the bundle name.
+  if (axis !== 'dataset' && axis !== 'environment') return valStr || '(unset)'
   const name = axis === 'dataset' ? runDatasetName(run) : runEnvName(run)
   return name && name !== 'Custom' ? `${name} (${valStr})` : valStr || '(unset)'
 }
@@ -3876,7 +3851,18 @@ function renderRunsTable() {
     renderComparisonView(body)
     return
   }
-  if (!runsCache.length) {
+  // Favorites are an explicit, curated pin list — resolve each pin from the WIDEST run set (findRunAnywhere:
+  // page/full cache → all-runs snapshot) and fetch any that live off the loaded data BY KEY, so a pin never
+  // vanishes just because its run isn't on the current page or in the snapshot. Independent of the Refresh.
+  const favoritesView = runsViewMode === 'favorites'
+  let favBase = null
+  if (favoritesView) {
+    const favKeys = [...favoritesCache]
+    favBase = favKeys.map((k) => findRunAnywhere(k)).filter(Boolean)
+    const missing = favKeys.filter((k) => !findRunAnywhere(k))
+    if (missing.length) warmRunsForRender(missing, renderRunsTable)
+  }
+  if (!runsCache.length && !favoritesView) {
     if (spark) spark.hidden = true
     if (runsViewMode !== 'runs') {
       setHtml(
@@ -3900,13 +3886,14 @@ function renderRunsTable() {
     closeRunDetail()
     return
   }
-  // Keep the off-page run cache bounded to runs still referenced by an open detail / compare / xAI view.
-  // Skip keys with an in-flight full-fetch — it would re-populate the cache right after eviction.
+  // Keep the off-page run cache bounded to runs still referenced by an open detail / compare / xAI view — or
+  // FAVORITED (a fetched pin must survive the render that requested it). Skip in-flight fetches.
   for (const k of [...runExtraCache.keys()]) {
     if (
       k !== selectedRunKey &&
       k !== xaiFocusKey &&
       !runsCompareKeys.has(k) &&
+      !favoritesCache.has(k) &&
       !fullRunFetches.has(k)
     ) {
       runExtraCache.delete(k)
@@ -3915,13 +3902,13 @@ function renderRunsTable() {
     }
   }
   const serverPaged = runsServerPaged()
-  // The Favorites view reuses the standard flat table over the starred runs (client-side; needs the
-  // all-runs snapshot, so it's never server-paged).
-  const favoritesView = runsViewMode === 'favorites'
-  const base = favoritesView ? runsCache.filter((r) => favoritesCache.has(r.key)) : runsCache
+  // The Favorites view reuses the standard flat table over the starred runs (client-side, never server-paged).
+  const base = favoritesView ? favBase : runsCache
   // Server total when the flat view paginates server-side; otherwise the loaded set's size.
   const total = serverPaged ? runsTotalCount : base.length
-  const filtered = applyRunsFilters(base)
+  // A pin is a deliberate override, so the exploratory filters (Hide-bad / status / lever / custom rules)
+  // never drop a favorite — only the text search narrows the curated list.
+  const filtered = favoritesView ? applyRunsTextFilter(base) : applyRunsFilters(base)
   if (spark) {
     const svg = sparklineSvg(filtered)
     setHtml(spark, svg)
@@ -3929,7 +3916,9 @@ function renderRunsTable() {
   }
   if (!filtered.length) {
     const empty = favoritesView
-      ? 'No favorites yet — click ☆ on any run (in the Runs view or a run’s detail) to star it.'
+      ? base.length
+        ? 'No favorites match the search — clear it to see all your starred runs.'
+        : 'No favorites yet — click ☆ on any run (in the Runs view or a run’s detail) to star it.'
       : 'No runs match the filter.'
     setHtml(body, `${runsToolbarHtml(0, total)}<div class="empty-hint">${empty}</div>`)
     closeRunDetail()
@@ -5293,10 +5282,16 @@ function decisionDiffChatSummary(baseline, tweak) {
   return `Decision diff vs the other run: ${(diff.divergenceRate * 100).toFixed(0)}% of ${diff.alignedSteps} aligned decisions changed; decision-quality reads "${q.verdict}" (reward Δ ${fmtSignedNum(q.meanRewardDeltaOnChanges)} at changed steps vs ${fmtSignedNum(q.meanRewardDeltaOnUnchanged)} control — heuristic, not causal); objective Δ ${fmtSignedNum(diff.objectiveDelta)}; action-mix Δ ${deltas || 'none'}.`
 }
 // --- xAI tab: model internals + cross-run config effects + the experiment recommender -------------
+// The run pool the xAI current-run views analyse: the ALL-runs snapshot when it's loaded (a global Refresh),
+// else the current page/cache. Preferring the snapshot means the By dataset / environment / value pooling +
+// standings see every run, not just one server page.
+function xaiRunPool() {
+  return allRunsCache.length ? allRunsCache : runsCache
+}
 // All analysis runs in the browser via window.Xai (a parity-tested mirror of the TS engine) over the
-// run records already in runsCache — deterministic, non-LLM, re-runnable anytime.
+// run records in the xAI pool — deterministic, non-LLM, re-runnable anytime.
 function xaiRuns() {
-  return runsCache
+  return xaiRunPool()
     .filter(
       (r) => r.summary && r.summary.status !== 'failed' && typeof r.summary.objective === 'number',
     )
@@ -5435,6 +5430,7 @@ function xaiScopeHeaderHtml(criterion) {
         <span class="xai-scope-tag">Run in focus</span><code class="xai-scope-value">${escapeHtml(shortKey(xaiFocusKey))}</code>
         ${favPicker}${critSel}${dirSel}
         <span class="xai-scope-spacer"></span>
+        <button type="button" class="ghost-btn" data-xai-view-run="${escapeHtml(xaiFocusKey)}" title="Open this run in the Runs tab">View in Runs \u2197</button>
         <button type="button" class="ghost-btn" data-xai-clear-focus>\u2715 Clear run</button>
       </div>
     </div>`
@@ -5558,6 +5554,9 @@ function xaiAllTabs(bundle, criterion) {
 function xaiCurrentTabs(criterion) {
   const hasDataset = window.Comparison.axisLeverKeys(manifest, 'dataset').length > 0
   const hasEnv = window.Comparison.axisLeverKeys(manifest, 'environment').length > 0
+  const focusRun = xaiFocusKey ? findRun(xaiFocusKey) : null
+  const focusCfg = (focusRun && focusRun.summary && focusRun.summary.config) || {}
+  const hasByValue = xaiByValueLevers(focusCfg).length > 0
   return [
     {
       id: 'standing',
@@ -5594,6 +5593,18 @@ function xaiCurrentTabs(criterion) {
           },
         ]
       : []),
+    // This config with every OTHER lever held fixed and ONE chosen lever varied — the one-factor-at-a-time
+    // view (e.g. how learning_rate moves the result). Offered when the run sets any tunable lever.
+    ...(hasByValue
+      ? [
+          {
+            id: 'byValue',
+            label: 'By value',
+            icon: xaiIconMap,
+            render: () => xaiByValueHtml(xaiFocusKey, criterion),
+          },
+        ]
+      : []),
     {
       id: 'narrative',
       label: 'Narrative',
@@ -5608,26 +5619,70 @@ function xaiCurrentTabs(criterion) {
     },
   ]
 }
-// CURRENT-RUN across an AXIS (dataset or environment): pin THIS run's exact model config and show how it
-// performs across each dataset/environment it was run in — the raw [min·avg·max] over seeds PLUS its
-// normalised STANDING within each (robust-z among all configs run there), so "robustly good" is told apart
-// from "lucky in one regime". The parallel of the Runs-tab pooled view, but for ONE config.
-function xaiCurrentAxisHtml(focusKey, criterion, axis) {
-  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
-  const focusRun = findRun(focusKey)
-  if (!focusRun || !focusRun.summary)
-    return `<div class="card"><p class="card-sub">Run ${escapeHtml(shortKey(focusKey))} isn’t loaded — Refresh, or open it from the Runs tab.</p></div>`
-  const focusCfg = focusRun.summary.config || {}
-  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
-  // Pin every NON-axis lever to this run's config, so every row is the SAME model across the axis.
+// Environment levers declared in the manifest but not currently wired into the sim — hidden from the
+// By-environment value line so an environment reads by what actually changes behaviour. Named per BlackSwan's
+// manifest; a harmless no-op for any project without them.
+const XAI_UNUSED_ENV_LEVERS = new Set(['position_sizing', 'transaction_fee', 'vol_target'])
+// A truthy config flag — booleans arrive as true / 'true' / 1 across the record sources.
+function xaiTruthyFlag(v) {
+  return v === true || v === 1 || String(v).toLowerCase() === 'true'
+}
+// The noun for an axis: the two scope axes read literally; a single-lever ("By value") axis reads "value".
+function xaiAxisNoun(axis) {
+  return axis === 'dataset' || axis === 'environment' ? axis : 'value'
+}
+// The regime SLICE options for a scope axis — a segmented "all + …" filter over the pooled rows. Dataset
+// slices by the `timeframe` fidelity (only values actually present); environment slices by the regime
+// booleans (shorting allowed / no sell). Each option carries a test(cfg). Empty ⇒ no toggle rendered.
+function xaiAxisSliceOptions(axis, runs) {
+  const levers = (manifest && manifest.levers) || {}
+  const cfgs = (runs || []).map((r) => (r && r.summary && r.summary.config) || {})
+  const out = []
+  if (axis === 'dataset' && levers.timeframe) {
+    const present = new Set(
+      cfgs.map((c) => c.timeframe).filter((v) => v !== undefined && v !== null).map(String),
+    )
+    // Only worth a toggle when the config actually ran at MORE than one fidelity.
+    if (present.size >= 2) {
+      const order = (levers.timeframe.choices || []).map(String).filter((v) => present.has(v))
+      for (const v of present) if (!order.includes(v)) order.push(v)
+      for (const v of order)
+        out.push({ id: `tf:${v}`, label: v, test: (cfg) => String(cfg.timeframe) === v })
+    }
+  }
+  if (axis === 'environment') {
+    const regimes = [
+      { lever: 'allow_shorting', id: 'shorting', label: 'shorting allowed' },
+      { lever: 'no_sell_action', id: 'nosell', label: 'no sell' },
+    ]
+    for (const rg of regimes) {
+      // Offer a regime only when the manifest declares it AND some pooled run actually uses it.
+      if (levers[rg.lever] && cfgs.some((c) => xaiTruthyFlag(c[rg.lever])))
+        out.push({ id: rg.id, label: rg.label, test: (cfg) => xaiTruthyFlag(cfg[rg.lever]) })
+    }
+  }
+  return out
+}
+// The segmented slice toggle for an axis ('' when the axis has no slice dimension).
+function xaiAxisSliceToggleHtml(axis, opts, activeId) {
+  if (!opts.length) return ''
+  const btn = (id, label) =>
+    `<button type="button" class="ghost-btn xai-scope-btn${activeId === id ? ' active' : ''}" data-xai-axis-slice="${escapeHtml(axis)}" data-slice-id="${escapeHtml(id)}">${escapeHtml(label)}</button>`
+  return `<div class="xai-scope-switch xai-axis-slice">${btn('all', 'all')}${opts.map((o) => btn(o.id, o.label)).join('')}</div>`
+}
+// Runs matching the focus config on every LOCKED lever (same setup) for an axis — the pool the across-axis
+// view groups. A lever axis holds every OTHER lever fixed; a scope axis holds the non-axis levers fixed.
+function xaiLockedMatches(focusCfg, axis) {
   const lock = {}
   for (const k of window.Comparison.lockedLeverKeys(manifest, axis))
     if (focusCfg[k] !== undefined && focusCfg[k] !== null) lock[k] = String(focusCfg[k])
-  const eligible = runsCache.filter(
-    (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
-  )
-  const matched = eligible.filter((r) => window.Comparison.matchesLock(lock, r))
-  const cols = comparisonColumns()
+  return xaiRunPool()
+    .filter((r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid')
+    .filter((r) => window.Comparison.matchesLock(lock, r))
+}
+// Group the matched pool by axis value, attach each group's normalised STANDING (robust-z within its axis
+// value among all configs run there), refresh the Sweep/Add-runs row cache, prune stale selection, and sort.
+function xaiAxisGroupsFrom(matched, axis, criterion, cols) {
   const labelCache = new Map()
   const items = matched.map((r) => {
     const axisSig = window.Comparison.runAxisSignature(manifest, axis, r)
@@ -5641,15 +5696,16 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
   })
   let groups = window.Comparison.groupComparison(items)
   const runByKey = new Map(matched.map((r) => [r.key, r]))
-  // Normalised standing per group: how this config ranks WITHIN each axis value, among ALL configs run there.
-  const standingByKey = window.Xai.normalizeByEnvironment(xaiRuns(), criterion, axisKeys)
+  const standingByKey = window.Xai.normalizeByEnvironment(
+    xaiRuns(),
+    criterion,
+    window.Comparison.axisLeverKeys(manifest, axis),
+  )
   const standingOf = (g) => {
     for (const k of g.keys) if (k in standingByKey) return standingByKey[k]
     return NaN
   }
   for (const g of groups) g.standing = standingOf(g)
-  // Cache each group's representative config + observed seeds so the Sweep / Add-runs handlers can rebuild
-  // launch specs without re-deriving the grouping. Keyed by the axis signature (what the checkboxes carry).
   xaiAxisRowCache = new Map(
     groups.map((g) => {
       const rep = runByKey.get(g.keys[0])
@@ -5661,56 +5717,56 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
       return [g.axisSig, { config: cfg, seeds }]
     }),
   )
-  // Drop any prior selection that no longer matches a visible group (config/scope changed).
   for (const sig of [...xaiAxisSelected]) if (!xaiAxisRowCache.has(sig)) xaiAxisSelected.delete(sig)
-  // Sort: default alphabetical by axis, else the user's clicked column (axis / #runs / standing / metric avg).
   groups = window.Comparison.sortComparisonGroups(
     groups,
     xaiAxisSortKey || 'axis',
     xaiAxisSortKey ? xaiAxisSortDir : 'asc',
   )
-  if (groups.length < 2) {
-    const only = groups.length === 1 ? ` — only <code>${escapeHtml(groups[0].axisLabel)}</code> so far` : ''
-    const sweepBtn = embedded()
-      ? `<div class="head-actions"><button type="button" class="ghost-btn" data-xai-axis-sweep="${escapeHtml(axis)}" title="Launch this exact config on every ${escapeHtml(axisNoun)} value it hasn't run yet (first-time experiments only)">Sweep all ${escapeHtml(axisNoun)}s ↗</button></div>`
-      : ''
-    return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s</h3>${sweepBtn}</div>
-      <p class="card-sub">This exact config has run in fewer than two ${escapeHtml(axisNoun)}s${only}. Use <strong>Sweep</strong> to run it on every other ${escapeHtml(axisNoun)} value and see whether it holds up across regimes.</p></div>`
-  }
-  const verdict = window.Comparison.robustnessVerdict(groups.map(standingOf))
-  const focusSig = window.Comparison.runAxisSignature(manifest, axis, focusRun)
-  const zCell = (z) => {
-    if (!Number.isFinite(z)) return '<td class="num card-sub">—</td>'
-    const cls = z > 0.15 ? 'delta-pos' : z < -0.15 ? 'delta-neg' : ''
-    return `<td class="num ${cls}" title="Robust z within this ${axisNoun} — how far above/below the typical config run here">${z >= 0 ? '+' : ''}${z.toFixed(2)}</td>`
-  }
-  // Clickable-column sort — mirrors the Runs table: the active column shows ▲/▼, a click toggles asc/desc.
+  return { groups, standingOf, runByKey }
+}
+// A group's row identity — a bold NAME + the axis value string. Dataset/environment name off the named
+// bundle; a lever axis names the row by the lever value. Unused env levers are hidden from the value line.
+function xaiAxisRowInfo(axis, axisKeys, runByKey, g) {
+  const axisNoun = xaiAxisNoun(axis)
+  const rep = runByKey.get(g.keys[0])
+  const cfg = (rep && rep.summary && rep.summary.config) || {}
+  let name
+  if (axis === 'dataset') name = rep ? runDatasetName(rep) : ''
+  else if (axis === 'environment') name = rep ? runEnvName(rep) : ''
+  else name = xaiFmtLeverValue(cfg[axis])
+  const hidden = axis === 'environment' ? XAI_UNUSED_ENV_LEVERS : null
+  const pairs = axisKeys
+    .map((k) => [k, cfg[k]])
+    .filter(([k, v]) => v !== undefined && v !== null && !(hidden && hidden.has(k)))
+  const valStr = pairs.map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`).join(' · ')
+  return { name: name && name !== 'Custom' ? name : `(${axisNoun})`, pairs, valStr }
+}
+// The shared across-axis comparison TABLE (checkbox + name + #runs + standing + metric columns), used by both
+// the By dataset / By environment views and the By value view so they render identically. axisLabelHead names
+// the identity column; the caller owns the surrounding card + head actions + intro.
+function xaiAxisTableHtml(axis, cols, groups, focusSig, standingOf, axisKeys, runByKey, axisLabelHead) {
+  const axisNoun = xaiAxisNoun(axis)
   const effSortKey = xaiAxisSortKey || 'axis'
   const effSortDir = xaiAxisSortKey ? xaiAxisSortDir : 'asc'
   const sortArrow = (key) => (effSortKey === key ? (effSortDir === 'asc' ? ' ▲' : ' ▼') : '')
   const sortTh = (key, label, numCls, help) =>
     `<th class="cmp-th${numCls ? ' num' : ''}" data-xai-axis-sort="${escapeHtml(key)}"${help ? helpAttr(help) : ''}>${label}${sortArrow(key)}</th>`
   const colHead = cols.map((c) => sortTh(c.id, escapeHtml(c.label), true, c.help)).join('')
-  // Split each row's identity into a bold NAME line + a config line, and give every row a "runs ↗" button
-  // that opens all runs in that dataset/environment. Computed once per group (few) off a representative run.
-  const axisInfoOf = (g) => {
-    const rep = runByKey.get(g.keys[0])
-    const cfg = (rep && rep.summary && rep.summary.config) || {}
-    const name = rep ? (axis === 'dataset' ? runDatasetName(rep) : runEnvName(rep)) : ''
-    const pairs = axisKeys
-      .map((k) => [k, cfg[k]])
-      .filter(([, v]) => v !== undefined && v !== null)
-    const valStr = pairs.map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`).join(' · ')
-    return { name: name && name !== 'Custom' ? name : `(${axisNoun})`, pairs, valStr }
+  const zCell = (z) => {
+    if (!Number.isFinite(z)) return '<td class="num card-sub">—</td>'
+    const cls = z > 0.15 ? 'delta-pos' : z < -0.15 ? 'delta-neg' : ''
+    return `<td class="num ${cls}" title="Robust z within this ${escapeHtml(axisNoun)} — how far above/below the typical config run here">${z >= 0 ? '+' : ''}${z.toFixed(2)}</td>`
   }
+  const allSelected = groups.length > 0 && groups.every((g) => xaiAxisSelected.has(g.axisSig))
   const rows = groups
     .map((g) => {
       const cur = g.axisSig === focusSig
-      const info = axisInfoOf(g)
+      const info = xaiAxisRowInfo(axis, axisKeys, runByKey, g)
       const cells = cols
         .map((c) => `<td class="num">${comparisonCellHtml(c, g.stats[c.id])}</td>`)
         .join('')
-      const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-runs="${escapeHtml(JSON.stringify(info.pairs))}" data-xai-axis-label="${escapeHtml(info.name)}" title="Open all runs in this ${escapeHtml(axisNoun)}">runs ↗</button>`
+      const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-runs="${escapeHtml(JSON.stringify(info.pairs))}" data-xai-axis-label="${escapeHtml(info.name)}" title="Open all runs with this ${escapeHtml(axisNoun)}">runs ↗</button>`
       return `<tr class="${cur ? 'is-selected' : ''}">
         <td><input type="checkbox" class="xai-axis-cb" data-sig="${escapeHtml(g.axisSig)}"${xaiAxisSelected.has(g.axisSig) ? ' checked' : ''} aria-label="select ${escapeHtml(info.name)}"></td>
         <td><div class="cmp-axis-name">${cur ? '<span class="xai-here">◀ this run</span> ' : ''}<strong>${escapeHtml(info.name)}</strong></div><div class="card-sub cmp-axis-config">${escapeHtml(info.valStr || '—')}</div></td>
@@ -5721,6 +5777,60 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
       </tr>`
     })
     .join('')
+  const standingHelp =
+    'Standing: this config’s robust z within the ' +
+    axisNoun +
+    ' — how far above/below the typical config run there. Regime scale removed, so it’s comparable across ' +
+    axisNoun +
+    's.'
+  return `<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>
+      <th class="cmp-th"><input type="checkbox" class="xai-axis-select-all"${allSelected ? ' checked' : ''} title="Select every ${escapeHtml(axisNoun)}"></th>
+      ${sortTh('axis', escapeHtml(axisLabelHead), false, null)}
+      ${sortTh('#runs', '# runs', true, 'Seeds of this config in this ' + axisNoun + '.')}
+      ${sortTh('standing', 'standing', true, standingHelp)}
+      ${colHead}
+      <th class="cmp-th"></th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`
+}
+
+// CURRENT-RUN across an AXIS (dataset or environment): pin THIS run's exact model config and show how it
+// performs across each dataset/environment it was run in — the raw [min·avg·max] over seeds PLUS its
+// normalised STANDING within each (robust-z among all configs run there), so "robustly good" is told apart
+// from "lucky in one regime". A regime SLICE toggle narrows the pool (1d/1h datasets, shorting / no-sell
+// environments). The parallel of the Runs-tab pooled view, but for ONE config.
+function xaiCurrentAxisHtml(focusKey, criterion, axis) {
+  const axisNoun = xaiAxisNoun(axis)
+  const focusRun = findRun(focusKey)
+  if (!focusRun || !focusRun.summary)
+    return `<div class="card"><p class="card-sub">Run ${escapeHtml(shortKey(focusKey))} isn’t loaded — Refresh, or open it from the Runs tab.</p></div>`
+  const focusCfg = focusRun.summary.config || {}
+  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
+  const cols = comparisonColumns()
+  const preMatched = xaiLockedMatches(focusCfg, axis)
+  // Regime slice (B2/B3): dataset by timeframe, environment by shorting / no-sell. Reset a stale selection.
+  const sliceOpts = xaiAxisSliceOptions(axis, preMatched)
+  let sliceId = xaiAxisSlice[axis] || 'all'
+  if (sliceId !== 'all' && !sliceOpts.some((o) => o.id === sliceId)) {
+    sliceId = 'all'
+    xaiAxisSlice[axis] = 'all'
+  }
+  const sliceOpt = sliceOpts.find((o) => o.id === sliceId)
+  const matched = sliceOpt
+    ? preMatched.filter((r) => sliceOpt.test((r.summary && r.summary.config) || {}))
+    : preMatched
+  const sliceToggle = xaiAxisSliceToggleHtml(axis, sliceOpts, sliceId)
+  const { groups, standingOf, runByKey } = xaiAxisGroupsFrom(matched, axis, criterion, cols)
+  const sweepBtn = embedded()
+    ? `<button type="button" class="ghost-btn" data-xai-axis-sweep="${escapeHtml(axis)}" title="Launch this exact config on every ${escapeHtml(axisNoun)} value it hasn't run yet (first-time experiments only)">Sweep all ${escapeHtml(axisNoun)}s ↗</button>`
+    : ''
+  if (groups.length < 2) {
+    const only = groups.length === 1 ? ` — only <code>${escapeHtml(groups[0].axisLabel)}</code> so far` : ''
+    const sliceNote = sliceId !== 'all' ? ` in the <strong>${escapeHtml((sliceOpt && sliceOpt.label) || sliceId)}</strong> slice` : ''
+    return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s</h3><div class="head-actions">${sliceToggle}${sweepBtn}</div></div>
+      <p class="card-sub">This exact config has run in fewer than two ${escapeHtml(axisNoun)}s${sliceNote}${only}. Use <strong>Sweep</strong> to run it on every other ${escapeHtml(axisNoun)} value and see whether it holds up across regimes.</p></div>`
+  }
+  const verdict = window.Comparison.robustnessVerdict(groups.map(standingOf))
+  const focusSig = window.Comparison.runAxisSignature(manifest, axis, focusRun)
   const vmap = {
     robust: `<span class="cmp-verdict is-robust">Robust</span> — at or above the typical config in every ${escapeHtml(axisNoun)}.`,
     mixed: `<span class="cmp-verdict is-mixed">Mixed</span> — strong in some ${escapeHtml(axisNoun)}s, below the typical config in others.`,
@@ -5728,24 +5838,177 @@ function xaiCurrentAxisHtml(focusKey, criterion, axis) {
     'n/a': `<span class="cmp-verdict">n/a</span>`,
   }
   const selCount = groups.filter((g) => xaiAxisSelected.has(g.axisSig)).length
-  const allSelected = groups.length > 0 && groups.every((g) => xaiAxisSelected.has(g.axisSig))
   const headActions = embedded()
     ? `<div class="head-actions">
-        <button type="button" class="ghost-btn" data-xai-axis-sweep="${escapeHtml(axis)}" title="Launch this exact config on every ${escapeHtml(axisNoun)} value it hasn't run yet (first-time experiments only)">Sweep all ${escapeHtml(axisNoun)}s ↗</button>
+        ${sliceToggle}
+        ${sweepBtn}
         <button type="button" class="ghost-btn" data-xai-axis-addruns="${escapeHtml(axis)}"${selCount ? '' : ' disabled'} title="Re-run the selected ${escapeHtml(axisNoun)}s with fresh seeds to verify the result isn't seed luck (non-exploration — never skipped)">Add runs${selCount ? ` (${selCount})` : ''} ↻</button>
       </div>`
-    : ''
+    : sliceToggle
+      ? `<div class="head-actions">${sliceToggle}</div>`
+      : ''
+  const table = xaiAxisTableHtml(
+    axis,
+    cols,
+    groups,
+    focusSig,
+    standingOf,
+    axisKeys,
+    runByKey,
+    axis === 'dataset' ? 'Dataset' : 'Environment',
+  )
   return `<div class="card"><div class="card-head card-head-row"><h3>This config across ${escapeHtml(axisNoun)}s <span class="card-sub">— ${groups.length} ${escapeHtml(axisNoun)}s · same model, varying the ${escapeHtml(axisNoun)}</span></h3>${headActions}</div>
     <p class="card-sub">${vmap[verdict.label] || vmap['n/a']} <span class="card-sub">(“standing” = robust z of <strong>${escapeHtml(criterion.label)}</strong> within each ${escapeHtml(axisNoun)}, so regime scale is removed and the ${escapeHtml(axisNoun)}s are comparable.)</span></p>
-    <div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>
-      <th class="cmp-th"><input type="checkbox" class="xai-axis-select-all"${allSelected ? ' checked' : ''} title="Select every ${escapeHtml(axisNoun)}"></th>
-      ${sortTh('axis', axis === 'dataset' ? 'Dataset' : 'Environment', false, null)}
-      ${sortTh('#runs', '# runs', true, 'Seeds of this config in this ' + axisNoun + '.')}
-      ${sortTh('standing', 'standing', true, 'Standing: this config’s robust z within the ' + axisNoun + ' — how far above/below the typical config run there. Regime scale removed, so it’s comparable across ' + axisNoun + 's.')}
-      ${colHead}
-      <th class="cmp-th"></th>
-    </tr></thead><tbody>${rows}</tbody></table></div>
+    ${table}
     <p class="runs-legend">Click a column to sort. Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across this config’s seeds. A <strong>positive standing</strong> in every ${escapeHtml(axisNoun)} = the config beats the field regardless of regime. Tick ${escapeHtml(axisNoun)}s and use <strong>Add runs</strong> to re-verify with fresh seeds.</p></div>`
+}
+// The tunable levers a run sets — the model-scope knobs (not seed / ignore / dataset / environment) present
+// in this run's config. These are the levers the "By value" view can vary one-at-a-time.
+function xaiByValueLevers(focusCfg) {
+  const levers = (manifest && manifest.levers) || {}
+  return Object.keys(levers).filter((k) => {
+    const scope = levers[k].scope || 'model'
+    if (k === 'seed' || scope === 'ignore' || scope === 'dataset' || scope === 'environment')
+      return false
+    return focusCfg[k] !== undefined && focusCfg[k] !== null && String(focusCfg[k]) !== 'n/a'
+  })
+}
+// BY VALUE: pick one tunable lever and show every run identical to this one EXCEPT that lever (same dataset,
+// environment, and every other setting), pooled over seeds — the one-factor-at-a-time view. Reuses the across-
+// axis machinery with the chosen lever as a single-lever axis; Sweep offers a popup of recommended values.
+function xaiByValueHtml(focusKey, criterion) {
+  const focusRun = findRun(focusKey)
+  if (!focusRun || !focusRun.summary)
+    return `<div class="card"><p class="card-sub">Run ${escapeHtml(shortKey(focusKey))} isn’t loaded — Refresh, or open it from the Runs tab.</p></div>`
+  const focusCfg = focusRun.summary.config || {}
+  const leverList = xaiByValueLevers(focusCfg)
+  if (!leverList.length)
+    return `<div class="card"><div class="card-head"><h3>By value</h3></div><p class="card-sub">This run sets no tunable lever to vary.</p></div>`
+  const lever = leverList.includes(xaiByValueLever)
+    ? xaiByValueLever
+    : leverList.includes('learning_rate')
+      ? 'learning_rate'
+      : leverList[0]
+  const cols = comparisonColumns()
+  const matched = xaiLockedMatches(focusCfg, lever)
+  const { groups, standingOf, runByKey } = xaiAxisGroupsFrom(matched, lever, criterion, cols)
+  const focusSig = window.Comparison.runAxisSignature(manifest, lever, focusRun)
+  const leverSelect = `<label class="card-sub xai-scope-field">Lever <select class="app-select" data-xai-value-lever>${leverList
+    .map((k) => `<option value="${escapeHtml(k)}"${k === lever ? ' selected' : ''}>${escapeHtml(k)}</option>`)
+    .join('')}</select></label>`
+  const selCount = groups.filter((g) => xaiAxisSelected.has(g.axisSig)).length
+  const sweepBtn = embedded()
+    ? `<button type="button" class="ghost-btn" data-xai-value-sweep="${escapeHtml(lever)}" title="Sweep ${escapeHtml(lever)} across recommended values, holding every other setting fixed">Sweep ${escapeHtml(lever)} ↗</button>`
+    : ''
+  const addBtn = embedded()
+    ? `<button type="button" class="ghost-btn" data-xai-axis-addruns="${escapeHtml(lever)}"${selCount ? '' : ' disabled'} title="Re-run the selected values with fresh seeds to verify the result isn't seed luck (non-exploration — never skipped)">Add runs${selCount ? ` (${selCount})` : ''} ↻</button>`
+    : ''
+  const headActions = `<div class="head-actions">${leverSelect}${sweepBtn}${addBtn}</div>`
+  if (groups.length < 2) {
+    return `<div class="card"><div class="card-head card-head-row"><h3>By value <span class="card-sub">— vary one lever, hold the rest</span></h3>${headActions}</div>
+      <p class="card-sub">Only one <code>${escapeHtml(lever)}</code> value has run with this exact setup. <strong>Sweep ${escapeHtml(lever)}</strong> to try more values and see how it moves <strong>${escapeHtml(criterion.label)}</strong>.</p></div>`
+  }
+  const table = xaiAxisTableHtml(
+    lever,
+    cols,
+    groups,
+    focusSig,
+    standingOf,
+    window.Comparison.axisLeverKeys(manifest, lever),
+    runByKey,
+    lever,
+  )
+  return `<div class="card"><div class="card-head card-head-row"><h3>By <code>${escapeHtml(lever)}</code> <span class="card-sub">— ${groups.length} values · same setup, only <code>${escapeHtml(lever)}</code> varies</span></h3>${headActions}</div>
+    <p class="card-sub">Every run here is <strong>identical to this run except <code>${escapeHtml(lever)}</code></strong> (pooled over seeds), so each row’s score isolates that lever’s effect. Tick values and <strong>Add runs</strong> to verify with fresh seeds, or <strong>Sweep</strong> to try recommended values.</p>
+    ${table}
+    <p class="runs-legend">Click a column to sort. Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across seeds. Change the <strong>Lever</strong> above to inspect a different setting.</p></div>`
+}
+// The value chosen for the current sweep popup (null when closed).
+let xaiSweepPopupLever = null
+// The recommended-values sweep popup for the By value view — checkboxes of the lever's recommended sweep
+// values (range/choices ∪ values already run), all pre-ticked; launching sweeps the ticked ones with every
+// other setting held to this run's config (first-time only — existing cells are skipped).
+function openXaiSweepPopup(lever) {
+  xaiSweepPopupLever = lever
+  renderXaiSweepPopup()
+}
+function closeXaiSweepPopup() {
+  xaiSweepPopupLever = null
+  const m = byId('xai-sweep-modal')
+  if (m) m.hidden = true
+}
+function xaiSweepRecommendedValues(lever) {
+  const focusRun = findRun(xaiFocusKey)
+  const cfg = focusRun && focusRun.summary ? focusRun.summary.config || {} : {}
+  const observed = xaiRuns().map((r) => (r.config ? r.config[lever] : undefined))
+  return { cfg, values: xaiSweepValues(lever, cfg[lever], observed) }
+}
+function renderXaiSweepPopup() {
+  const lever = xaiSweepPopupLever
+  if (!lever) return
+  const { cfg, values } = xaiSweepRecommendedValues(lever)
+  let modal = byId('xai-sweep-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'xai-sweep-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-sweep-cancel]'))
+        return closeXaiSweepPopup()
+    })
+    modal.addEventListener('submit', (event) => {
+      if (event.target.closest('#xai-sweep-form')) {
+        event.preventDefault()
+        submitXaiSweepPopup()
+      }
+    })
+  }
+  const curStr = String(cfg[lever])
+  const opts = values
+    .map((v) => {
+      const s = String(v)
+      const isCur = s === curStr
+      return `<label class="xai-sweep-opt"><input type="checkbox" name="sweepval" value="${escapeHtml(s)}" checked /> <code>${escapeHtml(xaiFmtLeverValue(v))}</code>${isCur ? ' <span class="card-sub">(current)</span>' : ''}</label>`
+    })
+    .join('')
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-sweep-cancel></div>
+    <div class="chart-modal__panel custom-rule-panel" role="dialog" aria-label="Sweep ${escapeHtml(lever)}">
+      <div class="chart-modal__head">
+        <strong>Sweep ${escapeHtml(lever)}</strong>
+        <button type="button" class="icon-btn" data-sweep-cancel title="Close" aria-label="Close">✕</button>
+      </div>
+      <form id="xai-sweep-form" class="custom-rule-form">
+        <p class="card-sub">Recommended values (the lever’s range/choices plus values already run). Untick any you don’t want. Every other setting stays at this run’s config; cells already run are skipped.</p>
+        <div class="xai-sweep-opts">${opts || '<span class="card-sub">This lever declares no range or choices to vary.</span>'}</div>
+        <div class="custom-rule-actions">
+          <button type="button" class="ghost-btn" data-sweep-cancel>Cancel</button>
+          <button type="submit" class="ghost-btn is-primary"${values.length ? '' : ' disabled'}>Sweep selected</button>
+        </div>
+      </form>
+    </div>`
+  modal.hidden = false
+}
+function submitXaiSweepPopup() {
+  const lever = xaiSweepPopupLever
+  const modal = byId('xai-sweep-modal')
+  if (!lever || !modal) return
+  const checked = [...modal.querySelectorAll('input[name="sweepval"]:checked')].map((el) => el.value)
+  if (!checked.length) return
+  const { cfg, values } = xaiSweepRecommendedValues(lever)
+  // Map the ticked strings back to the ORIGINAL typed values so numbers stay numbers in the launch spec.
+  const byStr = new Map(values.map((v) => [String(v), v]))
+  const chosen = checked.map((s) => (byStr.has(s) ? byStr.get(s) : s))
+  const fixed = {}
+  for (const [k, v] of Object.entries(cfg))
+    if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+  closeXaiSweepPopup()
+  xaiLaunchBatch([{ fixed, sweep: { [lever]: chosen }, seeds: [0] }], `Sweep ${lever}`, {
+    silent: true,
+  })
+  showToast(
+    `Sweeping ${lever} across ${chosen.length} value${chosen.length === 1 ? '' : 's'} — new cells run, existing ones are skipped. See the Activity tab.`,
+  )
 }
 // CURRENT-RUN map: the same configuration maps as All-runs, scoped to the focused run's environment, with
 // THIS run ringed so you can see where it sits among similar runs. Falls back to hints when the whole-space
@@ -7603,12 +7866,15 @@ function xaiSpecKey(spec) {
   const s = spec || {}
   return `${window.Xai.canonicalConfigString(s.fixed || {})}#${window.Xai.canonicalConfigString(s.sweep || {})}`
 }
-async function xaiLaunchBatch(specs, label) {
+// Launch a batch of specs from the xAI tab. STAYS on xAI (a toast reports the outcome) — an xAI launch is a
+// mid-analysis action, so yanking the user to Activity loses their place. `opts.silent` suppresses the
+// generic toast for callers that show their own (sweep / add-runs already report combo/seed counts).
+async function xaiLaunchBatch(specs, label, opts = {}) {
   const concurrency = savedConcurrency()
   // Skip any batch already launched this session (its button is locked) so Run-all never double-fires.
   const pending = specs.filter((spec) => !xaiLaunchedSpecs.has(xaiSpecKey(spec)))
   if (!pending.length) {
-    showTab('activity')
+    if (!opts.silent) showToast('Already queued this session — see the Activity tab.')
     return
   }
   try {
@@ -7617,7 +7883,10 @@ async function xaiLaunchBatch(specs, label) {
       xaiLaunchedSpecs.add(xaiSpecKey(spec)) // lock its button + Run-all until its runs land
     }
     if (activeTabId === 'xai') renderXai() // reflect the now-locked buttons
-    showTab('activity')
+    if (!opts.silent)
+      showToast(
+        `Queued ${pending.length} run${pending.length === 1 ? '' : 's'} — see the Activity tab.`,
+      )
   } catch {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
   }
@@ -7639,11 +7908,11 @@ function xaiAxisSweep(axis) {
   const focusRun = findRun(xaiFocusKey)
   const cfg = focusRun && focusRun.summary ? focusRun.summary.config : null
   if (!cfg) return
-  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const axisNoun = xaiAxisNoun(axis)
   const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
   const observedByLever = {}
   for (const r of xaiRuns()) {
-    const rc = (r && r.summary && r.summary.config) || {}
+    const rc = (r && r.config) || {}
     for (const k of axisKeys) (observedByLever[k] = observedByLever[k] || []).push(rc[k])
   }
   const valuesByLever = {}
@@ -7654,13 +7923,15 @@ function xaiAxisSweep(axis) {
     return
   }
   const combos = Object.values(spec.sweep).reduce((n, vals) => n * vals.length, 1)
-  xaiLaunchBatch([{ fixed: spec.fixed, sweep: spec.sweep, seeds: [0] }], `Sweep all ${axisNoun}s`)
+  xaiLaunchBatch([{ fixed: spec.fixed, sweep: spec.sweep, seeds: [0] }], `Sweep all ${axisNoun}s`, {
+    silent: true,
+  })
   showToast(`Sweeping this config across ${combos} ${axisNoun} combination${combos === 1 ? '' : 's'} — new cells run, existing ones are skipped. See the Activity tab.`)
 }
 // Add runs for the SELECTED axis groups with FRESH seeds — a non-exploration verify pass (fresh seeds are
 // never skipped as "already explored"), to confirm a good result isn't seed luck. Tops each config up to ~5 seeds.
 function xaiAxisAddRuns(axis) {
-  const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
+  const axisNoun = xaiAxisNoun(axis)
   const specs = []
   for (const sig of xaiAxisSelected) {
     const entry = xaiAxisRowCache.get(sig)
@@ -7675,8 +7946,23 @@ function xaiAxisAddRuns(axis) {
   if (!specs.length) return
   const n = specs.length
   xaiAxisSelected = new Set()
-  xaiLaunchBatch(specs, `Verify ${n} ${axisNoun}${n === 1 ? '' : 's'}`)
+  xaiLaunchBatch(specs, `Verify ${n} ${axisNoun}${n === 1 ? '' : 's'}`, { silent: true })
   showToast(`Queued ${n} ${axisNoun}${n === 1 ? '' : 's'} to re-run with fresh seeds — see the Activity tab.`)
+}
+// Jump from the xAI focus (often a favorite) to that run in the Runs tab, detail open. Warm it by key first
+// so the detail resolves even when the run is off the current page / snapshot; land on the Favorites view
+// when it's pinned (so it's also visible in the list), else the plain Runs view.
+async function xaiViewRunInRuns(key) {
+  if (!key) return
+  await ensureRunFull(key)
+  if (favoritesCache.has(key)) {
+    runsFilterKeys = null
+    runsFilterLabel = ''
+    runsViewMode = 'favorites'
+  }
+  runsPage = 0
+  showTab('runs')
+  openRunDetail(key)
 }
 // Load ONE run's narrative record into the cache (or drop it when none).
 async function loadXaiNarrative(runKey) {
@@ -8375,15 +8661,16 @@ async function observeQuickActivity(activityId) {
   const start = Date.now()
   let missing = 0
   while (Date.now() - start < MAX_QUICK_OBSERVE_MS) {
-    // Poll regardless of document visibility: the queue pump advances off this settling, so skipping
-    // the check while backgrounded stalls the whole queue until the user re-opens the app.
+    // Poll regardless of document visibility so a settle is caught even while backgrounded.
     const act = await getActivity(activityId)
-    if (act && act.status && act.status !== 'running') return act
+    // 'queued' = waiting for a host slot (not settled); keep polling until it runs then settles.
+    if (act && act.status && act.status !== 'running' && act.status !== 'queued') return act
     // Only bail on 3 CONSECUTIVE misses (the activity genuinely vanished) — a transient null mid-run (e.g.
     // a just-queued activity not yet visible) must not accumulate into a spurious "did not settle".
     if (act) missing = 0
     else if (++missing >= 3) return null
-    await sleep(POLL_MS)
+    // Fast while running (snappy status), slower while queued (nothing to show until a slot frees).
+    await sleep(act && act.status === 'queued' ? POLL_MS : ACTIVE_POLL_MS)
   }
   return null
 }
@@ -8426,7 +8713,11 @@ async function onJudgeClick() {
 async function onEvaluateRun(key) {
   if (evaluatingKeys.has(key) || !embedded()) return
   if (!runsCache.some((r) => r.key === key)) return
-  if (queueCache.some((q) => q.activityType === 'evaluate' && evaluateKeysOf(q).includes(key))) {
+  if (
+    [...liveActivities.values()].some(
+      (a) => a.item && a.item.activityType === 'evaluate' && evaluateKeysOf(a.item).includes(key),
+    )
+  ) {
     if (selectedRunKey === key) setStatusLine('run-eval-status', 'Already queued.')
     return
   }
@@ -8652,6 +8943,7 @@ function setupRuns() {
         closeBadRunEditor()
         closeConsolidateModal()
         closeDeviceTimingsModal()
+        closeXaiSweepPopup()
         toggleHypothesisForm(false)
         togglePaperForm(false)
       }
@@ -8771,6 +9063,9 @@ function setupRuns() {
       } else if (t.id === 'xai-lever') {
         xaiLever = t.value
         renderXai()
+      } else if (t.hasAttribute && t.hasAttribute('data-xai-value-lever')) {
+        xaiByValueLever = t.value
+        renderXai()
       } else if (t.id === 'xai-inter-a') {
         xaiInterA = t.value
         renderXai()
@@ -8884,6 +9179,17 @@ function setupRuns() {
       const axisAddRunsBtn = event.target.closest('[data-xai-axis-addruns]')
       if (axisAddRunsBtn) {
         xaiAxisAddRuns(axisAddRunsBtn.dataset.xaiAxisAddruns)
+        return
+      }
+      const axisSliceBtn = event.target.closest('[data-xai-axis-slice]')
+      if (axisSliceBtn) {
+        xaiAxisSlice[axisSliceBtn.dataset.xaiAxisSlice] = axisSliceBtn.dataset.sliceId
+        renderXai()
+        return
+      }
+      const valueSweepBtn = event.target.closest('[data-xai-value-sweep]')
+      if (valueSweepBtn) {
+        openXaiSweepPopup(valueSweepBtn.dataset.xaiValueSweep)
         return
       }
       const tabBtn = event.target.closest('[data-xai-tab]')
@@ -9037,6 +9343,11 @@ function setupRuns() {
       if (event.target.closest('[data-xai-clear-focus]')) {
         xaiFocusKey = null
         renderXai()
+        return
+      }
+      const viewRunBtn = event.target.closest('[data-xai-view-run]')
+      if (viewRunBtn) {
+        void xaiViewRunInRuns(viewRunBtn.dataset.xaiViewRun)
         return
       }
       if (event.target.closest('[data-xai-scroll-recs]')) {
@@ -12719,8 +13030,12 @@ function modelStatusSelectHtml(model) {
 // lifecycle in applyQuickDispatchState) OR still QUEUED (waiting for a slot). Both must spin the chip.
 function modelBenchmarkPending(modelId) {
   if (benchmarkingModels.has(modelId)) return true
-  return queueCache.some(
-    (q) => q.activityType === 'benchmark-model-device' && q.params && q.params.modelId === modelId,
+  return [...liveActivities.values()].some(
+    (a) =>
+      a.item &&
+      a.item.activityType === 'benchmark-model-device' &&
+      a.item.params &&
+      a.item.params.modelId === modelId,
   )
 }
 // The device chip shown next to the implementation-status badge: the measured CPU-vs-MPS winner, a
@@ -14282,32 +14597,43 @@ function rememberConcurrency(n) {
 // How many EXPERIMENTS (campaigns + evaluations) and how many TASKS (judge / propose / paper) may
 // run at once — two independent lanes so a quick task never waits behind a long campaign. Each
 // campaign still has its own "Max parallel runs", so total training processes ≈ the sum.
-function savedLaneBudget(key, fallback) {
-  try {
-    const n = Math.floor(Number(localStorage.getItem(key)))
-    return Number.isFinite(n) && n >= 1 ? n : fallback
-  } catch {
-    return fallback
-  }
+// Per-lane activity caps now live SERVER-SIDE — the host queue enforces them (draining even with the
+// app closed). The viewer edits a per-project `trainer-activity-limits` record; a synchronous cache,
+// hydrated on project load, backs the (sync) settings inputs.
+let laneLimitsCache = { experiment: DEFAULT_EXPERIMENT_BUDGET, task: DEFAULT_TASK_BUDGET }
+function laneLimit(value, fallback) {
+  const n = Math.floor(Number(value))
+  return Number.isFinite(n) && n >= 1 ? n : fallback
 }
 function savedExperimentBudget() {
-  return savedLaneBudget(EXPERIMENT_BUDGET_SS, DEFAULT_EXPERIMENT_BUDGET)
+  return laneLimit(laneLimitsCache.experiment, DEFAULT_EXPERIMENT_BUDGET)
 }
 function savedTaskBudget() {
-  return savedLaneBudget(TASK_BUDGET_SS, DEFAULT_TASK_BUDGET)
+  return laneLimit(laneLimitsCache.task, DEFAULT_TASK_BUDGET)
 }
-function rememberLaneBudget(key, n) {
+async function loadServerLaneLimits() {
   try {
-    localStorage.setItem(key, String(Math.max(1, Math.floor(Number(n)) || 1)))
+    const recs = await queryRecords(LANE_LIMITS_RECORD_TYPE, 'latest')
+    const c = (recs[0] && recs[0].content) || {}
+    laneLimitsCache = {
+      experiment: laneLimit(c.experiment, DEFAULT_EXPERIMENT_BUDGET),
+      task: laneLimit(c.task, DEFAULT_TASK_BUDGET),
+    }
   } catch {
-    // best-effort
+    laneLimitsCache = { experiment: DEFAULT_EXPERIMENT_BUDGET, task: DEFAULT_TASK_BUDGET }
   }
 }
-function rememberExperimentBudget(n) {
-  rememberLaneBudget(EXPERIMENT_BUDGET_SS, n)
-}
-function rememberTaskBudget(n) {
-  rememberLaneBudget(TASK_BUDGET_SS, n)
+async function saveServerLaneLimit(lane, value) {
+  laneLimitsCache = { ...laneLimitsCache, [lane]: laneLimit(value, laneLimitsCache[lane]) }
+  try {
+    await window.OverseerBridge.putData({
+      type: LANE_LIMITS_RECORD_TYPE,
+      key: 'latest',
+      content: { ...laneLimitsCache },
+    })
+  } catch {
+    // best-effort — the host falls back to its configured default until the write lands
+  }
 }
 // Whether the 2nd ('Tasks') column is collapsed — a per-session UI preference.
 function tasksColCollapsed() {
@@ -14983,15 +15309,46 @@ function setupLaunch() {
 // every training project, so an entry carrying a recordType only matches when
 // it is the selected project's. The run object carries { status, isLive } so
 // observers can tell a live run from an orphaned one.
+// Shared, throttled + request-deduped snapshot of ALL activities. Every campaign's observe loop
+// polls status via getActivity; without this each call re-fetched the FULL list, so N campaigns =
+// N list fetches per poll. Now concurrent/rapid calls collapse to at most one listActivities per
+// ACTIVITIES_CACHE_MS, so the request rate is ~constant no matter how many campaigns are tracked.
+let _actCacheAt = 0
+let _actCacheById = new Map()
+let _actCacheInflight = null
+function invalidateActivitiesCache() {
+  _actCacheAt = 0
+}
+async function activitiesSnapshot() {
+  if (_actCacheInflight) return _actCacheInflight
+  if (_actCacheAt && Date.now() - _actCacheAt < ACTIVITIES_CACHE_MS) return _actCacheById
+  _actCacheInflight = (async () => {
+    try {
+      const res = await window.OverseerBridge.listActivities()
+      const byId = new Map()
+      for (const a of (res && res.activities) || []) byId.set(a.activityId, a)
+      _actCacheById = byId
+      _actCacheAt = Date.now()
+    } catch {
+      // keep the previous snapshot on a transient failure
+    } finally {
+      _actCacheInflight = null
+    }
+    return _actCacheById
+  })()
+  return _actCacheInflight
+}
 async function getActivity(activityId) {
-  try {
-    const res = await window.OverseerBridge.listActivities()
-    const act = ((res && res.activities) || []).find((a) => a.activityId === activityId) || null
-    if (act && manifest && act.recordType && act.recordType !== manifest.recordType) return null
-    return act
-  } catch {
-    return null
-  }
+  const byId = await activitiesSnapshot()
+  const act = byId.get(activityId) || null
+  if (act && manifest && act.recordType && act.recordType !== manifest.recordType) return null
+  return act
+}
+// The display label for an activity we RE-TRACK from the host (reload / server-queued): the launch
+// label rides along in `resumeToken.params._label`; fall back to the generic type label.
+function trackedActivityLabel(a, type) {
+  const label = a && a.resumeToken && a.resumeToken.params && a.resumeToken.params._label
+  return (typeof label === 'string' && label) || activityTypeLabel(type)
 }
 function activityTypeLabel(type) {
   if (type === 'train') return 'Campaign'
@@ -15016,15 +15373,15 @@ async function resumeRunningActivity() {
   if (epoch !== projectEpoch || !manifest) return
   const mine = activities.filter((a) => a.recordType === manifest.recordType)
   const tracked = (id) => [...liveActivities.values()].some((e) => e.activityId === id)
-  const live = mine.filter((a) => a.status === 'running' && a.isLive !== false)
-  for (const a of live) {
+  // Track everything the host is RUNNING or has QUEUED (the host owns concurrency now), so each
+  // shows + observes to settlement regardless of any client-side budget.
+  const active = mine.filter(
+    (a) => (a.status === 'running' && a.isLive !== false) || a.status === 'queued',
+  )
+  for (const a of active) {
     if (tracked(a.activityId)) continue
     const type = quickActivityType(a) || 'train'
-    const experiment = isExperimentActivityType(type)
-    const slots = experiment ? experimentSlotCount() : taskSlotCount()
-    const budget = experiment ? savedExperimentBudget() : savedTaskBudget()
-    if (slots >= budget) continue
-    trackExistingActivity(a.activityId, type, activityTypeLabel(type))
+    trackExistingActivity(a.activityId, type, trackedActivityLabel(a, type), a.status)
   }
   // STALLED: 'running' in the store but NOT live in the backend (it restarted mid-run). Surface
   // each as PAUSED + Resume — resuming re-launches it and the trainer's completed-record skip
@@ -15038,17 +15395,18 @@ async function resumeRunningActivity() {
     if (!a.resumeToken || !a.resumeToken.activityType) continue
     if (tracked(a.activityId)) continue
     const type = a.resumeToken.activityType || 'train'
+    const label = trackedActivityLabel(a, type)
     const localId = 'stalled:' + a.activityId
     liveActivities.set(localId, {
       localId,
       activityId: a.activityId,
       activityType: type,
-      label: activityTypeLabel(type),
+      label,
       status: 'paused',
       progress: null,
       campaign: null,
       startedAt: Date.parse(a.updatedAt || a.createdAt || '') || Date.now(),
-      item: { activityType: type, label: activityTypeLabel(type) },
+      item: { activityType: type, label },
     })
   }
   if (!liveActivities.size) {
@@ -15102,9 +15460,19 @@ async function observeTrainActivity(entry, epoch) {
   let lastSig = ''
   while (Date.now() - start < MAX_OBSERVE_MS) {
     if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
-    const [mineProgress, act, mineCampaign] = await Promise.all([
+    // Status first (from the shared cached snapshot). While QUEUED, skip the per-campaign progress +
+    // campaign reads entirely — a queued run has none, and doing them per poll for every waiting
+    // campaign is exactly the load that swamped the backend.
+    const act = await getActivity(activityId)
+    if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
+    if (act && act.status === 'queued') {
+      entry.status = 'queued'
+      renderActivity()
+      await sleep(POLL_MS)
+      continue
+    }
+    const [mineProgress, mineCampaign] = await Promise.all([
       readProgressFor(activityId),
-      getActivity(activityId),
       readCampaignFor(activityId),
     ])
     if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
@@ -15154,7 +15522,7 @@ async function observeTrainActivity(entry, epoch) {
       entry.status = 'running'
     }
     renderActivity()
-    await sleep(POLL_MS)
+    await sleep(ACTIVE_POLL_MS)
   }
   entry.status = 'running'
 }
@@ -15198,6 +15566,7 @@ async function pauseActivityById(activityId) {
   renderActivity()
   try {
     await window.OverseerBridge.abortActivity(activityId)
+    invalidateActivitiesCache()
   } catch {
     // best-effort — the entry stays paused (user-marked) regardless
   }
@@ -15210,6 +15579,7 @@ async function abortActivityById(activityId) {
   if (btn) btn.disabled = true
   try {
     await window.OverseerBridge.abortActivity(activityId)
+    invalidateActivitiesCache()
   } catch {
     if (btn) btn.disabled = false
   }
@@ -15235,6 +15605,7 @@ async function resumeActivityById(activityId) {
   if (btn) btn.disabled = true
   try {
     await window.OverseerBridge.resumeActivity(activityId)
+    invalidateActivitiesCache()
     setPausedByUser(activityId, false)
     entry.status = 'running'
     renderActivity()
@@ -15244,6 +15615,7 @@ async function resumeActivityById(activityId) {
   }
 }
 const STATUS_META = {
+  queued: { label: 'Queued', cls: 'is-warn' },
   running: { label: 'Running', cls: 'is-running' },
   paused: { label: 'Paused', cls: 'is-warn' },
   completed: { label: 'Completed', cls: 'is-ok' },
@@ -15397,16 +15769,29 @@ const QUEUE_ICON_TOP =
 
 // A persisted queue for one lane: each waiting entry with its type chip, reorder controls and a
 // remove button. `items` is the lane's dispatch order, so index 0 is next up.
-function queueSectionHtml(items, title) {
-  if (!items.length) return ''
-  const rows = items
-    .map((item, idx) => {
-      const id = escapeHtml(item.id)
-      const first = idx === 0 ? ' disabled' : ''
-      const last = idx === items.length - 1 ? ' disabled' : ''
+// The pending list: PAUSED entries (resumable — Resume / Discard) first, then QUEUED entries (drain
+// order — reorder ↑/↓/⤒ / remove). Reorder positions are computed within the QUEUED sublist only.
+function queueSectionHtml(entries, title) {
+  if (!entries.length) return ''
+  const queued = entries.filter((e) => e.status === 'queued')
+  const rows = entries
+    .map((entry) => {
+      const id = escapeHtml(entry.activityId)
+      const label = escapeHtml(entry.label || activityTypeLabel(entry.activityType))
+      if (entry.status === 'paused') {
+        return `<li class="queue-item">
+      <span class="badge queue-chip is-warn">Paused</span>
+      <span class="queue-label">${label}</span>
+      <button type="button" data-resume="${id}">Resume</button>
+      <button type="button" class="queue-remove" data-queue-remove="${id}" aria-label="Discard">✕</button>
+    </li>`
+      }
+      const qi = queued.indexOf(entry)
+      const first = qi === 0 ? ' disabled' : ''
+      const last = qi === queued.length - 1 ? ' disabled' : ''
       return `<li class="queue-item">
-      <span class="badge queue-chip">${escapeHtml(item.activityType)}</span>
-      <span class="queue-label">${escapeHtml(item.label || item.activityType)}</span>
+      <span class="badge queue-chip">${escapeHtml(entry.activityType)}</span>
+      <span class="queue-label">${label}</span>
       <button type="button" class="queue-move" data-queue-up="${id}" aria-label="Move up"${first}>${QUEUE_ICON_UP}</button>
       <button type="button" class="queue-move" data-queue-down="${id}" aria-label="Move down"${last}>${QUEUE_ICON_DOWN}</button>
       <button type="button" class="queue-move" data-queue-top="${id}" aria-label="Move to top"${first}>${QUEUE_ICON_TOP}</button>
@@ -15415,7 +15800,7 @@ function queueSectionHtml(items, title) {
     })
     .join('')
   return `<div class="queue-section">
-    <h3>${escapeHtml(title)} <span class="group-count">${items.length}</span></h3>
+    <h3>${escapeHtml(title)} <span class="group-count">${entries.length}</span></h3>
     <ul class="queue-list">${rows}</ul>
   </div>`
 }
@@ -15486,7 +15871,7 @@ function activityBlockHtml(entry) {
   return `<div class="activity-block">
     <div class="activity-status-row">
       <span class="status-pill ${meta.cls}">${running ? `${spinnerHtml()} ` : ''}${escapeHtml(meta.label)}</span>
-      ${isTrain ? '' : `<span class="activity-kind">${escapeHtml(entry.label)}</span>`}
+      ${entry.label ? `<span class="activity-kind">${escapeHtml(entry.label)}</span>` : ''}
       ${phase ? `<span class="activity-phase">${escapeHtml(phase)}</span>` : ''}
       ${entry.activityId ? `<code class="activity-id">${escapeHtml(shortKey(entry.activityId))}</code>` : ''}
     </div>
@@ -15566,11 +15951,22 @@ function renderActivityNow() {
     setHtml(body, '<div class="empty-hint">Open inside the Overseer to follow campaigns.</div>')
     return
   }
-  const entries = [...liveActivities.values()].sort((a, b) => b.startedAt - a.startedAt)
-  const experimentEntries = entries.filter((e) => isExperimentActivityType(e.activityType))
-  const taskEntries = entries.filter((e) => !isExperimentActivityType(e.activityType))
-  const experimentQueue = queueCache.filter((q) => isExperimentActivityType(q.activityType))
-  const taskQueue = queueCache.filter((q) => !isExperimentActivityType(q.activityType))
+  // Only actively-RUNNING campaigns render as full BLOCKS. Everything pending — PAUSED (resumable,
+  // shown first) then QUEUED (in the user's drain order) — goes in the reorderable Queue section
+  // below, so paused runs sit at the top of the queue as requested.
+  const isRunning = (e) => e.status === 'running' || e.status === 'starting'
+  const blocks = [...liveActivities.values()]
+    .filter(isRunning)
+    .sort((a, b) => b.startedAt - a.startedAt)
+  const paused = [...liveActivities.values()]
+    .filter((e) => e.status === 'paused')
+    .sort((a, b) => b.startedAt - a.startedAt)
+  const queued = queuedEntriesInOrder()
+  const pending = [...paused, ...queued] // paused on top of the queue
+  const experimentEntries = blocks.filter((e) => isExperimentActivityType(e.activityType))
+  const taskEntries = blocks.filter((e) => !isExperimentActivityType(e.activityType))
+  const experimentQueue = pending.filter((e) => isExperimentActivityType(e.activityType))
+  const taskQueue = pending.filter((e) => !isExperimentActivityType(e.activityType))
   // The Tasks column only collapses when its lane is IDLE — any live/paused block or queued item
   // keeps it shown so the Abort/Resume/remove controls stay reachable. Collapsing the idle column
   // reclaims its width (via the grid modifier) so Experiments fills the row.
@@ -15638,17 +16034,17 @@ function setupActivity() {
     }
     const upBtn = event.target.closest('button[data-queue-up]')
     if (upBtn) {
-      moveQueueItem(upBtn.dataset.queueUp, 'up')
+      moveQueuedActivity(upBtn.dataset.queueUp, 'up')
       return
     }
     const downBtn = event.target.closest('button[data-queue-down]')
     if (downBtn) {
-      moveQueueItem(downBtn.dataset.queueDown, 'down')
+      moveQueuedActivity(downBtn.dataset.queueDown, 'down')
       return
     }
     const topBtn = event.target.closest('button[data-queue-top]')
     if (topBtn) {
-      moveQueueItem(topBtn.dataset.queueTop, 'top')
+      moveQueuedActivity(topBtn.dataset.queueTop, 'top')
       return
     }
     const removeBtn = event.target.closest('button[data-queue-remove]')
@@ -15657,11 +16053,9 @@ function setupActivity() {
   body.addEventListener('change', (event) => {
     if (event.target.id === 'activity-concurrency') rememberConcurrency(event.target.value)
     else if (event.target.id === 'experiment-budget') {
-      rememberExperimentBudget(event.target.value)
-      pumpQueue()
+      void saveServerLaneLimit('experiment', event.target.value)
     } else if (event.target.id === 'task-budget') {
-      rememberTaskBudget(event.target.value)
-      pumpQueue()
+      void saveServerLaneLimit('task', event.target.value)
     }
   })
 }

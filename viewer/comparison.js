@@ -15,25 +15,38 @@
   function leverScope(spec) {
     return (spec && spec.scope) || 'model'
   }
+  // A SCOPE axis groups by every lever in a scope ('dataset' | 'environment'); anything else is a SINGLE
+  // lever's key (the "By value" view — one chosen lever varies, everything else is held fixed).
+  function isScopeAxis(axis) {
+    return axis === 'dataset' || axis === 'environment'
+  }
+  // `seed` is a nuisance parameter pooled OVER, never a lever we lock or vary (matches setupKeyOfRun, which
+  // drops seed from a setup's identity). Real manifests often leave it unscoped (→ 'model'), so exclude it
+  // by NAME here rather than trusting the scope — otherwise the across-axis views pin the focus run's seed.
+  function isNuisanceLever(key, spec) {
+    return key === 'seed' || leverScope(spec) === 'ignore'
+  }
 
-  // The levers that VARY down the rows for an axis — those whose scope IS the axis ('dataset' | 'environment').
+  // The levers that VARY down the rows for an axis. Scope axis ⇒ every lever whose scope IS the axis; a
+  // single-lever axis ⇒ just that lever (empty when it isn't a real, non-nuisance lever).
   function axisLeverKeys(manifest, axis) {
     return leverEntries(manifest)
       .filter(function (e) {
-        return leverScope(e[1]) === axis
+        if (isScopeAxis(axis)) return leverScope(e[1]) === axis
+        return e[0] === axis && !isNuisanceLever(e[0], e[1])
       })
       .map(function (e) {
         return e[0]
       })
   }
 
-  // The levers held FIXED for an axis — every lever that is neither the axis nor explicitly ignored (seed).
-  // Locking these is what makes the across-axis comparison apples-to-apples.
+  // The levers held FIXED for an axis — every non-nuisance lever that isn't itself the axis. Locking these is
+  // what makes the comparison apples-to-apples (same setup, only the axis varies).
   function lockedLeverKeys(manifest, axis) {
     return leverEntries(manifest)
       .filter(function (e) {
-        var scope = leverScope(e[1])
-        return scope !== axis && scope !== 'ignore'
+        if (isNuisanceLever(e[0], e[1])) return false
+        return isScopeAxis(axis) ? leverScope(e[1]) !== axis : e[0] !== axis
       })
       .map(function (e) {
         return e[0]

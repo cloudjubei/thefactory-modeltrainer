@@ -1528,6 +1528,24 @@ button.run-badge.model-device-chip:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
+/* The By value "Sweep <lever>" popup: a scrollable grid of recommended values to tick. */
+.xai-sweep-opts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 6px 12px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.xai-sweep-opt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+/* The By dataset / By environment regime slice toggle sits inline in the card head. */
+.head-actions .xai-axis-slice {
+  margin-right: 4px;
+}
 /* The Datasets / Environments add-edit-clone popup (reuses .chart-modal positioning). */
 .bundle-form-panel {
   width: min(94vw, 540px);

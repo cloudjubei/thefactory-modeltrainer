@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { TrainerManifest } from './modelTrainerTypes.js'
+import type { TrainerManifest, TrainingRunSummary } from './modelTrainerTypes.js'
+import { MAX_DECISION_TRACE_STEPS, MAX_SERIES_POINTS } from './modelTrainerConstants.js'
 import {
   blendJudgeScore,
   parseProgressMarker,
@@ -42,6 +43,7 @@ import {
   validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
+  capRunSummaryForStorage,
   modelSlug,
   inferModelCategory,
   humanizeModelName,
@@ -3452,5 +3454,56 @@ describe('rankPaperCandidates', () => {
     const list = [c('A', 'https://x.com/1'), c('B', 'https://y.com/2')]
     expect(rankPaperCandidates(list)).toEqual(list)
     expect(rankPaperCandidates([...list])).toHaveLength(2)
+  })
+})
+
+describe('capRunSummaryForStorage', () => {
+  const base = (extra: Partial<TrainingRunSummary> = {}): TrainingRunSummary =>
+    ({ objective: 1, ...extra }) as TrainingRunSummary
+
+  it('leaves a run whose series + trace are within the caps untouched (same reference)', () => {
+    const summary = base({
+      series: { equity: [1, 2, 3] },
+      artifacts: { decisionTrace: { steps: [{ step: 0, action: 'hold' }] } },
+    })
+    expect(capRunSummaryForStorage(summary)).toBe(summary)
+  })
+
+  it('downsamples an over-long series metric to maxSeriesPoints, preserving the first and last point', () => {
+    const equity = Array.from({ length: MAX_SERIES_POINTS + 5000 }, (_, i) => i)
+    const out = capRunSummaryForStorage(base({ series: { equity } }))
+    expect(out.series!.equity).toHaveLength(MAX_SERIES_POINTS)
+    expect(out.series!.equity[0]).toBe(0)
+    expect(out.series!.equity[out.series!.equity.length - 1]).toBe(equity.length - 1)
+  })
+
+  it('only downsamples the series arrays that exceed the cap, leaving short siblings intact', () => {
+    const long = Array.from({ length: MAX_SERIES_POINTS + 1 }, (_, i) => i)
+    const out = capRunSummaryForStorage(base({ series: { long, short: [1, 2, 3] } }))
+    expect(out.series!.long).toHaveLength(MAX_SERIES_POINTS)
+    expect(out.series!.short).toEqual([1, 2, 3])
+  })
+
+  it('truncates a runaway decisionTrace.steps to a contiguous prefix and records the pre-cap totalSteps', () => {
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 100 }, (_, i) => ({ step: i, action: 'hold' }))
+    const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps } } }))
+    const trace = (out.artifacts as { decisionTrace: { steps: unknown[]; totalSteps: number } }).decisionTrace
+    expect(trace.steps).toHaveLength(MAX_DECISION_TRACE_STEPS)
+    expect((trace.steps[0] as { step: number }).step).toBe(0) // contiguous prefix (adjacency preserved)
+    expect(trace.totalSteps).toBe(steps.length)
+  })
+
+  it('preserves a producer-supplied totalSteps rather than overwriting it with the kept count', () => {
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 1 }, (_, i) => ({ step: i, action: 'hold' }))
+    const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps, totalSteps: 999999 } } }))
+    const trace = (out.artifacts as { decisionTrace: { totalSteps: number } }).decisionTrace
+    expect(trace.totalSteps).toBe(999999)
+  })
+
+  it('does not mutate the input summary', () => {
+    const equity = Array.from({ length: MAX_SERIES_POINTS + 1 }, (_, i) => i)
+    const summary = base({ series: { equity } })
+    capRunSummaryForStorage(summary)
+    expect(summary.series!.equity).toHaveLength(MAX_SERIES_POINTS + 1)
   })
 })

@@ -66,6 +66,83 @@ describe('axisLeverKeys / lockedLeverKeys', () => {
   })
 })
 
+// The real BlackSwan manifest leaves `seed` unscoped (→ 'model') — it must STILL never be locked (it's a
+// nuisance param pooled over, matching setupKeyOfRun). And any tunable lever can be a single-lever "axis"
+// (the By value view): axis = that one lever, locked = every other non-ignore lever except seed.
+const manifestSeedModel = {
+  ...manifest,
+  levers: {
+    ...manifest.levers,
+    learning_rate: { type: 'number', range: [0.00005, 0.001], scope: 'model' },
+    seed: { type: 'number', scope: 'model' },
+  },
+}
+
+describe('seed is always a nuisance param (never locked), even when the manifest scopes it model', () => {
+  it('By dataset lock never includes seed', () => {
+    expect(C.lockedLeverKeys(manifestSeedModel, 'dataset')).not.toContain('seed')
+  })
+  it('By environment lock never includes seed', () => {
+    expect(C.lockedLeverKeys(manifestSeedModel, 'environment')).not.toContain('seed')
+  })
+})
+
+describe('single-lever axis (By value)', () => {
+  it('axis = just that lever', () => {
+    expect(C.axisLeverKeys(manifestSeedModel, 'learning_rate')).toEqual(['learning_rate'])
+  })
+  it('axis = [] for a lever that is not in the manifest', () => {
+    expect(C.axisLeverKeys(manifestSeedModel, 'nope')).toEqual([])
+  })
+  it('locked = every non-ignore lever except the axis lever and seed', () => {
+    expect(C.lockedLeverKeys(manifestSeedModel, 'learning_rate')).toEqual([
+      'model_name',
+      'net_arch',
+      'asset',
+      'timeframe',
+      'stop_loss',
+    ])
+  })
+  it('runAxisSignature pins just that lever', () => {
+    const r = mkRun(
+      {
+        model_name: 'ppo',
+        asset: 'BTC',
+        timeframe: '1d',
+        stop_loss: 0.02,
+        learning_rate: 0.0003,
+        seed: 1,
+      },
+      10,
+    )
+    expect(C.runAxisSignature(manifestSeedModel, 'learning_rate', r)).toBe('learning_rate=0.0003')
+  })
+  it('axisSweepSpec pins every other lever to the focus config and sweeps the chosen lever', () => {
+    const focus = {
+      model_name: 'ppo',
+      net_arch: '[128]',
+      asset: 'BTC',
+      timeframe: '1d',
+      stop_loss: 0.05,
+      learning_rate: 0.0003,
+      seed: 0,
+    }
+    const spec = C.axisSweepSpec(manifestSeedModel, 'learning_rate', focus, {
+      learning_rate: [0.0001, 0.0003, 0.001],
+    })
+    expect(spec).toEqual({
+      fixed: {
+        model_name: 'ppo',
+        net_arch: '[128]',
+        asset: 'BTC',
+        timeframe: '1d',
+        stop_loss: 0.05,
+      },
+      sweep: { learning_rate: [0.0001, 0.0003, 0.001] },
+    })
+  })
+})
+
 describe('runAxisSignature', () => {
   it('is the axis levers pinned off the run config', () => {
     const r = mkRun(

@@ -34,6 +34,8 @@ import {
   DECISION_QUALITY_MIN_SCORED_STEPS,
   DECISION_QUALITY_REWARD_EPSILON,
   MAX_CAMPAIGN_ITEMS,
+  MAX_DECISION_TRACE_STEPS,
+  MAX_SERIES_POINTS,
 } from './modelTrainerConstants.js'
 
 const LEVER_TYPES: ReadonlySet<string> = new Set(['number', 'choice', 'boolean'])
@@ -1794,6 +1796,60 @@ export function parseProgressMarker(line: string): Record<string, unknown> | und
   } catch {
     return undefined
   }
+}
+
+/** Uniformly downsample `arr` to `max` items, always keeping the first and last (chart shape preserved). */
+function downsampleNumbers(arr: number[], max: number): number[] {
+  if (arr.length <= max) return arr
+  if (max <= 1) return arr.slice(0, Math.max(0, max))
+  const out = new Array<number>(max)
+  const stride = (arr.length - 1) / (max - 1)
+  for (let i = 0; i < max; i += 1) out[i] = arr[Math.round(i * stride)]
+  return out
+}
+
+/**
+ * Bound the unbounded per-step fields a producer can embed in a run summary BEFORE it is persisted, so no
+ * single run record grows pathologically large (which would defeat the by-key detail/xAI read even though
+ * the list scans already omit these fields). A pure safety valve: it returns the SAME object when nothing
+ * exceeds a cap, so normal runs are untouched. `series` metrics past {@link MAX_SERIES_POINTS} are uniformly
+ * downsampled; a `decisionTrace.steps` past {@link MAX_DECISION_TRACE_STEPS} is truncated to a contiguous
+ * prefix (adjacency preserved) with `totalSteps` recording the true pre-cap rollout length.
+ */
+export function capRunSummaryForStorage(
+  summary: TrainingRunSummary,
+  opts: { maxSeriesPoints?: number; maxDecisionTraceSteps?: number } = {},
+): TrainingRunSummary {
+  const maxSeries = opts.maxSeriesPoints ?? MAX_SERIES_POINTS
+  const maxSteps = opts.maxDecisionTraceSteps ?? MAX_DECISION_TRACE_STEPS
+  let out = summary
+
+  if (summary.series && typeof summary.series === 'object') {
+    let changed = false
+    const capped: Record<string, number[]> = {}
+    for (const [k, v] of Object.entries(summary.series)) {
+      if (Array.isArray(v) && v.length > maxSeries) {
+        capped[k] = downsampleNumbers(v, maxSeries)
+        changed = true
+      } else {
+        capped[k] = v
+      }
+    }
+    if (changed) out = { ...out, series: capped }
+  }
+
+  const trace = (out.artifacts as { decisionTrace?: { steps?: unknown[]; totalSteps?: number } } | undefined)
+    ?.decisionTrace
+  if (Array.isArray(trace?.steps) && trace.steps.length > maxSteps) {
+    const cappedTrace = {
+      ...trace,
+      steps: trace.steps.slice(0, maxSteps),
+      totalSteps: trace.totalSteps ?? trace.steps.length,
+    }
+    out = { ...out, artifacts: { ...out.artifacts, decisionTrace: cappedTrace } }
+  }
+
+  return out
 }
 
 export function validateTrainingRunSummary(raw: unknown): TrainingRunSummary {

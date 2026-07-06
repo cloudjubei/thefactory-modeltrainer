@@ -87,6 +87,7 @@ import type {
 import {
   DEFAULT_HYPOTHESIS_COUNT,
   DEFAULT_RAN_BY,
+  HEAVY_RUN_FIELDS,
   DEFAULT_RESEARCH_PAPER_COUNT,
   MAX_RESEARCH_PAPER_COUNT,
   RESEARCH_DISCOVERY_OVERSCAN,
@@ -161,6 +162,7 @@ import {
   totalCampaignUnits,
   validateDecisionTrace,
   validateTrainingRunSummary,
+  capRunSummaryForStorage,
 } from './modelTrainerUtils.js'
 import {
   computeConfigSpaceAnalysis,
@@ -358,7 +360,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
     let exploredSetups: Set<string> | undefined
     if (params.skipExplored) {
-      const priorRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+      const priorRecords = await deps.storage.listRecords({
+        scope: params.scope,
+        type: recordType,
+        omit: HEAVY_RUN_FIELDS,
+      })
       exploredSetups = new Set(
         priorRecords
           .map(
@@ -494,7 +500,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           }
           throw new Error(error)
         }
-        const runSummary = validateTrainingRunSummary(result.summary)
+        const runSummary = capRunSummaryForStorage(validateTrainingRunSummary(result.summary))
         const artifacts = sanitizeRunArtifacts(runSummary.artifacts)
         await deps.storage.upsertRecord({
           scope: params.scope,
@@ -552,7 +558,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const failures = summary.outcomes
       .filter((o) => o.status === 'failed')
       .map((o) => ({ key: o.item.key, error: o.error ?? 'unknown failure' }))
-    const records = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    const records = await deps.storage.listRecords({
+      scope: params.scope,
+      type: recordType,
+      omit: HEAVY_RUN_FIELDS,
+    })
     const best = pickBestRun(
       records
         .map((r) => ({
@@ -608,6 +618,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       computeTarget?: string
       abortSignal?: AbortSignal
       onRecordWritten?: (type: string, key: string) => void
+      activityId?: string
     },
   ): Promise<EvaluateTrainingRunResult> {
     const recordType = manifest.recordType
@@ -643,14 +654,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (result.status !== 'completed') {
       throw new Error(result.error ?? `evaluation exited with code ${result.exitCode}`)
     }
-    const summary = validateTrainingRunSummary(result.summary)
+    const summary = capRunSummaryForStorage(validateTrainingRunSummary(result.summary))
     const evaluatedAt = now()
     const evaluationType = `${recordType}-evaluation`
     await deps.storage.upsertRecord({
       scope: opts.scope,
       type: evaluationType,
       key: opts.runKey,
-      content: { ...summary, runKey: opts.runKey, status: 'completed', evaluatedAt },
+      content: {
+        ...summary,
+        runKey: opts.runKey,
+        status: 'completed',
+        evaluatedAt,
+        ...(opts.activityId ? { activityId: opts.activityId } : {}),
+      },
     })
     opts.onRecordWritten?.(evaluationType, opts.runKey)
     logger?.info('evaluated training run', { recordType, runKey: opts.runKey })
@@ -672,6 +689,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       computeTarget: params.computeTarget,
       abortSignal: params.abortSignal,
       onRecordWritten: params.onRecordWritten,
+      activityId: params.activityId,
     })
   }
 
@@ -712,6 +730,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           computeTarget: params.computeTarget,
           abortSignal: params.abortSignal,
           onRecordWritten: params.onRecordWritten,
+          activityId: params.activityId,
         })
         results.push(result)
         return result
@@ -749,8 +768,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return deps.deepResearch
   }
 
-  async function listCompletedRuns(scope: string, recordType: string) {
-    const records = await deps.storage.listRecords({ scope, type: recordType })
+  // `omitHeavy` sheds the unbounded per-step fields for callers that only read light fields (judging,
+  // config-space analysis); the xAI digest leaves it off because it needs the focus run's decision trace.
+  async function listCompletedRuns(scope: string, recordType: string, omitHeavy = false) {
+    const records = await deps.storage.listRecords({
+      scope,
+      type: recordType,
+      ...(omitHeavy ? { omit: HEAVY_RUN_FIELDS } : {}),
+    })
     return records
       .filter(
         (r) =>
@@ -770,7 +795,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const recordType = manifest.recordType
     const judgedBy = deriveModelRef({ kind: 'api', llmConfig: params.llmConfig }).label
     const judgedAt = now()
-    const allRuns = await listCompletedRuns(params.scope, recordType)
+    const allRuns = await listCompletedRuns(params.scope, recordType, true)
     const onlyKeys = params.runKeys && params.runKeys.length ? new Set(params.runKeys) : undefined
     const runs = onlyKeys ? allRuns.filter((run) => onlyKeys.has(run.key)) : allRuns
 
@@ -859,7 +884,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         scope: params.scope,
         type: verdictType,
         key: verdict.key,
-        content: verdict as unknown as Record<string, unknown>,
+        content: {
+          ...(verdict as unknown as Record<string, unknown>),
+          ...(params.activityId ? { activityId: params.activityId } : {}),
+        },
       })
       params.onRecordWritten?.(verdictType, verdict.key)
     }
@@ -891,7 +919,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const proposedAt = now()
     const count = params.count ?? DEFAULT_HYPOTHESIS_COUNT
 
-    const runs = await listCompletedRuns(params.scope, recordType)
+    const runs = await listCompletedRuns(params.scope, recordType, true)
     const direction = manifest.objective.direction
     runs.sort((a, b) =>
       direction === 'max'
@@ -1716,7 +1744,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const ignoreLevers = Object.entries(manifest.levers)
       .filter(([, spec]) => spec.scope === 'ignore')
       .map(([name]) => name)
-    const records = await listCompletedRuns(params.scope, recordType)
+    const records = await listCompletedRuns(params.scope, recordType, true)
     const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion, {
       contextLevers,
       environment: params.environment,
@@ -1736,9 +1764,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     criterion: AnalysisCriterion,
     siblingKey?: string,
   ): Promise<{ digest: RunXaiDigest; runCount: number }> {
-    const records = await listCompletedRuns(scope, manifest.recordType)
+    // Rank/importances read the LEAN run set (heavy fields omitted) so this never bulk-loads every run's
+    // decision trace; the trace-based parts re-read the focus (and sibling) run's FULL record by key.
+    const recordType = manifest.recordType
+    const records = await listCompletedRuns(scope, recordType, true)
     const focus = records.find((r) => r.key === runKey)
     if (!focus) throw new Error(`run "${runKey}" is not a completed run of this project`)
+    const focusFull = await deps.storage.readRecord({ scope, type: recordType, key: runKey })
+    const focusContent = (focusFull?.content ?? focus.content) as Record<string, unknown>
     const ignoreLevers = Object.entries(manifest.levers)
       .filter(([, spec]) => spec.scope === 'ignore')
       .map(([name]) => name)
@@ -1759,7 +1792,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
     // focusConfig keeps context levers (so a lever sweep can hold this run's environment fixed); drop only `ignore`.
     const focusConfig = stripBy(
-      (focus.content.config as Record<string, unknown>) || {},
+      (focusContent.config as Record<string, unknown>) || {},
       ignoreLevers,
     )
 
@@ -1775,7 +1808,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const rankPos = ranked.findIndex((x) => x.key === runKey)
 
     const trace = validateDecisionTrace(
-      (focus.content.artifacts as { decisionTrace?: unknown } | undefined)?.decisionTrace,
+      (focusContent.artifacts as { decisionTrace?: unknown } | undefined)?.decisionTrace,
     )
     const fa = trace?.featureAttribution
     const topGroups: [string, number][] = fa?.byGroup
@@ -1793,10 +1826,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
     let sibling: RunXaiDigest['sibling']
     const sib = siblingKey ? records.find((r) => r.key === siblingKey) : undefined
-    if (sib) {
+    const sibFull = sib
+      ? await deps.storage.readRecord({ scope, type: recordType, key: siblingKey as string })
+      : undefined
+    if (sib && sibFull) {
       const diff = diffDecisionTraces(
-        sib.content as unknown as TrainingRunSummary,
-        focus.content as unknown as TrainingRunSummary,
+        sibFull.content as unknown as TrainingRunSummary,
+        focusContent as unknown as TrainingRunSummary,
       )
       if (diff && diff.aligned) {
         const sibConfig = stripBy(
@@ -1821,7 +1857,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const digest: RunXaiDigest = {
       runKey,
       config: focusConfig,
-      objective: focus.content.objective as number | undefined,
+      objective: focusContent.objective as number | undefined,
       criterion,
       rank: rankPos >= 0 ? { position: rankPos + 1, total: ranked.length } : undefined,
       actionCounts: trace?.actionCounts,

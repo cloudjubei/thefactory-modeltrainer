@@ -936,6 +936,8 @@ export interface EvaluateTrainingRunParams {
   abortSignal?: AbortSignal
   /** Fired after the evaluation record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
+  /** Originating activity's id, stamped on the evaluation record so a run links back to it. */
+  activityId?: string
 }
 
 export interface EvaluateTrainingRunResult {
@@ -963,6 +965,8 @@ export interface EvaluateTrainingRunsParams {
   onRecordWritten?: (type: string, key: string) => void
   /** Streamed cumulative progress as evaluations settle. */
   onProgress?: (progress: { done: number; total: number; failed: number }) => void
+  /** Originating activity's id, stamped on each evaluation record so runs link back to it. */
+  activityId?: string
 }
 
 export interface EvaluateTrainingRunsResult {
@@ -1127,6 +1131,8 @@ export interface JudgeTrainingRunsParams {
   abortSignal?: AbortSignal
   /** Fired after each verdict record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
+  /** Originating activity's id, stamped on each verdict record so runs link back to it. */
+  activityId?: string
 }
 
 export interface JudgeTrainingRunsResult {
