@@ -63,3 +63,20 @@ export const XAI_FDR_ALPHA = 0.1
  * more seeds. The RL-reproducibility consensus warns N<5 averaging is unreliable.
  */
 export const XAI_MIN_SEEDS = 5
+
+/**
+ * Fraction of host TOTAL memory the campaign pool may budget for concurrent runs when sizing the
+ * RAM-aware concurrency ceiling. Deliberately off `os.totalmem()`, NOT `os.freemem()`: freemem excludes
+ * reclaimable page cache (Linux `MemFree`, macOS genuinely-free pages), so after the trainer reads
+ * multi-GB kline files it reads chronically low and would throttle the pool to 1 on a host with ample
+ * RAM. 0.8 leaves ~20% headroom for the OS + the backend itself.
+ */
+export const MEMORY_BUDGET_FRACTION = 0.8
+
+/**
+ * Conservative fallback for a run's peak memory (bytes) when the manifest declares no
+ * `maxMemoryBytesPerRun`. Makes the RAM-aware concurrency ceiling DEFAULT-ON: the campaign pool is
+ * always bounded by host memory, erring toward under-parallelizing (never a host OOM) until a project
+ * sets a measured per-run figure. 2 GiB ≈ a typical RL training process; override per-manifest to tune.
+ */
+export const DEFAULT_RUN_MEMORY_ESTIMATE_BYTES = 2 * 1024 * 1024 * 1024

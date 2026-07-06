@@ -122,7 +122,15 @@ function makeTools(
   logger = { info: vi.fn(), warn: vi.fn() },
 ) {
   return {
-    tools: createModelTrainerTools({ computeRunner: runner, storage, logger, now: () => NOW }),
+    tools: createModelTrainerTools({
+      computeRunner: runner,
+      storage,
+      logger,
+      now: () => NOW,
+      // Take host RAM out of the concurrency math by default so CPU-concurrency assertions are
+      // deterministic; tests that exercise the RAM ceiling inject a finite budget explicitly.
+      availableMemoryBytes: () => Number.MAX_SAFE_INTEGER,
+    }),
     logger,
   }
 }
@@ -153,6 +161,7 @@ function makeJudgeTools(executor: InferenceExecutor | undefined, storage: DataSt
       inferenceExecutor: executor,
       logger,
       now: () => NOW,
+      availableMemoryBytes: () => Number.MAX_SAFE_INTEGER,
     }),
     logger,
   }
@@ -612,6 +621,7 @@ describe('runTrainingCampaign', () => {
       logger: { info: vi.fn(), warn: vi.fn() },
       now: () => NOW,
       availableParallelism: () => 8,
+      availableMemoryBytes: () => Number.MAX_SAFE_INTEGER,
     })
     const result = await tools.runTrainingCampaign({
       scope: 'proj',
@@ -622,6 +632,62 @@ describe('runTrainingCampaign', () => {
     expect(result.completed).toBe(6)
     expect(peak).toBe(4) // floor(8 / 2), not 1 (sequential)
     expect(jobs[0].env).toMatchObject({ BS_NUM_THREADS: '2', OMP_NUM_THREADS: '2' })
+  })
+
+  it('MEMORY default-on: caps the pool by host RAM even when the manifest declares no per-run estimate', async () => {
+    let active = 0
+    let peak = 0
+    const runner: ComputeRunner = {
+      async calibrate() {
+        return { secondsObserved: 1, unitsPerSecond: 100 }
+      },
+      runJob(job: ComputeJob): ComputeJobHandle {
+        return {
+          jobId: job.jobId,
+          onLog: () => {},
+          abort: () => {},
+          done: (async (): Promise<ComputeJobResult> => {
+            active++
+            peak = Math.max(peak, active)
+            await Promise.resolve()
+            await Promise.resolve()
+            active--
+            return {
+              jobId: job.jobId,
+              status: 'completed',
+              exitCode: 0,
+              summary: { objective: 1 },
+              logTail: [],
+              durationMs: 1,
+            }
+          })(),
+        }
+      },
+    }
+    const m = manifest({ maxThreadsPerRun: 2 }) // no maxMemoryBytesPerRun → uses the conservative default
+    delete m.calibrate
+    const logger = { info: vi.fn(), warn: vi.fn() }
+    // 8 cores/2-threads → CPU wants 4, but a 5 GiB budget / 2 GiB default per run fits only 2.
+    const tools = createModelTrainerTools({
+      computeRunner: runner,
+      storage: memoryStorage(),
+      logger,
+      now: () => NOW,
+      availableParallelism: () => 8,
+      availableMemoryBytes: () => 5 * 1024 ** 3,
+    })
+    const result = await tools.runTrainingCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6] } },
+    })
+    expect(result.completed).toBe(6)
+    expect(peak).toBe(2) // floor(5 / 2), not floor(8/2)=4 — RAM is the binding constraint
+    expect(logger.warn).toHaveBeenCalledWith(
+      'campaign concurrency reduced to fit host memory',
+      expect.objectContaining({ concurrency: 2 }),
+    )
   })
 
   it('keeps the sequential default and sets no per-run env when the manifest declares no thread appetite', async () => {

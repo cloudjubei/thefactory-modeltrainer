@@ -115,6 +115,13 @@ export interface TrainerManifest {
    * threads into each run's process env so N runs × this ≈ host cores. Omit to keep the sequential default.
    */
   maxThreadsPerRun?: number
+  /**
+   * Estimated peak memory (bytes) ONE run of this project needs. When set, the campaign pool is
+   * additionally capped at `floor(hostFreeMemory / maxMemoryBytesPerRun)` so a packed parallel sweep can
+   * never launch more concurrent runs than host RAM holds — the guard against N heavy training processes
+   * OOM-ing the host. A HARD ceiling (caps an explicit `concurrency` too). Omit to keep the CPU-only pool.
+   */
+  maxMemoryBytesPerRun?: number
   objective: TrainerObjective
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
@@ -1084,6 +1091,8 @@ export interface ModelTrainerToolsDeps {
   now?: () => string
   /** Injectable host CPU count for deterministic tests; defaults to os.availableParallelism(). */
   availableParallelism?: () => number
+  /** Injectable host free-memory (bytes) for deterministic tests; defaults to os.freemem(). */
+  availableMemoryBytes?: () => number
 }
 
 /** One judged run: the deterministic objective blended with the LLM's verdict. */

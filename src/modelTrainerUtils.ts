@@ -66,23 +66,45 @@ export const THREAD_ENV_VARS: readonly string[] = [
  * LSTM model at 6 vs 2 threads) instead of idling 8 cores, a packed auto sweep still lands on
  * `threadsPerRun` each, and an over-packed sweep (concurrency > auto) caps below it to avoid
  * oversubscription. The MLP models don't scale with threads but aren't harmed by the extra.
+ *
+ * A RAM-aware ceiling caps the pool at `floor(availableMemoryBytes / maxMemoryBytesPerRun)` so a packed
+ * sweep can never launch more concurrent runs than host memory holds (the OOM guard). It is a HARD
+ * ceiling — it caps an explicit `concurrency` too — but opt-in: a manifest that declares no per-run
+ * memory estimate keeps the CPU-only derivation byte-for-byte. `memoryCapped` reports when it bit, so
+ * the caller can log the reduction rather than silently shrinking the pool.
  */
 export function resolveCampaignParallelism(opts: {
   concurrency?: number
   maxThreadsPerRun?: number
   availableParallelism: number
-}): { concurrency: number; runEnv?: Record<string, string> } {
+  maxMemoryBytesPerRun?: number
+  availableMemoryBytes?: number
+}): { concurrency: number; runEnv?: Record<string, string>; memoryCapped?: boolean } {
   const threadsPerRun = Math.max(1, Math.floor(opts.maxThreadsPerRun ?? 1))
   const cpus = Math.max(1, Math.floor(opts.availableParallelism))
   const auto = threadsPerRun > 1 ? Math.max(1, Math.floor(cpus / threadsPerRun)) : 1
-  const concurrency =
+  const requested =
     opts.concurrency !== undefined ? Math.max(1, Math.floor(opts.concurrency)) : auto
-  const perRunThreads = Math.max(1, Math.floor(cpus / concurrency))
+  const memoryCap =
+    opts.maxMemoryBytesPerRun &&
+    opts.maxMemoryBytesPerRun > 0 &&
+    opts.availableMemoryBytes &&
+    opts.availableMemoryBytes > 0
+      ? Math.max(1, Math.floor(opts.availableMemoryBytes / opts.maxMemoryBytesPerRun))
+      : Number.POSITIVE_INFINITY
+  const concurrency = Math.min(requested, memoryCap)
+  const memoryCapped = concurrency < requested ? true : undefined
+  // Each run's fair share of cores — EXCEPT when the RAM cap lowered the pool: expanding threads to fill
+  // the freed cores would raise each run's RSS above the estimate the cap was sized against, fighting the
+  // cap. So a memory-capped pool holds per-run threads at the declared appetite instead of expanding.
+  const perRunThreads = memoryCapped
+    ? Math.max(1, Math.min(Math.floor(cpus / concurrency), threadsPerRun))
+    : Math.max(1, Math.floor(cpus / concurrency))
   const runEnv =
     threadsPerRun > 1
       ? Object.fromEntries(THREAD_ENV_VARS.map((v) => [v, String(perRunThreads)]))
       : undefined
-  return { concurrency, runEnv }
+  return { concurrency, runEnv, memoryCapped }
 }
 
 /**

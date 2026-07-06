@@ -345,6 +345,66 @@ describe('resolveCampaignParallelism', () => {
       resolveCampaignParallelism({ maxThreadsPerRun: 3, availableParallelism: 10 }).concurrency,
     ).toBe(3)
   })
+
+  it('MEMORY: caps concurrency to floor(availableMemory / maxMemoryBytesPerRun) below the CPU pool', () => {
+    // 10 cores, 2 threads/run → CPU wants 5 runs, but only 3 fit in RAM (7 GiB free / 2 GiB per run).
+    const r = resolveCampaignParallelism({
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+      maxMemoryBytesPerRun: 2 * 1024 ** 3,
+      availableMemoryBytes: 7 * 1024 ** 3,
+    })
+    expect(r.concurrency).toBe(3)
+    expect(r.memoryCapped).toBe(true)
+  })
+
+  it('MEMORY: the RAM ceiling caps an EXPLICIT concurrency too (a hard ceiling, not a suggestion)', () => {
+    const r = resolveCampaignParallelism({
+      concurrency: 20,
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+      maxMemoryBytesPerRun: 2 * 1024 ** 3,
+      availableMemoryBytes: 5 * 1024 ** 3, // fits 2
+    })
+    expect(r.concurrency).toBe(2)
+    expect(r.memoryCapped).toBe(true)
+  })
+
+  it('MEMORY: applies no RAM cap when the manifest declares no per-run estimate (byte-compatible)', () => {
+    const r = resolveCampaignParallelism({
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+      availableMemoryBytes: 1 * 1024 ** 3, // tiny, but no per-run estimate → ignored
+    })
+    expect(r.concurrency).toBe(5)
+    expect(r.memoryCapped).toBeFalsy()
+  })
+
+  it('MEMORY: never caps below 1 even when a single run barely fits in RAM', () => {
+    const r = resolveCampaignParallelism({
+      concurrency: 4,
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+      maxMemoryBytesPerRun: 8 * 1024 ** 3,
+      availableMemoryBytes: 2 * 1024 ** 3, // less than one run
+    })
+    expect(r.concurrency).toBe(1)
+    expect(r.memoryCapped).toBe(true)
+  })
+
+  it('MEMORY: does NOT expand per-run threads when the RAM cap lowered concurrency', () => {
+    // 10 cores, 2 threads/run, RAM caps 5→3 runs. Expanding to floor(10/3)=3 threads would raise each
+    // run's RSS (more BLAS scratch / malloc arenas) above the estimate the cap was sized against — fighting
+    // the very cap that fired. Hold per-run threads at the declared appetite (2).
+    const r = resolveCampaignParallelism({
+      maxThreadsPerRun: 2,
+      availableParallelism: 10,
+      maxMemoryBytesPerRun: 2 * 1024 ** 3,
+      availableMemoryBytes: 7 * 1024 ** 3,
+    })
+    expect(r.concurrency).toBe(3)
+    for (const v of THREAD_ENV_VARS) expect(r.runEnv?.[v]).toBe('2')
+  })
 })
 
 describe('resolveModelDeviceForConfig', () => {

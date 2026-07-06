@@ -93,6 +93,8 @@ import {
   PAPER_VERIFY_MIN_CONFIDENCE,
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
+  MEMORY_BUDGET_FRACTION,
+  DEFAULT_RUN_MEMORY_ESTIMATE_BYTES,
 } from './modelTrainerConstants.js'
 import {
   fetchPaperText,
@@ -203,6 +205,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Memory the run pool may budget for concurrent runs. Off TOTAL memory (× a headroom fraction), NOT
+  // freemem — freemem excludes reclaimable page cache and reads chronically low after the trainer loads
+  // multi-GB kline files, which would spuriously throttle the pool to 1. Injectable for deterministic tests.
+  const hostMemoryBudget = (): number => {
+    if (deps.availableMemoryBytes) return deps.availableMemoryBytes()
+    try {
+      return Math.floor(os.totalmem() * MEMORY_BUDGET_FRACTION)
+    } catch {
+      return 0
+    }
+  }
+
   function resolveRunner(target: string | undefined): ComputeRunner {
     if (!target) return deps.computeRunner
     const runner = deps.resolveComputeRunner?.(target)
@@ -261,11 +275,29 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // Pack runs to the host: a manifest declaring maxThreadsPerRun lets an unset concurrency default to
     // floor(cpus / threadsPerRun) (vs the idle sequential default), and caps each run's threads so the
     // pool can't oversubscribe. Remote targets keep the host's own CPU math (the runner re-caps as needed).
-    const { concurrency: runConcurrency, runEnv } = resolveCampaignParallelism({
+    const memoryBudget = hostMemoryBudget()
+    const {
+      concurrency: runConcurrency,
+      runEnv,
+      memoryCapped,
+    } = resolveCampaignParallelism({
       concurrency: params.concurrency,
       maxThreadsPerRun: manifest.maxThreadsPerRun,
       availableParallelism: hostParallelism(),
+      // Default-on: fall back to a conservative per-run estimate so the host-RAM ceiling always bounds
+      // the pool, even when the manifest declares no figure. Override per-manifest with a measured value.
+      maxMemoryBytesPerRun: manifest.maxMemoryBytesPerRun ?? DEFAULT_RUN_MEMORY_ESTIMATE_BYTES,
+      availableMemoryBytes: memoryBudget,
     })
+    if (memoryCapped) {
+      logger?.warn('campaign concurrency reduced to fit host memory', {
+        recordType,
+        concurrency: runConcurrency,
+        requested: params.concurrency,
+        maxMemoryBytesPerRun: manifest.maxMemoryBytesPerRun,
+        memoryBudget,
+      })
+    }
     // Benchmarked models carry a `preferredDevice`; auto-apply it to each run's config (the device
     // benchmark's whole point). Concurrency-aware: resolveModelDeviceForConfig keeps an mps preference
     // OFF a parallel sweep (one shared GPU), and never overrides an explicit device.
@@ -652,11 +684,21 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       throw new Error('trainer manifest declares no evaluate command')
     }
     const recordType = manifest.recordType
-    const { concurrency: evalConcurrency } = resolveCampaignParallelism({
-      concurrency: params.concurrency,
-      maxThreadsPerRun: manifest.maxThreadsPerRun,
-      availableParallelism: hostParallelism(),
-    })
+    const { concurrency: evalConcurrency, memoryCapped: evalMemoryCapped } =
+      resolveCampaignParallelism({
+        concurrency: params.concurrency,
+        maxThreadsPerRun: manifest.maxThreadsPerRun,
+        availableParallelism: hostParallelism(),
+        maxMemoryBytesPerRun: manifest.maxMemoryBytesPerRun ?? DEFAULT_RUN_MEMORY_ESTIMATE_BYTES,
+        availableMemoryBytes: hostMemoryBudget(),
+      })
+    if (evalMemoryCapped) {
+      logger?.warn('evaluation concurrency reduced to fit host memory', {
+        recordType,
+        concurrency: evalConcurrency,
+        requested: params.concurrency,
+      })
+    }
     const results: EvaluateTrainingRunResult[] = []
     const summary = await runActivityWorkItems<string, EvaluateTrainingRunResult>({
       items: params.runKeys,

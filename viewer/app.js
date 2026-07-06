@@ -891,11 +891,52 @@ async function readLatestRecord(suffix) {
     updatedAt: content.updatedAt || rec.updatedAt,
   }
 }
+// -progress / -campaign records are keyed by activityId, so concurrent same-project campaigns
+// each own their record. Read ONE run's record by its activityId (record-level timestamps merged
+// in when the content lacks its own, so observers can anchor time estimates).
+async function readRecordByActivity(suffix, activityId) {
+  if (!manifest || !activityId) return null
+  const recs = await queryRecords(manifest.recordType + suffix, activityId)
+  const rec = recs[0]
+  if (!rec || !rec.content) return null
+  return {
+    ...rec.content,
+    startedAt: rec.content.startedAt || rec.createdAt,
+    updatedAt: rec.content.updatedAt || rec.updatedAt,
+  }
+}
+// The most-recently-generated record across EVERY activity — for the no-live dashboard tile that
+// shows the last campaign without knowing which activity produced it.
+async function readMostRecentRecord(suffix) {
+  if (!manifest || !embedded()) return null
+  try {
+    const recs = await window.OverseerBridge.queryData({
+      type: manifest.recordType + suffix,
+      orderBy: [{ field: 'generatedAt', direction: 'desc', numeric: false }],
+      limit: 1,
+    })
+    const rec = (recs || [])[0]
+    if (!rec || !rec.content) return null
+    return {
+      ...rec.content,
+      startedAt: rec.content.startedAt || rec.createdAt,
+      updatedAt: rec.content.updatedAt || rec.updatedAt,
+    }
+  } catch {
+    return null
+  }
+}
 async function readProgress() {
-  return readLatestRecord('-progress')
+  return readMostRecentRecord('-progress')
 }
 async function readCampaign() {
-  return readLatestRecord('-campaign')
+  return readMostRecentRecord('-campaign')
+}
+async function readProgressFor(activityId) {
+  return readRecordByActivity('-progress', activityId)
+}
+async function readCampaignFor(activityId) {
+  return readRecordByActivity('-campaign', activityId)
 }
 async function readVerdicts() {
   if (!manifest) return new Map()
@@ -2361,9 +2402,9 @@ async function putAutoEvalMarker(activityId, params) {
 async function processAutoEvalMarkers() {
   const markers = (await readQueueRecords()).filter((q) => q.marker === 'auto-eval')
   if (!markers.length) return
-  const campaign = await readCampaign()
   for (const marker of markers) {
-    if (campaign && campaign.activityId === marker.activityId) {
+    const campaign = await readCampaignFor(marker.activityId)
+    if (campaign) {
       if (!campaign.finishedAt) continue
       if (!campaign.aborted) await enqueueMissingEvaluations(campaign.keys, marker.params)
       await deleteQueueItem(marker.id)
@@ -2371,16 +2412,16 @@ async function processAutoEvalMarkers() {
     }
     const act = await getActivity(marker.activityId)
     if (act && (act.status === 'running' || act.status === 'paused')) continue
-    // Settled, but a concurrent campaign overwrote the single 'latest' campaign record, so we
-    // can't read this one's keys — fall back to evaluating every completed run missing an eval.
+    // Settled with no campaign record (e.g. aborted before it landed) — fall back to evaluating
+    // every completed run missing an eval, so auto-eval is never silently lost.
     if (act && act.status === 'completed') await enqueueMissingEvaluations(null, marker.params)
     await deleteQueueItem(marker.id)
   }
   await refreshQueue()
 }
 // Queue an evaluate for each completed run still missing one. `keys` scopes it to a
-// campaign's runs; when null (its campaign record was overwritten by a concurrent campaign)
-// it falls back to ALL completed runs missing an eval, so auto-eval is never silently lost.
+// campaign's runs; when null (its campaign record was never found — e.g. aborted early) it
+// falls back to ALL completed runs missing an eval, so auto-eval is never silently lost.
 async function enqueueMissingEvaluations(keys, baseParams) {
   if (!evalEnabled()) return
   const [runs, evaluations, queue] = await Promise.all([readRuns(), readEvaluations(), readQueue()])
@@ -10882,18 +10923,18 @@ async function clearHypothesisCampaign(recordType, hypothesisId, queueId) {
     content: { ...rest, updatedAt: existing.updatedAt || nowIso() },
   })
 }
-// Finalise hypotheses whose campaign has settled: copy the campaign record's
-// results in when its activityId matches, or fall back to the activity's final
-// status when the campaign record was superseded before we saw it.
+// Finalise hypotheses whose campaign has settled: copy the campaign record's results in (read by
+// the campaign's own activityId), or fall back to the activity's final status when no campaign
+// record landed (e.g. aborted before it wrote one).
 async function stampHypothesisCampaignResults() {
   if (!manifest) return
   const recordType = manifest.recordType
   const hyps = await readHypotheses()
   const open = hyps.filter((h) => h.campaign && h.campaign.activityId && !h.campaign.finishedAt)
   if (!open.length) return
-  const campaign = await readCampaign()
   for (const h of open) {
-    if (campaign && campaign.activityId === h.campaign.activityId && campaign.finishedAt) {
+    const campaign = await readCampaignFor(h.campaign.activityId)
+    if (campaign && campaign.finishedAt) {
       await stampHypothesisCampaign(recordType, h.id, {
         activityId: campaign.activityId,
         launchedAt: h.campaign.launchedAt,
@@ -15051,8 +15092,8 @@ async function observeActivity(entry) {
   }
 }
 // Poll a training campaign to settlement, writing its OWN progress/campaign/status into its
-// `entry` (filtered to its activityId — the backend keys these records 'latest', so with two
-// same-project campaigns a block's live progress is best-effort; results are unaffected).
+// `entry`. The -progress/-campaign records are keyed by this run's activityId, so concurrent
+// same-project campaigns never cross-contaminate a block's live progress.
 async function observeTrainActivity(entry, epoch) {
   const activityId = entry.activityId
   const start = Date.now()
@@ -15061,14 +15102,12 @@ async function observeTrainActivity(entry, epoch) {
   let lastSig = ''
   while (Date.now() - start < MAX_OBSERVE_MS) {
     if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
-    const [progress, act, campaign] = await Promise.all([
-      readProgress(),
+    const [mineProgress, act, mineCampaign] = await Promise.all([
+      readProgressFor(activityId),
       getActivity(activityId),
-      readCampaign(),
+      readCampaignFor(activityId),
     ])
     if (epoch !== projectEpoch || !liveActivities.has(entry.localId)) return
-    const mineProgress = progress && progress.activityId === activityId ? progress : null
-    const mineCampaign = campaign && campaign.activityId === activityId ? campaign : null
     if (mineProgress) entry.progress = mineProgress
     if (mineCampaign) entry.campaign = mineCampaign
     if (act && act.status && act.status !== 'running') {
@@ -15138,10 +15177,10 @@ function activityProgressSig(progress, campaign) {
 // and run the settle bookkeeping (hypothesis stamps + auto-eval markers).
 async function settleTrainActivity(entry) {
   const activityId = entry.activityId
-  const progress = await readProgress()
-  const campaign = await readCampaign()
-  if (progress && progress.activityId === activityId) entry.progress = progress
-  if (campaign && campaign.activityId === activityId) entry.campaign = campaign
+  const progress = await readProgressFor(activityId)
+  const campaign = await readCampaignFor(activityId)
+  if (progress) entry.progress = progress
+  if (campaign) entry.campaign = campaign
   if (entry.campaign) lastSettledCampaign = entry.campaign
   renderActivity()
   await renderRuns()
