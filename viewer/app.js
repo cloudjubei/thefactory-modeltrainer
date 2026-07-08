@@ -240,6 +240,12 @@ let queueCache = []
 let queueOrder = []
 let runsFilterKeys = null
 let runsFilterLabel = ''
+// The "Selection" view: a routed set of run keys (from a By value/dataset/environment "runs ↗", a comparison
+// drill, a hypothesis, …). Every "open these runs" gesture lands here so the last selection is always one tab
+// away. `Origin` remembers where it was routed from (a label + a back() closure) for the ← Back button.
+let runsSelectionKeys = []
+let runsSelectionLabel = ''
+let runsSelectionOrigin = null
 let runsSortKey = null
 let runsSortDir = 'desc'
 let runsLeverFilter = {}
@@ -1917,6 +1923,9 @@ function resetDashboardState() {
   queueCache = []
   runsFilterKeys = null
   runsFilterLabel = ''
+  runsSelectionKeys = []
+  runsSelectionLabel = ''
+  runsSelectionOrigin = null
   // The Runs lens + the all-runs snapshot are per-project: reset them so a comparison/favorites view (both
   // read allRunsCache directly) can't paint the PREVIOUS project's runs, and the lock re-initialises to the
   // new project's best run. modelStatsCache/Stale reset so the freshness note + latest-refresh frontier are
@@ -2580,16 +2589,44 @@ function clearRunsFilter() {
   runsPage = 0
   refreshRuns()
 }
-// Drill from a comparison row (one dataset/environment under the locked setup) into its individual runs:
-// pin the flat Runs view to exactly those run keys.
+// Route a named set of run keys into the "Selection" view — the single landing spot for every "open these
+// runs" gesture. `origin` = { label, back() } so the Selection view can offer a ← Back to where it came from.
+function openRunsSelection(keys, label, origin) {
+  const uniq = [...new Set((keys || []).filter(Boolean))]
+  if (!uniq.length) return
+  runsSelectionKeys = uniq
+  runsSelectionLabel = label || ''
+  runsSelectionOrigin = origin || null
+  runsFilterKeys = null
+  runsFilterLabel = ''
+  runsViewMode = 'selection'
+  runsPage = 0
+  if (activeTabId === 'runs') refreshRuns()
+  else showTab('runs')
+}
+function goBackFromSelection() {
+  const origin = runsSelectionOrigin
+  if (origin && typeof origin.back === 'function') origin.back()
+  else {
+    runsViewMode = 'runs'
+    runsPage = 0
+    refreshRuns()
+  }
+}
+// Drill from a comparison row (one dataset/environment under the locked setup) into its individual runs —
+// lands in the Selection view, with ← Back returning to the By dataset / By environment view it came from.
 function drillIntoComparison(sig) {
   const group = comparisonGroupsCache.get(sig)
   if (!group || !group.keys.length) return
-  runsFilterKeys = new Set(group.keys)
-  runsFilterLabel = group.label
-  runsViewMode = 'runs'
-  runsPage = 0
-  refreshRuns()
+  const mode = runsViewMode
+  openRunsSelection(group.keys, group.label, {
+    label: mode === 'dataset' ? 'By dataset' : 'By environment',
+    back: () => {
+      runsViewMode = mode
+      runsPage = 0
+      refreshRuns()
+    },
+  })
 }
 // Header-click sort for the comparison table: re-clicking the active column flips direction; a new column
 // starts descending (best-first) except the axis label, which starts ascending.
@@ -3560,12 +3597,21 @@ function runsToolbarHtml(shownCount, total) {
   </div>`
 
   // Favorites is a CURATED pin list — the exploratory filters (Hide-bad / status / lever / custom rules) don't
-  // apply there (they'd hide pins), so only the text search shows; everywhere else the full filter row shows.
-  const curated = runsViewMode === 'favorites'
+  // apply there (they'd hide members), so only the text search shows; everywhere else the full filter row shows.
+  const selectionView = runsViewMode === 'selection'
+  const curated = runsViewMode === 'favorites' || selectionView
   const active = curated ? Boolean(runsTextFilter.trim()) : hasActiveRunsFilters()
   const label = runsFilterLabel ? ` (${escapeHtml(runsFilterLabel)})` : ''
+  // The Selection view carries a "what this is + ← Back to where it came from" banner.
+  const selectionBanner = selectionView
+    ? `<div class="runs-selection-banner">
+        ${runsSelectionOrigin ? `<button type="button" class="ghost-btn" id="runs-selection-back" title="Return to ${escapeHtml(runsSelectionOrigin.label || 'where this opened')}">← Back${runsSelectionOrigin.label ? ` to ${escapeHtml(runsSelectionOrigin.label)}` : ''}</button>` : ''}
+        ${runsSelectionLabel ? `<span class="runs-selection-label">${escapeHtml(runsSelectionLabel)}</span>` : ''}
+      </div>`
+    : ''
   return `<div class="runs-toolbar">
     ${runsViewModeHtml()}
+    ${selectionBanner}
     ${curated ? '' : dropdownsPanel}
     <div class="runs-filters">
       <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
@@ -3596,7 +3642,16 @@ function runsViewModeHtml() {
         'Which ENVIRONMENT produces the best results: pool every filtered run by environment (fee / TP-SL regime) and rank by a criterion. Rows = environments, cells = min · avg · max.',
       )
     : ''
-  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}</div>`
+  // The Selection lens appears once a "runs ↗" gesture has routed a set here; it holds the LAST selection.
+  const selBtn =
+    runsSelectionKeys.length || runsViewMode === 'selection'
+      ? btn(
+          'selection',
+          `⛶ Selection${runsSelectionKeys.length ? ` (${runsSelectionKeys.length})` : ''}`,
+          'The runs you last opened from a By value / By dataset / By environment row (or another “runs ↗”). ← Back returns to where you opened it.',
+        )
+      : ''
+  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}${selBtn}</div>`
 }
 // The Hide-bad control: a chip like the custom-filter chips — the checkbox toggles it on/off; clicking the
 // chip body opens the editor for WHAT counts as bad (failed / health-flagged / under-traded), since badness
@@ -3851,18 +3906,21 @@ function renderRunsTable() {
     renderComparisonView(body)
     return
   }
-  // Favorites are an explicit, curated pin list — resolve each pin from the WIDEST run set (findRunAnywhere:
-  // page/full cache → all-runs snapshot) and fetch any that live off the loaded data BY KEY, so a pin never
-  // vanishes just because its run isn't on the current page or in the snapshot. Independent of the Refresh.
+  // Favorites (a pin list) and Selection (a routed run set) are CURATED key-list views — resolve each key
+  // from the WIDEST run set (findRunAnywhere: page/full cache → all-runs snapshot) and fetch any that live off
+  // the loaded data BY KEY, so a run never vanishes just because it isn't on the current page or in the
+  // snapshot. Independent of the Refresh.
   const favoritesView = runsViewMode === 'favorites'
-  let favBase = null
-  if (favoritesView) {
-    const favKeys = [...favoritesCache]
-    favBase = favKeys.map((k) => findRunAnywhere(k)).filter(Boolean)
-    const missing = favKeys.filter((k) => !findRunAnywhere(k))
+  const selectionView = runsViewMode === 'selection'
+  const curatedView = favoritesView || selectionView
+  let curatedBase = null
+  if (curatedView) {
+    const curatedKeys = favoritesView ? [...favoritesCache] : runsSelectionKeys
+    curatedBase = curatedKeys.map((k) => findRunAnywhere(k)).filter(Boolean)
+    const missing = curatedKeys.filter((k) => !findRunAnywhere(k))
     if (missing.length) warmRunsForRender(missing, renderRunsTable)
   }
-  if (!runsCache.length && !favoritesView) {
+  if (!runsCache.length && !curatedView) {
     if (spark) spark.hidden = true
     if (runsViewMode !== 'runs') {
       setHtml(
@@ -3887,13 +3945,16 @@ function renderRunsTable() {
     return
   }
   // Keep the off-page run cache bounded to runs still referenced by an open detail / compare / xAI view — or
-  // FAVORITED (a fetched pin must survive the render that requested it). Skip in-flight fetches.
+  // FAVORITED / in the current SELECTION (a fetched key must survive the render that requested it). Skip
+  // in-flight fetches.
+  const selectionSet = new Set(runsSelectionKeys)
   for (const k of [...runExtraCache.keys()]) {
     if (
       k !== selectedRunKey &&
       k !== xaiFocusKey &&
       !runsCompareKeys.has(k) &&
       !favoritesCache.has(k) &&
+      !selectionSet.has(k) &&
       !fullRunFetches.has(k)
     ) {
       runExtraCache.delete(k)
@@ -3902,13 +3963,13 @@ function renderRunsTable() {
     }
   }
   const serverPaged = runsServerPaged()
-  // The Favorites view reuses the standard flat table over the starred runs (client-side, never server-paged).
-  const base = favoritesView ? favBase : runsCache
+  // Curated views (Favorites / Selection) render the flat table over their resolved key set (never paged).
+  const base = curatedView ? curatedBase : runsCache
   // Server total when the flat view paginates server-side; otherwise the loaded set's size.
   const total = serverPaged ? runsTotalCount : base.length
-  // A pin is a deliberate override, so the exploratory filters (Hide-bad / status / lever / custom rules)
-  // never drop a favorite — only the text search narrows the curated list.
-  const filtered = favoritesView ? applyRunsTextFilter(base) : applyRunsFilters(base)
+  // A curated list is deliberate, so the exploratory filters (Hide-bad / status / lever / custom rules) never
+  // drop a member — only the text search narrows it.
+  const filtered = curatedView ? applyRunsTextFilter(base) : applyRunsFilters(base)
   if (spark) {
     const svg = sparklineSvg(filtered)
     setHtml(spark, svg)
@@ -3916,10 +3977,18 @@ function renderRunsTable() {
   }
   if (!filtered.length) {
     const empty = favoritesView
-      ? base.length
-        ? 'No favorites match the search — clear it to see all your starred runs.'
-        : 'No favorites yet — click ☆ on any run (in the Runs view or a run’s detail) to star it.'
-      : 'No runs match the filter.'
+      ? favoritesCache.size === 0
+        ? 'No favorites yet — click ☆ on any run (in the Runs view or a run’s detail) to star it.'
+        : base.length
+          ? 'No favorites match the search — clear it to see all your starred runs.'
+          : 'Loading your favorites…'
+      : selectionView
+        ? runsSelectionKeys.length === 0
+          ? 'No selection yet — click the <strong>runs ↗</strong> button on a By value / By dataset / By environment row.'
+          : base.length
+            ? 'No runs in this selection match the search — clear it to see the whole selection.'
+            : 'Loading the selection…'
+        : 'No runs match the filter.'
     setHtml(body, `${runsToolbarHtml(0, total)}<div class="empty-hint">${empty}</div>`)
     closeRunDetail()
     return
@@ -5670,15 +5739,15 @@ function xaiAxisSliceToggleHtml(axis, opts, activeId) {
     `<button type="button" class="ghost-btn xai-scope-btn${activeId === id ? ' active' : ''}" data-xai-axis-slice="${escapeHtml(axis)}" data-slice-id="${escapeHtml(id)}">${escapeHtml(label)}</button>`
   return `<div class="xai-scope-switch xai-axis-slice">${btn('all', 'all')}${opts.map((o) => btn(o.id, o.label)).join('')}</div>`
 }
-// Runs matching the focus config on every LOCKED lever (same setup) for an axis — the pool the across-axis
-// view groups. A lever axis holds every OTHER lever fixed; a scope axis holds the non-axis levers fixed.
+// Runs with the SAME setup as the focus config for an axis — differing ONLY in the axis lever(s) (+ seed) —
+// the pool the across-axis view groups. Strict + exhaustive (a lever the focus leaves unset can't leak in a
+// run that sets it), so a By value / By dataset row is exactly one config's seeds, nothing else.
 function xaiLockedMatches(focusCfg, axis) {
-  const lock = {}
-  for (const k of window.Comparison.lockedLeverKeys(manifest, axis))
-    if (focusCfg[k] !== undefined && focusCfg[k] !== null) lock[k] = String(focusCfg[k])
   return xaiRunPool()
     .filter((r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid')
-    .filter((r) => window.Comparison.matchesLock(lock, r))
+    .filter((r) =>
+      window.Comparison.sameSetupExceptAxis(manifest, axis, focusCfg, (r.summary && r.summary.config) || {}),
+    )
 }
 // Group the matched pool by axis value, attach each group's normalised STANDING (robust-z within its axis
 // value among all configs run there), refresh the Sweep/Add-runs row cache, prune stale selection, and sort.
@@ -5766,7 +5835,11 @@ function xaiAxisTableHtml(axis, cols, groups, focusSig, standingOf, axisKeys, ru
       const cells = cols
         .map((c) => `<td class="num">${comparisonCellHtml(c, g.stats[c.id])}</td>`)
         .join('')
-      const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-runs="${escapeHtml(JSON.stringify(info.pairs))}" data-xai-axis-label="${escapeHtml(info.name)}" title="Open all runs with this ${escapeHtml(axisNoun)}">runs ↗</button>`
+      // Open exactly the runs BEHIND this row (its seeds) in the Selection tab — not every run that happens to
+      // share the axis value, so a By value row opens this config's seeds, not the whole field at that value.
+      const rowLabel =
+        axis === 'dataset' || axis === 'environment' ? info.name : `${axis}=${info.name}`
+      const runsBtn = `<button type="button" class="ghost-btn xai-axis-runs-btn" data-xai-axis-run-keys="${escapeHtml(JSON.stringify(g.keys))}" data-xai-axis-label="${escapeHtml(rowLabel)}" title="Open the ${g.keys.length} run${g.keys.length === 1 ? '' : 's'} behind this row in the Selection tab">runs ↗</button>`
       return `<tr class="${cur ? 'is-selected' : ''}">
         <td><input type="checkbox" class="xai-axis-cb" data-sig="${escapeHtml(g.axisSig)}"${xaiAxisSelected.has(g.axisSig) ? ' checked' : ''} aria-label="select ${escapeHtml(info.name)}"></td>
         <td><div class="cmp-axis-name">${cur ? '<span class="xai-here">◀ this run</span> ' : ''}<strong>${escapeHtml(info.name)}</strong></div><div class="card-sub cmp-axis-config">${escapeHtml(info.valStr || '—')}</div></td>
@@ -7517,8 +7590,10 @@ function xaiNiceLogValues(lo, hi) {
     }
   return out
 }
-// Sane values to sweep a lever over: its declared choices, else a 1-2-5 (or linear) spread across its range
-// (or, with no range, two orders of magnitude around the current value), always including the current value.
+// Sane values to sweep a lever over: a 1-2-5 (or linear) spread across its range, plus its declared choices
+// and any observed values, always including the current value. STRING choices (net_arch, optimizer…) are a
+// hard set — only those. NUMERIC choices (batch_size, lookback_window) are PRESETS, not limits, so they also
+// get a fuller grid spanning them, so the lever is genuinely sweepable instead of stuck on 2-3 values.
 function xaiSweepValues(lever, current, observed) {
   const spec = manifest && manifest.levers ? manifest.levers[lever] : null
   const m = new Map()
@@ -7526,14 +7601,22 @@ function xaiSweepValues(lever, current, observed) {
     if (v === undefined || v === null || String(v) === 'n/a') return
     if (!m.has(String(v))) m.set(String(v), v)
   }
-  if (spec && Array.isArray(spec.choices)) {
-    for (const c of spec.choices) add(c)
+  const choices = spec && Array.isArray(spec.choices) ? spec.choices : null
+  const numericChoices =
+    !!choices && choices.length > 0 && choices.every((c) => Number.isFinite(Number(c)))
+  if (choices && !numericChoices) {
+    for (const c of choices) add(c)
   } else {
     const cur = Number(current)
     let lo, hi
     if (spec && Array.isArray(spec.range) && spec.range.length === 2) {
       lo = Number(spec.range[0])
       hi = Number(spec.range[1])
+    } else if (numericChoices) {
+      // Span the numeric presets — they bound the sensible range even without a declared `range`.
+      const nums = choices.map(Number)
+      lo = Math.min(...nums)
+      hi = Math.max(...nums)
     } else if (Number.isFinite(cur) && cur !== 0) {
       lo = Math.abs(cur) / 50
       hi = Math.abs(cur) * 50
@@ -7548,10 +7631,15 @@ function xaiSweepValues(lever, current, observed) {
         for (let k = 0; k <= 6; k++)
           vals.push(Number((lo + ((hi - lo) * k) / 6).toPrecision(4)))
       }
-      if (Number.isInteger(cur) && Number.isInteger(lo) && Number.isInteger(hi))
-        vals = [...new Set(vals.map((v) => Math.round(v)))].filter((v) => v >= lo && v <= hi)
+      // Integer levers (batch_size, lookback_window, learning_starts…) sweep over whole numbers only.
+      const intGrid =
+        (numericChoices && choices.every((c) => Number.isInteger(Number(c)))) ||
+        (Number.isInteger(cur) && Number.isInteger(lo) && Number.isInteger(hi))
+      if (intGrid) vals = [...new Set(vals.map((v) => Math.round(v)))].filter((v) => v >= lo && v <= hi)
       for (const v of vals.slice(0, 12)) add(v)
     }
+    // Always keep the declared presets available even alongside the grid.
+    if (numericChoices) for (const c of choices) add(Number(c))
   }
   for (const v of observed || []) add(v)
   add(
@@ -8743,6 +8831,10 @@ function setupRuns() {
   const body = byId('runs-body')
   if (body) {
     body.addEventListener('click', (event) => {
+      if (event.target.closest('#runs-selection-back')) {
+        goBackFromSelection()
+        return
+      }
       if (event.target.closest('#runs-filter-clear')) {
         clearRunsFilter()
         return
@@ -9151,16 +9243,17 @@ function setupRuns() {
         xaiAnalyzeEnvironment(envBtn.dataset.xaiEnv)
         return
       }
-      // "runs ↗" on a current-run By-dataset/By-environment row: open ALL runs in that dataset/environment.
-      const axisRunsBtn = event.target.closest('[data-xai-axis-runs]')
+      // "runs ↗" on a By value / By dataset / By environment row: open exactly that row's runs in the Selection tab.
+      const axisRunsBtn = event.target.closest('[data-xai-axis-run-keys]')
       if (axisRunsBtn) {
-        let pairs = []
+        let keys = []
         try {
-          pairs = JSON.parse(axisRunsBtn.dataset.xaiAxisRuns || '[]')
+          keys = JSON.parse(axisRunsBtn.dataset.xaiAxisRunKeys || '[]')
         } catch {
-          pairs = []
+          keys = []
         }
-        if (pairs.length) viewRunsByLeverValues(pairs, axisRunsBtn.dataset.xaiAxisLabel || '')
+        if (keys.length)
+          openRunsSelection(keys, axisRunsBtn.dataset.xaiAxisLabel || '', xaiSelectionOrigin())
         return
       }
       // A tick in the by-axis selection column: the 'change' listener owns it — swallow the click so it
@@ -11278,21 +11371,38 @@ function viewHypothesisRuns(id) {
     ? hypothesisMatchedRuns(h).map((r) => r.key)
     : (h.evidence && Array.isArray(h.evidence.matchedKeys) && h.evidence.matchedKeys) || []
   if (!keys.length) return
-  runsFilterKeys = new Set(keys)
-  runsFilterLabel = h.title || shortKey(id)
-  showTab('runs')
+  openRunsSelection(keys, h.title || shortKey(id), {
+    label: 'Hypotheses',
+    back: () => showTab('hypotheses'),
+  })
 }
-// Open the Runs tab drilled to the analysed runs whose config matches EVERY (lever, value) pair — the
-// runs behind an xAI fANOVA value or interaction cell. No-op when the pairs name no actual run (e.g. a
-// surrogate-predicted cell). `pairs` is an array of [lever, value]; `label` becomes the runs chip.
+// A back() closure that returns to the CURRENT xAI view (scope + sub-tab + focus + By value lever), snapshotted
+// so the Selection view's ← Back lands exactly where the "runs ↗" was clicked.
+function xaiSelectionOrigin() {
+  const scope = xaiScope
+  const tab = xaiTab
+  const focus = xaiFocusKey
+  const lever = xaiByValueLever
+  return {
+    label: 'xAI',
+    back: () => {
+      xaiScope = scope
+      xaiTab = tab
+      xaiFocusKey = focus
+      xaiByValueLever = lever
+      showTab('xai')
+    },
+  }
+}
+// Open the analysed runs whose config matches EVERY (lever, value) pair — the runs behind an xAI axis row,
+// fANOVA value, or interaction cell — in the Selection view. No-op when the pairs name no actual run (e.g. a
+// surrogate-predicted cell). `pairs` is an array of [lever, value]; `label` names the selection.
 function viewRunsByLeverValues(pairs, label) {
   const matches = xaiRuns().filter((r) =>
     pairs.every(([lever, value]) => String((r.config || {})[lever]) === String(value)),
   )
   if (!matches.length) return
-  runsFilterKeys = new Set(matches.map((r) => r.key))
-  runsFilterLabel = label
-  showTab('runs')
+  openRunsSelection(matches.map((r) => r.key), label, xaiSelectionOrigin())
 }
 // Launch the accepted hypothesis as a training campaign, exactly like the
 // Launch tab: start 'train' with its spec (or queue it behind the live
@@ -14476,10 +14586,16 @@ function choiceLeverHtml(key, spec) {
         `<option value="${escapeHtml(String(c))}"${String(c) === String(spec.default) ? ' selected' : ''}>${optionText(c)}</option>`,
     )
     .join('')
-  const sweepOptions = choices
+  // NUMERIC choices (batch_size, lookback_window) are presets, not hard limits — offer the full recommended
+  // sweep grid spanning them (same as the xAI Sweep popup), sorted, so you can sweep more than 2-3 values.
+  const numericChoices = choices.length > 0 && choices.every((c) => Number.isFinite(Number(c)))
+  const sweepChoices = numericChoices
+    ? [...xaiSweepValues(key, spec.default, [])].sort((a, b) => Number(a) - Number(b))
+    : choices
+  const sweepOptions = sweepChoices
     .map((c) => `<option value="${escapeHtml(String(c))}">${optionText(c)}</option>`)
     .join('')
-  const size = Math.max(2, Math.min(choices.length, 4))
+  const size = Math.max(2, Math.min(sweepChoices.length, 8))
   return `<div class="lever-grid">
     <label class="field"><span>Value</span>
       <select name="fixed:${escapeHtml(key)}">${fixedOptions}</select>

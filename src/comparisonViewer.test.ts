@@ -154,21 +154,56 @@ describe('runAxisSignature', () => {
   })
 })
 
-describe('matchesLock', () => {
-  const r = mkRun(
-    { model_name: 'ppo', net_arch: '[256,256]', asset: 'BTC', timeframe: '1d', stop_loss: 0.02 },
-    10,
-  )
-  it('matches when every locked value equals the run config (string-coerced)', () => {
-    expect(C.matchesLock({ model_name: 'ppo', net_arch: '[256,256]', stop_loss: '0.02' }, r)).toBe(
-      true,
-    )
+describe('sameSetupExceptAxis (strict across-axis grouping)', () => {
+  const focus = {
+    model_name: 'ppo',
+    net_arch: '[128]',
+    asset: 'BTC',
+    timeframe: '1d',
+    stop_loss: 0.05,
+    learning_rate: 0.0003,
+    seed: 0,
+  }
+  it('matches a run that differs ONLY in the axis lever (and seed, always pooled)', () => {
+    expect(
+      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', focus, {
+        ...focus,
+        learning_rate: 0.001,
+        seed: 7,
+      }),
+    ).toBe(true)
   })
-  it('fails when any locked value differs', () => {
-    expect(C.matchesLock({ model_name: 'dqn' }, r)).toBe(false)
+  it('rejects a run that differs in a NON-axis lever', () => {
+    expect(
+      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', focus, {
+        ...focus,
+        net_arch: '[256,256]',
+      }),
+    ).toBe(false)
   })
-  it('an empty lock matches everything', () => {
-    expect(C.matchesLock({}, r)).toBe(true)
+  it('treats unset ≡ null ≡ n/a, so a lever the focus never set cannot leak in runs that DO set it', () => {
+    const f = { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', learning_rate: 0.0003 }
+    expect(
+      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', f, { ...f, learning_rate: 0.001 }),
+    ).toBe(true) // stop_loss unset on both
+    expect(
+      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', f, {
+        ...f,
+        learning_rate: 0.001,
+        stop_loss: 0.02,
+      }),
+    ).toBe(false) // run sets a lever the focus left unset
+    expect(
+      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', { ...f, stop_loss: 'n/a' }, {
+        ...f,
+        learning_rate: 0.001,
+      }),
+    ).toBe(true) // focus 'n/a' ≡ run unset
+  })
+  it('By dataset: same model/env config across datasets (the axis levers are free to differ)', () => {
+    const f = { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', stop_loss: 0.05, seed: 1 }
+    expect(C.sameSetupExceptAxis(manifest, 'dataset', f, { ...f, asset: 'ETH', timeframe: '1h', seed: 3 })).toBe(true)
+    expect(C.sameSetupExceptAxis(manifest, 'dataset', f, { ...f, asset: 'ETH', stop_loss: 0.02 })).toBe(false)
   })
 })
 describe('groupComparison', () => {
@@ -242,6 +277,36 @@ describe('sortComparisonGroups', () => {
   it('sorts by the axis label (case-insensitive)', () => {
     const out = C.sortComparisonGroups(groups, 'axis', 'asc')
     expect(out.map((g: any) => g.axisLabel)).toEqual(['Alpha', 'Beta'])
+  })
+  it('sorts a NUMERIC axis (By value lever values) numerically, not lexically', () => {
+    const numeric = [
+      { axisSig: 'a', axisLabel: '128', count: 1, stats: {} },
+      { axisSig: 'b', axisLabel: '16', count: 1, stats: {} },
+      { axisSig: 'c', axisLabel: '4096', count: 1, stats: {} },
+      { axisSig: 'd', axisLabel: '512', count: 1, stats: {} },
+    ]
+    expect(C.sortComparisonGroups(numeric, 'axis', 'asc').map((g: any) => g.axisLabel)).toEqual([
+      '16',
+      '128',
+      '512',
+      '4096',
+    ])
+    expect(C.sortComparisonGroups(numeric, 'axis', 'desc').map((g: any) => g.axisLabel)).toEqual([
+      '4096',
+      '512',
+      '128',
+      '16',
+    ])
+  })
+  it('keeps a non-numeric axis (dataset/env names, comma-list arches) as a text sort', () => {
+    const mixed = [
+      { axisSig: 'a', axisLabel: '512,64', count: 1, stats: {} },
+      { axisSig: 'b', axisLabel: '128,32', count: 1, stats: {} },
+    ]
+    expect(C.sortComparisonGroups(mixed, 'axis', 'asc').map((g: any) => g.axisLabel)).toEqual([
+      '128,32',
+      '512,64',
+    ])
   })
   it('sorts by the attached per-group standing (robust z), NaN last', () => {
     const withStanding = [

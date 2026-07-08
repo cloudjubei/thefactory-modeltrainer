@@ -104,18 +104,26 @@ project by its manifest's `recordType`.
   greedy ablation tree, and a 2-lever interaction grid — predicting unobserved configs (the determinism is
   load-bearing: the forest is seeded from the data, so analysis never drifts between runs).
 - **Current-run across-axis views pool over an axis, hold everything else fixed** (`viewer/comparison.js`,
-  pure, tested in `comparisonViewer.test.ts`): pin the focus run's config on every LOCKED lever and pool the
-  matching runs by an AXIS — the dataset levers ("By dataset"), the environment levers ("By environment"), or
-  a single chosen tunable lever ("By value", the one-factor-at-a-time view). Each row shows the metric
-  [min·avg·max] over seeds plus its normalised STANDING (robust-z within that axis value), and
-  `robustnessVerdict` classifies robust/mixed/weak across the axis. `seed` is never a locked or axis lever (a
-  nuisance param pooled over, matching `setupKeyOfRun`). Regime slice toggles narrow the pool (dataset by
-  `timeframe`, environment by the `allow_shorting`/`no_sell_action` booleans); unused env levers
-  (`position_sizing`/`transaction_fee`/`vol_target`) are hidden from the value line. Every view sorts by any
-  column, selects rows to **Add runs** with fresh seeds (a non-exploration verify pass), and **Sweep**s the
-  axis for first-time-only cells (By value via a recommended-values popup) — all through `xaiLaunchBatch`,
-  which stays on the xAI tab. Favorites are resolved from the full-runs snapshot (`findRunAnywhere`, fetched
-  by key) so a pin never vanishes off-page; the picker jumps to the run in Runs via **View in Runs**.
+  pure, tested in `comparisonViewer.test.ts`): a run is in the pool iff `sameSetupExceptAxis` — it equals the
+  focus config on EVERY locked lever (exhaustive + strict, `unset ≡ null ≡ 'n/a'`, so a lever the focus leaves
+  unset can't leak in a run that sets it), differing only in the AXIS — the dataset levers ("By dataset"), the
+  environment levers ("By environment"), or one chosen tunable lever ("By value", one-factor-at-a-time). So a
+  row is exactly one config's seeds. Each row shows the metric [min·avg·max] over seeds plus its normalised
+  STANDING (robust-z within that axis value); `robustnessVerdict` classifies robust/mixed/weak. `seed` is
+  never a locked or axis lever (a nuisance param pooled over, matching `setupKeyOfRun`). Regime slice toggles
+  narrow the pool (dataset by `timeframe`, environment by `allow_shorting`/`no_sell_action`); unused env
+  levers (`position_sizing`/`transaction_fee`/`vol_target`) are hidden from the value line. Columns sort by
+  any metric (a numeric axis — By value lever values — sorts numerically, not lexically); rows select to
+  **Add runs** with fresh seeds, or **Sweep** the axis for first-time-only cells (By value via a
+  recommended-values popup — numeric CHOICE levers like `batch_size`/`lookback_window` get a full grid, not
+  just their presets). Launches go through `xaiLaunchBatch`, which stays on the xAI tab.
+- **Every "open these runs" gesture lands in the Selection view** (`openRunsSelection`): a By value / By
+  dataset / By environment row's "runs ↗" (the runs BEHIND that row), a comparison drill, a fANOVA/interaction
+  cell, or a hypothesis's runs all route to one `runsViewMode: 'selection'` tab that holds the LAST selection,
+  with a ← Back that restores where it was opened from (an `{ label, back() }` origin). Favorites + Selection
+  are curated key-list views: resolved from the full-runs snapshot (`findRunAnywhere`, fetched by key) so a
+  member never vanishes off-page, and the exploratory filters never drop one (text search only). The xAI
+  favorite picker jumps to a run in Runs via **View in Runs**.
 - **LLM only synthesises the xAI, never computes it**: a thin layer sits on top of the deterministic engine.
   `xaiNarrate` (tool) digests ONE run's own deterministic xAI server-side (its action mix, input attribution
   - the Adebayo sanity verdict, reward breakdown, latent probe, the decision-diff vs a passed-in sibling,

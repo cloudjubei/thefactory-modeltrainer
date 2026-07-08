@@ -1,8 +1,8 @@
 // Pure logic behind the "By dataset" / "By environment" views. An AXIS is the levers whose scope IS the axis
 // ('dataset' | 'environment'); a run's axis SIGNATURE is those levers' values. Two consumers share this:
 //   • the Runs tab POOLS every filtered run and groups by axis signature (which dataset/environment wins);
-//   • the xAI current-run tabs LOCK the non-axis levers to one config (matchesLock) and group by axis (how
-//     that one config holds up across the axis).
+//   • the xAI current-run tabs hold the non-axis levers to one config (sameSetupExceptAxis) and group by axis
+//     (how that one config holds up across the axis).
 // groupComparison reduces each group's per-column values to { min, avg, max }; robustnessVerdict classifies a
 // config's per-environment standings. Pure + dual-loaded (browser `window.Comparison` + node
 // `module.exports`) so the ACTUAL viewer logic is unit-tested directly (see src/comparisonViewer.test.ts).
@@ -64,15 +64,24 @@
       .join(' · ')
   }
 
-  // Does a run satisfy every locked lever value (string-coerced)? An empty lock matches all runs.
-  function matchesLock(lock, run) {
-    var cfg = (run && run.summary && run.summary.config) || {}
-    var keys = Object.keys(lock || {})
+  // Canonical value for lever equality: unset / null / '' all collapse to the same 'n/a' bucket, so a lever
+  // that is absent on one side and present on the other never counts as "equal", and two runs that both leave
+  // it unset (or pinned 'n/a' by conditional normalisation) do.
+  function canonLever(v) {
+    return v === undefined || v === null || v === '' ? 'n/a' : String(v)
+  }
+
+  // Whether a run has the SAME setup as the focus config on every LOCKED lever for an axis — i.e. it differs
+  // ONLY in the axis lever(s) (seed is always pooled, never locked). This is exhaustive over the locked
+  // levers (not just the ones the focus happens to set), so a run that sets a lever the focus left unset is
+  // correctly EXCLUDED — a By value / By dataset row is exactly one config's seeds, nothing bleeds in.
+  function sameSetupExceptAxis(manifest, axis, focusCfg, runCfg) {
+    var f = focusCfg || {}
+    var r = runCfg || {}
+    var keys = lockedLeverKeys(manifest, axis)
     for (var i = 0; i < keys.length; i++) {
       var k = keys[i]
-      var want = lock[k]
-      if (want === '' || want === undefined || want === null) continue
-      if (String(cfg[k]) !== String(want)) return false
+      if (canonLever(f[k]) !== canonLever(r[k])) return false
     }
     return true
   }
@@ -132,7 +141,13 @@
     var mul = sortDir === 'asc' ? 1 : -1
     var list = Array.isArray(groups) ? groups.slice() : []
     function valueOf(g) {
-      if (sortKey === 'axis') return String(g.axisLabel == null ? '' : g.axisLabel).toLowerCase()
+      if (sortKey === 'axis') {
+        // A By value lever axis labels rows by the lever VALUE — sort those numerically (128 < 512 < 4096),
+        // not lexically; a non-numeric label (dataset/env name, comma-list net_arch) stays a text sort.
+        var label = String(g.axisLabel == null ? '' : g.axisLabel)
+        var n = Number(label)
+        return label !== '' && Number.isFinite(n) ? n : label.toLowerCase()
+      }
       if (sortKey === '#runs') return g.count
       // 'standing' is a per-group robust-z the caller attaches (not a min/avg/max stat), so read it directly.
       if (sortKey === 'standing') return typeof g.standing === 'number' ? g.standing : NaN
@@ -207,7 +222,7 @@
     robustnessVerdict: robustnessVerdict,
     lockedLeverKeys: lockedLeverKeys,
     runAxisSignature: runAxisSignature,
-    matchesLock: matchesLock,
+    sameSetupExceptAxis: sameSetupExceptAxis,
     groupComparison: groupComparison,
     sortComparisonGroups: sortComparisonGroups,
   }

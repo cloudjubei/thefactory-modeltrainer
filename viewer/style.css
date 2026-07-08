@@ -1546,6 +1546,18 @@ button.run-badge.model-device-chip:hover {
 .head-actions .xai-axis-slice {
   margin-right: 4px;
 }
+/* The Selection view's "← Back to <origin> · <what this is>" banner, above the runs table. */
+.runs-selection-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  width: 100%;
+}
+.runs-selection-label {
+  font-weight: 600;
+  font-size: 13px;
+}
 /* The Datasets / Environments add-edit-clone popup (reuses .chart-modal positioning). */
 .bundle-form-panel {
   width: min(94vw, 540px);
