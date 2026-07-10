@@ -2524,7 +2524,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
-    const runRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    // Scan LEAN (heavy fields omitted): this runs at boot over EVERY run, so materializing each run's
+    // series/trace at once would OOM the process. Only the DECISION needs light fields (config/setupKey).
+    const runRecords = await deps.storage.listRecords({
+      scope: params.scope,
+      type: recordType,
+      omit: HEAVY_RUN_FIELDS,
+    })
     for (const record of runRecords) {
       examinedRuns++
       const content = (record.content ?? {}) as Record<string, unknown>
@@ -2542,13 +2548,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const ruled = rule ? (applyMigrationRules(cfg, rules) ?? cfg) : cfg
       const next = normalizeConditionalLevers(ruled, appliesWhen)
       if (hashTrainingConfig(next) === hashTrainingConfig(cfg)) continue
-      // setupKey stays RAW (from the pre-normalize config), exactly as the write path + isFresh compute it,
-      // so canonicalising a run's stored config never desyncs it from the skipExplored / unrunnable dedup.
+      // This run's config changes → rewrite. Read the FULL record by key (one at a time) so the omitted
+      // heavy fields are preserved. setupKey stays RAW (from the pre-normalize config), exactly as the
+      // write path + isFresh compute it, so canonicalising never desyncs the skipExplored/unrunnable dedup.
+      const full = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: record.key })
+      const fullContent = (full?.content ?? content) as Record<string, unknown>
       await deps.storage.upsertRecord({
         scope: params.scope,
         type: recordType,
         key: record.key,
-        content: { ...content, config: next, setupKey: setupKeyOf(ruled) },
+        content: { ...fullContent, config: next, setupKey: setupKeyOf(ruled) },
       })
       migratedRuns++
       params.onRecordWritten?.(recordType, record.key)
@@ -2615,7 +2624,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
     // Stamp affected, pre-fix runs as status='invalid'. Version-gated + skips already-invalid records, so
     // this is idempotent and never re-flags a re-run produced at/after the fix major.
-    const runRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    // Scan LEAN (heavy fields omitted) — the boot-time invalidation sweep touches EVERY run, so loading
+    // every run's series/trace at once would OOM the process; the decision needs only light fields.
+    const runRecords = await deps.storage.listRecords({
+      scope: params.scope,
+      type: recordType,
+      omit: HEAVY_RUN_FIELDS,
+    })
     for (const record of runRecords) {
       examinedRuns++
       const content = (record.content ?? {}) as Record<string, unknown>
@@ -2624,12 +2639,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (content.status === 'invalid') continue
       if (majorOf(content.pipelineVersion) >= params.beforePipelineMajor) continue
       if (!params.affectsRun(config)) continue
+      // Read the FULL record by key (one at a time) so the omitted heavy fields survive the status stamp.
+      const full = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: record.key })
+      const fullContent = (full?.content ?? content) as Record<string, unknown>
       await deps.storage.upsertRecord({
         scope: params.scope,
         type: recordType,
         key: record.key,
         content: {
-          ...content,
+          ...fullContent,
           status: 'invalid',
           invalidReason: params.reason,
           invalidatedBy: params.invalidationId,

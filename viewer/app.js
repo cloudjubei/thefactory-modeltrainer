@@ -6038,6 +6038,8 @@ function renderXaiSweepPopup() {
     })
   }
   const curStr = String(cfg[lever])
+  const spec = (manifest && manifest.levers && manifest.levers[lever]) || {}
+  const numeric = spec.type === 'number' || isNumericChoiceSpec(spec)
   const opts = values
     .map((v) => {
       const s = String(v)
@@ -6045,6 +6047,10 @@ function renderXaiSweepPopup() {
       return `<label class="xai-sweep-opt"><input type="checkbox" name="sweepval" value="${escapeHtml(s)}" checked /> <code>${escapeHtml(xaiFmtLeverValue(v))}</code>${isCur ? ' <span class="card-sub">(current)</span>' : ''}</label>`
     })
     .join('')
+  const customField = numeric
+    ? `<label class="field"><span>Add your own <em>(comma-separated)</em></span>
+        <input type="text" id="xai-sweep-custom" placeholder="e.g. 0.0007, 0.002" /></label>`
+    : ''
   modal.innerHTML = `<div class="chart-modal__backdrop" data-sweep-cancel></div>
     <div class="chart-modal__panel custom-rule-panel" role="dialog" aria-label="Sweep ${escapeHtml(lever)}">
       <div class="chart-modal__head">
@@ -6052,11 +6058,12 @@ function renderXaiSweepPopup() {
         <button type="button" class="icon-btn" data-sweep-cancel title="Close" aria-label="Close">✕</button>
       </div>
       <form id="xai-sweep-form" class="custom-rule-form">
-        <p class="card-sub">Recommended values (the lever’s range/choices plus values already run). Untick any you don’t want. Every other setting stays at this run’s config; cells already run are skipped.</p>
+        <p class="card-sub">Recommended values (the lever’s range/choices plus values already run). Untick any you don’t want${numeric ? ', or add your own below' : ''}. Every other setting stays at this run’s config; cells already run are skipped.</p>
         <div class="xai-sweep-opts">${opts || '<span class="card-sub">This lever declares no range or choices to vary.</span>'}</div>
+        ${customField}
         <div class="custom-rule-actions">
           <button type="button" class="ghost-btn" data-sweep-cancel>Cancel</button>
-          <button type="submit" class="ghost-btn is-primary"${values.length ? '' : ' disabled'}>Sweep selected</button>
+          <button type="submit" class="ghost-btn is-primary">Sweep selected</button>
         </div>
       </form>
     </div>`
@@ -6067,11 +6074,17 @@ function submitXaiSweepPopup() {
   const modal = byId('xai-sweep-modal')
   if (!lever || !modal) return
   const checked = [...modal.querySelectorAll('input[name="sweepval"]:checked')].map((el) => el.value)
-  if (!checked.length) return
+  const customEl = modal.querySelector('#xai-sweep-custom')
+  const custom = customEl ? parseNumberList(customEl.value) : []
   const { cfg, values } = xaiSweepRecommendedValues(lever)
-  // Map the ticked strings back to the ORIGINAL typed values so numbers stay numbers in the launch spec.
+  // Map the ticked strings back to the ORIGINAL typed values so numbers stay numbers, then merge in any
+  // custom values the user typed (deduped by string form).
   const byStr = new Map(values.map((v) => [String(v), v]))
-  const chosen = checked.map((s) => (byStr.has(s) ? byStr.get(s) : s))
+  const chosenMap = new Map()
+  for (const s of checked) chosenMap.set(s, byStr.has(s) ? byStr.get(s) : s)
+  for (const v of custom) chosenMap.set(String(v), v)
+  const chosen = [...chosenMap.values()]
+  if (!chosen.length) return
   const fixed = {}
   for (const [k, v] of Object.entries(cfg))
     if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
@@ -7600,6 +7613,13 @@ function xaiSweepValues(lever, current, observed) {
   const add = (v) => {
     if (v === undefined || v === null || String(v) === 'n/a') return
     if (!m.has(String(v))) m.set(String(v), v)
+  }
+  // A boolean lever sweeps its two states — never a numeric grid (Number(true) = 1 would otherwise trip the
+  // range branch and produce nonsense like 0.02 … 50 for use_indicators).
+  if (spec && spec.type === 'boolean') {
+    add(false)
+    add(true)
+    return [...m.values()]
   }
   const choices = spec && Array.isArray(spec.choices) ? spec.choices : null
   const numericChoices =
@@ -14475,17 +14495,66 @@ function leverRange(spec) {
   if (r && typeof r === 'object') return { min: r.min, max: r.max }
   return { min: undefined, max: undefined }
 }
+// A NUMERIC choice lever (batch_size, lookback_window) — its choices are numeric presets, not a hard set, so
+// the launch form treats it like a number lever (a free comma-separated sweep, not a fixed multi-select).
+function isNumericChoiceSpec(spec) {
+  return !!(
+    spec &&
+    spec.type === 'choice' &&
+    Array.isArray(spec.choices) &&
+    spec.choices.length > 0 &&
+    spec.choices.every((c) => Number.isFinite(Number(c)))
+  )
+}
+// The launch-form control KIND for a lever — numeric choices render + parse as numbers, everything else by
+// its declared type. One seam so the HTML, the sweep read, and the fixed read all agree.
+function launchLeverKind(spec) {
+  if (!spec) return 'choice'
+  if (spec.type === 'number' || isNumericChoiceSpec(spec)) return 'number'
+  if (spec.type === 'boolean') return 'boolean'
+  return 'choice'
+}
+// Every distinct value any completed run used for a lever (from the ALL-runs snapshot when loaded), so the
+// sweep suggestions reflect real history — not just the manifest presets.
+function observedLeverValues(key) {
+  const pool = allRunsCache.length ? allRunsCache : runsCache
+  const seen = new Map()
+  for (const r of pool) {
+    const v = r && r.summary && r.summary.config ? r.summary.config[key] : undefined
+    if (v === undefined || v === null || String(v) === 'n/a') continue
+    if (!seen.has(String(v))) seen.set(String(v), v)
+  }
+  return [...seen.values()]
+}
 function numberLeverHtml(key, spec) {
-  const { min, max } = leverRange(spec)
+  let { min, max } = leverRange(spec)
+  if ((min === undefined || max === undefined) && isNumericChoiceSpec(spec)) {
+    const nums = spec.choices.map(Number)
+    min = Math.min(...nums)
+    max = Math.max(...nums)
+  }
   const minAttr = Number.isFinite(Number(min)) ? ` min="${Number(min)}"` : ''
   const maxAttr = Number.isFinite(Number(max)) ? ` max="${Number(max)}"` : ''
   const value = spec.default === undefined ? '' : escapeHtml(String(spec.default))
+  // Recommended values to sweep — the grid ∪ manifest presets ∪ EVERY value already run — as click-to-add
+  // chips over a free text field, so the user starts from history + presets but can type any values.
+  const suggestions = xaiSweepValues(key, spec.default, observedLeverValues(key))
+    .filter((v) => Number.isFinite(Number(v)))
+    .sort((a, b) => Number(a) - Number(b))
+    .slice(0, 24) // the grid + presets + observed; a continuous lever can have many — the text field takes any
+  const chips = suggestions
+    .map(
+      (v) =>
+        `<button type="button" class="sweep-suggest" data-sweep-add="${escapeHtml(key)}" data-sweep-val="${escapeHtml(String(v))}">${escapeHtml(String(v))}</button>`,
+    )
+    .join('')
   return `<div class="lever-grid">
     <label class="field"><span>Value</span>
       <input type="number" step="any" name="fixed:${escapeHtml(key)}" value="${value}"${minAttr}${maxAttr} />
     </label>
     <label class="field"><span>Sweep values <em>(comma-separated, overrides value)</em></span>
       <input type="text" name="sweep:${escapeHtml(key)}" placeholder="e.g. 0.01, 0.05, 0.1" />
+      ${chips ? `<div class="sweep-suggests" title="Click a value to add it to the sweep">${chips}</div>` : ''}
     </label>
   </div>`
 }
@@ -14586,16 +14655,10 @@ function choiceLeverHtml(key, spec) {
         `<option value="${escapeHtml(String(c))}"${String(c) === String(spec.default) ? ' selected' : ''}>${optionText(c)}</option>`,
     )
     .join('')
-  // NUMERIC choices (batch_size, lookback_window) are presets, not hard limits — offer the full recommended
-  // sweep grid spanning them (same as the xAI Sweep popup), sorted, so you can sweep more than 2-3 values.
-  const numericChoices = choices.length > 0 && choices.every((c) => Number.isFinite(Number(c)))
-  const sweepChoices = numericChoices
-    ? [...xaiSweepValues(key, spec.default, [])].sort((a, b) => Number(a) - Number(b))
-    : choices
-  const sweepOptions = sweepChoices
+  const sweepOptions = choices
     .map((c) => `<option value="${escapeHtml(String(c))}">${optionText(c)}</option>`)
     .join('')
-  const size = Math.max(2, Math.min(sweepChoices.length, 8))
+  const size = Math.max(2, Math.min(choices.length, 4))
   return `<div class="lever-grid">
     <label class="field"><span>Value</span>
       <select name="fixed:${escapeHtml(key)}">${fixedOptions}</select>
@@ -14627,12 +14690,13 @@ function appliesWhenLabel(cond) {
   )
 }
 function leverFieldsetHtml(key, spec) {
+  const kind = launchLeverKind(spec)
   const inner =
-    spec.type === 'number'
+    kind === 'number'
       ? numberLeverHtml(key, spec)
-      : spec.type === 'choice'
-        ? choiceLeverHtml(key, spec)
-        : booleanLeverHtml(key, spec)
+      : kind === 'boolean'
+        ? booleanLeverHtml(key, spec)
+        : choiceLeverHtml(key, spec)
   const naNote = spec.appliesWhen
     ? `<p class="lever-na-note">${escapeHtml(appliesWhenLabel(spec.appliesWhen))}</p>`
     : ''
@@ -15202,16 +15266,18 @@ function parseNumberList(text) {
 function readSweepValues(form, key, spec) {
   const el = form.elements['sweep:' + key]
   if (!el) return []
-  if (spec.type === 'number') return parseNumberList(el.value)
-  if (spec.type === 'choice') return [...el.selectedOptions].map((o) => o.value)
-  if (spec.type === 'boolean') return el.checked ? [false, true] : []
+  const kind = launchLeverKind(spec)
+  if (kind === 'number') return parseNumberList(el.value)
+  if (kind === 'choice') return [...el.selectedOptions].map((o) => o.value)
+  if (kind === 'boolean') return el.checked ? [false, true] : []
   return []
 }
 function readFixedValue(form, key, spec) {
   const el = form.elements['fixed:' + key]
   if (!el) return spec.default
-  if (spec.type === 'boolean') return !!el.checked
-  if (spec.type === 'number') {
+  const kind = launchLeverKind(spec)
+  if (kind === 'boolean') return !!el.checked
+  if (kind === 'number') {
     const v = Number(el.value)
     return el.value !== '' && Number.isFinite(v) ? v : spec.default
   }
@@ -15380,6 +15446,22 @@ function setupLaunch() {
   const form = byId('launch-form')
   if (!form) return
   form.addEventListener('submit', onLaunchSubmit)
+  // Sweep-suggestion chips: click to add (or remove) a recommended/observed value to the lever's sweep list.
+  form.addEventListener('click', (event) => {
+    const chip = event.target.closest('[data-sweep-add]')
+    if (!chip) return
+    const input = form.elements['sweep:' + chip.dataset.sweepAdd]
+    if (!input) return
+    const val = chip.dataset.sweepVal
+    const parts = input.value.split(',').map((s) => s.trim()).filter(Boolean)
+    input.value = parts.includes(val)
+      ? parts.filter((p) => p !== val).join(', ')
+      : [...parts, val].join(', ')
+    chip.classList.toggle('is-added')
+    refreshLeverAnnotations(form)
+    refreshLeverApplicability(form)
+    updateLaunchSummary()
+  })
   form.addEventListener('input', (event) => {
     if (event.target && event.target.name === 'computeTarget') {
       rememberComputeTarget(event.target.value)

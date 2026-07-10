@@ -2566,6 +2566,32 @@ pre.json {
 .field textarea {
   resize: vertical;
 }
+/* Click-to-add recommended/observed sweep values under a numeric lever's sweep input. */
+.sweep-suggests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+.sweep-suggest {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 8px;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.sweep-suggest:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.sweep-suggest.is-added {
+  color: #fff;
+  background: var(--accent, #2563eb);
+  border-color: var(--accent, #2563eb);
+}
 .field input:focus,
 .field select:focus,
 .field textarea:focus {

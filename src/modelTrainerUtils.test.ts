@@ -20,6 +20,8 @@ import {
   THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
   isSpecAffectedByFidelityDesync,
+  isRunAffectedByFidelityLookahead,
+  isSpecAffectedByFidelityLookahead,
   findMigrationRule,
   migrateExperimentSpec,
   canonicalConfigString,
@@ -44,6 +46,7 @@ import {
   validateTrainerManifest,
   validateTrainingRunSummary,
   capRunSummaryForStorage,
+  plannedMatrixItemCount,
   modelSlug,
   inferModelCategory,
   humanizeModelName,
@@ -732,6 +735,20 @@ describe('expandExperimentMatrix', () => {
         hashByJson,
       ),
     ).toThrow(/compare lever/)
+  })
+
+  it('MEMORY-SAFETY: rejects a cartesian blow-up BEFORE materializing it (fails fast, never OOMs)', () => {
+    const levers: Record<string, { type: 'number'; default: number }> = {}
+    const sweep: Record<string, number[]> = {}
+    for (let i = 0; i < 8; i += 1) {
+      levers[`l${i}`] = { type: 'number', default: 0 }
+      sweep[`l${i}`] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    }
+    // 10^8 planned items: building the product would exhaust the heap (this is the boot-crash-loop cause).
+    // The guard computes the size and throws instantly — if it regressed, this test would OOM, not fail.
+    expect(() => expandExperimentMatrix(manifest({ levers }), { sweep }, hashByJson)).toThrow(
+      /100000000 items, exceeding the cap/,
+    )
   })
 
   it('multiplies configurations by seeds, setting config.seed', () => {
@@ -2712,6 +2729,69 @@ describe('isSpecAffectedByFidelityDesync', () => {
   })
 })
 
+describe('isRunAffectedByFidelityLookahead', () => {
+  // The v6 look-ahead: the run-cadence layer AND the base are BOTH absent from the observed layers
+  // (an hourly/minute step observing ONLY coarser layers), so the provider never sliced its price series
+  // to the decision cadence and get_price(step) trailed the observation by the warmup — the model saw
+  // ~32 days of FUTURE relative to the traded price. AFFECTED iff every observed layer is strictly coarser
+  // than the step.
+  it('flags 1h@1d (the runs-audit config) as affected', () => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: '1d' })).toBe(true)
+  })
+  it('flags 1h@1d+1w (coarse-only at an hourly step) as affected', () => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: '1d+1w' })).toBe(true)
+  })
+  it.each(['1d', '1h', '1h+1d', '1d+1w'])('flags a minute step observing only %s as affected', (fset) => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1m', fidelity_set: fset })).toBe(true)
+  })
+
+  // NOT affected — the base/run cadence IS observed (these v5 runs are correct; must NOT be invalidated).
+  it.each(['1h+1d', '1h+1d+1w', '1h'])('does NOT flag %s at an hourly step (base 1h observed)', (fset) => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: fset })).toBe(false)
+  })
+  it('does NOT flag 1h@1d run-through the daily step (1d@1h: base 1h observed, divider handles it)', () => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1d', fidelity_set: '1h' })).toBe(false)
+  })
+  it.each(['1d', '1d+1w', 'auto'])('does NOT flag a daily step observing %s (run cadence 1d observed)', (fset) => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1d', fidelity_set: fset })).toBe(false)
+  })
+  it('does NOT flag single-timeline or auto (base always observed)', () => {
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: '1h' })).toBe(false)
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: 'auto' })).toBe(false)
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h' })).toBe(false)
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1m', fidelity_set: '1m+1h' })).toBe(false)
+  })
+  it('returns false for a missing/invalid/unknown config (never invalidate the unknown)', () => {
+    expect(isRunAffectedByFidelityLookahead(undefined)).toBe(false)
+    expect(isRunAffectedByFidelityLookahead(null as unknown as Record<string, unknown>)).toBe(false)
+    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: 'bogus' })).toBe(false)
+  })
+})
+
+describe('isSpecAffectedByFidelityLookahead', () => {
+  it('flags a fixed-only spec on the look-ahead path (1h@1d)', () => {
+    expect(isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1d' } })).toBe(
+      true,
+    )
+  })
+  it('does NOT flag a fixed-only multi-layer spec that observes the base (1h+1d)', () => {
+    expect(
+      isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1h+1d' } }),
+    ).toBe(false)
+  })
+  it('flags a spec that SWEEPS fidelity_set into a coarse-only value even when fixed is safe', () => {
+    expect(
+      isSpecAffectedByFidelityLookahead({
+        fixed: { timeframe: '1h', fidelity_set: '1h+1d' },
+        sweep: { fidelity_set: ['1h+1d', '1d'] },
+      }),
+    ).toBe(true)
+  })
+  it('returns false for a missing spec', () => {
+    expect(isSpecAffectedByFidelityLookahead(undefined)).toBe(false)
+  })
+})
+
 describe('coerceConsolidationGroups', () => {
   const ids = ['a', 'b', 'c', 'd']
 
@@ -3505,5 +3585,39 @@ describe('capRunSummaryForStorage', () => {
     const summary = base({ series: { equity } })
     capRunSummaryForStorage(summary)
     expect(summary.series!.equity).toHaveLength(MAX_SERIES_POINTS + 1)
+  })
+})
+
+describe('plannedMatrixItemCount', () => {
+  it('is 1 for a bare spec (defaults only)', () => {
+    expect(plannedMatrixItemCount({})).toBe(1)
+  })
+
+  it('multiplies each sweep lever value count (cartesian product)', () => {
+    expect(plannedMatrixItemCount({ sweep: { a: [1, 2, 3], b: [1, 2] } })).toBe(6)
+  })
+
+  it('multiplies by seeds, datasets, environments, and compare values', () => {
+    expect(
+      plannedMatrixItemCount({
+        sweep: { a: [1, 2] },
+        seeds: [1, 2, 3],
+        datasets: [{ d: 1 }, { d: 2 }],
+        environments: [{ e: 1 }],
+        compare: { lever: 'c', values: [1, 2, 3, 4] },
+      }),
+    ).toBe(2 * 4 * 2 * 1 * 3)
+  })
+
+  it('counts explicit configs as themselves and suppresses the swept base', () => {
+    expect(
+      plannedMatrixItemCount({ sweep: { a: [1, 2] }, configs: [{ config: {} }, { config: {} }] }),
+    ).toBe(2)
+  })
+
+  it('reports a cartesian blow-up WITHOUT materializing it (the OOM guard)', () => {
+    const sweep: Record<string, number[]> = {}
+    for (let i = 0; i < 10; i += 1) sweep[`l${i}`] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    expect(plannedMatrixItemCount({ sweep })).toBe(1e10) // computed, never built
   })
 })

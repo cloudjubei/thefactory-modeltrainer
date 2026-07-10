@@ -673,6 +673,33 @@ export function appliesWhenMap(
   return out
 }
 
+/**
+ * How many training items a spec's matrix would expand to — the cartesian product of every sweep lever's
+ * values × compare values × dataset bundles × environment bundles × seeds, plus any explicit configs
+ * (which suppress the swept base). Computed from the input array lengths WITHOUT materializing the
+ * product, so {@link expandExperimentMatrix} can reject an over-cap matrix before building billions of
+ * configs (which would OOM the process). An empty sweep value yields 0 (matches the flatMap collapse).
+ */
+export function plannedMatrixItemCount(spec: ExperimentSpec): number {
+  const compare = spec.compare
+  const usesCompare = !!(
+    compare &&
+    compare.lever !== undefined &&
+    Array.isArray(compare.values) &&
+    compare.values.length
+  )
+  const multipliers = [
+    ...Object.values(spec.sweep ?? {}).map((v) => (Array.isArray(v) ? v.length : 0)),
+    ...(usesCompare ? [compare!.values.length] : []),
+    ...((spec.datasets?.length ?? 0) > 0 ? [spec.datasets!.length] : []),
+    ...((spec.environments?.length ?? 0) > 0 ? [spec.environments!.length] : []),
+    ...((spec.seeds?.length ?? 0) > 0 ? [spec.seeds!.length] : []),
+  ]
+  const explicitCount = spec.configs?.length ?? 0
+  const sweptCount = explicitCount ? 0 : multipliers.reduce((n, m) => n * m, 1)
+  return sweptCount + explicitCount
+}
+
 export function expandExperimentMatrix(
   manifest: TrainerManifest,
   spec: ExperimentSpec,
@@ -723,6 +750,15 @@ export function expandExperimentMatrix(
     }
   }
 
+  // Reject an over-cap matrix BEFORE materializing it: the cartesian expansion below builds one object per
+  // planned item, so a pathological sweep (e.g. 10 levers × 10 values = 10^10) would OOM the process long
+  // before a post-expansion length check could fire. The projected count equals the built length exactly.
+  const cap = spec.maxItems ?? MAX_CAMPAIGN_ITEMS
+  const projectedItems = plannedMatrixItemCount(spec)
+  if (projectedItems > cap) {
+    throw new Error(`campaign plans ${projectedItems} items, exceeding the cap of ${cap}`)
+  }
+
   const base: Record<string, unknown> = {}
   for (const [key, lever] of Object.entries(manifest.levers)) {
     if (lever.default !== undefined) base[key] = lever.default
@@ -771,11 +807,6 @@ export function expandExperimentMatrix(
   for (const entry of explicitConfigs) {
     const config = { ...base, ...entry.config }
     items.push(toItem(entry.key ?? hashConfig(config), config))
-  }
-
-  const cap = spec.maxItems ?? MAX_CAMPAIGN_ITEMS
-  if (items.length > cap) {
-    throw new Error(`campaign plans ${items.length} items, exceeding the cap of ${cap}`)
   }
   return items
 }
@@ -2041,6 +2072,93 @@ export function isSpecAffectedByFidelityDesync(spec: Record<string, unknown> | u
   for (const timeframe of timeframes) {
     for (const fidelity_set of fidelitySets) {
       if (isRunAffectedByFidelityDesync({ ...fixed, timeframe, fidelity_set })) return true
+    }
+  }
+  return false
+}
+
+// Coarsest-to-finest granularity rank — mirrors trainer/fidelity.py's cadence ordering (1m < 1h < 1d < 1w).
+const _FIDELITY_RANK: Record<string, number> = { '1m': 0, '1h': 1, '1d': 2, '1w': 3 }
+// fidelity_set label -> observed layer stack (mirrors trainer/fidelity.py `_LAYER_SETS`).
+const _FIDELITY_LAYER_SETS: Record<string, string[]> = {
+  '1m': ['1m'],
+  '1m+1h': ['1m', '1h'],
+  '1m+1h+1d': ['1m', '1h', '1d'],
+  '1d': ['1d'],
+  '1h': ['1h'],
+  '1h+1d': ['1h', '1d'],
+  '1h+1d+1w': ['1h', '1d', '1w'],
+  '1d+1w': ['1d', '1w'],
+}
+
+/** The OBSERVED layer stack for a (timeframe, fidelity_set) — mirrors trainer/fidelity.py `resolve_fidelity`
+ * (`auto` follows the step: 1h -> 1h+1d, 1m -> 1m+1h, else 1d). Empty for an unknown fidelity_set. */
+function resolveFidelityLayers(timeframe: string, rawFidelitySet: unknown): string[] {
+  const isAuto =
+    rawFidelitySet === undefined ||
+    rawFidelitySet === null ||
+    rawFidelitySet === '' ||
+    rawFidelitySet === 'auto'
+  if (isAuto) {
+    if (timeframe === '1h') return ['1h', '1d']
+    if (timeframe === '1m') return ['1m', '1h']
+    return ['1d']
+  }
+  return _FIDELITY_LAYER_SETS[String(rawFidelitySet)] ?? []
+}
+
+/**
+ * Whether a run hit the v6 fidelity LOOK-AHEAD: an hourly/minute step whose observed layers are ALL
+ * strictly coarser than the step, so neither the run cadence nor the base granularity is observed. The
+ * multi-timeline provider never sliced its price series to the decision cadence for this family, so
+ * `get_price(step)` trailed the observation by the warmup (~32 days at 1h/lookback 32) — the model saw the
+ * FUTURE relative to the price it traded, inflating returns (the runs-audit crazy results). Mirrors the
+ * provider's own guard condition (`fidelity_run ∉ layers AND fidelity_input ∉ layers`, i.e. the step is the
+ * finest cadence involved yet is unobserved). The v5 obs-offset fix left this case unfixed; v6 slices the
+ * price series so it aligns. NOT affected: any config that observes the base/run cadence (`1h+1d`, `1h`,
+ * single-timeline, `auto`, or a daily step where 1d is the observed run layer). Pure; false for a
+ * missing/unknown config (never invalidate the unknown).
+ */
+export function isRunAffectedByFidelityLookahead(
+  config: Record<string, unknown> | undefined,
+): boolean {
+  if (!config || typeof config !== 'object') return false
+  const timeframe = String(config.timeframe ?? '1d')
+  const stepRank = _FIDELITY_RANK[timeframe]
+  if (stepRank === undefined) return false
+  const layers = resolveFidelityLayers(timeframe, config.fidelity_set)
+  if (layers.length === 0) return false
+  // Affected iff EVERY observed layer is strictly coarser than the step (no base/run-cadence layer present).
+  return layers.every((layer) => {
+    const r = _FIDELITY_RANK[layer]
+    return r !== undefined && r > stepRank
+  })
+}
+
+/**
+ * Whether a PENDING launch spec (`{fixed, sweep}`) would produce ANY run on the v6 look-ahead path — so a
+ * queued campaign that SWEEPS `timeframe`/`fidelity_set` into a coarse-only combination is caught even when
+ * its `fixed` base is safe. Defers to {@link isRunAffectedByFidelityLookahead} per candidate; conservative.
+ */
+export function isSpecAffectedByFidelityLookahead(spec: Record<string, unknown> | undefined): boolean {
+  if (!spec || typeof spec !== 'object') return false
+  const fixed = (spec.fixed && typeof spec.fixed === 'object' ? spec.fixed : {}) as Record<
+    string,
+    unknown
+  >
+  const sweep = (spec.sweep && typeof spec.sweep === 'object' ? spec.sweep : {}) as Record<
+    string,
+    unknown
+  >
+  const timeframes =
+    Array.isArray(sweep.timeframe) && sweep.timeframe.length ? sweep.timeframe : [fixed.timeframe]
+  const fidelitySets =
+    Array.isArray(sweep.fidelity_set) && sweep.fidelity_set.length
+      ? sweep.fidelity_set
+      : [fixed.fidelity_set]
+  for (const timeframe of timeframes) {
+    for (const fidelity_set of fidelitySets) {
+      if (isRunAffectedByFidelityLookahead({ ...fixed, timeframe, fidelity_set })) return true
     }
   }
   return false

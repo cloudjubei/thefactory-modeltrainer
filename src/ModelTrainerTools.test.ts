@@ -2939,6 +2939,32 @@ describe('migrateTrainingRuns', () => {
     expect(content.setupKey).not.toBe('old')
   })
 
+  it('MEMORY-SAFETY: scans lean (omits heavy fields) yet preserves them via a by-key read on rewrite', async () => {
+    // The boot-time migration sweep runs over EVERY run; loading each run's full series/trace at once is
+    // what OOMs the backend at startup. It must scan lean and only read a full record when it rewrites one.
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: {
+        objective: 1,
+        config: { reward_model: 'combo_all', lr: 0.1 },
+        series: { equity: [1, 2, 3] },
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    const listScans = storage.queries.filter((q) => q.type === 'demo-run')
+    expect(listScans.length).toBeGreaterThan(0)
+    for (const q of listScans) expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { series: unknown }).series).toEqual({ equity: [1, 2, 3] })
+    expect((rec?.content as { config: { reward_model: string } }).config.reward_model).toBe(
+      'combo_unified',
+    )
+  })
+
   it('keeps an existing keepOrDefault value (per-run penalty preserved)', async () => {
     const storage = memoryStorage()
     await storage.upsertRecord({
@@ -3706,6 +3732,30 @@ describe('invalidateRuns', () => {
     expect(c.priorStatus).toBe('completed')
     expect(c.invalidReason).toBe('desync')
     expect(c.invalidatedBy).toBe('bug-v5')
+  })
+
+  it('MEMORY-SAFETY: scans lean (omits heavy fields) yet preserves them when stamping invalid', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: {
+        objective: 1,
+        status: 'completed',
+        pipelineVersion: '4.0',
+        config: { affected: true },
+        series: { equity: [1, 2, 3] },
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
+    const listScans = storage.queries.filter((q) => q.type === 'demo-run')
+    expect(listScans.length).toBeGreaterThan(0)
+    for (const q of listScans) expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { series: unknown }).series).toEqual({ equity: [1, 2, 3] })
+    expect((rec?.content as { status: string }).status).toBe('invalid')
   })
 
   it('does NOT mark an unaffected (single-path) run', async () => {
