@@ -109,3 +109,33 @@ export const MEMORY_BUDGET_FRACTION = 0.8
  * sets a measured per-run figure. 2 GiB ≈ a typical RL training process; override per-manifest to tune.
  */
 export const DEFAULT_RUN_MEMORY_ESTIMATE_BYTES = 2 * 1024 * 1024 * 1024
+
+// --- Exploration autopilot (the closed-loop config-space search) ---
+
+/** Consecutive `global`-stage rounds that must add NO new basin before the search moves on to climb them. */
+export const EXPLORATION_DRY_ROUNDS = 2
+
+/**
+ * Screening keeps a lever ACTIVE (searched) when its importance fraction clears this floor. Below it the
+ * lever barely moves the objective and is frozen at its best-so-far value to spare the search budget.
+ */
+export const EXPLORATION_ACTIVE_IMPORTANCE_FLOOR = 0.1
+
+/** Hard cap on how many levers the search varies at once — the highest-importance ones win the slots. */
+export const EXPLORATION_MAX_ACTIVE_LEVERS = 5
+
+/** Space-filling samples the screen stage (S1) draws across the full space before scoring lever importance. */
+export const EXPLORATION_SCREEN_SAMPLES = 12
+
+/**
+ * A discrete region qualifies as a basin only when its best setup beats the trivial baseline by more than
+ * this many noise-floor multiples — so seed-noise alone can never mint a spurious "maximum".
+ */
+export const EXPLORATION_BASIN_NOISE_MARGIN = 3
+
+/**
+ * ...AND captures at least this fraction of the baseline→global-best span. An absolute-ish bar (relative
+ * to the trivial baseline, not to the observed worst) so a genuine second-best basin close to the global
+ * max is still kept, while a region only marginally above random is rejected.
+ */
+export const EXPLORATION_BASIN_MIN_SPAN_FRACTION = 0.1

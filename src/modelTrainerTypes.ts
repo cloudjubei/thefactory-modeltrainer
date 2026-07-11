@@ -892,6 +892,155 @@ export interface ExperimentRecommendation {
   priority: number
 }
 
+// --- Exploration autopilot: the closed-loop config-space search over the run archive ---
+// A staged reducer (`nextExplorationStep`) drives the search: measure seed-noise → screen levers →
+// find basins → climb each → declare the global max. Its durable state is `ExplorationState`; the
+// enumerated maxima are `basins`. Domain-oblivious — the objective + levers come from the manifest.
+
+/**
+ * A stage of the autopilot's staged search:
+ * - `calibrate` — S0: measure the objective's seed-noise on a couple of configs (the "is this real" bar).
+ * - `screen` — S1: space-filling sample → lever importance → partition into active (searched) / frozen.
+ * - `global` — S2: surrogate-guided search, clustering hits into basins, until no new basin appears.
+ * - `local` — S3: climb each non-plateaued basin (fine sweep + more seeds + fill missing cells).
+ * - `converged` — S4: the global max is declared; the search is complete.
+ */
+export type ExplorationStage = 'calibrate' | 'screen' | 'global' | 'local' | 'converged'
+
+/**
+ * A cluster of high-performing configs sharing the same discrete-lever "region" — one candidate local
+ * maximum (a "hill"). Distinct architectures (e.g. `algo: ppo` vs `dqn`, or a `model_name`) are distinct
+ * basins; the numeric active levers form the local surface climbed within one.
+ */
+export interface Basin {
+  /** Stable id — a hash of the basin's defining discrete active-lever values. */
+  id: string
+  /** The discrete active-lever values that define this basin (its "region" key). */
+  region: Record<string, unknown>
+  /** The basin's best setup (fully resolved config, seed-folded) — its peak. */
+  centerConfig: Record<string, unknown>
+  /** Robust peak objective (the peak setup's seed-folded IQM, oriented to the objective direction). */
+  peakObjective: number
+  /** Bootstrap CI of the peak objective. */
+  peakCI?: [number, number]
+  /** Distinct seeds folded into the peak estimate. */
+  peakSeeds: number
+  /** True once local refinement no longer beats the peak beyond the noise floor — a settled local max. */
+  plateaued: boolean
+  /** Record keys of the runs assigned to this basin. */
+  memberRunKeys: string[]
+}
+
+/** Budget + stopping controls for one exploration. */
+export interface ExplorationBudget {
+  /** Max training runs the autopilot may spend; omit to run until convergence. */
+  maxRuns?: number
+  /** Runs spent so far (across every launched batch). */
+  spentRuns: number
+  /** Max concurrent runs to request per launched batch (the host caps still apply on top). */
+  maxConcurrent?: number
+}
+
+/** A point on the regret/convergence curve: best robust objective seen by a given run-spend. */
+export interface ExplorationRegretPoint {
+  runsSpent: number
+  bestObjective: number
+}
+
+/** User steer honored by the strategist each round — the "steer" half of pause/steer. */
+export interface ExplorationSteer {
+  /** Force these levers ACTIVE (searched) regardless of what screening decided. */
+  pinActive?: string[]
+  /** Force these levers FROZEN at the given values. */
+  pinFrozen?: Record<string, unknown>
+}
+
+/** The autopilot's durable state for one project — the exploration map the human used to hold in their head. */
+export interface ExplorationState {
+  /** The project's DataStorage record namespace (e.g. `cartpole-run`). */
+  recordType: string
+  /** The single north-star being optimised (copied from the manifest). */
+  objective: TrainerObjective
+  stage: ExplorationStage
+  /** Seed-noise floor measured in S0 — the std of the objective across seeds of one config. */
+  noiseFloor?: number
+  /** Levers the search actively varies (decided by S1 screening, plus any `steer.pinActive`). */
+  activeLevers: string[]
+  /** Levers pinned out of the search, at their best-so-far value. */
+  frozenLevers: Record<string, unknown>
+  /** Every basin found so far — the enumerated maxima. */
+  basins: Basin[]
+  budget: ExplorationBudget
+  /** best-objective-so-far vs runs-spent, for the regret/convergence curve. */
+  regret: ExplorationRegretPoint[]
+  /** Consecutive `global` rounds that added no new basin (the loop-until-dry counter). */
+  dryRounds: number
+  /** True once S4 has declared — the search is complete. */
+  done: boolean
+  /** The declared global-max basin id (set at S4). */
+  declaredBasinId?: string
+  /** User pause — when true the strategist emits an empty batch and holds the stage. */
+  paused?: boolean
+  steer?: ExplorationSteer
+  /** When the state was last advanced (ISO). */
+  updatedAt?: string
+}
+
+/** One step the strategist emits: the next batch to launch plus the advanced state. */
+export interface ExplorationStep {
+  stage: ExplorationStage
+  /** The batch to launch this round (empty when done, paused, or awaiting nothing). */
+  batch: ExperimentRecommendation[]
+  /** One-line human rationale for this step (for the viewer + logs). */
+  rationale: string
+  /** The state to persist after this step. */
+  stateNext: ExplorationState
+  /** True when the search has converged (stage `converged`). */
+  done: boolean
+}
+
+/** Drive an autonomous exploration of one project's config space (the closed-loop autopilot). */
+export interface ExplorationCampaignParams {
+  /** DataStorage scope (the projectId). */
+  scope: string
+  /** Absolute path of the trainer-conformant project checkout. */
+  projectRoot: string
+  /** Pre-read manifest; omitted → read from `projectRoot`. */
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** Activity id this exploration belongs to — keys its persisted {@link ExplorationState} record. */
+  activityId: string
+  /** Run/concurrency budget; omit `maxRuns` to run until convergence. */
+  budget?: { maxRuns?: number; maxConcurrent?: number }
+  /** Known objective ceiling (e.g. CartPole's solved score) for early-stop + validation. */
+  targetObjective?: number
+  /** Named compute target (resolved via the deps' `resolveComputeRunner`); omit for local. */
+  computeTarget?: string
+  /** Provenance label stamped on each run record; defaults to the compute target or `local`. */
+  ranBy?: string
+  abortSignal?: AbortSignal
+  /** Fired after each strategist step with the advanced state (for the viewer's live map). */
+  onProgress?: (state: ExplorationState) => void | Promise<void>
+  /** Fired after each record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Safety cap on strategist rounds (default 500). */
+  maxRounds?: number
+}
+
+export interface ExplorationCampaignResult {
+  recordType: string
+  activityId: string
+  /** The final persisted exploration map. */
+  state: ExplorationState
+  /** Runs spent across the whole exploration. */
+  spentRuns: number
+  /** The enumerated maxima. */
+  basins: Basin[]
+  /** The declared global-max basin id, when converged. */
+  declaredBasinId?: string
+}
+
 /** The machine-readable result a conformant run writes via `--summary-out`. */
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
@@ -1370,8 +1519,11 @@ export interface TrainingPaperRecord {
 
 /** The trimmed verify verdict stamped onto a research-discovered paper draft (see `researchVerdict`). */
 export interface PaperResearchVerdict {
-  /** Where the admitting verdict sat on the evidence ladder (`confirmed`/`implied` for a drafted paper). */
-  status: 'confirmed' | 'implied' | 'unverifiable' | 'refuted'
+  /**
+   * Where the admitting verdict sat on the evidence ladder — mirrors the deep-research `ResearchVerdictStatus`
+   * producer (in practice `confirmed`/`implied` for a drafted paper, since the admit gate rejects the rest).
+   */
+  status: 'confirmed' | 'implied' | 'unverifiable' | 'refuted' | 'conflicting' | 'alternative'
   /** Verify confidence, 0–1. */
   confidence: number
   /** Up to a few cited quotes from the paper's own page that supported admission. */
@@ -2167,6 +2319,12 @@ export interface ModelTrainerTools {
   ): Promise<TrainingCalibration | undefined>
   /** Plan → skip-if-fresh → run each item → persist records → report progress. */
   runTrainingCampaign(params: TrainingCampaignParams): Promise<TrainingCampaignResult>
+  /**
+   * The exploration autopilot: a closed-loop search that drives the pure strategist — each round reads the
+   * run archive, asks for the next batch, persists the {@link ExplorationState} map (pause/steer round-trip),
+   * and launches the batch as one campaign — until convergence, budget, pause, or abort.
+   */
+  runExplorationCampaign(params: ExplorationCampaignParams): Promise<ExplorationCampaignResult>
   /**
    * Re-test a completed run's saved checkpoint via the manifest's `evaluate`
    * command, persisting the result as a `{recordType}-evaluation` record.

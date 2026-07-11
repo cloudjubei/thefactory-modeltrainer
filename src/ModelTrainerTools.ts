@@ -21,6 +21,9 @@ import {
 import type {
   AnalysisCriterion,
   AnalysisRun,
+  ExplorationState,
+  ExplorationCampaignParams,
+  ExplorationCampaignResult,
   AnalyzeConfigSpaceParams,
   AnalyzeConfigSpaceResult,
   AnalyzePaperFromUrlParams,
@@ -41,6 +44,7 @@ import type {
   EvaluateTrainingRunResult,
   EvaluateTrainingRunsParams,
   EvaluateTrainingRunsResult,
+  ExperimentRecommendation,
   ExperimentSpec,
   GetRunDataParams,
   GetRunDataResult,
@@ -170,6 +174,7 @@ import {
   leverImportances,
   normalizeConditionalLevers,
 } from './xaiUtils.js'
+import { initExplorationState, nextExplorationStep } from './explorationUtils.js'
 
 /**
  * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
@@ -606,6 +611,111 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       direction: manifest.objective.direction,
       ...(calibration ? { calibration } : {}),
       finishedAt: now(),
+    }
+  }
+
+  /**
+   * The exploration autopilot: a closed-loop meta-campaign that drives the pure {@link nextExplorationStep}
+   * strategist. Each round it reads the completed-run archive, asks the strategist for the next batch,
+   * persists the advanced {@link ExplorationState} (so the viewer's live map + pause/steer round-trip), and
+   * launches that batch as ONE training campaign (union of expanded configs → single calibration + full
+   * parallelism, bounded by the host runner + concurrency caps). Loops until convergence, the budget
+   * ceiling, a user pause, or abort. Additive + opt-in — it changes no existing training/analysis path.
+   */
+  async function runExplorationCampaign(
+    params: ExplorationCampaignParams,
+  ): Promise<ExplorationCampaignResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const explorationType = `${recordType}-exploration`
+    const stateKey = params.activityId
+    const maxRounds = params.maxRounds ?? 500
+
+    const persist = async (state: ExplorationState): Promise<void> => {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: explorationType,
+        key: stateKey,
+        content: { ...state, activityId: params.activityId, updatedAt: now() },
+      })
+      params.onRecordWritten?.(explorationType, stateKey)
+      await params.onProgress?.(state)
+    }
+
+    // Expand a strategist batch into a single verbatim-config campaign spec, dropping configs that already
+    // have a completed run so no round re-runs finished work (each seed is a distinct config → distinct key).
+    const mergeBatch = (
+      recs: ExperimentRecommendation[],
+      completedKeys: Set<string>,
+    ): ExperimentSpec => {
+      const configs: Array<{ config: Record<string, unknown>; key?: string }> = []
+      const seen = new Set<string>()
+      for (const rec of recs) {
+        const items = expandExperimentMatrix(
+          manifest,
+          migrateExperimentSpec(rec.spec, manifest.migrations),
+          hashTrainingConfig,
+        )
+        for (const it of items) {
+          if (seen.has(it.key) || completedKeys.has(it.key)) continue
+          seen.add(it.key)
+          configs.push({ config: it.config, key: it.key })
+        }
+      }
+      return { configs }
+    }
+
+    let state: ExplorationState | undefined
+    for (let round = 0; round < maxRounds; round++) {
+      if (params.abortSignal?.aborted) break
+
+      const persisted = (await deps.storage.readRecord({
+        scope: params.scope,
+        type: explorationType,
+        key: stateKey,
+      })) as { content?: ExplorationState } | undefined
+      // persisted state carries stage/basins AND any viewer-set paused/steer; params.budget can widen it.
+      const base = persisted?.content ?? initExplorationState(manifest, params.budget)
+      const working: ExplorationState = {
+        ...base,
+        budget: { ...base.budget, ...(params.budget ?? {}) },
+      }
+
+      const runsRecords = await listCompletedRuns(params.scope, recordType, true)
+      const runs = recordsToAnalysisRuns(runsRecords)
+      const step = nextExplorationStep(working, runs, manifest, {
+        targetObjective: params.targetObjective,
+      })
+      await persist(step.stateNext)
+      state = step.stateNext
+
+      if (step.done || step.stateNext.paused) break
+      const completedKeys = new Set(runsRecords.map((r) => r.key))
+      const spec = mergeBatch(step.batch, completedKeys)
+      if (!spec.configs?.length) break // strategist proposed only finished work — nothing to advance
+
+      await runTrainingCampaign({
+        scope: params.scope,
+        projectRoot: params.projectRoot,
+        manifest,
+        spec,
+        concurrency: working.budget.maxConcurrent,
+        computeTarget: params.computeTarget,
+        ranBy: params.ranBy,
+        abortSignal: params.abortSignal,
+        onRecordWritten: params.onRecordWritten,
+      })
+    }
+
+    const finalState = state ?? initExplorationState(manifest, params.budget)
+    return {
+      recordType,
+      activityId: params.activityId,
+      state: finalState,
+      spentRuns: finalState.budget.spentRuns,
+      basins: finalState.basins,
+      ...(finalState.declaredBasinId ? { declaredBasinId: finalState.declaredBasinId } : {}),
     }
   }
 
@@ -2718,6 +2828,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       expandExperimentMatrix(manifest, spec, hashTrainingConfig),
     calibrateTrainingThroughput,
     runTrainingCampaign,
+    runExplorationCampaign,
     evaluateTrainingRun,
     evaluateTrainingRuns,
     judgeTrainingRuns,

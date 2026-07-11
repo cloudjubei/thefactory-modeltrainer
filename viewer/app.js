@@ -86,6 +86,7 @@ const TABS = [
   { id: 'launch', label: 'Launch', icon: iconRunSvg },
   { id: 'speed', label: 'Speed', icon: iconSpeedSvg },
   { id: 'xai', label: 'xAI', icon: iconXaiSvg },
+  { id: 'exploration', label: 'Exploration' },
   { id: 'activity', label: 'Activity' },
 ]
 // xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
@@ -1222,9 +1223,23 @@ async function putSeenKeys(projectKey, keys) {
 async function readProjectRunKeys(projectKey) {
   const rec = manifestsCache.get(projectKey)
   const recordType = rec && rec.manifest && rec.manifest.recordType
-  if (!recordType) return []
-  const recs = await queryRecords(recordType)
-  return recs
+  if (!recordType || !embedded()) return []
+  // Only the KEYS are needed (the unseen-count badge). This runs for EVERY project on the home overview's 3s
+  // poll, so it must NEVER pull FULL run records — at thousands of runs that is gigabytes of per-bar traces
+  // and freezes the app. `select` (content allowlist) shrinks each row to just the configHash fallback (the
+  // envelope `key` always returns); `omit` is a belt-and-suspenders guarantee the heavy subtrees are dropped
+  // even if the host bridge ignores `select`. No `limit` — the badge needs the COMPLETE key set.
+  let recs
+  try {
+    recs = await window.OverseerBridge.queryData({
+      type: recordType,
+      select: ['provenance.configHash', 'configHash'],
+      omit: HEAVY_RUN_FIELDS,
+    })
+  } catch {
+    recs = []
+  }
+  return (recs || [])
     .map((r) => {
       const summary = r.content || {}
       return (
@@ -16280,6 +16295,133 @@ function paintTabLoading(tabId) {
   body.innerHTML = `<div class="tab-loading card-sub">${spinnerHtml()} ${escapeHtml(label)}</div>`
   body.__lastHtml = undefined
 }
+// --- Exploration view: the config-space search map, always available per project ---------------
+let explorationPollTimer = null
+async function writeExplorationFlag(recordType, state, patch) {
+  if (!state || !state._recordKey) return
+  const content = { ...state }
+  delete content._recordKey
+  Object.assign(content, patch)
+  try {
+    await window.OverseerBridge.putData({ type: recordType + '-exploration', key: state._recordKey, content })
+  } catch {
+    // best-effort; the autopilot re-reads on its next round
+  }
+}
+async function renderExploration() {
+  const container = byId('exploration-body')
+  if (!container || !window.Exploration) return
+  if (!manifest) {
+    container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to explore its config space.</div>'
+    return
+  }
+  const recordType = manifest.recordType
+
+  // latest exploration state record (keyed by activityId; pick the most recently updated)
+  let state = null
+  try {
+    const recs = await queryRecords(recordType + '-exploration')
+    if (recs && recs.length) {
+      const sorted = recs
+        .slice()
+        .sort((a, b) =>
+          String((b.content && b.content.updatedAt) || '').localeCompare(
+            String((a.content && a.content.updatedAt) || ''),
+          ),
+        )
+      state = sorted[0].content || null
+      if (state) state._recordKey = sorted[0].key
+    }
+  } catch {
+    // no state yet
+  }
+
+  // completed runs → the heatmap's coverage grid
+  let runs = []
+  try {
+    runs = (await queryRunRecords({ limit: 6000 }))
+      .map((r) => ({
+        config: (r.summary && r.summary.config) || {},
+        objective: r.summary && r.summary.objective,
+        metrics: r.summary && r.summary.metrics,
+      }))
+      .filter((r) => typeof r.objective === 'number')
+  } catch {
+    // none yet
+  }
+
+  // a live/last explore activity for this project
+  let activity = null
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    const mine = ((res && res.activities) || []).filter(
+      (a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType),
+    )
+    activity =
+      mine.find((a) => a.status === 'running' || a.status === 'starting' || a.status === 'queued') ||
+      mine.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] ||
+      null
+  } catch {
+    // bridge may be unavailable in a preview frame
+  }
+
+  const actions = {
+    onLaunch: async (budget) => {
+      const params = { dir: '.' }
+      if (budget.maxRuns) params.maxRuns = budget.maxRuns
+      if (budget.maxConcurrent) params.maxConcurrent = budget.maxConcurrent
+      if (budget.targetObjective) params.targetObjective = budget.targetObjective
+      await startOrEnqueue('explore', params, `Explore ${recordType}`)
+      invalidateActivitiesCache()
+      setTimeout(() => renderExploration(), 600)
+    },
+    onAbort: async () => {
+      if (activity && activity.activityId) {
+        try {
+          await window.OverseerBridge.abortActivity(activity.activityId)
+        } catch {
+          // ignore
+        }
+      }
+      setTimeout(() => renderExploration(), 400)
+    },
+    onPause: async () => {
+      await writeExplorationFlag(recordType, state, { paused: true })
+      setTimeout(() => renderExploration(), 300)
+    },
+    onResume: async () => {
+      await writeExplorationFlag(recordType, state, { paused: false })
+      if (activity && activity.activityId) {
+        try {
+          await window.OverseerBridge.resumeActivity(activity.activityId)
+        } catch {
+          // ignore
+        }
+      }
+      invalidateActivitiesCache()
+      setTimeout(() => renderExploration(), 600)
+    },
+  }
+
+  window.Exploration.render(
+    container,
+    { manifest, state, runs, activity: activity ? { status: activity.status } : null },
+    actions,
+  )
+
+  // light poll while an exploration is live and this tab is open
+  if (explorationPollTimer) {
+    clearTimeout(explorationPollTimer)
+    explorationPollTimer = null
+  }
+  const active = activity && ['running', 'starting', 'queued'].includes(activity.status)
+  if (active && activeTabId === 'exploration') {
+    explorationPollTimer = setTimeout(() => {
+      if (activeTabId === 'exploration') void renderExploration()
+    }, 2500)
+  }
+}
+
 function showTab(id) {
   const target = TABS.some((t) => t.id === id) ? id : TABS[0].id
   const switching = target !== activeTabId
@@ -16321,6 +16463,7 @@ function showTab(id) {
     refreshQueue()
   }
   if (target === 'xai') void refreshXai()
+  if (target === 'exploration') void renderExploration()
 }
 // A tiny spinner on the ACTIVE tab while the open project has a live (running)
 // activity, so the in-flight campaign is visible from any tab — not just

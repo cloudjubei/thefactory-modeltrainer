@@ -88,6 +88,45 @@ Parked (real blocker / low value):
   axis logic; needs a manifest scope change to `ignore` + a re-analysis to take effect) — flag, don't
   silently change.
 
+### 4. Exploration autopilot — automate the config-space search (find all maxima + the global max)
+
+The wall: the analysis primitives exist (`leverImportances`, `ofatContrasts`, EI `acquisitionRecommendations`,
+`thinSeedRecommendations`, `missingCellRecommendations`, `paretoFrontier`) but the human is still the LOOP that
+sequences them and the bookkeeping that remembers where the search is. This item builds the **closed-loop
+strategist** that runs the search itself and persists the map. **Scoped to `examples/cartpole` then
+`examples/tabular` (Wine); BlackSwan's existing display is untouched (autopilot is additive + opt-in per
+project).** Decisions: full autopilot end-to-end; **closed-loop with pause/steer**; BlackSwan **scalarize-first**.
+
+**The method (a staged reducer over the run archive).** Five principles: (1) measure seed-noise before judging any
+peak; (2) a "maximum" is a **basin** (cluster of good configs), not a point; (3) screen levers → freeze the ones
+that don't move the objective before spending budget; (4) explore/exploit — never declare a global max while
+high-uncertainty regions are unprobed; (5) stop on evidence (no new basins for K rounds AND best basin plateaued
+AND marginal EI < ε). Stages: **S0 calibrate-noise → S1 screen → S2 global (find basins) → S3 local (climb each) →
+S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with `model_name` as the top basin axis.
+
+**Build order (pure core first — provable without any training):**
+
+1. **Types + constants.** `ExplorationState` (stage, active/frozen levers, `basins[]`, budget, regret series,
+   convergence flags, `paused`/steer overrides), `Basin` (centerConfig, peak±CI, robustness, plateaued,
+   memberRunIds), `ExplorationStep` (stage, `batch: ExperimentRecommendation[]`, rationale, stateNext, done) in
+   `modelTrainerTypes.ts`; thresholds in `modelTrainerConstants.ts`.
+2. **Pure Strategist** — `explorationUtils.ts`: `nextExplorationStep(state, runs, manifest, opts?) → ExplorationStep`,
+   a pure reducer composing the existing xAI primitives + a new basin-clustering pass. Fully unit-testable.
+3. **Synthetic-surface acceptance (TDD, the soundness proof).** A fake objective with 2 known basins (one global);
+   drive the loop on it; assert basin recall (both found), declared global ≈ true global, regret→0, convergence
+   fires. Proves the policy WITHOUT training.
+4. **Autopilot activity** (`explore`) — the loop: Strategist → launch batch via the (already-hardened) activity +
+   concurrency engine → await settle → re-read runs → re-assess → repeat until done/budget. Reads `ExplorationState`
+   each round so the viewer can **pause / set budget / pin-or-free levers** mid-run.
+5. **Live CartPole acceptance** — autopilot on fresh CartPole rediscovers ≈500 and enumerates the basins.
+6. **Wine reproducibility pass** — flips objective to `val_rmse`/min; only the manifest changes; cheap enough to run
+   the whole autopilot many times and measure declaration variance.
+7. **Thin Exploration viewer tab** — renders the map (basins = the list of maxima, regret curve, stage, convergence)
+   + pause/steer controls. **Additive; must not touch the shared render paths BlackSwan depends on.**
+8. **BlackSwan (later, gated on 5+6).** `model_name` as the top-level basin axis (screen across model_names, then
+   S1→S4 within the top few) + scalarize on the existing `traded_return`-with-min-trades north-star, so the whole
+   process runs unchanged. Opt-in — no change to the existing BlackSwan views. Pareto basins are a follow-on.
+
 ---
 
 ## Deferred — bigger work, picked up after the active work
@@ -219,8 +258,9 @@ _Further out — **FastContext-style repository explorer** (a candidate fourth t
 
 ### Optional phases
 
-- **Phase 8 — Autopilot + live handoff.** Scheduled meta-activity (propose → run → judge → promote,
-  human-approved); on a winner, tag the checkpoint for live trading (`run_server_model.py`).
+- **Live handoff.** On a winning run (the exploration autopilot's declared global max — see NEXT §4), tag the
+  checkpoint for live trading (`run_server_model.py`). The autopilot supersedes the old "Phase 8 propose→run→judge"
+  sketch; only the checkpoint→live-server tagging remains here.
 - **Phase 9 — Jupyter notebooks (UNDERSCOPED).** View/edit/execute a project's `.ipynb` from the
   Overseer. To scope: render-vs-edit depth, where the kernel runs (host/sandbox/remote runner), how
   notebooks read campaign records/artifacts, security (arbitrary code → likely the sandbox profile).

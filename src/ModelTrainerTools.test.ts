@@ -22,6 +22,7 @@ import type {
 } from 'thefactory-tools/types'
 import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
+import { initExplorationState } from './explorationUtils.js'
 import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
 import { HEAVY_RUN_FIELDS } from './modelTrainerConstants.js'
 
@@ -4481,5 +4482,91 @@ describe('researchTrainingPapers', () => {
     expect(result.discovered).toBe(5)
     // only the first two candidates were fetched + verified; the rest were never touched
     expect(dr.verifyCalls).toHaveLength(2)
+  })
+})
+
+describe('runExplorationCampaign (autopilot)', () => {
+  // The synthetic 2-basin surface driven through the REAL campaign machinery (stub runner + memory storage):
+  // A = global max (500 @ lr=0.5), B = local max (470 @ lr=0.3), C = baseline (20). noise_knob is inert.
+  const SURFACE_MANIFEST = manifest({
+    name: 'synthetic',
+    recordType: 'synthetic-run',
+    calibrate: undefined,
+    eta: undefined,
+    objective: { name: 'score', direction: 'max' },
+    levers: {
+      algo: { type: 'choice', choices: ['A', 'B', 'C'], default: 'A' },
+      lr: { type: 'number', range: [0, 1], default: 0.1 },
+      noise_knob: { type: 'number', range: [0, 1], default: 0.5 },
+      seed: { type: 'number', default: 0 },
+    },
+  })
+  function surface(c: Record<string, unknown>): number {
+    const algo = String(c.algo)
+    const lr = Number(c.lr ?? 0.1)
+    const seed = Number(c.seed ?? 0)
+    const jitter = (((seed * 37) % 7) - 3) * 0.4
+    const base = algo === 'A' ? 500 - 1600 * (lr - 0.5) ** 2 : algo === 'B' ? 470 - 1600 * (lr - 0.3) ** 2 : 20
+    return base + jitter
+  }
+  function surfaceRunner() {
+    return stubRunner({
+      jobResult: (job) => {
+        const c = job.config as Record<string, unknown>
+        const score = surface(c)
+        return { summary: { objective: score, config: c, seed: Number(c.seed ?? 0), metrics: { score, baseline: 20 } } }
+      },
+    })
+  }
+
+  it('explores to convergence, enumerates both maxima, declares the global, and persists the map', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const result = await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-1',
+      budget: { maxRuns: 1200, maxConcurrent: 8 },
+      targetObjective: 500,
+      maxRounds: 300,
+    })
+
+    expect(result.state.done).toBe(true)
+    expect(result.state.stage).toBe('converged')
+    expect(result.basins.map((b) => String(b.region.algo)).sort()).toEqual(['A', 'B'])
+    const declared = result.basins.find((b) => b.id === result.declaredBasinId)
+    expect(declared?.region.algo).toBe('A')
+    expect(declared?.peakObjective).toBeGreaterThan(485)
+
+    // the exploration map is persisted for the viewer / pause-steer round-trip
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'exp-1' })
+    expect((rec?.content as { stage?: string }).stage).toBe('converged')
+    expect((rec?.content as { activityId?: string }).activityId).toBe('exp-1')
+
+    // real training runs were persisted under the project's record type
+    const runs = await storage.listRecords({ scope: 's', type: 'synthetic-run' })
+    expect(runs.length).toBeGreaterThan(10)
+  })
+
+  it('halts immediately when the persisted state is paused (launches nothing)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'exp-2',
+      content: { ...initExplorationState(SURFACE_MANIFEST), stage: 'global', paused: true },
+    })
+    const runner = surfaceRunner()
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-2',
+      maxRounds: 50,
+    })
+    expect(result.state.paused).toBe(true)
+    expect(runner.jobs).toHaveLength(0) // no training launched while paused
   })
 })
