@@ -4,6 +4,8 @@ import {
   EXPLORATION_BASIN_NOISE_MARGIN,
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
+  EXPLORATION_REFINE_MAX_STEP_FRACTION,
+  EXPLORATION_REFINE_MIN_STEP_FRACTION,
   EXPLORATION_SCREEN_SAMPLES,
   XAI_MIN_SEEDS,
 } from './modelTrainerConstants.js'
@@ -245,8 +247,8 @@ function discreteCoverageRecs(
   return recs
 }
 
-/** Coordinate-ascent refinement + seed-stabilization inside one basin. */
-function localRefineRecs(
+/** Coordinate-ascent refinement + seed-stabilization inside one basin. Exported for direct unit testing. */
+export function localRefineRecs(
   basin: Basin,
   runs: AnalysisRun[],
   manifest: TrainerManifest,
@@ -275,16 +277,36 @@ function localRefineRecs(
     }
   }
 
-  // 2. finer coordinate-ascent sweep of each numeric lever around the center
+  // 2. ADAPTIVE coordinate-ascent sweep of each numeric lever around the center. The step is HALF the
+  //    distance to the nearest tried point on each side (falling back to the range edge) — so it bisects
+  //    toward the peak, TIGHTENING every round as neighbours close in. Capped at range/8 (never jumps
+  //    coarser than the old fixed step) and floored at range/64 (below that the lever is resolved, so the
+  //    basin can plateau). A fixed step overshoots a narrow optimum; this seats it.
   for (const lever of numericActive) {
     const spec = manifest.levers[lever]
     const range = spec.range
     if (!range) continue
+    const span = range[1] - range[0]
+    if (span <= 0) continue
     const c = Number(center[lever])
-    const step = (range[1] - range[0]) / 8
-    const cands = [c - step, c - step / 2, c + step / 2, c + step].filter((v) => v >= range[0] && v <= range[1])
-    const tried = new Set(regionRuns.map((r) => Number(r.config[lever]).toFixed(4)))
-    const fresh = uniq(cands.filter((v) => !tried.has(v.toFixed(4))).map((v) => Number(v.toFixed(4))))
+    const maxStep = span * EXPLORATION_REFINE_MAX_STEP_FRACTION
+    const minStep = span * EXPLORATION_REFINE_MIN_STEP_FRACTION
+    const triedVals = regionRuns.map((r) => Number(r.config[lever])).filter((v) => isFinite(v))
+    const eps = minStep / 4
+    // nearest tried point strictly below / above the center, else the range edge
+    const below = Math.max(range[0], ...triedVals.filter((v) => v < c - eps))
+    const above = Math.min(range[1], ...triedVals.filter((v) => v > c + eps))
+    const loStep = Math.min((c - below) / 2, maxStep)
+    const hiStep = Math.min((above - c) / 2, maxStep)
+    const tol = minStep / 2
+    const fresh: number[] = []
+    for (const v of [c - loStep, c - loStep / 2, c + hiStep / 2, c + hiStep]) {
+      if (v < range[0] || v > range[1]) continue
+      if (Math.abs(v - c) < minStep) continue // finer than the resolution floor → resolved here
+      if (triedVals.some((t) => Math.abs(t - v) <= tol)) continue
+      if (fresh.some((f) => Math.abs(f - v) <= tol)) continue
+      fresh.push(Number(v.toFixed(6)))
+    }
     if (fresh.length) {
       recs.push({
         kind: 'acquisition',
@@ -356,7 +378,7 @@ export function nextExplorationStep(
   state: ExplorationState,
   runs: AnalysisRun[],
   manifest: TrainerManifest,
-  opts?: { targetObjective?: number },
+  opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
   const criterion = criterionOf(state)
   const spentRuns = runs.length
@@ -496,13 +518,21 @@ function stepGlobal(
   manifest: TrainerManifest,
   criterion: AnalysisCriterion,
   mk: Mk,
-  opts?: { targetObjective?: number },
+  opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
   const basins = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
   const known = new Set(state.basins.map((b) => b.id))
   const foundNew = basins.some((b) => !known.has(b.id))
   const dryRounds = foundNew ? 0 : state.dryRounds + 1
   const state2 = { ...state, basins, dryRounds }
+
+  // The controller says every global proposal is already run — global search has nothing new to add, so
+  // advance to climbing the basins (drop the flag so `local` refines rather than immediately converging).
+  if (opts?.exhausted) {
+    return stepLocal({ ...state2, stage: 'local' }, runs, manifest, criterion, mk, {
+      targetObjective: opts.targetObjective,
+    })
+  }
 
   if (dryRounds >= EXPLORATION_DRY_ROUNDS) {
     return stepLocal({ ...state2, stage: 'local' }, runs, manifest, criterion, mk, opts)
@@ -540,7 +570,7 @@ function stepLocal(
   manifest: TrainerManifest,
   criterion: AnalysisCriterion,
   mk: Mk,
-  opts?: { targetObjective?: number },
+  opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
   const clustered = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
   const target = opts?.targetObjective
@@ -550,6 +580,10 @@ function stepLocal(
   }))
   const pending = withPlateau.filter((b) => !b.plateaued)
   const state2 = { ...state, basins: withPlateau }
+
+  // Every local refinement the controller could expand is already run — the space is covered at the current
+  // resolution; declare the global max from what we have rather than dead-ending mid-climb.
+  if (opts?.exhausted) return converge(state2, runs, criterion, mk, 'space exhausted at current resolution')
 
   if (!pending.length) return converge(state2, runs, criterion, mk, 'all basins plateaued')
 

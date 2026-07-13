@@ -40,12 +40,31 @@
       })
   }
 
-  // The levers held FIXED for an axis — every non-nuisance lever that isn't itself the axis. Locking these is
-  // what makes the comparison apples-to-apples (same setup, only the axis varies).
+  // Levers whose applicability is GATED by the axis lever — their `appliesWhen` names it. When that control
+  // lever is the axis (e.g. `model_name`), these legitimately differ per axis value (each model brings its own
+  // prob_threshold / momentum_lookback), and the store pins the inapplicable ones to 'n/a'. So they must NOT
+  // be locked (else only siblings sharing the focus's gated values match) NOR pinned by a sweep across values.
+  // Empty for a scope axis (appliesWhen never names dataset/environment) or a lever that gates nothing.
+  function axisGatedLevers(manifest, axis) {
+    var out = {}
+    if (isScopeAxis(axis)) return out
+    var entries = leverEntries(manifest)
+    for (var i = 0; i < entries.length; i++) {
+      var aw = entries[i][1] && entries[i][1].appliesWhen
+      if (aw && Object.prototype.hasOwnProperty.call(aw, axis)) out[entries[i][0]] = true
+    }
+    return out
+  }
+
+  // The levers held FIXED for an axis — every non-nuisance lever that isn't itself the axis, MINUS any lever
+  // the axis gates (those belong to each axis value's identity, not the shared setup). Locking these is what
+  // makes the comparison apples-to-apples (same setup, only the axis — and what it gates — varies).
   function lockedLeverKeys(manifest, axis) {
+    var gated = axisGatedLevers(manifest, axis)
     return leverEntries(manifest)
       .filter(function (e) {
         if (isNuisanceLever(e[0], e[1])) return false
+        if (gated[e[0]]) return false
         return isScopeAxis(axis) ? leverScope(e[1]) !== axis : e[0] !== axis
       })
       .map(function (e) {
@@ -288,8 +307,49 @@
     return { fixed: fixed, bundles: bundles }
   }
 
+  // Judge whether a run's result is a DUBIOUS, likely-lucky edge rather than a learned signal. The tell: the
+  // model's whole score spread sits in ONE probabilistic threshold lever (e.g. prob_threshold — a decision
+  // cutoff on a classifier's P(up)), and the setup doesn't hold up across datasets. Inputs are pre-computed by
+  // the caller (the model's top lever + its importance share + whether it's a manifest `probabilistic` lever,
+  // plus the config's across-dataset robustnessVerdict label + whether the estimate is confident):
+  //   • 'dubious'          — threshold dominates (share ≥ ½) AND robustness is weak/mixed AND the estimate is
+  //                          confident: the edge looks tuned to a threshold and doesn't generalise.
+  //   • 'threshold-driven' — threshold dominates but robustness is unverified (<2 datasets) / the estimate is
+  //                          thin: worth a caution, not a condemnation.
+  //   • 'ok'               — no single threshold dominates, the dominant lever isn't probabilistic, or it
+  //                          holds up (robust) everywhere.
+  function assessRunReliability(signals) {
+    var s = signals || {}
+    var probEdge = !!s.topProbabilistic && Number(s.topImportance) >= 0.5
+    if (!probEdge) return { level: 'ok', reasons: [] }
+    var reasons = [
+      s.topLever +
+        ' (a probabilistic threshold) drives ~' +
+        Math.round(Number(s.topImportance) * 100) +
+        "% of this model's score spread",
+    ]
+    var robust = s.robustness
+    if (robust === 'robust') return { level: 'ok', reasons: [] }
+    var unstable = robust === 'weak' || robust === 'mixed'
+    if (unstable) {
+      reasons.push(
+        'and the setup is ' +
+          robust +
+          ' across datasets — the edge looks like threshold-tuned luck rather than a learned signal',
+      )
+    } else {
+      reasons.push(
+        'and it is not yet verified across datasets — a threshold-driven edge is easily dataset-specific luck',
+      )
+    }
+    var level = unstable && s.confident !== false ? 'dubious' : 'threshold-driven'
+    return { level: level, reasons: reasons }
+  }
+
   var api = {
     axisLeverKeys: axisLeverKeys,
+    axisGatedLevers: axisGatedLevers,
+    assessRunReliability: assessRunReliability,
     axisSweepCombos: axisSweepCombos,
     axisSweepBundleSpec: axisSweepBundleSpec,
     leverOffValue: leverOffValue,

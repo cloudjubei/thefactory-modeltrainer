@@ -213,6 +213,14 @@ let activeTabId = null
 let runsCache = []
 let verdictsCache = new Map()
 let evaluationsCache = new Map()
+// Reliability verdicts. `reliabilityCache` holds the PERSISTED, authoritative verdicts (`source: 'user'`
+// override or `source: 'llm'`), keyed by run key — they survive reloads + are overturnable. The heuristic
+// baseline is NOT persisted: it's recomputed in-memory into `reliabilityHeuristicCache` on each global Refresh
+// (only the non-'ok' flags are stored, to stay lean). `resolveReliability` layers persisted over heuristic.
+let reliabilityCache = new Map()
+let reliabilityHeuristicCache = new Map()
+// Runs filter by reliability: '' (any) | 'ok' | 'threshold-driven' | 'dubious' | 'flagged' (either non-ok).
+let runsReliabilityFilter = ''
 // Run keys the user dismissed from the Activity failures list (persisted so a
 // reload doesn't resurface them); the failure record itself is left intact.
 let dismissedFailures = new Set()
@@ -968,6 +976,92 @@ async function readVerdicts() {
     if (key) map.set(key, content)
   }
   return map
+}
+// The persisted (user/LLM) reliability verdicts, keyed by run key. Read once on project open + after a Refresh.
+async function readReliability() {
+  if (!manifest) return new Map()
+  const recs = await queryRecords(manifest.recordType + '-reliability')
+  const map = new Map()
+  for (const r of recs || []) {
+    const c = r.content || {}
+    const key = r.key || c.runKey || ''
+    if (key && c.level) map.set(key, c)
+  }
+  return map
+}
+// Recompute the heuristic reliability baseline over the loaded pool into `reliabilityHeuristicCache` (only the
+// flagged, non-'ok' runs are kept). Cheap: the probabilistic-edge screen skips every run whose model isn't
+// dominated by a manifest `probabilistic` lever, so the O(pool) dataset-robustness check runs for a handful of
+// candidate setups, memoised. Called on each global Refresh (the pool is freshest then) + lazily for the filter.
+function computeReliabilityHeuristics() {
+  reliabilityHeuristicCache = new Map()
+  if (!manifest) return
+  const runs = xaiRuns()
+  if (!runs.length) return
+  const criterion = { key: 'objective', direction: objectiveDirection(), label: objectiveName() }
+  const byModel = new Map()
+  for (const r of runs) {
+    const m = String((r.config && r.config.model_name) || '')
+    if (!byModel.has(m)) byModel.set(m, [])
+    byModel.get(m).push(r)
+  }
+  const modelTop = new Map()
+  for (const [m, mruns] of byModel) modelTop.set(m, window.Xai.leverImportances(mruns, criterion)[0] || null)
+  const hasDs = hasDatasetLevers()
+  const robustBySetup = new Map()
+  const setupSig = (cfg) =>
+    window.Comparison.lockedLeverKeys(manifest, 'dataset')
+      .map((k) => `${k}=${cfg[k] === undefined || cfg[k] === null || cfg[k] === '' ? 'n/a' : String(cfg[k])}`)
+      .join(' · ')
+  for (const r of runs) {
+    const top = modelTop.get(String((r.config && r.config.model_name) || ''))
+    if (!top) continue
+    const spec = manifest.levers ? manifest.levers[top.lever] : null
+    // Only a probabilistic-dominant model can be flagged — skip the rest before the pricey robustness check.
+    if (!(spec && spec.probabilistic && Number(top.importance) >= 0.5)) continue
+    let robustness = 'n/a'
+    if (hasDs) {
+      const sig = setupSig(r.config)
+      if (!robustBySetup.has(sig)) robustBySetup.set(sig, xaiDatasetRobustness(r.config, criterion).label)
+      robustness = robustBySetup.get(sig)
+    }
+    const verdict = window.Comparison.assessRunReliability({
+      topLever: top.lever,
+      topImportance: top.importance,
+      topProbabilistic: true,
+      robustness,
+      confident: top.confident,
+    })
+    if (verdict.level !== 'ok')
+      reliabilityHeuristicCache.set(r.key, { ...verdict, source: 'heuristic', topLever: top.lever })
+  }
+}
+// The reliability verdict shown/filtered for a run: a PERSISTED user/LLM verdict wins (authoritative +
+// overturnable), else the in-memory heuristic flag, else a plain 'ok'. Always returns { level, source, ... }.
+function resolveReliability(runKey) {
+  return (
+    reliabilityCache.get(runKey) ||
+    reliabilityHeuristicCache.get(runKey) || { level: 'ok', source: 'heuristic', reasons: [] }
+  )
+}
+// Overturn (or set) a run's verdict as an explicit USER decision — persisted, wins over heuristic/LLM.
+async function setReliabilityOverride(runKey, level) {
+  if (!manifest || !runKey) return
+  const content = { runKey, level, source: 'user', reasons: [], assessedAt: nowIso() }
+  reliabilityCache.set(runKey, content)
+  if (selectedRunKey === runKey) renderRunDetail(runKey)
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + '-reliability',
+    key: runKey,
+    content,
+  })
+}
+// Drop a persisted verdict (user override or LLM), reverting the run to its live heuristic baseline.
+async function clearReliabilityOverride(runKey) {
+  if (!manifest || !runKey) return
+  reliabilityCache.delete(runKey)
+  if (selectedRunKey === runKey) renderRunDetail(runKey)
+  await window.OverseerBridge.deleteData({ type: manifest.recordType + '-reliability', key: runKey })
 }
 async function readJudgement() {
   return readMostRecentRecord('-judgement')
@@ -1908,6 +2002,9 @@ function resetDashboardState() {
   fullRunFetchFailed.clear()
   verdictsCache = new Map()
   evaluationsCache = new Map()
+  reliabilityCache = new Map()
+  reliabilityHeuristicCache = new Map()
+  runsReliabilityFilter = ''
   evaluatingKeys.clear()
   judgementSummary = null
   hypothesesCache = []
@@ -2331,8 +2428,13 @@ async function refreshAfterQuickDispatch(item, act) {
     if (activeTabId === 'xai') renderXai()
     setStatusLine('xai-status', quickActivityFailureText(act, 'Analysing'), true)
   } else if (item.activityType === 'xai-narrate') {
-    await loadXaiNarrative(item.params && item.params.runKey)
+    const narratedKey = item.params && item.params.runKey
+    await loadXaiNarrative(narratedKey)
+    // The narrate pass also lands an LLM reliability verdict (source 'llm') — pull it in so the badge/column/
+    // filter reflect it without a full reload.
+    if (act && act.status === 'completed') reliabilityCache = await readReliability()
     if (activeTabId === 'xai') renderXai()
+    if (activeTabId === 'runs' && selectedRunKey === narratedKey) renderRunDetail(narratedKey)
     setStatusLine('xai-status', quickActivityFailureText(act, 'Narrating'), true)
   } else if (item.activityType === 'evaluate') {
     await renderRuns()
@@ -2528,6 +2630,23 @@ function verdictChipHtml(verdict) {
   const cls = score >= 70 ? 'is-ok' : score >= 40 ? 'is-warn' : 'is-bad'
   return `<span class="badge score-chip ${cls}">${escapeHtml(String(Math.round(score)))}</span>`
 }
+// Ranks for sorting the Reliability column (worst-first when descending): dubious > threshold-driven > ok.
+const RELIABILITY_SORT_RANK = { dubious: 2, 'threshold-driven': 1, ok: 0 }
+// The Reliability column chip: blank for 'ok', a badge for a flagged run. A persisted user/LLM verdict shows a
+// dot so it reads as "overridden", not the raw heuristic.
+function reliabilityChipHtml(runKey) {
+  const v = resolveReliability(runKey)
+  if (!v || v.level === 'ok') return '<span class="judge-none">—</span>'
+  const overridden = v.source === 'user' || v.source === 'llm'
+  const cls = v.level === 'dubious' ? 'is-bad' : 'is-warn'
+  const text = v.level === 'dubious' ? '⚠ dubious' : 'threshold'
+  const title =
+    (v.level === 'dubious'
+      ? 'A probabilistic-threshold edge that doesn’t hold across datasets — likely luck.'
+      : 'Threshold-driven, not yet verified across datasets.') +
+    (overridden ? ` (${v.source === 'user' ? 'your override' : 'LLM'})` : '')
+  return `<span class="badge ${cls}" title="${escapeHtml(title)}">${text}${overridden ? ' •' : ''}</span>`
+}
 // Green when the re-test held up the training result (respecting the
 // objective's direction), amber when it came back worse.
 function evalChipHtml(run) {
@@ -2593,6 +2712,7 @@ function hasActiveRunsFilters() {
     runsTextFilter ||
     runsVersionFilter ||
     runsStatusFilter ||
+    runsReliabilityFilter ||
     Object.values(runsLeverFilter).some(Boolean) ||
     customRulesCache.some((r) => r.active)
   )
@@ -2604,6 +2724,7 @@ function clearRunsFilter() {
   runsTextFilter = ''
   runsVersionFilter = ''
   runsStatusFilter = ''
+  runsReliabilityFilter = ''
   for (const rule of customRulesCache) {
     if (rule.active) {
       rule.active = false
@@ -2983,6 +3104,18 @@ function runsColumns() {
       return v ? Number(v.score) : NaN
     },
   })
+  // Reliability verdict column — only for projects with a `probabilistic` lever (else the notion doesn't
+  // apply). Blank for 'ok'; a chip for a flagged run, tinted by whether it's the heuristic or an override.
+  if (hasProbabilisticLever()) {
+    cols.push({
+      id: 'reliability',
+      label: 'Reliability',
+      num: false,
+      help: 'xAI reliability verdict — “dubious” = a probabilistic-threshold edge that doesn’t hold across datasets (likely luck). A user/LLM override wins over the heuristic. Refresh to score every run; open a run to overturn.',
+      get: (r) => reliabilityChipHtml(r.key),
+      sort: (r) => RELIABILITY_SORT_RANK[resolveReliability(r.key).level] ?? 0,
+    })
+  }
   // Eval (re-test a saved checkpoint) only applies to projects that declare an `evaluate`
   // command — RL projects don't (you test on the live environment/market), so the column,
   // detail section and auto-eval option all disappear for them.
@@ -3226,6 +3359,9 @@ function runsServerOrderBy() {
 // which filters the full matching set THEN slices — keeping pages + rows consistent.
 function hasClientOnlyRunsFilter() {
   if (runsTextFilter && runsTextFilter.trim()) return true
+  // Reliability lives in a separate overlay record (not a run-record field), so it can't be pushed into the
+  // server `where` — filtering it needs the full matching set in memory, the same path the group-by views use.
+  if (runsReliabilityFilter) return true
   return customRulesCache.some((rule) => rule.active && !customRuleServerField(rule.field))
 }
 function runsServerPaged() {
@@ -3323,6 +3459,12 @@ function applyRunsFilters(runs) {
   }
   for (const rule of customRulesCache) {
     if (rule.active) out = out.filter((r) => runMatchesCustomRule(r, rule))
+  }
+  if (runsReliabilityFilter) {
+    out = out.filter((r) => {
+      const level = resolveReliability(r.key).level
+      return runsReliabilityFilter === 'flagged' ? level !== 'ok' : level === runsReliabilityFilter
+    })
   }
   return applyRunsTextFilter(out)
 }
@@ -3633,16 +3775,29 @@ function runsToolbarHtml(shownCount, total) {
             )
             .join('')}
         </select>`
+  const RELIABILITY_FILTER_OPTS = [
+    ['flagged', 'reliability: flagged'],
+    ['dubious', 'reliability: dubious'],
+    ['threshold-driven', 'reliability: threshold-driven'],
+    ['ok', 'reliability: ok'],
+  ]
+  const reliabilityFilter = hasProbabilisticLever()
+    ? `<select class="runs-filter-lever${runsReliabilityFilter ? ' is-changed' : ''}" id="runs-reliability-filter"${helpAttr('Show only runs by xAI reliability verdict — dubious = a probabilistic-threshold edge that doesn’t hold across datasets. Refresh to score every run.')}>
+          <option value="">reliability: any</option>
+          ${RELIABILITY_FILTER_OPTS.map(([k, lab]) => `<option value="${escapeHtml(k)}"${runsReliabilityFilter === k ? ' selected' : ''}>${escapeHtml(lab)}</option>`).join('')}
+        </select>`
+    : ''
   const changedDropdowns =
     (runsVersionFilter ? 1 : 0) +
     (runsStatusFilter ? 1 : 0) +
+    (runsReliabilityFilter ? 1 : 0) +
     Object.values(runsLeverFilter).filter(Boolean).length
   const dropdownsToggle = `<button type="button" id="runs-dropdowns-toggle" class="runs-dropdowns-toggle" aria-expanded="${runsDropdownsCollapsed ? 'false' : 'true'}">
     <span class="caret">${runsDropdownsCollapsed ? '▸' : '▾'}</span> ${runsDropdownsCollapsed ? 'More filter options' : 'Hide filter options'}${runsDropdownsCollapsed && changedDropdowns ? ` <span class="runs-dropdowns-count">${changedDropdowns}</span>` : ''}
   </button>`
   const dropdownsPanel = `<div id="runs-dropdowns" class="runs-dropdowns${runsDropdownsCollapsed ? ' is-collapsed' : ''}">
     ${dropdownsToggle}
-    <div class="runs-dropdowns-body">${statusFilter}${versionFilter}${leverDropdowns}</div>
+    <div class="runs-dropdowns-body">${statusFilter}${reliabilityFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
   // Favorites is a CURATED pin list — the exploratory filters (Hide-bad / status / lever / custom rules) don't
@@ -4149,6 +4304,7 @@ async function renderRuns() {
     evaluationsCache,
     dismissedFailures,
     unrunnableCache,
+    reliabilityCache,
   ] = await Promise.all([
     readRuns(),
     readVerdicts(),
@@ -4156,7 +4312,9 @@ async function renderRuns() {
     readEvaluations(),
     readDismissedFailures(),
     readUnrunnable(),
+    readReliability(),
   ])
+  computeReliabilityHeuristics()
   renderJudgeControls()
   renderRunsLive()
   await markRunsSeen()
@@ -4168,6 +4326,10 @@ async function renderRuns() {
 async function refreshRuns() {
   if (!byId('runs-body')) return
   runsCache = await readRuns()
+  // The reliability filter forces the UNPAGED path, so runsCache now holds the full matching set — (re)score
+  // the heuristic baseline over it (when no global-Refresh snapshot already covers everything) so the filter
+  // reflects every run, not just the current page.
+  if (runsReliabilityFilter && !allRunsCache.length) computeReliabilityHeuristics()
   renderRunsTable()
   // Close the xAI analyse→run→re-analyse loop: when records change (e.g. a launched batch lands), the
   // open xAI tab recomputes its effects + recommendations off the fresh runs.
@@ -5995,6 +6157,58 @@ function xaiByValueLevers(focusCfg) {
     return focusCfg[k] !== undefined && focusCfg[k] !== null && String(focusCfg[k]) !== 'n/a'
   })
 }
+// Below this normalised importance share a lever's effect reads as noise, not signal — used to flag levers a
+// model is empirically insensitive to (a sweep there is wasted) and to spot a model whose whole edge sits in
+// ONE lever.
+const XAI_LOW_EFFECT = 0.02
+// Lever-effect screening for ONE model (the focus run's): leverImportances over just that model's runs,
+// indexed by lever. A lever absent from the map has too few distinct values to score (not "no effect").
+function xaiModelLeverEffects(focusCfg, criterion) {
+  const model = focusCfg.model_name
+  const runs = xaiRuns().filter(
+    (r) => r.config && String(r.config.model_name) === String(model),
+  )
+  const map = new Map()
+  for (const i of window.Xai.leverImportances(runs, criterion)) map.set(i.lever, i)
+  return map
+}
+// How a config holds up ACROSS datasets — its robustnessVerdict label + dataset count — computed side-effect
+// free (unlike xaiAxisGroupsFrom, which mutates the By value selection cache) so it's safe to call from the
+// run detail. 'n/a' when the project has no dataset axis or the config has run in fewer than two datasets.
+function xaiDatasetRobustness(focusCfg, criterion) {
+  if (!hasDatasetLevers()) return { label: 'n/a', n: 0 }
+  const datasetKeys = window.Comparison.axisLeverKeys(manifest, 'dataset')
+  const standingByKey = window.Xai.normalizeByEnvironment(xaiRuns(), criterion, datasetKeys)
+  const seenSig = new Set()
+  const standings = []
+  for (const r of xaiLockedMatches(focusCfg, 'dataset')) {
+    const sig = window.Comparison.runAxisSignature(manifest, 'dataset', r)
+    if (seenSig.has(sig) || !(r.key in standingByKey)) continue
+    seenSig.add(sig)
+    standings.push(standingByKey[r.key])
+  }
+  return window.Comparison.robustnessVerdict(standings)
+}
+// Reliability of a run's result: is its edge a genuine learned signal, or a probabilistic threshold tuned to
+// luck? Screens the run's MODEL for a dominant `probabilistic` lever, checks whether the config holds across
+// datasets, and defers the verdict to the pure Comparison.assessRunReliability. Derived live off the loaded
+// pool (never persisted) — richer after a global Refresh loads every run.
+function xaiRunReliability(run) {
+  const cfg = run && run.summary && run.summary.config
+  if (!cfg || !cfg.model_name) return { level: 'ok', source: 'heuristic', reasons: [] }
+  const criterion = { key: 'objective', direction: objectiveDirection(), label: objectiveName() }
+  const top = [...xaiModelLeverEffects(cfg, criterion).values()][0]
+  if (!top) return { level: 'ok', source: 'heuristic', reasons: [] }
+  const spec = manifest && manifest.levers ? manifest.levers[top.lever] : null
+  const verdict = window.Comparison.assessRunReliability({
+    topLever: top.lever,
+    topImportance: top.importance,
+    topProbabilistic: !!(spec && spec.probabilistic),
+    robustness: xaiDatasetRobustness(cfg, criterion).label,
+    confident: top.confident,
+  })
+  return { ...verdict, source: 'heuristic', topLever: top.lever }
+}
 // BY VALUE: pick one tunable lever and show every run identical to this one EXCEPT that lever (same dataset,
 // environment, and every other setting), pooled over seeds — the one-factor-at-a-time view. Reuses the across-
 // axis machinery with the chosen lever as a single-lever axis; Sweep offers a popup of recommended values.
@@ -6015,9 +6229,19 @@ function xaiByValueHtml(focusKey, criterion) {
   const matched = xaiLockedMatches(focusCfg, lever)
   const { groups, standingOf, runByKey } = xaiAxisGroupsFrom(matched, lever, criterion, cols)
   const focusSig = window.Comparison.runAxisSignature(manifest, lever, focusRun)
+  // Per-model lever-effect screening: for THIS run's model, which levers actually move the score? Flag the
+  // ones with a measured near-zero effect so a sweep isn't wasted on a lever that never changes the result.
+  const effects = xaiModelLeverEffects(focusCfg, criterion)
+  const noEffect = (k) => {
+    const e = effects.get(k)
+    return e && e.confident && e.importance < XAI_LOW_EFFECT
+  }
   const leverSelect = `<label class="card-sub xai-scope-field">Lever <select class="app-select" data-xai-value-lever>${leverList
-    .map((k) => `<option value="${escapeHtml(k)}"${k === lever ? ' selected' : ''}>${escapeHtml(k)}</option>`)
+    .map((k) => `<option value="${escapeHtml(k)}"${k === lever ? ' selected' : ''}>${escapeHtml(k)}${noEffect(k) ? ' · no effect' : ''}</option>`)
     .join('')}</select></label>`
+  const noEffectNote = noEffect(lever)
+    ? `<p class="card-sub xai-noeffect-note">⚠ Across this model’s runs, <code>${escapeHtml(lever)}</code> shows <strong>no measurable effect</strong> on ${escapeHtml(criterion.label)} (${effects.get(lever).values} values, ${Math.round(effects.get(lever).importance * 100)}% importance) — a sweep here likely won’t change the result. Vary a higher-impact lever instead.</p>`
+    : ''
   const selCount = groups.filter((g) => xaiAxisSelected.has(g.axisSig)).length
   const sweepBtn = embedded()
     ? `<button type="button" class="ghost-btn" data-xai-value-sweep="${escapeHtml(lever)}" title="Sweep ${escapeHtml(lever)} across recommended values, holding every other setting fixed">Sweep ${escapeHtml(lever)} ↗</button>`
@@ -6028,7 +6252,7 @@ function xaiByValueHtml(focusKey, criterion) {
   const headActions = `<div class="head-actions">${leverSelect}${sweepBtn}${addBtn}</div>`
   if (groups.length < 2) {
     return `<div class="card"><div class="card-head card-head-row"><h3>By value <span class="card-sub">— vary one lever, hold the rest</span></h3>${headActions}</div>
-      <p class="card-sub">Only one <code>${escapeHtml(lever)}</code> value has run with this exact setup. <strong>Sweep ${escapeHtml(lever)}</strong> to try more values and see how it moves <strong>${escapeHtml(criterion.label)}</strong>.</p></div>`
+      ${noEffectNote}<p class="card-sub">Only one <code>${escapeHtml(lever)}</code> value has run with this exact setup. <strong>Sweep ${escapeHtml(lever)}</strong> to try more values and see how it moves <strong>${escapeHtml(criterion.label)}</strong>.</p></div>`
   }
   const table = xaiAxisTableHtml(
     lever,
@@ -6041,7 +6265,7 @@ function xaiByValueHtml(focusKey, criterion) {
     lever,
   )
   return `<div class="card"><div class="card-head card-head-row"><h3>By <code>${escapeHtml(lever)}</code> <span class="card-sub">— ${groups.length} values · same setup, only <code>${escapeHtml(lever)}</code> varies</span></h3>${headActions}</div>
-    <p class="card-sub">Every run here is <strong>identical to this run except <code>${escapeHtml(lever)}</code></strong> (pooled over seeds), so each row’s score isolates that lever’s effect. Tick values and <strong>Add runs</strong> to verify with fresh seeds, or <strong>Sweep</strong> to try recommended values.</p>
+    ${noEffectNote}<p class="card-sub">Every run here is <strong>identical to this run except <code>${escapeHtml(lever)}</code></strong> (pooled over seeds), so each row’s score isolates that lever’s effect. Tick values and <strong>Add runs</strong> to verify with fresh seeds, or <strong>Sweep</strong> to try recommended values.</p>
     ${table}
     <p class="runs-legend">Click a column to sort. Cells show ${comparisonAgg === 'full' ? 'min · avg · max' : 'the average'} across seeds. Change the <strong>Lever</strong> above to inspect a different setting.</p></div>`
 }
@@ -6134,9 +6358,13 @@ function submitXaiSweepPopup() {
   for (const v of custom) chosenMap.set(String(v), v)
   const chosen = [...chosenMap.values()]
   if (!chosen.length) return
+  // Sweeping a CONTROL lever (e.g. model_name) must not pin the levers it gates (prob_threshold, momentum_
+  // lookback…) onto values that don't use them — each swept value brings its own. Dropping them lets every
+  // model run at its own defaults (and keeps the launched configs matchable in the By value table).
+  const gated = window.Comparison.axisGatedLevers(manifest, lever)
   const fixed = {}
   for (const [k, v] of Object.entries(cfg))
-    if (k !== lever && k !== 'seed' && String(v) !== 'n/a') fixed[k] = v
+    if (k !== lever && k !== 'seed' && !gated[k] && String(v) !== 'n/a') fixed[k] = v
   closeXaiSweepPopup()
   xaiLaunchBatch([{ fixed, sweep: { [lever]: chosen }, seeds: [0] }], `Sweep ${lever}`, {
     silent: true,
@@ -8426,6 +8654,19 @@ function renderRunDetail(key) {
   const flagChips = flags.length
     ? flags.map((f) => `<span class="badge is-bad">${escapeHtml(f)}</span>`).join(' ')
     : '<span class="card-sub">none</span>'
+  // Reliability verdict (xAI): flags a run whose edge is a probabilistic threshold tuned to luck. A persisted
+  // user/LLM verdict wins; else the live heuristic. Only meaningful for a healthy, completed run.
+  const reliabilityPersisted = reliabilityCache.get(run.key)
+  const reliability =
+    !showVerdict || !hasProbabilisticLever()
+      ? { level: 'ok', source: 'heuristic', reasons: [] }
+      : reliabilityPersisted || xaiRunReliability(run)
+  const reliabilityBadge =
+    reliability.level === 'dubious'
+      ? ' · <span class="badge is-bad" title="xAI: this run\'s edge concentrates in a probabilistic threshold and does not hold across datasets — likely luck, not a learned signal.">⚠ dubious</span>'
+      : reliability.level === 'threshold-driven'
+        ? ' · <span class="badge is-warn" title="xAI: this run\'s edge is threshold-driven and not yet verified across datasets.">threshold-driven</span>'
+        : ''
   const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
   const datasetBadge = datasetBadgeHtml(s.dataset)
   const isUnrunnable = unrunnableCache.has(setupKeyForRun(run))
@@ -8448,7 +8689,7 @@ function renderRunDetail(key) {
     ? `<span class="badge is-bad" title="${escapeHtml(s.invalidReason || 'invalid')}">invalid</span>${s.invalidReason ? ` <span class="card-sub">${escapeHtml(s.invalidReason)}</span>` : ''}`
     : failed
       ? '<span class="badge is-bad">failed</span>'
-      : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}`
+      : `${escapeHtml(objectiveName())} ${escapeHtml(formatObjective(s.objective))} · ${healthBadgeHtml(s.health)}${reliabilityBadge}`
   const html = `
     <div class="card-head card-head-row">
       <div>
@@ -8470,6 +8711,7 @@ function renderRunDetail(key) {
     <div class="card-scroll">
     ${failed ? failureDetailHtml(s, run.key) : ''}
     ${flags.length ? `<h3>Health flags</h3><p class="badges-row">${flagChips}</p>` : ''}
+    ${showVerdict ? reliabilitySectionHtml(run, reliability) : ''}
     ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
     ${showEval ? evaluationSectionHtml(run) : ''}
     <h3>Metrics</h3>
@@ -8512,6 +8754,50 @@ function openRunDetail(key) {
   }
   renderRunDetail(key)
   syncRunsMdLayout()
+}
+// The Reliability section of the run detail: the verdict badge + its source + why, plus overturn actions. Only
+// shown for projects with a `probabilistic` lever (else the notion doesn't apply). A user override or LLM
+// verdict wins over the heuristic; "Reset to auto" drops the override back to the live heuristic.
+function reliabilitySectionHtml(run, reliability) {
+  if (!hasProbabilisticLever()) return ''
+  const level = reliability.level || 'ok'
+  const src = reliability.source || 'heuristic'
+  const srcLabel =
+    src === 'user'
+      ? 'your override'
+      : src === 'llm'
+        ? `LLM${reliability.model ? ` · ${reliability.model}` : ''}`
+        : 'auto · heuristic'
+  const badge =
+    level === 'dubious'
+      ? '<span class="badge is-bad">⚠ dubious</span>'
+      : level === 'threshold-driven'
+        ? '<span class="badge is-warn">threshold-driven</span>'
+        : '<span class="badge is-ok">ok</span>'
+  const body = reliability.rationale
+    ? escapeHtml(reliability.rationale)
+    : reliability.reasons && reliability.reasons.length
+      ? `${escapeHtml(reliability.reasons.join(' '))}.`
+      : level === 'ok'
+        ? 'No threshold-tuned-luck pattern detected for this run.'
+        : ''
+  const k = escapeHtml(run.key)
+  const actions = [
+    level !== 'dubious'
+      ? `<button type="button" class="ghost-btn" data-action="reliability-set" data-key="${k}" data-level="dubious">Mark dubious</button>`
+      : '',
+    level !== 'ok'
+      ? `<button type="button" class="ghost-btn" data-action="reliability-set" data-key="${k}" data-level="ok">Mark reliable</button>`
+      : '',
+    src === 'user' || src === 'llm'
+      ? `<button type="button" class="ghost-btn" data-action="reliability-reset" data-key="${k}">Reset to auto</button>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  return `<h3>Reliability ${badge} <span class="card-sub">${escapeHtml(srcLabel)}</span></h3>
+    ${body ? `<p class="card-sub">${body}${level !== 'ok' ? ' Verify with fresh seeds and across more datasets before trusting it.' : ''}</p>` : ''}
+    <p class="badges-row">${actions}</p>`
 }
 function closeRunDetail() {
   selectedRunKey = null
@@ -9071,6 +9357,12 @@ function setupRuns() {
         refreshRuns()
         return
       }
+      if (event.target.id === 'runs-reliability-filter') {
+        runsReliabilityFilter = event.target.value
+        runsPage = 0
+        refreshRuns()
+        return
+      }
       const sel = event.target.closest('.runs-filter-lever')
       if (sel) {
         runsLeverFilter[sel.dataset.lever] = sel.value
@@ -9139,6 +9431,10 @@ function setupRuns() {
       if (unrunBtn) toggleUnrunnable(unrunBtn.dataset.key)
       const delBtn = event.target.closest('button[data-action="delete-run"]')
       if (delBtn) deleteRun(delBtn.dataset.key)
+      const relSet = event.target.closest('button[data-action="reliability-set"]')
+      if (relSet) setReliabilityOverride(relSet.dataset.key, relSet.dataset.level)
+      const relReset = event.target.closest('button[data-action="reliability-reset"]')
+      if (relReset) clearReliabilityOverride(relReset.dataset.key)
       const expandBtn = event.target.closest('button[data-action="expand-chart"]')
       if (expandBtn) expandPriceActionChart(expandBtn.dataset.key)
     })
@@ -11340,7 +11636,9 @@ async function deleteRelatedRunRecords(key, setupKey) {
     manifest.recordType + '-evaluation',
     manifest.recordType + '-verdict',
     manifest.recordType + '-xai-narrative',
+    manifest.recordType + '-reliability',
   ]
+  reliabilityCache.delete(key)
   for (const type of types) {
     try {
       await window.OverseerBridge.deleteData({ type, key })
@@ -13459,6 +13757,9 @@ const RUN_DERIVED_UPDATERS = [
       await refreshHypothesisVerdicts(await readHypotheses())
     },
   },
+  // Recompute the heuristic reliability baseline over the freshly-scanned full run set. In-memory only
+  // (persisted user/LLM verdicts are untouched) — makes the reliability filter/column current after a Refresh.
+  { label: 'reliability baseline', run: async () => computeReliabilityHeuristics() },
 ]
 async function applyRunDerivedUpdaters(allRuns) {
   for (const u of RUN_DERIVED_UPDATERS) await u.run(allRuns)
@@ -14509,6 +14810,12 @@ function datasetLeverEntries() {
 }
 function hasDatasetLevers() {
   return datasetLeverEntries().length > 0
+}
+// Whether the project declares any `probabilistic` lever — gates the reliability filter/verdict UI so projects
+// without a threshold-tunable edge (no such lever) never surface a control that can't fire.
+function hasProbabilisticLever() {
+  const levers = (manifest && manifest.levers) || {}
+  return Object.keys(levers).some((k) => levers[k] && levers[k].probabilistic)
 }
 // The implicit "Default" dataset from the manifest's dataset-lever defaults.
 function defaultDataset() {
@@ -16448,38 +16755,39 @@ async function renderExploration() {
     // no state yet
   }
 
-  // completed runs → the heatmap's coverage grid
+  // completed runs → the heatmap's coverage grid + the strategist-parity count. Page through EVERY run and
+  // accumulate (NOT a single capped query, which returns only ONE page — the "only the last page is taken
+  // into account" bug — and NOT the shared xAI pool, which lags behind live runs). Filter to EXACTLY what
+  // the strategist counts (status==='completed' AND numeric objective) so the "N new being analyzed" backlog
+  // is a true transient, never a phantom. Falls back to the pool only if the paged query is unavailable.
   let runs = []
   try {
-    // Source from the shared run pool (xaiRuns → allRunsCache) so the heatmap includes EVERY run — incl.
-    // experiments launched manually outside the autopilot — and carries status:'completed' for the
-    // window.Xai importance ranking. Falls back to a direct query before the pool is populated this session.
-    runs = xaiRuns()
-    if (!runs.length) {
-      runs = (await queryRunRecords({ limit: 6000 }))
-        .map((r) => ({
-          key: r.key,
-          config: (r.summary && r.summary.config) || {},
-          objective: r.summary && r.summary.objective,
-          metrics: r.summary && r.summary.metrics,
-          seed: r.summary && r.summary.seed,
-          status: 'completed',
-        }))
-        .filter((r) => typeof r.objective === 'number')
-    }
+    runs = (await queryAllRunRecords())
+      .filter((r) => r.summary && r.summary.status === 'completed' && typeof r.summary.objective === 'number')
+      .map((r) => ({
+        key: r.key,
+        config: (r.summary && r.summary.config) || {},
+        objective: r.summary.objective,
+        metrics: r.summary.metrics,
+        seed: r.summary.seed,
+        status: 'completed',
+      }))
+    if (!runs.length) runs = xaiRuns()
   } catch {
-    // none yet
+    runs = xaiRuns()
   }
 
   // a live/last explore activity for this project, plus the round's in-flight child train (if any)
   let activity = null
   let pendingChild = null
+  let liveExploreCount = 0
   try {
     const res = await window.OverseerBridge.listActivities()
     const all = (res && res.activities) || []
     const mine = all.filter(
       (a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType),
     )
+    liveExploreCount = mine.filter((a) => ['running', 'starting', 'queued'].includes(a.status)).length
     activity =
       mine.find((a) => a.status === 'running' || a.status === 'starting' || a.status === 'queued') ||
       mine.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] ||
@@ -16494,8 +16802,11 @@ async function renderExploration() {
 
   const launchExplore = async (extra) => {
     // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend `explore`
-    // activity requires recordType (like `train`), so a bare budget object is rejected.
-    const res = await startOrEnqueue('explore', trainerComputeParams(extra || {}), `Explore ${recordType}`)
+    // activity requires recordType (like `train`), so a bare budget object is rejected. Parallelism comes
+    // from the Activity tab's ONE "max parallel runs" setting (savedConcurrency) — the same knob manual
+    // launches use — so each round's batch runs N-at-a-time instead of sequentially. Caller `extra` wins.
+    const merged = { maxConcurrent: savedConcurrency(), ...(extra || {}) }
+    const res = await startOrEnqueue('explore', trainerComputeParams(merged), `Explore ${recordType}`)
     if (!res || !res.started) {
       const host = container.querySelector('.expl-status') || container
       if (host && !host.querySelector('.expl-launch-err')) {
@@ -16517,9 +16828,23 @@ async function renderExploration() {
     onLaunch: async (budget) => {
       const extra = {}
       if (budget.maxRuns) extra.maxRuns = budget.maxRuns
-      if (budget.maxConcurrent) extra.maxConcurrent = budget.maxConcurrent
       if (budget.targetObjective) extra.targetObjective = budget.targetObjective
-      // Fresh start: clear any prior map so it begins at calibrate (Resume keeps the map instead).
+      // Fresh start: abort any live controller + its in-flight child, then clear the prior map so it begins
+      // at calibrate (Resume keeps the map instead). Aborting first avoids two controllers racing one map.
+      if (activity && activity.activityId) {
+        try {
+          await window.OverseerBridge.abortActivity(activity.activityId)
+        } catch {
+          // ignore
+        }
+      }
+      if (state && state.pendingChildId) {
+        try {
+          await window.OverseerBridge.abortActivity(state.pendingChildId)
+        } catch {
+          // ignore
+        }
+      }
       try {
         await window.OverseerBridge.deleteData({ type: recordType + '-exploration', key: 'current' })
       } catch {
@@ -16562,16 +16887,29 @@ async function renderExploration() {
       setTimeout(() => renderExploration(), 400)
     },
     onResume: async () => {
-      // Resume the SAME map: clear the paused flag, then relaunch the controller (it continues from
-      // the persisted 'current' record, fast-forwarding through stages from the run archive).
+      // Resume the SAME map: clear the paused flag, then relaunch UNLESS exactly ONE controller is already
+      // live. Relaunch when there are 0 (start it) OR >1 (duplicates racing one map — the backend singleton
+      // guard aborts the extras on launch, consolidating to one). A healthy single controller is left alone.
       await writeExplorationFlag(recordType, state, { paused: false })
-      await launchExplore({})
+      if (liveExploreCount === 1) {
+        invalidateActivitiesCache()
+        setTimeout(() => renderExploration(), 400)
+      } else {
+        await launchExplore({})
+      }
     },
   }
 
   window.Exploration.render(
     container,
-    { manifest, state, runs, activity: activity ? { status: activity.status } : null, pendingChild },
+    {
+      manifest,
+      state,
+      runs,
+      totalRuns: runs.length,
+      activity: activity ? { status: activity.status } : null,
+      pendingChild,
+    },
     actions,
   )
 
@@ -16583,7 +16921,9 @@ async function renderExploration() {
   // Keep the tab live while it is OPEN, regardless of whether a controller activity is live — the heatmap
   // is driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` froze it.
   if (activeTabId === 'exploration') {
-    const active = activity && ['running', 'starting', 'queued'].includes(activity.status)
+    const active =
+      (activity && ['running', 'starting', 'queued'].includes(activity.status)) ||
+      (pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
     explorationPollTimer = setTimeout(
       () => {
         if (activeTabId === 'exploration') void renderExploration()

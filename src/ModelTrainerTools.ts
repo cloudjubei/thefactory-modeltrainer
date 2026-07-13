@@ -23,6 +23,7 @@ import type {
   AnalysisRun,
   ExplorationStage,
   ExplorationState,
+  ExplorationStep,
   ExplorationCampaignParams,
   ExplorationCampaignResult,
   AnalyzeConfigSpaceParams,
@@ -138,6 +139,8 @@ import {
   coerceHypothesisCoverage,
   buildXaiNarrateSystemPrompt,
   buildXaiNarrateUserContent,
+  buildReliabilitySystemPrompt,
+  coerceReliabilityVerdict,
   coerceAnalyzedPaperModels,
   buildConsolidateModelsSystemPrompt,
   buildConsolidateModelsUserContent,
@@ -180,11 +183,16 @@ import { initExplorationState, nextExplorationStep } from './explorationUtils.js
 
 /**
  * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
- * (per-run judge score), and `-xai-narrative` (per-run narrative). When a run is deleted these are
- * removed alongside it so none orphan. The `-unrunnable` marker is keyed by SETUP key, not run key,
- * so it is handled separately.
+ * (per-run judge score), `-xai-narrative` (per-run narrative), and `-reliability` (the persisted reliability
+ * verdict). When a run is deleted these are removed alongside it so none orphan. The `-unrunnable` marker is
+ * keyed by SETUP key, not run key, so it is handled separately.
  */
-const RUN_KEYED_CHILD_SUFFIXES = ['-evaluation', '-verdict', '-xai-narrative'] as const
+const RUN_KEYED_CHILD_SUFFIXES = [
+  '-evaluation',
+  '-verdict',
+  '-xai-narrative',
+  '-reliability',
+] as const
 
 /** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
 function sanitizeRunArtifacts(
@@ -726,24 +734,33 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
       const runs = recordsToAnalysisRuns(runsRecords)
-      const step = nextExplorationStep(working, runs, manifest, {
-        targetObjective: params.targetObjective,
-      })
-      // Append a decision breadcrumb (what happened + why) so the viewer can show a live log.
-      const batchRuns = step.batch.reduce((n, r) => n + r.runCount, 0)
-      step.stateNext = appendLog(
-        { ...step.stateNext, pendingChildId: working.pendingChildId },
-        step.stage,
-        step.rationale,
-        batchRuns,
-      )
+      const completedKeys = new Set(runsRecords.map((r) => r.key))
+      const planStep = (exhausted: boolean): { step: ExplorationStep; spec: ExperimentSpec } => {
+        const s = nextExplorationStep(working, runs, manifest, {
+          targetObjective: params.targetObjective,
+          ...(exhausted ? { exhausted: true } : {}),
+        })
+        s.stateNext = appendLog(
+          { ...s.stateNext, pendingChildId: working.pendingChildId },
+          s.stage,
+          s.rationale,
+          s.batch.reduce((n, r) => n + r.runCount, 0),
+        )
+        return { step: s, spec: mergeBatch(s.batch, completedKeys) }
+      }
+
+      let { step, spec } = planStep(false)
+      // If every proposed config is already run, the current stage has nothing NEW to try — tell the
+      // strategist it's exhausted so it ADVANCES (global→local→converge) from the existing runs instead of
+      // dead-ending mid-search. Retried ONCE; if the advanced stage is also fully covered, it converges.
+      if (!spec.configs?.length && !step.done && !step.stateNext.paused) {
+        ;({ step, spec } = planStep(true))
+      }
       await persist(step.stateNext)
       state = step.stateNext
 
       if (step.done || step.stateNext.paused) break
-      const completedKeys = new Set(runsRecords.map((r) => r.key))
-      const spec = mergeBatch(step.batch, completedKeys)
-      if (!spec.configs?.length) break // strategist proposed only finished work — nothing to advance
+      if (!spec.configs?.length) break // even after advancing, nothing new to run — the space is covered
 
       if (params.launchTrainCampaign) {
         // Durable-controller mode: run the batch as a STANDARD `train` activity (visible under Experiments,
@@ -2612,6 +2629,41 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       },
     })
     params.onRecordWritten?.(narrativeType, params.runKey)
+
+    // The same pass also refines the RELIABILITY verdict: for a project with a probabilistic lever, a focused
+    // structured call re-judges (over the same digest) whether the edge is threshold-tuned luck, and persists
+    // it as an authoritative `source: 'llm'` overlay that overrides the heuristic (a user override still wins).
+    if (Object.values(manifest.levers).some((l) => l.probabilistic)) {
+      try {
+        const relRes = await executor.runInference({
+          systemPrompt: buildReliabilitySystemPrompt(manifest),
+          userContent: buildXaiNarrateUserContent(digest),
+          model: { kind: 'api', llmConfig: params.llmConfig },
+          abortSignal: params.abortSignal,
+        })
+        const verdict = coerceReliabilityVerdict(parseFirstValidJson(relRes.text))
+        if (verdict) {
+          const reliabilityType = `${recordType}-reliability`
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: reliabilityType,
+            key: params.runKey,
+            content: {
+              runKey: params.runKey,
+              level: verdict.level,
+              rationale: verdict.rationale,
+              source: 'llm',
+              model: narratedBy,
+              assessedAt: narratedAt,
+            },
+          })
+          params.onRecordWritten?.(reliabilityType, params.runKey)
+        }
+      } catch (err) {
+        // The verdict is a best-effort refinement — never fail the narrative over it.
+        logger?.warn?.('reliability refinement failed', { recordType, runKey: params.runKey })
+      }
+    }
     logger?.info('narrated xAI run', { recordType, runKey: params.runKey, runCount })
     return { recordType, runKey: params.runKey, runCount, narratedBy, narratedAt }
   }

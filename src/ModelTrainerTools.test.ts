@@ -2356,6 +2356,61 @@ describe('xaiNarrate', () => {
     expect(uc).toMatch(/ranks #1 of 2/) // bbb's objective (90) is best under max
   })
 
+  it('also persists an LLM reliability verdict when the project declares a probabilistic lever', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'aaa', 10, { config: { prob_threshold: 0.5 } })
+    await seedRun(storage, 'bbb', 90, { config: { prob_threshold: 0.9 } })
+    // The reliability call is distinguished by its system prompt; return a JSON verdict only for it.
+    const executor = stubExecutor((req) =>
+      /reliability auditor/.test(req.systemPrompt)
+        ? '{"level":"dubious","rationale":"the edge sits entirely in prob_threshold"}'
+        : 'narrative prose.',
+    )
+    const m = manifest({
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        steps: { type: 'number', default: 100 },
+        prob_threshold: { type: 'number', probabilistic: true },
+      },
+    })
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+      llmConfig: LLM,
+      runKey: 'bbb',
+    })
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-reliability' })
+    expect(recs).toHaveLength(1)
+    expect(recs[0].key).toBe('bbb')
+    expect(recs[0].content).toMatchObject({
+      level: 'dubious',
+      source: 'llm',
+      runKey: 'bbb',
+      model: 'openai/m',
+    })
+  })
+
+  it('writes NO reliability verdict for a project without a probabilistic lever', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'aaa', 10, { config: { lr: 0.1 } })
+    await seedRun(storage, 'bbb', 90, { config: { lr: 0.9 } })
+    const executor = stubExecutor('narrative prose.')
+    const { tools } = makeJudgeTools(executor, storage)
+    await tools.xaiNarrate({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+      runKey: 'bbb',
+    })
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-reliability' })
+    expect(recs).toHaveLength(0)
+    // ...and only one inference (the narrative) — no wasted reliability call.
+    expect(executor.requests).toHaveLength(1)
+  })
+
   it('surfaces per-step drivers in the narration when steps carry saliencyByGroup', async () => {
     const storage = memoryStorage()
     await seedRun(storage, 'ccc', 50, {

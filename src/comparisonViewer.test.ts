@@ -87,6 +87,88 @@ describe('seed is always a nuisance param (never locked), even when the manifest
   })
 })
 
+// A manifest with conditional (appliesWhen) levers gated on the model-identity lever — like BlackSwan, where
+// prob_threshold only applies to supervised models and momentum_lookback only to momentum. Sweeping model_name
+// (a By value axis on the CONTROL lever) must treat those gated levers as part of each model's identity: never
+// LOCK them (else only siblings sharing the focus's gated values match) and never PIN them across models.
+const manifestConditional = {
+  name: 'BlackSwan',
+  recordType: 'blackswan-run',
+  objective: { name: 'return', direction: 'max' },
+  levers: {
+    model_name: { type: 'choice', choices: ['supervised-logreg', 'momentum', 'ppo'], scope: 'model' },
+    learning_rate: { type: 'number', scope: 'model' },
+    asset: { type: 'choice', choices: ['BTC'], scope: 'dataset' },
+    stop_loss: { type: 'number', scope: 'environment' },
+    prob_threshold: {
+      type: 'number',
+      scope: 'model',
+      appliesWhen: { model_name: ['supervised-logreg'] },
+    },
+    momentum_lookback: { type: 'number', scope: 'model', appliesWhen: { model_name: ['momentum'] } },
+    seed: { type: 'number', scope: 'model' },
+  },
+}
+
+describe('axisGatedLevers (levers a control axis gates via appliesWhen)', () => {
+  it('lists the levers whose appliesWhen names the axis lever', () => {
+    expect(C.axisGatedLevers(manifestConditional, 'model_name')).toEqual({
+      prob_threshold: true,
+      momentum_lookback: true,
+    })
+  })
+  it('is empty for a scope axis (appliesWhen never names dataset/environment)', () => {
+    expect(C.axisGatedLevers(manifestConditional, 'dataset')).toEqual({})
+    expect(C.axisGatedLevers(manifestConditional, 'environment')).toEqual({})
+  })
+  it('is empty for a lever that gates nothing', () => {
+    expect(C.axisGatedLevers(manifestConditional, 'learning_rate')).toEqual({})
+  })
+})
+
+describe('locking / matching across the model-identity axis excludes gated levers', () => {
+  it('By model_name lock drops the axis lever AND every lever it gates', () => {
+    expect(C.lockedLeverKeys(manifestConditional, 'model_name')).toEqual([
+      'learning_rate',
+      'asset',
+      'stop_loss',
+    ])
+  })
+  it('a model that differs only in model_name + its own gated levers matches the focus', () => {
+    const focus = {
+      model_name: 'supervised-logreg',
+      learning_rate: 0.01,
+      asset: 'BTC',
+      stop_loss: 0.02,
+      prob_threshold: 0.6,
+    }
+    // A momentum run: shared levers identical, its own gated lever set, the focus's gated lever normalised n/a.
+    const momentum = {
+      model_name: 'momentum',
+      learning_rate: 0.01,
+      asset: 'BTC',
+      stop_loss: 0.02,
+      momentum_lookback: 10,
+      prob_threshold: 'n/a',
+    }
+    expect(C.sameSetupExceptAxis(manifestConditional, 'model_name', focus, momentum)).toBe(true)
+  })
+  it('a run that differs on a SHARED locked lever still does not match', () => {
+    const focus = { model_name: 'supervised-logreg', learning_rate: 0.01, asset: 'BTC', stop_loss: 0.02 }
+    const other = { model_name: 'ppo', learning_rate: 0.5, asset: 'BTC', stop_loss: 0.02 }
+    expect(C.sameSetupExceptAxis(manifestConditional, 'model_name', focus, other)).toBe(false)
+  })
+  it('a scope axis is unaffected — its lock still holds every non-axis lever', () => {
+    expect(C.lockedLeverKeys(manifestConditional, 'environment')).toEqual([
+      'model_name',
+      'learning_rate',
+      'asset',
+      'prob_threshold',
+      'momentum_lookback',
+    ])
+  })
+})
+
 describe('single-lever axis (By value)', () => {
   it('axis = just that lever', () => {
     expect(C.axisLeverKeys(manifestSeedModel, 'learning_rate')).toEqual(['learning_rate'])
@@ -502,5 +584,89 @@ describe('robustnessVerdict', () => {
     const v = C.robustnessVerdict([NaN, 0.5, 0.2, undefined as any])
     expect(v.label).toBe('robust')
     expect(v.n).toBe(2)
+  })
+})
+
+describe('assessRunReliability (probabilistic-edge / luck detection)', () => {
+  it('flags DUBIOUS when a probabilistic threshold dominates AND the setup is unstable across datasets', () => {
+    const weak = C.assessRunReliability({
+      topLever: 'prob_threshold',
+      topImportance: 0.72,
+      topProbabilistic: true,
+      robustness: 'weak',
+      confident: true,
+    })
+    expect(weak.level).toBe('dubious')
+    expect(weak.reasons.join(' ')).toContain('prob_threshold')
+    const mixed = C.assessRunReliability({
+      topLever: 'prob_threshold',
+      topImportance: 0.6,
+      topProbabilistic: true,
+      robustness: 'mixed',
+      confident: true,
+    })
+    expect(mixed.level).toBe('dubious')
+  })
+
+  it('softens to CAUTION when the edge is threshold-driven but robustness is unverified or low-confidence', () => {
+    expect(
+      C.assessRunReliability({
+        topLever: 'prob_threshold',
+        topImportance: 0.8,
+        topProbabilistic: true,
+        robustness: 'n/a',
+        confident: true,
+      }).level,
+    ).toBe('threshold-driven')
+    expect(
+      C.assessRunReliability({
+        topLever: 'prob_threshold',
+        topImportance: 0.8,
+        topProbabilistic: true,
+        robustness: 'weak',
+        confident: false,
+      }).level,
+    ).toBe('threshold-driven')
+  })
+
+  it('does NOT flag when the threshold-driven edge holds up across datasets (robust)', () => {
+    expect(
+      C.assessRunReliability({
+        topLever: 'prob_threshold',
+        topImportance: 0.8,
+        topProbabilistic: true,
+        robustness: 'robust',
+        confident: true,
+      }).level,
+    ).toBe('ok')
+  })
+
+  it('does NOT flag when the dominant lever is not a probabilistic threshold', () => {
+    expect(
+      C.assessRunReliability({
+        topLever: 'learning_rate',
+        topImportance: 0.9,
+        topProbabilistic: false,
+        robustness: 'weak',
+        confident: true,
+      }).level,
+    ).toBe('ok')
+  })
+
+  it('does NOT flag when no single lever dominates (share below half)', () => {
+    expect(
+      C.assessRunReliability({
+        topLever: 'prob_threshold',
+        topImportance: 0.3,
+        topProbabilistic: true,
+        robustness: 'weak',
+        confident: true,
+      }).level,
+    ).toBe('ok')
+  })
+
+  it('is null-safe on empty input', () => {
+    expect(C.assessRunReliability().level).toBe('ok')
+    expect(C.assessRunReliability({}).level).toBe('ok')
   })
 })

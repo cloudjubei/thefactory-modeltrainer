@@ -1208,6 +1208,38 @@ function round2(v: number): number {
 }
 
 /** The system prompt for the one-shot PER-RUN xAI narrative — explain this run, hedge on weak signals. */
+/**
+ * System prompt for the LLM RELIABILITY refinement: judge whether a run's edge is a genuine learned signal or
+ * a fragile probabilistic-THRESHOLD fluke (the deterministic heuristic's concern, re-judged with the run's
+ * full context). Names the manifest's `probabilistic` levers so the model knows which knobs are decision
+ * cutoffs, and constrains the answer to a JSON verdict in the ok/threshold-driven/dubious vocabulary. Pure.
+ */
+export function buildReliabilitySystemPrompt(manifest: TrainerManifest): string {
+  const probLevers = Object.entries(manifest.levers)
+    .filter(([, spec]) => spec.probabilistic)
+    .map(([k]) => k)
+  return [
+    `You are an ML reliability auditor for the "${manifest.name}" training project.`,
+    `Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`,
+    `Judge whether THIS run's result is a GENUINE learned edge or a fragile PROBABILISTIC-THRESHOLD fluke — an edge that lives entirely in tuning a decision cutoff${
+      probLevers.length ? ` (${probLevers.join(', ')})` : ''
+    } and would not survive on new data.`,
+    `Weigh the lever importances (does ONE probabilistic threshold dominate the score spread?), the run's rank, and the sibling comparison (does it hold up, or is it a lucky outlier?). Be skeptical of a strong score that rests on a single threshold.`,
+    `Reply with ONLY a JSON object: {"level": "ok" | "threshold-driven" | "dubious", "rationale": "<one or two sentences>"}. "dubious" = threshold-tuned luck; "threshold-driven" = threshold-led but not clearly luck, or unverified across datasets; "ok" = a defensible edge. No text outside the JSON.`,
+  ].join('\n')
+}
+
+/** Validate an LLM reliability verdict: keep it only if `level` is one of the three, trim the rationale. Pure. */
+export function coerceReliabilityVerdict(
+  parsed: unknown,
+): { level: 'ok' | 'threshold-driven' | 'dubious'; rationale: string } | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const level = (parsed as Record<string, unknown>).level
+  if (level !== 'ok' && level !== 'threshold-driven' && level !== 'dubious') return null
+  const raw = (parsed as Record<string, unknown>).rationale
+  return { level, rationale: typeof raw === 'string' ? raw.trim() : '' }
+}
+
 export function buildXaiNarrateSystemPrompt(manifest: TrainerManifest): string {
   return [
     `You are an ML interpretability analyst for the "${manifest.name}" training project.`,

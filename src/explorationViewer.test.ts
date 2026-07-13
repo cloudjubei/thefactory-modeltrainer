@@ -91,6 +91,46 @@ describe('Exploration.rankLevers', () => {
   })
 })
 
+describe('Exploration.heatmapCells', () => {
+  it('keeps EVERY run per X/Y cell (for subdivisions), sorted hottest-first, with empty cells present', () => {
+    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'cells-a' }, state, runs: runsFixture() })
+    expect(a.vs.axisX).toBe('x')
+    expect(a.vs.axisY).toBe('y')
+    const { xA, yA, cells } = Exploration.heatmapCells(a)
+    // algo A and B share each (x,y) coordinate → that cell holds BOTH runs (they differ only on algo)
+    const gi = xA.index(0.5)
+    const gj = yA.index(0.5)
+    const cell = cells[gj * xA.n + gi]
+    expect(cell.runs.length).toBe(2)
+    expect(cell.runs[0].t).toBeGreaterThanOrEqual(cell.runs[1].t) // hottest-first
+    expect(cell.best).toBe(cell.runs[0].t)
+    // the grid is mostly empty (24×24 numeric bins, only 15 distinct coords populated)
+    expect(cells.some((c: any) => c.runs.length === 0)).toBe(true)
+    // total runs across cells equals the in-grid run count
+    const totalInCells = cells.reduce((n: number, c: any) => n + c.runs.length, 0)
+    expect(totalInCells).toBe(30)
+  })
+
+  it('pegging a lever filters which runs populate the grid', () => {
+    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'cells-peg' }, state, runs: runsFixture() })
+    a.vs.pegs = { algo: 'A' }
+    const { cells } = Exploration.heatmapCells(a)
+    const total = cells.reduce((n: number, c: any) => n + c.runs.length, 0)
+    expect(total).toBe(15) // half the runs (algo=A only)
+  })
+
+  it('makeAxis exposes a cellLabel: numeric → a range, categorical → the value', () => {
+    const numA = Exploration.makeAxis('x', runsFixture(), MANIFEST, 1)
+    expect(numA.kind).toBe('num')
+    expect(String(numA.cellLabel(0))).toContain('–')
+    const catA = Exploration.makeAxis('algo', runsFixture(), MANIFEST, 1)
+    expect(catA.kind).toBe('cat')
+    expect(['A', 'B']).toContain(catA.cellLabel(0))
+  })
+})
+
 describe('Exploration.magma', () => {
   it('returns an rgb() string and ramps from dark to light across [0,1]', () => {
     expect(Exploration.magma(0)).toMatch(/^rgb\(/)

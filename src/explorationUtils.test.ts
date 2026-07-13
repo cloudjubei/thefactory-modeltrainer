@@ -8,7 +8,10 @@ import {
   initExplorationState,
   nextExplorationStep,
   clusterBasins,
+  localRefineRecs,
 } from './explorationUtils.js'
+import type { Basin } from './modelTrainerTypes.js'
+import { XAI_MIN_SEEDS } from './modelTrainerConstants.js'
 
 // A synthetic project: one discrete lever `algo` (the basin axis), one important continuous lever
 // `lr`, one INERT continuous lever `noise_knob` (screening must freeze it), and `seed` (the noise dim).
@@ -192,6 +195,119 @@ describe('clusterBasins', () => {
     expect(a.peakObjective).toBeGreaterThan(480)
     expect(Number(a.centerConfig.lr)).toBeCloseTo(0.5, 1)
     expect(a.peakSeeds).toBe(5)
+  })
+})
+
+describe('adaptive coordinate-ascent step', () => {
+  // A basin on `lr` (range [0,1]) whose peak we climb. peakSeeds high so the seed-stabilization rec is
+  // skipped and only the coordinate sweep is emitted. `state.activeLevers` includes lr so it's swept.
+  const basinAt = (lr: number): Basin => ({
+    id: 'algo=A',
+    region: { algo: 'A' },
+    centerConfig: { algo: 'A', lr, seed: 0 },
+    peakObjective: 500,
+    peakSeeds: XAI_MIN_SEEDS,
+    plateaued: false,
+    memberRunKeys: [],
+  })
+  const stateWith = (): ExplorationState => ({
+    ...initExplorationState(MANIFEST),
+    stage: 'local',
+    activeLevers: ['algo', 'lr'],
+    noiseFloor: 1,
+  })
+  const runAt = (lr: number): AnalysisRun => ({
+    key: `r-${lr}`,
+    config: { algo: 'A', lr, seed: 0 },
+    objective: 400,
+    metrics: { score: 400, baseline: BASELINE },
+    seed: 0,
+    status: 'completed',
+  })
+  const sweptValues = (basin: Basin, runs: AnalysisRun[]): number[] => {
+    const recs = localRefineRecs(basin, runs, MANIFEST, stateWith())
+    const sweep = recs.find((r) => r.spec.sweep && 'lr' in r.spec.sweep)
+    return sweep ? (sweep.spec.sweep!.lr as number[]).slice().sort((a, b) => a - b) : []
+  }
+
+  it('SHRINKS the step toward the peak as tried neighbours tighten (adaptive bisection, not fixed range/8)', () => {
+    // center 0.5, nearest tried neighbours at 0.4 and 0.6 → half-gap 0.05, FINER than the old range/8 (0.125)
+    const cands = sweptValues(basinAt(0.5), [runAt(0.4), runAt(0.5), runAt(0.6)])
+    expect(cands.length).toBeGreaterThan(0)
+    // every proposed point sits strictly inside the (0.4, 0.6) bracket — the search is honing in, not
+    // re-probing at the coarse fixed ±0.125 (which would propose 0.375 / 0.625, OUTSIDE the bracket)
+    for (const v of cands) {
+      expect(v).toBeGreaterThan(0.4)
+      expect(v).toBeLessThan(0.6)
+    }
+    const maxOffset = Math.max(...cands.map((v) => Math.abs(v - 0.5)))
+    expect(maxOffset).toBeLessThanOrEqual(0.05 + 1e-9)
+  })
+
+  it('never proposes a FIRST step coarser than range/8 (bounded when neighbours are the range edges)', () => {
+    // only the center tried → neighbours default to the range edges [0,1]; step capped at range/8 = 0.125
+    const cands = sweptValues(basinAt(0.5), [runAt(0.5)])
+    expect(cands.length).toBeGreaterThan(0)
+    const maxOffset = Math.max(...cands.map((v) => Math.abs(v - 0.5)))
+    expect(maxOffset).toBeLessThanOrEqual(0.125 + 1e-9)
+  })
+
+  it('PLATEAUS (emits no sweep) once the bracket is tighter than the min-step floor', () => {
+    // neighbours 0.49 and 0.51 → half-gap 0.005 < range/64 (0.0156): resolved, nothing left to try
+    const cands = sweptValues(basinAt(0.5), [runAt(0.49), runAt(0.5), runAt(0.51)])
+    expect(cands).toEqual([])
+  })
+
+  it('drives a NARROW off-grid peak much closer than the old fixed step could', () => {
+    // A sharp Gaussian-ish peak at lr=0.53 (off the 1/16 grid the old fixed step lands on). K large ⇒ narrow.
+    const NARROW: TrainerManifest = { ...MANIFEST, recordType: 'narrow-run' }
+    const trueNarrow = (c: Record<string, unknown>): number => {
+      const lr = Number(c.lr ?? 0.1)
+      const seed = Number(c.seed ?? 0)
+      const jitter = (((seed * 37) % 7) - 3) * 0.2
+      const base = String(c.algo) === 'A' ? 500 - 9000 * (lr - 0.53) ** 2 : BASELINE
+      return base + jitter
+    }
+    let seq = 0
+    let state = initExplorationState(NARROW, { maxRuns: 800 })
+    const runs: AnalysisRun[] = []
+    let rounds = 0
+    while (!state.done && rounds < 300) {
+      const step = nextExplorationStep(state, runs, NARROW, { targetObjective: 500 })
+      state = step.stateNext
+      for (const rec of step.batch)
+        for (const cfg of expandSpec(rec.spec, NARROW)) {
+          const score = trueNarrow(cfg)
+          runs.push({ key: `n-${seq++}`, config: { ...cfg }, objective: score, metrics: { score, baseline: BASELINE }, seed: Number(cfg.seed ?? 0), status: 'completed' })
+        }
+      rounds++
+    }
+    const declared = state.basins.find((b) => b.id === state.declaredBasinId)
+    expect(declared).toBeTruthy()
+    // the adaptive step seats the peak within ~490 of 500; the OLD fixed range/8 stalled ~1 step short (~430)
+    expect(declared!.peakObjective).toBeGreaterThan(490)
+    expect(Number(declared!.centerConfig.lr)).toBeCloseTo(0.53, 1)
+  })
+})
+
+describe('exhausted stage advance (no dead-end when the space is already covered)', () => {
+  it('advances GLOBAL → local when told the proposed batch is fully redundant', () => {
+    const runs = [
+      ...[0.2, 0.5, 0.8].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s }))),
+    ]
+    const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'global', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const normal = nextExplorationStep(state, runs, MANIFEST, {})
+    expect(normal.stage).toBe('global') // absent the flag it keeps probing globally
+    const advanced = nextExplorationStep(state, runs, MANIFEST, { exhausted: true })
+    expect(advanced.stage).not.toBe('global') // told it's exhausted → it moves on (local/converged), never dead-ends
+  })
+
+  it('converges from LOCAL when told the batch is fully redundant', () => {
+    const runs = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s })))
+    const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const advanced = nextExplorationStep(state, runs, MANIFEST, { exhausted: true })
+    expect(advanced.done).toBe(true)
+    expect(advanced.stage).toBe('converged')
   })
 })
 

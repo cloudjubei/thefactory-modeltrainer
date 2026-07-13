@@ -110,7 +110,11 @@ project by its manifest's `recordType`.
   environment levers ("By environment"), or one chosen tunable lever ("By value", one-factor-at-a-time). So a
   row is exactly one config's seeds. Each row shows the metric [min·avg·max] over seeds plus its normalised
   STANDING (robust-z within that axis value); `robustnessVerdict` classifies robust/mixed/weak. `seed` is
-  never a locked or axis lever (a nuisance param pooled over, matching `setupKeyOfRun`). Regime slice toggles
+  never a locked or axis lever (a nuisance param pooled over, matching `setupKeyOfRun`). When the axis is a
+  CONTROL lever (one that gates others via `appliesWhen`, e.g. `model_name`), `lockedLeverKeys` drops the
+  levers it gates (`axisGatedLevers`) from the lock AND the sweep pins — each model brings its own
+  `prob_threshold`/`momentum_lookback`, which the store normalises to `n/a` where they don't apply, so locking
+  them would hide every sibling that isn't the focus's own model. Regime slice toggles
   narrow the pool (dataset by `timeframe`, environment by `allow_shorting`/`no_sell_action`); levers the
   manifest marks `active: false` (declared but not wired into the sim — `position_sizing`/`transaction_fee`/
   `vol_target`) are hidden from the value line via `isLeverActive` and never swept. Columns sort by any metric
@@ -126,6 +130,27 @@ project by its manifest's `recordType`.
   `no_sell_action` off while `allow_shorting`, since the sim ignores it there) to its off value and dedupes —
   so an environment sweep is the ~dozens of runs that differ in behaviour, not 100k+. Launches go through
   `xaiLaunchBatch`, which stays on the xAI tab.
+- **Per-model lever relevance + run reliability** guard against wasteful runs and lucky edges. The By value
+  lever picker screens each lever's empirical effect for the focus RUN's model (`xaiModelLeverEffects` =
+  `leverImportances` over that model's runs) and marks the near-zero ones "· no effect" (a sweep there won't
+  move the score). Every run carries a RELIABILITY verdict (`assessRunReliability`, pure/tested): when a
+  model's whole score spread concentrates (≥½) in a manifest `probabilistic: true` lever (a decision cutoff
+  like `prob_threshold`) and the config is weak/mixed across datasets, the run is **dubious** (threshold-tuned
+  luck, not a learned edge); unverified-across-datasets softens it to **threshold-driven**; else **ok**.
+- **The verdict is a persisted, overturnable, filterable field** (only for projects with a `probabilistic`
+  lever). Layering (`resolveReliability`): a persisted **user override** wins over a persisted **LLM** verdict
+  wins over the **heuristic** baseline. Only the authoritative verdicts are stored (`<recordType>-reliability`
+  overlay record per run, `source: 'user'|'llm'`, like eval verdicts); the heuristic is recomputed in memory
+  into `reliabilityHeuristicCache` on each global Refresh (only the flagged runs kept, and the probabilistic-
+  edge screen skips non-candidate models so it stays O(pool)). Surfaced as a headline badge + a **Reliability**
+  section (Mark dubious / Mark reliable / Reset to auto) in run detail, a **Reliability** column, and a Runs
+  filter (`runsReliabilityFilter`: any / flagged / dubious / threshold-driven / ok). The filter lives in an
+  overlay record, not a run-record field, so it can't push into the server `where` — it forces the unpaged
+  client-filter path (like text search) and scores the full set in `refreshRuns`. The **LLM** verdict is
+  produced by the existing xAI narrate pass (`xaiNarrate` runs a second structured call — `buildReliability
+  SystemPrompt` + `coerceReliabilityVerdict` over the same run digest — and persists a `source: 'llm'` overlay),
+  so "Narrate" refines the verdict with the run's full context; it never fails the narrative if the verdict
+  call errors.
 - **Every "open these runs" gesture lands in the Selection view** (`openRunsSelection`): a By value / By
   dataset / By environment row's "runs ↗" (the runs BEHIND that row), a comparison drill, a fANOVA/interaction
   cell, or a hypothesis's runs all route to one `runsViewMode: 'selection'` tab that holds the LAST selection,

@@ -12,6 +12,8 @@ import {
   buildSuggestHypothesesSystemPrompt,
   buildSuggestHypothesesUserContent,
   buildXaiNarrateSystemPrompt,
+  buildReliabilitySystemPrompt,
+  coerceReliabilityVerdict,
   buildXaiNarrateUserContent,
   applyMigrationRules,
   resolveCampaignParallelism,
@@ -1487,6 +1489,29 @@ describe('prompt builders', () => {
     expect(prompt).toMatch(/SHORT narrative/)
     expect(prompt).toMatch(/ONE specific run/)
     expect(prompt).toMatch(/sanity check/)
+  })
+
+  it('reliability system prompt names the probabilistic levers and constrains the verdict vocabulary', () => {
+    const withProb = {
+      ...m,
+      levers: { ...m.levers, prob_threshold: { type: 'number' as const, probabilistic: true } },
+    }
+    const prompt = buildReliabilitySystemPrompt(withProb)
+    expect(prompt).toContain(m.name)
+    expect(prompt).toContain('prob_threshold')
+    expect(prompt).toMatch(/dubious/)
+    expect(prompt).toMatch(/threshold-driven/)
+    expect(prompt).toMatch(/JSON/)
+  })
+
+  it('coerceReliabilityVerdict accepts a valid verdict, trims the rationale, and rejects junk', () => {
+    expect(
+      coerceReliabilityVerdict({ level: 'dubious', rationale: '  threshold-tuned luck  ' }),
+    ).toEqual({ level: 'dubious', rationale: 'threshold-tuned luck' })
+    expect(coerceReliabilityVerdict({ level: 'ok' })).toEqual({ level: 'ok', rationale: '' })
+    expect(coerceReliabilityVerdict({ level: 'nonsense' })).toBeNull()
+    expect(coerceReliabilityVerdict(null)).toBeNull()
+    expect(coerceReliabilityVerdict({ rationale: 'no level' })).toBeNull()
   })
 
   it('xai-narrate user content digests one run: decisions, attribution+sanity, reward, latent, sibling, context', () => {

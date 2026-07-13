@@ -146,3 +146,17 @@ export const EXPLORATION_BASIN_MIN_SPAN_FRACTION = 0.1
  * an infinite spawn→fail cycle when a batch is genuinely un-runnable (bad config, missing compute).
  */
 export const EXPLORATION_MAX_CHILD_FAILURES = 3
+
+/**
+ * Coarsest local coordinate-ascent step, as a fraction of a numeric lever's range. The FIRST refinement
+ * around a basin center probes at most this far (so it never jumps coarser than an eighth of the range),
+ * then the step SHRINKS toward the peak as tried neighbours tighten around the center (adaptive bisection).
+ */
+export const EXPLORATION_REFINE_MAX_STEP_FRACTION = 1 / 8
+
+/**
+ * Finest local step, as a fraction of the range: once the nearest tried points bracket the center more
+ * tightly than this, the lever is considered resolved (no more sweep points) so the basin can plateau.
+ * Small enough (1/64) to seat a NARROW peak the old fixed 1/8 step overshot (~87% of a sharp Gaussian).
+ */
+export const EXPLORATION_REFINE_MIN_STEP_FRACTION = 1 / 64

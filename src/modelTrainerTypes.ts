@@ -59,6 +59,36 @@ export interface TrainerLeverSpec {
    * specific value. Distinct from {@link appliesWhen} (which greys the lever out in the launch form).
    */
   dependsOn?: { lever: string; active?: boolean; equals?: unknown }
+  /**
+   * Marks a lever that is a DECISION CUTOFF on a probabilistic signal (e.g. a classifier P(up) threshold).
+   * A model whose whole score spread concentrates in such a lever — and doesn't hold across datasets — has
+   * likely found threshold-tuned luck, not a learned edge; xAI flags such runs as dubious. Omitted ⇒ a
+   * normal lever.
+   */
+  probabilistic?: boolean
+}
+
+/**
+ * A run's RELIABILITY verdict — is its edge a learned signal or a probabilistic-threshold fluke? Persisted as
+ * a `<recordType>-reliability` overlay record keyed by run key ONLY when authoritative (`source: 'user'`
+ * override or `source: 'llm'`); the `heuristic` baseline is recomputed in memory, not stored. A user override
+ * wins over the LLM, which wins over the heuristic.
+ */
+export interface RunReliabilityVerdict {
+  /** `ok` = no concern; `threshold-driven` = a caution; `dubious` = likely threshold-tuned luck. */
+  level: 'ok' | 'threshold-driven' | 'dubious'
+  /** Who produced THIS verdict — a manual override, the LLM, or the deterministic heuristic. */
+  source: 'user' | 'llm' | 'heuristic'
+  /** Heuristic bullet reasons (the deterministic signals that fired). */
+  reasons?: string[]
+  /** LLM prose rationale (when `source: 'llm'`). */
+  rationale?: string
+  /** LLM model id that produced the verdict (when `source: 'llm'`). */
+  model?: string
+  /** ISO timestamp the verdict was written. */
+  assessedAt?: string
+  /** The run key this verdict is for (also the record key). */
+  runKey?: string
 }
 
 /** The single north-star metric a run is judged by. */

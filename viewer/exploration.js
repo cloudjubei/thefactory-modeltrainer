@@ -58,6 +58,8 @@
 
   // Per-project view state (chosen axes / pegs / zoom) — survives the live re-render poll.
   const view = {}
+  // Terminal-log stickiness: auto-scroll the decision log to the newest line UNLESS the user scrolled up.
+  let logStick = true
   let ctx = null // { container, data, actions } — cached so a selector change can re-render locally
 
   let stylesInjected = false
@@ -81,10 +83,14 @@
     .expl-status .now{font-family:var(--e-mono);font-size:12.5px;color:var(--e-muted);margin:8px 0 0}
     .expl-status .now b{color:var(--e-text);font-weight:600}
     .expl-status .now.sub{font-size:11.5px;color:var(--e-faint);margin-top:5px}
-    .expl-log{list-style:none;margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--e-line);max-height:132px;overflow:auto;display:flex;flex-direction:column-reverse;gap:0}
-    .expl-log li{display:flex;gap:10px;font-family:var(--e-mono);font-size:11.5px;padding:4px 0;color:var(--e-muted)}
-    .expl-log li .st{color:var(--e-gold);min-width:74px}
-    .expl-log li .rn{color:var(--e-faint);min-width:52px;text-align:right}
+    .expl-logwrap{margin:10px 0 0;padding-top:8px;border-top:1px solid var(--e-line);max-height:150px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin}
+    .expl-log{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:0}
+    .expl-log li{display:flex;gap:10px;font-family:var(--e-mono);font-size:11.5px;padding:4px 2px;color:var(--e-muted);border-top:1px solid color-mix(in srgb,var(--e-line) 45%,transparent)}
+    .expl-log li:first-child{border-top:none}
+    .expl-log li .st{color:var(--e-gold);min-width:74px;flex:none}
+    .expl-log li .ms{flex:1;min-width:0}
+    .expl-log li .rn{color:var(--e-faint);min-width:52px;text-align:right;flex:none}
+    .expl-status .now .bl{color:var(--e-gold)}
     .expl-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
     .expl-field{display:flex;flex-direction:column;gap:4px;font-family:var(--e-mono);font-size:11px;color:var(--e-muted)}
     .expl-field .lbl{display:inline-flex;align-items:center;gap:5px}
@@ -119,6 +125,15 @@
     .expl-axis-y{writing-mode:vertical-rl;transform:rotate(180deg);font-family:var(--e-mono);font-size:10.5px;color:var(--e-faint);text-align:center}
     .expl-maprow{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:stretch}
     .expl-axis-x{text-align:center;font-family:var(--e-mono);font-size:10.5px;color:var(--e-faint);margin-top:6px}
+    .expl-mapmain{position:relative}
+    .expl-mapcanvas{cursor:crosshair;display:block}
+    .expl-tip{position:absolute;z-index:20;pointer-events:none;max-width:270px;background:var(--e-panel);border:1px solid var(--e-line);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-family:var(--e-mono);font-size:11px;color:var(--e-muted)}
+    .expl-tip .th{color:var(--e-text);font-weight:600;margin-bottom:3px}
+    .expl-tip .tr{color:var(--e-faint);margin-bottom:5px}
+    .expl-tip .tr .tw,.expl-tip .tl b{color:var(--e-gold)}
+    .expl-tip .tl{padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .expl-tip .tl b{font-weight:600;margin-right:5px}
+    .expl-tip .tm{color:var(--e-faint);margin-top:3px}
     .expl-grid2{display:grid;grid-template-columns:1.1fr 1fr;gap:18px;margin-top:22px}
     @media (max-width:860px){.expl-grid2{grid-template-columns:1fr}}
     .expl-card{background:var(--e-panel);border:1px solid var(--e-line);border-radius:11px;padding:16px 18px}
@@ -216,6 +231,8 @@
       }
       if (hi === lo) hi = lo + 1
       const n = Math.round(BASE_GRID * zoom)
+      const edge = (i) => lo + (i / n) * (hi - lo)
+      const d = hi - lo < 1 ? 3 : hi - lo < 100 ? 2 : 0
       return {
         lever,
         kind: 'num',
@@ -225,6 +242,7 @@
         index: (v) => Math.max(0, Math.min(n - 1, Math.floor(((Number(v) - lo) / (hi - lo)) * n))),
         labels: [fmt(lo, lo < 1 ? 3 : 0), fmt(hi, hi < 1 ? 3 : 0)],
         coordOf: (v) => ((Number(v) - lo) / (hi - lo)),
+        cellLabel: (i) => `${fmt(edge(i), d)}–${fmt(edge(i + 1), d)}`,
       }
     }
     const distinct = [...new Set(vals.map(String))].sort().slice(0, MAX_CAT_BINS)
@@ -237,7 +255,34 @@
       index: (v) => (idx.has(String(v)) ? idx.get(String(v)) : -1),
       labels: distinct,
       coordOf: (v) => (idx.has(String(v)) ? (idx.get(String(v)) + 0.5) / distinct.length : -1),
+      cellLabel: (i) => distinct[i],
     }
+  }
+
+  // Bin the (peg-filtered) runs into the X×Y grid, KEEPING every run per cell (not just the best) so the
+  // heatmap can subdivide a busy cell + a hover can list the exact configs behind a square. Pure + tested.
+  function heatmapCells(a) {
+    const zoom = a.vs.zoom || 1
+    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest, xIsNum(a) ? zoom : 1)
+    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest, yIsNum(a) ? zoom : 1)
+    const pegs = a.vs.pegs || {}
+    const runs = a.runs.filter((r) =>
+      Object.keys(pegs).every((l) => pegs[l] == null || String(r.config[l]) === String(pegs[l])),
+    )
+    const cells = new Array(xA.n * yA.n)
+    for (let k = 0; k < cells.length; k++) cells[k] = { i: k % xA.n, j: Math.floor(k / xA.n), runs: [], best: null }
+    for (const r of runs) {
+      const gi = xA.index(r.config[a.vs.axisX])
+      const gj = yA.index(r.config[a.vs.axisY])
+      if (gi < 0 || gj < 0) continue
+      const o = num(r.objective)
+      const t = a.nrm(o)
+      const c = cells[gj * xA.n + gi]
+      c.runs.push({ config: r.config, objective: o, key: r.key, t: isFinite(t) ? t : 0 })
+      if (c.best === null || t > c.best) c.best = t
+    }
+    for (const c of cells) c.runs.sort((p, q) => q.t - p.t) // hottest-first so the mosaic + tooltip read best→worst
+    return { xA, yA, cells }
   }
 
   // --- drawing ----------------------------------------------------------------------------------
@@ -245,19 +290,16 @@
   function drawHeatmap(container, a) {
     const wrap = container.querySelector('[data-expl-map]')
     if (!wrap || !a.vs.axisX || !a.vs.axisY) return
-    const zoom = a.vs.zoom || 1
-    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest, xIsNum(a) ? zoom : 1)
-    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest, yIsNum(a) ? zoom : 1)
-    // filter runs by pegs
+    const { xA, yA, cells } = heatmapCells(a)
     const pegs = a.vs.pegs || {}
-    const runs = a.runs.filter((r) => Object.keys(pegs).every((l) => pegs[l] == null || String(r.config[l]) === String(pegs[l])))
 
     const canvas = wrap.querySelector('canvas')
     const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-    // cell size scales with zoom; a numeric axis gets more cells, a categorical axis gets bigger cells
-    const cell = Math.max(10, Math.round(18 * zoom))
-    const W = Math.min(1400, xA.n * cell)
-    const H = Math.min(1400, yA.n * cell)
+    // Bigger base cell now that a busy cell subdivides into a mini-mosaic — needs room to read.
+    const zoom = a.vs.zoom || 1
+    const cell = Math.max(14, Math.round(24 * zoom))
+    const W = Math.min(1600, xA.n * cell)
+    const H = Math.min(1600, yA.n * cell)
     canvas.style.width = W + 'px'
     canvas.style.height = H + 'px'
     canvas.width = W * dpr
@@ -265,26 +307,39 @@
     const x = canvas.getContext('2d')
     x.scale(dpr, dpr)
 
-    const best = new Array(xA.n * yA.n).fill(null)
-    for (const r of runs) {
-      const gi = xA.index(r.config[a.vs.axisX])
-      const gj = yA.index(r.config[a.vs.axisY])
-      if (gi < 0 || gj < 0) continue
-      const t = a.nrm(num(r.objective))
-      const k = gj * xA.n + gi
-      if (best[k] === null || t > best[k]) best[k] = t
-    }
     const cw = W / xA.n
     const ch = H / yA.n
-    const empty = getComputedStyle(container.querySelector('.expl')).getPropertyValue('--e-panel2') || '#0d121d'
+    const empty = (getComputedStyle(container.querySelector('.expl')).getPropertyValue('--e-panel2') || '#0d121d').trim()
     for (let j = 0; j < yA.n; j++) {
       for (let i = 0; i < xA.n; i++) {
-        const t = best[(yA.n - 1 - j) * xA.n + i]
-        x.fillStyle = t === null ? empty : magma(t)
-        x.fillRect(i * cw, j * ch, cw + 0.6, ch + 0.6)
+        const c = cells[(yA.n - 1 - j) * xA.n + i] // row 0 = highest y (drawn top)
+        const px = i * cw
+        const py = j * ch
+        if (!c.runs.length) {
+          x.fillStyle = empty
+          x.fillRect(px, py, cw + 0.6, ch + 0.6)
+          continue
+        }
+        if (c.runs.length === 1) {
+          x.fillStyle = magma(c.runs[0].t)
+          x.fillRect(px, py, cw + 0.6, ch + 0.6)
+          continue
+        }
+        // Multiple configs share this X/Y square (they differ on OTHER levers) — subdivide into a mosaic so
+        // the spread of results inside one cell is visible instead of collapsed to a single best colour.
+        const sub = Math.ceil(Math.sqrt(c.runs.length))
+        const sw = cw / sub
+        const sh = ch / sub
+        for (let s = 0; s < sub * sub; s++) {
+          const si = s % sub
+          const sj = Math.floor(s / sub)
+          const run = c.runs[s]
+          x.fillStyle = run ? magma(run.t) : empty
+          x.fillRect(px + si * sw, py + sj * sh, sw + 0.5, sh + 0.5)
+        }
       }
     }
-    x.strokeStyle = 'rgba(128,140,160,.14)'
+    x.strokeStyle = 'rgba(128,140,160,.16)'
     x.lineWidth = 1
     for (let g = 1; g < xA.n; g++) { x.beginPath(); x.moveTo(g * cw, 0); x.lineTo(g * cw, H); x.stroke() }
     for (let g = 1; g < yA.n; g++) { x.beginPath(); x.moveTo(0, g * ch); x.lineTo(W, g * ch); x.stroke() }
@@ -304,6 +359,55 @@
       x.beginPath(); x.arc(px, py, 7, 0, 7); x.stroke()
       x.beginPath(); x.moveTo(px - 11, py); x.lineTo(px + 11, py); x.moveTo(px, py - 11); x.lineTo(px, py + 11); x.lineWidth = 1.3; x.stroke()
     }
+
+    wireHeatmapHover(wrap, canvas, a, { xA, yA, cells, W, H, cw, ch })
+  }
+
+  // Hover a cell → a tooltip with the exact config(s) + result behind that square; hover an empty cell →
+  // the X/Y range it covers, so gaps read as "nothing tried here (x∈…, y∈…)" instead of a blank.
+  function wireHeatmapHover(wrap, canvas, a, geom) {
+    let tip = wrap.parentNode.querySelector('.expl-tip')
+    if (!tip) {
+      tip = document.createElement('div')
+      tip.className = 'expl-tip'
+      tip.style.display = 'none'
+      wrap.parentNode.appendChild(tip)
+    }
+    const { xA, yA, cells, W, H, cw, ch } = geom
+    const dir = a.dir === 'min' ? 'min' : 'max'
+    canvas.onmousemove = (ev) => {
+      const rect = canvas.getBoundingClientRect()
+      const mx = ((ev.clientX - rect.left) / rect.width) * W
+      const my = ((ev.clientY - rect.top) / rect.height) * H
+      const i = Math.max(0, Math.min(xA.n - 1, Math.floor(mx / cw)))
+      const jScreen = Math.max(0, Math.min(yA.n - 1, Math.floor(my / ch)))
+      const cj = yA.n - 1 - jScreen
+      const cell = cells[cj * xA.n + i]
+      const where = `<span class="tw">${esc(a.vs.axisX)}</span> ${esc(xA.cellLabel(i))} · <span class="tw">${esc(a.vs.axisY)}</span> ${esc(yA.cellLabel(cj))}`
+      let body
+      if (!cell || !cell.runs.length) {
+        body = `<div class="th">no runs here</div><div class="tr">${where}</div>`
+      } else {
+        const rows = cell.runs.slice(0, 8).map((r) => {
+          const cfg = Object.keys(r.config)
+            .filter((k) => k !== a.vs.axisX && k !== a.vs.axisY && k !== 'seed')
+            .map((k) => `${esc(k)}=${esc(fmtVal(r.config[k]))}`)
+            .join(' ')
+          return `<div class="tl"><b>${isFinite(r.objective) ? fmt(r.objective, 2) : '—'}</b> <span>${cfg || '—'}</span></div>`
+        }).join('')
+        const more = cell.runs.length > 8 ? `<div class="tm">+${cell.runs.length - 8} more</div>` : ''
+        body = `<div class="th">${cell.runs.length} run${cell.runs.length === 1 ? '' : 's'} · best ${dir === 'max' ? '↑' : '↓'}</div><div class="tr">${where}</div>${rows}${more}`
+      }
+      tip.innerHTML = body
+      tip.style.display = 'block'
+      const host = wrap.parentNode.getBoundingClientRect()
+      let left = ev.clientX - host.left + 14
+      let top = ev.clientY - host.top + 14
+      if (left + 260 > host.width) left = Math.max(4, ev.clientX - host.left - 260 - 14)
+      tip.style.left = left + 'px'
+      tip.style.top = top + 'px'
+    }
+    canvas.onmouseleave = () => { tip.style.display = 'none' }
   }
   const xIsNum = (a) => leverIsNumeric(a.manifest, a.vs.axisX, a.runs)
   const yIsNum = (a) => leverIsNumeric(a.manifest, a.vs.axisY, a.runs)
@@ -390,23 +494,40 @@
     const done = !!(data.state && data.state.done)
     const hasState = !!data.state
     const stage = data.state && data.state.stage
-    const inProgress = hasState && !done && !paused // the map is mid-search
     const log = (data.state && data.state.log) || []
     const last = log[log.length - 1]
 
-    // The Start controls appear ONLY when there is no active/paused/stalled search — otherwise the whole
-    // area is a live status view. This is the "no Start button while running" behaviour.
+    // The in-flight child `train` run this round launched (queued vs running). A running/queued child means
+    // the search IS working even when the `explore` controller activity momentarily isn't found live — so
+    // treat it as "working" and never fall back to a Start/Stopped view while a child is executing.
+    const pc = data.pendingChild
+    const childActive = !!(pc && (pc.status === 'running' || pc.status === 'starting' || pc.status === 'queued'))
+    const working = (live || childActive) && !paused
+    const inProgress = hasState && !done && !paused && !working // the map is mid-search but nothing is executing
+
+    // Real-time run accounting: the strategist's `spentRuns` (what it has folded into the map) vs the ACTUAL
+    // completed runs on disk. When runs land faster than rounds fold them, show the backlog so the count
+    // never looks stale/stuck ("7 accounted · 3 new being analyzed"), which is the "feels stale" complaint.
+    const spent = (data.state && data.state.budget && data.state.budget.spentRuns) || 0
+    const total = typeof data.totalRuns === 'number' ? data.totalRuns : a.runs.length
+    const backlog = Math.max(0, total - spent)
+
+    // Start controls appear ONLY when idle (no working/paused/stalled search) — otherwise a live status view.
     let head
     let ctrls
     let showBudget = false
-    if (live && !paused) {
-      head = `<span class="pulse"></span> Exploring — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
-      ctrls = `<button class="expl-btn" data-act="pause">Pause</button><button class="expl-btn" data-act="abort">Stop</button>`
+    if (working) {
+      const verb = live ? 'Exploring' : 'Finishing run'
+      head = `<span class="pulse"></span> ${verb} — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
+      ctrls = live
+        ? `<button class="expl-btn" data-act="pause">Pause</button><button class="expl-btn" data-act="abort">Stop</button>`
+        : `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
     } else if (paused) {
       head = 'Paused'
       ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
     } else if (inProgress) {
-      head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span> · Resume to continue`
+      const why = backlog > 0 ? ` · ${backlog} new run${backlog === 1 ? '' : 's'} to fold in` : ''
+      head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span>${why} · Resume to continue`
       ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
     } else if (done) {
       head = 'Converged'
@@ -421,43 +542,38 @@
     const b = (data.state && data.state.budget) || {}
     const field = (id, label, val, help) =>
       `<label class="expl-field"><span class="lbl" data-help="${esc(help)}">${esc(label)}</span><input type="number" min="0" id="${id}" value="${val != null ? esc(val) : ''}" placeholder="auto"></label>`
+    // Parallelism is NOT set here — it comes from the Activity tab's one "Max parallel runs" knob (so there's
+    // a single place for it). Only the run budget + target objective are exploration-specific.
     const budgetFields = showBudget
       ? `<div class="expl-controls" style="margin-top:12px">
             ${field('expl-maxruns', 'run budget', b.maxRuns, BUDGET_HELP.maxRuns)}
-            ${field('expl-conc', 'max concurrent', b.maxConcurrent, BUDGET_HELP.maxConcurrent)}
             ${field('expl-target', 'target objective', data.state && data.state.targetObjective, BUDGET_HELP.targetObjective)}
           </div>`
       : ''
 
-    const spent = (data.state && data.state.budget && data.state.budget.spentRuns) || 0
-    // The in-flight child `train` run this round launched (queued vs running) — makes "0 runs, nothing
-    // happening" legible: a queued child is WAITING for an experiment slot (other training or memory
-    // pressure is using them), not stuck.
-    const pc = data.pendingChild
     const childLine =
-      pc && (live || inProgress)
+      pc && (working || inProgress)
         ? pc.status === 'queued'
           ? '<p class="now sub">⏳ run queued — waiting for a free experiment slot (other training or host memory pressure may be using them)</p>'
           : pc.status === 'running' || pc.status === 'starting'
             ? '<p class="now sub">▶ training run in progress…</p>'
             : ''
         : ''
-    const nowLine =
-      last && (live || inProgress || paused)
-        ? `<p class="now"><b>${esc(last.rationale)}</b> · ${spent} runs so far</p>`
-        : live
-          ? '<p class="now">starting the controller…</p>'
-          : ''
+    const countLine =
+      working || inProgress || paused
+        ? `<p class="now"><b>${esc((last && last.rationale) || (stage ? stage : 'starting the controller…'))}</b> · ${spent} run${spent === 1 ? '' : 's'} folded in${backlog > 0 ? ` · <span class="bl">${backlog} new being analyzed…</span>` : ''}</p>`
+        : ''
+    // Decision breadcrumbs as a terminal-style console: oldest at top, NEWEST AT BOTTOM, in a fixed-height
+    // scroll box that auto-sticks to the bottom (handled after render) so new lines don't shove the page.
     const logHtml = log.length
-      ? `<ul class="expl-log">${log
-          .slice(-12)
-          .map((e) => `<li><span class="st">${esc(e.stage)}</span><span>${esc(e.rationale)}</span><span class="rn">${e.spentRuns} runs</span></li>`)
-          .join('')}</ul>`
+      ? `<div class="expl-logwrap" data-expl-log><ol class="expl-log">${log
+          .map((e) => `<li><span class="st">${esc(e.stage)}</span><span class="ms">${esc(e.rationale)}</span><span class="rn">${e.spentRuns} runs</span></li>`)
+          .join('')}</ol></div>`
       : ''
 
-    return `<div class="expl-status ${live && !paused ? 'live' : ''}">
+    return `<div class="expl-status ${working ? 'live' : ''}">
       <div class="row"><span class="title">${head}</span><div style="flex:1"></div>${ctrls}</div>
-      ${nowLine}
+      ${countLine}
       ${childLine}
       ${budgetFields}
       ${logHtml}
@@ -547,7 +663,7 @@
           ? `${mapControlsHtml(a)}
              <div class="expl-mapcard"><div class="expl-maprow">
                <div class="expl-axis-y">${esc(a.vs.axisY || '')} ↑</div>
-               <div><div class="expl-mapscroll" data-expl-map><canvas class="expl-mapcanvas"></canvas></div>
+               <div class="expl-mapmain"><div class="expl-mapscroll" data-expl-map><canvas class="expl-mapcanvas"></canvas></div>
                <div class="expl-axis-x">${esc(a.vs.axisX || '')} →</div></div>
              </div></div>`
           : `<div class="expl-empty">Coverage heatmap needs two levers with more than one value tried. Run the exploration (or a few experiments) and it will appear.</div>`
@@ -569,7 +685,20 @@
     }
     if (hasMap) drawHeatmap(container, a)
     drawRegret(container, a)
+    stickLog(container)
     wire(container, data, actions, a)
+  }
+
+  // Terminal-log behaviour: after each re-render, snap to the newest line if the user was already at the
+  // bottom; a scroll listener releases the snap the moment they scroll up to read history, and re-arms it
+  // when they return to the bottom — so live updates never yank them away from what they're reading.
+  function stickLog(container) {
+    const box = container.querySelector('[data-expl-log]')
+    if (!box) return
+    if (logStick) box.scrollTop = box.scrollHeight
+    box.addEventListener('scroll', () => {
+      logStick = box.scrollHeight - box.scrollTop - box.clientHeight < 8
+    })
   }
 
   function fmtVal(v) {
@@ -614,7 +743,7 @@
         const v = el ? parseInt(el.value, 10) : NaN
         return Number.isFinite(v) && v > 0 ? v : undefined
       }
-      actions.onLaunch && actions.onLaunch({ maxRuns: g('expl-maxruns'), maxConcurrent: g('expl-conc'), targetObjective: g('expl-target') })
+      actions.onLaunch && actions.onLaunch({ maxRuns: g('expl-maxruns'), targetObjective: g('expl-target') })
     })
     onAct('pause', () => actions.onPause && actions.onPause())
     onAct('resume', () => actions.onResume && actions.onResume())
@@ -629,7 +758,7 @@
     return b.id ? String(b.id).replace(/[[\]"]/g, '').slice(0, 24) || 'basin' : 'basin'
   }
 
-  const Exploration = { render, analyze, magma, rankLevers }
+  const Exploration = { render, analyze, magma, rankLevers, heatmapCells, makeAxis }
   if (typeof module !== 'undefined' && module.exports) module.exports = Exploration
   if (root) root.Exploration = Exploration
 })(typeof window !== 'undefined' ? window : null)

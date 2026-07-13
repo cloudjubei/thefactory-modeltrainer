@@ -735,6 +735,10 @@ button:focus-visible,
   color: var(--warn);
   background: var(--warn-soft);
 }
+.xai-noeffect-note {
+  margin: 0 0 8px;
+  color: var(--warn);
+}
 .badge.is-rejected {
   color: var(--muted);
   background: var(--surface-subtle);
