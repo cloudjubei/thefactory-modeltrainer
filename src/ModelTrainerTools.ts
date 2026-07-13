@@ -687,6 +687,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const step = nextExplorationStep(working, runs, manifest, {
         targetObjective: params.targetObjective,
       })
+      // Append a decision breadcrumb (what happened + why) so the viewer can show a live log.
+      const batchRuns = step.batch.reduce((n, r) => n + r.runCount, 0)
+      step.stateNext.log = [
+        ...(step.stateNext.log ?? []),
+        {
+          at: now(),
+          stage: step.stage,
+          rationale: step.rationale,
+          spentRuns: step.stateNext.budget.spentRuns,
+          batchRuns,
+        },
+      ].slice(-40)
       await persist(step.stateNext)
       state = step.stateNext
 
@@ -695,17 +707,26 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const spec = mergeBatch(step.batch, completedKeys)
       if (!spec.configs?.length) break // strategist proposed only finished work — nothing to advance
 
-      await runTrainingCampaign({
-        scope: params.scope,
-        projectRoot: params.projectRoot,
-        manifest,
-        spec,
-        concurrency: working.budget.maxConcurrent,
-        computeTarget: params.computeTarget,
-        ranBy: params.ranBy,
-        abortSignal: params.abortSignal,
-        onRecordWritten: params.onRecordWritten,
-      })
+      if (params.launchTrainCampaign) {
+        // Durable-controller mode: run the batch as a STANDARD `train` activity (visible under
+        // Experiments, sharing the experiment lane) and wait for it before planning the next round.
+        const { activityId } = await params.launchTrainCampaign(spec, {
+          concurrency: working.budget.maxConcurrent,
+        })
+        if (activityId && params.awaitActivity) await params.awaitActivity(activityId)
+      } else {
+        await runTrainingCampaign({
+          scope: params.scope,
+          projectRoot: params.projectRoot,
+          manifest,
+          spec,
+          concurrency: working.budget.maxConcurrent,
+          computeTarget: params.computeTarget,
+          ranBy: params.ranBy,
+          abortSignal: params.abortSignal,
+          onRecordWritten: params.onRecordWritten,
+        })
+      }
     }
 
     const finalState = state ?? initExplorationState(manifest, params.budget)

@@ -41,24 +41,26 @@ function runsFixture() {
 }
 
 describe('Exploration.analyze', () => {
-  it('picks the two most-varied numeric active levers as heatmap axes and the categorical as the region axis', () => {
+  it('chooses the two highest-ranked levers as the default X/Y axes (variance fallback, no Xai)', () => {
     const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
-    const a = Exploration.analyze({ manifest: MANIFEST, state, runs: runsFixture() })
-    expect(a.axes).toEqual(['x', 'y'])
-    expect(a.axes).not.toContain('noise')
-    expect(a.axes).not.toContain('seed')
-    expect(a.regionAxis).toBe('algo')
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'axes-a' }, state, runs: runsFixture() })
+    // x varies most, y next; noise is constant (filtered), seed excluded
+    expect(a.vs.axisX).toBe('x')
+    expect(a.vs.axisY).toBe('y')
+    expect(a.rankedKeys).not.toContain('noise') // one observed value -> not an axis candidate
+    expect(a.rankedKeys).not.toContain('seed')
     expect(a.dir).toBe('max')
   })
 
-  it('falls back to the model levers when no state is present', () => {
-    const a = Exploration.analyze({ manifest: MANIFEST, state: null, runs: runsFixture() })
-    expect(a.axes.length).toBe(2)
-    expect(a.regionAxis).toBe('algo')
+  it('falls back to model levers and sets two distinct axes when no state is present', () => {
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'axes-b' }, state: null, runs: runsFixture() })
+    expect(a.vs.axisX).toBeTruthy()
+    expect(a.vs.axisY).toBeTruthy()
+    expect(a.vs.axisX).not.toBe(a.vs.axisY)
   })
 
   it('orients the color scale so a MIN objective maps its lowest value to the hot end', () => {
-    const minManifest = { ...MANIFEST, objective: { name: 'rmse', direction: 'min' as const } }
+    const minManifest = { ...MANIFEST, recordType: 'min-c', objective: { name: 'rmse', direction: 'min' as const } }
     const runs = [
       { config: { algo: 'A', x: 0.1, y: 0.1 }, objective: 0.2 }, // best (lowest)
       { config: { algo: 'A', x: 0.9, y: 0.9 }, objective: 0.8 }, // worst (highest)
@@ -69,10 +71,23 @@ describe('Exploration.analyze', () => {
   })
 
   it('passes basins through and preserves the objective range', () => {
-    const state = { activeLevers: ['algo', 'x', 'y'], basins: [{ id: 'b1', region: { algo: 'A' }, peakObjective: 420 }], declaredBasinId: 'b1', stage: 'converged', budget: { spentRuns: 40 } }
-    const a = Exploration.analyze({ manifest: MANIFEST, state, runs: runsFixture() })
+    const state = { basins: [{ id: 'b1', region: { algo: 'A' }, peakObjective: 420, centerConfig: { algo: 'A', x: 0.5, y: 0.5 } }], declaredBasinId: 'b1', stage: 'converged', budget: { spentRuns: 40 } }
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'basins-d' }, state, runs: runsFixture() })
     expect(a.basins).toHaveLength(1)
     expect(a.oMax).toBeGreaterThan(a.oMin)
+  })
+})
+
+describe('Exploration.rankLevers', () => {
+  it('ranks candidate axis levers (>1 observed value) by variance when no Xai engine is present', () => {
+    const ranked = Exploration.rankLevers({ ...MANIFEST, recordType: 'rank-e' }, runsFixture())
+    const keys = ranked.map((r: any) => r.lever)
+    expect(keys[0]).toBe('x') // highest-variance numeric
+    expect(keys).toContain('y')
+    expect(keys).not.toContain('noise') // constant -> excluded
+    // algo is categorical with >1 value → a candidate (kind 'cat')
+    const algo = ranked.find((r: any) => r.lever === 'algo')
+    expect(algo && algo.kind).toBe('cat')
   })
 })
 

@@ -947,6 +947,19 @@ export interface ExplorationRegretPoint {
   bestObjective: number
 }
 
+/** One breadcrumb in the exploration's decision log — what the strategist did this round and why. */
+export interface ExplorationLogEntry {
+  /** ISO timestamp of the round. */
+  at: string
+  stage: ExplorationStage
+  /** The strategist's one-line reason for this step (e.g. "screen: 12 space-filling samples across 5 levers"). */
+  rationale: string
+  /** Runs spent by this point. */
+  spentRuns: number
+  /** Runs this round's batch launches. */
+  batchRuns: number
+}
+
 /** User steer honored by the strategist each round — the "steer" half of pause/steer. */
 export interface ExplorationSteer {
   /** Force these levers ACTIVE (searched) regardless of what screening decided. */
@@ -973,6 +986,8 @@ export interface ExplorationState {
   budget: ExplorationBudget
   /** best-objective-so-far vs runs-spent, for the regret/convergence curve. */
   regret: ExplorationRegretPoint[]
+  /** Recent decision breadcrumbs (what happened each round + why), newest last, capped. */
+  log?: ExplorationLogEntry[]
   /** Consecutive `global` rounds that added no new basin (the loop-until-dry counter). */
   dryRounds: number
   /** True once S4 has declared — the search is complete. */
@@ -1024,6 +1039,17 @@ export interface ExplorationCampaignParams {
   onProgress?: (state: ExplorationState) => void | Promise<void>
   /** Fired after each record upsert so the host can broadcast `data:updated`. */
   onRecordWritten?: (type: string, key: string) => void
+  /**
+   * Durable-controller mode: launch each round's batch as a STANDARD `train` activity (so it shows under
+   * Experiments and shares the experiment lane) and return its activity id. When omitted, the batch runs
+   * IN-PROCESS via {@link runTrainingCampaign} — the path unit tests exercise.
+   */
+  launchTrainCampaign?: (
+    spec: ExperimentSpec,
+    opts: { concurrency?: number },
+  ) => Promise<{ activityId?: string }>
+  /** Await a launched activity to a terminal status; paired with {@link launchTrainCampaign}. */
+  awaitActivity?: (activityId: string) => Promise<void>
   /** Safety cap on strategist rounds (default 500). */
   maxRounds?: number
 }

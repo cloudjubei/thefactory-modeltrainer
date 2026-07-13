@@ -2881,21 +2881,6 @@ function runsColumns() {
       sort: (r) => r.key,
     },
     {
-      id: 'data',
-      label: 'Data',
-      num: false,
-      get: (r) => escapeHtml(datasetLabel(r.summary)),
-      sort: (r) => datasetLabel(r.summary),
-    },
-    {
-      id: 'model',
-      label: 'Model',
-      num: false,
-      help: 'The model architecture this run trained — its model_name lever.',
-      get: (r) => escapeHtml(String((r.summary.config || {}).model_name ?? '—')),
-      sort: (r) => String((r.summary.config || {}).model_name ?? ''),
-    },
-    {
       id: 'version',
       label: 'v',
       num: false,
@@ -2904,6 +2889,46 @@ function runsColumns() {
       sort: (r) => String((r.summary && r.summary.pipelineVersion) || '1'),
     },
   ]
+  // Context columns are conditional: Data only when the project HAS dataset levers, Model only when it
+  // declares a model_name lever. For simple projects with neither (e.g. CartPole) show the categorical
+  // model levers (algo, net_arch) directly instead of two dead '—' columns — still sortable/filterable.
+  const contextCols = []
+  if (hasDatasetLevers()) {
+    contextCols.push({
+      id: 'data',
+      label: 'Data',
+      num: false,
+      get: (r) => escapeHtml(datasetLabel(r.summary)),
+      sort: (r) => datasetLabel(r.summary),
+    })
+  }
+  if (manifest && manifest.levers && manifest.levers.model_name) {
+    contextCols.push({
+      id: 'model',
+      label: 'Model',
+      num: false,
+      help: 'The model architecture this run trained — its model_name lever.',
+      get: (r) => escapeHtml(String((r.summary.config || {}).model_name ?? '—')),
+      sort: (r) => String((r.summary.config || {}).model_name ?? ''),
+    })
+  }
+  if (!contextCols.length && manifest && manifest.levers) {
+    const catLevers = Object.entries(manifest.levers)
+      .filter(([n, s]) => n !== 'seed' && (s.scope || 'model') === 'model' && (s.type === 'choice' || s.type === 'boolean'))
+      .map(([n]) => n)
+      .slice(0, 3)
+    for (const lev of catLevers) {
+      contextCols.push({
+        id: 'lever:' + lev,
+        label: lev,
+        num: false,
+        help: `The ${lev} lever this run used.`,
+        get: (r) => escapeHtml(String((r.summary.config || {})[lev] ?? '—')),
+        sort: (r) => String((r.summary.config || {})[lev] ?? ''),
+      })
+    }
+  }
+  cols.splice(2, 0, ...contextCols) // insert after the compare + Run columns
   for (const mk of runMetricKeys()) {
     cols.push({
       id: 'm:' + mk,
@@ -13362,6 +13387,7 @@ function rerenderRunDerivedTab() {
   if (activeTabId === 'hypotheses') return renderHypotheses()
   if (activeTabId === 'papers') return renderPapers()
   if (activeTabId === 'speed') return renderSpeed()
+  if (activeTabId === 'exploration') return renderExploration()
   return renderModels()
 }
 // Run-derived data is refreshed through ONE registry of updaters, each consuming the shared run set and
@@ -15584,7 +15610,8 @@ async function resumeRunningActivity() {
     activities = []
   }
   if (epoch !== projectEpoch || !manifest) return
-  const mine = activities.filter((a) => a.recordType === manifest.recordType)
+  // The `explore` controller lives in the Exploration tab, not the Activity Task lane — don't re-track it.
+  const mine = activities.filter((a) => a.recordType === manifest.recordType && a.activityType !== 'explore')
   const tracked = (id) => [...liveActivities.values()].some((e) => e.activityId === id)
   // Track everything the host is RUNNING or has QUEUED (the host owns concurrency now), so each
   // shows + observes to settlement regardless of any client-side budget.
@@ -15765,6 +15792,8 @@ async function settleTrainActivity(entry) {
   if (entry.campaign) lastSettledCampaign = entry.campaign
   renderActivity()
   await renderRuns()
+  // Keep the Exploration heatmap live as train runs land (its coverage grid is built from run records).
+  if (activeTabId === 'exploration') void renderExploration()
   await processSettledCampaignEffects()
 }
 // PAUSE ONE running campaign — kills the process but keeps it resumable: marks it user-paused (so the
@@ -16176,10 +16205,13 @@ function renderActivityNow() {
     .sort((a, b) => b.startedAt - a.startedAt)
   const queued = queuedEntriesInOrder()
   const pending = [...paused, ...queued] // paused on top of the queue
+  // The `explore` controller is driven from the Exploration tab (pause/resume there) and spawns its own
+  // standard `train` experiments — so it never renders here as a Task.
+  const isTaskEntry = (e) => !isExperimentActivityType(e.activityType) && e.activityType !== 'explore'
   const experimentEntries = blocks.filter((e) => isExperimentActivityType(e.activityType))
-  const taskEntries = blocks.filter((e) => !isExperimentActivityType(e.activityType))
+  const taskEntries = blocks.filter(isTaskEntry)
   const experimentQueue = pending.filter((e) => isExperimentActivityType(e.activityType))
-  const taskQueue = pending.filter((e) => !isExperimentActivityType(e.activityType))
+  const taskQueue = pending.filter(isTaskEntry)
   // The Tasks column only collapses when its lane is IDLE — any live/paused block or queued item
   // keeps it shown so the Abort/Resume/remove controls stay reachable. Collapsing the idle column
   // reclaims its width (via the grid modifier) so Experiments fills the row.
@@ -16339,13 +16371,22 @@ async function renderExploration() {
   // completed runs → the heatmap's coverage grid
   let runs = []
   try {
-    runs = (await queryRunRecords({ limit: 6000 }))
-      .map((r) => ({
-        config: (r.summary && r.summary.config) || {},
-        objective: r.summary && r.summary.objective,
-        metrics: r.summary && r.summary.metrics,
-      }))
-      .filter((r) => typeof r.objective === 'number')
+    // Source from the shared run pool (xaiRuns → allRunsCache) so the heatmap includes EVERY run — incl.
+    // experiments launched manually outside the autopilot — and carries status:'completed' for the
+    // window.Xai importance ranking. Falls back to a direct query before the pool is populated this session.
+    runs = xaiRuns()
+    if (!runs.length) {
+      runs = (await queryRunRecords({ limit: 6000 }))
+        .map((r) => ({
+          key: r.key,
+          config: (r.summary && r.summary.config) || {},
+          objective: r.summary && r.summary.objective,
+          metrics: r.summary && r.summary.metrics,
+          seed: r.summary && r.summary.seed,
+          status: 'completed',
+        }))
+        .filter((r) => typeof r.objective === 'number')
+    }
   } catch {
     // none yet
   }
@@ -16367,11 +16408,26 @@ async function renderExploration() {
 
   const actions = {
     onLaunch: async (budget) => {
-      const params = { dir: '.' }
-      if (budget.maxRuns) params.maxRuns = budget.maxRuns
-      if (budget.maxConcurrent) params.maxConcurrent = budget.maxConcurrent
-      if (budget.targetObjective) params.targetObjective = budget.targetObjective
-      await startOrEnqueue('explore', params, `Explore ${recordType}`)
+      // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend
+      // `explore` activity requires recordType (like `train`), so a bare budget object is rejected.
+      const extra = {}
+      if (budget.maxRuns) extra.maxRuns = budget.maxRuns
+      if (budget.maxConcurrent) extra.maxConcurrent = budget.maxConcurrent
+      if (budget.targetObjective) extra.targetObjective = budget.targetObjective
+      const res = await startOrEnqueue('explore', trainerComputeParams(extra), `Explore ${recordType}`)
+      if (!res || !res.started) {
+        const controls = container.querySelector('.expl-controls')
+        if (controls && !controls.querySelector('.expl-launch-err')) {
+          const msg = document.createElement('div')
+          msg.className = 'expl-launch-err'
+          msg.style.cssText =
+            'width:100%;color:#e0644f;font-family:ui-monospace,monospace;font-size:11.5px;margin-top:6px'
+          msg.textContent =
+            'Could not start exploration — the host rejected the launch. If you just updated, the backend may need a restart to register the "explore" activity.'
+          controls.appendChild(msg)
+        }
+        return
+      }
       invalidateActivitiesCache()
       setTimeout(() => renderExploration(), 600)
     },
@@ -16414,11 +16470,16 @@ async function renderExploration() {
     clearTimeout(explorationPollTimer)
     explorationPollTimer = null
   }
-  const active = activity && ['running', 'starting', 'queued'].includes(activity.status)
-  if (active && activeTabId === 'exploration') {
-    explorationPollTimer = setTimeout(() => {
-      if (activeTabId === 'exploration') void renderExploration()
-    }, 2500)
+  // Keep the tab live while it is OPEN, regardless of whether a controller activity is live — the heatmap
+  // is driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` froze it.
+  if (activeTabId === 'exploration') {
+    const active = activity && ['running', 'starting', 'queued'].includes(activity.status)
+    explorationPollTimer = setTimeout(
+      () => {
+        if (activeTabId === 'exploration') void renderExploration()
+      },
+      active ? 2500 : 5000,
+    )
   }
 }
 
