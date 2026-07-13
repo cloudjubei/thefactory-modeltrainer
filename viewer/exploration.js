@@ -387,42 +387,54 @@
     const live = st === 'running' || st === 'starting' || st === 'queued'
     const paused = !!(data.state && data.state.paused)
     const done = !!(data.state && data.state.done)
+    const hasState = !!data.state
     const stage = data.state && data.state.stage
+    const inProgress = hasState && !done && !paused // the map is mid-search
     const log = (data.state && data.state.log) || []
     const last = log[log.length - 1]
 
-    let head, ctrls
+    // The Start controls appear ONLY when there is no active/paused/stalled search — otherwise the whole
+    // area is a live status view. This is the "no Start button while running" behaviour.
+    let head
+    let ctrls
+    let showBudget = false
     if (live && !paused) {
       head = `<span class="pulse"></span> Exploring — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
       ctrls = `<button class="expl-btn" data-act="pause">Pause</button><button class="expl-btn" data-act="abort">Stop</button>`
     } else if (paused) {
       head = 'Paused'
       ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
+    } else if (inProgress) {
+      head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span> · Resume to continue`
+      ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
     } else if (done) {
       head = 'Converged'
       ctrls = `<button class="expl-btn primary" data-act="launch">Explore again</button>`
+      showBudget = true
     } else {
-      head = 'Idle'
+      head = 'Ready to explore'
       ctrls = `<button class="expl-btn primary" data-act="launch">Start exploration</button>`
+      showBudget = true
     }
 
     const b = (data.state && data.state.budget) || {}
     const field = (id, label, val, help) =>
       `<label class="expl-field"><span class="lbl" data-help="${esc(help)}">${esc(label)}</span><input type="number" min="0" id="${id}" value="${val != null ? esc(val) : ''}" placeholder="auto"></label>`
-    const budgetFields =
-      live || paused
-        ? ''
-        : `<div class="expl-controls" style="margin-top:12px">
+    const budgetFields = showBudget
+      ? `<div class="expl-controls" style="margin-top:12px">
             ${field('expl-maxruns', 'run budget', b.maxRuns, BUDGET_HELP.maxRuns)}
             ${field('expl-conc', 'max concurrent', b.maxConcurrent, BUDGET_HELP.maxConcurrent)}
             ${field('expl-target', 'target objective', data.state && data.state.targetObjective, BUDGET_HELP.targetObjective)}
           </div>`
+      : ''
 
-    const nowLine = last
-      ? `<p class="now"><b>${esc(last.rationale)}</b></p>`
-      : live
-        ? '<p class="now">starting…</p>'
-        : ''
+    const spent = (data.state && data.state.budget && data.state.budget.spentRuns) || 0
+    const nowLine =
+      last && (live || inProgress || paused)
+        ? `<p class="now"><b>${esc(last.rationale)}</b> · ${spent} runs so far</p>`
+        : live
+          ? '<p class="now">starting the controller…</p>'
+          : ''
     const logHtml = log.length
       ? `<ul class="expl-log">${log
           .slice(-12)

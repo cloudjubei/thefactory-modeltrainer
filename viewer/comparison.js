@@ -71,6 +71,32 @@
     return v === undefined || v === null || v === '' ? 'n/a' : String(v)
   }
 
+  // The "off" value of a lever — the value at which it does nothing: its declared default, else `false` for a
+  // boolean and `0` for a number (both projects' "0/false = off" convention). Used to collapse a lever the
+  // sim treats as inert (its `dependsOn` control unmet) back to a single neutral value.
+  function leverOffValue(spec) {
+    if (spec && spec.default !== undefined) return spec.default
+    return spec && spec.type === 'boolean' ? false : 0
+  }
+  // A lever is ACTIVE unless it declares `active: false` — an inactive lever is declared but not wired into
+  // the sim/model, so it's excluded from axis sweeps and the by-axis value line (it changes no behaviour).
+  function isLeverActive(spec) {
+    return !spec || spec.active !== false
+  }
+  // Whether a lever's `dependsOn` control is satisfied in a config, so the lever actually has an effect there.
+  // `{ lever, equals }` ⇒ control must canon-equal that value; `{ lever, active:true|false }` ⇒ control must be
+  // ON (≠ its off value) / OFF. A control absent from the config can't prune, so the dependency counts as met.
+  function dependencyMet(manifest, config, dependsOn) {
+    if (!dependsOn || !dependsOn.lever) return true
+    var cv = config[dependsOn.lever]
+    if (cv === undefined) return true
+    if ('equals' in dependsOn) return canonLever(cv) === canonLever(dependsOn.equals)
+    var levers = (manifest && manifest.levers) || {}
+    var on = canonLever(cv) !== canonLever(leverOffValue(levers[dependsOn.lever]))
+    if ('active' in dependsOn) return dependsOn.active ? on : !on
+    return true
+  }
+
   // Whether a run has the SAME setup as the focus config on every LOCKED lever for an axis — i.e. it differs
   // ONLY in the axis lever(s) (seed is always pooled, never locked). This is exhaustive over the locked
   // levers (not just the ones the focus happens to set), so a run that sets a lever the focus left unset is
@@ -190,35 +216,85 @@
     return { label: label, n: vals.length, min: min, max: max }
   }
 
-  // Build a launch spec that PINS the non-axis levers to one config and SWEEPS an axis across supplied
-  // values — the "fill the axis for this config" sweep. `fixed` = every locked lever the focus config sets
-  // (skipping 'n/a'/blank); `sweep` = each axis lever mapped to its values (levers with no values dropped).
-  // Returns null when nothing on the axis can be swept, so the caller can message instead of firing an empty
-  // campaign. Pure — the seed strategy + first-time-only (refresh) behaviour is the caller's concern.
-  function axisSweepSpec(manifest, axis, focusConfig, valuesByLever) {
-    var cfg = focusConfig || {}
+  // The DISTINCT, valid combos to sweep an axis over: the cartesian product of each ACTIVE axis lever's
+  // candidate values, with each combo NORMALISED so a lever whose `dependsOn` control is unmet collapses to
+  // its off value, then DEDUPED. Dropping combos the sim would treat as identical (e.g. no_sell_action while
+  // shorting, a trailing stop with no take-profit) is what keeps an environment sweep to the handful of runs
+  // that actually differ in behaviour instead of a blown-up cartesian. Inactive levers are never swept.
+  function axisSweepCombos(manifest, axisKeys, valuesByLever) {
+    var levers = (manifest && manifest.levers) || {}
     var vals = valuesByLever || {}
+    var keys = (axisKeys || []).filter(function (k) {
+      return isLeverActive(levers[k]) && Array.isArray(vals[k]) && vals[k].length
+    })
+    if (!keys.length) return []
+    var combos = [{}]
+    for (var i = 0; i < keys.length; i++) {
+      var k = keys[i]
+      var next = []
+      for (var c = 0; c < combos.length; c++) {
+        for (var v = 0; v < vals[k].length; v++) {
+          var merged = Object.assign({}, combos[c])
+          merged[k] = vals[k][v]
+          next.push(merged)
+        }
+      }
+      combos = next
+    }
+    var seen = {}
+    var out = []
+    for (var j = 0; j < combos.length; j++) {
+      var combo = combos[j]
+      for (var d = 0; d < keys.length; d++) {
+        var dk = keys[d]
+        var dep = levers[dk] && levers[dk].dependsOn
+        if (dep && !dependencyMet(manifest, combo, dep)) combo[dk] = leverOffValue(levers[dk])
+      }
+      var sig = keys
+        .map(function (kk) {
+          return kk + '=' + canonLever(combo[kk])
+        })
+        .join(' · ')
+      if (seen[sig]) continue
+      seen[sig] = true
+      out.push(combo)
+    }
+    return out
+  }
+
+  // Build a bundle launch spec for the "fill the axis for this config" sweep: `fixed` PINS every non-axis
+  // lever (and any INACTIVE axis lever) the focus config sets, skipping 'n/a'/blank; `bundles` is the pruned,
+  // deduped set of axis combos from {@link axisSweepCombos}, each a complete set of the active axis levers to
+  // run as one environment/dataset bundle. Returns null when the axis has nothing valid to sweep, so the
+  // caller can message instead of firing an empty campaign. Pure — seeds + skip-existing are the caller's job.
+  function axisSweepBundleSpec(manifest, axis, focusConfig, valuesByLever) {
+    var cfg = focusConfig || {}
+    var activeAxis = axisLeverKeys(manifest, axis).filter(function (k) {
+      return isLeverActive(manifest.levers[k])
+    })
+    var bundles = axisSweepCombos(manifest, activeAxis, valuesByLever)
+    if (!bundles.length) return null
+    var axisSet = {}
+    for (var a = 0; a < activeAxis.length; a++) axisSet[activeAxis[a]] = true
     var fixed = {}
-    var lockKeys = lockedLeverKeys(manifest, axis)
-    for (var i = 0; i < lockKeys.length; i++) {
-      var lk = lockKeys[i]
-      var v = cfg[lk]
-      if (v === undefined || v === null || v === '' || String(v) === 'n/a') continue
-      fixed[lk] = v
+    var entries = leverEntries(manifest)
+    for (var i = 0; i < entries.length; i++) {
+      var key = entries[i][0]
+      if (isNuisanceLever(key, entries[i][1]) || axisSet[key]) continue
+      var val = cfg[key]
+      if (val === undefined || val === null || val === '' || String(val) === 'n/a') continue
+      fixed[key] = val
     }
-    var sweep = {}
-    var axisKeys = axisLeverKeys(manifest, axis)
-    for (var j = 0; j < axisKeys.length; j++) {
-      var ak = axisKeys[j]
-      var list = vals[ak]
-      if (Array.isArray(list) && list.length) sweep[ak] = list
-    }
-    return Object.keys(sweep).length ? { fixed: fixed, sweep: sweep } : null
+    return { fixed: fixed, bundles: bundles }
   }
 
   var api = {
     axisLeverKeys: axisLeverKeys,
-    axisSweepSpec: axisSweepSpec,
+    axisSweepCombos: axisSweepCombos,
+    axisSweepBundleSpec: axisSweepBundleSpec,
+    leverOffValue: leverOffValue,
+    isLeverActive: isLeverActive,
+    dependencyMet: dependencyMet,
     robustnessVerdict: robustnessVerdict,
     lockedLeverKeys: lockedLeverKeys,
     runAxisSignature: runAxisSignature,

@@ -44,6 +44,21 @@ export interface TrainerLeverSpec {
    * keys must match (AND). Omitted ⇒ always applies.
    */
   appliesWhen?: Record<string, unknown[]>
+  /**
+   * `false` marks a lever that is DECLARED but not currently wired into the sim/model — it changes no
+   * behaviour, so it's excluded from axis sweeps and the by-axis value line (held at its focus value
+   * instead of varied). Omitted ⇒ active. Keeps a lever documented for a future re-enable without letting
+   * it blow up sweeps in the meantime.
+   */
+  active?: boolean
+  /**
+   * A RUNTIME dependency the sim enforces: this lever only has an effect when a CONTROL lever is on/off, so
+   * an axis sweep collapses it to its off value wherever the control makes it inert (then dedupes the
+   * resulting identical configs) — e.g. `trailing_take_profit` only acts when `take_profit` is on. `active:
+   * true` ⇒ the control must be ON (≠ its off value); `active: false` ⇒ OFF; `equals` ⇒ the control at a
+   * specific value. Distinct from {@link appliesWhen} (which greys the lever out in the launch form).
+   */
+  dependsOn?: { lever: string; active?: boolean; equals?: unknown }
 }
 
 /** The single north-star metric a run is judged by. */

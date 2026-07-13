@@ -117,30 +117,6 @@ describe('single-lever axis (By value)', () => {
     )
     expect(C.runAxisSignature(manifestSeedModel, 'learning_rate', r)).toBe('learning_rate=0.0003')
   })
-  it('axisSweepSpec pins every other lever to the focus config and sweeps the chosen lever', () => {
-    const focus = {
-      model_name: 'ppo',
-      net_arch: '[128]',
-      asset: 'BTC',
-      timeframe: '1d',
-      stop_loss: 0.05,
-      learning_rate: 0.0003,
-      seed: 0,
-    }
-    const spec = C.axisSweepSpec(manifestSeedModel, 'learning_rate', focus, {
-      learning_rate: [0.0001, 0.0003, 0.001],
-    })
-    expect(spec).toEqual({
-      fixed: {
-        model_name: 'ppo',
-        net_arch: '[128]',
-        asset: 'BTC',
-        timeframe: '1d',
-        stop_loss: 0.05,
-      },
-      sweep: { learning_rate: [0.0001, 0.0003, 0.001] },
-    })
-  })
 })
 
 describe('runAxisSignature', () => {
@@ -332,7 +308,143 @@ describe('sortComparisonGroups', () => {
   })
 })
 
-describe('axisSweepSpec', () => {
+describe('leverOffValue / isLeverActive', () => {
+  it('off value is the declared default, else false for a boolean and 0 for a number', () => {
+    expect(C.leverOffValue({ type: 'boolean', default: false })).toBe(false)
+    expect(C.leverOffValue({ type: 'boolean' })).toBe(false)
+    expect(C.leverOffValue({ type: 'number', default: 0 })).toBe(0)
+    expect(C.leverOffValue({ type: 'number' })).toBe(0)
+    expect(C.leverOffValue({ type: 'choice', default: 'fixed' })).toBe('fixed')
+  })
+  it('a lever is active unless it declares active:false', () => {
+    expect(C.isLeverActive({ type: 'number' })).toBe(true)
+    expect(C.isLeverActive({ type: 'number', active: true })).toBe(true)
+    expect(C.isLeverActive({ type: 'number', active: false })).toBe(false)
+    expect(C.isLeverActive(undefined)).toBe(true)
+  })
+})
+
+// A manifest shaped like BlackSwan's environment axis: 5 wired levers (2 booleans + 3 numeric exit mechanics),
+// 3 unused levers (active:false) that must NEVER be swept, and two runtime dependencies the sim enforces —
+// no_sell_action is inert while shorting; trailing_take_profit is inert unless take_profit is on.
+const envManifest = {
+  name: 'BlackSwan',
+  recordType: 'blackswan-run',
+  objective: { name: 'return', direction: 'max' },
+  levers: {
+    model_name: { type: 'choice', choices: ['ppo'], scope: 'model' },
+    allow_shorting: { type: 'boolean', default: false, scope: 'environment' },
+    no_sell_action: {
+      type: 'boolean',
+      default: false,
+      scope: 'environment',
+      dependsOn: { lever: 'allow_shorting', active: false },
+    },
+    stop_loss: { type: 'number', default: 0.02, range: [0, 0.1], scope: 'environment' },
+    take_profit: { type: 'number', default: 0, range: [0, 0.05], scope: 'environment' },
+    trailing_take_profit: {
+      type: 'number',
+      default: 0,
+      range: [0, 0.01],
+      scope: 'environment',
+      dependsOn: { lever: 'take_profit', active: true },
+    },
+    transaction_fee: { type: 'number', default: 0.001, scope: 'environment', active: false },
+    position_sizing: { type: 'choice', choices: ['fixed'], default: 'fixed', scope: 'environment', active: false },
+    vol_target: { type: 'number', default: 0.02, scope: 'environment', active: false },
+    seed: { type: 'number', scope: 'model' },
+  },
+}
+const envFocus = {
+  model_name: 'ppo',
+  allow_shorting: false,
+  no_sell_action: false,
+  stop_loss: 0.02,
+  take_profit: 0,
+  trailing_take_profit: 0,
+  transaction_fee: 0.001,
+  position_sizing: 'fixed',
+  vol_target: 0.02,
+  seed: 0,
+}
+
+describe('axisSweepBundleSpec (environment)', () => {
+  it('excludes active:false levers from the swept bundles and pins them (+ model levers) in fixed', () => {
+    const spec = C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {
+      allow_shorting: [false],
+      no_sell_action: [false],
+      stop_loss: [0.02],
+      take_profit: [0],
+      trailing_take_profit: [0],
+    })
+    // model lever + the 3 unused environment levers land in fixed, never in a bundle.
+    expect(spec.fixed).toEqual({
+      model_name: 'ppo',
+      transaction_fee: 0.001,
+      position_sizing: 'fixed',
+      vol_target: 0.02,
+    })
+    for (const b of spec.bundles) {
+      expect(Object.keys(b).sort()).toEqual(
+        ['allow_shorting', 'no_sell_action', 'stop_loss', 'take_profit', 'trailing_take_profit'].sort(),
+      )
+      expect('transaction_fee' in b).toBe(false)
+    }
+  })
+
+  it('collapses a dependent lever to its off value where its control makes it inert, then dedupes', () => {
+    const spec = C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {
+      allow_shorting: [false, true],
+      no_sell_action: [false, true],
+      stop_loss: [0.02],
+      take_profit: [0],
+      trailing_take_profit: [0],
+    })
+    // allow_shorting=false → no_sell_action free (2); allow_shorting=true → no_sell_action pinned false (1).
+    // So 3 distinct bundles, NOT the naive 2×2=4.
+    expect(spec.bundles.length).toBe(3)
+    const shorting = spec.bundles.filter((b: any) => b.allow_shorting === true)
+    expect(shorting.length).toBe(1)
+    expect(shorting[0].no_sell_action).toBe(false)
+  })
+
+  it('trailing_take_profit only survives when take_profit is on', () => {
+    const spec = C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {
+      allow_shorting: [false],
+      no_sell_action: [false],
+      stop_loss: [0.02],
+      take_profit: [0, 0.05],
+      trailing_take_profit: [0, 0.01],
+    })
+    // take_profit=0 → trailing forced 0 (1 bundle); take_profit=0.05 → trailing ∈ {0,0.01} (2). Total 3.
+    expect(spec.bundles.length).toBe(3)
+    for (const b of spec.bundles) {
+      if (b.take_profit === 0) expect(b.trailing_take_profit).toBe(0)
+    }
+  })
+
+  it('the full 5-lever grid prunes well below the naive cartesian product', () => {
+    const spec = C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {
+      allow_shorting: [false, true],
+      no_sell_action: [false, true],
+      stop_loss: [0, 0.02, 0.05],
+      take_profit: [0, 0.02, 0.05],
+      trailing_take_profit: [0, 0.005, 0.01],
+    })
+    // Naive 2×2×3×3×3 = 108; conditional collapse + dedupe brings it to 63.
+    expect(spec.bundles.length).toBe(63)
+    expect(spec.bundles.length).toBeLessThan(108)
+  })
+
+  it('returns null when no active axis lever has values to sweep', () => {
+    expect(C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {})).toBeNull()
+    expect(
+      C.axisSweepBundleSpec(envManifest, 'environment', envFocus, { transaction_fee: [0.001, 0.002] }),
+    ).toBeNull()
+  })
+})
+
+describe('axisSweepBundleSpec (dataset, no dependencies)', () => {
   const focus = {
     model_name: 'ppo',
     net_arch: '[128]',
@@ -341,29 +453,25 @@ describe('axisSweepSpec', () => {
     stop_loss: 0.05,
     seed: 0,
   }
-  it('By dataset: pins the locked (model+env) levers to the focus config and sweeps the dataset axis', () => {
-    const spec = C.axisSweepSpec(manifest, 'dataset', focus, {
+  it('pins locked (model+env) levers to the focus and returns the full cartesian of dataset values', () => {
+    const spec = C.axisSweepBundleSpec(manifest, 'dataset', focus, {
       asset: ['BTC', 'ETH'],
       timeframe: ['1d', '1h'],
     })
-    expect(spec).toEqual({
-      fixed: { model_name: 'ppo', net_arch: '[128]', stop_loss: 0.05 },
-      sweep: { asset: ['BTC', 'ETH'], timeframe: ['1d', '1h'] },
-    })
+    expect(spec.fixed).toEqual({ model_name: 'ppo', net_arch: '[128]', stop_loss: 0.05 })
+    expect(spec.bundles.length).toBe(4)
+    expect(spec.bundles).toContainEqual({ asset: 'BTC', timeframe: '1d' })
+    expect(spec.bundles).toContainEqual({ asset: 'ETH', timeframe: '1h' })
   })
   it('omits an inapplicable (n/a) locked lever from fixed', () => {
-    const spec = C.axisSweepSpec(
+    const spec = C.axisSweepBundleSpec(
       manifest,
       'environment',
       { ...focus, net_arch: 'n/a' },
       { stop_loss: [0.02, 0.05, 0.1] },
     )
     expect(spec.fixed).toEqual({ model_name: 'ppo', asset: 'BTC', timeframe: '1d' })
-    expect(spec.sweep).toEqual({ stop_loss: [0.02, 0.05, 0.1] })
-  })
-  it('returns null when no axis lever has values to sweep', () => {
-    expect(C.axisSweepSpec(manifest, 'dataset', focus, { asset: [] })).toBeNull()
-    expect(C.axisSweepSpec(manifest, 'dataset', focus, {})).toBeNull()
+    expect(spec.bundles.length).toBe(3)
   })
 })
 

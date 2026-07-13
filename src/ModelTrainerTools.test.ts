@@ -4539,8 +4539,8 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect(declared?.region.algo).toBe('A')
     expect(declared?.peakObjective).toBeGreaterThan(485)
 
-    // the exploration map is persisted for the viewer / pause-steer round-trip
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'exp-1' })
+    // the exploration map is persisted under the stable per-project key for the viewer / pause round-trip
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
     expect((rec?.content as { stage?: string }).stage).toBe('converged')
     expect((rec?.content as { activityId?: string }).activityId).toBe('exp-1')
 
@@ -4554,7 +4554,7 @@ describe('runExplorationCampaign (autopilot)', () => {
     await storage.upsertRecord({
       scope: 's',
       type: 'synthetic-run-exploration',
-      key: 'exp-2',
+      key: 'current',
       content: { ...initExplorationState(SURFACE_MANIFEST), stage: 'global', paused: true },
     })
     const runner = surfaceRunner()

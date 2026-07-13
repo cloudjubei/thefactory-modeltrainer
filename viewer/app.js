@@ -2013,6 +2013,7 @@ async function openProject(projectKey) {
   showTab(savedTabId() || TABS[0].id)
   await renderRuns()
   await resumeRunningActivity()
+  startExplorationDiscovery() // resume tracking a live exploration's spawned experiments after a reload
   if (epoch !== projectEpoch) return
   await refreshQueue()
   await processSettledCampaignEffects()
@@ -2195,7 +2196,10 @@ async function launchActivity(item) {
     item,
   }
   liveActivities.set(localId, entry)
-  renderActivity()
+  // Deliberately NOT rendered yet: a 'starting' entry displays as "running" at the top of the list, so
+  // showing it before the host tells us running-vs-queued is exactly the flash a queued campaign produces
+  // (top of running → drops to queue). The triggering button spins for feedback; the block appears with its
+  // REAL status once resolved just below. (Failure still renders — to clear a stale block if one was shown.)
   try {
     const started = await window.OverseerBridge.startActivity(item.activityType, item.params)
     entry.activityId = started && started.activityId
@@ -2206,7 +2210,12 @@ async function launchActivity(item) {
     renderActivity()
     return null
   }
-  entry.status = 'running'
+  // The host assigns running-vs-queued server-side and the 202 launch response carries only the id — so ASK
+  // for the REAL status (the cache was just invalidated above) before the first render. Otherwise a queued
+  // campaign flashes as "running" at the top of the list for a poll cycle before dropping to the queue. Fall
+  // back to 'running' only if the fresh snapshot doesn't list it yet; the observe loop then corrects it.
+  const launched = await getActivity(entry.activityId)
+  entry.status = (launched && launched.status) || 'running'
   // Best-effort bookkeeping: a marker/stamp write failure must NOT strand the entry (slot
   // leak → stalled queue) or skip the observe wiring (a live campaign that never settles).
   try {
@@ -2215,11 +2224,11 @@ async function launchActivity(item) {
       await stampHypothesisCampaign(item.params.recordType, item.hypothesisId, {
         activityId: entry.activityId,
         launchedAt: nowIso(),
-        status: 'running',
+        status: entry.status,
       })
     }
   } catch {
-    // ignore — the campaign is running; the marker/stamp are non-critical
+    // ignore — the campaign is running/queued; the marker/stamp are non-critical
   }
   renderActivity()
   void observeActivity(entry)
@@ -5728,10 +5737,6 @@ function xaiCurrentTabs(criterion) {
     },
   ]
 }
-// Environment levers declared in the manifest but not currently wired into the sim — hidden from the
-// By-environment value line so an environment reads by what actually changes behaviour. Named per BlackSwan's
-// manifest; a harmless no-op for any project without them.
-const XAI_UNUSED_ENV_LEVERS = new Set(['position_sizing', 'transaction_fee', 'vol_target'])
 // A truthy config flag — booleans arrive as true / 'true' / 1 across the record sources.
 function xaiTruthyFlag(v) {
   return v === true || v === 1 || String(v).toLowerCase() === 'true'
@@ -5844,10 +5849,14 @@ function xaiAxisRowInfo(axis, axisKeys, runByKey, g) {
   if (axis === 'dataset') name = rep ? runDatasetName(rep) : ''
   else if (axis === 'environment') name = rep ? runEnvName(rep) : ''
   else name = xaiFmtLeverValue(cfg[axis])
-  const hidden = axis === 'environment' ? XAI_UNUSED_ENV_LEVERS : null
+  // Drop levers the manifest marks inactive (declared but not wired into the sim) so an axis reads by what
+  // actually changes behaviour — the same set the sweep never varies.
   const pairs = axisKeys
     .map((k) => [k, cfg[k]])
-    .filter(([k, v]) => v !== undefined && v !== null && !(hidden && hidden.has(k)))
+    .filter(
+      ([k, v]) =>
+        v !== undefined && v !== null && window.Comparison.isLeverActive(manifest.levers[k]),
+    )
   const valStr = pairs.map(([k, v]) => `${k}=${xaiFmtLeverValue(v)}`).join(' · ')
   return { name: name && name !== 'Custom' ? name : `(${axisNoun})`, pairs, valStr }
 }
@@ -7928,9 +7937,14 @@ function xaiProposeButtonHtml() {
 // How many runs an LLM suggestion's spec expands to (sweep cartesian × seeds), for the run-count chip.
 function xaiSpecRunCount(spec) {
   const s = spec || {}
+  // Explicit configs run VERBATIM (no sweep/bundle/seed expansion), so they DEFINE the count when present.
+  if (Array.isArray(s.configs) && s.configs.length) return s.configs.length
   const seeds = Array.isArray(s.seeds) && s.seeds.length ? s.seeds.length : 1
   let combos = 1
   for (const v of Object.values(s.sweep || {})) if (Array.isArray(v) && v.length) combos *= v.length
+  // Environment/dataset bundles each cross the whole matrix (like a sweep dimension, applied together).
+  if (Array.isArray(s.environments) && s.environments.length) combos *= s.environments.length
+  if (Array.isArray(s.datasets) && s.datasets.length) combos *= s.datasets.length
   return combos * seeds
 }
 function xaiSuggestionToRec(sug) {
@@ -8012,7 +8026,18 @@ function xaiRecCardHtml(r, i) {
 // merge dedup distinguish sweep suggestions from each other and from grid cells.
 function xaiSpecKey(spec) {
   const s = spec || {}
-  return `${window.Xai.canonicalConfigString(s.fixed || {})}#${window.Xai.canonicalConfigString(s.sweep || {})}`
+  const cc = window.Xai.canonicalConfigString
+  // Include bundle/explicit-config shapes too — an axis sweep launches via `environments`/`datasets` bundles,
+  // so a key of fixed+sweep alone would collide across distinct sweeps and wrongly lock the button.
+  const bundles = (arr, pick) =>
+    Array.isArray(arr) ? arr.map((b) => cc((pick ? pick(b) : b) || {})).join(';') : ''
+  return [
+    cc(s.fixed || {}),
+    cc(s.sweep || {}),
+    bundles(s.environments),
+    bundles(s.datasets),
+    bundles(s.configs, (e) => e && e.config),
+  ].join('#')
 }
 // Launch a batch of specs from the xAI tab. STAYS on xAI (a toast reports the outcome) — an xAI launch is a
 // mid-analysis action, so yanking the user to Activity loses their place. `opts.silent` suppresses the
@@ -8050,30 +8075,59 @@ function toggleXaiAxisSort(key) {
   }
   renderXai()
 }
-// Sweep the CURRENT screen's axis: launch the focused config on every value of the axis levers it hasn't run
-// yet (first-time experiments only — no refresh, so existing cells are skipped). Fills the axis for this config.
+// The candidate values a "Sweep all <axis>s" run tries for one axis lever: a boolean's two states, a choice's
+// declared options, else just the values already OBSERVED across runs (+ the focus value). Deliberately does
+// NOT invent a numeric grid the way the per-lever Sweep popup does — the axis sweep fills the combinations the
+// project has actually explored, so an environment sweep stays small (its numeric exit levers hold a handful
+// of real values) instead of exploding into a continuous range.
+function xaiAxisSweepValues(lever, current, observed) {
+  const spec = manifest && manifest.levers ? manifest.levers[lever] : null
+  const m = new Map()
+  const add = (v) => {
+    if (v === undefined || v === null || String(v) === 'n/a') return
+    if (!m.has(String(v))) m.set(String(v), v)
+  }
+  if (spec && spec.type === 'boolean') {
+    add(false)
+    add(true)
+    return [...m.values()]
+  }
+  if (spec && Array.isArray(spec.choices)) for (const c of spec.choices) add(c)
+  for (const v of observed || []) add(v)
+  add(current)
+  return [...m.values()]
+}
+// Sweep the CURRENT screen's axis: launch the focused config on every valid combination of the axis levers it
+// hasn't run yet (first-time experiments only — no refresh, so existing cells are skipped). Inactive levers are
+// held fixed and conditional (dependsOn) levers collapse where they're inert, so the campaign covers only
+// environments/datasets that actually differ. Fires ONE activity of explicit bundles (not a blown-up cartesian).
 function xaiAxisSweep(axis) {
   const focusRun = findRun(xaiFocusKey)
   const cfg = focusRun && focusRun.summary ? focusRun.summary.config : null
   if (!cfg) return
   const axisNoun = xaiAxisNoun(axis)
-  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
+  const axisKeys = window.Comparison.axisLeverKeys(manifest, axis).filter((k) =>
+    window.Comparison.isLeverActive(manifest.levers[k]),
+  )
   const observedByLever = {}
   for (const r of xaiRuns()) {
     const rc = (r && r.config) || {}
     for (const k of axisKeys) (observedByLever[k] = observedByLever[k] || []).push(rc[k])
   }
   const valuesByLever = {}
-  for (const k of axisKeys) valuesByLever[k] = xaiSweepValues(k, cfg[k], observedByLever[k] || [])
-  const spec = window.Comparison.axisSweepSpec(manifest, axis, cfg, valuesByLever)
+  for (const k of axisKeys) valuesByLever[k] = xaiAxisSweepValues(k, cfg[k], observedByLever[k] || [])
+  const spec = window.Comparison.axisSweepBundleSpec(manifest, axis, cfg, valuesByLever)
   if (!spec) {
-    setStatusLine('xai-status', `Can't sweep the ${axisNoun} — its levers declare no range or choices to vary.`, true)
+    setStatusLine('xai-status', `Can't sweep the ${axisNoun} — its levers declare no values to vary.`, true)
     return
   }
-  const combos = Object.values(spec.sweep).reduce((n, vals) => n * vals.length, 1)
-  xaiLaunchBatch([{ fixed: spec.fixed, sweep: spec.sweep, seeds: [0] }], `Sweep all ${axisNoun}s`, {
-    silent: true,
-  })
+  const bundleField = axis === 'dataset' ? 'datasets' : 'environments'
+  const combos = spec.bundles.length
+  xaiLaunchBatch(
+    [{ fixed: spec.fixed, [bundleField]: spec.bundles, seeds: [0] }],
+    `Sweep all ${axisNoun}s`,
+    { silent: true },
+  )
   showToast(`Sweeping this config across ${combos} ${axisNoun} combination${combos === 1 ? '' : 's'} — new cells run, existing ones are skipped. See the Activity tab.`)
 }
 // Add runs for the SELECTED axis groups with FRESH seeds — a non-exploration verify pass (fresh seeds are
@@ -11496,12 +11550,13 @@ async function runHypothesisCampaign(id, button) {
       })
       if (epoch !== projectEpoch) return
       setStatusLine('hypotheses-status', queuedStatusText(result.ahead))
-      await renderHypotheses()
-      return
+    } else {
+      // launchActivity already stamped the hypothesis + is observing the campaign. STAY on the current tab
+      // (a launch is a mid-analysis action — never yank the user to Activity); a status line reports it.
+      if (epoch !== projectEpoch) return
+      setStatusLine('hypotheses-status', 'Campaign launched — see the Activity tab.')
     }
-    // launchActivity already stamped the hypothesis + is observing the campaign.
-    if (epoch !== projectEpoch) return
-    showTab('activity')
+    if (activeTabId === 'hypotheses') await renderHypotheses()
   } catch {
     if (epoch === projectEpoch) {
       setStatusLine('hypotheses-status', 'Could not start the campaign — please try again.', true)
@@ -13388,6 +13443,8 @@ function rerenderRunDerivedTab() {
   if (activeTabId === 'papers') return renderPapers()
   if (activeTabId === 'speed') return renderSpeed()
   if (activeTabId === 'exploration') return renderExploration()
+  // xAI's leaderboards + the Current-run favorites picker read the all-runs snapshot the Refresh just rebuilt.
+  if (activeTabId === 'xai') return renderXai()
   return renderModels()
 }
 // Run-derived data is refreshed through ONE registry of updaters, each consuming the shared run set and
@@ -16329,6 +16386,34 @@ function paintTabLoading(tabId) {
 }
 // --- Exploration view: the config-space search map, always available per project ---------------
 let explorationPollTimer = null
+let explorationDiscoveryTimer = null
+// The `explore` controller spawns its `train` experiments on the BACKEND, which the viewer only discovers
+// on open/focus. While a controller is live, re-scan on a timer so those experiments appear in Activity.
+async function explorationDiscoveryTick() {
+  explorationDiscoveryTimer = null
+  if (!manifest || !embedded()) return
+  let liveExplore = false
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    liveExplore = ((res && res.activities) || []).some(
+      (a) =>
+        a.activityType === 'explore' &&
+        a.recordType === manifest.recordType &&
+        (a.status === 'running' || a.status === 'starting' || a.status === 'queued'),
+    )
+  } catch {
+    // ignore
+  }
+  if (liveExplore) {
+    await resumeRunningActivity() // track the controller's backend-spawned `train` experiments
+    if (activeTabId === 'exploration') void renderExploration()
+    explorationDiscoveryTimer = setTimeout(explorationDiscoveryTick, 4000)
+  }
+}
+function startExplorationDiscovery() {
+  if (explorationDiscoveryTimer) return
+  explorationDiscoveryTimer = setTimeout(explorationDiscoveryTick, 800)
+}
 async function writeExplorationFlag(recordType, state, patch) {
   if (!state || !state._recordKey) return
   const content = { ...state }
@@ -16349,20 +16434,15 @@ async function renderExploration() {
   }
   const recordType = manifest.recordType
 
-  // latest exploration state record (keyed by activityId; pick the most recently updated)
+  // The single per-project exploration map (stable key 'current' — one exploration per project, resumable).
   let state = null
   try {
-    const recs = await queryRecords(recordType + '-exploration')
+    let recs = await queryRecords(recordType + '-exploration', 'current')
+    if (!recs || !recs.length) recs = await queryRecords(recordType + '-exploration') // legacy per-activityId records
     if (recs && recs.length) {
-      const sorted = recs
-        .slice()
-        .sort((a, b) =>
-          String((b.content && b.content.updatedAt) || '').localeCompare(
-            String((a.content && a.content.updatedAt) || ''),
-          ),
-        )
-      state = sorted[0].content || null
-      if (state) state._recordKey = sorted[0].key
+      const rec = recs.find((r) => r.key === 'current') || recs[0]
+      state = rec.content || null
+      if (state) state._recordKey = rec.key || 'current'
     }
   } catch {
     // no state yet
@@ -16406,30 +16486,40 @@ async function renderExploration() {
     // bridge may be unavailable in a preview frame
   }
 
+  const launchExplore = async (extra) => {
+    // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend `explore`
+    // activity requires recordType (like `train`), so a bare budget object is rejected.
+    const res = await startOrEnqueue('explore', trainerComputeParams(extra || {}), `Explore ${recordType}`)
+    if (!res || !res.started) {
+      const host = container.querySelector('.expl-status') || container
+      if (host && !host.querySelector('.expl-launch-err')) {
+        const msg = document.createElement('div')
+        msg.className = 'expl-launch-err expl-err'
+        msg.textContent =
+          'Could not start exploration — the host rejected the launch. If you just updated, restart the backend so it registers the "explore" activity.'
+        host.appendChild(msg)
+      }
+      return false
+    }
+    invalidateActivitiesCache()
+    startExplorationDiscovery() // pick up the controller's spawned `train` experiments so they show
+    setTimeout(() => renderExploration(), 600)
+    return true
+  }
+
   const actions = {
     onLaunch: async (budget) => {
-      // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend
-      // `explore` activity requires recordType (like `train`), so a bare budget object is rejected.
       const extra = {}
       if (budget.maxRuns) extra.maxRuns = budget.maxRuns
       if (budget.maxConcurrent) extra.maxConcurrent = budget.maxConcurrent
       if (budget.targetObjective) extra.targetObjective = budget.targetObjective
-      const res = await startOrEnqueue('explore', trainerComputeParams(extra), `Explore ${recordType}`)
-      if (!res || !res.started) {
-        const controls = container.querySelector('.expl-controls')
-        if (controls && !controls.querySelector('.expl-launch-err')) {
-          const msg = document.createElement('div')
-          msg.className = 'expl-launch-err'
-          msg.style.cssText =
-            'width:100%;color:#e0644f;font-family:ui-monospace,monospace;font-size:11.5px;margin-top:6px'
-          msg.textContent =
-            'Could not start exploration — the host rejected the launch. If you just updated, the backend may need a restart to register the "explore" activity.'
-          controls.appendChild(msg)
-        }
-        return
+      // Fresh start: clear any prior map so it begins at calibrate (Resume keeps the map instead).
+      try {
+        await window.OverseerBridge.deleteData({ type: recordType + '-exploration', key: 'current' })
+      } catch {
+        // no prior record
       }
-      invalidateActivitiesCache()
-      setTimeout(() => renderExploration(), 600)
+      await launchExplore(extra)
     },
     onAbort: async () => {
       if (activity && activity.activityId) {
@@ -16443,19 +16533,20 @@ async function renderExploration() {
     },
     onPause: async () => {
       await writeExplorationFlag(recordType, state, { paused: true })
-      setTimeout(() => renderExploration(), 300)
-    },
-    onResume: async () => {
-      await writeExplorationFlag(recordType, state, { paused: false })
       if (activity && activity.activityId) {
         try {
-          await window.OverseerBridge.resumeActivity(activity.activityId)
+          await window.OverseerBridge.abortActivity(activity.activityId)
         } catch {
-          // ignore
+          // ignore — the loop also breaks on the persisted paused flag
         }
       }
-      invalidateActivitiesCache()
-      setTimeout(() => renderExploration(), 600)
+      setTimeout(() => renderExploration(), 400)
+    },
+    onResume: async () => {
+      // Resume the SAME map: clear the paused flag, then relaunch the controller (it continues from
+      // the persisted 'current' record, fast-forwarding through stages from the run archive).
+      await writeExplorationFlag(recordType, state, { paused: false })
+      await launchExplore({})
     },
   }
 

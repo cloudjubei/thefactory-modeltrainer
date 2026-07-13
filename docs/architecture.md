@@ -111,12 +111,21 @@ project by its manifest's `recordType`.
   row is exactly one config's seeds. Each row shows the metric [min·avg·max] over seeds plus its normalised
   STANDING (robust-z within that axis value); `robustnessVerdict` classifies robust/mixed/weak. `seed` is
   never a locked or axis lever (a nuisance param pooled over, matching `setupKeyOfRun`). Regime slice toggles
-  narrow the pool (dataset by `timeframe`, environment by `allow_shorting`/`no_sell_action`); unused env
-  levers (`position_sizing`/`transaction_fee`/`vol_target`) are hidden from the value line. Columns sort by
-  any metric (a numeric axis — By value lever values — sorts numerically, not lexically); rows select to
-  **Add runs** with fresh seeds, or **Sweep** the axis for first-time-only cells (By value via a
-  recommended-values popup — numeric CHOICE levers like `batch_size`/`lookback_window` get a full grid, not
-  just their presets). Launches go through `xaiLaunchBatch`, which stays on the xAI tab.
+  narrow the pool (dataset by `timeframe`, environment by `allow_shorting`/`no_sell_action`); levers the
+  manifest marks `active: false` (declared but not wired into the sim — `position_sizing`/`transaction_fee`/
+  `vol_target`) are hidden from the value line via `isLeverActive` and never swept. Columns sort by any metric
+  (a numeric axis — By value lever values — sorts numerically, not lexically); rows select to **Add runs**
+  with fresh seeds, or **Sweep** the axis for first-time-only cells (By value via a recommended-values popup —
+  numeric CHOICE levers like `batch_size`/`lookback_window` get a full grid, not just their presets).
+- **"Sweep all datasets/environments" fires ONE campaign of pruned, deduped bundles**, not a blown-up
+  cartesian (`axisSweepBundleSpec` → `spec.environments`/`spec.datasets`, each bundle a complete set of the
+  active axis levers). Candidate values come from `xaiAxisSweepValues` — a boolean's two states, a choice's
+  options, else the values already OBSERVED across runs (no invented numeric grid, so the environment's
+  numeric exit levers stay at their handful of real values). `axisSweepCombos` then collapses any lever whose
+  manifest `dependsOn` control makes it inert (`trailing_take_profit` off unless `take_profit` is on;
+  `no_sell_action` off while `allow_shorting`, since the sim ignores it there) to its off value and dedupes —
+  so an environment sweep is the ~dozens of runs that differ in behaviour, not 100k+. Launches go through
+  `xaiLaunchBatch`, which stays on the xAI tab.
 - **Every "open these runs" gesture lands in the Selection view** (`openRunsSelection`): a By value / By
   dataset / By environment row's "runs ↗" (the runs BEHIND that row), a comparison drill, a fANOVA/interaction
   cell, or a hypothesis's runs all route to one `runsViewMode: 'selection'` tab that holds the LAST selection,

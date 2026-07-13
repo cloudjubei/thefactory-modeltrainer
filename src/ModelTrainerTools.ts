@@ -629,7 +629,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const explorationType = `${recordType}-exploration`
-    const stateKey = params.activityId
+    // Stable per-project key (NOT the activityId): one exploration per project, so relaunching the
+    // controller resumes the SAME map (fast-forwarding through stages from the shared run archive).
+    const stateKey = 'current'
     const maxRounds = params.maxRounds ?? 500
 
     const persist = async (state: ExplorationState): Promise<void> => {
