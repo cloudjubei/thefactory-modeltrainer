@@ -115,9 +115,15 @@ S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with 
 3. **Synthetic-surface acceptance (TDD, the soundness proof).** A fake objective with 2 known basins (one global);
    drive the loop on it; assert basin recall (both found), declared global ≈ true global, regret→0, convergence
    fires. Proves the policy WITHOUT training.
-4. **Autopilot activity** (`explore`) — the loop: Strategist → launch batch via the (already-hardened) activity +
-   concurrency engine → await settle → re-read runs → re-assess → repeat until done/budget. Reads `ExplorationState`
-   each round so the viewer can **pause / set budget / pin-or-free levers** mid-run.
+4. **Autopilot activity** (`explore`, durable backend controller) — the loop: Strategist → launch each batch as a
+   STANDARD `train` child (visible under Experiments, sharing the experiment lane) → await settle → re-read runs →
+   re-assess → repeat until done/budget. Reads `ExplorationState` each round so the viewer can **pause / set budget /
+   pin-or-free levers** mid-run. Durability contract: the in-flight child is tracked on the map as `pendingChildId`
+   and reconciled at the top of each round, so a resumed/restarted controller **adopts** the queued child instead of
+   spawning a duplicate, and a Stop aborts exactly it. `awaitActivity` self-heals the queue (`activityQueue.drain`)
+   each poll so a child queued under back-pressure (lane full / heap governor at 0) dispatches the moment a slot frees
+   — the queue otherwise only drains on an in-scope settle or the heap-relief edge, which a waiting controller misses.
+   A repeated-child-failure guard stops the loop instead of respawning an un-runnable batch forever.
 5. **Live CartPole acceptance** — autopilot on fresh CartPole rediscovers ≈500 and enumerates the basins.
 6. **Wine reproducibility pass** — flips objective to `val_rmse`/min; only the manifest changes; cheap enough to run
    the whole autopilot many times and measure declaration variance.

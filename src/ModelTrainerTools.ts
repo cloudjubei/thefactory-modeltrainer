@@ -21,6 +21,7 @@ import {
 import type {
   AnalysisCriterion,
   AnalysisRun,
+  ExplorationStage,
   ExplorationState,
   ExplorationCampaignParams,
   ExplorationCampaignResult,
@@ -100,6 +101,7 @@ import {
   MAX_JUDGE_RUNS,
   MEMORY_BUDGET_FRACTION,
   DEFAULT_RUN_MEMORY_ESTIMATE_BYTES,
+  EXPLORATION_MAX_CHILD_FAILURES,
 } from './modelTrainerConstants.js'
 import {
   fetchPaperText,
@@ -668,7 +670,21 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       return { configs }
     }
 
+    const appendLog = (
+      s: ExplorationState,
+      stage: ExplorationStage,
+      rationale: string,
+      batchRuns: number,
+    ): ExplorationState => ({
+      ...s,
+      log: [
+        ...(s.log ?? []),
+        { at: now(), stage, rationale, spentRuns: s.budget.spentRuns, batchRuns },
+      ].slice(-40),
+    })
+
     let state: ExplorationState | undefined
+    let failStreak = 0
     for (let round = 0; round < maxRounds; round++) {
       if (params.abortSignal?.aborted) break
 
@@ -684,6 +700,30 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         budget: { ...base.budget, ...(params.budget ?? {}) },
       }
 
+      // Reconcile any in-flight child from a prior round / a resumed controller BEFORE planning, so a
+      // resume ADOPTS the queued run instead of spawning a duplicate. `awaitActivity` self-heals the queue
+      // while it waits, so a child that queued under transient back-pressure dispatches when a slot frees.
+      if (working.pendingChildId && params.awaitActivity) {
+        const status = await params.awaitActivity(working.pendingChildId)
+        // undefined ⇒ the CONTROLLER itself was aborted mid-wait: stop, leaving pendingChildId set so a
+        // Stop can abort exactly this child (the viewer reads it off the persisted map).
+        if (params.abortSignal?.aborted || status === undefined) break
+        working.pendingChildId = undefined
+        await persist(working) // clear the settled handle durably (a concurrent Stop won't re-abort a dead id)
+        failStreak = status === 'completed' ? 0 : failStreak + 1
+        if (failStreak >= EXPLORATION_MAX_CHILD_FAILURES) {
+          const stopped = appendLog(
+            working,
+            working.stage,
+            `${failStreak} consecutive runs failed to produce results — stopping (check the run logs / config)`,
+            0,
+          )
+          await persist(stopped)
+          state = stopped
+          break
+        }
+      }
+
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
       const runs = recordsToAnalysisRuns(runsRecords)
       const step = nextExplorationStep(working, runs, manifest, {
@@ -691,16 +731,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       })
       // Append a decision breadcrumb (what happened + why) so the viewer can show a live log.
       const batchRuns = step.batch.reduce((n, r) => n + r.runCount, 0)
-      step.stateNext.log = [
-        ...(step.stateNext.log ?? []),
-        {
-          at: now(),
-          stage: step.stage,
-          rationale: step.rationale,
-          spentRuns: step.stateNext.budget.spentRuns,
-          batchRuns,
-        },
-      ].slice(-40)
+      step.stateNext = appendLog(
+        { ...step.stateNext, pendingChildId: working.pendingChildId },
+        step.stage,
+        step.rationale,
+        batchRuns,
+      )
       await persist(step.stateNext)
       state = step.stateNext
 
@@ -710,12 +746,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (!spec.configs?.length) break // strategist proposed only finished work — nothing to advance
 
       if (params.launchTrainCampaign) {
-        // Durable-controller mode: run the batch as a STANDARD `train` activity (visible under
-        // Experiments, sharing the experiment lane) and wait for it before planning the next round.
+        // Durable-controller mode: run the batch as a STANDARD `train` activity (visible under Experiments,
+        // sharing the experiment lane). Track it as pendingChildId and loop — the NEXT round's reconcile
+        // awaits it. Persisting the handle BEFORE we loop is what lets a Stop/resume find the exact child.
         const { activityId } = await params.launchTrainCampaign(spec, {
           concurrency: working.budget.maxConcurrent,
         })
-        if (activityId && params.awaitActivity) await params.awaitActivity(activityId)
+        if (!activityId) break
+        state = { ...step.stateNext, pendingChildId: activityId }
+        await persist(state)
       } else {
         await runTrainingCampaign({
           scope: params.scope,

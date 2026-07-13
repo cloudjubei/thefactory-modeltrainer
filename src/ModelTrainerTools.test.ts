@@ -20,7 +20,7 @@ import type {
   InferenceRequest,
   LLMConfig,
 } from 'thefactory-tools/types'
-import type { TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
+import type { ExperimentSpec, TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { initExplorationState } from './explorationUtils.js'
 import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
@@ -4568,5 +4568,154 @@ describe('runExplorationCampaign (autopilot)', () => {
     })
     expect(result.state.paused).toBe(true)
     expect(runner.jobs).toHaveLength(0) // no training launched while paused
+  })
+
+  // Durable-controller harness: `launchTrainCampaign` records the spawned child + returns a stable id;
+  // `awaitActivity` models the child running its spec to completion (writing real run records) unless the
+  // id is marked to fail/adopt. Mirrors how the backend spawns a `train` child and polls it to terminal.
+  function durableHarness(
+    tools: ReturnType<typeof makeTools>['tools'],
+    storage: DataStorage,
+    opts: { failAll?: boolean; abortAfter?: number } = {},
+  ) {
+    const launchOrder: ExperimentSpec[] = []
+    const awaitOrder: string[] = []
+    const children = new Map<string, ExperimentSpec>()
+    let counter = 0
+    let awaited = 0
+    const launchTrainCampaign = async (spec: ExperimentSpec) => {
+      const id = `child-${counter++}`
+      children.set(id, spec)
+      launchOrder.push(spec)
+      return { activityId: id }
+    }
+    const awaitActivity = async (id: string): Promise<string | undefined> => {
+      awaitOrder.push(id)
+      awaited++
+      if (opts.abortAfter !== undefined && awaited > opts.abortAfter) return undefined // controller aborted mid-wait
+      if (opts.failAll) return 'failed' // child settled without producing any run
+      const spec = children.get(id)
+      if (spec) {
+        await tools.runTrainingCampaign({
+          scope: 's',
+          projectRoot: '/repo',
+          manifest: SURFACE_MANIFEST,
+          spec,
+          concurrency: 8,
+        })
+      }
+      return 'completed'
+    }
+    return { launchTrainCampaign, awaitActivity, launchOrder, awaitOrder }
+  }
+
+  it('durable mode: spawns each round via launchTrainCampaign and converges (no duplicate spawns)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage)
+    const result = await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-d',
+      budget: { maxRuns: 1200, maxConcurrent: 8 },
+      targetObjective: 500,
+      maxRounds: 300,
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity: h.awaitActivity,
+    })
+    expect(result.state.done).toBe(true)
+    expect(result.basins.map((b) => String(b.region.algo)).sort()).toEqual(['A', 'B'])
+    // every launched child was awaited exactly once — no batch spawned twice, none left un-awaited
+    expect(h.awaitOrder.length).toBe(h.launchOrder.length)
+    // the map is fully settled: no in-flight child left pending after convergence
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBeUndefined()
+  })
+
+  it('durable mode: a spawned round is tracked as pendingChildId before it is awaited', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage)
+    await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-p',
+      maxRounds: 1, // one round: plan + spawn, then stop BEFORE the next round awaits the child
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity: h.awaitActivity,
+    })
+    expect(h.launchOrder.length).toBe(1)
+    expect(h.awaitOrder.length).toBe(0) // the freshly-spawned child is not awaited within the same round
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBe('child-0')
+  })
+
+  it('durable mode: ADOPTS an already-pending child on resume instead of spawning a duplicate', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+      content: { ...initExplorationState(SURFACE_MANIFEST), pendingChildId: 'orphan' },
+    })
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage)
+    let launchesWhenOrphanAwaited = -1
+    const awaitActivity = async (id: string): Promise<string | undefined> => {
+      if (id === 'orphan') launchesWhenOrphanAwaited = h.launchOrder.length
+      return h.awaitActivity(id)
+    }
+    await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-r',
+      budget: { maxRuns: 1200, maxConcurrent: 8 },
+      targetObjective: 500,
+      maxRounds: 300,
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity,
+    })
+    expect(h.awaitOrder[0]).toBe('orphan') // the pending child is reconciled first...
+    expect(launchesWhenOrphanAwaited).toBe(0) // ...BEFORE any new batch is launched
+  })
+
+  it('durable mode: stops after repeated child failures instead of respawning forever', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage, { failAll: true })
+    const result = await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-f',
+      maxRounds: 200,
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity: h.awaitActivity,
+    })
+    expect(result.state.done).toBe(false)
+    expect(h.launchOrder.length).toBeLessThanOrEqual(4) // bounded, not 200
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    const log = ((rec?.content as { log?: { rationale: string }[] }).log ?? []).map((e) => e.rationale)
+    expect(log.some((r) => /fail/i.test(r))).toBe(true)
+  })
+
+  it('durable mode: a controller aborted mid-wait leaves the child pending for a Stop to clean up', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage, { abortAfter: 0 }) // first await resolves undefined (aborted)
+    await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-a',
+      maxRounds: 200,
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity: h.awaitActivity,
+    })
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBe('child-0')
   })
 })

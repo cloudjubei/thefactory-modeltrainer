@@ -80,6 +80,7 @@
     @media (prefers-reduced-motion:reduce){.expl-status .pulse{animation:none}}
     .expl-status .now{font-family:var(--e-mono);font-size:12.5px;color:var(--e-muted);margin:8px 0 0}
     .expl-status .now b{color:var(--e-text);font-weight:600}
+    .expl-status .now.sub{font-size:11.5px;color:var(--e-faint);margin-top:5px}
     .expl-log{list-style:none;margin:10px 0 0;padding:10px 0 0;border-top:1px solid var(--e-line);max-height:132px;overflow:auto;display:flex;flex-direction:column-reverse;gap:0}
     .expl-log li{display:flex;gap:10px;font-family:var(--e-mono);font-size:11.5px;padding:4px 0;color:var(--e-muted)}
     .expl-log li .st{color:var(--e-gold);min-width:74px}
@@ -429,6 +430,18 @@
       : ''
 
     const spent = (data.state && data.state.budget && data.state.budget.spentRuns) || 0
+    // The in-flight child `train` run this round launched (queued vs running) — makes "0 runs, nothing
+    // happening" legible: a queued child is WAITING for an experiment slot (other training or memory
+    // pressure is using them), not stuck.
+    const pc = data.pendingChild
+    const childLine =
+      pc && (live || inProgress)
+        ? pc.status === 'queued'
+          ? '<p class="now sub">⏳ run queued — waiting for a free experiment slot (other training or host memory pressure may be using them)</p>'
+          : pc.status === 'running' || pc.status === 'starting'
+            ? '<p class="now sub">▶ training run in progress…</p>'
+            : ''
+        : ''
     const nowLine =
       last && (live || inProgress || paused)
         ? `<p class="now"><b>${esc(last.rationale)}</b> · ${spent} runs so far</p>`
@@ -445,6 +458,7 @@
     return `<div class="expl-status ${live && !paused ? 'live' : ''}">
       <div class="row"><span class="title">${head}</span><div style="flex:1"></div>${ctrls}</div>
       ${nowLine}
+      ${childLine}
       ${budgetFields}
       ${logHtml}
     </div>`

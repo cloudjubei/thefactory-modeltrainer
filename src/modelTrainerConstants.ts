@@ -139,3 +139,10 @@ export const EXPLORATION_BASIN_NOISE_MARGIN = 3
  * max is still kept, while a region only marginally above random is rejected.
  */
 export const EXPLORATION_BASIN_MIN_SPAN_FRACTION = 0.1
+
+/**
+ * Consecutive child `train` campaigns that settle WITHOUT producing a completed run (failed/aborted) before
+ * the controller stops itself instead of respawning the same batch forever. Guards the durable loop against
+ * an infinite spawn→fail cycle when a batch is genuinely un-runnable (bad config, missing compute).
+ */
+export const EXPLORATION_MAX_CHILD_FAILURES = 3

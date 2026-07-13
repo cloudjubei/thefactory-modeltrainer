@@ -1011,6 +1011,12 @@ export interface ExplorationState {
   declaredBasinId?: string
   /** User pause — when true the strategist emits an empty batch and holds the stage. */
   paused?: boolean
+  /**
+   * The in-flight child `train` activity this round launched, tracked durably so a resumed controller
+   * ADOPTS (awaits) it instead of spawning a duplicate, and a Stop can abort exactly it. Cleared once the
+   * child settles. Only set in durable-controller mode.
+   */
+  pendingChildId?: string
   steer?: ExplorationSteer
   /** When the state was last advanced (ISO). */
   updatedAt?: string
@@ -1063,8 +1069,14 @@ export interface ExplorationCampaignParams {
     spec: ExperimentSpec,
     opts: { concurrency?: number },
   ) => Promise<{ activityId?: string }>
-  /** Await a launched activity to a terminal status; paired with {@link launchTrainCampaign}. */
-  awaitActivity?: (activityId: string) => Promise<void>
+  /**
+   * Await a launched activity to a terminal status; paired with {@link launchTrainCampaign}. Resolves with
+   * the child's terminal status (`'completed' | 'failed' | 'aborted'`), or `undefined` if the CONTROLLER
+   * itself was aborted before the child settled (so the controller can stop while leaving the child for a
+   * Stop to clean up). Implementations should self-heal the queue while waiting so a child that queued under
+   * transient back-pressure dispatches as soon as a slot frees.
+   */
+  awaitActivity?: (activityId: string) => Promise<string | undefined>
   /** Safety cap on strategist rounds (default 500). */
   maxRounds?: number
 }

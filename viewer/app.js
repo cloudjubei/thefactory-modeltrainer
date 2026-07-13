@@ -16471,17 +16471,23 @@ async function renderExploration() {
     // none yet
   }
 
-  // a live/last explore activity for this project
+  // a live/last explore activity for this project, plus the round's in-flight child train (if any)
   let activity = null
+  let pendingChild = null
   try {
     const res = await window.OverseerBridge.listActivities()
-    const mine = ((res && res.activities) || []).filter(
+    const all = (res && res.activities) || []
+    const mine = all.filter(
       (a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType),
     )
     activity =
       mine.find((a) => a.status === 'running' || a.status === 'starting' || a.status === 'queued') ||
       mine.sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')))[0] ||
       null
+    if (state && state.pendingChildId) {
+      const c = all.find((a) => a.activityId === state.pendingChildId)
+      if (c) pendingChild = { status: c.status }
+    }
   } catch {
     // bridge may be unavailable in a preview frame
   }
@@ -16522,6 +16528,10 @@ async function renderExploration() {
       await launchExplore(extra)
     },
     onAbort: async () => {
+      // Stop the controller AND the in-flight child it launched — aborting only the controller leaves the
+      // child queued/running, which is exactly the "Stop doesn't clear the queue" trap. The child id is
+      // tracked on the persisted map so we abort EXACTLY it, then clear the handle so a later Resume/Start
+      // begins clean instead of re-adopting a dead run.
       if (activity && activity.activityId) {
         try {
           await window.OverseerBridge.abortActivity(activity.activityId)
@@ -16529,6 +16539,15 @@ async function renderExploration() {
           // ignore
         }
       }
+      if (state && state.pendingChildId) {
+        try {
+          await window.OverseerBridge.abortActivity(state.pendingChildId)
+        } catch {
+          // ignore
+        }
+        await writeExplorationFlag(recordType, state, { pendingChildId: undefined })
+      }
+      invalidateActivitiesCache()
       setTimeout(() => renderExploration(), 400)
     },
     onPause: async () => {
@@ -16552,7 +16571,7 @@ async function renderExploration() {
 
   window.Exploration.render(
     container,
-    { manifest, state, runs, activity: activity ? { status: activity.status } : null },
+    { manifest, state, runs, activity: activity ? { status: activity.status } : null, pendingChild },
     actions,
   )
 
