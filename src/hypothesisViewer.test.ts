@@ -996,6 +996,34 @@ describe('hypothesisHygieneCensus', () => {
     const c = H.hypothesisHygieneCensus(hyps, [], hygieneManifest, 3)
     expect(c.judged).toBe(1)
   })
+  // foldHygieneCensus is the shared classification path the viewer's CHUNKED warm folds a precomputed
+  // diagnosis map through — it must classify identically to the one-shot census (which now delegates to it).
+  it('foldHygieneCensus folds a precomputed diagnosis map identically to the one-shot census', () => {
+    const runs3 = [
+      run('a', { model_name: 'ppo' }, { vh: 5, objective: 5 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { vh: 4, objective: 4 }),
+      run('c', { model_name: 'ppo', seed: 2 }, { vh: 3, objective: 3 }),
+    ]
+    const hyps = [
+      { id: 'h1', spec: { fixed: { model_name: 'ppo' } } },
+      { id: 'h2', spec: { fixed: { model_name: 'ppo', reward_model: 'combo_all' } } },
+      { id: 'h3', spec: { fixed: { model_name: 'dqn' }, seeds: [0, 1, 2] } },
+      { id: 'h4', spec: { fixed: { model_name: 'ppo' } }, verdictSource: 'manual', status: 'disproved' },
+    ]
+    const byId = new Map(
+      hyps.map((h) => [h.id, H.hypothesisHygiene(h, runs3, hygieneManifest, 3)]),
+    )
+    const folded = H.foldHygieneCensus(hyps, byId)
+    expect(folded.total).toBe(4)
+    expect(folded.judged).toBe(2) // h1 proven + h4 manual
+    expect(folded.blocked).toBe(1) // h2
+    expect(folded.starved).toBe(1) // h3
+    expect(folded.blockedIds).toEqual(['h2'])
+    // A plain object map is accepted too.
+    const asObj: Record<string, unknown> = {}
+    byId.forEach((v, k) => (asObj[k] = v))
+    expect(H.foldHygieneCensus(hyps, asObj).judged).toBe(2)
+  })
 })
 
 describe('compareContexts — baselineIndex out of range must not silently mis-judge', () => {
@@ -1129,5 +1157,86 @@ describe('hypothesisHygiene with a manifest benchmark', () => {
     )
     const issue = d.issues.find((i: any) => i.kind === 'no-metric')
     expect(issue.detail).toContain('hypothesisBenchmark')
+  })
+})
+
+// The per-snapshot inverted run index — a perf accelerator whose ONLY contract is: matching over the
+// candidate superset it yields must be BYTE-IDENTICAL to matching over the full run set. specMatchesConfig
+// stays the verifier; the index just narrows the array it runs over. These tests pin that equivalence
+// (superset + verifier === full scan) across every spec shape + value-type edge case, since a missed
+// constraint would silently drop true matches and persist a WRONG verdict.
+describe('buildRunIndex + candidateRunsFor', () => {
+  const corpus = [
+    run('r1', { model_name: 'ppo', lr: 0.5, gamma: 0.99 }, { vh: 1 }),
+    run('r2', { model_name: 'ppo', lr: 0.1, gamma: 0.99 }, { vh: -1 }),
+    run('r3', { model_name: 'dqn', lr: 0.5, gamma: 0.9 }, { vh: 2 }),
+    run('r4', { model_name: 'a2c', lr: '0.5', gamma: 0.99 }, { vh: 3 }), // lr as STRING
+    run('r5', { model_name: 'ppo', gamma: 0.99 }, { vh: 4 }), // MISSING lr
+    run('r6', { model_name: 'ppo', lr: 0.5, gamma: 0.99, shorting: true }, { vh: 5 }), // boolean lever
+    run('r7', { model_name: 'sac', lr: 0.3 }, { vh: 6 }),
+  ]
+  const sameMatch = (spec: any, runs: any[]) => {
+    const idx = H.buildRunIndex(runs)
+    const viaIndex = H.hypothesisMatchingRuns(spec, H.candidateRunsFor(spec, idx))
+    const viaScan = H.hypothesisMatchingRuns(spec, runs)
+    // Order within the candidate superset may differ from the full scan; compare as sorted key sets.
+    const keys = (rs: any[]) => rs.map((r) => r.key).sort()
+    expect(keys(viaIndex)).toEqual(keys(viaScan))
+  }
+
+  it('fixed-only spec: candidates match the full scan', () => {
+    sameMatch({ fixed: { model_name: 'ppo' } }, corpus)
+  })
+  it('sweep-only spec (union of option buckets)', () => {
+    sameMatch({ sweep: { lr: [0.5, 0.1] } }, corpus)
+  })
+  it('mixed fixed + sweep (AND across constraints, picks the tighter superset)', () => {
+    sameMatch({ fixed: { model_name: 'ppo' }, sweep: { lr: [0.5, 0.1] } }, corpus)
+  })
+  it('compare spec (union over compare values)', () => {
+    sameMatch({ compare: { lever: 'model_name', values: ['ppo', 'dqn'] } }, corpus)
+  })
+  it('context-spanning spec with compare + environments still matches identically', () => {
+    sameMatch(
+      { compare: { lever: 'model_name', values: ['ppo', 'a2c'] }, environments: [{ asset: 'btc' }] },
+      corpus,
+    )
+  })
+  it('number-vs-string parity: fixed lr=0.5 also catches the run storing "0.5"', () => {
+    const spec = { fixed: { lr: 0.5 } }
+    const idx = H.buildRunIndex(corpus)
+    const got = H.hypothesisMatchingRuns(spec, H.candidateRunsFor(spec, idx))
+      .map((r: any) => r.key)
+      .sort()
+    // r1, r3, r4 ("0.5"), r6 all have lr 0.5/"0.5"; r5 has no lr, r2/r7 differ.
+    expect(got).toEqual(['r1', 'r3', 'r4', 'r6'])
+  })
+  it('boolean lever value indexes + matches', () => {
+    sameMatch({ fixed: { shorting: true } }, corpus)
+  })
+  it('fixed lever value carried by NO run yields no candidates and no matches', () => {
+    const spec = { fixed: { model_name: 'nonexistent' } }
+    expect(H.candidateRunsFor(spec, H.buildRunIndex(corpus))).toEqual([])
+    sameMatch(spec, corpus)
+  })
+  it('empty spec (no fixed/sweep/compare) yields [] — mirrors specMatchesConfig matching nothing', () => {
+    expect(H.candidateRunsFor({}, H.buildRunIndex(corpus))).toEqual([])
+    expect(H.candidateRunsFor({ environments: [{ asset: 'btc' }] }, H.buildRunIndex(corpus))).toEqual(
+      [],
+    )
+    sameMatch({}, corpus)
+    sameMatch({ environments: [{ asset: 'btc' }] }, corpus)
+  })
+  it('candidateRunsFor returns the SMALLEST superset among constraints (tighter than a dominant lever)', () => {
+    // gamma=0.99 is on 5 runs; model_name=sac on 1. The spec ANDs both; the seed must be the sac bucket.
+    const spec = { fixed: { gamma: 0.99, model_name: 'sac' } }
+    const cands = H.candidateRunsFor(spec, H.buildRunIndex(corpus))
+    // sac has gamma undefined, so the AND matches nothing — and the smallest seed (model_name=sac, 1 run)
+    // keeps the candidate set to that single run, not all five gamma=0.99 runs.
+    expect(cands.length).toBeLessThanOrEqual(1)
+    sameMatch(spec, corpus)
+  })
+  it('handles an empty run set', () => {
+    expect(H.candidateRunsFor({ fixed: { model_name: 'ppo' } }, H.buildRunIndex([]))).toEqual([])
   })
 })

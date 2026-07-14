@@ -302,12 +302,137 @@ describe('exhausted stage advance (no dead-end when the space is already covered
     expect(advanced.stage).not.toBe('global') // told it's exhausted → it moves on (local/converged), never dead-ends
   })
 
-  it('converges from LOCAL when told the batch is fully redundant', () => {
+  it('does NOT converge from LOCAL on exhausted while fresh refinement remains — it escalates instead', () => {
+    // Only lr=0.5 tried, no frozen levers: the coordinate sweep still has fresh points (0.375…0.625), so a
+    // controller "exhausted" signal must NOT dead-end into converged — the space is nowhere near covered.
     const runs = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s })))
     const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
     const advanced = nextExplorationStep(state, runs, MANIFEST, { exhausted: true })
-    expect(advanced.done).toBe(true)
-    expect(advanced.stage).toBe('converged')
+    expect(advanced.done).toBe(false)
+    expect(advanced.stage).toBe('local')
+    expect(advanced.batch.length).toBeGreaterThan(0)
+  })
+})
+
+// The core contract the user demanded: "it should never converge unless the whole search space was covered."
+// A plateau in the CURRENT active subspace must ESCALATE — unfreeze a previously-fixed lever, then deepen the
+// numeric resolution — and only declare `converged` once that whole ladder is dry (space genuinely covered).
+describe('escalation ladder — never converge until the space is covered', () => {
+  // MANIFEST-only helper: a manifest with NO inert lever, so `frozenLevers: {}` is a realistic full state
+  // (every searchable lever active) and rung-1 (unfreeze) is legitimately empty — isolating rung-2 (deepen).
+  const M2: TrainerManifest = {
+    name: 'no-inert',
+    recordType: 'no-inert-run',
+    run: 'noop',
+    objective: { name: 'score', direction: 'max' },
+    levers: {
+      algo: { type: 'choice', choices: ['A', 'B', 'C'], default: 'A' },
+      lr: { type: 'number', range: [0, 1], default: 0.1 },
+      seed: { type: 'number', default: 0 },
+    },
+  }
+  const aRun = (manifest: TrainerManifest, lr: number, seed: number): AnalysisRun => {
+    const cfg = manifest === M2 ? { algo: 'A', lr, seed } : { algo: 'A', lr, noise_knob: 0.5, seed }
+    return evaluate(cfg)
+  }
+
+  it('UNFREEZES a fixed numeric lever instead of converging when all basins plateaued (rung 1: widen)', () => {
+    // A is tightly resolved on lr (bracket 0.49–0.51 ⇒ plateaued), and noise_knob is frozen — so instead of
+    // "all basins plateaued → converged", the search must unfreeze noise_knob and probe it.
+    runSeq = 0
+    const runs: AnalysisRun[] = []
+    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(MANIFEST, lr, s))
+    const state: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: { noise_knob: 0.5 },
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, MANIFEST, {})
+    expect(step.done).toBe(false)
+    expect(step.stateNext.activeLevers).toContain('noise_knob') // widened into the fixed lever
+    expect(Object.keys(step.stateNext.frozenLevers)).not.toContain('noise_knob') // no longer pinned
+    expect(step.stage).toBe('global')
+    expect(step.batch.length).toBeGreaterThan(0)
+    expect(JSON.stringify(step.batch.map((b) => b.spec.sweep))).toContain('noise_knob')
+  })
+
+  it('DEEPENS the numeric resolution when a basin is resolved at the current floor but not a finer one (rung 2)', () => {
+    // lr tried at 0.48/0.5/0.52 → half-gap 0.01: resolved at range/64 (0.0156) but NOT at range/128 (0.0078).
+    // With no frozen levers, rung 1 is empty, so the search must deepen rather than converge.
+    runSeq = 0
+    const runs: AnalysisRun[] = []
+    for (const lr of [0.48, 0.5, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, M2, {})
+    expect(step.done).toBe(false)
+    expect(step.stage).toBe('local')
+    expect(step.stateNext.refineDepth).toBe(1) // deepened one level
+    expect(step.batch.length).toBeGreaterThan(0)
+  })
+
+  it('does NOT converge while the numeric range is still UNCOVERED — even with points clustered at the peak', () => {
+    // A pathological "looks converged" case: three runs bunched at 0.4995–0.5005. The old logic would call the
+    // basin plateaued and converge, but 99% of the lr range is untried — so the search must keep probing it.
+    runSeq = 0
+    const runs: AnalysisRun[] = []
+    for (const lr of [0.4995, 0.5, 0.5005]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, M2, {})
+    expect(step.done).toBe(false) // the space is nowhere near covered
+    const swept = step.batch.flatMap((b) => (b.spec.sweep?.lr as number[]) ?? [])
+    expect(swept.some((v) => v < 0.4 || v > 0.6)).toBe(true) // reaching out into the untried range
+  })
+
+  it('deepening the resolution proposes STRICTLY finer coordinate points (localRefineRecs honours refineDepth)', () => {
+    const basin: Basin = {
+      id: 'algo=A',
+      region: { algo: 'A' },
+      centerConfig: { algo: 'A', lr: 0.5, seed: 0 },
+      peakObjective: 500,
+      peakSeeds: XAI_MIN_SEEDS,
+      plateaued: false,
+      memberRunKeys: [],
+    }
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { algo: 'A', lr: 0.48, seed: 0 }, objective: 490, metrics: { score: 490, baseline: BASELINE }, seed: 0, status: 'completed' },
+      { key: 'b', config: { algo: 'A', lr: 0.52, seed: 0 }, objective: 490, metrics: { score: 490, baseline: BASELINE }, seed: 0, status: 'completed' },
+    ]
+    const base = { ...initExplorationState(M2), stage: 'local' as const, activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const shallow = localRefineRecs(basin, runs, M2, { ...base, refineDepth: 0 })
+    const deep = localRefineRecs(basin, runs, M2, { ...base, refineDepth: 2 })
+    // at the coarse floor (range/64 = 0.0156) the 0.48–0.52 bracket is resolved → no points; the finer floor
+    // (range/256) admits the sub-0.0156 offsets, so deepening un-plateaus the basin.
+    expect(shallow.length).toBe(0)
+    expect(deep.length).toBeGreaterThan(0)
+  })
+
+  it('declares the best region as the maximum at convergence even when NO region cleared the basin margin', () => {
+    // Objective barely above baseline (gain 2 < the min-span margin 3) ⇒ clusterBasins finds nothing, yet the
+    // run history has a clear best — the UI must never report "no maximum found".
+    const runs: AnalysisRun[] = []
+    for (const lr of [0.4995, 0.5, 0.5005]) for (const s of [0, 1, 2, 3, 4]) {
+      runs.push({ key: `w-${lr}-${s}`, config: { algo: 'A', lr, seed: s }, objective: 22, metrics: { score: 22, baseline: 20 }, seed: s, status: 'completed' })
+    }
+    expect(clusterBasins(runs, { key: 'objective', direction: 'max' }, ['algo', 'lr'], 1, 20)).toEqual([])
+    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const step = nextExplorationStep(state, runs, M2, {})
+    expect(step.done).toBe(true)
+    expect(step.stateNext.basins.length).toBeGreaterThanOrEqual(1) // a fallback basin synthesised from the best run
+    expect(step.stateNext.declaredBasinId).toBeTruthy()
   })
 })
 

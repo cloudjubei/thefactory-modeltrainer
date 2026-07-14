@@ -44,6 +44,85 @@
     )
   }
 
+  // A per-snapshot inverted index over runs: leverKey -> String(value) -> [runs carrying that value]. Built
+  // ONCE per run snapshot so matching can run over a small candidate SUPERSET rather than the whole set —
+  // the accelerator behind a non-blocking verdict refresh. String() coercion is IDENTICAL to
+  // specMatchesConfig, so buckets and lookups agree exactly. Holds only run REFERENCES (no duplication).
+  function buildRunIndex(runs) {
+    const index = new Map()
+    const all = runs || []
+    for (let i = 0; i < all.length; i++) {
+      const cfg = (all[i].summary && all[i].summary.config) || {}
+      const keys = Object.keys(cfg)
+      for (let k = 0; k < keys.length; k++) {
+        const key = keys[k]
+        let byVal = index.get(key)
+        if (!byVal) {
+          byVal = new Map()
+          index.set(key, byVal)
+        }
+        const v = String(cfg[key])
+        let bucket = byVal.get(v)
+        if (!bucket) {
+          bucket = []
+          byVal.set(v, bucket)
+        }
+        bucket.push(all[i])
+      }
+    }
+    return index
+  }
+
+  // The smallest candidate SUPERSET of the runs matching `spec`, via the index. Every true match satisfies
+  // EVERY constraint (fixed AND sweep AND compare are all required by specMatchesConfig), so it lives in
+  // each constraint's bucket(s) — hence any single constraint's bucket(s) is a valid superset and the
+  // SMALLEST is both safe and tightest. specMatchesConfig then verifies exactly, so matching over this
+  // superset is byte-identical to a full scan. Returns [] when the spec has no fixed/sweep/compare —
+  // mirroring specMatchesConfig, which matches nothing for such a spec (environments/datasets only PARTITION
+  // already-matched runs; they never gate the pooled match).
+  function candidateRunsFor(spec, index) {
+    const fixed = (spec && spec.fixed) || {}
+    const sweep = (spec && spec.sweep) || {}
+    const cmp = spec && spec.compare
+    const hasCompare = !!(cmp && cmp.lever && Array.isArray(cmp.values) && cmp.values.length)
+    const fixedKeys = Object.keys(fixed)
+    const sweepKeys = Object.keys(sweep)
+    if (!fixedKeys.length && !sweepKeys.length && !hasCompare) return []
+    const bucketFor = (key, value) => {
+      const byVal = index && index.get(key)
+      return (byVal && byVal.get(String(value))) || []
+    }
+    // Union of the buckets for a lever's allowed values (sweep options / compare values). Buckets for
+    // DISTINCT string values are disjoint, but coerced duplicates (0.5 vs '0.5') collapse — a Set guards it.
+    const unionBuckets = (key, values) => {
+      if (values.length === 1) return bucketFor(key, values[0])
+      const seen = new Set()
+      const out = []
+      for (let i = 0; i < values.length; i++) {
+        const b = bucketFor(key, values[i])
+        for (let j = 0; j < b.length; j++) {
+          if (!seen.has(b[j])) {
+            seen.add(b[j])
+            out.push(b[j])
+          }
+        }
+      }
+      return out
+    }
+    let best = null
+    const consider = (arr) => {
+      if (best === null || arr.length < best.length) best = arr
+    }
+    for (let i = 0; i < fixedKeys.length; i++)
+      consider(bucketFor(fixedKeys[i], fixed[fixedKeys[i]]))
+    for (let i = 0; i < sweepKeys.length; i++) {
+      const raw = sweep[sweepKeys[i]]
+      consider(unionBuckets(sweepKeys[i], Array.isArray(raw) ? raw : [raw]))
+    }
+    if (hasCompare) consider(unionBuckets(cmp.lever, cmp.values))
+    return best || []
+  }
+
   // The single-context SUCCESS BENCHMARK: which run METRIC proves a hypothesis and the threshold it must
   // clear. The manifest declares it (`hypothesisBenchmark: { metric, threshold?, direction? }` — e.g.
   // CartPole: eval_return_mean ≥ 475); absent, the trading line's historical default applies
@@ -743,9 +822,13 @@
     return { verdict, status, issues, pins, cells, plannedItems, metricRuns, runsNeeded }
   }
 
-  // The registry-wide roll-up: how many hypotheses are judged / structurally blocked / merely starved,
-  // issue-kind counts, and the blocked ids (the actionable fix list).
-  function hypothesisHygieneCensus(hyps, runs, manifest, minRuns) {
+  // Fold a PRECOMPUTED per-hypothesis diagnosis map (id -> hygiene) into the aggregate census. Split out so
+  // a chunked/incremental sweep (the viewer, to stay non-blocking) and the one-shot hypothesisHygieneCensus
+  // share ONE classification path. A manual non-untested verdict counts as judged regardless of the raw
+  // hygiene status. `byId` may be a Map or a plain object.
+  function foldHygieneCensus(hyps, byId) {
+    const get =
+      byId && typeof byId.get === 'function' ? (id) => byId.get(id) : (id) => byId && byId[id]
     const census = {
       total: (hyps || []).length,
       judged: 0,
@@ -759,7 +842,8 @@
         census.judged++
         continue
       }
-      const d = hypothesisHygiene(h, runs, manifest, minRuns)
+      const d = get(h && h.id)
+      if (!d) continue
       if (d.status === 'judged') census.judged++
       else if (d.status === 'blocked') {
         census.blocked++
@@ -772,11 +856,26 @@
     return census
   }
 
+  // The registry-wide roll-up: how many hypotheses are judged / structurally blocked / merely starved,
+  // issue-kind counts, and the blocked ids (the actionable fix list). Delegates classification to
+  // foldHygieneCensus so the one-shot and the viewer's chunked warm can't diverge.
+  function hypothesisHygieneCensus(hyps, runs, manifest, minRuns) {
+    const byId = new Map()
+    for (const h of hyps || []) {
+      if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0 && h.status !== 'untested')
+        continue
+      byId.set(h && h.id, hypothesisHygiene(h, runs, manifest, minRuns))
+    }
+    return foldHygieneCensus(hyps, byId)
+  }
+
   const Hypothesis = {
     VERDICTS: VERDICTS,
     specMatchesConfig: specMatchesConfig,
     resolveBenchmark: resolveBenchmark,
     hypothesisMatchingRuns: hypothesisMatchingRuns,
+    buildRunIndex: buildRunIndex,
+    candidateRunsFor: candidateRunsFor,
     matchedKeysOf: matchedKeysOf,
     measuredFromRuns: measuredFromRuns,
     autoVerdictFor: autoVerdictFor,
@@ -791,6 +890,7 @@
     evaluateHypothesis: evaluateHypothesis,
     hypothesisHygiene: hypothesisHygiene,
     hypothesisHygieneCensus: hypothesisHygieneCensus,
+    foldHygieneCensus: foldHygieneCensus,
     rollupPaperVerdict: rollupPaperVerdict,
     paperVerdictDetail: paperVerdictDetail,
     scorePaperVerdict: scorePaperVerdict,

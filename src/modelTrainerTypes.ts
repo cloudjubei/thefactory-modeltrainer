@@ -1057,6 +1057,13 @@ export interface ExplorationState {
   log?: ExplorationLogEntry[]
   /** Consecutive `global` rounds that added no new basin (the loop-until-dry counter). */
   dryRounds: number
+  /**
+   * How many times the search has DEEPENED its numeric resolution after basins plateaued — each level halves
+   * the coordinate-ascent min-step floor, so a plateau widens/tightens the search rather than ending it. The
+   * escalation ladder (unfreeze a lever → deepen resolution) is what makes convergence mean "space covered",
+   * never just "this subspace plateaued". Absent ⇒ 0.
+   */
+  refineDepth?: number
   /** True once S4 has declared — the search is complete. */
   done: boolean
   /** The declared global-max basin id (set at S4). */

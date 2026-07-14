@@ -4,6 +4,7 @@ import {
   EXPLORATION_BASIN_NOISE_MARGIN,
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
+  EXPLORATION_MAX_REFINE_DEPTH,
   EXPLORATION_REFINE_MAX_STEP_FRACTION,
   EXPLORATION_REFINE_MIN_STEP_FRACTION,
   EXPLORATION_SCREEN_SAMPLES,
@@ -290,7 +291,9 @@ export function localRefineRecs(
     if (span <= 0) continue
     const c = Number(center[lever])
     const maxStep = span * EXPLORATION_REFINE_MAX_STEP_FRACTION
-    const minStep = span * EXPLORATION_REFINE_MIN_STEP_FRACTION
+    // DEEPENING: each refine level halves the resolution floor, so a basin that plateaued at the coarse floor
+    // can be climbed further once the ladder deepens (the "never stop while the space is uncovered" contract).
+    const minStep = (span * EXPLORATION_REFINE_MIN_STEP_FRACTION) / Math.pow(2, state.refineDepth ?? 0)
     const triedVals = regionRuns.map((r) => Number(r.config[lever])).filter((v) => isFinite(v))
     const eps = minStep / 4
     // nearest tried point strictly below / above the center, else the range edge
@@ -581,15 +584,142 @@ function stepLocal(
   const pending = withPlateau.filter((b) => !b.plateaued)
   const state2 = { ...state, basins: withPlateau }
 
-  // Every local refinement the controller could expand is already run — the space is covered at the current
-  // resolution; declare the global max from what we have rather than dead-ending mid-climb.
-  if (opts?.exhausted) return converge(state2, runs, criterion, mk, 'space exhausted at current resolution')
-
-  if (!pending.length) return converge(state2, runs, criterion, mk, 'all basins plateaued')
-
+  // When the current active subspace is climbed out — every basin plateaued, no fresh refinement, or the
+  // controller reports the batch fully redundant — DON'T converge. A plateau in this subspace is not the whole
+  // space: ESCALATE (unfreeze a fixed lever, then deepen the numeric resolution). Convergence is reserved for
+  // when that ladder is fully dry — the only honest "the search space is covered".
   const batch = pending.flatMap((b) => localRefineRecs(b, runs, manifest, state)).slice(0, 8)
-  if (!batch.length) return converge(state2, runs, criterion, mk, 'no refinements remain')
+  if (opts?.exhausted || !pending.length || !batch.length) {
+    return expand(state2, withPlateau, runs, manifest, criterion, mk, target)
+  }
   return mk('local', batch, `climb ${pending.length} basin(s)`, state2, false)
+}
+
+/**
+ * The escalation ladder — what the search does INSTEAD of converging when the current subspace is climbed out.
+ * Rung 1 (widen): unfreeze the most-important still-fixed numeric lever and sweep it, re-opening the search
+ * along a previously-ignored dimension. Rung 2 (deepen): find the shallowest resolution depth that admits new
+ * coordinate points around a basin and climb there. Only when BOTH rungs are dry — every lever unfrozen and
+ * the finest resolution reached — is the space genuinely covered, and the search converges.
+ */
+function expand(
+  state: ExplorationState,
+  basins: Basin[],
+  runs: AnalysisRun[],
+  manifest: TrainerManifest,
+  criterion: AnalysisCriterion,
+  mk: Mk,
+  target?: number,
+): ExplorationStep {
+  // Rung 1 — unfreeze the highest-importance numeric lever that is still pinned, and sweep it across its range.
+  const frozenNumeric = Object.keys(state.frozenLevers).filter(
+    (l) => isNumericManifestLever(manifest, l) && !!manifest.levers[l]?.range,
+  )
+  if (frozenNumeric.length) {
+    const imps = leverImportances(runs, criterion)
+    const impOf = (l: string): number => imps.find((i) => i.lever === l)?.importance ?? 0
+    const lever = frozenNumeric.slice().sort((a, b) => impOf(b) - impOf(a) || (a < b ? -1 : 1))[0]
+    const frozenLevers = without(state.frozenLevers, lever)
+    const activeLevers = uniq([...state.activeLevers, lever])
+    const widened = { ...state, stage: 'global' as const, activeLevers, frozenLevers, dryRounds: 0, basins }
+    const sweep = unfreezeSweepRec(lever, frozenLevers, runs, manifest, criterion)
+    if (sweep) {
+      return mk('global', [sweep], `unfreeze ${lever} — widen the search into a previously-fixed lever`, widened, false)
+    }
+    // The lever was already swept across its range — just re-enter global search on the widened space.
+    return stepGlobal(widened, runs, manifest, criterion, mk, undefined)
+  }
+
+  // Rung 2 — deepen the numeric resolution: the shallowest depth (from the current one up) that yields fresh
+  // coordinate points around any basin. Starting at the current depth means we never bump it gratuitously.
+  const start = state.refineDepth ?? 0
+  for (let d = start; d <= EXPLORATION_MAX_REFINE_DEPTH; d++) {
+    const deeper = { ...state, refineDepth: d }
+    const batch = basins.flatMap((b) => localRefineRecs(b, runs, manifest, deeper)).slice(0, 8)
+    if (batch.length) {
+      const why = d > start ? `deepen resolution ×${Math.pow(2, d)} — no coarser refinement remains` : `climb the resolved subspace`
+      return mk('local', batch, why, { ...deeper, stage: 'local', basins }, false)
+    }
+  }
+
+  // Both rungs dry: every lever unfrozen and the finest resolution reached — the space is covered.
+  return converge({ ...state, basins }, runs, criterion, mk, 'search space fully covered')
+}
+
+/**
+ * A space-filling sweep of a freshly-unfrozen numeric lever across its full range (excluding already-tried
+ * values), holding the other levers at the best-known config. Guarantees NEW configs so the widening probes
+ * the lever rather than re-proposing runs already in the archive. Null when the range is already covered.
+ */
+function unfreezeSweepRec(
+  lever: string,
+  frozenLevers: Record<string, unknown>,
+  runs: AnalysisRun[],
+  manifest: TrainerManifest,
+  criterion: AnalysisCriterion,
+): ExperimentRecommendation | undefined {
+  const range = manifest.levers[lever]?.range
+  if (!range) return undefined
+  const [lo, hi] = range
+  const n = 5
+  const tried = new Set(runs.map((r) => Number(r.config[lever])).filter(isFinite).map((v) => v.toFixed(6)))
+  const fresh: number[] = []
+  for (let i = 0; i < n; i++) {
+    const v = Number((lo + ((i + 0.5) / n) * (hi - lo)).toFixed(6))
+    if (!tried.has(v.toFixed(6))) fresh.push(v)
+  }
+  if (!fresh.length) return undefined
+  const best = bestRunConfig(runs, criterion)
+  const fixed = { ...without(best, lever, 'seed'), ...frozenLevers }
+  return {
+    kind: 'acquisition',
+    reason: `unfreeze ${lever}: sweep ${fresh.length} values across its range`,
+    runCount: fresh.length * XAI_MIN_SEEDS,
+    spec: { fixed, sweep: { [lever]: fresh }, seeds: seedRange(XAI_MIN_SEEDS) },
+    priority: 70,
+  }
+}
+
+/** The config of the single best run by the criterion (the current champion to hold while probing a lever). */
+function bestRunConfig(runs: AnalysisRun[], criterion: AnalysisCriterion): Record<string, unknown> {
+  let best: AnalysisRun | undefined
+  for (const r of runs) {
+    const v = criterionValueOf(r, criterion)
+    if (v == null) continue
+    const bv = best ? criterionValueOf(best, criterion) : undefined
+    if (best === undefined || bv == null || isBetter(v, bv, criterion.direction)) best = r
+  }
+  return best ? { ...best.config } : {}
+}
+
+/**
+ * When no region cleared the basin margin (a hard problem, or too few runs yet) the run archive still has a
+ * best — declare it as a (weak) basin so the search never reports "no maximum found" while good runs exist.
+ */
+function syntheticBestBasin(
+  runs: AnalysisRun[],
+  criterion: AnalysisCriterion,
+  activeLevers: string[],
+): Basin | undefined {
+  const setups = aggregateToSetupRuns(runs, criterion)
+  if (!setups.length) return undefined
+  const dir = criterion.direction
+  let best = setups[0]
+  for (const s of setups) if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(best, criterion)!, dir)) best = s
+  const regionLevers = regionLeversOf(setups, activeLevers)
+  const region: Record<string, unknown> = {}
+  for (const l of regionLevers) region[l] = best.config[l]
+  const memberRunKeys = runs.filter((r) => matchesConfig(r.config, best.config, regionLevers)).map((r) => r.key)
+  return {
+    id: regionKey(best.config, regionLevers),
+    region,
+    centerConfig: best.config,
+    peakObjective: criterionValueOf(best, criterion)!,
+    peakCI: best.ci,
+    peakSeeds: best.seeds ?? 1,
+    plateaued: true,
+    memberRunKeys,
+  }
 }
 
 function isPlateaued(
@@ -616,9 +746,14 @@ function converge(
   mk: Mk,
   reason: string,
 ): ExplorationStep {
-  const basins = state.basins.length
+  let basins = state.basins.length
     ? state.basins
     : clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
+  if (!basins.length) {
+    // No region cleared the basin margin — still declare the best run so the maxima view is never empty.
+    const synth = syntheticBestBasin(runs, criterion, state.activeLevers)
+    if (synth) basins = [synth]
+  }
   const declared = bestBasin(basins, criterion)
   return mk(
     'converged',

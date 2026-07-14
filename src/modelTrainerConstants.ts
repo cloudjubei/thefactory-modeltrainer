@@ -158,5 +158,14 @@ export const EXPLORATION_REFINE_MAX_STEP_FRACTION = 1 / 8
  * Finest local step, as a fraction of the range: once the nearest tried points bracket the center more
  * tightly than this, the lever is considered resolved (no more sweep points) so the basin can plateau.
  * Small enough (1/64) to seat a NARROW peak the old fixed 1/8 step overshot (~87% of a sharp Gaussian).
+ * A plateau then DEEPENS the resolution (halving this floor per level) rather than converging.
  */
 export const EXPLORATION_REFINE_MIN_STEP_FRACTION = 1 / 64
+
+/**
+ * How many times the search may DEEPEN its numeric resolution after all basins plateau — each level halves
+ * the {@link EXPLORATION_REFINE_MIN_STEP_FRACTION} floor, so the effective finest step reaches range/(64·2^N).
+ * At N=4 that is range/1024 — finer than any real optimum needs. Convergence "space fully covered" is only
+ * declared once every lever is unfrozen AND this depth is exhausted, so a plateau never ends the search early.
+ */
+export const EXPLORATION_MAX_REFINE_DEPTH = 4

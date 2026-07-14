@@ -11306,10 +11306,38 @@ function hypScanMemoFor(wm) {
   }
   return m
 }
+// Drop a hypothesis's cached effective verdict (every min-runs variant) for the CURRENT snapshot. The
+// verdict memo is keyed only by (id, min-runs, snapshot) — so a write that changes the verdict WITHOUT
+// changing runs (a manual override / its clear) would be masked by a stale memo hit until the next refresh
+// reassigned allRunsCache. Callers invalidate the id here so the change shows immediately.
+function forgetHypothesisVerdict(id) {
+  const m = hypVerdictMemo.get(allRunsCache)
+  if (!m) return
+  const prefix = `${id}|`
+  for (const k of Array.from(m.keys())) if (k.startsWith(prefix)) m.delete(k)
+}
+// Per-snapshot inverted run index (built lazily, memoised on the allRunsCache array identity — so the
+// refresh's reassignment of allRunsCache invalidates it exactly like the two scan memos, no manual reset).
+// candidateFor(spec) narrows the run array every scan filters over from O(R) to O(matches); the pure module
+// stays the exact verifier over that superset, so verdicts/matchedKeys/transitions are byte-identical.
+const runIndexMemo = new WeakMap()
+function ensureRunIndex() {
+  let ix = runIndexMemo.get(allRunsCache)
+  if (!ix) {
+    ix = window.Hypothesis.buildRunIndex(allRunsCache)
+    runIndexMemo.set(allRunsCache, ix)
+  }
+  return ix
+}
+function candidateFor(spec) {
+  return allRunsCache.length ? window.Hypothesis.candidateRunsFor(spec, ensureRunIndex()) : allRunsCache
+}
 function hypothesisMatchedRuns(h) {
-  if (!h || !h.id) return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, allRunsCache)
+  if (!h || !h.id)
+    return window.Hypothesis.hypothesisMatchingRuns(h && h.spec, candidateFor(h && h.spec))
   const m = hypScanMemoFor(hypMatchedMemo)
-  if (!m.has(h.id)) m.set(h.id, window.Hypothesis.hypothesisMatchingRuns(h.spec, allRunsCache))
+  if (!m.has(h.id))
+    m.set(h.id, window.Hypothesis.hypothesisMatchingRuns(h.spec, candidateFor(h.spec)))
   return m.get(h.id)
 }
 function hypothesisMatchedCount(h) {
@@ -11348,7 +11376,7 @@ function modelNameImplemented(name) {
 function autoSuggestedVerdict(h) {
   return window.Hypothesis.autoVerdictForHypothesis(
     h,
-    allRunsCache,
+    candidateFor(h && h.spec),
     objectiveDirection(),
     hypothesisMinRuns,
     modelNameImplemented,
@@ -11365,7 +11393,7 @@ function effectiveHypothesisVerdict(h) {
     if (m && m.has(key)) return m.get(key)
     const v = window.Hypothesis.effectiveVerdict(
       h,
-      allRunsCache,
+      candidateFor(h.spec),
       objectiveDirection(),
       hypothesisMinRuns,
       modelNameImplemented,
@@ -11648,7 +11676,7 @@ function hypothesisComparisonHtml(h) {
   const perContext = allRunsCache.length
     ? window.Hypothesis.measuredByContext(
         h.spec,
-        allRunsCache,
+        candidateFor(h.spec),
         objectiveDirection(),
         hypothesisBenchmark(),
       )
@@ -11768,18 +11796,44 @@ function hypothesisHygieneFor(h) {
     m.set(key, window.Hypothesis.hypothesisHygiene(h, allRunsCache, manifest, hypothesisMinRuns))
   return m.get(key)
 }
-// Compute the aggregate census OFF the paint path (a macrotask), then fill the banner slot in place. The
-// tab has already painted its cards by the time this runs.
+// Compute the aggregate census OFF the paint path, CHUNKED so even this 200-hypothesis sweep never blocks
+// the main thread, then fill the banner slot in place. The tab has already painted its cards by the time
+// this runs. Abandons itself if a newer snapshot/hypotheses/min-runs supersedes it mid-build.
 function warmHygieneCensus() {
   if (!hygieneAvailable() || hygieneCensusWarm() || hygieneCensusWarming) return
   hygieneCensusWarming = true
-  setTimeout(() => {
-    hygieneCensusWarming = false
-    if (!hygieneAvailable()) return
-    refreshHygieneCache()
+  void buildHygieneCensusChunked()
+}
+async function buildHygieneCensusChunked() {
+  // try/finally guarantees the warming flag resets even if a diagnosis throws — a stuck flag would freeze
+  // the banner on "Diagnosing…" and block every future census warm.
+  try {
+    const runsRef = allRunsCache
+    const hypsRef = hypothesesCache
+    const minRuns = hypothesisMinRuns
+    const visible = hypsRef.filter((h) => !h.dismissed)
+    const hygieneById = new Map()
+    const CHUNK = 12
+    await yieldToLoop()
+    for (let i = 0; i < visible.length; i++) {
+      if (allRunsCache !== runsRef || hypothesesCache !== hypsRef || hypothesisMinRuns !== minRuns)
+        return // superseded — abandon this build
+      const h = visible[i]
+      hygieneById.set(h.id, window.Hypothesis.hypothesisHygiene(h, runsRef, manifest, minRuns))
+      if ((i + 1) % CHUNK === 0) await yieldToLoop()
+    }
+    hypothesisHygieneCache = {
+      runsRef,
+      hypsRef,
+      minRuns,
+      byId: hygieneById,
+      census: window.Hypothesis.foldHygieneCensus(visible, hygieneById),
+    }
     const slot = byId('hyp-hygiene-slot')
     if (slot && activeTabId === 'hypotheses') slot.innerHTML = hypothesisHygieneBannerHtml()
-  }, 0)
+  } finally {
+    hygieneCensusWarming = false
+  }
 }
 // The registry-health banner above the verdict sections: judged / blocked (structural — more runs can
 // never decide them) / starved (just need runs), the issue census, and a Discuss that shares it all.
@@ -11998,31 +12052,148 @@ function hypothesisSectionHtml(verdict, items, liveIds) {
 // Re-evaluate every hypothesis against the ALL-runs snapshot, persisting only material changes (a new
 // matched-run set OR an auto-verdict flip), recording a transition on each flip. Driven by the shared
 // all-runs refresh (`refreshAllRunsDerived`), so the verdict reflects EVERY run, not a page.
+//
+// CHUNKED + non-blocking: with 200+ hypotheses over ~20k runs this was a multi-second synchronous burst
+// (each evaluate scans the run set) that froze the tab. It now (a) evaluates each hypothesis over its
+// candidate SUPERSET (index-backed → O(matches)), (b) yields to the event loop every CHUNK so the main
+// thread never blocks, (c) flips each card's verdict badge IN PLACE as it lands + drives a live progress
+// line so the user watches it reload, and (d) batches persistence off the compute path. Warming the verdict
+// memo per hypothesis means the follow-up regroup paint is all memo hits (no second sweep).
 async function refreshHypothesisVerdicts(hyps) {
   if (!manifest || !embedded() || !window.Hypothesis) return false
   // Evaluate ONLY when the all-runs snapshot is loaded — never against an empty/partial set, which would
   // wrongly zero every verdict to untested. Without a snapshot the persisted verdicts stand.
   if (!allRunsCache.length) return false
+  const epoch = projectEpoch
+  const runsRef = allRunsCache
   const direction = objectiveDirection()
+  const benchmark = hypothesisBenchmark()
   const at = nowIso()
-  let wrote = false
-  for (const h of hyps || []) {
-    const { next, changed } = window.Hypothesis.evaluateHypothesis(h, allRunsCache, {
+  const list = hyps || []
+  const total = list.length
+  // What the user currently SEES per card (the pre-refresh badge label) — so we report + animate only the
+  // genuine verdict FLIPS. Read from the DOM, NOT recomputed (a recompute would already reflect the new
+  // snapshot and detect no change).
+  const shownLabel = new Map()
+  for (const h of list) {
+    const el = hypCardBadgeEl(h.id)
+    if (el) shownLabel.set(h.id, el.textContent.trim())
+  }
+  const pendingWrites = []
+  const changed = []
+  const onHyp = activeTabId === 'hypotheses'
+  const CHUNK = 16
+  if (onHyp && total) setStatusLine('hypotheses-status', `Reloading verdicts 0/${total}…`)
+  for (let i = 0; i < total; i++) {
+    // Bail if a project switch or a fresh refresh superseded this pass.
+    if (projectEpoch !== epoch || allRunsCache !== runsRef) return false
+    const h = list[i]
+    const { next, changed: didChange } = window.Hypothesis.evaluateHypothesis(h, candidateFor(h.spec), {
       direction,
       at,
       minRuns: hypothesisMinRuns,
-      benchmark: hypothesisBenchmark(),
+      benchmark,
     })
-    if (!changed) continue
-    try {
-      await putHypothesis(next)
+    if (didChange) {
+      // Apply in memory immediately so a re-entrant evaluate sees prev===evidence (changed:false → no
+      // double transition); the batched write below persists it.
       Object.assign(h, next)
-      wrote = true
-    } catch {
-      // best-effort: a failed verdict write must not break rendering
+      pendingWrites.push(h)
+    }
+    // The DISPLAY verdict (manual override + 'proposed' layered on). Calling it here ALSO warms the verdict
+    // memo, so the final regroup paint is memo-warm.
+    const v = effectiveHypothesisVerdict(h)
+    const label = HYPOTHESIS_VERDICT_LABEL[v] || v
+    const prevLabel = shownLabel.get(h.id)
+    if (prevLabel !== undefined && label !== prevLabel) {
+      updateHypothesisCardBadge(h.id, v) // flip this one card's badge in place as it lands
+      changed.push({ id: h.id, title: h.title || h.id, from: prevLabel, to: label })
+    }
+    if ((i + 1) % CHUNK === 0 || i === total - 1) {
+      if (onHyp)
+        setStatusLine(
+          'hypotheses-status',
+          `Reloading verdicts ${i + 1}/${total}… ${changed.length} changed`,
+        )
+      await yieldToLoop()
     }
   }
-  return wrote
+  // Persist the flips off the compute path with bounded concurrency (never one awaited write per hypothesis
+  // inside the scan). A manual override claimed mid-refresh is skipped.
+  await flushHypothesisVerdictWrites(pendingWrites)
+  if (projectEpoch === epoch && onHyp) {
+    if (changed.length) {
+      setStatusLine(
+        'hypotheses-status',
+        `${changed.length} hypothes${changed.length === 1 ? 'is' : 'es'} changed verdict.`,
+      )
+      showToast(`${changed.length} hypothesis verdict${changed.length === 1 ? '' : 's'} changed`, () => {
+        // Jump to the section holding the first flip. 'proposed' (and any non-section label) live in the
+        // untested section, so land there rather than no-op.
+        hypothesisOpenSection =
+          HYPOTHESIS_VERDICTS.find((vd) => HYPOTHESIS_VERDICT_LABEL[vd] === changed[0].to) || 'untested'
+        showTab('hypotheses')
+      })
+    } else {
+      setStatusLine('hypotheses-status', '')
+    }
+  }
+  return pendingWrites.length > 0
+}
+// Yield to the event loop so the chunked verdict refresh never blocks the main thread. requestAnimationFrame
+// while visible (the browser paints the badge flips between chunks); setTimeout while the iframe is hidden
+// (rAF is throttled to a near-halt in a background tab, which would stall persistence).
+function yieldToLoop() {
+  return new Promise((resolve) =>
+    document.hidden ? setTimeout(resolve, 0) : requestAnimationFrame(() => resolve()),
+  )
+}
+// The verdict badge element of a hypothesis card (the FIRST .run-badge, in its summary), or null if the card
+// isn't in the DOM (a different tab, or a concurrent paint replaced it — callers no-op).
+function hypCardBadgeEl(id) {
+  const sel =
+    typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : String(id).replace(/["\\]/g, '\\$&')
+  const card = document.querySelector(`.hypothesis-card[data-id="${sel}"]`)
+  return card ? card.querySelector('.run-badge') : null
+}
+// Patch one card's verdict badge (class + label) in place — no innerHTML, so the lazy body never collapses
+// and there's no scroll jump. No-op if the card is gone.
+function updateHypothesisCardBadge(id, verdict) {
+  const badge = hypCardBadgeEl(id)
+  if (!badge) return
+  badge.className = 'run-badge ' + (HYPOTHESIS_VERDICT_BADGE[verdict] || 'is-queued')
+  badge.textContent = HYPOTHESIS_VERDICT_LABEL[verdict] || verdict
+}
+// Persist a batch of changed hypotheses with bounded concurrency. Best-effort per record (a failed write
+// must not break rendering); skips any record now carrying a manual override (don't clobber a mid-refresh
+// edit).
+async function flushHypothesisVerdictWrites(list) {
+  if (!list || !list.length) return
+  // A manual override the user saved DURING this (now-yielding) refresh must NOT be clobbered by an auto
+  // write — the loop iterated a pre-override snapshot, so its `h` copies still read verdictSource:'auto'.
+  // Re-read the live records once and drop any pending write whose record has since become a manual
+  // override. (The residual TOCTOU window between this read and the writes is sub-millisecond.)
+  let liveManual = new Set()
+  try {
+    const live = await readHypotheses()
+    liveManual = new Set(live.filter((h) => h.verdictSource === 'manual').map((h) => h.id))
+  } catch {
+    // best-effort: if the re-read fails, fall back to the in-memory verdictSource check below
+  }
+  const writes = list.filter((h) => h && h.verdictSource !== 'manual' && !liveManual.has(h.id))
+  const POOL = 4
+  let idx = 0
+  async function worker() {
+    while (idx < writes.length) {
+      const h = writes[idx++]
+      try {
+        await putHypothesis(h)
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(POOL, writes.length) }, () => worker()))
 }
 function renderProposeControls() {
   const btn = byId('propose-btn')
@@ -12187,6 +12358,7 @@ async function saveHypothesisOverride(id) {
     return
   }
   hypothesisOverrideId = null
+  forgetHypothesisVerdict(id) // an override changes the verdict without changing runs — bust the stale memo
   await renderHypotheses()
 }
 // Clear a manual override → re-derive the verdict from the runs on the next refresh.
@@ -12200,6 +12372,7 @@ async function clearHypothesisOverride(id) {
     return
   }
   hypothesisOverrideId = null
+  forgetHypothesisVerdict(id) // clearing an override re-derives the verdict — bust the stale memo
   await renderHypotheses()
 }
 // Permanently remove a settled (accepted/rejected) hypothesis card.
@@ -14521,7 +14694,12 @@ const RUN_DERIVED_UPDATERS = [
   { label: 'reliability baseline', run: async () => computeReliabilityHeuristics() },
 ]
 async function applyRunDerivedUpdaters(allRuns) {
-  for (const u of RUN_DERIVED_UPDATERS) await u.run(allRuns)
+  // Yield to the event loop between updaters so their individual O(R) passes (model stats, the chunked
+  // hypothesis verdicts, the reliability baseline) never concatenate into one long main-thread stretch.
+  for (const u of RUN_DERIVED_UPDATERS) {
+    await yieldToLoop()
+    await u.run(allRuns)
+  }
 }
 // Recompute + persist the model-stats aggregate (the `<recordType>-model-stats` record), the first
 // run-derived updater. `newestRunAt`/`totalRuns` it records are the frontier the latest-only path extends.
@@ -17744,6 +17922,30 @@ async function renderExploration() {
       } else {
         await launchExplore({})
       }
+    },
+    onExploreMore: async (budget) => {
+      // Continue a CONVERGED search: reopen the SAME map (keep every run + the escalation progress — which
+      // levers were unfrozen, the resolution depth) and clear `done`/`converged` so the controller re-enters
+      // the escalation ladder (unfreeze the next lever / deepen resolution) instead of re-declaring converged.
+      // A wipe-and-restart would throw away that progress and just reconverge at the same point.
+      const extra = {}
+      if (budget && budget.maxRuns) extra.maxRuns = budget.maxRuns
+      if (budget && budget.targetObjective) extra.targetObjective = budget.targetObjective
+      if (state && state._recordKey) {
+        // Reset the run budget on the persisted map: a new ceiling if given, else CLEAR it so the reopened
+        // search runs until the space is genuinely covered (the controller merges params.budget over this,
+        // so a stale prior maxRuns would otherwise re-trigger "budget exhausted" on the first round).
+        const nextBudget = { ...state.budget }
+        if (budget && budget.maxRuns) nextBudget.maxRuns = budget.maxRuns
+        else delete nextBudget.maxRuns
+        await writeExplorationFlag(recordType, state, {
+          done: false,
+          paused: false,
+          stage: 'local',
+          budget: nextBudget,
+        })
+      }
+      await launchExplore(extra)
     },
     onOpenRuns: (keys) => {
       // Jump to the Runs tab with this basin's runs selected (the cross-page compare selection), so the

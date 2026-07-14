@@ -9,7 +9,7 @@
  *
  * window.Exploration.render(container, data, actions)
  *   data    = { manifest, state|null, runs:[{config,objective,metrics,status}], activity:{status}|null }
- *   actions = { onLaunch(budget), onPause(), onResume(), onAbort() }
+ *   actions = { onLaunch(budget), onExploreMore(budget), onPause(), onResume(), onAbort() }
  *
  * Exposed as window.Exploration in the browser and module.exports under CommonJS (pure analyze/magma tested).
  */
@@ -544,11 +544,12 @@
     } else if (done) {
       mode = 'done'
       head = 'Converged'
-      ctrls = '<button class="expl-btn primary" data-act="launch">Explore again</button>'
+      // Continue the SAME search (keep the runs, push the frontier deeper/wider) rather than restarting.
+      ctrls = '<button class="expl-btn primary" data-act="explore-more">Explore more</button>'
     } else {
       mode = 'idle'
       head = 'Ready to explore'
-      ctrls = '<button class="expl-btn primary" data-act="launch">Start exploration</button>'
+      ctrls = '<button class="expl-btn primary" data-act="launch">Start</button>'
     }
 
     // Readouts + stage progress are PART of the status (they only exist once the search has started), so they
@@ -761,14 +762,17 @@
       const btn = container.querySelector(`[data-act="${act}"]`)
       if (btn) btn.addEventListener('click', fn)
     }
-    onAct('launch', () => {
+    const readBudget = () => {
       const g = (id) => {
         const el = container.querySelector('#' + id)
         const v = el ? parseInt(el.value, 10) : NaN
         return Number.isFinite(v) && v > 0 ? v : undefined
       }
-      actions.onLaunch && actions.onLaunch({ maxRuns: g('expl-maxruns'), targetObjective: g('expl-target') })
-    })
+      return { maxRuns: g('expl-maxruns'), targetObjective: g('expl-target') }
+    }
+    onAct('launch', () => actions.onLaunch && actions.onLaunch(readBudget()))
+    // "Explore more" continues a converged search (reopen + escalate) instead of wiping it to start over.
+    onAct('explore-more', () => actions.onExploreMore && actions.onExploreMore(readBudget()))
     onAct('pause', () => actions.onPause && actions.onPause())
     onAct('resume', () => actions.onResume && actions.onResume())
     onAct('abort', () => actions.onAbort && actions.onAbort())
