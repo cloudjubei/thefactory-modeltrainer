@@ -2514,6 +2514,201 @@ describe('xaiNarrate', () => {
   })
 })
 
+describe('updateTrainingHypothesis / updateTrainingPaper (approval-gated chat write tools)', () => {
+  async function seedProject(storage: DataStorage) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: manifest(), dir: 'Demo' },
+    })
+  }
+
+  it('updates a hypothesis (allowed fields only) and stamps a manual verdict', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'h1',
+      content: { id: 'h1', title: 'old', rationale: 'r', spec: { fixed: { lr: 0.1 } }, status: 'untested' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.updateTrainingHypothesis({
+      scope: 'proj',
+      id: 'h1',
+      set: { title: 'new title', verdict: 'disproved', verdictNote: 'evidence is conclusive', junk: 'x' },
+    })
+    expect(result.updated).toEqual(expect.arrayContaining(['title', 'verdict', 'verdictNote']))
+    expect(result.updated).not.toContain('junk')
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h1' })
+    expect(rec!.content).toMatchObject({
+      title: 'new title',
+      rationale: 'r',
+      status: 'disproved',
+      verdictSource: 'manual',
+      verdictNote: 'evidence is conclusive',
+    })
+  })
+
+  it('validates a replacement spec against the manifest and rejects a bad one', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'h1',
+      content: { id: 'h1', title: 't', spec: { fixed: { lr: 0.1 } }, status: 'untested' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.updateTrainingHypothesis({
+        scope: 'proj',
+        id: 'h1',
+        set: { spec: { fixed: { bogus_lever: 1 } } },
+      }),
+    ).rejects.toThrow(/bogus_lever/)
+    const ok = await tools.updateTrainingHypothesis({
+      scope: 'proj',
+      id: 'h1',
+      set: { spec: { sweep: { lr: [0.1, 0.2] }, seeds: [0, 1] } },
+    })
+    expect(ok.updated).toContain('spec')
+  })
+
+  it('fails on an unknown hypothesis id', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.updateTrainingHypothesis({ scope: 'proj', id: 'nope', set: { title: 'x' } }),
+    ).rejects.toThrow(/nope/)
+  })
+
+  it('updates a paper (allowed fields only), preserving the rest', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'p1',
+      content: { id: 'p1', title: 'Paper', claim: 'c', hypothesisIds: ['h1'], status: 'untested' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.updateTrainingPaper({
+      scope: 'proj',
+      id: 'p1',
+      set: { verdictNote: 'replication looks weak', tags: ['rl'], dismissed: true, hypothesisIds: ['x'] },
+    })
+    expect(result.updated).toEqual(expect.arrayContaining(['verdictNote', 'tags', 'dismissed']))
+    expect(result.updated).not.toContain('hypothesisIds')
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1' })
+    expect(rec!.content).toMatchObject({
+      verdictNote: 'replication looks weak',
+      tags: ['rl'],
+      dismissed: true,
+      hypothesisIds: ['h1'],
+      claim: 'c',
+    })
+  })
+})
+
+describe('recommendTrainingExperiments (chat agent write tool)', () => {
+  async function seedProject(storage: DataStorage) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: manifest(), dir: 'Demo' },
+    })
+  }
+
+  it('validates specs against the manifest and persists runnable -xai-suggestion records', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.recommendTrainingExperiments({
+      scope: 'proj',
+      suggestions: [
+        {
+          title: 'Sweep the learning rate',
+          rationale: 'importance screening says lr dominates',
+          spec: { fixed: { steps: 100 }, sweep: { lr: [0.001, 0.01] }, seeds: [0, 1] },
+        },
+      ],
+    })
+    expect(result.recordType).toBe('demo-run')
+    expect(result.accepted).toBe(1)
+    expect(result.rejected).toEqual([])
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-suggestion' })
+    expect(recs).toHaveLength(1)
+    expect(recs[0].content).toMatchObject({
+      title: 'Sweep the learning rate',
+      source: 'llm',
+      spec: { sweep: { lr: [0.001, 0.01] } },
+    })
+  })
+
+  it('rejects a spec naming an undeclared lever (with the reason) instead of persisting junk', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.recommendTrainingExperiments({
+      scope: 'proj',
+      suggestions: [
+        { title: 'bad', rationale: 'x', spec: { fixed: { nonexistent_lever: 1 } } },
+        { title: 'good', rationale: 'y', spec: { sweep: { lr: [0.1] } } },
+      ],
+    })
+    expect(result.accepted).toBe(1)
+    expect(result.rejected).toHaveLength(1)
+    expect(result.rejected[0].reason).toMatch(/nonexistent_lever/)
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-suggestion' })
+    expect(recs).toHaveLength(1)
+  })
+
+  it('dedupes by spec hash against existing suggestions', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const spec = { sweep: { lr: [0.001] } }
+    await tools.recommendTrainingExperiments({
+      scope: 'proj',
+      suggestions: [{ title: 'a', rationale: 'r', spec }],
+    })
+    const second = await tools.recommendTrainingExperiments({
+      scope: 'proj',
+      suggestions: [{ title: 'a again', rationale: 'r', spec }],
+    })
+    expect(second.accepted).toBe(0)
+    expect(second.skippedExisting).toBe(1)
+  })
+
+  it('fails with the registered project names when the scope has several and none is named', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'other',
+      content: { manifest: manifest({ name: 'other', recordType: 'other-run' }), dir: 'Other' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.recommendTrainingExperiments({
+        scope: 'proj',
+        suggestions: [{ title: 'a', rationale: 'r', spec: { sweep: { lr: [0.1] } } }],
+      }),
+    ).rejects.toThrow(/demo.*other|other.*demo/)
+    const targeted = await tools.recommendTrainingExperiments({
+      scope: 'proj',
+      project: 'other',
+      suggestions: [{ title: 'a', rationale: 'r', spec: { sweep: { lr: [0.1] } } }],
+    })
+    expect(targeted.recordType).toBe('other-run')
+  })
+})
+
 describe('getRunData / getRunXAI (agent read tools)', () => {
   // Register the training project so the read tools can resolve a run id → its recordType.
   async function seedProject(storage: DataStorage) {
@@ -3452,6 +3647,37 @@ describe('scanProjectModels', () => {
     })
     const hodl = recs.find((r) => r.key === 'hodl')!.content as Record<string, unknown>
     expect(hodl).toMatchObject({ name: 'Buy-and-Hold', category: 'baseline' })
+  })
+
+  it('flags a manifest with NO model_name choice lever instead of silently finding zero', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      // A cartpole-shaped manifest whose identity lever is misnamed — the scan can't key on it.
+      manifest: manifest({
+        levers: {
+          algo: { type: 'choice', choices: ['ppo', 'dqn'], default: 'ppo' },
+          lr: { type: 'number', default: 0.01 },
+        },
+      }),
+    })
+    expect(result.noIdentityLever).toBe(true)
+    expect(result.created).toBe(0)
+    const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-model' })
+    expect(recs).toHaveLength(0)
+  })
+
+  it('does not flag a manifest that HAS a model_name choice lever', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.scanProjectModels({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: mm(['dqn']),
+    })
+    expect(result.noIdentityLever).toBeUndefined()
   })
 
   it('enriches each candidate with the LLM (name/description/category/paper links)', async () => {

@@ -56,7 +56,66 @@ hypotheses; Models = the catalog of implemented/proposed models).
   uses) is not yet surfaced — derive it from the source rather than hand-declaring (today
   `attention-blocks`/`nn-building-blocks` show no "used by" because recipe wiring isn't asserted).
 
-### 3. xAI — explain WHY the model acted (parallel track)
+### 3. Conversational hub — remaining work
+
+The core SHIPPED (see `docs/architecture.md`): the universal `discussBundle` Discuss seam on every
+surface (hypotheses + registry health, papers + per-gap, versions, datasets/environments), the
+hypothesis hygiene census (blocked/starved diagnosis with dead-pin causes), the
+`recommendTrainingExperiments` chat WRITE tool (backend `trainerTools.ts` + validated
+`-xai-suggestion` records), paper coverage-gap/improvement "→ story" buttons, the CartPole
+`model_name` identity fix + scan hint, the Versions run-counts/link/Discuss, and the
+Datasets/Environments capability-sections + named-presets redesigns. Remaining:
+
+1. **Generation-time spec validation.** Validate LLM-proposed hypothesis specs against manifest
+   choices/ranges + `appliesWhen` + migrations BEFORE persisting (today only lever NAMES are
+   checked — the hygiene census diagnoses the damage after the fact; stop it at the source).
+2. **Migrate hypothesis specs in `migrateTrainingRuns`.** Runs + queue are rewritten; hypothesis
+   specs pinning retired values stay stranded forever (the census's `migrated` dead pins). Add the
+   sweep + re-hash/consolidate on collision.
+3. **`getTrainerState` read tool.** A chat-orientation summary (verdict census, papers/models/
+   datasets/envs, version) so a chat can orient without a seeded bundle.
+4. **UX pass.** New-user-lens review of the new surfaces (hygiene banner, capability cards, Discuss
+   affordances) on web + mobile widths.
+
+### 4. Continued training + cross-dataset evaluation
+
+Train a model FURTHER on additional datasets from a saved checkpoint, then evaluate any checkpoint
+against named evaluation datasets — the apples-to-apples yardstick BlackSwan lacks (walk-forward
+windows have different test years, so today's metrics are never directly comparable).
+
+1. **Standardised scoring test sets.** Manifest `testSets` list (`{id, asset, timeframe, range}`) —
+   pulled forward from the deferred cross-asset section. A generic "evaluate on test set" activity
+   replays a checkpoint on each named set and writes a `<recordType>-settest` record per (run, set);
+   surfaced as a per-set matrix in run detail + a compare overlay. Same test window ⇒ comparable.
+2. **Continued training (extra-train).** A launch mode that seeds from an existing run's checkpoint
+   (`checkpoint_to_load` exists on the regression line; RL needs SB3 `.load()` + `set_env` +
+   `learn(reset_num_timesteps=False)`) and trains on a DIFFERENT dataset bundle; provenance links
+   parent run → continued run (`continuedFrom` on the summary) so lineage renders in run detail.
+   Judged on the standardised test sets from (1), never on the shifted train window.
+3. **Viewer.** "Continue training on…" action on a run (dataset picker), lineage chips, and the
+   per-set evaluation matrix. Hypothesis/objective plumbing unchanged — continued runs are normal
+   runs with provenance.
+
+### 5. Data refresh + stocks — remaining work
+
+The backfill SHIPPED (see `BlackSwan/data_refresh_report.md`): binance/ through 2026-06 (BTC 1m/1h/1d
+from 2017-08; 8 altcoins 1m from 2022-01 + derived 1h/1d), a new stocks/ dir (10 US tickers, 1d,
+2018-01..2026-06, yfinance — stooq is bot-walled), idempotent `scripts/backfill_klines.py` +
+`backfill_stocks.py`, `scan_stocks_inventory`, walk-forward windows `2025` + `alt-2024`/`alt-2025`
+(altcoins MUST use alt-* — plain windows train from 2020), and the manifest's asset lever now lists
+all 9 coins. Remaining:
+
+1. **Stocks as a first-class asset class.** Decide how stock tickers enter the trading manifest
+   (same `asset` lever vs a separate manifest à la the dip line — sessions/gaps differ from crypto),
+   wire the provider path end-to-end for one ticker, and add stock-suitable walk-forward windows.
+2. **data_inventory-driven capabilities.** The Datasets capability sections read what is ACTUALLY
+   on disk (a small inventory record the trainer publishes) instead of hardcoded choices, so new
+   assets appear as data lands; per-asset window capability (which windows an asset's history
+   supports) rendered on the asset card.
+3. **Refresh cadence.** Re-run the backfill scripts on a schedule (they are idempotent) so data
+   never goes stale again.
+
+### 6. xAI — explain WHY the model acted (parallel track)
 
 The xAI track is shipped (git + `docs/architecture.md`); the model-trainer side stays domain-oblivious.
 Shipped: the decision-trace spine + the full xAI tab (Phases 1–5); config-space exploration (surrogate +
@@ -88,7 +147,7 @@ Parked (real blocker / low value):
   axis logic; needs a manifest scope change to `ignore` + a re-analysis to take effect) — flag, don't
   silently change.
 
-### 4. Exploration autopilot — automate the config-space search (find all maxima + the global max)
+### 7. Exploration autopilot — automate the config-space search (find all maxima + the global max)
 
 The wall: the analysis primitives exist (`leverImportances`, `ofatContrasts`, EI `acquisitionRecommendations`,
 `thinSeedRecommendations`, `missingCellRecommendations`, `paretoFrontier`) but the human is still the LOOP that
@@ -104,17 +163,9 @@ high-uncertainty regions are unprobed; (5) stop on evidence (no new basins for K
 AND marginal EI < ε). Stages: **S0 calibrate-noise → S1 screen → S2 global (find basins) → S3 local (climb each) →
 S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with `model_name` as the top basin axis.
 
-**Build order (pure core first — provable without any training):**
+**Build order (steps 1–3 — types, pure Strategist, synthetic-surface proof — are SHIPPED: the
+Strategist finds all maxima + the global max on synthetic surfaces; see git + memory). Remaining:**
 
-1. **Types + constants.** `ExplorationState` (stage, active/frozen levers, `basins[]`, budget, regret series,
-   convergence flags, `paused`/steer overrides), `Basin` (centerConfig, peak±CI, robustness, plateaued,
-   memberRunIds), `ExplorationStep` (stage, `batch: ExperimentRecommendation[]`, rationale, stateNext, done) in
-   `modelTrainerTypes.ts`; thresholds in `modelTrainerConstants.ts`.
-2. **Pure Strategist** — `explorationUtils.ts`: `nextExplorationStep(state, runs, manifest, opts?) → ExplorationStep`,
-   a pure reducer composing the existing xAI primitives + a new basin-clustering pass. Fully unit-testable.
-3. **Synthetic-surface acceptance (TDD, the soundness proof).** A fake objective with 2 known basins (one global);
-   drive the loop on it; assert basin recall (both found), declared global ≈ true global, regret→0, convergence
-   fires. Proves the policy WITHOUT training.
 4. **Autopilot activity** (`explore`, durable backend controller) — the loop: Strategist → launch each batch as a
    STANDARD `train` child (visible under Experiments, sharing the experiment lane) → await settle → re-read runs →
    re-assess → repeat until done/budget. Reads `ExplorationState` each round so the viewer can **pause / set budget /
@@ -139,35 +190,16 @@ S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with 
 
 ### Cross-asset robustness testing
 
-The windowing dimension is covered by the walk-forward windows (named slices) + the By-dataset
-robustness view. What remains is the **cross-asset** dimension — test a trained checkpoint against any
-asset in the same data format to catch regime/asset overfit:
-
-- The trainer already replays a checkpoint deterministically; the missing piece is selecting the data
-  WINDOW/asset (a `testSet` param: asset + time-range, or a named curated slice).
-- Likely a manifest `testSets` list (`{id, asset, range/description}`) + a generic "test on set"
-  activity writing a `<recordType>-regimetest` record per (run, set), surfaced as a per-set matrix in
-  run-detail + a compare overlay. Keep it generic; BlackSwan is the first consumer.
+**Pulled forward into NEXT §4 (standardised `testSets` + evaluate-on-set activity).** What stays
+deferred here is only the broad cross-asset sweep matrix once many assets are on disk (NEXT §5).
 
 
-### Activity concurrency — server-side pass
+### Activity concurrency — remaining view work
 
-The viewer-only activity-count budget + client-driven stalled-run resume ship. The rest wants a
-host-aware, browsable, concurrency-capped center:
+The server-side pass SHIPPED (per-activityId records, host RUN cap, server queue drain, boot-scan
+resume, unseen badge, Run→Activity link data). Remaining:
 
-- **Per-activityId progress/campaign records.** Key the `-progress`/`-campaign` records by activityId
-  (not `'latest'`) so concurrent same-project campaigns each show their own live progress.
-- **Host-enforced global RUN cap.** A backend semaphore on `LocalComputeRunner.runJob` (the shared
-  `trainerLocalRunner`) so total concurrent training runs are bounded regardless of live-campaign
-  count — the durable resource guard the viewer-only budget doesn't provide.
-- **Server-side queue drain.** Chain the next queued activity on the backend when one settles, so
-  follow-ups advance while the app/viewer is closed.
-- **Boot-scan resume.** A server-side boot scan that auto-reclaims/relaunches resumable runs with no
-  client present (the durable version of the client-driven resume).
-- **App-nav unseen-results badge.** HOST-DERIVED (count trainer activities `finishedAt` since the user
-  last opened the app tab → Sidebar app-tab badge, web + mobile).
-- **Run→Activity link.** Needs a browsable per-activity history first; then `activityId`-tag
-  eval/verdict records and link into it.
+- **Browsable per-activity history VIEW** (Phase 5c) — then surface the Run→Activity link end-to-end.
 
 ### Position-blind signal model — a SEPARATE objective (always-on correct signal)
 
@@ -275,9 +307,8 @@ _Further out — **FastContext-style repository explorer** (a candidate fourth t
 
 - **Full RL resume** — per-episode RL checkpointing + `set_env` continuation for true mid-training
   resume (the regression line already resumes; RL restarts from zero). Revisit if worth the loop surgery.
-- **Other single assets** — running the SAME single-asset model on ETH/SOL/etc. is just the `asset`
-  lever + an altcoin 1d/1h backfill (lever + per-symbol globs + `data_inventory` gating already
-  correct, no code change). NOT multi-asset portfolio — that is the project split above.
+- **Other single assets** — superseded by NEXT §5 (backfill latest + derive altcoin 1h/1d from 1m +
+  per-asset walk-forward windows). NOT multi-asset portfolio — that is the project split above.
 - **Runner-channel WebSocket upgrade** — job dispatch is already ~instant (long-poll `wake()`); a WS only
   shaves ~1.5s log-batch latency, invisible until a live-log UI consumes it.
 - **Remote git repoRefs** — the engine emits local paths only; wire git refs + project bootstrap when a

@@ -92,40 +92,52 @@ describe('Exploration.rankLevers', () => {
 })
 
 describe('Exploration.heatmapCells', () => {
-  it('keeps EVERY run per X/Y cell (for subdivisions), sorted hottest-first, with empty cells present', () => {
-    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
-    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'cells-a' }, state, runs: runsFixture() })
-    expect(a.vs.axisX).toBe('x')
-    expect(a.vs.axisY).toBe('y')
-    const { xA, yA, cells } = Exploration.heatmapCells(a)
-    // algo A and B share each (x,y) coordinate → that cell holds BOTH runs (they differ only on algo)
-    const gi = xA.index(0.5)
-    const gj = yA.index(0.5)
-    const cell = cells[gj * xA.n + gi]
-    expect(cell.runs.length).toBe(2)
-    expect(cell.runs[0].t).toBeGreaterThanOrEqual(cell.runs[1].t) // hottest-first
+  const cellsFor = (runs: any[], rt: string) => {
+    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: runs.length } }
+    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: rt }, state, runs })
+    a.vs.axisX = 'x'
+    a.vs.axisY = 'y'
+    return { a, ...Exploration.heatmapCells(a) }
+  }
+
+  it('bins on CONCRETE tried values (numeric axis = distinct sorted values, not range bins)', () => {
+    const { xA, yA } = cellsFor(runsFixture(), 'cells-a')
+    expect(xA.numeric).toBe(true)
+    expect(xA.distinct).toEqual([0, 0.25, 0.5, 0.75, 1]) // the actual tried values, in order
+    expect(yA.distinct).toEqual([0.2, 0.5, 0.8])
+  })
+
+  it('keeps EVERY run per X/Y cell (for subdivisions), sorted hottest-first', () => {
+    const { xA, yA, cells } = cellsFor(runsFixture(), 'cells-b')
+    const cell = cells[yA.index(0.5) * xA.n + xA.index(0.5)]
+    expect(cell.runs.length).toBe(2) // algo A and B share coordinate (0.5,0.5)
+    expect(cell.runs[0].t).toBeGreaterThanOrEqual(cell.runs[1].t)
     expect(cell.best).toBe(cell.runs[0].t)
-    // the grid is mostly empty (24×24 numeric bins, only 15 distinct coords populated)
-    expect(cells.some((c: any) => c.runs.length === 0)).toBe(true)
-    // total runs across cells equals the in-grid run count
-    const totalInCells = cells.reduce((n: number, c: any) => n + c.runs.length, 0)
-    expect(totalInCells).toBe(30)
+    expect(cells.reduce((n: number, c: any) => n + c.runs.length, 0)).toBe(30)
+  })
+
+  it('leaves an untried (x,y) coordinate as an EMPTY cell even though both values exist on their axes', () => {
+    const runs = runsFixture().filter((r) => !(r.config.x === 0.5 && r.config.y === 0.5))
+    const { xA, yA, cells } = cellsFor(runs, 'cells-gap')
+    expect(xA.distinct).toContain(0.5) // 0.5 still tried at other y's
+    expect(yA.distinct).toContain(0.5)
+    expect(cells[yA.index(0.5) * xA.n + xA.index(0.5)].runs.length).toBe(0) // the gap
   })
 
   it('pegging a lever filters which runs populate the grid', () => {
-    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
-    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'cells-peg' }, state, runs: runsFixture() })
+    const { a, cells } = cellsFor(runsFixture(), 'cells-peg')
     a.vs.pegs = { algo: 'A' }
-    const { cells } = Exploration.heatmapCells(a)
-    const total = cells.reduce((n: number, c: any) => n + c.runs.length, 0)
-    expect(total).toBe(15) // half the runs (algo=A only)
+    const { cells: pegged } = Exploration.heatmapCells(a)
+    expect(pegged.reduce((n: number, c: any) => n + c.runs.length, 0)).toBe(15) // half (algo=A)
+    expect(cells.reduce((n: number, c: any) => n + c.runs.length, 0)).toBe(30) // unpegged = all
   })
 
-  it('makeAxis exposes a cellLabel: numeric → a range, categorical → the value', () => {
-    const numA = Exploration.makeAxis('x', runsFixture(), MANIFEST, 1)
+  it('makeAxis cellLabel is a CONCRETE value on both axis kinds (not a range)', () => {
+    const numA = Exploration.makeAxis('x', runsFixture(), MANIFEST)
     expect(numA.kind).toBe('num')
-    expect(String(numA.cellLabel(0))).toContain('–')
-    const catA = Exploration.makeAxis('algo', runsFixture(), MANIFEST, 1)
+    expect(String(numA.cellLabel(0))).not.toContain('–')
+    expect(Number(numA.cellLabel(0))).toBe(0) // smallest tried x value
+    const catA = Exploration.makeAxis('algo', runsFixture(), MANIFEST)
     expect(catA.kind).toBe('cat')
     expect(['A', 'B']).toContain(catA.cellLabel(0))
   })

@@ -171,10 +171,64 @@ project by its manifest's `recordType`.
     confounded/surrogate signals (e.g. an attribution that FAILED its sanity check). A chat agent can also pull
     ANY run mid-conversation (not just the seeded one) via two AGENT READ TOOLS — `getRunData` (a run's
     config/metrics + a compact decision-trace digest) and `getRunXAI` (the same deterministic `RunXaiDigest`)
-    — advertised on the project chat through the backend's `extraToolSchemas` seam (`trainerReadTools.ts`,
+    — advertised on the project chat through the backend's `extraToolSchemas` seam (`trainerTools.ts`,
     the knowledge-read-tools precedent; no ToolSchemas regen). They resolve a run id → its training project by
     searching the host's `trainer-project-manifest` records, and the `getRunXAI`/narrative facts share ONE
-    `buildRunXaiDigest`. Read-only.
+    `buildRunXaiDigest`.
+- **The conversational hub — discuss ANYTHING, act from chat.** One viewer seam, `discussBundle({title,
+  seed, intro, bundle})`, JSON-serialises exactly what the user is seeing into the topic chat's persistent
+  system prompt (capped at 60k chars) — every surface carries a 💬 Discuss built on it: hypothesis cards
+  (record + hygiene diagnosis + judging rule), the hypothesis registry-health banner (the full census +
+  every blocked spec), paper cards (record, verdict roll-up, coverage gaps — also per-gap —, proposed
+  improvements, linked hypotheses + verdicts), version cards (changelog entry, per-version run stats,
+  matching invalidations/migrations), and the Datasets/Environments capability sections (levers + usage +
+  presets). The ACT half: `recommendTrainingExperiments` — the trainer chat's one WRITE tool (schema +
+  dispatch in the backend's `trainerTools.ts`; handler in `ModelTrainerTools`) — validates the chat LLM's
+  suggested specs against the manifest (migrated first; unknown levers/empty sweeps/over-cap matrices are
+  rejected with the reason) and persists deduped `-xai-suggestion` records the xAI Suggested view runs as
+  one-click ✦ AI batches; it never launches compute. Papers additionally offer per-coverage-gap and
+  per-improvement **→ story** buttons (`OverseerBridge.createStory`, host `story.create` handler) so "work
+  on this" lands in the project's Stories for agents to pick up.
+- **Hypothesis hygiene — why an undecided hypothesis is undecided.** Pure `hypothesisHygiene` /
+  `hypothesisHygieneCensus` (`viewer/hypothesis.js`, tested): a per-fixed-pin census against ALL runs with
+  the dead-pin CAUSE — structural (`migrated` = a manifest migration rewrites the pin so stored configs
+  never match; `na-pinned` = the pin violates its own `appliesWhen` so stored configs hold `'n/a'`;
+  `off-manifest` = outside choices/range) vs launchable (`missing-key`, `never-run`) — plus per-sweep-option
+  and per-compare-cell run counts, planned-item math (an EXPLICIT seed list smaller than minRuns can never
+  be judged → `underplanned`), `no-metric` (the family never reports `return_vs_hold_pct`), `single-cell`,
+  and `baseline-out-of-range`. Status = `judged` | `blocked` (structural — fix the spec) | `starved` (just
+  needs runs). Surfaced as a census banner + per-card diagnosis line, computed in one cached sweep per
+  all-runs snapshot. `compareContexts` + `coerceComparison` now bound `baselineIndex` (an out-of-range
+  index stays untested / clamps to 0 instead of silently mis-judging).
+- **The single-context judging rule is manifest-declared** — `hypothesisBenchmark: {metric, threshold?,
+  direction?}` (CartPole: `eval_return_mean > 475`; omitted ⇒ the trading default `return_vs_hold_pct >
+  0`). `resolveBenchmark`/`measuredFromRuns` in `hypothesis.js` thread it through every verdict path,
+  the hygiene `no-metric` diagnosis names the ACTUAL benchmark metric (and says to declare one when
+  missing), and all evidence/criteria copy renders the project's own rule instead of "beats
+  buy-and-hold". The stored `measured.beatsHold` field name is historical — it means "meets the
+  benchmark". Cross-context (compare) hypotheses judge by the objective and ignore this.
+- **Chat write tools are approval-gated.** Beyond the auto-callable reads + `recommendTraining
+  Experiments`, the chat has `updateTrainingHypothesis` / `updateTrainingPaper` — allow-listed in-place
+  record updates (a chat `verdict` becomes a MANUAL override; a replacement spec is migrated + validated
+  like a launch). They are advertised but NEVER auto-called (`TRAINER_AUTO_TOOL_NAMES` excludes them),
+  so the chat surfaces every mutation for the user to approve; code/feature work is steered to
+  `addStory`/`addFeature` instead.
+- **One standard "work on this" affordance** — `iconStorySvg` + an always-on callout — everywhere a
+  view creates a story/feature: paper coverage gaps + proposed improvements (stories via
+  `OverseerBridge.createStory`) and proposed models / components (a FEATURE under the shared
+  "Implement missing model components" story via `OverseerBridge.createStoryFeature` → the host's
+  find-or-create `story.feature.create` handler, all three clients).
+- **Datasets/Environments are capability sections + named presets.** Each dataset/environment lever renders
+  as a FEATURE card (description, choices/range with the ★ default, per-value RUN USAGE from the loaded
+  pool, `active:false` = "not wired" badge, `dependsOn` dependency line), with the named records below as
+  pure PRESETS (the same bundle table + CRUD). The Datasets section carries the comparability warning
+  (metrics compare apples-to-apples only WITHIN one dataset). The environment form greys a dependent lever
+  while its control's current value makes it inert (`Comparison.dependencyMet`) and badges unwired levers;
+  values and signatures are unchanged (identity still spans every env lever).
+- **The Models catalog requires a `model_name` choice lever** — discovery, flavor binding, and run roll-up
+  all key on it. A manifest without one gets an explicit hint (Models empty state + a guarded Scan button +
+  `noIdentityLever` on the scan result) instead of a silent zero; `examples/cartpole` renames its `algo`
+  lever accordingly, with manifest `migrations` rolling old run configs forward.
 - **Judging blends, never replaces, the objective**: `judgeTrainingRuns` min–max-normalises
   the objective (direction-aware) and blends it 50/50 with the LLM's 0–100 verdict
   (`{recordType}-verdict` records, key = run key) — a money-losing run can't be ranked best

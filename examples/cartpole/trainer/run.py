@@ -38,7 +38,7 @@ def main() -> None:
 
 def run_training(config_path: Path | None, summary_out: Path, calibrate: bool) -> None:
     if calibrate:
-        config = replace(TrainerConfig(), algo="ppo", total_timesteps=CALIBRATION_TIMESTEPS)
+        config = replace(TrainerConfig(), model_name="ppo", total_timesteps=CALIBRATION_TIMESTEPS)
         eval_episodes = CALIBRATION_EVAL_EPISODES
     else:
         config = load_config(config_path)

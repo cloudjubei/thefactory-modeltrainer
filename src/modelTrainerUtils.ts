@@ -923,7 +923,9 @@ export function looksLikeDataGathering(title: string, rationale: string): boolea
 }
 
 // Validate an LLM-proposed comparison criterion; drop it unless `kind` is one of the known kinds.
-function coerceComparison(raw: unknown): HypothesisComparison | undefined {
+// `cellCount` bounds `baselineIndex` — an index beyond the spec's context cells would compare against
+// undefined and silently mis-judge, so it clamps to the first cell.
+function coerceComparison(raw: unknown, cellCount?: number): HypothesisComparison | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined
   const o = raw as Record<string, unknown>
   const kinds: HypothesisComparisonKind[] = ['beats-baseline', 'invariant', 'differs']
@@ -935,7 +937,8 @@ function coerceComparison(raw: unknown): HypothesisComparison | undefined {
     Number.isFinite(o.baselineIndex) &&
     o.baselineIndex >= 0
   ) {
-    c.baselineIndex = Math.trunc(o.baselineIndex)
+    const idx = Math.trunc(o.baselineIndex)
+    c.baselineIndex = cellCount !== undefined && idx >= cellCount ? 0 : idx
   }
   if (typeof o.tolerance === 'number' && Number.isFinite(o.tolerance)) c.tolerance = o.tolerance
   return c
@@ -1106,7 +1109,11 @@ export function coerceHypothesisItems(
         .filter((s): s is number => typeof s === 'number' && Number.isFinite(s))
         .map((s) => Math.trunc(s))
     }
-    const comparison = coerceComparison(obj.comparison)
+    const cellCount =
+      (spec.compare?.values.length || 1) *
+      (spec.environments?.length || 1) *
+      (spec.datasets?.length || 1)
+    const comparison = coerceComparison(obj.comparison, cellCount)
     const claim = typeof obj.claim === 'string' && obj.claim.trim() ? obj.claim.trim() : undefined
     items.push({
       title: obj.title,

@@ -1628,6 +1628,88 @@ button.run-badge.model-device-chip:hover {
   justify-content: flex-end;
   gap: 4px;
 }
+/* Lever CAPABILITY sections (Datasets/Environments): one feature card per lever, then named presets. */
+.lever-caps {
+  margin: 0 0 14px;
+}
+.lever-caps-head {
+  cursor: pointer;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lever-caps-head .card-actions {
+  margin-left: auto;
+}
+.lever-cap-note {
+  margin: 8px 0 2px;
+}
+.lever-caps-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+.lever-cap-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.lever-cap-card.is-inactive {
+  opacity: 0.65;
+}
+.lever-cap-head {
+  margin: 0 0 4px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lever-cap-card .card-sub {
+  margin: 2px 0;
+}
+.lever-cap-depends {
+  color: var(--warn);
+}
+.lever-cap-values {
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.lever-cap-value {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+.lever-cap-value.is-default {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.lever-cap-count {
+  color: var(--muted);
+}
+.bundle-presets-head {
+  margin: 12px 0 6px;
+}
+/* THE standard create-story/feature button — accent-tinted so the "work on this" verb reads the same
+   everywhere (papers gaps/improvements, proposed models, components). */
+.story-btn {
+  color: var(--accent);
+}
+/* Env form: inactive levers greyed; dependent levers greyed while their control makes them inert. */
+.env-field-inactive,
+.env-field-inert {
+  opacity: 0.55;
+}
+.lever-dep-note {
+  color: var(--warn);
+  font-size: 11px;
+}
 .papers-body {
   display: flex;
   flex-direction: column;
@@ -3048,6 +3130,31 @@ pre.json {
 .hyp-running {
   display: inline-flex;
   align-items: center;
+}
+/* Registry-health banner above the verdict sections: judged/blocked/starved chips + the issue census. */
+.hyp-hygiene-banner {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.hyp-hygiene-hint {
+  margin: 4px 0 10px;
+}
+.hyp-hygiene-line {
+  margin: 2px 0 6px;
+}
+/* The "what more running would decide this" block on a starved hypothesis, with its one-click launch. */
+.hyp-coverage {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+}
+.hyp-coverage .ghost-btn {
+  margin-top: 6px;
 }
 /* The action-button group, pushed to the right edge of a card summary. */
 .card-actions {

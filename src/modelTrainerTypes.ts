@@ -99,6 +99,22 @@ export interface TrainerObjective {
   direction: 'max' | 'min'
 }
 
+/**
+ * The SINGLE-CONTEXT hypothesis judging rule: a hypothesis is PROVEN when the best matching run's
+ * `metric` clears `threshold` (toward `direction`, default `max`). Declared per project so hypotheses
+ * are judged by THIS project's definition of success — e.g. CartPole `eval_return_mean > 475`, the
+ * trading line `return_vs_hold_pct > 0` (beats buy-and-hold OOS, the fallback when omitted). Cross-
+ * context (compare/environments/datasets) hypotheses judge by the objective instead and ignore this.
+ */
+export interface HypothesisBenchmark {
+  /** RunSummary `metrics` key the rule reads. */
+  metric: string
+  /** The value the best run must clear (default 0). */
+  threshold?: number
+  /** `max` ⇒ proven when best > threshold; `min` ⇒ proven when best < threshold. Default `max`. */
+  direction?: 'max' | 'min'
+}
+
 /** One file a dataset materialises: workspace destination + where to fetch it. */
 export interface TrainerDataFile {
   /** Path relative to the project root, e.g. `data/winequality-red.csv`. */
@@ -168,6 +184,12 @@ export interface TrainerManifest {
    */
   maxMemoryBytesPerRun?: number
   objective: TrainerObjective
+  /**
+   * How a SINGLE-CONTEXT hypothesis is proven (see {@link HypothesisBenchmark}). Omitted ⇒ the trading
+   * line's historical default (`return_vs_hold_pct > 0`) — declare it for any non-trading project or
+   * its hypotheses can never be judged.
+   */
+  hypothesisBenchmark?: HypothesisBenchmark
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
   eta?: { unitsLever: string }
@@ -1891,6 +1913,93 @@ export interface ProposeTrainingExperimentsResult {
   proposedAt: string
 }
 
+/**
+ * A CHAT agent handing back runnable experiment recommendations (the write half of the trainer chat
+ * tools): each suggestion is validated against the manifest and persisted as a `-xai-suggestion` record
+ * the xAI Suggested view surfaces as a one-click ✦ AI batch. Writes SUGGESTIONS only — never launches.
+ */
+export interface RecommendTrainingExperimentsParams {
+  scope: string
+  /**
+   * Which registered training project to recommend for — its manifest `name` or `recordType`. Optional
+   * when the scope registers exactly one project; with several and none named, the call fails listing
+   * the options (so the model can retry with one).
+   */
+  project?: string
+  suggestions: Array<{ title: string; rationale: string; spec: unknown }>
+  /** Provenance label (defaults to `chat-agent`). */
+  proposedBy?: string
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface RecommendTrainingExperimentsResult {
+  recordType: string
+  /** How many suggestions validated + persisted. */
+  accepted: number
+  /** Suggestions whose spec already exists as a suggestion record. */
+  skippedExisting: number
+  /** Suggestions dropped with WHY (unknown lever, empty spec, over-cap matrix, missing title). */
+  rejected: Array<{ title?: string; reason: string }>
+  suggestions: TrainingExperimentSuggestion[]
+}
+
+/**
+ * A CHAT agent updating ONE hypothesis in place — APPROVAL-GATED in the chat (advertised but never
+ * auto-called, so every call shows the user a confirmation with the args). Only the allow-listed
+ * fields apply; a replacement `spec` is migrated + validated against the manifest first; a `verdict`
+ * becomes a MANUAL override (auto-refresh won't flip it).
+ */
+export interface UpdateTrainingHypothesisParams {
+  scope: string
+  /** See {@link RecommendTrainingExperimentsParams.project}. */
+  project?: string
+  /** The hypothesis id (its record key). */
+  id: string
+  set: {
+    title?: string
+    claim?: string
+    rationale?: string
+    spec?: unknown
+    verdict?: 'proven' | 'disproved' | 'untested'
+    verdictNote?: string
+    dismissed?: boolean
+  }
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface UpdateTrainingHypothesisResult {
+  recordType: string
+  id: string
+  /** The fields that were actually applied (unknown/invalid fields are silently listed nowhere). */
+  updated: string[]
+}
+
+/** A CHAT agent updating ONE paper's prose/meta fields in place — approval-gated like the hypothesis tool. */
+export interface UpdateTrainingPaperParams {
+  scope: string
+  project?: string
+  /** The paper id (its record key). */
+  id: string
+  set: {
+    title?: string
+    claim?: string
+    approach?: string
+    verdictNote?: string
+    tags?: string[]
+    dismissed?: boolean
+    url?: string
+    authors?: string
+    year?: number
+  }
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface UpdateTrainingPaperResult {
+  recordType: string
+  id: string
+  updated: string[]
+}
+
 export interface AnalyzePaperFromUrlParams {
   scope: string
   projectRoot: string
@@ -2112,6 +2221,12 @@ export interface ScanProjectModelsResult {
   /** Provenance label of the enriching model (absent for a heuristic-only scan). */
   scannedBy?: string
   scannedAt: string
+  /**
+   * True when the manifest declares NO `model_name` choice lever — the whole catalog machinery keys on
+   * it, so the scan structurally cannot discover anything. Surfaced so a zero-result scan explains
+   * itself (name the model-identity lever `model_name`) instead of completing silently.
+   */
+  noIdentityLever?: boolean
 }
 
 export interface AnalyzePaperModelsParams {
@@ -2439,6 +2554,22 @@ export interface ModelTrainerTools {
   proposeTrainingExperiments(
     params: ProposeTrainingExperimentsParams,
   ): Promise<ProposeTrainingExperimentsResult>
+  /**
+   * A CHAT agent hands back runnable experiment recommendations: validate each spec against the
+   * project's manifest and persist the good ones as `{recordType}-xai-suggestion` records (deduped by
+   * spec hash) — the same records the xAI Suggested view runs in one click. Writes suggestions only;
+   * never launches compute. Invalid specs come back in `rejected` with the reason so the model can fix
+   * and retry.
+   */
+  recommendTrainingExperiments(
+    params: RecommendTrainingExperimentsParams,
+  ): Promise<RecommendTrainingExperimentsResult>
+  /** Approval-gated chat write: update ONE hypothesis in place (see {@link UpdateTrainingHypothesisParams}). */
+  updateTrainingHypothesis(
+    params: UpdateTrainingHypothesisParams,
+  ): Promise<UpdateTrainingHypothesisResult>
+  /** Approval-gated chat write: update ONE paper's prose/meta fields (see {@link UpdateTrainingPaperParams}). */
+  updateTrainingPaper(params: UpdateTrainingPaperParams): Promise<UpdateTrainingPaperResult>
   /**
    * Read a paper/source URL, summarise it with an LLM (the tool fetches the page text — no web tools),
    * and persist a DRAFT `{recordType}-paper` record (status 'untested', source 'research') for the user

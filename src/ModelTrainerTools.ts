@@ -63,6 +63,12 @@ import type {
   PlannedTrainingItem,
   ProposeTrainingExperimentsParams,
   ProposeTrainingExperimentsResult,
+  RecommendTrainingExperimentsParams,
+  RecommendTrainingExperimentsResult,
+  UpdateTrainingHypothesisParams,
+  UpdateTrainingHypothesisResult,
+  UpdateTrainingPaperParams,
+  UpdateTrainingPaperResult,
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
   BenchmarkModelDeviceParams,
@@ -1247,6 +1253,202 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Resolve which registered training project a CHAT tool call targets: by manifest name/recordType when
+  // `project` is given, else the scope's single registered project; several + none named is an error that
+  // LISTS the options so the model can retry with one.
+  async function resolveProjectManifest(
+    scope: string,
+    project?: string,
+  ): Promise<TrainerManifest> {
+    const records = await deps.storage.listRecords({ scope, type: 'trainer-project-manifest' })
+    const manifests = records
+      .map((r) => (r.content as { manifest?: TrainerManifest } | undefined)?.manifest)
+      .filter((m): m is TrainerManifest => !!m?.recordType)
+    if (!manifests.length) throw new Error('this project registers no training projects')
+    if (project) {
+      const hit = manifests.find((m) => m.name === project || m.recordType === project)
+      if (hit) return hit
+      throw new Error(
+        `no training project "${project}" — registered: ${manifests.map((m) => m.name).join(', ')}`,
+      )
+    }
+    if (manifests.length === 1) return manifests[0]
+    throw new Error(
+      `several training projects are registered (${manifests
+        .map((m) => m.name)
+        .join(', ')}) — pass \`project\` to pick one`,
+    )
+  }
+
+  async function recommendTrainingExperiments(
+    params: RecommendTrainingExperimentsParams,
+  ): Promise<RecommendTrainingExperimentsResult> {
+    const manifest = await resolveProjectManifest(params.scope, params.project)
+    const recordType = manifest.recordType
+    const suggestionType = `${recordType}-xai-suggestion`
+    const proposedBy = params.proposedBy ?? 'chat-agent'
+    const proposedAt = now()
+    const existing = await deps.storage.listRecords({ scope: params.scope, type: suggestionType })
+    const seenIds = new Set(existing.map((r) => r.key).filter((k): k is string => !!k))
+
+    const suggestions: TrainingExperimentSuggestion[] = []
+    const rejected: RecommendTrainingExperimentsResult['rejected'] = []
+    let skippedExisting = 0
+    for (const raw of params.suggestions ?? []) {
+      const title = typeof raw?.title === 'string' ? raw.title.trim() : ''
+      if (!title) {
+        rejected.push({ reason: 'suggestion needs a title' })
+        continue
+      }
+      if (!raw.spec || typeof raw.spec !== 'object' || Array.isArray(raw.spec)) {
+        rejected.push({ title, reason: 'suggestion needs a spec object ({fixed?, sweep?, seeds?, …})' })
+        continue
+      }
+      // Roll the spec through the manifest's migrations first (a chat can echo retired lever values),
+      // then let the planner's own validation judge it — unknown levers / empty sweeps / an over-cap
+      // matrix all throw with a precise message the model can act on.
+      const spec = migrateExperimentSpec(raw.spec as ExperimentSpec, manifest.migrations)
+      try {
+        const planned = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
+        if (!planned.length) {
+          rejected.push({ title, reason: 'the spec plans zero runs' })
+          continue
+        }
+      } catch (err) {
+        rejected.push({ title, reason: err instanceof Error ? err.message : String(err) })
+        continue
+      }
+      const id = hashTrainingConfig(spec as Record<string, unknown>)
+      if (seenIds.has(id)) {
+        skippedExisting += 1
+        continue
+      }
+      seenIds.add(id)
+      const suggestion: TrainingExperimentSuggestion = {
+        id,
+        title,
+        rationale: typeof raw.rationale === 'string' ? raw.rationale : '',
+        spec,
+        source: 'llm',
+        proposedBy,
+        proposedAt,
+      }
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: suggestionType,
+        key: id,
+        content: suggestion as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(suggestionType, id)
+      suggestions.push(suggestion)
+    }
+    logger?.info('chat recommended training experiments', {
+      recordType,
+      accepted: suggestions.length,
+      skippedExisting,
+      rejected: rejected.length,
+    })
+    return { recordType, accepted: suggestions.length, skippedExisting, rejected, suggestions }
+  }
+
+  // Shared core of the approval-gated chat UPDATE tools: read one record, apply only the allow-listed
+  // fields (each through its coercer; a coercer may throw to reject the whole call), stamp updatedAt,
+  // write back. Returns which fields actually applied so the chat can report faithfully.
+  async function updateRecordFields(
+    scope: string,
+    type: string,
+    id: string,
+    set: Record<string, unknown>,
+    coercers: Record<string, (v: unknown) => unknown | undefined>,
+    onRecordWritten?: (type: string, key: string) => void,
+  ): Promise<string[]> {
+    const rec = await deps.storage.readRecord({ scope, type, key: id })
+    if (!rec?.content) throw new Error(`no ${type} record "${id}" in this project`)
+    const content = { ...(rec.content as Record<string, unknown>) }
+    const updated: string[] = []
+    for (const [field, coerce] of Object.entries(coercers)) {
+      if (!(field in (set ?? {}))) continue
+      const value = coerce((set as Record<string, unknown>)[field])
+      if (value === undefined) continue
+      Object.assign(content, value as Record<string, unknown>)
+      updated.push(field)
+    }
+    if (!updated.length) throw new Error('nothing to update — no allow-listed field was set')
+    content.updatedAt = now()
+    await deps.storage.upsertRecord({ scope, type, key: id, content })
+    onRecordWritten?.(type, id)
+    return updated
+  }
+
+  const asTrimmed = (field: string) => (v: unknown) =>
+    typeof v === 'string' && v.trim() ? { [field]: v.trim() } : undefined
+  const asBool = (field: string) => (v: unknown) =>
+    typeof v === 'boolean' ? { [field]: v } : undefined
+
+  async function updateTrainingHypothesis(
+    params: UpdateTrainingHypothesisParams,
+  ): Promise<UpdateTrainingHypothesisResult> {
+    const manifest = await resolveProjectManifest(params.scope, params.project)
+    const recordType = manifest.recordType
+    const updated = await updateRecordFields(
+      params.scope,
+      `${recordType}-hypothesis`,
+      params.id,
+      params.set as Record<string, unknown>,
+      {
+        title: asTrimmed('title'),
+        claim: asTrimmed('claim'),
+        rationale: asTrimmed('rationale'),
+        verdictNote: asTrimmed('verdictNote'),
+        dismissed: asBool('dismissed'),
+        // A verdict from the chat is a MANUAL override — the auto-refresh must not silently flip it back.
+        verdict: (v) =>
+          v === 'proven' || v === 'disproved' || v === 'untested'
+            ? { status: v, verdictSource: 'manual' }
+            : undefined,
+        // A replacement spec is migrated + validated exactly like a launch — reject with the reason.
+        spec: (v) => {
+          if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
+          const spec = migrateExperimentSpec(v as ExperimentSpec, manifest.migrations)
+          const planned = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
+          if (!planned.length) throw new Error('the replacement spec plans zero runs')
+          return { spec }
+        },
+      },
+      params.onRecordWritten,
+    )
+    logger?.info('chat updated hypothesis', { recordType, id: params.id, updated })
+    return { recordType, id: params.id, updated }
+  }
+
+  async function updateTrainingPaper(
+    params: UpdateTrainingPaperParams,
+  ): Promise<UpdateTrainingPaperResult> {
+    const manifest = await resolveProjectManifest(params.scope, params.project)
+    const recordType = manifest.recordType
+    const updated = await updateRecordFields(
+      params.scope,
+      `${recordType}-paper`,
+      params.id,
+      params.set as Record<string, unknown>,
+      {
+        title: asTrimmed('title'),
+        claim: asTrimmed('claim'),
+        approach: asTrimmed('approach'),
+        verdictNote: asTrimmed('verdictNote'),
+        url: asTrimmed('url'),
+        authors: asTrimmed('authors'),
+        dismissed: asBool('dismissed'),
+        year: (v) => (Number.isFinite(Number(v)) ? { year: Math.trunc(Number(v)) } : undefined),
+        tags: (v) =>
+          Array.isArray(v) ? { tags: v.map(String).filter(Boolean).slice(0, 20) } : undefined,
+      },
+      params.onRecordWritten,
+    )
+    logger?.info('chat updated paper', { recordType, id: params.id, updated })
+    return { recordType, id: params.id, updated }
+  }
+
   // Shared paper-synthesis core, used by BOTH analyzePaperFromUrl (single pasted link) and
   // researchTrainingPapers (open-ended discovery): given the paper's fetched page TEXT, summarise it
   // into a draft record + its testable hypotheses. Returns undefined when the model produced no usable
@@ -2265,11 +2467,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.onRecordWritten?.(modelType, c.slug)
       models.push(model)
     }
+    // The whole catalog machinery keys on a `model_name` choice lever; without one the scan structurally
+    // finds nothing — say so instead of completing as a silent zero.
+    const noIdentityLever = !(lever && lever.type === 'choice' && Array.isArray(lever.choices))
     logger?.info('scanned project models', {
       recordType,
       discovered: candidates.length,
       created: models.length,
       skippedExisting,
+      ...(noIdentityLever ? { noIdentityLever } : {}),
     })
     return {
       recordType,
@@ -2279,6 +2485,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       models,
       scannedBy,
       scannedAt,
+      ...(noIdentityLever ? { noIdentityLever } : {}),
     }
   }
 
@@ -2948,6 +3155,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     judgeTrainingRuns,
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
+    recommendTrainingExperiments,
+    updateTrainingHypothesis,
+    updateTrainingPaper,
     analyzePaperFromUrl,
     researchTrainingPapers,
     suggestPaperHypotheses,

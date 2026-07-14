@@ -26,7 +26,7 @@ def build_train_env() -> Monitor:
 
 
 def build_model(config: TrainerConfig, env: gym.Env) -> BaseAlgorithm:
-    return _algo_class(config.algo)(
+    return _algo_class(config.model_name)(
         "MlpPolicy",
         env,
         learning_rate=config.learning_rate,
@@ -39,8 +39,8 @@ def build_model(config: TrainerConfig, env: gym.Env) -> BaseAlgorithm:
 
 
 def load_model(config: TrainerConfig, checkpoint: Path) -> BaseAlgorithm:
-    return _algo_class(config.algo).load(str(checkpoint), device="cpu")
+    return _algo_class(config.model_name).load(str(checkpoint), device="cpu")
 
 
-def _algo_class(algo: str) -> type[BaseAlgorithm]:
-    return PPO if algo == "ppo" else DQN
+def _algo_class(model_name: str) -> type[BaseAlgorithm]:
+    return PPO if model_name == "ppo" else DQN

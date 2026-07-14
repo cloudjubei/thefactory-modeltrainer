@@ -347,6 +347,9 @@ let hypothesisOverrideId = null
 let hypothesisMinRuns = DEFAULT_HYPOTHESIS_MIN_RUNS
 // Ids of the hypothesis/paper cards the user has expanded (collapsible rows), so expansion survives re-render.
 const hypothesisExpanded = new Set()
+// The live-activity ids captured by the last hypotheses DATA load — reused by paint-only re-renders and by
+// the lazy body-fill on expand, so neither pays for another async liveness read.
+let hypothesisLiveIds = new Set()
 const paperExpanded = new Set()
 let paperSubform = null
 // Models catalog records + the active category filter + which cards are expanded (survives re-render).
@@ -635,6 +638,16 @@ function iconRunSvg(size) {
   )
 }
 // A plus — "add a new one".
+// THE standard "create story/feature" glyph (a bookmarked card with a +) — every "work on this" button
+// across the app uses it, always paired with a callout explaining exactly what gets created.
+function iconStorySvg(size) {
+  const s = size || 15
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/>' +
+    '<line x1="12" y1="8" x2="12" y2="14"/><line x1="9" y1="11" x2="15" y2="11"/></svg>'
+  )
+}
 function iconPlusSvg(size) {
   const s = size || 16
   return (
@@ -833,21 +846,33 @@ function recordToRun(r) {
 }
 // Run records via the bridge, with the server-side filter/sort/pagination passed through (`extra` =
 // { where?, orderBy?, limit?, offset? }). The flat view sends a page; group-by/drill send no limit.
-async function queryRunRecords(extra) {
+// One run-record page (throwing). A bridge failure PROPAGATES so a bulk scan can tell a transient page
+// error apart from a genuine end-of-data short read — the accumulator retries the former and truncates on
+// neither. `timeoutMs` overrides the bridge's default 8s guard for the slower deep pages of a big project.
+async function queryRunRecordsRaw(extra, timeoutMs) {
   if (!embedded() || !manifest) return []
+  // Every list/aggregate fetch drops the heavy per-bar fields — they're re-fetched by key on demand.
+  const payload = { type: manifest.recordType, omit: HEAVY_RUN_FIELDS }
+  if (extra && extra.where) payload.where = extra.where
+  if (extra && extra.orderBy) payload.orderBy = extra.orderBy
+  if (extra && extra.limit !== undefined) payload.limit = extra.limit
+  if (extra && extra.offset !== undefined) payload.offset = extra.offset
+  const recs = await window.OverseerBridge.queryData(payload, timeoutMs)
+  return (recs || []).map(recordToRun).filter((r) => r.key)
+}
+// Best-effort single page: degrades a failure to an empty list. For callers that render a lone page (the
+// flat runs view, staleness probes) where a blip should show nothing rather than blow up — NEVER for the
+// unbounded accumulators, which must distinguish failure from end-of-data (they use the *Raw fetch).
+async function queryRunRecords(extra) {
   try {
-    // Every list/aggregate fetch drops the heavy per-bar fields — they're re-fetched by key on demand.
-    const payload = { type: manifest.recordType, omit: HEAVY_RUN_FIELDS }
-    if (extra && extra.where) payload.where = extra.where
-    if (extra && extra.orderBy) payload.orderBy = extra.orderBy
-    if (extra && extra.limit !== undefined) payload.limit = extra.limit
-    if (extra && extra.offset !== undefined) payload.offset = extra.offset
-    const recs = await window.OverseerBridge.queryData(payload)
-    return (recs || []).map(recordToRun).filter((r) => r.key)
+    return await queryRunRecordsRaw(extra)
   } catch {
     return []
   }
 }
+// A generous per-page timeout for bulk history scans: a deep page over a large project under concurrent
+// write load can exceed the bridge's 8s default, and a premature reject would look like end-of-data.
+const RUN_SCAN_PAGE_TIMEOUT_MS = 30000
 // Total runs matching `where` (ignores limit/offset), for the flat view's pager. Degrades to the
 // loaded length when the host predates the count verb.
 async function countRunRecords(where) {
@@ -863,21 +888,21 @@ async function countRunRecords(where) {
 }
 // EVERY run record matching `where` (omit it for all) — independent of any page cap. An unbounded query
 // can't be served (a single oversized page would blow the response), so page through with a fixed limit
-// until exhausted, deduped by key. `onProgress(n)` fires after each page so a long scan shows progress.
+// until exhausted, deduped by key. A transient page failure is RETRIED (not swallowed into an empty page
+// that would end the scan early — the "only 5500 of 20k runs" truncation bug); a persistent failure THROWS
+// so callers report honestly rather than silently under-count. `onProgress(n)` fires after each page.
 async function queryAllRunRecords(onProgress, where) {
   const PAGE = 500
-  const byKey = new Map()
-  let offset = 0
-  for (let guard = 0; guard < 10000; guard++) {
-    const extra = where ? { where, limit: PAGE, offset } : { limit: PAGE, offset }
-    const page = await queryRunRecords(extra)
-    if (!page.length) break
-    for (const r of page) byKey.set(r.key, r)
-    if (onProgress) onProgress(byKey.size)
-    if (page.length < PAGE) break
-    offset += PAGE
-  }
-  return [...byKey.values()]
+  return window.Paging.accumulatePages({
+    pageSize: PAGE,
+    sleep,
+    onProgress,
+    fetchPage: (offset) =>
+      queryRunRecordsRaw(
+        where ? { where, limit: PAGE, offset } : { limit: PAGE, offset },
+        RUN_SCAN_PAGE_TIMEOUT_MS,
+      ),
+  })
 }
 async function readRuns() {
   if (!manifest) return []
@@ -9118,6 +9143,43 @@ async function xaiDiscussView(viewId) {
     setStatusLine('xai-status', 'Could not open chat — please try again.', true)
   }
 }
+// ——— UNIVERSAL Discuss seam ————————————————————————————————————————————————————————————————————
+// Share ANY view's data into a project topic chat. `bundle` is a plain object of exactly what the user
+// is seeing (records, derived tables, analyses); it lands JSON-serialised in the chat's PERSISTENT
+// system prompt (the discussTopic contract: systemPrompt = durable context, seed = the first user
+// message). Capped so a huge view can't blow the completion request.
+const DISCUSS_BUNDLE_MAX_CHARS = 60000
+async function discussBundle({ title, seed, intro, bundle, statusId }) {
+  if (!chatAboutRunAvailable()) return
+  let json = ''
+  try {
+    json = JSON.stringify(bundle, null, 1)
+  } catch {
+    json = String(bundle)
+  }
+  if (json.length > DISCUSS_BUNDLE_MAX_CHARS)
+    json = `${json.slice(0, DISCUSS_BUNDLE_MAX_CHARS)}\n…(truncated — ask the user to share a narrower view for the rest)`
+  const systemPrompt = [
+    projectChatPreamble(),
+    intro ||
+      'The user shared this view from the model-trainer app. Everything they see is in the JSON below — work directly from it; do not ask for it. Signals may be heuristic/confounded; flag weak evidence (e.g. low run counts) honestly.',
+    json,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  try {
+    await window.OverseerBridge.discussTopic({ title, seed, systemPrompt })
+  } catch {
+    if (statusId) setStatusLine(statusId, 'Could not open chat — please try again.', true)
+    else showToast('Could not open chat — please try again.')
+  }
+}
+// The standard Discuss affordance — a small chat-icon button carried by any card/section. `action` is
+// the delegated data-action the surface's click handler routes; hidden entirely outside the Overseer.
+function discussButtonHtml(action, id, help) {
+  if (!chatAboutRunAvailable()) return ''
+  return `<button type="button" class="card-btn" data-action="${escapeHtml(action)}"${id ? ` data-id="${escapeHtml(id)}"` : ''}${helpAttr(help || 'Discuss this with the AI — everything on screen is shared into the chat.')}>${iconChatSvg()}</button>`
+}
 function busyButtonHtml(label) {
   return `${spinnerHtml()} ${escapeHtml(label)}`
 }
@@ -10419,13 +10481,74 @@ async function renderVersions() {
       const summary = entry
         ? escapeHtml(String(entry.summary || ''))
         : '<span class="card-sub">(no changelog entry for this version)</span>'
+      const vRuns = byVersion.get(v) || []
+      const runChip = vRuns.length
+        ? `<button type="button" class="run-count-chip" data-action="version-runs" data-version="${escapeHtml(v)}"${helpAttr('Open the Runs tab filtered to this pipeline version.')}>${vRuns.length} run${vRuns.length === 1 ? '' : 's'}</button>`
+        : ''
       return `<div class="version-card${isCur ? ' is-current' : ''}">
-        <p class="version-card-head"><strong>v${escapeHtml(v)}</strong>${isCur ? ' <span class="badge">current</span>' : ''} ${breaking}${date}</p>
+        <p class="version-card-head"><strong>v${escapeHtml(v)}</strong>${isCur ? ' <span class="badge">current</span>' : ''} ${breaking}${date} ${runChip} <span class="card-actions">${discussButtonHtml('discuss-version', v, 'Discuss this pipeline version with the AI — the changelog entry, per-version run stats and matching invalidations/migrations are shared into the chat.')}</span></p>
         <p class="version-summary">${summary}</p>
       </div>`
     })
     .join('')
   setHtml(body, `<div class="versions-list">${cards}</div>`)
+  if (!body.dataset.wired) {
+    body.dataset.wired = '1'
+    body.addEventListener('click', (event) => {
+      const btn = event.target.closest('button[data-action]')
+      if (!btn) return
+      if (btn.dataset.action === 'version-runs') {
+        runsVersionFilter = btn.dataset.version
+        runsPage = 0
+        showTab('runs')
+      } else if (btn.dataset.action === 'discuss-version') chatAboutVersion(btn.dataset.id)
+    })
+  }
+}
+// Discuss ONE pipeline version: the changelog entry, whether it's current/outdated, per-version run
+// stats, and the invalidations/migrations tied to it by major-number convention.
+async function chatAboutVersion(v) {
+  const changelog =
+    manifest && Array.isArray(manifest.pipelineChangelog) ? manifest.pipelineChangelog : []
+  const entry = changelog.find((e) => String(e.version) === String(v))
+  const current = currentPipelineVersion()
+  const vRuns = runsCache.filter((r) => runVersionOf(r) === String(v))
+  const objectives = vRuns
+    .map((r) => Number(r.summary.objective))
+    .filter((x) => Number.isFinite(x))
+  const statuses = {}
+  for (const r of vRuns) {
+    const s = (r.summary && r.summary.status) || 'unknown'
+    statuses[s] = (statuses[s] || 0) + 1
+  }
+  const major = parsePipelineVersion(String(v)).major
+  await discussBundle({
+    title: `Pipeline v${v}`,
+    seed:
+      String(v) === current
+        ? 'Walk me through this pipeline version — what changed, what it invalidated, and what runs under it show so far.'
+        : 'Walk me through this older pipeline version — what changed since, whether its runs are still comparable, and what is worth re-running.',
+    intro:
+      'The user shared ONE pipeline VERSION of this training project (versions gate run comparability: a MAJOR bump means data/scoring changed and older runs are not comparable). The JSON below carries the changelog entry, per-version run stats (from the loaded page), and the run-invalidation/migration rules keyed to it. Work directly from it.',
+    bundle: {
+      version: String(v),
+      changelogEntry: entry || null,
+      currentVersion: current,
+      isCurrent: String(v) === current,
+      outdated: major < parsePipelineVersion(current).major,
+      runStats: {
+        count: vRuns.length,
+        statuses,
+        bestObjective: objectives.length ? Math.max(...objectives) : null,
+        objectiveName: objectiveName(),
+      },
+      runInvalidations: ((manifest && manifest.runInvalidations) || []).filter(
+        (r) => Math.abs(Number(r.beforePipelineMajor) - major) <= 1,
+      ),
+      migrations: (manifest && manifest.migrations) || [],
+      fullChangelog: changelog,
+    },
+  })
 }
 
 // --- Datasets / Environments tables ----------------------------------------------
@@ -10475,6 +10598,113 @@ function bundleTableHtml(rows, leverEntries, sort, sortAttr, actionsFn) {
   return `<div class="table-wrap"><table class="runs-table bundle-table"><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
 }
 
+// ——— Lever CAPABILITY sections (the Datasets/Environments "features" view) ————————————————————————
+// Each dataset/environment lever rendered as a FEATURE card: what it is (the manifest description),
+// the values it offers (choices/range, ★ default), whether it's wired (`active:false` = declared but
+// not in the sim), what it DEPENDS on (`dependsOn`), and how much each value has actually run (usage
+// chips from the loaded run pool). The named records below are then purely PRESETS over these features.
+function leverValueUsage(key) {
+  const pool = allRunsCache.length ? allRunsCache : runsCache
+  const counts = new Map()
+  for (const r of pool) {
+    const v = r.summary && r.summary.config ? r.summary.config[key] : undefined
+    if (v === undefined || v === null || String(v) === 'n/a') continue
+    const s = String(v)
+    counts.set(s, (counts.get(s) || 0) + 1)
+  }
+  return counts
+}
+function leverDependsOnLine(spec) {
+  const d = spec && spec.dependsOn
+  if (!d || !d.lever) return ''
+  const cond = 'equals' in d ? `= ${d.equals}` : d.active === false ? 'is OFF' : 'is ON'
+  return `<p class="card-sub lever-cap-depends">↳ only acts when <code>${escapeHtml(d.lever)}</code> ${escapeHtml(cond)} — inert otherwise (sweeps collapse it automatically).</p>`
+}
+function leverCapabilityValueChip(value, isDefault, count) {
+  return `<span class="lever-cap-value${isDefault ? ' is-default' : ''}"${helpAttr(isDefault ? 'The manifest default.' : count ? `${count} run(s) used this value.` : 'No runs with this value yet.')}><code>${escapeHtml(String(value))}</code>${isDefault ? ' ★' : ''}${count ? ` <span class="lever-cap-count">${count}</span>` : ''}</span>`
+}
+function leverCapabilityCardHtml(key, spec) {
+  const usage = leverValueUsage(key)
+  const inactive = spec && spec.active === false
+  let values = ''
+  if (spec.type === 'choice') {
+    values = (spec.choices || [])
+      .map((c) => leverCapabilityValueChip(c, String(spec.default) === String(c), usage.get(String(c)) || 0))
+      .join(' ')
+  } else if (spec.type === 'boolean') {
+    values = [false, true]
+      .map((b) => leverCapabilityValueChip(b, String(spec.default) === String(b), usage.get(String(b)) || 0))
+      .join(' ')
+  } else {
+    const range =
+      Array.isArray(spec.range) && spec.range.length === 2
+        ? `<span class="card-sub">range ${escapeHtml(String(spec.range[0]))} – ${escapeHtml(String(spec.range[1]))} · default ${escapeHtml(String(spec.default === undefined ? '—' : spec.default))}</span> `
+        : `<span class="card-sub">default ${escapeHtml(String(spec.default === undefined ? '—' : spec.default))}</span> `
+    const observed = [...usage.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8)
+    values =
+      range +
+      observed
+        .map(([v, n]) => leverCapabilityValueChip(v, String(spec.default) === v, n))
+        .join(' ')
+  }
+  return `<div class="lever-cap-card${inactive ? ' is-inactive' : ''}">
+    <p class="lever-cap-head"><code>${escapeHtml(key)}</code>${inactive ? ` <span class="badge is-warn"${helpAttr('Declared in the manifest but not wired into the sim — it changes no behaviour, is excluded from sweeps, and is kept for a future re-enable.')}>not wired</span>` : ''}</p>
+    ${spec.description ? `<p class="card-sub">${escapeHtml(String(spec.description))}</p>` : ''}
+    ${leverDependsOnLine(spec)}
+    <p class="lever-cap-values">${values}</p>
+  </div>`
+}
+// The capabilities block for a tab: one feature card per lever + the comparability note + Discuss.
+function leverCapabilitiesHtml(entries, noun, discussAction) {
+  const cards = entries.map(([k, spec]) => leverCapabilityCardHtml(k, spec)).join('')
+  const note =
+    noun === 'dataset'
+      ? `<p class="card-sub lever-cap-note"${helpAttr('Two runs on different datasets saw different data — a train/test window change means the metric was measured on a DIFFERENT market. Compare across datasets only via the By-dataset robustness views, never raw numbers.')}>⚠ Metrics compare apples-to-apples only WITHIN one dataset. Usage counts show which values your runs have actually exercised.</p>`
+      : `<p class="card-sub lever-cap-note">Each feature below is one market mechanic; a named preset pins them all. Usage counts show which values your runs have actually exercised.</p>`
+  return `<details class="lever-caps" open>
+    <summary class="lever-caps-head">Features &amp; capabilities <span class="group-count">${entries.length}</span> <span class="card-actions">${discussButtonHtml(discussAction, '', `Discuss the ${noun} capabilities + presets with the AI — every lever (choices, defaults, dependencies, usage) and the named presets are shared into the chat.`)}</span></summary>
+    ${note}
+    <div class="lever-caps-grid">${cards}</div>
+  </details>`
+}
+// Discuss the whole Datasets/Environments tab: every lever's full spec + usage + the named presets.
+async function chatAboutBundleTab(kind) {
+  const isDataset = kind === 'dataset'
+  const entries = isDataset ? datasetLeverEntries() : envLeverEntries()
+  const presets = (isDataset ? allDatasets() : allEnvironments()).map((b) => ({
+    id: b.id,
+    name: b.name,
+    settings: b.settings,
+    default: b.id === (isDataset ? defaultDatasetId() : defaultEnvironmentId()),
+  }))
+  const levers = entries.map(([key, spec]) => ({
+    key,
+    type: spec.type,
+    choices: spec.choices,
+    range: spec.range,
+    default: spec.default,
+    description: spec.description,
+    active: spec.active,
+    dependsOn: spec.dependsOn,
+    usage: Object.fromEntries(leverValueUsage(key)),
+  }))
+  await discussBundle({
+    title: isDataset ? 'Datasets' : 'Environments',
+    seed: isDataset
+      ? 'Walk me through our dataset capabilities and presets — what should we standardise or add next (new assets, windows, fidelities), and where are runs not comparable?'
+      : 'Walk me through our environment features and presets — which mechanics matter, what dependencies exist, and which regimes should we test next?',
+    intro: `The user shared the ${isDataset ? 'DATASETS' : 'ENVIRONMENTS'} tab: each ${kind} lever as a feature (choices/range, default, description, active=false means declared-but-unwired, dependsOn = runtime dependency) with per-value RUN USAGE counts, plus the named presets (each pins every lever; runs match presets by value signature). Work directly from it.`,
+    bundle: {
+      levers,
+      namedPresets: presets,
+      totalRunsInPool: (allRunsCache.length ? allRunsCache : runsCache).length,
+      ...(isDataset
+        ? { comparabilityNote: 'metrics compare apples-to-apples only within one dataset (identical train/test data)' }
+        : {}),
+    },
+  })
+}
+
 // --- Environments tab ------------------------------------------------------------
 function environmentActionsHtml(env, editable, isDefault) {
   const cloneBtn = `<button type="button" class="icon-btn" data-env-clone="${escapeHtml(env.id)}" title="Clone to a new environment" aria-label="Clone">⧉</button>`
@@ -10508,11 +10738,15 @@ function environmentRows() {
 function renderEnvironmentsTable() {
   const body = byId('environments-body')
   if (!body) return
+  // Features first (each env lever as a capability card with dependencies + usage), then the named
+  // presets — the records themselves are PRESETS over those features, nothing more.
   setHtml(
     body,
-    bundleTableHtml(environmentRows(), envLeverEntries(), environmentsSort, 'env-sort', (r) =>
-      environmentActionsHtml(r.raw, r.editable, r.default),
-    ),
+    leverCapabilitiesHtml(envLeverEntries(), 'environment', 'discuss-environments') +
+      `<h3 class="bundle-presets-head">Named presets</h3>` +
+      bundleTableHtml(environmentRows(), envLeverEntries(), environmentsSort, 'env-sort', (r) =>
+        environmentActionsHtml(r.raw, r.editable, r.default),
+      ),
   )
 }
 async function renderEnvironments() {
@@ -10541,10 +10775,21 @@ function environmentFormHtml(env, isClone) {
   const fields = envLeverEntries()
     .map(([k, spec]) => {
       const cur = settings[k]
-      const labelSpan = `<span${helpAttr(spec.description || '')}>${escapeHtml(k)}</span>`
+      const inactive = spec.active === false
+      const dep = spec.dependsOn
+      const badges =
+        (inactive
+          ? ` <span class="badge is-warn"${helpAttr('Declared but not wired into the sim — the value is stored (it is part of the environment identity) but changes no behaviour.')}>not wired</span>`
+          : '') +
+        (dep && dep.lever
+          ? ` <span class="card-sub lever-dep-note"${helpAttr(`Only acts when ${dep.lever} ${'equals' in dep ? `= ${dep.equals}` : dep.active === false ? 'is OFF' : 'is ON'} — greyed while inert.`)}>↳ ${escapeHtml(dep.lever)}</span>`
+          : '')
+      const labelSpan = `<span${helpAttr(spec.description || '')}>${escapeHtml(k)}</span>${badges}`
+      const wrap = (inner, isCheck) =>
+        `<label class="${isCheck ? 'check-row' : 'field'}${inactive ? ' env-field-inactive' : ''}" data-env-field="${escapeHtml(k)}">${inner}</label>`
       if (spec.type === 'boolean') {
         const checked = cur === true || String(cur) === 'true' ? ' checked' : ''
-        return `<label class="check-row"><input type="checkbox" name="env:${escapeHtml(k)}"${checked} />${labelSpan}</label>`
+        return wrap(`<input type="checkbox" name="env:${escapeHtml(k)}"${checked} />${labelSpan}`, true)
       }
       if (spec.type === 'choice') {
         const opts = (spec.choices || [])
@@ -10553,14 +10798,17 @@ function environmentFormHtml(env, isClone) {
               `<option value="${escapeHtml(String(c))}"${String(cur) === String(c) ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
           )
           .join('')
-        return `<label class="field">${labelSpan}<select name="env:${escapeHtml(k)}">${opts}</select></label>`
+        return wrap(`${labelSpan}<select name="env:${escapeHtml(k)}">${opts}</select>`, false)
       }
       const { min, max } = leverRange(spec)
       const minAttr = Number.isFinite(Number(min)) ? ` min="${Number(min)}"` : ''
       const maxAttr = Number.isFinite(Number(max)) ? ` max="${Number(max)}"` : ''
       const val = cur === undefined ? '' : escapeHtml(String(cur))
-      return `<label class="field">${labelSpan}
-        <input type="number" step="any" name="env:${escapeHtml(k)}" value="${val}"${minAttr}${maxAttr} /></label>`
+      return wrap(
+        `${labelSpan}
+        <input type="number" step="any" name="env:${escapeHtml(k)}" value="${val}"${minAttr}${maxAttr} />`,
+        false,
+      )
     })
     .join('')
   return `<input type="hidden" name="id" value="${escapeHtml(isNew ? randomHexId() : env.id)}" />
@@ -10617,8 +10865,32 @@ function toggleEnvironmentForm(show, env, isClone) {
       </div>
     </div>`
   modal.hidden = false
+  const form = modal.querySelector('#environment-form')
+  if (form) {
+    syncEnvFormDependencies(form)
+    form.addEventListener('change', () => syncEnvFormDependencies(form))
+  }
   const nameInput = modal.querySelector('input[name="name"]')
   if (nameInput) nameInput.focus()
+}
+// Grey/disable each dependent env field while its control's CURRENT form value makes it inert (the sim
+// ignores it), mirroring the sweep's dependencyMet collapse — so the form can't suggest a dead knob does
+// something. Re-runs on every form change; the value is preserved, only the input is disabled.
+function syncEnvFormDependencies(form) {
+  const current = {}
+  for (const [k, spec] of envLeverEntries()) {
+    const el = form.querySelector(`[name="env:${k}"]`)
+    if (!el) continue
+    current[k] = spec.type === 'boolean' ? el.checked : el.value
+  }
+  for (const [k, spec] of envLeverEntries()) {
+    if (!spec.dependsOn || !spec.dependsOn.lever) continue
+    const inert = !window.Comparison.dependencyMet(manifest, current, spec.dependsOn)
+    const wrap = form.querySelector(`[data-env-field="${k}"]`)
+    const el = form.querySelector(`[name="env:${k}"]`)
+    if (wrap) wrap.classList.toggle('env-field-inert', inert)
+    if (el) el.disabled = inert
+  }
 }
 async function onSaveEnvironment(form) {
   const id = form.elements.id.value
@@ -10712,7 +10984,12 @@ function setupEnvironments() {
         return
       }
       const del = event.target.closest('button[data-env-delete]')
-      if (del) onDeleteEnvironment(del.dataset.envDelete)
+      if (del) {
+        onDeleteEnvironment(del.dataset.envDelete)
+        return
+      }
+      const discuss = event.target.closest('button[data-action="discuss-environments"]')
+      if (discuss) chatAboutBundleTab('environment')
     })
   }
 }
@@ -10750,11 +11027,15 @@ function datasetRows() {
 function renderDatasetsTable() {
   const body = byId('datasets-body')
   if (!body) return
+  // Capabilities first (what data/windows/fidelities exist, with the comparability warning + usage),
+  // then the named presets — the records themselves are PRESETS over those capabilities, nothing more.
   setHtml(
     body,
-    bundleTableHtml(datasetRows(), datasetLeverEntries(), datasetsSort, 'ds-sort', (r) =>
-      datasetActionsHtml(r.raw, r.editable, r.default),
-    ),
+    leverCapabilitiesHtml(datasetLeverEntries(), 'dataset', 'discuss-datasets') +
+      `<h3 class="bundle-presets-head">Named presets</h3>` +
+      bundleTableHtml(datasetRows(), datasetLeverEntries(), datasetsSort, 'ds-sort', (r) =>
+        datasetActionsHtml(r.raw, r.editable, r.default),
+      ),
   )
 }
 async function renderDatasets() {
@@ -10976,7 +11257,12 @@ function setupDatasets() {
         return
       }
       const del = event.target.closest('button[data-ds-delete]')
-      if (del) onDeleteDataset(del.dataset.dsDelete)
+      if (del) {
+        onDeleteDataset(del.dataset.dsDelete)
+        return
+      }
+      const discuss = event.target.closest('button[data-action="discuss-datasets"]')
+      if (discuss) chatAboutBundleTab('dataset')
     })
   }
 }
@@ -11032,9 +11318,18 @@ function hypothesisMatchedCount(h) {
     ? h.evidence.matchedKeys.length
     : 0
 }
+// The manifest-declared single-context judging rule ({metric, threshold, direction}); undefined falls
+// back to the trading line's historical default (return_vs_hold_pct > 0) inside hypothesis.js.
+function hypothesisBenchmark() {
+  return manifest && manifest.hypothesisBenchmark
+}
 function hypothesisMeasured(h) {
   if (allRunsCache.length)
-    return window.Hypothesis.measuredFromRuns(hypothesisMatchedRuns(h), objectiveDirection())
+    return window.Hypothesis.measuredFromRuns(
+      hypothesisMatchedRuns(h),
+      objectiveDirection(),
+      hypothesisBenchmark(),
+    )
   return (h && h.evidence && h.evidence.measured) || null
 }
 // The verdict the runs imply IGNORING any manual override — the "auto suggests" hint. Context-aware: a
@@ -11057,6 +11352,7 @@ function autoSuggestedVerdict(h) {
     objectiveDirection(),
     hypothesisMinRuns,
     modelNameImplemented,
+    hypothesisBenchmark(),
   )
 }
 function effectiveHypothesisVerdict(h) {
@@ -11073,6 +11369,7 @@ function effectiveHypothesisVerdict(h) {
       objectiveDirection(),
       hypothesisMinRuns,
       modelNameImplemented,
+      hypothesisBenchmark(),
     )
     if (m) m.set(key, v)
     return v
@@ -11091,12 +11388,23 @@ function effectiveHypothesisVerdict(h) {
 // Icon-only action buttons (same size, tooltips on hover) — shown in the card summary so they're
 // available collapsed AND expanded. "Launch more runs" is the play button; it stays enabled below
 // minRuns so the user can gather the data a verdict needs.
-function hypothesisActionsHtml(h) {
+function hypothesisActionsHtml(h, liveIds) {
   const id = escapeHtml(h.id)
   const c = h.campaign
-  const busy = c && (c.status === 'running' || c.status === 'queued')
+  // "Busy" = a campaign that is genuinely still live: queued, or running with its activity actually alive.
+  // A stale `running` stamp from an aborted campaign must NOT permanently grey out the launch — launching
+  // is exactly what gathers a starved hypothesis's missing evidence.
+  const busy = !!(
+    c &&
+    (c.status === 'queued' || (c.status === 'running' && liveIds && liveIds.has(c.activityId)))
+  )
   return (
     `<button type="button" class="card-btn" data-action="run" data-id="${id}"${busy ? ' disabled' : ''}${helpAttr('Launch more runs — gather the evidence the verdict needs (the verdict updates as runs land).')}>${iconRunSvg(15)}</button>` +
+    discussButtonHtml(
+      'discuss-hyp',
+      h.id,
+      'Discuss this hypothesis with the AI — the record, its hygiene diagnosis and the judging rule are shared into the chat.',
+    ) +
     `<button type="button" class="card-btn" data-action="override" data-id="${id}"${helpAttr('Override the verdict manually.')}>${iconEditSvg(15)}</button>` +
     `<button type="button" class="card-btn" data-action="${h.dismissed ? 'restore' : 'dismiss'}" data-id="${id}"${helpAttr(h.dismissed ? 'Restore this hypothesis.' : 'Dismiss this hypothesis (hide without deleting).')}>${h.dismissed ? '↺' : iconCrossSvg()}</button>` +
     `<button type="button" class="card-btn card-btn-danger" data-action="delete" data-id="${id}"${helpAttr('Delete this hypothesis.')}>${iconDeleteSvg()}</button>`
@@ -11145,9 +11453,23 @@ function hypothesisCampaignHtml(h, liveIds) {
 // proven/disproved/untested), the source's claimed metrics if any, and the list of matching runs (each
 // with its objective + return-vs-hold) with a link that opens the Runs tab filtered to exactly them.
 // The plain-language rule the auto-verdict applies, so an "untested"/"disproved" card explains itself.
+// The project's resolved single-context benchmark ({metric, threshold, direction}) + display helpers.
+// BlackSwan reads "vs hold > 0 (beats buy-and-hold OOS)"; CartPole "eval_return_mean > 475"; a project
+// declaring nothing falls back to the trading default inside hypothesis.js.
+function hypothesisBenchmarkResolved() {
+  return window.Hypothesis.resolveBenchmark(hypothesisBenchmark())
+}
+function benchmarkRuleText(bench) {
+  return `${metricLabel(bench.metric)} ${bench.direction === 'min' ? '<' : '>'} ${bench.threshold}`
+}
+function benchmarkClears(bench, v) {
+  return bench.direction === 'min' ? v < bench.threshold : v > bench.threshold
+}
 function hypothesisCriteriaText() {
   const m = hypothesisMinRuns
-  return `How it's judged: among the runs whose config MATCHES this spec, PROVEN if the best beats buy-and-hold out-of-sample (a positive return-vs-hold), DISPROVED if at least ${m} report a result and none beat it, otherwise UNTESTED — which also holds while fewer than ${m} matching runs REPORT return-vs-hold (older runs that don't are skipped).`
+  const bench = hypothesisBenchmarkResolved()
+  const rule = benchmarkRuleText(bench)
+  return `How it's judged: among the runs whose config MATCHES this spec, PROVEN if the best clears the project benchmark (${rule}), DISPROVED if at least ${m} report ${metricLabel(bench.metric)} and none clear it, otherwise UNTESTED — which also holds while fewer than ${m} matching runs REPORT it (runs that don't are skipped).`
 }
 // The verdict basis from the PERSISTED evidence — used when the full run snapshot isn't loaded on this tab,
 // so the view stays consistent with the run-count chip + verdict badge (which also read persisted state).
@@ -11156,14 +11478,16 @@ function hypothesisPersistedBasis(h) {
   const n = Array.isArray(ev.matchedKeys) ? ev.matchedKeys.length : 0
   const m = ev.measured || {}
   const verdict = (h && h.status) || 'untested'
+  const bench = hypothesisBenchmarkResolved()
+  const rule = benchmarkRuleText(bench)
   if (!n) return 'No matching runs recorded yet — launch runs to test it.'
   const runs = `${n} matching run${n === 1 ? '' : 's'}`
   if (m.beatsHold === null || m.beatsHold === undefined)
-    return `${runs}, but none report return-vs-hold — can't judge against buy-and-hold yet, so it stays <strong>untested</strong>.`
+    return `${runs}, but none report ${escapeHtml(metricLabel(bench.metric))} — can't judge against the benchmark yet, so it stays <strong>untested</strong>.`
   if (verdict === 'proven')
-    return `<strong>Proven</strong> — the best of ${runs} beats buy-and-hold out-of-sample.`
+    return `<strong>Proven</strong> — the best of ${runs} clears the benchmark (${escapeHtml(rule)}).`
   if (verdict === 'disproved')
-    return `<strong>Disproved</strong> — none of ${runs} beat buy-and-hold out-of-sample.`
+    return `<strong>Disproved</strong> — none of ${runs} clear the benchmark (${escapeHtml(rule)}).`
   if (Number(m.runs || n) < hypothesisMinRuns)
     return `<strong>Untested</strong> — only ${Number(m.runs || n)}/${hypothesisMinRuns} matching runs report a result.`
   return `<strong>${escapeHtml(verdict)}</strong> — ${runs}.`
@@ -11193,37 +11517,47 @@ function hypothesisEvidenceHtml(h) {
   if (!runs.length) {
     return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No runs match this spec yet — launch runs to test it.</p>${criteria}</div>`
   }
-  const pct = (v) => `${v > 0 ? '+' : ''}${v.toFixed(1)}%`
+  const bench = hypothesisBenchmarkResolved()
+  const benchName = metricLabel(bench.metric)
+  const fmt = (v) => formatMetricValue(bench.metric, v)
+  const better = (a, b) => (bench.direction === 'min' ? a - b : b - a)
   const rows = runs
     .map((r) => ({
       key: r.key,
       obj: Number(r.summary && r.summary.objective),
-      vh: runMetricValue(r, 'return_vs_hold_pct'),
+      bm: runMetricValue(r, bench.metric),
     }))
-    .sort(
-      (a, b) =>
-        (Number.isFinite(b.vh) ? b.vh : -Infinity) - (Number.isFinite(a.vh) ? a.vh : -Infinity),
+    .sort((a, b) =>
+      better(
+        Number.isFinite(a.bm) ? a.bm : bench.direction === 'min' ? Infinity : -Infinity,
+        Number.isFinite(b.bm) ? b.bm : bench.direction === 'min' ? Infinity : -Infinity,
+      ),
     )
-  const vhVals = rows.map((r) => r.vh).filter(Number.isFinite)
-  const beat = vhVals.filter((v) => v > 0).length
+  const bmVals = rows.map((r) => r.bm).filter(Number.isFinite)
+  const best = bmVals.length
+    ? bench.direction === 'min'
+      ? Math.min(...bmVals)
+      : Math.max(...bmVals)
+    : NaN
+  const beat = bmVals.filter((v) => benchmarkClears(bench, v)).length
   const verdict = effectiveHypothesisVerdict(h)
   let basis
-  if (!vhVals.length) {
-    basis = `${rows.length} matching run${rows.length === 1 ? '' : 's'}, but none report return-vs-hold — can't judge against buy-and-hold yet.`
+  if (!bmVals.length) {
+    basis = `${rows.length} matching run${rows.length === 1 ? '' : 's'}, but none report ${escapeHtml(benchName)} — can't judge against the benchmark yet.`
   } else if (verdict === 'proven') {
-    basis = `<strong>Proven</strong> — ${beat} of ${rows.length} matching runs beat buy-and-hold OOS (best ${pct(Math.max(...vhVals))} vs hold).`
+    basis = `<strong>Proven</strong> — ${beat} of ${rows.length} matching runs clear the benchmark (best ${escapeHtml(fmt(best))} ${escapeHtml(benchName)}).`
   } else if (verdict === 'disproved') {
-    basis = `<strong>Disproved</strong> — 0 of ${rows.length} matching runs beat buy-and-hold OOS (best ${pct(Math.max(...vhVals))} vs hold).`
+    basis = `<strong>Disproved</strong> — 0 of ${rows.length} matching runs clear the benchmark (best ${escapeHtml(fmt(best))} ${escapeHtml(benchName)}).`
   } else if (rows.length < hypothesisMinRuns) {
-    basis = `<strong>Untested</strong> — only ${rows.length}/${hypothesisMinRuns} runs needed to judge (best ${pct(Math.max(...vhVals))} vs hold so far). Launch more.`
+    basis = `<strong>Untested</strong> — only ${rows.length}/${hypothesisMinRuns} runs needed to judge (best ${escapeHtml(fmt(best))} ${escapeHtml(benchName)} so far). Launch more.`
   } else {
-    basis = `<strong>Untested</strong> — ${rows.length} runs, best ${pct(Math.max(...vhVals))} vs hold.`
+    basis = `<strong>Untested</strong> — ${rows.length} runs, best ${escapeHtml(fmt(best))} ${escapeHtml(benchName)}.`
   }
   const shown = rows.slice(0, 6)
   const runRows = shown
     .map(
       (r) =>
-        `<tr><td><code>${escapeHtml(shortKey(r.key))}</code></td><td>${Number.isFinite(r.obj) ? escapeHtml(formatObjective(r.obj)) : '—'}</td><td>${Number.isFinite(r.vh) ? escapeHtml(pct(r.vh)) : '—'}</td></tr>`,
+        `<tr><td><code>${escapeHtml(shortKey(r.key))}</code></td><td>${Number.isFinite(r.obj) ? escapeHtml(formatObjective(r.obj)) : '—'}</td><td>${Number.isFinite(r.bm) ? escapeHtml(fmt(r.bm)) : '—'}</td></tr>`,
     )
     .join('')
   const more =
@@ -11232,7 +11566,7 @@ function hypothesisEvidenceHtml(h) {
     ${claimedRow}
     <p class="card-sub hyp-basis">${basis}</p>
     ${criteria}
-    <table class="kv-table hyp-runs"><thead><tr><th>run</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${runRows}</tbody></table>
+    <table class="kv-table hyp-runs"><thead><tr><th>run</th><th>${escapeHtml(objectiveName())}</th><th>${escapeHtml(benchName)}</th></tr></thead><tbody>${runRows}</tbody></table>
     ${more}
     <button type="button" class="ghost-btn" data-action="view-runs" data-id="${id}"${helpAttr('Open the Runs tab filtered to exactly these matching runs.')}>View ${rows.length} run${rows.length === 1 ? '' : 's'} in Runs</button>
   </div>`
@@ -11312,7 +11646,12 @@ function hypothesisComparisonHtml(h) {
   const baselineIndex = cmp.baselineIndex || 0
   const cellCount = window.Hypothesis.contextCells(h.spec).length
   const perContext = allRunsCache.length
-    ? window.Hypothesis.measuredByContext(h.spec, allRunsCache, objectiveDirection())
+    ? window.Hypothesis.measuredByContext(
+        h.spec,
+        allRunsCache,
+        objectiveDirection(),
+        hypothesisBenchmark(),
+      )
     : null
   const cells = perContext || []
   const verdict = effectiveHypothesisVerdict(h)
@@ -11338,18 +11677,18 @@ function hypothesisComparisonHtml(h) {
     .map((c, i) => {
       const m = c.measured
       const obj = m && Number.isFinite(m.objective) ? formatObjective(m.objective) : '—'
-      const beats = m && m.beatsHold === true ? 'yes' : m && m.beatsHold === false ? 'no' : '—'
+      const clears = m && m.beatsHold === true ? 'yes' : m && m.beatsHold === false ? 'no' : '—'
       const tag =
         cmp.kind === 'beats-baseline' && i === baselineIndex
           ? ' <span class="badge">baseline</span>'
           : ''
-      return `<tr><td>${contextCellLabel(c.context)}${tag}</td><td>${m ? m.runs : 0}</td><td>${escapeHtml(obj)}</td><td>${beats}</td></tr>`
+      return `<tr><td>${contextCellLabel(c.context)}${tag}</td><td>${m ? m.runs : 0}</td><td>${escapeHtml(obj)}</td><td>${clears}</td></tr>`
     })
     .join('')
   return `<div class="hyp-evidence">
     <p class="card-sub hyp-basis">${basis}</p>
     ${criterion}
-    <table class="kv-table hyp-runs"><thead><tr><th>context</th><th>runs</th><th>${escapeHtml(objectiveName())}</th><th>vs hold</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="kv-table hyp-runs"><thead><tr><th>context</th><th>runs</th><th>${escapeHtml(objectiveName())}</th><th>clears ${escapeHtml(metricLabel(hypothesisBenchmarkResolved().metric))}?</th></tr></thead><tbody>${rows}</tbody></table>
     <button type="button" class="ghost-btn" data-action="view-runs" data-id="${escapeHtml(h.id)}"${helpAttr('Open the Runs tab filtered to these matching runs (grouped by environment there).')}>View runs in Runs</button>
   </div>`
 }
@@ -11361,12 +11700,236 @@ function hypothesisWeightChipHtml(weight) {
   if (w === null) return ''
   return `<span class="hyp-weight-chip"${helpAttr('THIS paper’s importance weight for the hypothesis (1 = minor / supporting … 5 = the paper’s central claim) — used when the paper verdict rolls up. Set via "Re-weigh hypotheses".')}>⚖ ${escapeHtml(String(w))}</span>`
 }
-function hypothesisCardHtml(h, liveIds) {
+// ——— Hypothesis HYGIENE (viewer layer) ————————————————————————————————————————————————————————
+// Diagnoses come from the pure window.Hypothesis.hypothesisHygiene over the ALL-runs snapshot. Two costs
+// are kept apart so neither can freeze the tab:
+//   • PER-CARD diagnosis (hypothesisHygieneFor) — ONE hypothesis's scan, memoised lazily per snapshot, so
+//     an expanding card pays only for itself.
+//   • The AGGREGATE census (the banner) — a sweep over ALL 200+ hypotheses. Deferred off the paint path
+//     (`warmHygieneCensus`) and filled into the banner slot when ready, so the first paint is instant.
+let hypothesisHygieneCache = { runsRef: null, hypsRef: null, minRuns: 0, byId: new Map(), census: null }
+const hygieneOneMemo = new WeakMap()
+let hygieneCensusWarming = false
+// The full sweep (byId for every hypothesis + census). Only the DEFERRED warm and the health-chat bundle
+// call this — never the interactive paint path.
+function refreshHygieneCache() {
+  const cache = hypothesisHygieneCache
+  if (
+    cache.runsRef === allRunsCache &&
+    cache.hypsRef === hypothesesCache &&
+    cache.minRuns === hypothesisMinRuns
+  )
+    return
+  const visible = hypothesesCache.filter((h) => !h.dismissed)
+  const byId = new Map()
+  for (const h of visible)
+    byId.set(h.id, window.Hypothesis.hypothesisHygiene(h, allRunsCache, manifest, hypothesisMinRuns))
+  hypothesisHygieneCache = {
+    runsRef: allRunsCache,
+    hypsRef: hypothesesCache,
+    minRuns: hypothesisMinRuns,
+    byId,
+    census: window.Hypothesis.hypothesisHygieneCensus(
+      visible,
+      allRunsCache,
+      manifest,
+      hypothesisMinRuns,
+    ),
+  }
+}
+function hygieneAvailable() {
+  return !!(allRunsCache.length && manifest && window.Hypothesis)
+}
+function hygieneCensusWarm() {
+  const c = hypothesisHygieneCache
+  return (
+    c.census &&
+    c.runsRef === allRunsCache &&
+    c.hypsRef === hypothesesCache &&
+    c.minRuns === hypothesisMinRuns
+  )
+}
+// Diagnose ONE hypothesis lazily. Uses the warm full sweep when present; otherwise computes just this one
+// (a single scan) and memoises it per (snapshot, id, minRuns). Crucially NEVER runs the 200-hypothesis
+// sweep, so expanding a card can't stall.
+function hypothesisHygieneFor(h) {
+  if (!hygieneAvailable() || !h || !h.id) return null
+  if (hygieneCensusWarm()) {
+    const d = hypothesisHygieneCache.byId.get(h.id)
+    if (d) return d
+  }
+  let m = hygieneOneMemo.get(allRunsCache)
+  if (!m) {
+    m = new Map()
+    hygieneOneMemo.set(allRunsCache, m)
+  }
+  const key = `${h.id}|${hypothesisMinRuns}`
+  if (!m.has(key))
+    m.set(key, window.Hypothesis.hypothesisHygiene(h, allRunsCache, manifest, hypothesisMinRuns))
+  return m.get(key)
+}
+// Compute the aggregate census OFF the paint path (a macrotask), then fill the banner slot in place. The
+// tab has already painted its cards by the time this runs.
+function warmHygieneCensus() {
+  if (!hygieneAvailable() || hygieneCensusWarm() || hygieneCensusWarming) return
+  hygieneCensusWarming = true
+  setTimeout(() => {
+    hygieneCensusWarming = false
+    if (!hygieneAvailable()) return
+    refreshHygieneCache()
+    const slot = byId('hyp-hygiene-slot')
+    if (slot && activeTabId === 'hypotheses') slot.innerHTML = hypothesisHygieneBannerHtml()
+  }, 0)
+}
+// The registry-health banner above the verdict sections: judged / blocked (structural — more runs can
+// never decide them) / starved (just need runs), the issue census, and a Discuss that shares it all.
+function hypothesisHygieneBannerHtml() {
+  if (!hygieneAvailable())
+    return '<p class="card-sub hyp-hygiene-hint">Hygiene: run a global <strong>Refresh</strong> to diagnose WHY undecided hypotheses are undecided (dead pins, starved cells, structural blocks).</p>'
+  // The aggregate census is expensive (a full 200-hypothesis sweep) — never block paint on it. When it
+  // isn't warm yet, show a diagnosing placeholder and let `warmHygieneCensus` fill this slot shortly after.
+  if (!hygieneCensusWarm()) {
+    warmHygieneCensus()
+    return '<p class="card-sub hyp-hygiene-hint">Diagnosing hypothesis health…</p>'
+  }
+  const c = hypothesisHygieneCache.census
+  if (!c || !c.total) return ''
+  const issues = Object.entries(c.byIssue)
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, n]) => `${k} ×${n}`)
+    .join(' · ')
+  return `<div class="hyp-hygiene-banner">
+    <span class="run-badge is-done"${helpAttr('Hypotheses with a decided verdict (proven/disproved).')}>${c.judged} judged</span>
+    <span class="run-badge is-failed"${helpAttr('Structurally BLOCKED as written — more runs can never decide them (a dead pin the store can never match, an underplanned seed list, a single context cell, a metric the family never reports). Fix the spec.')}>${c.blocked} blocked</span>
+    <span class="run-badge is-queued"${helpAttr('Sound but STARVED — they just need runs (launch the spec / add seeds / fill compare cells).')}>${c.starved} starved</span>
+    ${issues ? `<span class="card-sub">${escapeHtml(issues)}</span>` : ''}
+    ${discussButtonHtml('discuss-hygiene', '', 'Discuss the registry’s health with the AI — the full hygiene census (why hypotheses are blocked/starved) is shared into the chat.')}
+  </div>`
+}
+// The per-card one-liner explaining WHY an undecided hypothesis is undecided (top issues, most severe
+// first) — the census banner's detail, on the card it concerns.
+function hypothesisHygieneLineHtml(h, verdict) {
+  if (verdict === 'proven' || verdict === 'disproved') return ''
+  const d = hypothesisHygieneFor(h)
+  if (!d || d.status === 'judged') return ''
+  const parts = d.issues.slice(0, 3).map((i) => i.detail)
+  if (!parts.length && d.runsNeeded) parts.push(`${d.runsNeeded} more run(s) needed to judge`)
+  if (!parts.length) return ''
+  return `<p class="card-sub hyp-hygiene-line"><span class="badge ${d.status === 'blocked' ? 'is-bad' : 'is-warn'}">${escapeHtml(d.status)}</span> ${escapeHtml(parts.join(' · '))}</p>`
+}
+// For a STARVED (not structurally blocked) hypothesis: spell out exactly what more running would decide it —
+// the shortfall in runs of the current setups plus any sweep options never run — and a one-click launch of
+// precisely those missing runs (the planner runs the under-evidenced setups and skips the fresh ones). This
+// is what lets the user top up a starved hypothesis directly, without hand-planning or asking the LLM.
+function hypothesisCoverageHtml(h, verdict) {
+  if (verdict === 'proven' || verdict === 'disproved') return ''
+  const d = hypothesisHygieneFor(h)
+  if (!d || d.status !== 'starved') return ''
+  const parts = []
+  if (d.runsNeeded)
+    parts.push(`${d.runsNeeded} more run${d.runsNeeded === 1 ? '' : 's'} of the current setups`)
+  for (const i of (d.issues || []).filter((x) => x.kind === 'sweep-unrun'))
+    parts.push(
+      `${i.lever}: ${i.values.length} option${i.values.length === 1 ? '' : 's'} never run (${i.values.join(', ')})`,
+    )
+  if (!parts.length) return ''
+  const c = h.campaign
+  const busy = !!(
+    c &&
+    (c.status === 'queued' || (c.status === 'running' && hypothesisLiveIds.has(c.activityId)))
+  )
+  return `<div class="hyp-coverage">
+    <p class="card-sub">Still needed to judge: ${escapeHtml(parts.join(' · '))}.</p>
+    <button type="button" class="ghost-btn" data-action="run" data-id="${escapeHtml(h.id)}"${busy ? ' disabled' : ''}${helpAttr('Launch exactly the runs this hypothesis is missing — the planner runs the setups without enough evidence yet and skips the ones already done. The verdict updates as they land.')}>${iconRunSvg(14)} Launch the missing runs</button>
+  </div>`
+}
+// Discuss ONE hypothesis: the full record + its live hygiene diagnosis + the judging rule, so the chat
+// can propose a concrete spec fix or the exact runs to launch.
+async function chatAboutHypothesis(id) {
+  const h = hypothesesCache.find((x) => x.id === id)
+  if (!h) return
   const verdict = effectiveHypothesisVerdict(h)
-  const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</span>`
-  const live =
-    h.campaign && h.campaign.status === 'running' && liveIds && liveIds.has(h.campaign.activityId)
-  const running = live ? `<span class="hyp-running">${spinnerHtml()}</span>` : ''
+  const hygiene = hypothesisHygieneFor(h)
+  const linkedPapers = papersCache
+    .filter((p) => (p.hypothesisIds || []).includes(id))
+    .map((p) => p.title)
+  await discussBundle({
+    title: `Hypothesis: ${(h.title || id).slice(0, 60)}`,
+    seed:
+      verdict === 'proven' || verdict === 'disproved'
+        ? 'Walk me through this verdict — is the evidence sound, and what should we test next?'
+        : hygiene && hygiene.status === 'blocked'
+          ? 'This hypothesis is structurally blocked — explain why and propose a corrected spec I can run.'
+          : 'This hypothesis is undecided — what exactly should we run to decide it?',
+    intro:
+      'The user shared ONE hypothesis from the registry (a falsifiable claim that runs prove/disprove; its spec both launches and identifies the evidence runs). The JSON below carries the record, its hygiene diagnosis (why it is undecided, per-pin census, per-cell run counts), and how the verdict is decided. Work directly from it.',
+    bundle: {
+      hypothesis: {
+        id: h.id,
+        title: h.title,
+        claim: h.claim,
+        rationale: h.rationale,
+        spec: h.spec,
+        comparison: h.comparison,
+        verdict,
+        verdictSource: h.verdictSource,
+        source: h.source,
+        evidence: h.evidence,
+        transitions: h.transitions,
+      },
+      hygiene,
+      minRunsToJudge: hypothesisMinRuns,
+      judgingRule: hypothesisIsContextSpanning(h)
+        ? window.Hypothesis.comparisonCriterion(h.spec, h.comparison, {
+            objectiveName: objectiveName(),
+            direction: objectiveDirection(),
+            minRuns: hypothesisMinRuns,
+          })
+        : hypothesisCriteriaText(),
+      linkedPapers,
+    },
+    statusId: 'hypotheses-status',
+  })
+}
+// Discuss the WHOLE registry's health: the aggregate census + every blocked hypothesis's diagnosis, so
+// the chat can spot systemic generator faults (not just per-spec typos) and hand back fixes.
+async function chatAboutHypothesisHealth() {
+  if (!hygieneAvailable()) return
+  refreshHygieneCache()
+  const c = hypothesisHygieneCache.census
+  const blockedDetails = hypothesesCache
+    .filter((h) => !h.dismissed && c.blockedIds.includes(h.id))
+    .slice(0, 40)
+    .map((h) => {
+      const d = hypothesisHygieneCache.byId.get(h.id)
+      return {
+        id: h.id,
+        title: h.title,
+        source: h.source,
+        spec: h.spec,
+        issues: d ? d.issues : [],
+        deadPins: d ? d.pins.filter((p) => p.cause) : [],
+      }
+    })
+  await discussBundle({
+    title: 'Hypothesis registry health',
+    seed: 'Only a fraction of our hypotheses ever get decided. Diagnose the systemic causes from the census and propose fixes — both spec corrections and changes to how hypotheses get GENERATED.',
+    intro:
+      'The user shared the hypothesis registry HEALTH census: how many hypotheses are judged vs structurally blocked vs starved, the issue-kind counts, and each blocked hypothesis with its diagnosis (dead pins with cause: migrated / na-pinned / off-manifest / missing-key / never-run; underplanned seed lists; starved compare cells). Look for SYSTEMIC patterns (e.g. a generator that pins retired lever values or single seeds) — not just per-spec fixes.',
+    bundle: {
+      census: c,
+      minRunsToJudge: hypothesisMinRuns,
+      totalRunsInSnapshot: allRunsCache.length,
+      blockedHypotheses: blockedDetails,
+    },
+    statusId: 'hypotheses-status',
+  })
+}
+// The heavy card body (evidence tables / cross-context comparison / hygiene / coverage / override form) —
+// rendered ONLY for an expanded card. Collapsed cards ship an empty, `data-lazy` body that the `toggle`
+// handler fills on first expand. Building this for all 200+ cards up-front is what used to freeze the tab.
+function hypothesisBodyHtml(h, liveIds) {
+  const verdict = effectiveHypothesisVerdict(h)
   const source =
     h.source === 'llm'
       ? 'LLM'
@@ -11381,7 +11944,28 @@ function hypothesisCardHtml(h, liveIds) {
       ? `<p class="paper-suggest"${helpAttr('Manually set — auto-refresh won’t change it. Clear the override to auto-derive again.')}>manual override — auto suggests: ${escapeHtml(HYPOTHESIS_VERDICT_LABEL[autoSuggestedVerdict(h)])}</p>`
       : ''
   const overrideForm = hypothesisOverrideId === h.id ? hypothesisVerdictFormHtml(h) : ''
-  const open = hypothesisExpanded.has(h.id) ? ' open' : ''
+  return `${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
+      ${hypothesisHygieneLineHtml(h, verdict)}
+      ${specSummaryHtml(h.spec)}
+      ${hypothesisIsContextSpanning(h) ? hypothesisComparisonHtml(h) : hypothesisEvidenceHtml(h)}
+      ${hypothesisCoverageHtml(h, verdict)}
+      ${overrideNote}
+      ${transitionsHtml(h.transitions)}
+      ${linkedPaperChipsHtml(h)}
+      ${hypothesisCampaignHtml(h, liveIds)}
+      ${h.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(h.verdictNote)}</p>` : ''}
+      ${overrideForm}
+      <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>`
+}
+function hypothesisCardHtml(h, liveIds) {
+  const verdict = effectiveHypothesisVerdict(h)
+  const badge = `<span class="run-badge ${HYPOTHESIS_VERDICT_BADGE[verdict]}">${escapeHtml(HYPOTHESIS_VERDICT_LABEL[verdict])}</span>`
+  const live =
+    h.campaign && h.campaign.status === 'running' && liveIds && liveIds.has(h.campaign.activityId)
+  const running = live ? `<span class="hyp-running">${spinnerHtml()}</span>` : ''
+  // An open override form forces the body open even if the card wasn't otherwise expanded.
+  const expanded = hypothesisExpanded.has(h.id) || hypothesisOverrideId === h.id
+  const open = expanded ? ' open' : ''
   return `<details class="hypothesis-card${h.dismissed ? ' is-dismissed' : ''}" data-id="${escapeHtml(h.id)}"${open}>
     <summary class="hypothesis-summary">
       ${badge}
@@ -11389,20 +11973,9 @@ function hypothesisCardHtml(h, liveIds) {
       <span class="hyp-title">${escapeHtml(h.title || h.id)}</span>
       ${hypothesisClaimChipHtml(h)}
       ${running}
-      <span class="card-actions">${hypothesisActionsHtml(h)}</span>
+      <span class="card-actions">${hypothesisActionsHtml(h, liveIds)}</span>
     </summary>
-    <div class="hypothesis-body">
-      ${h.rationale ? `<p class="hypothesis-rationale">${escapeHtml(h.rationale)}</p>` : ''}
-      ${specSummaryHtml(h.spec)}
-      ${hypothesisIsContextSpanning(h) ? hypothesisComparisonHtml(h) : hypothesisEvidenceHtml(h)}
-      ${overrideNote}
-      ${transitionsHtml(h.transitions)}
-      ${linkedPaperChipsHtml(h)}
-      ${hypothesisCampaignHtml(h, liveIds)}
-      ${h.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(h.verdictNote)}</p>` : ''}
-      ${overrideForm}
-      <p class="card-sub">${escapeHtml(source)}${by} · created ${escapeHtml(formatWhen(h.createdAt))} · updated ${escapeHtml(formatWhen(h.updatedAt))}</p>
-    </div>
+    <div class="hypothesis-body"${expanded ? '' : ' data-lazy="1"'}>${expanded ? hypothesisBodyHtml(h, liveIds) : ''}</div>
   </details>`
 }
 // Each verdict view is its own collapsible, internally-scrolling section (accordion: only one open at a
@@ -11438,6 +12011,7 @@ async function refreshHypothesisVerdicts(hyps) {
       direction,
       at,
       minRuns: hypothesisMinRuns,
+      benchmark: hypothesisBenchmark(),
     })
     if (!changed) continue
     try {
@@ -11488,6 +12062,11 @@ function restoreHypScroll(snap) {
   const bodyEl = byId('hypotheses-body')
   if (bodyEl && snap.body) bodyEl.scrollTop = snap.body
 }
+// Load the hypotheses tab's DATA (the six persisted reads + liveness) then paint. Called on tab-show and
+// after any mutation. The frequent VIEW-STATE changes — expanding a card, switching the open section,
+// re-sorting, opening/closing the override form — call `paintHypotheses()` instead, which re-renders from
+// the in-memory caches with NO async round-trips. Separating the two is half the tab's perf fix; lazy card
+// bodies are the other half.
 async function renderHypotheses() {
   const body = byId('hypotheses-body')
   if (!body) return
@@ -11496,7 +12075,6 @@ async function renderHypotheses() {
     body.innerHTML = '<div class="empty-hint">Open inside the Overseer to manage hypotheses.</div>'
     return
   }
-  const scrollSnap = captureHypScroll()
   // Load the persisted aggregate (for the freshness note) + hypotheses (whose verdicts are persisted) +
   // a page of runs (only for the per-campaign best display). Verdicts are NOT recomputed here from the
   // page — the shared all-runs refresh (`refreshAllRunsDerived`) owns that.
@@ -11509,13 +12087,22 @@ async function renderHypotheses() {
       readModelStats(),
       readModels(),
     ])
+  hypothesisLiveIds = hypothesesCache.some((h) => h.campaign && h.campaign.status === 'running')
+    ? await readLiveActivityIds()
+    : new Set()
+  paintHypotheses()
+  void checkModelStatsStale()
+}
+// Pure paint from the in-memory caches — no async reads. Safe to call on every view-state change.
+function paintHypotheses() {
+  const body = byId('hypotheses-body')
+  if (!body || !embedded()) return
+  const scrollSnap = captureHypScroll()
   const minRunsInput = byId('hypothesis-min-runs')
   if (minRunsInput && document.activeElement !== minRunsInput)
     minRunsInput.value = hypothesisMinRuns
-  const liveIds = hypothesesCache.some((h) => h.campaign && h.campaign.status === 'running')
-    ? await readLiveActivityIds()
-    : new Set()
   renderProposeControls()
+  const liveIds = hypothesisLiveIds
   const controls = hypothesisStatsControlsHtml()
   const visible = hypothesesCache.filter((h) => !h.dismissed)
   const hidden = hypothesesCache.filter((h) => h.dismissed)
@@ -11523,7 +12110,6 @@ async function renderHypotheses() {
     body.innerHTML =
       controls +
       '<div class="empty-hint">No hypotheses yet — propose some (the lightbulb above) or add your own.</div>'
-    void checkModelStatsStale()
     return
   }
   const sorted = sortHypotheses(visible)
@@ -11542,10 +12128,10 @@ async function renderHypotheses() {
     : ''
   body.innerHTML =
     controls +
+    `<div id="hyp-hygiene-slot">${hypothesisHygieneBannerHtml()}</div>` +
     HYPOTHESIS_VERDICTS.map((v) => hypothesisSectionHtml(v, groups[v], liveIds)).join('') +
     hiddenSection
   restoreHypScroll(scrollSnap)
-  void checkModelStatsStale()
 }
 async function onProposeClick() {
   if (proposing) return
@@ -11746,6 +12332,20 @@ async function stampHypothesisCampaignResults() {
   if (!manifest) return
   const recordType = manifest.recordType
   const hyps = await readHypotheses()
+  // Reconcile stale QUEUED stamps first: a hypothesis stamped `queued` whose queue entry is gone (the queue
+  // drained or the item was removed WITHOUT ever launching — so no activityId was set) is never touched by
+  // the activity-based settle below, and would keep its "Launch more runs" button greyed out forever. Clear
+  // it so the launch is available again.
+  const queuedStamps = hyps.filter(
+    (h) => h.campaign && h.campaign.status === 'queued' && h.campaign.queueId,
+  )
+  if (queuedStamps.length) {
+    const liveQueueIds = new Set((await readQueueRecords()).map((q) => q.id))
+    for (const h of queuedStamps) {
+      if (!liveQueueIds.has(h.campaign.queueId))
+        await clearHypothesisCampaign(recordType, h.id, h.campaign.queueId)
+    }
+  }
   const open = hyps.filter((h) => h.campaign && h.campaign.activityId && !h.campaign.finishedAt)
   if (!open.length) return
   for (const h of open) {
@@ -12181,11 +12781,22 @@ function setupHypotheses() {
           const next = d.open ? d.dataset.section : null
           if (next !== hypothesisOpenSection) {
             hypothesisOpenSection = next
-            renderHypotheses()
+            paintHypotheses()
           }
         } else if (d.classList.contains('hypothesis-card') && d.dataset.id) {
-          if (d.open) hypothesisExpanded.add(d.dataset.id)
-          else hypothesisExpanded.delete(d.dataset.id)
+          if (d.open) {
+            hypothesisExpanded.add(d.dataset.id)
+            // Lazily build this card's heavy body on first expand (see hypothesisCardHtml). Only this one
+            // card pays the cost — the collapsed 200 never do.
+            const bodyEl = d.querySelector('.hypothesis-body')
+            if (bodyEl && bodyEl.dataset.lazy) {
+              const h = hypothesesCache.find((x) => x.id === d.dataset.id)
+              if (h) {
+                bodyEl.innerHTML = hypothesisBodyHtml(h, hypothesisLiveIds)
+                delete bodyEl.dataset.lazy
+              }
+            }
+          } else hypothesisExpanded.delete(d.dataset.id)
         }
       },
       true,
@@ -12194,7 +12805,7 @@ function setupHypotheses() {
       const sort = event.target.closest('#hypothesis-sort-select')
       if (sort) {
         hypothesisSortKey = sort.value
-        renderHypotheses()
+        paintHypotheses()
       }
     })
     body.addEventListener('click', (event) => {
@@ -12212,6 +12823,8 @@ function setupHypotheses() {
       const { action, id } = btn.dataset
       if (action === 'run') runHypothesisCampaign(id, btn)
       else if (action === 'view-runs') viewHypothesisRuns(id)
+      else if (action === 'discuss-hyp') chatAboutHypothesis(id)
+      else if (action === 'discuss-hygiene') chatAboutHypothesisHealth()
       else if (action === 'override') {
         // Open the inline override form AND expand the card so it's visible from the collapsed state.
         if (hypothesisOverrideId === id) {
@@ -12220,12 +12833,12 @@ function setupHypotheses() {
           hypothesisOverrideId = id
           hypothesisExpanded.add(id)
         }
-        renderHypotheses()
+        paintHypotheses()
       } else if (action === 'save-override') saveHypothesisOverride(id)
       else if (action === 'clear-override') clearHypothesisOverride(id)
       else if (action === 'cancel-override') {
         hypothesisOverrideId = null
-        renderHypotheses()
+        paintHypotheses()
       } else if (action === 'dismiss') setHypothesisDismissed(id, true)
       else if (action === 'restore') setHypothesisDismissed(id, false)
       else if (action === 'delete') deleteHypothesis(id)
@@ -12340,12 +12953,34 @@ function hypothesisClaimChipHtml(h) {
   if (!t) return ''
   return `<span class="hyp-thesis-chip"${helpAttr('Paper claim this hypothesis tests: ' + t)}>◆ ${escapeHtml(t)}</span>`
 }
+// Whether the host offers story creation (the "work on this" seam) — embedded + bridge method present.
+function createStoryAvailable() {
+  return embedded() && !!window.OverseerBridge && !!window.OverseerBridge.createStory
+}
+// The per-item "work on this" affordance: turn a coverage gap / proposed improvement into a project
+// story that agents pick up from the Stories screen. Standard icon (iconStorySvg) + an always-on
+// callout saying exactly what gets created.
+function workOnButtonHtml(action, paperId, index, help) {
+  if (!createStoryAvailable()) return ''
+  return `<button type="button" class="icon-btn story-btn" data-action="${escapeHtml(action)}" data-paper="${escapeHtml(paperId)}" data-index="${index}"${helpAttr(help)} aria-label="Create story">${iconStorySvg()}</button>`
+}
 // A warning listing paper claims NO linked hypothesis covers — found by the scrutinous re-weigh pass. A
-// signal only (never gates the verdict); the user can Suggest more hypotheses to close the gap.
+// signal only (never gates the verdict); the user can Suggest more hypotheses to close the gap, DISCUSS
+// a gap with the AI, or turn it into a story to work on.
 function paperCoverageGapsHtml(paper) {
   const gaps = Array.isArray(paper.coverageGaps) ? paper.coverageGaps.filter(Boolean) : []
   if (!gaps.length) return ''
-  const items = gaps.map((g) => `<li>${escapeHtml(g)}</li>`).join('')
+  const pid = escapeHtml(paper.id)
+  const items = gaps
+    .map(
+      (g, idx) =>
+        `<li>${escapeHtml(g)} ${
+          chatAboutRunAvailable()
+            ? `<button type="button" class="improvement-toggle" data-action="discuss-gap" data-paper="${pid}" data-index="${idx}"${helpAttr('Discuss this gap with the AI — the paper, its hypotheses and this gap are shared into the chat.')}>💬</button>`
+            : ''
+        }${workOnButtonHtml('gap-story', paper.id, idx, 'Create a project story to close this gap (add the hypotheses / build what’s missing) — agents pick it up from the Stories screen.')}</li>`,
+    )
+    .join('')
   return `<div class="paper-coverage-gaps card-sub"${helpAttr('Paper claims with no covering hypothesis (found when re-weighing). Use Suggest to add hypotheses that close the gap — coherent coverage makes the verdict trustworthy.')}><strong>⚠ Coverage gaps</strong> — claims no hypothesis tests yet:<ul>${items}</ul></div>`
 }
 // The short label + glyph for each proposed-improvement kind, shown as a leading tag on the list item.
@@ -12374,7 +13009,15 @@ function paperProposedImprovementsHtml(paper) {
       const off = !!p.inapplicable
       const toggle = `<button type="button" class="improvement-toggle" data-action="toggle-improvement" data-paper="${pid}" data-index="${idx}"${helpAttr(off ? 'Marked NOT APPLICABLE to this project — kept for reference but excluded from counts and the “add to catalog” list. Click to mark applicable again.' : 'Mark NOT APPLICABLE — keep it listed for reference but exclude it from counts and the “add to catalog” list (e.g. a proposed model that is really a methodology, not something to train here).')}>${off ? '↩ applicable' : '✕ not applicable'}</button>`
       const tagEl = off ? ' <span class="improvement-inapplicable-tag">not applicable</span>' : ''
-      return `<li class="${off ? 'improvement-inapplicable' : ''}"><span class="improvement-kind">${escapeHtml(tag)}</span> <strong>${escapeHtml(p.title)}</strong>${detail}${tagEl} ${toggle}</li>`
+      const workOn = off
+        ? ''
+        : workOnButtonHtml(
+            'improvement-story',
+            paper.id,
+            idx,
+            'Create a project story to BUILD this improvement — agents pick it up from the Stories screen.',
+          )
+      return `<li class="${off ? 'improvement-inapplicable' : ''}"><span class="improvement-kind">${escapeHtml(tag)}</span> <strong>${escapeHtml(p.title)}</strong>${detail}${tagEl} ${toggle}${workOn}</li>`
     })
     .join('')
   return `<div class="paper-proposed-improvements card-sub"${helpAttr('Functionality this paper implies is missing — build it and the untested claims above become testable. Found by "Find models" (which proposes general improvements, not just catalog models). Mark any item “not applicable” to keep it for reference but exclude it everywhere.')}><strong>🛠 Proposed improvements</strong> — build these to test the above:<ul>${rows}</ul></div>`
@@ -12581,6 +13224,11 @@ function paperCardHtml(paper) {
     (linkedCount
       ? `<button type="button" class="card-btn" data-action="replicate" data-id="${id}"${helpAttr('Replicate — launch every linked hypothesis’s spec.')}>${iconRunSvg(15)}</button>`
       : '') +
+    discussButtonHtml(
+      'discuss-paper',
+      paper.id,
+      'Discuss this paper with the AI — the full record (claim, assumptions, verdict roll-up, coverage gaps, proposed improvements, linked hypotheses + verdicts) is shared into the chat.',
+    ) +
     `<button type="button" class="card-btn" data-action="edit" data-id="${id}"${helpAttr('Edit this paper.')}>${iconEditSvg(15)}</button>` +
     `<button type="button" class="card-btn" data-action="toggle-dismiss" data-id="${id}"${helpAttr(paper.dismissed ? 'Restore — show this paper in the list again.' : 'Not wanted — hide this paper from the list (without deleting it).')}>${iconBanSvg(14)}</button>` +
     `<button type="button" class="card-btn card-btn-danger" data-action="delete" data-id="${id}"${helpAttr('Delete this paper.')}>${iconDeleteSvg()}</button>`
@@ -12606,6 +13254,102 @@ function paperCardHtml(paper) {
       ${paper.verdictNote ? `<p class="card-sub paper-note">${escapeHtml(paper.verdictNote)}</p>` : ''}
     </div>
   </details>`
+}
+// The full shareable read of ONE paper — everything its card shows: the record, the verdict roll-up +
+// why, and each linked hypothesis with its live verdict/weight/spec. One builder feeds Discuss (whole
+// paper AND per-gap) so the chat always has the complete picture.
+function paperDiscussBundle(paper) {
+  const info = paperVerdictInfo(paper)
+  const weights = paper.hypothesisWeights || {}
+  const linked = (paper.hypothesisIds || [])
+    .map((hid) => hypothesesCache.find((h) => h.id === hid))
+    .filter(Boolean)
+    .map((h) => ({
+      id: h.id,
+      title: h.title,
+      claim: h.claim,
+      verdict: effectiveHypothesisVerdict(h),
+      weight: weights[h.id],
+      spec: h.spec,
+      matchedRuns: hypothesisMatchedCount(h),
+    }))
+  return {
+    paper: {
+      id: paper.id,
+      title: paper.title,
+      url: paper.url,
+      authors: paper.authors,
+      year: paper.year,
+      claim: paper.claim,
+      claimedMetrics: paper.claimedMetrics,
+      assumptions: paper.assumptions,
+      approach: paper.approach,
+      researchVerdict: paper.researchVerdict,
+      coverageGaps: paper.coverageGaps,
+      proposedImprovements: paper.proposedImprovements,
+      verdictNote: paper.verdictNote,
+    },
+    verdictRollup: { status: info.status, why: info.why, counts: info.counts },
+    linkedHypotheses: linked,
+    minRunsToJudge: hypothesisMinRuns,
+  }
+}
+// Discuss ONE paper (optionally focused on one coverage gap): claim, verdict roll-up, gaps,
+// improvements, and every linked hypothesis + verdict land in the chat's system prompt.
+async function chatAboutPaper(id, gapIndex) {
+  const paper = papersCache.find((p) => p.id === id)
+  if (!paper) return
+  const gaps = Array.isArray(paper.coverageGaps) ? paper.coverageGaps : []
+  const gap = gapIndex !== undefined ? gaps[gapIndex] : undefined
+  const seed = gap
+    ? `Focus on this coverage gap: "${gap}". How should we test it — propose concrete runnable hypotheses (declared levers only), or name exactly what to build first.`
+    : gaps.length
+      ? 'Walk me through this paper: does the evidence support its claims so far, and how do we close the coverage gaps?'
+      : 'Walk me through this paper: does our evidence support its claims, and what should we test next?'
+  await discussBundle({
+    title: `Paper: ${String(paper.title || id).slice(0, 60)}`,
+    seed,
+    intro:
+      'The user shared ONE paper from the library (a container of falsifiable hypotheses runs prove/disprove; its verdict ROLLS UP from the weighted verdicts of its linked hypotheses). The JSON below carries the record, the roll-up + why, the coverage gaps (claims no hypothesis tests), the proposed improvements (what to build to make untestable claims testable), and every linked hypothesis with its live verdict. Work directly from it.',
+    bundle: paperDiscussBundle(paper),
+    statusId: 'papers-status',
+  })
+}
+// Turn a coverage gap / proposed improvement into a project STORY (the "work on this" verb) — grounded
+// title + description so an agent picking it up from the Stories screen has the full context.
+async function createPaperWorkStory(paperId, kind, index) {
+  const paper = papersCache.find((p) => p.id === paperId)
+  if (!paper || !createStoryAvailable()) return
+  let title = ''
+  let body = []
+  const paperLine = `Paper: "${paper.title || paperId}"${paper.url ? ` (${paper.url})` : ''} — claim: ${paper.claim || '—'}`
+  if (kind === 'gap') {
+    const gap = (paper.coverageGaps || [])[index]
+    if (!gap) return
+    title = `Close coverage gap: ${gap}`.slice(0, 120)
+    body = [
+      `A paper claim no hypothesis tests yet (a COVERAGE GAP from the model-trainer Papers tab).`,
+      paperLine,
+      `Gap: ${gap}`,
+      `Goal: make this claim testable and tested — add hypotheses with runnable specs (declared manifest levers only) that test the claim, build any missing functionality they need, launch the runs, and confirm the verdict lands (proven/disproved, not untested).`,
+    ]
+  } else {
+    const item = (paper.proposedImprovements || [])[index]
+    if (!item || !item.title) return
+    title = `Build: ${item.title}`.slice(0, 120)
+    body = [
+      `A PROPOSED IMPROVEMENT from the model-trainer Papers tab — functionality the paper implies is missing (kind: ${item.kind || 'other'}).`,
+      paperLine,
+      `Improvement: ${item.title}${item.detail ? ` — ${item.detail}` : ''}`,
+      `Goal: build it so the paper's currently-untestable claims become testable, then add + run the hypotheses that use it.`,
+    ]
+  }
+  try {
+    const res = await window.OverseerBridge.createStory({ title, description: body.join('\n\n') })
+    showToast(`Story created${res && res.storyId ? ` (${String(res.storyId).slice(0, 8)})` : ''} — run an agent on it from the Stories screen.`)
+  } catch {
+    setStatusLine('papers-status', 'Could not create the story — please try again.', true)
+  }
 }
 // Order papers for a FULL render. Default 'status' = rolled-up verdict bucket, then newest-first within it
 // (stable across an update, so a changed card never jumps); 'name' / 'year' are explicit user picks.
@@ -13329,6 +14073,11 @@ function setupPapers() {
       else if (action === 'toggle-dismiss') onToggleDismissPaper(id)
       else if (action === 'toggle-improvement')
         onToggleImprovementApplicable(paperId, Number(btn.dataset.index))
+      else if (action === 'discuss-paper') chatAboutPaper(id)
+      else if (action === 'discuss-gap') chatAboutPaper(paperId, Number(btn.dataset.index))
+      else if (action === 'gap-story') createPaperWorkStory(paperId, 'gap', Number(btn.dataset.index))
+      else if (action === 'improvement-story')
+        createPaperWorkStory(paperId, 'improvement', Number(btn.dataset.index))
       else if (action === 'suggest-hyp') onSuggestPaperHypotheses(id)
       else if (action === 'reweigh-hyps') onReweighPaperHypotheses(id)
       else if (action === 'add-hyp') {
@@ -13592,6 +14341,8 @@ function modelDeviceChipHtml(model) {
     const title = `Fastest device (measured): ${dev}${margin}.${per} Click for the exact per-device timings.`
     return `<button type="button" class="run-badge model-device-chip ${cls}" data-action="device-timings" data-id="${id}"${helpAttr(title)}>${escapeHtml(dev)}</button>`
   }
+  // No benchmarkDevice command in the manifest ⇒ the benchmark activity can only fail — offer nothing.
+  if (!manifest || !manifest.benchmarkDevice) return ''
   return `<button type="button" class="run-badge is-queued model-device-chip" data-action="benchmark-device" data-id="${id}"${helpAttr('Benchmark this model on CPU vs MPS to set its faster device')}>⚡ check device</button>`
 }
 // The other names this model is known by (from a merge or a manifest seed) — papers/scans/seeds that refer
@@ -13614,10 +14365,18 @@ function modelCardHtml(model) {
       : st === 'proposed'
         ? 'Discuss implementing this model with the AI'
         : 'Discuss / improve this model with the AI'
+  // Proposed models + component entries are BUILD work — offer the standard create-feature affordance
+  // (a feature under the shared "Implement missing model components" story).
+  const workable = st === 'proposed' || model.category === 'component'
+  const featureBtn =
+    workable && createStoryAvailable()
+      ? `<button type="button" class="card-btn story-btn" data-action="model-feature" data-id="${id}"${helpAttr(`Create a feature to implement this ${model.category === 'component' ? 'component' : 'model'} — filed under the "${MODEL_WORK_STORY_TITLE}" story; run an agent on it from the Stories screen.`)} aria-label="Create feature">${iconStorySvg()}</button>`
+      : ''
   const actions =
     (chatAboutRunAvailable()
       ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
       : '') +
+    featureBtn +
     `<button type="button" class="card-btn card-btn-danger" data-action="delete-model" data-id="${id}"${helpAttr('Remove this model from the catalog.')}>${iconDeleteSvg()}</button>`
   return `<details class="paper-card model-card" data-id="${id}"${open}>
     <summary class="paper-summary">
@@ -13791,11 +14550,21 @@ async function fetchRunsNewerThan(newestRunAt, onProgress) {
   const fresh = []
   let offset = 0
   for (let guard = 0; guard < 10000; guard++) {
-    const page = await queryRunRecords({
-      orderBy: [{ field: 'provenance.ranAt', direction: 'desc', numeric: false }],
-      limit: PAGE,
-      offset,
-    })
+    const at = offset
+    // Retry a transient page failure (bridge timeout under write load) rather than swallowing it into an
+    // empty page — an early break here would silently drop part of the newer tail.
+    const page = await window.Paging.withRetries(
+      () =>
+        queryRunRecordsRaw(
+          {
+            orderBy: [{ field: 'provenance.ranAt', direction: 'desc', numeric: false }],
+            limit: PAGE,
+            offset: at,
+          },
+          RUN_SCAN_PAGE_TIMEOUT_MS,
+        ),
+      { sleep },
+    )
     if (!page.length) break
     let hitOld = false
     for (const r of page) {
@@ -14071,11 +14840,14 @@ async function renderModels() {
   ])
   const seedBanner = pendingSeedModelsHtml()
   if (!modelsCache.length) {
+    // The catalog machinery keys on a `model_name` choice lever; without one, Scan structurally finds
+    // nothing — explain that instead of offering a scan that completes as a silent zero.
+    const hint = hasModelIdentityLever()
+      ? 'No models yet — Scan Project to discover them, or import the curated set.'
+      : 'This project’s manifest declares no <code>model_name</code> choice lever, so the catalog can’t discover or bind models. Name the model-identity lever <code>model_name</code> (see <code>examples/cartpole</code>) and add a config migration for old runs.'
     setHtml(
       body,
-      seedBanner +
-        modelStatsControlsHtml() +
-        '<div class="empty-hint">No models yet — Scan Project to discover them, or import the curated set.</div>',
+      seedBanner + modelStatsControlsHtml() + `<div class="empty-hint">${hint}</div>`,
     )
     void checkModelStatsStale()
     return
@@ -14109,6 +14881,47 @@ async function renderModels() {
 }
 // Open the host chat preloaded with this model's full context (status, bindings, runs, linked papers +
 // hypotheses); the seed adapts to status — implement (proposed), fix (failing), or improve.
+// The ONE shared story every model/component implementation feature files under — hardcoded so all
+// such build work collects in a single place on the Stories screen.
+const MODEL_WORK_STORY_TITLE = 'Implement missing model components'
+const MODEL_WORK_STORY_DESCRIPTION =
+  'Implement the proposed models and reusable components the model-trainer catalog is missing. Each feature ' +
+  'names ONE catalog entry (a proposed model or a component) with its context; implement it in the training ' +
+  'project, bind it to a model_name flavor where applicable, and verify with a training run. Features are ' +
+  'filed from the model-trainer Models tab.'
+// File a feature (under the shared story) to implement ONE proposed model / component — the standard
+// create-feature affordance on workable catalog cards.
+async function createModelWorkFeature(id) {
+  const model = modelsCache.find((m) => m.id === id)
+  if (!model || !createStoryAvailable()) return
+  const kind = model.category === 'component' ? 'component' : 'model'
+  const paperTitles = (model.paperIds || [])
+    .map((pid) => (papersCache.find((p) => p.id === pid) || {}).title)
+    .filter(Boolean)
+  const description = [
+    `Implement the ${kind} "${model.name || model.id}" (catalog slug: ${model.slug || model.id}).`,
+    model.description ? `What it is: ${model.description}` : '',
+    model.proposal ? `To add: ${model.proposal}` : '',
+    paperTitles.length ? `Source papers: ${paperTitles.join(' · ')}` : '',
+    kind === 'model'
+      ? 'Done when: it trains via a model_name flavor and a verifying run completes.'
+      : 'Done when: at least one model flavor declares it in `components` and trains with it.',
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+  try {
+    const res = await window.OverseerBridge.createStoryFeature({
+      storyTitle: MODEL_WORK_STORY_TITLE,
+      storyDescription: MODEL_WORK_STORY_DESCRIPTION,
+      feature: { title: `Implement: ${model.name || model.id}`, description },
+    })
+    showToast(
+      `Feature filed under "${MODEL_WORK_STORY_TITLE}"${res && res.featureId ? ` (${String(res.featureId).slice(0, 8)})` : ''} — run an agent on it from the Stories screen.`,
+    )
+  } catch {
+    setStatusLine('models-status', 'Could not create the feature — please try again.', true)
+  }
+}
 async function chatAboutModel(id) {
   const model = modelsCache.find((m) => m.id === id)
   if (!model || !chatAboutRunAvailable()) return
@@ -14156,9 +14969,23 @@ async function chatAboutModel(id) {
 }
 // Scan Project: discover declared models (model_name choices) not yet catalogued, enrich with the LLM,
 // and persist them. Triggers the backend `scan-models` activity, then re-renders Models.
+// Whether the manifest declares the `model_name` choice lever the whole Models machinery keys on
+// (discovery, flavor binding, run roll-up).
+function hasModelIdentityLever() {
+  const lever = manifest && manifest.levers && manifest.levers.model_name
+  return !!(lever && lever.type === 'choice' && Array.isArray(lever.choices))
+}
 async function onScanModels() {
   if (!embedded()) {
     setStatusLine('models-status', 'Open inside the Overseer to scan for models.', true)
+    return
+  }
+  if (!hasModelIdentityLever()) {
+    setStatusLine(
+      'models-status',
+      'The manifest declares no model_name choice lever — the scan can’t discover models. Rename the model-identity lever to model_name (see examples/cartpole).',
+      true,
+    )
     return
   }
   const epoch = projectEpoch
@@ -14691,6 +15518,7 @@ function setupModels() {
     if (action === 'import-seeds') importSeedModels()
     else if (action === 'open-model') focusModel(id)
     else if (action === 'discuss-model') chatAboutModel(id)
+    else if (action === 'model-feature') createModelWorkFeature(id)
     else if (action === 'benchmark-device') {
       event.preventDefault() // the chip lives in <summary>; don't toggle the card open/closed on click
       onBenchmarkModelDevice(id)
@@ -16694,6 +17522,9 @@ function paintTabLoading(tabId) {
 // --- Exploration view: the config-space search map, always available per project ---------------
 let explorationPollTimer = null
 let explorationDiscoveryTimer = null
+// When the user hits Start/Resume, the controller takes a beat to appear as a live activity. Stamp the
+// launch so the status view shows an optimistic "Starting…" until a live controller / running child shows up.
+let explorationLaunchingAt = 0
 // The `explore` controller spawns its `train` experiments on the BACKEND, which the viewer only discovers
 // on open/focus. While a controller is live, re-scan on a timer so those experiments appear in Activity.
 async function explorationDiscoveryTick() {
@@ -16794,11 +17625,25 @@ async function renderExploration() {
       null
     if (state && state.pendingChildId) {
       const c = all.find((a) => a.activityId === state.pendingChildId)
-      if (c) pendingChild = { status: c.status }
+      if (c) {
+        // concrete campaign progress (runs done / total across the child's steps) for the status line
+        let done = 0
+        let tot = 0
+        for (const s of c.steps || []) {
+          done += Number(s.done) || 0
+          tot += Number(s.total) || 0
+        }
+        pendingChild = { status: c.status, ...(tot > 0 ? { done, total: tot } : {}) }
+      }
     }
   } catch {
     // bridge may be unavailable in a preview frame
   }
+  // Optimistic "Starting…" until a live controller / running child appears (activities are eventually
+  // consistent, so right after Start/Resume neither shows yet). Clears itself after a grace window.
+  const childActiveNow = !!(pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
+  if (liveExploreCount > 0 || childActiveNow) explorationLaunchingAt = 0
+  const launching = explorationLaunchingAt > 0 && Date.now() - explorationLaunchingAt < 12000
 
   const launchExplore = async (extra) => {
     // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend `explore`
@@ -16818,6 +17663,7 @@ async function renderExploration() {
       }
       return false
     }
+    explorationLaunchingAt = Date.now() // show "Starting…" until the controller/child appears
     invalidateActivitiesCache()
     startExplorationDiscovery() // pick up the controller's spawned `train` experiments so they show
     setTimeout(() => renderExploration(), 600)
@@ -16892,11 +17738,21 @@ async function renderExploration() {
       // guard aborts the extras on launch, consolidating to one). A healthy single controller is left alone.
       await writeExplorationFlag(recordType, state, { paused: false })
       if (liveExploreCount === 1) {
+        explorationLaunchingAt = Date.now()
         invalidateActivitiesCache()
         setTimeout(() => renderExploration(), 400)
       } else {
         await launchExplore({})
       }
+    },
+    onOpenRuns: (keys) => {
+      // Jump to the Runs tab with this basin's runs selected (the cross-page compare selection), so the
+      // maxima table is a launchpad into the underlying runs.
+      const list = (keys || []).filter(Boolean)
+      if (!list.length) return
+      runsCompareKeys = new Set(list)
+      selectedRunKey = list[0]
+      showTab('runs')
     },
   }
 
@@ -16907,8 +17763,10 @@ async function renderExploration() {
       state,
       runs,
       totalRuns: runs.length,
+      launching,
       activity: activity ? { status: activity.status } : null,
       pendingChild,
+      childProgress: pendingChild && pendingChild.total ? { done: pendingChild.done, total: pendingChild.total } : null,
     },
     actions,
   )
@@ -16922,6 +17780,7 @@ async function renderExploration() {
   // is driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` froze it.
   if (activeTabId === 'exploration') {
     const active =
+      launching ||
       (activity && ['running', 'starting', 'queued'].includes(activity.status)) ||
       (pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
     explorationPollTimer = setTimeout(

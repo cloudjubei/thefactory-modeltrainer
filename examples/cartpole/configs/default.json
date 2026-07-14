@@ -1,5 +1,5 @@
 {
-  "algo": "ppo",
+  "model_name": "ppo",
   "learning_rate": 0.0003,
   "gamma": 0.99,
   "total_timesteps": 8000,

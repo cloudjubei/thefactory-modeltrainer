@@ -747,3 +747,387 @@ describe('proposed status derivation (blocked on an unimplemented model)', () =>
     expect(H.effectiveVerdict(h, [], 'max', 0)).toBe('untested')
   })
 })
+
+// ---------------------------------------------------------------------------------------------------
+// hypothesisHygiene — the per-hypothesis diagnosis of WHY a hypothesis is undecided (dead pins with
+// cause, per-cell starvation, underplanned specs, metric absence), + the aggregate census.
+// ---------------------------------------------------------------------------------------------------
+
+const hygieneManifest = {
+  name: 'demo',
+  recordType: 'demo-run',
+  objective: { name: 'score', direction: 'max' },
+  levers: {
+    model_name: { type: 'choice', choices: ['ppo', 'dqn', 'supervised-logreg'] },
+    lr: { type: 'number', range: [0.0001, 0.1] },
+    reward_model: { type: 'choice', choices: ['combo_unified'] },
+    prob_threshold: {
+      type: 'number',
+      range: [0.5, 0.9],
+      appliesWhen: { model_name: ['supervised-logreg'] },
+    },
+    timeframe: { type: 'choice', choices: ['1d', '1h'], scope: 'dataset' },
+    seed: { type: 'number' },
+  },
+  migrations: [
+    { match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified' } },
+  ],
+}
+
+describe('hypothesisHygiene — dead-pin causes', () => {
+  const runs = [
+    run('r1', { model_name: 'ppo', lr: 0.001, timeframe: '1d' }, { vh: 5, objective: 5 }),
+    run('r2', { model_name: 'ppo', lr: 0.01, timeframe: '1d' }, { vh: -2, objective: -2 }),
+    run('r3', { model_name: 'dqn', lr: 0.001, timeframe: '1h' }, { vh: 1, objective: 1 }),
+  ]
+  it('never-run: pinned value exists as a key in runs but never with that value — launchable, so starved', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo', lr: 0.05 } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const pin = d.pins.find((p: any) => p.lever === 'lr')
+    expect(pin.matches).toBe(0)
+    expect(pin.cause).toBe('never-run')
+    expect(d.status).toBe('starved')
+    expect(d.issues.some((i: any) => i.kind === 'dead-pin' && i.lever === 'lr')).toBe(true)
+  })
+  it('missing-key: pinned lever appears in NO run config (appliesWhen satisfied)', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'supervised-logreg', prob_threshold: 0.6 } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const pin = d.pins.find((p: any) => p.lever === 'prob_threshold')
+    expect(pin.cause).toBe('missing-key')
+  })
+  it('na-pinned: a conditional lever pinned alongside a control value it does not apply to', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo', prob_threshold: 0.6 } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const pin = d.pins.find((p: any) => p.lever === 'prob_threshold')
+    expect(pin.cause).toBe('na-pinned')
+    expect(d.status).toBe('blocked')
+  })
+  it('sweep-unrun: sweep options no run has tried are listed (launchable, so starved)', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' }, sweep: { lr: [0.001, 0.05] } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const issue = d.issues.find((i: any) => i.kind === 'sweep-unrun')
+    expect(issue.lever).toBe('lr')
+    expect(issue.values).toEqual(['0.05'])
+    expect(d.status).toBe('starved')
+  })
+  it('migrated: the fixed config would be rewritten by a manifest migration', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo', reward_model: 'combo_all' } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const pin = d.pins.find((p: any) => p.lever === 'reward_model')
+    expect(pin.cause).toBe('migrated')
+  })
+  it('off-manifest: pinned value outside the declared choices / range', () => {
+    const badChoice = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'sac' } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    expect(badChoice.pins.find((p: any) => p.lever === 'model_name').cause).toBe('off-manifest')
+    const badRange = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo', lr: 5 } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    expect(badRange.pins.find((p: any) => p.lever === 'lr').cause).toBe('off-manifest')
+  })
+  it('a live pin (matches > 0) carries no cause', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      runs,
+      hygieneManifest,
+      3,
+    )
+    const pin = d.pins.find((p: any) => p.lever === 'model_name')
+    expect(pin.matches).toBe(2)
+    expect(pin.cause).toBeUndefined()
+  })
+})
+
+describe('hypothesisHygiene — statuses + structural issues', () => {
+  it('judged: a decided hypothesis reports status judged with no issues', () => {
+    const runs3 = [
+      run('a', { model_name: 'ppo' }, { vh: 5, objective: 5 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { vh: 4, objective: 4 }),
+      run('c', { model_name: 'ppo', seed: 2 }, { vh: 3, objective: 3 }),
+    ]
+    const d = H.hypothesisHygiene({ spec: { fixed: { model_name: 'ppo' } } }, runs3, hygieneManifest, 3)
+    expect(d.verdict).toBe('proven')
+    expect(d.status).toBe('judged')
+    expect(d.issues).toEqual([])
+  })
+  it('underplanned: a fully-pinned single-seed spec can never reach minRuns', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo', lr: 0.001 }, seeds: [0] } },
+      [run('a', { model_name: 'ppo', lr: 0.001 }, { vh: 5 })],
+      hygieneManifest,
+      3,
+    )
+    expect(d.plannedItems).toBe(1)
+    expect(d.issues.some((i: any) => i.kind === 'underplanned')).toBe(true)
+    expect(d.status).toBe('blocked')
+  })
+  it('a sweep or seed list large enough to reach minRuns is not underplanned', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' }, sweep: { lr: [0.001, 0.01] }, seeds: [0, 1] } },
+      [],
+      hygieneManifest,
+      3,
+    )
+    expect(d.plannedItems).toBe(4)
+    expect(d.issues.some((i: any) => i.kind === 'underplanned')).toBe(false)
+    expect(d.status).toBe('starved')
+  })
+  it('starved: live pins, enough planned, just needs runs — reports runsNeeded', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' }, seeds: [0, 1, 2] } },
+      [run('a', { model_name: 'ppo' }, { vh: 5 })],
+      hygieneManifest,
+      3,
+    )
+    expect(d.status).toBe('starved')
+    expect(d.runsNeeded).toBe(2)
+  })
+  it('no-metric: matched live runs exist but none report return_vs_hold_pct', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' }, seeds: [0, 1, 2] } },
+      [
+        run('a', { model_name: 'ppo' }, { objective: 5 }),
+        run('b', { model_name: 'ppo', seed: 1 }, { objective: 4 }),
+        run('c', { model_name: 'ppo', seed: 2 }, { objective: 3 }),
+      ],
+      hygieneManifest,
+      3,
+    )
+    expect(d.metricRuns).toBe(0)
+    expect(d.issues.some((i: any) => i.kind === 'no-metric')).toBe(true)
+    expect(d.status).toBe('blocked')
+  })
+  it('invalid-evidence: every matched run is failed/invalid', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      [run('a', { model_name: 'ppo' }, { vh: 5, status: 'invalid' })],
+      hygieneManifest,
+      3,
+    )
+    expect(d.issues.some((i: any) => i.kind === 'invalid-evidence')).toBe(true)
+    expect(d.status).toBe('starved')
+  })
+  it('cell-starved: a compare arm below minRuns blocks judgment and is reported per cell', () => {
+    const h = {
+      spec: { compare: { lever: 'model_name', values: ['ppo', 'dqn'] } },
+      comparison: { kind: 'beats-baseline', baselineIndex: 0 },
+    }
+    const runsOneArm = [
+      run('a', { model_name: 'ppo' }, { vh: 5, objective: 5 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { vh: 4, objective: 4 }),
+    ]
+    const d = H.hypothesisHygiene(h, runsOneArm, hygieneManifest, 2)
+    expect(d.cells.length).toBe(2)
+    const starved = d.issues.find((i: any) => i.kind === 'cell-starved')
+    expect(starved).toBeTruthy()
+    expect(d.status).toBe('starved')
+    const dqnCell = d.cells.find((c: any) => c.context.model_name === 'dqn')
+    expect(dqnCell.runs).toBe(0)
+    expect(dqnCell.needed).toBe(2)
+  })
+  it('single-cell: an env-bundle spec that collapses to one cell can never compare', () => {
+    const h = { spec: { fixed: { model_name: 'ppo' }, environments: [{ timeframe: '1d' }] } }
+    const d = H.hypothesisHygiene(h, [], hygieneManifest, 2)
+    expect(d.issues.some((i: any) => i.kind === 'single-cell')).toBe(true)
+    expect(d.status).toBe('blocked')
+  })
+  it('baseline-out-of-range: comparison.baselineIndex beyond the cells is structural', () => {
+    const h = {
+      spec: { compare: { lever: 'model_name', values: ['ppo', 'dqn'] } },
+      comparison: { kind: 'beats-baseline', baselineIndex: 5 },
+    }
+    const d = H.hypothesisHygiene(h, [], hygieneManifest, 2)
+    expect(d.issues.some((i: any) => i.kind === 'baseline-out-of-range')).toBe(true)
+    expect(d.status).toBe('blocked')
+  })
+})
+
+describe('hypothesisHygieneCensus', () => {
+  it('aggregates statuses and issue kinds across hypotheses', () => {
+    const runs3 = [
+      run('a', { model_name: 'ppo' }, { vh: 5, objective: 5 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { vh: 4, objective: 4 }),
+      run('c', { model_name: 'ppo', seed: 2 }, { vh: 3, objective: 3 }),
+    ]
+    const hyps = [
+      { id: 'h1', spec: { fixed: { model_name: 'ppo' } } }, // judged (proven)
+      { id: 'h2', spec: { fixed: { model_name: 'ppo', reward_model: 'combo_all' } } }, // blocked (migrated pin)
+      { id: 'h3', spec: { fixed: { model_name: 'dqn' }, seeds: [0, 1, 2] } }, // starved (never-run, launchable)
+    ]
+    const c = H.hypothesisHygieneCensus(hyps, runs3, hygieneManifest, 3)
+    expect(c.total).toBe(3)
+    expect(c.judged).toBe(1)
+    expect(c.blocked).toBe(1)
+    expect(c.starved).toBe(1)
+    expect(c.byIssue['dead-pin']).toBe(2)
+    expect(c.blockedIds).toEqual(['h2'])
+  })
+  it('a manual verdict counts as judged regardless of runs', () => {
+    const hyps = [
+      { id: 'h1', spec: { fixed: { model_name: 'ppo' } }, verdictSource: 'manual', status: 'proven' },
+    ]
+    const c = H.hypothesisHygieneCensus(hyps, [], hygieneManifest, 3)
+    expect(c.judged).toBe(1)
+  })
+})
+
+describe('compareContexts — baselineIndex out of range must not silently mis-judge', () => {
+  it('returns untested (not disproved) when baselineIndex exceeds the cells', () => {
+    const perContext = [
+      { context: { m: 'a' }, measured: { runs: 3, objective: 5, beatsHold: true } },
+      { context: { m: 'b' }, measured: { runs: 3, objective: 7, beatsHold: true } },
+    ]
+    expect(
+      H.compareContexts(perContext, { kind: 'beats-baseline', baselineIndex: 9 }, 'max', 3),
+    ).toBe('untested')
+  })
+})
+
+// ---------------------------------------------------------------------------------------------------
+// hypothesisBenchmark — the manifest-declared SINGLE-CONTEXT judging rule. Absent, the trading line's
+// historical default applies (return_vs_hold_pct > 0); a project like CartPole declares its own metric
+// + threshold so hypotheses are judged by ITS definition of success, not BlackSwan's.
+// ---------------------------------------------------------------------------------------------------
+
+describe('measuredFromRuns with a manifest benchmark', () => {
+  const cartRun = (key: string, evalReturn: number, cfg: Record<string, unknown> = {}) => ({
+    key,
+    summary: {
+      config: { model_name: 'ppo', ...cfg },
+      objective: evalReturn,
+      status: 'completed',
+      metrics: { eval_return_mean: evalReturn },
+    },
+  })
+  const benchmark = { metric: 'eval_return_mean', threshold: 475 }
+
+  it('judges by the declared metric + threshold instead of return_vs_hold_pct', () => {
+    const m = H.measuredFromRuns([cartRun('a', 490)], 'max', benchmark)
+    expect(m.beatsHold).toBe(true)
+    const low = H.measuredFromRuns([cartRun('a', 100)], 'max', benchmark)
+    expect(low.beatsHold).toBe(false)
+  })
+  it('stays null when no run reports the benchmark metric', () => {
+    const m = H.measuredFromRuns(
+      [run('a', { model_name: 'ppo' }, { objective: 490 })],
+      'max',
+      benchmark,
+    )
+    expect(m.beatsHold).toBe(null)
+  })
+  it('a min-direction benchmark proves when the best value is BELOW the threshold', () => {
+    const wine = { metric: 'val_rmse', threshold: 0.6, direction: 'min' }
+    const mk = (v: number) => ({
+      key: 'k' + v,
+      summary: { config: {}, objective: v, status: 'completed', metrics: { val_rmse: v } },
+    })
+    expect(H.measuredFromRuns([mk(0.5), mk(0.9)], 'min', wine).beatsHold).toBe(true)
+    expect(H.measuredFromRuns([mk(0.7)], 'min', wine).beatsHold).toBe(false)
+  })
+  it('without a benchmark the historical default (return_vs_hold_pct > 0) still applies', () => {
+    expect(H.measuredFromRuns([run('a', {}, { vh: 5 })], 'max').beatsHold).toBe(true)
+    expect(H.measuredFromRuns([run('a', {}, { vh: -1 })], 'max').beatsHold).toBe(false)
+  })
+
+  it('threads through autoVerdictForHypothesis / effectiveVerdict / evaluateHypothesis', () => {
+    const h = { spec: { fixed: { model_name: 'ppo' } } }
+    const runs3 = [cartRun('a', 490), cartRun('b', 480, { seed: 1 }), cartRun('c', 495, { seed: 2 })]
+    expect(H.autoVerdictForHypothesis(h, runs3, 'max', 3, undefined, benchmark)).toBe('proven')
+    expect(H.effectiveVerdict(h, runs3, 'max', 3, undefined, benchmark)).toBe('proven')
+    const out = H.evaluateHypothesis(h, runs3, { direction: 'max', at: 't', minRuns: 3, benchmark })
+    expect(out.next.status).toBe('proven')
+  })
+})
+
+describe('hypothesisHygiene with a manifest benchmark', () => {
+  const cartManifest = {
+    name: 'cartpole',
+    recordType: 'cartpole-run',
+    objective: { name: 'eval_return_mean', direction: 'max' },
+    hypothesisBenchmark: { metric: 'eval_return_mean', threshold: 475 },
+    levers: {
+      model_name: { type: 'choice', choices: ['ppo', 'dqn'] },
+      lr: { type: 'number' },
+      seed: { type: 'number' },
+    },
+  }
+  const cartRun = (key: string, evalReturn: number, seed: number) => ({
+    key,
+    summary: {
+      config: { model_name: 'ppo', seed },
+      objective: evalReturn,
+      status: 'completed',
+      metrics: { eval_return_mean: evalReturn },
+    },
+  })
+
+  it('judges a CartPole hypothesis by ITS benchmark (no return_vs_hold_pct anywhere)', () => {
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      [cartRun('a', 490, 0), cartRun('b', 480, 1), cartRun('c', 495, 2)],
+      cartManifest,
+      3,
+    )
+    expect(d.verdict).toBe('proven')
+    expect(d.status).toBe('judged')
+  })
+  it('no-metric names the DECLARED benchmark metric, not return_vs_hold_pct', () => {
+    const noMetricRuns = [
+      run('a', { model_name: 'ppo' }, { objective: 1 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { objective: 2 }),
+      run('c', { model_name: 'ppo', seed: 2 }, { objective: 3 }),
+    ]
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      noMetricRuns,
+      cartManifest,
+      3,
+    )
+    const issue = d.issues.find((i: any) => i.kind === 'no-metric')
+    expect(issue.detail).toContain('eval_return_mean')
+    expect(issue.detail).not.toContain('return_vs_hold_pct')
+  })
+  it('with NO declared benchmark and no default metric, no-metric says to declare one', () => {
+    const noBench = { ...cartManifest, hypothesisBenchmark: undefined }
+    const noMetricRuns = [
+      run('a', { model_name: 'ppo' }, { objective: 1 }),
+      run('b', { model_name: 'ppo', seed: 1 }, { objective: 2 }),
+      run('c', { model_name: 'ppo', seed: 2 }, { objective: 3 }),
+    ]
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      noMetricRuns,
+      noBench,
+      3,
+    )
+    const issue = d.issues.find((i: any) => i.kind === 'no-metric')
+    expect(issue.detail).toContain('hypothesisBenchmark')
+  })
+})

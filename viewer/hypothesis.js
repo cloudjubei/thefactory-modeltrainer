@@ -44,9 +44,25 @@
     )
   }
 
-  // The aggregate read of matching runs: count, best objective (per `direction`), and whether any beats
-  // buy-and-hold OOS (`return_vs_hold_pct > 0`). Null when no non-failed run is present.
-  function measuredFromRuns(runs, direction) {
+  // The single-context SUCCESS BENCHMARK: which run METRIC proves a hypothesis and the threshold it must
+  // clear. The manifest declares it (`hypothesisBenchmark: { metric, threshold?, direction? }` — e.g.
+  // CartPole: eval_return_mean ≥ 475); absent, the trading line's historical default applies
+  // (return_vs_hold_pct > 0 — beats buy-and-hold OOS).
+  const DEFAULT_HYPOTHESIS_BENCHMARK = { metric: 'return_vs_hold_pct', threshold: 0, direction: 'max' }
+  function resolveBenchmark(benchmark) {
+    const b = benchmark || DEFAULT_HYPOTHESIS_BENCHMARK
+    return {
+      metric: typeof b.metric === 'string' && b.metric ? b.metric : DEFAULT_HYPOTHESIS_BENCHMARK.metric,
+      threshold: Number.isFinite(Number(b.threshold)) ? Number(b.threshold) : 0,
+      direction: b.direction === 'min' ? 'min' : 'max',
+    }
+  }
+
+  // The aggregate read of matching runs: count, best objective (per `direction`), and whether any run
+  // clears the project's hypothesis benchmark. Null when no non-failed run is present. The `beatsHold`
+  // field name is historical (the trading line's benchmark is buy-and-hold) — it means "meets the
+  // benchmark" and is judged by the manifest's `hypothesisBenchmark` when one is declared.
+  function measuredFromRuns(runs, direction, benchmark) {
     // Exclude failed AND invalid runs — an invalid run (since-fixed bug) must never move a verdict.
     const live = (runs || []).filter(
       (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
@@ -60,13 +76,20 @@
         ? Math.min.apply(null, objectives)
         : Math.max.apply(null, objectives)
       : NaN
-    const vhs = live
-      .map((r) => Number(((r.summary && r.summary.metrics) || {}).return_vs_hold_pct))
+    const bench = resolveBenchmark(benchmark)
+    const values = live
+      .map((r) => Number(((r.summary && r.summary.metrics) || {})[bench.metric]))
       .filter(Number.isFinite)
+    const best = values.length
+      ? bench.direction === 'min'
+        ? Math.min.apply(null, values)
+        : Math.max.apply(null, values)
+      : null
     return {
       runs: live.length,
       objective,
-      beatsHold: vhs.length ? Math.max.apply(null, vhs) > 0 : null,
+      beatsHold:
+        best === null ? null : bench.direction === 'min' ? best < bench.threshold : best > bench.threshold,
     }
   }
 
@@ -130,13 +153,13 @@
   }
 
   // Per-cell measured reads (count/objective/beats-hold) — each computed over ONLY that cell's runs.
-  function measuredByContext(spec, runs, direction) {
+  function measuredByContext(spec, runs, direction, benchmark) {
     const groups = groupRunsByContext(spec, runs)
     if (!groups) return null
     return groups.map((g) => ({
       context: g.context,
       runKeys: g.runs.map((r) => r.key).sort(),
-      measured: measuredFromRuns(g.runs, direction),
+      measured: measuredFromRuns(g.runs, direction, benchmark),
     }))
   }
 
@@ -157,6 +180,8 @@
     if (cells.length < 2 || !ready) return 'untested'
     const objs = cells.map((c) => c.measured.objective)
     const baselineIndex = (comparison && comparison.baselineIndex) || 0
+    // An out-of-range baseline must stay untested — comparing against undefined would silently mis-judge.
+    if (baselineIndex >= objs.length) return 'untested'
     if (kind === 'beats-baseline') {
       const baseObj = objs[baselineIndex]
       const others = objs.filter((_, i) => i !== baselineIndex)
@@ -224,19 +249,19 @@
   // The auto-verdict for a hypothesis: a context-spanning spec reads its cross-context comparison; a
   // single-context spec uses the pooled beats-hold rule. Precedence: decided (proven/disproved) > proposed
   // (blocked on an unimplemented model) > untested.
-  function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented) {
+  function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark) {
     const spec = h && h.spec
     let verdict
     if (contextCells(spec).length) {
       verdict = compareContexts(
-        measuredByContext(spec, runs, direction),
+        measuredByContext(spec, runs, direction, benchmark),
         h && h.comparison,
         direction,
         minRuns,
       )
     } else {
       verdict = autoVerdictFor(
-        measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction),
+        measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction, benchmark),
         minRuns,
       )
     }
@@ -246,9 +271,9 @@
   }
 
   // The verdict to SHOW: a manual override wins; otherwise the live auto-verdict from matching runs.
-  function effectiveVerdict(h, runs, direction, minRuns, modelImplemented) {
+  function effectiveVerdict(h, runs, direction, minRuns, modelImplemented, benchmark) {
     if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0) return h.status
-    return autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented)
+    return autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark)
   }
 
   // Sorted keys of the runs matching a hypothesis (the evidence-set identity used to detect new runs).
@@ -271,10 +296,11 @@
     const at = (opts && opts.at) || ''
     const minRuns = (opts && opts.minRuns) || 0
     const modelImplemented = opts && opts.modelImplemented
+    const benchmark = opts && opts.benchmark
     if (h && h.verdictSource === 'manual') return { next: h, transition: null, changed: false }
     const matchedKeys = matchedKeysOf(h && h.spec, runs)
-    const measured = measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction)
-    const nextStatus = autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented)
+    const measured = measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction, benchmark)
+    const nextStatus = autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark)
     const prev = (h && h.evidence) || { matchedKeys: [], status: 'untested' }
     const prevKeys = prev.matchedKeys || []
     const keysChanged =
@@ -397,7 +423,7 @@
     detail.passedClaims = labelled.filter((c) => c.detail.status === 'holds-up').length
     return detail
   }
-  function paperVerdictDetail(paper, hyps, runs, direction, minRuns, modelImplemented) {
+  function paperVerdictDetail(paper, hyps, runs, direction, minRuns, modelImplemented, benchmark) {
     const ids = {}
     const linkIds = (paper && paper.hypothesisIds) || []
     for (let i = 0; i < linkIds.length; i++) ids[linkIds[i]] = true
@@ -406,7 +432,7 @@
     const linked = (hyps || [])
       .filter((h) => ids[h.id])
       .map((h) => ({
-        verdict: effectiveVerdict(h, runs, direction, minRuns, modelImplemented),
+        verdict: effectiveVerdict(h, runs, direction, minRuns, modelImplemented, benchmark),
         weight: weights[h.id],
         claim: h.claim,
       }))
@@ -486,13 +512,270 @@
     return { formula: formula, ladder: ladder }
   }
 
-  function rollupPaperVerdict(paper, hyps, runs, direction, minRuns) {
-    return paperVerdictDetail(paper, hyps, runs, direction, minRuns).status
+  function rollupPaperVerdict(paper, hyps, runs, direction, minRuns, modelImplemented, benchmark) {
+    return paperVerdictDetail(paper, hyps, runs, direction, minRuns, modelImplemented, benchmark).status
+  }
+
+  // ——— HYGIENE: why is a hypothesis undecided? ———————————————————————————————————————————————
+  // The registry-wide reality (e.g. 22 of 247 judged) is usually structural, not "not enough runs yet".
+  // hypothesisHygiene diagnoses ONE hypothesis; hypothesisHygieneCensus aggregates. `manifest` supplies
+  // levers (choices/range/appliesWhen) + migrations; both stay pure.
+
+  // Faithful port of the engine's findMigrationRule + applyMigrationRules (modelTrainerUtils.ts) for the
+  // pin census: returns the rewritten fixed config, or null when no rule fires / the rule is a delete.
+  function migratedFixed(fixed, migrations) {
+    const config = fixed || {}
+    const rule = (migrations || []).find((r) => {
+      const hasClause = !!(r.match || r.matchNot)
+      const hasUnset = !!(r.unset && r.unset.length)
+      if (!hasClause && !hasUnset) return false
+      const eq = Object.entries(r.match || {}).every(
+        ([k, v]) => k in config && String(config[k]) === String(v),
+      )
+      const neq = Object.entries(r.matchNot || {}).every(
+        ([k, v]) => k in config && String(config[k]) !== String(v),
+      )
+      const clauseOk = hasClause ? eq && neq : true
+      const unsetOk = hasUnset && !hasClause ? r.unset.some((k) => k in config) : true
+      return clauseOk && unsetOk
+    })
+    if (!rule || rule.delete) return null
+    const next = Object.assign({}, config, rule.set || {})
+    Object.entries(rule.keepOrDefault || {}).forEach(([k, fb]) => {
+      next[k] = k in config ? config[k] : fb
+    })
+    ;(rule.unset || []).forEach((k) => delete next[k])
+    return next
+  }
+
+  // The CAUSE of a dead pin (matches === 0), most actionable first. STRUCTURAL causes (more runs can
+  // never fix them): 'migrated' — a manifest migration rewrites the pinned value, so launches land under
+  // the NEW value and stored configs never match; 'na-pinned' — the lever's appliesWhen is violated by
+  // the spec's own pins, so stored configs hold the 'n/a' sentinel; 'off-manifest' — the value is outside
+  // the lever's declared choices/range. LAUNCHABLE causes (running the spec fixes them): 'missing-key' —
+  // no run config carries the lever (runs predate it); 'never-run' — the value simply hasn't run yet.
+  function deadPinCause(lever, value, fixed, keyRuns, manifest, migrated) {
+    if (migrated && String(migrated[lever]) !== String(value)) return 'migrated'
+    const levers = (manifest && manifest.levers) || {}
+    const spec = levers[lever]
+    if (spec && spec.appliesWhen && String(value) !== 'n/a') {
+      const violated = Object.entries(spec.appliesWhen).some(
+        ([control, allowed]) =>
+          control in (fixed || {}) &&
+          !(Array.isArray(allowed) ? allowed : [allowed])
+            .map(String)
+            .includes(String(fixed[control])),
+      )
+      if (violated) return 'na-pinned'
+    }
+    if (spec) {
+      if (Array.isArray(spec.choices) && !spec.choices.map(String).includes(String(value)))
+        return 'off-manifest'
+      const n = Number(value)
+      if (
+        Array.isArray(spec.range) &&
+        spec.range.length === 2 &&
+        Number.isFinite(n) &&
+        (n < Number(spec.range[0]) || n > Number(spec.range[1]))
+      )
+        return 'off-manifest'
+    }
+    return keyRuns === 0 ? 'missing-key' : 'never-run'
+  }
+
+  const STRUCTURAL_PIN_CAUSES = ['migrated', 'na-pinned', 'off-manifest']
+
+  // Diagnose ONE hypothesis against the full run set. Returns:
+  //   { verdict, status: 'judged'|'blocked'|'starved', issues: [{kind, lever?, values?, detail}],
+  //     pins: [{lever, value, keyRuns, matches, cause?}], cells|null, plannedItems, metricRuns, runsNeeded }
+  // 'blocked' = structurally undecidable AS WRITTEN (a structural dead pin, an underplanned pinned-seed
+  // spec, a single context cell, an out-of-range baseline, a metric the run family never reports);
+  // 'starved' = sound, just needs runs (launch the spec / add seeds / fill cells).
+  function hypothesisHygiene(h, runs, manifest, minRuns) {
+    const spec = (h && h.spec) || {}
+    const direction =
+      (manifest && manifest.objective && manifest.objective.direction) === 'min' ? 'min' : 'max'
+    const benchmark = resolveBenchmark(manifest && manifest.hypothesisBenchmark)
+    const verdict = autoVerdictForHypothesis(h, runs, direction, minRuns, undefined, benchmark)
+    const all = runs || []
+    if (verdict === 'proven' || verdict === 'disproved') {
+      return {
+        verdict,
+        status: 'judged',
+        issues: [],
+        pins: [],
+        cells: null,
+        plannedItems: 0,
+        metricRuns: 0,
+        runsNeeded: 0,
+      }
+    }
+    const fixed = spec.fixed || {}
+    const migrated = migratedFixed(fixed, manifest && manifest.migrations)
+    const issues = []
+    // Per-fixed-pin census against ALL runs (independent of the other pins), so a dead pin names the
+    // exact lever+value that strands the hypothesis rather than just "0 matching runs".
+    const pins = Object.entries(fixed).map(([lever, value]) => {
+      let keyRuns = 0
+      let matches = 0
+      for (let i = 0; i < all.length; i++) {
+        const cfg = (all[i].summary && all[i].summary.config) || {}
+        if (lever in cfg) keyRuns++
+        if (String(cfg[lever]) === String(value)) matches++
+      }
+      const pin = { lever, value, keyRuns, matches }
+      if (matches === 0) {
+        pin.cause = deadPinCause(lever, value, fixed, keyRuns, manifest, migrated)
+        issues.push({
+          kind: 'dead-pin',
+          lever,
+          detail: `fixed ${lever}=${value} matches no run (${pin.cause})`,
+          structural: STRUCTURAL_PIN_CAUSES.indexOf(pin.cause) >= 0,
+        })
+      }
+      return pin
+    })
+    // Per-sweep-option census: options nothing has run yet (launchable — the spec itself fills them).
+    Object.entries(spec.sweep || {}).forEach(([lever, raw]) => {
+      const opts = Array.isArray(raw) ? raw : [raw]
+      const unrun = opts.filter(
+        (v) =>
+          !all.some(
+            (r) => String(((r.summary && r.summary.config) || {})[lever]) === String(v),
+          ),
+      )
+      if (unrun.length)
+        issues.push({
+          kind: 'sweep-unrun',
+          lever,
+          values: unrun.map(String),
+          detail: `sweep ${lever}: ${unrun.length} of ${opts.length} option(s) never run`,
+          structural: false,
+        })
+    })
+    // Planned-item math for the spec AS WRITTEN. Only an EXPLICIT seed list caps re-launches (no seeds
+    // declared ⇒ fresh seeds can always be added); explicit configs define their own count.
+    const sweepProduct = Object.values(spec.sweep || {}).reduce(
+      (n, v) => n * (Array.isArray(v) ? v.length : 1),
+      1,
+    )
+    const cellList = contextCells(spec)
+    const seedCount = Array.isArray(spec.seeds) && spec.seeds.length ? spec.seeds.length : 1
+    const perCellPlanned = sweepProduct * seedCount
+    const plannedItems =
+      Array.isArray(spec.configs) && spec.configs.length
+        ? spec.configs.length
+        : perCellPlanned * (cellList.length || 1)
+    if (
+      Array.isArray(spec.seeds) &&
+      spec.seeds.length &&
+      !(Array.isArray(spec.configs) && spec.configs.length) &&
+      minRuns &&
+      perCellPlanned < minRuns
+    ) {
+      issues.push({
+        kind: 'underplanned',
+        detail: `the spec plans ${perCellPlanned} run(s) per cell but the verdict needs ${minRuns} — add seeds or sweep values`,
+        structural: true,
+      })
+    }
+    const matching = hypothesisMatchingRuns(spec, all)
+    const live = matching.filter(
+      (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
+    )
+    const metricRuns = live.filter((r) =>
+      Number.isFinite(Number(((r.summary && r.summary.metrics) || {})[benchmark.metric])),
+    ).length
+    if (matching.length && !live.length) {
+      issues.push({
+        kind: 'invalid-evidence',
+        detail: `all ${matching.length} matching run(s) are failed/invalid — re-run to regenerate evidence`,
+        structural: false,
+      })
+    }
+    let cells = null
+    let runsNeeded = 0
+    if (cellList.length) {
+      if (cellList.length < 2) {
+        issues.push({
+          kind: 'single-cell',
+          detail: 'the context bundles collapse to ONE cell — nothing to compare across',
+          structural: true,
+        })
+      }
+      const baselineIndex = (h && h.comparison && h.comparison.baselineIndex) || 0
+      if (baselineIndex >= cellList.length) {
+        issues.push({
+          kind: 'baseline-out-of-range',
+          detail: `comparison.baselineIndex ${baselineIndex} exceeds the ${cellList.length} cell(s)`,
+          structural: true,
+        })
+      }
+      const perContext = measuredByContext(spec, all, direction) || []
+      cells = perContext.map((c) => ({
+        context: c.context,
+        runs: c.measured ? c.measured.runs : 0,
+        needed: minRuns || 0,
+      }))
+      const starvedCells = cells.filter((c) => c.runs < (minRuns || 0))
+      if (starvedCells.length) {
+        issues.push({
+          kind: 'cell-starved',
+          detail: `${starvedCells.length} of ${cells.length} cell(s) below ${minRuns} run(s)`,
+          structural: false,
+        })
+      }
+      runsNeeded = cells.reduce((n, c) => n + Math.max(0, (minRuns || 0) - c.runs), 0)
+    } else {
+      runsNeeded = Math.max(0, (minRuns || 0) - live.length)
+      if (live.length && !metricRuns) {
+        issues.push({
+          kind: 'no-metric',
+          detail:
+            manifest && manifest.hypothesisBenchmark
+              ? `matching runs report no ${benchmark.metric} — the manifest's hypothesisBenchmark metric this project judges by`
+              : `matching runs report no ${benchmark.metric} — declare hypothesisBenchmark ({metric, threshold}) in the manifest so hypotheses are judged by THIS project's success metric`,
+          structural: true,
+        })
+      }
+    }
+    const status = issues.some((i) => i.structural) ? 'blocked' : 'starved'
+    return { verdict, status, issues, pins, cells, plannedItems, metricRuns, runsNeeded }
+  }
+
+  // The registry-wide roll-up: how many hypotheses are judged / structurally blocked / merely starved,
+  // issue-kind counts, and the blocked ids (the actionable fix list).
+  function hypothesisHygieneCensus(hyps, runs, manifest, minRuns) {
+    const census = {
+      total: (hyps || []).length,
+      judged: 0,
+      blocked: 0,
+      starved: 0,
+      byIssue: {},
+      blockedIds: [],
+    }
+    for (const h of hyps || []) {
+      if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0 && h.status !== 'untested') {
+        census.judged++
+        continue
+      }
+      const d = hypothesisHygiene(h, runs, manifest, minRuns)
+      if (d.status === 'judged') census.judged++
+      else if (d.status === 'blocked') {
+        census.blocked++
+        census.blockedIds.push(h && h.id)
+      } else census.starved++
+      for (const issue of d.issues) {
+        census.byIssue[issue.kind] = (census.byIssue[issue.kind] || 0) + 1
+      }
+    }
+    return census
   }
 
   const Hypothesis = {
     VERDICTS: VERDICTS,
     specMatchesConfig: specMatchesConfig,
+    resolveBenchmark: resolveBenchmark,
     hypothesisMatchingRuns: hypothesisMatchingRuns,
     matchedKeysOf: matchedKeysOf,
     measuredFromRuns: measuredFromRuns,
@@ -506,6 +789,8 @@
     autoVerdictForHypothesis: autoVerdictForHypothesis,
     requiresUnimplementedModel: requiresUnimplementedModel,
     evaluateHypothesis: evaluateHypothesis,
+    hypothesisHygiene: hypothesisHygiene,
+    hypothesisHygieneCensus: hypothesisHygieneCensus,
     rollupPaperVerdict: rollupPaperVerdict,
     paperVerdictDetail: paperVerdictDetail,
     scorePaperVerdict: scorePaperVerdict,

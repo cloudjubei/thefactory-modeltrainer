@@ -37,6 +37,9 @@
   }
   const BASE_GRID = 24
   const MAX_CAT_BINS = 14
+  // A search tries a DISCRETE set of values per lever, so each heatmap cell is a CONCRETE tried value (not a
+  // range bin). Cap the distinct values shown per axis; beyond this a lever is too finely sampled to grid.
+  const MAX_AXIS_VALUES = 80
   const MAG = [
     [0, 0, 4], [40, 11, 84], [101, 21, 110], [159, 42, 99],
     [212, 72, 66], [245, 125, 21], [250, 193, 39], [252, 253, 191],
@@ -99,7 +102,19 @@
     .expl-btn{font:inherit;font-family:var(--e-mono);font-size:12.5px;padding:8px 15px;border-radius:8px;border:1px solid var(--e-line);background:var(--e-panel);color:var(--e-text);cursor:pointer}
     .expl-btn.primary{background:var(--e-gold);border-color:transparent;color:#1a1204;font-weight:600}
     .expl-btn:disabled{opacity:.5;cursor:default}
-    .expl-btn:focus-visible,.expl-sel select:focus-visible,.expl-field input:focus-visible{outline:2px solid var(--e-ice);outline-offset:2px}
+    .expl-btn:focus-visible,.expl-ico:focus-visible,.expl-open:focus-visible,.expl-sel select:focus-visible,.expl-field input:focus-visible{outline:2px solid var(--e-ice);outline-offset:2px}
+    .expl-ctrls{display:flex;align-items:center;gap:8px}
+    .expl-ico{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;border-radius:8px;border:1px solid var(--e-line);background:var(--e-panel);color:var(--e-text);font-size:12px;line-height:1;cursor:pointer;font-family:var(--e-mono)}
+    .expl-ico:hover{border-color:var(--e-muted)}
+    .expl-ico.primary{background:var(--e-gold);border-color:transparent;color:#1a1204}
+    .spin{width:12px;height:12px;border-radius:50%;border:2px solid color-mix(in srgb,var(--e-gold) 30%,transparent);border-top-color:var(--e-gold);display:inline-block;animation:expl-spin .8s linear infinite}
+    @keyframes expl-spin{to{transform:rotate(360deg)}}
+    @media (prefers-reduced-motion:reduce){.spin{animation:none}}
+    .expl-lede{color:var(--e-muted);font-size:12.5px;line-height:1.5;max-width:74ch;margin:12px 0 0}
+    .expl-open{font:inherit;font-family:var(--e-mono);font-size:11px;padding:3px 8px;border-radius:6px;border:1px solid var(--e-line);background:var(--e-panel);color:var(--e-ice);cursor:pointer}
+    .expl-open:hover{border-color:var(--e-ice)}
+    .expl-status .expl-readouts{margin:15px 0 0}
+    .expl-status .expl-stages{margin:12px 0 0}
     .expl-readouts{display:flex;flex-wrap:wrap;gap:12px 30px;font-family:var(--e-mono);margin:0 0 18px}
     .expl-ro{display:flex;flex-direction:column;gap:2px}
     .expl-ro .k{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--e-faint)}
@@ -213,58 +228,38 @@
     return { manifest, dir, runs, ranked, rankedKeys, vs, nrm, oMin, oMax, basins: (data.state && data.state.basins) || [] }
   }
 
-  // Build an axis descriptor: numeric → range bins; categorical → distinct-value bins.
-  function makeAxis(lever, runs, manifest, zoom) {
+  // Build an axis descriptor: every cell is a CONCRETE tried value (numeric axes sort numerically + label
+  // with the value; categorical axes sort as strings). Not range bins — a config-space search probes a
+  // discrete set of values, so "0.004–0.004" ranges read as noise; the actual values are what matter.
+  function makeAxis(lever, runs, manifest) {
     const levers = manifest.levers || {}
     const spec = levers[lever] || {}
     const vals = runs.map((r) => r.config[lever]).filter((v) => v !== undefined && v !== null)
     const numeric = spec.type === 'number' || (vals.length && vals.every(isNumericValue))
-    if (numeric) {
-      let lo, hi
-      if (Array.isArray(spec.range)) {
-        lo = spec.range[0]
-        hi = spec.range[1]
-      } else {
-        const nv = vals.map(Number).filter(isFinite)
-        lo = nv.length ? Math.min(...nv) : 0
-        hi = nv.length ? Math.max(...nv) : 1
-      }
-      if (hi === lo) hi = lo + 1
-      const n = Math.round(BASE_GRID * zoom)
-      const edge = (i) => lo + (i / n) * (hi - lo)
-      const d = hi - lo < 1 ? 3 : hi - lo < 100 ? 2 : 0
-      return {
-        lever,
-        kind: 'num',
-        n,
-        lo,
-        hi,
-        index: (v) => Math.max(0, Math.min(n - 1, Math.floor(((Number(v) - lo) / (hi - lo)) * n))),
-        labels: [fmt(lo, lo < 1 ? 3 : 0), fmt(hi, hi < 1 ? 3 : 0)],
-        coordOf: (v) => ((Number(v) - lo) / (hi - lo)),
-        cellLabel: (i) => `${fmt(edge(i), d)}–${fmt(edge(i + 1), d)}`,
-      }
-    }
-    const distinct = [...new Set(vals.map(String))].sort().slice(0, MAX_CAT_BINS)
-    const idx = new Map(distinct.map((v, i) => [v, i]))
+    const distinct = numeric
+      ? [...new Set(vals.map(Number).filter(isFinite))].sort((a, b) => a - b).slice(0, MAX_AXIS_VALUES)
+      : [...new Set(vals.map(String))].sort().slice(0, MAX_AXIS_VALUES)
+    const key = (v) => (numeric ? String(Number(v)) : String(v))
+    const idx = new Map(distinct.map((v, i) => [key(v), i]))
+    const n = Math.max(1, distinct.length)
     return {
       lever,
-      kind: 'cat',
-      n: Math.max(1, distinct.length),
+      kind: numeric ? 'num' : 'cat',
+      numeric,
+      n,
       distinct,
-      index: (v) => (idx.has(String(v)) ? idx.get(String(v)) : -1),
-      labels: distinct,
-      coordOf: (v) => (idx.has(String(v)) ? (idx.get(String(v)) + 0.5) / distinct.length : -1),
-      cellLabel: (i) => distinct[i],
+      index: (v) => (idx.has(key(v)) ? idx.get(key(v)) : -1),
+      labels: distinct.map((v) => (numeric ? fmtVal(v) : String(v))),
+      coordOf: (v) => (idx.has(key(v)) ? (idx.get(key(v)) + 0.5) / n : -1),
+      cellLabel: (i) => (numeric ? fmtVal(distinct[i]) : String(distinct[i])),
     }
   }
 
   // Bin the (peg-filtered) runs into the X×Y grid, KEEPING every run per cell (not just the best) so the
   // heatmap can subdivide a busy cell + a hover can list the exact configs behind a square. Pure + tested.
   function heatmapCells(a) {
-    const zoom = a.vs.zoom || 1
-    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest, xIsNum(a) ? zoom : 1)
-    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest, yIsNum(a) ? zoom : 1)
+    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest)
+    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest)
     const pegs = a.vs.pegs || {}
     const runs = a.runs.filter((r) =>
       Object.keys(pegs).every((l) => pegs[l] == null || String(r.config[l]) === String(pegs[l])),
@@ -295,64 +290,89 @@
 
     const canvas = wrap.querySelector('canvas')
     const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-    // Bigger base cell now that a busy cell subdivides into a mini-mosaic — needs room to read.
     const zoom = a.vs.zoom || 1
-    const cell = Math.max(14, Math.round(24 * zoom))
-    const W = Math.min(1600, xA.n * cell)
-    const H = Math.min(1600, yA.n * cell)
+    const cellPx = Math.max(16, Math.round(26 * zoom))
+    // Reserve a margin for axis value ticks — left of the rows (y) and under the columns (x).
+    const mL = 60
+    const mB = 30
+    const mT = 6
+    const mR = 8
+    const gridW = xA.n * cellPx
+    const gridH = yA.n * cellPx
+    // No clamp: the canvas lives in a scroll container, so it takes its natural size and scrolls rather
+    // than clipping cells off the right/bottom edge.
+    const W = mL + gridW + mR
+    const H = mT + gridH + mB
     canvas.style.width = W + 'px'
     canvas.style.height = H + 'px'
     canvas.width = W * dpr
     canvas.height = H * dpr
     const x = canvas.getContext('2d')
     x.scale(dpr, dpr)
+    const cs = getComputedStyle(container.querySelector('.expl'))
+    const empty = (cs.getPropertyValue('--e-panel2') || '#0d121d').trim()
+    const faint = (cs.getPropertyValue('--e-faint') || '#8a97a9').trim()
+    const mono = cs.fontFamily || 'monospace'
+    const CX = (i) => mL + i * cellPx // grid-left of column i
+    const CY = (jScreen) => mT + jScreen * cellPx // grid-top of screen-row jScreen (0 = top)
 
-    const cw = W / xA.n
-    const ch = H / yA.n
-    const empty = (getComputedStyle(container.querySelector('.expl')).getPropertyValue('--e-panel2') || '#0d121d').trim()
-    for (let j = 0; j < yA.n; j++) {
+    for (let jScreen = 0; jScreen < yA.n; jScreen++) {
+      const cj = yA.n - 1 - jScreen // y points UP: top screen row = highest tried value
       for (let i = 0; i < xA.n; i++) {
-        const c = cells[(yA.n - 1 - j) * xA.n + i] // row 0 = highest y (drawn top)
-        const px = i * cw
-        const py = j * ch
+        const c = cells[cj * xA.n + i]
+        const px = CX(i)
+        const py = CY(jScreen)
         if (!c.runs.length) {
           x.fillStyle = empty
-          x.fillRect(px, py, cw + 0.6, ch + 0.6)
+          x.fillRect(px, py, cellPx + 0.6, cellPx + 0.6)
           continue
         }
         if (c.runs.length === 1) {
           x.fillStyle = magma(c.runs[0].t)
-          x.fillRect(px, py, cw + 0.6, ch + 0.6)
+          x.fillRect(px, py, cellPx + 0.6, cellPx + 0.6)
           continue
         }
         // Multiple configs share this X/Y square (they differ on OTHER levers) — subdivide into a mosaic so
         // the spread of results inside one cell is visible instead of collapsed to a single best colour.
         const sub = Math.ceil(Math.sqrt(c.runs.length))
-        const sw = cw / sub
-        const sh = ch / sub
+        const sw = cellPx / sub
         for (let s = 0; s < sub * sub; s++) {
-          const si = s % sub
-          const sj = Math.floor(s / sub)
           const run = c.runs[s]
           x.fillStyle = run ? magma(run.t) : empty
-          x.fillRect(px + si * sw, py + sj * sh, sw + 0.5, sh + 0.5)
+          x.fillRect(px + (s % sub) * sw, py + Math.floor(s / sub) * sw, sw + 0.5, sw + 0.5)
         }
       }
     }
+    // grid lines
     x.strokeStyle = 'rgba(128,140,160,.16)'
     x.lineWidth = 1
-    for (let g = 1; g < xA.n; g++) { x.beginPath(); x.moveTo(g * cw, 0); x.lineTo(g * cw, H); x.stroke() }
-    for (let g = 1; g < yA.n; g++) { x.beginPath(); x.moveTo(0, g * ch); x.lineTo(W, g * ch); x.stroke() }
+    for (let g = 0; g <= xA.n; g++) { x.beginPath(); x.moveTo(CX(g), mT); x.lineTo(CX(g), mT + gridH); x.stroke() }
+    for (let g = 0; g <= yA.n; g++) { x.beginPath(); x.moveTo(mL, mT + g * cellPx); x.lineTo(mL + gridW, mT + g * cellPx); x.stroke() }
+
+    // axis value ticks — concrete values under each column / left of each row, thinned so they never crowd
+    x.fillStyle = faint
+    x.font = `10px ${mono}`
+    const xStep = Math.max(1, Math.ceil(xA.n / Math.max(1, Math.floor(gridW / 46))))
+    x.textAlign = 'center'
+    x.textBaseline = 'top'
+    for (let i = 0; i < xA.n; i += xStep) x.fillText(String(xA.labels[i]), CX(i) + cellPx / 2, mT + gridH + 6, cellPx * xStep - 2)
+    const yStep = Math.max(1, Math.ceil(yA.n / Math.max(1, Math.floor(gridH / 20))))
+    x.textAlign = 'right'
+    x.textBaseline = 'middle'
+    for (let jScreen = 0; jScreen < yA.n; jScreen += yStep) {
+      const cj = yA.n - 1 - jScreen
+      x.fillText(String(yA.labels[cj]), mL - 6, CY(jScreen) + cellPx / 2, mL - 10)
+    }
 
     // peak crosshairs for basins whose center matches the current pegs
     for (const b of a.basins) {
       if (!b.centerConfig) continue
       if (!Object.keys(pegs).every((l) => pegs[l] == null || String(b.centerConfig[l]) === String(pegs[l]))) continue
-      const cx = xA.coordOf(b.centerConfig[a.vs.axisX])
-      const cy = yA.coordOf(b.centerConfig[a.vs.axisY])
-      if (cx < 0 || cy < 0) continue
-      const px = cx * W
-      const py = (1 - cy) * H
+      const gi = xA.index(b.centerConfig[a.vs.axisX])
+      const gj = yA.index(b.centerConfig[a.vs.axisY])
+      if (gi < 0 || gj < 0) continue
+      const px = CX(gi) + cellPx / 2
+      const py = CY(yA.n - 1 - gj) + cellPx / 2
       const isG = ctx && ctx.data.state && b.id === ctx.data.state.declaredBasinId
       x.strokeStyle = isG ? '#f4b740' : '#8fd6ff'
       x.lineWidth = 2
@@ -360,11 +380,11 @@
       x.beginPath(); x.moveTo(px - 11, py); x.lineTo(px + 11, py); x.moveTo(px, py - 11); x.lineTo(px, py + 11); x.lineWidth = 1.3; x.stroke()
     }
 
-    wireHeatmapHover(wrap, canvas, a, { xA, yA, cells, W, H, cw, ch })
+    wireHeatmapHover(wrap, canvas, a, { xA, yA, cells, W, H, mL, mT, cellPx, gridW, gridH })
   }
 
-  // Hover a cell → a tooltip with the exact config(s) + result behind that square; hover an empty cell →
-  // the X/Y range it covers, so gaps read as "nothing tried here (x∈…, y∈…)" instead of a blank.
+  // Hover a cell → a tooltip with the exact config(s) + result behind that square (each a CONCRETE tried
+  // value); hover an empty cell → the X/Y values it sits at, so gaps read as "nothing tried here".
   function wireHeatmapHover(wrap, canvas, a, geom) {
     let tip = wrap.parentNode.querySelector('.expl-tip')
     if (!tip) {
@@ -373,17 +393,18 @@
       tip.style.display = 'none'
       wrap.parentNode.appendChild(tip)
     }
-    const { xA, yA, cells, W, H, cw, ch } = geom
+    const { xA, yA, cells, W, H, mL, mT, cellPx, gridW, gridH } = geom
     const dir = a.dir === 'min' ? 'min' : 'max'
     canvas.onmousemove = (ev) => {
       const rect = canvas.getBoundingClientRect()
-      const mx = ((ev.clientX - rect.left) / rect.width) * W
-      const my = ((ev.clientY - rect.top) / rect.height) * H
-      const i = Math.max(0, Math.min(xA.n - 1, Math.floor(mx / cw)))
-      const jScreen = Math.max(0, Math.min(yA.n - 1, Math.floor(my / ch)))
+      const mx = ((ev.clientX - rect.left) / rect.width) * W - mL
+      const my = ((ev.clientY - rect.top) / rect.height) * H - mT
+      if (mx < 0 || my < 0 || mx >= gridW || my >= gridH) { tip.style.display = 'none'; return }
+      const i = Math.max(0, Math.min(xA.n - 1, Math.floor(mx / cellPx)))
+      const jScreen = Math.max(0, Math.min(yA.n - 1, Math.floor(my / cellPx)))
       const cj = yA.n - 1 - jScreen
       const cell = cells[cj * xA.n + i]
-      const where = `<span class="tw">${esc(a.vs.axisX)}</span> ${esc(xA.cellLabel(i))} · <span class="tw">${esc(a.vs.axisY)}</span> ${esc(yA.cellLabel(cj))}`
+      const where = `<span class="tw">${esc(a.vs.axisX)}</span> = ${esc(xA.cellLabel(i))} · <span class="tw">${esc(a.vs.axisY)}</span> = ${esc(yA.cellLabel(cj))}`
       let body
       if (!cell || !cell.runs.length) {
         body = `<div class="th">no runs here</div><div class="tr">${where}</div>`
@@ -408,14 +429,6 @@
       tip.style.top = top + 'px'
     }
     canvas.onmouseleave = () => { tip.style.display = 'none' }
-  }
-  const xIsNum = (a) => leverIsNumeric(a.manifest, a.vs.axisX, a.runs)
-  const yIsNum = (a) => leverIsNumeric(a.manifest, a.vs.axisY, a.runs)
-  function leverIsNumeric(manifest, lever, runs) {
-    const spec = (manifest.levers || {})[lever]
-    if (spec && spec.type === 'number') return true
-    const vals = runs.map((r) => r.config[lever]).filter((v) => v !== undefined && v !== null)
-    return vals.length > 0 && vals.every(isNumericValue)
   }
 
   function drawRegret(container, a) {
@@ -497,84 +510,114 @@
     const log = (data.state && data.state.log) || []
     const last = log[log.length - 1]
 
-    // The in-flight child `train` run this round launched (queued vs running). A running/queued child means
-    // the search IS working even when the `explore` controller activity momentarily isn't found live — so
-    // treat it as "working" and never fall back to a Start/Stopped view while a child is executing.
+    // A running/queued child `train` means the search IS working even if the `explore` controller activity
+    // isn't found live in this (eventually-consistent) snapshot — so treat it as working, never a Stopped view.
     const pc = data.pendingChild
     const childActive = !!(pc && (pc.status === 'running' || pc.status === 'starting' || pc.status === 'queued'))
+    const launching = !!data.launching && !live && !childActive // optimistic: just clicked Start/Resume
     const working = (live || childActive) && !paused
-    const inProgress = hasState && !done && !paused && !working // the map is mid-search but nothing is executing
+    const inProgress = hasState && !done && !paused && !working && !launching // mid-search, nothing executing
+    const started = hasState || working || launching
 
-    // Real-time run accounting: the strategist's `spentRuns` (what it has folded into the map) vs the ACTUAL
-    // completed runs on disk. When runs land faster than rounds fold them, show the backlog so the count
-    // never looks stale/stuck ("7 accounted · 3 new being analyzed"), which is the "feels stale" complaint.
-    const spent = (data.state && data.state.budget && data.state.budget.spentRuns) || 0
     const total = typeof data.totalRuns === 'number' ? data.totalRuns : a.runs.length
-    const backlog = Math.max(0, total - spent)
 
-    // Start controls appear ONLY when idle (no working/paused/stalled search) — otherwise a live status view.
-    let head
-    let ctrls
-    let showBudget = false
-    if (working) {
-      const verb = live ? 'Exploring' : 'Finishing run'
-      head = `<span class="pulse"></span> ${verb} — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
-      ctrls = live
-        ? `<button class="expl-btn" data-act="pause">Pause</button><button class="expl-btn" data-act="abort">Stop</button>`
-        : `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
+    // Icon-only transport controls (pause/resume/stop); Start / Explore-again stay labelled (primary action).
+    const ico = (act, glyph, label, cls) =>
+      `<button class="expl-ico ${cls || ''}" data-act="${act}" title="${label}" aria-label="${label}">${glyph}</button>`
+    let head, ctrls, mode
+    if (launching) {
+      mode = 'launching'
+      head = '<span class="spin"></span> Starting exploration…'
+      ctrls = ico('abort', '■', 'Stop')
+    } else if (working) {
+      mode = 'working'
+      head = `<span class="pulse"></span> Exploring — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || 'running')}</span>`
+      ctrls = ico('pause', '❚❚', 'Pause') + ico('abort', '■', 'Stop') // no Resume while working
     } else if (paused) {
+      mode = 'paused'
       head = 'Paused'
-      ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
+      ctrls = ico('resume', '▶', 'Resume', 'primary') + ico('abort', '■', 'Stop')
     } else if (inProgress) {
-      const why = backlog > 0 ? ` · ${backlog} new run${backlog === 1 ? '' : 's'} to fold in` : ''
-      head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span>${why} · Resume to continue`
-      ctrls = `<button class="expl-btn primary" data-act="resume">Resume</button><button class="expl-btn" data-act="abort">Stop</button>`
+      mode = 'stopped'
+      head = `Stopped — <span data-help="${esc(STAGE_HELP[stage] || '')}">${esc(stage || '')}</span>`
+      ctrls = ico('resume', '▶', 'Resume', 'primary') + ico('abort', '■', 'Stop')
     } else if (done) {
+      mode = 'done'
       head = 'Converged'
-      ctrls = `<button class="expl-btn primary" data-act="launch">Explore again</button>`
-      showBudget = true
+      ctrls = '<button class="expl-btn primary" data-act="launch">Explore again</button>'
     } else {
+      mode = 'idle'
       head = 'Ready to explore'
-      ctrls = `<button class="expl-btn primary" data-act="launch">Start exploration</button>`
-      showBudget = true
+      ctrls = '<button class="expl-btn primary" data-act="launch">Start exploration</button>'
     }
 
+    // Readouts + stage progress are PART of the status (they only exist once the search has started), so they
+    // live at the top of the card rather than as a separate strip.
+    const bestObj =
+      data.state && data.state.regret && data.state.regret.length
+        ? data.state.regret[data.state.regret.length - 1].bestObjective
+        : a.runs.length ? (a.dir === 'max' ? a.oMax : a.oMin) : NaN
+    const declared = a.basins.find((x) => data.state && x.id === data.state.declaredBasinId)
+    const readouts = started
+      ? [
+          ['runs', total, ''],
+          ['basins', a.basins.length, ''],
+          ['best objective', isFinite(bestObj) ? fmt(bestObj, 2) : '—', 'gold'],
+          ...(declared ? [['global max', basinLabel(declared, a), 'gold']] : []),
+        ]
+      : []
+    const readoutsHtml = readouts.length
+      ? `<div class="expl-readouts">${readouts.map((r) => `<div class="expl-ro"><span class="k">${esc(r[0])}</span><span class="v ${r[2]}">${esc(r[1])}</span></div>`).join('')}</div>`
+      : ''
+    const reachedIdx = data.state ? STAGES.indexOf(data.state.stage) : -1
+    const stagesHtml = started
+      ? `<ol class="expl-stages">${STAGES.map((s, i) => {
+          const d = reachedIdx >= i
+          const cur = data.state && data.state.stage === s && !done
+          return `<li class="${d ? 'done' : ''} ${cur ? 'cur' : ''}" data-help="${esc(STAGE_HELP[s])}"><span class="n">${i + 1}</span><span>${esc(s)}</span></li>`
+        }).join('')}</ol>`
+      : ''
+
+    // What's happening now — the last decision + the CURRENT campaign's concrete run progress (X/Y), not an
+    // opaque "N being analyzed" backlog (the live total sits in the readouts above).
+    const rationale = (last && last.rationale) || (stage || 'starting')
+    let progress = ''
+    if (working) {
+      if (childActive && pc.status === 'queued') progress = ' · <span class="bl">run queued — waiting for a free experiment slot</span>'
+      else if (data.childProgress && data.childProgress.total) progress = ` · running ${data.childProgress.done}/${data.childProgress.total} runs`
+      else if (childActive) progress = ' · training run in progress…'
+      else progress = ' · planning the next batch…'
+    }
+    const nowLine =
+      working || paused || inProgress
+        ? `<p class="now"><b>${esc(rationale)}</b>${progress}</p>`
+        : launching ? '<p class="now">launching the controller…</p>' : ''
+
+    // Idle: the ONE-TIME explainer + budget fields. Done: budget fields (to re-run). Otherwise neither.
     const b = (data.state && data.state.budget) || {}
     const field = (id, label, val, help) =>
       `<label class="expl-field"><span class="lbl" data-help="${esc(help)}">${esc(label)}</span><input type="number" min="0" id="${id}" value="${val != null ? esc(val) : ''}" placeholder="auto"></label>`
-    // Parallelism is NOT set here — it comes from the Activity tab's one "Max parallel runs" knob (so there's
-    // a single place for it). Only the run budget + target objective are exploration-specific.
-    const budgetFields = showBudget
-      ? `<div class="expl-controls" style="margin-top:12px">
-            ${field('expl-maxruns', 'run budget', b.maxRuns, BUDGET_HELP.maxRuns)}
-            ${field('expl-target', 'target objective', data.state && data.state.targetObjective, BUDGET_HELP.targetObjective)}
-          </div>`
-      : ''
+    const budgetFields =
+      mode === 'idle' || mode === 'done'
+        ? `<div class="expl-controls" style="margin-top:12px">${field('expl-maxruns', 'run budget', b.maxRuns, BUDGET_HELP.maxRuns)}${field('expl-target', 'target objective', data.state && data.state.targetObjective, BUDGET_HELP.targetObjective)}</div>`
+        : ''
+    const ledeHtml =
+      mode === 'idle'
+        ? `<p class="expl-lede">The autopilot searches this project's config space — screening which levers matter, finding every basin, then climbing each to its peak. Press Start; the coverage heatmap below fills in as runs land.</p>`
+        : ''
 
-    const childLine =
-      pc && (working || inProgress)
-        ? pc.status === 'queued'
-          ? '<p class="now sub">⏳ run queued — waiting for a free experiment slot (other training or host memory pressure may be using them)</p>'
-          : pc.status === 'running' || pc.status === 'starting'
-            ? '<p class="now sub">▶ training run in progress…</p>'
-            : ''
-        : ''
-    const countLine =
-      working || inProgress || paused
-        ? `<p class="now"><b>${esc((last && last.rationale) || (stage ? stage : 'starting the controller…'))}</b> · ${spent} run${spent === 1 ? '' : 's'} folded in${backlog > 0 ? ` · <span class="bl">${backlog} new being analyzed…</span>` : ''}</p>`
-        : ''
-    // Decision breadcrumbs as a terminal-style console: oldest at top, NEWEST AT BOTTOM, in a fixed-height
-    // scroll box that auto-sticks to the bottom (handled after render) so new lines don't shove the page.
     const logHtml = log.length
       ? `<div class="expl-logwrap" data-expl-log><ol class="expl-log">${log
           .map((e) => `<li><span class="st">${esc(e.stage)}</span><span class="ms">${esc(e.rationale)}</span><span class="rn">${e.spentRuns} runs</span></li>`)
           .join('')}</ol></div>`
       : ''
 
-    return `<div class="expl-status ${working ? 'live' : ''}">
-      <div class="row"><span class="title">${head}</span><div style="flex:1"></div>${ctrls}</div>
-      ${countLine}
-      ${childLine}
+    return `<div class="expl-status ${working || launching ? 'live' : ''}">
+      <div class="row"><span class="title">${head}</span><div style="flex:1"></div><div class="expl-ctrls">${ctrls}</div></div>
+      ${readoutsHtml}
+      ${stagesHtml}
+      ${nowLine}
+      ${ledeHtml}
       ${budgetFields}
       ${logHtml}
     </div>`
@@ -611,50 +654,32 @@
     injectStyles()
     ctx = { container, data, actions }
     const a = analyze(data)
-    const declared = a.basins.find((x) => data.state && x.id === data.state.declaredBasinId)
-    const bestObj = data.state && data.state.regret && data.state.regret.length
-      ? data.state.regret[data.state.regret.length - 1].bestObjective
-      : a.runs.length ? (a.dir === 'max' ? a.oMax : a.oMin) : NaN
-
-    const readouts = [
-      ['runs', a.runs.length, ''],
-      ['basins', a.basins.length, ''],
-      ['best objective', isFinite(bestObj) ? fmt(bestObj, 2) : '—', 'gold'],
-    ]
-    if (declared) readouts.push(['global max', basinLabel(declared, a), 'gold'])
-
-    const reachedIdx = data.state ? STAGES.indexOf(data.state.stage) : -1
-    const stageBar = STAGES.map((s, i) => {
-      const done = reachedIdx >= i
-      const cur = data.state && data.state.stage === s && !data.state.done
-      return `<li class="${done ? 'done' : ''} ${cur ? 'cur' : ''}" data-help="${esc(STAGE_HELP[s])}"><span class="n">${i + 1}</span><span>${s}</span></li>`
-    }).join('')
-
     const oMinL = fmt(a.oMin, 1)
     const oMaxL = fmt(a.oMax, 1)
     const cmapId = 'expl-cmap'
     const hasMap = a.rankedKeys.length >= 2
 
     const basinRows = a.basins.length
-      ? a.basins.map((b) => {
+      ? a.basins.map((b, bi) => {
           const isG = data.state && b.id === data.state.declaredBasinId
           const center = b.centerConfig && a.vs.axisX && a.vs.axisY
             ? `${esc(a.vs.axisX)}=${esc(fmtVal(b.centerConfig[a.vs.axisX]))}, ${esc(a.vs.axisY)}=${esc(fmtVal(b.centerConfig[a.vs.axisY]))}`
             : '—'
+          const nRuns = (b.memberRunKeys && b.memberRunKeys.length) || 0
+          const openBtn = nRuns
+            ? `<button class="expl-open" data-basin-open="${bi}" title="Open this basin's ${nRuns} run${nRuns === 1 ? '' : 's'} in the Runs tab">Runs ↗</button>`
+            : ''
+          const tier = isG ? '<span class="expl-badge">global</span>' : '<span style="color:var(--e-faint)">local</span>'
           return `<tr><td><span class="dot" style="background:${isG ? '#f4b740' : '#8fd6ff'}"></span>${esc(basinLabel(b, a))}</td>
             <td style="font-weight:600">${fmt(b.peakObjective, 1)}</td><td>${center}</td>
             <td>${b.peakSeeds || 1}</td><td>${b.plateaued ? 'yes' : '—'}</td>
-            <td>${isG ? '<span class="expl-badge">global</span>' : '<span style="color:var(--e-faint)">local</span>'}</td></tr>`
+            <td style="text-align:right;white-space:nowrap">${tier}${openBtn ? ' ' + openBtn : ''}</td></tr>`
         }).join('')
       : `<tr><td colspan="6" style="color:var(--e-faint);padding:14px 0">No basins yet — run the exploration to enumerate maxima.</td></tr>`
 
     container.innerHTML = `<div class="expl">
-      <h2>Exploration${data.manifest ? ' — ' + esc(data.manifest.recordType || '') : ''}</h2>
-      <p class="lede">The autopilot searches this project's config space — screening which levers matter, finding every basin, then climbing each to its peak. Hover any stage or field for what it does; the heatmap shows where the search has spent its budget.</p>
       ${statusHtml(data, a)}
-      <div class="expl-readouts">${readouts.map((r) => `<div class="expl-ro"><span class="k">${r[0]}</span><span class="v ${r[2]}">${esc(r[1])}</span></div>`).join('')}</div>
-      <ol class="expl-stages">${stageBar}</ol>
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:6px">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin:16px 0 6px">
         <h3 style="margin:0">Search-space coverage</h3>
         <div class="expl-legend"><span>objective</span><canvas id="${cmapId}" width="170" height="12"></canvas><span>${oMinL}</span><span>${oMaxL}</span></div>
       </div>
@@ -675,7 +700,6 @@
           <table class="expl-basins"><thead><tr><th>basin</th><th>peak</th><th>center</th><th>seeds</th><th>plateaued</th><th></th></tr></thead><tbody>${basinRows}</tbody></table>
           <p class="cap">A basin beats the trivial baseline; the <b>global max</b> is the best basin that is robust across seeds and locally plateaued.</p></div>
       </div>
-      ${data.state ? '' : '<p class="expl-note">No exploration has run yet — set a budget and press Start.</p>'}
     </div>`
 
     const cm = container.querySelector('#' + cmapId)
@@ -748,6 +772,13 @@
     onAct('pause', () => actions.onPause && actions.onPause())
     onAct('resume', () => actions.onResume && actions.onResume())
     onAct('abort', () => actions.onAbort && actions.onAbort())
+    container.querySelectorAll('[data-basin-open]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const bi = parseInt(btn.getAttribute('data-basin-open'), 10)
+        const basin = a.basins[bi]
+        if (basin && basin.memberRunKeys && actions.onOpenRuns) actions.onOpenRuns(basin.memberRunKeys)
+      })
+    })
   }
 
   function basinLabel(b, a) {

@@ -5,14 +5,19 @@
   "calibrate": ".venv/bin/python -m trainer.run --calibrate --summary-out {summaryOut}",
   "evaluate": ".venv/bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}",
   "objective": { "name": "eval_return_mean", "direction": "max" },
+  "hypothesisBenchmark": { "metric": "eval_return_mean", "threshold": 475 },
   "levers": {
-    "algo": { "type": "choice", "choices": ["ppo", "dqn"], "default": "ppo" },
+    "model_name": { "type": "choice", "choices": ["ppo", "dqn"], "default": "ppo" },
     "learning_rate": { "type": "number", "default": 0.0003, "range": [0.00001, 0.01] },
     "gamma": { "type": "number", "default": 0.99, "range": [0.8, 0.9999] },
     "total_timesteps": { "type": "number", "default": 8000, "range": [1000, 200000] },
     "net_arch": { "type": "choice", "choices": ["64,64", "256,256"], "default": "64,64" },
     "seed": { "type": "number", "default": 0 }
   },
+  "migrations": [
+    { "match": { "algo": "ppo" }, "set": { "model_name": "ppo" }, "unset": ["algo"] },
+    { "match": { "algo": "dqn" }, "set": { "model_name": "dqn" }, "unset": ["algo"] }
+  ],
   "eta": { "unitsLever": "total_timesteps" },
   "data": [],
   "resources": { "gpu": false, "memory": "2g", "cpus": 2 }

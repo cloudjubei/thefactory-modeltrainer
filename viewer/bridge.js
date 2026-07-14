@@ -32,7 +32,10 @@
 
   window.OverseerBridge = {
     embedded: window.parent && window.parent !== window,
-    queryData: (payload) => call('data.query', payload),
+    // `timeoutMs` overrides the default 8s guard — bulk history scans page a large project under DB write
+    // contention, where a single page can legitimately take longer than 8s (a too-tight timeout rejects,
+    // which the accumulator would otherwise mistake for end-of-data and truncate the scan).
+    queryData: (payload, timeoutMs) => call('data.query', payload, timeoutMs),
     // Total records matching a filter (type/where), ignoring limit/offset — pairs with queryData's
     // limit/offset for server-side pagination. Returns { count }.
     countData: (payload) => call('data.count', payload),
@@ -75,6 +78,13 @@
     // Open the docked chat sidebar seeded with a topic + first message, and
     // auto-send the seed. Used by "Ask AI for help" on a failed run.
     discussTopic: (payload) => call('chat.discuss', payload, 30000),
+    // Create a story in the ACTIVE project ({ title, description } → { storyId }) — the "work on this"
+    // seam (e.g. a paper coverage-gap becomes a story agents can pick up from the Stories screen).
+    createStory: (payload) => call('story.create', payload, 30000),
+    // Create a FEATURE inside a find-or-create story (matched by title):
+    // { storyTitle, storyDescription, feature: { title, description } } → { storyId, featureId }.
+    // For recurring buckets (e.g. "implement missing model components") that collect features over time.
+    createStoryFeature: (payload) => call('story.feature.create', payload, 30000),
     // Tell the host which model kinds this app's background activities can run on, so the activity
     // model chip can disable unsupported options (e.g. CLI for API-only judge/propose/analyze).
     reportCapabilities: (payload) => call('app.capabilities', payload),

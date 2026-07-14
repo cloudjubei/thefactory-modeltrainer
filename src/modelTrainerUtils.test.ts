@@ -1256,6 +1256,41 @@ describe('coerceHypothesisItems — precision guards + compare', () => {
       ),
     ).toEqual([])
   })
+  it('clamps an out-of-range comparison.baselineIndex to 0 (an LLM index beyond the cells would mis-judge)', () => {
+    const out = coerceHypothesisItems(
+      [
+        {
+          title: 'reppo vs ppo',
+          rationale: 'compare with a bad baseline index',
+          spec: {
+            fixed: { timeframe: '1h' },
+            compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+          },
+          comparison: { kind: 'beats-baseline', baselineIndex: 7 },
+        },
+      ],
+      mfModel(),
+    )
+    expect(out).toHaveLength(1)
+    expect(out[0].comparison).toEqual({ kind: 'beats-baseline', baselineIndex: 0 })
+  })
+  it('keeps a valid in-range baselineIndex', () => {
+    const out = coerceHypothesisItems(
+      [
+        {
+          title: 'reppo vs ppo',
+          rationale: 'compare with baseline 1',
+          spec: {
+            fixed: { timeframe: '1h' },
+            compare: { lever: 'model_name', values: ['ppo-custom', 'reppo-custom'] },
+          },
+          comparison: { kind: 'beats-baseline', baselineIndex: 1 },
+        },
+      ],
+      mfModel(),
+    )
+    expect(out[0].comparison).toEqual({ kind: 'beats-baseline', baselineIndex: 1 })
+  })
   it('keeps a single-context spec that pins the model-identity lever', () => {
     const out = coerceHypothesisItems(
       [

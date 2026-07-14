@@ -22,6 +22,10 @@ something the orchestrator or a comparison actually depends on.
   "run": "python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
   "calibrate": "python -m trainer.run --calibrate --summary-out {summaryOut}",
   "objective": { "name": "eval_return", "direction": "max" }, // single north-star
+  // How a SINGLE-CONTEXT hypothesis is PROVEN: the best matching run's `metric` clears `threshold`
+  // (toward `direction`, default max). Omitted ⇒ the trading default (return_vs_hold_pct > 0) — declare
+  // it for any non-trading project or its hypotheses can never be judged.
+  "hypothesisBenchmark": { "metric": "eval_return", "threshold": 475 },
   "levers": {
     // the sweepable config space (renders the launch form)
     "learning_rate": { "type": "number", "default": 3e-4, "range": [1e-5, 1e-2] },
