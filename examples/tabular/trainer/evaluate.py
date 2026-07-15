@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
-from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.base import RegressorMixin
 from sklearn.metrics import mean_squared_error, r2_score
 
 from trainer.data import DatasetSplit
@@ -20,7 +20,7 @@ class EvalResult:
     flags: list[str] = field(default_factory=list)
 
 
-def evaluate_model(model: GradientBoostingRegressor, split: DatasetSplit) -> EvalResult:
+def evaluate_model(model: RegressorMixin, split: DatasetSplit) -> EvalResult:
     val_rmse = math.sqrt(float(mean_squared_error(split.y_val, model.predict(split.x_val))))
     train_rmse = math.sqrt(float(mean_squared_error(split.y_train, model.predict(split.x_train))))
     val_r2 = float(r2_score(split.y_val, model.predict(split.x_val)))

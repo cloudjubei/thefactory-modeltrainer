@@ -9,6 +9,7 @@ import {
   nextExplorationStep,
   clusterBasins,
   localRefineRecs,
+  coverageGridRecs,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
 import { XAI_MIN_SEEDS } from './modelTrainerConstants.js'
@@ -315,11 +316,11 @@ describe('exhausted stage advance (no dead-end when the space is already covered
 })
 
 // The core contract the user demanded: "it should never converge unless the whole search space was covered."
-// A plateau in the CURRENT active subspace must ESCALATE — unfreeze a previously-fixed lever, then deepen the
-// numeric resolution — and only declare `converged` once that whole ladder is dry (space genuinely covered).
+// A plateau in the current subspace must ESCALATE — unfreeze a fixed lever, then keep SPACE-FILLING the active
+// numeric space to a density target — and only converge once every lever is unfrozen AND the space is covered.
 describe('escalation ladder — never converge until the space is covered', () => {
-  // MANIFEST-only helper: a manifest with NO inert lever, so `frozenLevers: {}` is a realistic full state
-  // (every searchable lever active) and rung-1 (unfreeze) is legitimately empty — isolating rung-2 (deepen).
+  // A manifest with NO inert lever, so `frozenLevers: {}` is a realistic full state (every searchable lever
+  // active) and rung-1 (unfreeze) is legitimately empty — isolating the coverage rung.
   const M2: TrainerManifest = {
     name: 'no-inert',
     recordType: 'no-inert-run',
@@ -335,9 +336,18 @@ describe('escalation ladder — never converge until the space is covered', () =
     const cfg = manifest === M2 ? { algo: 'A', lr, seed } : { algo: 'A', lr, noise_knob: 0.5, seed }
     return evaluate(cfg)
   }
+  // configs emitted by a coverage rec (space-filling samples ride in spec.configs, not a per-lever sweep)
+  const coverageLrs = (step: ReturnType<typeof nextExplorationStep>): number[] =>
+    step.batch.flatMap((b) => (b.spec.configs ?? []).map((c) => Number(c.config.lr)))
+  // every lr value the step proposes, whether via a coverage config or a coordinate sweep
+  const proposedLrs = (step: ReturnType<typeof nextExplorationStep>): number[] =>
+    step.batch.flatMap((b) => [
+      ...(b.spec.configs ?? []).map((c) => Number(c.config.lr)),
+      ...(((b.spec.sweep?.lr as number[]) ?? []).map(Number)),
+    ])
 
   it('UNFREEZES a fixed numeric lever instead of converging when all basins plateaued (rung 1: widen)', () => {
-    // A is tightly resolved on lr (bracket 0.49–0.51 ⇒ plateaued), and noise_knob is frozen — so instead of
+    // A is tightly resolved on lr (bracket 0.48–0.52 ⇒ plateaued), and noise_knob is frozen — so instead of
     // "all basins plateaued → converged", the search must unfreeze noise_knob and probe it.
     runSeq = 0
     const runs: AnalysisRun[] = []
@@ -358,12 +368,13 @@ describe('escalation ladder — never converge until the space is covered', () =
     expect(JSON.stringify(step.batch.map((b) => b.spec.sweep))).toContain('noise_knob')
   })
 
-  it('DEEPENS the numeric resolution when a basin is resolved at the current floor but not a finer one (rung 2)', () => {
-    // lr tried at 0.48/0.5/0.52 → half-gap 0.01: resolved at range/64 (0.0156) but NOT at range/128 (0.0078).
-    // With no frozen levers, rung 1 is empty, so the search must deepen rather than converge.
+  it('SPACE-FILLS the under-sampled range instead of converging, without auto-deepening the resolution', () => {
+    // The single basin on lr is locally resolved (bunched 0.48–0.52), but far fewer than the coverage target
+    // of distinct setups exist — so the search must sample the REST of the range, and NOT bump refineDepth
+    // (deepening is user-driven via "Explore more", not automatic).
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const lr of [0.48, 0.5, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
     const state: ExplorationState = {
       ...initExplorationState(M2),
       stage: 'local',
@@ -373,14 +384,15 @@ describe('escalation ladder — never converge until the space is covered', () =
     }
     const step = nextExplorationStep(state, runs, M2, {})
     expect(step.done).toBe(false)
-    expect(step.stage).toBe('local')
-    expect(step.stateNext.refineDepth).toBe(1) // deepened one level
-    expect(step.batch.length).toBeGreaterThan(0)
+    expect(step.stateNext.refineDepth ?? 0).toBe(0) // NOT auto-deepened
+    const lrs = coverageLrs(step)
+    expect(lrs.length).toBeGreaterThan(0)
+    expect(lrs.some((v) => v < 0.4 || v > 0.6)).toBe(true) // reaching out into the untried range
   })
 
   it('does NOT converge while the numeric range is still UNCOVERED — even with points clustered at the peak', () => {
-    // A pathological "looks converged" case: three runs bunched at 0.4995–0.5005. The old logic would call the
-    // basin plateaued and converge, but 99% of the lr range is untried — so the search must keep probing it.
+    // The old logic called the basin plateaued and converged with 3 bunched runs; but 99% of the lr range is
+    // untried, so the search must keep space-filling it.
     runSeq = 0
     const runs: AnalysisRun[] = []
     for (const lr of [0.4995, 0.5, 0.5005]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
@@ -392,9 +404,42 @@ describe('escalation ladder — never converge until the space is covered', () =
       noiseFloor: 1,
     }
     const step = nextExplorationStep(state, runs, M2, {})
-    expect(step.done).toBe(false) // the space is nowhere near covered
-    const swept = step.batch.flatMap((b) => (b.spec.sweep?.lr as number[]) ?? [])
-    expect(swept.some((v) => v < 0.4 || v > 0.6)).toBe(true) // reaching out into the untried range
+    expect(step.done).toBe(false)
+    expect(proposedLrs(step).some((v) => v < 0.4 || v > 0.6)).toBe(true) // reaching into the untried range
+  })
+
+  it('CONVERGES once the space is covered (density target met) AND the peak is resolved', () => {
+    // A dense-near-peak + spread-across-range history: >= the coverage target of distinct lr setups, with the
+    // peak bracketed tighter than the resolution floor — nothing left to sample, so it may finally converge.
+    runSeq = 0
+    const lrs = [0, 0.1, 0.2, 0.3, 0.4, 0.49, 0.495, 0.5, 0.505, 0.51, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+    const runs: AnalysisRun[] = []
+    for (const lr of lrs) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, M2, {})
+    expect(step.done).toBe(true)
+    expect(step.stage).toBe('converged')
+    expect(step.rationale).toMatch(/covered/i)
+    expect(step.stateNext.declaredBasinId).toBeTruthy()
+  })
+
+  it('coverageGridRecs space-fills up to the density target, then goes empty (the convergence gate)', () => {
+    // < target distinct setups ⇒ it proposes space-filling configs; >= target ⇒ nothing (space covered).
+    runSeq = 0
+    const few: AnalysisRun[] = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => aRun(M2, lr, s)))
+    const many: AnalysisRun[] = []
+    for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) many.push(aRun(M2, i / 19, s))
+    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const sparse = coverageGridRecs(state, few, M2, { key: 'objective', direction: 'max' })
+    const covered = coverageGridRecs(state, many, M2, { key: 'objective', direction: 'max' })
+    expect(sparse.flatMap((r) => r.spec.configs ?? []).length).toBeGreaterThan(0)
+    expect(covered).toEqual([]) // 20 spread setups >= the 16 target for one lever at depth 0
   })
 
   it('deepening the resolution proposes STRICTLY finer coordinate points (localRefineRecs honours refineDepth)', () => {
@@ -421,11 +466,11 @@ describe('escalation ladder — never converge until the space is covered', () =
   })
 
   it('declares the best region as the maximum at convergence even when NO region cleared the basin margin', () => {
-    // Objective barely above baseline (gain 2 < the min-span margin 3) ⇒ clusterBasins finds nothing, yet the
-    // run history has a clear best — the UI must never report "no maximum found".
+    // Objective barely above baseline (gain 2 < the min-span margin) ⇒ clusterBasins finds nothing; yet with the
+    // space covered (>= target spread setups) the run history has a clear best — never report "no maximum found".
     const runs: AnalysisRun[] = []
-    for (const lr of [0.4995, 0.5, 0.5005]) for (const s of [0, 1, 2, 3, 4]) {
-      runs.push({ key: `w-${lr}-${s}`, config: { algo: 'A', lr, seed: s }, objective: 22, metrics: { score: 22, baseline: 20 }, seed: s, status: 'completed' })
+    for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) {
+      runs.push({ key: `w-${i}-${s}`, config: { algo: 'A', lr: i / 19, seed: s }, objective: 22, metrics: { score: 22, baseline: 20 }, seed: s, status: 'completed' })
     }
     expect(clusterBasins(runs, { key: 'objective', direction: 'max' }, ['algo', 'lr'], 1, 20)).toEqual([])
     const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
@@ -433,6 +478,35 @@ describe('escalation ladder — never converge until the space is covered', () =
     expect(step.done).toBe(true)
     expect(step.stateNext.basins.length).toBeGreaterThanOrEqual(1) // a fallback basin synthesised from the best run
     expect(step.stateNext.declaredBasinId).toBeTruthy()
+  })
+})
+
+describe('stale state heals when the run archive is emptied', () => {
+  it('restarts from calibrate when a CONVERGED state has zero runs (the user deleted every run)', () => {
+    const converged: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'converged',
+      done: true,
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: { noise_knob: 0.5 },
+      basins: [{ id: 'algo=A', region: { algo: 'A' }, centerConfig: { algo: 'A', lr: 0.5 }, peakObjective: 500, peakSeeds: 5, plateaued: true, memberRunKeys: [] }],
+      declaredBasinId: 'algo=A',
+      refineDepth: 3,
+    }
+    const step = nextExplorationStep(converged, [], MANIFEST, {})
+    expect(step.done).toBe(false)
+    expect(step.stage).toBe('calibrate') // NOT a re-declared convergence over runs that no longer exist
+    expect(step.batch.length).toBeGreaterThan(0) // re-measures the noise floor on the default config
+    expect(step.stateNext.basins).toEqual([])
+    expect(step.stateNext.declaredBasinId).toBeUndefined()
+    expect(step.stateNext.refineDepth).toBe(0)
+  })
+
+  it('a zero-run state with a spent budget still converges (budget takes precedence over the reset)', () => {
+    const spent: ExplorationState = { ...initExplorationState(MANIFEST, { maxRuns: 0 }), stage: 'global' }
+    const step = nextExplorationStep(spent, [], MANIFEST)
+    expect(step.done).toBe(true)
+    expect(step.stage).toBe('converged')
   })
 })
 

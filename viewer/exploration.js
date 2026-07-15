@@ -231,35 +231,90 @@
   // Build an axis descriptor: every cell is a CONCRETE tried value (numeric axes sort numerically + label
   // with the value; categorical axes sort as strings). Not range bins — a config-space search probes a
   // discrete set of values, so "0.004–0.004" ranges read as noise; the actual values are what matter.
-  function makeAxis(lever, runs, manifest) {
+  // `zoom` sets a NUMERIC axis's grid DENSITY: the target bin count is round(distinctValues × zoom), so zoom=1
+  // gives ~one cell per tried value (concrete), zoom<1 GROUPS adjacent values into fewer wider bins (coarser),
+  // and zoom>1 SUBDIVIDES into MORE bins than there are values — the extra empty bins reveal the untried gaps
+  // (a genuinely finer scale, which the old "one cell per distinct value" cap could never show). Bins are
+  // equal-width over the tried range; a cell labels as its lone value, its members' real min–max, or (empty)
+  // its scale midpoint — never a degenerate "x–x". Categorical axes are always their distinct values.
+  function makeAxis(lever, runs, manifest, zoom) {
     const levers = manifest.levers || {}
     const spec = levers[lever] || {}
     const vals = runs.map((r) => r.config[lever]).filter((v) => v !== undefined && v !== null)
     const numeric = spec.type === 'number' || (vals.length && vals.every(isNumericValue))
-    const distinct = numeric
-      ? [...new Set(vals.map(Number).filter(isFinite))].sort((a, b) => a - b).slice(0, MAX_AXIS_VALUES)
-      : [...new Set(vals.map(String))].sort().slice(0, MAX_AXIS_VALUES)
-    const key = (v) => (numeric ? String(Number(v)) : String(v))
-    const idx = new Map(distinct.map((v, i) => [key(v), i]))
-    const n = Math.max(1, distinct.length)
+
+    if (!numeric) {
+      const distinct = [...new Set(vals.map(String))].sort().slice(0, MAX_AXIS_VALUES)
+      const idx = new Map(distinct.map((v, i) => [v, i]))
+      const n = Math.max(1, distinct.length)
+      return {
+        lever,
+        kind: 'cat',
+        numeric: false,
+        n,
+        distinct,
+        index: (v) => (idx.has(String(v)) ? idx.get(String(v)) : -1),
+        labels: distinct.map(String),
+        coordOf: (v) => (idx.has(String(v)) ? (idx.get(String(v)) + 0.5) / n : -1),
+        cellLabel: (i) => String(distinct[i]),
+      }
+    }
+
+    const nums = [...new Set(vals.map(Number).filter(isFinite))].sort((a, b) => a - b).slice(0, MAX_AXIS_VALUES)
+    const D = Math.max(1, nums.length)
+    const z = zoom > 0 ? zoom : 1
+    const lo = nums.length ? nums[0] : 0
+    const hi = nums.length ? nums[nums.length - 1] : 1
+    // Bin count scales with zoom (min 2, capped generously above the value count so zoom-IN keeps adding bins).
+    const B = hi <= lo ? D : Math.max(2, Math.min(MAX_AXIS_VALUES * 3, Math.round(D * z)))
+
+    // Each bin carries the distinct values that fall in it, so its label is the concrete value (one value) or
+    // the actual min–max of its members (never a degenerate "x–x"); an empty bin shows its scale midpoint.
+    let bins
+    if (hi <= lo) {
+      bins = nums.map((v) => ({ values: [v], lo: v, hi: v }))
+    } else {
+      bins = Array.from({ length: B }, (_, i) => ({ values: [], lo: lo + (i * (hi - lo)) / B, hi: lo + ((i + 1) * (hi - lo)) / B }))
+      for (const v of nums) bins[Math.min(B - 1, Math.max(0, Math.floor(((v - lo) / (hi - lo)) * B)))].values.push(v)
+    }
+    const n = Math.max(1, bins.length)
+    const index = (v) => {
+      const x = Number(v)
+      if (!isFinite(x)) return -1
+      if (hi <= lo) return nums.indexOf(x)
+      return Math.min(n - 1, Math.max(0, Math.floor(((x - lo) / (hi - lo)) * n)))
+    }
+    const cellLabel = (i) => {
+      const b = bins[i]
+      if (!b) return ''
+      if (b.values.length === 1) return fmtVal(b.values[0])
+      if (b.values.length > 1) return fmtVal(b.values[0]) + '–' + fmtVal(b.values[b.values.length - 1])
+      return fmtVal((b.lo + b.hi) / 2)
+    }
     return {
       lever,
-      kind: numeric ? 'num' : 'cat',
-      numeric,
+      kind: 'num',
+      numeric: true,
       n,
-      distinct,
-      index: (v) => (idx.has(key(v)) ? idx.get(key(v)) : -1),
-      labels: distinct.map((v) => (numeric ? fmtVal(v) : String(v))),
-      coordOf: (v) => (idx.has(key(v)) ? (idx.get(key(v)) + 0.5) / n : -1),
-      cellLabel: (i) => (numeric ? fmtVal(distinct[i]) : String(distinct[i])),
+      distinct: nums,
+      index,
+      labels: bins.map((_, i) => cellLabel(i)),
+      coordOf: (v) => {
+        const i = index(v)
+        return i < 0 ? -1 : (i + 0.5) / n
+      },
+      cellLabel,
     }
   }
 
   // Bin the (peg-filtered) runs into the X×Y grid, KEEPING every run per cell (not just the best) so the
   // heatmap can subdivide a busy cell + a hover can list the exact configs behind a square. Pure + tested.
   function heatmapCells(a) {
-    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest)
-    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest)
+    // Zoom sets each numeric axis's grid DENSITY (bins = distinct × zoom): 1 ≈ one cell per tried value, <1
+    // groups, >1 subdivides to reveal untried gaps.
+    const zoom = a.vs.zoom || 1
+    const xA = makeAxis(a.vs.axisX, a.runs, a.manifest, zoom)
+    const yA = makeAxis(a.vs.axisY, a.runs, a.manifest, zoom)
     const pegs = a.vs.pegs || {}
     const runs = a.runs.filter((r) =>
       Object.keys(pegs).every((l) => pegs[l] == null || String(r.config[l]) === String(pegs[l])),
@@ -290,8 +345,9 @@
 
     const canvas = wrap.querySelector('canvas')
     const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-    const zoom = a.vs.zoom || 1
-    const cellPx = Math.max(16, Math.round(26 * zoom))
+    // Cell PIXEL size is fixed — zoom changes the value-bin DENSITY (cells count), not their size, so the
+    // canvas grows with the grid and scrolls in its container.
+    const cellPx = 26
     // Reserve a margin for axis value ticks — left of the rows (y) and under the columns (x).
     const mL = 60
     const mB = 30
@@ -504,11 +560,12 @@
     const st = data.activity && data.activity.status
     const live = st === 'running' || st === 'starting' || st === 'queued'
     const paused = !!(data.state && data.state.paused)
-    const done = !!(data.state && data.state.done)
     const hasState = !!data.state
     const stage = data.state && data.state.stage
     const log = (data.state && data.state.log) || []
     const last = log[log.length - 1]
+
+    const total = typeof data.totalRuns === 'number' ? data.totalRuns : a.runs.length
 
     // A running/queued child `train` means the search IS working even if the `explore` controller activity
     // isn't found live in this (eventually-consistent) snapshot — so treat it as working, never a Stopped view.
@@ -516,10 +573,12 @@
     const childActive = !!(pc && (pc.status === 'running' || pc.status === 'starting' || pc.status === 'queued'))
     const launching = !!data.launching && !live && !childActive // optimistic: just clicked Start/Resume
     const working = (live || childActive) && !paused
-    const inProgress = hasState && !done && !paused && !working && !launching // mid-search, nothing executing
-    const started = hasState || working || launching
-
-    const total = typeof data.totalRuns === 'number' ? data.totalRuns : a.runs.length
+    // A converged / mid-search state whose runs were ALL deleted (total 0) is stale — it has nothing to show,
+    // so it must fall through to the idle Start state (whose launch wipes the stale map), NOT show
+    // "Converged / Explore more" or "Stopped" over an empty archive.
+    const done = !!(data.state && data.state.done) && total > 0
+    const inProgress = hasState && !done && !paused && !working && !launching && total > 0
+    const started = (hasState && total > 0) || working || launching
 
     // Icon-only transport controls (pause/resume/stop); Start / Explore-again stay labelled (primary action).
     const ico = (act, glyph, label, cls) =>
@@ -647,7 +706,7 @@
         return `<div class="expl-sel">${esc(r.lever)} <select data-expl-peg="${esc(r.lever)}">${opts}</select></div>`
       })
       .join('')
-    const zoom = `<div class="expl-zoom"><button data-expl-zoom="out" title="Zoom out">−</button><button data-expl-zoom="reset" title="Reset zoom">${Math.round((a.vs.zoom || 1) * 100)}%</button><button data-expl-zoom="in" title="Zoom in">+</button></div>`
+    const zoom = `<div class="expl-zoom"><button data-expl-zoom="out" title="Coarser value grid (group nearby values)">−</button><button data-expl-zoom="reset" title="Reset grid density">${Math.round((a.vs.zoom || 1) * 100)}%</button><button data-expl-zoom="in" title="Finer value grid (toward one cell per tried value)">+</button></div>`
     return `<div class="expl-mapbar">${axisSel}${pegSel ? '<span style="color:var(--e-faint);font-family:var(--e-mono);font-size:11px">peg:</span>' + pegSel : ''}${zoom}</div>`
   }
 
@@ -752,8 +811,10 @@
     container.querySelectorAll('[data-expl-zoom]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const dir = btn.getAttribute('data-expl-zoom')
-        if (dir === 'in') a.vs.zoom = Math.min(4, (a.vs.zoom || 1) + 0.5)
-        else if (dir === 'out') a.vs.zoom = Math.max(0.5, (a.vs.zoom || 1) - 0.5)
+        // Zoom = value-grid DENSITY. Range allows coarse grouping (0.25) up to ~one cell per tried value for a
+        // finely-sampled lever (8 × BASE_BINS well past MAX_AXIS_VALUES).
+        if (dir === 'in') a.vs.zoom = Math.min(8, (a.vs.zoom || 1) + 0.5)
+        else if (dir === 'out') a.vs.zoom = Math.max(0.25, (a.vs.zoom || 1) - 0.25)
         else a.vs.zoom = 1
         rerender()
       })

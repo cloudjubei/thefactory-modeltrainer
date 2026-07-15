@@ -2,6 +2,7 @@ import {
   EXPLORATION_ACTIVE_IMPORTANCE_FLOOR,
   EXPLORATION_BASIN_MIN_SPAN_FRACTION,
   EXPLORATION_BASIN_NOISE_MARGIN,
+  EXPLORATION_COVERAGE_PER_LEVER,
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
   EXPLORATION_MAX_REFINE_DEPTH,
@@ -409,11 +410,29 @@ export function nextExplorationStep(
   })
 
   if (state.paused) return mk(state.stage, [], 'paused', state, state.done)
-  if (state.done || state.stage === 'converged') {
-    return mk('converged', [], 'converged', { ...state, stage: 'converged', done: true }, true)
-  }
   if (state.budget.maxRuns !== undefined && spentRuns >= state.budget.maxRuns) {
     return converge(state, runs, criterion, mk, 'budget exhausted')
+  }
+  // An EMPTY run archive (e.g. the user deleted every run) makes any advanced/converged state stale — there is
+  // nothing to have converged on, so restart from calibrate rather than re-declaring a convergence (or trying
+  // to refine/cover) over runs that no longer exist. Resets the derived fields, keeps budget/steer.
+  if (spentRuns === 0) {
+    const fresh: ExplorationState = {
+      ...state,
+      stage: 'calibrate',
+      done: false,
+      basins: [],
+      activeLevers: [],
+      frozenLevers: {},
+      refineDepth: 0,
+      dryRounds: 0,
+      declaredBasinId: undefined,
+      noiseFloor: undefined,
+    }
+    return stepCalibrate(fresh, runs, manifest, criterion, mk)
+  }
+  if (state.done || state.stage === 'converged') {
+    return mk('converged', [], 'converged', { ...state, stage: 'converged', done: true }, true)
   }
 
   switch (state.stage) {
@@ -598,9 +617,11 @@ function stepLocal(
 /**
  * The escalation ladder — what the search does INSTEAD of converging when the current subspace is climbed out.
  * Rung 1 (widen): unfreeze the most-important still-fixed numeric lever and sweep it, re-opening the search
- * along a previously-ignored dimension. Rung 2 (deepen): find the shallowest resolution depth that admits new
- * coordinate points around a basin and climb there. Only when BOTH rungs are dry — every lever unfrozen and
- * the finest resolution reached — is the space genuinely covered, and the search converges.
+ * along a previously-ignored dimension. Rung 2 (cover): keep SPACE-FILLING the active numeric space until it
+ * holds the density target of distinct setups — WITHOUT this a pure-numeric problem converges the instant its
+ * single best neighbourhood is locally resolved, leaving the rest of the space (other good regions) untried.
+ * Only when every lever is unfrozen AND the space is covered at the current resolution does it converge —
+ * "Explore more" then raises `refineDepth` for a finer, denser sweep. Resolution is NEVER auto-deepened.
  */
 function expand(
   state: ExplorationState,
@@ -609,7 +630,7 @@ function expand(
   manifest: TrainerManifest,
   criterion: AnalysisCriterion,
   mk: Mk,
-  target?: number,
+  _target?: number,
 ): ExplorationStep {
   // Rung 1 — unfreeze the highest-importance numeric lever that is still pinned, and sweep it across its range.
   const frozenNumeric = Object.keys(state.frozenLevers).filter(
@@ -630,20 +651,118 @@ function expand(
     return stepGlobal(widened, runs, manifest, criterion, mk, undefined)
   }
 
-  // Rung 2 — deepen the numeric resolution: the shallowest depth (from the current one up) that yields fresh
-  // coordinate points around any basin. Starting at the current depth means we never bump it gratuitously.
-  const start = state.refineDepth ?? 0
-  for (let d = start; d <= EXPLORATION_MAX_REFINE_DEPTH; d++) {
-    const deeper = { ...state, refineDepth: d }
-    const batch = basins.flatMap((b) => localRefineRecs(b, runs, manifest, deeper)).slice(0, 8)
-    if (batch.length) {
-      const why = d > start ? `deepen resolution ×${Math.pow(2, d)} — no coarser refinement remains` : `climb the resolved subspace`
-      return mk('local', batch, why, { ...deeper, stage: 'local', basins }, false)
-    }
+  // Rung 2 — space-fill the active numeric space until it reaches the coverage density target.
+  const coverage = coverageGridRecs(state, runs, manifest, criterion)
+  if (coverage.length) {
+    return mk('local', coverage, `cover the space — ${coverage[0].runCount} space-filling sample(s)`, { ...state, stage: 'local', basins }, false)
   }
 
-  // Both rungs dry: every lever unfrozen and the finest resolution reached — the space is covered.
-  return converge({ ...state, basins }, runs, criterion, mk, 'search space fully covered')
+  // Every lever unfrozen, every peak resolved, and the space sampled to the density target — genuinely covered.
+  const finest = (state.refineDepth ?? 0) >= EXPLORATION_MAX_REFINE_DEPTH
+  const reason = finest
+    ? 'search space fully covered at the finest resolution'
+    : 'search space covered — Explore more to sample finer'
+  return converge({ ...state, basins }, runs, criterion, mk, reason)
+}
+
+/**
+ * A deterministic low-discrepancy (Halton) coordinate in [0,1) — the space-filling sequence the coverage rung
+ * draws from. Deterministic so a run is reproducible and unit-testable (no RNG).
+ */
+function halton(index: number, base: number): number {
+  let result = 0
+  let f = 1 / base
+  let i = index
+  while (i > 0) {
+    result += f * (i % base)
+    i = Math.floor(i / base)
+    f /= base
+  }
+  return result
+}
+
+const HALTON_BASES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
+
+/**
+ * Space-filling COVERAGE of the active numeric space: keeps proposing Halton-spread configs (other levers held
+ * at the best-known config) until the archive holds `EXPLORATION_COVERAGE_PER_LEVER × #active-numeric ×
+ * (1 + refineDepth)` distinct setups. Candidates are chosen maximin — farthest (normalised L∞) from every
+ * tried setup — so each round meaningfully fills the emptiest regions. Returns [] once the target is met (the
+ * convergence gate) or nothing fresh remains. Exported for direct unit testing.
+ */
+export function coverageGridRecs(
+  state: ExplorationState,
+  runs: AnalysisRun[],
+  manifest: TrainerManifest,
+  criterion: AnalysisCriterion,
+): ExperimentRecommendation[] {
+  const numericActive = state.activeLevers.filter(
+    (l) => isNumericManifestLever(manifest, l) && !!manifest.levers[l]?.range,
+  )
+  if (!numericActive.length) return []
+  const setups = aggregateToSetupRuns(runs, criterion)
+  const target = EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
+  if (setups.length >= target) return []
+
+  const ranges = numericActive.map((l) => manifest.levers[l].range as [number, number])
+  const tried = setups.map((s) => numericActive.map((l, j) => (Number(s.config[l]) - ranges[j][0]) / (ranges[j][1] - ranges[j][0] || 1)))
+  const minDistToTried = (pt: number[]): number => {
+    let best = Infinity
+    for (const t of tried) {
+      let d = 0
+      for (let j = 0; j < pt.length; j++) d = Math.max(d, Math.abs(pt[j] - t[j]))
+      if (d < best) best = d
+    }
+    return tried.length ? best : Infinity
+  }
+
+  const best = bestRunConfig(runs, criterion)
+  const need = Math.min(8, target - setups.length)
+  // Draw a pool of Halton candidates, then greedily take the ones farthest from BOTH the tried set and each
+  // other — a maximin fill that avoids clustering with existing runs or within the batch.
+  const pool: Array<{ norm: number[]; config: Record<string, unknown> }> = []
+  for (let i = 1; i <= need * 12 + 48; i++) {
+    const norm = numericActive.map((_, j) => halton(i, HALTON_BASES[j % HALTON_BASES.length]))
+    const config: Record<string, unknown> = { ...best }
+    for (let j = 0; j < numericActive.length; j++) {
+      const [lo, hi] = ranges[j]
+      config[numericActive[j]] = Number((lo + norm[j] * (hi - lo)).toFixed(6))
+    }
+    pool.push({ norm, config })
+  }
+  const chosenNorms: number[][] = []
+  const configs: Array<{ config: Record<string, unknown> }> = []
+  while (configs.length < need) {
+    let pick = -1
+    let pickDist = -1
+    for (let k = 0; k < pool.length; k++) {
+      const c = pool[k]
+      let d = minDistToTried(c.norm)
+      for (const cn of chosenNorms) {
+        let dd = 0
+        for (let j = 0; j < cn.length; j++) dd = Math.max(dd, Math.abs(c.norm[j] - cn[j]))
+        d = Math.min(d, dd)
+      }
+      if (d > pickDist) {
+        pickDist = d
+        pick = k
+      }
+    }
+    if (pick < 0 || pickDist <= 0) break // nothing fresh left to add
+    chosenNorms.push(pool[pick].norm)
+    configs.push({ config: pool[pick].config })
+    pool.splice(pick, 1)
+  }
+  if (!configs.length) return []
+  return [
+    {
+      kind: 'missing-cell',
+      reason: `cover the space: ${configs.length} space-filling sample(s) across ${numericActive.length} lever(s)`,
+      runCount: configs.length,
+      spec: { configs },
+      priority: 75,
+    },
+  ]
 }
 
 /**

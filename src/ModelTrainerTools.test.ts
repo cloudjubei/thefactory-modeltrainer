@@ -4860,14 +4860,16 @@ describe('runExplorationCampaign (autopilot)', () => {
     opts: { failAll?: boolean; abortAfter?: number } = {},
   ) {
     const launchOrder: ExperimentSpec[] = []
+    const labelOrder: string[] = []
     const awaitOrder: string[] = []
     const children = new Map<string, ExperimentSpec>()
     let counter = 0
     let awaited = 0
-    const launchTrainCampaign = async (spec: ExperimentSpec) => {
+    const launchTrainCampaign = async (spec: ExperimentSpec, campaignOpts?: { label?: string }) => {
       const id = `child-${counter++}`
       children.set(id, spec)
       launchOrder.push(spec)
+      labelOrder.push(campaignOpts?.label ?? '')
       return { activityId: id }
     }
     const awaitActivity = async (id: string): Promise<string | undefined> => {
@@ -4887,7 +4889,7 @@ describe('runExplorationCampaign (autopilot)', () => {
       }
       return 'completed'
     }
-    return { launchTrainCampaign, awaitActivity, launchOrder, awaitOrder }
+    return { launchTrainCampaign, awaitActivity, launchOrder, awaitOrder, labelOrder }
   }
 
   it('durable mode: spawns each round via launchTrainCampaign and converges (no duplicate spawns)', async () => {
@@ -4909,6 +4911,9 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect(result.basins.map((b) => String(b.region.algo)).sort()).toEqual(['A', 'B'])
     // every launched child was awaited exactly once — no batch spawned twice, none left un-awaited
     expect(h.awaitOrder.length).toBe(h.launchOrder.length)
+    // each spawned batch is labelled by its strategist step (calibrate/screen/…) so it's identifiable in Activity
+    expect(h.labelOrder.every((l) => l.startsWith('explore · '))).toBe(true)
+    expect(h.labelOrder.some((l) => l.includes('calibrate'))).toBe(true)
     // the map is fully settled: no in-flight child left pending after convergence
     const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
     expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBeUndefined()

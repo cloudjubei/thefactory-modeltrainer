@@ -141,6 +141,25 @@ describe('Exploration.heatmapCells', () => {
     expect(catA.kind).toBe('cat')
     expect(['A', 'B']).toContain(catA.cellLabel(0))
   })
+
+  it('zoom = grid density: zoom<1 GROUPS values; zoom=1 ≈ one cell per value; zoom>1 SUBDIVIDES past the values', () => {
+    // 30 distinct x values in [0, 29/30]. Bin count = round(distinct × zoom): coarse groups them, fine keeps
+    // one-per-value, and — the zoom-IN fix — zoom>1 keeps ADDING bins beyond the value count (untried gaps).
+    const runs = Array.from({ length: 30 }, (_, i) => ({ config: { algo: 'A', x: i / 30, y: 0.5 }, objective: 100 + i }))
+    const coarse = Exploration.makeAxis('x', runs, MANIFEST, 0.2)
+    const finest = Exploration.makeAxis('x', runs, MANIFEST, 1)
+    const finer = Exploration.makeAxis('x', runs, MANIFEST, 3)
+    expect(coarse.n).toBe(6) // round(30 × 0.2)
+    expect(finest.n).toBe(30) // round(30 × 1)
+    expect(finer.n).toBe(90) // round(30 × 3) — zoom-in KEEPS growing the grid (the bug fix)
+    expect(coarse.n).toBeLessThan(finest.n)
+    expect(finer.n).toBeGreaterThan(finest.n)
+    // every x lands in some coarse cell, and multi-value cells read as a real range (never "x–x")
+    expect(coarse.index(0.0)).toBe(0)
+    expect(coarse.index(29 / 30)).toBe(5)
+    expect(coarse.labels.some((l: string) => l.includes('–'))).toBe(true)
+    expect(coarse.labels.every((l: string) => !/^(\S+)–\1$/.test(l))).toBe(true)
+  })
 })
 
 describe('Exploration.magma', () => {

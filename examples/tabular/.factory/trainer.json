@@ -6,6 +6,11 @@
   "evaluate": ".venv/bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}",
   "objective": { "name": "val_rmse", "direction": "min" },
   "levers": {
+    "model_name": {
+      "type": "choice",
+      "default": "gradient_boosting",
+      "choices": ["gradient_boosting", "random_forest", "hist_gradient_boosting"]
+    },
     "n_estimators": { "type": "number", "default": 150, "range": [10, 1000] },
     "learning_rate": { "type": "number", "default": 0.1, "range": [0.005, 0.5] },
     "max_depth": { "type": "number", "default": 3, "range": [1, 8] },

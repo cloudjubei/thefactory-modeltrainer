@@ -2111,6 +2111,56 @@ function resetDashboardState() {
   const activityBody = byId('activity-body')
   if (activityBody) setHtml(activityBody, '')
 }
+// F.1 cross-app chat: declare this trainer project's data-capability manifest so the Overseer chat's
+// generic project-data tools (queryProjectData / updateProjectRecord / startProjectActivity) advertise
+// against these record types. The host persists the `data` block (per Overseer project) and the backend
+// reads it when a chat opens. Only PLAIN editable fields are exposed here — spec / verdict edits keep
+// their domain tool (updateTrainingHypothesis: spec migration + verdict-source override). Each type's
+// `view` becomes a clickable resource link on returned records (F.2/F.3).
+function trainerDataCapabilityManifest(m) {
+  const rt = m.recordType
+  return {
+    types: [
+      {
+        type: rt,
+        label: 'Training run',
+        description: 'A completed run: its config levers, metrics, dataset, objective and status.',
+        view: { view: 'runs', keyParam: 'run' },
+      },
+      {
+        type: rt + '-hypothesis',
+        label: 'Hypothesis',
+        description: 'A tested claim about which lever settings help.',
+        editable: true,
+        editableFields: ['title', 'claim', 'rationale', 'verdictNote', 'dismissed'],
+        view: { view: 'hypotheses', keyParam: 'focus' },
+      },
+      {
+        type: rt + '-paper',
+        label: 'Paper',
+        description: 'A research paper and its testable hypotheses.',
+        editable: true,
+        editableFields: ['title', 'claim', 'approach', 'verdictNote', 'url', 'authors', 'dismissed'],
+        view: { view: 'papers', keyParam: 'paper' },
+      },
+      {
+        type: rt + '-xai-suggestion',
+        label: 'AI experiment suggestion',
+        description: 'A runnable experiment the AI recommended.',
+        view: { view: 'xai', params: { scope: 'all' } },
+      },
+    ],
+    activities: ['inspect-trainer', 'scan-models', 'propose-experiments'],
+  }
+}
+function reportDataCapabilities() {
+  if (!window.OverseerBridge || !window.OverseerBridge.embedded || !manifest) return
+  window.OverseerBridge.reportCapabilities({
+    activitiesApiOnly: true,
+    cliActivities: ['research-training-papers'],
+    data: trainerDataCapabilityManifest(manifest),
+  }).catch(function () {})
+}
 async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
   if (!project || !projectHasManifest(projectKey)) return
@@ -2123,6 +2173,7 @@ async function openProject(projectKey) {
   closeRunnerPairing()
   resetDashboardState()
   applyManifestChrome()
+  reportDataCapabilities()
   // Load saved environments before the launch form so its environment picker is populated.
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
@@ -17938,10 +17989,15 @@ async function renderExploration() {
         const nextBudget = { ...state.budget }
         if (budget && budget.maxRuns) nextBudget.maxRuns = budget.maxRuns
         else delete nextBudget.maxRuns
+        // DEEPEN one level (capped at EXPLORATION_MAX_REFINE_DEPTH=4): a finer resolution floor AND a denser
+        // space-filling coverage target, so "Explore more" always does genuinely MORE — sampling the space
+        // finer and seating each peak tighter — rather than reconverging at the same density.
+        const nextDepth = Math.min(4, (state.refineDepth || 0) + 1)
         await writeExplorationFlag(recordType, state, {
           done: false,
           paused: false,
           stage: 'local',
+          refineDepth: nextDepth,
           budget: nextBudget,
         })
       }

@@ -1126,7 +1126,7 @@ export interface ExplorationCampaignParams {
    */
   launchTrainCampaign?: (
     spec: ExperimentSpec,
-    opts: { concurrency?: number },
+    opts: { concurrency?: number; label?: string },
   ) => Promise<{ activityId?: string }>
   /**
    * Await a launched activity to a terminal status; paired with {@link launchTrainCampaign}. Resolves with

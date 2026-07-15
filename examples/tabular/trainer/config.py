@@ -11,10 +11,14 @@ N_ESTIMATORS_RANGE = (10, 1000)
 LEARNING_RATE_RANGE = (0.005, 0.5)
 MAX_DEPTH_RANGE = (1, 8)
 SUBSAMPLE_RANGE = (0.3, 1.0)
+# The model-identity lever ("model_name" so the project scan can discover it). Each is an sklearn regressor
+# the factory builds; the ensemble hyperparameters below apply where meaningful (see model.build_model).
+MODEL_NAMES = ("gradient_boosting", "random_forest", "hist_gradient_boosting")
 
 
 @dataclass(frozen=True)
 class TrainerConfig:
+    model_name: str = "gradient_boosting"
     n_estimators: int = 150
     learning_rate: float = 0.1
     max_depth: int = 3
@@ -29,6 +33,8 @@ class EvalConfig:
 
 
 def validate_config(config: TrainerConfig) -> None:
+    if config.model_name not in MODEL_NAMES:
+        raise ValueError(f"model_name must be one of {MODEL_NAMES}, got {config.model_name!r}")
     if not N_ESTIMATORS_RANGE[0] <= config.n_estimators <= N_ESTIMATORS_RANGE[1]:
         raise ValueError(f"n_estimators must be in {N_ESTIMATORS_RANGE}, got {config.n_estimators}")
     if not LEARNING_RATE_RANGE[0] <= config.learning_rate <= LEARNING_RATE_RANGE[1]:

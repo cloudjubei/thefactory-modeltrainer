@@ -772,8 +772,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         // Durable-controller mode: run the batch as a STANDARD `train` activity (visible under Experiments,
         // sharing the experiment lane). Track it as pendingChildId and loop — the NEXT round's reconcile
         // awaits it. Persisting the handle BEFORE we loop is what lets a Stop/resume find the exact child.
+        // Label the child by the strategist's step so each batch is IDENTIFIABLE under Experiments/Activity
+        // (e.g. "explore · screen", "explore · climb 3 basin(s)") rather than an anonymous "Exploration run".
+        const runCount = spec.configs?.length ?? 0
+        const label = `explore · ${step.stage} — ${step.rationale} (${runCount} run${runCount === 1 ? '' : 's'})`
         const { activityId } = await params.launchTrainCampaign(spec, {
           concurrency: working.budget.maxConcurrent,
+          label,
         })
         if (!activityId) break
         state = { ...step.stateNext, pendingChildId: activityId }

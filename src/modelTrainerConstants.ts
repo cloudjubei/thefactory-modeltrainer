@@ -163,9 +163,19 @@ export const EXPLORATION_REFINE_MAX_STEP_FRACTION = 1 / 8
 export const EXPLORATION_REFINE_MIN_STEP_FRACTION = 1 / 64
 
 /**
- * How many times the search may DEEPEN its numeric resolution after all basins plateau — each level halves
- * the {@link EXPLORATION_REFINE_MIN_STEP_FRACTION} floor, so the effective finest step reaches range/(64·2^N).
- * At N=4 that is range/1024 — finer than any real optimum needs. Convergence "space fully covered" is only
- * declared once every lever is unfrozen AND this depth is exhausted, so a plateau never ends the search early.
+ * Resolution depth (0-based). Each level halves the {@link EXPLORATION_REFINE_MIN_STEP_FRACTION} local floor
+ * (finest step range/(64·2^depth)) AND scales the space-filling coverage target — so it controls how densely
+ * the whole space is sampled + how finely each peak is seated. It is USER-driven ("Explore more" bumps it),
+ * never auto-incremented: a single run converges once the space is covered at the CURRENT depth, and the
+ * user deepens on demand. Capped at this max (range/1024 + a very dense grid — thorough by any measure).
  */
 export const EXPLORATION_MAX_REFINE_DEPTH = 4
+
+/**
+ * Space-filling COVERAGE density: the search keeps sampling the active numeric space until it holds at least
+ * `PER_LEVER × (#active numeric levers) × (1 + refineDepth)` distinct setups, spread by a deterministic
+ * low-discrepancy (Halton) sequence. This is the honest "search space covered" gate — WITHOUT it a pure-
+ * numeric problem converges the moment its single global-best neighbourhood is locally resolved, leaving the
+ * rest of the space (other good regions) untried. Deepening (Explore more) raises the target for a finer sweep.
+ */
+export const EXPLORATION_COVERAGE_PER_LEVER = 16
