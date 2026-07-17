@@ -169,7 +169,9 @@ project by its manifest's `recordType`.
     button feeds the lever-importance + gap signal as instructions into the existing `proposeTrainingHypotheses`.
     The deterministic records stay the source of truth; the model interprets them and is told to hedge on the
     confounded/surrogate signals (e.g. an attribution that FAILED its sanity check). A chat agent can also pull
-    ANY run mid-conversation (not just the seeded one) via two AGENT READ TOOLS — `getRunData` (a run's
+    ANY run mid-conversation (not just the seeded one) via AGENT READ TOOLS — `getTrainerState` (a one-shot
+    orientation summary: objective + version, lever counts by scope, run count + best, the hypothesis verdict
+    census, paper/model counts — so a chat can orient without a seeded bundle), `getRunData` (a run's
     config/metrics + a compact decision-trace digest) and `getRunXAI` (the same deterministic `RunXaiDigest`)
     — advertised on the project chat through the backend's `extraToolSchemas` seam (`trainerTools.ts`,
     the knowledge-read-tools precedent; no ToolSchemas regen). They resolve a run id → its training project by
@@ -199,7 +201,14 @@ project by its manifest's `recordType`.
   and `baseline-out-of-range`. Status = `judged` | `blocked` (structural — fix the spec) | `starved` (just
   needs runs). Surfaced as a census banner + per-card diagnosis line, computed in one cached sweep per
   all-runs snapshot. `compareContexts` + `coerceComparison` now bound `baselineIndex` (an out-of-range
-  index stays untested / clamps to 0 instead of silently mis-judging).
+  index stays untested / clamps to 0 instead of silently mis-judging). Two producers now stop those dead
+  pins at the SOURCE rather than only diagnosing them: (1) generation-time validation — `coerceHypothesis
+  Items` migrates each proposed spec then runs `validateSpecAgainstManifest` (values vs `choices`/`range`/
+  type + `appliesWhen`), DROPPING a spec whose values are off-manifest before it is ever persisted; (2)
+  `migrateTrainingRuns` now also migrates HYPOTHESIS specs (`planHypothesisSpecMigration`) — re-keying each
+  to its migrated-spec hash, consolidating collisions (canonical metadata + unioned paper links, evidence
+  reset so the verdict recomputes), and repointing paper/model `hypothesisIds`/weights — so a manifest
+  migration no longer strands hypotheses that pinned the retired value.
 - **The single-context judging rule is manifest-declared** — `hypothesisBenchmark: {metric, threshold?,
   direction?}` (CartPole: `eval_return_mean > 475`; omitted ⇒ the trading default `return_vs_hold_pct >
   0`). `resolveBenchmark`/`measuredFromRuns` in `hypothesis.js` thread it through every verdict path,
@@ -207,12 +216,27 @@ project by its manifest's `recordType`.
   missing), and all evidence/criteria copy renders the project's own rule instead of "beats
   buy-and-hold". The stored `measured.beatsHold` field name is historical — it means "meets the
   benchmark". Cross-context (compare) hypotheses judge by the objective and ignore this.
-- **Chat write tools are approval-gated.** Beyond the auto-callable reads + `recommendTraining
-  Experiments`, the chat has `updateTrainingHypothesis` / `updateTrainingPaper` — allow-listed in-place
-  record updates (a chat `verdict` becomes a MANUAL override; a replacement spec is migrated + validated
-  like a launch). They are advertised but NEVER auto-called (`TRAINER_AUTO_TOOL_NAMES` excludes them),
-  so the chat surfaces every mutation for the user to approve; code/feature work is steered to
-  `addStory`/`addFeature` instead.
+- **Chat write path reuses the GENERIC cross-app primitives (F.1/F.2/F.3), not bespoke trainer tools.**
+  The custom `updateTrainingHypothesis`/`updateTrainingPaper` tools were RETIRED: in-place record edits —
+  including a manual verdict override (set `status` + `verdictSource:'manual'`) — now go through the shared
+  `updateProjectRecord` tool, gated by the project's declared **data-capability manifest**
+  (`trainerDataCapabilityManifest` in the viewer, sent via `app.capabilities`): it lists the queryable/
+  editable record types (`-run`, `-hypothesis` [editable prose + status/verdictSource], `-paper` [+ year/
+  tags], `-xai-suggestion`) with a `view` deep-link template each. `queryProjectData` (auto) + `update
+  ProjectRecord` / `startProjectActivity` (approval-gated) are advertised automatically once that manifest
+  is present. A hypothesis SPEC change is NOT an edit (it changes the record's identity) — it flows through
+  `recommendTrainingExperiments`, which validates + creates a runnable suggestion. That tool now also
+  returns a `viewLink` (an `overseer://…/app?view=xai&scope=all` resource link); its chat tool-view renders
+  it as a clickable chip that navigates into the app's xAI → Suggested view to launch (F.3), via the
+  `onResourceLink`→`navigateToResource` path. The remaining custom tools (`getTrainerState`, `getRunData`,
+  `getRunXAI`) stay bespoke because they return COMPUTED aggregates/digests the generic query can't produce.
+  The app deep-link resolves both on a FRESH app-tab mount (the app PULLs `nav.current` at boot) AND while
+  ALREADY mounted: the host PUSHes `nav.open` (a fire-and-forget `{view, params}` message from
+  `buildNavOpenMessage`) whenever the App-tab route query changes, so clicking a chat link while sitting on
+  the trainer App tab re-navigates the running viewer. `ProjectAppView` (web + native) owns the push effect
+  (`shouldPushDeepLink` — never fires on a mount/remount baseline, which the boot pull covers); the viewer's
+  `bridge.js` receives it via `OverseerBridge.onNavOpen` and applies it through the same idempotent
+  `applyDeepLink` path.
 - **One standard "work on this" affordance** — `iconStorySvg` + an always-on callout — everywhere a
   view creates a story/feature: paper coverage gaps + proposed improvements (stories via
   `OverseerBridge.createStory`) and proposed models / components (a FEATURE under the shared

@@ -209,6 +209,9 @@ let currentProject = null
 // and stops when the user has navigated away.
 let projectEpoch = 0
 let manifest = null
+// A one-time app deep-link (F.2) read from the host on boot: the view/params a chat resource link
+// navigated the App tab to. Applied on the first project open, then cleared.
+let deepLinkPending = null
 let activeTabId = null
 let runsCache = []
 let verdictsCache = new Map()
@@ -2114,9 +2117,11 @@ function resetDashboardState() {
 // F.1 cross-app chat: declare this trainer project's data-capability manifest so the Overseer chat's
 // generic project-data tools (queryProjectData / updateProjectRecord / startProjectActivity) advertise
 // against these record types. The host persists the `data` block (per Overseer project) and the backend
-// reads it when a chat opens. Only PLAIN editable fields are exposed here — spec / verdict edits keep
-// their domain tool (updateTrainingHypothesis: spec migration + verdict-source override). Each type's
-// `view` becomes a clickable resource link on returned records (F.2/F.3).
+// reads it when a chat opens. These editable fields are ALL record edits the chat can make — including a
+// manual verdict override (set `status` + `verdictSource:'manual'`). There is NO bespoke trainer update
+// tool: a hypothesis SPEC change goes through recommendTrainingExperiments (validated + becomes a runnable
+// suggestion; editing a spec changes the hypothesis's identity). Each type's `view` becomes a clickable
+// resource link on returned records (F.2/F.3).
 function trainerDataCapabilityManifest(m) {
   const rt = m.recordType
   return {
@@ -2130,9 +2135,18 @@ function trainerDataCapabilityManifest(m) {
       {
         type: rt + '-hypothesis',
         label: 'Hypothesis',
-        description: 'A tested claim about which lever settings help.',
+        description:
+          'A tested claim about which lever settings help. To override a verdict, set BOTH status (proven/disproved/untested) and verdictSource="manual".',
         editable: true,
-        editableFields: ['title', 'claim', 'rationale', 'verdictNote', 'dismissed'],
+        editableFields: [
+          'title',
+          'claim',
+          'rationale',
+          'verdictNote',
+          'dismissed',
+          'status',
+          'verdictSource',
+        ],
         view: { view: 'hypotheses', keyParam: 'focus' },
       },
       {
@@ -2140,7 +2154,17 @@ function trainerDataCapabilityManifest(m) {
         label: 'Paper',
         description: 'A research paper and its testable hypotheses.',
         editable: true,
-        editableFields: ['title', 'claim', 'approach', 'verdictNote', 'url', 'authors', 'dismissed'],
+        editableFields: [
+          'title',
+          'claim',
+          'approach',
+          'verdictNote',
+          'url',
+          'authors',
+          'dismissed',
+          'year',
+          'tags',
+        ],
         view: { view: 'papers', keyParam: 'paper' },
       },
       {
@@ -2160,6 +2184,17 @@ function reportDataCapabilities() {
     cliActivities: ['research-training-papers'],
     data: trainerDataCapabilityManifest(manifest),
   }).catch(function () {})
+}
+// Apply a one-time app deep-link (F.2): open the target tab and, when the params name a record, its
+// detail. Best-effort — a run/paper not in the opened project simply no-ops. Requires an open project.
+function applyDeepLink(dl) {
+  if (!dl || !dl.view || !manifest) return false
+  const p = dl.params || {}
+  if (!TABS.some((t) => t.id === dl.view)) return false
+  showTab(dl.view)
+  if (dl.view === 'runs' && p.run) openRunDetail(p.run)
+  else if (dl.view === 'papers' && p.paper) focusPaper(p.paper)
+  return true
 }
 async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
@@ -2185,6 +2220,10 @@ async function openProject(projectKey) {
   showView('dashboard')
   showTab(savedTabId() || TABS[0].id)
   await renderRuns()
+  if (deepLinkPending) {
+    applyDeepLink(deepLinkPending)
+    deepLinkPending = null
+  }
   await resumeRunningActivity()
   startExplorationDiscovery() // resume tracking a live exploration's spawned experiments after a reload
   if (epoch !== projectEpoch) return
@@ -9229,7 +9268,7 @@ async function discussBundle({ title, seed, intro, bundle, statusId }) {
 // the delegated data-action the surface's click handler routes; hidden entirely outside the Overseer.
 function discussButtonHtml(action, id, help) {
   if (!chatAboutRunAvailable()) return ''
-  return `<button type="button" class="card-btn" data-action="${escapeHtml(action)}"${id ? ` data-id="${escapeHtml(id)}"` : ''}${helpAttr(help || 'Discuss this with the AI — everything on screen is shared into the chat.')}>${iconChatSvg()}</button>`
+  return `<button type="button" class="card-btn" data-action="${escapeHtml(action)}"${id ? ` data-id="${escapeHtml(id)}"` : ''} aria-label="Discuss with the AI"${helpAttr(help || 'Discuss this with the AI — everything on screen is shared into the chat.')}>${iconChatSvg()}</button>`
 }
 function busyButtonHtml(label) {
   return `${spinnerHtml()} ${escapeHtml(label)}`
@@ -10669,7 +10708,7 @@ function leverDependsOnLine(spec) {
   const d = spec && spec.dependsOn
   if (!d || !d.lever) return ''
   const cond = 'equals' in d ? `= ${d.equals}` : d.active === false ? 'is OFF' : 'is ON'
-  return `<p class="card-sub lever-cap-depends">↳ only acts when <code>${escapeHtml(d.lever)}</code> ${escapeHtml(cond)} — inert otherwise (sweeps collapse it automatically).</p>`
+  return `<p class="card-sub lever-cap-depends">↳ only acts when <code>${escapeHtml(d.lever)}</code> ${escapeHtml(cond)} — inert otherwise (campaigns automatically skip it where it can’t take effect).</p>`
 }
 function leverCapabilityValueChip(value, isDefault, count) {
   return `<span class="lever-cap-value${isDefault ? ' is-default' : ''}"${helpAttr(isDefault ? 'The manifest default.' : count ? `${count} run(s) used this value.` : 'No runs with this value yet.')}><code>${escapeHtml(String(value))}</code>${isDefault ? ' ★' : ''}${count ? ` <span class="lever-cap-count">${count}</span>` : ''}</span>`
@@ -10710,8 +10749,8 @@ function leverCapabilitiesHtml(entries, noun, discussAction) {
   const cards = entries.map(([k, spec]) => leverCapabilityCardHtml(k, spec)).join('')
   const note =
     noun === 'dataset'
-      ? `<p class="card-sub lever-cap-note"${helpAttr('Two runs on different datasets saw different data — a train/test window change means the metric was measured on a DIFFERENT market. Compare across datasets only via the By-dataset robustness views, never raw numbers.')}>⚠ Metrics compare apples-to-apples only WITHIN one dataset. Usage counts show which values your runs have actually exercised.</p>`
-      : `<p class="card-sub lever-cap-note">Each feature below is one market mechanic; a named preset pins them all. Usage counts show which values your runs have actually exercised.</p>`
+      ? `<p class="card-sub lever-cap-note"${helpAttr('Two runs on different datasets saw different data — a train/test window change means the metric was measured on a DIFFERENT market. Compare across datasets only via the By-dataset robustness views, never raw numbers.')}>⚠ Metrics compare apples-to-apples only WITHIN one dataset. Each feature below is one dataset knob; a named preset pins them all into a reusable bundle. Usage counts show which values your runs have actually exercised · ★ = the default value.</p>`
+      : `<p class="card-sub lever-cap-note">Each feature below is one market mechanic; a named preset pins them all into a reusable bundle. Usage counts show which values your runs have actually exercised · ★ = the default value.</p>`
   return `<details class="lever-caps" open>
     <summary class="lever-caps-head">Features &amp; capabilities <span class="group-count">${entries.length}</span> <span class="card-actions">${discussButtonHtml(discussAction, '', `Discuss the ${noun} capabilities + presets with the AI — every lever (choices, defaults, dependencies, usage) and the named presets are shared into the chat.`)}</span></summary>
     ${note}
@@ -11886,11 +11925,23 @@ async function buildHygieneCensusChunked() {
     hygieneCensusWarming = false
   }
 }
+// Friendly labels for the census's internal issue slugs — the banner is a diagnosis for the USER, so the
+// raw keys (dead-pin, sweep-unrun…) must never leak into copy.
+const HYGIENE_ISSUE_LABEL = {
+  'dead-pin': 'dead pin (the spec pins a value no stored run has)',
+  'sweep-unrun': 'sweep option never run',
+  'no-metric': 'benchmark metric never reported',
+  underplanned: 'too few runs planned to ever decide',
+  'invalid-evidence': 'all matching runs failed/invalid',
+  'single-cell': 'only one context cell (nothing to compare)',
+  'baseline-out-of-range': 'comparison baseline out of range',
+  'cell-starved': 'context cells below the run minimum',
+}
 // The registry-health banner above the verdict sections: judged / blocked (structural — more runs can
 // never decide them) / starved (just need runs), the issue census, and a Discuss that shares it all.
 function hypothesisHygieneBannerHtml() {
   if (!hygieneAvailable())
-    return '<p class="card-sub hyp-hygiene-hint">Hygiene: run a global <strong>Refresh</strong> to diagnose WHY undecided hypotheses are undecided (dead pins, starved cells, structural blocks).</p>'
+    return '<p class="card-sub hyp-hygiene-hint">Hypothesis health: run a global <strong>Refresh</strong> to diagnose why undecided hypotheses are still undecided — missing runs vs. specs that can never be decided as written.</p>'
   // The aggregate census is expensive (a full 200-hypothesis sweep) — never block paint on it. When it
   // isn't warm yet, show a diagnosing placeholder and let `warmHygieneCensus` fill this slot shortly after.
   if (!hygieneCensusWarm()) {
@@ -11901,14 +11952,15 @@ function hypothesisHygieneBannerHtml() {
   if (!c || !c.total) return ''
   const issues = Object.entries(c.byIssue)
     .sort((a, b) => b[1] - a[1])
-    .map(([k, n]) => `${k} ×${n}`)
+    .map(([k, n]) => `${HYGIENE_ISSUE_LABEL[k] || k} ×${n}`)
     .join(' · ')
   return `<div class="hyp-hygiene-banner">
-    <span class="run-badge is-done"${helpAttr('Hypotheses with a decided verdict (proven/disproved).')}>${c.judged} judged</span>
-    <span class="run-badge is-failed"${helpAttr('Structurally BLOCKED as written — more runs can never decide them (a dead pin the store can never match, an underplanned seed list, a single context cell, a metric the family never reports). Fix the spec.')}>${c.blocked} blocked</span>
-    <span class="run-badge is-queued"${helpAttr('Sound but STARVED — they just need runs (launch the spec / add seeds / fill compare cells).')}>${c.starved} starved</span>
+    <span class="hyp-hygiene-title">Hypothesis health</span>
+    <span class="run-badge is-done" tabindex="0"${helpAttr('Hypotheses with a decided verdict (proven/disproved).')}>${c.judged} judged</span>
+    <span class="run-badge is-failed" tabindex="0"${helpAttr('Structurally BLOCKED as written — more runs can never decide them (a dead pin the store can never match, an underplanned seed list, a single context cell, a metric the family never reports). Fix the spec — 💬 Discuss proposes a corrected one.')}>${c.blocked} blocked</span>
+    <span class="run-badge is-queued" tabindex="0"${helpAttr('Sound but STARVED — they just need more runs (launch the spec / add seeds / fill compare cells).')}>${c.starved} starved</span>
     ${issues ? `<span class="card-sub">${escapeHtml(issues)}</span>` : ''}
-    ${discussButtonHtml('discuss-hygiene', '', 'Discuss the registry’s health with the AI — the full hygiene census (why hypotheses are blocked/starved) is shared into the chat.')}
+    ${discussButtonHtml('discuss-hygiene', '', 'Discuss the registry’s health with the AI — the full health census (why hypotheses are blocked/starved) is shared into the chat.')}
   </div>`
 }
 // The per-card one-liner explaining WHY an undecided hypothesis is undecided (top issues, most severe
@@ -11920,7 +11972,11 @@ function hypothesisHygieneLineHtml(h, verdict) {
   const parts = d.issues.slice(0, 3).map((i) => i.detail)
   if (!parts.length && d.runsNeeded) parts.push(`${d.runsNeeded} more run(s) needed to judge`)
   if (!parts.length) return ''
-  return `<p class="card-sub hyp-hygiene-line"><span class="badge ${d.status === 'blocked' ? 'is-bad' : 'is-warn'}">${escapeHtml(d.status)}</span> ${escapeHtml(parts.join(' · '))}</p>`
+  const statusHelp =
+    d.status === 'blocked'
+      ? 'Structurally blocked: as written, more runs can never decide this — the spec needs fixing. 💬 Discuss shares the diagnosis and proposes a corrected spec.'
+      : 'Sound but under-evidenced — it just needs more runs; launch the missing ones below.'
+  return `<p class="card-sub hyp-hygiene-line"><span class="badge ${d.status === 'blocked' ? 'is-bad' : 'is-warn'}" tabindex="0"${helpAttr(statusHelp)}>${escapeHtml(d.status)}</span> ${escapeHtml(parts.join(' · '))}</p>`
 }
 // For a STARVED (not structurally blocked) hypothesis: spell out exactly what more running would decide it —
 // the shortfall in runs of the current setups plus any sweep options never run — and a one-click launch of
@@ -12178,7 +12234,7 @@ async function refreshHypothesisVerdicts(hyps) {
         'hypotheses-status',
         `${changed.length} hypothes${changed.length === 1 ? 'is' : 'es'} changed verdict.`,
       )
-      showToast(`${changed.length} hypothesis verdict${changed.length === 1 ? '' : 's'} changed`, () => {
+      showToast(`${changed.length} hypothesis verdict${changed.length === 1 ? '' : 's'} changed — tap to view`, () => {
         // Jump to the section holding the first flip. 'proposed' (and any non-section label) live in the
         // untested section, so land there rather than no-op.
         hypothesisOpenSection =
@@ -14598,7 +14654,7 @@ function modelCardHtml(model) {
       : ''
   const actions =
     (chatAboutRunAvailable()
-      ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
+      ? `<button type="button" class="card-btn" data-action="discuss-model" data-id="${id}" aria-label="Discuss with the AI"${helpAttr(discussTitle)}>${iconChatSvg()}</button>`
       : '') +
     featureBtn +
     `<button type="button" class="card-btn card-btn-danger" data-action="delete-model" data-id="${id}"${helpAttr('Remove this model from the catalog.')}>${iconDeleteSvg()}</button>`
@@ -17750,10 +17806,59 @@ function paintTabLoading(tabId) {
 }
 // --- Exploration view: the config-space search map, always available per project ---------------
 let explorationPollTimer = null
+// A cheap change-signature of the last exploration render (run count + explore-activity statuses + the map's
+// stage/done/paused/pendingChild/spentRuns). A POLL tick that finds it unchanged SKIPS the heavy full-run
+// re-scan AND the DOM rebuild — so the heatmap scroll, open peg dropdowns, and hover tooltip survive, and a
+// large project isn't re-paged every few seconds. A user-driven render always proceeds and refreshes it.
+let explorationLastSig = null
+let explorationLastActive = false
+// Reschedule the exploration poll. `active` (a live controller/child) polls faster; omit it to reuse the last
+// cadence. `keepSig` skips recomputing the signature (used by the no-change skip path, where it's still valid).
+async function scheduleExplorationPoll(recordType, active, opts) {
+  if (explorationPollTimer) {
+    clearTimeout(explorationPollTimer)
+    explorationPollTimer = null
+  }
+  if (activeTabId !== 'exploration') return
+  if (active !== undefined) explorationLastActive = active
+  if (!opts || !opts.keepSig) explorationLastSig = await explorationPollSignature(recordType)
+  explorationPollTimer = setTimeout(
+    () => {
+      if (activeTabId === 'exploration') void renderExploration(true)
+    },
+    explorationLastActive ? 2500 : 5000,
+  )
+}
+async function explorationPollSignature(recordType) {
+  try {
+    const count = await countRunRecords(undefined)
+    let actSig = ''
+    try {
+      const res = await window.OverseerBridge.listActivities()
+      actSig = ((res && res.activities) || [])
+        .filter((a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType))
+        .map((a) => a.activityId + ':' + a.status)
+        .sort()
+        .join(',')
+    } catch {
+      // activities unavailable — leave actSig empty; count + state still drive change detection
+    }
+    const recs = await queryRecords(recordType + '-exploration', 'current')
+    const st = recs && recs[0] && recs[0].content
+    const stSig = st
+      ? `${st.stage}:${st.done}:${st.paused || false}:${st.pendingChildId || ''}:${(st.budget && st.budget.spentRuns) || 0}`
+      : 'none'
+    return `${count == null ? '?' : count}|${actSig}|${stSig}`
+  } catch {
+    return null // probe failed — never skip on an unknown signature
+  }
+}
 let explorationDiscoveryTimer = null
 // When the user hits Start/Resume, the controller takes a beat to appear as a live activity. Stamp the
 // launch so the status view shows an optimistic "Starting…" until a live controller / running child shows up.
-let explorationLaunchingAt = 0
+// Optimistic "Starting…" stamp, TAGGED with the project it belongs to so the grace window can't leak the
+// spinner into a DIFFERENT project the user switches to right after a launch.
+let explorationLaunching = { recordType: null, at: 0 }
 // The `explore` controller spawns its `train` experiments on the BACKEND, which the viewer only discovers
 // on open/focus. While a controller is live, re-scan on a timer so those experiments appear in Activity.
 async function explorationDiscoveryTick() {
@@ -17792,7 +17897,7 @@ async function writeExplorationFlag(recordType, state, patch) {
     // best-effort; the autopilot re-reads on its next round
   }
 }
-async function renderExploration() {
+async function renderExploration(fromPoll) {
   const container = byId('exploration-body')
   if (!container || !window.Exploration) return
   if (!manifest) {
@@ -17800,6 +17905,16 @@ async function renderExploration() {
     return
   }
   const recordType = manifest.recordType
+
+  // Poll tick: if nothing observable changed since the last render, skip the heavy re-scan + DOM rebuild so the
+  // user's scroll / open dropdown / hover survives. A user-driven render (fromPoll falsy) always proceeds.
+  if (fromPoll && container.querySelector('.expl')) {
+    const sig = await explorationPollSignature(recordType)
+    if (sig !== null && sig === explorationLastSig) {
+      await scheduleExplorationPoll(recordType, undefined, { keepSig: true })
+      return
+    }
+  }
 
   // The single per-project exploration map (stable key 'current' — one exploration per project, resumable).
   let state = null
@@ -17819,7 +17934,10 @@ async function renderExploration() {
   // accumulate (NOT a single capped query, which returns only ONE page — the "only the last page is taken
   // into account" bug — and NOT the shared xAI pool, which lags behind live runs). Filter to EXACTLY what
   // the strategist counts (status==='completed' AND numeric objective) so the "N new being analyzed" backlog
-  // is a true transient, never a phantom. Falls back to the pool only if the paged query is unavailable.
+  // is a true transient, never a phantom. `queryAllRunRecords` THROWS on a real failure (retry-then-throw pager)
+  // and returns [] ONLY when the archive is genuinely empty — so an empty result must STAY empty (it drives the
+  // all-runs-deleted self-heal → Start). The stale xAI pool is used ONLY on an actual query error (the catch),
+  // never to paper over a genuinely-empty archive.
   let runs = []
   try {
     runs = (await queryAllRunRecords())
@@ -17832,7 +17950,6 @@ async function renderExploration() {
         seed: r.summary.seed,
         status: 'completed',
       }))
-    if (!runs.length) runs = xaiRuns()
   } catch {
     runs = xaiRuns()
   }
@@ -17871,8 +17988,11 @@ async function renderExploration() {
   // Optimistic "Starting…" until a live controller / running child appears (activities are eventually
   // consistent, so right after Start/Resume neither shows yet). Clears itself after a grace window.
   const childActiveNow = !!(pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
-  if (liveExploreCount > 0 || childActiveNow) explorationLaunchingAt = 0
-  const launching = explorationLaunchingAt > 0 && Date.now() - explorationLaunchingAt < 12000
+  if (liveExploreCount > 0 || childActiveNow) explorationLaunching = { recordType: null, at: 0 }
+  const launching =
+    explorationLaunching.recordType === recordType &&
+    explorationLaunching.at > 0 &&
+    Date.now() - explorationLaunching.at < 12000
 
   const launchExplore = async (extra) => {
     // trainerComputeParams injects recordType/dir/manifestRelPath/computeTarget — the backend `explore`
@@ -17892,7 +18012,7 @@ async function renderExploration() {
       }
       return false
     }
-    explorationLaunchingAt = Date.now() // show "Starting…" until the controller/child appears
+    explorationLaunching = { recordType, at: Date.now() } // show "Starting…" until the controller/child appears
     invalidateActivitiesCache()
     startExplorationDiscovery() // pick up the controller's spawned `train` experiments so they show
     setTimeout(() => renderExploration(), 600)
@@ -17945,7 +18065,11 @@ async function renderExploration() {
         } catch {
           // ignore
         }
-        await writeExplorationFlag(recordType, state, { pendingChildId: undefined })
+      }
+      // Clear the in-flight handle AND the paused flag: Stopping after a Pause must NOT leave the map paused
+      // (it would keep showing "Paused" with a Resume button over a stopped search).
+      if (state && state._recordKey) {
+        await writeExplorationFlag(recordType, state, { pendingChildId: undefined, paused: false })
       }
       invalidateActivitiesCache()
       setTimeout(() => renderExploration(), 400)
@@ -17967,7 +18091,7 @@ async function renderExploration() {
       // guard aborts the extras on launch, consolidating to one). A healthy single controller is left alone.
       await writeExplorationFlag(recordType, state, { paused: false })
       if (liveExploreCount === 1) {
-        explorationLaunchingAt = Date.now()
+        explorationLaunching = { recordType, at: Date.now() }
         invalidateActivitiesCache()
         setTimeout(() => renderExploration(), 400)
       } else {
@@ -18029,25 +18153,15 @@ async function renderExploration() {
     actions,
   )
 
-  // light poll while an exploration is live and this tab is open
-  if (explorationPollTimer) {
-    clearTimeout(explorationPollTimer)
-    explorationPollTimer = null
-  }
-  // Keep the tab live while it is OPEN, regardless of whether a controller activity is live — the heatmap
-  // is driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` froze it.
-  if (activeTabId === 'exploration') {
-    const active =
-      launching ||
-      (activity && ['running', 'starting', 'queued'].includes(activity.status)) ||
-      (pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
-    explorationPollTimer = setTimeout(
-      () => {
-        if (activeTabId === 'exploration') void renderExploration()
-      },
-      active ? 2500 : 5000,
-    )
-  }
+  // Light poll while the tab is OPEN, regardless of whether a controller activity is live — the heatmap is
+  // driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` alone froze it.
+  // scheduleExplorationPoll stores the change-signature so the NEXT tick can skip a no-op re-render.
+  const active = !!(
+    launching ||
+    (activity && ['running', 'starting', 'queued'].includes(activity.status)) ||
+    (pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
+  )
+  await scheduleExplorationPoll(recordType, active)
 }
 
 function showTab(id) {
@@ -18176,6 +18290,18 @@ async function init() {
     setBanner('Open inside the Overseer to use the viewer.')
     renderHome()
     return
+  }
+  deepLinkPending = await window.OverseerBridge.getDeepLink().catch(function () {
+    return null
+  })
+  // Host->app deep-link PUSH (nav.open): fired when the App-tab route changes while we stay mounted (the
+  // boot pull above only covers a fresh mount). Apply now if a project is open, else stash for the next
+  // openProject — the same idempotent, best-effort path the boot pull uses.
+  if (window.OverseerBridge.onNavOpen) {
+    window.OverseerBridge.onNavOpen(function (dl) {
+      if (manifest) applyDeepLink(dl)
+      else deepLinkPending = dl
+    })
   }
   await renderHome()
   startHomePoll()

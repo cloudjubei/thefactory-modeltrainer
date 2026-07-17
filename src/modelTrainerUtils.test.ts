@@ -26,6 +26,7 @@ import {
   isSpecAffectedByFidelityLookahead,
   findMigrationRule,
   migrateExperimentSpec,
+  validateSpecAgainstManifest,
   canonicalConfigString,
   estimateRemainingCampaignSeconds,
   coerceHypothesisItems,
@@ -70,6 +71,7 @@ import {
   hypothesisConsolidationKey,
   mergeHypothesisSpecs,
   pickCanonicalHypothesis,
+  planHypothesisSpecMigration,
   groupHypothesesForConsolidation,
   planHypothesisConsolidation,
   buildPaperResearchGoal,
@@ -1086,6 +1088,135 @@ describe('coerceVerdictRows', () => {
   })
 })
 
+describe('validateSpecAgainstManifest', () => {
+  const vm = manifest({
+    levers: {
+      lr: { type: 'number', default: 0.01, range: [0.0001, 0.1] },
+      steps: { type: 'number', default: 100 },
+      algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+      net_arch: {
+        type: 'choice',
+        choices: [
+          [64, 64],
+          [256, 256],
+        ],
+        default: [64, 64],
+      },
+      use_dropout: { type: 'boolean', default: false },
+      dropout_p: {
+        type: 'number',
+        default: 0.1,
+        range: [0, 1],
+        appliesWhen: { use_dropout: [true] },
+      },
+    },
+  })
+
+  it('accepts a spec whose values are all in range / valid choices', () => {
+    expect(
+      validateSpecAgainstManifest(vm, { fixed: { algo: 'a', lr: 0.05 }, sweep: { steps: [50, 100] } }),
+    ).toEqual([])
+  })
+  it('flags a number outside its declared range (fixed and sweep)', () => {
+    expect(validateSpecAgainstManifest(vm, { fixed: { lr: 5 } })).toHaveLength(1)
+    expect(validateSpecAgainstManifest(vm, { sweep: { lr: [0.05, 9] } })).toHaveLength(1)
+  })
+  it('flags a choice value not in the manifest choices', () => {
+    expect(validateSpecAgainstManifest(vm, { fixed: { algo: 'c' } })).toHaveLength(1)
+    expect(validateSpecAgainstManifest(vm, { fixed: { algo: 'a' } })).toEqual([])
+  })
+  it('compares array-valued choices by deep value (net_arch)', () => {
+    expect(
+      validateSpecAgainstManifest(vm, { fixed: { net_arch: [256, 256] } }),
+    ).toEqual([])
+    expect(validateSpecAgainstManifest(vm, { fixed: { net_arch: [1, 2] } })).toHaveLength(1)
+  })
+  it('flags a non-boolean value for a boolean lever', () => {
+    expect(validateSpecAgainstManifest(vm, { fixed: { use_dropout: 1 } })).toHaveLength(1)
+    expect(validateSpecAgainstManifest(vm, { fixed: { use_dropout: true } })).toEqual([])
+  })
+  it('validates compare values against the compared lever', () => {
+    expect(
+      validateSpecAgainstManifest(vm, { compare: { lever: 'algo', values: ['a', 'b'] } }),
+    ).toEqual([])
+    expect(
+      validateSpecAgainstManifest(vm, { compare: { lever: 'algo', values: ['a', 'zzz'] } }),
+    ).toHaveLength(1)
+  })
+  it('flags a lever pinned where its appliesWhen condition is not met (control pinned incompatibly)', () => {
+    expect(
+      validateSpecAgainstManifest(vm, { fixed: { dropout_p: 0.2, use_dropout: false } }),
+    ).toHaveLength(1)
+    expect(
+      validateSpecAgainstManifest(vm, { fixed: { dropout_p: 0.2, use_dropout: true } }),
+    ).toEqual([])
+  })
+  it('uses the control default when the control is unpinned (dropout_p needs use_dropout=true)', () => {
+    // use_dropout defaults to false ⇒ dropout_p never applies ⇒ flagged.
+    expect(validateSpecAgainstManifest(vm, { fixed: { dropout_p: 0.2 } })).toHaveLength(1)
+    // but if the control is SWEPT to include a satisfying value, it can apply ⇒ not flagged.
+    expect(
+      validateSpecAgainstManifest(vm, {
+        fixed: { dropout_p: 0.2 },
+        sweep: { use_dropout: [true, false] },
+      }),
+    ).toEqual([])
+  })
+  it('flags a lever name that is not in the manifest', () => {
+    expect(validateSpecAgainstManifest(vm, { fixed: { ghost: 1 } })).toHaveLength(1)
+  })
+  it('validates environment/dataset bundle values too', () => {
+    const bm = manifest({
+      levers: {
+        algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        asset: { type: 'choice', choices: ['btc', 'eth'], scope: 'dataset', default: 'btc' },
+      },
+    })
+    expect(validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'doge' }] })).toHaveLength(1)
+    expect(validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'eth' }] })).toEqual([])
+  })
+  it('appliesWhen control satisfied via a DATASET/ENVIRONMENT bundle is not flagged (bundles set levers too)', () => {
+    const bm = manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['m'], default: 'm' },
+        fidelity: { type: 'choice', choices: ['1m', '5m'], scope: 'dataset', default: '5m' },
+        lookback: { type: 'number', default: 10, appliesWhen: { fidelity: ['1m'] } },
+      },
+    })
+    // The only dataset bundle sets fidelity=1m, so lookback DOES apply — must not be dropped.
+    expect(
+      validateSpecAgainstManifest(bm, {
+        fixed: { model_name: 'm', lookback: 20 },
+        datasets: [{ fidelity: '1m' }],
+      }),
+    ).toEqual([])
+    // No bundle → control falls back to the default 5m → genuinely inapplicable → flagged.
+    expect(
+      validateSpecAgainstManifest(bm, { fixed: { model_name: 'm', lookback: 20 } }),
+    ).toHaveLength(1)
+    // MIXED bundles (one satisfies, one missing the control → default): some context satisfies → not flagged.
+    expect(
+      validateSpecAgainstManifest(bm, {
+        fixed: { model_name: 'm', lookback: 20 },
+        datasets: [{ fidelity: '1m' }, {}],
+      }),
+    ).toEqual([])
+  })
+  it('coercion parity with specMatchesConfig: a string echo of a numeric choice / boolean is accepted', () => {
+    const bm = manifest({
+      levers: {
+        fidelity: { type: 'choice', choices: [1, 5, 15], default: 5 },
+        use_layernorm: { type: 'boolean', default: false },
+      },
+    })
+    // specMatchesConfig compares String(a)===String(b), so '5' matches runs storing 5 — must not be dropped.
+    expect(validateSpecAgainstManifest(bm, { fixed: { fidelity: '5' } })).toEqual([])
+    expect(validateSpecAgainstManifest(bm, { fixed: { fidelity: '7' } })).toHaveLength(1)
+    expect(validateSpecAgainstManifest(bm, { fixed: { use_layernorm: 'true' } })).toEqual([])
+    expect(validateSpecAgainstManifest(bm, { fixed: { use_layernorm: 'yes' } })).toHaveLength(1)
+  })
+})
+
 describe('coerceHypothesisItems', () => {
   const m = manifest()
 
@@ -1108,6 +1239,32 @@ describe('coerceHypothesisItems', () => {
     expect(
       coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { sweep: { ghost: [1] } } }], m),
     ).toEqual([])
+  })
+
+  it('drops a proposal whose VALUE is off-manifest (choice not in choices) — generation-time validation', () => {
+    // algo is a choice over ['a','b']; 'zzz' is not allowed, so the item never persists.
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { fixed: { algo: 'zzz' } } }], m),
+    ).toEqual([])
+    expect(
+      coerceHypothesisItems([{ title: 't', rationale: 'r', spec: { fixed: { algo: 'b' } } }], m),
+    ).toHaveLength(1)
+  })
+
+  it('folds a retired value via migrations before persisting (no stranded dead pin)', () => {
+    const mm = manifest({
+      levers: {
+        algo: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        lr: { type: 'number', default: 0.01 },
+      },
+      migrations: [{ match: { algo: 'old' }, set: { algo: 'b' } }],
+    })
+    const items = coerceHypothesisItems(
+      [{ title: 't', rationale: 'r', spec: { fixed: { algo: 'old' } } }],
+      mm,
+    )
+    expect(items).toHaveLength(1)
+    expect(items[0].spec.fixed).toEqual({ algo: 'b' })
   })
 
   it('drops a proposal with an empty sweep array', () => {
@@ -3255,6 +3412,132 @@ describe('planHypothesisConsolidation', () => {
     expect(p!.unionRecord.id).toBe(unionId)
     expect(p!.deletedIds).toEqual(['narrow'])
     expect(new Set(p!.unionRecord.paperIds)).toEqual(new Set(['pA', 'pB']))
+  })
+})
+
+describe('planHypothesisSpecMigration', () => {
+  const migrations = [{ match: { algo: 'old' }, set: { algo: 'b' } }]
+  const h = (id: string, spec: any, o: any = {}) => ({
+    id,
+    spec,
+    title: id,
+    rationale: '',
+    status: 'untested',
+    verdictSource: 'auto',
+    source: 'llm',
+    createdAt: '2026-01-01',
+    updatedAt: '2026-01-01',
+    paperIds: [],
+    ...o,
+  })
+  const idOf = (spec: any) => hashTrainingConfig(spec)
+  const run = (hyps: any[], papers: any[] = [], models: any[] = [], rules: any = migrations) =>
+    planHypothesisSpecMigration(hyps as any, papers as any, models as any, rules, '2026-07-16T00:00:00Z', hashTrainingConfig)
+
+  it('no-ops without migrations', () => {
+    expect(
+      planHypothesisSpecMigration(
+        [h(idOf({ fixed: { algo: 'old' } }), { fixed: { algo: 'old' } })] as any,
+        [],
+        [],
+        undefined,
+        '2026-07-16T00:00:00Z',
+        hashTrainingConfig,
+      ),
+    ).toEqual({ writes: [], deletes: [], changedPapers: [], changedModels: [] })
+  })
+
+  it('re-keys a hypothesis pinning a retired value to the migrated-spec id', () => {
+    const oldId = idOf({ fixed: { algo: 'old' } })
+    const p = run([h(oldId, { fixed: { algo: 'old' } })])
+    expect(p.deletes).toEqual([oldId])
+    expect(p.writes).toHaveLength(1)
+    expect(p.writes[0].spec.fixed).toEqual({ algo: 'b' })
+    expect(p.writes[0].id).toBe(idOf({ fixed: { algo: 'b' } }))
+    expect(p.writes[0].id).not.toBe(oldId)
+  })
+
+  it('leaves an already-current hypothesis untouched', () => {
+    const cur = idOf({ fixed: { algo: 'b' } })
+    expect(run([h(cur, { fixed: { algo: 'b' } })])).toEqual({
+      writes: [],
+      deletes: [],
+      changedPapers: [],
+      changedModels: [],
+    })
+  })
+
+  it('consolidates two hypotheses that migrate to the SAME spec into one survivor', () => {
+    const newId = idOf({ fixed: { algo: 'b' } })
+    const a = h('A', { fixed: { algo: 'old' } }, { paperIds: ['p1'] }) // migrates → newId
+    const bAtNew = h(newId, { fixed: { algo: 'b' } }, { paperIds: ['p2'] }) // already at newId
+    const p = run([a, bAtNew])
+    expect(p.writes).toHaveLength(1)
+    expect(p.writes[0].id).toBe(newId)
+    expect(new Set(p.writes[0].paperIds)).toEqual(new Set(['p1', 'p2']))
+    expect(p.deletes).toEqual(['A'])
+  })
+
+  it('repoints paper hypothesisIds + weights off a deleted id (weights max-merged onto survivor)', () => {
+    const newId = idOf({ fixed: { algo: 'b' } })
+    const paper = { id: 'p1', hypothesisIds: ['A', newId], hypothesisWeights: { A: 5, [newId]: 2 } }
+    const p = run([h('A', { fixed: { algo: 'old' } })], [paper])
+    expect(p.changedPapers).toHaveLength(1)
+    expect(p.changedPapers[0].hypothesisIds).toEqual([newId])
+    expect(p.changedPapers[0].hypothesisWeights![newId]).toBe(5)
+    expect('A' in (p.changedPapers[0].hypothesisWeights || {})).toBe(false)
+  })
+
+  it('defers a group with an in-flight campaign (would orphan its pending write)', () => {
+    const a = h('A', { fixed: { algo: 'old' } }, { campaign: { status: 'running', activityId: 'x' } })
+    expect(run([a]).writes).toEqual([])
+  })
+
+  it('skips a conflicting manual-verdict pair rather than silently pinning one', () => {
+    const p = run([
+      h('A', { fixed: { algo: 'old' } }, { verdictSource: 'manual', status: 'proven' }),
+      h('B', { fixed: { algo: 'old' } }, { verdictSource: 'manual', status: 'disproved' }),
+    ])
+    expect(p.writes).toEqual([])
+    expect(p.deletes).toEqual([])
+  })
+
+  it('drops stale evidence/transitions/campaign on a re-keyed survivor', () => {
+    const a = h('A', { fixed: { algo: 'old' } }, {
+      evidence: { matchedKeys: ['k'], status: 'proven' },
+      transitions: [{ at: 't', from: 'untested', to: 'proven' }],
+      campaign: { status: 'completed', activityId: 'x' },
+    })
+    const p = run([a])
+    expect('evidence' in p.writes[0]).toBe(false)
+    expect('transitions' in p.writes[0]).toBe(false)
+    expect('campaign' in p.writes[0]).toBe(false)
+  })
+
+  it('CHAINED rules: a paper weight hops exactly ONE remap step (ids and weights stay in agreement)', () => {
+    // Chained rule set: a→b and b→c (applyMigrationRules applies ONE hop per record). H1(a)→id B,
+    // H2(b)→id C, H3(c) already at C. remap = {A→B, B→C}. A paper weighting A must land its weight on B
+    // (where A's content now lives) — NOT double-hop through B→C onto a hypothesis it doesn't link.
+    const chain = [
+      { match: { algo: 'a' }, set: { algo: 'b' } },
+      { match: { algo: 'b' }, set: { algo: 'c' } },
+    ]
+    const idA = idOf({ fixed: { algo: 'a' } })
+    const idB = idOf({ fixed: { algo: 'b' } })
+    const idC = idOf({ fixed: { algo: 'c' } })
+    const paper = { id: 'p1', hypothesisIds: [idA], hypothesisWeights: { [idA]: 4 } }
+    const p = run(
+      [h(idA, { fixed: { algo: 'a' } }), h(idB, { fixed: { algo: 'b' } }), h(idC, { fixed: { algo: 'c' } })],
+      [paper],
+      [],
+      chain,
+    )
+    // B is both written (survivor of A's group) and absorbed into C — the record guard keeps B alive.
+    expect(p.deletes).toEqual([idA])
+    const cp = p.changedPapers[0]
+    expect(cp.hypothesisIds).toEqual([idB])
+    expect(cp.hypothesisWeights![idB]).toBe(4)
+    expect(idC in (cp.hypothesisWeights || {})).toBe(false)
   })
 })
 

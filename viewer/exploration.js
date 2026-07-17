@@ -260,13 +260,15 @@
       }
     }
 
-    const nums = [...new Set(vals.map(Number).filter(isFinite))].sort((a, b) => a - b).slice(0, MAX_AXIS_VALUES)
+    // The FULL distinct set — lo/hi span EVERY tried value, so no run falls outside [lo,hi] and gets clamped
+    // into the edge bin. Only the BIN COUNT is capped (below), never the value range.
+    const nums = [...new Set(vals.map(Number).filter(isFinite))].sort((a, b) => a - b)
     const D = Math.max(1, nums.length)
     const z = zoom > 0 ? zoom : 1
     const lo = nums.length ? nums[0] : 0
     const hi = nums.length ? nums[nums.length - 1] : 1
     // Bin count scales with zoom (min 2, capped generously above the value count so zoom-IN keeps adding bins).
-    const B = hi <= lo ? D : Math.max(2, Math.min(MAX_AXIS_VALUES * 3, Math.round(D * z)))
+    const B = hi <= lo ? Math.min(D, MAX_AXIS_VALUES * 3) : Math.max(2, Math.min(MAX_AXIS_VALUES * 3, Math.round(D * z)))
 
     // Each bin carries the distinct values that fall in it, so its label is the concrete value (one value) or
     // the actual min–max of its members (never a degenerate "x–x"); an empty bin shows its scale midpoint.

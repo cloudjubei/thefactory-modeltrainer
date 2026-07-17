@@ -350,6 +350,102 @@ export function migrateExperimentSpec(
 }
 
 /**
+ * Validate a spec's VALUES against the manifest (names are validated elsewhere by `expandExperimentMatrix`).
+ * Returns a list of human-readable problems (empty ⇒ valid). Catches what only lever-NAME checks miss and
+ * the hygiene census would otherwise diagnose after the fact: a `choice` value not among `choices`, a
+ * `number` outside its `range`, a non-`boolean` for a boolean lever, an unknown lever, and a lever pinned
+ * where its `appliesWhen` condition can never hold (the `na-pinned` dead-pin, resolved against the control's
+ * pinned/swept/compared value, else its default). Used at hypothesis GENERATION time to reject a bad spec at
+ * the source rather than persisting a permanently-blocked hypothesis.
+ */
+export function validateSpecAgainstManifest(
+  manifest: TrainerManifest,
+  spec: ExperimentSpec,
+): string[] {
+  const errors: string[] = []
+  const levers = (manifest && manifest.levers) || {}
+  // Value equality mirrors specMatchesConfig's String() coercion EXACTLY — that matcher decides which runs
+  // are evidence, so validation must accept whatever it would match ('5' vs 5, 'true' vs true). A stricter
+  // deep-equality here would silently drop viable hypotheses over a type echo the matcher ignores.
+  const eq = (a: unknown, b: unknown) => String(a) === String(b)
+  const checkValue = (key: string, value: unknown, where: string): void => {
+    const lever = levers[key]
+    if (!lever) {
+      errors.push(`${where} "${key}" names no manifest lever`)
+      return
+    }
+    if (lever.type === 'choice' && Array.isArray(lever.choices) && lever.choices.length) {
+      if (!lever.choices.some((c) => eq(c, value)))
+        errors.push(`${where} ${key}=${canonicalConfigString(value)} is not an allowed choice`)
+    } else if (lever.type === 'number') {
+      const n = Number(value)
+      if (!Number.isFinite(n))
+        errors.push(`${where} ${key}=${canonicalConfigString(value)} must be a number`)
+      else if (lever.range && (n < lever.range[0] || n > lever.range[1]))
+        errors.push(`${where} ${key}=${n} is outside the range [${lever.range[0]}, ${lever.range[1]}]`)
+    } else if (lever.type === 'boolean' && typeof value !== 'boolean' && !eq(value, true) && !eq(value, false)) {
+      errors.push(`${where} ${key}=${canonicalConfigString(value)} must be a boolean`)
+    }
+  }
+  for (const [k, v] of Object.entries(spec.fixed ?? {})) checkValue(k, v, 'fixed')
+  for (const [k, raw] of Object.entries(spec.sweep ?? {}))
+    for (const v of Array.isArray(raw) ? raw : [raw]) checkValue(k, v, 'sweep')
+  if (spec.compare && spec.compare.lever)
+    for (const v of spec.compare.values ?? []) checkValue(spec.compare.lever, v, 'compare')
+  for (const bundle of spec.environments ?? [])
+    for (const [k, v] of Object.entries(bundle)) checkValue(k, v, 'environment')
+  for (const bundle of spec.datasets ?? [])
+    for (const [k, v] of Object.entries(bundle)) checkValue(k, v, 'dataset')
+  for (const entry of spec.configs ?? [])
+    for (const [k, v] of Object.entries(entry.config ?? {})) checkValue(k, v, 'config')
+
+  // appliesWhen: a pinned/swept lever whose CONTROL lever can never hold a satisfying value in THIS spec is
+  // inapplicable — it would do nothing (the `na-pinned` census damage). Resolve the control's possible
+  // values from the spec: fixed → single, sweep → options, compare → values, environment/dataset BUNDLES →
+  // each bundle's value (bundles set context levers per cell; a bundle missing the control leaves it at the
+  // manifest default, so mixed bundles contribute the default too), else the manifest default. The bias is
+  // toward acceptance — flag only when NO possible context satisfies.
+  const controlValues = (ctrl: string): unknown[] => {
+    if (spec.fixed && ctrl in spec.fixed) return [spec.fixed[ctrl]]
+    if (spec.sweep && ctrl in spec.sweep) {
+      const raw = spec.sweep[ctrl]
+      return Array.isArray(raw) ? raw : [raw]
+    }
+    if (spec.compare && spec.compare.lever === ctrl) return spec.compare.values ?? []
+    const def = levers[ctrl] ? levers[ctrl].default : undefined
+    const bundles = [...(spec.environments ?? []), ...(spec.datasets ?? [])]
+    if (bundles.length) {
+      const vals: unknown[] = []
+      let missing = false
+      for (const bundle of bundles) {
+        if (ctrl in bundle) vals.push(bundle[ctrl])
+        else missing = true
+      }
+      if (vals.length) {
+        if (missing && def !== undefined) vals.push(def)
+        return vals
+      }
+    }
+    return def === undefined ? [] : [def]
+  }
+  const pinnedKeys = new Set([...Object.keys(spec.fixed ?? {}), ...Object.keys(spec.sweep ?? {})])
+  for (const key of pinnedKeys) {
+    const lever = levers[key]
+    if (!lever || !lever.appliesWhen) continue
+    for (const [ctrl, allowed] of Object.entries(lever.appliesWhen)) {
+      const vals = controlValues(ctrl)
+      if (!vals.length) continue // control indeterminate — don't guess
+      const allow = Array.isArray(allowed) ? allowed : [allowed]
+      if (!vals.some((v) => allow.some((a) => eq(a, v))))
+        errors.push(
+          `${key} does not apply when ${ctrl} ∈ {${vals.map((v) => canonicalConfigString(v)).join(', ')}} (needs ${allow.map((a) => canonicalConfigString(a)).join(', ')})`,
+        )
+    }
+  }
+  return errors
+}
+
+/**
  * Predicted wall-clock SECONDS for the campaign's REMAINING runs, from the ACTUAL durations of runs that
  * have completed THIS session — not elapsed/done (which is diluted toward zero by instantly-skipped, already
  * completed runs). Runs over the same data+model take a similar time, so the average per-run duration × the
@@ -655,6 +751,147 @@ export function planHypothesisConsolidation(
     deletedIds: [...absorbedIds],
     mergedFrom: members.map((m) => m.id),
   }
+}
+
+export interface HypothesisSpecMigrationPlan {
+  /** Survivor hypotheses to upsert at their (possibly NEW) id. */
+  writes: TrainingHypothesis[]
+  /** Old ids to delete (re-keyed away or absorbed on collision). */
+  deletes: string[]
+  /** Papers whose hypothesis links/weights were repointed off a deleted id. */
+  changedPapers: TrainingPaperRecord[]
+  /** Models/flavors whose hypothesis links were repointed. */
+  changedModels: TrainingModel[]
+}
+
+/**
+ * Plan the migration of HYPOTHESIS specs when the manifest's `migrations` retire lever values. A run/queue
+ * migration ({@link migrateExperimentSpec} on configs) leaves hypotheses pinning the retired value stranded
+ * forever — the hygiene census's `migrated` dead pins. This folds each hypothesis's spec through the rules,
+ * re-keys it to the migrated-spec hash, and — when several specs collapse to the SAME migrated spec (or one
+ * already exists there) — CONSOLIDATES them into one survivor (canonical metadata via
+ * {@link pickCanonicalHypothesis}, unioned paper links, evidence/transitions/campaign dropped so the verdict
+ * recomputes cleanly against the new spec). Paper `hypothesisIds`/`hypothesisWeights` and model/flavor
+ * `hypothesisIds` are repointed off the deleted ids (weights max-merged). A group with an in-flight campaign
+ * is deferred (re-keying would orphan its pending results write), and a conflicting manual verdict is skipped.
+ * Pure — the caller performs the writes/deletes. No-op when there are no migrations.
+ */
+export function planHypothesisSpecMigration(
+  hypotheses: TrainingHypothesis[],
+  papers: TrainingPaperRecord[],
+  models: TrainingModel[],
+  migrations: TrainerMigrationRule[] | undefined,
+  nowIso: string,
+  hashFn: (config: Record<string, unknown>) => string,
+): HypothesisSpecMigrationPlan {
+  const empty: HypothesisSpecMigrationPlan = {
+    writes: [],
+    deletes: [],
+    changedPapers: [],
+    changedModels: [],
+  }
+  if (!migrations || migrations.length === 0 || !hypotheses || hypotheses.length === 0) return empty
+
+  const migrated = hypotheses.map((h) => {
+    const spec = migrateExperimentSpec(h.spec || {}, migrations)
+    return { h, spec, newId: hashFn(spec as unknown as Record<string, unknown>) }
+  })
+  const byNewId = new Map<string, typeof migrated>()
+  for (const m of migrated) {
+    const g = byNewId.get(m.newId)
+    if (g) g.push(m)
+    else byNewId.set(m.newId, [m])
+  }
+
+  const writes: TrainingHypothesis[] = []
+  const deletes: string[] = []
+  const remap = new Map<string, string>() // absorbed/re-keyed old id -> survivor new id
+  for (const [newId, group] of byNewId) {
+    // Nothing to do if every member already lives at this id (spec unchanged by migration).
+    if (!group.some((g) => g.h.id !== newId)) continue
+    const members = group.map((g) => g.h)
+    // Defer while a campaign is in flight — re-keying would orphan its pending results write.
+    if (
+      members.some(
+        (m) => m.campaign && (m.campaign.status === 'running' || m.campaign.status === 'queued'),
+      )
+    )
+      continue
+    const { canonical, conflict } = pickCanonicalHypothesis(members)
+    if (conflict || !canonical) continue
+    const canonSpec = migrated.find((g) => g.h.id === canonical.id)?.spec ?? migrated[0].spec
+    const base = members.find((m) => m.id === newId) || canonical
+    const earliest = members
+      .map((m) => m.createdAt)
+      .filter(Boolean)
+      .sort()[0]
+    const keepManual = canonical.verdictSource === 'manual'
+    const survivor: TrainingHypothesis = {
+      ...base,
+      id: newId,
+      spec: canonSpec,
+      status: keepManual ? canonical.status : 'untested',
+      verdictSource: keepManual ? 'manual' : 'auto',
+      paperIds: unionStrings(...members.map((m) => m.paperIds)),
+      createdAt: earliest || nowIso,
+      updatedAt: nowIso,
+    }
+    // The spec changed ⇒ old evidence/transitions/campaign describe a different run family. Drop them so the
+    // verdict recomputes cleanly on the next refresh.
+    delete (survivor as Partial<TrainingHypothesis>).evidence
+    delete (survivor as Partial<TrainingHypothesis>).transitions
+    delete (survivor as Partial<TrainingHypothesis>).campaign
+    if (keepManual) {
+      if (canonical.verdictNote) survivor.verdictNote = canonical.verdictNote
+    } else delete (survivor as Partial<TrainingHypothesis>).verdictNote
+    writes.push(survivor)
+    for (const m of members)
+      if (m.id !== newId) {
+        deletes.push(m.id)
+        remap.set(m.id, newId)
+      }
+  }
+  // Never delete an id we are also writing (guards a pathological chained rule X→Y, Y→Z from data loss).
+  const writtenIds = new Set(writes.map((w) => w.id))
+  const safeDeletes = deletes.filter((id) => !writtenIds.has(id))
+
+  const changedPapers: TrainingPaperRecord[] = []
+  for (const p of papers) {
+    const ids = p.hypothesisIds || []
+    if (!ids.some((id) => remap.has(id))) continue
+    const nextIds = unionStrings(ids.map((id) => remap.get(id) || id))
+    // Rebuild weights with the SAME single-hop lookup as the ids: each ORIGINAL key hops at most once
+    // (remap.get(key) || key). Iterating the global remap over a mutating object would chain hops (A→B then
+    // B→C carries A's weight onto C) and desync the weights from the links under chained migration rules.
+    const weights: Record<string, number> = {}
+    for (const [key, w] of Object.entries(p.hypothesisWeights || {})) {
+      const nextKey = remap.get(key) || key
+      weights[nextKey] = nextKey in weights ? Math.max(weights[nextKey], w) : w
+    }
+    const next: TrainingPaperRecord = { ...p, hypothesisIds: nextIds, updatedAt: nowIso }
+    if (Object.keys(weights).length) next.hypothesisWeights = weights
+    else delete next.hypothesisWeights
+    changedPapers.push(next)
+  }
+
+  const repoint = (ids: string[] | undefined): { ids: string[]; touched: boolean } => {
+    const list = ids || []
+    if (!list.some((id) => remap.has(id))) return { ids: list, touched: false }
+    return { ids: unionStrings(list.map((id) => remap.get(id) || id)), touched: true }
+  }
+  const changedModels: TrainingModel[] = []
+  for (const m of models) {
+    const top = repoint(m.hypothesisIds)
+    let touched = top.touched
+    const flavors = (m.flavors || []).map((f: ModelFlavor) => {
+      const r = repoint(f.hypothesisIds)
+      if (r.touched) touched = true
+      return r.touched ? { ...f, hypothesisIds: r.ids } : f
+    })
+    if (touched) changedModels.push({ ...m, hypothesisIds: top.ids, flavors, updatedAt: nowIso })
+  }
+
+  return { writes, deletes: safeDeletes, changedPapers, changedModels }
 }
 
 /**
@@ -1109,16 +1346,22 @@ export function coerceHypothesisItems(
         .filter((s): s is number => typeof s === 'number' && Number.isFinite(s))
         .map((s) => Math.trunc(s))
     }
+    // Generation-time value validation: fold any retired values the LLM echoed (migrations), then reject a
+    // spec whose VALUES are off-manifest (a choice not in `choices`, a number out of `range`, a lever pinned
+    // where its `appliesWhen` can never hold). Name checks above catch typos; this stops a permanently-blocked
+    // hypothesis at the source instead of persisting one the hygiene census diagnoses after the fact.
+    const migratedSpec = migrateExperimentSpec(spec, manifest.migrations)
+    if (validateSpecAgainstManifest(manifest, migratedSpec).length) continue
     const cellCount =
-      (spec.compare?.values.length || 1) *
-      (spec.environments?.length || 1) *
-      (spec.datasets?.length || 1)
+      (migratedSpec.compare?.values.length || 1) *
+      (migratedSpec.environments?.length || 1) *
+      (migratedSpec.datasets?.length || 1)
     const comparison = coerceComparison(obj.comparison, cellCount)
     const claim = typeof obj.claim === 'string' && obj.claim.trim() ? obj.claim.trim() : undefined
     items.push({
       title: obj.title,
       rationale: obj.rationale,
-      spec,
+      spec: migratedSpec,
       ...(comparison ? { comparison } : {}),
       ...(claim ? { claim } : {}),
     })

@@ -24,7 +24,7 @@ import type { ExperimentSpec, TrainerManifest, TrainingCampaignProgress } from '
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { initExplorationState } from './explorationUtils.js'
 import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
-import { HEAVY_RUN_FIELDS } from './modelTrainerConstants.js'
+import { HEAVY_RUN_FIELDS, EXPLORATION_MAX_CHILD_FAILURES } from './modelTrainerConstants.js'
 
 const NOW = '2026-06-10T12:00:00.000Z'
 
@@ -2514,105 +2514,6 @@ describe('xaiNarrate', () => {
   })
 })
 
-describe('updateTrainingHypothesis / updateTrainingPaper (approval-gated chat write tools)', () => {
-  async function seedProject(storage: DataStorage) {
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'trainer-project-manifest',
-      key: 'demo',
-      content: { manifest: manifest(), dir: 'Demo' },
-    })
-  }
-
-  it('updates a hypothesis (allowed fields only) and stamps a manual verdict', async () => {
-    const storage = memoryStorage()
-    await seedProject(storage)
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'demo-run-hypothesis',
-      key: 'h1',
-      content: { id: 'h1', title: 'old', rationale: 'r', spec: { fixed: { lr: 0.1 } }, status: 'untested' },
-    })
-    const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.updateTrainingHypothesis({
-      scope: 'proj',
-      id: 'h1',
-      set: { title: 'new title', verdict: 'disproved', verdictNote: 'evidence is conclusive', junk: 'x' },
-    })
-    expect(result.updated).toEqual(expect.arrayContaining(['title', 'verdict', 'verdictNote']))
-    expect(result.updated).not.toContain('junk')
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h1' })
-    expect(rec!.content).toMatchObject({
-      title: 'new title',
-      rationale: 'r',
-      status: 'disproved',
-      verdictSource: 'manual',
-      verdictNote: 'evidence is conclusive',
-    })
-  })
-
-  it('validates a replacement spec against the manifest and rejects a bad one', async () => {
-    const storage = memoryStorage()
-    await seedProject(storage)
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'demo-run-hypothesis',
-      key: 'h1',
-      content: { id: 'h1', title: 't', spec: { fixed: { lr: 0.1 } }, status: 'untested' },
-    })
-    const { tools } = makeTools(stubRunner(), storage)
-    await expect(
-      tools.updateTrainingHypothesis({
-        scope: 'proj',
-        id: 'h1',
-        set: { spec: { fixed: { bogus_lever: 1 } } },
-      }),
-    ).rejects.toThrow(/bogus_lever/)
-    const ok = await tools.updateTrainingHypothesis({
-      scope: 'proj',
-      id: 'h1',
-      set: { spec: { sweep: { lr: [0.1, 0.2] }, seeds: [0, 1] } },
-    })
-    expect(ok.updated).toContain('spec')
-  })
-
-  it('fails on an unknown hypothesis id', async () => {
-    const storage = memoryStorage()
-    await seedProject(storage)
-    const { tools } = makeTools(stubRunner(), storage)
-    await expect(
-      tools.updateTrainingHypothesis({ scope: 'proj', id: 'nope', set: { title: 'x' } }),
-    ).rejects.toThrow(/nope/)
-  })
-
-  it('updates a paper (allowed fields only), preserving the rest', async () => {
-    const storage = memoryStorage()
-    await seedProject(storage)
-    await storage.upsertRecord({
-      scope: 'proj',
-      type: 'demo-run-paper',
-      key: 'p1',
-      content: { id: 'p1', title: 'Paper', claim: 'c', hypothesisIds: ['h1'], status: 'untested' },
-    })
-    const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.updateTrainingPaper({
-      scope: 'proj',
-      id: 'p1',
-      set: { verdictNote: 'replication looks weak', tags: ['rl'], dismissed: true, hypothesisIds: ['x'] },
-    })
-    expect(result.updated).toEqual(expect.arrayContaining(['verdictNote', 'tags', 'dismissed']))
-    expect(result.updated).not.toContain('hypothesisIds')
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1' })
-    expect(rec!.content).toMatchObject({
-      verdictNote: 'replication looks weak',
-      tags: ['rl'],
-      dismissed: true,
-      hypothesisIds: ['h1'],
-      claim: 'c',
-    })
-  })
-})
-
 describe('recommendTrainingExperiments (chat agent write tool)', () => {
   async function seedProject(storage: DataStorage) {
     await storage.upsertRecord({
@@ -2640,6 +2541,9 @@ describe('recommendTrainingExperiments (chat agent write tool)', () => {
     expect(result.recordType).toBe('demo-run')
     expect(result.accepted).toBe(1)
     expect(result.rejected).toEqual([])
+    // F.3: an overseer:// deep-link into the xAI Suggested view (scope = the host projectId) so the chat
+    // tool-view can offer a one-click "open to launch" without leaving the conversation.
+    expect(result.viewLink).toBe('overseer://projects/proj/app?view=xai&scope=all')
     const recs = await storage.listRecords({ scope: 'proj', type: 'demo-run-xai-suggestion' })
     expect(recs).toHaveLength(1)
     expect(recs[0].content).toMatchObject({
@@ -3147,6 +3051,47 @@ describe('suggestPaperHypotheses', () => {
   })
 })
 
+describe('getTrainerState (chat orientation read tool)', () => {
+  it('summarizes objective, version, levers, runs+best, verdict census, papers/models', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: manifest({ pipelineVersion: '3' }), dir: 'Demo' },
+    })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r1', content: { status: 'completed', objective: 5, config: {} } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r2', content: { status: 'completed', objective: 9, config: {} } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r3', content: { status: 'failed' } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h1', content: { id: 'h1', status: 'proven', verdictSource: 'auto' } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h2', content: { id: 'h2', status: 'untested', verdictSource: 'manual' } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h3', content: { id: 'h3', status: 'disproved', dismissed: true } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1', content: { id: 'p1' } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-model', key: 'm1', content: { id: 'm1' } })
+    const { tools } = makeTools(stubRunner(), storage)
+    const state = await tools.getTrainerState({ scope: 'proj' })
+    expect(state.found).toBe(true)
+    expect(state.recordType).toBe('demo-run')
+    expect(state.objective).toEqual({ name: 'score', direction: 'max' })
+    expect(state.pipelineVersion).toBe('3')
+    expect(state.runs).toEqual({ total: 2, best: { key: 'r2', objective: 9 } })
+    expect(state.hypotheses).toEqual({ total: 2, proven: 1, disproved: 0, untested: 1, manual: 1 })
+    expect(state.papers).toEqual({ total: 1 })
+    expect(state.models).toEqual({ total: 1 })
+    expect(state.levers).toEqual({ total: 2, model: 2, environment: 0, dataset: 0 })
+  })
+
+  it('returns found:false with the options when the project is ambiguous', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
+    const { tools } = makeTools(stubRunner(), storage)
+    const state = await tools.getTrainerState({ scope: 'proj' })
+    expect(state.found).toBe(false)
+    expect(state.error).toMatch(/several/)
+  })
+})
+
 describe('migrateTrainingRuns', () => {
   const migrations = [
     {
@@ -3188,6 +3133,50 @@ describe('migrateTrainingRuns', () => {
       lr: 0.1,
     })
     expect(content.setupKey).not.toBe('old')
+  })
+
+  it('re-keys a hypothesis pinning a retired value + repoints its paper link (no stranded dead pin)', async () => {
+    const storage = memoryStorage()
+    const oldSpec = { fixed: { reward_model: 'combo_all', lr: 0.1 } }
+    const oldId = hashTrainingConfig(oldSpec)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: oldId,
+      content: {
+        id: oldId,
+        title: 't',
+        rationale: 'r',
+        spec: oldSpec,
+        status: 'untested',
+        verdictSource: 'auto',
+        source: 'llm',
+        paperIds: ['p1'],
+      },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'p1',
+      content: { id: 'p1', title: 'paper', hypothesisIds: [oldId], hypothesisWeights: { [oldId]: 4 } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
+    expect(result).toMatchObject({ migratedHypotheses: 1, deletedHypotheses: 1 })
+    const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
+    expect(hyps).toHaveLength(1)
+    expect(hyps[0].key).not.toBe(oldId)
+    expect((hyps[0].content as { spec: { fixed: Record<string, unknown> } }).spec.fixed).toMatchObject(
+      { reward_model: 'combo_unified', combo_sell: 1000, lr: 0.1 },
+    )
+    const paper = await storage.readRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1' })
+    const pc = paper?.content as { hypothesisIds: string[]; hypothesisWeights: Record<string, number> }
+    expect(pc.hypothesisIds).toEqual([hyps[0].key])
+    expect(pc.hypothesisWeights[hyps[0].key]).toBe(4)
   })
 
   it('MEMORY-SAFETY: scans lean (omits heavy fields) yet preserves them via a by-key read on rewrite', async () => {
@@ -4857,7 +4846,7 @@ describe('runExplorationCampaign (autopilot)', () => {
   function durableHarness(
     tools: ReturnType<typeof makeTools>['tools'],
     storage: DataStorage,
-    opts: { failAll?: boolean; abortAfter?: number } = {},
+    opts: { failAll?: boolean; completeEmpty?: boolean; abortAfter?: number } = {},
   ) {
     const launchOrder: ExperimentSpec[] = []
     const labelOrder: string[] = []
@@ -4877,6 +4866,7 @@ describe('runExplorationCampaign (autopilot)', () => {
       awaited++
       if (opts.abortAfter !== undefined && awaited > opts.abortAfter) return undefined // controller aborted mid-wait
       if (opts.failAll) return 'failed' // child settled without producing any run
+      if (opts.completeEmpty) return 'completed' // the REAL failure mode: child settles 'completed' but writes NO runs
       const spec = children.get(id)
       if (spec) {
         await tools.runTrainingCampaign({
@@ -4985,7 +4975,28 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect(h.launchOrder.length).toBeLessThanOrEqual(4) // bounded, not 200
     const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
     const log = ((rec?.content as { log?: { rationale: string }[] }).log ?? []).map((e) => e.rationale)
-    expect(log.some((r) => /fail/i.test(r))).toBe(true)
+    expect(log.some((r) => /fail|no new runs/i.test(r))).toBe(true)
+  })
+
+  it('durable mode: stops when a child settles `completed` but produces NO runs (fail-guard reads run outcomes, not status)', async () => {
+    // The real failure mode a `train` child exhibits: it terminates `completed` even when every run in it FAILED.
+    // The guard must key off the completed-RUN-count delta (which stays 0), not the child activity status.
+    const storage = memoryStorage()
+    const { tools } = makeTools(surfaceRunner(), storage)
+    const h = durableHarness(tools, storage, { completeEmpty: true })
+    const result = await tools.runExplorationCampaign({
+      scope: 's',
+      projectRoot: '/repo',
+      manifest: SURFACE_MANIFEST,
+      activityId: 'exp-fe',
+      maxRounds: 200,
+      launchTrainCampaign: h.launchTrainCampaign,
+      awaitActivity: h.awaitActivity,
+    })
+    expect(result.state.done).toBe(false)
+    expect(h.launchOrder.length).toBeLessThanOrEqual(4) // bounded — did NOT re-spawn the fruitless batch 200×
+    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    expect((rec?.content as { failStreak?: number }).failStreak).toBeGreaterThanOrEqual(EXPLORATION_MAX_CHILD_FAILURES)
   })
 
   it('durable mode: a controller aborted mid-wait leaves the child pending for a Stop to clean up', async () => {

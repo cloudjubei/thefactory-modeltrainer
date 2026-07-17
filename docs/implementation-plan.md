@@ -58,24 +58,22 @@ hypotheses; Models = the catalog of implemented/proposed models).
 
 ### 3. Conversational hub — remaining work
 
-The core SHIPPED (see `docs/architecture.md`): the universal `discussBundle` Discuss seam on every
-surface (hypotheses + registry health, papers + per-gap, versions, datasets/environments), the
-hypothesis hygiene census (blocked/starved diagnosis with dead-pin causes), the
-`recommendTrainingExperiments` chat WRITE tool (backend `trainerTools.ts` + validated
-`-xai-suggestion` records), paper coverage-gap/improvement "→ story" buttons, the CartPole
-`model_name` identity fix + scan hint, the Versions run-counts/link/Discuss, and the
-Datasets/Environments capability-sections + named-presets redesigns. Remaining:
+The core SHIPPED (see `docs/architecture.md`): the universal `discussBundle` Discuss seam, hypothesis
+hygiene census, `recommendTrainingExperiments` + the approval-gated update tools, generation-time spec
+validation (`validateSpecAgainstManifest` in `coerceHypothesisItems`), hypothesis-spec migration in
+`migrateTrainingRuns` (`planHypothesisSpecMigration`), the `getTrainerState` orientation read tool, and
+the 2026-07-16 UX pass (hypothesis-health banner naming + humanized census, per-card status tooltips,
+capability-card copy, mobile wrap/grid fixes, tool-view copy). Remaining:
 
-1. **Generation-time spec validation.** Validate LLM-proposed hypothesis specs against manifest
-   choices/ranges + `appliesWhen` + migrations BEFORE persisting (today only lever NAMES are
-   checked — the hygiene census diagnoses the damage after the fact; stop it at the source).
-2. **Migrate hypothesis specs in `migrateTrainingRuns`.** Runs + queue are rewritten; hypothesis
-   specs pinning retired values stay stranded forever (the census's `migrated` dead pins). Add the
-   sweep + re-hash/consolidate on collision.
-3. **`getTrainerState` read tool.** A chat-orientation summary (verdict census, papers/models/
-   datasets/envs, version) so a chat can orient without a seeded bundle.
-4. **UX pass.** New-user-lens review of the new surfaces (hygiene banner, capability cards, Discuss
-   affordances) on web + mobile widths.
+1. **Touch-reachable help layer.** `setupHelpTooltips` fires only on hover/focus; icon buttons and
+   badges are the viewer's whole explanatory layer and are unreachable on touch (the hygiene badges
+   now carry `tabindex` as a stopgap). Needs a deliberate design: tap-to-reveal for coarse pointers
+   or inline glosses at small widths.
+2. **Blocked-card action.** A starved card has "Launch the missing runs"; a blocked card's remedy
+   (fix the spec) lives only in the tooltip + Discuss seed — add an on-card affordance (e.g. open
+   the editor pre-seeded, or a scoped Discuss button).
+3. **On-device mobile parity check** of the new hub surfaces (the ≤767px fixes are code-reviewed,
+   not device-verified).
 
 ### 4. Continued training + cross-dataset evaluation
 
@@ -163,24 +161,23 @@ high-uncertainty regions are unprobed; (5) stop on evidence (no new basins for K
 AND marginal EI < ε). Stages: **S0 calibrate-noise → S1 screen → S2 global (find basins) → S3 local (climb each) →
 S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with `model_name` as the top basin axis.
 
-**Build order (steps 1–3 — types, pure Strategist, synthetic-surface proof — are SHIPPED: the
-Strategist finds all maxima + the global max on synthetic surfaces; see git + memory). Remaining:**
+**SHIPPED (steps 1–4 + 7 — see git + memory `project_exploration_autopilot`):** types + pure Strategist (finds all
+maxima + the global max on synthetic surfaces); the durable `explore` controller (Strategist → launch each batch as a
+STANDARD `train` child sharing the experiment lane → await settle → re-assess → repeat; `pendingChildId`
+reconcile/adopt/Stop-exactly-it, `awaitActivity` queue self-heal, repeated-failure guard, singleton guard); the
+Exploration viewer tab (basin/maxima list, regret, stage bar, coverage heatmap, pause/steer, Start / Explore-more).
+Later hardening also shipped: the **coverage gate** (space-filling Halton convergence — never declare "covered" while
+the space is under-sampled), **self-heal** (empty run archive → restart at calibrate), **`model_name` as a real basin
+axis** (examples/tabular now offers 3 sklearn models), **zoom = grid density**, **per-step activity labels**, and a
+**reproducibility test** (repeated runs declare the same model despite noise — the pure half of step 6).
 
-4. **Autopilot activity** (`explore`, durable backend controller) — the loop: Strategist → launch each batch as a
-   STANDARD `train` child (visible under Experiments, sharing the experiment lane) → await settle → re-read runs →
-   re-assess → repeat until done/budget. Reads `ExplorationState` each round so the viewer can **pause / set budget /
-   pin-or-free levers** mid-run. Durability contract: the in-flight child is tracked on the map as `pendingChildId`
-   and reconciled at the top of each round, so a resumed/restarted controller **adopts** the queued child instead of
-   spawning a duplicate, and a Stop aborts exactly it. `awaitActivity` self-heals the queue (`activityQueue.drain`)
-   each poll so a child queued under back-pressure (lane full / heap governor at 0) dispatches the moment a slot frees
-   — the queue otherwise only drains on an in-scope settle or the heap-relief edge, which a waiting controller misses.
-   A repeated-child-failure guard stops the loop instead of respawning an un-runnable batch forever.
-5. **Live CartPole acceptance** — autopilot on fresh CartPole rediscovers ≈500 and enumerates the basins.
-6. **Wine reproducibility pass** — flips objective to `val_rmse`/min; only the manifest changes; cheap enough to run
-   the whole autopilot many times and measure declaration variance.
-7. **Thin Exploration viewer tab** — renders the map (basins = the list of maxima, regret curve, stage, convergence)
-   + pause/steer controls. **Additive; must not touch the shared render paths BlackSwan depends on.**
-8. **BlackSwan (later, gated on 5+6).** `model_name` as the top-level basin axis (screen across model_names, then
+**Remaining:**
+
+5. **Live CartPole + Wine acceptance** (user-run — needs their Python/SB3). Autopilot on fresh CartPole rediscovers
+   ≈500 and enumerates the basins; Wine covers the space across the 3 models and declares the best consistently. The
+   reducer is verified in-repo (drives do 375–975 runs and converge correctly); the controller runs SERVER-SIDE, so a
+   backend restart is required to pick up the shipped dist.
+6. **BlackSwan opt-in (gated on 5).** `model_name` as the top-level basin axis (screen across model_names, then
    S1→S4 within the top few) + scalarize on the existing `traded_return`-with-min-trades north-star, so the whole
    process runs unchanged. Opt-in — no change to the existing BlackSwan views. Pareto basins are a follow-on.
 

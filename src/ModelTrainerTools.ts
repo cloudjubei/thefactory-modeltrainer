@@ -13,6 +13,7 @@ import type {
 import {
   deriveModelRef,
   estimateCampaignEtaSeconds,
+  formatResourceLink,
   parseFirstValidJson,
   parseStructuredItems,
   runActivityWorkItems,
@@ -50,6 +51,8 @@ import type {
   ExperimentSpec,
   GetRunDataParams,
   GetRunDataResult,
+  GetTrainerStateParams,
+  GetTrainerStateResult,
   GetRunXaiParams,
   GetRunXaiResult,
   JudgeTrainingRunsParams,
@@ -65,10 +68,6 @@ import type {
   ProposeTrainingExperimentsResult,
   RecommendTrainingExperimentsParams,
   RecommendTrainingExperimentsResult,
-  UpdateTrainingHypothesisParams,
-  UpdateTrainingHypothesisResult,
-  UpdateTrainingPaperParams,
-  UpdateTrainingPaperResult,
   ProposeTrainingHypothesesParams,
   ProposeTrainingHypothesesResult,
   BenchmarkModelDeviceParams,
@@ -153,6 +152,7 @@ import {
   coerceConsolidationGroups,
   groupHypothesesForConsolidation,
   planHypothesisConsolidation,
+  planHypothesisSpecMigration,
   coerceHypothesisItems,
   coercePaperDraft,
   buildPaperResearchGoal,
@@ -698,7 +698,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     })
 
     let state: ExplorationState | undefined
-    let failStreak = 0
     for (let round = 0; round < maxRounds; round++) {
       if (params.abortSignal?.aborted) break
 
@@ -717,30 +716,45 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // Reconcile any in-flight child from a prior round / a resumed controller BEFORE planning, so a
       // resume ADOPTS the queued run instead of spawning a duplicate. `awaitActivity` self-heals the queue
       // while it waits, so a child that queued under transient back-pressure dispatches when a slot frees.
+      // NOTE: a `train` child settles `completed` even when every run in it FAILED, so its status alone can't
+      // tell a fruitful batch from a dud — we judge fruitfulness below by the actual completed-run count delta.
+      let settledStatus: string | undefined
+      let baselineRuns: number | undefined
       if (working.pendingChildId && params.awaitActivity) {
         const status = await params.awaitActivity(working.pendingChildId)
         // undefined ⇒ the CONTROLLER itself was aborted mid-wait: stop, leaving pendingChildId set so a
         // Stop can abort exactly this child (the viewer reads it off the persisted map).
         if (params.abortSignal?.aborted || status === undefined) break
+        settledStatus = status
+        baselineRuns = working.pendingChildRuns
         working.pendingChildId = undefined
-        await persist(working) // clear the settled handle durably (a concurrent Stop won't re-abort a dead id)
-        failStreak = status === 'completed' ? 0 : failStreak + 1
-        if (failStreak >= EXPLORATION_MAX_CHILD_FAILURES) {
+        working.pendingChildRuns = undefined
+      }
+
+      const runsRecords = await listCompletedRuns(params.scope, recordType, true)
+      const runs = recordsToAnalysisRuns(runsRecords)
+      const completedKeys = new Set(runsRecords.map((r) => r.key))
+
+      // Fail-guard: a just-settled child that produced NO new completed runs was fruitless (failed / empty
+      // batch). Persisted `failStreak` survives resume, so a bad config stops the loop instead of re-spawning
+      // forever — and it resets the moment a batch lands real runs.
+      if (settledStatus !== undefined) {
+        const producedNew = baselineRuns == null ? runs.length > 0 : runs.length > baselineRuns
+        const fruitful = settledStatus === 'completed' && producedNew
+        working.failStreak = fruitful ? 0 : (working.failStreak ?? 0) + 1
+        if ((working.failStreak ?? 0) >= EXPLORATION_MAX_CHILD_FAILURES) {
           const stopped = appendLog(
             working,
             working.stage,
-            `${failStreak} consecutive runs failed to produce results — stopping (check the run logs / config)`,
+            `${working.failStreak} consecutive batches produced no new runs — stopping (check the run logs / config)`,
             0,
           )
           await persist(stopped)
           state = stopped
           break
         }
+        await persist(working) // clear the settled handle + record the streak durably
       }
-
-      const runsRecords = await listCompletedRuns(params.scope, recordType, true)
-      const runs = recordsToAnalysisRuns(runsRecords)
-      const completedKeys = new Set(runsRecords.map((r) => r.key))
       const planStep = (exhausted: boolean): { step: ExplorationStep; spec: ExperimentSpec } => {
         const s = nextExplorationStep(working, runs, manifest, {
           targetObjective: params.targetObjective,
@@ -781,7 +795,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           label,
         })
         if (!activityId) break
-        state = { ...step.stateNext, pendingChildId: activityId }
+        // Record the completed-run count at spawn time as the baseline the NEXT round compares against to
+        // decide whether this batch was fruitful (see the fail-guard above).
+        state = { ...step.stateNext, pendingChildId: activityId, pendingChildRuns: runs.length }
         await persist(state)
       } else {
         await runTrainingCampaign({
@@ -1353,105 +1369,18 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       skippedExisting,
       rejected: rejected.length,
     })
-    return { recordType, accepted: suggestions.length, skippedExisting, rejected, suggestions }
-  }
-
-  // Shared core of the approval-gated chat UPDATE tools: read one record, apply only the allow-listed
-  // fields (each through its coercer; a coercer may throw to reject the whole call), stamp updatedAt,
-  // write back. Returns which fields actually applied so the chat can report faithfully.
-  async function updateRecordFields(
-    scope: string,
-    type: string,
-    id: string,
-    set: Record<string, unknown>,
-    coercers: Record<string, (v: unknown) => unknown | undefined>,
-    onRecordWritten?: (type: string, key: string) => void,
-  ): Promise<string[]> {
-    const rec = await deps.storage.readRecord({ scope, type, key: id })
-    if (!rec?.content) throw new Error(`no ${type} record "${id}" in this project`)
-    const content = { ...(rec.content as Record<string, unknown>) }
-    const updated: string[] = []
-    for (const [field, coerce] of Object.entries(coercers)) {
-      if (!(field in (set ?? {}))) continue
-      const value = coerce((set as Record<string, unknown>)[field])
-      if (value === undefined) continue
-      Object.assign(content, value as Record<string, unknown>)
-      updated.push(field)
-    }
-    if (!updated.length) throw new Error('nothing to update — no allow-listed field was set')
-    content.updatedAt = now()
-    await deps.storage.upsertRecord({ scope, type, key: id, content })
-    onRecordWritten?.(type, id)
-    return updated
-  }
-
-  const asTrimmed = (field: string) => (v: unknown) =>
-    typeof v === 'string' && v.trim() ? { [field]: v.trim() } : undefined
-  const asBool = (field: string) => (v: unknown) =>
-    typeof v === 'boolean' ? { [field]: v } : undefined
-
-  async function updateTrainingHypothesis(
-    params: UpdateTrainingHypothesisParams,
-  ): Promise<UpdateTrainingHypothesisResult> {
-    const manifest = await resolveProjectManifest(params.scope, params.project)
-    const recordType = manifest.recordType
-    const updated = await updateRecordFields(
-      params.scope,
-      `${recordType}-hypothesis`,
-      params.id,
-      params.set as Record<string, unknown>,
-      {
-        title: asTrimmed('title'),
-        claim: asTrimmed('claim'),
-        rationale: asTrimmed('rationale'),
-        verdictNote: asTrimmed('verdictNote'),
-        dismissed: asBool('dismissed'),
-        // A verdict from the chat is a MANUAL override — the auto-refresh must not silently flip it back.
-        verdict: (v) =>
-          v === 'proven' || v === 'disproved' || v === 'untested'
-            ? { status: v, verdictSource: 'manual' }
-            : undefined,
-        // A replacement spec is migrated + validated exactly like a launch — reject with the reason.
-        spec: (v) => {
-          if (!v || typeof v !== 'object' || Array.isArray(v)) return undefined
-          const spec = migrateExperimentSpec(v as ExperimentSpec, manifest.migrations)
-          const planned = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
-          if (!planned.length) throw new Error('the replacement spec plans zero runs')
-          return { spec }
-        },
-      },
-      params.onRecordWritten,
-    )
-    logger?.info('chat updated hypothesis', { recordType, id: params.id, updated })
-    return { recordType, id: params.id, updated }
-  }
-
-  async function updateTrainingPaper(
-    params: UpdateTrainingPaperParams,
-  ): Promise<UpdateTrainingPaperResult> {
-    const manifest = await resolveProjectManifest(params.scope, params.project)
-    const recordType = manifest.recordType
-    const updated = await updateRecordFields(
-      params.scope,
-      `${recordType}-paper`,
-      params.id,
-      params.set as Record<string, unknown>,
-      {
-        title: asTrimmed('title'),
-        claim: asTrimmed('claim'),
-        approach: asTrimmed('approach'),
-        verdictNote: asTrimmed('verdictNote'),
-        url: asTrimmed('url'),
-        authors: asTrimmed('authors'),
-        dismissed: asBool('dismissed'),
-        year: (v) => (Number.isFinite(Number(v)) ? { year: Math.trunc(Number(v)) } : undefined),
-        tags: (v) =>
-          Array.isArray(v) ? { tags: v.map(String).filter(Boolean).slice(0, 20) } : undefined,
-      },
-      params.onRecordWritten,
-    )
-    logger?.info('chat updated paper', { recordType, id: params.id, updated })
-    return { recordType, id: params.id, updated }
+    // A deep-link (F.2) into this project's xAI → Suggested view, where the new ✦ AI batches are launched —
+    // the recommendTrainingExperiments tool-view renders it as a clickable chip so the user can act without
+    // leaving the chat. In-place record EDITS (a hypothesis/paper field, a manual verdict override) go
+    // through the GENERIC updateProjectRecord tool + this project's data-capability manifest, not a custom
+    // tool. (Editing a hypothesis's SPEC changes its identity — propose the corrected spec here instead.)
+    const viewLink = formatResourceLink({
+      kind: 'app',
+      projectId: params.scope,
+      view: 'xai',
+      params: { scope: 'all' },
+    })
+    return { recordType, accepted: suggestions.length, skippedExisting, rejected, suggestions, viewLink }
   }
 
   // Shared paper-synthesis core, used by BOTH analyzePaperFromUrl (single pasted link) and
@@ -2880,6 +2809,61 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, runKey: params.runKey, runCount, narratedBy, narratedAt }
   }
 
+  async function getTrainerState(params: GetTrainerStateParams): Promise<GetTrainerStateResult> {
+    let manifest: TrainerManifest
+    try {
+      manifest = await resolveProjectManifest(params.scope, params.project)
+    } catch (err) {
+      return { found: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    const recordType = manifest.recordType
+    const direction = manifest.objective.direction
+    const [runs, hypRecs, paperRecs, modelRecs] = await Promise.all([
+      listCompletedRuns(params.scope, recordType, true),
+      deps.storage.listRecords({ scope: params.scope, type: `${recordType}-hypothesis` }),
+      deps.storage.listRecords({ scope: params.scope, type: `${recordType}-paper` }),
+      deps.storage.listRecords({ scope: params.scope, type: `${recordType}-model` }),
+    ])
+    let best: { key: string; objective: number } | undefined
+    for (const r of runs) {
+      const o = Number((r.content as { objective?: unknown }).objective)
+      if (!Number.isFinite(o)) continue
+      if (!best || (direction === 'max' ? o > best.objective : o < best.objective))
+        best = { key: r.key, objective: o }
+    }
+    const hyps = hypRecs
+      .map((r) => r.content as { status?: string; verdictSource?: string; dismissed?: boolean; id?: string })
+      .filter((h) => h && h.id && !h.dismissed)
+    const hypCensus = { total: hyps.length, proven: 0, disproved: 0, untested: 0, manual: 0 }
+    for (const h of hyps) {
+      if (h.status === 'proven') hypCensus.proven++
+      else if (h.status === 'disproved') hypCensus.disproved++
+      else hypCensus.untested++
+      if (h.verdictSource === 'manual') hypCensus.manual++
+    }
+    const levers = { total: 0, model: 0, environment: 0, dataset: 0 }
+    for (const lever of Object.values(manifest.levers || {})) {
+      const scope = (lever as { scope?: string }).scope
+      if (scope === 'ignore') continue
+      levers.total++
+      if (scope === 'environment') levers.environment++
+      else if (scope === 'dataset') levers.dataset++
+      else levers.model++
+    }
+    return {
+      found: true,
+      recordType,
+      name: manifest.name,
+      objective: { name: manifest.objective.name, direction },
+      pipelineVersion: manifest.pipelineVersion,
+      levers,
+      runs: { total: runs.length, best },
+      hypotheses: hypCensus,
+      papers: { total: paperRecs.filter((r) => (r.content as { id?: string })?.id).length },
+      models: { total: modelRecs.filter((r) => (r.content as { id?: string })?.id).length },
+    }
+  }
+
   async function getRunData(params: GetRunDataParams): Promise<GetRunDataResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -2924,6 +2908,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let examinedQueue = 0
     let migratedQueue = 0
     let deletedQueue = 0
+    let migratedHypotheses = 0
+    let deletedHypotheses = 0
     if (rules.length === 0 && !hasConditional) {
       return {
         recordType,
@@ -2933,6 +2919,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         examinedQueue,
         migratedQueue,
         deletedQueue,
+        migratedHypotheses,
+        deletedHypotheses,
       }
     }
 
@@ -3037,6 +3025,70 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
     }
 
+    // Migrate HYPOTHESIS specs too (rule-based only): a run/queue value migration leaves hypotheses pinning
+    // the retired value stranded forever — the hygiene census's `migrated` dead pins. Re-key each to its
+    // migrated-spec hash, consolidating collisions and repointing paper/model links. Conditional 'n/a'
+    // normalisation is intentionally NOT applied to hypotheses (they are test INTENT, not resolved configs).
+    if (rules.length > 0) {
+      const hypothesisType = `${recordType}-hypothesis`
+      const paperType = `${recordType}-paper`
+      const modelType = `${recordType}-model`
+      const hypRecords = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
+      const hyps = hypRecords
+        .map((r) => r.content as unknown as TrainingHypothesis)
+        .filter((h) => h && h.id)
+      if (hyps.length) {
+        const paperRecords = await deps.storage.listRecords({ scope: params.scope, type: paperType })
+        const papers = paperRecords
+          .map((r) => r.content as unknown as TrainingPaperRecord)
+          .filter((p) => p && p.id)
+        const modelRecords = await deps.storage.listRecords({ scope: params.scope, type: modelType })
+        const models = modelRecords
+          .map((r) => r.content as unknown as TrainingModel)
+          .filter((m) => m && m.id)
+        const plan = planHypothesisSpecMigration(hyps, papers, models, rules, now(), hashTrainingConfig)
+        for (const survivor of plan.writes) {
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: hypothesisType,
+            key: survivor.id,
+            content: survivor as unknown as Record<string, unknown>,
+          })
+          params.onRecordWritten?.(hypothesisType, survivor.id)
+          migratedHypotheses++
+        }
+        for (const paper of plan.changedPapers) {
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: paperType,
+            key: paper.id,
+            content: paper as unknown as Record<string, unknown>,
+          })
+          params.onRecordWritten?.(paperType, paper.id)
+        }
+        for (const model of plan.changedModels) {
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: modelType,
+            key: model.id,
+            content: model as unknown as Record<string, unknown>,
+          })
+          params.onRecordWritten?.(modelType, model.id)
+        }
+        for (const deadId of plan.deletes) {
+          const removed = await deps.storage.deleteRecord({
+            scope: params.scope,
+            type: hypothesisType,
+            key: deadId,
+          })
+          if (removed) {
+            params.onRecordWritten?.(hypothesisType, deadId)
+            deletedHypotheses++
+          }
+        }
+      }
+    }
+
     return {
       recordType,
       examinedRuns,
@@ -3045,6 +3097,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       examinedQueue,
       migratedQueue,
       deletedQueue,
+      migratedHypotheses,
+      deletedHypotheses,
     }
   }
 
@@ -3161,8 +3215,6 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
     recommendTrainingExperiments,
-    updateTrainingHypothesis,
-    updateTrainingPaper,
     analyzePaperFromUrl,
     researchTrainingPapers,
     suggestPaperHypotheses,
@@ -3174,6 +3226,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzePaperModels,
     xaiNarrate,
     getRunData,
+    getTrainerState,
     getRunXAI,
     analyzeConfigSpace,
     migrateTrainingRuns,

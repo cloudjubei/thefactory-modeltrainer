@@ -113,9 +113,17 @@ function isCategoricalValue(v: unknown): boolean {
   return true // arrays / objects (e.g. net_arch [64,64])
 }
 
-/** A region axis is a categorical active lever; numeric active levers climb WITHIN one. */
-function regionLeversOf(setups: AnalysisRun[], activeLevers: string[]): string[] {
+/**
+ * A region axis is a categorical active lever; numeric active levers climb WITHIN one. The manifest's DECLARED
+ * type is authoritative when available — a `choice`/`boolean` lever is always a region axis (even one whose
+ * values look numeric, e.g. n_layers ∈ {1,2,3}), a `number` lever never is. Only when the type is unknown do we
+ * fall back to inspecting the observed values.
+ */
+function regionLeversOf(setups: AnalysisRun[], activeLevers: string[], manifest?: TrainerManifest): string[] {
   return activeLevers.filter((lever) => {
+    const type = manifest?.levers[lever]?.type
+    if (type === 'choice' || type === 'boolean') return true
+    if (type === 'number') return false
     const vals = setups.map((s) => s.config[lever]).filter((v) => v !== undefined)
     return vals.length > 0 && vals.some(isCategoricalValue)
   })
@@ -136,11 +144,12 @@ export function clusterBasins(
   activeLevers: string[],
   noiseFloor: number,
   baseline?: number,
+  manifest?: TrainerManifest,
 ): Basin[] {
   const setups = aggregateToSetupRuns(runs, criterion)
   if (!setups.length) return []
   const dir = criterion.direction
-  const regionLevers = regionLeversOf(setups, activeLevers)
+  const regionLevers = regionLeversOf(setups, activeLevers, manifest)
 
   const byRegion = new Map<string, AnalysisRun[]>()
   for (const s of setups) {
@@ -542,7 +551,7 @@ function stepGlobal(
   mk: Mk,
   opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
-  const basins = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
+  const basins = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
   const known = new Set(state.basins.map((b) => b.id))
   const foundNew = basins.some((b) => !known.has(b.id))
   const dryRounds = foundNew ? 0 : state.dryRounds + 1
@@ -594,7 +603,7 @@ function stepLocal(
   mk: Mk,
   opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
-  const clustered = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
+  const clustered = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
   const target = opts?.targetObjective
   const withPlateau = clustered.map((b) => ({
     ...b,
@@ -696,9 +705,13 @@ export function coverageGridRecs(
   manifest: TrainerManifest,
   criterion: AnalysisCriterion,
 ): ExperimentRecommendation[] {
-  const numericActive = state.activeLevers.filter(
-    (l) => isNumericManifestLever(manifest, l) && !!manifest.levers[l]?.range,
-  )
+  // Only levers with a NON-DEGENERATE range can be space-filled — a [x,x] lever yields one value forever, so
+  // counting it toward coverage would make the target unreachable and the search never converge (mirrors the
+  // `span > 0` guard in localRefineRecs).
+  const numericActive = state.activeLevers.filter((l) => {
+    const range = manifest.levers[l]?.range
+    return isNumericManifestLever(manifest, l) && !!range && range[1] > range[0]
+  })
   if (!numericActive.length) return []
   const setups = aggregateToSetupRuns(runs, criterion)
   const target = EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
@@ -715,8 +728,16 @@ export function coverageGridRecs(
     }
     return tried.length ? best : Infinity
   }
+  // The QUANTIZED config signature (the sampled numeric values, as actually emitted) — so we never re-propose a
+  // config already run OR already chosen this round. This is what lets the gate close for a tiny (but non-zero)
+  // range where 1e-6 quantization can't supply `target` distinct points: once every representable cell is tried,
+  // no fresh signature remains and we return [].
+  const sigOf = (config: Record<string, unknown>): string => numericActive.map((l) => Number(config[l]).toFixed(6)).join('|')
+  const triedSigs = new Set(setups.map((s) => sigOf(s.config)))
 
-  const best = bestRunConfig(runs, criterion)
+  // Coverage samples probe BREADTH at a single seed — seeds are added later when a region is climbed — so the
+  // champion's seed is NOT carried onto them (it would pin every sample to one noise draw).
+  const best = without(bestRunConfig(runs, criterion), 'seed')
   const need = Math.min(8, target - setups.length)
   // Draw a pool of Halton candidates, then greedily take the ones farthest from BOTH the tried set and each
   // other — a maximin fill that avoids clustering with existing runs or within the batch.
@@ -731,12 +752,15 @@ export function coverageGridRecs(
     pool.push({ norm, config })
   }
   const chosenNorms: number[][] = []
+  const chosenSigs = new Set<string>()
   const configs: Array<{ config: Record<string, unknown> }> = []
   while (configs.length < need) {
     let pick = -1
     let pickDist = -1
     for (let k = 0; k < pool.length; k++) {
       const c = pool[k]
+      const sig = sigOf(c.config)
+      if (triedSigs.has(sig) || chosenSigs.has(sig)) continue // already run / already in this batch — never dup
       let d = minDistToTried(c.norm)
       for (const cn of chosenNorms) {
         let dd = 0
@@ -748,8 +772,9 @@ export function coverageGridRecs(
         pick = k
       }
     }
-    if (pick < 0 || pickDist <= 0) break // nothing fresh left to add
+    if (pick < 0) break // no candidate with a fresh signature remains → the representable space is saturated
     chosenNorms.push(pool[pick].norm)
+    chosenSigs.add(sigOf(pool[pick].config))
     configs.push({ config: pool[pick].config })
     pool.splice(pick, 1)
   }
@@ -819,13 +844,14 @@ function syntheticBestBasin(
   runs: AnalysisRun[],
   criterion: AnalysisCriterion,
   activeLevers: string[],
+  manifest?: TrainerManifest,
 ): Basin | undefined {
   const setups = aggregateToSetupRuns(runs, criterion)
   if (!setups.length) return undefined
   const dir = criterion.direction
   let best = setups[0]
   for (const s of setups) if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(best, criterion)!, dir)) best = s
-  const regionLevers = regionLeversOf(setups, activeLevers)
+  const regionLevers = regionLeversOf(setups, activeLevers, manifest)
   const region: Record<string, unknown> = {}
   for (const l of regionLevers) region[l] = best.config[l]
   const memberRunKeys = runs.filter((r) => matchesConfig(r.config, best.config, regionLevers)).map((r) => r.key)
@@ -864,13 +890,14 @@ function converge(
   criterion: AnalysisCriterion,
   mk: Mk,
   reason: string,
+  manifest?: TrainerManifest,
 ): ExplorationStep {
   let basins = state.basins.length
     ? state.basins
-    : clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs))
+    : clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
   if (!basins.length) {
     // No region cleared the basin margin — still declare the best run so the maxima view is never empty.
-    const synth = syntheticBestBasin(runs, criterion, state.activeLevers)
+    const synth = syntheticBestBasin(runs, criterion, state.activeLevers, manifest)
     if (synth) basins = [synth]
   }
   const declared = bestBasin(basins, criterion)

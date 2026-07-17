@@ -1076,6 +1076,18 @@ export interface ExplorationState {
    * child settles. Only set in durable-controller mode.
    */
   pendingChildId?: string
+  /**
+   * Completed-run count when {@link pendingChildId} was spawned — the baseline the controller compares against
+   * after the child settles to tell a FRUITFUL batch (new completed runs) from a fruitless one. A `train` child
+   * reports `completed` even when every run in it FAILED, so this run-count delta — not the child's status — is
+   * how the fail-guard detects an un-runnable batch. Durable-controller bookkeeping.
+   */
+  pendingChildRuns?: number
+  /**
+   * Consecutive fruitless child batches — persisted so the fail-guard survives a controller resume/restart
+   * (otherwise a bad config that stops the loop would silently reset to 0 and re-spawn on every relaunch).
+   */
+  failStreak?: number
   steer?: ExplorationSteer
   /** When the state was last advanced (ISO). */
   updatedAt?: string
@@ -1948,64 +1960,53 @@ export interface RecommendTrainingExperimentsResult {
   /** Suggestions dropped with WHY (unknown lever, empty spec, over-cap matrix, missing title). */
   rejected: Array<{ title?: string; reason: string }>
   suggestions: TrainingExperimentSuggestion[]
+  /** An `overseer://` deep-link (F.2) into the project's xAI → Suggested view where the new ✦ AI batches
+   * are launched — the tool-view renders it as a clickable chip so the user can act from the chat. */
+  viewLink?: string
 }
 
 /**
- * A CHAT agent updating ONE hypothesis in place — APPROVAL-GATED in the chat (advertised but never
- * auto-called, so every call shows the user a confirmation with the args). Only the allow-listed
- * fields apply; a replacement `spec` is migrated + validated against the manifest first; a `verdict`
- * becomes a MANUAL override (auto-refresh won't flip it).
+ * A chat READ tool: a one-shot orientation summary of a training project — objective, pipeline version,
+ * lever counts by scope, run count + best, the hypothesis verdict census, and paper/model counts. Lets a
+ * chat orient itself WITHOUT a seeded discuss-bundle (e.g. a general chat asking "what's the state of the
+ * BlackSwan project?"). Read-only ⇒ auto-callable (no approval gate).
  */
-export interface UpdateTrainingHypothesisParams {
+export interface GetTrainerStateParams {
   scope: string
-  /** See {@link RecommendTrainingExperimentsParams.project}. */
+  /** Which registered training project — its manifest `name`/`recordType`. Optional when the scope
+   * registers exactly one; with several and none named, the call fails listing the options. */
   project?: string
-  /** The hypothesis id (its record key). */
-  id: string
-  set: {
-    title?: string
-    claim?: string
-    rationale?: string
-    spec?: unknown
-    verdict?: 'proven' | 'disproved' | 'untested'
-    verdictNote?: string
-    dismissed?: boolean
+}
+
+export interface GetTrainerStateResult {
+  found: boolean
+  /** Set (with found:false) when the project can't be resolved (lists the options for a retry). */
+  error?: string
+  recordType?: string
+  name?: string
+  objective?: { name: string; direction: 'max' | 'min' }
+  pipelineVersion?: string
+  /** Sweepable levers by scope (`ignore` levers excluded). */
+  levers?: { total: number; model: number; environment: number; dataset: number }
+  runs?: { total: number; best?: { key: string; objective: number } }
+  /** Verdict census over non-dismissed hypotheses (from the PERSISTED status). */
+  hypotheses?: {
+    total: number
+    proven: number
+    disproved: number
+    untested: number
+    /** How many carry a MANUAL verdict override. */
+    manual: number
   }
-  onRecordWritten?: (type: string, key: string) => void
+  papers?: { total: number }
+  models?: { total: number }
 }
 
-export interface UpdateTrainingHypothesisResult {
-  recordType: string
-  id: string
-  /** The fields that were actually applied (unknown/invalid fields are silently listed nowhere). */
-  updated: string[]
-}
-
-/** A CHAT agent updating ONE paper's prose/meta fields in place — approval-gated like the hypothesis tool. */
-export interface UpdateTrainingPaperParams {
-  scope: string
-  project?: string
-  /** The paper id (its record key). */
-  id: string
-  set: {
-    title?: string
-    claim?: string
-    approach?: string
-    verdictNote?: string
-    tags?: string[]
-    dismissed?: boolean
-    url?: string
-    authors?: string
-    year?: number
-  }
-  onRecordWritten?: (type: string, key: string) => void
-}
-
-export interface UpdateTrainingPaperResult {
-  recordType: string
-  id: string
-  updated: string[]
-}
+// In-place record EDITS from a chat (a hypothesis/paper field, a manual verdict override) are handled by
+// the GENERIC cross-app `updateProjectRecord` tool against this project's declared data-capability manifest
+// (`trainerDataCapabilityManifest` in the viewer) — NOT a bespoke trainer tool. A hypothesis SPEC change goes
+// through `recommendTrainingExperiments` (it's validated + becomes a runnable suggestion, and editing a spec
+// changes the hypothesis's identity anyway).
 
 export interface AnalyzePaperFromUrlParams {
   scope: string
@@ -2453,6 +2454,10 @@ export interface MigrateTrainingRunsResult {
   examinedQueue: number
   migratedQueue: number
   deletedQueue: number
+  /** Hypothesis records re-keyed to their migrated-spec id / deleted (absorbed on collision). A spec-value
+   * migration that leaves hypotheses stranded is what the hygiene census reports as `migrated` dead pins. */
+  migratedHypotheses: number
+  deletedHypotheses: number
 }
 
 export interface InvalidateRunsParams {
@@ -2571,12 +2576,6 @@ export interface ModelTrainerTools {
   recommendTrainingExperiments(
     params: RecommendTrainingExperimentsParams,
   ): Promise<RecommendTrainingExperimentsResult>
-  /** Approval-gated chat write: update ONE hypothesis in place (see {@link UpdateTrainingHypothesisParams}). */
-  updateTrainingHypothesis(
-    params: UpdateTrainingHypothesisParams,
-  ): Promise<UpdateTrainingHypothesisResult>
-  /** Approval-gated chat write: update ONE paper's prose/meta fields (see {@link UpdateTrainingPaperParams}). */
-  updateTrainingPaper(params: UpdateTrainingPaperParams): Promise<UpdateTrainingPaperResult>
   /**
    * Read a paper/source URL, summarise it with an LLM (the tool fetches the page text — no web tools),
    * and persist a DRAFT `{recordType}-paper` record (status 'untested', source 'research') for the user
@@ -2646,6 +2645,12 @@ export interface ModelTrainerTools {
    * kept) so the result is agent-sized. Read-only.
    */
   getRunData(params: GetRunDataParams): Promise<GetRunDataResult>
+  /**
+   * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
+   * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a
+   * seeded discuss-bundle. Read-only.
+   */
+  getTrainerState(params: GetTrainerStateParams): Promise<GetTrainerStateResult>
   /**
    * Agent-facing READ tool: compute the deterministic xAI analysis ({@link RunXaiDigest}) for ONE run by
    * id — the same facts the narrative is built from, returned as structured data (the LLM never computes

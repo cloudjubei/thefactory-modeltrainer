@@ -7,10 +7,36 @@
   const PREFIX = 'overseer:'
   const pending = new Map()
   let seq = 0
+  // Handler for host->app PUSH messages the host sends UNSOLICITED (no id). Currently just `nav.open`.
+  let navOpenHandler = null
 
   window.addEventListener('message', (event) => {
     const data = event.data
-    if (!data || data.overseerBridgeResponse !== true) return
+    if (!data) return
+    // A host->app PUSH is request-shaped (a prefixed `type`, no response marker). Accept an object (web
+    // iframe postMessage) or a JSON string (native WebView injected MessageEvent). Only from our parent.
+    let push = data
+    if (typeof push === 'string') {
+      try {
+        push = JSON.parse(push)
+      } catch (e) {
+        push = null
+      }
+    }
+    if (push && typeof push.type === 'string' && push.type.indexOf(PREFIX) === 0) {
+      if (event.source && event.source !== window.parent) return
+      const name = push.type.slice(PREFIX.length)
+      if (name === 'nav.open' && navOpenHandler) {
+        try {
+          navOpenHandler(push.payload)
+        } catch (e) {
+          /* a nav apply must never throw out of the message listener */
+        }
+      }
+      return
+    }
+    // Otherwise: an RPC response to a call() we made.
+    if (data.overseerBridgeResponse !== true) return
     const entry = pending.get(data.id)
     if (!entry) return
     pending.delete(data.id)
@@ -88,6 +114,15 @@
     // Tell the host which model kinds this app's background activities can run on, so the activity
     // model chip can disable unsupported options (e.g. CLI for API-only judge/propose/analyze).
     reportCapabilities: (payload) => call('app.capabilities', payload),
+    // The deep-link target the host was navigated to (F.2 app link `overseer://…/app?view=<v>&…`), or
+    // null. Call on load to open that view instead of the default. Returns { view, params }.
+    getDeepLink: () => call('nav.current'),
+    // Register a listener for host->app deep-link PUSHes (`nav.open`) — the host fires these when the App-tab
+    // route changes WHILE this app stays mounted (the boot-time getDeepLink pull only covers a fresh mount).
+    // The payload is the same { view, params } shape.
+    onNavOpen: (fn) => {
+      navOpenHandler = typeof fn === 'function' ? fn : null
+    },
   }
 
   // The trainer's LLM activities (judge/propose/analyze-paper/consolidate/xai-narrate/…) run API-only

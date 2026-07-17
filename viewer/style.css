@@ -1647,7 +1647,9 @@ button.run-badge.model-device-chip:hover {
 }
 .lever-caps-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  /* min(320px, 100%) — a hard 320px floor overflows the ~296px of content width inside a padded card on a
+   * 360-390px phone; capping at 100% lets cards collapse to one full-width column instead. */
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
   gap: 10px;
   margin-top: 10px;
 }
@@ -3105,6 +3107,25 @@ pre.json {
 .paper-summary::-webkit-details-marker {
   display: none;
 }
+/* Phones: the summary row (badge + run chip + title + 5 icon buttons) exceeds ~360px and the body clips
+ * overflow — without wrapping, the right-most actions (override/dismiss/delete) are unreachable. Wrapping
+ * drops .card-actions to its own line; slightly larger buttons make them comfortably tappable. */
+@media (max-width: 767px) {
+  .hypothesis-summary,
+  .paper-summary {
+    flex-wrap: wrap;
+  }
+  .hypothesis-summary .card-actions,
+  .paper-summary .card-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .card-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
 .hypothesis-summary::before,
 .paper-summary::before {
   content: '▸';
@@ -3138,6 +3159,11 @@ pre.json {
   flex-wrap: wrap;
   gap: 8px;
   margin: 4px 0 10px;
+}
+.hyp-hygiene-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
 }
 .hyp-hygiene-hint {
   margin: 4px 0 10px;
