@@ -9,7 +9,7 @@
  *
  * window.Exploration.render(container, data, actions)
  *   data    = { manifest, state|null, runs:[{config,objective,metrics,status}], activity:{status}|null }
- *   actions = { onLaunch(budget), onExploreMore(budget), onPause(), onResume(), onAbort() }
+ *   actions = { onLaunch(budget), onExploreMore(budget), onPause(), onResume(), onAbort(), onRunCells(configs) }
  *
  * Exposed as window.Exploration in the browser and module.exports under CommonJS (pure analyze/magma tested).
  */
@@ -141,7 +141,10 @@
     .expl-maprow{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:stretch}
     .expl-axis-x{text-align:center;font-family:var(--e-mono);font-size:10.5px;color:var(--e-faint);margin-top:6px}
     .expl-mapmain{position:relative}
-    .expl-mapcanvas{cursor:crosshair;display:block}
+    .expl-mapcanvas{cursor:pointer;display:block}
+    .expl-selbar{align-items:center;gap:10px;margin:8px 0 0;padding:8px 10px;background:var(--e-panel2,#0d121d);border:1px solid var(--e-line);border-radius:8px}
+    .expl-selcount{font-family:var(--e-mono);font-size:12px;color:var(--e-muted)}
+    .expl-selhint{color:var(--e-faint);font-size:11px;margin:6px 0 0}
     .expl-tip{position:absolute;z-index:20;pointer-events:none;max-width:270px;background:var(--e-panel);border:1px solid var(--e-line);border-radius:8px;padding:8px 10px;box-shadow:0 8px 24px rgba(0,0,0,.35);font-family:var(--e-mono);font-size:11px;color:var(--e-muted)}
     .expl-tip .th{color:var(--e-text);font-weight:600;margin-bottom:3px}
     .expl-tip .tr{color:var(--e-faint);margin-bottom:5px}
@@ -208,7 +211,8 @@
     const runs = (data.runs || []).filter((r) => r && r.config && isFinite(num(r.objective)))
     const ranked = rankLevers(manifest, runs)
     const rt = manifest.recordType || '_'
-    const vs = view[rt] || (view[rt] = { axisX: null, axisY: null, pegs: {}, zoom: 1 })
+    const vs = view[rt] || (view[rt] = { axisX: null, axisY: null, pegs: {}, zoom: 1, selected: new Set() })
+    if (!vs.selected) vs.selected = new Set() // manual-mode cell selection (keys "colIndex:rowIndex")
 
     // default axes = top-2 ranked levers (prefer numeric for a continuous surface, but allow categorical)
     const rankedKeys = ranked.map((r) => r.lever)
@@ -257,6 +261,7 @@
         labels: distinct.map(String),
         coordOf: (v) => (idx.has(String(v)) ? (idx.get(String(v)) + 0.5) / n : -1),
         cellLabel: (i) => String(distinct[i]),
+        cellValue: (i) => distinct[i], // the concrete value to RUN for cell i (manual mode)
       }
     }
 
@@ -306,6 +311,17 @@
         return i < 0 ? -1 : (i + 0.5) / n
       },
       cellLabel,
+      // the concrete value to RUN for cell i (manual mode). An OCCUPIED cell returns the real tried value in it
+      // (the one nearest the bin center) so running a cell REPRODUCES the config it shows — critically, the
+      // best/extreme run, which always sits at a bin EDGE, not its midpoint. An EMPTY cell returns the bin
+      // midpoint — a fresh untried value that fills the gap.
+      cellValue: (i) => {
+        const b = bins[i]
+        if (!b) return lo
+        const mid = (b.lo + b.hi) / 2
+        if (b.values.length) return b.values.reduce((best, v) => (Math.abs(v - mid) < Math.abs(best - mid) ? v : best), b.values[0])
+        return Number(mid.toFixed(6))
+      },
     }
   }
 
@@ -337,12 +353,67 @@
     return { xA, yA, cells }
   }
 
+  // A stable fingerprint of the heatmap grid — its bin COUNT and value RANGE per axis. Any change (new runs
+  // re-bin an axis or extend its range) yields a different key, so a stale cell selection can be detected + dropped.
+  function gridKeyOf(xA, yA) {
+    const gk = (ax) => ax.n + ':' + (ax.distinct[0] != null ? ax.distinct[0] : '') + ':' + (ax.distinct.length ? ax.distinct[ax.distinct.length - 1] : '')
+    return gk(xA) + '|' + gk(yA)
+  }
+
+  // MANUAL MODE: turn selected heatmap cells into runnable configs. Each cell fixes the two axis levers to that
+  // cell's concrete value (tried value / bin midpoint / category); every OTHER lever takes the PEGGED value if one
+  // is set for it, else the best-known run's value, else the manifest default. `seed` is left for the planner.
+  // Out-of-range cell indices (a stale selection) are SKIPPED so a bogus/undefined config is never launched.
+  // Pure + tested.
+  function manualCellConfigs(cells, opts) {
+    const xA = opts.xA
+    const yA = opts.yA
+    const pegs = opts.pegs || {}
+    const best = opts.best || {}
+    const levers = (opts.manifest && opts.manifest.levers) || {}
+    const axisX = xA.lever
+    const axisY = yA.lever
+    const coerce = (lever, val) => {
+      const spec = levers[lever] || {}
+      if (spec.type === 'number') {
+        const n = Number(val)
+        return isFinite(n) ? n : val
+      }
+      if (spec.type === 'boolean') return val === true || val === 'true'
+      return val
+    }
+    const configs = []
+    for (const cell of cells || []) {
+      if (!cell || cell.x < 0 || cell.x >= xA.n || cell.y < 0 || cell.y >= yA.n) continue // stale / out-of-range
+      const xv = xA.cellValue(cell.x)
+      const yv = yA.cellValue(cell.y)
+      if (xv === undefined || yv === undefined) continue // never launch an invalid axis value
+      const config = {}
+      for (const lever of Object.keys(levers)) {
+        if (lever === 'seed' || lever === axisX || lever === axisY) continue
+        if (pegs[lever] != null && pegs[lever] !== '') config[lever] = coerce(lever, pegs[lever])
+        else if (best[lever] !== undefined) config[lever] = best[lever]
+        else if (levers[lever].default !== undefined) config[lever] = levers[lever].default
+      }
+      config[axisX] = xv
+      config[axisY] = yv
+      configs.push(config)
+    }
+    return configs
+  }
+
   // --- drawing ----------------------------------------------------------------------------------
 
   function drawHeatmap(container, a) {
     const wrap = container.querySelector('[data-expl-map]')
     if (!wrap || !a.vs.axisX || !a.vs.axisY) return
     const { xA, yA, cells } = heatmapCells(a)
+    // If the grid re-binned since cells were selected (new runs changed the bin COUNT or the value RANGE), the
+    // selection's indices no longer map to the same values — drop it rather than run the wrong/invalid configs.
+    if (a.vs.selected && a.vs.selected.size && a.vs.selGridKey && a.vs.selGridKey !== gridKeyOf(xA, yA)) {
+      a.vs.selected.clear()
+      a.vs.selGridKey = null
+    }
     const pegs = a.vs.pegs || {}
 
     const canvas = wrap.querySelector('canvas')
@@ -438,6 +509,20 @@
       x.beginPath(); x.moveTo(px - 11, py); x.lineTo(px + 11, py); x.moveTo(px, py - 11); x.lineTo(px, py + 11); x.lineWidth = 1.3; x.stroke()
     }
 
+    // manual-mode selection — a bright border on each selected cell
+    const selected = a.vs.selected || new Set()
+    if (selected.size) {
+      x.strokeStyle = '#7ef0c0'
+      x.lineWidth = 2
+      for (const key of selected) {
+        const parts = key.split(':')
+        const si = Number(parts[0])
+        const scj = Number(parts[1])
+        if (si < 0 || si >= xA.n || scj < 0 || scj >= yA.n) continue
+        x.strokeRect(CX(si) + 1, CY(yA.n - 1 - scj) + 1, cellPx - 2, cellPx - 2)
+      }
+    }
+
     wireHeatmapHover(wrap, canvas, a, { xA, yA, cells, W, H, mL, mT, cellPx, gridW, gridH })
   }
 
@@ -487,6 +572,75 @@
       tip.style.top = top + 'px'
     }
     canvas.onmouseleave = () => { tip.style.display = 'none' }
+    // Click a cell to TOGGLE it in the manual-mode selection (empty or not); redraw in place (scroll survives).
+    canvas.onclick = (ev) => {
+      const rect = canvas.getBoundingClientRect()
+      const mx = ((ev.clientX - rect.left) / rect.width) * W - mL
+      const my = ((ev.clientY - rect.top) / rect.height) * H - mT
+      if (mx < 0 || my < 0 || mx >= gridW || my >= gridH) return
+      const i = Math.max(0, Math.min(xA.n - 1, Math.floor(mx / cellPx)))
+      const jScreen = Math.max(0, Math.min(yA.n - 1, Math.floor(my / cellPx)))
+      const cj = yA.n - 1 - jScreen
+      const key = i + ':' + cj
+      const sel = a.vs.selected || (a.vs.selected = new Set())
+      if (sel.has(key)) sel.delete(key)
+      else sel.add(key)
+      a.vs.selGridKey = gridKeyOf(xA, yA) // tag the grid the selection was made against (staleness guard)
+      drawHeatmap(ctx.container, a)
+      updateSelBar(ctx.container, a)
+    }
+  }
+
+  // The best (by objective) run's config — the default the manual-mode cells inherit for their non-axis levers.
+  function bestRunConfig(a) {
+    let best = null
+    for (const r of a.runs) {
+      if (!isFinite(r.objective)) continue
+      if (!best || (a.dir === 'min' ? r.objective < best.objective : r.objective > best.objective)) best = r
+    }
+    return best ? best.config : {}
+  }
+
+  // Render/refresh the manual-mode selection bar (count + Run + Clear), shown only when cells are selected.
+  function updateSelBar(container, a) {
+    const bar = container.querySelector('[data-expl-selbar]')
+    if (!bar) return
+    const n = (a.vs.selected && a.vs.selected.size) || 0
+    if (!n) {
+      bar.innerHTML = ''
+      bar.style.display = 'none'
+      return
+    }
+    bar.style.display = 'flex'
+    bar.innerHTML =
+      `<span class="expl-selcount">${n} cell${n === 1 ? '' : 's'} selected — will run at the best/pegged config</span>` +
+      `<button class="expl-btn primary" data-expl-runcells>Run ${n} cell${n === 1 ? '' : 's'}</button>` +
+      `<button class="expl-ico" data-expl-clearcells title="Clear selection" aria-label="Clear selection">✕</button>`
+    const runBtn = bar.querySelector('[data-expl-runcells]')
+    if (runBtn) runBtn.onclick = () => runSelectedCells(a)
+    const clearBtn = bar.querySelector('[data-expl-clearcells]')
+    if (clearBtn)
+      clearBtn.onclick = () => {
+        a.vs.selected.clear()
+        drawHeatmap(ctx.container, a)
+        updateSelBar(ctx.container, a)
+      }
+  }
+
+  // Build configs from the selected cells and hand them to the host to run as a manual campaign.
+  function runSelectedCells(a) {
+    if (!a.vs.selected || !a.vs.selected.size || !ctx.actions.onRunCells) return
+    const { xA, yA } = heatmapCells(a)
+    const cells = [...a.vs.selected].map((key) => {
+      const parts = key.split(':')
+      return { x: Number(parts[0]), y: Number(parts[1]) }
+    })
+    const configs = manualCellConfigs(cells, { xA, yA, pegs: a.vs.pegs, best: bestRunConfig(a), manifest: a.manifest })
+    if (!configs.length) return
+    ctx.actions.onRunCells(configs)
+    a.vs.selected.clear()
+    drawHeatmap(ctx.container, a)
+    updateSelBar(ctx.container, a)
   }
 
   function drawRegret(container, a) {
@@ -751,6 +905,8 @@
              <div class="expl-mapcard"><div class="expl-maprow">
                <div class="expl-axis-y">${esc(a.vs.axisY || '')} ↑</div>
                <div class="expl-mapmain"><div class="expl-mapscroll" data-expl-map><canvas class="expl-mapcanvas"></canvas></div>
+               <div class="expl-selbar" data-expl-selbar style="display:none"></div>
+               <p class="expl-selhint">Tip: click cells (even empty ones) to select, then run them at the best/pegged config.</p>
                <div class="expl-axis-x">${esc(a.vs.axisX || '')} →</div></div>
              </div></div>`
           : `<div class="expl-empty">Coverage heatmap needs two levers with more than one value tried. Run the exploration (or a few experiments) and it will appear.</div>`
@@ -769,7 +925,10 @@
       const cx = cm.getContext('2d')
       for (let i = 0; i < cm.width; i++) { cx.fillStyle = magma(i / (cm.width - 1)); cx.fillRect(i, 0, 1, cm.height) }
     }
-    if (hasMap) drawHeatmap(container, a)
+    if (hasMap) {
+      drawHeatmap(container, a)
+      updateSelBar(container, a)
+    }
     drawRegret(container, a)
     stickLog(container)
     wire(container, data, actions, a)
@@ -794,12 +953,16 @@
 
   function wire(container, data, actions, a) {
     const rerender = () => render(ctx.container, ctx.data, ctx.actions)
+    // Changing the axes / pegs / zoom rebuilds the grid, so the selection's cell indices no longer mean the
+    // same thing — clear it so a stale selection can't run the wrong configs.
+    const clearSelection = () => a.vs.selected && a.vs.selected.clear()
     container.querySelectorAll('[data-expl-axis]').forEach((sel) => {
       sel.addEventListener('change', () => {
         const which = sel.getAttribute('data-expl-axis')
         if (which === 'x') a.vs.axisX = sel.value
         else a.vs.axisY = sel.value
         if (a.vs.axisX === a.vs.axisY) a.vs.axisY = a.rankedKeys.find((k) => k !== a.vs.axisX) || a.vs.axisY
+        clearSelection()
         rerender()
       })
     })
@@ -807,6 +970,7 @@
       sel.addEventListener('change', () => {
         const lever = sel.getAttribute('data-expl-peg')
         a.vs.pegs[lever] = sel.value === '' ? null : sel.value
+        clearSelection()
         rerender()
       })
     })
@@ -818,6 +982,7 @@
         if (dir === 'in') a.vs.zoom = Math.min(8, (a.vs.zoom || 1) + 0.5)
         else if (dir === 'out') a.vs.zoom = Math.max(0.25, (a.vs.zoom || 1) - 0.25)
         else a.vs.zoom = 1
+        clearSelection()
         rerender()
       })
     })
@@ -856,7 +1021,7 @@
     return b.id ? String(b.id).replace(/[[\]"]/g, '').slice(0, 24) || 'basin' : 'basin'
   }
 
-  const Exploration = { render, analyze, magma, rankLevers, heatmapCells, makeAxis }
+  const Exploration = { render, analyze, magma, rankLevers, heatmapCells, makeAxis, manualCellConfigs }
   if (typeof module !== 'undefined' && module.exports) module.exports = Exploration
   if (root) root.Exploration = Exploration
 })(typeof window !== 'undefined' ? window : null)

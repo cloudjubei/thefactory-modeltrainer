@@ -2,6 +2,7 @@ import {
   EXPLORATION_ACTIVE_IMPORTANCE_FLOOR,
   EXPLORATION_BASIN_MIN_SPAN_FRACTION,
   EXPLORATION_BASIN_NOISE_MARGIN,
+  EXPLORATION_BATCH_MAX,
   EXPLORATION_COVERAGE_PER_LEVER,
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
@@ -571,7 +572,7 @@ function stepGlobal(
 
   const coverage = discreteCoverageRecs(runs, manifest, state.activeLevers, state.frozenLevers)
   const acquisition = coverage.length ? [] : globalAcquisitionRecs(state, runs, manifest, criterion)
-  const batch = [...coverage, ...acquisition].slice(0, 8)
+  const batch = [...coverage, ...acquisition].slice(0, EXPLORATION_BATCH_MAX)
   if (!batch.length) {
     // nothing new to probe — fall through to climbing the basins we have
     return stepLocal({ ...state2, stage: 'local' }, runs, manifest, criterion, mk, opts)
@@ -616,7 +617,7 @@ function stepLocal(
   // controller reports the batch fully redundant — DON'T converge. A plateau in this subspace is not the whole
   // space: ESCALATE (unfreeze a fixed lever, then deepen the numeric resolution). Convergence is reserved for
   // when that ladder is fully dry — the only honest "the search space is covered".
-  const batch = pending.flatMap((b) => localRefineRecs(b, runs, manifest, state)).slice(0, 8)
+  const batch = pending.flatMap((b) => localRefineRecs(b, runs, manifest, state)).slice(0, EXPLORATION_BATCH_MAX)
   if (opts?.exhausted || !pending.length || !batch.length) {
     return expand(state2, withPlateau, runs, manifest, criterion, mk, target)
   }
@@ -693,11 +694,13 @@ function halton(index: number, base: number): number {
 const HALTON_BASES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31]
 
 /**
- * Space-filling COVERAGE of the active numeric space: keeps proposing Halton-spread configs (other levers held
- * at the best-known config) until the archive holds `EXPLORATION_COVERAGE_PER_LEVER × #active-numeric ×
- * (1 + refineDepth)` distinct setups. Candidates are chosen maximin — farthest (normalised L∞) from every
- * tried setup — so each round meaningfully fills the emptiest regions. Returns [] once the target is met (the
- * convergence gate) or nothing fresh remains. Exported for direct unit testing.
+ * Space-filling COVERAGE — PER categorical region. Each discrete region (each `model_name`/algo value combo) is
+ * sampled toward `EXPLORATION_COVERAGE_PER_LEVER × #active-numeric × (1 + refineDepth)` distinct setups with a
+ * deterministic Halton maximin fill, holding that region's categoricals fixed and the other levers at the best
+ * config. This is what stops the search abandoning an under-sampled value (dqn getting 5 runs while ppo gets
+ * hundreds): every region's own space is explored to the SAME density. The round's batch is round-robined across
+ * under-covered regions (so each progresses) and capped at {@link EXPLORATION_BATCH_MAX}. Returns [] once every
+ * region meets its target (or is saturated) — the convergence gate. Exported for direct unit testing.
  */
 export function coverageGridRecs(
   state: ExplorationState,
@@ -714,11 +717,77 @@ export function coverageGridRecs(
   })
   if (!numericActive.length) return []
   const setups = aggregateToSetupRuns(runs, criterion)
-  const target = EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
-  if (setups.length >= target) return []
-
+  const regionLevers = regionLeversOf(setups, state.activeLevers, manifest)
+  const perRegionTarget = EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
   const ranges = numericActive.map((l) => manifest.levers[l].range as [number, number])
-  const tried = setups.map((s) => numericActive.map((l, j) => (Number(s.config[l]) - ranges[j][0]) / (ranges[j][1] - ranges[j][0] || 1)))
+  // Coverage samples probe BREADTH at a single seed — seeds are added later when a region is climbed — so the
+  // champion's seed is NOT carried onto them (it would pin every sample to one noise draw).
+  const best = without(bestRunConfig(runs, criterion), 'seed')
+
+  // Group setups into their discrete regions (a pure-numeric problem is one region under key '').
+  const regions = new Map<string, { region: Record<string, unknown>; setups: AnalysisRun[] }>()
+  for (const s of setups) {
+    const rk = regionKey(s.config, regionLevers)
+    let entry = regions.get(rk)
+    if (!entry) {
+      const region: Record<string, unknown> = {}
+      for (const l of regionLevers) region[l] = s.config[l]
+      entry = { region, setups: [] }
+      regions.set(rk, entry)
+    }
+    entry.setups.push(s)
+  }
+
+  // A queue of fresh maximin candidates per UNDER-covered region.
+  const queues: Array<Array<{ config: Record<string, unknown> }>> = []
+  for (const { region, setups: rSetups } of regions.values()) {
+    if (rSetups.length >= perRegionTarget) continue
+    const need = Math.min(perRegionTarget - rSetups.length, EXPLORATION_BATCH_MAX)
+    const fresh = maximinCoverageConfigs(numericActive, ranges, rSetups, { ...best, ...region }, need)
+    if (fresh.length) queues.push(fresh)
+  }
+  const regionCount = queues.length
+  if (!regionCount) return []
+
+  // Round-robin across regions so EVERY under-covered value makes progress, up to the batch cap. When there are
+  // MORE under-covered regions than the cap, one round can't serve them all — so ROTATE the start each round (by
+  // the monotonically-growing setup count) so the served window slides and no region is permanently starved.
+  const configs: Array<{ config: Record<string, unknown> }> = []
+  let idx = setups.length % regionCount
+  while (configs.length < EXPLORATION_BATCH_MAX && queues.some((q) => q.length)) {
+    const q = queues[idx % regionCount]
+    if (q.length) configs.push(q.shift() as { config: Record<string, unknown> })
+    idx++
+  }
+  if (!configs.length) return []
+  return [
+    {
+      kind: 'missing-cell',
+      reason: `cover ${regionCount} region(s): ${configs.length} space-filling sample(s)`,
+      runCount: configs.length,
+      spec: { configs },
+      priority: 75,
+    },
+  ]
+}
+
+/**
+ * Halton maximin fill for ONE region's numeric space: up to `need` fresh configs (base = the region's fixed
+ * levers), each as far as possible (normalised L∞) from every tried setup and from the others already chosen,
+ * never duplicating a quantized signature. Returns fewer (or none) when the representable space is saturated.
+ */
+function maximinCoverageConfigs(
+  numericActive: string[],
+  ranges: Array<[number, number]>,
+  rSetups: AnalysisRun[],
+  base: Record<string, unknown>,
+  need: number,
+): Array<{ config: Record<string, unknown> }> {
+  const sigOf = (config: Record<string, unknown>): string => numericActive.map((l) => Number(config[l]).toFixed(6)).join('|')
+  const normOf = (config: Record<string, unknown>): number[] =>
+    numericActive.map((l, j) => (Number(config[l]) - ranges[j][0]) / (ranges[j][1] - ranges[j][0] || 1))
+  const tried = rSetups.map((s) => normOf(s.config))
+  const triedSigs = new Set(rSetups.map((s) => sigOf(s.config)))
   const minDistToTried = (pt: number[]): number => {
     let best = Infinity
     for (const t of tried) {
@@ -728,23 +797,10 @@ export function coverageGridRecs(
     }
     return tried.length ? best : Infinity
   }
-  // The QUANTIZED config signature (the sampled numeric values, as actually emitted) — so we never re-propose a
-  // config already run OR already chosen this round. This is what lets the gate close for a tiny (but non-zero)
-  // range where 1e-6 quantization can't supply `target` distinct points: once every representable cell is tried,
-  // no fresh signature remains and we return [].
-  const sigOf = (config: Record<string, unknown>): string => numericActive.map((l) => Number(config[l]).toFixed(6)).join('|')
-  const triedSigs = new Set(setups.map((s) => sigOf(s.config)))
-
-  // Coverage samples probe BREADTH at a single seed — seeds are added later when a region is climbed — so the
-  // champion's seed is NOT carried onto them (it would pin every sample to one noise draw).
-  const best = without(bestRunConfig(runs, criterion), 'seed')
-  const need = Math.min(8, target - setups.length)
-  // Draw a pool of Halton candidates, then greedily take the ones farthest from BOTH the tried set and each
-  // other — a maximin fill that avoids clustering with existing runs or within the batch.
   const pool: Array<{ norm: number[]; config: Record<string, unknown> }> = []
   for (let i = 1; i <= need * 12 + 48; i++) {
     const norm = numericActive.map((_, j) => halton(i, HALTON_BASES[j % HALTON_BASES.length]))
-    const config: Record<string, unknown> = { ...best }
+    const config: Record<string, unknown> = { ...base }
     for (let j = 0; j < numericActive.length; j++) {
       const [lo, hi] = ranges[j]
       config[numericActive[j]] = Number((lo + norm[j] * (hi - lo)).toFixed(6))
@@ -753,14 +809,14 @@ export function coverageGridRecs(
   }
   const chosenNorms: number[][] = []
   const chosenSigs = new Set<string>()
-  const configs: Array<{ config: Record<string, unknown> }> = []
-  while (configs.length < need) {
+  const out: Array<{ config: Record<string, unknown> }> = []
+  while (out.length < need) {
     let pick = -1
     let pickDist = -1
     for (let k = 0; k < pool.length; k++) {
       const c = pool[k]
       const sig = sigOf(c.config)
-      if (triedSigs.has(sig) || chosenSigs.has(sig)) continue // already run / already in this batch — never dup
+      if (triedSigs.has(sig) || chosenSigs.has(sig)) continue // already run / already chosen — never dup
       let d = minDistToTried(c.norm)
       for (const cn of chosenNorms) {
         let dd = 0
@@ -772,22 +828,13 @@ export function coverageGridRecs(
         pick = k
       }
     }
-    if (pick < 0) break // no candidate with a fresh signature remains → the representable space is saturated
+    if (pick < 0) break // representable space saturated
     chosenNorms.push(pool[pick].norm)
     chosenSigs.add(sigOf(pool[pick].config))
-    configs.push({ config: pool[pick].config })
+    out.push({ config: pool[pick].config })
     pool.splice(pick, 1)
   }
-  if (!configs.length) return []
-  return [
-    {
-      kind: 'missing-cell',
-      reason: `cover the space: ${configs.length} space-filling sample(s) across ${numericActive.length} lever(s)`,
-      runCount: configs.length,
-      spec: { configs },
-      priority: 75,
-    },
-  ]
+  return out
 }
 
 /**

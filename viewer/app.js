@@ -2136,7 +2136,7 @@ function trainerDataCapabilityManifest(m) {
         type: rt + '-hypothesis',
         label: 'Hypothesis',
         description:
-          'A tested claim about which lever settings help. To override a verdict, set BOTH status (proven/disproved/untested) and verdictSource="manual".',
+          'A tested claim about which lever settings help. To override a verdict, set BOTH status (proven/disproved/untested) and verdictSource="manual". Create a new one with a `spec` ({fixed?, sweep?, seeds?, environments?, datasets?, compare?}) using the manifest\'s declared lever names.',
         editable: true,
         editableFields: [
           'title',
@@ -2147,6 +2147,9 @@ function trainerDataCapabilityManifest(m) {
           'status',
           'verdictSource',
         ],
+        creatable: true,
+        creatableFields: ['title', 'claim', 'rationale', 'spec', 'comparison'],
+        createDefaults: { status: 'untested', verdictSource: 'auto', source: 'llm' },
         view: { view: 'hypotheses', keyParam: 'focus' },
       },
       {
@@ -2165,6 +2168,9 @@ function trainerDataCapabilityManifest(m) {
           'year',
           'tags',
         ],
+        creatable: true,
+        creatableFields: ['title', 'claim', 'approach', 'url', 'authors', 'year', 'tags'],
+        createDefaults: { status: 'untested', source: 'research' },
         view: { view: 'papers', keyParam: 'paper' },
       },
       {
@@ -18135,6 +18141,25 @@ async function renderExploration(fromPoll) {
       runsCompareKeys = new Set(list)
       selectedRunKey = list[0]
       showTab('runs')
+    },
+    onRunCells: async (configs) => {
+      // Manual mode: run the user's hand-picked heatmap cells as a STANDARD `train` campaign. It shares the
+      // experiment lane + the run archive, so the exploration picks the results up on its next scan (no special
+      // wiring). Concurrency comes from the same Activity "max parallel runs" knob every launch uses.
+      const list = (configs || []).filter((c) => c && typeof c === 'object')
+      if (!list.length) return
+      const spec = { configs: list.map((config) => ({ config })) }
+      const res = await startOrEnqueue(
+        'train',
+        trainerComputeParams({ spec, concurrency: savedConcurrency() }),
+        `Manual · ${list.length} cell${list.length === 1 ? '' : 's'}`,
+      )
+      if (res && res.started) {
+        showToast(`Launched ${list.length} manual run${list.length === 1 ? '' : 's'} — see Experiments.`)
+        invalidateActivitiesCache()
+        startExplorationDiscovery()
+        setTimeout(() => renderExploration(), 600)
+      }
     },
   }
 

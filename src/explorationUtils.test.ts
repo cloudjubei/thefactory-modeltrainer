@@ -12,7 +12,7 @@ import {
   coverageGridRecs,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
-import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH } from './modelTrainerConstants.js'
+import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX } from './modelTrainerConstants.js'
 
 // A synthetic project: one discrete lever `algo` (the basin axis), one important continuous lever
 // `lr`, one INERT continuous lever `noise_knob` (screening must freeze it), and `seed` (the noise dim).
@@ -429,6 +429,64 @@ describe('escalation ladder — never converge until the space is covered', () =
     const lrs = coverageLrs(step)
     expect(lrs.length).toBeGreaterThan(0)
     expect(lrs.some((v) => v < 0.4 || v > 0.6)).toBe(true) // reaching out into the untried range
+  })
+
+  // objective is irrelevant to coverage (it samples space, not maxima), so a helper for arbitrary algo/lr runs.
+  const run2 = (algo: string, lr: number, s: number): AnalysisRun => ({
+    key: `rr-${algo}-${lr}-${s}`,
+    config: { algo, lr, seed: s },
+    objective: 100,
+    metrics: { score: 100, baseline: 20 },
+    seed: s,
+    status: 'completed',
+  })
+
+  it('covers EACH categorical region to the density target — never abandons an under-sampled value (dqn vs ppo)', () => {
+    const runs: AnalysisRun[] = []
+    for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) runs.push(run2('A', i / 20, s)) // A: densely covered
+    for (const lr of [0.5, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(run2('B', lr, s)) // B: only 2 setups
+    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const recs = coverageGridRecs(state, runs, M2, { key: 'objective', direction: 'max' })
+    const configs = recs.flatMap((r) => r.spec.configs ?? [])
+    expect(configs.length).toBeGreaterThan(0)
+    // it samples the UNDER-covered region B (not the already-saturated A)
+    expect(configs.every((c) => c.config.algo === 'B')).toBe(true)
+    expect(new Set(configs.map((c) => Number(c.config.lr))).size).toBeGreaterThan(1) // real spread within B
+  })
+
+  it('round-robins coverage across multiple under-covered regions so EVERY value progresses each round', () => {
+    const runs: AnalysisRun[] = []
+    for (const algo of ['A', 'B', 'C']) for (const lr of [0.5, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(run2(algo, lr, s))
+    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const recs = coverageGridRecs(state, runs, M2, { key: 'objective', direction: 'max' })
+    const configs = recs.flatMap((r) => r.spec.configs ?? [])
+    expect(configs.length).toBeLessThanOrEqual(EXPLORATION_BATCH_MAX) // one round is bounded by the batch cap
+    const byRegion = new Set(configs.map((c) => String(c.config.algo)))
+    expect(byRegion).toEqual(new Set(['A', 'B', 'C'])) // all three regions represented in the same round
+  })
+
+  it('rotates the round-robin start so MORE regions than the batch cap are NOT permanently starved', () => {
+    // 26 categorical regions > EXPLORATION_BATCH_MAX (24): a single round can only serve 24, so the start must
+    // ROTATE across rounds (by the growing setup count) or the last regions would never get sampled.
+    const algos = Array.from({ length: 26 }, (_, i) => 'a' + i)
+    const M26: TrainerManifest = {
+      name: 'many', recordType: 'many-run', run: 'noop',
+      objective: { name: 'score', direction: 'max' },
+      levers: { algo: { type: 'choice', choices: algos, default: 'a0' }, lr: { type: 'number', range: [0, 1], default: 0.5 }, seed: { type: 'number', default: 0 } },
+    }
+    const mk = (extra: string[]): AnalysisRun[] => {
+      const rs: AnalysisRun[] = []
+      for (const algo of algos) for (const lr of [0.4, 0.6]) rs.push({ key: `m-${algo}-${lr}`, config: { algo, lr, seed: 0 }, objective: 100, metrics: { score: 100, baseline: 20 }, seed: 0, status: 'completed' })
+      for (const k of extra) rs.push({ key: `x-${k}`, config: { algo: 'a0', lr: Number(k), seed: 0 }, objective: 100, metrics: { score: 100, baseline: 20 }, seed: 0, status: 'completed' })
+      return rs
+    }
+    const state: ExplorationState = { ...initExplorationState(M26), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const served = (runs: AnalysisRun[]) => new Set(coverageGridRecs(state, runs, M26, { key: 'objective', direction: 'max' }).flatMap((r) => r.spec.configs ?? []).map((c) => String(c.config.algo)))
+    const roundA = served(mk([])) // 52 setups → start 52%26 = 0
+    const roundB = served(mk(['0.1'])) // 53 setups → start 53%26 = 1 → serves a different window
+    expect(roundA.size).toBe(EXPLORATION_BATCH_MAX) // one round is capped
+    expect([...roundA].sort()).not.toEqual([...roundB].sort()) // the served window ROTATED
+    expect(roundB.has('a24')).toBe(true) // a region starved in round A is served in round B (no permanent starvation)
   })
 
   it('does NOT converge while the numeric range is still UNCOVERED — even with points clustered at the peak', () => {

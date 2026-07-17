@@ -162,6 +162,90 @@ describe('Exploration.heatmapCells', () => {
   })
 })
 
+describe('Exploration.manualCellConfigs', () => {
+  const M = {
+    recordType: 'demo-run',
+    objective: { name: 'score', direction: 'max' as const },
+    levers: {
+      algo: { type: 'choice', choices: ['A', 'B'], default: 'A' },
+      x: { type: 'number', range: [0, 1], default: 0.5 },
+      y: { type: 'number', range: [0, 1], default: 0.5 },
+      noise: { type: 'number', range: [0, 1], default: 0.5 },
+      seed: { type: 'number', default: 0 },
+    },
+  }
+  const runs = [
+    { config: { algo: 'A', x: 0.5, y: 0.5, noise: 0.9 }, objective: 400 },
+    { config: { algo: 'B', x: 0.25, y: 0.75, noise: 0.1 }, objective: 200 },
+  ]
+  const axes = (aX: string, aY: string) => ({
+    xA: Exploration.makeAxis(aX, runs, M, 1),
+    yA: Exploration.makeAxis(aY, runs, M, 1),
+  })
+
+  it('builds one config per cell: axis levers = the cell values, other levers = the BEST run, seed omitted', () => {
+    const { xA, yA } = axes('x', 'y')
+    const best = { algo: 'A', x: 0.5, y: 0.5, noise: 0.9, seed: 3 } // the top run's config
+    const cx = xA.index(0.5)
+    const cy = yA.index(0.5)
+    const cfgs = Exploration.manualCellConfigs([{ x: cx, y: cy }], { xA, yA, pegs: {}, best, manifest: M })
+    expect(cfgs).toHaveLength(1)
+    expect(cfgs[0].x).toBe(xA.cellValue(cx)) // the cell's concrete run value (bin midpoint)
+    expect(cfgs[0].y).toBe(yA.cellValue(cy))
+    expect(cfgs[0].noise).toBe(0.9) // a non-axis lever takes the best run's value
+    expect(cfgs[0].algo).toBe('A')
+    expect('seed' in cfgs[0]).toBe(false) // seed left for the planner
+  })
+
+  it('a PEGGED lever overrides the best value (coerced to the lever type)', () => {
+    const { xA, yA } = axes('x', 'y')
+    const best = { algo: 'A', x: 0.5, y: 0.5, noise: 0.9 }
+    const cfgs = Exploration.manualCellConfigs([{ x: xA.index(0.5), y: yA.index(0.5) }], {
+      xA,
+      yA,
+      pegs: { noise: '0.2', algo: 'B' }, // peg values arrive as strings from the <select>
+      best,
+      manifest: M,
+    })
+    expect(cfgs[0].noise).toBe(0.2) // coerced to a number
+    expect(cfgs[0].algo).toBe('B')
+  })
+
+  it('falls back to the manifest default when a lever is neither pegged nor in the best run', () => {
+    const { xA, yA } = axes('x', 'y')
+    const cfgs = Exploration.manualCellConfigs([{ x: xA.index(0.25), y: yA.index(0.75) }], { xA, yA, pegs: {}, best: {}, manifest: M })
+    expect(cfgs[0].noise).toBe(0.5) // manifest default
+  })
+
+  it('cellValue reproduces the TRIED value in an OCCUPIED cell (not the bin geometric midpoint)', () => {
+    // Tried lr values [0.001, 0.003, 0.01]; the extreme 0.01 lands at the top edge of its bin, so a naive
+    // midpoint would run 0.0085 — a config never tried. cellValue must return the real value the cell shows.
+    const lrRuns = [0.001, 0.003, 0.01].map((lr) => ({ config: { algo: 'A', x: lr, y: 0.5 }, objective: 100 }))
+    const ax = Exploration.makeAxis('x', lrRuns, M, 1)
+    const i = ax.index(0.01)
+    expect(ax.cellValue(i)).toBe(0.01) // the concrete tried value, matching cellLabel
+    expect(Number(ax.cellLabel(i))).toBe(0.01)
+  })
+
+  it('cellValue on an EMPTY cell returns a fresh gap-fill value inside the cell', () => {
+    const lrRuns = [0.0, 1.0].map((lr) => ({ config: { algo: 'A', x: lr, y: 0.5 }, objective: 100 }))
+    const ax = Exploration.makeAxis('x', lrRuns, M, 3) // 3 bins over [0,1]; the middle bin is empty
+    const mid = ax.cellValue(1)
+    expect(mid).toBeGreaterThan(0) // a value strictly inside the empty middle bin
+    expect(mid).toBeLessThan(1)
+  })
+
+  it('SKIPS an out-of-range (stale) cell index instead of launching an invalid config', () => {
+    const { xA, yA } = axes('x', 'y')
+    const cfgs = Exploration.manualCellConfigs(
+      [{ x: xA.index(0.5), y: yA.index(0.5) }, { x: 999, y: 0 }, { x: 0, y: -1 }],
+      { xA, yA, pegs: {}, best: {}, manifest: M },
+    )
+    expect(cfgs).toHaveLength(1) // only the in-range cell survives; the two stale ones are dropped
+    expect(cfgs[0].algo).toBeDefined()
+  })
+})
+
 describe('Exploration.magma', () => {
   it('returns an rgb() string and ramps from dark to light across [0,1]', () => {
     expect(Exploration.magma(0)).toMatch(/^rgb\(/)

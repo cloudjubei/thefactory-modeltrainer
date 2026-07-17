@@ -172,10 +172,17 @@ export const EXPLORATION_REFINE_MIN_STEP_FRACTION = 1 / 64
 export const EXPLORATION_MAX_REFINE_DEPTH = 4
 
 /**
- * Space-filling COVERAGE density: the search keeps sampling the active numeric space until it holds at least
- * `PER_LEVER × (#active numeric levers) × (1 + refineDepth)` distinct setups, spread by a deterministic
- * low-discrepancy (Halton) sequence. This is the honest "search space covered" gate — WITHOUT it a pure-
- * numeric problem converges the moment its single global-best neighbourhood is locally resolved, leaving the
- * rest of the space (other good regions) untried. Deepening (Explore more) raises the target for a finer sweep.
+ * Space-filling COVERAGE density, PER categorical region: each discrete region (e.g. each `model_name`/algo) is
+ * sampled until it holds at least `PER_LEVER × (#active numeric levers) × (1 + refineDepth)` distinct setups,
+ * spread by a deterministic low-discrepancy (Halton) sequence. Coverage is PER-REGION so a categorical value
+ * (dqn vs ppo) gets its own space explored to the same density — never abandoned after a handful of screen runs
+ * just because its early samples looked worse. Deepening ("Explore more") raises the target for a finer sweep.
  */
 export const EXPLORATION_COVERAGE_PER_LEVER = 16
+
+/**
+ * The most configs a single strategist round proposes (one child `train` campaign). Larger than the old cap of
+ * 8 so "Explore more" / coverage rounds launch a MEATIER batch — the Activity "max parallel runs" setting throttles
+ * how many of them run at once, so a bigger batch just means fuller waves, not more concurrency.
+ */
+export const EXPLORATION_BATCH_MAX = 24

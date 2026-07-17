@@ -220,11 +220,18 @@ project by its manifest's `recordType`.
   The custom `updateTrainingHypothesis`/`updateTrainingPaper` tools were RETIRED: in-place record edits —
   including a manual verdict override (set `status` + `verdictSource:'manual'`) — now go through the shared
   `updateProjectRecord` tool, gated by the project's declared **data-capability manifest**
-  (`trainerDataCapabilityManifest` in the viewer, sent via `app.capabilities`): it lists the queryable/
-  editable record types (`-run`, `-hypothesis` [editable prose + status/verdictSource], `-paper` [+ year/
-  tags], `-xai-suggestion`) with a `view` deep-link template each. `queryProjectData` (auto) + `update
-  ProjectRecord` / `startProjectActivity` (approval-gated) are advertised automatically once that manifest
-  is present. A hypothesis SPEC change is NOT an edit (it changes the record's identity) — it flows through
+  (`trainerDataCapabilityManifest` in the viewer, sent via `app.capabilities`): it lists the queryable /
+  editable / **creatable** record types (`-run`, `-hypothesis` [editable prose + status/verdictSource;
+  CREATABLE via title/claim/rationale/spec/comparison, defaulting status/verdictSource/source], `-paper`
+  [+ year/tags; creatable], `-xai-suggestion`) with a `view` deep-link template each. `queryProjectData`
+  (auto) + `updateProjectRecord` / **`createProjectRecord`** / `startProjectActivity` (approval-gated) are
+  advertised automatically once that manifest is present. `createProjectRecord` lets the chat add a brand-new
+  record (e.g. a hypothesis) — the manifest's `createDefaults` fill status/source and a key + timestamps are
+  stamped (a chat-created hypothesis gets a generated id, not its spec-hash, so the app's consolidation pass
+  dedups it against any spec-hash twin; its `spec` isn't manifest-validated on this path, so the hygiene
+  census diagnoses a bad one). All the generic data tools are also seeded into the chat's per-tool toggle
+  defaults (`withProjectDataToolChatSettings` in the backend, wrapped into `/chats/settings`) so they appear
+  as toggleable options in the chat UI — matching how the trainer/knowledge tools surface. A hypothesis SPEC change is NOT an edit (it changes the record's identity) — it flows through
   `recommendTrainingExperiments`, which validates + creates a runnable suggestion. That tool now also
   returns a `viewLink` (an `overseer://…/app?view=xai&scope=all` resource link); its chat tool-view renders
   it as a clickable chip that navigates into the app's xAI → Suggested view to launch (F.3), via the
