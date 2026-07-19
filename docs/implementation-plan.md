@@ -145,41 +145,18 @@ Parked (real blocker / low value):
   axis logic; needs a manifest scope change to `ignore` + a re-analysis to take effect) — flag, don't
   silently change.
 
-### 7. Exploration autopilot — automate the config-space search (find all maxima + the global max)
+### 7. Exploration autopilot — remaining
 
-The wall: the analysis primitives exist (`leverImportances`, `ofatContrasts`, EI `acquisitionRecommendations`,
-`thinSeedRecommendations`, `missingCellRecommendations`, `paretoFrontier`) but the human is still the LOOP that
-sequences them and the bookkeeping that remembers where the search is. This item builds the **closed-loop
-strategist** that runs the search itself and persists the map. **Scoped to `examples/cartpole` then
-`examples/tabular` (Wine); BlackSwan's existing display is untouched (autopilot is additive + opt-in per
-project).** Decisions: full autopilot end-to-end; **closed-loop with pause/steer**; BlackSwan **scalarize-first**.
+The closed-loop strategist, durable `explore` controller, and viewer tab are built (per-region coverage gate,
+self-heal, `model_name` basin axis, manual cell-select mode; how it fits: `docs/architecture.md`, history:
+`project_exploration_autopilot` memory). Remaining:
 
-**The method (a staged reducer over the run archive).** Five principles: (1) measure seed-noise before judging any
-peak; (2) a "maximum" is a **basin** (cluster of good configs), not a point; (3) screen levers → freeze the ones
-that don't move the objective before spending budget; (4) explore/exploit — never declare a global max while
-high-uncertainty regions are unprobed; (5) stop on evidence (no new basins for K rounds AND best basin plateaued
-AND marginal EI < ε). Stages: **S0 calibrate-noise → S1 screen → S2 global (find basins) → S3 local (climb each) →
-S4 converge & declare.** For BlackSwan this maps 1:1 onto the manual loop, with `model_name` as the top basin axis.
-
-**SHIPPED (steps 1–4 + 7 — see git + memory `project_exploration_autopilot`):** types + pure Strategist (finds all
-maxima + the global max on synthetic surfaces); the durable `explore` controller (Strategist → launch each batch as a
-STANDARD `train` child sharing the experiment lane → await settle → re-assess → repeat; `pendingChildId`
-reconcile/adopt/Stop-exactly-it, `awaitActivity` queue self-heal, repeated-failure guard, singleton guard); the
-Exploration viewer tab (basin/maxima list, regret, stage bar, coverage heatmap, pause/steer, Start / Explore-more).
-Later hardening also shipped: the **coverage gate** (space-filling Halton convergence — never declare "covered" while
-the space is under-sampled), **self-heal** (empty run archive → restart at calibrate), **`model_name` as a real basin
-axis** (examples/tabular now offers 3 sklearn models), **zoom = grid density**, **per-step activity labels**, and a
-**reproducibility test** (repeated runs declare the same model despite noise — the pure half of step 6).
-
-**Remaining:**
-
-5. **Live CartPole + Wine acceptance** (user-run — needs their Python/SB3). Autopilot on fresh CartPole rediscovers
-   ≈500 and enumerates the basins; Wine covers the space across the 3 models and declares the best consistently. The
-   reducer is verified in-repo (drives do 375–975 runs and converge correctly); the controller runs SERVER-SIDE, so a
-   backend restart is required to pick up the shipped dist.
-6. **BlackSwan opt-in (gated on 5).** `model_name` as the top-level basin axis (screen across model_names, then
-   S1→S4 within the top few) + scalarize on the existing `traded_return`-with-min-trades north-star, so the whole
-   process runs unchanged. Opt-in — no change to the existing BlackSwan views. Pareto basins are a follow-on.
+1. **Live CartPole + Wine acceptance** (user-run — needs Python/SB3; the reducer/controller run server-side, so the
+   backend must be restarted to pick up the shipped dist). CartPole rediscovers ≈500 and enumerates the basins; Wine
+   covers the space across the 3 models and declares the best consistently.
+2. **BlackSwan opt-in (gated on 1).** `model_name` as the top-level basin axis + scalarize on the existing
+   `traded_return`-with-min-trades north-star, so the whole S0→S4 process runs unchanged. Opt-in — no change to the
+   existing BlackSwan views. Pareto basins are a follow-on.
 
 ---
 
@@ -293,7 +270,7 @@ _Further out — **FastContext-style repository explorer** (a candidate fourth t
 
 ### Optional phases
 
-- **Live handoff.** On a winning run (the exploration autopilot's declared global max — see NEXT §4), tag the
+- **Live handoff.** On a winning run (the exploration autopilot's declared global max — see NEXT §7), tag the
   checkpoint for live trading (`run_server_model.py`). The autopilot supersedes the old "Phase 8 propose→run→judge"
   sketch; only the checkpoint→live-server tagging remains here.
 - **Phase 9 — Jupyter notebooks (UNDERSCOPED).** View/edit/execute a project's `.ipynb` from the

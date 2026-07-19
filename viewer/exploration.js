@@ -977,10 +977,11 @@
     container.querySelectorAll('[data-expl-zoom]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const dir = btn.getAttribute('data-expl-zoom')
-        // Zoom = value-grid DENSITY. Range allows coarse grouping (0.25) up to ~one cell per tried value for a
-        // finely-sampled lever (8 × BASE_BINS well past MAX_AXIS_VALUES).
-        if (dir === 'in') a.vs.zoom = Math.min(8, (a.vs.zoom || 1) + 0.5)
-        else if (dir === 'out') a.vs.zoom = Math.max(0.25, (a.vs.zoom || 1) - 0.25)
+        // Zoom = value-grid DENSITY, MULTIPLICATIVE (×2 in / ×0.5 out) so it spans a wide range in a few clicks:
+        // down to ~1% for a coarse whole-space overview (bins ≈ round(distinct × zoom), floored at 2), up to 800%
+        // for ~one cell per tried value. Reset returns to 100%.
+        if (dir === 'in') a.vs.zoom = Math.min(8, (a.vs.zoom || 1) * 2)
+        else if (dir === 'out') a.vs.zoom = Math.max(0.01, (a.vs.zoom || 1) * 0.5)
         else a.vs.zoom = 1
         clearSelection()
         rerender()
