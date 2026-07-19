@@ -7,6 +7,7 @@ import {
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
   EXPLORATION_MAX_REFINE_DEPTH,
+  EXPLORATION_MAX_REGION_AXES,
   EXPLORATION_REFINE_MAX_STEP_FRACTION,
   EXPLORATION_REFINE_MIN_STEP_FRACTION,
   EXPLORATION_SCREEN_SAMPLES,
@@ -514,23 +515,35 @@ function stepScreen(
   const discrete = searchable.filter((l) => !isNumericManifestLever(manifest, l))
   const numeric = searchable.filter((l) => isNumericManifestLever(manifest, l))
 
-  // discrete levers are basin AXES — never frozen. numeric levers are kept only if they move the objective.
+  // Basin AXES = at most EXPLORATION_MAX_REGION_AXES categorical levers, `model_name` (the model-identity lever)
+  // preferred, then by importance. More categoricals than that would explode the region cross-product (BlackSwan
+  // has 14 discretes), so the rest are frozen and tuned WITHIN a basin — this is what keeps `model_name` the
+  // TOP-level basin axis rather than one of many co-equal ones.
+  const regionAxes = discrete
+    .slice()
+    .sort((a, b) => (b === 'model_name' ? 1 : 0) - (a === 'model_name' ? 1 : 0) || impOf(b) - impOf(a) || (a < b ? -1 : 1))
+    .slice(0, EXPLORATION_MAX_REGION_AXES)
+
+  // Numeric climb dims: important numerics filling the remaining active budget (always at least one when numeric
+  // levers exist — a many-categorical manifest must NOT be left with zero numeric slots to climb).
   let activeNumeric = numeric.filter((l) => impOf(l) >= EXPLORATION_ACTIVE_IMPORTANCE_FLOOR)
   if (!activeNumeric.length && numeric.length) {
     activeNumeric = [numeric.slice().sort((a, b) => impOf(b) - impOf(a))[0]] // keep at least one climb dimension
   }
-  activeNumeric = activeNumeric.sort((a, b) => impOf(b) - impOf(a)).slice(0, Math.max(0, EXPLORATION_MAX_ACTIVE_LEVERS - discrete.length))
+  const numericSlots = Math.max(numeric.length ? 1 : 0, EXPLORATION_MAX_ACTIVE_LEVERS - regionAxes.length)
+  activeNumeric = activeNumeric.sort((a, b) => impOf(b) - impOf(a)).slice(0, numericSlots)
 
   const steerActive = (state.steer?.pinActive ?? []).filter((l) => searchable.includes(l))
-  const active = uniq([...discrete, ...activeNumeric, ...steerActive])
+  const active = uniq([...regionAxes, ...activeNumeric, ...steerActive])
 
-  // only numeric levers are ever frozen (categoricals are always-active basin axes), so freeze at the
-  // best observed value coerced back to a number.
+  // Freeze every searchable lever NOT active at its best-so-far value. A numeric freezes to a number; a
+  // categorical/boolean keeps its category value (coercing it to a number would set NaN).
   const frozenLevers: Record<string, unknown> = {}
   for (const l of searchable) {
     if (active.includes(l)) continue
     const best = imps.find((i) => i.lever === l)?.bestValue
-    frozenLevers[l] = best !== undefined ? Number(best) : manifest.levers[l].default
+    if (best === undefined) frozenLevers[l] = manifest.levers[l].default
+    else frozenLevers[l] = isNumericManifestLever(manifest, l) ? Number(best) : best
   }
   if (state.steer?.pinFrozen) Object.assign(frozenLevers, state.steer.pinFrozen)
 

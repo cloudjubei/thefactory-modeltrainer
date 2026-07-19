@@ -186,3 +186,12 @@ export const EXPLORATION_COVERAGE_PER_LEVER = 16
  * how many of them run at once, so a bigger batch just means fuller waves, not more concurrency.
  */
 export const EXPLORATION_BATCH_MAX = 24
+
+/**
+ * The most CATEGORICAL levers that become basin AXES (the discrete dimensions that define distinct maxima). Every
+ * additional categorical axis multiplies the region cross-product, so a manifest with many `choice`/`boolean`
+ * levers (e.g. BlackSwan's 14 model-scope discretes) is capped here — the model-identity lever `model_name` is
+ * always kept, then the most important others. The rest are FROZEN at their best value and tuned within a basin
+ * (unfreeze via steer). This is what makes `model_name` the top-level basin axis rather than one of fourteen.
+ */
+export const EXPLORATION_MAX_REGION_AXES = 2

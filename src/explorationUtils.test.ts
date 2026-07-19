@@ -12,7 +12,7 @@ import {
   coverageGridRecs,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
-import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX } from './modelTrainerConstants.js'
+import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES } from './modelTrainerConstants.js'
 
 // A synthetic project: one discrete lever `algo` (the basin axis), one important continuous lever
 // `lr`, one INERT continuous lever `noise_knob` (screening must freeze it), and `seed` (the noise dim).
@@ -173,6 +173,45 @@ describe('S1 screen', () => {
     expect(step.stateNext.activeLevers).not.toContain('seed')
     expect(Object.keys(step.stateNext.frozenLevers)).toContain('noise_knob')
     expect(step.stage).toBe('global')
+  })
+
+  it('CAPS categorical basin axes (model_name preferred) and keeps numeric climb slots on a high-cardinality manifest', () => {
+    // BlackSwan-shaped: MANY categorical levers. Without a cap all 4 discrete would become basin axes (a 4-D
+    // region cross-product) and `MAX_ACTIVE_LEVERS - 4` would leave numerics un-climbable. The cap must keep only
+    // EXPLORATION_MAX_REGION_AXES categoricals (model_name always in), freeze the rest at their CATEGORICAL value,
+    // and still activate numeric climb dims.
+    const BS: TrainerManifest = {
+      name: 'bs', recordType: 'bs-run', run: 'noop',
+      objective: { name: 'ret', direction: 'max' },
+      levers: {
+        model_name: { type: 'choice', choices: ['m0', 'm1', 'm2'], default: 'm0' },
+        net_arch: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        optimizer: { type: 'choice', choices: ['adam', 'sgd'], default: 'adam' },
+        use_x: { type: 'boolean', default: false },
+        lr: { type: 'number', range: [0, 1], default: 0.5 },
+        gamma: { type: 'number', range: [0.9, 1], default: 0.99 },
+        buf: { type: 'number', range: [1, 100], default: 50 },
+        seed: { type: 'number', default: 0 },
+      },
+    }
+    const runs: AnalysisRun[] = []
+    let s = 0
+    for (const model of ['m0', 'm1', 'm2']) for (const na of ['a', 'b']) for (const lr of [0.2, 0.5, 0.8]) {
+      const ret = (model === 'm1' ? 500 : 200) + (na === 'b' ? 30 : 0) - 200 * (lr - 0.5) ** 2 // model_name + lr matter most
+      runs.push({ key: `bs-${s}`, config: { model_name: model, net_arch: na, optimizer: 'adam', use_x: false, lr, gamma: 0.99, buf: 50, seed: s % 5 }, objective: ret, metrics: { ret, baseline: 20 }, seed: s % 5, status: 'completed' })
+      s++
+    }
+    const state: ExplorationState = { ...initExplorationState(BS), stage: 'screen', noiseFloor: 1 }
+    const step = nextExplorationStep(state, runs, BS)
+    const active = step.stateNext.activeLevers
+    const activeCats = active.filter((l) => BS.levers[l].type !== 'number')
+    expect(activeCats.length).toBeLessThanOrEqual(EXPLORATION_MAX_REGION_AXES) // NOT all 4 discrete
+    expect(active).toContain('model_name') // the model-identity lever is always a basin axis
+    expect(active.filter((l) => BS.levers[l].type === 'number').length).toBeGreaterThanOrEqual(1) // numerics DO climb
+    // a frozen categorical keeps its category value — never coerced to NaN
+    for (const [l, v] of Object.entries(step.stateNext.frozenLevers)) {
+      if (BS.levers[l] && BS.levers[l].type !== 'number') expect(Number.isNaN(v as number)).toBe(false)
+    }
   })
 })
 

@@ -147,16 +147,15 @@ Parked (real blocker / low value):
 
 ### 7. Exploration autopilot — remaining
 
-The closed-loop strategist, durable `explore` controller, and viewer tab are built (per-region coverage gate,
-self-heal, `model_name` basin axis, manual cell-select mode; how it fits: `docs/architecture.md`, history:
-`project_exploration_autopilot` memory). Remaining:
+The closed-loop strategist, durable `explore` controller, and viewer tab are built and all three consumers are
+enabled — including BlackSwan (capped categorical basin axes with `model_name` on top; scalar `traded_return`
+north-star). How it fits: `docs/architecture.md`; history: `project_exploration_autopilot` memory. Remaining:
 
-1. **Live CartPole + Wine acceptance** (user-run — needs Python/SB3; the reducer/controller run server-side, so the
-   backend must be restarted to pick up the shipped dist). CartPole rediscovers ≈500 and enumerates the basins; Wine
-   covers the space across the 3 models and declares the best consistently.
-2. **BlackSwan opt-in (gated on 1).** `model_name` as the top-level basin axis + scalarize on the existing
-   `traded_return`-with-min-trades north-star, so the whole S0→S4 process runs unchanged. Opt-in — no change to the
-   existing BlackSwan views. Pareto basins are a follow-on.
+1. **Live acceptance (user-run — needs Python/SB3; restart the backend to load the server-side reducer/controller).**
+   CartPole rediscovers ≈500 and enumerates the basins; Wine + BlackSwan cover the space across their models and
+   declare the best consistently. Optional refinements once it's exercised: emit a `baseline` metric in BlackSwan's
+   `trainer/summary.py` (cleaner basin threshold than the worst-region fallback); let the escalation ladder unfreeze
+   non-axis categoricals; Pareto basins.
 
 ---
 
