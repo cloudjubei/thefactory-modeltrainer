@@ -39,6 +39,26 @@ and the `obs_squash` normalization experiment. A setup counts only when it **bea
 buy-and-hold out-of-sample net of 0.1% fees**, with profit that is NOT concentrated in up-regimes
 (genuine timing, not beta), stable across seeds AND windows.
 
+**2026-07-20 corpus diagnosis (20,888 leak-free runs; `project_blackswan_search_diagnosis`).** No setup
+trades AND beats buy-and-hold across all four walk-forward windows (≥2 windows: 46 setups, ≥3: 4, ≥4: **0**);
+**93% of strong wins are the single 2022 bear window** and invert in up-years — a GENERALIZATION failure, not a
+bad objective (beta-neutral: corr with hold 0.008) nor low Sharpe (annualized winners ≈1.3). The v5 cohort is
+mostly VALID (only the `tf=1d/fs=1h` look-ahead config leaked). Next, in EV order — driven from the new
+**Diagnosis tab**:
+1. **Replicate** the ~top-20 setups across ALL windows × ≥5 seeds; select on worst-window `return_vs_hold`
+   (Diagnosis → Replicate — one campaign per window).
+2. **Reseed** the promising single-seed setups to ≥5 seeds (Diagnosis → Reseed) so luck separates from edge.
+3. **`max_drawdown` experiment (lever + metric SHIPPED).** `trainer/summary.py` now emits `max_drawdown_pct`
+   (signed peak-to-trough of the OOS equity curve) and a new sweepable reward lever `combo_drawdown_penalty`
+   (default 0 = off; `penalty = weight × |open-position drawdown|`, combo_unified only) is wired end-to-end
+   (manifest → config_builder → model_config → abstract_model → `base_crypto_env._drawdown_penalty`), all
+   green (1290 BlackSwan tests). REMAINING (user): run the sweep `combo_drawdown_penalty ∈ {0, …}` on a fixed
+   base and add the hypothesis "drawdown penalty makes zero-trade setups trade (n_trades 0→>0)" via the
+   Hypotheses tab (custom benchmark `n_trades`), watching that it doesn't just silence already-trading setups.
+   NB prior attempts suggest it may silence rather than help — a falsifiable test.
+4. If nothing survives replication, the edge likely isn't on single-asset BTC — see the less-noisy asset-class
+   direction (Deferred → Multi-asset).
+
 - **Wave 3 — multi-asset portfolio / cross-sectional long-short. PROJECT-SPLIT** (see Deferred).
 
 ### 2. Model-trainer app
@@ -157,6 +177,35 @@ north-star). How it fits: `docs/architecture.md`; history: `project_exploration_
    `trainer/summary.py` (cleaner basin threshold than the worst-region fallback); let the escalation ladder unfreeze
    non-axis categoricals; Pareto basins.
 
+### 8. Research Diagnostician — diagnose WHY a search hasn't found a winner
+
+A read-only battery over any project's run corpus that answers "is there a strong candidate, and if not,
+why" and turns the answer into launchable campaigns. Complements the exploration autopilot (§7): that
+SEARCHES, this DIAGNOSES. Domain-oblivious — every check reads the manifest. Motivated by the 20,888-run
+BlackSwan diagnosis (see §1); history in `project_blackswan_search_diagnosis` memory.
+
+SHIPPED (viewer, all green — 1202 tests): `viewer/diagnostics.js` (dual-export, `src/diagnosticsViewer.test.ts`,
+16 tests) + a **Diagnosis tab**. Seven checks → severity-ranked findings + a verdict + a "do next":
+cohort-integrity, discriminability/seeds, null-ceiling (beats the declared baseline / at ceiling?),
+**split-consistency** (does the incumbent hold across walk-forward/CV/dataset splits, or is it single-split
+luck?), incumbent-separation, budget/coverage, objective-confound. Verdicts derive from EXISTING manifest
+fields (`hypothesisBenchmark.metric === objective` ⇒ ceiling target; else ⇒ per-run null baseline). Two
+campaign generators wired to one-click launch (a SERIES via `startOrEnqueue`): **reseed** (lift the top-N
+promising setups to ≥5 seeds — only the MISSING seeds, never re-run everything) and **replicate** (the
+shortlist across every split value, ONE campaign per split/data-bundle for data-load efficiency). Validated
+on real data: CartPole → `converged` (hits the 475 target, multiple optima), Wine → `winner-emerging`.
+
+Remaining:
+1. **Manifest `diagnostics` blocks** for the projects so the optional checks light up — the defaults already
+   work off `hypothesisBenchmark`, but declaring `splitAxis`/`confoundMetrics`/`riskMetrics`/`degenerateWhen`
+   sharpens them. For BlackSwan the single line `splitAxis: walk_forward_window` is what turns single-window
+   overfit from invisible into a blocker; for Wine, `nullBaseline` = mean-predictor + `splitAxis` = CV fold.
+2. **Server-side engine + chat + gate** (optional follow-on): `src/diagnosticsUtils.ts` mirroring the viewer
+   logic (Phase-0 exports of `bootstrapDiff`/`benjaminiHochberg`/`baselineOf`) → a `diagnoseSearch` chat read
+   tool + an `xaiNarrate`-style narration + feeding the diagnosis into `nextExplorationStep` as a convergence
+   GATE (block `converged` until the incumbent holds across ≥K splits — the deterministic fix for §7's
+   single-window false-convergence).
+
 ---
 
 ## Deferred — bigger work, picked up after the active work
@@ -231,6 +280,16 @@ as its own ~3–4 week project and blocks none of the in-place wins. Hard depend
 klines are on disk → altcoin backfill (via the data mine) is a prerequisite. Research calls
 cross-sectional long-short the strongest-edge config, so it is promising — deliberately sequenced
 last. (Distinct from "Other single assets" below, which is just the `asset` lever + a backfill.)
+
+**Strategic direction — less-noisy asset classes with fundamental data (post-diagnosis).** The 20,888-run
+BlackSwan diagnosis (§1) points to single-asset crypto PRICE being too noisy to carry a learnable edge. The
+sequenced answer after multi-asset: move to **commodities, stocks, and FX** — lower-noise series that,
+crucially, are tied to geopolitical/macro-economic drivers, so each brings NEW fundamental data crypto lacks
+(rates, CPI/inflation, earnings, inventories/COT, trade balances, an event calendar) that could be the actual
+source of edge. Requires the data mine to gather + timestamp-align these series with their fundamentals,
+per-asset-class walk-forward windows, and features that FUSE price with the fundamental stream. Test the SAME
+model families across classes and judge with the Diagnosis tab's split-consistency + a cross-class leaderboard
+(is any edge asset-class-specific or general?). This is the "look at less noisy things" hypothesis made falsifiable.
 
 ### The data mine — a shared dataset project for every model trainer
 

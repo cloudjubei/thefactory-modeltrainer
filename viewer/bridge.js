@@ -77,10 +77,6 @@
       call('settings.put', { key: key, level: level, value: value }),
     // Clear this app's override so the user-global default applies again.
     clearAppSetting: (key) => call('settings.delete', { key: key }),
-    // Run a named analysis job (web search + LLM); it writes records this app
-    // re-reads via data.query. Slow (often >90s), so allow 3 minutes. Even if
-    // this call times out, the backend still writes the record — callers re-read.
-    runJob: (jobName, params) => call('analysis.run', { jobName: jobName, params: params }, 180000),
     // Start a DETACHED background activity. Returns { activityId } immediately;
     // the activity keeps running server-side even if this app is closed or the
     // user navigates away. Observe progress + results by re-reading records via

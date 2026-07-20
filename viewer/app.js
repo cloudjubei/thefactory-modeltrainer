@@ -87,6 +87,7 @@ const TABS = [
   { id: 'speed', label: 'Speed', icon: iconSpeedSvg },
   { id: 'xai', label: 'xAI', icon: iconXaiSvg },
   { id: 'exploration', label: 'Exploration' },
+  { id: 'diagnosis', label: 'Diagnosis' },
   { id: 'activity', label: 'Activity' },
 ]
 // xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
@@ -14786,6 +14787,7 @@ function rerenderRunDerivedTab() {
   if (activeTabId === 'papers') return renderPapers()
   if (activeTabId === 'speed') return renderSpeed()
   if (activeTabId === 'exploration') return renderExploration()
+  if (activeTabId === 'diagnosis') return renderDiagnosis()
   // xAI's leaderboards + the Current-run favorites picker read the all-runs snapshot the Refresh just rebuilt.
   if (activeTabId === 'xai') return renderXai()
   return renderModels()
@@ -18189,6 +18191,55 @@ async function renderExploration(fromPoll) {
   await scheduleExplorationPoll(recordType, active)
 }
 
+async function renderDiagnosis() {
+  const container = byId('diagnosis-body')
+  if (!container || !window.Diagnostics) return
+  if (!manifest) {
+    container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to diagnose its search.</div>'
+    return
+  }
+  // Pass the FULL census (every status) so cohort-integrity can report decision-grade N vs raw run count — the
+  // diagnostician partitions failed/degenerate/invalid itself. queryAllRunRecords page-accumulates all records;
+  // fall back to the shared xAI pool only on a real query error (never over an empty archive).
+  let runs = []
+  try {
+    runs = (await queryAllRunRecords()).map((r) => ({
+      key: r.key,
+      config: (r.summary && r.summary.config) || {},
+      objective: r.summary && r.summary.objective,
+      metrics: r.summary && r.summary.metrics,
+      seed: r.summary && r.summary.seed,
+      status: (r.summary && r.summary.status) || 'completed',
+      health: r.summary && r.summary.health,
+      pipelineVersion: r.summary && r.summary.pipelineVersion,
+    }))
+  } catch {
+    runs = xaiRuns()
+  }
+  const actions = {
+    // Launch a SERIES of train campaigns (one per ExperimentSpec) — the reseed batch is one spec, the replication
+    // batch is one spec PER split value so each campaign trains a single data bundle. Concurrency comes from the
+    // shared Activity "max parallel runs" knob, exactly like manual + explore launches.
+    onLaunchCampaigns: async (specs, label) => {
+      const list = (specs || []).filter((s) => s && s.configs && s.configs.length)
+      if (!list.length) return
+      const concurrency = savedConcurrency()
+      let launched = 0
+      for (const spec of list) {
+        const res = await startOrEnqueue('train', trainerComputeParams({ spec, concurrency }), label)
+        if (res && res.started) launched++
+      }
+      if (launched) {
+        const runsN = list.reduce((n, s) => n + s.configs.length, 0)
+        showToast(`Launched ${launched} campaign${launched === 1 ? '' : 's'} (${runsN} runs) — see Experiments.`)
+        invalidateActivitiesCache()
+        setTimeout(() => renderDiagnosis(), 800)
+      }
+    },
+  }
+  window.Diagnostics.render(container, { manifest, runs }, actions)
+}
+
 function showTab(id) {
   const target = TABS.some((t) => t.id === id) ? id : TABS[0].id
   const switching = target !== activeTabId
@@ -18231,6 +18282,7 @@ function showTab(id) {
   }
   if (target === 'xai') void refreshXai()
   if (target === 'exploration') void renderExploration()
+  if (target === 'diagnosis') void renderDiagnosis()
 }
 // A tiny spinner on the ACTIVE tab while the open project has a live (running)
 // activity, so the in-flight campaign is visible from any tab — not just
