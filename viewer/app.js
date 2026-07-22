@@ -81,6 +81,7 @@ const TABS = [
   { id: 'papers', label: 'Papers', icon: iconPaperSvg },
   { id: 'models', label: 'Models', icon: iconModelSvg },
   { id: 'versions', label: 'Versions', icon: iconVersionSvg },
+  { id: 'data', label: 'Data', icon: iconDatasetSvg },
   { id: 'datasets', label: 'Datasets', icon: iconDatasetSvg },
   { id: 'environments', label: 'Environments', icon: iconEnvironmentSvg },
   { id: 'launch', label: 'Launch', icon: iconRunSvg },
@@ -2024,6 +2025,8 @@ function showView(view) {
   if (dash) dash.hidden = view !== 'dashboard'
 }
 function resetDashboardState() {
+  explorationRenderedRt = null
+  diagnosisRenderedRt = null
   runsCache = []
   runExtraCache.clear()
   fullRunKeys.clear()
@@ -11152,6 +11155,169 @@ async function renderDatasets() {
   datasetsCache = await readDatasets()
   renderDatasetsTable()
 }
+
+// --- Data mine tab (view what data is available to download, and download it on demand) --------------
+// The catalog (asset class → instruments, each with `onDisk` coverage) is produced by the project's
+// `data-catalog` activity into the singleton `{recordType}-datacatalog` record; Download launches the
+// `mine-data` activity for a symbol or a whole class. Pure presentation lives in viewer/data.js.
+const dataMineBusy = new Set()
+let dataClicksBound = false
+
+async function readDataCatalog() {
+  if (!manifest) return null
+  const recs = await queryRecords(manifest.recordType + '-datacatalog', 'current')
+  const content = recs[0] && recs[0].content
+  return content && Array.isArray(content.assetClasses) ? content.assetClasses : null
+}
+
+function dataCatalogHtml(assetClasses) {
+  const DC = window.DataCatalog
+  return assetClasses
+    .map((cls) => {
+      const counts = DC.classCounts(cls)
+      const classBusy = dataMineBusy.has('cls:' + cls.id)
+      const rows = (cls.instruments || [])
+        .map((inst) => {
+          const state = DC.instrumentState(inst)
+          const dot = state === 'ready' ? 'is-ready' : state === 'gaps' ? 'is-gaps' : 'is-avail'
+          const busy = dataMineBusy.has('sym:' + inst.symbol) || classBusy
+          const label = state === 'available' ? 'Download' : 'Update'
+          return (
+            '<tr>' +
+            '<td><span class="status-dot ' +
+            dot +
+            '"></span> <strong>' +
+            escapeHtml(inst.symbol) +
+            '</strong> <span class="muted">' +
+            escapeHtml(inst.label) +
+            '</span></td>' +
+            '<td class="muted">' +
+            escapeHtml(inst.source + ' · ' + inst.sourceSymbol) +
+            '</td>' +
+            '<td class="muted">' +
+            escapeHtml((inst.intervals || []).join(', ')) +
+            '</td>' +
+            '<td class="muted">' +
+            escapeHtml(DC.coverageLine(inst)) +
+            '</td>' +
+            '<td class="muted" title="when the bar closes (point-in-time anchor)">' +
+            escapeHtml(inst.barCloseTz || '') +
+            '</td>' +
+            '<td><button type="button" class="ghost-btn" data-action="mine" data-symbol="' +
+            escapeHtml(inst.symbol) +
+            '"' +
+            (busy ? ' disabled' : '') +
+            '>' +
+            (busy ? 'Mining…' : label) +
+            '</button></td>' +
+            '</tr>'
+          )
+        })
+        .join('')
+      return (
+        '<section class="card" aria-label="' +
+        escapeHtml(cls.label) +
+        '"><div class="card-head card-head-row"><div><h3>' +
+        escapeHtml(cls.label) +
+        '</h3><p class="card-sub">' +
+        counts.onDisk +
+        ' / ' +
+        counts.total +
+        ' downloaded</p></div><div class="head-actions"><button type="button" class="ghost-btn" data-action="mine-class" data-class="' +
+        escapeHtml(cls.id) +
+        '"' +
+        (classBusy ? ' disabled' : '') +
+        '>' +
+        (classBusy ? 'Mining…' : 'Download all') +
+        '</button></div></div><table class="data-table"><tbody>' +
+        rows +
+        '</tbody></table></section>'
+      )
+    })
+    .join('')
+}
+
+async function renderData() {
+  const body = byId('data-body')
+  if (!body) return
+  if (!embedded()) {
+    setHtml(body, '<div class="empty-hint">Open inside the Overseer to view + download data.</div>')
+    return
+  }
+  if (!manifest || !manifest.dataCatalog) {
+    setHtml(
+      body,
+      '<div class="empty-hint">This project declares no <code>dataCatalog</code> command, so there is no data catalog to browse.</div>',
+    )
+    return
+  }
+  bindDataClicks()
+  const assetClasses = await readDataCatalog()
+  if (!assetClasses) {
+    setHtml(
+      body,
+      '<div class="empty-hint">No data catalog yet. <button type="button" class="ghost-btn" data-action="refresh-catalog">Scan now</button></div>',
+    )
+    return
+  }
+  setHtml(body, dataCatalogHtml(assetClasses))
+}
+
+function bindDataClicks() {
+  if (dataClicksBound) return
+  const panel = byId('tab-data')
+  if (!panel) return
+  dataClicksBound = true
+  panel.addEventListener('click', onDataClick)
+}
+
+async function onDataClick(event) {
+  const btn = event.target.closest('button[data-action]')
+  if (!btn) return
+  const action = btn.getAttribute('data-action')
+  if (action === 'refresh-catalog') return void refreshDataCatalog()
+  if (action === 'mine') {
+    const symbol = btn.getAttribute('data-symbol')
+    return void mineData({ symbols: [symbol] }, 'sym:' + symbol)
+  }
+  if (action === 'mine-class') {
+    const cls = btn.getAttribute('data-class')
+    return void mineData({ class: cls }, 'cls:' + cls)
+  }
+}
+
+async function refreshDataCatalog() {
+  try {
+    const started = await window.OverseerBridge.startActivity(
+      'data-catalog',
+      trainerActivityParams(),
+    )
+    if (started && started.activityId) await observeQuickActivity(started.activityId)
+  } catch {
+    // best-effort — a failed scan just leaves the last catalog in place
+  }
+  await renderData()
+}
+
+async function mineData(request, busyKey) {
+  dataMineBusy.add(busyKey)
+  await renderData()
+  try {
+    const started = await window.OverseerBridge.startActivity(
+      'mine-data',
+      trainerActivityParams(request),
+    )
+    if (started && started.activityId) {
+      const act = await observeQuickActivity(started.activityId)
+      showToast(act && act.status === 'completed' ? 'Data downloaded' : 'Mining continues in Activity')
+    }
+  } catch {
+    showToast('Download failed')
+  } finally {
+    dataMineBusy.delete(busyKey)
+    await renderData()
+  }
+}
 // A single-value, type-aware field for one dataset lever (choice → select, number → number input,
 // boolean → true/false select), pre-filled with the dataset's saved value. "" = use the default.
 function datasetFieldHtml(key, spec, value) {
@@ -17802,7 +17968,16 @@ const TAB_LOADING_LABEL = {
   datasets: 'Loading datasets…',
   versions: 'Loading versions…',
   speed: 'Loading…',
+  // Both read the FULL run corpus (20k+ for BlackSwan) before their first paint — spinner on switch so the
+  // tab never shows the previous project's data while that loads. Polls bypass showTab so they never flash.
+  exploration: 'Preparing exploration…',
+  diagnosis: 'Analyzing runs…',
 }
+// The project (recordType) whose content is currently painted in each run-derived tab that awaits a big read.
+// null after a project switch (see resetDashboardState) → the render repaints a spinner before loading, and a
+// post-load recordType recheck drops a result that arrived after the user switched away (never paint stale).
+let explorationRenderedRt = null
+let diagnosisRenderedRt = null
 function paintTabLoading(tabId) {
   const label = TAB_LOADING_LABEL[tabId]
   const body = label && byId(`${tabId}-body`)
@@ -17913,6 +18088,11 @@ async function renderExploration(fromPoll) {
     return
   }
   const recordType = manifest.recordType
+
+  // Project just switched (tracker null'd in resetDashboardState) or first open: the previous project's heatmap
+  // is still in the DOM while this project's (possibly huge) corpus loads. Paint a spinner NOW so we never show
+  // another project's exploration. Not on a poll (fromPoll) — that would flash the live view every tick.
+  if (explorationRenderedRt !== recordType && !fromPoll) paintTabLoading('exploration')
 
   // Poll tick: if nothing observable changed since the last render, skip the heavy re-scan + DOM rebuild so the
   // user's scroll / open dropdown / hover survives. A user-driven render (fromPoll falsy) always proceeds.
@@ -18165,6 +18345,9 @@ async function renderExploration(fromPoll) {
     },
   }
 
+  // The awaited reads above (runs + activities) can outlast a project switch; if the user moved on, drop this
+  // result rather than paint another project's data over the new one.
+  if (!manifest || manifest.recordType !== recordType) return
   window.Exploration.render(
     container,
     {
@@ -18179,6 +18362,7 @@ async function renderExploration(fromPoll) {
     },
     actions,
   )
+  explorationRenderedRt = recordType
 
   // Light poll while the tab is OPEN, regardless of whether a controller activity is live — the heatmap is
   // driven by TRAIN runs landing (which carry no 'explore' activity), so gating on `active` alone froze it.
@@ -18198,6 +18382,10 @@ async function renderDiagnosis() {
     container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to diagnose its search.</div>'
     return
   }
+  const recordType = manifest.recordType
+  // Project just switched (tracker null'd on switch) or first open: clear the previous project's diagnosis to a
+  // spinner while this project's (possibly huge) corpus loads — never show another project's findings.
+  if (diagnosisRenderedRt !== recordType) paintTabLoading('diagnosis')
   // Pass the FULL census (every status) so cohort-integrity can report decision-grade N vs raw run count — the
   // diagnostician partitions failed/degenerate/invalid itself. queryAllRunRecords page-accumulates all records;
   // fall back to the shared xAI pool only on a real query error (never over an empty archive).
@@ -18216,6 +18404,8 @@ async function renderDiagnosis() {
   } catch {
     runs = xaiRuns()
   }
+  // The run query can outlast a project switch — drop a result that arrived after the user moved on.
+  if (!manifest || manifest.recordType !== recordType) return
   const actions = {
     // Launch a SERIES of train campaigns (one per ExperimentSpec) — the reseed batch is one spec, the replication
     // batch is one spec PER split value so each campaign trains a single data bundle. Concurrency comes from the
@@ -18238,6 +18428,7 @@ async function renderDiagnosis() {
     },
   }
   window.Diagnostics.render(container, { manifest, runs }, actions)
+  diagnosisRenderedRt = recordType
 }
 
 function showTab(id) {
@@ -18270,6 +18461,7 @@ function showTab(id) {
   if (target === 'runs') renderRuns()
   if (target === 'versions') renderVersions()
   if (target === 'environments') renderEnvironments()
+  if (target === 'data') renderData()
   if (target === 'datasets') renderDatasets()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'papers') renderPapers()

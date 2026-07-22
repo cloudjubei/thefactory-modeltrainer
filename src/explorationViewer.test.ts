@@ -91,6 +91,44 @@ describe('Exploration.rankLevers', () => {
   })
 })
 
+// A conditional lever (n/a for most runs, e.g. forward_horizon only on the supervised models) must not be
+// treated as a broad axis — its applicable fraction is tracked and it stays a peggable but non-default lever.
+const COND_MANIFEST = {
+  recordType: 'cond-run',
+  objective: { name: 'score', direction: 'max' as const },
+  levers: {
+    lr: { type: 'number', scope: 'model' },
+    gamma: { type: 'number', scope: 'model' },
+    cond: { type: 'number', scope: 'model' },
+    seed: { type: 'number', scope: 'model' },
+  },
+}
+function condRuns() {
+  const runs: any[] = []
+  for (let i = 0; i < 20; i++) {
+    const applies = i < 2 // cond applies to only 2 of 20 runs, with extreme values (5, 500)
+    runs.push({ config: { lr: (i % 5) * 0.25, gamma: 0.9 + (i % 3) * 0.03, cond: applies ? (i === 0 ? 5 : 500) : 'n/a', seed: i }, objective: 100 + (i % 5) * 10 })
+  }
+  return runs
+}
+
+describe('Exploration conditional-lever handling', () => {
+  it('rankLevers records the applicable fraction of each lever (n/a values excluded)', () => {
+    const ranked = Exploration.rankLevers(COND_MANIFEST, condRuns())
+    const cond = ranked.find((r: any) => r.lever === 'cond')
+    const lr = ranked.find((r: any) => r.lever === 'lr')
+    expect(cond.applicable).toBeCloseTo(0.1, 5) // 2 / 20
+    expect(lr.applicable).toBe(1)
+  })
+
+  it('analyze keeps a mostly-n/a conditional lever OUT of the default axes but still peggable', () => {
+    const a = Exploration.analyze({ manifest: COND_MANIFEST, state: null, runs: condRuns() })
+    expect(a.vs.axisX).not.toBe('cond')
+    expect(a.vs.axisY).not.toBe('cond')
+    expect(a.rankedKeys).toContain('cond') // >1 real value → still a peggable lever
+  })
+})
+
 describe('Exploration.heatmapCells', () => {
   const cellsFor = (runs: any[], rt: string) => {
     const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: runs.length } }

@@ -45,6 +45,33 @@ const mean = (nums: number[]): number => (nums.length ? nums.reduce((a, b) => a 
 const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)]
 const seedRange = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
 
+/**
+ * A robust objective noise-floor estimate from a POPULATED archive: the median within-setup (config-minus-seed)
+ * seed std across every setup that has ≥2 seeds. Returns undefined when no setup is seed-replicated. Lets a
+ * project with lots of pre-existing runs calibrate WITHOUT re-running the exact manifest-default config × N seeds
+ * (which it may never hold — the default combo was never run, or conditional levers get stamped n/a at runtime).
+ */
+function archiveNoiseFloor(runs: AnalysisRun[], criterion: AnalysisCriterion): number | undefined {
+  const groups = new Map<string, number[]>()
+  for (const r of runs) {
+    const v = criterionValueOf(r, criterion)
+    if (v == null) continue
+    const key = JSON.stringify(
+      Object.keys(r.config || {})
+        .filter((k) => k !== 'seed')
+        .sort()
+        .map((k) => [k, (r.config as Record<string, unknown>)[k]]),
+    )
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(v)
+  }
+  const stds: number[] = []
+  for (const vals of groups.values()) if (vals.length >= 2) stds.push(std(vals))
+  if (!stds.length) return undefined
+  stds.sort((a, b) => a - b)
+  return stds[Math.floor(stds.length / 2)]
+}
+
 function without(obj: Record<string, unknown>, ...keys: string[]): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(obj)) if (!keys.includes(k)) out[k] = v
@@ -396,11 +423,17 @@ export function nextExplorationStep(
   opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
   const criterion = criterionOf(state)
-  const spentRuns = runs.length
+  const archiveRuns = runs.length
+  // Budget + progress count runs THIS exploration produced, not the whole pre-existing archive: capture the
+  // archive size at map start (first step), then spentRuns = archiveNow - baseline. On a project with 20k runs
+  // this keeps a run budget from tripping "budget exhausted" on round 0. Reset to 0 when the archive is emptied.
+  const baselineRuns = archiveRuns === 0 ? 0 : state.baselineRuns ?? archiveRuns
+  const spentRuns = Math.max(0, archiveRuns - baselineRuns)
   const best = bestObjectiveOf(runs, criterion)
 
   const withMeta = (s: ExplorationState): ExplorationState => ({
     ...s,
+    baselineRuns,
     budget: { ...s.budget, spentRuns },
     regret: best === undefined ? s.regret : appendRegret(s.regret, spentRuns, best),
     updatedAt: state.updatedAt,
@@ -426,8 +459,9 @@ export function nextExplorationStep(
   }
   // An EMPTY run archive (e.g. the user deleted every run) makes any advanced/converged state stale — there is
   // nothing to have converged on, so restart from calibrate rather than re-declaring a convergence (or trying
-  // to refine/cover) over runs that no longer exist. Resets the derived fields, keeps budget/steer.
-  if (spentRuns === 0) {
+  // to refine/cover) over runs that no longer exist. Resets the derived fields, keeps budget/steer. Keys off the
+  // ARCHIVE being empty, not spentRuns (which is 0 on round 0 of every populated project too).
+  if (archiveRuns === 0) {
     const fresh: ExplorationState = {
       ...state,
       stage: 'calibrate',
@@ -480,20 +514,28 @@ function stepCalibrate(
   const calibRuns = runs.filter((r) => matchesConfig(r.config, defaults, nonSeedKeys))
   const seedsPresent = new Set(calibRuns.map((r) => r.seed ?? 0)).size
 
-  if (seedsPresent < XAI_MIN_SEEDS) {
-    const rec: ExperimentRecommendation = {
-      kind: 'thin-seeds',
-      reason: `calibrate seed-noise on the default config (×${XAI_MIN_SEEDS} seeds)`,
-      runCount: XAI_MIN_SEEDS,
-      spec: { fixed: without(defaults, 'seed'), seeds: seedRange(XAI_MIN_SEEDS) },
-      priority: 100,
-    }
-    return mk('calibrate', [rec], 'measure the objective noise floor', state, false)
+  if (seedsPresent >= XAI_MIN_SEEDS) {
+    const vals = calibRuns.map((r) => criterionValueOf(r, criterion)).filter((v): v is number => v != null)
+    return stepScreen({ ...state, stage: 'screen', noiseFloor: std(vals) }, runs, manifest, criterion, mk)
   }
 
-  const vals = calibRuns.map((r) => criterionValueOf(r, criterion)).filter((v): v is number => v != null)
-  const noiseFloor = std(vals)
-  return stepScreen({ ...state, stage: 'screen', noiseFloor }, runs, manifest, criterion, mk)
+  // Populated project whose archive doesn't hold the manifest-default config × N seeds (the default combo was
+  // never run, or conditional levers stamp differently at runtime so produced runs don't match it): estimate the
+  // noise floor from ANY seed-replicated setups on record and advance — otherwise the search stalls at calibrate
+  // re-proposing a default-config batch it can't recognize (the BlackSwan stuck-at-calibrate bug).
+  const archiveNoise = archiveNoiseFloor(runs, criterion)
+  if (archiveNoise !== undefined) {
+    return stepScreen({ ...state, stage: 'screen', noiseFloor: archiveNoise }, runs, manifest, criterion, mk)
+  }
+
+  const rec: ExperimentRecommendation = {
+    kind: 'thin-seeds',
+    reason: `calibrate seed-noise on the default config (×${XAI_MIN_SEEDS} seeds)`,
+    runCount: XAI_MIN_SEEDS,
+    spec: { fixed: without(defaults, 'seed'), seeds: seedRange(XAI_MIN_SEEDS) },
+    priority: 100,
+  }
+  return mk('calibrate', [rec], 'measure the objective noise floor', state, false)
 }
 
 function stepScreen(

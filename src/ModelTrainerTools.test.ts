@@ -5016,3 +5016,119 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBe('child-0')
   })
 })
+
+describe('data catalog + mining', () => {
+  const dataManifest = () =>
+    manifest({
+      dataCatalog: 'bin/python -m trainer.data_cli catalog --out {summaryOut}',
+      mineData: 'bin/python -m trainer.data_cli mine --request {configPath} --out {summaryOut}',
+    })
+
+  it('scanProjectDataCatalog runs the catalog command and returns typed asset classes', async () => {
+    const runner = stubRunner({
+      calibration: {
+        secondsObserved: 1,
+        summary: {
+          assetClasses: [
+            {
+              id: 'commodities',
+              label: 'Commodities',
+              directory: 'commodities',
+              instruments: [{ symbol: 'GOLD', source: 'yfinance', onDisk: {} }],
+            },
+          ],
+        },
+      },
+    })
+    const { tools } = makeTools(runner, memoryStorage())
+    const res = await tools.scanProjectDataCatalog({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+    })
+    expect(res.recordType).toBe('demo-run')
+    expect(res.assetClasses[0].id).toBe('commodities')
+    expect(res.assetClasses[0].instruments[0].symbol).toBe('GOLD')
+    expect(res.scannedAt).toBe(NOW)
+    // The catalog command runs as a probe (only {summaryOut}), never a config-taking job.
+    expect(runner.probes[0].commandTemplate).toContain('catalog')
+    expect(runner.jobs).toHaveLength(0)
+  })
+
+  it('scanProjectDataCatalog throws when the manifest declares no dataCatalog command', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(
+      tools.scanProjectDataCatalog({ scope: 'proj', projectRoot: '/repo', manifest: manifest() }),
+    ).rejects.toThrow(/dataCatalog/)
+  })
+
+  it('mineProjectData passes the request as the job config and returns the mined outcome', async () => {
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: {
+          mined: [{ symbol: 'GOLD', source: 'yfinance', written: 24, skipped: 0, errors: [], gaps: [] }],
+          unknown: [],
+          through: '2026-06',
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, memoryStorage())
+    const res = await tools.mineProjectData({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      request: { symbols: ['GOLD'], through: '2026-06' },
+    })
+    expect(res.mined[0].symbol).toBe('GOLD')
+    expect(res.mined[0].written).toBe(24)
+    expect(res.unknown).toEqual([])
+    expect(res.through).toBe('2026-06')
+    expect(res.minedAt).toBe(NOW)
+    // The mine request crossed via the {configPath} job config.
+    expect(runner.jobs[0].config).toEqual({ symbols: ['GOLD'], through: '2026-06' })
+  })
+
+  it('mineProjectData uses a collision-free jobId (two mines in the same clock tick differ)', async () => {
+    // makeTools pins now() to a fixed NOW, so a timestamp-derived jobId would collide — which cross-wires
+    // the two jobs on the remote-runner channel. The id must be unique per mine regardless of the clock.
+    const runner = stubRunner({
+      jobResult: () => ({ summary: { mined: [], unknown: [], through: '2026-06' } }),
+    })
+    const { tools } = makeTools(runner, memoryStorage())
+    await tools.mineProjectData({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      request: { symbols: ['GOLD'] },
+    })
+    await tools.mineProjectData({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      request: { symbols: ['WTI'] },
+    })
+    expect(runner.jobs[0].jobId).not.toBe(runner.jobs[1].jobId)
+  })
+
+  it('mineProjectData throws when the mine job fails', async () => {
+    const runner = stubRunner({
+      jobResult: () => ({ status: 'failed', exitCode: 3, error: 'boom', summary: undefined }),
+    })
+    const { tools } = makeTools(runner, memoryStorage())
+    await expect(
+      tools.mineProjectData({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: dataManifest(),
+        request: { symbols: ['GOLD'] },
+      }),
+    ).rejects.toThrow(/boom/)
+  })
+
+  it('mineProjectData throws when the manifest declares no mineData command', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(
+      tools.mineProjectData({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), request: {} }),
+    ).rejects.toThrow(/mineData/)
+  })
+})

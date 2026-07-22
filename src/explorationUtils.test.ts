@@ -147,6 +147,30 @@ describe('S0 calibrate', () => {
     expect(step.stage).toBe('screen')
     expect(step.batch.length).toBeGreaterThan(0)
   })
+
+  it('advances to screen from an existing seed-replicated archive when the default config is NOT seeded (populated project)', () => {
+    runSeq = 0
+    // A large pre-existing archive that never ran the manifest-default config (lr=0.1) but IS seed-replicated
+    // elsewhere — calibrate must estimate the noise floor from it and advance, not stall re-proposing a default
+    // batch (the BlackSwan stuck-at-calibrate bug).
+    const archive = [0.3, 0.7].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })))
+    const step = nextExplorationStep(initExplorationState(MANIFEST), archive, MANIFEST)
+    expect(step.stage).toBe('screen')
+    expect(step.stateNext.noiseFloor).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('budget accounting on a populated archive', () => {
+  it('counts runs THIS exploration produced, not the whole pre-existing archive (no instant converge)', () => {
+    runSeq = 0
+    const archive = [0.2, 0.5, 0.8].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s }))) // 15 runs
+    // maxRuns:10 over a 15-run archive would OLD-converge instantly ("budget exhausted"); now producedRuns=0.
+    const state: ExplorationState = { ...initExplorationState(MANIFEST, { maxRuns: 10 }), stage: 'global', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const step = nextExplorationStep(state, archive, MANIFEST)
+    expect(step.done).toBe(false)
+    expect(step.stateNext.baselineRuns).toBe(15)
+    expect(step.stateNext.budget.spentRuns).toBe(0) // this exploration has produced nothing yet
+  })
 })
 
 describe('S1 screen', () => {

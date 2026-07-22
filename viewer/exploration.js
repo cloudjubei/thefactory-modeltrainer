@@ -175,11 +175,23 @@
 
   // --- analysis ---------------------------------------------------------------------------------
 
+  // A lever value is "inapplicable" for a run when the manifest's appliesWhen gate is off — the trainer stamps
+  // it n/a / None (e.g. forward_horizon only applies to the supervised models). Such a value is NOT a real tried
+  // point, so it must not drive importance/variance or the default axes.
+  const isRealValue = (v) => {
+    const s = String(v == null ? '' : v).trim().toLowerCase()
+    return s !== '' && s !== 'n/a' && s !== 'none' && s !== 'null' && s !== 'undefined'
+  }
+
   function rankLevers(manifest, runs) {
     const levers = manifest.levers || {}
     const searchable = Object.keys(levers).filter((l) => l !== 'seed' && ((levers[l].scope || 'model') === 'model'))
     const kindOf = (l) => (levers[l] && levers[l].type === 'number' ? 'num' : 'cat')
-    const distinct = (l) => new Set(runs.map((r) => String(r.config[l])).filter((v) => v && v !== 'undefined')).size
+    const distinct = (l) => new Set(runs.map((r) => String(r.config[l])).filter(isRealValue)).size
+    // Fraction of runs the lever actually applies to. A conditional lever that is n/a for 95% of runs (its
+    // few applicable runs happen to vary a lot) must NOT out-rank a lever every run tunes — else it becomes a
+    // default axis whose n/a cells are empty, and pegging its n/a value shows nothing (the reported bug).
+    const applicableFrac = (l) => (runs.length ? runs.filter((r) => isRealValue(r.config[l])).length / runs.length : 1)
 
     // Importance via the parity-tested Xai engine when available (numeric + categorical), else variance.
     let importance = {}
@@ -192,15 +204,21 @@
       }
     }
     const varOf = (l) => {
-      const vals = runs.map((r) => num(r.config[l])).filter((v) => isFinite(v))
+      const vals = runs.map((r) => (isRealValue(r.config[l]) ? num(r.config[l]) : NaN)).filter((v) => isFinite(v))
       if (vals.length < 2) return 0
       const m = vals.reduce((a, b) => a + b, 0) / vals.length
       return vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length
     }
     const hasImp = Object.keys(importance).length > 0
     const ranked = searchable
-      .map((l) => ({ lever: l, kind: kindOf(l), values: distinct(l), score: hasImp ? importance[l] || 0 : varOf(l) }))
-      .filter((r) => r.values > 1) // a lever with one observed value can't be an axis
+      .map((l) => ({
+        lever: l,
+        kind: kindOf(l),
+        values: distinct(l),
+        applicable: applicableFrac(l),
+        score: (hasImp ? importance[l] || 0 : varOf(l)) * applicableFrac(l),
+      }))
+      .filter((r) => r.values > 1) // a lever with one real observed value can't be an axis
       .sort((a, b) => b.score - a.score)
     return ranked
   }
@@ -214,11 +232,16 @@
     const vs = view[rt] || (view[rt] = { axisX: null, axisY: null, pegs: {}, zoom: 1, selected: new Set() })
     if (!vs.selected) vs.selected = new Set() // manual-mode cell selection (keys "colIndex:rowIndex")
 
-    // default axes = top-2 ranked levers (prefer numeric for a continuous surface, but allow categorical)
+    // default axes = top-2 ranked levers, but chosen from the BROADLY-APPLICABLE ones (applicable to >half the
+    // runs) so the heatmap isn't a mostly-empty grid over a conditional lever (forward_horizon / momentum_lookback
+    // are n/a for ~95% of runs — as an axis their n/a cells are empty and pegging n/a shows nothing). Fall back to
+    // the full ranking only when fewer than two broadly-applicable levers exist. A user can still pick any lever.
     const rankedKeys = ranked.map((r) => r.lever)
-    if (!vs.axisX || !rankedKeys.includes(vs.axisX)) vs.axisX = rankedKeys[0] || null
+    const applicableKeys = ranked.filter((r) => r.applicable >= 0.5).map((r) => r.lever)
+    const axisPool = applicableKeys.length >= 2 ? applicableKeys : rankedKeys
+    if (!vs.axisX || !rankedKeys.includes(vs.axisX)) vs.axisX = axisPool[0] || rankedKeys[0] || null
     if (!vs.axisY || !rankedKeys.includes(vs.axisY) || vs.axisY === vs.axisX)
-      vs.axisY = rankedKeys.find((k) => k !== vs.axisX) || null
+      vs.axisY = axisPool.find((k) => k !== vs.axisX) || rankedKeys.find((k) => k !== vs.axisX) || null
 
     // objective orientation → color scale (hot = better)
     const objs = runs.map((r) => num(r.objective)).filter(isFinite)
@@ -849,10 +872,11 @@
     const axisSel = `
       <div class="expl-sel">X <select data-expl-axis="x">${opt(a.vs.axisX, a.vs.axisY)}</select></div>
       <div class="expl-sel">Y <select data-expl-axis="y">${opt(a.vs.axisY, a.vs.axisX)}</select></div>`
-    // peg controls for every ranked lever not currently an axis
+    // peg controls for EVERY searchable lever with >1 tried value that isn't currently an axis (importance-
+    // ordered, so the broadly-applicable levers come first and the conditional ones — forward_horizon etc. —
+    // sit at the end but are still peggable; the bar wraps). Was capped at 4, hiding most levers.
     const pegSel = a.ranked
       .filter((r) => r.lever !== a.vs.axisX && r.lever !== a.vs.axisY)
-      .slice(0, 4)
       .map((r) => {
         const vals = [...new Set(a.runs.map((run) => String(run.config[r.lever])).filter((v) => v && v !== 'undefined'))].sort()
         const cur = a.vs.pegs[r.lever]

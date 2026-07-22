@@ -19,6 +19,8 @@ import {
   resolveCampaignParallelism,
   resolveModelDeviceForConfig,
   parseDeviceBenchmark,
+  parseDataCatalog,
+  parseMineResult,
   THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
   isSpecAffectedByFidelityDesync,
@@ -471,6 +473,46 @@ describe('resolveModelDeviceForConfig', () => {
       resolveModelDeviceForConfig({ config: { model_name: 'unknown' }, models, concurrency: 1 }),
     ).toBeUndefined()
     expect(resolveModelDeviceForConfig({ config: {}, models, concurrency: 1 })).toBeUndefined()
+  })
+})
+
+describe('parseDataCatalog', () => {
+  it('returns the asset classes from a well-formed summary', () => {
+    const classes = parseDataCatalog({
+      assetClasses: [{ id: 'crypto', label: 'Crypto', directory: 'binance', instruments: [] }],
+    })
+    expect(classes).toHaveLength(1)
+    expect(classes[0].id).toBe('crypto')
+  })
+
+  it('throws a clear error when assetClasses is missing or malformed', () => {
+    expect(() => parseDataCatalog({})).toThrow(/assetClasses/)
+    expect(() => parseDataCatalog(undefined)).toThrow(/assetClasses/)
+    expect(() => parseDataCatalog({ assetClasses: 'nope' })).toThrow(/assetClasses/)
+  })
+})
+
+describe('parseMineResult', () => {
+  it('parses the mined outcome, unknowns, and through', () => {
+    const r = parseMineResult({
+      mined: [{ symbol: 'GOLD', source: 'yfinance', written: 2, skipped: 0, errors: [], gaps: [] }],
+      unknown: ['NOPE'],
+      through: '2026-06',
+    })
+    expect(r.mined[0].symbol).toBe('GOLD')
+    expect(r.unknown).toEqual(['NOPE'])
+    expect(r.through).toBe('2026-06')
+  })
+
+  it('defaults unknown/through when absent', () => {
+    const r = parseMineResult({ mined: [] })
+    expect(r.unknown).toEqual([])
+    expect(r.through).toBe('')
+  })
+
+  it('throws when the mined array is missing', () => {
+    expect(() => parseMineResult({})).toThrow(/mined/)
+    expect(() => parseMineResult(undefined)).toThrow(/mined/)
   })
 })
 

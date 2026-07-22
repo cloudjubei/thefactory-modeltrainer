@@ -3528,6 +3528,34 @@ pre.json {
   background: var(--muted);
   opacity: 0.6;
 }
+/* Data mine tab: on-disk (ready) / gaps / available-to-download status dots + the catalog table. */
+.status-dot.is-ready {
+  background: var(--ok);
+  box-shadow: 0 0 0 3px var(--ok-soft);
+}
+.status-dot.is-gaps {
+  background: var(--warn);
+}
+.status-dot.is-avail {
+  background: var(--muted);
+  opacity: 0.5;
+}
+.muted {
+  color: var(--muted);
+}
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.data-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.data-table tr:last-child td {
+  border-bottom: none;
+}
 .runner-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

@@ -72,6 +72,10 @@ import type {
   ProposeTrainingHypothesesResult,
   BenchmarkModelDeviceParams,
   BenchmarkModelDeviceResult,
+  ScanProjectDataCatalogParams,
+  ScanProjectDataCatalogResult,
+  MineProjectDataParams,
+  MineProjectDataResult,
   RunXaiDigest,
   ScanProjectModelsParams,
   ScanProjectModelsResult,
@@ -121,6 +125,8 @@ import {
   blendJudgeScore,
   findMigrationRule,
   manifestDataFiles,
+  parseDataCatalog,
+  parseMineResult,
   migrateExperimentSpec,
   parseDeviceBenchmark,
   parseProgressMarker,
@@ -2314,6 +2320,58 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function scanProjectDataCatalog(
+    params: ScanProjectDataCatalogParams,
+  ): Promise<ScanProjectDataCatalogResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.dataCatalog) {
+      throw new Error('trainer manifest declares no dataCatalog command')
+    }
+    // Reuse the calibrate runner contract: one probe runs the catalog command (only `{summaryOut}`) and
+    // returns the parsed JSON for us to read back — no config in, a catalog out.
+    const probe = await resolveRunner(params.computeTarget).calibrate({
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.dataCatalog,
+      dataFiles: manifestDataFiles(manifest),
+      abortSignal: params.abortSignal,
+    })
+    return {
+      recordType: manifest.recordType,
+      assetClasses: parseDataCatalog(probe.summary),
+      scannedAt: now(),
+    }
+  }
+
+  async function mineProjectData(
+    params: MineProjectDataParams,
+  ): Promise<MineProjectDataResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.mineData) {
+      throw new Error('trainer manifest declares no mineData command')
+    }
+    // The mine request crosses via the `{configPath}` file (same contract as run/evaluate); the miner is
+    // idempotent, so a re-mine of an already-present slice is a cheap no-op.
+    const handle = resolveRunner(params.computeTarget).runJob({
+      jobId: `mine-data-${uuidv4()}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.mineData,
+      config: params.request,
+      dataFiles: manifestDataFiles(manifest),
+      abortSignal: params.abortSignal,
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      throw new Error(result.error ?? `mineData exited with code ${result.exitCode}`)
+    }
+    return {
+      recordType: manifest.recordType,
+      ...parseMineResult(result.summary),
+      minedAt: now(),
+    }
+  }
+
   async function scanProjectModels(
     params: ScanProjectModelsParams,
   ): Promise<ScanProjectModelsResult> {
@@ -3223,6 +3281,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     consolidateModels,
     consolidateHypotheses,
     benchmarkModelDevice,
+    scanProjectDataCatalog,
+    mineProjectData,
     analyzePaperModels,
     xaiNarrate,
     getRunData,

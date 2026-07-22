@@ -291,23 +291,177 @@ per-asset-class walk-forward windows, and features that FUSE price with the fund
 model families across classes and judge with the Diagnosis tab's split-consistency + a cross-class leaderboard
 (is any edge asset-class-specific or general?). This is the "look at less noisy things" hypothesis made falsifiable.
 
-### The data mine — a shared dataset project for every model trainer
+### The data mine — view + acquire training data on demand
 
-A standalone repo (`thefactory-datamine`) that is the **source of truth for training data**: gather raw
-data, clean + validate + normalise, publish versioned/reproducible. Trainers declare which prepared
-dataset(s) they need (the manifest's `data[]`); the data mine + content-addressed cache deliver them.
-Architecture decision: store **MINIMAL raw OHLCV only** — indicators + higher fidelities are derived AT
-RUNTIME in the consumer, so storage stays small and an indicator fix is a one-line code change. The
-basis exists (`BlackSwanPriceEmitter`: Binance miner + indicator engine, ~80% the right shape; the
-indicator engine is now a REFERENCE for the runtime formulas, not a storage artifact). Remaining job:
-(a) gather + clean raw OHLCV (gap/dedup/continuity checks, NaN sanitisation, mine missing intervals);
-(b) generalise the `derive_cache` (1m canonical → derive+cache fidelities centrally); (c) the
-content-addressed cache + remote-runner data path from one curated origin.
+The **source of truth for training data**: gather raw data, clean + validate, and let a user SEE what
+data exists (on disk + available to acquire) and DOWNLOAD more on demand from inside the app, then run
+tests on it. Storage stays **MINIMAL raw OHLCV only** — indicators + higher fidelities are derived at
+RUNTIME in the consumer (`derive_cache`), so an indicator fix is a one-line code change, never a
+re-mine. Beyond price, the mine grows to **augment** an asset with the fundamentals that move it (US
+macro releases, company events) and to **link** an asset to the related series that drive it (Nvidia↔
+semiconductors, Tesla↔lithium) — each new stream point-in-time-correct so a model only ever sees what
+was public at that instant.
 
-**Guided data discovery (north-star 1).** Take a problem statement + model goal → run deep research on
-what data exists (sources/APIs/coverage/cost/licence/granularity, reuse the deep-research harness) →
-propose candidate datasets + a mining plan + trade-offs → hand off to gather→clean→cache. Output a
-cited report + an approved mining plan.
+**Build-in-place decision (supersedes the standalone-repo sketch).** BlackSwan already OWNS the data
+(`binance/`, `stocks/`), the idempotent miners (`scripts/backfill_*.py`), the inventory
+(`trainer/data_inventory.py`), and the runtime derive (`trainer/derive_cache.py`). So the mine is built
+**in-place first**: BlackSwan owns the catalog + miners + a small **data CLI**; the model-trainer
+surfaces a **Data tab** + on-demand mining through the app; extract to a standalone `thefactory-datamine`
+repo only once a SECOND trainer needs the same data (YAGNI until then). The generic
+`ContentAddressedDataCache` + `manifest.data[]` URL path stays for URL-delivered datasets; BlackSwan's
+data is mined by script, not fetched by URL, so it uses the catalog+CLI path instead.
+
+**Architecture / seam (domain-oblivious engine, project-declared data commands).** Mirrors the existing
+`evaluate` / `benchmarkDevice` optional-command pattern end to end:
+
+- **Catalog registry** (`trainer/data_catalog.py`) — the single static "menu": asset class → instruments
+  `{symbol, label, source, sourceSymbol, intervals, directory, tier}`. Consumed by BOTH the miner (what
+  to fetch from where) and the catalog emitter (what to show as available).
+- **Coverage inventory** (`trainer/data_inventory.scan_coverage`, ✅ built) — the on-disk read-model:
+  per symbol/timeframe `{start, end, months, gaps}`. The catalog = menu; coverage = what's in the fridge.
+- **Data CLI** (`trainer/data_cli.py`) — two subcommands emitting JSON to `{summaryOut}`: `catalog`
+  (registry ⋈ coverage → the full catalog record) and `mine` (read a request `{configPath}`, run the
+  right miner for the requested class/symbols/intervals/range, emit a result). Idempotent (skips months
+  already on disk); after mining, re-derives fidelities and re-scans coverage.
+- **Manifest commands** — two new optional templates on `TrainerManifest`: `dataCatalog` (only
+  `{summaryOut}`) and `mineData` (`{configPath}` + `{summaryOut}`), declared in BlackSwan's
+  `.factory/trainer.json`.
+- **Tool methods** (`ModelTrainerTools`) — `scanProjectDataCatalog(...)` and `mineProjectData(request)`
+  invoke those commands via the ComputeRunner (same contract as `benchmarkDevice`) and parse the summary.
+- **Backend activities** — `data-catalog` (runs the scan, writes a `{recordType}-datacatalog` record)
+  and `mine-data` (runs the mine, streams per-symbol progress, re-writes the catalog record). New `data`
+  queue lane so a long download never blocks the training lane.
+- **Data tab** (`viewer/data.js` + `app.js`) — reads the `-datacatalog` record via `queryData`, renders
+  per-asset-class cards (each instrument: tier, on-disk range + gaps vs available, size), a **Download**
+  button → `startActivity('mine-data', …)` with live progress, and a **Refresh** → `data-catalog`. This
+  is a THIRD "data" surface, distinct from the *Datasets* tab (run-grouping identity) and
+  `manifest.data[]` (URL requirements) — do not conflate them.
+
+#### Phase D1 — Catalog + inventory + on-demand price download — SHIPPED
+
+The full vertical is built + tested: **BlackSwan** `trainer/data_inventory.scan_coverage` (per symbol/tf
+range+gaps), `trainer/data_catalog.py` (4 classes, verified tickers, per-instrument `barCloseTz`),
+`scripts/backfill_market.py` (generalized yfinance daily miner for commodities+FX, real yfinance smoke),
+`trainer/data_cli.py` (`catalog` + `mine` subcommands, idempotent, real catalog emit + mine dry-run
+proven); **trainer** manifest `dataCatalog`/`mineData` commands + `scanProjectDataCatalog`/
+`mineProjectData` tool methods + `parseDataCatalog`/`parseMineResult` coercers; **backend** `data-catalog`
++ `mine-data` activities (mine on the `research` lane, writes the singleton `{recordType}-datacatalog` +
+per-run `-mine` records); **viewer** Data tab (`viewer/data.js` pure helpers + app.js/index.html) showing
+per-class cards (on-disk range/gaps vs available, tier, source, `barCloseTz`) with Download / Download-all
+→ `mine-data`, and Refresh → `data-catalog`. BlackSwan's `.factory/trainer.json` declares both commands.
+Remaining polish: on-device in-app verification of the tab; ETF proxy tickers (`SOXX`/`SMH`/`LIT`) added
+to the catalog for D3 linkage; the config-drift cleanups below.
+
+The headline picks below shipped as the catalog entries (research pass D0 verified the tickers, history
+depth, and roll/adjustment/`barCloseTz` gotchas — folded into the correctness rules):
+
+- **Crypto (top 5, source `binance`)** — BTC + the 4 largest of the 8 altcoins already on disk (ETH, SOL,
+  XRP, DOGE …), mined 1m + derived 1h/1d. Existing `backfill_klines.py` path, now catalog-driven.
+- **Stocks (top 10, source `yfinance`)** — the 10 US tickers already on disk (NVDA, MSFT, AAPL, GOOGL,
+  AMZN, META, AVGO, TSLA, JPM, WMT), 1d. Existing `backfill_stocks.py` path.
+- **Commodities (top ~6–8, source `yfinance` futures, NEW)** — Gold `GC=F`, Silver `SI=F`, WTI `CL=F`,
+  Brent `BZ=F`, NatGas `NG=F`, Copper `HG=F` (+ Corn `ZC=F`/Wheat `ZW=F`), 1d, local symbols `GOLD`/
+  `SILVER`/`WTI`/… into a new `commodities/` dir.
+- **FX (top 5 majors, source `yfinance` `=X`, NEW)** — EURUSD, USDJPY, GBPUSD, AUDUSD, USDCAD, 1d, local
+  symbols `EURUSD`/… into a new `fx/` dir (yfinance FX carries no real volume → neutral fill like stocks).
+
+Build: generalize the yfinance daily miner to `(symbol, sourceSymbol, outDir)` so commodities + FX reuse
+it; catalog registry; data CLI; the two tool methods + two activities; the Data tab. Also fold the
+config-drift cleanups the refresh flagged: `walk_forward.py` windows still cap at test-year 2025 though
+2026 is on disk; `data_config.py:48`'s "not on disk yet" comment is stale — a catalog-driven system
+should derive available windows from actual coverage.
+
+#### Phase D2 — Augmentation: US macro + company fundamentals (point-in-time)
+
+New non-price series fused with price in the provider. **The whole value is point-in-time correctness**
+(the user's "unemployment rates WHEN they are announced"): a model may only see a value AS KNOWN then.
+
+- **US macro (FRED/ALFRED, free API key).** Starter set, exact series ids: unemployment `UNRATE`,
+  nonfarm payrolls `PAYEMS`, CPI `CPIAUCNS` (NSA — never revised) / `CPIAUCSL` (SA), core PCE `PCEPILFE`,
+  Fed funds effective `DFF` + target `DFEDTARU`, initial claims `ICSA`, retail sales `RSAFS`, real GDP
+  `GDPC1`, 10y `DGS10`, curve `T10Y2Y`. **ISM/PMI is intentionally dropped** (removed from FRED ~2016 for
+  licensing — do NOT substitute a differently-timed proxy under a "PMI" id). Fetch **ALFRED vintages**,
+  not the default series (default FRED returns only latest-revised values for every historical date — a
+  silent leak): `fred/series/observations` with `output_type=4` (initial release) or explicit
+  `vintage_dates`; store the full vintage matrix, never one collapsed column.
+- **Company fundamentals (SEC EDGAR, free, no key).** `companyfacts`/`companyconcept` JSON — earnings/
+  report EPS/revenue + slow fundamentals, stamped at the actual **`filingDate`/`acceptanceDateTime`**
+  (EDGAR is point-in-time by construction), NEVER the fiscal-period end (yfinance dates FY figures to
+  period-end with no filing date → a 45–90-day accounting look-ahead). Restatements are new dated rows,
+  not overwrites. Survivorship: EDGAR/yfinance current-universe screens drop delisted names — use a
+  point-in-time constituent set or document the bias as unmitigated.
+- **Fusion rule (the leakage guard).** Stamp each observation with its actual **release datetime** from a
+  per-release publish-time table (08:30 ET employment/CPI/claims/retail/GDP; 14:00 ET FOMC; ~16:15 ET
+  H.15 rates — NOT a blanket 08:30), join to price bars on that timestamp, then **forward-fill** to the
+  next release. A macro feature at bar *t* = the latest value whose release ≤ *t*. Derived changes
+  (MoM/YoY) = **diff of the SAME vintage**, never latest-revised. Unit-test the alignment against a known
+  jobs-report calendar (release ≈ 1st Friday for the prior month) — a fixture that fails if reference-
+  period alignment ever sneaks back in.
+
+#### Phase D3 — Asset-linkage graph
+
+Tie a traded asset to the related series that drive it, each a mineable proxy that REUSES the D1 miner.
+
+- **Model.** Nodes = mineable series; typed directed edges `{from, to, type, proxySymbol, rationale}`
+  where `type ∈ {input-cost, supplier, competitor, sector-peer, macro-driver}`. Stored as a
+  `{recordType}-linkage` record; rendered on the Data tab as per-asset "related data" chips.
+- **Seed set (verified edges, proxies already mineable via D1/D2)** — banks (JPM) → curve slope
+  `T10Y2Y` (net-interest-margin); USD/JPY → 10y `DGS10` (rate-differential carry); AUD/USD → copper
+  `HG=F` (terms-of-trade commodity currency); USD/CAD → WTI `CL=F` inverse (oil→CAD); energy equities →
+  WTI `CL=F`; airlines/transport → WTI `CL=F` inverse (fuel cost); gold miners → gold `GC=F`; gold →
+  real yield `DFII10`; rate-sensitive equities (utilities/REITs/homebuilders) → `DGS10`; broad equities →
+  Fed funds target `DFEDTARU` (steps at FOMC only); cyclicals → initial claims `ICSA` (growth nowcast);
+  ag equities → corn/wheat `ZC=F`/`ZW=F`. Semiconductors (NVDA/AVGO/AAPL) → a `SOXX`/`SMH` proxy once
+  ETF tickers are added to the catalog. Edges are **versioned** (`validFrom`/`validTo`) and the loader
+  joins by TIMESTAMP (honouring each series' `barCloseTz`/release stamp), never by date string.
+- **Growth.** Deep-research harness proposes new edges from an asset (supply-chain, ETF-holdings reverse
+  lookup) → human-approve gate → the proxy series is added to the catalog and mined.
+
+#### Phase D4 — Guided data discovery (north-star 1)
+
+Problem statement + model goal → deep-research harness surveys what data exists (sources/APIs/coverage/
+cost/licence/granularity) → proposes candidate datasets + a mining plan + trade-offs → approve gate →
+hand off to the D1 mine flow. Output: a cited report + an approved, launchable mining plan.
+
+#### Phase D5 — Extraction + cache + remote data path (deferred)
+
+Only when a SECOND trainer needs the same data: extract catalog+miners+CLI to `thefactory-datamine`;
+generalize `derive_cache` to a central 1m→fidelities service; wire the `ContentAddressedDataCache` +
+remote-runner data path from one curated origin. `BlackSwanPriceEmitter`'s indicator engine stays a
+runtime-formula REFERENCE, not a storage artifact.
+
+**Providers (access / auth / cost / licence / point-in-time).**
+
+| Provider | Access | Auth | Cost | Licence + PIT |
+| --- | --- | --- | --- | --- |
+| yfinance (Yahoo) | Python lib (existing miner) | none | free | personal/research, no redistribution; **not PIT** (latest marks, opaque continuous stitch) |
+| Stooq | CSV per symbol | none | free | personal; longer history — cross-check source; not PIT |
+| Frankfurter/ECB | REST no-key, 1 fix/biz day, 1999→ | none | free | **open licence** (only redistribution-safe series); EUR-base, one 16:00 CET fix |
+| FRED / ALFRED | REST + `vintage_dates`/`realtime_*` + `releases/dates` | free key | free | non-commercial + attribution; **PIT via vintages** — the macro backbone |
+| SEC EDGAR | REST `companyfacts` JSON | none (set UA) | free | public domain; **PIT via `filingDate`/`acceptanceDateTime`** |
+| Dukascopy / Polygon (optional) | tick/agg FX | none / free key | free tier | personal; the only genuine FX **volume proxy** (tick counts) — high fetch cost / rate-capped |
+
+**Correctness rules (leakage-first — enforce in the loader, not just docs).**
+
+- **Store minimal raw only**, derive fidelities+indicators at runtime.
+- **Join by TIMESTAMP, never by date string.** Each price row carries `barCloseTz`; a same-calendar-date
+  cross-class join imports later-session info (FX 17:00 NY, commodity Globex, macro release times) — a
+  1–7h look-ahead.
+- **Macro is point-in-time.** ALFRED vintages (`output_type=4`), stamp at the per-release datetime
+  (not a blanket 08:30), forward-fill to next release; MoM/YoY = diff of the SAME vintage.
+- **Post-close series only next session.** `DGS10`/`T10Y2Y` (H.15 ~16:15 ET) publish after the equity
+  close — forward-fill to next open, don't align to the session they price.
+- **Fundamentals stamp at filing/acceptance**, not period-end; restatements are new dated rows.
+- **Commodity continuous roll is a look-ahead machine** — back-adjust with recorded roll dates (or raw
+  contracts); stamp at exchange settle, not 16:00 ET.
+- **FX `Volume ≡ 0` is a constant, not data** — neutral-fill and audit every feature step so no FX row
+  feeds a volume feature. Always use the 6-char `=X` form (short forms mix base/quote → inverted series).
+- **Never forward-fill one leg of a ratio** (ECB triangulation compounds different holiday calendars →
+  spurious holiday-correlated signal); reconcile calendars on the intersection before merging.
+- **Idempotent + validated** mining (monotonic unique timestamps, positive prices, cross-month
+  continuity, sane trading-day counts); split/dividend-adjust equities/ETFs.
+- **Licence-gate any shareable output** — only Frankfurter/ECB is redistribution-safe; the rest are
+  personal/research only.
 
 ### Code-change risk model — a third ML consumer (research first)
 

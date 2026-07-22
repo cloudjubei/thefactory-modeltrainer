@@ -12,6 +12,8 @@ import type {
   HypothesisComparisonKind,
   ModelCategory,
   ModelDeviceBenchmark,
+  DataCatalogAssetClass,
+  MinedInstrumentResult,
   ModelFlavor,
   PaperCandidate,
   PlannedTrainingItem,
@@ -187,6 +189,39 @@ export function parseDeviceBenchmark(
   return result
 }
 
+/**
+ * Coerce a `dataCatalog` command's `{summaryOut}` JSON (`{ assetClasses: [...] }`) into typed asset
+ * classes. Throws a clear error when the command produced no `assetClasses` array, so a broken data
+ * command surfaces instead of silently emptying the Data tab.
+ */
+export function parseDataCatalog(summary: unknown): DataCatalogAssetClass[] {
+  const classes = (summary as { assetClasses?: unknown } | undefined)?.assetClasses
+  if (!Array.isArray(classes)) {
+    throw new Error('dataCatalog command produced no assetClasses')
+  }
+  return classes as DataCatalogAssetClass[]
+}
+
+/**
+ * Coerce a `mineData` command's `{summaryOut}` JSON (`{ mined, unknown, through }`) into the typed
+ * result. Throws when the command produced no `mined` array.
+ */
+export function parseMineResult(summary: unknown): {
+  mined: MinedInstrumentResult[]
+  unknown: string[]
+  through: string
+} {
+  const s = (summary ?? {}) as { mined?: unknown; unknown?: unknown; through?: unknown }
+  if (!Array.isArray(s.mined)) {
+    throw new Error('mineData command produced no mined result')
+  }
+  const unknown = Array.isArray(s.unknown)
+    ? s.unknown.filter((x): x is string => typeof x === 'string')
+    : []
+  const through = typeof s.through === 'string' ? s.through : ''
+  return { mined: s.mined as MinedInstrumentResult[], unknown, through }
+}
+
 export function validateTrainerManifest(raw: unknown): TrainerManifest {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('trainer manifest must be a JSON object')
@@ -210,6 +245,19 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
   if (m.benchmarkDevice !== undefined) {
     if (typeof m.benchmarkDevice !== 'string' || !m.benchmarkDevice.includes('{summaryOut}')) {
       throw new Error('trainer manifest benchmarkDevice template must contain {summaryOut}')
+    }
+  }
+  if (m.dataCatalog !== undefined) {
+    if (typeof m.dataCatalog !== 'string' || !m.dataCatalog.includes('{summaryOut}')) {
+      throw new Error('trainer manifest dataCatalog template must contain {summaryOut}')
+    }
+  }
+  if (m.mineData !== undefined) {
+    if (typeof m.mineData !== 'string' || !m.mineData.includes('{configPath}')) {
+      throw new Error('trainer manifest mineData template must contain {configPath}')
+    }
+    if (!m.mineData.includes('{summaryOut}')) {
+      throw new Error('trainer manifest mineData template must contain {summaryOut}')
     }
   }
   if (m.evaluate !== undefined) {

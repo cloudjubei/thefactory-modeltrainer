@@ -53,6 +53,11 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
+            'ipt src="data.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
             'ipt src="badRuns.js' +
             v +
             '" defer></scr' +
@@ -226,6 +231,33 @@
                 </p>
               </div>
               <div id="versions-body" class="versions-body tab-scroll"></div>
+            </section>
+          </section>
+
+          <!-- Data mine (what market data is available to download + on-demand download) -->
+          <section id="tab-data" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="data-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="data-h">Data mine</h2>
+                  <p class="card-sub">
+                    The market data this project can train on — crypto, US stocks, commodities and FX.
+                    Green is on disk; grey is available to download. Hit <em>Download</em> to mine an
+                    instrument (or a whole class) on demand so you can run tests on it.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    class="ghost-btn"
+                    data-action="refresh-catalog"
+                    title="Re-scan the catalog + on-disk coverage"
+                  >
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              <div id="data-body" class="environments-body tab-scroll"></div>
             </section>
           </section>
 

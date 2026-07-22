@@ -170,6 +170,19 @@ export interface TrainerManifest {
    */
   benchmarkDevice?: string
   /**
+   * Command template (only `{summaryOut}`) that emits the project's DATA CATALOG — the asset classes
+   * and instruments this project can acquire, each joined with its on-disk coverage. Powers the Data
+   * tab's "what's available to download". Omit if the project publishes no data catalog.
+   */
+  dataCatalog?: string
+  /**
+   * Command template (`{configPath}` mine request + `{summaryOut}` result) that MINES a requested data
+   * slice on demand (idempotent — skips what's already on disk). The config it receives is a
+   * {@link MineDataRequest}. Powers the Data tab's per-instrument "Download". Omit if the project cannot
+   * mine data on demand.
+   */
+  mineData?: string
+  /**
    * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
    * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
    * in parallel (instead of the safe sequential default that leaves cores idle), and exports this many
@@ -1088,6 +1101,13 @@ export interface ExplorationState {
    * (otherwise a bad config that stops the loop would silently reset to 0 and re-spawn on every relaunch).
    */
   failStreak?: number
+  /**
+   * Archive size (completed-run count) when this exploration map STARTED, captured on the first step. The run
+   * budget (`budget.maxRuns`) and `budget.spentRuns` count runs THIS exploration produced (`runs.length -
+   * baselineRuns`), NOT the whole pre-existing archive — else opening exploration on a project with 20k runs
+   * would instantly "budget exhausted". Reset to 0 when the archive is emptied (the deleted-runs self-heal).
+   */
+  baselineRuns?: number
   steer?: ExplorationSteer
   /** When the state was last advanced (ISO). */
   updatedAt?: string
@@ -2216,6 +2236,108 @@ export interface BenchmarkModelDeviceResult {
   deviceBenchmark: ModelDeviceBenchmark
 }
 
+/** On-disk coverage of one (instrument, timeframe): the mined span, month count, and any interior gaps. */
+export interface DataCatalogCoverage {
+  /** Earliest mined month, `YYYY-MM`. */
+  start: string
+  /** Latest mined month, `YYYY-MM`. */
+  end: string
+  /** Distinct months present. */
+  months: number
+  /** Missing `YYYY-MM` months between start and end (empty when contiguous). */
+  gaps: string[]
+}
+
+/** One mineable market series in the data catalog. */
+export interface DataCatalogInstrument {
+  /** Local symbol / filename stem (e.g. `BTCUSDT`, `GOLD`, `EURUSD`). */
+  symbol: string
+  label: string
+  assetClass: string
+  /** Which miner acquires it (e.g. `binance`, `yfinance`). */
+  source: string
+  /** Exact ticker/series id at the source (e.g. `GC=F`, `EURUSD=X`). */
+  sourceSymbol: string
+  /** Timeframes usable for training. */
+  intervals: string[]
+  directory: string
+  /** Rank within the class (1 = top). */
+  tier: number
+  /** When a bar closes (`"<tz> <HH:MM>"`, or `UTC`) — the point-in-time anchor for cross-asset fusion. */
+  barCloseTz: string
+  /** On-disk coverage per timeframe; empty when nothing has been mined yet. */
+  onDisk: Record<string, DataCatalogCoverage>
+}
+
+/** One asset class (crypto / stocks / commodities / fx) with its instruments. */
+export interface DataCatalogAssetClass {
+  id: string
+  label: string
+  directory: string
+  instruments: DataCatalogInstrument[]
+}
+
+export interface ScanProjectDataCatalogParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  /** Manifest file relative to `projectRoot` (default `.factory/trainer.json`). */
+  manifestRelPath?: string
+  /** Named compute target to run the scan on; omit for the default (local) runner. */
+  computeTarget?: string
+  abortSignal?: AbortSignal
+}
+
+export interface ScanProjectDataCatalogResult {
+  recordType: string
+  assetClasses: DataCatalogAssetClass[]
+  scannedAt: string
+}
+
+/** A request to mine a slice of data on demand — a set of instruments (or a whole class) + optional range. */
+export interface MineDataRequest {
+  /** Local symbols to mine (e.g. `["GOLD", "WTI"]`). */
+  symbols?: string[]
+  /** Mine a whole asset class instead of naming symbols (e.g. `"commodities"`). */
+  class?: string
+  /** Restrict to these timeframes (filtered to what each instrument supports). */
+  intervals?: string[]
+  /** Last month to fetch, `YYYY-MM` (default: last complete month). */
+  through?: string
+}
+
+/** Per-instrument outcome of a mine. */
+export interface MinedInstrumentResult {
+  symbol: string
+  source: string
+  /** Months written this run. */
+  written: number
+  /** Months already on disk, skipped. */
+  skipped: number
+  errors: string[]
+  gaps: string[]
+}
+
+export interface MineProjectDataParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  request: MineDataRequest
+  computeTarget?: string
+  abortSignal?: AbortSignal
+}
+
+export interface MineProjectDataResult {
+  recordType: string
+  mined: MinedInstrumentResult[]
+  /** Requested symbols not found in the catalog. */
+  unknown: string[]
+  /** The `YYYY-MM` mined through. */
+  through: string
+  minedAt: string
+}
+
 export interface ScanProjectModelsResult {
   recordType: string
   /** How many candidate models the heuristic found that were not already in the catalog. */
@@ -2620,6 +2742,18 @@ export interface ModelTrainerTools {
    * tab's per-model "Benchmark device" button.
    */
   benchmarkModelDevice(params: BenchmarkModelDeviceParams): Promise<BenchmarkModelDeviceResult>
+  /**
+   * Emit the project's DATA CATALOG (via the manifest's `dataCatalog` command): the asset classes +
+   * mineable instruments, each joined with on-disk coverage. Read-only. Powers the Data tab.
+   */
+  scanProjectDataCatalog(
+    params: ScanProjectDataCatalogParams,
+  ): Promise<ScanProjectDataCatalogResult>
+  /**
+   * MINE a requested data slice on demand (via the manifest's `mineData` command) — idempotent, skipping
+   * what's already on disk. Powers the Data tab's "Download". Returns the per-instrument outcome.
+   */
+  mineProjectData(params: MineProjectDataParams): Promise<MineProjectDataResult>
   /**
    * Analyse ONE paper for the MODELS it introduces/improves: an LLM matches it against the existing
    * catalog (linking the models it is about, updating the paper's `modelIds` and each model's
