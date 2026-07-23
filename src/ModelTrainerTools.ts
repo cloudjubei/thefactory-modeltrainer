@@ -33,6 +33,9 @@ import type {
   AnalyzePaperFromUrlResult,
   ResearchTrainingPapersParams,
   ResearchTrainingPapersResult,
+  DiscoverDataParams,
+  DiscoverDataResult,
+  DiscoverDataProgressEvent,
   ResearchPapersProgressEvent,
   PaperResearchVerdict,
   AnalyzePaperModelsParams,
@@ -47,6 +50,10 @@ import type {
   EvaluateTrainingRunResult,
   EvaluateTrainingRunsParams,
   EvaluateTrainingRunsResult,
+  CrossTestRunParams,
+  CrossTestRunResult,
+  CrossTestRunRecord,
+  CrossTestResult,
   ExperimentRecommendation,
   ExperimentSpec,
   GetRunDataParams,
@@ -106,6 +113,9 @@ import {
   DEFAULT_RESEARCH_PAPER_COUNT,
   MAX_RESEARCH_PAPER_COUNT,
   RESEARCH_DISCOVERY_OVERSCAN,
+  DEFAULT_DATA_DISCOVERY_LIMIT,
+  MAX_DATA_DISCOVERY_LIMIT,
+  DATA_DISCOVERY_INSTRUCTIONS,
   PAPER_VERIFY_MIN_CONFIDENCE,
   JUDGE_LLM_WEIGHT,
   MAX_JUDGE_RUNS,
@@ -126,7 +136,12 @@ import {
   findMigrationRule,
   manifestDataFiles,
   parseDataCatalog,
+  parseDataLinkage,
   parseMineResult,
+  buildDataDiscoveryGoal,
+  coerceDataSourceCandidates,
+  slugifyDataSource,
+  missingCrossTestValues,
   migrateExperimentSpec,
   parseDeviceBenchmark,
   parseProgressMarker,
@@ -201,6 +216,7 @@ import { initExplorationState, nextExplorationStep } from './explorationUtils.js
  */
 const RUN_KEYED_CHILD_SUFFIXES = [
   '-evaluation',
+  '-settest',
   '-verdict',
   '-xai-narrative',
   '-reliability',
@@ -478,7 +494,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           models: benchmarkedModels,
           concurrency: runConcurrency,
         })
-        const runConfig = device ? { ...item.config, device } : item.config
+        // keepCheckpoints is injected AFTER hashing (item.key is already fixed), so a checkpointed run
+        // keeps the same setup identity as an uncheckpointed one — dedup/skipExplored are unaffected.
+        const keepCheckpoint =
+          params.keepCheckpoints && manifest.keepCheckpointKey
+            ? { [manifest.keepCheckpointKey]: true }
+            : undefined
+        const runConfig =
+          device || keepCheckpoint
+            ? { ...item.config, ...(keepCheckpoint ?? {}), ...(device ? { device } : {}) }
+            : item.config
         const handle = runner.runJob({
           jobId: item.key,
           repoRef,
@@ -913,6 +938,127 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       onRecordWritten: params.onRecordWritten,
       activityId: params.activityId,
     })
+  }
+
+  async function crossTestRun(params: CrossTestRunParams): Promise<CrossTestRunResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.evaluate) {
+      throw new Error('trainer manifest declares no evaluate command')
+    }
+    const recordType = manifest.recordType
+    const lever = params.lever ?? 'asset'
+    const leverSpec = manifest.levers[lever]
+    const universe = Array.isArray(leverSpec?.choices)
+      ? leverSpec.choices.filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+      : []
+    if (!universe.length) {
+      throw new Error(`cannot cross-test: manifest lever "${lever}" has no choices`)
+    }
+    const record = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+    if (!record) throw new Error(`no run record for key ${params.runKey}`)
+    const content = record.content as {
+      config?: Record<string, unknown>
+      artifacts?: { checkpoint?: unknown }
+    }
+    const checkpoint = content.artifacts?.checkpoint
+    if (typeof checkpoint !== 'string' || !checkpoint) {
+      throw new Error(
+        `run ${params.runKey} has no checkpoint — re-run with "keep checkpoint" on to cross-test it`,
+      )
+    }
+    const config = content.config ?? {}
+    const trainedValue = String(config[lever] ?? '')
+
+    const settestType = `${recordType}-settest`
+    const existing = await deps.storage.readRecord({ scope: params.scope, type: settestType, key: params.runKey })
+    const prior = (existing?.content as CrossTestRunRecord | undefined) ?? {
+      runKey: params.runKey,
+      trainedValues: {},
+      levers: {},
+      updatedAt: '',
+    }
+    const priorResults: Record<string, CrossTestResult> = { ...(prior.levers?.[lever] ?? {}) }
+    const { missing, unknown } = missingCrossTestValues(
+      trainedValue,
+      params.values,
+      Object.keys(priorResults),
+      universe,
+    )
+
+    const { runEnv } = resolveCampaignParallelism({
+      maxThreadsPerRun: manifest.maxThreadsPerRun,
+      availableParallelism: hostParallelism(),
+    })
+    const results: CrossTestResult[] = []
+    let done = 0
+    for (const value of missing) {
+      if (params.abortSignal?.aborted) break
+      params.onProgress?.({ done, total: missing.length, value })
+      const handle = resolveRunner(params.computeTarget).runJob({
+        jobId: `crosstest-${params.runKey}-${lever}-${value}`,
+        repoRef: { kind: 'local', localPath: params.projectRoot },
+        commandTemplate: manifest.evaluate!,
+        // The checkpoint replays with ONE lever overridden; run.py's --evaluate skips training and rebuilds
+        // the data purely from this config, so the same weights test on the new asset/window.
+        config: { ...config, [lever]: value, checkpoint },
+        dataFiles: manifestDataFiles(manifest),
+        ...(runEnv ? { env: runEnv } : {}),
+        abortSignal: params.abortSignal,
+      })
+      const jobResult = await handle.done
+      const evaluatedAt = now()
+      let cell: CrossTestResult
+      if (jobResult.status !== 'completed') {
+        cell = {
+          value,
+          status: 'failed',
+          error: jobResult.error ?? `evaluation exited with code ${jobResult.exitCode}`,
+          evaluatedAt,
+        }
+      } else {
+        const summary = capRunSummaryForStorage(validateTrainingRunSummary(jobResult.summary))
+        const returnVsHold = summary.metrics?.return_vs_hold_pct
+        cell = {
+          value,
+          status: 'completed',
+          objective: summary.objective,
+          evaluatedAt,
+          ...(summary.metrics ? { metrics: summary.metrics } : {}),
+          ...(typeof returnVsHold === 'number' ? { returnVsHold } : {}),
+          ...(summary.dataset ? { dataset: summary.dataset } : {}),
+        }
+      }
+      priorResults[value] = cell
+      results.push(cell)
+      done++
+    }
+    const updatedAt = now()
+    const recordContent: CrossTestRunRecord = {
+      runKey: params.runKey,
+      trainedValues: { ...(prior.trainedValues ?? {}), [lever]: trainedValue },
+      levers: { ...(prior.levers ?? {}), [lever]: priorResults },
+      updatedAt,
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: settestType,
+      key: params.runKey,
+      content: recordContent as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(settestType, params.runKey)
+    logger?.info('cross-tested training run', { recordType, runKey: params.runKey, lever, tested: results.length })
+    return {
+      recordType,
+      runKey: params.runKey,
+      lever,
+      tested: results.filter((r) => r.status === 'completed').length,
+      failed: results.filter((r) => r.status === 'failed').length,
+      missing: missing.length,
+      unknown,
+      results,
+      updatedAt,
+    }
   }
 
   async function evaluateTrainingRuns(
@@ -1746,6 +1892,71 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function discoverData(params: DiscoverDataParams): Promise<DiscoverDataResult> {
+    const dr = requireDeepResearch()
+    requireInferenceExecutor()
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const discoveredBy = deriveModelRef(params.model).label
+    const discoveredAt = now()
+    const model = params.model
+    const budgetOpt = params.researchBudget ? { budget: params.researchBudget } : {}
+    const emit = (event: DiscoverDataProgressEvent) => {
+      try {
+        params.onProgress?.(event)
+      } catch {
+        // progress is best-effort — a bad sink must never fail the run.
+      }
+    }
+    const limit = Math.max(
+      1,
+      Math.min(params.limit ?? DEFAULT_DATA_DISCOVERY_LIMIT, MAX_DATA_DISCOVERY_LIMIT),
+    )
+    const goal = buildDataDiscoveryGoal(manifest, params.problemStatement, params.goal)
+
+    emit({ phase: 'discover', message: 'Searching for candidate data sources…' })
+    const evidence = await dr.gather({
+      query: goal,
+      limit,
+      model,
+      abortSignal: params.abortSignal,
+      ...budgetOpt,
+    })
+
+    emit({ phase: 'propose', message: 'Extracting candidate datasets from the evidence…' })
+    const extraction = await dr.extract({
+      instructions: DATA_DISCOVERY_INSTRUCTIONS,
+      evidence,
+      breadth: true,
+      model,
+      abortSignal: params.abortSignal,
+      ...budgetOpt,
+    })
+    const candidates = coerceDataSourceCandidates(extraction.items).slice(0, limit)
+    const sources = (extraction.sources ?? []).map((s) => ({ title: s.title, url: s.url }))
+
+    // Persist each candidate as a reviewable draft the Data tab renders (and the user hands into the mine).
+    for (const candidate of candidates) {
+      const key = slugifyDataSource(candidate.name)
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: `${recordType}-datasource`,
+        key,
+        content: {
+          ...candidate,
+          id: key,
+          sources,
+          status: 'proposed',
+          discoveredBy,
+          discoveredAt,
+        } as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(`${recordType}-datasource`, key)
+    }
+    return { recordType, candidates, discovered: candidates.length, sources, discoveredBy, discoveredAt }
+  }
+
   async function suggestPaperHypotheses(
     params: SuggestPaperHypothesesParams,
   ): Promise<SuggestPaperHypothesesResult> {
@@ -2339,6 +2550,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return {
       recordType: manifest.recordType,
       assetClasses: parseDataCatalog(probe.summary),
+      linkage: parseDataLinkage(probe.summary),
       scannedAt: now(),
     }
   }
@@ -3269,12 +3481,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     runExplorationCampaign,
     evaluateTrainingRun,
     evaluateTrainingRuns,
+    crossTestRun,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
     recommendTrainingExperiments,
     analyzePaperFromUrl,
     researchTrainingPapers,
+    discoverData,
     suggestPaperHypotheses,
     weighPaperHypotheses,
     scanProjectModels,

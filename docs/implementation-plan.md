@@ -101,10 +101,30 @@ Train a model FURTHER on additional datasets from a saved checkpoint, then evalu
 against named evaluation datasets — the apples-to-apples yardstick BlackSwan lacks (walk-forward
 windows have different test years, so today's metrics are never directly comparable).
 
-1. **Standardised scoring test sets.** Manifest `testSets` list (`{id, asset, timeframe, range}`) —
-   pulled forward from the deferred cross-asset section. A generic "evaluate on test set" activity
-   replays a checkpoint on each named set and writes a `<recordType>-settest` record per (run, set);
-   surfaced as a per-set matrix in run detail + a compare overlay. Same test window ⇒ comparable.
+1. **Cross-asset + extended-OOS robustness testing (Phase E) — ENGINE SHIPPED, UI remaining.** Re-test a
+   TRAINED model on data after its cutoff + on OTHER assets it wasn't trained on, WITHOUT retraining —
+   checkpoint-replay via `trainer/run.py --evaluate` (skips training, rebuilds data purely from the config's
+   `asset`/`walk_forward_window`). Decisions: checkpoints are **per-run opt-in** (a Launch toggle, only
+   checkpointed runs are re-testable — existing runs have none); the display is the **full** set; a **Launch
+   setting** declares which assets to cross-test on (all/specified) with a settable **campaign default**.
+   - **SHIPPED (all TDD):** open-ended `oos-*` walk-forward windows (test cutoff→latest on disk, via the
+     existence-filter — `walk_forward.py`) so a run's own test spans all post-cutoff data; the `evaluate`
+     command in BlackSwan's manifest; `missingCrossTestValues` (requested − trained − already-tested, over
+     the lever's choices); `ModelTrainerTools.crossTestRun({runKey, lever='asset', values})` — replays the
+     checkpoint with the lever overridden, fills only MISSING cells, writes a `{recordType}-settest` matrix
+     record keyed by run (a `CrossTestResult` per value, compact — no series/ledger); the `cross-test`
+     backend activity (experiment lane). Obs-shaping levers (fidelity/lookback/indicators) must stay fixed;
+     only `asset`/`walk_forward_window` vary.
+   - **UI SHIPPED too (2026-07-23):** Launch "Keep checkpoints" toggle + "Cross-test after training"
+     control (off / all other assets / specific assets, persisted campaign default; selecting it implies
+     kept checkpoints) → `keepCheckpoints`/`crossTest` train params, with the train activity spawning ONE
+     auto `cross-test` batch over the campaign's runs; run-detail **Cross-test section** (per-asset matrix
+     + "Test N missing assets" + "Extend test window (oos-*)"); the runs-table **Robust column**
+     (`n/m beat hold` chip from the `-settest` cache); the **Robustness lens** (run × asset vs-hold
+     matrix view-mode); and the Diagnosis **cross-asset robustness check** (`checkCrossAssetRobustness`
+     — incumbent robust / partial / asset-bound from settest cells, no re-training). Pure logic in
+     `viewer/crossTest.js` (tested). REMAINING: exercise live once a checkpointed campaign exists (no
+     existing run has a checkpoint); consider auto-refreshing the settest cache on `data:updated`.
 2. **Continued training (extra-train).** A launch mode that seeds from an existing run's checkpoint
    (`checkpoint_to_load` exists on the regression line; RL needs SB3 `.load()` + `set_env` +
    `learn(reset_num_timesteps=False)`) and trains on a DIFFERENT dataset bundle; provenance links
@@ -371,10 +391,24 @@ config-drift cleanups the refresh flagged: `walk_forward.py` windows still cap a
 2026 is on disk; `data_config.py:48`'s "not on disk yet" comment is stale — a catalog-driven system
 should derive available windows from actual coverage.
 
-#### Phase D2 — Augmentation: US macro + company fundamentals (point-in-time)
+#### Phase D2 — Augmentation: US macro + company fundamentals (point-in-time) — SHIPPED (acquisition + fusion)
 
-New non-price series fused with price in the provider. **The whole value is point-in-time correctness**
-(the user's "unemployment rates WHEN they are announced"): a model may only see a value AS KNOWN then.
+New non-price release series, acquired point-in-time and viewable/downloadable through the SAME D1
+vertical (the catalog now carries `macro` (13 FRED series) + `fundamentals` (10 EDGAR tickers) classes;
+the mine activity → CLI dispatches FRED/EDGAR; the FRED key rides the backend env passthrough — no
+plumbing). **The whole value is point-in-time correctness** (the user's "unemployment rates WHEN they are
+announced"): a model may only see a value AS KNOWN then. Built + tested (real EDGAR: 1120 point-in-time
+observations for AAPL):
+- `trainer/pit_fusion.py` — the **leakage guard** (`asof_join` + `release_datetime_ms` DST-aware + a
+  per-series publish-time table): a bar sees a value only from its release instant, forward-filled. The
+  jobs-report fixture proves January's number is invisible until its February release.
+- `scripts/backfill_macro.py` — FRED `output_type=4` (initial-release vintages, `realtime_start` = release
+  date); `scripts/backfill_fundamentals.py` — SEC EDGAR companyfacts stamped at `filingDate`, restatements
+  kept as distinct rows; `data_inventory.scan_series_coverage` for the release-series dirs.
+
+REMAINING (the consuming step, a training-pipeline change, NOT the data mine): fuse the acquired series
+into the provider's observation frame so a run TRAINS on them (a new feature config reading `macro/` +
+`fundamentals/` through `pit_fusion`), and derived MoM/YoY features from same-vintage diffs.
 
 - **US macro (FRED/ALFRED, free API key).** Starter set, exact series ids: unemployment `UNRATE`,
   nonfarm payrolls `PAYEMS`, CPI `CPIAUCNS` (NSA — never revised) / `CPIAUCSL` (SA), core PCE `PCEPILFE`,
@@ -398,9 +432,14 @@ New non-price series fused with price in the provider. **The whole value is poin
   jobs-report calendar (release ≈ 1st Friday for the prior month) — a fixture that fails if reference-
   period alignment ever sneaks back in.
 
-#### Phase D3 — Asset-linkage graph
+#### Phase D3 — Asset-linkage graph — SHIPPED
 
 Tie a traded asset to the related series that drive it, each a mineable proxy that REUSES the D1 miner.
+Built + tested: `trainer/data_linkage.py` (8 verified seed edges between catalogued instruments, each
+decorated with its proxy's source + `barCloseTz`), folded into the `data-catalog` command emit →
+`scanProjectDataCatalog` returns `linkage` → the `-datacatalog` record carries it → the Data tab renders
+per-asset **"related data" chips** (each a one-click mine of the driver, rationale on hover). REMAINING:
+add ETF proxy tickers (`SOXX`/`SMH`/`LIT`) to the catalog so semiconductor/lithium edges become mineable.
 
 - **Model.** Nodes = mineable series; typed directed edges `{from, to, type, proxySymbol, rationale}`
   where `type ∈ {input-cost, supplier, competitor, sector-peer, macro-driver}`. Stored as a
@@ -417,11 +456,16 @@ Tie a traded asset to the related series that drive it, each a mineable proxy th
 - **Growth.** Deep-research harness proposes new edges from an asset (supply-chain, ETF-holdings reverse
   lookup) → human-approve gate → the proxy series is added to the catalog and mined.
 
-#### Phase D4 — Guided data discovery (north-star 1)
+#### Phase D4 — Guided data discovery (north-star 1) — SHIPPED (research + proposals)
 
-Problem statement + model goal → deep-research harness surveys what data exists (sources/APIs/coverage/
-cost/licence/granularity) → proposes candidate datasets + a mining plan + trade-offs → approve gate →
-hand off to the D1 mine flow. Output: a cited report + an approved, launchable mining plan.
+Problem statement + model goal → deep-research harness surveys what data exists → proposes candidate
+data sources. Built + tested: `discoverData(problemStatement, goal)` (`ModelTrainerTools`, reuses the
+injected `DeepResearchEngine`: `gather` → `extract` breadth → `coerceDataSourceCandidates`), persisting
+each as a `{recordType}-datasource` draft (source/coverage/cost/licence/how-to-acquire + cited sources);
+the `discover-data` activity (research lane, runs on `ModelSelection` — API or CLI); a Data-tab **Discover
+form** (problem + goal → proposals rendered as cards). REMAINING: an approve gate that adds an approved
+NEW source to the catalog registry + auto-launches its mine (today the proposal is a reviewable draft;
+mining a source already IN the catalog works via D1).
 
 #### Phase D5 — Extraction + cache + remote data path (deferred)
 

@@ -590,6 +590,75 @@
       doNext: VERDICT_NEXT[verdict] || 'Review the findings below.',
     }
   }
+  // Cross-asset robustness from the `-settest` matrices (kept checkpoints replayed on other assets —
+  // cheap OOS evidence, no retraining): does the INCUMBENT's edge travel to markets it never trained on?
+  // Complements split-consistency (across windows) with the across-assets axis.
+  function checkCrossAssetRobustness(records, spec, settests) {
+    const matrices = Array.isArray(settests) ? settests : []
+    if (!matrices.length)
+      return finding(
+        'crossasset.unverifiable',
+        'cross-asset',
+        'info',
+        'unverifiable',
+        'No cross-test matrices — replay kept checkpoints on other assets (a run’s Cross-test section, or “Cross-test after training” in Launch) to verify the edge travels beyond its training market.',
+        [],
+        null,
+      )
+    const { valid } = partitionCohort(records, spec)
+    const setups = foldSetups(valid, ['seed'])
+    const inc = bestSetup(setups, spec.direction)
+    if (!inc) return finding('crossasset.no-runs', 'cross-asset', 'info', 'no-runs', 'No runs.', [])
+    const incKeys = new Set(inc.runs.map((r) => r.key))
+    const cells = []
+    for (const m of matrices) {
+      if (!m || !incKeys.has(m.runKey)) continue
+      const byValue = (m.levers || {}).asset || {}
+      for (const value of Object.keys(byValue)) cells.push(byValue[value])
+    }
+    const completed = cells.filter((c) => c && c.status === 'completed')
+    if (!completed.length)
+      return finding(
+        'crossasset.not-cross-tested',
+        'cross-asset',
+        'caution',
+        'not-cross-tested',
+        'The incumbent has no cross-asset evidence — cross-test its checkpoint before trusting the edge to travel.',
+        [],
+        { control: 'cross-test', text: 'Cross-test the incumbent’s runs on the other assets.' },
+      )
+    const beating = completed.filter((c) => Number(c.returnVsHold) > 0).length
+    if (beating === completed.length)
+      return finding(
+        'crossasset.robust',
+        'cross-asset',
+        'ok',
+        'robust',
+        `The incumbent beats buy-and-hold on all ${completed.length} cross-tested asset cell${completed.length === 1 ? '' : 's'} — the edge travels.`,
+        [{ stat: 'asset cells beating hold', value: beating, threshold: completed.length }],
+        null,
+      )
+    if (beating === 0)
+      return finding(
+        'crossasset.asset-bound',
+        'cross-asset',
+        'blocker',
+        'asset-bound',
+        `The incumbent beats buy-and-hold on 0/${completed.length} other assets — it learned its training market, not a general edge.`,
+        [{ stat: 'asset cells beating hold', value: 0, threshold: completed.length }],
+        { control: 'cross-test', text: 'Treat the incumbent as asset-specific; re-rank candidates by worst cross-asset result.' },
+      )
+    return finding(
+      'crossasset.partial',
+      'cross-asset',
+      'caution',
+      'partial',
+      `The incumbent beats buy-and-hold on ${beating}/${completed.length} cross-tested asset cells — partially transferable, weight the misses before declaring a winner.`,
+      [{ stat: 'asset cells beating hold', value: beating, threshold: completed.length }],
+      { control: 'cross-test', text: 'Cross-test the remaining assets and prefer candidates that hold everywhere.' },
+    )
+  }
+
   function diagnose(data) {
     const manifest = (data && data.manifest) || {}
     const spec = resolveSpec(manifest)
@@ -607,6 +676,10 @@
       checkBudgetCoverage(records, spec),
       checkObjectiveConfound(records, spec),
     ]
+    // Cross-asset evidence is optional input — only assessed when the host supplies the settest matrices.
+    if (Array.isArray(data && data.settests)) {
+      findings.push(checkCrossAssetRobustness(records, spec, data.settests))
+    }
     const ordered = orderFindings(findings)
     const verdict = deriveVerdict(ordered)
     return { cohort, incumbent: incumbentOf(cohort, spec), splitAxis: spec.splitLevers, findings: ordered, verdict, headline: deriveHeadline(ordered, verdict), spec }
@@ -805,6 +878,7 @@
     checkIncumbentSeparation,
     checkBudgetCoverage,
     checkObjectiveConfound,
+    checkCrossAssetRobustness,
     reseedSpecs,
     replicateSpecs,
   }

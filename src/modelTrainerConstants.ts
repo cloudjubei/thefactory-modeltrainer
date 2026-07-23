@@ -48,6 +48,20 @@ export const DEFAULT_HYPOTHESIS_COUNT = 5
 /** Candidate papers `researchTrainingPapers` discovers when the caller names no count. */
 export const DEFAULT_RESEARCH_PAPER_COUNT = 8
 
+/** Candidate data sources `discoverData` enumerates when the caller names no limit. */
+export const DEFAULT_DATA_DISCOVERY_LIMIT = 8
+
+/** Hard ceiling on candidate data sources a discovery run enumerates. */
+export const MAX_DATA_DISCOVERY_LIMIT = 20
+
+/** The extraction instructions steering `discoverData`'s breadth pass over the gathered evidence. */
+export const DATA_DISCOVERY_INSTRUCTIONS =
+  'List every concrete DATASET or data source in the evidence that could improve the model described. ' +
+  'Return a JSON array; each item: {name, description, source (the provider/API), coverage (history + ' +
+  'granularity), cost (free/free-key/paid), licence, mineHint (how to acquire it — a ticker/series id/' +
+  'endpoint if known)}. One object per distinct dataset. Prefer programmatically-accessible, ' +
+  'point-in-time-correct sources; omit anything that is not real data.'
+
 /** Hard ceiling on the number of papers a research run will DRAFT (the target `count`). */
 export const MAX_RESEARCH_PAPER_COUNT = 12
 

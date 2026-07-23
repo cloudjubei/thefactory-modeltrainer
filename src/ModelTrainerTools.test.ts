@@ -4473,6 +4473,8 @@ interface StubDeepResearch extends DeepResearchTools {
 function stubDeepResearch(opts: {
   discovered?: DiscoveredSource[]
   verdict?: (claim: string) => Partial<ClaimVerdict>
+  extractItems?: unknown[]
+  extractSources?: { title: string; url: string }[]
 }): StubDeepResearch {
   const discoverCalls: unknown[] = []
   const verifyCalls: unknown[] = []
@@ -4494,10 +4496,10 @@ function stubDeepResearch(opts: {
       return opts.discovered ?? []
     },
     async gather() {
-      return []
+      return [{ source: { title: 't', url: 'u' }, text: 'evidence' }]
     },
     async extract() {
-      return { items: [], sources: [] }
+      return { items: opts.extractItems ?? [], sources: opts.extractSources ?? [] }
     },
     async verifyClaim(p) {
       verifyCalls.push(p)
@@ -5037,6 +5039,7 @@ describe('data catalog + mining', () => {
               instruments: [{ symbol: 'GOLD', source: 'yfinance', onDisk: {} }],
             },
           ],
+          linkage: { edges: [{ asset: 'GOLD', proxy: 'DFII10', edgeType: 'real-rate' }] },
         },
       },
     })
@@ -5049,6 +5052,7 @@ describe('data catalog + mining', () => {
     expect(res.recordType).toBe('demo-run')
     expect(res.assetClasses[0].id).toBe('commodities')
     expect(res.assetClasses[0].instruments[0].symbol).toBe('GOLD')
+    expect(res.linkage[0].proxy).toBe('DFII10')
     expect(res.scannedAt).toBe(NOW)
     // The catalog command runs as a probe (only {summaryOut}), never a config-taking job.
     expect(runner.probes[0].commandTemplate).toContain('catalog')
@@ -5130,5 +5134,259 @@ describe('data catalog + mining', () => {
     await expect(
       tools.mineProjectData({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), request: {} }),
     ).rejects.toThrow(/mineData/)
+  })
+})
+
+describe('discoverData', () => {
+  const base = (overrides = {}) => ({
+    scope: 'proj',
+    projectRoot: '/repo',
+    manifest: manifest(),
+    model: { kind: 'api' as const, llmConfig: LLM },
+    problemStatement: 'single-asset crypto price is too noisy',
+    ...overrides,
+  })
+
+  it('gathers, extracts candidate datasets, and persists them as datasource drafts', async () => {
+    const storage = memoryStorage()
+    const dr = stubDeepResearch({
+      extractItems: [
+        { name: 'FRED macro', source: 'FRED', coverage: '1950-', cost: 'free', licence: 'attribution' },
+        { name: 'SEC EDGAR', source: 'EDGAR' },
+      ],
+      extractSources: [{ title: 'FRED', url: 'https://fred.example' }],
+    })
+    const { tools } = makeResearchTools(stubExecutor('x'), storage, dr)
+    const res = await tools.discoverData(base())
+    expect(res.discovered).toBe(2)
+    expect(res.candidates[0].name).toBe('FRED macro')
+    expect(res.candidates[0].coverage).toBe('1950-')
+    expect(res.sources[0].url).toBe('https://fred.example')
+    // each candidate persisted as a reviewable {recordType}-datasource draft
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-datasource', key: 'fred-macro' })
+    expect((rec!.content as { status: string }).status).toBe('proposed')
+  })
+
+  it('throws when no deepResearch seam is injected', async () => {
+    const { tools } = makeResearchTools(stubExecutor('x'), memoryStorage(), undefined)
+    await expect(tools.discoverData(base())).rejects.toThrow(/deepResearch/i)
+  })
+
+  it('clamps to the requested limit', async () => {
+    const dr = stubDeepResearch({
+      extractItems: Array.from({ length: 30 }, (_, i) => ({ name: 'ds' + i, source: 's' })),
+    })
+    const { tools } = makeResearchTools(stubExecutor('x'), memoryStorage(), dr)
+    const res = await tools.discoverData(base({ limit: 3 }))
+    expect(res.candidates).toHaveLength(3)
+  })
+})
+
+describe('crossTestRun', () => {
+  const ctManifest = () =>
+    manifest({
+      evaluate: 'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], scope: 'dataset' },
+      },
+    })
+
+  async function seedRunWithCheckpoint(storage: DataStorage, key: string, asset: string) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key,
+      content: {
+        objective: 1,
+        config: { asset, lr: 0.01 },
+        artifacts: { checkpoint: `checkpoints/${key}.zip` },
+      },
+    })
+  }
+
+  it('cross-tests the missing assets, overriding the asset lever, and writes a -settest record', async () => {
+    const storage = memoryStorage()
+    await seedRunWithCheckpoint(storage, 'run1', 'BTCUSDT')
+    const runner = stubRunner({
+      jobResult: (job) => ({
+        summary: {
+          objective: 5,
+          metrics: { return_vs_hold_pct: (job.config as { asset: string }).asset === 'ETHUSDT' ? 3 : -2 },
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.crossTestRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: ctManifest(),
+      runKey: 'run1',
+      values: 'all',
+    })
+    expect(res.tested).toBe(2)
+    expect(res.results.map((r) => r.value).sort()).toEqual(['ETHUSDT', 'SOLUSDT'])
+    // each eval job carried the OVERRIDDEN asset + the checkpoint
+    expect(runner.jobs.map((j) => (j.config as { asset: string }).asset).sort()).toEqual(['ETHUSDT', 'SOLUSDT'])
+    expect(runner.jobs.every((j) => (j.config as { checkpoint: string }).checkpoint === 'checkpoints/run1.zip')).toBe(true)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-settest', key: 'run1' })
+    const content = rec!.content as {
+      trainedValues: Record<string, string>
+      levers: Record<string, Record<string, { returnVsHold: number }>>
+    }
+    expect(content.trainedValues.asset).toBe('BTCUSDT')
+    expect(content.levers.asset.ETHUSDT.returnVsHold).toBe(3)
+  })
+
+  it('only fills MISSING assets (tops up an existing matrix)', async () => {
+    const storage = memoryStorage()
+    await seedRunWithCheckpoint(storage, 'run1', 'BTCUSDT')
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-settest',
+      key: 'run1',
+      content: {
+        runKey: 'run1',
+        trainedValues: { asset: 'BTCUSDT' },
+        levers: { asset: { ETHUSDT: { value: 'ETHUSDT', status: 'completed', evaluatedAt: 'T' } } },
+        updatedAt: 'T',
+      },
+    })
+    const runner = stubRunner({ jobResult: () => ({ summary: { objective: 1, metrics: {} } }) })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.crossTestRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: ctManifest(),
+      runKey: 'run1',
+      values: 'all',
+    })
+    expect(res.results.map((r) => r.value)).toEqual(['SOLUSDT'])
+    expect(runner.jobs).toHaveLength(1)
+  })
+
+  it('records a failed cell when an evaluation fails (e.g. the asset lacks data at the run timeframe)', async () => {
+    const storage = memoryStorage()
+    await seedRunWithCheckpoint(storage, 'run1', 'BTCUSDT')
+    const runner = stubRunner({
+      jobResult: (job) =>
+        (job.config as { asset: string }).asset === 'SOLUSDT'
+          ? { status: 'failed', exitCode: 1, error: 'no data', summary: undefined }
+          : { summary: { objective: 1, metrics: {} } },
+    })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.crossTestRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: ctManifest(),
+      runKey: 'run1',
+      values: 'all',
+    })
+    expect(res.tested).toBe(1)
+    expect(res.failed).toBe(1)
+    const failed = res.results.find((r) => r.value === 'SOLUSDT')!
+    expect(failed.status).toBe('failed')
+    expect(failed.error).toContain('no data')
+  })
+
+  it('throws when the run has no checkpoint', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'run1',
+      content: { objective: 1, config: { asset: 'BTCUSDT' } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.crossTestRun({ scope: 'proj', projectRoot: '/repo', manifest: ctManifest(), runKey: 'run1', values: 'all' }),
+    ).rejects.toThrow(/checkpoint/)
+  })
+
+  it('throws when the manifest declares no evaluate command', async () => {
+    const storage = memoryStorage()
+    await seedRunWithCheckpoint(storage, 'run1', 'BTCUSDT')
+    const m = ctManifest()
+    delete m.evaluate
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.crossTestRun({ scope: 'proj', projectRoot: '/repo', manifest: m, runKey: 'run1', values: 'all' }),
+    ).rejects.toThrow(/evaluate/)
+  })
+})
+
+describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
+  const wManifest = () =>
+    manifest({
+      evaluate: 'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+      keepCheckpointKey: 'save_checkpoint',
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT'], scope: 'dataset' },
+        walk_forward_window: { type: 'choice', choices: ['2024', 'oos-2024'], scope: 'dataset' },
+      },
+    })
+
+  it('varying a second lever nests under it without clobbering the asset results', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'run1',
+      content: {
+        objective: 1,
+        config: { asset: 'BTCUSDT', walk_forward_window: '2024' },
+        artifacts: { checkpoint: 'checkpoints/run1.zip' },
+      },
+    })
+    const runner = stubRunner({ jobResult: () => ({ summary: { objective: 2, metrics: {} } }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.crossTestRun({
+      scope: 'proj', projectRoot: '/repo', manifest: wManifest(), runKey: 'run1', values: 'all',
+    })
+    await tools.crossTestRun({
+      scope: 'proj', projectRoot: '/repo', manifest: wManifest(), runKey: 'run1',
+      lever: 'walk_forward_window', values: 'all',
+    })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-settest', key: 'run1' })
+    const content = rec!.content as {
+      trainedValues: Record<string, string>
+      levers: Record<string, Record<string, unknown>>
+    }
+    expect(Object.keys(content.levers.asset)).toEqual(['ETHUSDT'])
+    expect(Object.keys(content.levers.walk_forward_window)).toEqual(['oos-2024'])
+    expect(content.trainedValues).toEqual({ asset: 'BTCUSDT', walk_forward_window: '2024' })
+  })
+
+  it('campaign keepCheckpoints injects the manifest key into job configs WITHOUT changing item keys', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const m = wManifest()
+    delete m.calibrate
+    const plainKeys = tools.planTrainingMatrix(m, { sweep: { lr: [0.1, 0.2] } }).map((i) => i.key)
+    await tools.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2] } },
+      keepCheckpoints: true,
+    })
+    expect(runner.jobs).toHaveLength(2)
+    expect(runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true)).toBe(true)
+    // identity unchanged: the hashed item keys equal a plain (non-checkpointed) plan
+    expect(runner.jobs.map((j) => j.jobId).sort()).toEqual([...plainKeys].sort())
+  })
+
+  it('keepCheckpoints is a no-op when the manifest declares no keepCheckpointKey', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const m = manifest()
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: m,
+      spec: { sweep: { lr: [0.1] } },
+      keepCheckpoints: true,
+    })
+    expect('save_checkpoint' in (runner.jobs[0].config as Record<string, unknown>)).toBe(false)
   })
 })

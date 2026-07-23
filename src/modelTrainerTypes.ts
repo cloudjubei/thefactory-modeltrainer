@@ -170,6 +170,13 @@ export interface TrainerManifest {
    */
   benchmarkDevice?: string
   /**
+   * The config key that, when true, makes ONE run persist its re-testable checkpoint (e.g. BlackSwan's
+   * `save_checkpoint`). Declaring it lights up the launch form's "Keep checkpoint" toggle and lets a
+   * campaign inject it per run WITHOUT changing setup identity (injected after hashing). Only
+   * checkpointed runs can be cross-tested/re-evaluated. Omit if runs always/never checkpoint.
+   */
+  keepCheckpointKey?: string
+  /**
    * Command template (only `{summaryOut}`) that emits the project's DATA CATALOG — the asset classes
    * and instruments this project can acquire, each joined with its on-disk coverage. Powers the Data
    * tab's "what's available to download". Omit if the project publishes no data catalog.
@@ -1274,6 +1281,72 @@ export interface EvaluateTrainingRunsResult {
   failures?: { runKey: string; error: string }[]
 }
 
+/**
+ * One cross-test cell: the out-of-sample result of replaying a run's checkpoint with ONE dataset lever
+ * value overridden (e.g. a different `asset`, or an open-ended `walk_forward_window`). Compact — no series
+ * or ledger — so a run's whole cross-test record stays light.
+ */
+export interface CrossTestResult {
+  /** The lever value tested (e.g. the asset symbol). */
+  value: string
+  status: 'completed' | 'failed'
+  objective?: number
+  metrics?: Record<string, number>
+  /** Convenience mirror of `metrics.return_vs_hold_pct` for the robustness verdict. */
+  returnVsHold?: number
+  dataset?: TrainingRunDataset
+  error?: string
+  evaluatedAt: string
+}
+
+/**
+ * The persisted `{recordType}-settest` record — a run's cross-test matrix, keyed by run key. Results
+ * nest PER LEVER so cross-testing `asset` and extending `walk_forward_window` on the same run never
+ * collide in one flat value map.
+ */
+export interface CrossTestRunRecord {
+  runKey: string
+  /** Per varied lever, the value the run was trained on (excluded from cross-testing). */
+  trainedValues: Record<string, string>
+  /** Per varied lever, the per-value results. */
+  levers: Record<string, Record<string, CrossTestResult>>
+  updatedAt: string
+}
+
+export interface CrossTestRunParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The run whose checkpoint is replayed. */
+  runKey: string
+  /** The dataset lever to vary (default `asset`). Must be a manifest lever with `choices`. */
+  lever?: string
+  /** Which values to test — `'all'` (the lever's choices) or an explicit list. Missing ones are filled. */
+  values?: string[] | 'all'
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+  onProgress?: (event: { done: number; total: number; value: string }) => void
+  activityId?: string
+}
+
+export interface CrossTestRunResult {
+  recordType: string
+  runKey: string
+  lever: string
+  /** Values evaluated to completion this run. */
+  tested: number
+  /** Values whose evaluation failed this run (e.g. the asset lacks data at the run's timeframe). */
+  failed: number
+  /** How many missing values were attempted this run. */
+  missing: number
+  /** Requested values not in the lever's choices. */
+  unknown: string[]
+  results: CrossTestResult[]
+  updatedAt: string
+}
+
 /** Streamed campaign progress — written to the `{recordType}-progress` record by the host activity. */
 export interface TrainingCampaignProgress {
   phase: 'calibrate' | 'train' | 'done'
@@ -1300,6 +1373,12 @@ export interface TrainingCampaignParams {
   spec: ExperimentSpec
   /** Re-run items that already have a completed record. */
   refresh?: boolean
+  /**
+   * Persist each run's re-testable checkpoint: injects `{[manifest.keepCheckpointKey]: true}` into every
+   * job config AFTER hashing, so setup identity/dedup is unchanged — the same setup with or without a
+   * kept checkpoint is one setup. No-op when the manifest declares no `keepCheckpointKey`.
+   */
+  keepCheckpoints?: boolean
   /**
    * Maximum number of runs dispatched at once (default 1, sequential). Each run is
    * isolated (unique jobId + its own temp config/summary), so the real cap is host
@@ -2123,6 +2202,62 @@ export interface ResearchTrainingPapersResult {
   researchedAt: string
 }
 
+/** One candidate data source the guided-discovery research proposes for the mine. */
+export interface DataSourceCandidate {
+  /** Short name of the dataset/source. */
+  name: string
+  /** What it is + why it might help. */
+  description: string
+  /** Where it comes from (provider/API). */
+  source: string
+  /** History + granularity, free text (e.g. "1990-, daily"). */
+  coverage?: string
+  /** Access cost (free / free key / paid). */
+  cost?: string
+  /** Licence / usage terms. */
+  licence?: string
+  /** How it maps to the mine flow (e.g. "add as an fx instrument via yfinance USDCHF=X"). */
+  mineHint?: string
+}
+
+export interface DiscoverDataParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The problem to find data for (the user's "why" — e.g. "single-asset crypto price is too noisy"). */
+  problemStatement: string
+  /** Optional narrower goal folded into the research query (e.g. "macro context for regime detection"). */
+  goal?: string
+  /** Max candidate sources to enumerate. Clamped; default {@link DEFAULT_DATA_DISCOVERY_LIMIT}. */
+  limit?: number
+  /** Which model runs the research inferences — an API config OR a CLI agent (the web SEARCH uses webTools). */
+  model: ModelSelection
+  /** Per-call deep-research budget override. */
+  researchBudget?: Partial<ResearchBudget>
+  abortSignal?: AbortSignal
+  /** Fired after each datasource record upsert so the host can broadcast `data:updated`. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Coarse progress sink for the discover/propose phases (never throws). */
+  onProgress?: (event: DiscoverDataProgressEvent) => void
+}
+
+export interface DiscoverDataProgressEvent {
+  phase: 'discover' | 'propose'
+  message: string
+}
+
+export interface DiscoverDataResult {
+  recordType: string
+  /** The proposed candidate sources (each persisted as a `{recordType}-datasource` draft for review). */
+  candidates: DataSourceCandidate[]
+  discovered: number
+  /** Cited sources the proposal was drawn from. */
+  sources: { title: string; url: string }[]
+  discoveredBy: string
+  discoveredAt: string
+}
+
 export interface SuggestPaperHypothesesParams {
   scope: string
   projectRoot: string
@@ -2288,9 +2423,23 @@ export interface ScanProjectDataCatalogParams {
   abortSignal?: AbortSignal
 }
 
+/** One asset-linkage edge: a traded asset tied to a mineable proxy series that drives it. */
+export interface DataCatalogLinkageEdge {
+  asset: string
+  assetClass: string
+  proxy: string
+  edgeType: string
+  rationale: string
+  proxySource?: string
+  proxyClass?: string
+  proxyBarCloseTz?: string
+}
+
 export interface ScanProjectDataCatalogResult {
   recordType: string
   assetClasses: DataCatalogAssetClass[]
+  /** The asset-linkage graph (empty when the project publishes none). */
+  linkage: DataCatalogLinkageEdge[]
   scannedAt: string
 }
 
@@ -2669,6 +2818,14 @@ export interface ModelTrainerTools {
    */
   evaluateTrainingRuns(params: EvaluateTrainingRunsParams): Promise<EvaluateTrainingRunsResult>
   /**
+   * CROSS-TEST a run's checkpoint on other values of a dataset lever (default `asset`) WITHOUT retraining
+   * — replays the saved weights with the lever overridden, evaluating on assets/windows the run wasn't
+   * trained on. Fills only the MISSING values (requested minus trained minus already-tested), so a re-run
+   * tops up the matrix. Persists a `{recordType}-settest` record keyed by run key. Requires a saved
+   * checkpoint (`keep checkpoint` on at launch) + the manifest's `evaluate` command.
+   */
+  crossTestRun(params: CrossTestRunParams): Promise<CrossTestRunResult>
+  /**
    * Score every completed run: auto-reject health-flagged ones, blend the
    * normalised objective with an LLM verdict, persist `{recordType}-verdict` records.
    */
@@ -2714,6 +2871,13 @@ export interface ModelTrainerTools {
   researchTrainingPapers(
     params: ResearchTrainingPapersParams,
   ): Promise<ResearchTrainingPapersResult>
+  /**
+   * GUIDED DATA DISCOVERY (data mine): given a problem statement + goal, run deep web research on what
+   * data exists to improve this model, and propose candidate data sources (each with source/coverage/
+   * cost/licence/how-to-mine), persisted as `{recordType}-datasource` drafts for the user to review and
+   * feed into the mine flow. Runs on `model` (API or CLI); the web search uses the engine's webTools.
+   */
+  discoverData(params: DiscoverDataParams): Promise<DiscoverDataResult>
   /**
    * Enrich an EXISTING paper with hypotheses: an LLM matches the paper against the project's existing
    * hypotheses (linking the ones that test its claims) AND proposes any NEW testable hypotheses not yet

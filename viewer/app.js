@@ -23,6 +23,8 @@ const DEAD_CONFIRM_MS = 45000
 const MAX_QUICK_OBSERVE_MS = 10 * 60 * 1000
 const ACTIVE_TAB_SS = 'trainer.activeTab'
 const AUTO_EVAL_SS = 'trainer.autoEval'
+const KEEP_CHECKPOINTS_SS = 'trainer.keepCheckpoints'
+const CROSS_TEST_SS = 'trainer.crossTest'
 const COMPUTE_TARGET_SS = 'trainer.computeTarget'
 const LAUNCH_DEVICE_SS = 'trainer.launchDevice'
 const CONCURRENCY_SS = 'trainer.concurrency'
@@ -218,6 +220,9 @@ let activeTabId = null
 let runsCache = []
 let verdictsCache = new Map()
 let evaluationsCache = new Map()
+// runKey -> `{recordType}-settest` content (the cross-test matrix: checkpoint replayed on other assets /
+// an extended window). Loaded once per render like evaluationsCache — rows read it synchronously.
+let crossTestsCache = new Map()
 // Reliability verdicts. `reliabilityCache` holds the PERSISTED, authoritative verdicts (`source: 'user'`
 // override or `source: 'llm'`), keyed by run key — they survive reloads + are overturnable. The heuristic
 // baseline is NOT persisted: it's recomputed in-memory into `reliabilityHeuristicCache` on each global Refresh
@@ -233,6 +238,8 @@ let dismissedFailures = new Set()
 // on re-run (alongside skipExplored) unless force-rerun or a version bump clears them.
 let unrunnableCache = new Set()
 const evaluatingKeys = new Set()
+// Runs with a cross-test in flight (spinner in the run-detail Cross-test section).
+const crossTestingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
 let proposalSummary = null
@@ -1099,6 +1106,17 @@ async function readJudgement() {
 async function readEvaluations() {
   if (!manifest) return new Map()
   const recs = await queryRecords(manifest.recordType + '-evaluation')
+  const map = new Map()
+  for (const r of recs) {
+    const content = r.content || {}
+    const key = r.key || content.runKey || ''
+    if (key) map.set(key, content)
+  }
+  return map
+}
+async function readCrossTests() {
+  if (!manifest) return new Map()
+  const recs = await queryRecords(manifest.recordType + '-settest')
   const map = new Map()
   for (const r of recs) {
     const content = r.content || {}
@@ -2783,6 +2801,15 @@ function evalChipHtml(run) {
     !Number.isFinite(train) || (objectiveDirection() === 'min' ? value <= train : value >= train)
   return `<span class="badge eval-chip ${heldUp ? 'is-ok' : 'is-warn'}">${escapeHtml(formatObjective(value))}</span>`
 }
+// The cross-test robustness chip: n/m tested sets beating hold (green = all, amber = some, red = none),
+// from the run's `-settest` matrix. Em-dash when the run was never cross-tested.
+function crossTestChipHtml(run) {
+  const record = crossTestsCache.get(run.key)
+  if (!record) return '<span class="judge-none">—</span>'
+  const verdict = window.CrossTest.crossTestVerdict(record)
+  const chip = window.CrossTest.verdictChip(verdict)
+  return `<span class="badge xt-chip ${chip.cls}">${escapeHtml(chip.label)}</span>`
+}
 // "asset · timeframe" for the runs-table Data column, from the run's dataset
 // descriptor (preferred) or its config — so multi-asset/timeframe runs separate.
 function datasetLabel(s) {
@@ -3115,6 +3142,15 @@ function vsHoldValue(s) {
 function evalEnabled() {
   return !!(manifest && manifest.evaluate)
 }
+// Whether cross-testing (replaying a kept checkpoint on OTHER assets / an extended window) is available:
+// the manifest must re-test checkpoints (`evaluate`), declare how to keep them (`keepCheckpointKey`), and
+// have an asset choice to vary. Existing settest data keeps the UI visible even if the manifest regresses.
+function crossTestUiEnabled() {
+  if (crossTestsCache.size > 0) return true
+  if (!manifest || !manifest.evaluate || !manifest.keepCheckpointKey) return false
+  const asset = manifest.levers && manifest.levers.asset
+  return !!(asset && Array.isArray(asset.choices) && asset.choices.length > 1)
+}
 // The column model the table renders + sorts from; metric columns are derived.
 function runsColumns() {
   const cols = [
@@ -3254,6 +3290,19 @@ function runsColumns() {
       sort: (r) => {
         const e = evaluationsCache.get(r.key)
         return e ? Number(e.objective) : NaN
+      },
+    })
+  }
+  if (crossTestUiEnabled()) {
+    cols.push({
+      id: 'crosstest',
+      label: 'Robust',
+      num: true,
+      help: 'Cross-test robustness: the kept checkpoint replayed on OTHER assets / an extended window (no retraining). n/m = how many of the tested sets beat buy-and-hold. Empty = not cross-tested (needs a kept checkpoint).',
+      get: (r) => crossTestChipHtml(r),
+      sort: (r) => {
+        const v = window.CrossTest.crossTestVerdict(crossTestsCache.get(r.key))
+        return v.tested ? v.positive / v.tested : NaN
       },
     })
   }
@@ -3971,6 +4020,13 @@ function runsViewModeHtml() {
         'Which ENVIRONMENT produces the best results: pool every filtered run by environment (fee / TP-SL regime) and rank by a criterion. Rows = environments, cells = min · avg · max.',
       )
     : ''
+  const robustBtn = crossTestUiEnabled()
+    ? btn(
+        'robustness',
+        'Robustness',
+        'Cross-test robustness: every run whose kept checkpoint was replayed on OTHER assets / an extended window, as a run × asset matrix of vs-hold results. The fast answer to “does this model only work where it was trained?”.',
+      )
+    : ''
   // The Selection lens appears once a "runs ↗" gesture has routed a set here; it holds the LAST selection.
   const selBtn =
     runsSelectionKeys.length || runsViewMode === 'selection'
@@ -3980,7 +4036,7 @@ function runsViewModeHtml() {
           'The runs you last opened from a By value / By dataset / By environment row (or another “runs ↗”). ← Back returns to where you opened it.',
         )
       : ''
-  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}${selBtn}</div>`
+  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}${robustBtn}${selBtn}</div>`
 }
 // The Hide-bad control: a chip like the custom-filter chips — the checkbox toggles it on/off; clicking the
 // chip body opens the editor for WHAT counts as bad (failed / health-flagged / under-traded), since badness
@@ -4222,6 +4278,82 @@ function renderComparisonView(body) {
     `${toolbar}${controls}<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>${axisHead}${runsHead}${colHead}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
   )
 }
+// The Robustness lens: every cross-tested run as a run × tested-set matrix (vs-hold per cell), sorted
+// most-robust first. Reads only crossTestsCache (settest records are few — one per cross-tested run),
+// joining run info from the loaded caches when available and degrading to the bare key when not.
+function renderRobustnessView(body) {
+  const CT = window.CrossTest
+  const records = [...crossTestsCache.entries()]
+  const toolbar = `<div class="runs-toolbar">${runsViewModeHtml()}</div>`
+  if (!records.length) {
+    setHtml(
+      body,
+      `${toolbar}<div class="empty-hint">No cross-tested runs yet. Launch a campaign with <em>Keep checkpoints</em> + <em>Cross-test after training</em>, or open a checkpointed run and hit “Test missing assets”.</div>`,
+    )
+    return
+  }
+  // Column universe: every value tested across any record (assets first, then window extensions).
+  const assetValues = new Set()
+  const windowValues = new Set()
+  for (const [, record] of records) {
+    for (const v of Object.keys((record.levers || {}).asset || {})) assetValues.add(v)
+    for (const v of Object.keys((record.levers || {}).walk_forward_window || {})) windowValues.add(v)
+  }
+  const columns = [
+    ...[...assetValues].sort().map((v) => ({ lever: 'asset', value: v })),
+    ...[...windowValues].sort().map((v) => ({ lever: 'walk_forward_window', value: v })),
+  ]
+  const ranked = records
+    .map(([key, record]) => ({ key, record, verdict: CT.crossTestVerdict(record) }))
+    .sort((a, b) => {
+      const ra = a.verdict.tested ? a.verdict.positive / a.verdict.tested : -1
+      const rb = b.verdict.tested ? b.verdict.positive / b.verdict.tested : -1
+      return rb - ra || b.verdict.tested - a.verdict.tested
+    })
+  const head =
+    '<th>Run</th><th>Trained on</th><th>Robustness</th>' +
+    columns
+      .map(
+        (c) =>
+          `<th class="num">${escapeHtml(c.lever === 'asset' ? c.value : c.value)}</th>`,
+      )
+      .join('')
+  const rows = ranked
+    .map(({ key, record, verdict }) => {
+      const run = runsCache.find((r) => r.key === key)
+      const model = run && run.summary && run.summary.config ? run.summary.config.model_name || '' : ''
+      const chip = CT.verdictChip(verdict)
+      const cells = columns
+        .map((c) => {
+          const cell = ((record.levers || {})[c.lever] || {})[c.value]
+          if (!cell) {
+            const trained = (record.trainedValues || {})[c.lever] === c.value
+            return `<td class="num xt-blank">${trained ? '<span class="muted" title="the asset this run trained on">trained</span>' : ''}</td>`
+          }
+          if (cell.status !== 'completed') {
+            return `<td class="num"><span class="xt-cell is-none" title="${escapeHtml(cell.error || 'failed')}">✕</span></td>`
+          }
+          const vsHold = Number(cell.returnVsHold)
+          const cls = vsHold > 0 ? 'is-robust' : 'is-weak'
+          const label = Number.isFinite(vsHold) ? `${vsHold >= 0 ? '+' : ''}${vsHold.toFixed(1)}%` : '·'
+          return `<td class="num"><span class="xt-cell ${cls}" title="vs buy-and-hold on ${escapeHtml(c.value)}">${escapeHtml(label)}</span></td>`
+        })
+        .join('')
+      return `<tr>
+        <td><button type="button" class="link-btn" data-open-run="${escapeHtml(key)}">${escapeHtml(shortKey(key))}</button>${model ? ` <span class="muted">${escapeHtml(String(model))}</span>` : ''}</td>
+        <td>${escapeHtml((record.trainedValues || {}).asset || '—')}</td>
+        <td><span class="badge xt-chip ${chip.cls}">${escapeHtml(chip.label)}</span></td>
+        ${cells}
+      </tr>`
+    })
+    .join('')
+  const legend =
+    '<p class="runs-legend">Each row is a run whose kept checkpoint was replayed on the column’s data <strong>without retraining</strong> — green beat buy-and-hold there, red didn’t. A model that is only green on its trained asset learned that market, not a general edge.</p>'
+  setHtml(
+    body,
+    `${toolbar}<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>${legend}`,
+  )
+}
 // When drilled into a single setup, an editor for that setup's conclusion note —
 // the user half of the ledger (LLM verdict + score being the other halves).
 // Render the table from the in-memory caches (no refetch) — used by sort/filter/view.
@@ -4233,6 +4365,11 @@ function renderRunsTable() {
   if (runsViewMode === 'dataset' || runsViewMode === 'environment') {
     if (spark) spark.hidden = true
     renderComparisonView(body)
+    return
+  }
+  if (runsViewMode === 'robustness') {
+    if (spark) spark.hidden = true
+    renderRobustnessView(body)
     return
   }
   // Favorites (a pin list) and Selection (a routed run set) are CURATED key-list views — resolve each key
@@ -4427,6 +4564,7 @@ async function renderRuns() {
     verdictsCache,
     judgementSummary,
     evaluationsCache,
+    crossTestsCache,
     dismissedFailures,
     unrunnableCache,
     reliabilityCache,
@@ -4435,6 +4573,7 @@ async function renderRuns() {
     readVerdicts(),
     readJudgement(),
     readEvaluations(),
+    readCrossTests(),
     readDismissedFailures(),
     readUnrunnable(),
     readReliability(),
@@ -4758,6 +4897,65 @@ function evaluationSectionHtml(run) {
     </tbody></table>
     <p class="card-sub">Evaluated ${escapeHtml(formatWhen(evaluation.evaluatedAt))}${escapeHtml(statusBit)}</p>
     ${button}${statusLine}`
+}
+// The cross-test section: the run's per-asset / extended-window matrix (kept checkpoint replayed on data
+// it was NOT trained on — no retraining) + the actions to fill what's missing.
+function crossTestSectionHtml(run) {
+  const CT = window.CrossTest
+  const s = run.summary
+  const statusLine = '<p id="run-crosstest-status" class="form-status" role="status" hidden></p>'
+  const checkpoint = (s.artifacts && s.artifacts.checkpoint) || ''
+  const record = crossTestsCache.get(run.key)
+  const rows = CT.crossTestRows(record)
+  const missing = CT.missingAssets(manifest, run, record)
+  const runWindow = String((s.config || {}).walk_forward_window || '')
+  const extended = CT.extendedWindowFor(runWindow)
+  const windowTested = !!(record && record.levers && record.levers.walk_forward_window)
+  if (crossTestingKeys.has(run.key)) {
+    return `<h3>Cross-test</h3>
+      <p class="card-sub">${spinnerHtml()} Cross-testing — replaying the checkpoint on other data…</p>
+      ${statusLine}`
+  }
+  if (!checkpoint) {
+    return `<h3>Cross-test</h3>
+      <p class="card-sub">No kept checkpoint — this run cannot be cross-tested. Re-run it with “Keep checkpoints” on in Launch.</p>
+      ${statusLine}`
+  }
+  const buttons = []
+  if (missing.length) {
+    buttons.push(
+      `<button type="button" data-action="cross-test" data-key="${escapeHtml(run.key)}"${helpAttr('Replay this run’s checkpoint on every asset it has not been tested on yet — a fast robustness read, no retraining.')}>Test ${missing.length} missing asset${missing.length === 1 ? '' : 's'}</button>`,
+    )
+  }
+  if (extended && !windowTested) {
+    buttons.push(
+      `<button type="button" class="ghost-btn" data-action="cross-test-window" data-key="${escapeHtml(run.key)}" data-window="${escapeHtml(extended)}"${helpAttr('Replay the checkpoint with the open-ended window — testing on ALL data after the training cutoff through the latest on disk, not just the run’s fixed test year.')}>Extend test window (${escapeHtml(extended)})</button>`,
+    )
+  }
+  const actions = buttons.length ? `<div class="form-actions">${buttons.join(' ')}</div>` : ''
+  if (!rows.length) {
+    return `<h3>Cross-test</h3>
+      <p class="card-sub">Not cross-tested yet — replay this run’s checkpoint on other assets or the full post-cutoff window.</p>
+      ${actions}${statusLine}`
+  }
+  const verdict = CT.crossTestVerdict(record)
+  const chip = CT.verdictChip(verdict)
+  const trained = (record && record.trainedValues && record.trainedValues.asset) || ''
+  const rowsHtml = rows
+    .map((row) => {
+      const vsHold = Number(row.returnVsHold)
+      const cellCls = row.status !== 'completed' ? 'is-none' : vsHold > 0 ? 'is-robust' : 'is-weak'
+      const detail =
+        row.status !== 'completed'
+          ? escapeHtml(row.error || 'failed')
+          : `${escapeHtml(formatObjective(Number(row.objective)))} · vs hold ${escapeHtml(Number.isFinite(vsHold) ? (vsHold >= 0 ? '+' : '') + vsHold.toFixed(2) + '%' : '—')}`
+      return `<tr><th>${escapeHtml(row.lever === 'asset' ? row.value : row.lever + ' → ' + row.value)}</th><td class="num"><span class="xt-cell ${cellCls}">${detail}</span></td></tr>`
+    })
+    .join('')
+  return `<h3>Cross-test <span class="badge xt-chip ${chip.cls}">${escapeHtml(chip.label)}</span></h3>
+    <p class="card-sub">Trained on ${escapeHtml(trained || '—')} — each row replays the SAME weights on data it never trained on.</p>
+    <table class="kv-table"><tbody>${rowsHtml}</tbody></table>
+    ${actions}${statusLine}`
 }
 function trainingCurveSectionHtml(summary) {
   const series = summary.series
@@ -8839,6 +9037,7 @@ function renderRunDetail(key) {
     ${showVerdict ? reliabilitySectionHtml(run, reliability) : ''}
     ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
     ${showEval ? evaluationSectionHtml(run) : ''}
+    ${crossTestUiEnabled() ? crossTestSectionHtml(run) : ''}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
@@ -9389,12 +9588,51 @@ async function onEvaluateRun(key) {
     }
   }
 }
+// Launch a cross-test for one run: the missing assets by default, or — when `windowId` is given — the
+// open-ended walk-forward window (test on all post-cutoff data). Mirrors onEvaluateRun's observe dance:
+// the spinner keys on crossTestingKeys and the table refreshes when the activity settles.
+async function onCrossTestRun(key, windowId) {
+  if (crossTestingKeys.has(key) || !embedded()) return
+  const epoch = projectEpoch
+  const params = windowId
+    ? { runKey: key, lever: 'walk_forward_window', values: [windowId] }
+    : { runKey: key, values: 'all' }
+  crossTestingKeys.add(key)
+  if (selectedRunKey === key) renderRunDetail(key)
+  try {
+    const result = await startOrEnqueue(
+      'cross-test',
+      trainerComputeParams(params),
+      `Cross-test ${shortKey(key)}`,
+    )
+    if (result.queued && epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-crosstest-status', queuedStatusText(result.ahead))
+    }
+    if (result.activityId) await observeQuickActivity(result.activityId)
+  } catch {
+    if (epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-crosstest-status', 'Could not start the cross-test — please try again.', true)
+    }
+  } finally {
+    crossTestingKeys.delete(key)
+    if (epoch === projectEpoch) {
+      crossTestsCache = await readCrossTests()
+      renderRunsTable()
+      if (selectedRunKey === key) renderRunDetail(key)
+    }
+  }
+}
 function setupRuns() {
   const body = byId('runs-body')
   if (body) {
     body.addEventListener('click', (event) => {
       if (event.target.closest('#runs-selection-back')) {
         goBackFromSelection()
+        return
+      }
+      const openRunBtn = event.target.closest('[data-open-run]')
+      if (openRunBtn) {
+        openRunDetail(openRunBtn.dataset.openRun)
         return
       }
       if (event.target.closest('#runs-filter-clear')) {
@@ -9579,6 +9817,10 @@ function setupRuns() {
       if (event.target.closest('#run-detail-close')) closeRunDetail()
       const evalBtn = event.target.closest('button[data-action="evaluate"]')
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
+      const xtBtn = event.target.closest('button[data-action="cross-test"]')
+      if (xtBtn) onCrossTestRun(xtBtn.dataset.key)
+      const xtWinBtn = event.target.closest('button[data-action="cross-test-window"]')
+      if (xtWinBtn) onCrossTestRun(xtWinBtn.dataset.key, xtWinBtn.dataset.window)
       const cloneBtn = event.target.closest('button[data-action="clone"]')
       if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
       const rerunBtn = event.target.closest('button[data-action="rerun"]')
@@ -11167,10 +11409,34 @@ async function readDataCatalog() {
   if (!manifest) return null
   const recs = await queryRecords(manifest.recordType + '-datacatalog', 'current')
   const content = recs[0] && recs[0].content
-  return content && Array.isArray(content.assetClasses) ? content.assetClasses : null
+  return content && Array.isArray(content.assetClasses) ? content : null
 }
 
-function dataCatalogHtml(assetClasses) {
+// The related-data chips for one asset row: each linkage edge's proxy series, as a one-click mine of that
+// driver (with the rationale on hover).
+function linkageChipsHtml(linkage, symbol, classId) {
+  const related = window.DataCatalog.linkageForAsset(linkage, symbol, classId)
+  if (!related.length) return ''
+  return (
+    ' ' +
+    related
+      .map(
+        (e) =>
+          '<button type="button" class="link-chip" data-action="mine" data-symbol="' +
+          escapeHtml(e.proxy) +
+          '" data-class="' +
+          escapeHtml(e.proxyClass || '') +
+          '" title="' +
+          escapeHtml((e.edgeType || '') + ': ' + (e.rationale || '')) +
+          '">→ ' +
+          escapeHtml(e.proxy) +
+          '</button>',
+      )
+      .join(' ')
+  )
+}
+
+function dataCatalogHtml(assetClasses, linkage) {
   const DC = window.DataCatalog
   return assetClasses
     .map((cls) => {
@@ -11180,7 +11446,7 @@ function dataCatalogHtml(assetClasses) {
         .map((inst) => {
           const state = DC.instrumentState(inst)
           const dot = state === 'ready' ? 'is-ready' : state === 'gaps' ? 'is-gaps' : 'is-avail'
-          const busy = dataMineBusy.has('sym:' + inst.symbol) || classBusy
+          const busy = dataMineBusy.has('sym:' + cls.id + ':' + inst.symbol) || classBusy
           const label = state === 'available' ? 'Download' : 'Update'
           return (
             '<tr>' +
@@ -11190,7 +11456,9 @@ function dataCatalogHtml(assetClasses) {
             escapeHtml(inst.symbol) +
             '</strong> <span class="muted">' +
             escapeHtml(inst.label) +
-            '</span></td>' +
+            '</span>' +
+            linkageChipsHtml(linkage, inst.symbol, cls.id) +
+            '</td>' +
             '<td class="muted">' +
             escapeHtml(inst.source + ' · ' + inst.sourceSymbol) +
             '</td>' +
@@ -11205,6 +11473,8 @@ function dataCatalogHtml(assetClasses) {
             '</td>' +
             '<td><button type="button" class="ghost-btn" data-action="mine" data-symbol="' +
             escapeHtml(inst.symbol) +
+            '" data-class="' +
+            escapeHtml(cls.id) +
             '"' +
             (busy ? ' disabled' : '') +
             '>' +
@@ -11252,15 +11522,16 @@ async function renderData() {
     return
   }
   bindDataClicks()
-  const assetClasses = await readDataCatalog()
-  if (!assetClasses) {
+  await renderDiscoveredSources()
+  const catalog = await readDataCatalog()
+  if (!catalog) {
     setHtml(
       body,
       '<div class="empty-hint">No data catalog yet. <button type="button" class="ghost-btn" data-action="refresh-catalog">Scan now</button></div>',
     )
     return
   }
-  setHtml(body, dataCatalogHtml(assetClasses))
+  setHtml(body, dataCatalogHtml(catalog.assetClasses, catalog.linkage || []))
 }
 
 function bindDataClicks() {
@@ -11278,12 +11549,71 @@ async function onDataClick(event) {
   if (action === 'refresh-catalog') return void refreshDataCatalog()
   if (action === 'mine') {
     const symbol = btn.getAttribute('data-symbol')
-    return void mineData({ symbols: [symbol] }, 'sym:' + symbol)
+    const cls = btn.getAttribute('data-class')
+    return void mineData({ symbols: [symbol], class: cls }, 'sym:' + cls + ':' + symbol)
   }
   if (action === 'mine-class') {
     const cls = btn.getAttribute('data-class')
     return void mineData({ class: cls }, 'cls:' + cls)
   }
+  if (action === 'discover') return void discoverData()
+}
+
+async function readDataSources() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + '-datasource')
+  return recs.map((r) => r.content).filter((c) => c && c.name)
+}
+
+function dataSourceCardHtml(s) {
+  const meta = [s.source, s.coverage, s.cost, s.licence]
+    .filter(Boolean)
+    .map(escapeHtml)
+    .join(' · ')
+  return (
+    '<div class="datasource-card"><div><strong>' +
+    escapeHtml(s.name) +
+    '</strong>' +
+    (meta ? ' <span class="muted">' + meta + '</span>' : '') +
+    '</div>' +
+    (s.description ? '<div class="muted">' + escapeHtml(s.description) + '</div>' : '') +
+    (s.mineHint ? '<div class="muted">How to acquire: ' + escapeHtml(s.mineHint) + '</div>' : '') +
+    '</div>'
+  )
+}
+
+async function renderDiscoveredSources() {
+  const area = byId('data-discovered')
+  if (!area) return
+  const sources = await readDataSources()
+  setHtml(
+    area,
+    sources.length ? '<h3>Proposed sources</h3>' + sources.map(dataSourceCardHtml).join('') : '',
+  )
+}
+
+async function discoverData() {
+  const problemEl = byId('data-problem')
+  const problem = ((problemEl && problemEl.value) || '').trim()
+  if (!problem) {
+    setStatusLine('data-discover-status', 'Describe a problem to research.', false)
+    return
+  }
+  const goalEl = byId('data-goal')
+  const goal = ((goalEl && goalEl.value) || '').trim()
+  setStatusLine('data-discover-status', 'Researching data sources…', true)
+  try {
+    const params = goal ? { problemStatement: problem, goal } : { problemStatement: problem }
+    const started = await window.OverseerBridge.startActivity(
+      'discover-data',
+      trainerActivityParams(params),
+    )
+    if (started && started.activityId) await observeQuickActivity(started.activityId)
+    setStatusLine('data-discover-status', 'Done — proposals below.', false)
+  } catch {
+    setStatusLine('data-discover-status', 'Discovery failed.', false)
+  }
+  await renderDiscoveredSources()
 }
 
 async function refreshDataCatalog() {
@@ -16446,6 +16776,43 @@ function rememberAutoEval(on) {
     // storage may be unavailable in a sandboxed frame — purely best-effort
   }
 }
+// Persisted launch defaults for checkpoint keeping + auto cross-test — the "campaign default": the next
+// launch (and every one after) starts from what was last chosen. Cross-test persists as
+// 'off' | 'all' | 'choose:SYM1,SYM2'.
+function savedKeepCheckpoints() {
+  try {
+    return sessionStorage.getItem(KEEP_CHECKPOINTS_SS) === '1'
+  } catch {
+    return false
+  }
+}
+function rememberKeepCheckpoints(on) {
+  try {
+    sessionStorage.setItem(KEEP_CHECKPOINTS_SS, on ? '1' : '')
+  } catch {
+    // best-effort
+  }
+}
+function savedCrossTest() {
+  try {
+    const raw = sessionStorage.getItem(CROSS_TEST_SS) || 'off'
+    if (raw === 'all') return { mode: 'all', assets: [] }
+    if (raw.startsWith('choose:')) {
+      return { mode: 'choose', assets: raw.slice('choose:'.length).split(',').filter(Boolean) }
+    }
+    return { mode: 'off', assets: [] }
+  } catch {
+    return { mode: 'off', assets: [] }
+  }
+}
+function rememberCrossTest(mode, assets) {
+  try {
+    const value = mode === 'choose' ? 'choose:' + (assets || []).join(',') : mode
+    sessionStorage.setItem(CROSS_TEST_SS, value)
+  } catch {
+    // best-effort
+  }
+}
 // Max parallel runs is an Activity-level setting (not a per-launch field): how many
 // runs of a campaign may execute at once. Persisted; read at launch.
 // Persisted in localStorage (NOT sessionStorage): the embedded iframe gets a fresh
@@ -16744,6 +17111,31 @@ function selectedDatasets(form) {
   const ids = new Set([...form.querySelectorAll('input[name="ds"]:checked')].map((el) => el.value))
   return allDatasets().filter((d) => ids.has(d.id))
 }
+// The launch "Cross-test after training" control: off / all other assets / choose specific ones. The
+// chosen default persists (the campaign default); per run, the engine skips the run's OWN trained asset
+// and any already-tested one automatically — so "all" means "every other asset it hasn't been tested on".
+function crossTestLaunchFieldHtml() {
+  const saved = savedCrossTest()
+  const choices =
+    manifest && manifest.levers && manifest.levers.asset && Array.isArray(manifest.levers.asset.choices)
+      ? manifest.levers.asset.choices.map(String)
+      : []
+  const boxes = choices
+    .map(
+      (sym) =>
+        `<label class="xt-asset"><input type="checkbox" name="crossTestAsset" value="${escapeHtml(sym)}"${saved.assets.includes(sym) ? ' checked' : ''} /> ${escapeHtml(sym)}</label>`,
+    )
+    .join('')
+  return `<div class="field launch-crosstest">
+      <span${helpAttr('After training (with kept checkpoints), automatically replay each run on other assets it was NOT trained on — a fast robustness read with no retraining. "All other assets" fills every missing asset; "Specific assets…" tests just the ones you tick. Turning this on also keeps checkpoints.')}>Cross-test after training</span>
+      <select name="crossTestMode">
+        <option value="off"${saved.mode === 'off' ? ' selected' : ''}>Off</option>
+        <option value="all"${saved.mode === 'all' ? ' selected' : ''}>All other assets</option>
+        <option value="choose"${saved.mode === 'choose' ? ' selected' : ''}>Specific assets…</option>
+      </select>
+      <div id="crosstest-assets" class="xt-assets"${saved.mode === 'choose' ? '' : ' hidden'}>${boxes}</div>
+    </div>`
+}
 function renderLaunchForm() {
   const form = byId('launch-form')
   if (!form) return
@@ -16777,6 +17169,15 @@ function renderLaunchForm() {
         </label>`
             : ''
         }
+        ${
+          manifest && manifest.keepCheckpointKey
+            ? `<label class="check-row launch-keepckpt">
+          <input type="checkbox" name="keepCheckpoints"${savedKeepCheckpoints() ? ' checked' : ''} />
+          <span${helpAttr('Persist each run’s trained weights (a small checkpoint file) so the run can later be re-tested on OTHER assets or an extended window WITHOUT retraining. Required for cross-testing — runs without a kept checkpoint can never be cross-tested.')}>Keep checkpoints — runs stay re-testable</span>
+        </label>`
+            : ''
+        }
+        ${crossTestUiEnabled() ? crossTestLaunchFieldHtml() : ''}
         <label class="field launch-target" id="launch-target-field">${computeTargetFieldHtml(launchRunnersCache, savedComputeTarget())}</label>
         <label class="field launch-device" id="launch-device-field">${launchDeviceFieldHtml(savedLaunchDevice())}</label>
       </div>
@@ -17100,6 +17501,21 @@ async function onLaunchSubmit(event) {
   // Max parallel runs is set in the Activity tab (one place), not per-launch — read the saved value.
   const concurrency = savedConcurrency()
   const skipExplored = !!(form.elements.skipExplored && form.elements.skipExplored.checked)
+  // Cross-test selection: 'all', an explicit asset list, or undefined (off / choose-with-none-ticked).
+  const crossTestMode = form.elements.crossTestMode ? form.elements.crossTestMode.value : 'off'
+  const crossTestAssets = [...form.querySelectorAll('input[name="crossTestAsset"]:checked')].map(
+    (el) => el.value,
+  )
+  const crossTest =
+    crossTestMode === 'all'
+      ? 'all'
+      : crossTestMode === 'choose' && crossTestAssets.length
+        ? crossTestAssets
+        : undefined
+  // Cross-testing implies kept checkpoints — nothing could be replayed otherwise.
+  const keepCheckpoints =
+    !!(form.elements.keepCheckpoints && form.elements.keepCheckpoints.checked) ||
+    crossTest !== undefined
   if (button) button.disabled = true
   if (status) status.textContent = 'Starting campaign…'
   try {
@@ -17108,6 +17524,8 @@ async function onLaunchSubmit(event) {
       refresh,
       concurrency,
       ...(skipExplored ? { skipExplored: true } : {}),
+      ...(keepCheckpoints ? { keepCheckpoints: true } : {}),
+      ...(crossTest !== undefined ? { crossTest } : {}),
     })
     const extra = {
       ...(autoEval ? { autoEval: true } : {}),
@@ -17188,6 +17606,26 @@ function setupLaunch() {
     }
     if (event.target && event.target.name === 'device') saveLaunchDevice(event.target.value)
     if (event.target && event.target.name === 'autoEval') rememberAutoEval(event.target.checked)
+    if (event.target && event.target.name === 'keepCheckpoints') {
+      rememberKeepCheckpoints(event.target.checked)
+    }
+    if (
+      event.target &&
+      (event.target.name === 'crossTestMode' || event.target.name === 'crossTestAsset')
+    ) {
+      const mode = form.elements.crossTestMode ? form.elements.crossTestMode.value : 'off'
+      const assets = [...form.querySelectorAll('input[name="crossTestAsset"]:checked')].map(
+        (el) => el.value,
+      )
+      const assetsRow = byId('crosstest-assets')
+      if (assetsRow) assetsRow.hidden = mode !== 'choose'
+      // Cross-testing needs kept checkpoints — turning it on checks the box (the submit enforces it too).
+      if (mode !== 'off' && form.elements.keepCheckpoints && !form.elements.keepCheckpoints.checked) {
+        form.elements.keepCheckpoints.checked = true
+        rememberKeepCheckpoints(true)
+      }
+      rememberCrossTest(mode, assets)
+    }
     refreshLeverAnnotations(form)
     refreshLeverApplicability(form)
     updateLaunchSummary()
@@ -18427,7 +18865,15 @@ async function renderDiagnosis() {
       }
     },
   }
-  window.Diagnostics.render(container, { manifest, runs }, actions)
+  // Cross-asset evidence: the settest matrices (kept checkpoints replayed on other assets) power the
+  // cross-asset robustness check — cheap OOS proof the incumbent's edge travels, without re-training.
+  let settests = []
+  try {
+    settests = (await queryRecords(recordType + '-settest')).map((r) => r.content).filter(Boolean)
+  } catch {
+    settests = []
+  }
+  window.Diagnostics.render(container, { manifest, runs, settests }, actions)
   diagnosisRenderedRt = recordType
 }
 

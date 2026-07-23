@@ -48,12 +48,20 @@
     }
   }
 
-  // The mine request to download one instrument (all its intervals) or a whole class.
+  // The mine request to download one instrument (all its intervals) or a whole class. The instrument
+  // request is class-scoped so a fundamentals ticker resolves distinctly from the same stock ticker.
   function mineRequestForInstrument(inst) {
-    return { symbols: [inst.symbol] }
+    return { symbols: [inst.symbol], class: inst.assetClass }
   }
   function mineRequestForClass(cls) {
     return { class: cls.id }
+  }
+
+  // The linkage edges FROM one asset — the related driver series a user can mine alongside it.
+  function linkageForAsset(edges, symbol, assetClass) {
+    return (edges || []).filter(
+      (e) => e && e.asset === symbol && (!assetClass || e.assetClass === assetClass),
+    )
   }
 
   const api = {
@@ -63,6 +71,7 @@
     classCounts: classCounts,
     mineRequestForInstrument: mineRequestForInstrument,
     mineRequestForClass: mineRequestForClass,
+    linkageForAsset: linkageForAsset,
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = api
   root.DataCatalog = api

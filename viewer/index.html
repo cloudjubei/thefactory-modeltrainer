@@ -58,6 +58,11 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
+            'ipt src="crossTest.js' +
+            v +
+            '" defer></scr' +
+            'ipt>' +
+            '<scr' +
             'ipt src="badRuns.js' +
             v +
             '" defer></scr' +
@@ -258,6 +263,29 @@
                 </div>
               </div>
               <div id="data-body" class="environments-body tab-scroll"></div>
+            </section>
+            <section class="card" aria-labelledby="data-discover-h">
+              <div class="card-head">
+                <h2 id="data-discover-h">Discover more data</h2>
+                <p class="card-sub">
+                  Describe a problem and an LLM researches what data could help — proposals (source,
+                  coverage, cost, licence, how to acquire) appear below to review and add to the mine.
+                </p>
+              </div>
+              <div class="discover-form">
+                <textarea
+                  id="data-problem"
+                  rows="2"
+                  placeholder="e.g. single-asset crypto price is too noisy to carry a learnable edge"
+                ></textarea>
+                <input
+                  id="data-goal"
+                  type="text"
+                  placeholder="optional narrower goal (e.g. macro context for regime detection)"
+                />
+                <button type="button" class="ghost-btn" data-action="discover">Discover</button>
+              </div>
+              <div id="data-discovered" class="tab-scroll"></div>
             </section>
           </section>
 

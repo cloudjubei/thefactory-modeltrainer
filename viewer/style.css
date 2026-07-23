@@ -3556,6 +3556,79 @@ pre.json {
 .data-table tr:last-child td {
   border-bottom: none;
 }
+/* Related-data (asset-linkage) chips — a one-click mine of a driver series, rationale on hover. */
+.link-chip {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 1px 7px;
+  font-size: 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.link-chip:hover {
+  border-color: var(--accent, #6366f1);
+  color: var(--text-primary, inherit);
+}
+/* Guided data discovery: the problem form + the proposed-source cards. */
+.discover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.discover-form textarea,
+.discover-form input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.discover-form button {
+  align-self: flex-start;
+}
+.datasource-card {
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+/* Cross-test robustness: the runs-table chip, matrix cells, and launch controls. */
+.xt-chip.is-robust {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+.xt-chip.is-mixed {
+  background: rgba(217, 119, 6, 0.12);
+  color: var(--warn);
+}
+.xt-chip.is-weak {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--bad);
+}
+.xt-chip.is-none {
+  color: var(--muted);
+}
+.xt-cell.is-robust {
+  color: var(--ok);
+}
+.xt-cell.is-weak {
+  color: var(--bad);
+}
+.xt-cell.is-none {
+  color: var(--muted);
+}
+.xt-assets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.xt-assets .xt-asset {
+  white-space: nowrap;
+}
 .runner-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));

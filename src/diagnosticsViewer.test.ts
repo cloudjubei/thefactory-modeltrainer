@@ -232,3 +232,70 @@ describe('replicateSpecs', () => {
     }
   })
 })
+
+describe('checkCrossAssetRobustness', () => {
+  const settestFor = (runKey: string, cells: Record<string, number | null>) => ({
+    runKey,
+    trainedValues: { asset: 'BTCUSDT' },
+    levers: {
+      asset: Object.fromEntries(
+        Object.entries(cells).map(([value, vsHold]) => [
+          value,
+          vsHold === null
+            ? { value, status: 'failed', error: 'no data', evaluatedAt: 'T' }
+            : { value, status: 'completed', returnVsHold: vsHold, objective: 1, evaluatedAt: 'T' },
+        ]),
+      ),
+    },
+    updatedAt: 'T',
+  })
+  const spec = () => (Diagnostics as any).resolveSpec(BLACKSWAN_MANIFEST)
+  const runs = () => blackswanOverfit()
+  const incumbentKeys = () =>
+    runs()
+      .filter((r: any) => r.config.model_name === 'x' && r.config.window === 'A')
+      .map((r: any) => r.key)
+
+  it('is unverifiable-info with no settest matrices at all', () => {
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [])
+    expect(f.severity).toBe('info')
+    expect(f.verdict).toBe('unverifiable')
+  })
+
+  it('cautions when matrices exist but none cover the incumbent', () => {
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [settestFor('someone-else', { ETHUSDT: 2 })])
+    expect(f.severity).toBe('caution')
+    expect(f.verdict).toBe('not-cross-tested')
+  })
+
+  it('is ok/robust when every completed incumbent cell beats hold', () => {
+    const keys = incumbentKeys()
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [
+      settestFor(keys[0], { ETHUSDT: 3, SOLUSDT: 1 }),
+      settestFor(keys[1], { ETHUSDT: 0.5 }),
+    ])
+    expect(f.severity).toBe('ok')
+    expect(f.verdict).toBe('robust')
+  })
+
+  it('is a blocker when NO incumbent cell beats hold — the edge does not travel', () => {
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [
+      settestFor(incumbentKeys()[0], { ETHUSDT: -4, SOLUSDT: -2 }),
+    ])
+    expect(f.severity).toBe('blocker')
+    expect(f.verdict).toBe('asset-bound')
+  })
+
+  it('cautions on a mixed result (failed cells ignored for the ratio)', () => {
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [
+      settestFor(incumbentKeys()[0], { ETHUSDT: 3, SOLUSDT: -2, XRPUSDT: null }),
+    ])
+    expect(f.severity).toBe('caution')
+    expect(f.verdict).toBe('partial')
+  })
+
+  it('diagnose folds the check in when settests are supplied', () => {
+    const out = Diagnostics.diagnose({ manifest: BLACKSWAN_MANIFEST, runs: runs(), settests: [] })
+    expect(out.findings.some((f: any) => f.category === 'cross-asset')).toBe(true)
+  })
+})

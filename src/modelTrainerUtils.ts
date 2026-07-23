@@ -13,6 +13,8 @@ import type {
   ModelCategory,
   ModelDeviceBenchmark,
   DataCatalogAssetClass,
+  DataCatalogLinkageEdge,
+  DataSourceCandidate,
   MinedInstrumentResult,
   ModelFlavor,
   PaperCandidate,
@@ -200,6 +202,16 @@ export function parseDataCatalog(summary: unknown): DataCatalogAssetClass[] {
     throw new Error('dataCatalog command produced no assetClasses')
   }
   return classes as DataCatalogAssetClass[]
+}
+
+/**
+ * Coerce the asset-linkage edges from a `dataCatalog` command's `{summaryOut}` JSON
+ * (`{ linkage: { edges: [...] } }`). Defaults to an empty array — a project without a linkage graph is
+ * fine (the Data tab just shows no "related data" chips), never an error.
+ */
+export function parseDataLinkage(summary: unknown): DataCatalogLinkageEdge[] {
+  const edges = (summary as { linkage?: { edges?: unknown } } | undefined)?.linkage?.edges
+  return Array.isArray(edges) ? (edges as DataCatalogLinkageEdge[]) : []
 }
 
 /**
@@ -1939,6 +1951,111 @@ export function coercePaperDraft(raw: unknown): Partial<TrainingPaperRecord> | u
  * lever's choices) — then steer the search toward scholarly sources. Missing pieces are omitted so no
  * dangling label or `undefined` leaks into the query.
  */
+/**
+ * The lever values still to cross-test a checkpoint on: given the trained value, the requested set
+ * (`'all'`/undefined → the whole lever universe, else an explicit list filtered to the universe), and the
+ * already-tested values, return the MISSING values (universe order, deduped, minus trained + tested) plus
+ * any requested values not in the lever's choices (`unknown`).
+ */
+export function missingCrossTestValues(
+  trainedValue: string,
+  requested: string[] | 'all' | undefined,
+  tested: string[],
+  universe: string[],
+): { missing: string[]; unknown: string[] } {
+  const universeSet = new Set(universe)
+  const testedSet = new Set(tested)
+  let pool: string[]
+  let unknown: string[] = []
+  if (!requested || requested === 'all') {
+    pool = universe
+  } else {
+    pool = requested.filter((v) => universeSet.has(v))
+    unknown = requested.filter((v) => !universeSet.has(v))
+  }
+  const seen = new Set<string>()
+  const missing: string[] = []
+  for (const value of pool) {
+    if (value === trainedValue || testedSet.has(value) || seen.has(value)) continue
+    seen.add(value)
+    missing.push(value)
+  }
+  return { missing, unknown }
+}
+
+/** A stable record key for a discovered data source (lowercase, dash-separated, bounded). */
+export function slugifyDataSource(name: string): string {
+  const slug = String(name ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+  return slug || 'source'
+}
+
+/**
+ * Compose a guided-data-discovery research query from the manifest + the user's problem statement + an
+ * optional goal — steering the deep-research engine to find DATASETS (not papers) that could improve the
+ * model.
+ */
+export function buildDataDiscoveryGoal(
+  manifest: TrainerManifest,
+  problemStatement: string,
+  goal?: string,
+): string {
+  const parts: string[] = []
+  const desc = typeof manifest.description === 'string' ? manifest.description.trim() : ''
+  parts.push(desc ? `${manifest.name}: ${desc}` : manifest.name)
+  parts.push(`Objective: ${manifest.objective.name} (${manifest.objective.direction} is better).`)
+  const problem = problemStatement?.trim()
+  if (problem) parts.push(`Problem: ${problem}`)
+  const narrower = goal?.trim()
+  if (narrower) parts.push(`Goal: ${narrower}`)
+  parts.push(
+    'Find concrete DATASETS / data sources that could improve this model — for each: what it is, the ' +
+      'source/API, coverage + granularity, cost, licence, and how to acquire it.',
+  )
+  return parts.join(' ')
+}
+
+/**
+ * Coerce the deep-research extraction's raw items into typed {@link DataSourceCandidate}s, accepting a few
+ * alternate field names (dataset/provider/license) and deduping by name (case-insensitive). Items without
+ * a name are dropped — a proposal must be nameable.
+ */
+export function coerceDataSourceCandidates(raw: unknown[]): DataSourceCandidate[] {
+  const trimmed = (value: unknown): string | undefined => {
+    const s = typeof value === 'string' ? value.trim() : ''
+    return s.length ? s : undefined
+  }
+  const out: DataSourceCandidate[] = []
+  const seen = new Set<string>()
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!item || typeof item !== 'object') continue
+    const r = item as Record<string, unknown>
+    const name = trimmed(r.name) ?? trimmed(r.dataset) ?? trimmed(r.title)
+    if (!name) continue
+    const key = name.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    const candidate: DataSourceCandidate = {
+      name,
+      description: trimmed(r.description) ?? '',
+      source: trimmed(r.source) ?? trimmed(r.provider) ?? '',
+    }
+    const coverage = trimmed(r.coverage)
+    if (coverage) candidate.coverage = coverage
+    const cost = trimmed(r.cost)
+    if (cost) candidate.cost = cost
+    const licence = trimmed(r.licence) ?? trimmed(r.license)
+    if (licence) candidate.licence = licence
+    const mineHint = trimmed(r.mineHint) ?? trimmed(r.howToMine)
+    if (mineHint) candidate.mineHint = mineHint
+    out.push(candidate)
+  }
+  return out
+}
+
 export function buildPaperResearchGoal(
   manifest: TrainerManifest,
   opts?: { notes?: string },

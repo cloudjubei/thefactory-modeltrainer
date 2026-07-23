@@ -20,7 +20,12 @@ import {
   resolveModelDeviceForConfig,
   parseDeviceBenchmark,
   parseDataCatalog,
+  parseDataLinkage,
   parseMineResult,
+  buildDataDiscoveryGoal,
+  coerceDataSourceCandidates,
+  slugifyDataSource,
+  missingCrossTestValues,
   THREAD_ENV_VARS,
   isRunAffectedByFidelityDesync,
   isSpecAffectedByFidelityDesync,
@@ -489,6 +494,123 @@ describe('parseDataCatalog', () => {
     expect(() => parseDataCatalog({})).toThrow(/assetClasses/)
     expect(() => parseDataCatalog(undefined)).toThrow(/assetClasses/)
     expect(() => parseDataCatalog({ assetClasses: 'nope' })).toThrow(/assetClasses/)
+  })
+})
+
+describe('buildDataDiscoveryGoal', () => {
+  const m = {
+    name: 'BlackSwan',
+    description: 'a crypto trader',
+    objective: { name: 'return', direction: 'max' },
+    levers: {},
+  } as unknown as TrainerManifest
+
+  it('composes the manifest, problem, and goal into a research query about datasets', () => {
+    const q = buildDataDiscoveryGoal(m, 'price is too noisy', 'add macro context')
+    expect(q).toContain('BlackSwan')
+    expect(q).toContain('price is too noisy')
+    expect(q).toContain('add macro context')
+    expect(q.toLowerCase()).toContain('dataset')
+  })
+
+  it('works with no goal', () => {
+    expect(buildDataDiscoveryGoal(m, 'just the problem')).toContain('just the problem')
+  })
+})
+
+describe('coerceDataSourceCandidates', () => {
+  it('coerces fields and dedupes by name (case-insensitive)', () => {
+    const out = coerceDataSourceCandidates([
+      { name: 'FRED macro', source: 'FRED', coverage: '1950-', cost: 'free', licence: 'attribution', description: 'macro' },
+      { name: 'fred macro', source: 'FRED' },
+      { nope: 1 },
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({
+      name: 'FRED macro',
+      source: 'FRED',
+      coverage: '1950-',
+      cost: 'free',
+      licence: 'attribution',
+    })
+  })
+
+  it('accepts alternate field names and a non-array input', () => {
+    expect(coerceDataSourceCandidates('nope' as unknown as unknown[])).toEqual([])
+    const out = coerceDataSourceCandidates([{ dataset: 'X', provider: 'P', license: 'MIT' }])
+    expect(out[0]).toMatchObject({ name: 'X', source: 'P', licence: 'MIT' })
+  })
+
+  it('drops items with no name', () => {
+    expect(coerceDataSourceCandidates([{ source: 'S' }, { description: 'd' }])).toEqual([])
+  })
+})
+
+describe('missingCrossTestValues', () => {
+  const universe = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT']
+
+  it('all = the lever universe minus the trained value and already-tested', () => {
+    const { missing, unknown } = missingCrossTestValues('BTCUSDT', 'all', ['ETHUSDT'], universe)
+    expect(missing).toEqual(['SOLUSDT', 'XRPUSDT'])
+    expect(unknown).toEqual([])
+  })
+
+  it('undefined requested behaves like "all"', () => {
+    expect(missingCrossTestValues('BTCUSDT', undefined, [], universe).missing).toEqual([
+      'ETHUSDT',
+      'SOLUSDT',
+      'XRPUSDT',
+    ])
+  })
+
+  it('an explicit list is filtered to the universe, minus trained + tested', () => {
+    const { missing, unknown } = missingCrossTestValues(
+      'BTCUSDT',
+      ['ETHUSDT', 'SOLUSDT', 'NOPE'],
+      ['SOLUSDT'],
+      universe,
+    )
+    expect(missing).toEqual(['ETHUSDT'])
+    expect(unknown).toEqual(['NOPE'])
+  })
+
+  it('excludes the trained value even if explicitly requested', () => {
+    expect(missingCrossTestValues('BTCUSDT', ['BTCUSDT', 'ETHUSDT'], [], universe).missing).toEqual([
+      'ETHUSDT',
+    ])
+  })
+
+  it('dedupes and returns empty when everything is already tested', () => {
+    expect(
+      missingCrossTestValues('BTCUSDT', 'all', ['ETHUSDT', 'SOLUSDT', 'XRPUSDT'], universe).missing,
+    ).toEqual([])
+  })
+})
+
+describe('slugifyDataSource', () => {
+  it('lowercases + dash-separates', () => {
+    expect(slugifyDataSource('FRED Macro (US)')).toBe('fred-macro-us')
+  })
+  it('falls back to "source" for an empty name', () => {
+    expect(slugifyDataSource('')).toBe('source')
+    expect(slugifyDataSource('  ')).toBe('source')
+  })
+})
+
+describe('parseDataLinkage', () => {
+  it('returns the linkage edges from a catalog summary', () => {
+    const edges = parseDataLinkage({
+      linkage: { edges: [{ asset: 'JPM', proxy: 'T10Y2Y', edgeType: 'curve-slope' }] },
+    })
+    expect(edges).toHaveLength(1)
+    expect(edges[0].asset).toBe('JPM')
+  })
+
+  it('defaults to an empty array when linkage is missing or malformed', () => {
+    expect(parseDataLinkage({})).toEqual([])
+    expect(parseDataLinkage(undefined)).toEqual([])
+    expect(parseDataLinkage({ linkage: {} })).toEqual([])
+    expect(parseDataLinkage({ linkage: { edges: 'nope' } })).toEqual([])
   })
 })
 

@@ -95,11 +95,41 @@ describe('classCounts', () => {
 })
 
 describe('mine request builders', () => {
-  it('builds a per-instrument request from the symbol', () => {
-    expect(D.mineRequestForInstrument({ symbol: 'GOLD' })).toEqual({ symbols: ['GOLD'] })
+  it('builds a per-instrument request scoped to its class', () => {
+    expect(D.mineRequestForInstrument({ symbol: 'GOLD', assetClass: 'commodities' })).toEqual({
+      symbols: ['GOLD'],
+      class: 'commodities',
+    })
+    // Fundamentals reuse a stock ticker — the class must scope it.
+    expect(D.mineRequestForInstrument({ symbol: 'AAPL', assetClass: 'fundamentals' })).toEqual({
+      symbols: ['AAPL'],
+      class: 'fundamentals',
+    })
   })
 
   it('builds a per-class request from the class id', () => {
     expect(D.mineRequestForClass({ id: 'fx' })).toEqual({ class: 'fx' })
+  })
+})
+
+describe('linkageForAsset', () => {
+  const edges = [
+    { asset: 'JPM', assetClass: 'stocks', proxy: 'T10Y2Y', edgeType: 'curve-slope' },
+    { asset: 'USDCAD', assetClass: 'fx', proxy: 'WTI', edgeType: 'terms-of-trade' },
+    { asset: 'AAPL', assetClass: 'fundamentals', proxy: 'X', edgeType: 't' },
+  ]
+
+  it('returns the edges from an asset', () => {
+    expect(D.linkageForAsset(edges, 'JPM')).toEqual([edges[0]])
+  })
+
+  it('scopes by asset class', () => {
+    expect(D.linkageForAsset(edges, 'AAPL', 'stocks')).toEqual([])
+    expect(D.linkageForAsset(edges, 'AAPL', 'fundamentals')).toEqual([edges[2]])
+  })
+
+  it('handles missing edges', () => {
+    expect(D.linkageForAsset(undefined, 'JPM')).toEqual([])
+    expect(D.linkageForAsset(edges, 'NONE')).toEqual([])
   })
 })
