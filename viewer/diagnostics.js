@@ -126,6 +126,37 @@
     for (const k of Object.keys(config || {})) if (!keys.includes(k)) c[k] = config[k]
     return c
   }
+  // Exact config key INCLUDING seed — identifies a specific run. Used to drop already-run configs from a
+  // recommended campaign so a launch never re-proposes work already on record ("nothing runs, nothing changes").
+  function configKeyExact(config) {
+    return JSON.stringify(
+      Object.keys(config || {})
+        .sort()
+        .map((k) => [k, String(config[k])]),
+    )
+  }
+  const _archiveCache = new WeakMap()
+  function archiveKeySet(runs) {
+    const arr = runs || []
+    const hit = _archiveCache.get(arr)
+    if (hit) return hit
+    const s = new Set()
+    for (const r of arr) s.add(configKeyExact(r.config || {}))
+    _archiveCache.set(arr, s)
+    return s
+  }
+  // Keep only configs not already in the archive AND not duplicated within the batch.
+  function freshConfigs(configs, seen) {
+    const out = []
+    const batch = new Set()
+    for (const c of configs) {
+      const k = configKeyExact(c.config)
+      if (seen.has(k) || batch.has(k)) continue
+      batch.add(k)
+      out.push(c)
+    }
+    return out
+  }
   const finding = (code, category, severity, verdict, headline, evidence, action) => ({
     code,
     category,
@@ -193,7 +224,27 @@
     }
     return false
   }
+  // partitionCohort + foldSetups are the O(n) hot path (foldSetups JSON-stringifies every run's config) and are
+  // called 8+ times over the SAME array per render (each check + the composer + the campaign generators). On a
+  // 22k-run project that was ~3s of repeated work that froze the tab. Memoize per (array identity, key-signature)
+  // so a whole render partitions the corpus ONCE; a fresh query gives a new array → the WeakMap entry is GC'd.
+  const _foldCache = new WeakMap()
+  const _partCache = new WeakMap()
   function foldSetups(valid, exclude) {
+    const arr = valid || []
+    let per = _foldCache.get(arr)
+    if (!per) {
+      per = new Map()
+      _foldCache.set(arr, per)
+    }
+    const sig = (exclude || []).join(',')
+    const hit = per.get(sig)
+    if (hit) return hit
+    const res = foldSetupsRaw(arr, exclude)
+    per.set(sig, res)
+    return res
+  }
+  function foldSetupsRaw(valid, exclude) {
     const groups = new Map()
     for (const r of valid) {
       const k = stableStr(withoutKeys(r.config || {}, exclude))
@@ -209,6 +260,20 @@
     return out
   }
   function partitionCohort(records, spec) {
+    const all = records || []
+    let per = _partCache.get(all)
+    if (!per) {
+      per = new Map()
+      _partCache.set(all, per)
+    }
+    const sig = spec.objectiveName + '|' + spec.direction + '|' + spec.minSeeds + '|' + JSON.stringify(spec.degenerateWhen || [])
+    const hit = per.get(sig)
+    if (hit) return hit
+    const res = partitionCohortRaw(all, spec)
+    per.set(sig, res)
+    return res
+  }
+  function partitionCohortRaw(records, spec) {
     const all = records || []
     let failed = 0
     let degenerate = 0
@@ -712,7 +777,8 @@
         seed++
       }
     }
-    return configs.length ? [{ configs }] : []
+    const fresh = freshConfigs(configs, archiveKeySet(opts.runs))
+    return fresh.length ? [{ configs: fresh }] : []
   }
   // replicate the shortlist across every split value — ONE campaign per split (efficient: shared data bundle).
   function replicateSpecs(opts) {
@@ -736,6 +802,7 @@
       seen.add(k)
       splitVals.push(splitValObj(r, spec.splitLevers))
     }
+    const archived = archiveKeySet(opts.runs)
     const specs = []
     for (const sv of splitVals) {
       const configs = []
@@ -743,7 +810,8 @@
         const baseCfg = withoutKeys(base.config, exclude)
         for (const seed of seeds) configs.push({ config: Object.assign({}, baseCfg, sv, { seed }) })
       }
-      if (configs.length) specs.push({ configs })
+      const fresh = freshConfigs(configs, archived)
+      if (fresh.length) specs.push({ configs: fresh })
     }
     return specs
   }
@@ -779,7 +847,18 @@
     .diag .d-btn:hover{border-color:var(--d-muted)} .diag .d-btn:disabled{opacity:.5;cursor:default}
     .diag .d-btn small{display:block;font-weight:400;color:var(--d-faint);font-size:11px;margin-top:1px}
     .diag .d-sec{font-family:var(--d-mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--d-faint);margin:8px 0 10px;border-bottom:1px solid var(--d-line);padding-bottom:6px}
-    .diag .d-empty{color:var(--d-faint);padding:24px 0}`
+    .diag .d-empty{color:var(--d-faint);padding:24px 0}
+    .diag .d-verdict .d-btn{margin-top:12px}
+    .diag .d-plan{list-style:none;margin:0 0 22px;padding:0;display:flex;flex-direction:column;gap:10px}
+    .diag .d-step{background:var(--d-panel);border:1px solid var(--d-line);border-left:3px solid var(--d-warn);border-radius:10px;padding:13px 15px}
+    .diag .d-step.done{border-left-color:var(--d-ok);opacity:.75}
+    .diag .d-step.strategic{border-left-color:var(--d-info);background:var(--d-infobg)}
+    .diag .d-step-h{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+    .diag .d-stepn{font-family:var(--d-mono);font-size:12px;font-weight:700;color:var(--d-faint);min-width:16px}
+    .diag .d-step-t{font-size:13.5px;font-weight:600;flex:1}
+    .diag .d-step-a{margin-top:9px}
+    .diag .d-done{font-size:13px;color:var(--d-ok);font-weight:600}
+    .diag .d-note{font-size:12.5px;color:var(--d-muted);line-height:1.5;margin:0 0 8px}`
     const el = document.createElement('style')
     el.textContent = css
     document.head.appendChild(el)
@@ -793,61 +872,169 @@
     confounded: ['warn', 'Confounded objective'],
     stalled: ['warn', 'Stalled'],
   }
-  function render(container, data, actions) {
-    injectStyles()
-    const d = diagnose(data)
+  // Turn the diagnosis into an ORDERED, self-guided PLAN. Each actionable finding (blocker/caution) becomes a
+  // step whose launchable action reports how many GENUINELY-NEW runs it would add (deduped against the archive) —
+  // a step whose action adds 0 new runs is marked DONE, so the plan never re-recommends work already on record and
+  // naturally advances toward the strategic "discuss with the AI" step once the mechanical steps are exhausted.
+  function planSteps(d, campaigns) {
+    const reseedN = campaigns.reseed.reduce((n, s) => n + s.configs.length, 0)
+    const replN = campaigns.replicate.reduce((n, s) => n + s.configs.length, 0)
+    const replCamps = campaigns.replicate.length
+    const splitLabel = (d.splitAxis || []).join('+') || 'split'
+    const steps = []
+    for (const f of d.findings) {
+      if (f.severity === 'ok' || f.severity === 'info') continue
+      const step = { severity: f.severity, category: f.category, title: f.headline, evidence: f.evidence, action: { kind: 'discuss' }, newRuns: 0, done: false }
+      if (
+        (f.category === 'objective-discriminability' && (f.verdict === 'under-seeded' || f.verdict === 'noisy-objective')) ||
+        (f.category === 'incumbent-separation' && f.verdict === 'no-clear-winner')
+      ) {
+        step.action = { kind: 'reseed', label: `Reseed the promising setups · ${reseedN} new run${reseedN === 1 ? '' : 's'}` }
+        step.newRuns = reseedN
+        step.done = reseedN === 0
+        step.doneText = `Every promising setup is already seeded ≥${MIN_SEEDS}.`
+      } else if (f.category === 'split-consistency' && (f.verdict === 'single-split-luck' || f.verdict === 'not-replicated')) {
+        step.action = { kind: 'replicate', label: `Replicate the shortlist across every ${splitLabel} · ${replN} new run${replN === 1 ? '' : 's'} (${replCamps} campaign${replCamps === 1 ? '' : 's'})` }
+        step.newRuns = replN
+        step.done = replN === 0
+        step.doneText = `The shortlist is already run across every ${splitLabel} — since it still doesn't generalize, this is now a strategic question, not a coverage gap.`
+      } else if (f.category === 'budget-coverage' && f.verdict === 'constant-levers') {
+        step.action = { kind: 'open-levers', label: 'Open the unexplored levers' }
+      } else if (f.category === 'null-ceiling' && f.verdict === 'no-signal') {
+        step.action = { kind: 'discuss', label: 'Rethink the model / features / data with the AI' }
+      } else if (f.category === 'objective-confound' && f.verdict === 'confounded') {
+        step.action = { kind: 'discuss', label: 'Fix the objective with the AI' }
+      } else if (f.category === 'cohort-integrity') {
+        step.action = { kind: 'discuss', label: 'Steer the search away from degenerate configs' }
+      }
+      steps.push(step)
+    }
+    return steps
+  }
+
+  // Pure, worker-safe compute: run the diagnosis + campaign generation + plan, and return a SLIM result (cohort
+  // as counts, not the 20k run-object arrays) so it is cheap to structured-clone across a Web Worker boundary.
+  // No DOM/globals here — the heavy work (partition/fold/campaigns) runs off the main thread; `paint` builds the
+  // DOM from this result. `render` (analyze+paint) stays the synchronous entry for tests + a non-worker fallback.
+  function analyze(data) {
+    const dFull = diagnose(data)
     const runs = (data && data.runs) || []
-    const spec = d.spec
+    const spec = dFull.spec
+    const campaigns = {
+      reseed: reseedSpecs({ runs, manifest: data.manifest, spec, topN: 12, targetSeeds: MIN_SEEDS }),
+      replicate: replicateSpecs({ runs, manifest: data.manifest, spec, topN: 10 }),
+    }
+    const steps = planSteps(dFull, campaigns)
+    const d = {
+      verdict: dFull.verdict,
+      headline: dFull.headline,
+      splitAxis: dFull.splitAxis,
+      spec: { objectiveName: spec.objectiveName, direction: spec.direction, splitLevers: spec.splitLevers, minSeeds: spec.minSeeds },
+      cohort: dFull.cohort
+        ? {
+            total: dFull.cohort.total,
+            completed: dFull.cohort.completed,
+            failed: dFull.cohort.failed,
+            degenerate: dFull.cohort.degenerate,
+            invalid: dFull.cohort.invalid,
+            validCount: dFull.cohort.valid.length,
+            decisionGradeN: dFull.cohort.decisionGradeN,
+          }
+        : null,
+      incumbent: dFull.incumbent,
+      findings: dFull.findings,
+    }
+    return { d, campaigns, steps }
+  }
+
+  function render(container, data, actions) {
+    paint(container, analyze(data), data, actions)
+  }
+
+  // An instant, styled placeholder painted BEFORE the corpus loads / the analysis runs, so the tab is never a
+  // frozen blank on a big project. `#diag-progress` is updated with scan/analyze progress by the host.
+  function shell(container, message) {
+    injectStyles()
+    container.innerHTML = `<div class="diag">
+      <div class="d-verdict warn">
+        <div class="d-vtag">Diagnosis</div>
+        <div class="d-vtitle">Analyzing the run corpus…</div>
+        <div id="diag-progress" class="d-next">${esc(message || 'Loading runs…')}</div>
+      </div>
+      <div class="d-sec">Your plan — work through these in order</div>
+      <div class="d-empty">The plan appears here once the runs are analyzed. This runs off the main thread, so the rest of the app stays responsive.</div>
+    </div>`
+  }
+
+  function paint(container, analysis, data, actions) {
+    injectStyles()
+    const d = analysis.d
+    const campaigns = analysis.campaigns
+    const steps = analysis.steps
+    const canDiscuss = !!(actions && actions.canDiscuss)
     const vs = VERDICT_STYLE[d.verdict] || ['warn', d.verdict]
-    const reseed = reseedSpecs({ runs, manifest: data.manifest, spec, topN: 12, targetSeeds: MIN_SEEDS })
-    const replicate = replicateSpecs({ runs, manifest: data.manifest, spec, topN: 10 })
-    const reseedN = reseed.reduce((n, s) => n + s.configs.length, 0)
-    const replN = replicate.reduce((n, s) => n + s.configs.length, 0)
 
     const stat = (v, l) => `<div class="d-stat"><div class="v">${esc(v)}</div><div class="l">${esc(l)}</div></div>`
     const stats = d.cohort
       ? `<div class="d-stats">
           ${stat(d.cohort.total, 'runs on record')}
-          ${stat(d.cohort.valid.length, 'decision-grade')}
+          ${stat(d.cohort.validCount, 'decision-grade')}
           ${stat(d.cohort.decisionGradeN, `setups seeded ≥${MIN_SEEDS}`)}
           ${stat(d.incumbent ? fmt(d.incumbent.iqm, 2) : '—', 'incumbent (IQM)')}
         </div>`
       : ''
+    const evHtml = (evidence) =>
+      (evidence || [])
+        .map((e) => `${esc(e.stat)}: <b>${esc(e.value != null ? e.value : e.ci ? '[' + e.ci.join(', ') + ']' : '')}</b>${e.ci && e.value != null ? ' [' + e.ci.join(', ') + ']' : ''}${e.threshold != null ? ' vs ' + esc(e.threshold) : ''}`)
+        .join(' · ')
 
-    const cards = d.findings
-      .map((f) => {
-        const ev = f.evidence
-          .map((e) => `${esc(e.stat)}: <b>${esc(e.value != null ? e.value : e.ci ? '[' + e.ci.join(', ') + ']' : '')}</b>${e.ci && e.value != null ? ' [' + e.ci.join(', ') + ']' : ''}${e.threshold != null ? ' vs ' + esc(e.threshold) : ''}`)
-          .join(' · ')
-        return `<div class="d-card">
-          <div class="d-top"><span class="d-sev ${esc(f.severity)}">${esc(f.severity)}</span><span class="d-cat">${esc(catLabel(f.category))}</span></div>
-          <p>${esc(f.headline)}</p>
-          ${ev ? `<div class="d-ev">${ev}</div>` : ''}
-        </div>`
-      })
+    const discussBtn = (label) => (canDiscuss ? `<button class="d-btn" data-diag-act="discuss">${esc(label)}</button>` : '')
+    const stepAction = (s) => {
+      if (s.done) return `<div class="d-done">✓ ${esc(s.doneText || 'Already done — no new runs to add.')}</div>`
+      if (s.action.kind === 'reseed' || s.action.kind === 'replicate')
+        return `<button class="d-btn" data-diag-act="${s.action.kind}">${esc(s.action.label)}</button>`
+      if (s.action.kind === 'open-levers')
+        return `<div class="d-note">Add values for the constant levers on the <b>Launch</b> tab (or a sweep), or ask the AI to propose them.</div>${discussBtn('Ask the AI which values to try')}`
+      return discussBtn(s.action.label || 'Discuss with the AI') || `<div class="d-note">Open this project in the Overseer chat to discuss.</div>`
+    }
+    const stepLi = (s, i) => `<li class="d-step ${s.done ? 'done' : ''}">
+        <div class="d-step-h"><span class="d-stepn">${i + 1}</span><span class="d-sev ${esc(s.severity)}">${esc(s.severity)}</span><span class="d-step-t">${esc(s.title)}</span></div>
+        ${evHtml(s.evidence) ? `<div class="d-ev">${evHtml(s.evidence)}</div>` : ''}
+        <div class="d-step-a">${stepAction(s)}</div>
+      </li>`
+
+    const strategicLi = `<li class="d-step strategic">
+        <div class="d-step-h"><span class="d-stepn">${steps.length + 1}</span><span class="d-sev info">then</span><span class="d-step-t">Still no strong candidate after the steps above?</span></div>
+        <p class="d-note">Work out the next move — different data, features, objective, or a strategic pivot — with the AI. It can read your runs (getTrainerState / getRunData / getRunXAI) and hand back concrete experiments.</p>
+        <div class="d-step-a">${discussBtn('💬 Discuss the strategic next move with the AI') || '<div class="d-note">Open this project in the Overseer chat to discuss.</div>'}</div>
+      </li>`
+
+    const passed = d.findings.filter((f) => f.severity === 'ok' || f.severity === 'info')
+    const passedCards = passed
+      .map((f) => `<div class="d-card"><div class="d-top"><span class="d-sev ${esc(f.severity)}">${esc(f.severity)}</span><span class="d-cat">${esc(catLabel(f.category))}</span></div><p>${esc(f.headline)}</p></div>`)
       .join('')
-
-    const actionsHtml = `<div class="d-actions">
-      ${reseedN ? `<button class="d-btn" data-diag-act="reseed">Reseed top setups<small>${reseedN} runs · lift the promising setups to ≥${MIN_SEEDS} seeds</small></button>` : ''}
-      ${replN ? `<button class="d-btn" data-diag-act="replicate">Replicate shortlist across splits<small>${replicate.length} campaign${replicate.length === 1 ? '' : 's'} · ${replN} runs · one per ${esc(spec.splitLevers.join('+') || 'split')}</small></button>` : ''}
-    </div>`
 
     container.innerHTML = `<div class="diag">
       <div class="d-verdict ${vs[0]}">
         <div class="d-vtag">Diagnosis · ${esc(vs[1])}</div>
         <div class="d-vtitle">${esc(d.headline.stalledBecause || d.headline.doNext)}</div>
         ${d.headline.stalledBecause ? `<p class="d-next">Do next: ${esc(d.headline.doNext)}</p>` : ''}
+        ${discussBtn('💬 Discuss this diagnosis with the AI')}
       </div>
       ${stats}
-      ${reseedN || replN ? `<div class="d-sec">Suggested campaigns</div>${actionsHtml}` : ''}
-      <div class="d-sec">Findings</div>
-      ${cards ? `<div class="d-cards">${cards}</div>` : '<div class="d-empty">No findings.</div>'}
+      <div class="d-sec">Your plan — work through these in order</div>
+      <ol class="d-plan">${steps.map(stepLi).join('')}${strategicLi}</ol>
+      ${passedCards ? `<div class="d-sec">Checks that passed</div><div class="d-cards">${passedCards}</div>` : ''}
     </div>`
 
     container.querySelectorAll('[data-diag-act]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const kind = btn.getAttribute('data-diag-act')
-        const specs = kind === 'reseed' ? reseed : replicate
+        if (kind === 'discuss') {
+          if (actions && actions.onDiscuss) actions.onDiscuss(d)
+          return
+        }
+        const specs = kind === 'reseed' ? campaigns.reseed : campaigns.replicate
         const label = kind === 'reseed' ? 'Diagnose · reseed top setups' : 'Diagnose · replicate shortlist'
         btn.disabled = true
         if (actions && actions.onLaunchCampaigns) await actions.onLaunchCampaigns(specs, label, kind)
@@ -868,6 +1055,9 @@
 
   const Diagnostics = {
     render,
+    analyze,
+    paint,
+    shell,
     diagnose,
     resolveSpec,
     partitionCohort,
@@ -879,6 +1069,7 @@
     checkBudgetCoverage,
     checkObjectiveConfound,
     checkCrossAssetRobustness,
+    planSteps,
     reseedSpecs,
     replicateSpecs,
   }

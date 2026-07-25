@@ -233,6 +233,56 @@ describe('replicateSpecs', () => {
   })
 })
 
+describe('analyze + paint (worker split)', () => {
+  it('analyze returns a slim, clone-safe result (cohort as counts, no run arrays) matching diagnose', () => {
+    const data = { runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST }
+    const a = Diagnostics.analyze(data)
+    const d = Diagnostics.diagnose(data)
+    expect(a.d.verdict).toBe(d.verdict)
+    expect(a.d.cohort.validCount).toBe(d.cohort.valid.length)
+    expect(a.d.cohort.valid).toBeUndefined() // the 20k run-object arrays must NOT cross the worker boundary
+    expect(Array.isArray(a.d.findings)).toBe(true)
+    expect(a.campaigns).toHaveProperty('reseed')
+    expect(a.campaigns).toHaveProperty('replicate')
+    expect(Array.isArray(a.steps)).toBe(true)
+    expect(() => JSON.stringify(a)).not.toThrow() // structured-clone-safe
+  })
+
+  it('paint builds the plan DOM from a slim analysis without touching removed run arrays', () => {
+    const data = { runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST }
+    const a = Diagnostics.analyze(data)
+    const container: any = { innerHTML: '', querySelectorAll: () => [] }
+    expect(() => Diagnostics.paint(container, a, data, { canDiscuss: false })).not.toThrow()
+    expect(container.innerHTML).toContain('Your plan')
+  })
+})
+
+describe('planSteps', () => {
+  it('maps an actionable finding to a launchable step carrying its NEW-run count', () => {
+    const d = Diagnostics.diagnose({ runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST })
+    const steps = Diagnostics.planSteps(d, { reseed: [], replicate: [{ configs: [{ config: { a: 1 } }, { config: { a: 2 } }] }] })
+    const split = steps.find((s: any) => s.category === 'split-consistency')
+    expect(split).toBeTruthy()
+    expect(split.action.kind).toBe('replicate')
+    expect(split.newRuns).toBe(2)
+    expect(split.done).toBe(false)
+  })
+
+  it('marks a launchable step DONE when its action adds 0 new runs (already on record — no re-recommending)', () => {
+    const d = Diagnostics.diagnose({ runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST })
+    const steps = Diagnostics.planSteps(d, { reseed: [], replicate: [] })
+    const split = steps.find((s: any) => s.category === 'split-consistency')
+    expect(split.done).toBe(true)
+    expect(split.newRuns).toBe(0)
+  })
+
+  it('excludes ok/info findings from the plan (they are not action items)', () => {
+    const d = Diagnostics.diagnose({ runs: cartpoleConverged(), manifest: CARTPOLE_MANIFEST })
+    const steps = Diagnostics.planSteps(d, { reseed: [], replicate: [] })
+    expect(steps.every((s: any) => s.severity === 'blocker' || s.severity === 'caution')).toBe(true)
+  })
+})
+
 describe('checkCrossAssetRobustness', () => {
   const settestFor = (runKey: string, cells: Record<string, number | null>) => ({
     runKey,

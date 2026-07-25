@@ -916,6 +916,38 @@ async function queryAllRunRecords(onProgress, where) {
       ),
   })
 }
+
+// The Exploration + Diagnosis tabs each read the FULL run corpus (20k+ records → ~45 paged bridge round-trips).
+// Paging that on EVERY render — and their polls re-render whenever a run lands, i.e. constantly while a campaign
+// is producing runs — re-scanned the whole archive every couple of seconds and, with the backend busy writing
+// runs, never finished → the "Analyzing…" spinner stuck forever. Cache the paged corpus briefly and DEDUPE
+// concurrent scans, so frequent re-renders reuse one snapshot; a launch / global Refresh / project switch clears
+// it for immediate freshness, and the short TTL bounds staleness otherwise.
+const RAW_CORPUS_TTL_MS = 12000
+let _rawCorpus = { records: null, at: 0, rt: null, inflight: null }
+function invalidateRawCorpus() {
+  _rawCorpus = { records: null, at: 0, rt: null, inflight: null }
+}
+// A global Refresh already paged the whole corpus — hand it to the Diagnosis/Exploration cache so they render
+// instantly from it instead of re-paging 20k records again.
+function seedRawCorpus(records) {
+  if (records && manifest) _rawCorpus = { records, at: Date.now(), rt: manifest.recordType, inflight: null }
+}
+async function loadRawCorpus(recordType, onProgress) {
+  const now = Date.now()
+  if (_rawCorpus.records && _rawCorpus.rt === recordType && now - _rawCorpus.at < RAW_CORPUS_TTL_MS) return _rawCorpus.records
+  if (_rawCorpus.inflight && _rawCorpus.rt === recordType) return _rawCorpus.inflight
+  const p = queryAllRunRecords(onProgress) // cold scan → progress ticks per page; warm hit above returns instantly
+  _rawCorpus = { records: _rawCorpus.records, at: _rawCorpus.at, rt: recordType, inflight: p }
+  try {
+    const records = await p
+    _rawCorpus = { records, at: Date.now(), rt: recordType, inflight: null }
+    return records
+  } catch (e) {
+    if (_rawCorpus.inflight === p) _rawCorpus.inflight = null
+    throw e
+  }
+}
 async function readRuns() {
   if (!manifest) return []
   const where = buildRunsServerWhere()
@@ -2045,6 +2077,7 @@ function showView(view) {
 function resetDashboardState() {
   explorationRenderedRt = null
   diagnosisRenderedRt = null
+  invalidateRawCorpus()
   runsCache = []
   runExtraCache.clear()
   fullRunKeys.clear()
@@ -15399,6 +15432,7 @@ async function runDerivedRefresh(mode) {
       allRuns = await queryAllRunRecords((n) => setRefreshProgress(`Scanning ${n} runs…`))
     }
     allRunsCache = allRuns
+    seedRawCorpus(allRuns)
     await applyRunDerivedUpdaters(allRuns)
     modelStatsStale = false
     ok = true
@@ -18416,6 +18450,71 @@ const TAB_LOADING_LABEL = {
 // post-load recordType recheck drops a result that arrived after the user switched away (never paint stale).
 let explorationRenderedRt = null
 let diagnosisRenderedRt = null
+// Re-entrancy guards: a heavy render (page the corpus + analyze 20k+ runs) can outlast the poll interval, so a
+// second trigger while one is in flight would pile up and the spinner would never settle. Drop overlapping calls.
+let diagnosisRendering = false
+let explorationRendering = false
+// The Diagnosis analysis (diagnose + campaign generation over 20k+ runs, ~1s of synchronous work) runs in a Web
+// Worker so it never blocks the UI. Epoch token drops a worker reply that lands after a project switch / re-render;
+// a lazily-created shared worker falls back to main-thread compute if Workers are unavailable (CSP/sandbox).
+let diagnosisRenderToken = 0
+let diagWorkerMsgToken = 0
+let _diagWorker = null
+let _diagWorkerBroken = false
+function getDiagWorker() {
+  if (_diagWorkerBroken) return null
+  if (_diagWorker) return _diagWorker
+  try {
+    const bust = '?v=' + Date.now()
+    const w = new Worker('diagnosticsWorker.js' + bust)
+    w.__scriptUrl = 'diagnostics.js' + bust
+    _diagWorker = w
+    return w
+  } catch {
+    _diagWorkerBroken = true
+    return null
+  }
+}
+// Compute the diagnosis off the main thread; resolve to the slim analysis. Falls back to a yielded main-thread
+// compute (still after the shell paints — a brief freeze, never a blank/stuck screen) if the worker can't run.
+function computeDiagnosis(data) {
+  const w = getDiagWorker()
+  if (!w || !window.Diagnostics) return new Promise((resolve) => setTimeout(() => resolve(window.Diagnostics.analyze(data)), 0))
+  return new Promise((resolve) => {
+    const mtok = ++diagWorkerMsgToken
+    let settled = false
+    const finish = (fn) => {
+      if (settled) return
+      settled = true
+      w.removeEventListener('message', onMsg)
+      w.removeEventListener('error', onErr)
+      fn()
+    }
+    const onMsg = (e) => {
+      if (!e.data || e.data.token !== mtok) return
+      if (e.data.ok) finish(() => resolve(e.data.analysis))
+      else finish(() => { _diagWorkerBroken = true; resolve(window.Diagnostics.analyze(data)) })
+    }
+    const onErr = () =>
+      finish(() => {
+        try { w.terminate() } catch { /* noop */ }
+        _diagWorker = null
+        _diagWorkerBroken = true // Workers blocked (CSP/sandbox) — never retry; use the main thread from now on
+        setTimeout(() => resolve(window.Diagnostics.analyze(data)), 0)
+      })
+    w.addEventListener('message', onMsg)
+    w.addEventListener('error', onErr)
+    try {
+      w.postMessage({ scriptUrl: w.__scriptUrl, runs: data.runs, manifest: data.manifest, settests: data.settests, token: mtok })
+    } catch {
+      onErr()
+    }
+  })
+}
+function setDiagProgress(text) {
+  const el = byId('diag-progress')
+  if (el) el.innerHTML = `${spinnerHtml()} ${escapeHtml(text)}`
+}
 function paintTabLoading(tabId) {
   const label = TAB_LOADING_LABEL[tabId]
   const body = label && byId(`${tabId}-body`)
@@ -18526,21 +18625,25 @@ async function renderExploration(fromPoll) {
     return
   }
   const recordType = manifest.recordType
+  // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
+  // heavy re-scans pile up and the spinner never settles. The in-flight render paints the fresh state.
+  if (explorationRendering) return
 
   // Project just switched (tracker null'd in resetDashboardState) or first open: the previous project's heatmap
   // is still in the DOM while this project's (possibly huge) corpus loads. Paint a spinner NOW so we never show
   // another project's exploration. Not on a poll (fromPoll) — that would flash the live view every tick.
   if (explorationRenderedRt !== recordType && !fromPoll) paintTabLoading('exploration')
-
-  // Poll tick: if nothing observable changed since the last render, skip the heavy re-scan + DOM rebuild so the
-  // user's scroll / open dropdown / hover survives. A user-driven render (fromPoll falsy) always proceeds.
-  if (fromPoll && container.querySelector('.expl')) {
-    const sig = await explorationPollSignature(recordType)
-    if (sig !== null && sig === explorationLastSig) {
-      await scheduleExplorationPoll(recordType, undefined, { keepSig: true })
-      return
+  explorationRendering = true
+  try {
+    // Poll tick: if nothing observable changed since the last render, skip the heavy re-scan + DOM rebuild so the
+    // user's scroll / open dropdown / hover survives. A user-driven render (fromPoll falsy) always proceeds.
+    if (fromPoll && container.querySelector('.expl')) {
+      const sig = await explorationPollSignature(recordType)
+      if (sig !== null && sig === explorationLastSig) {
+        await scheduleExplorationPoll(recordType, undefined, { keepSig: true })
+        return
+      }
     }
-  }
 
   // The single per-project exploration map (stable key 'current' — one exploration per project, resumable).
   let state = null
@@ -18566,7 +18669,7 @@ async function renderExploration(fromPoll) {
   // never to paper over a genuinely-empty archive.
   let runs = []
   try {
-    runs = (await queryAllRunRecords())
+    runs = (await loadRawCorpus(recordType))
       .filter((r) => r.summary && r.summary.status === 'completed' && typeof r.summary.objective === 'number')
       .map((r) => ({
         key: r.key,
@@ -18777,6 +18880,7 @@ async function renderExploration(fromPoll) {
       if (res && res.started) {
         showToast(`Launched ${list.length} manual run${list.length === 1 ? '' : 's'} — see Experiments.`)
         invalidateActivitiesCache()
+        invalidateRawCorpus()
         startExplorationDiscovery()
         setTimeout(() => renderExploration(), 600)
       }
@@ -18811,6 +18915,37 @@ async function renderExploration(fromPoll) {
     (pendingChild && ['running', 'starting', 'queued'].includes(pendingChild.status))
   )
   await scheduleExplorationPoll(recordType, active)
+  } catch (e) {
+    // Never leave the spinner stuck; keep a working heatmap on a poll error, else show a legible message.
+    if (container && manifest && manifest.recordType === recordType && !container.querySelector('.expl'))
+      container.textContent = 'Exploration failed to render — try Refresh.'
+  } finally {
+    explorationRendering = false
+  }
+}
+
+// Seed the docked AI chat with the Research Diagnostician verdict + findings, so the user can work out the
+// strategic next move (different data / features / objective / a pivot) with a model that can read the runs via
+// getTrainerState / getRunData / getRunXAI and hand back experiments via recommendTrainingExperiments.
+async function chatAboutDiagnosis(d) {
+  if (!d) return
+  await discussBundle({
+    title: `Diagnosis: ${d.verdict}`,
+    seed: d.headline && d.headline.stalledBecause
+      ? 'The search has stalled per this diagnosis. Given the findings and my run history, what is the single highest-value next move — and if the mechanical steps are exhausted, what STRATEGIC change (data, features, objective, or a pivot) should I consider? Explain why.'
+      : 'Given this diagnosis and my run history, what should I run next to move the objective, and why?',
+    intro:
+      'The user shared the Research Diagnostician verdict for this training project — a DETERMINISTIC read of whether the config-space search has found a strong candidate and, if not, why. The JSON below carries the verdict, the headline (stalledBecause / doNext), cohort-integrity stats, the incumbent, and every finding (category, severity, headline, evidence). These reads are heuristic — flag weak signals honestly. Use getTrainerState / getRunData / getRunXAI to drill into the corpus, and hand back concrete next steps (recommendTrainingExperiments for runnable ones).',
+    bundle: {
+      verdict: d.verdict,
+      headline: d.headline,
+      splitAxis: d.splitAxis,
+      cohort: d.cohort ? { total: d.cohort.total, decisionGrade: d.cohort.validCount, setupsSeeded: d.cohort.decisionGradeN, failedOrDegenerate: d.cohort.failed + d.cohort.degenerate + (d.cohort.invalid || 0) } : null,
+      incumbent: d.incumbent,
+      findings: (d.findings || []).map((f) => ({ category: f.category, severity: f.severity, verdict: f.verdict, headline: f.headline, evidence: f.evidence })),
+    },
+    statusId: null,
+  })
 }
 
 async function renderDiagnosis() {
@@ -18821,30 +18956,45 @@ async function renderDiagnosis() {
     return
   }
   const recordType = manifest.recordType
-  // Project just switched (tracker null'd on switch) or first open: clear the previous project's diagnosis to a
-  // spinner while this project's (possibly huge) corpus loads — never show another project's findings.
-  if (diagnosisRenderedRt !== recordType) paintTabLoading('diagnosis')
-  // Pass the FULL census (every status) so cohort-integrity can report decision-grade N vs raw run count — the
-  // diagnostician partitions failed/degenerate/invalid itself. queryAllRunRecords page-accumulates all records;
-  // fall back to the shared xAI pool only on a real query error (never over an empty archive).
-  let runs = []
+  // Drop a trigger that arrives while a render is already in flight (a poll firing under an unfinished render) —
+  // otherwise heavy renders pile up and the spinner never settles. The in-flight render paints the fresh state.
+  if (diagnosisRendering) return
+  const token = ++diagnosisRenderToken
+  // Project switch / first open: paint an INSTANT styled shell (with a live progress node) — never a frozen blank
+  // — while this project's (possibly huge) corpus loads and the analysis runs off the main thread.
+  if (diagnosisRenderedRt !== recordType) window.Diagnostics.shell(container, 'Loading runs…')
+  diagnosisRendering = true
   try {
-    runs = (await queryAllRunRecords()).map((r) => ({
-      key: r.key,
-      config: (r.summary && r.summary.config) || {},
-      objective: r.summary && r.summary.objective,
-      metrics: r.summary && r.summary.metrics,
-      seed: r.summary && r.summary.seed,
-      status: (r.summary && r.summary.status) || 'completed',
-      health: r.summary && r.summary.health,
-      pipelineVersion: r.summary && r.summary.pipelineVersion,
-    }))
-  } catch {
-    runs = xaiRuns()
-  }
-  // The run query can outlast a project switch — drop a result that arrived after the user moved on.
-  if (!manifest || manifest.recordType !== recordType) return
-  const actions = {
+    // Pass the FULL census (every status) so cohort-integrity can report decision-grade N vs raw run count — the
+    // diagnostician partitions failed/degenerate/invalid itself. loadRawCorpus caches the paged scan briefly so a
+    // poll storm doesn't re-page 20k every tick; fall back to the shared xAI pool only on a real query error.
+    let runs = []
+    try {
+      runs = (
+        await loadRawCorpus(recordType, (n) => {
+          if (token === diagnosisRenderToken) setDiagProgress(`Scanning ${n} runs…`)
+        })
+      ).map((r) => ({
+        key: r.key,
+        config: (r.summary && r.summary.config) || {},
+        objective: r.summary && r.summary.objective,
+        metrics: r.summary && r.summary.metrics,
+        seed: r.summary && r.summary.seed,
+        status: (r.summary && r.summary.status) || 'completed',
+        health: r.summary && r.summary.health,
+        pipelineVersion: r.summary && r.summary.pipelineVersion,
+      }))
+    } catch {
+      runs = xaiRuns()
+    }
+    // The run query can outlast a project switch / re-render — drop a stale result.
+    if (token !== diagnosisRenderToken || !manifest || manifest.recordType !== recordType) return
+    const actions = {
+    // The diagnosis' escalation: hand the whole verdict + findings to the docked AI chat (seeded), so when the
+    // mechanical plan steps are exhausted the user works out the strategic next move with a model that can read
+    // the runs. Gated by the same availability check as every other Discuss button.
+    canDiscuss: chatAboutRunAvailable(),
+    onDiscuss: (d) => chatAboutDiagnosis(d),
     // Launch a SERIES of train campaigns (one per ExperimentSpec) — the reseed batch is one spec, the replication
     // batch is one spec PER split value so each campaign trains a single data bundle. Concurrency comes from the
     // shared Activity "max parallel runs" knob, exactly like manual + explore launches.
@@ -18861,20 +19011,34 @@ async function renderDiagnosis() {
         const runsN = list.reduce((n, s) => n + s.configs.length, 0)
         showToast(`Launched ${launched} campaign${launched === 1 ? '' : 's'} (${runsN} runs) — see Experiments.`)
         invalidateActivitiesCache()
-        setTimeout(() => renderDiagnosis(), 800)
+        invalidateRawCorpus() // the launched runs should show on the next scan
+        setTimeout(() => renderDiagnosis(), 1200)
       }
     },
+    }
+    // Cross-asset evidence: the settest matrices (kept checkpoints replayed on other assets) power the
+    // cross-asset robustness check — cheap OOS proof the incumbent's edge travels, without re-training.
+    let settests = []
+    try {
+      settests = (await queryRecords(recordType + '-settest')).map((r) => r.content).filter(Boolean)
+    } catch {
+      settests = []
+    }
+    if (token !== diagnosisRenderToken || !manifest || manifest.recordType !== recordType) return
+    // The heavy compute (diagnose + campaign generation over 20k+ runs, ~1s) runs OFF the main thread in a Web
+    // Worker so the UI never freezes; the main thread only paints the returned slim result. A stale reply (after
+    // a switch / re-render) is dropped by the token recheck.
+    setDiagProgress(`Analyzing ${runs.length} runs…`)
+    const analysis = await computeDiagnosis({ runs, manifest, settests })
+    if (token !== diagnosisRenderToken || !manifest || manifest.recordType !== recordType) return
+    window.Diagnostics.paint(container, analysis, { manifest, runs, settests }, actions)
+    diagnosisRenderedRt = recordType
+  } catch (e) {
+    // Never leave the shell stuck on a render error — clear it to a legible message the user can act on.
+    if (container && manifest && manifest.recordType === recordType && token === diagnosisRenderToken) container.textContent = 'Diagnosis failed to render — try Refresh.'
+  } finally {
+    diagnosisRendering = false
   }
-  // Cross-asset evidence: the settest matrices (kept checkpoints replayed on other assets) power the
-  // cross-asset robustness check — cheap OOS proof the incumbent's edge travels, without re-training.
-  let settests = []
-  try {
-    settests = (await queryRecords(recordType + '-settest')).map((r) => r.content).filter(Boolean)
-  } catch {
-    settests = []
-  }
-  window.Diagnostics.render(container, { manifest, runs, settests }, actions)
-  diagnosisRenderedRt = recordType
 }
 
 function showTab(id) {
