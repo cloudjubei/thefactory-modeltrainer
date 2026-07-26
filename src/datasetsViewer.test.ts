@@ -121,3 +121,34 @@ describe('runDatasetSignature + runDatasetName', () => {
     expect(D.runDatasetSignature(m, run(2022))).not.toBe(D.runDatasetSignature(m, run(2024)))
   })
 })
+
+describe('cartesianBundles', () => {
+  it('one bundle per single-value lever (a fixed ad-hoc dataset)', () => {
+    expect(
+      D.cartesianBundles([
+        ['asset', ['BTCUSDT']],
+        ['context_set', ['macro_core']],
+      ]),
+    ).toEqual([{ asset: 'BTCUSDT', context_set: 'macro_core' }])
+  })
+
+  it('multiplies swept levers into the full grid (the ablation)', () => {
+    const bundles = D.cartesianBundles([
+      ['projection', ['minimal', 'with_indicators']],
+      ['context_set', ['none', 'macro_core']],
+    ])
+    expect(bundles).toHaveLength(4)
+    expect(bundles).toContainEqual({ projection: 'minimal', context_set: 'none' })
+    expect(bundles).toContainEqual({ projection: 'with_indicators', context_set: 'macro_core' })
+  })
+
+  it('skips levers with no chosen values (they fall back to defaults at plan time)', () => {
+    expect(D.cartesianBundles([['asset', ['ETHUSDT']], ['projection', []]])).toEqual([
+      { asset: 'ETHUSDT' },
+    ])
+  })
+
+  it('empty input yields a single empty bundle', () => {
+    expect(D.cartesianBundles([])).toEqual([{}])
+  })
+})

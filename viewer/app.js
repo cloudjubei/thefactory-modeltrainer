@@ -17180,6 +17180,7 @@ function renderLaunchForm() {
     ${presetsSelectHtml()}
     ${datasetPickerHtml()}
     ${environmentPickerHtml()}
+    ${advancedLaunchHtml()}
     ${levers || '<p class="card-sub">This manifest declares no model levers — the campaign runs the default config.</p>'}
     <fieldset class="lever">
       <legend>Campaign</legend>
@@ -17435,21 +17436,54 @@ function buildSpecFromForm(form) {
   if (device && device !== 'auto') fixed.device = device
   const seedCount = readSeedCount(form)
   const out = { sweep, fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
+  // Advanced mode builds the dataset/environment bundles DIRECTLY from per-lever fields (a fixed value, or
+  // a sweep = the ablation grid), overriding the pickers and any preset-supplied bundles.
+  const advanced = !!(form.elements.advancedDatasetEnv && form.elements.advancedDatasetEnv.checked)
   if (hasEnvLevers()) {
-    // A preset that sweeps environments wins; otherwise the picker selection.
-    const envBundles = launchPresetEnvironments.length
-      ? launchPresetEnvironments
-      : selectedEnvironments(form).map((e) => e.settings)
+    const envBundles = advanced
+      ? advancedBundles(form, envLeverEntries())
+      : launchPresetEnvironments.length
+        ? launchPresetEnvironments
+        : selectedEnvironments(form).map((e) => e.settings)
     if (envBundles.length) out.environments = envBundles
   }
   if (hasDatasetLevers()) {
-    // A preset that sweeps datasets wins; otherwise the picker selection.
-    const dsBundles = launchPresetDatasets.length
-      ? launchPresetDatasets
-      : selectedDatasets(form).map((d) => d.settings)
+    const dsBundles = advanced
+      ? advancedBundles(form, datasetLeverEntries())
+      : launchPresetDatasets.length
+        ? launchPresetDatasets
+        : selectedDatasets(form).map((d) => d.settings)
     if (dsBundles.length) out.datasets = dsBundles
   }
   return out
+}
+// The ad-hoc dataset/environment bundles for ADVANCED launch mode: each lever's chosen value(s) — a sweep
+// list if any, else its single fixed value — Cartesian-producted into settings bundles (see
+// Datasets.cartesianBundles). A lever left blank is omitted, falling back to its default at plan time.
+function advancedBundles(form, entries) {
+  const perLever = entries.map(([key, spec]) => {
+    const swept = readSweepValues(form, key, spec)
+    if (swept.length) return [key, swept]
+    const fixed = readFixedValue(form, key, spec)
+    return [key, fixed === undefined || fixed === '' ? [] : [fixed]]
+  })
+  return window.Datasets.cartesianBundles(perLever)
+}
+// The collapsible "Advanced" block: every dataset + environment lever as an individual field (reusing the
+// model-lever fixed/sweep control), gated behind a checkbox that overrides the named-bundle pickers.
+function advancedLaunchHtml() {
+  if (!hasDatasetLevers() && !hasEnvLevers()) return ''
+  const dsFields = datasetLeverEntries().map(([k, spec]) => leverFieldsetHtml(k, spec)).join('')
+  const envFields = envLeverEntries().map(([k, spec]) => leverFieldsetHtml(k, spec)).join('')
+  return `<details class="lever launch-advanced">
+    <summary>Advanced — set dataset &amp; environment levers directly</summary>
+    <label class="check-row launch-advanced-toggle">
+      <input type="checkbox" name="advancedDatasetEnv" />
+      <span${helpAttr('Build the dataset/environment from the levers below instead of picking a named bundle above — set each value, or SWEEP several (comma-separated numbers / multi-select choices) to run the whole grid, e.g. projection × context_set for an ablation. Overrides the pickers and any preset bundles for this launch.')}>Use these levers (override the pickers above)</span>
+    </label>
+    ${dsFields ? `<div class="advanced-lever-group"><h4>Dataset</h4>${dsFields}</div>` : ''}
+    ${envFields ? `<div class="advanced-lever-group"><h4>Environment</h4>${envFields}</div>` : ''}
+  </details>`
 }
 function updateLaunchSummary() {
   const form = byId('launch-form')

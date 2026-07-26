@@ -60,12 +60,29 @@
     return match ? match.name : 'Custom'
   }
 
+  // The Cartesian product of per-lever value lists into a list of settings bundles — the ad-hoc dataset/
+  // environment bundles built from the Launch form's ADVANCED per-lever fields (each lever set directly
+  // instead of picking a named bundle). `perLever` is [[key, [v1, v2]], [key2, [v3]], ...]; a lever with
+  // no values is skipped (falls back to its default at plan time). Empty input -> [{}] (one bundle, no
+  // pins). A lever swept over N values multiplies the bundle count by N (an ablation grid).
+  function cartesianBundles(perLever) {
+    let bundles = [{}]
+    for (const [key, values] of perLever || []) {
+      if (!Array.isArray(values) || !values.length) continue
+      const next = []
+      for (const bundle of bundles) for (const value of values) next.push({ ...bundle, [key]: value })
+      bundles = next
+    }
+    return bundles
+  }
+
   const api = {
     datasetLeverKeys: datasetLeverKeys,
     datasetSettingsSignature: datasetSettingsSignature,
     findDuplicateDataset: findDuplicateDataset,
     runDatasetSignature: runDatasetSignature,
     runDatasetName: runDatasetName,
+    cartesianBundles: cartesianBundles,
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = api
   root.Datasets = api

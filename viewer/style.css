@@ -1629,6 +1629,23 @@ button.run-badge.model-device-chip:hover {
   gap: 4px;
 }
 /* Lever CAPABILITY sections (Datasets/Environments): one feature card per lever, then named presets. */
+.launch-advanced > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.launch-advanced .launch-advanced-toggle {
+  margin: 10px 0 4px;
+}
+.advanced-lever-group {
+  margin-top: 12px;
+}
+.advanced-lever-group > h4 {
+  margin: 6px 0;
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.7;
+}
 .lever-caps {
   margin: 0 0 14px;
 }
