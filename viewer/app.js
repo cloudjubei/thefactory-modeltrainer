@@ -8248,7 +8248,7 @@ function xaiSweepValues(lever, current, observed) {
     if (!m.has(String(v))) m.set(String(v), v)
   }
   // A boolean lever sweeps its two states — never a numeric grid (Number(true) = 1 would otherwise trip the
-  // range branch and produce nonsense like 0.02 … 50 for use_indicators).
+  // range branch and produce nonsense like 0.02 … 50 for allow_shorting).
   if (spec && spec.type === 'boolean') {
     add(false)
     add(true)

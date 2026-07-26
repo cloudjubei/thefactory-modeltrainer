@@ -391,7 +391,7 @@ config-drift cleanups the refresh flagged: `walk_forward.py` windows still cap a
 2026 is on disk; `data_config.py:48`'s "not on disk yet" comment is stale — a catalog-driven system
 should derive available windows from actual coverage.
 
-#### Phase D2 — Augmentation: US macro + company fundamentals (point-in-time) — SHIPPED (acquisition + fusion)
+#### Phase D2 — Augmentation: US macro + company fundamentals (point-in-time) — ACQUISITION SHIPPED; CONSUMING (fusion → training) in progress
 
 New non-price release series, acquired point-in-time and viewable/downloadable through the SAME D1
 vertical (the catalog now carries `macro` (13 FRED series) + `fundamentals` (10 EDGAR tickers) classes;
@@ -406,9 +406,51 @@ observations for AAPL):
   date); `scripts/backfill_fundamentals.py` — SEC EDGAR companyfacts stamped at `filingDate`, restatements
   kept as distinct rows; `data_inventory.scan_series_coverage` for the release-series dirs.
 
-REMAINING (the consuming step, a training-pipeline change, NOT the data mine): fuse the acquired series
-into the provider's observation frame so a run TRAINS on them (a new feature config reading `macro/` +
-`fundamentals/` through `pit_fusion`), and derived MoM/YoY features from same-vintage diffs.
+CONSUMING STEP — the "data projection" design (RAW LEVELS; the model derives its own features). A dataset
+is N aligned series; each asset carries a PER-ASSET projection = how much of its own data is exposed.
+Levels: **0** = per-asset projection primitive; **A** = one tradeable + global context channels; **B** =
+mix N assets, trade one; **C** = mix N, trade many (portfolio — the big env change, parked). Context splits
+two ways: GLOBAL (macro — asset-agnostic, a run-level set) vs ASSET-SPECIFIC (folded into that asset's
+projection as `with_extra_data`). Representation rule: a series that is already a rate / percentage /
+bounded ratio is shown as its LEVEL; a value / count / price / index is shown as CHANGE over time. Both
+causal (no fitted/full-sample scaler — the pipeline has none, so a naive standardizer would leak).
+
+- **Level 0 — per-asset projection primitive — SHIPPED (2026-07-25, TDD).** `trainer/projection.py`
+  (`resolve_projection`; a per-asset `projections` map overrides the scalar `projection`; coarsest→richest
+  `minimal` / `standard` / `with_indicators`). `config_builder` derives the low-level `type` + `use_indicators`
+  from it. The manifest `use_indicators` boolean was UNIFIED into a `projection` choice lever (scope
+  `dataset`): 19 papers/presets migrated, historical runs migrated (`use_indicators:true` → `with_indicators`,
+  else `standard`) via combined set+unset rules that converge. History-preserving: `standard` == the old
+  default, `with_indicators` == the old `use_indicators:true`. Runnable NOW: the minimal/standard/with_indicators
+  own-data ablation on a single asset.
+- **Step 2 — global context channels — SHIPPED (2026-07-25, TDD).** `trainer/context.py` (registry
+  `CONTEXT_SERIES`/`CONTEXT_PANELS`, `resolve_context`, pure `fuse_context_series` = pit_fusion + the
+  level/change representation, `context_columns`, fail-fast `load_context_observations`). Fused as raw-level
+  per-bar COLUMNS in BOTH `process_df` and `process_df_simple` via `AbstractDataProvider._add_context_columns`
+  — a NO-OP when `context='none'` (default, byte-identical to pre-context runs); the context set joins all
+  three feature-cache keys only when set (no mass cache invalidation). `DataConfig.context` + a `context_set`
+  choice lever (`none`/`rates`/`macro_core`, scope dataset). Because the panel is GLOBAL (asset-agnostic
+  macro), a context-trained checkpoint cross-tests on other assets with NO extra obs-signature work — the
+  same panel fused onto any asset yields the same obs width. Verified: trainer 501 + src/data 235 green.
+  Follow-up: pre-first-release bars currently `fillna(0)` (a window-restriction to post-first-release is a
+  `config_builder` follow-up needing coverage data; a non-issue for the deep-history FRED panels).
+  The FRED macro mine is now LIVE (2026-07-26): `scripts/backfill_macro.py` was fixed category-aware (the
+  request had never worked against live FRED — `output_type=4` needs an explicit full-history realtime
+  window, and daily rates exceed FRED's vintage-date cap so they fetch standard observations stamped as-of).
+  All 13 series mined to `macro/`; `rates`/`macro_core` proven end-to-end on real BTC klines (values
+  economically correct incl. the 2023 curve inversion). Key lives in `BlackSwan/.env`; app-triggered mines
+  still need it in the backend env.
+- **Step 2b — price-source context — SHIPPED + LIVE-PROVEN (2026-07-25, TDD).** The keyless path that works
+  on klines already on disk: a linked/peer asset's return fused as a context column (`load_price_observations`
+  + a `load_series_observations` source dispatcher; `majors` = BTC+ETH returns, for use on an alt). Proven
+  end-to-end on real ADAUSDT klines through the real `process_df_simple`. This is the concrete
+  "tie assets to related assets", and the same price-source mechanism a yfinance `gold`/`dxy`/`spx` panel
+  (also keyless) will reuse. The live e2e caught two real bugs clean fixtures missed (nanosecond
+  `pd.to_datetime` unless via `read_json`; string-typed kline prices).
+- **Step 3 — `with_extra_data`.** The 4th projection rung: this asset's own fused context series, same seam.
+  This is where the explicit obs-signature gate IS needed (asset-specific panels differ across assets).
+- **Step 4 — the 4-arm ablation** (own-price minimal|full × context off|on), pre-registered OOS net-of-fees +
+  Sharpe, once a checkpointed panel run exists.
 
 - **US macro (FRED/ALFRED, free API key).** Starter set, exact series ids: unemployment `UNRATE`,
   nonfarm payrolls `PAYEMS`, CPI `CPIAUCNS` (NSA — never revised) / `CPIAUCSL` (SA), core PCE `PCEPILFE`,
