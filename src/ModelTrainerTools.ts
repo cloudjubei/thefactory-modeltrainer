@@ -576,6 +576,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
                 setupKey: setupKeyOf(item.config),
                 pipelineVersion,
                 ...thesisFields,
+                ...(params.activityId ? { activityId: params.activityId } : {}),
                 ranAt: now(),
                 ranBy,
                 durationMs: result.durationMs,
@@ -599,6 +600,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             setupKey: setupKeyOf(item.config),
             pipelineVersion,
             ...thesisFields,
+            ...(params.activityId ? { activityId: params.activityId } : {}),
             ranAt: now(),
             ranBy,
             durationMs: result.durationMs,
@@ -2655,6 +2657,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       commandTemplate: manifest.mineData,
       config: params.request,
       dataFiles: manifestDataFiles(manifest),
+      ...(params.env ? { env: params.env } : {}),
       abortSignal: params.abortSignal,
     })
     const result = await handle.done

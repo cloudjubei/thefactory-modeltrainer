@@ -48,6 +48,35 @@
     return 'runs: ' + windows.join(', ')
   }
 
+  // Every asset SYMBOL with data on disk (any interval), across all classes — deduped. [] when the catalog
+  // is absent, so the Datasets cards NEVER dim everything just because no data-catalog run exists yet.
+  function assetsWithData(catalog) {
+    const classes = (catalog && catalog.assetClasses) || []
+    const out = []
+    const seen = {}
+    for (const cls of classes) {
+      for (const inst of (cls && cls.instruments) || []) {
+        const sym = inst && inst.symbol
+        if (sym && instrumentState(inst) !== 'available' && !seen[sym]) {
+          seen[sym] = true
+          out.push(sym)
+        }
+      }
+    }
+    return out
+  }
+
+  // Whether a manifest lever VALUE has no data on disk — true ONLY for the `asset` lever when the catalog is
+  // present AND the symbol is absent from `assetsWithData`. Returns false (dim NOTHING) when the catalog is
+  // null/empty (no data known) or the lever isn't `asset`, so a project without a data-catalog run is never
+  // greyed out wholesale.
+  function isLeverValueDataless(catalog, lever, value) {
+    if (lever !== 'asset') return false
+    const withData = assetsWithData(catalog)
+    if (!withData.length) return false
+    return withData.indexOf(String(value)) === -1
+  }
+
   // { onDisk, total } for a class — how many instruments have any coverage.
   function classCounts(cls) {
     const instruments = (cls && cls.instruments) || []
@@ -78,6 +107,8 @@
     instrumentState: instrumentState,
     coverageLine: coverageLine,
     supportedWindowsLine: supportedWindowsLine,
+    assetsWithData: assetsWithData,
+    isLeverValueDataless: isLeverValueDataless,
     classCounts: classCounts,
     mineRequestForInstrument: mineRequestForInstrument,
     mineRequestForClass: mineRequestForClass,

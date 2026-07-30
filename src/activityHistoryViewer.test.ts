@@ -89,3 +89,29 @@ describe('statusClass', () => {
     expect(AH.statusClass('aborted')).toBe('is-warn')
   })
 })
+
+describe('runKeysForActivity (A6 activity→runs jump)', () => {
+  // caches are Maps runKey -> content; content.activityId is the producing/judging activity (stamped by the
+  // tools). entriesLists = [evaluationsCache.entries(), verdictsCache.entries()].
+  const evals = new Map<string, { activityId?: string }>([
+    ['runA', { activityId: 'act-1' }],
+    ['runB', { activityId: 'act-2' }],
+    ['runC', {}], // never judged by an activity
+  ])
+  const verdicts = new Map<string, { activityId?: string }>([
+    ['runA', { activityId: 'act-1' }], // same run judged + evaluated by act-1 → deduped
+    ['runD', { activityId: 'act-1' }],
+  ])
+  const lists = () => [[...evals], [...verdicts]]
+
+  it('collects the run keys any evaluation OR verdict stamped with this activity, deduped', () => {
+    expect(AH.runKeysForActivity(lists(), 'act-1').sort()).toEqual(['runA', 'runD'])
+    expect(AH.runKeysForActivity(lists(), 'act-2')).toEqual(['runB'])
+  })
+
+  it('returns [] for an unknown activity, a falsy id, or junk lists', () => {
+    expect(AH.runKeysForActivity(lists(), 'act-none')).toEqual([])
+    expect(AH.runKeysForActivity(lists(), '')).toEqual([])
+    expect(AH.runKeysForActivity(null, 'act-1')).toEqual([])
+  })
+})

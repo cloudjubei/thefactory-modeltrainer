@@ -66,11 +66,34 @@
     return status === 'completed' ? 'is-ok' : status === 'failed' ? 'is-bad' : 'is-warn'
   }
 
+  // The run keys an activity produced/judged — every evaluation OR verdict record stamped with its
+  // activityId, deduped. `entriesLists` = [evaluationsCache.entries(), verdictsCache.entries()] (each a list
+  // of [runKey, content]). [] for a falsy id or junk input.
+  function runKeysForActivity(entriesLists, activityId) {
+    if (!activityId) return []
+    var seen = {}
+    var out = []
+    var lists = Array.isArray(entriesLists) ? entriesLists : []
+    for (var i = 0; i < lists.length; i++) {
+      var entries = lists[i] || []
+      for (var j = 0; j < entries.length; j++) {
+        var key = entries[j] && entries[j][0]
+        var content = entries[j] && entries[j][1]
+        if (key && content && content.activityId === activityId && !seen[key]) {
+          seen[key] = true
+          out.push(key)
+        }
+      }
+    }
+    return out
+  }
+
   var api = {
     historyRows: historyRows,
     formatDuration: formatDuration,
     statusClass: statusClass,
     labelOf: labelOf,
+    runKeysForActivity: runKeysForActivity,
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = api
   root.ActivityHistory = api

@@ -51,6 +51,7 @@ import {
   totalCampaignUnits,
   datasetAlignmentSignature,
   diffDecisionTraces,
+  summarizeSnapshotTraces,
   summarizeStepAttribution,
   validateDecisionTrace,
   validateTrainerManifest,
@@ -2303,6 +2304,33 @@ describe('validateDecisionTrace', () => {
         attentionMatrix: { rows: ['t0'], grid: [[0.1]] },
       })?.attentionMatrix,
     ).toBeUndefined()
+  })
+})
+
+describe('summarizeSnapshotTraces (A6 mid-training snapshot index)', () => {
+  it('shapes a well-formed index, sorted by training step, coercing keyMetrics', () => {
+    const rows = summarizeSnapshotTraces([
+      { step: 200, checkpointRef: 'm.step200', traceFile: 'checkpoints/m.snapshots.jsonl', keyMetrics: { actionCounts: { hold: 5, buy: 2, bad: 'x' }, totalSteps: 7 } },
+      { step: 100, checkpointRef: 'm.step100', traceFile: 'checkpoints/m.snapshots.jsonl', keyMetrics: { actionCounts: { hold: 3 }, totalSteps: 3 } },
+    ])
+    expect(rows.map((r) => r.step)).toEqual([100, 200]) // ascending training order
+    expect(rows[1]).toEqual({
+      step: 200,
+      checkpointRef: 'm.step200',
+      traceFile: 'checkpoints/m.snapshots.jsonl',
+      keyMetrics: { actionCounts: { hold: 5, buy: 2 }, totalSteps: 7 }, // non-numeric dropped
+    })
+  })
+
+  it('drops malformed entries and returns [] for non-array input', () => {
+    expect(summarizeSnapshotTraces(null)).toEqual([])
+    expect(summarizeSnapshotTraces('nope')).toEqual([])
+    const rows = summarizeSnapshotTraces([
+      { step: 'bad', traceFile: 'f' }, // non-numeric step
+      { step: 100, checkpointRef: 5 }, // no traceFile
+      { step: 300, traceFile: 'f' }, // no keyMetrics -> {} + missing checkpointRef -> ''
+    ])
+    expect(rows).toEqual([{ step: 300, checkpointRef: '', traceFile: 'f', keyMetrics: {} }])
   })
 })
 

@@ -106,6 +106,38 @@ describe('classCounts', () => {
   })
 })
 
+describe('assetsWithData / isLeverValueDataless (A6 dim data-less asset lever values)', () => {
+  const catalog = {
+    assetClasses: [
+      {
+        id: 'crypto',
+        instruments: [
+          { symbol: 'BTCUSDT', onDisk: { '1d': cov('2017-08', '2026-06', 100) } },
+          { symbol: 'DOGEUSDT', onDisk: {} }, // no data on disk
+        ],
+      },
+      { id: 'stocks', instruments: [{ symbol: 'AAPL', onDisk: { '1d': cov('2018-01', '2026-06', 100) } }] },
+    ],
+  }
+
+  it('assetsWithData lists only symbols with on-disk coverage, deduped', () => {
+    expect(D.assetsWithData(catalog).sort()).toEqual(['AAPL', 'BTCUSDT'])
+  })
+
+  it('isLeverValueDataless is true for an asset absent from the on-disk set, false for one present', () => {
+    expect(D.isLeverValueDataless(catalog, 'asset', 'DOGEUSDT')).toBe(true)
+    expect(D.isLeverValueDataless(catalog, 'asset', 'BTCUSDT')).toBe(false)
+    expect(D.isLeverValueDataless(catalog, 'asset', 'AAPL')).toBe(false)
+  })
+
+  it('NEVER dims when there is no catalog / no known data (only the `asset` lever is data-gated)', () => {
+    expect(D.assetsWithData(null)).toEqual([])
+    expect(D.isLeverValueDataless(null, 'asset', 'BTCUSDT')).toBe(false) // no catalog -> dim nothing
+    expect(D.isLeverValueDataless({ assetClasses: [] }, 'asset', 'BTCUSDT')).toBe(false) // no data known
+    expect(D.isLeverValueDataless(catalog, 'timeframe', '1d')).toBe(false) // non-asset lever never gated
+  })
+})
+
 describe('mine request builders', () => {
   it('builds a per-instrument request scoped to its class', () => {
     expect(D.mineRequestForInstrument({ symbol: 'GOLD', assetClass: 'commodities' })).toEqual({

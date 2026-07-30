@@ -281,6 +281,25 @@ describe('runTrainingCampaign', () => {
     })
   })
 
+  it('stamps the producing activityId onto each run record (A6 run→activity link), or nothing when unset', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    await tools.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: manifest(),
+      spec: { sweep: { lr: [0.1] } }, activityId: 'act-train-7',
+    })
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run' }))[0]
+    expect((rec.content as { activityId?: string }).activityId).toBe('act-train-7')
+
+    const storage2 = memoryStorage()
+    const { tools: tools2 } = makeTools(stubRunner(), storage2)
+    await tools2.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: manifest(), spec: { sweep: { lr: [0.1] } },
+    })
+    const rec2 = (await storage2.listRecords({ scope: 'proj', type: 'demo-run' }))[0]
+    expect('activityId' in (rec2.content as Record<string, unknown>)).toBe(false)
+  })
+
   it('migrates spec.fixed via manifest.migrations BEFORE planning, so a dispatched run executes under the new shape', async () => {
     const runner = stubRunner()
     const storage = memoryStorage()
@@ -5090,6 +5109,26 @@ describe('data catalog + mining', () => {
     expect(res.minedAt).toBe(NOW)
     // The mine request crossed via the {configPath} job config.
     expect(runner.jobs[0].config).toEqual({ symbols: ['GOLD'], through: '2026-06' })
+  })
+
+  it('mineProjectData forwards params.env to the mine job (e.g. FRED_API_KEY), omitting it when unset', async () => {
+    // A1.3: app-triggered macro mines need the FRED key in the job env. The tool threads whatever env the
+    // host supplies onto the runJob call (never logging it); absent -> no env key.
+    const mineResult = () => ({ summary: { mined: [], unknown: [], through: '2026-06' } })
+    const runner = stubRunner({ jobResult: mineResult })
+    const { tools } = makeTools(runner, memoryStorage())
+    await tools.mineProjectData({
+      scope: 'proj', projectRoot: '/repo', manifest: dataManifest(),
+      request: { class: 'macro_core' }, env: { FRED_API_KEY: 'test-key' },
+    })
+    expect(runner.jobs[0].env).toEqual({ FRED_API_KEY: 'test-key' })
+
+    const runner2 = stubRunner({ jobResult: mineResult })
+    const { tools: tools2 } = makeTools(runner2, memoryStorage())
+    await tools2.mineProjectData({
+      scope: 'proj', projectRoot: '/repo', manifest: dataManifest(), request: { class: 'macro_core' },
+    })
+    expect('env' in (runner2.jobs[0] as Record<string, unknown>)).toBe(false)
   })
 
   it('mineProjectData uses a collision-free jobId (two mines in the same clock tick differ)', async () => {

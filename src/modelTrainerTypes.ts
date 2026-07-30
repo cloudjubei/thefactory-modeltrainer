@@ -568,6 +568,23 @@ export interface StepAttributionSummary {
 }
 
 /**
+ * One entry in a run's MID-TRAINING snapshot index (`summary.artifacts.snapshotTraces`) — a decision trace
+ * captured from a retained checkpoint partway through training, so the learning trajectory can be diffed over
+ * time (A6). The full per-snapshot trace lives in the JSONL sidecar `traceFile`; `keyMetrics` is the
+ * lightweight summary the index carries so the Explain view lists snapshots without fetching the sidecar.
+ */
+export interface SnapshotTraceIndexEntry {
+  /** SB3 training timestep the snapshot was taken at. */
+  step: number
+  /** The checkpoint basename the trace was generated from. */
+  checkpointRef: string
+  /** Path to the JSONL sidecar holding this snapshot's full decision trace. */
+  traceFile: string
+  /** Lightweight summary so the index is legible without loading the sidecar. */
+  keyMetrics: { actionCounts?: Record<string, number>; totalSteps?: number }
+}
+
+/**
  * A model's decision trace over a test/eval rollout — the explainability artifact stored at
  * `summary.artifacts.decisionTrace`. Domain-oblivious: `steps` carry arbitrary action labels and
  * `actionCounts` tallies them so the Explain view flags distribution anomalies generically. The embedded
@@ -1267,7 +1284,8 @@ export interface TrainingRunSummary {
   /**
    * Free-form run outputs. Known keys the hub reads: `checkpoint` (path), `runChart`, and
    * `decisionTrace` (a {@link DecisionTrace} for the Explain view) plus `decisionTraceFile` (path to
-   * the optional full per-step sidecar). Unknown keys are stored and ignored.
+   * the optional full per-step sidecar), and `snapshotTraces` (a {@link SnapshotTraceIndexEntry}`[]` — the
+   * mid-training snapshot index). Unknown keys are stored and ignored.
    */
   artifacts?: Record<string, unknown>
   /** What data this run trained on (asset, timeframe, sample count, date span) — for the hub's data-visibility surface. */
@@ -1515,6 +1533,12 @@ export interface TrainingCampaignParams {
   computeTarget?: string
   /** Provenance label stamped on each run record; defaults to the compute target or `local`. */
   ranBy?: string
+  /**
+   * The launching activity's id — stamped onto each run record's `activityId` (A6 run→activity link) so a run
+   * detail can jump to the campaign that produced it. Omit → no `activityId` stamped (historical runs use the
+   * `-campaign`-record-keys fallback).
+   */
+  activityId?: string
   abortSignal?: AbortSignal
   onProgress?: (progress: TrainingCampaignProgress) => void | Promise<void>
   /**
@@ -2621,6 +2645,12 @@ export interface MineProjectDataParams {
   manifestRelPath?: string
   request: MineDataRequest
   computeTarget?: string
+  /**
+   * Environment variables to hand the mine job — e.g. `{ FRED_API_KEY }` so an app-triggered macro mine can
+   * authenticate (a local job otherwise only inherits the backend process env). Threaded onto the runJob call
+   * verbatim; NEVER logged. Omit for mines that need no secret.
+   */
+  env?: Record<string, string>
   abortSignal?: AbortSignal
 }
 

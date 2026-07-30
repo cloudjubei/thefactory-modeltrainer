@@ -5847,6 +5847,32 @@ function xaiSanityBadgeHtml(sc) {
   }
   return `<p class="badges-row"><span class="badge is-warn">sanity ⚠ unreliable</span> <span class="card-sub">— saliency barely changed when weights were randomized (rank corr ${escapeHtml(corr)}), so it may reflect the input/architecture, not what the model learned. Treat with caution.</span></p>`
 }
+// A6: the MID-TRAINING snapshot index (summary.artifacts.snapshotTraces) — a decision trace captured from a
+// retained checkpoint partway through training, so the action mix over time shows how the policy's behaviour
+// evolved. The heavy per-snapshot traces live in a JSONL sidecar; the index carries only keyMetrics, so this
+// renders without a fetch. Returns '' when the run has no snapshots.
+function snapshotTracesHtml(summary) {
+  const raw = summary && summary.artifacts && summary.artifacts.snapshotTraces
+  if (!Array.isArray(raw)) return ''
+  const rows = raw
+    .filter((e) => e && typeof e.step === 'number')
+    .sort((a, b) => a.step - b.step)
+  if (!rows.length) return ''
+  const body = rows
+    .map((r) => {
+      const km = r.keyMetrics || {}
+      const counts =
+        km.actionCounts && typeof km.actionCounts === 'object'
+          ? Object.entries(km.actionCounts)
+              .map(([a, n]) => `${escapeHtml(a)} ${escapeHtml(String(n))}`)
+              .join(' · ')
+          : '—'
+      return `<tr><th class="num">step ${escapeHtml(String(r.step))}</th><td class="num">${km.totalSteps != null ? escapeHtml(String(km.totalSteps)) : '—'}</td><td>${counts}</td></tr>`
+    })
+    .join('')
+  return `<h4 class="card-sub">Mid-training snapshots <span class="card-sub">— ${rows.length} checkpoint trace(s) captured DURING training; the action mix over time shows how the policy's behaviour evolved</span></h4>
+    <table class="kv-table report-table"><thead><tr><th class="num">at</th><th class="num">steps</th><th>action mix</th></tr></thead><tbody>${body}</tbody></table>`
+}
 function explainSectionHtml(summary) {
   const trace = readDecisionTrace(summary)
   if (!trace) return ''
@@ -5860,6 +5886,7 @@ function explainSectionHtml(summary) {
     decisionStepAttributionHtml(trace),
     decisionAttentionHeatmapHtml(trace),
     decisionLatentMapHtml(trace),
+    snapshotTracesHtml(summary),
   ]
     .filter(Boolean)
     .join('')
@@ -9253,6 +9280,7 @@ function renderRunDetail(key) {
         <button type="button" data-action="xai" data-key="${escapeHtml(run.key)}" class="icon-btn" title="Analyze in xAI — internals, config effects, suggested experiments" aria-label="Analyze in xAI">🔬</button>
         <button type="button" data-action="toggle-favorite" data-key="${escapeHtml(run.key)}" class="icon-btn${favoritesCache.has(run.key) ? ' is-fav' : ''}" title="${favoritesCache.has(run.key) ? 'Remove from favorites' : 'Mark as favorite — quick-pick it in xAI'}" aria-label="Toggle favorite">${favoritesCache.has(run.key) ? '★' : '☆'}</button>
         <button type="button" data-action="chat" data-key="${escapeHtml(run.key)}" class="icon-btn"${chatAboutRunAvailable() ? '' : ' disabled'} title="Discuss this run with the AI" aria-label="Discuss this run">${iconChatSvg()}</button>
+        ${s.activityId ? `<button type="button" data-action="run-activity" data-id="${escapeHtml(String(s.activityId))}" class="icon-btn" title="View the activity that produced this run" aria-label="Producing activity">${iconHistorySvg()}</button>` : ''}
         <button type="button" data-action="toggle-unrunnable" data-key="${escapeHtml(run.key)}" class="icon-btn" title="${isUnrunnable ? 'Allow this setup to run again' : 'Mark unrunnable — skip on re-run (this pipeline version) unless forced'}" aria-label="${isUnrunnable ? 'Mark runnable' : 'Mark unrunnable'}">${isUnrunnable ? '⊙' : '⊘'}</button>
         <button type="button" data-action="delete-run" data-key="${escapeHtml(run.key)}" class="icon-btn icon-btn-danger" title="Delete this run (and its evaluation/verdict)" aria-label="Delete run">${iconDeleteSvg()}</button>
         <button type="button" id="run-detail-close" class="icon-btn" title="Close" aria-label="Close">✕</button>
@@ -10100,6 +10128,8 @@ function setupRuns() {
       if (rerunBtn) reRunRuns([rerunBtn.dataset.key])
       const chatBtn = event.target.closest('button[data-action="chat"]')
       if (chatBtn) chatAboutRun(chatBtn.dataset.key)
+      const runActBtn = event.target.closest('button[data-action="run-activity"]')
+      if (runActBtn) openActivityHistory(runActBtn.dataset.id)
       const xaiBtn = event.target.closest('button[data-action="xai"]')
       if (xaiBtn) analyzeInXai(xaiBtn.dataset.key)
       const favBtn = event.target.closest('button[data-action="toggle-favorite"]')
@@ -11235,16 +11265,26 @@ function leverDependsOnLine(spec) {
   const cond = 'equals' in d ? `= ${d.equals}` : d.active === false ? 'is OFF' : 'is ON'
   return `<p class="card-sub lever-cap-depends">↳ only acts when <code>${escapeHtml(d.lever)}</code> ${escapeHtml(cond)} — inert otherwise (campaigns automatically skip it where it can’t take effect).</p>`
 }
-function leverCapabilityValueChip(value, isDefault, count) {
-  return `<span class="lever-cap-value${isDefault ? ' is-default' : ''}"${helpAttr(isDefault ? 'The manifest default.' : count ? `${count} run(s) used this value.` : 'No runs with this value yet.')}><code>${escapeHtml(String(value))}</code>${isDefault ? ' ★' : ''}${count ? ` <span class="lever-cap-count">${count}</span>` : ''}</span>`
+function leverCapabilityValueChip(value, isDefault, count, dataless) {
+  const help = dataless
+    ? 'No data on disk for this asset — mine it from the Data tab before training on it.'
+    : isDefault
+      ? 'The manifest default.'
+      : count
+        ? `${count} run(s) used this value.`
+        : 'No runs with this value yet.'
+  return `<span class="lever-cap-value${isDefault ? ' is-default' : ''}${dataless ? ' is-dataless' : ''}"${helpAttr(help)}><code>${escapeHtml(String(value))}</code>${isDefault ? ' ★' : ''}${count ? ` <span class="lever-cap-count">${count}</span>` : ''}${dataless ? ' <span class="card-sub">· no data</span>' : ''}</span>`
 }
 function leverCapabilityCardHtml(key, spec) {
   const usage = leverValueUsage(key)
   const inactive = spec && spec.active === false
+  // Only the `asset` lever is data-gated: dim choices with no on-disk coverage (no-op when the catalog is
+  // unknown). window.DataCatalog.isLeverValueDataless returns false for every non-asset lever + a null catalog.
+  const datalessOf = (v) => window.DataCatalog.isLeverValueDataless(dataCatalogCache, key, v)
   let values = ''
   if (spec.type === 'choice') {
     values = (spec.choices || [])
-      .map((c) => leverCapabilityValueChip(c, String(spec.default) === String(c), usage.get(String(c)) || 0))
+      .map((c) => leverCapabilityValueChip(c, String(spec.default) === String(c), usage.get(String(c)) || 0, datalessOf(c)))
       .join(' ')
   } else if (spec.type === 'boolean') {
     values = [false, true]
@@ -11668,6 +11708,7 @@ async function renderDatasets() {
     return
   }
   datasetsCache = await readDatasets()
+  await readDataCatalog() // populate dataCatalogCache so the asset lever card can dim data-less values
   renderDatasetsTable()
 }
 
@@ -11677,12 +11718,16 @@ async function renderDatasets() {
 // `mine-data` activity for a symbol or a whole class. Pure presentation lives in viewer/data.js.
 const dataMineBusy = new Set()
 let dataClicksBound = false
+// Last-read data catalog (asset classes → on-disk coverage), so the SYNC Datasets-card render can dim asset
+// lever values that have no data on disk. Null until a catalog is read; when null the dimming is a no-op.
+let dataCatalogCache = null
 
 async function readDataCatalog() {
   if (!manifest) return null
   const recs = await queryRecords(manifest.recordType + '-datacatalog', 'current')
   const content = recs[0] && recs[0].content
-  return content && Array.isArray(content.assetClasses) ? content : null
+  dataCatalogCache = content && Array.isArray(content.assetClasses) ? content : null
+  return dataCatalogCache
 }
 
 // The related-data chips for one asset row: each linkage edge's proxy series, as a one-click mine of that
@@ -18697,7 +18742,7 @@ function renderActivityNow() {
 // ones render in the tab itself). Reads the raw listActivities snapshot; the pure module reduces it to
 // settled rows (newest-finished first). Read-only; the link data (activityId stamped on the records each
 // activity wrote) already exists — surfacing the run↔activity jump is a follow-on.
-async function openActivityHistory() {
+async function openActivityHistory(highlightId) {
   let rows = []
   try {
     const res = await window.OverseerBridge.listActivities()
@@ -18708,14 +18753,18 @@ async function openActivityHistory() {
   } catch {
     rows = []
   }
-  renderActivityHistoryModal(rows)
+  renderActivityHistoryModal(rows, highlightId)
 }
 function closeActivityHistory() {
   const m = byId('activity-history-modal')
   if (m) m.hidden = true
 }
-function activityHistoryRowHtml(r) {
+// Activity types whose produced runs can be jumped to: train/continue-training via the campaign record's
+// run keys; judge/evaluate via the verdicts/evaluations they stamped with their activityId.
+const HISTORY_RUN_TYPES = new Set(['train', 'continue-training', 'judge', 'evaluate'])
+function activityHistoryRowHtml(r, highlightId) {
   const cls = window.ActivityHistory.statusClass(r.status)
+  const hl = highlightId && r.activityId === highlightId ? ' class="activity-history-hl"' : ''
   const took = window.ActivityHistory.formatDuration(r.durationMs)
   const when = r.finishedAt ? formatWhen(r.finishedAt) : '—'
   const cost = r.costUSD != null ? ` · $${r.costUSD.toFixed(2)}` : ''
@@ -18723,14 +18772,39 @@ function activityHistoryRowHtml(r) {
     r.status === 'failed' && r.error
       ? `<div class="card-sub activity-history-err">${escapeHtml(r.error)}</div>`
       : ''
-  return `<tr>
-      <th><div>${escapeHtml(r.label)}</div><div class="card-sub">${escapeHtml(activityTypeLabel(r.type))}${escapeHtml(cost)}</div>${errLine}</th>
+  const runsBtn =
+    r.status === 'completed' && HISTORY_RUN_TYPES.has(r.type) && r.activityId
+      ? `<button type="button" class="link-btn" data-history-runs="${escapeHtml(r.activityId)}" data-history-type="${escapeHtml(r.type)}"${helpAttr('Open the runs this activity produced/judged.')}>runs ↗</button>`
+      : ''
+  return `<tr${hl}>
+      <th><div>${escapeHtml(r.label)}${runsBtn ? ' ' + runsBtn : ''}</div><div class="card-sub">${escapeHtml(activityTypeLabel(r.type))}${escapeHtml(cost)}</div>${errLine}</th>
       <td><span class="badge ${cls}">${escapeHtml(r.status)}</span></td>
       <td class="num">${escapeHtml(when)}</td>
       <td class="num">${escapeHtml(took)}</td>
     </tr>`
 }
-function renderActivityHistoryModal(rows) {
+// Jump from a finished activity to the runs it produced/judged (from the History popup).
+async function onOpenActivityRuns(activityId, type) {
+  if (!activityId) return
+  let keys = []
+  if (type === 'train' || type === 'continue-training') {
+    const campaign = await readCampaignFor(activityId)
+    keys = campaign && Array.isArray(campaign.keys) ? campaign.keys : []
+  } else {
+    keys = window.ActivityHistory.runKeysForActivity(
+      [[...evaluationsCache], [...verdictsCache]],
+      activityId,
+    )
+  }
+  if (!keys.length) {
+    showToast('No runs linked to this activity')
+    return
+  }
+  closeActivityHistory()
+  openRunsSelection(keys, `Activity ${shortKey(activityId)}`, { view: 'activity' })
+  showTab('runs')
+}
+function renderActivityHistoryModal(rows, highlightId) {
   let modal = byId('activity-history-modal')
   if (!modal) {
     modal = document.createElement('div')
@@ -18738,6 +18812,11 @@ function renderActivityHistoryModal(rows) {
     modal.className = 'chart-modal'
     document.body.appendChild(modal)
     modal.addEventListener('click', (event) => {
+      const runsBtn = event.target.closest('[data-history-runs]')
+      if (runsBtn) {
+        onOpenActivityRuns(runsBtn.dataset.historyRuns, runsBtn.dataset.historyType)
+        return
+      }
       if (event.target === modal || event.target.closest('[data-history-close]')) closeActivityHistory()
     })
     document.addEventListener('keydown', (event) => {
@@ -18745,7 +18824,7 @@ function renderActivityHistoryModal(rows) {
     })
   }
   const table = rows.length
-    ? `<table class="kv-table report-table activity-history-table"><thead><tr><th>Activity</th><th>Status</th><th class="num">Finished</th><th class="num">Took</th></tr></thead><tbody>${rows.map(activityHistoryRowHtml).join('')}</tbody></table>`
+    ? `<table class="kv-table report-table activity-history-table"><thead><tr><th>Activity</th><th>Status</th><th class="num">Finished</th><th class="num">Took</th></tr></thead><tbody>${rows.map((r) => activityHistoryRowHtml(r, highlightId)).join('')}</tbody></table>`
     : '<p class="card-sub">No finished activities yet — completed campaigns, judges, evaluations, cross-tests and mines will appear here.</p>'
   modal.innerHTML = `<div class="chart-modal__backdrop" data-history-close></div>
     <div class="chart-modal__panel" role="dialog" aria-label="Activity history">
@@ -18756,6 +18835,8 @@ function renderActivityHistoryModal(rows) {
       <div class="chart-modal__scroll">${table}</div>
     </div>`
   modal.hidden = false
+  const hlRow = highlightId && modal.querySelector('.activity-history-hl')
+  if (hlRow && hlRow.scrollIntoView) hlRow.scrollIntoView({ block: 'center' })
 }
 function setupActivity() {
   const body = byId('activity-body')

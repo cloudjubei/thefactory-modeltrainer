@@ -3,6 +3,7 @@ import type {
   ConsolidationGroup,
   DecisionFeatureAttribution,
   MatrixAttribution,
+  SnapshotTraceIndexEntry,
   DecisionQualitySignal,
   DecisionStep,
   DecisionStepDelta,
@@ -2452,6 +2453,33 @@ export function validateDecisionTrace(raw: unknown): DecisionTrace | undefined {
   const attentionMatrix = coerceMatrixAttribution(raw.attentionMatrix)
   if (attentionMatrix) trace.attentionMatrix = attentionMatrix
   return trace
+}
+
+/**
+ * Soft-validate a stored `artifacts.snapshotTraces` mid-training snapshot index into clean, step-sorted
+ * {@link SnapshotTraceIndexEntry} rows — dropping malformed entries (no numeric `step`, no string
+ * `traceFile`) rather than throwing. `[]` for non-array/absent input, so a run without snapshots ingests
+ * normally. The heavy per-snapshot traces stay in the JSONL sidecar; this is just the legible index.
+ */
+export function summarizeSnapshotTraces(raw: unknown): SnapshotTraceIndexEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: SnapshotTraceIndexEntry[] = []
+  for (const entry of raw) {
+    if (!isPlainObject(entry) || !isFiniteNumber(entry.step) || typeof entry.traceFile !== 'string') continue
+    const km = isPlainObject(entry.keyMetrics) ? entry.keyMetrics : {}
+    const keyMetrics: SnapshotTraceIndexEntry['keyMetrics'] = {}
+    const actionCounts = coerceNumberMap(km.actionCounts)
+    if (actionCounts) keyMetrics.actionCounts = actionCounts
+    if (isFiniteNumber(km.totalSteps)) keyMetrics.totalSteps = km.totalSteps
+    out.push({
+      step: entry.step,
+      checkpointRef: typeof entry.checkpointRef === 'string' ? entry.checkpointRef : '',
+      traceFile: entry.traceFile,
+      keyMetrics,
+    })
+  }
+  out.sort((a, b) => a.step - b.step)
+  return out
 }
 
 function coerceLatentMap(raw: unknown): DecisionTrace['latentMap'] | undefined {

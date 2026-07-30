@@ -1733,6 +1733,11 @@ button.run-badge.model-device-chip:hover {
   border-color: var(--accent);
   background: var(--accent-soft);
 }
+/* A6: an asset choice with no data on disk — greyed, still visible (mineable from the Data tab). */
+.lever-cap-value.is-dataless {
+  opacity: 0.5;
+  border-style: dashed;
+}
 .lever-cap-count {
   color: var(--muted);
 }
@@ -2367,6 +2372,9 @@ button.block-chip:hover {
   white-space: pre-wrap;
   word-break: break-word;
   margin-top: 2px;
+}
+.activity-history-hl > * {
+  background: var(--accent-soft);
 }
 .activity-cols {
   display: grid;
