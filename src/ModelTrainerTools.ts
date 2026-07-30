@@ -87,6 +87,8 @@ import type {
   ScanProjectDataCatalogResult,
   MineProjectDataParams,
   MineProjectDataResult,
+  ApproveDataSourceParams,
+  ApproveDataSourceResult,
   RunXaiDigest,
   ScanProjectModelsParams,
   ScanProjectModelsResult,
@@ -504,11 +506,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           models: benchmarkedModels,
           concurrency: runConcurrency,
         })
-        // keepCheckpoints AND continueFrom are injected AFTER hashing (item.key is already fixed), so a
-        // checkpointed / continued run keeps the same setup identity — dedup/skipExplored are unaffected.
-        // A continued run implies keeping a checkpoint (so it stays continuable).
+        // keepCheckpoints, continueFrom AND snapshotInterval are injected AFTER hashing (item.key is already
+        // fixed), so a checkpointed / continued / snapshotted run keeps the same setup identity —
+        // dedup/skipExplored are unaffected. A continued OR snapshotted run implies keeping a checkpoint (so
+        // the parent stays continuable / the mid-training snapshots persist).
         const keepCheckpoint =
-          (params.keepCheckpoints || params.continueFrom) && manifest.keepCheckpointKey
+          (params.keepCheckpoints || params.continueFrom || params.snapshotInterval) &&
+          manifest.keepCheckpointKey
             ? { [manifest.keepCheckpointKey]: true }
             : undefined
         // continueFrom = extra-train: load the parent checkpoint but KEEP training (the project's
@@ -517,12 +521,19 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           params.continueFrom && manifest.continueFromKey
             ? { [manifest.continueFromKey]: params.continueFrom }
             : undefined
+        // snapshotInterval = save a retained checkpoint every N training units (the project's
+        // `snapshotIntervalKey` config field) so the trainer can emit a decision trace per snapshot.
+        const snapshotInterval =
+          params.snapshotInterval && manifest.snapshotIntervalKey
+            ? { [manifest.snapshotIntervalKey]: params.snapshotInterval }
+            : undefined
         const runConfig =
-          device || keepCheckpoint || continueFrom
+          device || keepCheckpoint || continueFrom || snapshotInterval
             ? {
                 ...item.config,
                 ...(keepCheckpoint ?? {}),
                 ...(continueFrom ?? {}),
+                ...(snapshotInterval ?? {}),
                 ...(device ? { device } : {}),
               }
             : item.config
@@ -1006,6 +1017,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
       ...(params.concurrency ? { concurrency: params.concurrency } : {}),
       ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+      ...(params.onRecordWritten ? { onRecordWritten: params.onRecordWritten } : {}),
+      ...(params.onProgress ? { onProgress: params.onProgress } : {}),
+      ...(params.onItemProgress ? { onItemProgress: params.onItemProgress } : {}),
     })
     return { recordType, parentKey: params.runKey, continuedFrom: checkpoint, campaign }
   }
@@ -2654,6 +2668,37 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // D4 approve-gate: promote a `discoverData` datasource DRAFT (status `proposed`) into the approved registry,
+  // and — when the caller supplies a concrete `mineRequest` and the manifest declares a `mineData` command —
+  // auto-launch its mine. The draft itself carries only a prose `mineHint`, so the runnable request comes from
+  // the caller (the Data tab's "Approve & mine"); a bare approval just registers it as catalogued.
+  async function approveDataSource(
+    params: ApproveDataSourceParams,
+  ): Promise<ApproveDataSourceResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const type = `${recordType}-datasource`
+    const record = await deps.storage.readRecord({ scope: params.scope, type, key: params.sourceId })
+    if (!record) throw new Error(`no datasource draft for ${params.sourceId}`)
+    const approved = { ...(record.content as Record<string, unknown>), status: 'approved', approvedAt: now() }
+    await deps.storage.upsertRecord({ scope: params.scope, type, key: params.sourceId, content: approved })
+    params.onRecordWritten?.(type, params.sourceId)
+
+    let mine: MineProjectDataResult | undefined
+    if (params.mineRequest && manifest.mineData) {
+      mine = await mineProjectData({
+        scope: params.scope,
+        projectRoot: params.projectRoot,
+        manifest,
+        request: params.mineRequest,
+        ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+        ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+      })
+    }
+    return { recordType, sourceId: params.sourceId, status: 'approved', mined: !!mine, ...(mine ? { mine } : {}) }
+  }
+
   async function scanProjectModels(
     params: ScanProjectModelsParams,
   ): Promise<ScanProjectModelsResult> {
@@ -3602,6 +3647,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     benchmarkModelDevice,
     scanProjectDataCatalog,
     mineProjectData,
+    approveDataSource,
     analyzePaperModels,
     xaiNarrate,
     diagnoseSearch,

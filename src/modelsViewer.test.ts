@@ -492,6 +492,63 @@ describe('flavorComponents + modelsUsingComponent (block composition)', () => {
   })
 })
 
+describe('modelsUsingComponentInRuns (custom_net_arch recipe wiring, A9)', () => {
+  const attention = {
+    slug: 'attention-blocks',
+    name: 'Attention Blocks',
+    category: 'component',
+    flavors: [],
+    blockTokens: ['SelfAttention', 'MultiHeadAttention', 'GlobalContextAttention'],
+  }
+  const nn = {
+    slug: 'nn-building-blocks',
+    name: 'NN Building Blocks',
+    category: 'component',
+    flavors: [],
+    blockTokens: ['NoisyLinear', 'ResidualBlock'],
+  }
+  const reppo = { slug: 'reppo-custom', name: 'Reppo Custom', category: 'rl', flavors: [{ modelName: 'reppo-custom' }] }
+  const gru = { slug: 'gru-custom', name: 'GRU Custom', category: 'rl', flavors: [{ modelName: 'gru-custom' }, { modelName: 'gru' }] }
+  const models = [attention, nn, reppo, gru]
+  const run = (modelName: string, arch: unknown) => ({ config: { model_name: modelName, custom_net_arch: arch } })
+
+  it('finds the models whose RUNS wire a block belonging to the component', () => {
+    const runs = [
+      run('reppo-custom', ['Linear', 'activation_fn', 'SelfAttention', 'Linear']),
+      run('gru-custom', ['BatchNorm1d', 'Linear']), // no attention block
+    ]
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['reppo-custom'])
+  })
+
+  it('reads the recipe from ANY array-valued config key (domain-oblivious) + dedups a model across runs', () => {
+    const runs = [
+      run('gru-custom', ['NoisyLinear', 'Linear']),
+      run('gru-custom', ['ResidualBlock']), // same model, another nn-block run
+      run('reppo-custom', ['Linear']), // no nn block
+    ]
+    expect(M.modelsUsingComponentInRuns(nn, models, runs).map((m: any) => m.slug)).toEqual(['gru-custom'])
+  })
+
+  it('returns [] for a component without blockTokens, and ignores a non-array recipe', () => {
+    expect(M.modelsUsingComponentInRuns({ slug: 'x', category: 'component' }, models, [run('reppo-custom', ['SelfAttention'])])).toEqual([])
+    expect(M.modelsUsingComponentInRuns(attention, models, [run('reppo-custom', 'notarray')])).toEqual([])
+  })
+
+  it('reads a viewer run shape (summary.config) too', () => {
+    const runs = [{ summary: { config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] } } }]
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['reppo-custom'])
+  })
+
+  it('skips invalid + failed runs (parity with the computeModelStats exclusion)', () => {
+    const runs = [
+      { summary: { status: 'invalid', config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] } } },
+      { summary: { status: 'failed', config: { model_name: 'reppo-custom', custom_net_arch: ['MultiHeadAttention'] } } },
+      { summary: { status: 'completed', config: { model_name: 'gru-custom', custom_net_arch: ['SelfAttention'] } } },
+    ]
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['gru-custom'])
+  })
+})
+
 describe('seed re-sync (flavor components)', () => {
   const base = {
     id: 'rainbow-dqn',

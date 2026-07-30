@@ -914,6 +914,30 @@ button.run-badge.model-device-chip:hover {
   stroke: var(--border);
   stroke-width: 1;
 }
+/* 2-D matrix attribution (attention heatmap): fixed-cell grid, so don't stretch it to 100% like line/scatter
+   charts — let a wide grid scroll inside its wrapper instead of distorting square cells. Cell fills are inline
+   (from the pure Heatmap model); the thin stroke just separates cells and adapts to the theme surface. */
+.heatmap {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+.heatmap-wrap {
+  overflow-x: auto;
+}
+.heatmap rect {
+  stroke: var(--surface-subtle);
+  stroke-width: 0.5;
+  shape-rendering: crispEdges;
+}
+.heatmap-legend {
+  display: block;
+  margin: 6px 0 0;
+}
+.heatmap-legend rect {
+  shape-rendering: crispEdges;
+}
 .chart-axis {
   stroke: var(--muted);
   stroke-width: 1;
@@ -2324,6 +2348,26 @@ button.block-chip:hover {
    Experiments (campaigns + evaluations) on the left, Tasks (judge / propose /
    paper import) on the right. The tasks column is collapsible and shows an
    empty view when its lane is idle. Stacks on narrow screens. */
+/* A12: the History-popup launcher above the live activity columns. */
+.activity-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 12px;
+}
+.activity-toolbar .ghost-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.activity-history-table th > div:first-child {
+  font-weight: 600;
+}
+.activity-history-err {
+  color: var(--bad);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-top: 2px;
+}
 .activity-cols {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
@@ -3645,6 +3689,28 @@ pre.json {
 }
 .xt-assets .xt-asset {
   white-space: nowrap;
+}
+/* Continue-training (extra-train) dataset picker in the run-detail section. */
+.ct-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 6px 0 4px;
+}
+.ct-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.ct-field select,
+.ct-field input {
+  min-width: 120px;
+}
+.ct-field input[type='number'] {
+  width: 72px;
+  min-width: 0;
 }
 .runner-cards {
   display: grid;

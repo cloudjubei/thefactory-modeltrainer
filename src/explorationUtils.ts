@@ -6,6 +6,7 @@ import {
   EXPLORATION_COVERAGE_PER_LEVER,
   EXPLORATION_DRY_ROUNDS,
   EXPLORATION_MAX_ACTIVE_LEVERS,
+  EXPLORATION_LADDER_MAX_REGION_AXES,
   EXPLORATION_MAX_REFINE_DEPTH,
   EXPLORATION_MAX_REGION_AXES,
   EXPLORATION_REFINE_MAX_STEP_FRACTION,
@@ -733,6 +734,31 @@ function expand(
     return mk('local', coverage, `cover the space — ${coverage[0].runCount} space-filling sample(s)`, { ...state, stage: 'local', basins }, false)
   }
 
+  // Rung 3 — the numeric space is unfrozen AND covered: grow into a still-FROZEN CATEGORICAL dimension (open a
+  // new basin axis) so a lever the screen capped out of the region cross-product finally gets its other values
+  // explored. One per escalation, importance-ranked, and only up to EXPLORATION_LADDER_MAX_REGION_AXES active
+  // categorical axes so the region product can't explode on a many-categorical manifest. Deliberately AFTER
+  // numerics+coverage — exhaust the current space before multiplying it.
+  const setups = aggregateToSetupRuns(runs, criterion)
+  const regionAxes = regionLeversOf(setups, state.activeLevers, manifest)
+  const frozenCategorical = Object.keys(state.frozenLevers).filter(
+    (l) => !isNumericManifestLever(manifest, l) && (categoricalChoices(manifest, l)?.length ?? 0) > 1,
+  )
+  if (frozenCategorical.length && regionAxes.length < EXPLORATION_LADDER_MAX_REGION_AXES) {
+    const imps = leverImportances(runs, criterion)
+    const impOf = (l: string): number => imps.find((i) => i.lever === l)?.importance ?? 0
+    const lever = frozenCategorical.slice().sort((a, b) => impOf(b) - impOf(a) || (a < b ? -1 : 1))[0]
+    const frozenLevers = without(state.frozenLevers, lever)
+    const activeLevers = uniq([...state.activeLevers, lever])
+    const widened = { ...state, stage: 'global' as const, activeLevers, frozenLevers, dryRounds: 0, basins }
+    const sweep = unfreezeCategoricalRec(lever, frozenLevers, runs, manifest, criterion)
+    if (sweep) {
+      return mk('global', [sweep], `unfreeze ${lever} — open a new basin axis into a fixed categorical`, widened, false)
+    }
+    // Every value already tried — just widen (re-cluster with the new axis so its tried values become basins).
+    return stepGlobal(widened, runs, manifest, criterion, mk, undefined)
+  }
+
   // Every lever unfrozen, every peak resolved, and the space sampled to the density target — genuinely covered.
   const finest = (state.refineDepth ?? 0) >= EXPLORATION_MAX_REFINE_DEPTH
   const reason = finest
@@ -934,6 +960,48 @@ function unfreezeSweepRec(
     runCount: fresh.length * XAI_MIN_SEEDS,
     spec: { fixed, sweep: { [lever]: fresh }, seeds: seedRange(XAI_MIN_SEEDS) },
     priority: 70,
+  }
+}
+
+/**
+ * The discrete value set of a categorical basin-axis lever: a `choice` lever's `choices`, or `[false, true]`
+ * for a `boolean` (which carries no `choices` array). Undefined for anything else — so numerics + degenerate
+ * single-choice levers are never treated as a categorical axis to open.
+ */
+function categoricalChoices(manifest: TrainerManifest, lever: string): unknown[] | undefined {
+  const spec = manifest.levers[lever]
+  if (!spec) return undefined
+  if (Array.isArray(spec.choices) && spec.choices.length > 1) return spec.choices
+  if (spec.type === 'boolean') return [false, true]
+  return undefined
+}
+
+/**
+ * Try the UNTRIED values of a freshly-promoted categorical basin axis (holding the other levers at the best
+ * config), so opening the axis actually produces new regions to cluster. Handles `boolean` levers (values
+ * `false`/`true`) as well as `choice`. Null when every value is already in the archive (the caller then just
+ * widens + re-clusters over the existing runs).
+ */
+function unfreezeCategoricalRec(
+  lever: string,
+  frozenLevers: Record<string, unknown>,
+  runs: AnalysisRun[],
+  manifest: TrainerManifest,
+  criterion: AnalysisCriterion,
+): ExperimentRecommendation | undefined {
+  const choices = categoricalChoices(manifest, lever)
+  if (!choices || choices.length < 2) return undefined
+  const tried = new Set(runs.map((r) => JSON.stringify(r.config[lever])))
+  const fresh = choices.filter((c) => !tried.has(JSON.stringify(c)))
+  if (!fresh.length) return undefined
+  const best = bestRunConfig(runs, criterion)
+  const fixed = { ...without(best, lever, 'seed'), ...frozenLevers }
+  return {
+    kind: 'acquisition',
+    reason: `unfreeze ${lever}: try ${fresh.length} untried value(s)`,
+    runCount: fresh.length * XAI_MIN_SEEDS,
+    spec: { fixed, sweep: { [lever]: fresh }, seeds: seedRange(XAI_MIN_SEEDS) },
+    priority: 65,
   }
 }
 

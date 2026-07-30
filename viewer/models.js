@@ -334,6 +334,45 @@
     return out
   }
 
+  // The catalog models whose RUNS wire a block belonging to this component — derived from each run's recipe
+  // (ANY array-valued config entry, e.g. `custom_net_arch`) intersecting the component's declared
+  // `blockTokens`. This surfaces "used by" for the attention/nn-block cards, whose blocks are chosen PER-RUN
+  // (a lever recipe) rather than declared statically in a flavor's `components`. Pure + domain-oblivious.
+  function configOfRun(run) {
+    return (run && run.config) || (run && run.summary && run.summary.config) || {}
+  }
+  function runStatusOf(run) {
+    return (run && run.status) || (run && run.summary && run.summary.status) || 'completed'
+  }
+  function modelsUsingComponentInRuns(component, models, runs) {
+    const tokens = component && Array.isArray(component.blockTokens) ? component.blockTokens : []
+    if (!tokens.length) return []
+    const tokenSet = {}
+    for (let i = 0; i < tokens.length; i++) tokenSet[slugify(tokens[i])] = true
+    const usedNames = {}
+    for (const run of runs || []) {
+      const status = runStatusOf(run)
+      if (status === 'invalid' || status === 'failed') continue // parity with computeModelStats exclusion
+      const cfg = configOfRun(run)
+      let wired = false
+      for (const k in cfg) {
+        const v = cfg[k]
+        if (Array.isArray(v) && v.some((t) => tokenSet[slugify(t)])) {
+          wired = true
+          break
+        }
+      }
+      if (wired && cfg.model_name != null) usedNames[String(cfg.model_name)] = true
+    }
+    if (!Object.keys(usedNames).length) return []
+    const out = []
+    for (const m of models || []) {
+      if (!m || m.category === 'component') continue
+      if (modelFlavors(m).some((fl) => usedNames[String(fl.modelName)])) out.push(m)
+    }
+    return out
+  }
+
   // Manifest-owned SCALAR fields a seed re-sync overwrites onto an existing record (flavors compared
   // separately, deeply). The rest are user-owned: statusSource:manual status + statusNote, notes,
   // dismissed, hypothesisIds, createdAt.
@@ -635,6 +674,7 @@
     visibleMissingModels: visibleMissingModels,
     flavorComponents: flavorComponents,
     modelsUsingComponent: modelsUsingComponent,
+    modelsUsingComponentInRuns: modelsUsingComponentInRuns,
     seedDiffersFromModel: seedDiffersFromModel,
     mergeSeedIntoModel: mergeSeedIntoModel,
     mergeModelsForConsolidation: mergeModelsForConsolidation,

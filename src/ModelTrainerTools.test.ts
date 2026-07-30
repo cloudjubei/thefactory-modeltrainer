@@ -5182,6 +5182,61 @@ describe('discoverData', () => {
   })
 })
 
+describe('approveDataSource (D4 approve-gate)', () => {
+  const dataManifest = () =>
+    manifest({ mineData: 'bin/python -m trainer.data_cli mine --request {configPath} --out {summaryOut}' })
+  const seedDraft = (storage: ReturnType<typeof memoryStorage>) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-datasource',
+      key: 'fred-macro',
+      content: { id: 'fred-macro', name: 'FRED macro', source: 'FRED', status: 'proposed', mineHint: 'add fred CPIAUCSL' },
+    })
+
+  it('promotes a proposed draft to the approved registry (no mine without a request)', async () => {
+    const storage = memoryStorage()
+    await seedDraft(storage)
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.approveDataSource({ scope: 'proj', projectRoot: '/repo', manifest: dataManifest(), sourceId: 'fred-macro' })
+    expect(res.status).toBe('approved')
+    expect(res.mined).toBe(false)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-datasource', key: 'fred-macro' })
+    expect((rec!.content as { status: string }).status).toBe('approved')
+    expect((rec!.content as { approvedAt?: string }).approvedAt).toBe(NOW)
+    expect(runner.jobs).toHaveLength(0) // registry-only: no mine launched
+  })
+
+  it('auto-launches the mine when a concrete request is supplied', async () => {
+    const storage = memoryStorage()
+    await seedDraft(storage)
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: { mined: [{ symbol: 'CPIAUCSL', source: 'fred', written: 12, skipped: 0, errors: [], gaps: [] }], unknown: [], through: '2026-06' },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.approveDataSource({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      sourceId: 'fred-macro',
+      mineRequest: { symbols: ['CPIAUCSL'] },
+    })
+    expect(res.status).toBe('approved')
+    expect(res.mined).toBe(true)
+    expect(res.mine?.mined[0].symbol).toBe('CPIAUCSL')
+    expect(runner.jobs).toHaveLength(1)
+  })
+
+  it('throws when the datasource draft does not exist', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(
+      tools.approveDataSource({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), sourceId: 'ghost' }),
+    ).rejects.toThrow(/no datasource/)
+  })
+})
+
 describe('crossTestRun', () => {
   const ctManifest = () =>
     manifest({
@@ -5389,6 +5444,41 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     })
     expect('save_checkpoint' in (runner.jobs[0].config as Record<string, unknown>)).toBe(false)
   })
+
+  it('campaign snapshotInterval injects the manifest key + implies keep-checkpoint WITHOUT changing item keys', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const m = wManifest()
+    m.snapshotIntervalKey = 'snapshot_interval'
+    delete m.calibrate
+    const plainKeys = tools.planTrainingMatrix(m, { sweep: { lr: [0.1, 0.2] } }).map((i) => i.key)
+    await tools.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: m,
+      spec: { sweep: { lr: [0.1, 0.2] } },
+      snapshotInterval: 5000,
+    })
+    expect(runner.jobs).toHaveLength(2)
+    // the interval is injected AND a snapshot run keeps its checkpoint (so the snapshots persist)
+    expect(runner.jobs.every((j) => (j.config as { snapshot_interval: number }).snapshot_interval === 5000)).toBe(true)
+    expect(runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true)).toBe(true)
+    // identity unchanged: injection happens AFTER hashing
+    expect(runner.jobs.map((j) => j.jobId).sort()).toEqual([...plainKeys].sort())
+  })
+
+  it('snapshotInterval is a no-op when the manifest declares no snapshotIntervalKey', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const m = wManifest() // no snapshotIntervalKey
+    delete m.calibrate
+    await tools.runTrainingCampaign({
+      scope: 'proj', projectRoot: '/repo', manifest: m,
+      spec: { sweep: { lr: [0.1] } },
+      snapshotInterval: 5000,
+    })
+    expect('snapshot_interval' in (runner.jobs[0].config as Record<string, unknown>)).toBe(false)
+  })
 })
 
 describe('diagnoseSearch (A5 read tool)', () => {
@@ -5506,5 +5596,35 @@ describe('continueTrainingRun (A3 extra-train)', () => {
     await expect(
       tools.continueTrainingRun({ scope: 'proj', projectRoot: '/repo', manifest: contManifest(), runKey: 'p2' }),
     ).rejects.toThrow(/no checkpoint/)
+  })
+
+  it('forwards onRecordWritten + onProgress to the campaign (so the host can stream + refresh)', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, contManifest())
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'parent',
+      content: {
+        config: { lr: 0.05, asset: 'BTCUSDT', walk_forward_window: '2024' },
+        objective: 10,
+        status: 'completed',
+        artifacts: { checkpoint: 'checkpoints/parent.zip' },
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const written: string[] = []
+    const progress: number[] = []
+    await tools.continueTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: contManifest(),
+      runKey: 'parent',
+      datasetOverrides: { asset: 'ETHUSDT', walk_forward_window: '2025' },
+      onRecordWritten: (type, key) => written.push(`${type}:${key}`),
+      onProgress: (p) => progress.push(p.done),
+    })
+    expect(written.some((w) => w.startsWith('demo-run:'))).toBe(true)
+    expect(progress.length).toBeGreaterThan(0)
   })
 })

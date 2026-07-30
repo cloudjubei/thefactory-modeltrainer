@@ -209,3 +209,12 @@ export const EXPLORATION_BATCH_MAX = 24
  * (unfreeze via steer). This is what makes `model_name` the top-level basin axis rather than one of fourteen.
  */
 export const EXPLORATION_MAX_REGION_AXES = 2
+
+/**
+ * The most categorical basin axes the ESCALATION LADDER will grow to. The screen starts at {@link
+ * EXPLORATION_MAX_REGION_AXES}; once the numeric space is unfrozen AND covered, the ladder promotes the next
+ * still-frozen categorical to a basin axis (one per escalation, importance-ranked) so a lever the screen
+ * capped out finally gets its other values explored — but only up to this bound, so the region cross-product
+ * can't explode on a many-categorical manifest. Beyond it, the search converges.
+ */
+export const EXPLORATION_LADDER_MAX_REGION_AXES = 4

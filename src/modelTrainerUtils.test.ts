@@ -2219,6 +2219,91 @@ describe('validateDecisionTrace', () => {
     expect(trace?.featureAttribution).toBeUndefined()
     expect(trace?.actionCounts).toBeUndefined()
   })
+
+  it('coerces a well-formed attentionMatrix (2-D matrix attribution)', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      attentionMatrix: {
+        rows: ['t0', 't1'],
+        cols: ['c0', 'c1'],
+        grid: [
+          [0.1, 0.2],
+          [0.3, 0.4],
+        ],
+        method: 'attention-weights',
+      },
+    })
+    expect(trace?.attentionMatrix).toEqual({
+      rows: ['t0', 't1'],
+      cols: ['c0', 'c1'],
+      grid: [
+        [0.1, 0.2],
+        [0.3, 0.4],
+      ],
+      method: 'attention-weights',
+    })
+  })
+
+  it('coerces the attentionMatrix sanityCheck (reuses the Adebayo shape)', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      attentionMatrix: {
+        rows: ['t0'],
+        cols: ['c0'],
+        grid: [[0.5]],
+        sanityCheck: { method: 'model-randomization', rankCorrelation: 0.9, passed: true, junk: 1 },
+      },
+    })
+    expect(trace?.attentionMatrix?.sanityCheck).toEqual({
+      method: 'model-randomization',
+      rankCorrelation: 0.9,
+      passed: true,
+    })
+  })
+
+  it('drops a ragged attentionMatrix grid but keeps the rest of the trace', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      attentionMatrix: { rows: ['t0', 't1'], cols: ['c0', 'c1'], grid: [[0.1], [0.3, 0.4]] },
+    })
+    expect(trace).toBeDefined()
+    expect(trace?.attentionMatrix).toBeUndefined()
+  })
+
+  it('drops an attentionMatrix whose grid row count ≠ rows.length', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      attentionMatrix: { rows: ['t0', 't1'], cols: ['c0'], grid: [[0.1]] },
+    })
+    expect(trace?.attentionMatrix).toBeUndefined()
+  })
+
+  it('drops an attentionMatrix with a non-finite cell', () => {
+    const trace = validateDecisionTrace({
+      steps: [{ step: 0, action: 'hold' }],
+      attentionMatrix: {
+        rows: ['t0'],
+        cols: ['c0', 'c1'],
+        grid: [[0.1, Number.NaN]],
+      },
+    })
+    expect(trace?.attentionMatrix).toBeUndefined()
+  })
+
+  it('drops an attentionMatrix missing rows or cols', () => {
+    expect(
+      validateDecisionTrace({
+        steps: [{ step: 0, action: 'hold' }],
+        attentionMatrix: { cols: ['c0'], grid: [[0.1]] },
+      })?.attentionMatrix,
+    ).toBeUndefined()
+    expect(
+      validateDecisionTrace({
+        steps: [{ step: 0, action: 'hold' }],
+        attentionMatrix: { rows: ['t0'], grid: [[0.1]] },
+      })?.attentionMatrix,
+    ).toBeUndefined()
+  })
 })
 
 describe('datasetAlignmentSignature', () => {
@@ -4092,6 +4177,23 @@ describe('capRunSummaryForStorage', () => {
     const summary = base({ series: { equity } })
     capRunSummaryForStorage(summary)
     expect(summary.series!.equity).toHaveLength(MAX_SERIES_POINTS + 1)
+  })
+
+  it('preserves a trace-level attentionMatrix through the step-cap (grid is source-capped, never dropped here)', () => {
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 10 }, (_, i) => ({ step: i, action: 'hold' }))
+    const attentionMatrix = {
+      rows: ['t0', 't1'],
+      cols: ['c0', 'c1'],
+      grid: [
+        [0.1, 0.2],
+        [0.3, 0.4],
+      ],
+      method: 'attention-weights',
+    }
+    const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps, attentionMatrix } } }))
+    const trace = (out.artifacts as { decisionTrace: { steps: unknown[]; attentionMatrix: unknown } }).decisionTrace
+    expect(trace.steps).toHaveLength(MAX_DECISION_TRACE_STEPS)
+    expect(trace.attentionMatrix).toEqual(attentionMatrix)
   })
 })
 

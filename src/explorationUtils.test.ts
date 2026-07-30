@@ -13,7 +13,7 @@ import {
   gateConvergenceOnSplits,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
-import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES } from './modelTrainerConstants.js'
+import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES, EXPLORATION_LADDER_MAX_REGION_AXES } from './modelTrainerConstants.js'
 
 // A synthetic project: one discrete lever `algo` (the basin axis), one important continuous lever
 // `lr`, one INERT continuous lever `noise_knob` (screening must freeze it), and `seed` (the noise dim).
@@ -657,6 +657,114 @@ describe('escalation ladder — never converge until the space is covered', () =
     expect(step.done).toBe(false)
     expect(step.stateNext.activeLevers).toContain('noise_knob') // widened despite nothing fresh to sweep
     expect(Object.keys(step.stateNext.frozenLevers)).not.toContain('noise_knob')
+  })
+
+  it('UNFREEZES a fixed CATEGORICAL lever as a NEW basin axis when numerics + coverage are dry (rung 3)', () => {
+    // algo is climbed out (both regions plateau, no numeric to refine) and coverage is trivially met (no
+    // numeric active). A second categorical `optimizer` is frozen at adam — the ladder must promote it to a
+    // basin axis and try its UNTRIED values rather than converge over a subspace that never varied it.
+    const CAT: TrainerManifest = {
+      name: 'two-cat',
+      recordType: 'two-cat-run',
+      run: 'noop',
+      objective: { name: 'score', direction: 'max' },
+      levers: {
+        algo: { type: 'choice', choices: ['A', 'B'], default: 'A' },
+        optimizer: { type: 'choice', choices: ['adam', 'sgd', 'rmsprop'], default: 'adam' },
+        seed: { type: 'number', default: 0 },
+      },
+    }
+    runSeq = 0
+    const runs: AnalysisRun[] = []
+    for (const algo of ['A', 'B']) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, optimizer: 'adam', seed: s }))
+    const state: ExplorationState = {
+      ...initExplorationState(CAT),
+      stage: 'local',
+      activeLevers: ['algo'],
+      frozenLevers: { optimizer: 'adam' },
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, CAT, {})
+    expect(step.done).toBe(false)
+    expect(step.stage).toBe('global')
+    expect(step.stateNext.activeLevers).toContain('optimizer') // promoted to a basin axis
+    expect(Object.keys(step.stateNext.frozenLevers)).not.toContain('optimizer')
+    const swept = step.batch.flatMap((b) => (b.spec.sweep?.optimizer as unknown[]) ?? [])
+    expect(swept).toContain('sgd')
+    expect(swept).toContain('rmsprop')
+    expect(swept).not.toContain('adam') // adam already tried — only fresh values
+  })
+
+  it('UNFREEZES a fixed BOOLEAN lever as a basin axis too (booleans are region axes, no `choices` array)', () => {
+    const BOOL: TrainerManifest = {
+      name: 'bool-cat',
+      recordType: 'bc-run',
+      run: 'noop',
+      objective: { name: 'score', direction: 'max' },
+      levers: {
+        algo: { type: 'choice', choices: ['A', 'B'], default: 'A' },
+        use_x: { type: 'boolean', default: false },
+        seed: { type: 'number', default: 0 },
+      },
+    }
+    runSeq = 0
+    const runs: AnalysisRun[] = []
+    for (const algo of ['A', 'B']) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, use_x: false, seed: s }))
+    const state: ExplorationState = {
+      ...initExplorationState(BOOL),
+      stage: 'local',
+      activeLevers: ['algo'],
+      frozenLevers: { use_x: false },
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, BOOL, {})
+    expect(step.done).toBe(false)
+    expect(step.stateNext.activeLevers).toContain('use_x') // promoted despite carrying no `choices` array
+    expect(Object.keys(step.stateNext.frozenLevers)).not.toContain('use_x')
+    const swept = step.batch.flatMap((b) => (b.spec.sweep?.use_x as unknown[]) ?? [])
+    expect(swept).toContain(true) // the untried boolean value
+    expect(swept).not.toContain(false) // already tried
+  })
+
+  it('does NOT grow beyond EXPLORATION_LADDER_MAX_REGION_AXES categorical axes — it converges instead', () => {
+    // Region growth is BOUNDED: with the ladder cap of categorical axes already active, a further frozen
+    // categorical is left pinned and the search converges rather than exploding the region cross-product.
+    const MANY: TrainerManifest = {
+      name: 'many-cat',
+      recordType: 'mc-run',
+      run: 'noop',
+      objective: { name: 's', direction: 'max' },
+      levers: {
+        c1: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        c2: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        c3: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        c4: { type: 'choice', choices: ['a', 'b'], default: 'a' },
+        c5: { type: 'choice', choices: ['a', 'b', 'c'], default: 'a' },
+        seed: { type: 'number', default: 0 },
+      },
+    }
+    runSeq = 0
+    const active = ['c1', 'c2', 'c3', 'c4'].slice(0, EXPLORATION_LADDER_MAX_REGION_AXES)
+    const runs: AnalysisRun[] = []
+    for (const s of [0, 1, 2, 3, 4])
+      runs.push({
+        key: `r${runSeq++}`,
+        config: { c1: 'a', c2: 'a', c3: 'a', c4: 'a', c5: 'a', seed: s },
+        objective: 100,
+        metrics: { s: 100, baseline: 0 },
+        seed: s,
+        status: 'completed',
+      })
+    const state: ExplorationState = {
+      ...initExplorationState(MANY),
+      stage: 'local',
+      activeLevers: active,
+      frozenLevers: { c5: 'a' },
+      noiseFloor: 1,
+    }
+    const step = nextExplorationStep(state, runs, MANY, {})
+    expect(step.done).toBe(true) // converged, not grown to a further categorical axis
+    expect(step.stateNext.activeLevers).not.toContain('c5')
   })
 
   it('declares "fully covered at the finest resolution" once refineDepth is at the cap and nothing remains', () => {

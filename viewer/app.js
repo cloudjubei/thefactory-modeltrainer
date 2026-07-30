@@ -50,7 +50,7 @@ const LANE_LIMITS_RECORD_TYPE = 'trainer-activity-limits'
 // drain reads so the user can reorder which queued campaign runs next (the Activity tab's ↑/↓/⤒).
 const QUEUE_ORDER_RECORD_TYPE = 'trainer-queue-order'
 // Activity types that run on compute — the experiment lane. Everything else is a task.
-const EXPERIMENT_ACTIVITY_TYPES = new Set(['train', 'evaluate'])
+const EXPERIMENT_ACTIVITY_TYPES = new Set(['train', 'evaluate', 'continue-training'])
 // Whether the 2nd ('Tasks') column is collapsed (persisted per session).
 const TASKS_COLLAPSED_SS = 'trainer.tasksCollapsed'
 // activityIds the user PAUSED (vs a backend-down stall). Persisted so a paused campaign still
@@ -223,6 +223,11 @@ let evaluationsCache = new Map()
 // runKey -> `{recordType}-settest` content (the cross-test matrix: checkpoint replayed on other assets /
 // an extended window). Loaded once per render like evaluationsCache — rows read it synchronously.
 let crossTestsCache = new Map()
+// Lean lineage rows ({key, summary:{artifacts.checkpoint, provenance.continuedFrom, config, objective,
+// status}}) for ALL runs — so the run-detail Continue-training section resolves parent<->child lineage
+// across the WHOLE run set, not just the current server page. Empty unless the manifest declares
+// `continueFromKey`; refreshed wherever `crossTestsCache` is.
+let continuedLineageCache = []
 // Reliability verdicts. `reliabilityCache` holds the PERSISTED, authoritative verdicts (`source: 'user'`
 // override or `source: 'llm'`), keyed by run key — they survive reloads + are overturnable. The heuristic
 // baseline is NOT persisted: it's recomputed in-memory into `reliabilityHeuristicCache` on each global Refresh
@@ -240,6 +245,8 @@ let unrunnableCache = new Set()
 const evaluatingKeys = new Set()
 // Runs with a cross-test in flight (spinner in the run-detail Cross-test section).
 const crossTestingKeys = new Set()
+// Runs launching a continue-training (extra-train) campaign (spinner in the run-detail Continue-training section).
+const continueTrainingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
 let proposalSummary = null
@@ -649,6 +656,14 @@ function iconRunSvg(size) {
     '<path d="M7 4.5v15a1 1 0 0 0 1.5.86l12-7.5a1 1 0 0 0 0-1.72l-12-7.5A1 1 0 0 0 7 4.5z"/></svg>'
   )
 }
+// A clock with a counter-clockwise arrow — the "history / past activity" glyph.
+function iconHistorySvg(size) {
+  const s = size || 14
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1 0 6 5.3L3 8"/><path d="M12 7v5l3 2"/></svg>'
+  )
+}
 // A plus — "add a new one".
 // THE standard "create story/feature" glyph (a bookmarked card with a +) — every "work on this" button
 // across the app uses it, always paired with a callout explaining exactly what gets created.
@@ -785,16 +800,26 @@ function hideHelpTooltip() {
   helpTooltipFor = null
   if (helpTooltipEl) helpTooltipEl.hidden = true
 }
+// Actionable controls whose tap must run their action, never pin a help callout (they flash help via focus
+// on a fine pointer). Includes `[data-action]` rows/cells + `label` (wrapping an input), matched against the
+// ACTUAL tap target, not a `[data-help]` ancestor wrapper.
+const HELP_ACTIONABLE_SELECTOR = 'button, a, input, select, textarea, label, [role="button"], [data-action]'
 function setupHelpTooltips() {
-  document.addEventListener('mouseover', (e) => {
-    const t = e.target.closest && e.target.closest('[data-help]')
-    if (t && t !== helpTooltipFor) showHelpTooltip(t)
-  })
-  document.addEventListener('mouseout', (e) => {
-    if (!helpTooltipFor) return
-    if (e.relatedTarget && helpTooltipFor.contains(e.relatedTarget)) return
-    if (e.target.closest && e.target.closest('[data-help]') === helpTooltipFor) hideHelpTooltip()
-  })
+  // On a COARSE pointer, touch synthesizes mouseover/mouseout unreliably (a mouseover fires just before the
+  // click, so a toggle would show-then-immediately-hide). So hover is FINE-POINTER only; touch drives the
+  // tooltip purely from `click` below.
+  const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches
+  if (!coarse) {
+    document.addEventListener('mouseover', (e) => {
+      const t = e.target.closest && e.target.closest('[data-help]')
+      if (t && t !== helpTooltipFor) showHelpTooltip(t)
+    })
+    document.addEventListener('mouseout', (e) => {
+      if (!helpTooltipFor) return
+      if (e.relatedTarget && helpTooltipFor.contains(e.relatedTarget)) return
+      if (e.target.closest && e.target.closest('[data-help]') === helpTooltipFor) hideHelpTooltip()
+    })
+  }
   document.addEventListener('focusin', (e) => {
     const t = e.target.closest && e.target.closest('[data-help]')
     if (t) showHelpTooltip(t)
@@ -803,6 +828,21 @@ function setupHelpTooltips() {
   // A scroll moves the trigger out from under a fixed tooltip — just hide it; it reappears
   // on the next hover, already clamped.
   window.addEventListener('scroll', hideHelpTooltip, true)
+  // Touch reachability: hover + focus never fire on a tap, so on a COARSE pointer a `data-help` trigger that
+  // isn't itself an actionable control is otherwise unreachable. A tap REVEALS its callout (never toggles — a
+  // synthetic mouseover can't race it off); a tap on an action control OR anywhere else dismisses it (the
+  // action still runs — no preventDefault). Desktop (fine pointer) is untouched — hover owns it.
+  if (coarse) {
+    document.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest(HELP_ACTIONABLE_SELECTOR)) {
+        hideHelpTooltip()
+        return
+      }
+      const t = e.target.closest && e.target.closest('[data-help]')
+      if (t) showHelpTooltip(t)
+      else hideHelpTooltip()
+    })
+  }
 }
 function queuedStatusText(ahead) {
   return `Queued — ${ahead} ahead of it.`
@@ -1156,6 +1196,23 @@ async function readCrossTests() {
     if (key) map.set(key, content)
   }
   return map
+}
+// Lean lineage rows for EVERY run — just the fields the Continue-training lineage/matrix needs, projected
+// server-side (never the heavy per-bar traces) so the whole-set join stays cheap even at thousands of runs.
+// Only fetched when the project declares continued training; otherwise the section never renders.
+async function readContinuedLineage() {
+  if (!manifest || !manifest.continueFromKey || !embedded()) return []
+  let recs
+  try {
+    recs = await window.OverseerBridge.queryData({
+      type: manifest.recordType,
+      select: ['artifacts.checkpoint', 'provenance.continuedFrom', 'config', 'objective', 'status'],
+      omit: HEAVY_RUN_FIELDS,
+    })
+  } catch {
+    recs = []
+  }
+  return (recs || []).map((r) => ({ key: r.key, summary: r.content || {} })).filter((r) => r.key)
 }
 async function readProposal() {
   return readMostRecentRecord('-proposal')
@@ -4598,6 +4655,7 @@ async function renderRuns() {
     judgementSummary,
     evaluationsCache,
     crossTestsCache,
+    continuedLineageCache,
     dismissedFailures,
     unrunnableCache,
     reliabilityCache,
@@ -4607,6 +4665,7 @@ async function renderRuns() {
     readJudgement(),
     readEvaluations(),
     readCrossTests(),
+    readContinuedLineage(),
     readDismissedFailures(),
     readUnrunnable(),
     readReliability(),
@@ -4989,6 +5048,85 @@ function crossTestSectionHtml(run) {
     <p class="card-sub">Trained on ${escapeHtml(trained || '—')} — each row replays the SAME weights on data it never trained on.</p>
     <table class="kv-table"><tbody>${rowsHtml}</tbody></table>
     ${actions}${statusLine}`
+}
+// Whether the project supports continued training (extra-train) — the manifest declares a `continueFromKey`.
+function continueTrainUiEnabled() {
+  return !!(manifest && manifest.continueFromKey)
+}
+// The run-detail Continue-training section: parent lineage, the per-set evaluation matrix of continued
+// children, and — when embedded with dataset levers — a picker to continue THIS run's checkpoint onto a new
+// dataset. A continued child is a full run trained further from the parent weights, judged on its OWN
+// standardised test window (never the shifted train window). Distinct from cross-test, which never retrains.
+function continueTrainSectionHtml(run) {
+  const CtT = window.ContinueTrain
+  const s = run.summary
+  const statusLine = '<p id="run-continue-status" class="form-status" role="status" hidden></p>'
+  if (continueTrainingKeys.has(run.key)) {
+    return `<h3>Continue training</h3>
+      <p class="card-sub">${spinnerHtml()} Launching a continued run from this checkpoint…</p>
+      ${statusLine}`
+  }
+  const checkpoint = CtT.checkpointOf(run)
+  // Join over the whole-set lineage cache (the current run may be a lean page copy, so fold it in too).
+  const lineageRuns = continuedLineageCache.some((r) => r.key === run.key)
+    ? continuedLineageCache
+    : continuedLineageCache.concat([{ key: run.key, summary: run.summary }])
+  const index = CtT.lineageIndex(lineageRuns)
+  const parentKey = CtT.parentKeyOf(run, index)
+  const datasetKeys = datasetLeverEntries().map(([k]) => k)
+  const matrixRows = CtT.continuedMatrixRows(
+    run,
+    index,
+    new Map(lineageRuns.map((r) => [r.key, r])),
+    datasetKeys,
+  )
+  const lineageHtml = parentKey
+    ? `<p class="card-sub">Continued from <button type="button" class="link-btn" data-open-run="${escapeHtml(parentKey)}">${escapeHtml(shortKey(parentKey))}</button> — this run kept training the parent’s weights on shifted data.</p>`
+    : ''
+  const matrixHtml = matrixRows.length
+    ? `<p class="card-sub">Continued onto ${matrixRows.length} dataset${matrixRows.length === 1 ? '' : 's'} — each row is a full run judged on its OWN test window.</p>
+       <table class="kv-table"><tbody>${matrixRows
+         .map(
+           (row) =>
+             `<tr><th><button type="button" class="link-btn" data-open-run="${escapeHtml(row.key)}">${escapeHtml(row.label)}</button></th><td class="num">${row.status !== 'completed' ? `<span class="muted">${escapeHtml(String(row.status))}</span>` : escapeHtml(formatObjective(Number(row.objective)))}</td></tr>`,
+         )
+         .join('')}</tbody></table>`
+    : ''
+  // The launcher — only when embedded (can start activities) and the project has dataset levers to shift onto.
+  let launcher = ''
+  if (embedded() && datasetKeys.length) {
+    if (!checkpoint) {
+      launcher = `<p class="card-sub">No kept checkpoint — this run cannot be continued. Re-run it with “Keep checkpoints” on in Launch.</p>`
+    } else {
+      const cfg = s.config || {}
+      const fields = datasetLeverEntries()
+        .map(([k, spec]) => {
+          const cur = cfg[k] === undefined ? '' : String(cfg[k])
+          const label = escapeHtml(k.replace(/_/g, ' '))
+          if (Array.isArray(spec.choices) && spec.choices.length) {
+            const opts = spec.choices
+              .map(
+                (c) =>
+                  `<option value="${escapeHtml(String(c))}"${String(c) === cur ? ' selected' : ''}>${escapeHtml(String(c))}</option>`,
+              )
+              .join('')
+            return `<label class="ct-field">${label}<select name="ctDataset" data-lever="${escapeHtml(k)}">${opts}</select></label>`
+          }
+          return `<label class="ct-field">${label}<input type="text" name="ctDataset" data-lever="${escapeHtml(k)}" value="${escapeHtml(cur)}" /></label>`
+        })
+        .join('')
+      launcher = `
+        <p class="card-sub">Continue this checkpoint’s training onto a new dataset — the parent’s weights carried forward, then trained further.</p>
+        <div class="ct-fields">${fields}<label class="ct-field">seeds<input type="number" id="ct-seeds" min="1" step="1" value="1" /></label></div>
+        <div class="form-actions"><button type="button" data-action="continue-train" data-key="${escapeHtml(run.key)}"${helpAttr('Seed a fresh run from THIS run’s checkpoint and keep training it on the chosen dataset. It appears as a new run, judged on its own test window.')}>Continue training</button></div>`
+    }
+  }
+  if (!lineageHtml && !matrixHtml && !launcher) return ''
+  return `<h3>Continue training</h3>
+    ${lineageHtml}
+    ${matrixHtml}
+    ${launcher}
+    ${statusLine}`
 }
 function trainingCurveSectionHtml(summary) {
   const series = summary.series
@@ -5555,6 +5693,61 @@ function decisionLatentMapHtml(trace) {
     ${chartLegendHtml(groupColors)}<div class="chart-wrap">${svg}</div>
     ${xaiLatentProbeHtml(lm.probe)}`
 }
+// The 2-D matrix attribution (e.g. the rollout-aggregated attention weights): a colour-mapped heatmap over
+// two labelled axes. Pure cell/colour/geometry model comes from window.Heatmap.buildHeatmapModel (unit-tested
+// in src/heatmapViewer.test.ts); this only assembles the SVG. Returns '' when the run has no matrix.
+function decisionAttentionHeatmapHtml(trace) {
+  const am = trace.attentionMatrix
+  // The viewer reads the RAW stored artifact (not re-coerced), so require the full shape here — a matrix with
+  // a grid but missing/!array rows or cols would otherwise throw and crash the whole Explain render.
+  if (!am || !Array.isArray(am.grid) || !am.grid.length || !Array.isArray(am.rows) || !Array.isArray(am.cols))
+    return ''
+  const model = window.Heatmap.buildHeatmapModel(am.grid, {
+    rowLabels: am.rows,
+    colLabels: am.cols,
+    cell: 16,
+    gutterLeft: 52,
+    gutterTop: 18,
+  })
+  if (!model.cells.length) return ''
+  // Axis text only when sparse enough to be legible; otherwise the caption carries the dimensions.
+  const showRowLabels = model.rowLabels.length <= 24
+  const showColLabels = model.colLabels.length <= 24
+  const cells = model.cells
+    .map(
+      (cell) =>
+        `<rect x="${cell.x}" y="${cell.y}" width="${cell.w}" height="${cell.h}" style="fill:${cell.fill}"><title>${escapeHtml(cell.title)}</title></rect>`,
+    )
+    .join('')
+  const rowText = showRowLabels
+    ? model.rowLabels
+        .map(
+          (l) =>
+            `<text x="${model.cells[0].x - 4}" y="${l.y}" class="chart-tick" text-anchor="end" dominant-baseline="middle">${escapeHtml(l.text)}</text>`,
+        )
+        .join('')
+    : ''
+  const colText = showColLabels
+    ? model.colLabels
+        .map(
+          (l) =>
+            `<text x="${l.x}" y="${model.cells[0].y - 5}" class="chart-tick" text-anchor="middle">${escapeHtml(l.text)}</text>`,
+        )
+        .join('')
+    : ''
+  const legendStops = 20
+  const legend = Array.from({ length: legendStops }, (_, i) => {
+    const t = i / (legendStops - 1)
+    return `<rect x="${i * 8}" y="0" width="8" height="10" style="fill:${window.Heatmap.rampColor(t, model.legend.diverging)}" />`
+  }).join('')
+  const legendSvg = `<svg class="heatmap-legend" width="${legendStops * 8}" height="24" role="img" aria-label="colour scale from ${escapeHtml(formatTickValue(model.legend.min))} to ${escapeHtml(formatTickValue(model.legend.max))}"><g>${legend}</g><text x="0" y="22" class="chart-tick" text-anchor="start">${escapeHtml(formatTickValue(model.legend.min))}</text><text x="${legendStops * 8}" y="22" class="chart-tick" text-anchor="end">${escapeHtml(formatTickValue(model.legend.max))}</text></svg>`
+  const dims = `${am.rows.length}×${am.cols.length}`
+  const capped = model.shown < model.total ? ` (pooled to ${model.rowLabels.length}×${model.colLabels.length})` : ''
+  const svg = `<svg class="chart heatmap" width="${model.width}" height="${model.height}" role="img" aria-label="attention matrix heatmap, ${escapeHtml(dims)}">${colText}${rowText}${cells}</svg>`
+  return `<h4 class="card-sub">Attention map <span class="card-sub">— ${escapeHtml(String(am.method || 'attention-weights'))}, ${escapeHtml(dims)}${escapeHtml(capped)}; brighter = more weight</span></h4>
+    ${xaiSanityBadgeHtml(am.sanityCheck)}
+    <div class="chart-wrap heatmap-wrap">${svg}</div>${legendSvg}`
+}
 // The linear-probe read: does the latent linearly encode the action? Accuracy vs the majority baseline.
 function xaiLatentProbeHtml(probe) {
   if (!probe || typeof probe !== 'object' || !Number.isFinite(Number(probe.accuracy))) return ''
@@ -5665,6 +5858,7 @@ function explainSectionHtml(summary) {
     decisionConfidenceChartHtml(trace),
     decisionAttributionHtml(trace),
     decisionStepAttributionHtml(trace),
+    decisionAttentionHeatmapHtml(trace),
     decisionLatentMapHtml(trace),
   ]
     .filter(Boolean)
@@ -9071,6 +9265,7 @@ function renderRunDetail(key) {
     ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
     ${showEval ? evaluationSectionHtml(run) : ''}
     ${crossTestUiEnabled() ? crossTestSectionHtml(run) : ''}
+    ${continueTrainUiEnabled() ? continueTrainSectionHtml(run) : ''}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
@@ -9655,6 +9850,47 @@ async function onCrossTestRun(key, windowId) {
     }
   }
 }
+// Launch a continued-training campaign from one run's checkpoint onto the dataset chosen in the run-detail
+// picker. It appears as a NEW child run (seeded from the parent weights, then trained further). Mirrors
+// onCrossTestRun's spinner+refresh dance; the child surfaces in the runs table on settle + via data:updated.
+async function onContinueTrainRun(key) {
+  if (continueTrainingKeys.has(key) || !embedded()) return
+  const epoch = projectEpoch
+  const panel = byId('run-detail')
+  const datasetOverrides = {}
+  if (panel) {
+    for (const el of panel.querySelectorAll('[name="ctDataset"]')) {
+      const lever = el.dataset.lever
+      if (lever && el.value !== '') datasetOverrides[lever] = el.value
+    }
+  }
+  const seedsEl = panel && byId('ct-seeds')
+  const seeds = Math.max(1, Math.floor(Number((seedsEl && seedsEl.value) || 1)) || 1)
+  continueTrainingKeys.add(key)
+  if (selectedRunKey === key) renderRunDetail(key)
+  try {
+    const result = await startOrEnqueue(
+      'continue-training',
+      trainerComputeParams({ runKey: key, datasetOverrides, seeds }),
+      `Continue ${shortKey(key)}`,
+    )
+    if (result.queued && epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-continue-status', queuedStatusText(result.ahead))
+    }
+    if (result.activityId) await observeQuickActivity(result.activityId)
+  } catch {
+    if (epoch === projectEpoch && selectedRunKey === key) {
+      setStatusLine('run-continue-status', 'Could not start continued training — please try again.', true)
+    }
+  } finally {
+    continueTrainingKeys.delete(key)
+    if (epoch === projectEpoch) {
+      ;[runsCache, continuedLineageCache] = await Promise.all([readRuns(), readContinuedLineage()])
+      renderRunsTable()
+      if (selectedRunKey === key) renderRunDetail(key)
+    }
+  }
+}
 function setupRuns() {
   const body = byId('runs-body')
   if (body) {
@@ -9854,6 +10090,10 @@ function setupRuns() {
       if (xtBtn) onCrossTestRun(xtBtn.dataset.key)
       const xtWinBtn = event.target.closest('button[data-action="cross-test-window"]')
       if (xtWinBtn) onCrossTestRun(xtWinBtn.dataset.key, xtWinBtn.dataset.window)
+      const ctBtn = event.target.closest('button[data-action="continue-train"]')
+      if (ctBtn) onContinueTrainRun(ctBtn.dataset.key)
+      const openRunBtn = event.target.closest('[data-open-run]')
+      if (openRunBtn) openRunDetail(openRunBtn.dataset.openRun)
       const cloneBtn = event.target.closest('button[data-action="clone"]')
       if (cloneBtn) cloneRunToLaunch(cloneBtn.dataset.key)
       const rerunBtn = event.target.closest('button[data-action="rerun"]')
@@ -11595,6 +11835,7 @@ async function onDataClick(event) {
     return void mineData({ class: cls }, 'cls:' + cls)
   }
   if (action === 'discover') return void discoverData()
+  if (action === 'approve-source') return void onApproveDataSource(btn.getAttribute('data-id'))
 }
 
 async function readDataSources() {
@@ -11608,16 +11849,52 @@ function dataSourceCardHtml(s) {
     .filter(Boolean)
     .map(escapeHtml)
     .join(' · ')
+  const id = s.id || ''
+  const approved = s.status === 'approved'
+  const action = approved
+    ? '<span class="badge is-ok">✓ approved</span>'
+    : embedded() && id
+      ? '<button type="button" class="ghost-btn" data-act="approve-source" data-id="' +
+        escapeHtml(id) +
+        '"' +
+        helpAttr(
+          'Approve this source — promote it into the catalog registry (recorded as accepted). Its “How to acquire” note tells you how to mine it.',
+        ) +
+        (dataMineBusy.has('approve:' + id) ? ' disabled' : '') +
+        '>Approve</button>'
+      : ''
   return (
-    '<div class="datasource-card"><div><strong>' +
+    '<div class="datasource-card"><div class="datasource-head"><div><strong>' +
     escapeHtml(s.name) +
     '</strong>' +
     (meta ? ' <span class="muted">' + meta + '</span>' : '') +
+    '</div>' +
+    (action ? '<div class="datasource-actions">' + action + '</div>' : '') +
     '</div>' +
     (s.description ? '<div class="muted">' + escapeHtml(s.description) + '</div>' : '') +
     (s.mineHint ? '<div class="muted">How to acquire: ' + escapeHtml(s.mineHint) + '</div>' : '') +
     '</div>'
   )
+}
+// D4: promote a discovered source into the catalog registry (status → approved). Registry-only from here;
+// a concrete mine (symbols/class) is launched via the approve-data-source activity when supplied.
+async function onApproveDataSource(id) {
+  if (!id || dataMineBusy.has('approve:' + id)) return
+  dataMineBusy.add('approve:' + id)
+  await renderData()
+  try {
+    const started = await window.OverseerBridge.startActivity(
+      'approve-data-source',
+      trainerActivityParams({ sourceId: id }),
+    )
+    if (started && started.activityId) await observeQuickActivity(started.activityId)
+    showToast('Source approved')
+  } catch {
+    showToast('Approve failed')
+  } finally {
+    dataMineBusy.delete('approve:' + id)
+    await renderData()
+  }
 }
 
 async function renderDiscoveredSources() {
@@ -12545,6 +12822,18 @@ function hypothesisCoverageHtml(h, verdict) {
     <button type="button" class="ghost-btn" data-action="run" data-id="${escapeHtml(h.id)}"${busy ? ' disabled' : ''}${helpAttr('Launch exactly the runs this hypothesis is missing — the planner runs the setups without enough evidence yet and skips the ones already done. The verdict updates as they land.')}>${iconRunSvg(14)} Launch the missing runs</button>
   </div>`
 }
+// For a structurally BLOCKED hypothesis the remedy is not "run more" — the spec must be rewritten. Surface
+// that as an on-card ACTION (a scoped Discuss that seeds the WHY-blocked diagnosis + a corrected-spec prompt,
+// via chatAboutHypothesis) so the fix is one click away instead of buried in the status badge's tooltip.
+function hypothesisBlockedRemedyHtml(h, verdict) {
+  if (verdict === 'proven' || verdict === 'disproved') return ''
+  const d = hypothesisHygieneFor(h)
+  if (!d || d.status !== 'blocked' || !chatAboutRunAvailable()) return ''
+  return `<div class="hyp-coverage">
+    <p class="card-sub">As written, more runs can never decide this — the spec needs fixing.</p>
+    <button type="button" class="ghost-btn" data-action="discuss-hyp" data-id="${escapeHtml(h.id)}"${helpAttr('Discuss this blocked hypothesis with the AI — it gets the diagnosis of WHY it can never be decided and proposes a corrected spec you can run.')}>${iconChatSvg()} Discuss the fix</button>
+  </div>`
+}
 // Discuss ONE hypothesis: the full record + its live hygiene diagnosis + the judging rule, so the chat
 // can propose a concrete spec fix or the exact runs to launch.
 async function chatAboutHypothesis(id) {
@@ -12651,6 +12940,7 @@ function hypothesisBodyHtml(h, liveIds) {
       ${specSummaryHtml(h.spec)}
       ${hypothesisIsContextSpanning(h) ? hypothesisComparisonHtml(h) : hypothesisEvidenceHtml(h)}
       ${hypothesisCoverageHtml(h, verdict)}
+      ${hypothesisBlockedRemedyHtml(h, verdict)}
       ${overrideNote}
       ${transitionsHtml(h.transitions)}
       ${linkedPaperChipsHtml(h)}
@@ -15074,7 +15364,16 @@ function flavorComponentsHtml(flavor) {
 // On a component card: the models whose flavors are built from it (reverse of the flavor block chips).
 function modelUsedByHtml(model) {
   if (!model || model.category !== 'component') return ''
-  const users = window.Models.modelsUsingComponent(model.slug, modelsCache)
+  // Static reverse-lookup (flavors that DECLARE this component) unioned with the recipe-derived usage
+  // (models whose runs WIRE one of this block card's `blockTokens` via custom_net_arch) — so a block chosen
+  // per-run rather than declared per flavor still shows its real "used by".
+  const declared = window.Models.modelsUsingComponent(model.slug, modelsCache)
+  // Pass the RAW run pool (keeps summary.status) — xaiRuns() masks status to 'completed', which would let an
+  // invalidated run wrongly wire a block; modelsUsingComponentInRuns skips invalid/failed for parity.
+  const inRuns = window.Models.modelsUsingComponentInRuns(model, modelsCache, xaiRunPool())
+  const bySlug = new Map()
+  for (const m of [...declared, ...inRuns]) if (m && m.slug && !bySlug.has(m.slug)) bySlug.set(m.slug, m)
+  const users = [...bySlug.values()]
   if (!users.length) return ''
   const chips = users
     .map(
@@ -18378,9 +18677,10 @@ function renderActivityNow() {
   // keeps it shown so the Abort/Resume/remove controls stay reachable. Collapsing the idle column
   // reclaims its width (via the grid modifier) so Experiments fills the row.
   const tasksCollapsed = tasksColCollapsed() && taskEntries.length + taskQueue.length === 0
+  const toolbar = `<div class="activity-toolbar"><button type="button" class="ghost-btn" data-activity-history${helpAttr('Browse every FINISHED activity for this project — campaigns, judges, evaluations, cross-tests, mines — with status + how long each took.')}>${iconHistorySvg()} History</button></div>`
   setHtml(
     body,
-    `<div class="activity-cols${tasksCollapsed ? ' tasks-collapsed' : ''}">${experimentColumnHtml(experimentEntries, experimentQueue)}${taskColumnHtml(taskEntries, taskQueue, tasksCollapsed)}</div>`,
+    `${toolbar}<div class="activity-cols${tasksCollapsed ? ' tasks-collapsed' : ''}">${experimentColumnHtml(experimentEntries, experimentQueue)}${taskColumnHtml(taskEntries, taskQueue, tasksCollapsed)}</div>`,
   )
   // Every in-flight run across all live campaigns, for the shared elapsed-timer ticker.
   const allInFlight = []
@@ -18393,10 +18693,79 @@ function renderActivityNow() {
   }
   syncInFlightTimer(allInFlight)
 }
+// A12: the browsable per-activity HISTORY popup — every FINISHED activity for this project (the live/queued
+// ones render in the tab itself). Reads the raw listActivities snapshot; the pure module reduces it to
+// settled rows (newest-finished first). Read-only; the link data (activityId stamped on the records each
+// activity wrote) already exists — surfacing the run↔activity jump is a follow-on.
+async function openActivityHistory() {
+  let rows = []
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    rows = window.ActivityHistory.historyRows(
+      (res && res.activities) || [],
+      manifest && manifest.recordType,
+    )
+  } catch {
+    rows = []
+  }
+  renderActivityHistoryModal(rows)
+}
+function closeActivityHistory() {
+  const m = byId('activity-history-modal')
+  if (m) m.hidden = true
+}
+function activityHistoryRowHtml(r) {
+  const cls = window.ActivityHistory.statusClass(r.status)
+  const took = window.ActivityHistory.formatDuration(r.durationMs)
+  const when = r.finishedAt ? formatWhen(r.finishedAt) : '—'
+  const cost = r.costUSD != null ? ` · $${r.costUSD.toFixed(2)}` : ''
+  const errLine =
+    r.status === 'failed' && r.error
+      ? `<div class="card-sub activity-history-err">${escapeHtml(r.error)}</div>`
+      : ''
+  return `<tr>
+      <th><div>${escapeHtml(r.label)}</div><div class="card-sub">${escapeHtml(activityTypeLabel(r.type))}${escapeHtml(cost)}</div>${errLine}</th>
+      <td><span class="badge ${cls}">${escapeHtml(r.status)}</span></td>
+      <td class="num">${escapeHtml(when)}</td>
+      <td class="num">${escapeHtml(took)}</td>
+    </tr>`
+}
+function renderActivityHistoryModal(rows) {
+  let modal = byId('activity-history-modal')
+  if (!modal) {
+    modal = document.createElement('div')
+    modal.id = 'activity-history-modal'
+    modal.className = 'chart-modal'
+    document.body.appendChild(modal)
+    modal.addEventListener('click', (event) => {
+      if (event.target === modal || event.target.closest('[data-history-close]')) closeActivityHistory()
+    })
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && modal && !modal.hidden) closeActivityHistory()
+    })
+  }
+  const table = rows.length
+    ? `<table class="kv-table report-table activity-history-table"><thead><tr><th>Activity</th><th>Status</th><th class="num">Finished</th><th class="num">Took</th></tr></thead><tbody>${rows.map(activityHistoryRowHtml).join('')}</tbody></table>`
+    : '<p class="card-sub">No finished activities yet — completed campaigns, judges, evaluations, cross-tests and mines will appear here.</p>'
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-history-close></div>
+    <div class="chart-modal__panel" role="dialog" aria-label="Activity history">
+      <div class="chart-modal__head">
+        <strong>Activity history <span class="card-sub">— ${rows.length} finished</span></strong>
+        <div class="chart-modal__tools"><button type="button" class="icon-btn" data-history-close title="Close (Esc)" aria-label="Close">✕</button></div>
+      </div>
+      <div class="chart-modal__scroll">${table}</div>
+    </div>`
+  modal.hidden = false
+}
 function setupActivity() {
   const body = byId('activity-body')
   if (!body) return
   body.addEventListener('click', (event) => {
+    const historyBtn = event.target.closest('[data-activity-history]')
+    if (historyBtn) {
+      openActivityHistory()
+      return
+    }
     const tasksToggle = event.target.closest('[data-tasks-toggle]')
     if (tasksToggle) {
       setTasksColCollapsed(!tasksColCollapsed())

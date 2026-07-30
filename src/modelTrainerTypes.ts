@@ -198,6 +198,13 @@ export interface TrainerManifest {
    */
   continueFromKey?: string
   /**
+   * The config key that makes a run save a RETAINED checkpoint every N training units so the trainer can
+   * emit a decision trace per snapshot (A6 mid-training traces) — e.g. BlackSwan's `snapshot_interval`.
+   * Declaring it lets a campaign inject `snapshotInterval` per run after hashing (and implies keepCheckpoints
+   * so the snapshots persist). Omit for projects without mid-training snapshots.
+   */
+  snapshotIntervalKey?: string
+  /**
    * Command template (only `{summaryOut}`) that emits the project's DATA CATALOG — the asset classes
    * and instruments this project can acquire, each joined with its on-disk coverage. Powers the Data
    * tab's "what's available to download". Omit if the project publishes no data catalog.
@@ -487,6 +494,32 @@ export interface DecisionFeatureAttribution {
 }
 
 /**
+ * A 2-D matrix attribution for a {@link DecisionTrace} — a heatmap over two labelled axes (e.g. an
+ * attention weight matrix: query positions × key positions, aggregated over the rollout). Domain-oblivious:
+ * `rows`/`cols` carry arbitrary axis labels and `grid` is row-major (`grid.length === rows.length`, every
+ * `grid[i].length === cols.length`, all cells finite). The viewer renders it as a colour-mapped grid.
+ */
+export interface MatrixAttribution {
+  /** Row-axis labels (e.g. query/time positions); `grid.length === rows.length`. */
+  rows: string[]
+  /** Column-axis labels (e.g. key/feature positions); each `grid[i].length === cols.length`. */
+  cols: string[]
+  /** Row-major weights: `grid[r][c]` is the attribution of row `r` on column `c`. All cells finite. */
+  grid: number[][]
+  /** How the matrix was computed, e.g. `attention-weights`. */
+  method?: string
+  /**
+   * The same Adebayo model-randomization sanity check as {@link DecisionFeatureAttribution.sanityCheck}, so
+   * the viewer's faithfulness warning is uniform: a FAITHFUL attention map changes under weight randomization.
+   */
+  sanityCheck?: {
+    method?: string
+    rankCorrelation?: number
+    passed?: boolean
+  }
+}
+
+/**
  * One step in a model's {@link DecisionTrace}. Domain-oblivious — the action is an arbitrary
  * project-defined label (no trading vocabulary in the engine), optionally annotated with how confident
  * the policy was and what it nearly did instead, so the Explain view can answer "what did it do, and why".
@@ -558,6 +591,8 @@ export interface DecisionTrace {
   rewardBreakdown?: Record<string, number>
   /** A 2-D projection of the policy's internal (penultimate-layer) representation — how it organises states. */
   latentMap?: DecisionLatentMap
+  /** A 2-D matrix attribution (e.g. the rollout-aggregated attention weights), when the model exposes one. */
+  attentionMatrix?: MatrixAttribution
 }
 
 /** One projected state in a {@link DecisionLatentMap}: its 2-D coordinates + the action taken there. */
@@ -1356,6 +1391,12 @@ export interface ContinueTrainingRunParams {
   computeTarget?: string
   concurrency?: number
   abortSignal?: AbortSignal
+  /** Forwarded to the underlying campaign so a host can broadcast `data:updated` per continued run. */
+  onRecordWritten?: (type: string, key: string) => void
+  /** Forwarded to the underlying campaign so a host can stream cumulative continue-training progress. */
+  onProgress?: (progress: TrainingCampaignProgress) => void | Promise<void>
+  /** Forwarded to the underlying campaign for within-run sub-progress of the continued run. */
+  onItemProgress?: (key: string, progress: Record<string, unknown>) => void | Promise<void>
 }
 
 export interface ContinueTrainingRunResult {
@@ -1440,6 +1481,13 @@ export interface TrainingCampaignParams {
    * so the continued run stays continuable). No-op when the manifest declares no `continueFromKey`.
    */
   continueFrom?: string
+  /**
+   * Mid-training snapshots: save a RETAINED checkpoint every N training units so the trainer can emit a
+   * decision trace per snapshot (A6). Injects `{[manifest.snapshotIntervalKey]: snapshotInterval}` per job
+   * after hashing (and implies keepCheckpoints so the snapshots persist). No-op when the manifest declares
+   * no `snapshotIntervalKey`.
+   */
+  snapshotInterval?: number
   /**
    * Maximum number of runs dispatched at once (default 1, sequential). Each run is
    * isolated (unique jobId + its own temp config/summary), so the real cap is host
@@ -1950,6 +1998,13 @@ export interface TrainingModel {
    * flavors carried a flat `modelNames: string[]`; the viewer reads either.)
    */
   flavors: ModelFlavor[]
+  /**
+   * For a `component` entry whose building blocks are chosen PER-RUN via a recipe lever (e.g. BlackSwan's
+   * `custom_net_arch`) rather than declared in a flavor's `components`: the recipe TOKENS (source class
+   * names) this component provides. The Models tab derives "used by" for the card by finding models whose
+   * runs wire any of these tokens — so a block's real usage shows even though no flavor lists it statically.
+   */
+  blockTokens?: string[]
   /** Ids of Papers that introduce or improve this model. */
   paperIds?: string[]
   /** Ids (spec hashes) of Hypotheses that test this model. */
@@ -2569,6 +2624,35 @@ export interface MineProjectDataParams {
   abortSignal?: AbortSignal
 }
 
+export interface ApproveDataSourceParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The `{recordType}-datasource` draft's id (key) to approve — a candidate `discoverData` proposed. */
+  sourceId: string
+  /**
+   * A concrete mine request to launch immediately on approval. The draft carries only a prose `mineHint`
+   * (not a runnable spec), so the mineable request is supplied by the caller ("Approve & mine"). When present
+   * AND the manifest declares a `mineData` command, the mine auto-launches; otherwise approval is registry-only.
+   */
+  mineRequest?: MineDataRequest
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+}
+
+export interface ApproveDataSourceResult {
+  recordType: string
+  /** The approved datasource's id. */
+  sourceId: string
+  status: 'approved'
+  /** Whether a mine was launched (only when a `mineRequest` was supplied + the manifest declares `mineData`). */
+  mined: boolean
+  /** The mine outcome, when one was launched. */
+  mine?: MineProjectDataResult
+}
+
 export interface MineProjectDataResult {
   recordType: string
   mined: MinedInstrumentResult[]
@@ -3011,6 +3095,7 @@ export interface ModelTrainerTools {
    * what's already on disk. Powers the Data tab's "Download". Returns the per-instrument outcome.
    */
   mineProjectData(params: MineProjectDataParams): Promise<MineProjectDataResult>
+  approveDataSource(params: ApproveDataSourceParams): Promise<ApproveDataSourceResult>
   /**
    * Analyse ONE paper for the MODELS it introduces/improves: an LLM matches it against the existing
    * catalog (linking the models it is about, updating the paper's `modelIds` and each model's

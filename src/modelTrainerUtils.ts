@@ -2,6 +2,7 @@ import type {
   ComputeDevice,
   ConsolidationGroup,
   DecisionFeatureAttribution,
+  MatrixAttribution,
   DecisionQualitySignal,
   DecisionStep,
   DecisionStepDelta,
@@ -2399,6 +2400,37 @@ function coerceFeatureAttribution(raw: unknown): DecisionFeatureAttribution | un
 }
 
 /**
+ * Soft-validate a 2-D matrix attribution (e.g. an attention heatmap): require `rows`/`cols` string arrays
+ * and a RECTANGULAR, all-finite `number[][]` grid whose shape matches (`grid.length === rows.length`, each
+ * inner length === `cols.length`). A ragged / non-finite / mis-shaped grid returns `undefined` (dropped) —
+ * renderers index by row/col, so a malformed grid must never survive.
+ */
+function coerceMatrixAttribution(raw: unknown): MatrixAttribution | undefined {
+  if (!isPlainObject(raw)) return undefined
+  const { rows, cols, grid } = raw
+  if (!Array.isArray(rows) || !rows.every((r): r is string => typeof r === 'string')) return undefined
+  if (!Array.isArray(cols) || !cols.every((c): c is string => typeof c === 'string')) return undefined
+  if (!rows.length || !cols.length) return undefined
+  if (!Array.isArray(grid) || grid.length !== rows.length) return undefined
+  const cleanGrid: number[][] = []
+  for (const row of grid) {
+    if (!Array.isArray(row) || row.length !== cols.length || !row.every(isFiniteNumber)) return undefined
+    cleanGrid.push(row.slice())
+  }
+  const out: MatrixAttribution = { rows: rows.slice(), cols: cols.slice(), grid: cleanGrid }
+  if (typeof raw.method === 'string') out.method = raw.method
+  if (isPlainObject(raw.sanityCheck)) {
+    const sc = raw.sanityCheck
+    const sanityCheck: NonNullable<MatrixAttribution['sanityCheck']> = {}
+    if (typeof sc.method === 'string') sanityCheck.method = sc.method
+    if (isFiniteNumber(sc.rankCorrelation)) sanityCheck.rankCorrelation = sc.rankCorrelation
+    if (typeof sc.passed === 'boolean') sanityCheck.passed = sc.passed
+    if (Object.keys(sanityCheck).length) out.sanityCheck = sanityCheck
+  }
+  return out
+}
+
+/**
  * Soft-validate a stored `artifacts.decisionTrace` into a clean {@link DecisionTrace}, dropping malformed
  * steps and fields rather than throwing — a missing or unusable trace is NOT an error (returns
  * `undefined`), so a run without explainability data ingests normally.
@@ -2417,6 +2449,8 @@ export function validateDecisionTrace(raw: unknown): DecisionTrace | undefined {
   if (rewardBreakdown) trace.rewardBreakdown = rewardBreakdown
   const latentMap = coerceLatentMap(raw.latentMap)
   if (latentMap) trace.latentMap = latentMap
+  const attentionMatrix = coerceMatrixAttribution(raw.attentionMatrix)
+  if (attentionMatrix) trace.attentionMatrix = attentionMatrix
   return trace
 }
 
