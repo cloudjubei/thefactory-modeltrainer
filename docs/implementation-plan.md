@@ -5,9 +5,10 @@ Contract: `docs/model-training-standard.md`. The core loop (engine, backend acti
 runner) and three conformant consumers (`examples/cartpole`, `examples/tabular`, **BlackSwan**) are built;
 the engine stays domain-oblivious — any further model is _data + the thin CLI contract_, not engine code.
 
-**Structure:** §A = things to **BUILD** (the running backlog of platform improvements — keep adding to it).
-§B = bigger deferred projects. §C = open questions. (Experiments are no longer a plan section — the
-exploration autopilot / Diagnosis plan drives them; findings live in git + memory.)
+**Structure:** §A = things to **BUILD** now (the ready backlog of platform improvements — keep adding to it).
+§B = bigger deferred projects. §C = open questions + trigger-blocked builds (act when the dependency lands).
+(Experiments are no longer a plan section — the exploration autopilot / Diagnosis plan drives them; findings
+live in git + memory.)
 
 ## North star (frames prioritization)
 
@@ -17,11 +18,11 @@ exploration autopilot / Diagnosis plan drives them; findings live in git + memor
 2. **Use it to make BlackSwan the best trading model**, in STRICT ORDER: **(A) correctness → (B) find ONE
    setup that trades well → (C) huge-space exploration.** BlackSwan is the forcing function that hardens the
    generic pipeline. "Trades well" is defined by the **scorecard** (gates + fitness), NOT the reward — the
-   reward is a training proxy that for BlackSwan does not equal success (A2).
+   reward is a training proxy that for BlackSwan does not equal success (A1).
 3. **Fully AI-operable, shipped as a template.** Anything a user can do in the app, the API/CLI AI can do via
-   tools through the approval gate (A3) — so a user drives the whole loop as a CONVERSATION where the AI
-   researches/proposes/runs and the human mostly approves (A4); and the app is a SINGLE-PURPOSE template a
-   project copies + a library it consumes for engine + base UI (A5), with BlackSwan the first consumer.
+   tools through the approval gate (A2) — so a user drives the whole loop as a CONVERSATION where the AI
+   researches/proposes/runs and the human mostly approves (A3); and the app is a SINGLE-PURPOSE template a
+   project copies + a library it consumes for engine + base UI (A4), with BlackSwan the first consumer.
 
 ## Repo split (governs where work lands)
 
@@ -40,34 +41,16 @@ exploration autopilot / Diagnosis plan drives them; findings live in git + memor
 
 Ordered by value. Each is something to **implement**.
 
-### A1. Context / data-fusion — finish the consuming feature
+### A1. Define success — reward vs scorecard (gates + fitness), and measure their alignment
 
-The projection ladder + `context_set` panels + presets + advanced launch are shipped; app-triggered macro
-mines now thread `FRED_API_KEY` from the backend env into the mine job (✅). The remaining builds are all
-**trigger-blocked** — each needs a dependency that doesn't exist yet, so do NOT build speculative plumbing:
-
-1. **Step 3 — `with_extra_data`** (4th projection rung: an asset's OWN fused series + the obs-signature gate
-   as a REAL replay guard). Blocked: every context panel today is GLOBAL (macro/majors/market); no per-asset
-   series is mined (`fundamentals/`, EDGAR are empty). Unblock = mine ≥1 asset-specific series, THEN wire the
-   rung (the fusion substrate + loader already exist, so the rung itself is small once data lands).
-2. **Post-first-release window restriction** in `config_builder` (pre-release context bars `fillna(0)`).
-   Blocked + currently a no-op: every context series on disk is deep-history (FRED to 1776; GOLD/SPY from
-   2018), so `fillna(0)` never zeroes a real signal. Do when a LATE-STARTING context series is mined.
-3. **Auto-refresh the cross-test (`-settest`) cache** on `data:updated`. Blocked on TRANSPORT: the viewer has
-   no host→iframe `data:updated` push (the bridge only forwards `nav.open`). The viewer half is trivial
-   (an `onDataUpdated` handler debouncing a `readCrossTests()`), but it lands nothing until thefactory-ui
-   (`appBridge` + `ProjectAppView`) + `bridge.js` add the push channel first. → moved to §C transport.
-
-### A2. Define success — reward vs scorecard (gates + fitness), and measure their alignment
-
-**Why this comes first (blocks A3–A5 + any real BlackSwan evaluation).** The **reward** is a training PROXY, not the definition of
+**Why this comes first (blocks A2–A4 + any real BlackSwan evaluation).** The **reward** is a training PROXY, not the definition of
 success. For CartPole/Wine reward = acceptance = ranking all coincide (which is *why* they feel solved and the
 Diagnosis correctly calls them exhausted). For BlackSwan they DIVERGE: a high `traded_return` does NOT mean a
 usable trader — a good model must beat buy-and-hold, trade often enough *over time*, and hold drawdown in
 bounds, and whether `no_op`s matter depends on the deployment case. So the thing a human uses to filter good
 runs from bad lives only in their head; it is not declared, not computed, and — critically — not what
 selection/ranking/exploration optimise. This is the missing first-class layer. It must land before the AI
-companion (A4) and full parity (A3): the AI can only drive and rank the loop if "good" is machine-readable.
+companion (A3) and full parity (A2): the AI can only drive and rank the loop if "good" is machine-readable.
 **Generic principle:** every project declares THREE layers, not one — `objective` (reward, steers learning),
 `gates` (accept/reject predicates), `fitness` (ranking metric(s), possibly Pareto). Simple projects collapse
 all three; BlackSwan is the forcing function that separates them.
@@ -110,7 +93,7 @@ all three; BlackSwan is the forcing function that separates them.
    `docs/model-training-standard.md`: reward stays the training signal; gate acceptance reads `gates`;
    ranking/incumbent/convergence read `fitness`.
 
-### A3. Full AI action parity — anything the user can do, the AI can do
+### A2. Full AI action parity — anything the user can do, the AI can do
 
 **Standing rule:** every mutating/launching user action has an equivalent chat capability, routed through the
 existing **approval gate** — `startProjectActivity` / `createProjectRecord` / `updateProjectRecord`
@@ -139,13 +122,13 @@ data, research papers, config/xai analysis, consolidate, delete/invalidate) is u
    `putData`/`deleteData(<recordType>)` sites and asserts each is declared in the data-capability manifest (or
    explicitly exempted as code). Codify the rule in `docs/model-training-standard.md`.
 
-### A4. AI companion — drive the whole loop as a conversation with approvals
+### A3. AI companion — drive the whole loop as a conversation with approvals
 
-**Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on A3
+**Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on A2
 (full action parity) + the approval gate.
 
 1. **Orient tools.** Promote the shipped `diagnoseSearch` to a chat tool (the AI reads the same Diagnosis plan
-   the user sees) and let it rank candidates on the A2 **scorecard** (not the reward); add campaign/activity-status
+   the user sees) and let it rank candidates on the A1 **scorecard** (not the reward); add campaign/activity-status
    reads (via `queryProjectData` on activity-run records) so the AI knows what's running / pending / done.
 2. **Approval surface (new VIEW — the "just approve" seam).** A proposals inbox: the AI's pending actions
    (launch / edit / delete) with rationale + expected cost (runs × ETA) + one-click approve / reject, batched.
@@ -161,7 +144,7 @@ data, research papers, config/xai analysis, consolidate, delete/invalidate) is u
 5. **Decide:** the wake-the-chat hook (how the backend notifies a chat topic on run completion); the approval
    granularity (per-action vs batched vs trust-tiered — lean on the change-review design).
 
-### A5. Single-purpose template + BlackSwan-as-library
+### A4. Single-purpose template + BlackSwan-as-library
 
 **Strategy change.** Today's docs prescribe a multi-project HUB (`architecture.md`; projects "registered, not
 forked"; repo-split table). New model: modeltrainer is ALSO a SINGLE-PURPOSE template + LIBRARY a project copies
@@ -191,20 +174,13 @@ template for a shipped single-purpose app).
 6. **Update docs** (`architecture.md`, repo-split table, `model-training-standard.md`) to describe the
    template+library model alongside the hub.
 
-### A6. Follow-ons on the shipped features (small + opportunistic — none blocking)
-
-Much of this batch shipped (2026-07-30): the per-STEP attention SIDECAR writer (`write_per_step_attention` →
-`attentionMatrixFile`, streaming JSONL, gated on `decision_trace_attention_per_step`); the mid-training
-snapshot cap (`snapshot_cap` ring-buffer + deletes the superseded `.zip`); the `snapshotTraces` index rendered
-in the Explain view; `stk-*` train-from-2018 walk-forward windows; data-less `asset` chips dimmed in the
-Datasets cards; the Activity History history-row→runs jump + a run-detail→producing-activity chip (`activityId`
-now stamped on run records). Remaining slivers:
+### A5. Follow-ons on the shipped xAI / snapshot / activity features (small + opportunistic — none blocking)
 
 - **xAI traces:** a VIEWER surface for the per-step attention sidecar (fetch the `.attn.jsonl`, animate/scrub
   the attention over the rollout — the producer is shipped, the viewer only renders the inline aggregate +
   the snapshot index today); and a **diff-consecutive** arm on the snapshot index (lazily fetch two snapshots'
   traces and feed them to the shipped `DecisionTraceDiff` — today the index lists snapshots, doesn't diff).
-- **Exploration:** **Pareto basins** in the reducer — qualify/rank basins on the Pareto front, once A2's
+- **Exploration:** **Pareto basins** in the reducer — qualify/rank basins on the Pareto front, once A1's
   multi-objective `fitness` lands (today the reducer ranks on a single scalar).
 - **Datasets:** derive the `asset` lever CHOICES themselves from disk (today a manifest list — needs a manifest
   generator; the on-disk DIMMING of listed-but-absent values is shipped).
@@ -223,7 +199,7 @@ now stamped on run records). Remaining slivers:
 The one genuine project split. BlackSwan's single-asset env hardcodes one asset everywhere, so multi-asset
 needs a fundamentally different env: a **3-D observation** (`asset × lookback × features`), a **portfolio
 action space** (per-asset long/short/weight), a **timestamp-aligning N-symbol data provider** (misalignment =
-silent P&L corruption — unit-test against a 3-coin × 100-bar fixture), and an **A2 scorecard for a portfolio**
+silent P&L corruption — unit-test against a 3-coin × 100-bar fixture), and an **A1 scorecard for a portfolio**
 (reward = portfolio return minus fees + a correlation-penalty CONSTRAINT; fitness = Sharpe/Calmar — not a
 "Sharpe objective" that steers directly). REUSES BlackSwan's reward components, feature engineering, SB3 algos,
 walk-forward harness; ~3–4 week project, blocks none of the in-place wins. Research calls cross-sectional
@@ -233,7 +209,7 @@ long-short the strongest-edge config — promising, deliberately sequenced last.
 
 The trading line trains a position MANAGER (actions are position-gated; out-of-position output is never shaped
 — `blocked_signal_ratio` ~0.95). A model whose raw per-step output IS a long/flat(/short) signal, independent
-of position, is a **different objective** (the "Case 1" of A2). Probe it cheaply FIRST via A2's
+of position, is a **different objective** (the "Case 1" of A1). Probe it cheaply FIRST via A1's
 forward-horizon expectancy lens on existing manager checkpoints — build this full project only if that lens
 shows a generalisable per-signal edge. First confirm the clean manager (via `combo_noop_penalty`, which
 drops `blocked_signal_ratio` ~0.95→~0.02 by going silent on no-ops) isn't already enough. Then: reuse the env's
@@ -247,11 +223,11 @@ the split as a DERIVED `approach` facet. Compare manager vs forecaster on a SHAR
 
 **Remaining source coverage** — the lower-noise asset-class line (this supersedes the old "strategic
 direction": the mine that enables it is largely built). Macro `rates`/`macro_core`, `majors`, `market`, and
-stocks are already mined + tradeable (A1 + the shipped stocks class). Left: make **commodities + FX** tradeable
-classes (catalog + `asset` lever + backfill, per the shipped stocks pattern — absorbs the old "other single
-assets" item) and mine the **fundamental panels crypto lacks** — earnings, COT/inventories, trade balances, an
-event calendar — each under the correctness rules below. The edge-search across these classes is the
-exploration autopilot's job + the Diagnosis cross-class read, not a build here.
+stocks are already mined + tradeable (context/data-fusion + the shipped stocks class). Left: make **commodities
++ FX** tradeable classes (catalog + `asset` lever + backfill, per the shipped stocks pattern — absorbs the old
+"other single assets" item) and mine the **fundamental panels crypto lacks** — earnings, COT/inventories, trade
+balances, an event calendar — each under the correctness rules below. The edge-search across these classes is
+the exploration autopilot's job + the Diagnosis cross-class read, not a build here.
 
 **Productionization (D5) — only when a SECOND trainer needs the same data:** extract catalog+miners+CLI to a
 standalone `thefactory-datamine`; generalize `derive_cache` to a central 1m→fidelities service; wire the
@@ -283,14 +259,23 @@ the same go/no-go + LLM-training compute the ComputeRunner has never exercised._
 - **Runner-channel WebSocket upgrade** — dispatch is already ~instant; a WS only shaves ~1.5s log latency.
 - **Remote git repoRefs** — wire git refs + project bootstrap when a real remote machine needs it.
 
-## C. Open questions (decide when the dependency lands)
+## C. Open questions + trigger-blocked builds (act when the dependency lands)
 
+- **Context — `with_extra_data` projection rung** (blocked on data). The 4th projection rung: an asset's OWN
+  fused series + the obs-signature gate as a REAL replay guard. Every context panel today is GLOBAL
+  (macro/majors/market); no per-asset series is mined (`fundamentals/`, EDGAR are empty). The fusion substrate
+  + loader already exist, so the rung is small — build it once ≥1 asset-specific series is mined.
+- **Context — post-release window restriction** in `config_builder` (blocked + currently a no-op). Bar
+  pre-release context bars via `fillna(0)`. Every context series on disk is deep-history (FRED to 1776;
+  GOLD/SPY from 2018), so `fillna(0)` never zeroes a real signal — build it when a LATE-STARTING context series
+  is mined.
+- **Host→iframe `data:updated` push channel** — the viewer is poll-only; the bridge forwards only `nav.open`.
+  A push channel (thefactory-ui `appBridge` + `ProjectAppView` + `bridge.js`) would let the viewer live-refresh
+  on a data change instead of polling. Unblocks the cross-test (`-settest`) auto-refresh (the viewer half is a
+  trivial `onDataUpdated` handler debouncing a `readCrossTests()`) + trims poll latency generally.
 - **Remote artifact/checkpoint storage** — keep-on-runner + reference vs upload; how a winning remote
   checkpoint reaches the live trading server. Meaningful once remote runs AND live handoff both exist.
 - **GPU + sandbox profile for training images** — `--read-only` rootfs vs ML caches; `--gpus` is wired but
   unexercised (the runner runs jobs directly, not through Docker-sandboxed `SandboxTools`).
 - **Judge/proposer model transport** — `ModelSelection` (API vs CLI), overtaken by the in-flight refactor.
   Revisit once the CLI inference stage lands.
-- **Host→iframe `data:updated` push channel** — the viewer is poll-only; the bridge forwards only `nav.open`.
-  A push channel (thefactory-ui `appBridge` + `ProjectAppView` + `bridge.js`) would let the viewer live-refresh
-  on a data change instead of polling — unblocks A1.3's `-settest` auto-refresh + trims poll latency generally.
