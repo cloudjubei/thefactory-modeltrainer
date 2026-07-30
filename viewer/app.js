@@ -11500,6 +11500,11 @@ function dataCatalogHtml(assetClasses, linkage) {
             '</td>' +
             '<td class="muted">' +
             escapeHtml(DC.coverageLine(inst)) +
+            (DC.supportedWindowsLine(inst)
+              ? '<br><span class="muted data-windows" title="walk-forward windows this asset’s data range can run">' +
+                escapeHtml(DC.supportedWindowsLine(inst)) +
+                '</span>'
+              : '') +
             '</td>' +
             '<td class="muted" title="when the bar closes (point-in-time anchor)">' +
             escapeHtml(inst.barCloseTz || '') +

@@ -52,6 +52,8 @@ import type {
   EvaluateTrainingRunsResult,
   CrossTestRunParams,
   CrossTestRunResult,
+  ContinueTrainingRunParams,
+  ContinueTrainingRunResult,
   CrossTestRunRecord,
   CrossTestResult,
   ExperimentRecommendation,
@@ -60,6 +62,8 @@ import type {
   GetRunDataResult,
   GetTrainerStateParams,
   GetTrainerStateResult,
+  DiagnoseSearchParams,
+  DiagnoseSearchResult,
   GetRunXaiParams,
   GetRunXaiResult,
   JudgeTrainingRunsParams,
@@ -207,6 +211,12 @@ import {
   normalizeConditionalLevers,
 } from './xaiUtils.js'
 import { initExplorationState, nextExplorationStep } from './explorationUtils.js'
+import {
+  incumbentSplitHoldout,
+  convergenceGatedBySplits,
+  splitLeversOf,
+  narrateSplitHoldout,
+} from './diagnosticsUtils.js'
 
 /**
  * Record types the engine persists keyed by a RUN's key — its `-evaluation` (re-test), `-verdict`
@@ -494,15 +504,27 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           models: benchmarkedModels,
           concurrency: runConcurrency,
         })
-        // keepCheckpoints is injected AFTER hashing (item.key is already fixed), so a checkpointed run
-        // keeps the same setup identity as an uncheckpointed one — dedup/skipExplored are unaffected.
+        // keepCheckpoints AND continueFrom are injected AFTER hashing (item.key is already fixed), so a
+        // checkpointed / continued run keeps the same setup identity — dedup/skipExplored are unaffected.
+        // A continued run implies keeping a checkpoint (so it stays continuable).
         const keepCheckpoint =
-          params.keepCheckpoints && manifest.keepCheckpointKey
+          (params.keepCheckpoints || params.continueFrom) && manifest.keepCheckpointKey
             ? { [manifest.keepCheckpointKey]: true }
             : undefined
+        // continueFrom = extra-train: load the parent checkpoint but KEEP training (the project's
+        // `continueFromKey` config field, read by its trainer to seed + continue instead of eval-replay).
+        const continueFrom =
+          params.continueFrom && manifest.continueFromKey
+            ? { [manifest.continueFromKey]: params.continueFrom }
+            : undefined
         const runConfig =
-          device || keepCheckpoint
-            ? { ...item.config, ...(keepCheckpoint ?? {}), ...(device ? { device } : {}) }
+          device || keepCheckpoint || continueFrom
+            ? {
+                ...item.config,
+                ...(keepCheckpoint ?? {}),
+                ...(continueFrom ?? {}),
+                ...(device ? { device } : {}),
+              }
             : item.config
         const handle = runner.runJob({
           jobId: item.key,
@@ -938,6 +960,54 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       onRecordWritten: params.onRecordWritten,
       activityId: params.activityId,
     })
+  }
+
+  // Extra-train: seed a NEW training run from a parent run's checkpoint and keep training it on a different
+  // dataset (continue_from), reusing the full campaign pipeline (records/dedup/progress). continue_from is
+  // injected per job by runTrainingCampaign (it's not a manifest lever, so it can't ride the spec matrix).
+  async function continueTrainingRun(
+    params: ContinueTrainingRunParams,
+  ): Promise<ContinueTrainingRunResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    if (!manifest.continueFromKey) {
+      throw new Error('trainer manifest declares no continueFromKey — this project has no continue-training path')
+    }
+    const recordType = manifest.recordType
+    const record = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+    if (!record) throw new Error(`no run record for key ${params.runKey}`)
+    const content = record.content as {
+      config?: Record<string, unknown>
+      artifacts?: { checkpoint?: unknown }
+    }
+    const checkpoint = content.artifacts?.checkpoint
+    if (typeof checkpoint !== 'string' || !checkpoint) {
+      throw new Error(
+        `run ${params.runKey} has no checkpoint — re-run with "keep checkpoint" on to continue-train it`,
+      )
+    }
+    // Only manifest LEVER keys go in spec.fixed (expandExperimentMatrix rejects the rest); drop seed + any
+    // inherited checkpoint refs. The parent checkpoint is injected as continue_from by runTrainingCampaign.
+    const leverKeys = manifest.levers || {}
+    const merged = { ...(content.config ?? {}), ...(params.datasetOverrides ?? {}) }
+    const fixed: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(merged)) {
+      if (k !== 'seed' && k in leverKeys) fixed[k] = v
+    }
+    const seedCount = Math.max(1, params.seeds ?? 1)
+    const spec: ExperimentSpec = { fixed, seeds: Array.from({ length: seedCount }, (_, i) => i) }
+    const campaign = await runTrainingCampaign({
+      scope: params.scope,
+      projectRoot: params.projectRoot,
+      manifest,
+      spec,
+      continueFrom: checkpoint,
+      ...(params.refresh ? { refresh: params.refresh } : {}),
+      ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+      ...(params.concurrency ? { concurrency: params.concurrency } : {}),
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    return { recordType, parentKey: params.runKey, continuedFrom: checkpoint, campaign }
   }
 
   async function crossTestRun(params: CrossTestRunParams): Promise<CrossTestRunResult> {
@@ -3134,6 +3204,40 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // Read-only search diagnosis: is there a robust candidate, and if not, why? Runs the deterministic
+  // split-consistency check (the same one the Diagnosis tab + the exploration convergence gate use) over
+  // the project's completed runs and narrates the verdict for the AI. No side effects.
+  async function diagnoseSearch(params: DiagnoseSearchParams): Promise<DiagnoseSearchResult> {
+    let manifest: TrainerManifest
+    try {
+      manifest = await resolveProjectManifest(params.scope, params.project)
+    } catch (err) {
+      return { found: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    const recordType = manifest.recordType
+    const criterion: AnalysisCriterion = { key: 'objective', direction: manifest.objective.direction }
+    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true))
+    const splitLevers = splitLeversOf(manifest)
+    const holdout = incumbentSplitHoldout(runs, splitLevers, criterion)
+    return {
+      found: true,
+      recordType,
+      objective: manifest.objective.name,
+      totalRuns: runs.length,
+      splitAxis: splitLevers,
+      verdict: holdout.verdict,
+      splits: {
+        evaluated: holdout.evaluated,
+        held: holdout.held,
+        total: holdout.splitValues.length,
+        missing: holdout.missingSplits,
+      },
+      incumbent: holdout.incumbentConfig,
+      convergenceGated: convergenceGatedBySplits(holdout),
+      narrative: narrateSplitHoldout(holdout, splitLevers, manifest.objective.name, runs.length),
+    }
+  }
+
   async function getRunData(params: GetRunDataParams): Promise<GetRunDataResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -3482,6 +3586,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     evaluateTrainingRun,
     evaluateTrainingRuns,
     crossTestRun,
+    continueTrainingRun,
     judgeTrainingRuns,
     proposeTrainingHypotheses,
     proposeTrainingExperiments,
@@ -3499,6 +3604,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     mineProjectData,
     analyzePaperModels,
     xaiNarrate,
+    diagnoseSearch,
     getRunData,
     getTrainerState,
     getRunXAI,

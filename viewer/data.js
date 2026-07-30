@@ -39,6 +39,15 @@
     return line
   }
 
+  // The walk-forward windows this asset's data range can actually run (inventory-driven, emitted per price
+  // instrument by the catalog), e.g. "runs: 2024, 2026, alt-2024" — or '' when none (nothing on disk yet,
+  // or a release series that isn't walk-forward-traded).
+  function supportedWindowsLine(inst) {
+    const windows = (inst && inst.supportedWindows) || []
+    if (!windows.length) return ''
+    return 'runs: ' + windows.join(', ')
+  }
+
   // { onDisk, total } for a class — how many instruments have any coverage.
   function classCounts(cls) {
     const instruments = (cls && cls.instruments) || []
@@ -68,6 +77,7 @@
     primaryInterval: primaryInterval,
     instrumentState: instrumentState,
     coverageLine: coverageLine,
+    supportedWindowsLine: supportedWindowsLine,
     classCounts: classCounts,
     mineRequestForInstrument: mineRequestForInstrument,
     mineRequestForClass: mineRequestForClass,

@@ -76,6 +76,18 @@ describe('coverageLine', () => {
   })
 })
 
+describe('supportedWindowsLine', () => {
+  it('lists the runnable walk-forward windows', () => {
+    expect(D.supportedWindowsLine({ supportedWindows: ['2024', '2026', 'alt-2024'] })).toBe(
+      'runs: 2024, 2026, alt-2024',
+    )
+  })
+  it('is empty when there are none (off disk, or a release series)', () => {
+    expect(D.supportedWindowsLine({ supportedWindows: [] })).toBe('')
+    expect(D.supportedWindowsLine({})).toBe('')
+  })
+})
+
 describe('classCounts', () => {
   it('counts how many instruments have any coverage', () => {
     const cls = {

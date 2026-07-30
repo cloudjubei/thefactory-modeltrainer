@@ -5390,3 +5390,121 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     expect('save_checkpoint' in (runner.jobs[0].config as Record<string, unknown>)).toBe(false)
   })
 })
+
+describe('diagnoseSearch (A5 read tool)', () => {
+  const registerManifest = (storage: any, m: any) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: m },
+    })
+  const seedRun = (storage: any, key: string, config: any, objective: number) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key,
+      content: { config, objective, status: 'completed' },
+    })
+
+  it('narrates the split-consistency verdict over the project runs', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }))
+    await seedRun(storage, 'a', { lr: 1, window: '2024' }, 20) // incumbent, only run on 2024
+    await seedRun(storage, 'b', { lr: 2, window: '2022' }, 1)
+    await seedRun(storage, 'c', { lr: 2, window: '2023' }, 1)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.found).toBe(true)
+    expect(res.splitAxis).toEqual(['window'])
+    expect(res.verdict).toBe('not-replicated')
+    expect(res.convergenceGated).toBe(true)
+    expect(res.splits?.missing).toContain('window=2022')
+    expect(res.incumbent).toMatchObject({ lr: 1 })
+    expect(res.narrative).toMatch(/replicate it across/)
+  })
+
+  it('is unverifiable when no split axis is declared', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest())
+    await seedRun(storage, 'a', { lr: 1 }, 5)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.verdict).toBe('unverifiable')
+    expect(res.convergenceGated).toBe(false)
+  })
+
+  it('returns found:false when no project is registered', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.found).toBe(false)
+    expect(res.error).toMatch(/registers no training projects/)
+  })
+})
+
+describe('continueTrainingRun (A3 extra-train)', () => {
+  const contManifest = () =>
+    manifest({
+      keepCheckpointKey: 'save_checkpoint',
+      continueFromKey: 'continue_from',
+      levers: {
+        lr: { type: 'number', default: 0.01 },
+        steps: { type: 'number', default: 100 },
+        asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT'], scope: 'dataset' },
+        walk_forward_window: { type: 'choice', choices: ['2024', '2025'], scope: 'dataset' },
+      },
+    })
+  const registerManifest = (storage: any, mm: any) =>
+    storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'demo', content: { manifest: mm } })
+
+  it('seeds a run from the parent checkpoint on a NEW dataset (continue_from + keep-checkpoint injected)', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, contManifest())
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'parent',
+      content: {
+        config: { lr: 0.05, asset: 'BTCUSDT', walk_forward_window: '2024' },
+        objective: 10,
+        status: 'completed',
+        artifacts: { checkpoint: 'checkpoints/parent.zip' },
+      },
+    })
+    const runner = stubRunner()
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.continueTrainingRun({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: contManifest(),
+      runKey: 'parent',
+      datasetOverrides: { asset: 'ETHUSDT', walk_forward_window: '2025' },
+    })
+    expect(res.parentKey).toBe('parent')
+    expect(res.continuedFrom).toBe('checkpoints/parent.zip')
+    // The launched run keeps the parent's model levers, takes the new dataset, and gets continue_from +
+    // save_checkpoint injected (so it trains further and stays continuable).
+    expect(runner.jobs[0].config).toMatchObject({
+      lr: 0.05,
+      asset: 'ETHUSDT',
+      walk_forward_window: '2025',
+      continue_from: 'checkpoints/parent.zip',
+      save_checkpoint: true,
+    })
+  })
+
+  it('refuses a parent run with no kept checkpoint', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, contManifest())
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'p2',
+      content: { config: { lr: 0.05, asset: 'BTCUSDT' }, objective: 5, status: 'completed' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(
+      tools.continueTrainingRun({ scope: 'proj', projectRoot: '/repo', manifest: contManifest(), runKey: 'p2' }),
+    ).rejects.toThrow(/no checkpoint/)
+  })
+})

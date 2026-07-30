@@ -23,6 +23,7 @@ import type {
   ExplorationStep,
   TrainerManifest,
 } from './modelTrainerTypes.js'
+import { convergenceGatedBySplits, incumbentSplitHoldout, splitLeversOf } from './diagnosticsUtils.js'
 import { aggregateToSetupRuns, criterionValueOf, leverImportances, recommendExperiments } from './xaiUtils.js'
 
 // The exploration autopilot's pure core: `nextExplorationStep` is a staged reducer over the run archive.
@@ -480,18 +481,28 @@ export function nextExplorationStep(
     return mk('converged', [], 'converged', { ...state, stage: 'converged', done: true }, true)
   }
 
+  let step: ExplorationStep
   switch (state.stage) {
     case 'calibrate':
-      return stepCalibrate(state, runs, manifest, criterion, mk)
+      step = stepCalibrate(state, runs, manifest, criterion, mk)
+      break
     case 'screen':
-      return stepScreen(state, runs, manifest, criterion, mk)
+      step = stepScreen(state, runs, manifest, criterion, mk)
+      break
     case 'global':
-      return stepGlobal(state, runs, manifest, criterion, mk, opts)
+      step = stepGlobal(state, runs, manifest, criterion, mk, opts)
+      break
     case 'local':
-      return stepLocal(state, runs, manifest, criterion, mk, opts)
+      step = stepLocal(state, runs, manifest, criterion, mk, opts)
+      break
     default:
-      return converge(state, runs, criterion, mk, 'done')
+      step = converge(state, runs, criterion, mk, 'done', manifest)
+      break
   }
+  // Split-consistency GATE: never crown an incumbent that isn't robust across the declared split axis while
+  // there are unrun splits + budget to try them — the deterministic fix for single-window false-convergence.
+  const budgetLeft = state.budget.maxRuns == null || spentRuns < state.budget.maxRuns
+  return gateConvergenceOnSplits(step, state, runs, manifest, criterion, budgetLeft, mk)
 }
 
 type Mk = (
@@ -1009,5 +1020,48 @@ function converge(
     `converged: ${reason}`,
     { ...state, stage: 'converged', done: true, basins, declaredBasinId: declared?.id },
     true,
+  )
+}
+
+/**
+ * The split-consistency convergence GATE (A5). When a step would crown an incumbent (`converged`) but a
+ * splitAxis is declared, budget remains, and the incumbent is not-replicated / single-split-luck WITH unrun
+ * splits, replace the convergence with `missing-cell` split-fill recs — replicate the incumbent across its
+ * missing splits before trusting it. The search stays at its current stage (done:false) and re-checks after
+ * the fills run; loop-safe because each pass shrinks the missing splits (a budget-exhausted convergence
+ * bypasses the gate — nothing more can be run). A no-op when no splitAxis is declared. Exported for testing.
+ */
+export function gateConvergenceOnSplits(
+  step: ExplorationStep,
+  state: ExplorationState,
+  runs: AnalysisRun[],
+  manifest: TrainerManifest | undefined,
+  criterion: AnalysisCriterion,
+  budgetLeft: boolean,
+  mk: Mk,
+): ExplorationStep {
+  if (!step.done || step.stage !== 'converged' || !budgetLeft) return step
+  const splitLevers = splitLeversOf(manifest)
+  if (!splitLevers.length) return step
+  const holdout = incumbentSplitHoldout(runs, splitLevers, criterion, { baseline: baselineOf(runs) })
+  if (!convergenceGatedBySplits(holdout) || !holdout.missingSplitConfigs.length || !holdout.incumbentConfig) {
+    return step
+  }
+  const base = without(holdout.incumbentConfig, 'seed')
+  const batch: ExperimentRecommendation[] = holdout.missingSplitConfigs.map((sc) => ({
+    kind: 'missing-cell',
+    reason: `split-consistency gate — replicate the incumbent across ${Object.entries(sc)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(', ')} before crowning it`,
+    runCount: XAI_MIN_SEEDS,
+    spec: { fixed: { ...base, ...sc }, seeds: seedRange(XAI_MIN_SEEDS) },
+    priority: 80,
+  }))
+  return mk(
+    state.stage,
+    batch,
+    `gated: incumbent not yet robust across ${splitLevers.join(', ')} — replicating it across ${batch.length} unrun split(s)`,
+    state,
+    false,
   )
 }

@@ -143,6 +143,20 @@ export interface TrainerResources {
  * (see docs/model-training-standard.md). The engine reads ONLY this — no
  * model-specific knowledge lives in the engine.
  */
+/** Diagnosis-tab / search-diagnostician configuration on a {@link TrainerManifest}. */
+export interface TrainerDiagnostics {
+  /** The lever(s) whose distinct values are OOS splits (walk-forward windows / CV folds / datasets). */
+  splitAxis?: { levers: string[]; kind?: string }
+  /** Metrics whose given value marks a run degenerate (e.g. `n_trades == 0`). */
+  degenerateWhen?: Array<{ metric: string; op: string; value: number }>
+  /** Metrics that confound the objective (surfaced by the objective-confound check). */
+  confoundMetrics?: string[]
+  /** Risk metrics surfaced alongside the objective. */
+  riskMetrics?: string[]
+  /** An explicit null baseline the incumbent must beat (else the per-run benchmark is used). */
+  nullBaseline?: unknown
+}
+
 export interface TrainerManifest {
   name: string
   /** Namespaces every DataStorage record this project produces, e.g. `cartpole-run`. */
@@ -177,6 +191,13 @@ export interface TrainerManifest {
    */
   keepCheckpointKey?: string
   /**
+   * The config key that seeds a run from a PARENT checkpoint and CONTINUES training it (extra-train) on a
+   * new dataset — e.g. BlackSwan's `continue_from`. Unlike an eval-replay (`checkpoint_to_load`), a
+   * continued run keeps training the loaded weights. Declaring it lets `continueTrainingRun` inject the
+   * parent checkpoint per run after hashing. Omit for projects without a continue-training path.
+   */
+  continueFromKey?: string
+  /**
    * Command template (only `{summaryOut}`) that emits the project's DATA CATALOG — the asset classes
    * and instruments this project can acquire, each joined with its on-disk coverage. Powers the Data
    * tab's "what's available to download". Omit if the project publishes no data catalog.
@@ -210,6 +231,13 @@ export interface TrainerManifest {
    * its hypotheses can never be judged.
    */
   hypothesisBenchmark?: HypothesisBenchmark
+  /**
+   * Optional Diagnosis-tab / search-diagnostician config. `splitAxis` names the dataset lever(s) whose
+   * distinct values are out-of-sample SPLITS (walk-forward windows / CV folds / datasets) — the
+   * split-consistency check AND the exploration convergence gate ({@link gateConvergenceOnSplits}) require
+   * it to detect single-split luck. The other fields sharpen the remaining checks.
+   */
+  diagnostics?: TrainerDiagnostics
   levers: Record<string, TrainerLeverSpec>
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
   eta?: { unitsLever: string }
@@ -1313,6 +1341,33 @@ export interface CrossTestRunRecord {
   updatedAt: string
 }
 
+export interface ContinueTrainingRunParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The parent run to continue-train from (must have a kept checkpoint). */
+  runKey: string
+  /** Dataset lever overrides for the continued run — the NEW dataset it trains further on. */
+  datasetOverrides?: Record<string, unknown>
+  /** How many seeds of the continued run (default 1). */
+  seeds?: number
+  refresh?: boolean
+  computeTarget?: string
+  concurrency?: number
+  abortSignal?: AbortSignal
+}
+
+export interface ContinueTrainingRunResult {
+  recordType: string
+  /** The parent run the continued run(s) were seeded from. */
+  parentKey: string
+  /** The parent checkpoint injected as `continue_from`. */
+  continuedFrom: string
+  /** The launched training campaign (run keys, counts). */
+  campaign: TrainingCampaignResult
+}
+
 export interface CrossTestRunParams {
   scope: string
   projectRoot: string
@@ -1379,6 +1434,12 @@ export interface TrainingCampaignParams {
    * kept checkpoint is one setup. No-op when the manifest declares no `keepCheckpointKey`.
    */
   keepCheckpoints?: boolean
+  /**
+   * Extra-train: seed every run from this PARENT checkpoint and CONTINUE training it (not eval-replay).
+   * Injects `{[manifest.continueFromKey]: continueFrom}` per job after hashing (and implies keepCheckpoints
+   * so the continued run stays continuable). No-op when the manifest declares no `continueFromKey`.
+   */
+  continueFrom?: string
   /**
    * Maximum number of runs dispatched at once (default 1, sequential). Each run is
    * isolated (unique jobId + its own temp config/summary), so the real cap is host
@@ -2099,6 +2160,37 @@ export interface GetTrainerStateResult {
   }
   papers?: { total: number }
   models?: { total: number }
+}
+
+export interface DiagnoseSearchParams {
+  scope: string
+  /** Which registered training project (as {@link GetTrainerStateParams.project}). */
+  project?: string
+}
+
+/**
+ * A read-only diagnosis of whether the search has a robust candidate — the server-side split-consistency
+ * verdict (the same check the Diagnosis tab + the exploration convergence gate use), narrated for the AI.
+ */
+export interface DiagnoseSearchResult {
+  found: boolean
+  /** Set (with found:false) when the project can't be resolved. */
+  error?: string
+  recordType?: string
+  objective?: string
+  totalRuns?: number
+  /** The split levers (`diagnostics.splitAxis`) the diagnosis ran over — [] when none is declared. */
+  splitAxis?: string[]
+  /** The split-consistency verdict for the current incumbent. */
+  verdict?: 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
+  /** Splits the incumbent was evaluated on, how many it held, the total, and the ones it hasn't run. */
+  splits?: { evaluated: number; held: number; total: number; missing: string[] }
+  /** The incumbent setup's config, or null when there are no runs. */
+  incumbent?: Record<string, unknown> | null
+  /** Whether this verdict BLOCKS the exploration autopilot from declaring convergence. */
+  convergenceGated?: boolean
+  /** A one-paragraph human read + do-next. */
+  narrative?: string
 }
 
 // In-place record EDITS from a chat (a hypothesis/paper field, a manual verdict override) are handled by
@@ -2825,6 +2917,7 @@ export interface ModelTrainerTools {
    * checkpoint (`keep checkpoint` on at launch) + the manifest's `evaluate` command.
    */
   crossTestRun(params: CrossTestRunParams): Promise<CrossTestRunResult>
+  continueTrainingRun(params: ContinueTrainingRunParams): Promise<ContinueTrainingRunResult>
   /**
    * Score every completed run: auto-reject health-flagged ones, blend the
    * normalised objective with an LLM verdict, persist `{recordType}-verdict` records.
@@ -2949,6 +3042,7 @@ export interface ModelTrainerTools {
    * seeded discuss-bundle. Read-only.
    */
   getTrainerState(params: GetTrainerStateParams): Promise<GetTrainerStateResult>
+  diagnoseSearch(params: DiagnoseSearchParams): Promise<DiagnoseSearchResult>
   /**
    * Agent-facing READ tool: compute the deterministic xAI analysis ({@link RunXaiDigest}) for ONE run by
    * id — the same facts the narrative is built from, returned as structured data (the LLM never computes

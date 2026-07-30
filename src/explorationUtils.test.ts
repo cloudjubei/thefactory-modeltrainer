@@ -10,6 +10,7 @@ import {
   clusterBasins,
   localRefineRecs,
   coverageGridRecs,
+  gateConvergenceOnSplits,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
 import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES } from './modelTrainerConstants.js'
@@ -1127,5 +1128,70 @@ describe('categorical levers are always-active basin axes', () => {
     expect(step.stateNext.activeLevers).not.toContain('dead_num') // inert numeric IS frozen
     expect(Object.keys(step.stateNext.frozenLevers)).toContain('dead_num')
     expect(typeof step.stateNext.frozenLevers.dead_num).toBe('number') // coerced to a number
+  })
+})
+
+describe('gateConvergenceOnSplits (A5 split-consistency convergence gate)', () => {
+  const criterion = { key: 'objective', direction: 'max' as const }
+  const mk = (stage: any, batch: any, rationale: any, stateNext: any, done: any) => ({
+    stage,
+    batch,
+    rationale,
+    stateNext,
+    done,
+  })
+  const state = { stage: 'local', budget: {} } as any
+  const converged = {
+    stage: 'converged',
+    batch: [],
+    rationale: 'converged: done',
+    stateNext: state,
+    done: true,
+  } as any
+  const manifest = { diagnostics: { splitAxis: { levers: ['window'] } }, levers: {} } as any
+  const run = (config: any, objective: number, seed = 0) => ({
+    key: JSON.stringify(config) + seed,
+    config,
+    objective,
+    seed,
+    status: 'completed',
+  })
+
+  it('replaces a not-yet-robust convergence with split-fill recs when unrun splits remain', () => {
+    const runs = [
+      run({ lr: 1, window: '2024' }, 20), // incumbent (best), only evaluated on 2024
+      run({ lr: 2, window: '2022' }, 1),
+      run({ lr: 2, window: '2023' }, 1),
+    ]
+    const out = gateConvergenceOnSplits(converged, state, runs, manifest, criterion, true, mk)
+    expect(out.done).toBe(false)
+    expect(out.stage).toBe('local')
+    expect(out.batch.map((b: any) => b.kind)).toEqual(['missing-cell', 'missing-cell'])
+    // Replicates the INCUMBENT (lr:1), not the field, across the missing windows.
+    const fixeds = out.batch.map((b: any) => b.spec.fixed)
+    expect(fixeds).toContainEqual({ lr: 1, window: '2022' })
+    expect(fixeds).toContainEqual({ lr: 1, window: '2023' })
+  })
+
+  it('lets a fully-replicated incumbent converge (no unrun splits to fill)', () => {
+    const runs = [run({ lr: 1, window: '2024' }, 8), run({ lr: 1, window: '2022' }, 3)]
+    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, true, mk)).toBe(converged)
+  })
+
+  it('bypasses the gate when budget is exhausted', () => {
+    const runs = [run({ lr: 1, window: '2024' }, 20), run({ lr: 2, window: '2022' }, 1)]
+    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, false, mk)).toBe(converged)
+  })
+
+  it('is a no-op when the manifest declares no split axis', () => {
+    const runs = [run({ lr: 1, window: '2024' }, 20), run({ lr: 2, window: '2022' }, 1)]
+    const noSplit = { levers: {} } as any
+    expect(gateConvergenceOnSplits(converged, state, runs, noSplit, criterion, true, mk)).toBe(converged)
+  })
+
+  it('never touches a non-converged step', () => {
+    const inProgress = { stage: 'local', batch: [], rationale: 'x', stateNext: state, done: false } as any
+    const runs = [run({ lr: 1, window: '2024' }, 20)]
+    expect(gateConvergenceOnSplits(inProgress, state, runs, manifest, criterion, true, mk)).toBe(inProgress)
   })
 })
