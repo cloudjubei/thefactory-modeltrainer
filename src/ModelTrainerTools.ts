@@ -200,6 +200,8 @@ import {
   expandExperimentMatrix,
   estimateRemainingCampaignSeconds,
   normalizeObjectiveScores,
+  computeScorecard,
+  primaryFitnessCriterion,
   pickBestRun,
   totalCampaignUnits,
   validateDecisionTrace,
@@ -218,6 +220,8 @@ import {
   convergenceGatedBySplits,
   splitLeversOf,
   narrateSplitHoldout,
+  rewardFitnessAlignment,
+  narrateAlignment,
 } from './diagnosticsUtils.js'
 
 /**
@@ -798,7 +802,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
 
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
-      const runs = recordsToAnalysisRuns(runsRecords)
+      const runs = recordsToAnalysisRuns(runsRecords, manifest)
       const completedKeys = new Set(runsRecords.map((r) => r.key))
 
       // Fail-guard: a just-settled child that produced NO new completed runs was fruitless (failed / empty
@@ -2331,21 +2335,29 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   // Map completed-run records to the engine's AnalysisRun shape (shared by the digest + whole-space bundle).
   function recordsToAnalysisRuns(
     records: { key: string; content: Record<string, unknown> }[],
+    manifest?: TrainerManifest,
   ): AnalysisRun[] {
-    return records.map((r) => ({
-      key: r.key,
-      config: (r.content.config as Record<string, unknown>) || {},
-      metrics: r.content.metrics as Record<string, number> | undefined,
-      objective: r.content.objective as number,
-      durationMs: r.content.durationMs as number | undefined,
-      seed: r.content.seed as number | undefined,
-      dataset: r.content.dataset as AnalysisRun['dataset'],
-      status: 'completed',
-      ranAt:
-        ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
-          (r.content.ranAt as string | undefined)) ||
-        undefined,
-    }))
+    return records.map((r) => {
+      const objective = r.content.objective as number
+      const metrics = r.content.metrics as Record<string, number> | undefined
+      return {
+        key: r.key,
+        config: (r.content.config as Record<string, unknown>) || {},
+        metrics,
+        objective,
+        durationMs: r.content.durationMs as number | undefined,
+        seed: r.content.seed as number | undefined,
+        dataset: r.content.dataset as AnalysisRun['dataset'],
+        status: 'completed',
+        // Scorecard acceptance (gates) — only when a manifest is supplied so the verdict layer can prefer
+        // accepted runs; omitted otherwise so pure analysis over all runs is unaffected.
+        accepted: manifest ? computeScorecard(manifest, { objective, metrics }).accepted : undefined,
+        ranAt:
+          ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
+            (r.content.ranAt as string | undefined)) ||
+          undefined,
+      }
+    })
   }
 
   async function analyzeConfigSpace(
@@ -3263,10 +3275,22 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       return { found: false, error: err instanceof Error ? err.message : String(err) }
     }
     const recordType = manifest.recordType
-    const criterion: AnalysisCriterion = { key: 'objective', direction: manifest.objective.direction }
-    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true))
+    // Rank the incumbent by the scorecard's FITNESS (falls back to the objective when no fitness is
+    // declared), and let the split-holdout prefer gate-ACCEPTED runs (populated on the projected runs).
+    const criterion: AnalysisCriterion = primaryFitnessCriterion(manifest)
+    const rankMetric = manifest.fitness?.[0]?.metric ?? manifest.objective.name
+    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest)
     const splitLevers = splitLeversOf(manifest)
     const holdout = incumbentSplitHoldout(runs, splitLevers, criterion)
+    // Reward–success alignment: does the reward/objective actually track the declared success metrics
+    // (gates + fitness)? A near-zero primary correlation = a misaligned proxy (BlackSwan's whole problem).
+    const alignMetrics = [
+      ...new Set([
+        ...(manifest.fitness?.map((f) => f.metric) ?? []),
+        ...(manifest.gates?.map((g) => g.metric) ?? []),
+      ]),
+    ].filter((m) => m !== 'objective')
+    const alignment = alignMetrics.length ? rewardFitnessAlignment(runs, alignMetrics) : undefined
     return {
       found: true,
       recordType,
@@ -3282,7 +3306,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       },
       incumbent: holdout.incumbentConfig,
       convergenceGated: convergenceGatedBySplits(holdout),
-      narrative: narrateSplitHoldout(holdout, splitLevers, manifest.objective.name, runs.length),
+      ...(alignment
+        ? { alignment, alignmentNarrative: narrateAlignment(alignment, rankMetric) }
+        : {}),
+      narrative: narrateSplitHoldout(holdout, splitLevers, rankMetric, runs.length),
     }
   }
 

@@ -5563,6 +5563,60 @@ describe('diagnoseSearch (A5 read tool)', () => {
     expect(res.convergenceGated).toBe(false)
   })
 
+  it('crowns the best gate-ACCEPTED setup by FITNESS, not the highest raw objective', async () => {
+    const storage = memoryStorage()
+    await registerManifest(
+      storage,
+      manifest({
+        gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }],
+        fitness: [{ metric: 'return_vs_hold_pct', direction: 'max' }],
+        diagnostics: { splitAxis: { levers: ['window'] } },
+      }),
+    )
+    const seedM = (key: string, config: any, objective: number, metrics: any) =>
+      storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective, metrics, status: 'completed' } })
+    // lr:9 has the highest objective AND highest return_vs_hold, but oos_return_pct<0 ⇒ FAILS the gate.
+    await seedM('a', { lr: 9, window: '2024' }, 100, { oos_return_pct: -5, return_vs_hold_pct: 50 })
+    await seedM('b', { lr: 9, window: '2022' }, 90, { oos_return_pct: -5, return_vs_hold_pct: 48 })
+    // lr:1 is lower on objective/fitness but PASSES the gate on both splits.
+    await seedM('c', { lr: 1, window: '2024' }, 30, { oos_return_pct: 8, return_vs_hold_pct: 6 })
+    await seedM('d', { lr: 1, window: '2022' }, 20, { oos_return_pct: 4, return_vs_hold_pct: 3 })
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.incumbent).toMatchObject({ lr: 1 }) // NOT lr:9 (rejected)
+    expect(res.verdict).toBe('robust')
+    expect(res.convergenceGated).toBe(false)
+    expect(res.narrative).toMatch(/return_vs_hold_pct/) // narrated by the ranking metric
+  })
+
+  it('reports the reward–success alignment and flags a MISALIGNED reward proxy', async () => {
+    const storage = memoryStorage()
+    await registerManifest(
+      storage,
+      manifest({
+        fitness: [{ metric: 'return_vs_hold_pct', direction: 'max' }],
+        diagnostics: { splitAxis: { levers: ['window'] } },
+      }),
+    )
+    const seedM = (key: string, objective: number, rvh: number) =>
+      storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run',
+        key,
+        content: { config: { window: '2024' }, objective, metrics: { return_vs_hold_pct: rvh }, status: 'completed' },
+      })
+    // objective and return_vs_hold_pct are decorrelated (r≈0): a high reward does NOT imply a good model.
+    await seedM('a', -1, 1)
+    await seedM('b', 0, 0)
+    await seedM('c', 1, 1)
+    await seedM('d', 0, 0)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.alignment?.[0]).toMatchObject({ metric: 'return_vs_hold_pct', n: 4 })
+    expect(res.alignment?.[0].r).toBeCloseTo(0, 6)
+    expect(res.alignmentNarrative).toMatch(/misaligned|does not imply/i)
+  })
+
   it('returns found:false when no project is registered', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     const res = await tools.diagnoseSearch({ scope: 'proj' })

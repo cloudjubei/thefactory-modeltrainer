@@ -5,6 +5,8 @@ import {
   convergenceGatedBySplits,
   splitLeversOf,
   narrateSplitHoldout,
+  rewardFitnessAlignment,
+  narrateAlignment,
 } from './diagnosticsUtils'
 import type { AnalysisRun, AnalysisCriterion } from './modelTrainerTypes'
 
@@ -72,6 +74,33 @@ describe('incumbentSplitHoldout', () => {
     expect(h.verdict).toBe('robust')
   })
 
+  it('prefers the best gate-ACCEPTED setup over a higher-ranked rejected one', () => {
+    const runs = [
+      { ...run({ lr: 9, window: '2024' }, 100), accepted: false }, // best objective but REJECTED
+      { ...run({ lr: 9, window: '2022' }, 90), accepted: false },
+      { ...run({ lr: 1, window: '2024' }, 30), accepted: true }, // lower objective, ACCEPTED
+      { ...run({ lr: 1, window: '2022' }, 20), accepted: true },
+    ]
+    const h = incumbentSplitHoldout(runs, ['window'], crit)
+    expect(h.incumbentConfig).toMatchObject({ lr: 1 })
+    expect(h.verdict).toBe('robust')
+  })
+
+  it('falls back to all runs when NO run passes gates (still yields an incumbent)', () => {
+    const runs = [
+      { ...run({ lr: 1, window: '2024' }, 8), accepted: false },
+      { ...run({ lr: 1, window: '2022' }, 3), accepted: false },
+    ]
+    const h = incumbentSplitHoldout(runs, ['window'], crit)
+    expect(h.incumbentConfig).toMatchObject({ lr: 1 })
+    expect(h.verdict).toBe('robust')
+  })
+
+  it('treats runs with no acceptance flag as accepted (gates not evaluated)', () => {
+    const runs = [run({ lr: 1, window: '2024' }, 8), run({ lr: 1, window: '2022' }, 3)]
+    expect(incumbentSplitHoldout(runs, ['window'], crit).verdict).toBe('robust')
+  })
+
   it('uses a metrics.* criterion when asked', () => {
     const r = (w: string, v: number): AnalysisRun => ({
       key: `${w}`,
@@ -84,6 +113,78 @@ describe('incumbentSplitHoldout', () => {
       direction: 'max',
     })
     expect(h.verdict).toBe('robust')
+  })
+})
+
+describe('rewardFitnessAlignment', () => {
+  // A run carrying the objective (reward proxy) plus arbitrary summary metrics.
+  const r = (objective: number, metrics: Record<string, number>): AnalysisRun => ({
+    key: `${objective}-${JSON.stringify(metrics)}`,
+    config: {},
+    objective,
+    metrics,
+    status: 'completed',
+  })
+
+  it('reports r≈+1 when a metric moves exactly with the objective', () => {
+    const runs = [r(1, { m: 1 }), r(2, { m: 2 }), r(3, { m: 3 }), r(4, { m: 4 })]
+    const [a] = rewardFitnessAlignment(runs, ['m'])
+    expect(a.metric).toBe('m')
+    expect(a.r).toBeCloseTo(1, 6)
+    expect(a.n).toBe(4)
+  })
+
+  it('reports r≈-1 when a metric moves opposite the objective', () => {
+    const runs = [r(1, { m: 4 }), r(2, { m: 3 }), r(3, { m: 2 }), r(4, { m: 1 })]
+    expect(rewardFitnessAlignment(runs, ['m'])[0].r).toBeCloseTo(-1, 6)
+  })
+
+  it('reports r≈0 when the reward is DECORRELATED from the metric (the misaligned-proxy case)', () => {
+    const runs = [r(-1, { m: 1 }), r(0, { m: 0 }), r(1, { m: 1 })]
+    expect(rewardFitnessAlignment(runs, ['m'])[0].r).toBeCloseTo(0, 6)
+  })
+
+  it('returns r=null with fewer than 3 finite pairs', () => {
+    const a = rewardFitnessAlignment([r(1, { m: 1 }), r(2, { m: 2 })], ['m'])[0]
+    expect(a.r).toBeNull()
+    expect(a.n).toBe(2)
+  })
+
+  it('returns r=null when the metric has zero variance (undefined correlation)', () => {
+    const runs = [r(1, { m: 5 }), r(2, { m: 5 }), r(3, { m: 5 })]
+    expect(rewardFitnessAlignment(runs, ['m'])[0].r).toBeNull()
+  })
+
+  it('counts only runs where BOTH the objective and the metric are finite', () => {
+    const runs = [r(1, { m: 1 }), r(2, {}), r(3, { m: 3 }), r(4, { m: 4 })]
+    const a = rewardFitnessAlignment(runs, ['m'])[0]
+    expect(a.n).toBe(3) // the metric-less run is dropped
+  })
+
+  it('handles multiple metrics independently', () => {
+    const runs = [r(1, { a: 1, b: 3 }), r(2, { a: 2, b: 2 }), r(3, { a: 3, b: 1 })]
+    const out = rewardFitnessAlignment(runs, ['a', 'b'])
+    expect(out.map((x) => x.metric)).toEqual(['a', 'b'])
+    expect(out[0].r).toBeCloseTo(1, 6)
+    expect(out[1].r).toBeCloseTo(-1, 6)
+  })
+})
+
+describe('narrateAlignment', () => {
+  it('flags a decorrelated primary metric as a misaligned reward proxy', () => {
+    const msg = narrateAlignment([{ metric: 'return_vs_hold_pct', r: 0.05, n: 40 }], 'return_vs_hold_pct')
+    expect(msg).toMatch(/misaligned|does not (predict|imply)/i)
+    expect(msg).toMatch(/return_vs_hold_pct/)
+  })
+
+  it('confirms a well-aligned reward when the primary metric tracks it', () => {
+    const msg = narrateAlignment([{ metric: 'eval_return', r: 0.92, n: 40 }], 'eval_return')
+    expect(msg).toMatch(/aligned|good proxy|tracks/i)
+  })
+
+  it('is explicit when alignment cannot be measured yet', () => {
+    const msg = narrateAlignment([{ metric: 'x', r: null, n: 2 }], 'x')
+    expect(msg).toMatch(/can'?t|cannot|not enough|insufficient/i)
   })
 })
 

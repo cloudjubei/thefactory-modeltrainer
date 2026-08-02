@@ -236,6 +236,9 @@ let reliabilityCache = new Map()
 let reliabilityHeuristicCache = new Map()
 // Runs filter by reliability: '' (any) | 'ok' | 'threshold-driven' | 'dubious' | 'flagged' (either non-ok).
 let runsReliabilityFilter = ''
+// Runs filter by scorecard verdict: '' (any) | 'accepted' (all gates pass) | 'rejected'. Client-computed
+// from the manifest gates + each run's summary (window.Scorecard), so it can't push into the server `where`.
+let runsScorecardFilter = ''
 // Run keys the user dismissed from the Activity failures list (persisted so a
 // reload doesn't resurface them); the failure record itself is left intact.
 let dismissedFailures = new Set()
@@ -2145,6 +2148,7 @@ function resetDashboardState() {
   reliabilityCache = new Map()
   reliabilityHeuristicCache = new Map()
   runsReliabilityFilter = ''
+  runsScorecardFilter = ''
   evaluatingKeys.clear()
   judgementSummary = null
   hypothesesCache = []
@@ -2809,6 +2813,17 @@ function ranBySuffixHtml(summary) {
   return ` <span class="ran-by">on ${escapeHtml(ranBy)}</span>`
 }
 function sortRunsByObjective(runs) {
+  // When the project declares a scorecard (gates/fitness), "best-first" means accepted-first then by
+  // primary fitness — success, not the raw reward. Projects without one keep the plain objective sort.
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (SC && SC.hasScorecard(manifest)) {
+    return [...runs].sort((a, b) =>
+      SC.compareScorecards(
+        SC.computeScorecard(manifest, a.summary || {}),
+        SC.computeScorecard(manifest, b.summary || {}),
+      ),
+    )
+  }
   const dir = objectiveDirection()
   return [...runs].sort((a, b) => {
     const va = Number(a.summary.objective)
@@ -2891,6 +2906,18 @@ function evalChipHtml(run) {
     !Number.isFinite(train) || (objectiveDirection() === 'min' ? value <= train : value >= train)
   return `<span class="badge eval-chip ${heldUp ? 'is-ok' : 'is-warn'}">${escapeHtml(formatObjective(value))}</span>`
 }
+// The scorecard verdict pill: green "accepted" when every gate passes, red "rejected" otherwise, with the
+// failed gate labels in the hover title. Only rendered for projects that DECLARE a scorecard (gates/fitness).
+function scorecardBadgeHtml(run) {
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (!SC || !SC.hasScorecard(manifest)) return '<span class="judge-none">—</span>'
+  const sc = SC.computeScorecard(manifest, run.summary || {})
+  const failed = sc.gates.filter((g) => !g.pass).map((g) => g.label)
+  const title = sc.accepted
+    ? 'Passes every scorecard gate.'
+    : `Failed: ${failed.join(', ')}`
+  return `<span class="badge ${sc.accepted ? 'is-ok' : 'is-bad'}" title="${escapeHtml(title)}">${sc.accepted ? 'accepted' : 'rejected'}</span>`
+}
 // The cross-test robustness chip: n/m tested sets beating hold (green = all, amber = some, red = none),
 // from the run's `-settest` matrix. Em-dash when the run was never cross-tested.
 function crossTestChipHtml(run) {
@@ -2955,6 +2982,7 @@ function hasActiveRunsFilters() {
     runsVersionFilter ||
     runsStatusFilter ||
     runsReliabilityFilter ||
+    runsScorecardFilter ||
     Object.values(runsLeverFilter).some(Boolean) ||
     customRulesCache.some((r) => r.active)
   )
@@ -2967,6 +2995,7 @@ function clearRunsFilter() {
   runsVersionFilter = ''
   runsStatusFilter = ''
   runsReliabilityFilter = ''
+  runsScorecardFilter = ''
   for (const rule of customRulesCache) {
     if (rule.active) {
       rule.active = false
@@ -3344,6 +3373,19 @@ function runsColumns() {
       sort: (r) => vsHoldValue(r.summary),
     })
   }
+  // Scorecard verdict column — only for projects that DECLARE a scorecard (gates/fitness); "accepted" = every
+  // gate passes (success, not the raw reward). Sorts accepted-first then by primary fitness (like the default sort).
+  const _SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (_SC && _SC.hasScorecard(manifest)) {
+    cols.push({
+      id: 'scorecard',
+      label: 'Success',
+      num: false,
+      help: 'Scorecard verdict: “accepted” = the run passes every declared gate (beats-hold, trades enough, drawdown, …). Hover a “rejected” pill for the failed gates. This is the definition of a good model, separate from the training reward.',
+      get: (r) => scorecardBadgeHtml(r),
+      sort: (r) => _SC.scorecardSortValue(_SC.computeScorecard(manifest, r.summary || {})),
+    })
+  }
   cols.push({
     id: 'judge',
     label: 'Judge',
@@ -3626,6 +3668,9 @@ function hasClientOnlyRunsFilter() {
   // Reliability lives in a separate overlay record (not a run-record field), so it can't be pushed into the
   // server `where` — filtering it needs the full matching set in memory, the same path the group-by views use.
   if (runsReliabilityFilter) return true
+  // Scorecard acceptance is computed client-side from manifest+summary, so it can't push into the server
+  // `where` either — force the full in-memory set, else a server page would mismatch the filtered rows.
+  if (runsScorecardFilter) return true
   return customRulesCache.some((rule) => rule.active && !customRuleServerField(rule.field))
 }
 function runsServerPaged() {
@@ -3728,6 +3773,13 @@ function applyRunsFilters(runs) {
     out = out.filter((r) => {
       const level = resolveReliability(r.key).level
       return runsReliabilityFilter === 'flagged' ? level !== 'ok' : level === runsReliabilityFilter
+    })
+  }
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (runsScorecardFilter && SC && SC.hasScorecard(manifest)) {
+    out = out.filter((r) => {
+      const accepted = SC.computeScorecard(manifest, r.summary || {}).accepted
+      return runsScorecardFilter === 'accepted' ? accepted : !accepted
     })
   }
   return applyRunsTextFilter(out)
@@ -4051,17 +4103,27 @@ function runsToolbarHtml(shownCount, total) {
           ${RELIABILITY_FILTER_OPTS.map(([k, lab]) => `<option value="${escapeHtml(k)}"${runsReliabilityFilter === k ? ' selected' : ''}>${escapeHtml(lab)}</option>`).join('')}
         </select>`
     : ''
+  const _scFilterMod = typeof window !== 'undefined' ? window.Scorecard : null
+  const scorecardFilter =
+    _scFilterMod && _scFilterMod.hasScorecard(manifest)
+      ? `<select class="runs-filter-lever${runsScorecardFilter ? ' is-changed' : ''}" id="runs-scorecard-filter"${helpAttr('Show only runs by scorecard verdict — accepted = passes every declared gate (success), rejected = fails one or more.')}>
+          <option value="">success: any</option>
+          <option value="accepted"${runsScorecardFilter === 'accepted' ? ' selected' : ''}>success: accepted</option>
+          <option value="rejected"${runsScorecardFilter === 'rejected' ? ' selected' : ''}>success: rejected</option>
+        </select>`
+      : ''
   const changedDropdowns =
     (runsVersionFilter ? 1 : 0) +
     (runsStatusFilter ? 1 : 0) +
     (runsReliabilityFilter ? 1 : 0) +
+    (runsScorecardFilter ? 1 : 0) +
     Object.values(runsLeverFilter).filter(Boolean).length
   const dropdownsToggle = `<button type="button" id="runs-dropdowns-toggle" class="runs-dropdowns-toggle" aria-expanded="${runsDropdownsCollapsed ? 'false' : 'true'}">
     <span class="caret">${runsDropdownsCollapsed ? '▸' : '▾'}</span> ${runsDropdownsCollapsed ? 'More filter options' : 'Hide filter options'}${runsDropdownsCollapsed && changedDropdowns ? ` <span class="runs-dropdowns-count">${changedDropdowns}</span>` : ''}
   </button>`
   const dropdownsPanel = `<div id="runs-dropdowns" class="runs-dropdowns${runsDropdownsCollapsed ? ' is-collapsed' : ''}">
     ${dropdownsToggle}
-    <div class="runs-dropdowns-body">${statusFilter}${reliabilityFilter}${versionFilter}${leverDropdowns}</div>
+    <div class="runs-dropdowns-body">${statusFilter}${reliabilityFilter}${scorecardFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
   // Favorites is a CURATED pin list — the exploratory filters (Hide-bad / status / lever / custom rules) don't
@@ -10056,6 +10118,12 @@ function setupRuns() {
       }
       if (event.target.id === 'runs-reliability-filter') {
         runsReliabilityFilter = event.target.value
+        runsPage = 0
+        refreshRuns()
+        return
+      }
+      if (event.target.id === 'runs-scorecard-filter') {
+        runsScorecardFilter = event.target.value
         runsPage = 0
         refreshRuns()
         return

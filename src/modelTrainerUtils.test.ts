@@ -90,6 +90,10 @@ import {
   isPaperVerdictAdmitted,
   paperHostAffinity,
   rankPaperCandidates,
+  computeScorecard,
+  scorecardRankValue,
+  compareScorecards,
+  primaryFitnessCriterion,
 } from './modelTrainerUtils.js'
 import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
@@ -4256,5 +4260,236 @@ describe('plannedMatrixItemCount', () => {
     const sweep: Record<string, number[]> = {}
     for (let i = 0; i < 10; i += 1) sweep[`l${i}`] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     expect(plannedMatrixItemCount({ sweep })).toBe(1e10) // computed, never built
+  })
+})
+
+describe('computeScorecard', () => {
+  const objMax = { objective: { name: 'ret', direction: 'max' as const } }
+  const objMin = { objective: { name: 'rmse', direction: 'min' as const } }
+
+  it('with no gates and no fitness, accepts and ranks by the objective (the collapse)', () => {
+    const card = computeScorecard(objMax, { objective: 42 })
+    expect(card.gates).toEqual([])
+    expect(card.accepted).toBe(true)
+    expect(card.fitness).toEqual([{ metric: 'objective', direction: 'max', value: 42 }])
+  })
+
+  it('default fitness inherits the objective direction (min)', () => {
+    const card = computeScorecard(objMin, { objective: 0.3 })
+    expect(card.fitness).toEqual([{ metric: 'objective', direction: 'min', value: 0.3 }])
+  })
+
+  it('resolves a fitness metric from summary.metrics by key', () => {
+    const card = computeScorecard(
+      { ...objMax, fitness: [{ metric: 'oos_sharpe', direction: 'max' }] },
+      { objective: 42, metrics: { oos_sharpe: 1.4 } },
+    )
+    expect(card.fitness).toEqual([{ metric: 'oos_sharpe', direction: 'max', value: 1.4 }])
+  })
+
+  it('carries a multi-objective (Pareto) fitness vector in declared order', () => {
+    const card = computeScorecard(
+      {
+        ...objMax,
+        fitness: [
+          { metric: 'oos_sharpe', direction: 'max' },
+          { metric: 'max_drawdown_pct', direction: 'max' },
+        ],
+      },
+      { objective: 42, metrics: { oos_sharpe: 1.4, max_drawdown_pct: -12 } },
+    )
+    expect(card.fitness).toEqual([
+      { metric: 'oos_sharpe', direction: 'max', value: 1.4 },
+      { metric: 'max_drawdown_pct', direction: 'max', value: -12 },
+    ])
+  })
+
+  it('a missing fitness metric resolves to NaN', () => {
+    const card = computeScorecard({ ...objMax, fitness: [{ metric: 'gone', direction: 'max' }] }, { objective: 42 })
+    expect(Number.isNaN(card.fitness[0].value)).toBe(true)
+  })
+
+  it('a passing literal gate accepts the run', () => {
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }] },
+      { objective: 42, metrics: { oos_return_pct: 5 } },
+    )
+    expect(card.gates).toHaveLength(1)
+    expect(card.gates[0]).toMatchObject({ metric: 'oos_return_pct', op: '>', bound: 0, actual: 5, pass: true })
+    expect(card.accepted).toBe(true)
+  })
+
+  it('a failing literal gate rejects the run', () => {
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }] },
+      { objective: 42, metrics: { oos_return_pct: -3 } },
+    )
+    expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(false)
+  })
+
+  it('resolves a metric-vs-metric gate bound (beat buy-and-hold)', () => {
+    const beatHold = { metric: 'oos_return_pct', op: '>' as const, value: { metric: 'hold_return_pct' } }
+    const pass = computeScorecard({ ...objMax, gates: [beatHold] }, { objective: 1, metrics: { oos_return_pct: 10, hold_return_pct: 4 } })
+    expect(pass.gates[0]).toMatchObject({ bound: 4, actual: 10, pass: true })
+    const fail = computeScorecard({ ...objMax, gates: [beatHold] }, { objective: 1, metrics: { oos_return_pct: 2, hold_return_pct: 4 } })
+    expect(fail.gates[0]).toMatchObject({ bound: 4, actual: 2, pass: false })
+  })
+
+  it('a gate on a MISSING metric fails (unverifiable is never accepted)', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 42 })
+    expect(Number.isNaN(card.gates[0].actual)).toBe(true)
+    expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(false)
+  })
+
+  it('a gate whose REFERENCED metric is missing fails', () => {
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: { metric: 'gone' } }] },
+      { objective: 1, metrics: { oos_return_pct: 10 } },
+    )
+    expect(Number.isNaN(card.gates[0].bound)).toBe(true)
+    expect(card.gates[0].pass).toBe(false)
+  })
+
+  it('accepts only when EVERY gate passes', () => {
+    const gates = [
+      { metric: 'a', op: '>' as const, value: 0 },
+      { metric: 'b', op: '>' as const, value: 0 },
+    ]
+    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: 1 } }).accepted).toBe(true)
+    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: -1 } }).accepted).toBe(false)
+  })
+
+  it('a gate can read the objective via the `objective` key', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'objective', op: '>=', value: 40 }] }, { objective: 42 })
+    expect(card.gates[0]).toMatchObject({ actual: 42, bound: 40, pass: true })
+  })
+
+  it.each([
+    ['>', 5, 3, true],
+    ['>', 3, 5, false],
+    ['>=', 5, 5, true],
+    ['>=', 4, 5, false],
+    ['<', 3, 5, true],
+    ['<', 5, 3, false],
+    ['<=', 5, 5, true],
+    ['<=', 6, 5, false],
+    ['==', 5, 5, true],
+    ['==', 5, 6, false],
+    ['!=', 5, 6, true],
+    ['!=', 5, 5, false],
+  ] as const)('evaluates %s (actual=%d bound=%d) as %s', (op, actual, bound, expected) => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op, value: bound }] }, { objective: 1, metrics: { m: actual } })
+    expect(card.gates[0].pass).toBe(expected)
+  })
+
+  it('a NaN actual fails even the != operator', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '!=', value: 5 }] }, { objective: 1 })
+    expect(card.gates[0].pass).toBe(false)
+  })
+
+  it('renders a default label from metric/op/literal when none is given', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }] }, { objective: 1, metrics: { oos_return_pct: 1 } })
+    expect(card.gates[0].label).toBe('oos_return_pct > 0')
+  })
+
+  it('renders a default label naming the referenced metric', () => {
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: { metric: 'hold_return_pct' } }] },
+      { objective: 1, metrics: { oos_return_pct: 5, hold_return_pct: 4 } },
+    )
+    expect(card.gates[0].label).toBe('oos_return_pct > hold_return_pct')
+  })
+
+  it('preserves a custom gate label', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0, label: 'is profitable' }] }, { objective: 1, metrics: { m: 1 } })
+    expect(card.gates[0].label).toBe('is profitable')
+  })
+
+  it('treats a non-finite objective as NaN in the default fitness', () => {
+    const card = computeScorecard(objMax, { objective: Infinity })
+    expect(Number.isNaN(card.fitness[0].value)).toBe(true)
+  })
+})
+
+describe('primaryFitnessCriterion', () => {
+  it('falls back to the objective when no fitness is declared', () => {
+    expect(primaryFitnessCriterion({ objective: { name: 'ret', direction: 'max' } })).toEqual({
+      key: 'objective',
+      direction: 'max',
+    })
+  })
+
+  it('preserves the objective direction in the fallback (min)', () => {
+    expect(primaryFitnessCriterion({ objective: { name: 'rmse', direction: 'min' } })).toEqual({
+      key: 'objective',
+      direction: 'min',
+    })
+  })
+
+  it('uses the FIRST fitness objective as the ranking criterion', () => {
+    expect(
+      primaryFitnessCriterion({
+        objective: { name: 'traded_return', direction: 'max' },
+        fitness: [
+          { metric: 'oos_sharpe', direction: 'max' },
+          { metric: 'max_drawdown_pct', direction: 'max' },
+        ],
+      }),
+    ).toEqual({ key: 'oos_sharpe', direction: 'max' })
+  })
+
+  it('honours a min-direction primary fitness objective', () => {
+    expect(
+      primaryFitnessCriterion({
+        objective: { name: 'ret', direction: 'max' },
+        fitness: [{ metric: 'max_drawdown_pct', direction: 'min' }],
+      }),
+    ).toEqual({ key: 'max_drawdown_pct', direction: 'min' })
+  })
+})
+
+describe('scorecardRankValue', () => {
+  it('returns the primary fitness value for a max objective', () => {
+    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value: 7 }] })).toBe(7)
+  })
+
+  it('negates the value for a min objective so higher-is-better holds', () => {
+    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'min', value: 7 }] })).toBe(-7)
+  })
+
+  it('ranks only on the FIRST (primary) fitness objective', () => {
+    const card = { gates: [], accepted: true, fitness: [{ metric: 'a', direction: 'max' as const, value: 3 }, { metric: 'b', direction: 'max' as const, value: 99 }] }
+    expect(scorecardRankValue(card)).toBe(3)
+  })
+
+  it('returns -Infinity for a non-finite primary value', () => {
+    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value: NaN }] })).toBe(-Infinity)
+  })
+
+  it('returns -Infinity when there is no fitness objective', () => {
+    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [] })).toBe(-Infinity)
+  })
+})
+
+describe('compareScorecards', () => {
+  const acc = (value: number) => ({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max' as const, value }] })
+  const rej = (value: number) => ({ gates: [], accepted: false, fitness: [{ metric: 'x', direction: 'max' as const, value }] })
+
+  it('orders an accepted run before a rejected one regardless of value', () => {
+    expect(compareScorecards(rej(100), acc(1))).toBeGreaterThan(0)
+    expect(compareScorecards(acc(1), rej(100))).toBeLessThan(0)
+  })
+
+  it('orders higher primary fitness first among accepted runs', () => {
+    expect(compareScorecards(acc(9), acc(3))).toBeLessThan(0)
+    expect(compareScorecards(acc(3), acc(9))).toBeGreaterThan(0)
+  })
+
+  it('sorts a mixed list best-first (accepted by fitness, then rejected)', () => {
+    const cards = [rej(50), acc(2), acc(8), rej(90)]
+    const sorted = [...cards].sort(compareScorecards)
+    expect(sorted.map((c) => c.fitness[0].value)).toEqual([8, 2, 90, 50])
   })
 })

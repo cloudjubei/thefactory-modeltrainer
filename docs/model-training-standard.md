@@ -21,7 +21,20 @@ something the orchestrator or a comparison actually depends on.
   "recordType": "cartpole-run", // namespaces all DataStorage records
   "run": "python -m trainer.run --config-json {configPath} --summary-out {summaryOut}",
   "calibrate": "python -m trainer.run --calibrate --summary-out {summaryOut}",
-  "objective": { "name": "eval_return", "direction": "max" }, // single north-star
+  "objective": { "name": "eval_return", "direction": "max" }, // the REWARD/steering signal (in-sample)
+  // The SCORECARD (gates + fitness) — the machine-readable definition of SUCCESS, SEPARATE from the
+  // reward. Both optional; omit them and the project COLLAPSES to the objective (reward = success, e.g.
+  // CartPole/Wine). Declare them when a high reward does NOT equal a good model (e.g. a trading run that
+  // games a metric): selection/convergence/ranking + the viewer then read the scorecard, not the reward.
+  "gates": [
+    // accept/reject predicates over the summary — a run is ACCEPTED only if EVERY gate passes. `value` is
+    // a literal OR { "metric": "..." } to compare against another metric (e.g. beat a benchmark).
+    { "metric": "eval_return", "op": ">", "value": 0, "label": "profitable" }
+  ],
+  "fitness": [
+    // how ACCEPTED runs are RANKED — a single scalar or a Pareto set; the first entry is the primary key.
+    { "metric": "eval_return", "direction": "max" }
+  ],
   // How a SINGLE-CONTEXT hypothesis is PROVEN: the best matching run's `metric` clears `threshold`
   // (toward `direction`, default max). Omitted ⇒ the trading default (return_vs_hold_pct > 0) — declare
   // it for any non-trading project or its hypotheses can never be judged.
@@ -54,6 +67,18 @@ something the orchestrator or a comparison actually depends on.
   ever; a missing file at run time should exit non-zero with a clear message). Never inline
   secrets. `examples/tabular` is the executable spec of this clause.
 - `resources` is declarative truth for scheduling + for telling a human the machine class.
+- **Three declared layers — `objective` / `gates` / `fitness`.** `objective` is the REWARD (what training
+  steers on, in-sample). `gates` are accept/reject predicates and `fitness` is the ranking metric(s) — together
+  the **scorecard**, the definition of SUCCESS (out-of-sample), computed post-hoc from the summary and
+  INDEPENDENT of the reward. The engine reads the scorecard, not the reward, to accept runs (all gates pass),
+  rank/select the incumbent (primary fitness), and gate convergence. **Simple projects collapse all three**:
+  omit `gates`/`fitness` and success = the objective (CartPole/Wine — reward *is* success). **They diverge**
+  when a high reward does not mean a good model (a trading run that games a metric): declare the scorecard so
+  "good" is machine-readable. Governing rule: in-sample behavioural SHAPE (trade frequency, no-op fraction) →
+  the reward, as a constraint; out-of-sample OUTCOME (beat-a-benchmark, risk-adjusted return) → the scorecard
+  ONLY, never the reward — rewarding on the metric you then select on re-creates single-window overfit. The
+  `diagnoseSearch` tool reports the **reward–success alignment** (the correlation of the reward with each
+  scorecard metric across the cohort): strong = a good proxy, near-zero = a misaligned proxy.
 
 ---
 
@@ -138,8 +163,10 @@ contract's hard requirement is the final `RunSummary`.
    version on every run. Pinned deps (lockfile).
 3. **Structured tracking, not ephemeral.** Log params + metrics + artifacts to a tracker (MLflow),
    streamed during training — not a CSV dumped in the cwd at the end.
-4. **One objective + a standard battery + baseline-relative.** Held-out eval; report vs a trivial
-   baseline (random / buy-and-hold / majority-class). Degenerate-run detection.
+4. **One objective (the reward) + the scorecard (success) + a standard battery, baseline-relative.** The
+   objective is the single steering signal; `gates`/`fitness` define success separately (collapse to the
+   objective when reward = success). Held-out eval; report vs a trivial baseline (random / buy-and-hold /
+   majority-class). Degenerate-run detection.
 5. **Seed aggregation.** Multiple seeds aggregated (mean/median/std), not N raw rows the human eyeballs.
 6. **Train/val/test discipline + leakage guards.** Temporal split for time-series; no test leakage.
 7. **Checkpoint-best + resume.** Standard checkpoint format, traceable to its run; "best" by the

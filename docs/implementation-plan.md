@@ -41,57 +41,31 @@ live in git + memory.)
 
 Ordered by value. Each is something to **implement**.
 
-### A1. Define success — reward vs scorecard (gates + fitness), and measure their alignment
+### A1. Define success — reward vs scorecard (gates + fitness) — SHIPPED; 2 optional tails remain
 
-**Why this comes first (blocks A2–A4 + any real BlackSwan evaluation).** The **reward** is a training PROXY, not the definition of
-success. For CartPole/Wine reward = acceptance = ranking all coincide (which is *why* they feel solved and the
-Diagnosis correctly calls them exhausted). For BlackSwan they DIVERGE: a high `traded_return` does NOT mean a
-usable trader — a good model must beat buy-and-hold, trade often enough *over time*, and hold drawdown in
-bounds, and whether `no_op`s matter depends on the deployment case. So the thing a human uses to filter good
-runs from bad lives only in their head; it is not declared, not computed, and — critically — not what
-selection/ranking/exploration optimise. This is the missing first-class layer. It must land before the AI
-companion (A3) and full parity (A2): the AI can only drive and rank the loop if "good" is machine-readable.
-**Generic principle:** every project declares THREE layers, not one — `objective` (reward, steers learning),
-`gates` (accept/reject predicates), `fitness` (ranking metric(s), possibly Pareto). Simple projects collapse
-all three; BlackSwan is the forcing function that separates them.
+**Shipped** (see memory `project_modeltrainer_scorecard_shipped`): every project declares THREE layers —
+`objective` (reward, steers) / `gates` (accept-reject) / `fitness` (ranking, maybe Pareto); omit gates/fitness ⇒
+collapse to the objective (CartPole/Wine). `computeScorecard` + the verdict layer (`incumbentSplitHoldout` /
+`diagnoseSearch` prefer gate-accepted runs, rank by fitness), the reward–success **alignment** diagnostic
+(Pearson reward-vs-metric), the standard doc, and the viewer's accepted-first sort (`viewer/scorecard.js`) are
+all built + tested. BlackSwan declares its Case-2 scorecard (4 gates + 3-metric fitness) and emits
+`trades_per_day` + the **Case-1 signal lens** (`signal_expectancy`/`_hit_rate`/`_coverage`, position-blind
+forward-return edge per buy/sell — the cheap probe that gates whether to build B2). Architecture call: the
+exploration reducer keeps CLIMBING on the objective (its baseline/noiseFloor are objective-scoped); the
+scorecard drives the VERDICT + convergence gate — steer on reward, decide on scorecard.
 
-1. **Scorecard schema (generic, the core build).** Alongside the manifest `objective`, declare two new blocks:
-   `gates` = pass/fail predicates over summary metrics (a run is ACCEPTED only if all pass) and `fitness` =
-   the ranking metric(s) (single scalar or a Pareto set). Compute a per-run **scorecard** post-hoc from
-   existing metrics. Switch incumbent selection / convergence / exploration ranking and the viewer's
-   filter+sort to read the **scorecard**, not the reward (today `criterion`/incumbent read the objective). For
-   CartPole/Wine `gates`/`fitness` default to the objective — a deliberate no-op that proves the collapse.
-2. **BlackSwan gates + fitness — Case 2 (position manager, what exists).** Gates: `oos_return_pct > 0`,
-   `oos_return_pct > hold_return_pct` (beat hold), `trades_per_day >= r_min` (time-normalised liveness — a raw
-   `n_trades >= 10` is confounded by window length; normalise per day/month), `max_drawdown_pct < dd_max`
-   (`combo_drawdown_penalty` lever already emits the metric). Fitness: a Pareto/weighted set over `oos_sharpe`
-   (or Sortino/Calmar — see B1), excess-over-hold, drawdown, and a trade-rate band. Emit `trades_per_day` +
-   the derived scorecard fields from `trainer/summary.py`.
-3. **Reward rework to match Case 2 honestly.** Replace `traded_return = total_return × min(1,(n_trades/20)²)`
-   (a multiplicative hack with a magic 20) with a proper portfolio reward = per-step mark-to-market equity
-   log-return minus fees, and move trade-frequency from a multiplier to a **constraint/penalty band**
-   (`trade_rate ∈ [lo, hi]`) — behaviourally enforced, no arbitrary constant. **Governing rule:** in-sample
-   behavioural SHAPE (trade frequency, no-op fraction) → the reward (as a constraint); out-of-sample OUTCOME
-   (beat-hold, OOS Sharpe) → the scorecard ONLY, never the reward — rewarding on the metric you then select on
-   re-creates the single-window overfit already diagnosed.
-4. **Case-1 forward-horizon expectancy lens (cheap, on existing checkpoints).** The two deployment cases are
-   two different problem FORMULATIONS, each with its own reward AND score: **Case 2** = single-asset position
-   manager (net-of-fees equity reward; `no_op`/hold is a legitimate decision so it's not a quality signal;
-   strong guarantee; does not generalise) — that's items 2–3. **Case 1** = asset-agnostic signal emitter (B2)
-   where EVERY buy/sell must stand on its own. The automated "verify every signal" IS forward-return labelling
-   (the `forward_horizon` machinery already exists): score each signal by realised forward return over H bars →
-   per-signal expectancy / hit-rate / coverage, independent of position. Run it as a SECOND lens on existing
-   Case-2 checkpoints (no retrain) → answers "does anything generalise?" cheaply; a Case-2 winner that ALSO
-   scores as a Case-1 emitter is the strongest signal. Feeds B2 (own objective + `trainer-signal.json`).
-5. **Reward–success alignment diagnostic (generic — the answer to "how do we KNOW a high reward isn't a good
-   model?").** A new Diagnosis check on the shipped diagnostics engine (the `incumbentSplitHoldout` /
-   `diagnoseSearch` layer): across the cohort, correlate the training reward with each gate/fitness metric.
-   Strongly correlated → the reward is a good proxy (CartPole). Reward high but DECORRELATED from fitness → the
-   reward is a misaligned proxy (BlackSwan, precisely) → the check reports it and points at the scorecard.
-   Turns the qualitative worry into a number on ANY project.
-6. **Update the standard.** Codify `objective` / `gates` / `fitness` as the three declared layers in
-   `docs/model-training-standard.md`: reward stays the training signal; gate acceptance reads `gates`;
-   ranking/incumbent/convergence read `fitness`.
+Also shipped: the viewer's **acceptance badge** ("Success" column: green accepted / red rejected + failed-gate
+hover) and the **success: accepted/rejected filter** (client-only, forces the unpaged path; gated on
+`hasScorecard` so no-scorecard projects are unchanged) — built + adversarially reviewed, pending a visual pass
+in the running Overseer.
+
+**Remaining (optional, owner decision — breaks history):**
+
+1. **Honest BlackSwan objective.** `traded_return` (the magic-20
+   `total_return × min(1,(n/20)²)`) is KEPT as the in-sample steering objective; the scorecard now owns success,
+   so no history break was needed. Optionally switch the objective to `total_return_pct` (honest) with the
+   trade-rate purely in the gate — a breaking `pipelineVersion` bump that INVALIDATES all BlackSwan run history.
+   Only do this on an explicit owner call.
 
 ### A2. Full AI action parity — anything the user can do, the AI can do
 

@@ -5,7 +5,7 @@
 // single-split luck and must be blocked. Pure — the controller (explorationUtils) and a future
 // `diagnoseSearch` chat tool both consume it.
 
-import type { AnalysisRun, AnalysisCriterion } from './modelTrainerTypes'
+import type { AnalysisRun, AnalysisCriterion, MetricAlignment } from './modelTrainerTypes'
 
 export type SplitVerdict = 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
 
@@ -80,9 +80,16 @@ export function incumbentSplitHoldout(
   )
   if (!completed.length) return { ...base, verdict: 'not-replicated' }
 
+  // Choose the incumbent from gate-ACCEPTED runs only (a gate-failing run is never crowned when an
+  // accepted one exists); fall back to all completed when none pass so the verdict still has an incumbent.
+  // `accepted === undefined` ⇒ gates not evaluated ⇒ treated as accepted. The split universe below stays
+  // over ALL completed runs (a rejected setup still counts as a split we've covered).
+  const acceptedRuns = completed.filter((r) => r.accepted !== false)
+  const incumbentPool = acceptedRuns.length ? acceptedRuns : completed
+
   const exclude = new Set<string>(['seed', ...splitLevers])
   const bySetup = new Map<string, AnalysisRun[]>()
-  for (const r of completed) {
+  for (const r of incumbentPool) {
     const k = setupKey(r.config, exclude)
     const arr = bySetup.get(k)
     if (arr) arr.push(r)
@@ -153,6 +160,68 @@ export function splitLeversOf(
 ): string[] {
   const levers = manifest?.diagnostics?.splitAxis?.levers
   return Array.isArray(levers) ? levers.filter((l): l is string => typeof l === 'string') : []
+}
+
+/** Pearson correlation of two equal-length series, or null when undefined (n < 3 or a flat series). */
+function pearson(xs: number[], ys: number[]): number | null {
+  if (xs.length < 3) return null
+  const mx = mean(xs)
+  const my = mean(ys)
+  let sxy = 0
+  let sxx = 0
+  let syy = 0
+  for (let i = 0; i < xs.length; i++) {
+    const dx = xs[i] - mx
+    const dy = ys[i] - my
+    sxy += dx * dy
+    sxx += dx * dx
+    syy += dy * dy
+  }
+  if (sxx === 0 || syy === 0) return null
+  return sxy / Math.sqrt(sxx * syy)
+}
+
+/**
+ * The reward–success alignment diagnostic: for each fitness/gate metric, correlate the run OBJECTIVE
+ * (the reward/steering proxy) against that metric across the cohort. A strong correlation means the
+ * reward is a good proxy for success on that metric (CartPole: reward = success); a near-zero
+ * correlation means the reward is a MISALIGNED proxy — a high reward does not imply a good model
+ * (BlackSwan) — and selection must read the scorecard, not the reward.
+ */
+export function rewardFitnessAlignment(runs: AnalysisRun[], metrics: string[]): MetricAlignment[] {
+  const completed = runs.filter((r) => (r.status ?? 'completed') === 'completed')
+  return metrics.map((metric) => {
+    const xs: number[] = []
+    const ys: number[] = []
+    for (const r of completed) {
+      const x = valueOf(r, { key: 'objective', direction: 'max' })
+      const y = valueOf(r, { key: metric, direction: 'max' })
+      if (x === undefined || y === undefined) continue
+      xs.push(x)
+      ys.push(y)
+    }
+    return { metric, r: pearson(xs, ys), n: xs.length }
+  })
+}
+
+/** A one-line read of the PRIMARY metric's {@link MetricAlignment} — the "is the reward a good proxy?" answer. */
+export function narrateAlignment(
+  alignments: MetricAlignment[],
+  primaryMetric: string,
+  weakThreshold = 0.3,
+): string {
+  const a = alignments.find((x) => x.metric === primaryMetric) ?? alignments[0]
+  if (!a || a.r === null) {
+    return `Reward–success alignment can't be measured yet (need ≥3 runs with a finite ${primaryMetric}). Once enough land, this reports whether a high reward actually predicts a good ${primaryMetric}.`
+  }
+  const r = a.r
+  if (Math.abs(r) < weakThreshold) {
+    return `The reward is a MISALIGNED proxy: it barely tracks ${a.metric} across ${a.n} runs (r=${r.toFixed(2)}) — a high reward does NOT imply success, so rank by the scorecard, not the reward.`
+  }
+  if (r > 0) {
+    return `The reward is a GOOD proxy for ${a.metric} (r=${r.toFixed(2)} over ${a.n} runs) — it tracks success, so the objective is aligned.`
+  }
+  return `The reward is INVERTED against ${a.metric} (r=${r.toFixed(2)} over ${a.n} runs) — climbing the reward moves AWAY from success; the objective is actively misaligned.`
 }
 
 /** A one-paragraph human read of a {@link SplitHoldout} — the `diagnoseSearch` narrative + do-next. */

@@ -115,6 +115,73 @@ export interface HypothesisBenchmark {
   direction?: 'max' | 'min'
 }
 
+/** Comparison operator for a {@link TrainerGate}. */
+export type GateOp = '>' | '>=' | '<' | '<=' | '==' | '!='
+
+/**
+ * One accept/reject predicate over a run's summary — a run is ACCEPTED only if every gate passes.
+ * Generalises the single {@link HypothesisBenchmark} into a set. `value` is a literal bound, or
+ * `{ metric }` to compare against ANOTHER summary metric (e.g. a beat-buy-and-hold gate:
+ * `{ metric: 'oos_return_pct', op: '>', value: { metric: 'hold_return_pct' } }`). A metric that is
+ * missing/non-finite makes the gate FAIL (an unverifiable run is never accepted).
+ */
+export interface TrainerGate {
+  /** RunSummary metric key to test (`objective` reads `summary.objective`, else `summary.metrics[key]`). */
+  metric: string
+  op: GateOp
+  /** Literal bound, or a reference to another summary metric key. */
+  value: number | { metric: string }
+  /** Human label for the scorecard row; defaults to a rendered `metric op value`. */
+  label?: string
+}
+
+/**
+ * One objective in a {@link TrainerManifest.fitness} ranking: a metric and which direction is better.
+ * A single objective is a scalar ranking; more than one is a Pareto set.
+ */
+export interface FitnessObjective {
+  /** RunSummary metric key (`objective` ⇒ `summary.objective`, else `summary.metrics[key]`). */
+  metric: string
+  direction: 'max' | 'min'
+}
+
+/** One evaluated gate on a run: the resolved bound, the run's actual value, and whether it passed. */
+export interface ScorecardGate {
+  /** Human label (from {@link TrainerGate.label} or a rendered default). */
+  label: string
+  metric: string
+  op: GateOp
+  /** The resolved comparison bound (a literal, or the referenced metric's value; `NaN` when missing). */
+  bound: number
+  /** The run's actual value for `metric` (`NaN` when missing/non-finite). */
+  actual: number
+  pass: boolean
+}
+
+/** One evaluated fitness objective on a run: its value + direction, for ranking. */
+export interface ScorecardFitness {
+  metric: string
+  direction: 'max' | 'min'
+  /** The run's value for `metric` (`NaN` when missing/non-finite). */
+  value: number
+}
+
+/**
+ * A run's post-hoc SCORECARD — the machine-readable definition of "good" (gates + fitness), computed
+ * from a run's summary INDEPENDENTLY of the training reward/objective. Selection, convergence,
+ * exploration ranking and the viewer read this, not the reward. For a project that declares neither
+ * `gates` nor `fitness` (CartPole/Wine) it collapses to the objective: no gates ⇒ always accepted,
+ * fitness ⇒ the single objective — a deliberate no-op that proves those projects need only one layer.
+ */
+export interface RunScorecard {
+  /** Every declared gate, evaluated. Empty when the manifest declares none. */
+  gates: ScorecardGate[]
+  /** True iff every gate passes (vacuously true when no gates are declared). */
+  accepted: boolean
+  /** One entry per fitness objective (defaults to the manifest objective when `fitness` is absent). */
+  fitness: ScorecardFitness[]
+}
+
 /** One file a dataset materialises: workspace destination + where to fetch it. */
 export interface TrainerDataFile {
   /** Path relative to the project root, e.g. `data/winequality-red.csv`. */
@@ -232,6 +299,18 @@ export interface TrainerManifest {
    */
   maxMemoryBytesPerRun?: number
   objective: TrainerObjective
+  /**
+   * Accept/reject predicates over the run summary (see {@link TrainerGate}). A run's scorecard is
+   * ACCEPTED only if every gate passes; selection/convergence prefer accepted runs. Omit ⇒ every run
+   * is accepted (the objective is the whole story, e.g. CartPole/Wine).
+   */
+  gates?: TrainerGate[]
+  /**
+   * How ACCEPTED runs are RANKED (see {@link FitnessObjective}) — a single scalar or a Pareto set,
+   * SEPARATE from the training `objective`. Omit ⇒ ranking falls back to the objective (the collapse
+   * that proves a simple project needs only one layer). The first objective is the primary ranking key.
+   */
+  fitness?: FitnessObjective[]
   /**
    * How a SINGLE-CONTEXT hypothesis is proven (see {@link HypothesisBenchmark}). Omitted ⇒ the trading
    * line's historical default (`return_vs_hold_pct > 0`) — declare it for any non-trading project or
@@ -735,6 +814,13 @@ export interface AnalysisRun {
   dataset?: TrainingRunDataset
   /** Only `completed` runs are analysed. */
   status?: string
+  /**
+   * Whether the run passes the manifest's scorecard `gates` (see {@link RunScorecard}). Set at
+   * projection when a manifest is available; `undefined` ⇒ not evaluated / no gates ⇒ treated as
+   * accepted. The verdict layer (incumbent/convergence) prefers accepted runs so a gate-failing run
+   * is never crowned when an accepted one exists.
+   */
+  accepted?: boolean
   /** When the run completed (ISO), for the time-ordered convergence series. */
   ranAt?: string
   /** On an AGGREGATED setup (from {@link aggregateToSetupRuns}): bootstrap CI of the criterion's IQM. */
@@ -2251,6 +2337,15 @@ export interface DiagnoseSearchParams {
  * A read-only diagnosis of whether the search has a robust candidate — the server-side split-consistency
  * verdict (the same check the Diagnosis tab + the exploration convergence gate use), narrated for the AI.
  */
+/** One metric's alignment with the reward/objective across the cohort (a `rewardFitnessAlignment` row). */
+export interface MetricAlignment {
+  metric: string
+  /** Pearson r between the run objective (the reward/steering proxy) and this metric. Null when < 3 finite pairs or zero variance. */
+  r: number | null
+  /** Runs where BOTH the objective and this metric are finite. */
+  n: number
+}
+
 export interface DiagnoseSearchResult {
   found: boolean
   /** Set (with found:false) when the project can't be resolved. */
@@ -2268,6 +2363,14 @@ export interface DiagnoseSearchResult {
   incumbent?: Record<string, unknown> | null
   /** Whether this verdict BLOCKS the exploration autopilot from declaring convergence. */
   convergenceGated?: boolean
+  /**
+   * Reward–success alignment: for each fitness metric, the Pearson r between the run objective (the
+   * reward/steering proxy) and that metric across the cohort. A near-zero primary r means the reward is
+   * a MISALIGNED proxy — a high reward does not imply success (see {@link alignmentNarrative}).
+   */
+  alignment?: MetricAlignment[]
+  /** A one-line read of the primary metric's {@link alignment} — the "is the reward a good proxy?" answer. */
+  alignmentNarrative?: string
   /** A one-paragraph human read + do-next. */
   narrative?: string
 }

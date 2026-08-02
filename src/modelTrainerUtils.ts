@@ -25,6 +25,8 @@ import type {
   ProposedImprovementKind,
   ProposedModel,
   RunXaiDigest,
+  RunScorecard,
+  GateOp,
   StepAttributionSummary,
   TrainerDataFile,
   TrainerLeverSpec,
@@ -1179,6 +1181,95 @@ export function blendJudgeScore(
   const llm = clamp(llmScore, 0, 100)
   const weight = clamp(llmWeight, 0, 1)
   return Math.round(llm * weight + objective * (1 - weight))
+}
+
+/** Resolve a scorecard metric key against a run: `objective` ⇒ `run.objective`, else `metrics[key]`; NaN when missing/non-finite. */
+function readScorecardMetric(
+  run: { objective?: number; metrics?: Record<string, number> },
+  key: string,
+): number {
+  const raw = key === 'objective' ? run.objective : run.metrics?.[key]
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : NaN
+}
+
+/** Apply a gate operator; a NaN on either side always fails (an unverifiable run is never accepted). */
+function applyGateOp(actual: number, op: GateOp, bound: number): boolean {
+  if (!Number.isFinite(actual) || !Number.isFinite(bound)) return false
+  switch (op) {
+    case '>':
+      return actual > bound
+    case '>=':
+      return actual >= bound
+    case '<':
+      return actual < bound
+    case '<=':
+      return actual <= bound
+    case '==':
+      return actual === bound
+    case '!=':
+      return actual !== bound
+  }
+}
+
+/**
+ * Compute a run's SCORECARD (gates + fitness) from its summary, independently of the training
+ * reward. Selection/convergence/ranking read this instead of the raw objective. With neither `gates`
+ * nor `fitness` declared it collapses to the objective: no gates ⇒ always accepted, fitness ⇒ the
+ * single objective (the deliberate no-op for projects whose reward already equals success).
+ */
+export function computeScorecard(
+  manifest: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
+  run: { objective?: number; metrics?: Record<string, number> },
+): RunScorecard {
+  const gates = (manifest.gates ?? []).map((gate) => {
+    const actual = readScorecardMetric(run, gate.metric)
+    const bound = typeof gate.value === 'number' ? gate.value : readScorecardMetric(run, gate.value.metric)
+    const rendered = typeof gate.value === 'number' ? String(gate.value) : gate.value.metric
+    return {
+      label: gate.label ?? `${gate.metric} ${gate.op} ${rendered}`,
+      metric: gate.metric,
+      op: gate.op,
+      bound,
+      actual,
+      pass: applyGateOp(actual, gate.op, bound),
+    }
+  })
+  const fitnessSpec = manifest.fitness?.length
+    ? manifest.fitness
+    : [{ metric: 'objective', direction: manifest.objective.direction }]
+  const fitness = fitnessSpec.map((f) => ({
+    metric: f.metric,
+    direction: f.direction,
+    value: readScorecardMetric(run, f.metric),
+  }))
+  return { gates, accepted: gates.every((g) => g.pass), fitness }
+}
+
+/**
+ * The scalar ranking criterion for a project: the FIRST fitness objective, or the objective when no
+ * fitness is declared. This is what the exploration engine, diagnostics incumbent, and config-space
+ * analysis rank by — so a project ranks on its declared success metric, not necessarily the reward.
+ */
+export function primaryFitnessCriterion(
+  manifest: Pick<TrainerManifest, 'objective' | 'fitness'>,
+): { key: string; direction: 'max' | 'min' } {
+  const primary = manifest.fitness?.[0]
+  return primary
+    ? { key: primary.metric, direction: primary.direction }
+    : { key: 'objective', direction: manifest.objective.direction }
+}
+
+/** The primary fitness scalar oriented so HIGHER is better (min objectives negated); -Infinity when unrankable. */
+export function scorecardRankValue(scorecard: RunScorecard): number {
+  const primary = scorecard.fitness[0]
+  if (!primary || !Number.isFinite(primary.value)) return -Infinity
+  return primary.direction === 'min' ? -primary.value : primary.value
+}
+
+/** Best-first comparator: accepted runs before rejected, then by oriented primary fitness (higher first). */
+export function compareScorecards(a: RunScorecard, b: RunScorecard): number {
+  if (a.accepted !== b.accepted) return a.accepted ? -1 : 1
+  return scorecardRankValue(b) - scorecardRankValue(a)
 }
 
 export function coerceVerdictRows(raw: unknown[]): { key: string; score: number; why: string }[] {
