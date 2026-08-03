@@ -22,7 +22,7 @@ live in git + memory.)
 3. **Fully AI-operable, shipped as a template.** Anything a user can do in the app, the API/CLI AI can do via
    tools through the approval gate (A2) — so a user drives the whole loop as a CONVERSATION where the AI
    researches/proposes/runs and the human mostly approves (A3); and the app is a SINGLE-PURPOSE template a
-   project copies + a library it consumes for engine + base UI (A4), with BlackSwan the first consumer.
+   project copies + a library it consumes for engine + base UI (A5), with BlackSwan the first consumer.
 
 ## Repo split (governs where work lands)
 
@@ -92,7 +92,50 @@ data, research papers, config/xai analysis, consolidate, delete/invalidate) is u
 5. **Decide:** the wake-the-chat hook (how the backend notifies a chat topic on run completion); the approval
    granularity (per-action vs batched vs trust-tiered — lean on the change-review design).
 
-### A4. Single-purpose template + BlackSwan-as-library
+### A4. Semi-automation follow-ups — close the loop A2/A3 leave open
+
+A2 (chat action-parity) + A3 (companion / approvals) make the AI able to propose → run → read INSIDE one
+project chat. Three gaps remain before the loop is genuinely hands-off AND trustworthy — all outside A2/A3's
+scope, and they double as the "keep improving the tooling as we go" side-goal. Ordered by value.
+
+1. **Cross-project + unattended orchestration** (thefactory-tools / backend infra — beyond A3's in-chat scope).
+   - **Cross-project launch/monitor verb.** A central/overseer agent can only READ a registered training
+     project (`queryProjectData` on the fail-closed allowlist, `crossProjectAccess.ts`) or delegate a CODE edit
+     (`requestProjectFeature`); it CANNOT launch/monitor a BlackSwan campaign from outside. Add an approval-gated
+     cross-project "start-/read-activity" verb so ONE orchestrator drives BlackSwan without living in its chat.
+   - **Event→agent-turn re-invocation** (the primitive A3.3's wake hook sits on). `startProjectActivity` returns
+     202 and the turn ends; nothing re-triggers a completion (`featureRequestResume` injects a message but never
+     runs one). Build the generic backend "re-invoke an agent turn on an async activity-settle event" primitive —
+     plus a **scheduler/cron** variant that wakes the planner on a timer for overnight autonomous progress.
+   - **App-declared activity types** (`docs/GENERIC_ACTIVITY_SYSTEM_PLAN.md`). BlackSwan's activity types are
+     hand-wired backend closures (`activityDefinitions.ts`); every new AI-proposed campaign primitive needs a
+     backend code change + redeploy. Make activity types app-declared data so the loop adds primitives deploy-free.
+2. **Self-improvement EXECUTION path — run the stories, don't just file them.** A2.1 has the AI FILE a
+   story/feature for any manifest/lever/code change; nothing lets it EXECUTE that work. Expose the verifier-gated
+   writer panel (`AgentTaskTools.spawnPanel`, absent from `CLI_AGENT_SPAWN_MCP_TOOL_NAMES`) as an approval-gated
+   orchestrator tool, so the AI picks up its own filed Stories and improves BlackSwan / the engine under a
+   verifier gate — the mechanism that turns "keep improving BlackSwan as we go" into an actual loop.
+3. **Honest-by-construction guardrails + the champion stop-condition** — so an UNATTENDED search over thousands
+   of configs cannot manufacture a false winner (the loop climbs on the objective and best-of-N overfits by
+   default). The single most important follow-up.
+   - **End-to-end deflated-Sharpe / multiple-testing verdict.** DSR/PSR primitives exist (`trainer/sharpe.py`)
+     and per-run inputs are emitted (`oos_sharpe`/`n_obs`/skew/kurt), but nothing aggregates them across the
+     window×seed distribution into a pass/fail. Wire it (BlackSwan emits, engine gates).
+   - **Multi-window AND-of-medians acceptance gate.** Per-run acceptance (`computeScorecard`) can crown a config
+     that beats hold in ONE lucky window; `incumbentSplitHoldout` ranks on the MEAN across seeds. Add a
+     manifest-level "beat buy-and-hold net-of-fee in EVERY walk-forward window, median across seeds" gate.
+   - **Beta / up-vs-down-capture gate.** BlackSwan's recurring failure is "defensive in bear, lags in bull" —
+     beta dressed as alpha. Regime capture is emitted as diagnostic only (`summary.py`); promote it to a GATE
+     that rejects profit which only appears when the market rose (a closet-long).
+   - **One composite "declare champion" verdict tool.** Extend `diagnoseSearch` (or add `evaluateReplication`)
+     to AND {robust split verdict + DSR>threshold + beta gate + seed-stable + drawdown-bound + trades_per_day}
+     into ONE machine-readable steady/not-steady output — the loop's stop condition the human approves against,
+     instead of assembling it ad hoc each round.
+
+Repo split: 1 → thefactory-tools/backend (+ clients for the scheduler surface); 2 → thefactory-tools/backend;
+3 → BlackSwan emits the DSR/beta metrics, this repo (engine) owns the acceptance gate + composite verdict.
+
+### A5. Single-purpose template + BlackSwan-as-library
 
 **Strategy change.** Today's docs prescribe a multi-project HUB (`architecture.md`; projects "registered, not
 forked"; repo-split table). New model: modeltrainer is ALSO a SINGLE-PURPOSE template + LIBRARY a project copies
@@ -122,7 +165,7 @@ template for a shipped single-purpose app).
 6. **Update docs** (`architecture.md`, repo-split table, `model-training-standard.md`) to describe the
    template+library model alongside the hub.
 
-### A5. Follow-ons on the shipped xAI / snapshot / activity features (small + opportunistic — none blocking)
+### A6. Follow-ons on the shipped xAI / snapshot / activity features (small + opportunistic — none blocking)
 
 - **xAI traces:** a VIEWER surface for the per-step attention sidecar (fetch the `.attn.jsonl`, animate/scrub
   the attention over the rollout — the producer is shipped, the viewer only renders the inline aggregate +
