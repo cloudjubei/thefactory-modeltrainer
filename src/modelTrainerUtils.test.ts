@@ -95,6 +95,7 @@ import {
   compareScorecards,
   primaryFitnessCriterion,
   deriveBackfillMetric,
+  selectActiveScorecard,
 } from './modelTrainerUtils.js'
 import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
@@ -4431,6 +4432,42 @@ describe('computeScorecard', () => {
   it('treats a non-finite objective as NaN in the default fitness', () => {
     const card = computeScorecard(objMax, { objective: Infinity })
     expect(Number.isNaN(card.fitness[0].value)).toBe(true)
+  })
+})
+
+describe('selectActiveScorecard', () => {
+  const manifest = {
+    objective: { name: 'ret', direction: 'max' as const },
+    gates: [{ metric: 'a', op: '>' as const, value: 0 }],
+    fitness: [{ metric: 'a', direction: 'max' as const }],
+  }
+  const cardX = { id: 'x', gates: [{ metric: 'b', op: '>' as const, value: 1 }], fitness: [{ metric: 'b', direction: 'min' as const }] }
+  const cardY = { id: 'y', gates: [{ metric: 'c', op: '<' as const, value: 2 }], fitness: [{ metric: 'c', direction: 'max' as const }] }
+
+  it('falls back to the manifest gates/fitness when there are no cards', () => {
+    expect(selectActiveScorecard(manifest, [], null)).toEqual({
+      objective: manifest.objective,
+      gates: manifest.gates,
+      fitness: manifest.fitness,
+    })
+  })
+
+  it('returns the active card by id (grafting the manifest objective)', () => {
+    const r = selectActiveScorecard(manifest, [cardX, cardY], 'y')
+    expect(r).toEqual({ objective: manifest.objective, gates: cardY.gates, fitness: cardY.fitness })
+  })
+
+  it('falls back to the FIRST card when the active id is missing/unknown', () => {
+    expect(selectActiveScorecard(manifest, [cardX, cardY], null).gates).toEqual(cardX.gates)
+    expect(selectActiveScorecard(manifest, [cardX, cardY], 'gone').gates).toEqual(cardX.gates)
+  })
+
+  it('ignores card entries without an id', () => {
+    expect(selectActiveScorecard(manifest, [{ gates: [], fitness: [] } as any, cardY], 'y').gates).toEqual(cardY.gates)
+  })
+
+  it('always keeps the manifest objective (cards carry no objective)', () => {
+    expect(selectActiveScorecard(manifest, [cardX], 'x').objective).toEqual(manifest.objective)
   })
 })
 

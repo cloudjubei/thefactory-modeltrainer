@@ -202,6 +202,7 @@ import {
   normalizeObjectiveScores,
   computeScorecard,
   primaryFitnessCriterion,
+  selectActiveScorecard,
   deriveBackfillMetric,
   pickBestRun,
   totalCampaignUnits,
@@ -803,7 +804,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
 
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
-      const runs = recordsToAnalysisRuns(runsRecords, manifest)
+      const runs = recordsToAnalysisRuns(runsRecords, await resolveActiveScorecard(params.scope, manifest))
       const completedKeys = new Set(runsRecords.map((r) => r.key))
 
       // Fail-guard: a just-settled child that produced NO new completed runs was fruitless (failed / empty
@@ -2334,9 +2335,28 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   }
 
   // Map completed-run records to the engine's AnalysisRun shape (shared by the digest + whole-space bundle).
+  // Resolve the project's ACTIVE scorecard (gates/fitness) from its scorecard records + active-pointer
+  // singleton, falling back to the manifest's own gates/fitness (the seed) when no cards exist. Both the
+  // verdict layer here and the viewer read the same records, so they agree on the current definition of good.
+  async function resolveActiveScorecard(
+    scope: string,
+    manifest: TrainerManifest,
+  ): Promise<Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>> {
+    const cards = (
+      await deps.storage.listRecords({ scope, type: `${manifest.recordType}-scorecard` })
+    ).map((r) => (r.content ?? {}) as { id?: string; gates?: TrainerManifest['gates']; fitness?: TrainerManifest['fitness'] })
+    const activeRec = await deps.storage.readRecord({
+      scope,
+      type: `${manifest.recordType}-scorecard-active`,
+      key: 'active',
+    })
+    const activeId = (activeRec?.content as { activeId?: string } | undefined)?.activeId
+    return selectActiveScorecard(manifest, cards, activeId)
+  }
+
   function recordsToAnalysisRuns(
     records: { key: string; content: Record<string, unknown> }[],
-    manifest?: TrainerManifest,
+    card?: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
   ): AnalysisRun[] {
     return records.map((r) => {
       const objective = r.content.objective as number
@@ -2350,9 +2370,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         seed: r.content.seed as number | undefined,
         dataset: r.content.dataset as AnalysisRun['dataset'],
         status: 'completed',
-        // Scorecard acceptance (gates) — only when a manifest is supplied so the verdict layer can prefer
-        // accepted runs; omitted otherwise so pure analysis over all runs is unaffected.
-        accepted: manifest ? computeScorecard(manifest, { objective, metrics }).accepted : undefined,
+        // Scorecard acceptance (gates) — only when the active scorecard is supplied so the verdict layer can
+        // prefer accepted runs; omitted otherwise so pure analysis over all runs is unaffected.
+        accepted: card ? computeScorecard(card, { objective, metrics }).accepted : undefined,
         ranAt:
           ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
             (r.content.ranAt as string | undefined)) ||
@@ -3276,19 +3296,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       return { found: false, error: err instanceof Error ? err.message : String(err) }
     }
     const recordType = manifest.recordType
-    // Rank the incumbent by the scorecard's FITNESS (falls back to the objective when no fitness is
+    // Rank the incumbent by the ACTIVE scorecard's FITNESS (falls back to the objective when none is
     // declared), and let the split-holdout prefer gate-ACCEPTED runs (populated on the projected runs).
-    const criterion: AnalysisCriterion = primaryFitnessCriterion(manifest)
-    const rankMetric = manifest.fitness?.[0]?.metric ?? manifest.objective.name
-    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest)
+    const card = await resolveActiveScorecard(params.scope, manifest)
+    const criterion: AnalysisCriterion = primaryFitnessCriterion(card)
+    const rankMetric = card.fitness?.[0]?.metric ?? manifest.objective.name
+    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), card)
     const splitLevers = splitLeversOf(manifest)
     const holdout = incumbentSplitHoldout(runs, splitLevers, criterion)
-    // Reward–success alignment: does the reward/objective actually track the declared success metrics
-    // (gates + fitness)? A near-zero primary correlation = a misaligned proxy (BlackSwan's whole problem).
+    // Reward–success alignment: does the reward/objective actually track the ACTIVE scorecard's success
+    // metrics (gates + fitness)? A near-zero primary correlation = a misaligned proxy (BlackSwan's problem).
     const alignMetrics = [
       ...new Set([
-        ...(manifest.fitness?.map((f) => f.metric) ?? []),
-        ...(manifest.gates?.map((g) => g.metric) ?? []),
+        ...(card.fitness?.map((f) => f.metric) ?? []),
+        ...(card.gates?.map((g) => g.metric) ?? []),
       ]),
     ].filter((m) => m !== 'objective')
     const alignment = alignMetrics.length ? rewardFitnessAlignment(runs, alignMetrics) : undefined

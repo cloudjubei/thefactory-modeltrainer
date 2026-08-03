@@ -5708,6 +5708,30 @@ describe('diagnoseSearch (A5 read tool)', () => {
     expect(res.alignmentNarrative).toMatch(/misaligned|does not imply/i)
   })
 
+  it('evaluates against the ACTIVE scorecard record, not the manifest gates/fitness', async () => {
+    const storage = memoryStorage()
+    await registerManifest(
+      storage,
+      manifest({ fitness: [{ metric: 'manifest_metric', direction: 'max' }], diagnostics: { splitAxis: { levers: ['window'] } } }),
+    )
+    // A scorecard CARD (active) that ranks/gates by a DIFFERENT metric than the manifest.
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-scorecard',
+      key: 'c1',
+      content: { id: 'c1', name: 'Strict', gates: [], fitness: [{ metric: 'card_metric', direction: 'max' }] },
+    })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-scorecard-active', key: 'active', content: { activeId: 'c1' } })
+    const seedM = (key: string, config: any, metrics: any) =>
+      storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective: 1, metrics, status: 'completed' } })
+    await seedM('a', { window: '2024' }, { card_metric: 5, manifest_metric: -9 })
+    await seedM('b', { window: '2022' }, { card_metric: 3, manifest_metric: -9 })
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    // Alignment is built from the ACTIVE card's metrics → card_metric, NOT the manifest's manifest_metric.
+    expect(res.alignment?.map((a) => a.metric)).toEqual(['card_metric'])
+  })
+
   it('returns found:false when no project is registered', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     const res = await tools.diagnoseSearch({ scope: 'proj' })

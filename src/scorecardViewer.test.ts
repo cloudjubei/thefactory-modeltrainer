@@ -127,6 +127,28 @@ describe('viewer scorecardSortValue (numeric column sort)', () => {
   })
 })
 
+describe('viewer selectActiveScorecard', () => {
+  const manifest = { objective: { name: 'ret', direction: 'max' }, gates: [{ metric: 'a', op: '>', value: 0 }], fitness: [{ metric: 'a', direction: 'max' }] }
+  const cardX = { id: 'x', gates: [{ metric: 'b', op: '>', value: 1 }], fitness: [{ metric: 'b', direction: 'min' }] }
+  const cardY = { id: 'y', gates: [{ metric: 'c', op: '<', value: 2 }], fitness: [{ metric: 'c', direction: 'max' }] }
+
+  it('falls back to the manifest when there are no cards', () => {
+    expect(S.selectActiveScorecard(manifest, [], null)).toEqual({ objective: manifest.objective, gates: manifest.gates, fitness: manifest.fitness })
+  })
+  it('returns the active card by id, grafting the manifest objective', () => {
+    expect(S.selectActiveScorecard(manifest, [cardX, cardY], 'y')).toEqual({ objective: manifest.objective, gates: cardY.gates, fitness: cardY.fitness })
+  })
+  it('falls back to the first card when the active id is unknown', () => {
+    expect(S.selectActiveScorecard(manifest, [cardX, cardY], 'gone').gates).toEqual(cardX.gates)
+  })
+  it('matches the engine twin: an active card overrides the manifest gates in computeScorecard', () => {
+    const active = S.selectActiveScorecard(manifest, [cardX], 'x')
+    // card x gates on metric b>1; a run with b=5 passes it, regardless of the manifest's a-gate.
+    expect(S.computeScorecard(active, { objective: 1, metrics: { b: 5 } }).accepted).toBe(true)
+    expect(S.computeScorecard(active, { objective: 1, metrics: { b: 0 } }).accepted).toBe(false)
+  })
+})
+
 describe('viewer hasScorecard', () => {
   it('is false with no gates/fitness, true when either is declared', () => {
     expect(S.hasScorecard(objMax)).toBe(false)

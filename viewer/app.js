@@ -65,6 +65,8 @@ const PROJECT_MANIFEST_RECORD_TYPE = 'trainer-project-manifest'
 const ENVIRONMENT_RECORD_SUFFIX = '-environment'
 const DATASET_RECORD_SUFFIX = '-dataset'
 const PAPER_RECORD_SUFFIX = '-paper'
+const SCORECARD_RECORD_SUFFIX = '-scorecard'
+const SCORECARD_ACTIVE_RECORD_SUFFIX = '-scorecard-active'
 const MODEL_RECORD_SUFFIX = '-model'
 // Approach/paper verdict lifecycle (matches TrainingPaperRecord.status). Drives the verdict badge,
 // the verdict filter, and the auto-suggested verdict from measured-vs-hold.
@@ -91,6 +93,7 @@ const TABS = [
   { id: 'xai', label: 'xAI', icon: iconXaiSvg },
   { id: 'exploration', label: 'Exploration' },
   { id: 'diagnosis', label: 'Diagnosis' },
+  { id: 'scorecards', label: 'Scorecards' },
   { id: 'activity', label: 'Activity' },
 ]
 // xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
@@ -344,6 +347,10 @@ let runsViewMode = 'runs'
 let environmentsCache = []
 // Named datasets (dataset-lever bundles — asset / window / fidelity) the user defined.
 let datasetsCache = []
+// Named scorecard records ({id,name,gates,fitness}) + the id of the ACTIVE one (drives the Runs table);
+// the manifest's gates/fitness seed a "Default". Empty ⇒ fall back to the manifest scorecard.
+let scorecardsCache = []
+let activeScorecardId = null
 // Approach/paper library records + the active rolled-up-verdict filter ('all' | a paper verdict).
 let papersCache = []
 let paperVerdictFilter = 'all'
@@ -2223,6 +2230,8 @@ function resetDashboardState() {
   if (environmentsBody) setHtml(environmentsBody, '')
   environmentsCache = []
   datasetsCache = []
+  scorecardsCache = []
+  activeScorecardId = null
   papersCache = []
   paperSubform = null
   launchPresetDatasets = []
@@ -2290,6 +2299,18 @@ function trainerDataCapabilityManifest(m) {
         view: { view: 'papers', keyParam: 'paper' },
       },
       {
+        type: rt + '-scorecard',
+        label: 'Scorecard',
+        description:
+          'A named definition of "good": `gates` (accept/reject predicates over run-summary metrics, each {metric, op (one of >,>=,<,<=,==,!=), value (a number or {metric} to compare against another metric), label?}) + `fitness` (ranking objectives, each {metric, direction (max|min)}), separate from the training reward. The "Default" is seeded from the manifest; create alternates to score the same runs by a different bar. Which card is ACTIVE (drives the Runs table) is set via the Scorecards tab.',
+        editable: true,
+        editableFields: ['name', 'description', 'gates', 'fitness'],
+        creatable: true,
+        creatableFields: ['name', 'description', 'gates', 'fitness'],
+        createDefaults: { source: 'llm' },
+        view: { view: 'scorecards' },
+      },
+      {
         type: rt + '-xai-suggestion',
         label: 'AI experiment suggestion',
         description: 'A runnable experiment the AI recommended.',
@@ -2334,6 +2355,9 @@ async function openProject(projectKey) {
   // Load saved environments before the launch form so its environment picker is populated.
   environmentsCache = hasEnvLevers() ? await readEnvironments() : []
   datasetsCache = hasDatasetLevers() ? await readDatasets() : []
+  scorecardsCache = await readScorecards()
+  activeScorecardId = await readActiveScorecardId()
+  normalizeActiveScorecardId()
   await loadHypothesisMinRuns()
   await loadServerLaneLimits()
   await loadQueueOrder()
@@ -2816,11 +2840,12 @@ function sortRunsByObjective(runs) {
   // When the project declares a scorecard (gates/fitness), "best-first" means accepted-first then by
   // primary fitness — success, not the raw reward. Projects without one keep the plain objective sort.
   const SC = typeof window !== 'undefined' ? window.Scorecard : null
-  if (SC && SC.hasScorecard(manifest)) {
+  const card = SC ? activeScorecard() : null
+  if (SC && SC.hasScorecard(card)) {
     return [...runs].sort((a, b) =>
       SC.compareScorecards(
-        SC.computeScorecard(manifest, a.summary || {}),
-        SC.computeScorecard(manifest, b.summary || {}),
+        SC.computeScorecard(card, a.summary || {}),
+        SC.computeScorecard(card, b.summary || {}),
       ),
     )
   }
@@ -2910,8 +2935,9 @@ function evalChipHtml(run) {
 // failed gate labels in the hover title. Only rendered for projects that DECLARE a scorecard (gates/fitness).
 function scorecardBadgeHtml(run) {
   const SC = typeof window !== 'undefined' ? window.Scorecard : null
-  if (!SC || !SC.hasScorecard(manifest)) return '<span class="judge-none">—</span>'
-  const sc = SC.computeScorecard(manifest, run.summary || {})
+  const card = SC ? activeScorecard() : null
+  if (!SC || !SC.hasScorecard(card)) return '<span class="judge-none">—</span>'
+  const sc = SC.computeScorecard(card, run.summary || {})
   const failed = sc.gates.filter((g) => g.applicable && !g.pass).map((g) => g.label)
   const skipped = sc.gates.filter((g) => !g.applicable).length
   const skipNote = skipped ? ` (${skipped} gate${skipped > 1 ? 's' : ''} not recorded)` : ''
@@ -2923,10 +2949,11 @@ function scorecardBadgeHtml(run) {
 // The run-detail Scorecard section: the accept/reject verdict, EVERY gate (its value vs the required
 // threshold + pass/fail/not-recorded), and the fitness (ranking) metrics — the definition of "good",
 // separate from the training reward. Only shown for projects that declare a scorecard (gates/fitness).
-function scorecardSectionHtml(run) {
-  const SC = typeof window !== 'undefined' ? window.Scorecard : null
-  if (!SC || !SC.hasScorecard(manifest)) return ''
-  const sc = SC.computeScorecard(manifest, run.summary || {})
+// One scorecard card's block for the run detail: name + verdict, the gate table (value vs required +
+// pass/fail/not-recorded), and the fitness metrics. `card` is a manifest-shaped {objective,gates,fitness}.
+function scorecardCardHtml(run, card, opts) {
+  const SC = window.Scorecard
+  const sc = SC.computeScorecard(card, run.summary || {})
   const fmt = (v) => (Number.isFinite(v) ? formatObjective(v) : '—')
   const gateRow = (g) => {
     const status = !g.applicable
@@ -2952,13 +2979,31 @@ function scorecardSectionHtml(run) {
         )
         .join('')}</tbody></table>`
     : ''
-  const verdict = sc.accepted
-    ? '<span class="badge is-ok">accepted</span>'
-    : '<span class="badge is-bad">rejected</span>'
-  return `<h3>Scorecard</h3>
-    <p class="badges-row">${verdict} <span class="card-sub">— accepted only when every RECORDED gate passes; the definition of success, separate from the training reward.</span></p>
-    ${gatesTable}
-    ${fitnessTable ? `<p class="card-sub" style="margin:.6rem 0 .2rem">Fitness — the ranking metrics (primary first)</p>${fitnessTable}` : ''}`
+  const verdict = sc.accepted ? '<span class="badge is-ok">accepted</span>' : '<span class="badge is-bad">rejected</span>'
+  const header = opts.name
+    ? `<p class="badges-row">${verdict} <strong>${escapeHtml(opts.name)}</strong>${opts.active ? ' <span class="badge is-info">active</span>' : ''}</p>`
+    : `<p class="badges-row">${verdict} <span class="card-sub">— accepted only when every RECORDED gate passes; the definition of success, separate from the training reward.</span></p>`
+  return `<div class="scorecard-card${opts.active ? ' is-active' : ''}">${header}${gatesTable}${fitnessTable ? `<p class="card-sub" style="margin:.6rem 0 .2rem">Fitness — the ranking metrics (primary first)</p>${fitnessTable}` : ''}</div>`
+}
+// The run-detail Scorecard section: the run scored against EVERY named scorecard (active highlighted), so a
+// run can be compared under each definition of "good". Falls back to the single manifest scorecard when no
+// card records exist yet. Only shown for projects that declare a scorecard.
+function scorecardSectionHtml(run) {
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (!SC) return ''
+  const graft = (c) => ({ objective: manifest && manifest.objective, gates: c.gates, fitness: c.fitness })
+  const entries = scorecardsCache.length
+    ? scorecardsCache
+        .map((c) => ({ card: graft(c), name: c.name || c.id, active: c.id === activeScorecardId }))
+        // Skip degenerate cards (no gates and no fitness) so the section appears on the same condition as
+        // the Runs Success column/filter/sort (which gate on hasScorecard of the active card).
+        .filter((e) => SC.hasScorecard(e.card))
+    : SC.hasScorecard(manifest)
+      ? [{ card: manifest, name: null, active: false }]
+      : []
+  if (!entries.length) return ''
+  const blocks = entries.map((e) => scorecardCardHtml(run, e.card, { name: e.name, active: e.active })).join('')
+  return `<h3>Scorecard${entries.length > 1 ? 's' : ''}</h3>${blocks}`
 }
 // The cross-test robustness chip: n/m tested sets beating hold (green = all, amber = some, red = none),
 // from the run's `-settest` matrix. Em-dash when the run was never cross-tested.
@@ -3418,14 +3463,15 @@ function runsColumns() {
   // Scorecard verdict column — only for projects that DECLARE a scorecard (gates/fitness); "accepted" = every
   // gate passes (success, not the raw reward). Sorts accepted-first then by primary fitness (like the default sort).
   const _SC = typeof window !== 'undefined' ? window.Scorecard : null
-  if (_SC && _SC.hasScorecard(manifest)) {
+  const _activeCard = _SC ? activeScorecard() : null
+  if (_SC && _SC.hasScorecard(_activeCard)) {
     cols.push({
       id: 'scorecard',
       label: 'Success',
       num: false,
-      help: 'Scorecard verdict: “accepted” = the run passes every declared gate (beats-hold, trades enough, drawdown, …). Hover a “rejected” pill for the failed gates. This is the definition of a good model, separate from the training reward.',
+      help: 'Scorecard verdict for the ACTIVE scorecard: “accepted” = the run passes every declared gate (beats-hold, trades enough, drawdown, …). Hover a “rejected” pill for the failed gates. This is the definition of a good model, separate from the training reward.',
       get: (r) => scorecardBadgeHtml(r),
-      sort: (r) => _SC.scorecardSortValue(_SC.computeScorecard(manifest, r.summary || {})),
+      sort: (r) => _SC.scorecardSortValue(_SC.computeScorecard(_activeCard, r.summary || {})),
     })
   }
   cols.push({
@@ -3818,9 +3864,10 @@ function applyRunsFilters(runs) {
     })
   }
   const SC = typeof window !== 'undefined' ? window.Scorecard : null
-  if (runsScorecardFilter && SC && SC.hasScorecard(manifest)) {
+  const scFilterCard = SC ? activeScorecard() : null
+  if (runsScorecardFilter && SC && SC.hasScorecard(scFilterCard)) {
     out = out.filter((r) => {
-      const accepted = SC.computeScorecard(manifest, r.summary || {}).accepted
+      const accepted = SC.computeScorecard(scFilterCard, r.summary || {}).accepted
       return runsScorecardFilter === 'accepted' ? accepted : !accepted
     })
   }
@@ -4147,7 +4194,7 @@ function runsToolbarHtml(shownCount, total) {
     : ''
   const _scFilterMod = typeof window !== 'undefined' ? window.Scorecard : null
   const scorecardFilter =
-    _scFilterMod && _scFilterMod.hasScorecard(manifest)
+    _scFilterMod && _scFilterMod.hasScorecard(_scFilterMod ? activeScorecard() : null)
       ? `<select class="runs-filter-lever${runsScorecardFilter ? ' is-changed' : ''}" id="runs-scorecard-filter"${helpAttr('Show only runs by scorecard verdict — accepted = passes every declared gate (success), rejected = fails one or more.')}>
           <option value="">success: any</option>
           <option value="accepted"${runsScorecardFilter === 'accepted' ? ' selected' : ''}>success: accepted</option>
@@ -12331,6 +12378,300 @@ function setupDatasets() {
   }
 }
 
+// --- Scorecards tab (named gates+fitness; the active one drives the Runs table) ----
+// The card being created/edited (null ⇒ the list view).
+let scorecardDraft = null
+const SCORECARD_GATE_OPS = ['>', '>=', '<', '<=', '==', '!=']
+
+function newScorecardId() {
+  return 'sc-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+}
+async function putScorecard(card) {
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + SCORECARD_RECORD_SUFFIX,
+    key: card.id,
+    content: { ...card, updatedAt: nowIso() },
+  })
+}
+async function deleteScorecardRecord(id) {
+  await window.OverseerBridge.deleteData({ type: manifest.recordType + SCORECARD_RECORD_SUFFIX, key: id })
+}
+async function reloadScorecards() {
+  scorecardsCache = await readScorecards()
+  activeScorecardId = await readActiveScorecardId()
+  normalizeActiveScorecardId()
+}
+// Keep the in-memory active id naming a REAL card whenever cards exist (a null/stale pointer — after
+// deleting the active card, or a seed that never wrote the pointer — resolves to the first card, which is
+// exactly what the read path selectActiveScorecard falls back to; this keeps the display in sync with it).
+function normalizeActiveScorecardId() {
+  if (!scorecardsCache.length) {
+    activeScorecardId = null
+  } else if (!scorecardsCache.some((c) => c.id === activeScorecardId)) {
+    activeScorecardId = scorecardsCache[0].id
+  }
+}
+function setScorecardStatus(msg, isError) {
+  const el = byId('scorecards-status')
+  if (!el) return
+  el.textContent = msg || ''
+  el.hidden = !msg
+  el.classList.toggle('is-error', !!isError)
+}
+// The metric options for the editor: 'objective' + every metric seen across runs, UNIONED with the metrics
+// the draft already references — so editing a card never silently drops a gate/fitness metric that isn't in
+// the current run set.
+function scorecardMetricOptions(draft) {
+  const keys = new Set(['objective'])
+  for (const r of allRunsCache || []) {
+    const m = r.summary && r.summary.metrics
+    if (m) for (const k of Object.keys(m)) keys.add(k)
+  }
+  if (draft) {
+    for (const g of draft.gates || []) {
+      if (g.metric) keys.add(g.metric)
+      if (g.value && typeof g.value === 'object' && g.value.metric) keys.add(g.value.metric)
+    }
+    for (const f of draft.fitness || []) if (f.metric) keys.add(f.metric)
+  }
+  return Array.from(keys).sort()
+}
+function scorecardSummaryHtml(card) {
+  const gate = (g) =>
+    `${escapeHtml(g.metric)} ${escapeHtml(g.op)} ${escapeHtml(g.value && typeof g.value === 'object' ? g.value.metric : String(g.value))}`
+  const gates = (card.gates || []).length
+    ? `<p class="card-sub">gates: ${card.gates.map(gate).join(' · ')}</p>`
+    : '<p class="card-sub">gates: none (every run accepted)</p>'
+  const fit = (card.fitness || []).length
+    ? `<p class="card-sub">fitness: ${card.fitness.map((f) => `${escapeHtml(f.metric)} (${escapeHtml(f.direction)})`).join(' · ')}</p>`
+    : '<p class="card-sub">fitness: objective</p>'
+  return gates + fit
+}
+function scorecardListItemHtml(card) {
+  const active = card.id === activeScorecardId
+  return `<div class="scorecard-list-item${active ? ' is-active' : ''}">
+    <div class="card-head card-head-row">
+      <div>
+        <strong>${escapeHtml(card.name || card.id)}</strong>${active ? ' <span class="badge is-info">active</span>' : ''}
+        ${scorecardSummaryHtml(card)}
+      </div>
+      <div class="head-actions">
+        ${active ? '' : `<button type="button" class="ghost-btn" data-sc-activate="${escapeHtml(card.id)}">Set active</button>`}
+        <button type="button" class="ghost-btn" data-sc-edit="${escapeHtml(card.id)}">Edit</button>
+        <button type="button" class="ghost-btn" data-sc-clone="${escapeHtml(card.id)}">Clone</button>
+        <button type="button" class="icon-btn icon-btn-danger" data-sc-delete="${escapeHtml(card.id)}" title="Delete scorecard" aria-label="Delete scorecard">✕</button>
+      </div>
+    </div>
+  </div>`
+}
+function scorecardEditorHtml(draft) {
+  const metrics = scorecardMetricOptions(draft)
+  const metricSel = (name, sel) =>
+    `<select data-sc-${name}="metric">${metrics.map((m) => `<option value="${escapeHtml(m)}"${m === sel ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select>`
+  const opSel = (sel) =>
+    `<select data-sc-gate="op">${SCORECARD_GATE_OPS.map((o) => `<option value="${escapeHtml(o)}"${o === sel ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select>`
+  const cmpSel = (g) => {
+    const isRef = g.value && typeof g.value === 'object'
+    const selected = isRef ? g.value.metric : '(number)'
+    return `<select data-sc-gate="cmp">${['(number)'].concat(metrics).map((o) => `<option value="${escapeHtml(o)}"${o === selected ? ' selected' : ''}>${o === '(number)' ? '(number)' : escapeHtml(o)}</option>`).join('')}</select>`
+  }
+  const gateRows = (draft.gates || [])
+    .map((g) => {
+      const numVal = typeof g.value === 'number' ? g.value : ''
+      return `<div class="sc-row" data-sc-gate-row>
+        ${metricSel('gate', g.metric)}
+        ${opSel(g.op)}
+        ${cmpSel(g)}
+        <input type="number" step="any" data-sc-gate="value" value="${numVal}" placeholder="threshold" />
+        <button type="button" class="icon-btn" data-sc-gate-remove title="Remove gate">✕</button>
+      </div>`
+    })
+    .join('')
+  const fitRows = (draft.fitness || [])
+    .map(
+      (f) => `<div class="sc-row" data-sc-fit-row>
+      ${metricSel('fit', f.metric)}
+      <select data-sc-fit="direction"><option value="max"${f.direction === 'max' ? ' selected' : ''}>max</option><option value="min"${f.direction === 'min' ? ' selected' : ''}>min</option></select>
+      <button type="button" class="icon-btn" data-sc-fit-remove title="Remove fitness">✕</button>
+    </div>`,
+    )
+    .join('')
+  return `<div class="scorecard-editor">
+    <label class="sc-name-label">Name <input type="text" id="sc-name" value="${escapeHtml(draft.name || '')}" placeholder="e.g. Strict" /></label>
+    <h3>Gates <span class="card-sub">— a run is ACCEPTED only if EVERY gate passes; a metric not on a run is skipped, not failed</span></h3>
+    ${gateRows}
+    <button type="button" class="ghost-btn" data-sc-add-gate>+ Add gate</button>
+    <h3>Fitness <span class="card-sub">— ranking metrics (first is primary); none ⇒ ranks by the objective</span></h3>
+    ${fitRows}
+    <button type="button" class="ghost-btn" data-sc-add-fit>+ Add fitness</button>
+    <div class="form-actions">
+      <button type="button" id="sc-save">Save</button>
+      <button type="button" class="ghost-btn" id="sc-cancel">Cancel</button>
+    </div>
+  </div>`
+}
+// Read the editor DOM back into the draft (called before any re-render and on save, so unsaved rows persist).
+function readScorecardForm() {
+  if (!scorecardDraft) return
+  const body = byId('scorecards-body')
+  if (!body) return
+  const nameEl = body.querySelector('#sc-name')
+  if (nameEl) scorecardDraft.name = nameEl.value
+  const gates = []
+  body.querySelectorAll('[data-sc-gate-row]').forEach((row, i) => {
+    const metric = row.querySelector('[data-sc-gate="metric"]').value
+    const op = row.querySelector('[data-sc-gate="op"]').value
+    const cmp = row.querySelector('[data-sc-gate="cmp"]').value
+    const raw = row.querySelector('[data-sc-gate="value"]').value
+    const value = cmp === '(number)' ? (raw === '' ? NaN : Number(raw)) : { metric: cmp }
+    const g = { metric, op, value }
+    // Carry a curated label forward while its metric is unchanged (the editor has no label input, so a
+    // rename / threshold tweak must not silently drop the Default card's hand-written gate labels).
+    const prev = (scorecardDraft.gates || [])[i]
+    if (prev && prev.label && prev.metric === metric) g.label = prev.label
+    gates.push(g)
+  })
+  scorecardDraft.gates = gates
+  const fitness = []
+  body.querySelectorAll('[data-sc-fit-row]').forEach((row) => {
+    fitness.push({
+      metric: row.querySelector('[data-sc-fit="metric"]').value,
+      direction: row.querySelector('[data-sc-fit="direction"]').value,
+    })
+  })
+  scorecardDraft.fitness = fitness
+}
+function renderScorecards() {
+  const body = byId('scorecards-body')
+  if (!body) return
+  if (scorecardDraft) {
+    setHtml(body, scorecardEditorHtml(scorecardDraft))
+    return
+  }
+  setScorecardStatus('')
+  if (!scorecardsCache.length) {
+    setHtml(
+      body,
+      '<p class="card-sub">No scorecards yet. A “Default” is seeded from the project manifest when it declares gates/fitness; click ＋ to create one.</p>',
+    )
+    return
+  }
+  setHtml(body, scorecardsCache.map(scorecardListItemHtml).join(''))
+}
+function openScorecardEditor(card, isClone) {
+  const clone = (arr) => JSON.parse(JSON.stringify(arr || []))
+  scorecardDraft = card
+    ? {
+        id: isClone ? null : card.id,
+        name: isClone ? `${card.name || 'Scorecard'} (copy)` : card.name || '',
+        gates: clone(card.gates),
+        fitness: clone(card.fitness),
+      }
+    : { id: null, name: '', gates: [], fitness: [] }
+  renderScorecards()
+}
+async function onSaveScorecard() {
+  readScorecardForm()
+  const draft = scorecardDraft
+  if (!draft) return
+  if (!draft.name || !draft.name.trim()) {
+    setScorecardStatus('A name is required.', true)
+    return
+  }
+  for (const g of draft.gates) {
+    if (!g.metric || (typeof g.value === 'number' && !Number.isFinite(g.value))) {
+      setScorecardStatus('Every gate needs a metric and a numeric threshold (or a “vs metric”).', true)
+      return
+    }
+  }
+  // Merge onto the stored record so fields the editor doesn't surface (source provenance, createdAt,
+  // description) survive an edit; the editor's fields win.
+  const prior = scorecardsCache.find((c) => c.id === draft.id) || {}
+  const card = { ...prior, id: draft.id || newScorecardId(), name: draft.name.trim(), gates: draft.gates, fitness: draft.fitness }
+  try {
+    await putScorecard(card)
+    // First card created ⇒ make it active so it drives the Runs table immediately.
+    if (!scorecardsCache.length) await setActiveScorecardId(card.id)
+    await reloadScorecards()
+  } catch (err) {
+    setScorecardStatus('Could not save: ' + (err && err.message ? err.message : String(err)), true)
+    return
+  }
+  scorecardDraft = null
+  renderScorecards()
+  refreshRuns()
+}
+async function onDeleteScorecard(id) {
+  if (!confirm('Delete this scorecard?')) return
+  const wasActive = activeScorecardId === id
+  try {
+    await deleteScorecardRecord(id)
+    await reloadScorecards() // re-promotes activeScorecardId to a surviving card (or null) in memory
+    // Persist the re-promotion so the stored active pointer never dangles at the deleted card.
+    if (wasActive) await setActiveScorecardId(activeScorecardId)
+  } catch (err) {
+    setScorecardStatus('Could not delete: ' + (err && err.message ? err.message : String(err)), true)
+    return
+  }
+  renderScorecards()
+  refreshRuns()
+}
+async function onActivateScorecard(id) {
+  await setActiveScorecardId(id)
+  renderScorecards()
+  refreshRuns()
+}
+function setupScorecards() {
+  const addToggle = byId('scorecard-add-toggle')
+  if (addToggle) addToggle.addEventListener('click', () => openScorecardEditor(null))
+  const body = byId('scorecards-body')
+  if (!body) return
+  body.addEventListener('click', (event) => {
+    const t = event.target
+    const activate = t.closest('button[data-sc-activate]')
+    if (activate) return void onActivateScorecard(activate.dataset.scActivate)
+    const edit = t.closest('button[data-sc-edit]')
+    if (edit) return void openScorecardEditor(scorecardsCache.find((c) => c.id === edit.dataset.scEdit))
+    const clone = t.closest('button[data-sc-clone]')
+    if (clone) return void openScorecardEditor(scorecardsCache.find((c) => c.id === clone.dataset.scClone), true)
+    const del = t.closest('button[data-sc-delete]')
+    if (del) return void onDeleteScorecard(del.dataset.scDelete)
+    if (t.closest('[data-sc-add-gate]')) {
+      readScorecardForm()
+      scorecardDraft.gates.push({ metric: 'objective', op: '>', value: 0 })
+      renderScorecards()
+      return
+    }
+    if (t.closest('[data-sc-add-fit]')) {
+      readScorecardForm()
+      scorecardDraft.fitness.push({ metric: 'objective', direction: 'max' })
+      renderScorecards()
+      return
+    }
+    const gr = t.closest('[data-sc-gate-remove]')
+    if (gr) {
+      readScorecardForm()
+      const rows = Array.from(body.querySelectorAll('[data-sc-gate-row]'))
+      scorecardDraft.gates.splice(rows.indexOf(gr.closest('[data-sc-gate-row]')), 1)
+      renderScorecards()
+      return
+    }
+    const fr = t.closest('[data-sc-fit-remove]')
+    if (fr) {
+      readScorecardForm()
+      const rows = Array.from(body.querySelectorAll('[data-sc-fit-row]'))
+      scorecardDraft.fitness.splice(rows.indexOf(fr.closest('[data-sc-fit-row]')), 1)
+      renderScorecards()
+      return
+    }
+    if (t.closest('#sc-save')) return void onSaveScorecard()
+    if (t.closest('#sc-cancel')) {
+      scorecardDraft = null
+      renderScorecards()
+    }
+  })
+}
+
 // --- Hypotheses tab --------------------------------------------------------------
 function specSummaryHtml(spec) {
   const s = spec || {}
@@ -14134,6 +14475,35 @@ async function readPapers() {
   if (!manifest) return []
   const recs = await queryRecords(manifest.recordType + PAPER_RECORD_SUFFIX)
   return recs.map((r) => r.content).filter((c) => c && c.id)
+}
+// The named scorecard cards for this project ({id,name,gates,fitness}). Seeded with a "Default" from the
+// manifest by the inspect-trainer activity; empty when standalone / not yet seeded.
+async function readScorecards() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + SCORECARD_RECORD_SUFFIX)
+  return recs.map((r) => r.content).filter((c) => c && c.id)
+}
+// The per-project ACTIVE scorecard id (a singleton pointer record). Null ⇒ the first card / manifest default.
+async function readActiveScorecardId() {
+  if (!manifest) return null
+  const recs = await queryRecords(manifest.recordType + SCORECARD_ACTIVE_RECORD_SUFFIX, 'active')
+  return (recs[0] && recs[0].content && recs[0].content.activeId) || null
+}
+async function setActiveScorecardId(activeId) {
+  activeScorecardId = activeId
+  if (!manifest || !embedded()) return
+  await window.OverseerBridge.putData({
+    type: manifest.recordType + SCORECARD_ACTIVE_RECORD_SUFFIX,
+    key: 'active',
+    content: { activeId },
+  })
+}
+// The ACTIVE scorecard as a manifest-shaped {objective,gates,fitness} the Scorecard module consumes — the
+// active card's gates/fitness grafted onto the manifest objective, or the manifest itself when no cards.
+function activeScorecard() {
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (!SC) return manifest
+  return SC.selectActiveScorecard(manifest, scorecardsCache, activeScorecardId)
 }
 async function putPaper(paper) {
   await window.OverseerBridge.putData({
@@ -19673,6 +20043,7 @@ function showTab(id) {
   if (target === 'environments') renderEnvironments()
   if (target === 'data') renderData()
   if (target === 'datasets') renderDatasets()
+  if (target === 'scorecards') renderScorecards()
   if (target === 'hypotheses') renderHypotheses()
   if (target === 'papers') renderPapers()
   if (target === 'models') renderModels()
@@ -19756,6 +20127,7 @@ async function init() {
   setupRuns()
   setupEnvironments()
   setupDatasets()
+  setupScorecards()
   setupHypotheses()
   setupPapers()
   setupModels()

@@ -1258,6 +1258,25 @@ export function computeScorecard(
 }
 
 /**
+ * Pick the ACTIVE scorecard's gates/fitness from a project's scorecard cards, grafting the manifest's
+ * objective (cards carry gates+fitness, never an objective). No cards ⇒ fall back to the manifest's own
+ * gates/fitness (the seed). Unknown/absent active id ⇒ the first card. Pure — the engine verdict layer and
+ * the viewer both use this so they agree on which definition of "good" is current.
+ */
+export function selectActiveScorecard(
+  manifest: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
+  cards: Array<{ id?: string; gates?: TrainerManifest['gates']; fitness?: TrainerManifest['fitness'] }>,
+  activeId?: string | null,
+): Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'> {
+  const valid = cards.filter((c) => c && c.id)
+  if (!valid.length) {
+    return { objective: manifest.objective, gates: manifest.gates, fitness: manifest.fitness }
+  }
+  const card = valid.find((c) => c.id === activeId) ?? valid[0]
+  return { objective: manifest.objective, gates: card.gates ?? [], fitness: card.fitness ?? [] }
+}
+
+/**
  * Derive a {@link MetricBackfill}'s value for one run from fields it already carries, or `undefined` when
  * the derivation's inputs aren't all present. Pure — the migration sweep uses it to fill a metric onto
  * runs that predate it (only where the metric is absent).

@@ -69,6 +69,28 @@ it runs; idempotent) rewrites each stale run's objective from its stored metric 
 
 **Remaining:** only a visual pass of the viewer Success badge + filter in the running Overseer.
 
+### A1b. Multiple named, in-app-tunable scorecards — SHIPPED (pending a viewer visual pass)
+
+The shipped scorecard is a SINGLE manifest-declared gates+fitness per project. The intended (and originally
+verbally-discussed, never-written) design is a SET of named scorecards, tunable IN-APP, with one **active**
+driving the Runs table and the others shown in run detail for comparison. **Reconciliation of a prior decision:**
+"manifest + levers stay code" governs the RUN SPACE (levers/command/data — change them and a run's meaning
+changes). A scorecard is a **post-hoc evaluation lens** — tuning it only re-scores existing runs — so scorecards
+are deliberately EXEMPT: they become user-editable DataStorage records, while the manifest's gates/fitness merely
+SEED a "Default" card. The three-layer model + steer-on-reward/decide-on-scorecard split carry forward intact
+(a scorecard is still one objective-agnostic gates+fitness triple; multi just lets several coexist + selectable).
+
+- **Phase A — data model + read side.** A `<recordType>-scorecard` record `{ id, name, gates[], fitness[] }`;
+  seed a "Default" from `manifest.gates/fitness` on first load; a per-project **active-scorecard** selection.
+  Rewire every READ to the ACTIVE card, not `manifest.gates` directly: the viewer badge/filter/sort + the
+  engine verdict layer (`recordsToAnalysisRuns.accepted` / `diagnoseSearch` / convergence gate) resolve the
+  active card's gates/fitness. Run detail shows the run scored against ALL cards (active highlighted).
+- **Phase B — the Scorecards tab + editor.** A dedicated tab: list cards; create/clone/edit (gate editor =
+  metric picker from run metrics + operator + threshold; fitness editor = metric + max/min); delete; set-active.
+  Editing is CRUD on the scorecard records (declare `<recordType>-scorecard` editable/creatable in the
+  data-capability manifest so the chat AI can drive it too). `computeScorecard(gatesFitness, run)` already takes
+  gates/fitness — so the only engine change is RESOLVING the active card, not the evaluation.
+
 ### A2. Full AI action parity — anything the user can do, the AI can do
 
 **Standing rule:** every mutating/launching user action has an equivalent chat capability, routed through the

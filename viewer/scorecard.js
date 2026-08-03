@@ -114,6 +114,28 @@
     return !!(manifest && ((manifest.gates && manifest.gates.length) || (manifest.fitness && manifest.fitness.length)))
   }
 
+  // Pick the ACTIVE scorecard's gates/fitness from a project's cards (grafting the manifest objective, since
+  // cards carry no objective). No cards ⇒ the manifest's own gates/fitness (the seed); unknown active id ⇒
+  // the first card. The exact twin of the engine's selectActiveScorecard so viewer + server agree.
+  function selectActiveScorecard(manifest, cards, activeId) {
+    var objective = manifest && manifest.objective
+    var valid = (cards || []).filter(function (c) {
+      return c && c.id
+    })
+    if (!valid.length) {
+      return { objective: objective, gates: manifest && manifest.gates, fitness: manifest && manifest.fitness }
+    }
+    var card = null
+    for (var i = 0; i < valid.length; i++) {
+      if (valid[i].id === activeId) {
+        card = valid[i]
+        break
+      }
+    }
+    if (!card) card = valid[0]
+    return { objective: objective, gates: card.gates || [], fitness: card.fitness || [] }
+  }
+
   var Scorecard = {
     computeScorecard: computeScorecard,
     primaryFitnessCriterion: primaryFitnessCriterion,
@@ -121,6 +143,7 @@
     compareScorecards: compareScorecards,
     scorecardSortValue: scorecardSortValue,
     hasScorecard: hasScorecard,
+    selectActiveScorecard: selectActiveScorecard,
   }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = Scorecard

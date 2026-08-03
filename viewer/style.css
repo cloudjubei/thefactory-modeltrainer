@@ -735,6 +735,42 @@ button:focus-visible,
   color: var(--warn);
   background: var(--warn-soft);
 }
+.badge.is-info {
+  color: var(--accent, #4a90d9);
+  background: var(--accent-soft, rgba(74, 144, 217, 0.15));
+}
+/* Run-detail: one block per named scorecard; the active card gets a green accent rail. */
+.scorecard-card {
+  margin: 0 0 14px;
+  padding-left: 10px;
+  border-left: 3px solid var(--border, #dddddd);
+}
+.scorecard-card.is-active {
+  border-left-color: var(--ok, #2e7d32);
+}
+/* Scorecards tab: list items + the gate/fitness editor rows. */
+.scorecard-list-item {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #dddddd);
+}
+.scorecard-list-item.is-active {
+  border-left: 3px solid var(--ok, #2e7d32);
+  padding-left: 8px;
+}
+.scorecard-editor .sc-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 4px 0;
+}
+.scorecard-editor .sc-name-label {
+  display: block;
+  margin: 4px 0 10px;
+}
+.scorecard-editor input[type='number'] {
+  width: 8em;
+}
 .xai-noeffect-note {
   margin: 0 0 8px;
   color: var(--warn);

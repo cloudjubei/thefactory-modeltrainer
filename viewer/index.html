@@ -339,6 +339,37 @@
             </section>
           </section>
 
+          <!-- Scorecards (named gates+fitness definitions of "good"; the active one drives the Runs table) -->
+          <section id="tab-scorecards" class="tab-panel" role="tabpanel" hidden>
+            <section class="card" aria-labelledby="scorecards-h">
+              <div class="card-head card-head-row">
+                <div>
+                  <h2 id="scorecards-h">Scorecards</h2>
+                  <p class="card-sub">
+                    A named definition of <em>good</em> — <strong>gates</strong> (accept/reject
+                    predicates over a run's metrics) + <strong>fitness</strong> (ranking metrics),
+                    separate from the training reward. The <strong>active</strong> card drives the
+                    Runs table's Success badge, filter and sort; every card is shown in a run's
+                    detail. Tune the bar without re-running anything.
+                  </p>
+                </div>
+                <div class="head-actions">
+                  <button
+                    type="button"
+                    id="scorecard-add-toggle"
+                    class="icon-btn"
+                    title="New scorecard"
+                    aria-label="New scorecard"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <p id="scorecards-status" class="form-status" role="status" hidden></p>
+              <div id="scorecards-body" class="environments-body tab-scroll"></div>
+            </section>
+          </section>
+
           <!-- Environments (named market-mechanic bundles — fee / TP-SL — to run models against) -->
           <section id="tab-environments" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="environments-h">
