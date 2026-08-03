@@ -83,11 +83,6 @@
             '" defer></scr' +
             'ipt>' +
             '<scr' +
-            'ipt src="badRuns.js' +
-            v +
-            '" defer></scr' +
-            'ipt>' +
-            '<scr' +
             'ipt src="comparison.js' +
             v +
             '" defer></scr' +
@@ -245,6 +240,11 @@
             </div>
           </section>
 
+          <!-- Ecosystem group: Data / Datasets / Environments / Scorecards / Versions behind a left rail. -->
+          <section id="tab-ecosystem" class="tab-panel group-panel" role="tabpanel" hidden>
+            <div class="group-shell" id="ecosystem-shell">
+              <nav class="group-rail" id="ecosystem-rail" aria-label="Ecosystem views"></nav>
+              <div class="group-content">
           <!-- Versions (pipeline version changelog + how runs fared per version) -->
           <section id="tab-versions" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="versions-h">
@@ -398,7 +398,15 @@
               <div id="environments-body" class="environments-body tab-scroll"></div>
             </section>
           </section>
+              </div>
+            </div>
+          </section>
 
+          <!-- Research group: Papers / Hypotheses / Models / Speed behind a left rail. -->
+          <section id="tab-research" class="tab-panel group-panel" role="tabpanel" hidden>
+            <div class="group-shell" id="research-shell">
+              <nav class="group-rail" id="research-rail" aria-label="Research views"></nav>
+              <div class="group-content">
           <!-- Hypotheses (LLM-proposed + human experiment backlog) -->
           <section id="tab-hypotheses" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="hypotheses-h">
@@ -514,6 +522,14 @@
             </section>
           </section>
 
+          <!-- Speed — per-model device benchmark + run durations -->
+          <section id="tab-speed" class="tab-panel" role="tabpanel" hidden>
+            <div id="speed-body" class="tab-scroll"></div>
+          </section>
+              </div>
+            </div>
+          </section>
+
           <!-- Launch (sweep / fixed lever values → a training campaign) -->
           <section id="tab-launch" class="tab-panel" role="tabpanel" hidden>
             <section class="card" aria-labelledby="launch-h">
@@ -532,11 +548,6 @@
             <section class="card" aria-label="Activity">
               <div id="activity-body" class="activity-body tab-scroll"></div>
             </section>
-          </section>
-
-          <!-- Speed — per-model device benchmark + run durations -->
-          <section id="tab-speed" class="tab-panel" role="tabpanel" hidden>
-            <div id="speed-body" class="tab-scroll"></div>
           </section>
 
           <!-- xAI — model internals + cross-run config effects + the experiment recommender -->

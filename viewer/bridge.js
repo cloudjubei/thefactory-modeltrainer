@@ -83,7 +83,9 @@
     // data.query, and watch the nav-panel activity spinner.
     startActivity: (activityType, params) =>
       call('activities.start', { activityType: activityType, params: params }, 30000),
-    listActivities: () => call('activities.list', undefined),
+    // `timeoutMs` overrides the default 8s guard — the History popup lists a large project's FULL activity
+    // set, whose serialization can exceed 8s (an under-tight timeout rejects and looks like "no history").
+    listActivities: (timeoutMs) => call('activities.list', undefined, timeoutMs),
     abortActivity: (activityId) => call('activities.abort', { activityId: activityId }),
     // Resume a run that's no longer live (e.g. orphaned by a server restart).
     // No-op if it's still genuinely running. Returns { activityId }.

@@ -199,11 +199,15 @@ export interface MetricBackfill {
   /** The `metrics` key to write. */
   name: string
   /**
-   * A per-CALENDAR-DAY rate: `metrics[count] / (metrics[bars] × barDays[config[barDaysLever]])`. Used to
-   * backfill e.g. `trades_per_day` from `n_trades` / (test-bars × the bar's day-span for the timeframe).
+   * A per-CALENDAR-DAY rate: `count / (bars × barDays[config[barDaysLever]])`. Used to backfill e.g.
+   * `trades_per_day` from `n_trades` / (test-bars × the bar's day-span for the timeframe). `count` and `bars`
+   * each resolve from the run's `metrics` block first, then its `dataset` block — so a bar count that only
+   * lives in `dataset` (e.g. `candles`) still derives on runs that predate a metrics-block equivalent.
    */
   ratePerDay?: {
+    /** Metrics/dataset key holding the event count (e.g. `n_trades`). */
     count: string
+    /** Metrics/dataset key holding the bar count (e.g. `candles`, resolved from metrics then dataset). */
     bars: string
     /** Config lever naming the bar timeframe (e.g. `timeframe`). */
     barDaysLever: string

@@ -3461,6 +3461,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const derived = deriveBackfillMetric(spec, {
           metrics: runMetrics,
           config: content.config as Record<string, unknown> | undefined,
+          dataset: content.dataset as Record<string, unknown> | undefined,
         })
         if (derived !== undefined) metricAdds[spec.name] = derived
       }
@@ -3499,12 +3500,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         examinedQueue++
         const content = (record.content ?? {}) as Record<string, unknown>
         const itemParams = content.params as Record<string, unknown> | undefined
-        const spec = itemParams?.spec as { fixed?: Record<string, unknown> } | undefined
-        const fixed = spec?.fixed
-        if (!record.key || !fixed || typeof fixed !== 'object') continue
-        const rule = findMigrationRule(fixed, rules)
-        if (!rule) continue
-        if (rule.delete) {
+        const spec = itemParams?.spec as ExperimentSpec | undefined
+        if (!record.key || !spec || typeof spec !== 'object') continue
+        // A `delete` rule matching the FIXED config cancels the stale queued campaign (same as the run path).
+        const fixed = spec.fixed
+        if (fixed && typeof fixed === 'object' && findMigrationRule(fixed, rules)?.delete) {
           await deps.storage.deleteRecord({
             scope: params.scope,
             type: params.queueRecordType,
@@ -3514,14 +3514,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           params.onRecordWritten?.(params.queueRecordType, record.key)
           continue
         }
-        const migrated = applyMigrationRules(fixed, rules)
-        if (!migrated) continue
-        if (hashTrainingConfig(migrated) === hashTrainingConfig(fixed)) continue
+        // Roll the WHOLE spec forward (fixed + configs + sweep) — a sweep over a retired lever (e.g.
+        // `use_indicators` → `projection`) would otherwise stay stale and crash the next drain. Unchanged specs
+        // return the same object, so a fully-migrated queue is a cheap no-op.
+        const migratedSpec = migrateExperimentSpec(spec, rules)
+        if (migratedSpec === spec) continue
         await deps.storage.upsertRecord({
           scope: params.scope,
           type: params.queueRecordType,
           key: record.key,
-          content: { ...content, params: { ...itemParams, spec: { ...spec, fixed: migrated } } },
+          content: { ...content, params: { ...itemParams, spec: migratedSpec } },
         })
         migratedQueue++
         params.onRecordWritten?.(params.queueRecordType, record.key)

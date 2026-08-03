@@ -771,6 +771,9 @@ button:focus-visible,
 .scorecard-editor input[type='number'] {
   width: 8em;
 }
+.scorecard-editor .sc-metric-input {
+  min-width: 11em;
+}
 .xai-noeffect-note {
   margin: 0 0 8px;
   color: var(--warn);
@@ -2498,20 +2501,23 @@ button.block-chip:hover {
   background: var(--accent-soft);
 }
 
-/* ---- Hide-bad chip sub-label + bad-run editor --------------------------------- */
-.filter-chip-sub {
-  opacity: 0.7;
-  font-weight: 400;
-}
-.bad-run-crit {
+/* ---- Run detail "Analyze this run" one-click row ------------------------------ */
+.analyze-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  padding: 4px 0;
+  margin: 6px 0 10px;
 }
-.bad-run-crit input[type='number'] {
-  width: 56px;
+.analyze-row__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 2px;
+}
+.analyze-row #run-analyze-status {
+  flex-basis: 100%;
+  margin: 2px 0 0;
 }
 
 /* ---- By dataset / By environment comparison view ------------------------------ */
@@ -4120,6 +4126,105 @@ pre.json {
   display: flex;
   flex-direction: column;
 }
+
+/* ---- Group tabs (Research / Ecosystem) -------------------------------------
+   Two top-level tabs each collapse several former tabs behind a left rail — the
+   same pattern as the xAI rail. The group container itself gets the generic
+   `.tab-main.is-fullwidth > .tab-panel` fill rules (padding + column flex); the
+   shell lays out rail + content in a row, and the active member sub-panel fills
+   the content column (header fixed, marked body scrolls) exactly like a
+   standalone tab. `activeTabId` stays the leaf id — the rail only navigates. */
+.group-shell {
+  display: flex;
+  gap: 12px;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.group-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+  width: 176px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-y: auto;
+}
+.group-rail-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.group-shell.rail-collapsed .group-rail {
+  width: auto;
+}
+.group-shell.rail-collapsed .group-rail-lbl {
+  display: none;
+}
+.group-rail-btn {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.group-rail-btn:hover {
+  background: rgba(127, 127, 127, 0.12);
+}
+.group-rail-btn.active {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+.group-rail-ico {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+}
+.group-rail-toggle {
+  margin-top: auto;
+  opacity: 0.65;
+}
+.group-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The active member sub-panel fills the content area (mirrors the standalone-tab rules, which don't reach it
+   here because it's no longer a direct child of `.tab-main`). */
+.group-content > .tab-panel:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+}
+.group-content > .tab-panel:not([hidden]) > .card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  margin-bottom: 0;
+  overflow: hidden;
+}
+.group-content > .tab-panel:not([hidden]) > .card > .tab-scroll,
+.group-content > .tab-panel:not([hidden]) > .tab-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Shared scope header (env + criterion + direction + Re-run, or the focused run) above every view. */
 .xai-scope-header {
   flex: 0 0 auto;

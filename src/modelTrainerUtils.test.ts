@@ -288,6 +288,37 @@ describe('migrateExperimentSpec', () => {
     expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
   })
 
+  it('migrates a sweep AXIS over a RETIRED lever that cleanly renames to a single replacement lever', () => {
+    // The reported crash: a queued spec sweeps `use_indicators` (removed from the manifest in favour of the
+    // `projection` dataset flavour), so expandExperimentMatrix throws "sweep names no manifest lever". The
+    // manifest maps each swept value to a single projection value, so the axis rolls forward cleanly.
+    const rules = [
+      { match: { use_indicators: true }, set: { projection: 'with_indicators' }, unset: ['use_indicators'] },
+      { match: { use_indicators: false }, set: { projection: 'standard' }, unset: ['use_indicators'] },
+    ]
+    const out = migrateExperimentSpec({ sweep: { use_indicators: [true, false] }, seeds: [0] }, rules)
+    expect(out.sweep).toEqual({ projection: ['with_indicators', 'standard'] })
+    expect(out.seeds).toEqual([0])
+  })
+
+  it('leaves a sweep axis untouched when its migration is not a clean single-lever rename (multi-key set)', () => {
+    // combo_all → combo_unified ALSO sets combo_sell (two keys), so the axis can't collapse to one lever; the
+    // lever name is still valid too, so nothing is rewritten (a same-object pass-through).
+    const spec = { sweep: { reward_model: ['combo_all', 'profit_all2'] } }
+    expect(migrateExperimentSpec(spec, migrations)).toBe(spec)
+  })
+
+  it('migrates only the retired sweep axis, leaving live axes (and their order) intact', () => {
+    const rules = [
+      { match: { use_indicators: true }, set: { projection: 'with_indicators' }, unset: ['use_indicators'] },
+    ]
+    const out = migrateExperimentSpec(
+      { sweep: { learning_rate: [0.1, 0.01], use_indicators: [true] } },
+      rules,
+    )
+    expect(out.sweep).toEqual({ learning_rate: [0.1, 0.01], projection: ['with_indicators'] })
+  })
+
   it('migrates each spec.configs entry config while PRESERVING its key (re-run rolls old configs forward in place)', () => {
     const out = migrateExperimentSpec(
       {
@@ -4493,6 +4524,28 @@ describe('deriveBackfillMetric', () => {
 
   it('returns 0 when there are no test bars (never divides by zero)', () => {
     expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 0 }, config: { timeframe: '1d' } })).toBe(0)
+  })
+
+  it('resolves the bars count from the run dataset block when absent from metrics', () => {
+    // The ~20k historical corpus predates oos_n_obs (a metric) but carries dataset.candles (bar count) — the
+    // rate must derive from the dataset block so pre-existing runs backfill instead of staying "not recorded".
+    const candleSpec = {
+      name: 'trades_per_day',
+      ratePerDay: { count: 'n_trades', bars: 'candles', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } },
+    }
+    expect(
+      deriveBackfillMetric(candleSpec, { metrics: { n_trades: 10 }, dataset: { candles: 200 }, config: { timeframe: '1d' } }),
+    ).toBeCloseTo(0.05)
+  })
+
+  it('prefers a metrics value over the dataset block when both carry the bars key', () => {
+    const dualSpec = {
+      name: 'trades_per_day',
+      ratePerDay: { count: 'n_trades', bars: 'n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1 } },
+    }
+    expect(
+      deriveBackfillMetric(dualSpec, { metrics: { n_trades: 10, n_obs: 100 }, dataset: { n_obs: 999 }, config: { timeframe: '1d' } }),
+    ).toBeCloseTo(0.1)
   })
 
   it('returns undefined for a spec with no supported derivation', () => {

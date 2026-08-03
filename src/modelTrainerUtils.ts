@@ -380,12 +380,52 @@ export function applyMigrationRules(
 }
 
 /**
+ * Roll a SWEEP's axes forward through the migration rules. An axis over a RETIRED lever whose migration
+ * cleanly renames it to a single replacement lever — e.g. `use_indicators: [true, false]` →
+ * `projection: [with_indicators, standard]` — is rewritten so the planner doesn't throw "sweep names no
+ * manifest lever". Each swept value is probed as a one-key config; the axis is remapped ONLY when every value
+ * collapses to the SAME single replacement lever (a clean rename). An axis whose migration adds/keeps multiple
+ * keys, or names a still-live lever (no matching rule), is left exactly as-is — better a caught validation
+ * error than a silently-wrong remap. Returns null when nothing changed. Values merge (deduped) into a target
+ * axis that already exists. Order of the axes is preserved.
+ */
+function migrateSweepAxes(
+  sweep: Record<string, unknown[]>,
+  rules: TrainerMigrationRule[],
+): Record<string, unknown[]> | null {
+  let changed = false
+  const out: Record<string, unknown[]> = {}
+  const pushDeduped = (key: string, values: unknown[]): void => {
+    const bucket = out[key] ?? (out[key] = [])
+    for (const v of values) if (!bucket.some((e) => String(e) === String(v))) bucket.push(v)
+  }
+  for (const [lever, raw] of Object.entries(sweep)) {
+    const values = Array.isArray(raw) ? raw : [raw]
+    const mapped = values.map((v) => {
+      const migrated = applyMigrationRules({ [lever]: v }, rules)
+      if (!migrated) return { key: lever, value: v } // no rule matched this value → unchanged
+      const keys = Object.keys(migrated)
+      return keys.length === 1 ? { key: keys[0], value: migrated[keys[0]] } : null // clean iff one key
+    })
+    const cleanRename =
+      mapped.every((m) => m) && new Set(mapped.map((m) => m!.key)).size === 1
+    if (cleanRename) {
+      const key = mapped[0]!.key
+      pushDeduped(key, mapped.map((m) => m!.value))
+      if (key !== lever || mapped.some((m, i) => String(m!.value) !== String(values[i]))) changed = true
+    } else {
+      pushDeduped(lever, values)
+    }
+  }
+  return changed ? out : null
+}
+
+/**
  * Roll an {@link ExperimentSpec} forward through the same migration rules before it is planned, so a
  * run dispatched from an OLD queued/pending spec (e.g. `reward_model: "combo_all"`) executes under the
- * migrated shape rather than the retired one. `spec.fixed` and each `spec.configs` entry are migrated (the
- * pinned/explicit configs runs carry); a `sweep` over a migrated lever is left untouched (its values are a
- * list, not a config). Returns the SAME spec object when no rule matches, so callers can treat it as a
- * cheap pass-through.
+ * migrated shape rather than the retired one. `spec.fixed`, each `spec.configs` entry, AND `spec.sweep`
+ * axes are migrated (see {@link migrateSweepAxes} for the sweep-rename semantics). Returns the SAME spec
+ * object when no rule matches, so callers can treat it as a cheap pass-through.
  */
 export function migrateExperimentSpec(
   spec: ExperimentSpec,
@@ -408,6 +448,13 @@ export function migrateExperimentSpec(
     })
     if (migratedConfigs.some((entry, i) => entry !== spec.configs![i])) {
       next.configs = migratedConfigs
+      changed = true
+    }
+  }
+  if (spec.sweep && Object.keys(spec.sweep).length > 0) {
+    const migratedSweep = migrateSweepAxes(spec.sweep, migrations)
+    if (migratedSweep) {
+      next.sweep = migratedSweep
       changed = true
     }
   }
@@ -1283,12 +1330,21 @@ export function selectActiveScorecard(
  */
 export function deriveBackfillMetric(
   spec: MetricBackfill,
-  content: { metrics?: Record<string, number>; config?: Record<string, unknown> },
+  content: {
+    metrics?: Record<string, number>
+    config?: Record<string, unknown>
+    dataset?: Record<string, unknown>
+  },
 ): number | undefined {
   const r = spec.ratePerDay
   if (r) {
-    const count = content.metrics?.[r.count]
-    const bars = content.metrics?.[r.bars]
+    // A rate's count/bars may live in the run's `metrics` OR its `dataset` block — e.g. the test-window bar
+    // count is `dataset.candles`, present on the whole historical corpus, whereas the metrics-block equivalent
+    // (`oos_n_obs`) only exists on runs produced after it was added. Prefer metrics, fall back to dataset, so a
+    // pre-existing run still backfills instead of staying "not recorded".
+    const stat = (key: string): unknown => content.metrics?.[key] ?? content.dataset?.[key]
+    const count = stat(r.count)
+    const bars = stat(r.bars)
     const tf = content.config?.[r.barDaysLever]
     const barDays = typeof tf === 'string' ? r.barDays[tf] : undefined
     if (typeof count === 'number' && typeof bars === 'number' && typeof barDays === 'number') {

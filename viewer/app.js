@@ -15,6 +15,13 @@ const ACTIVE_POLL_MS = 900
 // this long, so N concurrent observers cost ~one list fetch per interval, not N.
 const ACTIVITIES_CACHE_MS = 800
 const MAX_OBSERVE_MS = 6 * 60 * 60 * 1000
+// Trailing gap before a coalesced post-settle runs reload fires (see scheduleSettleRefresh) — long enough to
+// fold a burst of near-simultaneous settlements into one reload, short enough that the table stays live.
+const SETTLE_REFRESH_THROTTLE_MS = 1200
+// Gap between successive launches in a large xAI batch (see xaiLaunchBatch). Each launch is 2 bridge
+// round-trips + backend campaign planning; firing hundreds back-to-back saturated the bridge so nothing else
+// (renders, other data reads) could be serviced and the whole app froze. Pacing lets those interleave.
+const XAI_LAUNCH_PACING_MS = 15
 // How long an activity must read as not-live (controller gone) AND show no progress
 // advancement before we treat it as genuinely dead. `isLive` is an in-memory flag with
 // no heartbeat, so a momentary backend blip (a slow GET, a dev reload) can flip it for a
@@ -96,6 +103,32 @@ const TABS = [
   { id: 'scorecards', label: 'Scorecards' },
   { id: 'activity', label: 'Activity' },
 ]
+// The two GROUP tabs (Research / Ecosystem) each collapse several former top-level tabs behind a left rail,
+// mirroring the xAI tab. `activeTabId` stays the LEAF id (e.g. 'papers') so every `activeTabId === <leaf>`
+// check and `showTab(<leaf>)` call keeps working unchanged; a leaf's group is derived from LEAF_TO_GROUP.
+const TAB_GROUPS = [
+  {
+    id: 'research',
+    label: 'Research',
+    icon: iconResearchSvg,
+    members: ['papers', 'hypotheses', 'models', 'speed'],
+  },
+  {
+    id: 'ecosystem',
+    label: 'Ecosystem',
+    icon: iconEcosystemSvg,
+    members: ['data', 'datasets', 'environments', 'scorecards', 'versions'],
+  },
+]
+const TAB_BY_ID = Object.fromEntries(TABS.map((t) => [t.id, t]))
+const LEAF_TO_GROUP = {}
+for (const g of TAB_GROUPS) for (const m of g.members) LEAF_TO_GROUP[m] = g.id
+// The top tab bar, in order: standalone leaf tabs interleaved with the two group tabs.
+const TOP_BAR = ['runs', 'research', 'ecosystem', 'launch', 'xai', 'exploration', 'diagnosis', 'activity']
+// Last-viewed member per group, so re-opening a group returns to where you were (defaults to the first member).
+const groupActiveLeaf = { research: 'papers', ecosystem: 'data' }
+// The group rails collapse to icons-only together (one shared state, like the xAI rail), for the session.
+let groupRailCollapsed = false
 // xAI tab state: the selectable analysis criterion + direction, the focused run (Model internals), the
 // OFAT lever, and the last recommendation set (so a Run-batch click can launch it by index).
 let xaiCriterionKey = 'objective'
@@ -205,7 +238,7 @@ const inspectingKeys = new Set()
 // current run keys, and the per-project set of run keys the user has already
 // seen (persisted as 'trainer-seen' records) — their difference is "unseen".
 let liveRecordTypes = new Set()
-let runKeysByProject = new Map()
+let runCountByProject = new Map()
 let seenKeysByProject = new Map()
 // Bumped whenever the home poll loop should stop (a project is opened); the loop
 // captures it and exits when a newer session supersedes it.
@@ -237,6 +270,11 @@ let continuedLineageCache = []
 // (only the non-'ok' flags are stored, to stay lean). `resolveReliability` layers persisted over heuristic.
 let reliabilityCache = new Map()
 let reliabilityHeuristicCache = new Map()
+// The run-pool array `reliabilityHeuristicCache` was last computed over. The heuristic is an O(pool) scan
+// (up to ~20k runs) that renderRuns runs on every reload; since the pool array is REPLACED (not mutated) when
+// the corpus changes, an identical reference means the cache is still valid — so we skip the rescan. Reset on
+// project switch alongside the cache.
+let reliabilityHeuristicPoolRef = null
 // Runs filter by reliability: '' (any) | 'ok' | 'threshold-driven' | 'dubious' | 'flagged' (either non-ok).
 let runsReliabilityFilter = ''
 // Runs filter by scorecard verdict: '' (any) | 'accepted' (all gates pass) | 'rejected'. Client-computed
@@ -284,10 +322,8 @@ let runsSortKey = null
 let runsSortDir = 'desc'
 let runsLeverFilter = {}
 let runsTextFilter = ''
-let runsHideBad = false
-// The persisted "bad run" DEFINITION (which criteria the Hide-bad toggle drops). Loaded per project from a
-// `<recordType>-bad-run-def` record; defaults to failed + degenerate + under-traded. Editable via the chip.
-let badRunDefCache = window.BadRuns.defaultBadRunDefinition()
+// Debounce handle for the text-filter re-render (see debounceRunsTextRender).
+let runsTextRenderTimer = 0
 let runsVersionFilter = ''
 // The By dataset / By environment views POOL every filtered run and group it by the axis value.
 // `comparisonAgg` picks how each cell reduces the group ('avg' | 'full' = min·avg·max); `comparisonSortKey`/
@@ -305,7 +341,7 @@ let runsStatusFilter = ''
 let runsDropdownsCollapsed = true
 // User-defined numeric filter rules (e.g. "return % > 0"), persisted per project as
 // recordType + '-filter-rule' records so they survive reloads. Each: { id, field, op,
-// value, active }. Rendered as toggle chips alongside "Hide bad runs".
+// value, active }. Rendered as toggle chips in the Runs filter row.
 let customRulesCache = []
 let favoritesCache = new Set()
 // When the add/edit custom-rule popup is open, the id being edited (null = creating new).
@@ -403,6 +439,17 @@ let modelStatsRefreshing = false
 // the Hypotheses verdicts derive from it (one scan updates both). Empty until refreshed / after a reload —
 // the tabs then render from each record's PERSISTED result (model-stats record; hypothesis status/evidence).
 let allRunsCache = []
+// Corpus regime + lifecycle. `allRunsCache` is loaded ONCE per session (on project open) and then advanced
+// INCREMENTALLY — only the newer tail is fetched as runs land — so no view ever re-walks the whole archive.
+// `corpusMode`: 'memory' = held fully in memory, EVERY run view (Runs table, Exploration, Diagnosis, xAI,
+// Models) filters/analyses it client-side (instant, no scans); 'paged' = the corpus is above CORPUS_MEMORY_MAX,
+// so Runs server-pages and analysis views scan on demand (the pre-corpus behaviour, kept for huge archives);
+// null = not yet decided. `corpusFrontier` is the newest run's ranAt — the base the incremental tail extends.
+let corpusMode = null
+let corpusLoaded = false
+let corpusFrontier = ''
+// Above this run count, holding every lean record in a browser iframe is risky, so stay in 'paged' mode.
+const CORPUS_MEMORY_MAX = 50000
 // Missing-model proposals from the last "Find models" run, keyed by paperId — the Papers card turns
 // these into one-click "Add to catalog" buttons until the user acts on them.
 const paperMissingModels = new Map()
@@ -762,6 +809,22 @@ function iconXaiSvg(size) {
     '<path d="M12 3l1.7 4.6L18 9l-4.3 1.4L12 15l-1.7-4.6L6 9l4.3-1.4z"/><path d="M18 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/></svg>'
   )
 }
+// A lab flask — the Research group tab (papers, hypotheses, models, speed).
+function iconResearchSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M9 3h6"/><path d="M10 3v6.5L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.5V3"/><line x1="8.5" y1="14" x2="15.5" y2="14"/></svg>'
+  )
+}
+// Stacked layers — the Ecosystem group tab (data, datasets, environments, scorecards, versions).
+function iconEcosystemSvg(size) {
+  const s = size || 16
+  return (
+    `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">` +
+    '<path d="M12 2 2 7l10 5 10-5-10-5Z"/><path d="M2 12l10 5 10-5"/><path d="M2 17l10 5 10-5"/></svg>'
+  )
+}
 // Small circular "?" button with a styled hover/focus callout (no native title).
 // Help is shown by HOVERING (or focusing) the item it describes — no "?" buttons. Any
 // element carrying a `data-help` attribute is a trigger; `helpAttr(text)` produces that
@@ -984,6 +1047,11 @@ function seedRawCorpus(records) {
   if (records && manifest) _rawCorpus = { records, at: Date.now(), rt: manifest.recordType, inflight: null }
 }
 async function loadRawCorpus(recordType, onProgress) {
+  // In the in-memory regime the corpus is already loaded + kept current — Exploration/Diagnosis read it
+  // directly instead of running their own scan (the source of the "stuck analysing" churn during a campaign).
+  if (corpusMode === 'memory' && corpusLoaded && manifest && manifest.recordType === recordType) {
+    return allRunsCache
+  }
   const now = Date.now()
   if (_rawCorpus.records && _rawCorpus.rt === recordType && now - _rawCorpus.at < RAW_CORPUS_TTL_MS) return _rawCorpus.records
   if (_rawCorpus.inflight && _rawCorpus.rt === recordType) return _rawCorpus.inflight
@@ -998,8 +1066,97 @@ async function loadRawCorpus(recordType, onProgress) {
     throw e
   }
 }
+// The newest run's ranAt across a set — the frontier the incremental tail fetch extends from.
+function maxRanAtOf(runs) {
+  let max = ''
+  for (const r of runs) {
+    const at = runRanAt((r && r.summary) || {})
+    if (at && at > max) max = at
+  }
+  return max
+}
+// Show the initial corpus-load progress in the Runs body so the first open is never a blank/stuck spinner.
+function setCorpusProgress(loaded, total) {
+  const body = byId('runs-body')
+  if (!body) return
+  const of = total ? ` of ${total}` : ''
+  setHtml(body, `<div class="empty-hint">${spinnerHtml()} Loading runs (${loaded}${of})…</div>`)
+}
+// Decide the corpus regime + load it ONCE, on project open. An O(1) count gates it: a corpus at/under
+// CORPUS_MEMORY_MAX is pulled fully into memory (every view then reads it, all filtering client-side and
+// INSTANT); a larger one stays 'paged' (Runs server-pages, analysis views scan on demand). Resilient: if the
+// one-time scan can't finish (backend busy), fall back to 'paged' so the app stays usable rather than stuck.
+let corpusLoadInflight = null
+async function ensureCorpus() {
+  if (corpusMode || !embedded() || !manifest) return
+  // Inflight guard: several tab renders can call this concurrently on open — they share ONE load, never
+  // double-scan (corpusMode is only set AFTER an await, so a plain flag would race).
+  if (corpusLoadInflight) return corpusLoadInflight
+  const epoch = projectEpoch
+  corpusLoadInflight = (async () => {
+    let total = null
+    try {
+      total = await countRunRecords()
+    } catch {
+      total = null
+    }
+    if (epoch !== projectEpoch) return
+    if (total !== null && total > CORPUS_MEMORY_MAX) {
+      corpusMode = 'paged'
+      return
+    }
+    corpusMode = 'memory'
+    try {
+      const all = await queryAllRunRecords((n) => {
+        if (epoch === projectEpoch) setCorpusProgress(n, total)
+      })
+      if (epoch !== projectEpoch) return
+      allRunsCache = all
+      runsCache = all
+      corpusFrontier = maxRanAtOf(all)
+      corpusLoaded = true
+      seedRawCorpus(all)
+      reliabilityHeuristicPoolRef = null // recompute the heuristic over the freshly-loaded pool
+    } catch {
+      // The one-time scan couldn't complete — degrade to server-paged Runs (usable) rather than a stuck spinner.
+      if (epoch === projectEpoch && !corpusLoaded) corpusMode = 'paged'
+    }
+  })()
+  try {
+    await corpusLoadInflight
+  } finally {
+    corpusLoadInflight = null
+  }
+}
+// Advance the in-memory corpus by ONLY the newer tail (runs whose ranAt > the frontier), merged by key. This
+// is the heart of "never do the same work twice": a settle costs one small tail fetch, not a whole-archive
+// walk. No-op outside the loaded in-memory regime. Returns true when the corpus actually grew.
+async function advanceCorpus() {
+  if (corpusMode !== 'memory' || !corpusLoaded) return false
+  let fresh
+  try {
+    fresh = await fetchRunsNewerThan(corpusFrontier)
+  } catch {
+    return false
+  }
+  if (!fresh.length) return false
+  const byKey = new Map(allRunsCache.map((r) => [r.key, r]))
+  for (const r of fresh) byKey.set(r.key, r)
+  allRunsCache = [...byKey.values()]
+  runsCache = allRunsCache
+  corpusFrontier = maxRanAtOf(allRunsCache)
+  seedRawCorpus(allRunsCache)
+  reliabilityHeuristicPoolRef = null
+  return true
+}
 async function readRuns() {
   if (!manifest) return []
+  // In-memory regime: the whole corpus is loaded + current, so the Runs table filters/sorts/pages it
+  // client-side (runsServerPaged() is false here) — no DB round-trip, every filter instant.
+  if (corpusMode === 'memory' && corpusLoaded) {
+    runsTotalCount = allRunsCache.length
+    return allRunsCache
+  }
   const where = buildRunsServerWhere()
   if (runsServerPaged()) {
     const [page, total] = await Promise.all([
@@ -1019,6 +1176,19 @@ async function readRuns() {
   if (allRunsCache.length) {
     runsTotalCount = allRunsCache.length
     return allRunsCache
+  }
+  // A CLIENT-ONLY filter (scorecard / reliability / text / non-server rule) in the flat Runs view needs the
+  // FULL matching set to filter over — page the whole corpus on demand (server-pushable predicates still
+  // narrow it) instead of requiring a prior global Refresh. Group-by/drill views keep their "Refresh" hint.
+  if (runsViewMode === 'runs' && hasClientOnlyRunsFilter()) {
+    const all = await queryAllRunRecords(undefined, where)
+    // Only cache when the scan is the FULL corpus (no server-pushable predicate). A `where`-narrowed subset
+    // must NEVER be written to allRunsCache — every other view (xAI / Models / reliability / hypothesis
+    // matching) treats it as the filter-independent full corpus; caching a subset would silently undercount
+    // them and could blank the Runs table when a server filter later changes.
+    if (!where) allRunsCache = all
+    runsTotalCount = all.length
+    return all
   }
   runsTotalCount = 0
   return []
@@ -1113,6 +1283,12 @@ async function readReliability() {
 // dominated by a manifest `probabilistic` lever, so the O(pool) dataset-robustness check runs for a handful of
 // candidate setups, memoised. Called on each global Refresh (the pool is freshest then) + lazily for the filter.
 function computeReliabilityHeuristics() {
+  const pool = xaiRunPool()
+  // Reuse the last result when the pool array reference is unchanged — the corpus is replaced wholesale on a
+  // refresh/settle/switch, so an identical reference means nothing that feeds the heuristic has moved. This
+  // turns the O(20k) rescan that renderRuns triggers on every reload into a no-op between corpus changes.
+  if (pool === reliabilityHeuristicPoolRef) return
+  reliabilityHeuristicPoolRef = pool
   reliabilityHeuristicCache = new Map()
   if (!manifest) return
   const runs = xaiRuns()
@@ -1209,20 +1385,56 @@ async function readCrossTests() {
 }
 // Lean lineage rows for EVERY run — just the fields the Continue-training lineage/matrix needs, projected
 // server-side (never the heavy per-bar traces) so the whole-set join stays cheap even at thousands of runs.
-// Only fetched when the project declares continued training; otherwise the section never renders.
+// PAGED (500/page): a lone no-limit list hit the HTTP route's 10k ceiling, truncating the lineage on a big
+// corpus. Only used by the run-detail Continue-training section, so it's loaded LAZILY (ensureContinuedLineage),
+// never on every renderRuns/settle.
 async function readContinuedLineage() {
   if (!manifest || !manifest.continueFromKey || !embedded()) return []
-  let recs
   try {
-    recs = await window.OverseerBridge.queryData({
-      type: manifest.recordType,
-      select: ['artifacts.checkpoint', 'provenance.continuedFrom', 'config', 'objective', 'status'],
-      omit: HEAVY_RUN_FIELDS,
+    const recs = await window.Paging.accumulatePages({
+      pageSize: 500,
+      sleep,
+      fetchPage: (offset) =>
+        window.OverseerBridge.queryData(
+          {
+            type: manifest.recordType,
+            select: ['artifacts.checkpoint', 'provenance.continuedFrom', 'config', 'objective', 'status'],
+            omit: HEAVY_RUN_FIELDS,
+            limit: 500,
+            offset,
+          },
+          RUN_SCAN_PAGE_TIMEOUT_MS,
+        ),
     })
+    return (recs || []).map((r) => ({ key: r.key, summary: r.content || {} })).filter((r) => r.key)
   } catch {
-    recs = []
+    return []
   }
-  return (recs || []).map((r) => ({ key: r.key, summary: r.content || {} })).filter((r) => r.key)
+}
+// Load the continued-lineage cache ON DEMAND (when a Continue-training run detail is open) instead of on every
+// runs render. Loads at most once per project/Refresh; `force` re-pulls after a continue action lands a child.
+// Re-renders the open detail when a fresh pull arrives so the lineage/matrix fills in.
+let continuedLineageLoaded = false
+let continuedLineageInflight = null
+async function ensureContinuedLineage(force) {
+  if (!continueTrainUiEnabled() || !embedded()) return
+  if (continuedLineageLoaded && !force) return
+  if (continuedLineageInflight) {
+    // Let an in-flight load settle. A non-forced caller is then satisfied; a FORCE caller (post-continue) needs
+    // a FRESH read that starts AFTER the new child was written, so it falls through to start its own.
+    await continuedLineageInflight.catch(() => {})
+    if (!force || continuedLineageInflight) return continuedLineageInflight
+  }
+  continuedLineageInflight = (async () => {
+    try {
+      continuedLineageCache = await readContinuedLineage()
+      continuedLineageLoaded = true
+    } finally {
+      continuedLineageInflight = null
+    }
+  })()
+  await continuedLineageInflight
+  if (selectedRunKey && byId('run-detail')) renderRunDetail(selectedRunKey)
 }
 async function readProposal() {
   return readMostRecentRecord('-proposal')
@@ -1398,22 +1610,6 @@ async function toggleFavorite(runKey) {
   if (activeTabId === 'runs' && (runsViewMode === 'favorites' || selectedRunKey === runKey))
     renderRunsTable()
 }
-// The persisted "bad run" definition (one record per project). Missing ⇒ the default definition.
-async function readBadRunDefinition() {
-  if (!manifest) return window.BadRuns.defaultBadRunDefinition()
-  const recs = await queryRecords(`${manifest.recordType}-bad-run-def`, 'bad-run-def')
-  const content = recs && recs[0] && recs[0].content
-  return window.BadRuns.normalizeBadRunDefinition(content)
-}
-async function saveBadRunDefinition(def) {
-  badRunDefCache = window.BadRuns.normalizeBadRunDefinition(def)
-  if (!manifest) return
-  await window.OverseerBridge.putData({
-    type: `${manifest.recordType}-bad-run-def`,
-    key: 'bad-run-def',
-    content: badRunDefCache,
-  })
-}
 async function deleteCustomRule(id) {
   if (!manifest || !id) return
   await window.OverseerBridge.deleteData({ type: manifest.recordType + '-filter-rule', key: id })
@@ -1458,36 +1654,20 @@ async function putSeenKeys(projectKey, keys) {
     content: { projectKey, keys: [...keys], updatedAt: nowIso() },
   })
 }
-// The current run-record keys for one project, read through its manifest's
-// recordType (run records key on the configHash). Empty for an uninspected
-// project or one with no manifest.
-async function readProjectRunKeys(projectKey) {
+// The current run COUNT for one project (via its manifest recordType). Used ONLY by the home-overview unseen
+// badge, which polls every 3s for EVERY project — so it must be O(1): a server COUNT (indexed), NEVER a pull of
+// the run keys. A no-limit key pull at 23k runs hit the list route's 10k ceiling (truncating the count + logging
+// a cap warning every poll) and 503-shed under memory pressure. Empty for an uninspected/manifest-less project.
+async function readProjectRunCount(projectKey) {
   const rec = manifestsCache.get(projectKey)
   const recordType = rec && rec.manifest && rec.manifest.recordType
-  if (!recordType || !embedded()) return []
-  // Only the KEYS are needed (the unseen-count badge). This runs for EVERY project on the home overview's 3s
-  // poll, so it must NEVER pull FULL run records — at thousands of runs that is gigabytes of per-bar traces
-  // and freezes the app. `select` (content allowlist) shrinks each row to just the configHash fallback (the
-  // envelope `key` always returns); `omit` is a belt-and-suspenders guarantee the heavy subtrees are dropped
-  // even if the host bridge ignores `select`. No `limit` — the badge needs the COMPLETE key set.
-  let recs
+  if (!recordType || !embedded() || !window.OverseerBridge.countData) return 0
   try {
-    recs = await window.OverseerBridge.queryData({
-      type: recordType,
-      select: ['provenance.configHash', 'configHash'],
-      omit: HEAVY_RUN_FIELDS,
-    })
+    const res = await window.OverseerBridge.countData({ type: recordType })
+    return Number((res && res.count) || 0)
   } catch {
-    recs = []
+    return 0
   }
-  return (recs || [])
-    .map((r) => {
-      const summary = r.content || {}
-      return (
-        r.key || (summary.provenance && summary.provenance.configHash) || summary.configHash || ''
-      )
-    })
-    .filter(Boolean)
 }
 // Auto-eval intents persist as marker records on the 'trainer-queue' type (project-scoped through
 // the stored params.recordType); the concurrency queue itself now lives host-side.
@@ -1543,10 +1723,12 @@ function projectHasLiveActivity(projectKey) {
 // How many of a project's current run keys the user has not seen yet (its run
 // keys minus the persisted seen set).
 function projectUnseenCount(projectKey) {
-  const keys = runKeysByProject.get(projectKey) || []
-  if (!keys.length) return 0
-  const seen = seenKeysByProject.get(projectKey) || new Set()
-  return keys.reduce((n, k) => (seen.has(k) ? n : n + 1), 0)
+  // total − seen, from an O(1) server count minus the persisted seen-key set. Exact while runs are append-only
+  // (seen ⊆ all); a clamp guards the rare case where deletions leave stale seen keys (seen.size > total).
+  const total = runCountByProject.get(projectKey) || 0
+  if (!total) return 0
+  const seen = seenKeysByProject.get(projectKey)
+  return Math.max(0, total - (seen ? seen.size : 0))
 }
 function totalUnseenCount() {
   return projectsCache.reduce((n, p) => n + projectUnseenCount(p.key), 0)
@@ -1632,9 +1814,9 @@ async function renderHome() {
 async function refreshHomeLiveState() {
   liveRecordTypes = await readLiveRecordTypes()
   const entries = await Promise.all(
-    projectsCache.map(async (p) => [p.key, await readProjectRunKeys(p.key)]),
+    projectsCache.map(async (p) => [p.key, await readProjectRunCount(p.key)]),
   )
-  runKeysByProject = new Map(entries)
+  runCountByProject = new Map(entries)
 }
 // Every recordType with a running, live activity — matches a card to its project
 // via the manifest's recordType.
@@ -2154,8 +2336,13 @@ function resetDashboardState() {
   evaluationsCache = new Map()
   reliabilityCache = new Map()
   reliabilityHeuristicCache = new Map()
+  reliabilityHeuristicPoolRef = null
   runsReliabilityFilter = ''
   runsScorecardFilter = ''
+  if (runsTextRenderTimer) {
+    clearTimeout(runsTextRenderTimer)
+    runsTextRenderTimer = 0
+  }
   evaluatingKeys.clear()
   judgementSummary = null
   hypothesesCache = []
@@ -2192,10 +2379,15 @@ function resetDashboardState() {
   // The Runs lens + the all-runs snapshot are per-project: reset them so a comparison/favorites view (both
   // read allRunsCache directly) can't paint the PREVIOUS project's runs, and the lock re-initialises to the
   // new project's best run. modelStatsCache/Stale reset so the freshness note + latest-refresh frontier are
-  // per-project too (badRunDefCache/favoritesCache reload in renderRuns).
+  // per-project too (favoritesCache reloads in renderRuns).
   runsViewMode = 'runs'
-  runsHideBad = false
   allRunsCache = []
+  corpusMode = null
+  corpusLoaded = false
+  corpusFrontier = ''
+  corpusLoadInflight = null
+  continuedLineageCache = []
+  continuedLineageLoaded = false
   comparisonGroupsCache = new Map()
   comparisonSortKey = 'objective'
   comparisonSortDir = 'desc'
@@ -2230,6 +2422,7 @@ function resetDashboardState() {
   if (environmentsBody) setHtml(environmentsBody, '')
   environmentsCache = []
   datasetsCache = []
+  dataCatalogCache = null
   scorecardsCache = []
   activeScorecardId = null
   papersCache = []
@@ -2365,6 +2558,10 @@ async function openProject(projectKey) {
   renderLaunchForm()
   showView('dashboard')
   showTab(savedTabId() || TABS[0].id)
+  // Load the run corpus ONCE (in-memory regime) before the first render, so every view reads it instead of
+  // scanning — with a live progress hint so the initial open is never a blank/stuck spinner.
+  await ensureCorpus()
+  if (epoch !== projectEpoch) return
   await renderRuns()
   if (deepLinkPending) {
     applyDeepLink(deepLinkPending)
@@ -2818,9 +3015,19 @@ async function processSettledCampaignEffects() {
   await stampHypothesisCampaignResults()
   await processAutoEvalMarkers()
   runsCache = await readRuns()
-  await refreshHypothesisVerdicts(await readHypotheses())
-  if (activeTabId === 'hypotheses') await renderHypotheses()
-  if (activeTabId === 'papers') await renderPapers()
+  // Hypothesis verdicts recompute over the all-runs SNAPSHOT (allRunsCache), which a settle normally leaves
+  // unchanged — so re-scanning it (O(hypotheses × ~23k runs)) on every settle mostly produces no new verdict and
+  // just burns the main thread during a campaign. Only do it when the user is actually looking at
+  // hypotheses/papers; otherwise the persisted verdicts stand until a global Refresh (the canonical trigger that
+  // advances the snapshot) or the user opens those tabs. (A settle under an active client-only filter can lazily
+  // fill an empty allRunsCache; that's a rare edge that still self-heals on the next Refresh.)
+  if (activeTabId === 'hypotheses') {
+    await refreshHypothesisVerdicts(await readHypotheses())
+    await renderHypotheses()
+  } else if (activeTabId === 'papers') {
+    await refreshHypothesisVerdicts(await readHypotheses())
+    await renderPapers()
+  }
   // A settled campaign means new runs exist past the last aggregate — reflect that in the topbar control.
   void checkModelStatsStale()
 }
@@ -2940,7 +3147,7 @@ function scorecardBadgeHtml(run) {
   const sc = SC.computeScorecard(card, run.summary || {})
   const failed = sc.gates.filter((g) => g.applicable && !g.pass).map((g) => g.label)
   const skipped = sc.gates.filter((g) => !g.applicable).length
-  const skipNote = skipped ? ` (${skipped} gate${skipped > 1 ? 's' : ''} not recorded)` : ''
+  const skipNote = skipped ? ` (${skipped} gate${skipped > 1 ? 's' : ''} n/a)` : ''
   const title = sc.accepted
     ? `Passes every recorded scorecard gate${skipNote}.`
     : `Failed: ${failed.join(', ')}${skipNote}`
@@ -2957,7 +3164,7 @@ function scorecardCardHtml(run, card, opts) {
   const fmt = (v) => (Number.isFinite(v) ? formatObjective(v) : '—')
   const gateRow = (g) => {
     const status = !g.applicable
-      ? '<span class="badge is-warn" title="This run has no value for this metric — the gate is skipped, not failed.">⊘ not recorded</span>'
+      ? '<span class="badge is-info" title="This run predates this metric (or the trainer didn’t emit it), so the gate is skipped — NOT failed. Only runs trained since the metric was added carry it; a value can’t be reconstructed for older runs.">⊘ n/a</span>'
       : g.pass
         ? '<span class="badge is-ok">✓ pass</span>'
         : '<span class="badge is-bad">✗ fail</span>'
@@ -3148,7 +3355,10 @@ async function markRunsSeen() {
   if (!embedded() || !currentProject || !manifest) return
   const projectKey = currentProject.key
   const seen = seenKeysByProject.get(projectKey) || new Set()
-  const unseen = runsCache.map((r) => r.key).filter((k) => k && !seen.has(k))
+  // Mark only the VISIBLE page (the rows actually rendered) as seen — NOT the whole runsCache, which in the
+  // in-memory regime IS the entire corpus (marking it all seen would permanently zero the "new" badge). In the
+  // server-paged regime the visible set already equals the loaded page, so this is unchanged there.
+  const unseen = runsVisibleKeys.filter((k) => k && !seen.has(k))
   if (!unseen.length) return
   const next = new Set(seen)
   for (const k of unseen) next.add(k)
@@ -3157,6 +3367,25 @@ async function markRunsSeen() {
     await putSeenKeys(projectKey, next)
   } catch {
     // best-effort: the badge resyncs from the persisted record on next read
+  }
+}
+// Drop deleted run keys from the project's persisted seen-set. The home unseen badge is now O(1)
+// (total − seen.size); without pruning, deleting seen runs would leave stale keys so seen.size could exceed the
+// reduced total and the clamp would wrongly show 0 unseen. Best-effort persist.
+async function pruneSeenKeys(keys) {
+  if (!embedded() || !currentProject || !keys || !keys.length) return
+  const projectKey = currentProject.key
+  const seen = seenKeysByProject.get(projectKey)
+  if (!seen || !seen.size) return
+  const next = new Set(seen)
+  let changed = false
+  for (const k of keys) if (next.delete(k)) changed = true
+  if (!changed) return
+  seenKeysByProject.set(projectKey, next)
+  try {
+    await putSeenKeys(projectKey, next)
+  } catch {
+    // best-effort — resyncs from the persisted record on next read
   }
 }
 // --- Results workbench: dynamic metric columns + sort + filter -----------------
@@ -3181,8 +3410,7 @@ const RUN_METRIC_ORDER = [
   'simple_ratio',
 ]
 // Threshold below which a trade count reads as degenerate (≈ buy-and-hold); mirrors
-// summary.py's DEGENERATE_TRADE_COUNT. Used for the #trades colour (the bad-run filter's
-// own under-trade threshold lives in the editable definition — see badRuns.js).
+// summary.py's DEGENERATE_TRADE_COUNT. Used for the #trades colour.
 const DEGENERATE_TRADE_COUNT = 2
 // vs-hold-style green/red for the lead metrics: %return by sign, #trades by whether the
 // run actually traded (more than a near-hold count).
@@ -3229,6 +3457,18 @@ const METRIC_INFO = {
     'Skew of the out-of-sample per-bar returns. Positive = a few large gains; negative = a fat left tail (a few large losses).',
   oos_ret_kurt:
     'Excess kurtosis of the out-of-sample per-bar returns — tail-heaviness. High = more frequent extreme moves than a normal distribution.',
+  max_drawdown_pct:
+    'Worst peak-to-trough decline of the test-window equity curve, as a signed percent (≤ 0; 0 means it never dipped below a prior peak). The risk metric behind the scorecard’s drawdown gate/fitness — closer to 0 is better. Only on runs produced since it was re-added, so older runs show “—”.',
+  signal_expectancy:
+    'Case-1 signal lens (eval-only): mean forward return, over signal_horizon bars, of every buy/sell the agent EMITTED — position- and P&L-blind (forced TP/SL exits excluded). Measures the raw per-signal predictive edge, independent of how the position manager sized or timed it. >0 means the signals point the right way even if the executed strategy lost. Higher is better.',
+  signal_hit_rate:
+    'Case-1 signal lens (eval-only): share of the agent’s emitted signals whose forward return over the horizon moved in the signalled direction. Higher is better.',
+  signal_coverage:
+    'Case-1 signal lens (eval-only): fraction of bars on which the agent emitted a directional signal — how often it acts versus staying dormant.',
+  signal_count:
+    'Case-1 signal lens (eval-only): number of emitted signals scored by the forward-return probe (the sample size behind signal_expectancy / signal_hit_rate).',
+  signal_horizon:
+    'Case-1 signal lens (eval-only): the forward-return horizon, in bars, each signal is scored over (the H in signal_expectancy).',
 }
 const VSHOLD_INFO =
   'Run return minus buy-and-hold over the same window. Positive = beat just holding. Hold is a control to judge against — never the optimisation target.'
@@ -3256,13 +3496,13 @@ const TWO_DP_METRICS = new Set([
 const PERCENT_RATIO_METRICS = new Set(['blocked_signal_ratio'])
 // Metrics surfaced only in a single run's DETAIL (too granular for the table); kept
 // out of the table's metric columns but still rendered by metricsTableHtml.
-// Retired metrics — no longer produced (summary.py dropped Sharpe/CAGR/max-drawdown + the window
-// breakdown as noise for the trade-frequency objective). Hidden EVERYWHERE so OLD runs that still
-// carry them in storage don't resurrect dead columns/rows. New runs don't emit them at all.
+// Retired metrics — no longer produced (summary.py dropped Sharpe/CAGR + the window breakdown as noise for
+// the trade-frequency objective). Hidden EVERYWHERE so OLD runs that still carry them in storage don't
+// resurrect dead columns/rows. New runs don't emit them at all. (max_drawdown_pct is NOT here: summary.py
+// emits it again as the risk metric behind the scorecard's drawdown gate/fitness — it's shown in the detail.)
 const RETIRED_METRICS = [
   'sharpe',
   'cagr_pct',
-  'max_drawdown_pct',
   'sharpe_alpha',
   'worst_window_return_pct',
   'windows_profitable_pct',
@@ -3278,12 +3518,22 @@ const TABLE_HIDDEN_METRICS = new Set([
   'blocked_signals',
   'executed_signals',
   'signal_noise_pct',
+  // Case-1 signal lens (per-signal forward-return probe) is EVAL-only — most runs never carry it, so as
+  // generic columns it's just a wall of "—". It lives in the run detail's per-action section, not the table.
+  'signal_expectancy',
+  'signal_hit_rate',
+  'signal_coverage',
+  'signal_count',
+  'signal_horizon',
   // OOS return statistics (Sharpe/skew/kurtosis/n) feed the Wave-2 PSR/DSR verdict layer — detail-only,
   // too granular for the table.
   'oos_sharpe',
   'oos_n_obs',
   'oos_ret_skew',
   'oos_ret_kurt',
+  // Drawdown is shown in the run DETAIL (+ the scorecard gate), but kept OUT of the table: most of the
+  // historical corpus predates it, so a column would be a wall of "—". Add it back if it becomes near-universal.
+  'max_drawdown_pct',
   ...RETIRED_METRICS,
 ])
 function metricLabel(mk) {
@@ -3564,11 +3814,6 @@ function sortRuns(runs) {
     return String(va).localeCompare(String(vb)) * dir
   })
 }
-// A run is "bad" per the user-editable definition (which criteria to drop: failed / health-flagged /
-// under-traded). The Hide-bad toggle drops these; the definition is edited via the chip and persisted.
-function runIsBad(r) {
-  return window.BadRuns.isBadRun(badRunDefCache, r)
-}
 function runVersionOf(r) {
   return String((r.summary && r.summary.pipelineVersion) || '1.0')
 }
@@ -3695,7 +3940,7 @@ const RUN_STATUS_FILTERS = {
   },
 }
 // The filters that push DOWN to the server query: lever-equals, pipeline version, status, and the pushable
-// numeric rules. Text search, Hide-bad, vs-hold rules, and a group-by drill stay client-side.
+// numeric rules. Text search, vs-hold rules, and a group-by drill stay client-side.
 function buildRunsServerWhere() {
   const preds = []
   for (const [lever, val] of Object.entries(runsLeverFilter)) {
@@ -3710,18 +3955,7 @@ function buildRunsServerWhere() {
     const field = customRuleServerField(rule.field)
     if (field) preds.push({ field, op: rule.op, value: rule.value })
   }
-  // Hide-bad is an internal criterion, pushed server-side like the custom rules so each page stays
-  // full instead of being thinned after the fact. An all-disabled definition yields no predicate.
-  if (runsHideBad) {
-    const bad = runsHideBadWhere()
-    if (bad) preds.push(bad)
-  }
   return preds.length ? { and: preds } : undefined
-}
-// The server-side negation of the bad-run definition: keep the good runs so each page stays full instead
-// of being thinned client-side. Built from the SAME definition as runIsBad (shared badRuns.js module).
-function runsHideBadWhere() {
-  return window.BadRuns.badRunWhere(badRunDefCache)
 }
 // Server ordering for the flat view. The "Ran at" column must sort by the run's actual ran-at (what
 // it displays: provenance.ranAt, else ranAt) — NOT the entity's updated_at, which a later judge/eval
@@ -3762,6 +3996,11 @@ function hasClientOnlyRunsFilter() {
   return customRulesCache.some((rule) => rule.active && !customRuleServerField(rule.field))
 }
 function runsServerPaged() {
+  // In-memory regime (once LOADED): the whole corpus is in memory, so the Runs table always filters/sorts/
+  // paginates it client-side (instant) — never server-paged. Requiring corpusLoaded means the brief pre-load
+  // window falls back to the safe server-paged path rather than paginating an empty cache. Server-paging is the
+  // steady state only for the 'paged' (huge-corpus) regime.
+  if (corpusMode === 'memory' && corpusLoaded) return false
   return runsViewMode === 'runs' && !runsFilterKeys && !hasClientOnlyRunsFilter()
 }
 // Resolve a run by key from the current page cache, falling back to records stashed when a run was
@@ -3847,7 +4086,6 @@ function warmRunsForRender(keys, rerender) {
 }
 function applyRunsFilters(runs) {
   let out = runsFilterKeys ? runs.filter((r) => runsFilterKeys.has(r.key)) : runs
-  if (runsHideBad) out = out.filter((r) => !runIsBad(r))
   if (runsVersionFilter) out = out.filter((r) => runVersionOf(r) === runsVersionFilter)
   if (RUN_STATUS_FILTERS[runsStatusFilter])
     out = out.filter(RUN_STATUS_FILTERS[runsStatusFilter].test)
@@ -3874,7 +4112,7 @@ function applyRunsFilters(runs) {
   return applyRunsTextFilter(out)
 }
 // The free-text search over key + config JSON — split out so the curated Favorites view can search WITHOUT
-// the exploratory filters (Hide-bad / status / lever / custom rules) that must never drop an explicit pin.
+// the exploratory filters (status / lever / custom rules) that must never drop an explicit pin.
 function applyRunsTextFilter(runs) {
   const q = runsTextFilter.trim().toLowerCase()
   if (!q) return runs
@@ -4064,71 +4302,6 @@ async function submitCustomRulePopup() {
   runsPage = 0
   refreshRuns()
 }
-// The editor for the bad-run DEFINITION — the list of criteria the Hide-bad toggle drops. Each is a
-// checkbox; the under-trade criterion also carries its threshold. Persisted per project on Save.
-function openBadRunEditor() {
-  renderBadRunEditor()
-}
-function closeBadRunEditor() {
-  const m = byId('bad-run-modal')
-  if (m) m.hidden = true
-}
-function renderBadRunEditor() {
-  const def = window.BadRuns.normalizeBadRunDefinition(badRunDefCache)
-  let modal = byId('bad-run-modal')
-  if (!modal) {
-    modal = document.createElement('div')
-    modal.id = 'bad-run-modal'
-    modal.className = 'chart-modal'
-    document.body.appendChild(modal)
-    modal.addEventListener('click', (event) => {
-      if (event.target === modal || event.target.closest('[data-bad-cancel]'))
-        return closeBadRunEditor()
-    })
-    modal.addEventListener('submit', (event) => {
-      if (event.target.closest('#bad-run-form')) {
-        event.preventDefault()
-        submitBadRunEditor()
-      }
-    })
-  }
-  modal.innerHTML = `<div class="chart-modal__backdrop" data-bad-cancel></div>
-    <div class="chart-modal__panel custom-rule-panel" role="dialog" aria-label="Edit bad-run definition">
-      <div class="chart-modal__head">
-        <strong>What counts as a bad run</strong>
-        <button type="button" class="icon-btn" data-bad-cancel title="Close" aria-label="Close">✕</button>
-      </div>
-      <form id="bad-run-form" class="custom-rule-form">
-        <p class="card-sub">The Hide-bad toggle drops runs matching any ticked criterion. These aren't a real test of a setup.</p>
-        <label class="bad-run-crit"><input type="checkbox" id="bad-failed"${def.failed ? ' checked' : ''} /> Failed / errored runs</label>
-        <label class="bad-run-crit"><input type="checkbox" id="bad-degenerate"${def.degenerate ? ' checked' : ''} /> Health-flagged (degenerate — degenerate policy, NaN metrics)</label>
-        <label class="bad-run-crit"><input type="checkbox" id="bad-mintrades-on"${def.minTrades !== null ? ' checked' : ''} /> Under-traded — fewer than or equal to
-          <input type="number" id="bad-mintrades" min="0" step="1" value="${escapeHtml(String(def.minTrades === null ? window.BadRuns.DEFAULT_MIN_TRADES : def.minTrades))}" aria-label="Minimum trades threshold" /> trades</label>
-        <div class="custom-rule-actions">
-          <button type="button" class="ghost-btn" data-bad-cancel>Cancel</button>
-          <button type="submit" class="ghost-btn is-primary">Save</button>
-        </div>
-      </form>
-    </div>`
-  modal.hidden = false
-}
-async function submitBadRunEditor() {
-  const minOn = byId('bad-mintrades-on')
-  const minEl = byId('bad-mintrades')
-  const minVal =
-    minEl && Number.isFinite(Number(minEl.value))
-      ? Number(minEl.value)
-      : window.BadRuns.DEFAULT_MIN_TRADES
-  const def = {
-    failed: !!(byId('bad-failed') && byId('bad-failed').checked),
-    degenerate: !!(byId('bad-degenerate') && byId('bad-degenerate').checked),
-    minTrades: minOn && minOn.checked ? minVal : null,
-  }
-  await saveBadRunDefinition(def)
-  closeBadRunEditor()
-  runsPage = 0
-  refreshRuns()
-}
 function runsToolbarHtml(shownCount, total) {
   // Lever choice dropdowns + the pipeline-version dropdown live in the collapsible panel.
   // Each carries `is-changed` (highlighted) when it has a non-default selection; collapsed,
@@ -4215,7 +4388,7 @@ function runsToolbarHtml(shownCount, total) {
     <div class="runs-dropdowns-body">${statusFilter}${reliabilityFilter}${scorecardFilter}${versionFilter}${leverDropdowns}</div>
   </div>`
 
-  // Favorites is a CURATED pin list — the exploratory filters (Hide-bad / status / lever / custom rules) don't
+  // Favorites is a CURATED pin list — the exploratory filters (status / lever / custom rules) don't
   // apply there (they'd hide members), so only the text search shows; everywhere else the full filter row shows.
   const selectionView = runsViewMode === 'selection'
   const curated = runsViewMode === 'favorites' || selectionView
@@ -4234,7 +4407,6 @@ function runsToolbarHtml(shownCount, total) {
     ${curated ? '' : dropdownsPanel}
     <div class="runs-filters">
       <input type="search" id="runs-filter-text" class="runs-filter-text" placeholder="filter config / key…" value="${escapeHtml(runsTextFilter)}" />
-      ${curated ? '' : hideBadChipHtml()}
       ${curated ? '' : customTogglesHtml()}
       <span class="runs-count">${shownCount}/${total} runs${label}</span>
       ${active ? '<button type="button" id="runs-filter-clear" class="ghost-btn">clear</button>' : ''}
@@ -4278,21 +4450,6 @@ function runsViewModeHtml() {
         )
       : ''
   return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}${robustBtn}${selBtn}</div>`
-}
-// The Hide-bad control: a chip like the custom-filter chips — the checkbox toggles it on/off; clicking the
-// chip body opens the editor for WHAT counts as bad (failed / health-flagged / under-traded), since badness
-// is a LIST of criteria, not a single rule.
-function hideBadChipHtml() {
-  const def = window.BadRuns.normalizeBadRunDefinition(badRunDefCache)
-  const parts = []
-  if (def.failed) parts.push('failed')
-  if (def.degenerate) parts.push('degenerate')
-  if (def.minTrades !== null) parts.push(`≤${def.minTrades} trades`)
-  const summary = parts.length ? parts.join(' · ') : 'no criteria'
-  return `<span class="filter-chip${runsHideBad ? ' is-on' : ''}" data-bad-edit title="Click to edit what counts as a bad run">
-      <input type="checkbox" class="filter-chip-cb" id="runs-hide-bad"${runsHideBad ? ' checked' : ''} aria-label="Hide bad runs" />
-      <span class="filter-chip-text">Hide bad runs <span class="filter-chip-sub">(${escapeHtml(summary)})</span></span>
-    </span>`
 }
 function toggleRunsSort(id) {
   if (runsSortKey === id) runsSortDir = runsSortDir === 'asc' ? 'desc' : 'asc'
@@ -4411,7 +4568,7 @@ function comparisonCellHtml(col, stat) {
 }
 // The pooled-comparison control row: pick which criterion RANKS the datasets/environments (and its
 // direction), plus the Averages/Full cell toggle. The standard Runs filter bar (runsToolbarHtml) is rendered
-// ABOVE this, so every Runs filter — search, lever/status/version dropdowns, hide-bad — narrows the pool.
+// ABOVE this, so every Runs filter — search, lever/status/version dropdowns, custom rules — narrows the pool.
 function comparisonRankControlsHtml(axis, cols) {
   const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
   const rankOpts = [
@@ -4454,7 +4611,7 @@ function renderComparisonView(body) {
     return
   }
   // Pool every run the standard filters keep, minus the non-comparable (failed/invalid, or missing this
-  // axis's levers so it can't be placed). Hide-bad + the filter dropdowns/search flow through applyRunsFilters.
+  // axis's levers so it can't be placed). The filter dropdowns/search flow through applyRunsFilters.
   const axisKeys = window.Comparison.axisLeverKeys(manifest, axis)
   const filtered = applyRunsFilters(runsCache).filter(
     (r) =>
@@ -4674,7 +4831,7 @@ function renderRunsTable() {
   const base = curatedView ? curatedBase : runsCache
   // Server total when the flat view paginates server-side; otherwise the loaded set's size.
   const total = serverPaged ? runsTotalCount : base.length
-  // A curated list is deliberate, so the exploratory filters (Hide-bad / status / lever / custom rules) never
+  // A curated list is deliberate, so the exploratory filters (status / lever / custom rules) never
   // drop a member — only the text search narrows it.
   const filtered = curatedView ? applyRunsTextFilter(base) : applyRunsFilters(base)
   if (spark) {
@@ -4702,7 +4859,7 @@ function renderRunsTable() {
   }
   const toolbar = runsToolbarHtml(filtered.length, total)
   // Server-paged: the backend already filtered + sorted + sliced this page, so render it as-is
-  // (client text/Hide-bad already refined `filtered`). Otherwise (group-by drill) sort + slice here.
+  // (client text search already refined `filtered`). Otherwise (group-by drill) sort + slice here.
   let shown
   let pageCount
   let start
@@ -4793,20 +4950,15 @@ function disarmRunsDelete() {
 }
 async function renderRuns() {
   if (!byId('runs-body'))
-    return // Custom rules + the bad-run definition drive the server-side `where`, so they must be loaded BEFORE
-    // readRuns builds it.
-  ;[customRulesCache, favoritesCache, badRunDefCache] = await Promise.all([
-    readCustomRules(),
-    readFavorites(),
-    readBadRunDefinition(),
-  ])
+    return // Custom rules drive the server-side `where`, so they must be loaded BEFORE readRuns builds it.
+  await ensureCorpus() // load the corpus ONCE (in-memory regime) before reading runs; idempotent thereafter
+  ;[customRulesCache, favoritesCache] = await Promise.all([readCustomRules(), readFavorites()])
   ;[
     runsCache,
     verdictsCache,
     judgementSummary,
     evaluationsCache,
     crossTestsCache,
-    continuedLineageCache,
     dismissedFailures,
     unrunnableCache,
     reliabilityCache,
@@ -4816,23 +4968,37 @@ async function renderRuns() {
     readJudgement(),
     readEvaluations(),
     readCrossTests(),
-    readContinuedLineage(),
     readDismissedFailures(),
     readUnrunnable(),
     readReliability(),
   ])
+  // Continued-lineage is NOT loaded here: it's a whole-corpus projected read used ONLY by the run-detail
+  // Continue-training section, so pulling it on every renderRuns (i.e. every settle) re-scanned all ~23k runs
+  // for nothing. It's now lazy — fetched once when a continue-training run detail opens (ensureContinuedLineage).
   computeReliabilityHeuristics()
   renderJudgeControls()
   renderRunsLive()
-  await markRunsSeen()
   renderRunsTable()
+  // AFTER the table renders (so `runsVisibleKeys` reflects the page just shown) mark those rows seen.
+  await markRunsSeen()
 }
 // Re-fetch only the runs for the current view/filters/sort/page and re-render the table. Server-side
 // filtering + pagination mean a filter/sort/page/view change needs a fresh query, not just a client
 // re-render (the other caches — verdicts/notes/etc. — are unaffected, so they aren't refetched).
 async function refreshRuns() {
   if (!byId('runs-body')) return
-  runsCache = await readRuns()
+  // A client-only filter drives readRuns into a full-corpus scan (~40 paged round-trips). While a campaign is
+  // writing runs the backend is busy, so a page can time out and the scan THROWS — leaving the table blank/stale
+  // with no explanation (the "selecting a 2nd filter shows nothing" symptom). Catch it: keep the prior rows and
+  // surface a retry hint instead of silently blanking.
+  let next
+  try {
+    next = await readRuns()
+  } catch {
+    showToast('Couldn’t load the full set (the backend is busy) — try the filter again.')
+    return
+  }
+  runsCache = next
   // The reliability filter forces the UNPAGED path, so runsCache now holds the full matching set — (re)score
   // the heuristic baseline over it (when no global-Refresh snapshot already covers everything) so the filter
   // reflects every run, not just the current page.
@@ -4841,6 +5007,30 @@ async function refreshRuns() {
   // Close the xAI analyse→run→re-analyse loop: when records change (e.g. a launched batch lands), the
   // open xAI tab recomputes its effects + recommendations off the fresh runs.
   if (activeTabId === 'xai') renderXai()
+}
+// Trailing-debounced text-filter re-render — reads the live caret at fire time so a re-render that rebuilds the
+// toolbar doesn't drop the cursor. See the runs-filter-text input handler.
+function debounceRunsTextRender() {
+  if (runsTextRenderTimer) clearTimeout(runsTextRenderTimer)
+  runsTextRenderTimer = setTimeout(() => {
+    runsTextRenderTimer = 0
+    // Bail if the user navigated away before the trailing fire — rendering into the hidden Runs panel would be
+    // a wasted O(pool) pass and the trailing focus() would steal focus from wherever they went.
+    if (activeTabId !== 'runs' || !byId('runs-filter-text')) return
+    const before = byId('runs-filter-text')
+    const pos = before ? before.selectionStart : null
+    renderRunsTable()
+    const el = byId('runs-filter-text')
+    if (el) {
+      el.focus()
+      if (pos != null)
+        try {
+          el.setSelectionRange(pos, pos)
+        } catch {
+          // some input types disallow setSelectionRange — focus alone is fine
+        }
+    }
+  }, 160)
 }
 // A hypothesis's canonical identity = the spec hash (matching how the engine hashes a run's config),
 // matching the backend `hashTrainingConfig` so the same spec dedupes across viewer + LLM/paper sources.
@@ -9006,18 +9196,45 @@ async function xaiLaunchBatch(specs, label, opts = {}) {
     if (!opts.silent) showToast('Already queued this session — see the Activity tab.')
     return
   }
-  try {
-    for (const spec of pending) {
-      await startOrEnqueue('train', trainerComputeParams({ spec, concurrency }), label)
-      xaiLaunchedSpecs.add(xaiSpecKey(spec)) // lock its button + Run-all until its runs land
+  // Lock EVERY spec's button up front (not one-by-one as each lands), then reflect it once — so a second
+  // Run-all click while a big batch is still draining in the background can't re-fire the not-yet-launched tail.
+  for (const spec of pending) xaiLaunchedSpecs.add(xaiSpecKey(spec))
+  if (activeTabId === 'xai') renderXai()
+  const many = pending.length > 1
+  if (!opts.silent && many)
+    showToast(`Queuing ${pending.length} runs in the background — follow them in the Activity tab.`)
+  let launched = 0
+  let failed = 0
+  const epoch = projectEpoch
+  for (const spec of pending) {
+    // A big paced batch can span seconds; if the user switches project mid-drain, stop — don't launch the
+    // tail into a different project's context (trainerComputeParams reads the now-current project).
+    if (epoch !== projectEpoch) break
+    try {
+      const res = await startOrEnqueue('train', trainerComputeParams({ spec, concurrency }), label)
+      if (res && res.started) launched++
+      else {
+        failed++
+        xaiLaunchedSpecs.delete(xaiSpecKey(spec)) // a rejected launch stays retryable this session
+      }
+    } catch {
+      failed++
+      xaiLaunchedSpecs.delete(xaiSpecKey(spec))
     }
-    if (activeTabId === 'xai') renderXai() // reflect the now-locked buttons
-    if (!opts.silent)
-      showToast(
-        `Queued ${pending.length} run${pending.length === 1 ? '' : 's'} — see the Activity tab.`,
-      )
-  } catch {
+    // Yield between launches so the bridge can service renders + data reads — a tight await-loop over hundreds
+    // of specs saturated it and froze the whole app. The Activity tab reflects each as it's queued regardless.
+    if (many) await sleep(XAI_LAUNCH_PACING_MS)
+  }
+  if (epoch !== projectEpoch) return
+  if (activeTabId === 'xai') renderXai()
+  // A total failure is surfaced even for a `silent` batch (its callers show an optimistic toast, so swallowing
+  // the error would leave a false "queued" impression); only the SUCCESS toast is suppressed when silent.
+  if (failed && !launched) {
     setStatusLine('xai-status', 'Could not launch the batch — please try again.', true)
+  } else if (!opts.silent) {
+    showToast(
+      `Queued ${launched} run${launched === 1 ? '' : 's'}${failed ? ` (${failed} couldn’t start)` : ''} — see the Activity tab.`,
+    )
   }
 }
 // Toggle the current-run by-axis table sort — mirrors toggleComparisonSort: same key flips asc/desc, a new
@@ -9174,10 +9391,22 @@ async function loadXaiRunAnalyses() {
   }
 }
 async function refreshXai() {
-  if (xaiFocusKey) await loadXaiNarrative(xaiFocusKey)
-  await loadXaiSuggestions()
-  await loadXaiConfigSpace()
-  await loadXaiRunAnalyses()
+  // Paint the shell FIRST so the tab is never blank while its data loads — then render again once the loads
+  // land. Guard the loads so a single hung/rejected read can't leave the whole tab empty (the "xAI shows
+  // nothing until I visit other tabs" bug: renderXai only ran AFTER all four awaits, so any stall blanked it).
+  renderXai()
+  try {
+    // xAI analyses the WHOLE run space (xaiRunPool = allRunsCache), so it needs the full corpus — load it via
+    // the shared one-time loader (no separate scan) then re-render, instead of an empty analysis until a Refresh.
+    await ensureCorpus()
+    renderXai()
+    if (xaiFocusKey) await loadXaiNarrative(xaiFocusKey)
+    await loadXaiSuggestions()
+    await loadXaiConfigSpace()
+    await loadXaiRunAnalyses()
+  } catch {
+    // A failed load leaves the shell + whatever loaded; the user can Refresh to retry.
+  }
   renderXai()
 }
 async function onXaiNarrateClick() {
@@ -9440,6 +9669,7 @@ function renderRunDetail(key) {
     <div class="card-scroll">
     ${failed ? failureDetailHtml(s, run.key) : ''}
     ${flags.length ? `<h3>Health flags</h3><p class="badges-row">${flagChips}</p>` : ''}
+    ${detailAnalyzeRowHtml(run, { showVerdict, showEval, reliability })}
     ${showVerdict ? reliabilitySectionHtml(run, reliability) : ''}
     ${showVerdict ? verdictSectionHtml(verdictsCache.get(run.key)) : ''}
     ${showEval ? evaluationSectionHtml(run) : ''}
@@ -9463,6 +9693,9 @@ function renderRunDetail(key) {
   setHtml(panel, html)
   panel.hidden = false
   syncRunsMdLayout()
+  // Continue-training section joins over the whole-corpus lineage — fetch it lazily the first time a detail
+  // that needs it opens (then it re-renders this detail with the filled-in parent/children matrix).
+  if (continueTrainUiEnabled() && !continuedLineageLoaded) void ensureContinuedLineage()
 }
 // Split the Runs master-detail into two panes only when a detail/compare is open;
 // otherwise the list spans the full width.
@@ -9530,6 +9763,38 @@ function reliabilitySectionHtml(run, reliability) {
   return `<h3>Reliability ${badge} <span class="card-sub">${escapeHtml(srcLabel)}</span></h3>
     ${body ? `<p class="card-sub">${body}${level !== 'ok' ? ' Verify with fresh seeds and across more datasets before trusting it.' : ''}</p>` : ''}
     <p class="badges-row">${actions}</p>`
+}
+// A compact "Analyze this run" row at the TOP of the run detail: one-click buttons for each per-run analysis
+// that is APPLICABLE but not yet computed and not already in flight — so the analyses the user asked to be
+// one-click (Reliability / Eval / Robustness, plus the LLM Judge verdict) are reachable without scrolling to
+// each section's own button. Empty string when nothing is missing/available (the sections still tell the story).
+function detailAnalyzeRowHtml(run, ctx) {
+  const k = escapeHtml(run.key)
+  const checkpoint = (run.summary.artifacts && run.summary.artifacts.checkpoint) || ''
+  const btns = []
+  if (ctx.showVerdict && !verdictsCache.get(run.key) && !isRunActivityInFlight('judge', run.key))
+    btns.push(
+      `<button type="button" class="ghost-btn" data-action="judge-run" data-key="${k}" title="Score this run 0–100 with the LLM verdict (weighs stability + how promising the config is)">⚖ Judge</button>`,
+    )
+  if (
+    hasProbabilisticLever() &&
+    ctx.showVerdict &&
+    ctx.reliability.source !== 'llm' &&
+    !isRunActivityInFlight('xai-narrate', run.key)
+  )
+    btns.push(
+      `<button type="button" class="ghost-btn" data-action="reliability-verify" data-key="${k}" title="Ask the AI to verify whether this run's edge is a genuine learned signal or threshold-tuned luck">◈ Verify reliability</button>`,
+    )
+  if (ctx.showEval && checkpoint && !evaluationsCache.get(run.key) && !evaluatingKeys.has(run.key))
+    btns.push(
+      `<button type="button" class="ghost-btn" data-action="evaluate" data-key="${k}" title="Re-test the saved checkpoint out-of-sample">▶ Evaluate</button>`,
+    )
+  if (crossTestUiEnabled() && checkpoint && !crossTestsCache.get(run.key) && !crossTestingKeys.has(run.key))
+    btns.push(
+      `<button type="button" class="ghost-btn" data-action="cross-test" data-key="${k}" title="Replay the checkpoint on assets/windows it wasn’t trained on — a robustness read, no retraining">⇄ Robustness</button>`,
+    )
+  if (!btns.length) return ''
+  return `<div class="analyze-row"><span class="analyze-row__label">Analyze:</span>${btns.join('')}<p id="run-analyze-status" class="form-status" role="status" hidden></p></div>`
 }
 function closeRunDetail() {
   selectedRunKey = null
@@ -9964,6 +10229,63 @@ async function onJudgeClick() {
     }
   }
 }
+// Whether a per-run analysis activity is already queued/running for this key — so the detail's Analyze row
+// hides its button and the handler no-ops a re-click (judge + xai-narrate have no per-key spinner set of their
+// own, unlike evaluate/cross-test; launchActivity registers the tracking entry synchronously, so this also
+// blocks a fast double-click). `runKeys` (judge, an array) vs `runKey` (narrate, scalar) per the launch params.
+function isRunActivityInFlight(activityType, key) {
+  return [...liveActivities.values()].some((a) => {
+    if (!a.item || a.item.activityType !== activityType) return false
+    const p = a.item.params || {}
+    return Array.isArray(p.runKeys) ? p.runKeys.includes(key) : p.runKey === key
+  })
+}
+// Judge ONE run from its detail (the multi-select onJudgeClick's per-run twin) — the LLM verdict is the
+// "get a verdict" one-click the detail's Analyze row offers. Uses trainerActivityParams (judge takes no
+// compute target); launchActivity observes it and refreshes verdicts on settle.
+async function onJudgeRun(key) {
+  if (!embedded()) {
+    setStatusLine('run-analyze-status', 'Open inside the Overseer to judge runs.', false)
+    return
+  }
+  if (!findRun(key) || verdictsCache.get(key)) return
+  if (isRunActivityInFlight('judge', key)) {
+    setStatusLine('run-analyze-status', 'Already judging this run.')
+    return
+  }
+  const epoch = projectEpoch
+  try {
+    await startOrEnqueue('judge', trainerActivityParams({ runKeys: [key] }), `Judge ${shortKey(key)}`)
+    if (selectedRunKey === key && epoch === projectEpoch) renderRunDetail(key)
+  } catch {
+    if (epoch === projectEpoch)
+      setStatusLine('run-analyze-status', 'Could not start judging — please try again.', true)
+  }
+}
+// Generate the LLM xAI narrative for ONE run — its side effect is the persisted LLM reliability verdict, so
+// this is the detail's one-click "verify reliability with AI". Mirrors onXaiNarrateClick but keys on an
+// explicit run rather than the xAI tab's focus, so it works straight from the run detail.
+async function narrateRun(key) {
+  if (narrating || !key || !embedded() || isRunActivityInFlight('xai-narrate', key)) return
+  const criterion = currentXaiCriterion()
+  const sibling = xaiBestSibling(findRun(key))
+  try {
+    await startOrEnqueue(
+      'xai-narrate',
+      trainerActivityParams({
+        runKey: key,
+        siblingKey: sibling ? sibling.key : undefined,
+        criterionKey: criterion.key,
+        criterionDir: criterion.direction,
+        criterionLabel: criterion.label,
+      }),
+      `Verify ${shortKey(key)}`,
+    )
+    if (selectedRunKey === key) renderRunDetail(key)
+  } catch {
+    if (selectedRunKey === key) setStatusLine('run-analyze-status', 'Could not start the AI check — please try again.', true)
+  }
+}
 // Re-test one run's saved checkpoint via the quick 'evaluate' activity (no
 // LLM): start it, observe until it settles, then re-read the evaluation record
 // through renderRuns so the table chip and the detail section both refresh.
@@ -10065,8 +10387,10 @@ async function onContinueTrainRun(key) {
   } finally {
     continueTrainingKeys.delete(key)
     if (epoch === projectEpoch) {
-      ;[runsCache, continuedLineageCache] = await Promise.all([readRuns(), readContinuedLineage()])
+      runsCache = await readRuns()
       renderRunsTable()
+      // A continue action may add a lineage child — force a fresh lineage pull (re-renders the detail itself).
+      await ensureContinuedLineage(true)
       if (selectedRunKey === key) renderRunDetail(key)
     }
   }
@@ -10119,12 +10443,6 @@ function setupRuns() {
       const editChip = event.target.closest('[data-rule-edit]')
       if (editChip && !event.target.closest('.filter-chip-cb')) {
         openCustomRulePopup(editChip.dataset.ruleEdit)
-        return
-      }
-      // The Hide-bad chip: the checkbox toggles it (handled below); a click on the chip BODY edits the def.
-      const badChip = event.target.closest('[data-bad-edit]')
-      if (badChip && !event.target.closest('.filter-chip-cb')) {
-        openBadRunEditor()
         return
       }
       const viewBtn = event.target.closest('.runs-view-btn')
@@ -10233,12 +10551,6 @@ function setupRuns() {
         renderRunsTable()
         return
       }
-      if (event.target.id === 'runs-hide-bad') {
-        runsHideBad = event.target.checked
-        runsPage = 0
-        refreshRuns()
-        return
-      }
       const ruleCb = event.target.closest('[data-rule-toggle]')
       if (ruleCb) {
         const rule = customRulesCache.find((r) => r.id === ruleCb.dataset.ruleToggle)
@@ -10253,23 +10565,19 @@ function setupRuns() {
     body.addEventListener('input', (event) => {
       if (event.target.id !== 'runs-filter-text') return
       runsTextFilter = event.target.value
-      const pos = event.target.selectionStart
-      renderRunsTable()
-      const el = byId('runs-filter-text')
-      if (el) {
-        el.focus()
-        try {
-          el.setSelectionRange(pos, pos)
-        } catch {
-          // some input types disallow setSelectionRange — focus alone is fine
-        }
-      }
+      // Debounce the re-render: text is a client-only filter, so each keystroke re-filters + re-sorts the whole
+      // in-memory set (up to ~20k rows). Rendering per keystroke lags badly on a large corpus; coalesce them.
+      debounceRunsTextRender()
     })
   }
   const panel = byId('run-detail')
   if (panel) {
     panel.addEventListener('click', (event) => {
       if (event.target.closest('#run-detail-close')) closeRunDetail()
+      const judgeRunBtn = event.target.closest('button[data-action="judge-run"]')
+      if (judgeRunBtn) onJudgeRun(judgeRunBtn.dataset.key)
+      const relVerifyBtn = event.target.closest('button[data-action="reliability-verify"]')
+      if (relVerifyBtn) narrateRun(relVerifyBtn.dataset.key)
       const evalBtn = event.target.closest('button[data-action="evaluate"]')
       if (evalBtn) onEvaluateRun(evalBtn.dataset.key)
       const xtBtn = event.target.closest('button[data-action="cross-test"]')
@@ -10307,7 +10615,6 @@ function setupRuns() {
       if (event.key === 'Escape') {
         closeChartModal()
         closeCustomRulePopup()
-        closeBadRunEditor()
         closeConsolidateModal()
         closeDeviceTimingsModal()
         closeXaiSweepPopup()
@@ -11254,12 +11561,15 @@ async function renderVersions() {
     setHtml(body, '<div class="empty-hint">Open inside the Overseer to see versions.</div>')
     return
   }
-  runsCache = await readRuns()
+  // Per-version counts need the WHOLE corpus, not a Runs page — load it via the shared one-time loader (no
+  // separate scan, and it no longer clobbers the shared runsCache the way a per-visit readRuns did).
+  await ensureCorpus()
+  const pool = allRunsCache.length ? allRunsCache : runsCache
   const changelog =
     manifest && Array.isArray(manifest.pipelineChangelog) ? manifest.pipelineChangelog : []
   const current = String((manifest && manifest.pipelineVersion) || '1')
   const byVersion = new Map()
-  for (const r of runsCache) {
+  for (const r of pool) {
     const v = runVersionOf(r)
     if (!byVersion.has(v)) byVersion.set(v, [])
     byVersion.get(v).push(r)
@@ -11576,6 +11886,9 @@ async function renderEnvironments() {
     )
     return
   }
+  // The environments record type is tiny (a handful of user presets), so this read is cheap — keep it so a
+  // save/edit/delete/set-default is always reflected. The "always loading" flash it caused was the tab SPINNER
+  // (removed from TAB_LOADING_LABEL), not this fetch.
   environmentsCache = await readEnvironments()
   renderEnvironmentsTable()
 }
@@ -11865,8 +12178,11 @@ async function renderDatasets() {
     )
     return
   }
+  // The datasets record type is tiny (a handful of presets) — keep this cheap read so a save/edit/delete is
+  // always reflected (the flash was the tab SPINNER, removed from TAB_LOADING_LABEL). The data CATALOG, by
+  // contrast, is a single (potentially large) record used only to dim data-less lever values — load it once.
   datasetsCache = await readDatasets()
-  await readDataCatalog() // populate dataCatalogCache so the asset lever card can dim data-less values
+  if (dataCatalogCache == null) await readDataCatalog()
   renderDatasetsTable()
 }
 
@@ -12381,6 +12697,8 @@ function setupDatasets() {
 // --- Scorecards tab (named gates+fitness; the active one drives the Runs table) ----
 // The card being created/edited (null ⇒ the list view).
 let scorecardDraft = null
+// Monotonic token so a slow editor-open (awaiting a run sample) can't overwrite a newer open.
+let scorecardOpenToken = 0
 const SCORECARD_GATE_OPS = ['>', '>=', '<', '<=', '==', '!=']
 
 function newScorecardId() {
@@ -12412,7 +12730,9 @@ function normalizeActiveScorecardId() {
   }
 }
 function setScorecardStatus(msg, isError) {
-  const el = byId('scorecards-status')
+  // Prefer the modal's own status line (present while the editor is open) so save-validation errors show
+  // inside the popup; fall back to the tab-level status.
+  const el = byId('scorecards-form-status') || byId('scorecards-status')
   if (!el) return
   el.textContent = msg || ''
   el.hidden = !msg
@@ -12423,7 +12743,9 @@ function setScorecardStatus(msg, isError) {
 // the current run set.
 function scorecardMetricOptions(draft) {
   const keys = new Set(['objective'])
-  for (const r of allRunsCache || []) {
+  // Union metric keys from whichever run cache is populated (the Scorecards tab loads a sample on open, but
+  // a prior global Refresh or Runs-tab visit may have filled allRunsCache) — so the picker lists real metrics.
+  for (const r of [...(allRunsCache || []), ...(runsCache || [])]) {
     const m = r.summary && r.summary.metrics
     if (m) for (const k of Object.keys(m)) keys.add(k)
   }
@@ -12466,8 +12788,11 @@ function scorecardListItemHtml(card) {
 }
 function scorecardEditorHtml(draft) {
   const metrics = scorecardMetricOptions(draft)
+  const datalist = `<datalist id="sc-metric-list">${metrics.map((m) => `<option value="${escapeHtml(m)}"></option>`).join('')}</datalist>`
+  // Free-text input backed by a datalist of the project's real metrics — populated as suggestions, yet the
+  // user can type any metric key (a run page may not carry every one).
   const metricSel = (name, sel) =>
-    `<select data-sc-${name}="metric">${metrics.map((m) => `<option value="${escapeHtml(m)}"${m === sel ? ' selected' : ''}>${escapeHtml(m)}</option>`).join('')}</select>`
+    `<input class="sc-metric-input" list="sc-metric-list" data-sc-${name}="metric" value="${escapeHtml(sel || '')}" placeholder="metric" />`
   const opSel = (sel) =>
     `<select data-sc-gate="op">${SCORECARD_GATE_OPS.map((o) => `<option value="${escapeHtml(o)}"${o === sel ? ' selected' : ''}>${escapeHtml(o)}</option>`).join('')}</select>`
   const cmpSel = (g) => {
@@ -12497,6 +12822,7 @@ function scorecardEditorHtml(draft) {
     )
     .join('')
   return `<div class="scorecard-editor">
+    ${datalist}
     <label class="sc-name-label">Name <input type="text" id="sc-name" value="${escapeHtml(draft.name || '')}" placeholder="e.g. Strict" /></label>
     <h3>Gates <span class="card-sub">— a run is ACCEPTED only if EVERY gate passes; a metric not on a run is skipped, not failed</span></h3>
     ${gateRows}
@@ -12506,14 +12832,14 @@ function scorecardEditorHtml(draft) {
     <button type="button" class="ghost-btn" data-sc-add-fit>+ Add fitness</button>
     <div class="form-actions">
       <button type="button" id="sc-save">Save</button>
-      <button type="button" class="ghost-btn" id="sc-cancel">Cancel</button>
+      <button type="button" class="ghost-btn" data-sc-form-cancel>Cancel</button>
     </div>
   </div>`
 }
 // Read the editor DOM back into the draft (called before any re-render and on save, so unsaved rows persist).
 function readScorecardForm() {
   if (!scorecardDraft) return
-  const body = byId('scorecards-body')
+  const body = byId('scorecard-modal')
   if (!body) return
   const nameEl = body.querySelector('#sc-name')
   if (nameEl) scorecardDraft.name = nameEl.value
@@ -12541,13 +12867,10 @@ function readScorecardForm() {
   })
   scorecardDraft.fitness = fitness
 }
+// The tab body ALWAYS shows the list; the editor lives in a modal.
 function renderScorecards() {
   const body = byId('scorecards-body')
   if (!body) return
-  if (scorecardDraft) {
-    setHtml(body, scorecardEditorHtml(scorecardDraft))
-    return
-  }
   setScorecardStatus('')
   if (!scorecardsCache.length) {
     setHtml(
@@ -12558,7 +12881,79 @@ function renderScorecards() {
   }
   setHtml(body, scorecardsCache.map(scorecardListItemHtml).join(''))
 }
-function openScorecardEditor(card, isClone) {
+// The lazily-created persistent modal that hosts the editor (mirrors datasetModal): one delegated listener
+// attached once to the outer div, innerHTML re-injected per open/re-render.
+function scorecardModal() {
+  let modal = byId('scorecard-modal')
+  if (modal) return modal
+  modal = document.createElement('div')
+  modal.id = 'scorecard-modal'
+  modal.className = 'chart-modal'
+  modal.hidden = true
+  document.body.appendChild(modal)
+  modal.addEventListener('click', (event) => {
+    const t = event.target
+    if (t === modal || t.closest('[data-sc-form-cancel]')) return void toggleScorecardForm(false)
+    if (t.closest('#sc-save')) return void onSaveScorecard()
+    if (t.closest('[data-sc-add-gate]')) {
+      readScorecardForm()
+      scorecardDraft.gates.push({ metric: 'objective', op: '>', value: 0 })
+      return void renderScorecardEditor()
+    }
+    if (t.closest('[data-sc-add-fit]')) {
+      readScorecardForm()
+      scorecardDraft.fitness.push({ metric: 'objective', direction: 'max' })
+      return void renderScorecardEditor()
+    }
+    const gr = t.closest('[data-sc-gate-remove]')
+    if (gr) {
+      readScorecardForm()
+      const rows = Array.from(modal.querySelectorAll('[data-sc-gate-row]'))
+      scorecardDraft.gates.splice(rows.indexOf(gr.closest('[data-sc-gate-row]')), 1)
+      return void renderScorecardEditor()
+    }
+    const fr = t.closest('[data-sc-fit-remove]')
+    if (fr) {
+      readScorecardForm()
+      const rows = Array.from(modal.querySelectorAll('[data-sc-fit-row]'))
+      scorecardDraft.fitness.splice(rows.indexOf(fr.closest('[data-sc-fit-row]')), 1)
+      return void renderScorecardEditor()
+    }
+  })
+  return modal
+}
+function renderScorecardEditor() {
+  const modal = byId('scorecard-modal')
+  const scroll = modal && modal.querySelector('.chart-modal__scroll')
+  if (scroll) setHtml(scroll, '<p id="scorecards-form-status" class="form-status" role="status" hidden></p>' + scorecardEditorHtml(scorecardDraft))
+}
+function toggleScorecardForm(show) {
+  const modal = scorecardModal()
+  if (!show) {
+    modal.hidden = true
+    modal.innerHTML = ''
+    scorecardDraft = null
+    return
+  }
+  const title = scorecardDraft && scorecardDraft.id ? 'Edit scorecard' : 'New scorecard'
+  modal.innerHTML = `<div class="chart-modal__backdrop" data-sc-form-cancel></div><div class="chart-modal__panel bundle-form-panel" role="dialog" aria-label="${title}"><div class="chart-modal__head"><strong>${title}</strong><button type="button" class="icon-btn" data-sc-form-cancel aria-label="Close">✕</button></div><div class="chart-modal__scroll"></div></div>`
+  renderScorecardEditor()
+  modal.hidden = false
+  const name = modal.querySelector('#sc-name')
+  if (name) name.focus()
+}
+async function openScorecardEditor(card, isClone) {
+  // Ensure a run sample is loaded so the metric picker has real suggestions even without a prior Refresh.
+  // Guard re-entry: if a newer open starts during the await, this stale one must not overwrite the draft.
+  const token = ++scorecardOpenToken
+  if (!allRunsCache.length && !runsCache.length) {
+    try {
+      runsCache = await queryRunRecords({ limit: 200 })
+    } catch {
+      /* keep going with whatever metrics the draft references */
+    }
+  }
+  if (token !== scorecardOpenToken) return
   const clone = (arr) => JSON.parse(JSON.stringify(arr || []))
   scorecardDraft = card
     ? {
@@ -12568,7 +12963,7 @@ function openScorecardEditor(card, isClone) {
         fitness: clone(card.fitness),
       }
     : { id: null, name: '', gates: [], fitness: [] }
-  renderScorecards()
+  toggleScorecardForm(true)
 }
 async function onSaveScorecard() {
   readScorecardForm()
@@ -12598,6 +12993,7 @@ async function onSaveScorecard() {
     return
   }
   scorecardDraft = null
+  toggleScorecardForm(false)
   renderScorecards()
   refreshRuns()
 }
@@ -12626,6 +13022,8 @@ function setupScorecards() {
   if (addToggle) addToggle.addEventListener('click', () => openScorecardEditor(null))
   const body = byId('scorecards-body')
   if (!body) return
+  // The tab body holds only the LIST; editor controls (add/remove row, save, cancel) are delegated on the
+  // modal container (see scorecardModal).
   body.addEventListener('click', (event) => {
     const t = event.target
     const activate = t.closest('button[data-sc-activate]')
@@ -12636,39 +13034,6 @@ function setupScorecards() {
     if (clone) return void openScorecardEditor(scorecardsCache.find((c) => c.id === clone.dataset.scClone), true)
     const del = t.closest('button[data-sc-delete]')
     if (del) return void onDeleteScorecard(del.dataset.scDelete)
-    if (t.closest('[data-sc-add-gate]')) {
-      readScorecardForm()
-      scorecardDraft.gates.push({ metric: 'objective', op: '>', value: 0 })
-      renderScorecards()
-      return
-    }
-    if (t.closest('[data-sc-add-fit]')) {
-      readScorecardForm()
-      scorecardDraft.fitness.push({ metric: 'objective', direction: 'max' })
-      renderScorecards()
-      return
-    }
-    const gr = t.closest('[data-sc-gate-remove]')
-    if (gr) {
-      readScorecardForm()
-      const rows = Array.from(body.querySelectorAll('[data-sc-gate-row]'))
-      scorecardDraft.gates.splice(rows.indexOf(gr.closest('[data-sc-gate-row]')), 1)
-      renderScorecards()
-      return
-    }
-    const fr = t.closest('[data-sc-fit-remove]')
-    if (fr) {
-      readScorecardForm()
-      const rows = Array.from(body.querySelectorAll('[data-sc-fit-row]'))
-      scorecardDraft.fitness.splice(rows.indexOf(fr.closest('[data-sc-fit-row]')), 1)
-      renderScorecards()
-      return
-    }
-    if (t.closest('#sc-save')) return void onSaveScorecard()
-    if (t.closest('#sc-cancel')) {
-      scorecardDraft = null
-      renderScorecards()
-    }
   })
 }
 
@@ -13865,9 +14230,13 @@ async function deleteRun(key) {
     return
   }
   await deleteRelatedRunRecords(key, run ? setupKeyForRun(run) : undefined)
-  runsCache = runsCache.filter((r) => r.key !== key)
+  // Drop it from the in-memory corpus too (else it reappears on the next read); keep runsCache === the corpus
+  // in the memory regime so every view (Runs/xAI/Exploration) loses the run at once, no rescan.
+  allRunsCache = allRunsCache.filter((r) => r.key !== key)
+  runsCache = corpusMode === 'memory' && corpusLoaded ? allRunsCache : runsCache.filter((r) => r.key !== key)
   runsCompareKeys.delete(key)
   forgetRun(key)
+  await pruneSeenKeys([key])
   if (selectedRunKey === key) closeRunDetail()
   await renderRuns()
 }
@@ -13896,11 +14265,16 @@ async function deleteSelectedRuns() {
     }
   }
   const removed = new Set(keys)
-  runsCache = runsCache.filter((r) => !removed.has(r.key))
+  allRunsCache = allRunsCache.filter((r) => !removed.has(r.key))
+  runsCache =
+    corpusMode === 'memory' && corpusLoaded
+      ? allRunsCache
+      : runsCache.filter((r) => !removed.has(r.key))
   for (const k of keys) {
     runsCompareKeys.delete(k)
     forgetRun(k)
   }
+  await pruneSeenKeys(keys)
   if (selectedRunKey && removed.has(selectedRunKey)) closeRunDetail()
   await renderRuns()
 }
@@ -16263,7 +16637,18 @@ async function runDerivedRefresh(mode) {
     }
     allRunsCache = allRuns
     seedRawCorpus(allRuns)
+    // A manual Refresh re-materialised the whole corpus in memory — keep the in-memory regime coherent so the
+    // Runs table + settle advance keep reading it (and don't fall back to a rescan).
+    if (corpusMode !== 'paged') {
+      corpusMode = 'memory'
+      corpusLoaded = true
+      corpusFrontier = maxRanAtOf(allRuns)
+      runsCache = allRuns
+    }
     await applyRunDerivedUpdaters(allRuns)
+    // A full Refresh re-scanned the corpus — let the lazy lineage re-pull on the next detail open so it
+    // reflects any newly-continued runs, without doing that whole-corpus read here.
+    continuedLineageLoaded = false
     modelStatsStale = false
     ok = true
   } catch {
@@ -16483,6 +16868,7 @@ async function renderModels() {
     )
     return
   }
+  await ensureCorpus() // the component→runs linkage reads the shared corpus (xaiRunPool); load it once
   // Load the persisted all-runs STATS (not a page of runs) + papers + hypotheses for the links. Hypothesis
   // verdicts render from their PERSISTED status (refreshed by the shared all-runs refresh, not here).
   ;[modelsCache, modelStatsCache, papersCache, hypothesesCache] = await Promise.all([
@@ -18770,6 +19156,42 @@ function activityProgressSig(progress, campaign) {
 }
 // A campaign settled: re-read its result, refresh the Runs tab so new run records show,
 // and run the settle bookkeeping (hypothesis stamps + auto-eval markers).
+// A settling run triggers a FULL runs reload (readRuns + O(pool) heuristics) plus processSettledCampaignEffects
+// (a SECOND readRuns + hypothesis re-score). When a big batch drains — the "Run all (400+)" case — dozens
+// settle in a tight window and each firing that whole sequence over a 20k corpus is what froze the app. Coalesce
+// them: the first settle refreshes immediately (responsive); settles that arrive while a refresh is in flight
+// are folded into ONE trailing pass a short throttle later, so N concurrent settlements cost ~2 reloads, not N.
+let settleRefreshRunning = false
+let settleRefreshQueued = false
+async function scheduleSettleRefresh() {
+  if (settleRefreshRunning) {
+    settleRefreshQueued = true
+    return
+  }
+  settleRefreshRunning = true
+  try {
+    if (corpusMode === 'memory' && corpusLoaded) {
+      // Incremental: pull ONLY the newly-landed runs into the corpus, then re-render from it — never a
+      // whole-archive rescan. The overlay caches (verdicts/evaluations/…) don't change when a TRAIN run lands,
+      // so they're not re-read here.
+      await advanceCorpus()
+      computeReliabilityHeuristics()
+      renderRunsLive()
+      if (activeTabId === 'runs') renderRunsTable()
+    } else {
+      await renderRuns()
+    }
+    // Keep the Exploration heatmap live as train runs land (its coverage grid is built from run records).
+    if (activeTabId === 'exploration') void renderExploration()
+    await processSettledCampaignEffects()
+  } finally {
+    settleRefreshRunning = false
+  }
+  if (settleRefreshQueued) {
+    settleRefreshQueued = false
+    setTimeout(() => void scheduleSettleRefresh(), SETTLE_REFRESH_THROTTLE_MS)
+  }
+}
 async function settleTrainActivity(entry) {
   const activityId = entry.activityId
   const progress = await readProgressFor(activityId)
@@ -18778,10 +19200,7 @@ async function settleTrainActivity(entry) {
   if (campaign) entry.campaign = campaign
   if (entry.campaign) lastSettledCampaign = entry.campaign
   renderActivity()
-  await renderRuns()
-  // Keep the Exploration heatmap live as train runs land (its coverage grid is built from run records).
-  if (activeTabId === 'exploration') void renderExploration()
-  await processSettledCampaignEffects()
+  await scheduleSettleRefresh()
 }
 // PAUSE ONE running campaign — kills the process but keeps it resumable: marks it user-paused (so the
 // observe loop + reload detection keep it as a Resume-able block), then aborts the live process. The
@@ -19223,16 +19642,21 @@ function renderActivityNow() {
 // ones render in the tab itself). Reads the raw listActivities snapshot; the pure module reduces it to
 // settled rows (newest-finished first). Read-only; the link data (activityId stamped on the records each
 // activity wrote) already exists — surfacing the run↔activity jump is a follow-on.
+// Most recent finished activities shown in the History popup — a large project can have tens of thousands, so
+// cap the rendered DOM (rows are sorted newest-first) while still loading the full set for an accurate count.
+const ACTIVITY_HISTORY_MAX_ROWS = 500
 async function openActivityHistory(highlightId) {
-  let rows = []
+  let rows = null // null = load failed (distinct from an empty-but-successful load)
   try {
-    const res = await window.OverseerBridge.listActivities()
+    // Generous timeout: the default 8s rejects while a big project's full activity list serializes, which used
+    // to surface as "No finished activities yet" even with hundreds of runs.
+    const res = await window.OverseerBridge.listActivities(30000)
     rows = window.ActivityHistory.historyRows(
       (res && res.activities) || [],
       manifest && manifest.recordType,
     )
   } catch {
-    rows = []
+    rows = null
   }
   renderActivityHistoryModal(rows, highlightId)
 }
@@ -19304,13 +19728,30 @@ function renderActivityHistoryModal(rows, highlightId) {
       if (event.key === 'Escape' && modal && !modal.hidden) closeActivityHistory()
     })
   }
-  const table = rows.length
-    ? `<table class="kv-table report-table activity-history-table"><thead><tr><th>Activity</th><th>Status</th><th class="num">Finished</th><th class="num">Took</th></tr></thead><tbody>${rows.map((r) => activityHistoryRowHtml(r, highlightId)).join('')}</tbody></table>`
-    : '<p class="card-sub">No finished activities yet — completed campaigns, judges, evaluations, cross-tests and mines will appear here.</p>'
+  // rows === null means the load FAILED — show a retry hint, never the misleading "no history yet" empty state.
+  const failed = rows === null
+  const all = failed ? [] : rows
+  let shown = all.slice(0, ACTIVITY_HISTORY_MAX_ROWS)
+  // Keep the run→activity jump working even when its target activity is older than the cap — append it so the
+  // highlight/scroll below finds a rendered row (out of strict time order, but the jump is the point).
+  if (highlightId && !shown.some((r) => r.activityId === highlightId)) {
+    const hit = all.find((r) => r.activityId === highlightId)
+    if (hit) shown = shown.concat([hit])
+  }
+  const capNote =
+    all.length > shown.length
+      ? `<p class="card-sub">Showing the ${shown.length} most recent of ${all.length} finished activities.</p>`
+      : ''
+  const table = failed
+    ? '<p class="card-sub is-error">Couldn’t load the activity history (the backend is busy) — close this and try again.</p>'
+    : shown.length
+      ? `${capNote}<table class="kv-table report-table activity-history-table"><thead><tr><th>Activity</th><th>Status</th><th class="num">Finished</th><th class="num">Took</th></tr></thead><tbody>${shown.map((r) => activityHistoryRowHtml(r, highlightId)).join('')}</tbody></table>`
+      : '<p class="card-sub">No finished activities yet — completed campaigns, judges, evaluations, cross-tests and mines will appear here.</p>'
+  const countLabel = failed ? '—' : all.length
   modal.innerHTML = `<div class="chart-modal__backdrop" data-history-close></div>
     <div class="chart-modal__panel" role="dialog" aria-label="Activity history">
       <div class="chart-modal__head">
-        <strong>Activity history <span class="card-sub">— ${rows.length} finished</span></strong>
+        <strong>Activity history <span class="card-sub">— ${countLabel} finished</span></strong>
         <div class="chart-modal__tools"><button type="button" class="icon-btn" data-history-close title="Close (Esc)" aria-label="Close">✕</button></div>
       </div>
       <div class="chart-modal__scroll">${table}</div>
@@ -19406,8 +19847,8 @@ const TAB_LOADING_LABEL = {
   hypotheses: 'Loading hypotheses…',
   papers: 'Loading papers…',
   models: 'Loading models…',
-  environments: 'Loading environments…',
-  datasets: 'Loading datasets…',
+  // Environments + Datasets render synchronously from caches loaded at project open (like Scorecards), so they
+  // must NOT be here — a spinner on a warm re-visit is the "always loading" flash the user hit.
   versions: 'Loading versions…',
   speed: 'Loading…',
   // Both read the FULL run corpus (20k+ for BlackSwan) before their first paint — spinner on switch so the
@@ -19639,6 +20080,7 @@ async function renderExploration(fromPoll) {
   // never to paper over a genuinely-empty archive.
   let runs = []
   try {
+    await ensureCorpus() // in-memory regime: loadRawCorpus returns the shared corpus (no separate scan)
     runs = (await loadRawCorpus(recordType))
       .filter((r) => r.summary && r.summary.status === 'completed' && typeof r.summary.objective === 'number')
       .map((r) => ({
@@ -19940,6 +20382,7 @@ async function renderDiagnosis() {
     // poll storm doesn't re-page 20k every tick; fall back to the shared xAI pool only on a real query error.
     let runs = []
     try {
+      await ensureCorpus() // in-memory regime: loadRawCorpus returns the shared corpus (no separate scan)
       runs = (
         await loadRawCorpus(recordType, (n) => {
           if (token === diagnosisRenderToken) setDiagProgress(`Scanning ${n} runs…`)
@@ -20015,15 +20458,37 @@ function showTab(id) {
   const target = TABS.some((t) => t.id === id) ? id : TABS[0].id
   const switching = target !== activeTabId
   activeTabId = target
+  const group = LEAF_TO_GROUP[target] || null
+  if (group) groupActiveLeaf[group] = target
+  // Panel visibility. A standalone leaf shows its own panel; a grouped leaf shows its group container and,
+  // inside it, only the active member sub-panel (each member keeps its own `tab-<id>` panel, now nested).
   for (const tab of TABS) {
     const panel = byId(`tab-${tab.id}`)
     if (panel) panel.hidden = tab.id !== target
+  }
+  for (const g of TAB_GROUPS) {
+    const panel = byId(`tab-${g.id}`)
+    if (panel) panel.hidden = g.id !== group
+  }
+  // Top-bar button active state. Standalone buttons carry data-tab; a group button (data-group) lights up
+  // whenever the active leaf belongs to it.
+  for (const tab of TABS) {
     const btn = document.querySelector(`.tab-btn[data-tab="${tab.id}"]`)
     if (btn) {
-      btn.classList.toggle('is-active', tab.id === target)
-      btn.setAttribute('aria-selected', String(tab.id === target))
+      const on = tab.id === target
+      btn.classList.toggle('is-active', on)
+      btn.setAttribute('aria-selected', String(on))
     }
   }
+  for (const g of TAB_GROUPS) {
+    const btn = document.querySelector(`.tab-btn[data-group="${g.id}"]`)
+    if (btn) {
+      const on = g.id === group
+      btn.classList.toggle('is-active', on)
+      btn.setAttribute('aria-selected', String(on))
+    }
+  }
+  if (group) renderGroupRail(group)
   // Every dashboard tab is full-width with its OWN inner scroll (a fixed header + a scrolling body), so the
   // controls never scroll away. Scope to the DASHBOARD's tab-main — the home view has its own `.tab-main`
   // that would otherwise match `querySelector` first.
@@ -20057,6 +20522,31 @@ function showTab(id) {
   if (target === 'exploration') void renderExploration()
   if (target === 'diagnosis') void renderDiagnosis()
 }
+// Render a group tab's left rail: one button per member sub-tab (active = the current leaf), plus the shared
+// collapse toggle. Rebuilt on every showTab so the highlight and live spinners stay in sync.
+function renderGroupRail(groupId) {
+  const g = TAB_GROUPS.find((x) => x.id === groupId)
+  const nav = byId(`${groupId}-rail`)
+  if (!g || !nav) return
+  const shell = byId(`${groupId}-shell`)
+  if (shell) shell.classList.toggle('rail-collapsed', groupRailCollapsed)
+  const memberBtn = (leaf) => {
+    const t = TAB_BY_ID[leaf]
+    if (!t) return ''
+    const on = activeTabId === leaf
+    const live = tabHasLiveWork(leaf) ? spinnerHtml() : ''
+    return `<button type="button" class="group-rail-btn${on ? ' active' : ''}" data-group-leaf="${escapeHtml(leaf)}" title="${escapeHtml(t.label)}"><span class="group-rail-ico" aria-hidden="true">${t.icon ? t.icon(16) : ''}</span><span class="group-rail-lbl">${escapeHtml(t.label)}</span><span class="tab-live" aria-hidden="true">${live}</span></button>`
+  }
+  const toggle = `<button type="button" class="group-rail-btn group-rail-toggle" data-group-rail-toggle title="${groupRailCollapsed ? 'Expand panel' : 'Collapse panel'}"><span class="group-rail-ico" aria-hidden="true">${groupRailCollapsed ? '»' : '«'}</span><span class="group-rail-lbl">Collapse</span></button>`
+  setHtml(nav, `<div class="group-rail-tabs">${g.members.map(memberBtn).join('')}</div>${toggle}`)
+}
+// Open a group tab — jump to its last-viewed member (or the first).
+function showGroup(groupId) {
+  const g = TAB_GROUPS.find((x) => x.id === groupId)
+  if (!g) return
+  const leaf = g.members.includes(groupActiveLeaf[groupId]) ? groupActiveLeaf[groupId] : g.members[0]
+  showTab(leaf)
+}
 // A tiny spinner on the ACTIVE tab while the open project has a live (running)
 // activity, so the in-flight campaign is visible from any tab — not just
 // Activity. The spinner lives in a fixed `.tab-live` slot on each button so
@@ -20065,6 +20555,8 @@ function showTab(id) {
 // work (campaign / judge / propose / evaluate). Runs spins ONLY for run-specific work that lands on a
 // run (a judgement or an evaluation). Hypotheses spins while proposing. Versions is view-only — never.
 function tabHasLiveWork(id) {
+  const grp = TAB_GROUPS.find((g) => g.id === id)
+  if (grp) return grp.members.some((m) => tabHasLiveWork(m))
   if (id === 'activity') {
     return anyActivityRunning() || judging || proposing || evaluatingKeys.size > 0
   }
@@ -20075,23 +20567,66 @@ function tabHasLiveWork(id) {
 function renderTabLiveIndicator() {
   for (const tab of TABS) {
     const slot = document.querySelector(`.tab-btn[data-tab="${tab.id}"] .tab-live`)
-    if (!slot) continue
-    setHtml(slot, tabHasLiveWork(tab.id) ? spinnerHtml() : '')
+    if (slot) setHtml(slot, tabHasLiveWork(tab.id) ? spinnerHtml() : '')
+  }
+  // Group buttons spin when ANY member has live work, and the open group's rail buttons stay in sync.
+  for (const g of TAB_GROUPS) {
+    const slot = document.querySelector(`.tab-btn[data-group="${g.id}"] .tab-live`)
+    if (slot) setHtml(slot, tabHasLiveWork(g.id) ? spinnerHtml() : '')
+  }
+  const group = LEAF_TO_GROUP[activeTabId]
+  const activeGroup = group && TAB_GROUPS.find((g) => g.id === group)
+  if (activeGroup) {
+    for (const leaf of activeGroup.members) {
+      const slot = document.querySelector(
+        `#${group}-rail .group-rail-btn[data-group-leaf="${leaf}"] .tab-live`,
+      )
+      if (slot) setHtml(slot, tabHasLiveWork(leaf) ? spinnerHtml() : '')
+    }
   }
 }
 function setupTabs() {
   const bar = byId('tabbar')
   if (!bar) return
   bar.innerHTML = ''
-  for (const tab of TABS) {
+  for (const id of TOP_BAR) {
+    const group = TAB_GROUPS.find((g) => g.id === id)
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.className = 'tab-btn'
-    btn.dataset.tab = tab.id
     btn.setAttribute('role', 'tab')
-    btn.innerHTML = `${tab.icon ? `<span class="tab-icon" aria-hidden="true">${tab.icon(14)}</span>` : ''}<span class="tab-label">${escapeHtml(tab.label)}</span><span class="tab-live" aria-hidden="true"></span>`
-    btn.addEventListener('click', () => showTab(tab.id))
+    if (group) {
+      btn.dataset.group = group.id
+      btn.innerHTML = `<span class="tab-icon" aria-hidden="true">${group.icon(14)}</span><span class="tab-label">${escapeHtml(group.label)}</span><span class="tab-live" aria-hidden="true"></span>`
+      btn.addEventListener('click', () => showGroup(group.id))
+    } else {
+      const tab = TAB_BY_ID[id]
+      if (!tab) continue
+      btn.dataset.tab = tab.id
+      btn.innerHTML = `${tab.icon ? `<span class="tab-icon" aria-hidden="true">${tab.icon(14)}</span>` : ''}<span class="tab-label">${escapeHtml(tab.label)}</span><span class="tab-live" aria-hidden="true"></span>`
+      btn.addEventListener('click', () => showTab(tab.id))
+    }
     bar.append(btn)
+  }
+  setupGroupRails()
+}
+// Delegate rail clicks per group container (the rail nav is re-rendered, so listen on the stable container).
+function setupGroupRails() {
+  for (const g of TAB_GROUPS) {
+    const container = byId(`tab-${g.id}`)
+    if (!container || container.__railWired) continue
+    container.__railWired = true
+    container.addEventListener('click', (event) => {
+      const memberBtn = event.target.closest('[data-group-leaf]')
+      if (memberBtn) {
+        showTab(memberBtn.dataset.groupLeaf)
+        return
+      }
+      if (event.target.closest('[data-group-rail-toggle]')) {
+        groupRailCollapsed = !groupRailCollapsed
+        renderGroupRail(g.id)
+      }
+    })
   }
 }
 function savedTabId() {
