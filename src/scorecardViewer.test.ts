@@ -36,9 +36,16 @@ describe('viewer computeScorecard', () => {
     expect(card.accepted).toBe(true)
   })
 
-  it('fails a gate on a missing metric (unverifiable is never accepted)', () => {
-    const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 1 })
+  it('SKIPS a gate on an absent metric (not applicable) rather than rejecting the run', () => {
+    const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 1, metrics: { other: 1 } })
+    expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(true)
+  })
+
+  it('FAILS a gate on a present but non-finite metric (measured garbage is not skipped)', () => {
+    const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] }, { objective: 1, metrics: { m: NaN } })
+    expect(card.gates[0]).toMatchObject({ applicable: true, pass: false })
     expect(card.accepted).toBe(false)
   })
 

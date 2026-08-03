@@ -41,7 +41,7 @@ live in git + memory.)
 
 Ordered by value. Each is something to **implement**.
 
-### A1. Define success — reward vs scorecard (gates + fitness) — SHIPPED; 2 optional tails remain
+### A1. Define success — reward vs scorecard (gates + fitness) — SHIPPED (only a viewer visual pass remains)
 
 **Shipped** (see memory `project_modeltrainer_scorecard_shipped`): every project declares THREE layers —
 `objective` (reward, steers) / `gates` (accept-reject) / `fitness` (ranking, maybe Pareto); omit gates/fitness ⇒
@@ -59,13 +59,15 @@ hover) and the **success: accepted/rejected filter** (client-only, forces the un
 `hasScorecard` so no-scorecard projects are unchanged) — built + adversarially reviewed, pending a visual pass
 in the running Overseer.
 
-**Remaining (optional, owner decision — breaks history):**
+**Also shipped — honest BlackSwan objective (NO history break).** The objective is now `total_return_pct` (the
+raw post-fee return), NOT the magic-20 `traded_return` (`total_return × min(1,(n/20)²)`); trade frequency is the
+`trades_per_day` GATE, not baked into the objective. This did NOT need invalidation: `total_return_pct` is
+already emitted on every run, so a generic backfill in `migrateTrainingRuns` enforces the invariant
+`objective == metrics[objective.name]` — the boot-time `sweepTrainerMigrations` (BlackSwan has `migrations`, so
+it runs; idempotent) rewrites each stale run's objective from its stored metric on the next Overseer boot.
+`traded_return`/`trade_gate` are kept as diagnostic metrics.
 
-1. **Honest BlackSwan objective.** `traded_return` (the magic-20
-   `total_return × min(1,(n/20)²)`) is KEPT as the in-sample steering objective; the scorecard now owns success,
-   so no history break was needed. Optionally switch the objective to `total_return_pct` (honest) with the
-   trade-rate purely in the gate — a breaking `pipelineVersion` bump that INVALIDATES all BlackSwan run history.
-   Only do this on an explicit owner call.
+**Remaining:** only a visual pass of the viewer Success badge + filter in the running Overseer.
 
 ### A2. Full AI action parity — anything the user can do, the AI can do
 

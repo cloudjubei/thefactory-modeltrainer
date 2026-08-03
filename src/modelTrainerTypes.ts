@@ -153,8 +153,15 @@ export interface ScorecardGate {
   op: GateOp
   /** The resolved comparison bound (a literal, or the referenced metric's value; `NaN` when missing). */
   bound: number
-  /** The run's actual value for `metric` (`NaN` when missing/non-finite). */
+  /** The run's actual value for `metric` (`NaN` when the metric is absent/non-finite). */
   actual: number
+  /**
+   * Whether this gate could be EVALUATED — false when `metric` is absent from the run (e.g. a run that
+   * predates a newly-added gate). A non-applicable gate is SKIPPED: it never rejects a run (only an
+   * applicable-and-failing gate does), so `accepted` is judged on the gates a run actually carries.
+   */
+  applicable: boolean
+  /** True iff the gate is applicable AND the comparison holds. */
   pass: boolean
 }
 
@@ -180,6 +187,29 @@ export interface RunScorecard {
   accepted: boolean
   /** One entry per fitness objective (defaults to the manifest objective when `fitness` is absent). */
   fitness: ScorecardFitness[]
+}
+
+/**
+ * A stored metric the migration sweep can DERIVE onto historical runs from fields those runs already
+ * carry — so a newly-added (e.g. gated) metric is backfilled without re-running. Only fills a run where
+ * the metric is ABSENT (present values are never touched). Domain-oblivious: the manifest supplies any
+ * unit mapping, so the engine hardcodes no timeframe/asset knowledge.
+ */
+export interface MetricBackfill {
+  /** The `metrics` key to write. */
+  name: string
+  /**
+   * A per-CALENDAR-DAY rate: `metrics[count] / (metrics[bars] × barDays[config[barDaysLever]])`. Used to
+   * backfill e.g. `trades_per_day` from `n_trades` / (test-bars × the bar's day-span for the timeframe).
+   */
+  ratePerDay?: {
+    count: string
+    bars: string
+    /** Config lever naming the bar timeframe (e.g. `timeframe`). */
+    barDaysLever: string
+    /** Days per bar for each timeframe value, e.g. `{ "1d": 1, "1h": 0.0416667 }`. */
+    barDays: Record<string, number>
+  }
 }
 
 /** One file a dataset materialises: workspace destination + where to fetch it. */
@@ -325,6 +355,11 @@ export interface TrainerManifest {
    */
   diagnostics?: TrainerDiagnostics
   levers: Record<string, TrainerLeverSpec>
+  /**
+   * Metrics the migration sweep DERIVES onto historical runs that predate them (see {@link MetricBackfill}),
+   * so a newly-added gate metric (e.g. `trades_per_day`) can be evaluated on old runs without re-running.
+   */
+  backfillMetrics?: MetricBackfill[]
   /** Names the lever whose numeric value measures work (e.g. `total_timesteps`) for ETA math. */
   eta?: { unitsLever: string }
   /**

@@ -14,6 +14,12 @@
     return typeof raw === 'number' && isFinite(raw) ? raw : NaN
   }
 
+  // Whether a metric key is PRESENT on a run at all (regardless of finiteness) — absent ⇒ its gate is skipped.
+  function hasMetric(run, key) {
+    if (key === 'objective') return !!run && run.objective !== undefined
+    return !!run && !!run.metrics && Object.prototype.hasOwnProperty.call(run.metrics, key)
+  }
+
   function applyOp(actual, op, bound) {
     if (!isFinite(actual) || !isFinite(bound)) return false
     switch (op) {
@@ -44,13 +50,15 @@
       var isRef = g.value && typeof g.value === 'object'
       var bound = isRef ? readMetric(run, g.value.metric) : g.value
       var rendered = isRef ? g.value.metric : String(g.value)
+      var applicable = hasMetric(run, g.metric)
       return {
         label: g.label || g.metric + ' ' + g.op + ' ' + rendered,
         metric: g.metric,
         op: g.op,
         bound: bound,
         actual: actual,
-        pass: applyOp(actual, g.op, bound),
+        applicable: applicable,
+        pass: applicable && applyOp(actual, g.op, bound),
       }
     })
     var fitnessSpec =
@@ -62,8 +70,9 @@
     })
     return {
       gates: gates,
+      // Accepted iff every APPLICABLE gate passes — a skipped (absent-metric) gate never rejects.
       accepted: gates.every(function (g) {
-        return g.pass
+        return !g.applicable || g.pass
       }),
       fitness: fitness,
     }

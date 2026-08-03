@@ -202,6 +202,7 @@ import {
   normalizeObjectiveScores,
   computeScorecard,
   primaryFitnessCriterion,
+  deriveBackfillMetric,
   pickBestRun,
   totalCampaignUnits,
   validateDecisionTrace,
@@ -3351,6 +3352,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // data stays canonical and xAI never reasons over a value a model ignores.
     const appliesWhen = appliesWhenMap(manifest)
     const hasConditional = Object.keys(appliesWhen).length > 0
+    const backfills = manifest.backfillMetrics ?? []
     let examinedRuns = 0
     let migratedRuns = 0
     let deletedRuns = 0
@@ -3359,7 +3361,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let deletedQueue = 0
     let migratedHypotheses = 0
     let deletedHypotheses = 0
-    if (rules.length === 0 && !hasConditional) {
+    if (rules.length === 0 && !hasConditional && backfills.length === 0) {
       return {
         recordType,
         examinedRuns,
@@ -3420,17 +3422,48 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // so a config that's already migrated + normalised hashes identically and is left untouched.
       const ruled = rule ? (applyMigrationRules(cfg, rules) ?? cfg) : cfg
       const next = normalizeConditionalLevers(ruled, appliesWhen)
-      if (hashTrainingConfig(next) === hashTrainingConfig(cfg)) continue
-      // This run's config changes → rewrite. Read the FULL record by key (one at a time) so the omitted
-      // heavy fields are preserved. setupKey stays RAW (from the pre-normalize config), exactly as the
-      // write path + isFresh compute it, so canonicalising never desyncs the skipExplored/unrunnable dedup.
+      const configChanged = hashTrainingConfig(next) !== hashTrainingConfig(cfg)
+      // Objective invariant: the stored `objective` scalar must equal metrics[objective.name]. An objective
+      // RENAME (e.g. BlackSwan traded_return → total_return_pct) leaves it stale — but the honest value is
+      // already in the metrics block, so backfill it in place; no re-run needed. Only fires when the metric is
+      // present and actually differs, so already-correct runs (objective === metric) are left untouched.
+      const objName = manifest.objective.name
+      const metricObj = (content.metrics as Record<string, unknown> | undefined)?.[objName]
+      const objectiveStale =
+        typeof metricObj === 'number' && Number.isFinite(metricObj) && metricObj !== content.objective
+      // Metric backfill: DERIVE any declared metric that's ABSENT from this run (present values untouched,
+      // so no float-churn on runs that already emitted it) — e.g. trades_per_day onto pre-existing runs.
+      const runMetrics = (content.metrics as Record<string, number> | undefined) ?? {}
+      const metricAdds: Record<string, number> = {}
+      for (const spec of backfills) {
+        if (spec.name in runMetrics) continue
+        const derived = deriveBackfillMetric(spec, {
+          metrics: runMetrics,
+          config: content.config as Record<string, unknown> | undefined,
+        })
+        if (derived !== undefined) metricAdds[spec.name] = derived
+      }
+      const backfilled = Object.keys(metricAdds).length > 0
+      if (!configChanged && !objectiveStale && !backfilled) continue
+      // This run changes → rewrite. Read the FULL record by key (one at a time) so the omitted heavy fields are
+      // preserved. setupKey stays RAW (from the pre-normalize config), exactly as the write path + isFresh
+      // compute it, so canonicalising never desyncs the skipExplored/unrunnable dedup.
       const full = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: record.key })
       const fullContent = (full?.content ?? content) as Record<string, unknown>
+      const rewritten: Record<string, unknown> = { ...fullContent }
+      if (configChanged) {
+        rewritten.config = next
+        rewritten.setupKey = setupKeyOf(ruled)
+      }
+      if (objectiveStale) rewritten.objective = metricObj
+      if (backfilled) {
+        rewritten.metrics = { ...((fullContent.metrics as Record<string, number>) ?? {}), ...metricAdds }
+      }
       await deps.storage.upsertRecord({
         scope: params.scope,
         type: recordType,
         key: record.key,
-        content: { ...fullContent, config: next, setupKey: setupKeyOf(ruled) },
+        content: rewritten,
       })
       migratedRuns++
       params.onRecordWritten?.(recordType, record.key)

@@ -3154,6 +3154,97 @@ describe('migrateTrainingRuns', () => {
     expect(content.setupKey).not.toBe('old')
   })
 
+  it('backfills the objective from metrics[objective.name] when a rename left it stale (config unchanged)', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: {
+        objective: 1, // stale: the old objective value
+        metrics: { score: 5 }, // the manifest objective is `score`; the honest value lives here
+        config: { reward_model: 'combo_unified', lr: 0.1, seed: 3 }, // already canonical — no config rule matches
+        setupKey: 'sk',
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    expect(result.migratedRuns).toBe(1)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    const content = rec?.content as { objective: number; config: Record<string, unknown>; setupKey: string }
+    expect(content.objective).toBe(5) // backfilled from metrics.score
+    expect(content.config).toMatchObject({ reward_model: 'combo_unified', lr: 0.1 }) // config untouched
+    expect(content.setupKey).toBe('sk')
+  })
+
+  it('leaves a run untouched when the objective already equals metrics[objective.name]', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 5, metrics: { score: 5 }, config: { reward_model: 'combo_unified', lr: 0.1 } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    expect(result.migratedRuns).toBe(0)
+  })
+
+  it('backfills a derived metric (ratePerDay) onto runs that predate it', async () => {
+    const storage = memoryStorage()
+    const m = manifest({
+      backfillMetrics: [
+        { name: 'trades_per_day', ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } } },
+      ],
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 5, metrics: { score: 5, n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '1d' } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: m })
+    expect(result.migratedRuns).toBe(1)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { metrics: Record<string, number> }).metrics.trades_per_day).toBeCloseTo(0.05)
+  })
+
+  it('leaves a derived metric that is already present untouched (no float churn)', async () => {
+    const storage = memoryStorage()
+    const m = manifest({
+      backfillMetrics: [
+        { name: 'trades_per_day', ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1 } } },
+      ],
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 5, metrics: { score: 5, n_trades: 10, oos_n_obs: 200, trades_per_day: 0.99 }, config: { timeframe: '1d' } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: m })
+    expect(result.migratedRuns).toBe(0)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { metrics: Record<string, number> }).metrics.trades_per_day).toBe(0.99)
+  })
+
+  it('does not touch the objective when the manifest objective metric is absent from a run', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { objective: 1, metrics: { other: 9 }, config: { reward_model: 'combo_unified', lr: 0.1 } },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    expect(result.migratedRuns).toBe(0)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
+    expect((rec?.content as { objective: number }).objective).toBe(1)
+  })
+
   it('re-keys a hypothesis pinning a retired value + repoints its paper link (no stranded dead pin)', async () => {
     const storage = memoryStorage()
     const oldSpec = { fixed: { reward_model: 'combo_all', lr: 0.1 } }

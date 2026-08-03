@@ -2912,11 +2912,53 @@ function scorecardBadgeHtml(run) {
   const SC = typeof window !== 'undefined' ? window.Scorecard : null
   if (!SC || !SC.hasScorecard(manifest)) return '<span class="judge-none">—</span>'
   const sc = SC.computeScorecard(manifest, run.summary || {})
-  const failed = sc.gates.filter((g) => !g.pass).map((g) => g.label)
+  const failed = sc.gates.filter((g) => g.applicable && !g.pass).map((g) => g.label)
+  const skipped = sc.gates.filter((g) => !g.applicable).length
+  const skipNote = skipped ? ` (${skipped} gate${skipped > 1 ? 's' : ''} not recorded)` : ''
   const title = sc.accepted
-    ? 'Passes every scorecard gate.'
-    : `Failed: ${failed.join(', ')}`
+    ? `Passes every recorded scorecard gate${skipNote}.`
+    : `Failed: ${failed.join(', ')}${skipNote}`
   return `<span class="badge ${sc.accepted ? 'is-ok' : 'is-bad'}" title="${escapeHtml(title)}">${sc.accepted ? 'accepted' : 'rejected'}</span>`
+}
+// The run-detail Scorecard section: the accept/reject verdict, EVERY gate (its value vs the required
+// threshold + pass/fail/not-recorded), and the fitness (ranking) metrics — the definition of "good",
+// separate from the training reward. Only shown for projects that declare a scorecard (gates/fitness).
+function scorecardSectionHtml(run) {
+  const SC = typeof window !== 'undefined' ? window.Scorecard : null
+  if (!SC || !SC.hasScorecard(manifest)) return ''
+  const sc = SC.computeScorecard(manifest, run.summary || {})
+  const fmt = (v) => (Number.isFinite(v) ? formatObjective(v) : '—')
+  const gateRow = (g) => {
+    const status = !g.applicable
+      ? '<span class="badge is-warn" title="This run has no value for this metric — the gate is skipped, not failed.">⊘ not recorded</span>'
+      : g.pass
+        ? '<span class="badge is-ok">✓ pass</span>'
+        : '<span class="badge is-bad">✗ fail</span>'
+    return `<tr>
+      <th${helpAttr(METRIC_INFO[g.metric])}>${escapeHtml(g.label)}</th>
+      <td class="num">${escapeHtml(fmt(g.actual))}</td>
+      <td class="mono">${escapeHtml(g.op + ' ' + fmt(g.bound))}</td>
+      <td>${status}</td>
+    </tr>`
+  }
+  const gatesTable = sc.gates.length
+    ? `<table class="kv-table"><thead><tr><th>gate</th><th class="num">value</th><th>required</th><th>status</th></tr></thead><tbody>${sc.gates.map(gateRow).join('')}</tbody></table>`
+    : '<p class="card-sub">No gates declared — every run is accepted.</p>'
+  const fitnessTable = sc.fitness.length
+    ? `<table class="kv-table"><tbody>${sc.fitness
+        .map(
+          (f, i) =>
+            `<tr><th>${escapeHtml(f.metric)} <span class="card-sub">(${escapeHtml(f.direction)}${i === 0 ? ', primary' : ''})</span></th><td class="num">${escapeHtml(fmt(f.value))}</td></tr>`,
+        )
+        .join('')}</tbody></table>`
+    : ''
+  const verdict = sc.accepted
+    ? '<span class="badge is-ok">accepted</span>'
+    : '<span class="badge is-bad">rejected</span>'
+  return `<h3>Scorecard</h3>
+    <p class="badges-row">${verdict} <span class="card-sub">— accepted only when every RECORDED gate passes; the definition of success, separate from the training reward.</span></p>
+    ${gatesTable}
+    ${fitnessTable ? `<p class="card-sub" style="margin:.6rem 0 .2rem">Fitness — the ranking metrics (primary first)</p>${fitnessTable}` : ''}`
 }
 // The cross-test robustness chip: n/m tested sets beating hold (green = all, amber = some, red = none),
 // from the run's `-settest` matrix. Em-dash when the run was never cross-tested.
@@ -9356,6 +9398,7 @@ function renderRunDetail(key) {
     ${showEval ? evaluationSectionHtml(run) : ''}
     ${crossTestUiEnabled() ? crossTestSectionHtml(run) : ''}
     ${continueTrainUiEnabled() ? continueTrainSectionHtml(run) : ''}
+    ${scorecardSectionHtml(run)}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}

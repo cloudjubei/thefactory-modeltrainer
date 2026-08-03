@@ -94,6 +94,7 @@ import {
   scorecardRankValue,
   compareScorecards,
   primaryFitnessCriterion,
+  deriveBackfillMetric,
 } from './modelTrainerUtils.js'
 import { hashTrainingConfig } from './modelTrainerHelpers.js'
 import type { ProposedModel, TrainingRunSummary } from './modelTrainerTypes.js'
@@ -4336,10 +4337,30 @@ describe('computeScorecard', () => {
     expect(fail.gates[0]).toMatchObject({ bound: 4, actual: 2, pass: false })
   })
 
-  it('a gate on a MISSING metric fails (unverifiable is never accepted)', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 42 })
-    expect(Number.isNaN(card.gates[0].actual)).toBe(true)
+  it('a gate on an ABSENT metric is SKIPPED (not applicable) and does not reject the run', () => {
+    // A run that predates a metric (the key isn't in `metrics` at all) can't be judged on that gate — skip
+    // it rather than auto-fail, so the run is accepted/rejected on the gates it CAN be evaluated on.
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 42, metrics: { other: 1 } })
+    expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(true) // the only gate is skipped ⇒ vacuously accepted
+  })
+
+  it('a PRESENT but non-finite gate metric FAILS (a measured-garbage value is not skipped)', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] }, { objective: 1, metrics: { m: NaN } })
+    expect(card.gates[0].applicable).toBe(true)
+    expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(false)
+  })
+
+  it('rejects on a FAILING gate even when another gate is skipped', () => {
+    const gates = [
+      { metric: 'gone', op: '>' as const, value: 0 }, // absent ⇒ skipped
+      { metric: 'ret', op: '>' as const, value: 0 }, // present + fails
+    ]
+    const card = computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { ret: -5 } })
+    expect(card.gates[0].applicable).toBe(false)
+    expect(card.gates[1]).toMatchObject({ applicable: true, pass: false })
     expect(card.accepted).toBe(false)
   })
 
@@ -4384,9 +4405,9 @@ describe('computeScorecard', () => {
     expect(card.gates[0].pass).toBe(expected)
   })
 
-  it('a NaN actual fails even the != operator', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '!=', value: 5 }] }, { objective: 1 })
-    expect(card.gates[0].pass).toBe(false)
+  it('a PRESENT NaN actual fails even the != operator', () => {
+    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '!=', value: 5 }] }, { objective: 1, metrics: { m: NaN } })
+    expect(card.gates[0]).toMatchObject({ applicable: true, pass: false })
   })
 
   it('renders a default label from metric/op/literal when none is given', () => {
@@ -4410,6 +4431,35 @@ describe('computeScorecard', () => {
   it('treats a non-finite objective as NaN in the default fitness', () => {
     const card = computeScorecard(objMax, { objective: Infinity })
     expect(Number.isNaN(card.fitness[0].value)).toBe(true)
+  })
+})
+
+describe('deriveBackfillMetric', () => {
+  const spec = {
+    name: 'trades_per_day',
+    ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } },
+  }
+
+  it('derives a per-day rate as count / (bars × bar-days) at a daily step', () => {
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '1d' } })).toBeCloseTo(0.05)
+  })
+
+  it('scales by the timeframe bar-days (hourly step spans 1/24 day per bar)', () => {
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 240 }, config: { timeframe: '1h' } })).toBeCloseTo(10 / (240 / 24))
+  })
+
+  it('returns undefined when a required input is missing', () => {
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10 }, config: { timeframe: '1d' } })).toBeUndefined()
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: {} })).toBeUndefined()
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '5m' } })).toBeUndefined()
+  })
+
+  it('returns 0 when there are no test bars (never divides by zero)', () => {
+    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 0 }, config: { timeframe: '1d' } })).toBe(0)
+  })
+
+  it('returns undefined for a spec with no supported derivation', () => {
+    expect(deriveBackfillMetric({ name: 'x' }, { metrics: {}, config: {} })).toBeUndefined()
   })
 })
 

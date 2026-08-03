@@ -27,6 +27,7 @@ import type {
   RunXaiDigest,
   RunScorecard,
   GateOp,
+  MetricBackfill,
   StepAttributionSummary,
   TrainerDataFile,
   TrainerLeverSpec,
@@ -1192,6 +1193,14 @@ function readScorecardMetric(
   return typeof raw === 'number' && Number.isFinite(raw) ? raw : NaN
 }
 
+/** Whether a metric key is PRESENT on a run at all (regardless of finiteness) — absent ⇒ a gate on it is skipped. */
+function hasScorecardMetric(
+  run: { objective?: number; metrics?: Record<string, number> },
+  key: string,
+): boolean {
+  return key === 'objective' ? run.objective !== undefined : !!run.metrics && key in run.metrics
+}
+
 /** Apply a gate operator; a NaN on either side always fails (an unverifiable run is never accepted). */
 function applyGateOp(actual: number, op: GateOp, bound: number): boolean {
   if (!Number.isFinite(actual) || !Number.isFinite(bound)) return false
@@ -1225,13 +1234,15 @@ export function computeScorecard(
     const actual = readScorecardMetric(run, gate.metric)
     const bound = typeof gate.value === 'number' ? gate.value : readScorecardMetric(run, gate.value.metric)
     const rendered = typeof gate.value === 'number' ? String(gate.value) : gate.value.metric
+    const applicable = hasScorecardMetric(run, gate.metric)
     return {
       label: gate.label ?? `${gate.metric} ${gate.op} ${rendered}`,
       metric: gate.metric,
       op: gate.op,
       bound,
       actual,
-      pass: applyGateOp(actual, gate.op, bound),
+      applicable,
+      pass: applicable && applyGateOp(actual, gate.op, bound),
     }
   })
   const fitnessSpec = manifest.fitness?.length
@@ -1242,7 +1253,31 @@ export function computeScorecard(
     direction: f.direction,
     value: readScorecardMetric(run, f.metric),
   }))
-  return { gates, accepted: gates.every((g) => g.pass), fitness }
+  // Accepted iff every APPLICABLE gate passes — a skipped (absent-metric) gate never rejects.
+  return { gates, accepted: gates.every((g) => !g.applicable || g.pass), fitness }
+}
+
+/**
+ * Derive a {@link MetricBackfill}'s value for one run from fields it already carries, or `undefined` when
+ * the derivation's inputs aren't all present. Pure — the migration sweep uses it to fill a metric onto
+ * runs that predate it (only where the metric is absent).
+ */
+export function deriveBackfillMetric(
+  spec: MetricBackfill,
+  content: { metrics?: Record<string, number>; config?: Record<string, unknown> },
+): number | undefined {
+  const r = spec.ratePerDay
+  if (r) {
+    const count = content.metrics?.[r.count]
+    const bars = content.metrics?.[r.bars]
+    const tf = content.config?.[r.barDaysLever]
+    const barDays = typeof tf === 'string' ? r.barDays[tf] : undefined
+    if (typeof count === 'number' && typeof bars === 'number' && typeof barDays === 'number') {
+      const days = bars * barDays
+      return days > 0 ? count / days : 0
+    }
+  }
+  return undefined
 }
 
 /**
