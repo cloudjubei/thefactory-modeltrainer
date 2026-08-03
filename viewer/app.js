@@ -1067,16 +1067,32 @@ async function loadRawCorpus(recordType, onProgress) {
   }
 }
 // The newest run's ranAt across a set — the frontier the incremental tail fetch extends from.
+// Parse a ranAt to epoch ms — ranAt comes in TWO incompatible ISO shapes (Python success runs stamp
+// microsecond `…+00:00`, JS-side failed runs stamp millisecond `…Z`), so a string compare mis-orders them.
+// Always compare parsed timestamps.
+function ranAtMs(at) {
+  const t = at ? Date.parse(at) : NaN
+  return Number.isFinite(t) ? t : -Infinity
+}
+// The newest run's ranAt (by parsed TIME, not string) across a set — the frontier the incremental tail extends.
 function maxRanAtOf(runs) {
   let max = ''
+  let maxMs = -Infinity
   for (const r of runs) {
     const at = runRanAt((r && r.summary) || {})
-    if (at && at > max) max = at
+    const t = ranAtMs(at)
+    if (at && t > maxMs) {
+      maxMs = t
+      max = at
+    }
   }
   return max
 }
 // Show the initial corpus-load progress in the Runs body so the first open is never a blank/stuck spinner.
+// ONLY when the Runs tab is the visible one — else this would strand a "Loading runs…" message in the hidden
+// runs-body (a non-Runs tab that triggered the load shows its OWN loading state and clears it on its render).
 function setCorpusProgress(loaded, total) {
+  if (activeTabId !== 'runs') return
   const body = byId('runs-body')
   if (!body) return
   const of = total ? ` of ${total}` : ''
@@ -1122,10 +1138,13 @@ async function ensureCorpus() {
       if (epoch === projectEpoch && !corpusLoaded) corpusMode = 'paged'
     }
   })()
+  const mine = corpusLoadInflight
   try {
-    await corpusLoadInflight
+    await mine
   } finally {
-    corpusLoadInflight = null
+    // Only clear MY handle — a project switch resets corpusLoadInflight to a newer load, which this stale
+    // resolution must not null out (that would defeat the dedup guard and allow a duplicate full scan).
+    if (corpusLoadInflight === mine) corpusLoadInflight = null
   }
 }
 // Advance the in-memory corpus by ONLY the newer tail (runs whose ranAt > the frontier), merged by key. This
@@ -1133,13 +1152,16 @@ async function ensureCorpus() {
 // walk. No-op outside the loaded in-memory regime. Returns true when the corpus actually grew.
 async function advanceCorpus() {
   if (corpusMode !== 'memory' || !corpusLoaded) return false
+  const epoch = projectEpoch
   let fresh
   try {
     fresh = await fetchRunsNewerThan(corpusFrontier)
   } catch {
     return false
   }
-  if (!fresh.length) return false
+  // Bail if the project switched during the fetch — otherwise this stale tail (possibly the OTHER project's
+  // pages) would be merged into the NEW project's freshly-loaded corpus, contaminating every view.
+  if (epoch !== projectEpoch || !fresh.length) return false
   const byKey = new Map(allRunsCache.map((r) => [r.key, r]))
   for (const r of fresh) byKey.set(r.key, r)
   allRunsCache = [...byKey.values()]
@@ -2326,6 +2348,7 @@ function showView(view) {
 function resetDashboardState() {
   explorationRenderedRt = null
   diagnosisRenderedRt = null
+  diagnosisCache = null
   invalidateRawCorpus()
   runsCache = []
   runExtraCache.clear()
@@ -2557,12 +2580,15 @@ async function openProject(projectKey) {
   if (epoch !== projectEpoch) return
   renderLaunchForm()
   showView('dashboard')
-  showTab(savedTabId() || TABS[0].id)
+  const openTab = savedTabId() || TABS[0].id
+  showTab(openTab)
   // Load the run corpus ONCE (in-memory regime) before the first render, so every view reads it instead of
   // scanning — with a live progress hint so the initial open is never a blank/stuck spinner.
   await ensureCorpus()
   if (epoch !== projectEpoch) return
-  await renderRuns()
+  // Render the Runs master ONLY when it wasn't the opened tab — showTab already dispatched renderRuns for it,
+  // so re-rendering here would double the work (two concurrent full renderRuns) on open.
+  if (openTab !== 'runs') await renderRuns()
   if (deepLinkPending) {
     applyDeepLink(deepLinkPending)
     deepLinkPending = null
@@ -16571,8 +16597,12 @@ async function updateModelStatsFromRuns(allRuns) {
 }
 // The newer tail: page newest-first (ranAt desc) and collect runs past the last aggregate's frontier,
 // stopping at the first run that's already covered. The cheap path — it never re-pages the whole history.
+// How far below the frontier the incremental tail re-scans (then de-dupes by key) — a safety band so runs that
+// land in the same/adjacent millisecond as the frontier, across the two ranAt formats, are never dropped.
+const RUN_TAIL_MARGIN_MS = 2000
 async function fetchRunsNewerThan(newestRunAt, onProgress) {
   const PAGE = 500
+  const frontierMs = ranAtMs(newestRunAt)
   const fresh = []
   let offset = 0
   for (let guard = 0; guard < 10000; guard++) {
@@ -16594,8 +16624,13 @@ async function fetchRunsNewerThan(newestRunAt, onProgress) {
     if (!page.length) break
     let hitOld = false
     for (const r of page) {
-      const ranAt = r.summary && r.summary.provenance && r.summary.provenance.ranAt
-      if (ranAt && newestRunAt && ranAt <= newestRunAt) {
+      // Compare by PARSED time (ranAt has two incompatible ISO shapes; a string compare mis-orders them) and
+      // read via runRanAt so a run with no provenance.ranAt (failed runs) still resolves its top-level ranAt.
+      // Stop only at STRICTLY older than a small margin below the frontier — the frontier band is re-fetched
+      // and de-duplicated by key in the merge, so same-/near-millisecond runs across the two formats are never
+      // dropped (the strict `<=` on a raw string used to silently lose them until a full Refresh).
+      const t = ranAtMs(runRanAt((r && r.summary) || {}))
+      if (frontierMs !== -Infinity && t < frontierMs - RUN_TAIL_MARGIN_MS) {
         hitOld = true
         break
       }
@@ -16637,13 +16672,17 @@ async function runDerivedRefresh(mode) {
     }
     allRunsCache = allRuns
     seedRawCorpus(allRuns)
-    // A manual Refresh re-materialised the whole corpus in memory — keep the in-memory regime coherent so the
-    // Runs table + settle advance keep reading it (and don't fall back to a rescan).
-    if (corpusMode !== 'paged') {
+    // A manual Refresh (or a 'latest' merge) just materialised the whole corpus in memory — enter/keep the
+    // in-memory regime when it fits, gating on the ACTUAL loaded size (not on the current mode). This also
+    // RECOVERS from an initial ensureCorpus that fell back to 'paged' because the first scan failed under a busy
+    // backend: once a Refresh succeeds and the corpus is ≤ the cap, every view goes instant again.
+    if (allRuns.length <= CORPUS_MEMORY_MAX) {
       corpusMode = 'memory'
       corpusLoaded = true
       corpusFrontier = maxRanAtOf(allRuns)
       runsCache = allRuns
+    } else {
+      corpusMode = 'paged'
     }
     await applyRunDerivedUpdaters(allRuns)
     // A full Refresh re-scanned the corpus — let the lazy lineage re-pull on the next detail open so it
@@ -19169,27 +19208,33 @@ async function scheduleSettleRefresh() {
     return
   }
   settleRefreshRunning = true
+  const epoch = projectEpoch
   try {
     if (corpusMode === 'memory' && corpusLoaded) {
       // Incremental: pull ONLY the newly-landed runs into the corpus, then re-render from it — never a
       // whole-archive rescan. The overlay caches (verdicts/evaluations/…) don't change when a TRAIN run lands,
       // so they're not re-read here.
       await advanceCorpus()
-      computeReliabilityHeuristics()
-      renderRunsLive()
-      if (activeTabId === 'runs') renderRunsTable()
+      if (epoch === projectEpoch) {
+        computeReliabilityHeuristics()
+        renderRunsLive()
+        if (activeTabId === 'runs') renderRunsTable()
+      }
     } else {
       await renderRuns()
     }
     // Keep the Exploration heatmap live as train runs land (its coverage grid is built from run records).
-    if (activeTabId === 'exploration') void renderExploration()
-    await processSettledCampaignEffects()
+    if (epoch === projectEpoch && activeTabId === 'exploration') void renderExploration()
+    if (epoch === projectEpoch) await processSettledCampaignEffects()
   } finally {
     settleRefreshRunning = false
   }
-  if (settleRefreshQueued) {
+  // Don't re-enter for a project we've since left.
+  if (settleRefreshQueued && epoch === projectEpoch) {
     settleRefreshQueued = false
     setTimeout(() => void scheduleSettleRefresh(), SETTLE_REFRESH_THROTTLE_MS)
+  } else if (epoch !== projectEpoch) {
+    settleRefreshQueued = false
   }
 }
 async function settleTrainActivity(entry) {
@@ -19865,6 +19910,10 @@ let diagnosisRenderedRt = null
 // second trigger while one is in flight would pile up and the spinner would never settle. Drop overlapping calls.
 let diagnosisRendering = false
 let explorationRendering = false
+// Last-computed diagnosis, reused when nothing it depends on changed — { recordsRef, settestLen, analysis } —
+// so re-entering the Diagnosis tab paints instantly instead of re-analysing ~20k runs every time. `recordsRef`
+// is the loadRawCorpus result identity (advanced on new runs / reset on project switch), so it self-invalidates.
+let diagnosisCache = null
 // The Diagnosis analysis (diagnose + campaign generation over 20k+ runs, ~1s of synchronous work) runs in a Web
 // Worker so it never blocks the UI. Epoch token drops a worker reply that lands after a project switch / re-render;
 // a lazily-created shared worker falls back to main-thread compute if Workers are unavailable (CSP/sandbox).
@@ -20381,13 +20430,13 @@ async function renderDiagnosis() {
     // diagnostician partitions failed/degenerate/invalid itself. loadRawCorpus caches the paged scan briefly so a
     // poll storm doesn't re-page 20k every tick; fall back to the shared xAI pool only on a real query error.
     let runs = []
+    let records = []
     try {
       await ensureCorpus() // in-memory regime: loadRawCorpus returns the shared corpus (no separate scan)
-      runs = (
-        await loadRawCorpus(recordType, (n) => {
-          if (token === diagnosisRenderToken) setDiagProgress(`Scanning ${n} runs…`)
-        })
-      ).map((r) => ({
+      records = await loadRawCorpus(recordType, (n) => {
+        if (token === diagnosisRenderToken) setDiagProgress(`Scanning ${n} runs…`)
+      })
+      runs = records.map((r) => ({
         key: r.key,
         config: (r.summary && r.summary.config) || {},
         objective: r.summary && r.summary.objective,
@@ -20438,6 +20487,18 @@ async function renderDiagnosis() {
       settests = []
     }
     if (token !== diagnosisRenderToken || !manifest || manifest.recordType !== recordType) return
+    // Reuse the last analysis when nothing it depends on changed — the corpus (loadRawCorpus result identity,
+    // which advances on new runs / resets on switch) and the settest count. This is what makes re-entering the
+    // Diagnosis tab instant instead of re-analysing every run each time.
+    if (
+      diagnosisCache &&
+      diagnosisCache.recordsRef === records &&
+      diagnosisCache.settestLen === settests.length
+    ) {
+      window.Diagnostics.paint(container, diagnosisCache.analysis, { manifest, runs, settests }, actions)
+      diagnosisRenderedRt = recordType
+      return
+    }
     // The heavy compute (diagnose + campaign generation over 20k+ runs, ~1s) runs OFF the main thread in a Web
     // Worker so the UI never freezes; the main thread only paints the returned slim result. A stale reply (after
     // a switch / re-render) is dropped by the token recheck.
@@ -20445,6 +20506,7 @@ async function renderDiagnosis() {
     const analysis = await computeDiagnosis({ runs, manifest, settests })
     if (token !== diagnosisRenderToken || !manifest || manifest.recordType !== recordType) return
     window.Diagnostics.paint(container, analysis, { manifest, runs, settests }, actions)
+    diagnosisCache = { recordsRef: records, settestLen: settests.length, analysis }
     diagnosisRenderedRt = recordType
   } catch (e) {
     // Never leave the shell stuck on a render error — clear it to a legible message the user can act on.

@@ -18,7 +18,7 @@ live in git + memory.)
 2. **Use it to make BlackSwan the best trading model**, in STRICT ORDER: **(A) correctness → (B) find ONE
    setup that trades well → (C) huge-space exploration.** BlackSwan is the forcing function that hardens the
    generic pipeline. "Trades well" is defined by the **scorecard** (gates + fitness), NOT the reward — the
-   reward is a training proxy that for BlackSwan does not equal success (A1).
+   reward is a training proxy that for BlackSwan does not equal success (the shipped scorecard defines "good").
 3. **Fully AI-operable, shipped as a template.** Anything a user can do in the app, the API/CLI AI can do via
    tools through the approval gate (A2) — so a user drives the whole loop as a CONVERSATION where the AI
    researches/proposes/runs and the human mostly approves (A3); and the app is a SINGLE-PURPOSE template a
@@ -40,56 +40,6 @@ live in git + memory.)
 ## A. Build — implementation tasks
 
 Ordered by value. Each is something to **implement**.
-
-### A1. Define success — reward vs scorecard (gates + fitness) — SHIPPED (only a viewer visual pass remains)
-
-**Shipped** (see memory `project_modeltrainer_scorecard_shipped`): every project declares THREE layers —
-`objective` (reward, steers) / `gates` (accept-reject) / `fitness` (ranking, maybe Pareto); omit gates/fitness ⇒
-collapse to the objective (CartPole/Wine). `computeScorecard` + the verdict layer (`incumbentSplitHoldout` /
-`diagnoseSearch` prefer gate-accepted runs, rank by fitness), the reward–success **alignment** diagnostic
-(Pearson reward-vs-metric), the standard doc, and the viewer's accepted-first sort (`viewer/scorecard.js`) are
-all built + tested. BlackSwan declares its Case-2 scorecard (4 gates + 3-metric fitness) and emits
-`trades_per_day` + the **Case-1 signal lens** (`signal_expectancy`/`_hit_rate`/`_coverage`, position-blind
-forward-return edge per buy/sell — the cheap probe that gates whether to build B2). Architecture call: the
-exploration reducer keeps CLIMBING on the objective (its baseline/noiseFloor are objective-scoped); the
-scorecard drives the VERDICT + convergence gate — steer on reward, decide on scorecard.
-
-Also shipped: the viewer's **acceptance badge** ("Success" column: green accepted / red rejected + failed-gate
-hover) and the **success: accepted/rejected filter** (client-only, forces the unpaged path; gated on
-`hasScorecard` so no-scorecard projects are unchanged) — built + adversarially reviewed, pending a visual pass
-in the running Overseer.
-
-**Also shipped — honest BlackSwan objective (NO history break).** The objective is now `total_return_pct` (the
-raw post-fee return), NOT the magic-20 `traded_return` (`total_return × min(1,(n/20)²)`); trade frequency is the
-`trades_per_day` GATE, not baked into the objective. This did NOT need invalidation: `total_return_pct` is
-already emitted on every run, so a generic backfill in `migrateTrainingRuns` enforces the invariant
-`objective == metrics[objective.name]` — the boot-time `sweepTrainerMigrations` (BlackSwan has `migrations`, so
-it runs; idempotent) rewrites each stale run's objective from its stored metric on the next Overseer boot.
-`traded_return`/`trade_gate` are kept as diagnostic metrics.
-
-**Remaining:** only a visual pass of the viewer Success badge + filter in the running Overseer.
-
-### A1b. Multiple named, in-app-tunable scorecards — SHIPPED (pending a viewer visual pass)
-
-The shipped scorecard is a SINGLE manifest-declared gates+fitness per project. The intended (and originally
-verbally-discussed, never-written) design is a SET of named scorecards, tunable IN-APP, with one **active**
-driving the Runs table and the others shown in run detail for comparison. **Reconciliation of a prior decision:**
-"manifest + levers stay code" governs the RUN SPACE (levers/command/data — change them and a run's meaning
-changes). A scorecard is a **post-hoc evaluation lens** — tuning it only re-scores existing runs — so scorecards
-are deliberately EXEMPT: they become user-editable DataStorage records, while the manifest's gates/fitness merely
-SEED a "Default" card. The three-layer model + steer-on-reward/decide-on-scorecard split carry forward intact
-(a scorecard is still one objective-agnostic gates+fitness triple; multi just lets several coexist + selectable).
-
-- **Phase A — data model + read side.** A `<recordType>-scorecard` record `{ id, name, gates[], fitness[] }`;
-  seed a "Default" from `manifest.gates/fitness` on first load; a per-project **active-scorecard** selection.
-  Rewire every READ to the ACTIVE card, not `manifest.gates` directly: the viewer badge/filter/sort + the
-  engine verdict layer (`recordsToAnalysisRuns.accepted` / `diagnoseSearch` / convergence gate) resolve the
-  active card's gates/fitness. Run detail shows the run scored against ALL cards (active highlighted).
-- **Phase B — the Scorecards tab + editor.** A dedicated tab: list cards; create/clone/edit (gate editor =
-  metric picker from run metrics + operator + threshold; fitness editor = metric + max/min); delete; set-active.
-  Editing is CRUD on the scorecard records (declare `<recordType>-scorecard` editable/creatable in the
-  data-capability manifest so the chat AI can drive it too). `computeScorecard(gatesFitness, run)` already takes
-  gates/fitness — so the only engine change is RESOLVING the active card, not the evaluation.
 
 ### A2. Full AI action parity — anything the user can do, the AI can do
 
@@ -126,7 +76,7 @@ data, research papers, config/xai analysis, consolidate, delete/invalidate) is u
 (full action parity) + the approval gate.
 
 1. **Orient tools.** Promote the shipped `diagnoseSearch` to a chat tool (the AI reads the same Diagnosis plan
-   the user sees) and let it rank candidates on the A1 **scorecard** (not the reward); add campaign/activity-status
+   the user sees) and let it rank candidates on the **scorecard** (not the reward); add campaign/activity-status
    reads (via `queryProjectData` on activity-run records) so the AI knows what's running / pending / done.
 2. **Approval surface (new VIEW — the "just approve" seam).** A proposals inbox: the AI's pending actions
    (launch / edit / delete) with rationale + expected cost (runs × ETA) + one-click approve / reject, batched.
@@ -178,8 +128,8 @@ template for a shipped single-purpose app).
   the attention over the rollout — the producer is shipped, the viewer only renders the inline aggregate +
   the snapshot index today); and a **diff-consecutive** arm on the snapshot index (lazily fetch two snapshots'
   traces and feed them to the shipped `DecisionTraceDiff` — today the index lists snapshots, doesn't diff).
-- **Exploration:** **Pareto basins** in the reducer — qualify/rank basins on the Pareto front, once A1's
-  multi-objective `fitness` lands (today the reducer ranks on a single scalar).
+- **Exploration:** **Pareto basins** in the reducer — qualify/rank basins on the Pareto front using the
+  scorecard's (now shipped) multi-objective `fitness` (today the reducer ranks on a single scalar).
 - **Datasets:** derive the `asset` lever CHOICES themselves from disk (today a manifest list — needs a manifest
   generator; the on-disk DIMMING of listed-but-absent values is shipped).
 - **On-device verification (test, not build):** mobile parity pass of the conversational-hub surfaces; in-app
@@ -197,7 +147,7 @@ template for a shipped single-purpose app).
 The one genuine project split. BlackSwan's single-asset env hardcodes one asset everywhere, so multi-asset
 needs a fundamentally different env: a **3-D observation** (`asset × lookback × features`), a **portfolio
 action space** (per-asset long/short/weight), a **timestamp-aligning N-symbol data provider** (misalignment =
-silent P&L corruption — unit-test against a 3-coin × 100-bar fixture), and an **A1 scorecard for a portfolio**
+silent P&L corruption — unit-test against a 3-coin × 100-bar fixture), and a **scorecard for a portfolio**
 (reward = portfolio return minus fees + a correlation-penalty CONSTRAINT; fitness = Sharpe/Calmar — not a
 "Sharpe objective" that steers directly). REUSES BlackSwan's reward components, feature engineering, SB3 algos,
 walk-forward harness; ~3–4 week project, blocks none of the in-place wins. Research calls cross-sectional
@@ -207,9 +157,9 @@ long-short the strongest-edge config — promising, deliberately sequenced last.
 
 The trading line trains a position MANAGER (actions are position-gated; out-of-position output is never shaped
 — `blocked_signal_ratio` ~0.95). A model whose raw per-step output IS a long/flat(/short) signal, independent
-of position, is a **different objective** (the "Case 1" of A1). Probe it cheaply FIRST via A1's
-forward-horizon expectancy lens on existing manager checkpoints — build this full project only if that lens
-shows a generalisable per-signal edge. First confirm the clean manager (via `combo_noop_penalty`, which
+of position, is a **different objective** (the "Case-1" signal case). Probe it cheaply FIRST via the shipped
+forward-horizon signal lens (`signal_expectancy`/`_hit_rate`/`_coverage`) on existing manager checkpoints —
+build this full project only if that lens shows a generalisable per-signal edge. First confirm the clean manager (via `combo_noop_penalty`, which
 drops `blocked_signal_ratio` ~0.95→~0.02 by going silent on no-ops) isn't already enough. Then: reuse the env's
 `buy_sell_signal` reward family or the supervised direction head; its OWN objective (signal precision/recall/
 coverage vs realized forward returns, or a signal-following backtest); likely its OWN manifest

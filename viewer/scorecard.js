@@ -68,12 +68,25 @@
     var fitness = fitnessSpec.map(function (f) {
       return { metric: f.metric, direction: f.direction, value: readMetric(run, f.metric) }
     })
+    // "Accepted" = a genuinely SUCCESSFUL run: (a) a completed, healthy run (a failed/invalid/degenerate run is
+    // never accepted) AND (b) at least one gate is applicable AND every applicable gate passes. A skipped
+    // (absent-metric) gate never REJECTS, but without the "≥1 applicable" floor a run missing every gate metric
+    // would be VACUOUSLY accepted, making the accepted set ≈ all runs (the accepted filter a no-op).
+    var applicable = gates.filter(function (g) {
+      return g.applicable
+    })
+    var hs = run.health && run.health.status
+    var eligible = run.status !== 'failed' && run.status !== 'invalid' && (!hs || hs === 'ok')
+    var accepted =
+      eligible &&
+      (gateSpecs.length === 0 ||
+        (applicable.length > 0 &&
+          applicable.every(function (g) {
+            return g.pass
+          })))
     return {
       gates: gates,
-      // Accepted iff every APPLICABLE gate passes — a skipped (absent-metric) gate never rejects.
-      accepted: gates.every(function (g) {
-        return !g.applicable || g.pass
-      }),
+      accepted: accepted,
       fitness: fitness,
     }
   }

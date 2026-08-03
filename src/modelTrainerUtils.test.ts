@@ -4369,13 +4369,36 @@ describe('computeScorecard', () => {
     expect(fail.gates[0]).toMatchObject({ bound: 4, actual: 2, pass: false })
   })
 
-  it('a gate on an ABSENT metric is SKIPPED (not applicable) and does not reject the run', () => {
-    // A run that predates a metric (the key isn't in `metrics` at all) can't be judged on that gate — skip
-    // it rather than auto-fail, so the run is accepted/rejected on the gates it CAN be evaluated on.
+  it('a gate on an ABSENT metric is SKIPPED (not applicable) and does not by itself REJECT the run', () => {
+    // A run that predates a metric (the key isn't in `metrics` at all) can't be judged on that gate — skip it
+    // rather than auto-fail. But when it's the ONLY gate, there is nothing we CAN evaluate, so the run is NOT
+    // "accepted" (that would vacuously accept every failed/old run and make the accepted filter a no-op).
     const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 42, metrics: { other: 1 } })
     expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
-    expect(card.accepted).toBe(true) // the only gate is skipped ⇒ vacuously accepted
+    expect(card.accepted).toBe(false) // no applicable gate ⇒ can't verify ⇒ NOT accepted (no vacuous accept)
+  })
+
+  it('a skipped gate alongside a PASSING applicable gate still accepts (judged on what CAN be evaluated)', () => {
+    const gates = [
+      { metric: 'gone', op: '>' as const, value: 0 }, // absent ⇒ skipped
+      { metric: 'ret', op: '>' as const, value: 0 }, // present + passes
+    ]
+    const card = computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { ret: 5 } })
+    expect(card.gates[0].applicable).toBe(false)
+    expect(card.gates[1]).toMatchObject({ applicable: true, pass: true })
+    expect(card.accepted).toBe(true)
+  })
+
+  it('a FAILED or degenerate run is never accepted, even if its applicable gates pass', () => {
+    const gates = [{ metric: 'ret', op: '>' as const, value: 0 }]
+    const metrics = { ret: 5 }
+    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics }).accepted).toBe(true)
+    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' }).accepted).toBe(false)
+    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'invalid' }).accepted).toBe(false)
+    expect(
+      computeScorecard({ ...objMax, gates }, { objective: 1, metrics, health: { status: 'degenerate' } }).accepted,
+    ).toBe(false)
   })
 
   it('a PRESENT but non-finite gate metric FAILS (a measured-garbage value is not skipped)', () => {

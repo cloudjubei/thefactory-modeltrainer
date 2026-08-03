@@ -36,11 +36,25 @@ describe('viewer computeScorecard', () => {
     expect(card.accepted).toBe(true)
   })
 
-  it('SKIPS a gate on an absent metric (not applicable) rather than rejecting the run', () => {
+  it('SKIPS a gate on an absent metric (not applicable) but does NOT vacuously accept when it is the only gate', () => {
     const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 1, metrics: { other: 1 } })
     expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
+    expect(card.accepted).toBe(false) // no applicable gate ⇒ can't verify ⇒ not accepted
+  })
+
+  it('accepts when a skipped gate sits alongside a PASSING applicable gate', () => {
+    const gates = [{ metric: 'gone', op: '>', value: 0 }, { metric: 'ret', op: '>', value: 0 }]
+    const card = S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { ret: 5 } })
     expect(card.accepted).toBe(true)
+  })
+
+  it('never accepts a failed / invalid / degenerate run even when gates pass', () => {
+    const gates = [{ metric: 'ret', op: '>', value: 0 }]
+    const metrics = { ret: 5 }
+    expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics }).accepted).toBe(true)
+    expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' }).accepted).toBe(false)
+    expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics, health: { status: 'degenerate' } }).accepted).toBe(false)
   })
 
   it('FAILS a gate on a present but non-finite metric (measured garbage is not skipped)', () => {

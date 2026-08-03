@@ -1275,9 +1275,15 @@ function applyGateOp(actual: number, op: GateOp, bound: number): boolean {
  */
 export function computeScorecard(
   manifest: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
-  run: { objective?: number; metrics?: Record<string, number> },
+  run: {
+    objective?: number
+    metrics?: Record<string, number>
+    status?: string
+    health?: { status?: string }
+  },
 ): RunScorecard {
-  const gates = (manifest.gates ?? []).map((gate) => {
+  const gateSpecs = manifest.gates ?? []
+  const gates = gateSpecs.map((gate) => {
     const actual = readScorecardMetric(run, gate.metric)
     const bound = typeof gate.value === 'number' ? gate.value : readScorecardMetric(run, gate.value.metric)
     const rendered = typeof gate.value === 'number' ? String(gate.value) : gate.value.metric
@@ -1300,8 +1306,17 @@ export function computeScorecard(
     direction: f.direction,
     value: readScorecardMetric(run, f.metric),
   }))
-  // Accepted iff every APPLICABLE gate passes — a skipped (absent-metric) gate never rejects.
-  return { gates, accepted: gates.every((g) => !g.applicable || g.pass), fitness }
+  // "Accepted" = a genuinely SUCCESSFUL run. A skipped (absent-metric) gate never REJECTS, but it also can't
+  // vouch for a run — so acceptance requires (a) the run is a completed, healthy one (a failed/invalid/degenerate
+  // run is never accepted — when status is unknown, callers pre-filter to completed) AND (b) at least one gate is
+  // applicable AND every applicable gate passes. Without the "≥1 applicable" floor, a run missing every gate
+  // metric would be VACUOUSLY accepted, making the accepted set ≈ all runs (the accepted filter a no-op).
+  const applicable = gates.filter((g) => g.applicable)
+  const hs = run.health?.status
+  const eligible = run.status !== 'failed' && run.status !== 'invalid' && (!hs || hs === 'ok')
+  const accepted =
+    eligible && (gateSpecs.length === 0 || (applicable.length > 0 && applicable.every((g) => g.pass)))
+  return { gates, accepted, fitness }
 }
 
 /**
