@@ -20,7 +20,7 @@ live in git + memory.)
    generic pipeline. "Trades well" is defined by the **scorecard** (gates + fitness), NOT the reward — the
    reward is a training proxy that for BlackSwan does not equal success (the shipped scorecard defines "good").
 3. **Fully AI-operable, shipped as a template.** Anything a user can do in the app, the API/CLI AI can do via
-   tools through the approval gate (A2) — so a user drives the whole loop as a CONVERSATION where the AI
+   tools through the approval gate (shipped) — so a user drives the whole loop as a CONVERSATION where the AI
    researches/proposes/runs and the human mostly approves (A3); and the app is a SINGLE-PURPOSE template a
    project copies + a library it consumes for engine + base UI (A5), with BlackSwan the first consumer.
 
@@ -41,39 +41,10 @@ live in git + memory.)
 
 Ordered by value. Each is something to **implement**.
 
-### A2. Full AI action parity — anything the user can do, the AI can do
-
-**Standing rule:** every mutating/launching user action has an equivalent chat capability, routed through the
-existing **approval gate** — `startProjectActivity` / `createProjectRecord` / `updateProjectRecord`
-(thefactory-tools `projectData`, approval-gated) + the trainer tools. The mechanism already exists; the gap is
-a DECLARATION gap. Today the chat can launch only `manifest.activities = [inspect-trainer, scan-models,
-propose-experiments]` and edit only hypothesis/paper records (`trainerDataCapabilityManifest`,
-`viewer/app.js:2180-2240`); every other user action (train, explore, judge, evaluate, cross-test, mine/discover
-data, research papers, config/xai analysis, consolidate, delete/invalidate) is unreachable via chat.
-
-1. **Declare the full surface** in `trainerDataCapabilityManifest`:
-   - Launchable activities (each approval-gated): add `train`, `explore`, `judge`, `evaluate`, `cross-test`,
-     `continue-training`, `data-catalog`, `mine-data`, `discover-data`, `approve-data-source`,
-     `research-training-papers`, `analyze-paper`, `suggest-paper-hypotheses`, `weigh-paper-hypotheses`,
-     `analyze-paper-models`, `config-space-analyze`, `run-xai-analyze`, `xai-narrate`, `consolidate-models`,
-     `consolidate-hypotheses`, `benchmark-model-device`.
-   - Editable/creatable record types: environments, datasets, presets, run flags (reliability / favorite /
-     unrunnable), filter + bad-run rules, hypothesis min-runs, activity queue/budget. (Manifest + levers stay
-     code → the AI files a story/feature, never edits them in place.)
-2. **Spec-validated launch.** `train`/`explore` need matrix validation — reuse `recommendTrainingExperiments`'
-   `expandExperimentMatrix` + lever validation. Add a `launchTrainingCampaign` tool (or validate server-side in
-   the `train` activity) that rejects malformed matrices with the same `rejected[]` diagnostics, and fold in
-   "launch an approved `-xai-suggestion`" (today only a human click launches a suggestion — see the xAI Suggested surface).
-3. **Missing verbs** (no activity/record path today): `deleteRuns` (destructive — ALWAYS explicit approval),
-   `invalidateRuns`, `migrateTrainingRuns` — add as approval-gated activities/tools.
-4. **Parity audit (prevent regression).** A test that enumerates the viewer's `startOrEnqueue(<type>)` +
-   `putData`/`deleteData(<recordType>)` sites and asserts each is declared in the data-capability manifest (or
-   explicitly exempted as code). Codify the rule in `docs/model-training-standard.md`.
-
 ### A3. AI companion — drive the whole loop as a conversation with approvals
 
-**Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on A2
-(full action parity) + the approval gate.
+**Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on the
+shipped full action-parity surface + the approval gate.
 
 1. **Orient tools.** Promote the shipped `diagnoseSearch` to a chat tool (the AI reads the same Diagnosis plan
    the user sees) and let it rank candidates on the **scorecard** (not the reward); add campaign/activity-status
@@ -92,10 +63,10 @@ data, research papers, config/xai analysis, consolidate, delete/invalidate) is u
 5. **Decide:** the wake-the-chat hook (how the backend notifies a chat topic on run completion); the approval
    granularity (per-action vs batched vs trust-tiered — lean on the change-review design).
 
-### A4. Semi-automation follow-ups — close the loop A2/A3 leave open
+### A4. Semi-automation follow-ups — close the loop A3 leaves open
 
-A2 (chat action-parity) + A3 (companion / approvals) make the AI able to propose → run → read INSIDE one
-project chat. Three gaps remain before the loop is genuinely hands-off AND trustworthy — all outside A2/A3's
+The shipped chat action-parity + A3 (companion / approvals) make the AI able to propose → run → read INSIDE one
+project chat. Three gaps remain before the loop is genuinely hands-off AND trustworthy — all outside that
 scope, and they double as the "keep improving the tooling as we go" side-goal. Ordered by value.
 
 1. **Cross-project + unattended orchestration** (thefactory-tools / backend infra — beyond A3's in-chat scope).
@@ -110,8 +81,8 @@ scope, and they double as the "keep improving the tooling as we go" side-goal. O
    - **App-declared activity types** (`docs/GENERIC_ACTIVITY_SYSTEM_PLAN.md`). BlackSwan's activity types are
      hand-wired backend closures (`activityDefinitions.ts`); every new AI-proposed campaign primitive needs a
      backend code change + redeploy. Make activity types app-declared data so the loop adds primitives deploy-free.
-2. **Self-improvement EXECUTION path — run the stories, don't just file them.** A2.1 has the AI FILE a
-   story/feature for any manifest/lever/code change; nothing lets it EXECUTE that work. Expose the verifier-gated
+2. **Self-improvement EXECUTION path — run the stories, don't just file them.** The shipped action-parity has
+   the AI FILE a story/feature for any manifest/lever/code change; nothing lets it EXECUTE that work. Expose the verifier-gated
    writer panel (`AgentTaskTools.spawnPanel`, absent from `CLI_AGENT_SPAWN_MCP_TOOL_NAMES`) as an approval-gated
    orchestrator tool, so the AI picks up its own filed Stories and improves BlackSwan / the engine under a
    verifier gate — the mechanism that turns "keep improving BlackSwan as we go" into an actual loop.
@@ -176,7 +147,10 @@ template for a shipped single-purpose app).
 - **Datasets:** derive the `asset` lever CHOICES themselves from disk (today a manifest list — needs a manifest
   generator; the on-disk DIMMING of listed-but-absent values is shipped).
 - **On-device verification (test, not build):** mobile parity pass of the conversational-hub surfaces; in-app
-  Data-tab check. Both need a device.
+  Data-tab check (both need a device); and the shipped **AI-action-parity** end-to-end smoke — in the running
+  Overseer, confirm a chat `createProjectRecord`/`updateProjectRecord` (e.g. a new environment) surfaces in the
+  viewer and a `startTrainerActivity` train/judge launch round-trips through the queue (needs one Overseer
+  restart for the rebuilt engine dist).
 - **Parked (need a net-new dependency):** generative counterfactual states (a GAN/VAE); step-by-step decision
   animation replay + scrubber; `seed` still counts as a model lever in the engine's fANOVA (needs a manifest
   lever `scope:'ignore'` + re-analysis — flag, don't silently change).

@@ -111,6 +111,10 @@ import type {
   TrainingVerdict,
   XaiNarrateParams,
   XaiNarrateResult,
+  DeleteRunsParams,
+  DeleteRunsResult,
+  ValidateTrainingSpecParams,
+  ValidateTrainingSpecResult,
 } from './modelTrainerTypes.js'
 import {
   DEFAULT_HYPOTHESIS_COUNT,
@@ -218,6 +222,10 @@ import {
 } from './xaiUtils.js'
 import { initExplorationState, nextExplorationStep } from './explorationUtils.js'
 import {
+  TRAINER_RUN_KEYED_CHILD_SUFFIXES,
+  TRAINER_RUN_SETUP_KEYED_SUFFIX,
+} from './trainerCapabilities.js'
+import {
   incumbentSplitHoldout,
   convergenceGatedBySplits,
   splitLeversOf,
@@ -232,13 +240,39 @@ import {
  * verdict). When a run is deleted these are removed alongside it so none orphan. The `-unrunnable` marker is
  * keyed by SETUP key, not run key, so it is handled separately.
  */
-const RUN_KEYED_CHILD_SUFFIXES = [
-  '-evaluation',
-  '-settest',
-  '-verdict',
-  '-xai-narrative',
-  '-reliability',
-] as const
+// The run-keyed child cascade is SINGLE-SOURCED in trainerCapabilities.ts (also mirrored by the viewer twin +
+// checked by the A2 parity audit), so the chat deleteRuns tool, the migration delete path, and the viewer all
+// cascade identically — a new derived child added there is deleted everywhere with no drift.
+const RUN_KEYED_CHILD_SUFFIXES = TRAINER_RUN_KEYED_CHILD_SUFFIXES
+
+/**
+ * Delete a run record and every record that hangs off its key — the run-keyed children
+ * ({@link RUN_KEYED_CHILD_SUFFIXES}) plus the SETUP-keyed marker — firing `onRecordWritten` per record actually
+ * removed so the host can broadcast each `data:updated`. Shared by the migration `delete`-rule path and the
+ * chat-facing `deleteRuns` tool so both cascade identically. Returns whether the run itself existed.
+ */
+async function deleteRunAndDerivedRecords(
+  storage: Pick<ModelTrainerToolsDeps['storage'], 'deleteRecord'>,
+  scope: string,
+  recordType: string,
+  runKey: string,
+  setupKey: unknown,
+  onRecordWritten?: (recordType: string, key: string) => void,
+): Promise<boolean> {
+  const removed = await storage.deleteRecord({ scope, type: recordType, key: runKey })
+  if (removed) onRecordWritten?.(recordType, runKey)
+  for (const suffix of RUN_KEYED_CHILD_SUFFIXES) {
+    const childType = recordType + suffix
+    const childRemoved = await storage.deleteRecord({ scope, type: childType, key: runKey })
+    if (childRemoved) onRecordWritten?.(childType, runKey)
+  }
+  if (typeof setupKey === 'string' && setupKey) {
+    const unrunnableType = `${recordType}${TRAINER_RUN_SETUP_KEYED_SUFFIX}`
+    const unrunnableRemoved = await storage.deleteRecord({ scope, type: unrunnableType, key: setupKey })
+    if (unrunnableRemoved) onRecordWritten?.(unrunnableType, setupKey)
+  }
+  return removed
+}
 
 /** Drop a `decisionTrace` artifact that {@link validateDecisionTrace} can't use, leaving every other artifact intact. */
 function sanitizeRunArtifacts(
@@ -3397,28 +3431,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
 
     // Delete a run AND its derived records (so nothing orphans), broadcasting each actual removal.
-    const deleteRunAndDerived = async (runKey: string, setupKey: unknown): Promise<void> => {
-      await deps.storage.deleteRecord({ scope: params.scope, type: recordType, key: runKey })
-      params.onRecordWritten?.(recordType, runKey)
-      for (const suffix of RUN_KEYED_CHILD_SUFFIXES) {
-        const childType = recordType + suffix
-        const removed = await deps.storage.deleteRecord({
-          scope: params.scope,
-          type: childType,
-          key: runKey,
-        })
-        if (removed) params.onRecordWritten?.(childType, runKey)
-      }
-      if (typeof setupKey === 'string' && setupKey) {
-        const unrunnableType = `${recordType}-unrunnable`
-        const removed = await deps.storage.deleteRecord({
-          scope: params.scope,
-          type: unrunnableType,
-          key: setupKey,
-        })
-        if (removed) params.onRecordWritten?.(unrunnableType, setupKey)
-      }
-    }
+    const deleteRunAndDerived = (runKey: string, setupKey: unknown): Promise<boolean> =>
+      deleteRunAndDerivedRecords(
+        deps.storage,
+        params.scope,
+        recordType,
+        runKey,
+        setupKey,
+        params.onRecordWritten,
+      )
 
     // Scan LEAN (heavy fields omitted): this runs at boot over EVERY run, so materializing each run's
     // series/trace at once would OOM the process. Only the DECISION needs light fields (config/setupKey).
@@ -3706,6 +3727,52 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // A2: the chat-facing, approval-gated destructive verb. Resolves the recordType from the scope's registered
+  // projects, then removes each run + its derived children via the shared cascade so nothing orphans.
+  async function deleteRuns(params: DeleteRunsParams): Promise<DeleteRunsResult> {
+    const manifest = await resolveProjectManifest(params.scope, params.project)
+    const recordType = manifest.recordType
+    const missing: string[] = []
+    let deleted = 0
+    for (const runKey of params.runKeys) {
+      const existing = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
+      if (!existing) {
+        missing.push(runKey)
+        continue
+      }
+      const setupKey = (existing.content as { setupKey?: unknown } | undefined)?.setupKey
+      await deleteRunAndDerivedRecords(
+        deps.storage,
+        params.scope,
+        recordType,
+        runKey,
+        setupKey,
+        params.onRecordWritten,
+      )
+      deleted++
+    }
+    logger?.info('chat deleted runs', { recordType, requested: params.runKeys.length, deleted })
+    return { recordType, requested: params.runKeys.length, deleted, missing }
+  }
+
+  // A2: validate an experiment spec against the manifest WITHOUT launching — the same expandExperimentMatrix
+  // gate recommendTrainingExperiments uses, so the bespoke train/explore launch can reject a malformed matrix
+  // up front instead of failing asynchronously as a dead activity.
+  async function validateTrainingSpec(
+    params: ValidateTrainingSpecParams,
+  ): Promise<ValidateTrainingSpecResult> {
+    const manifest = await resolveProjectManifest(params.scope, params.project)
+    const recordType = manifest.recordType
+    const spec = migrateExperimentSpec(params.spec, manifest.migrations)
+    try {
+      const planned = expandExperimentMatrix(manifest, spec, hashTrainingConfig)
+      if (!planned.length) return { ok: false, recordType, reason: 'the spec plans zero runs' }
+      return { ok: true, recordType, spec, plannedCount: planned.length }
+    } catch (err) {
+      return { ok: false, recordType, reason: err instanceof Error ? err.message : String(err) }
+    }
+  }
+
   return {
     readTrainerManifest: (projectRoot, manifestRelPath) =>
       readTrainerManifest(projectRoot, manifestRelPath),
@@ -3743,5 +3810,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzeConfigSpace,
     migrateTrainingRuns,
     invalidateRuns,
+    deleteRuns,
+    validateTrainingSpec,
   }
 }

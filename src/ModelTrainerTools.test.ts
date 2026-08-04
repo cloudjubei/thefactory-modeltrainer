@@ -5836,3 +5836,110 @@ describe('continueTrainingRun (A3 extra-train)', () => {
     expect(progress.length).toBeGreaterThan(0)
   })
 })
+
+describe('deleteRuns (A2 destructive chat verb)', () => {
+  const registerManifest = (storage: MemoryStorage, mm = manifest()) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: mm },
+    })
+
+  it('deletes the run + its derived children + the unrunnable setup marker', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { config: { lr: 0.01 }, objective: 1, status: 'completed', setupKey: 's1' },
+    })
+    for (const suffix of ['-evaluation', '-settest', '-verdict', '-xai-narrative', '-reliability']) {
+      await storage.upsertRecord({ scope: 'proj', type: 'demo-run' + suffix, key: 'r1', content: { runKey: 'r1' } })
+    }
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-unrunnable', key: 's1', content: { setupKey: 's1' } })
+    const written: string[] = []
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.deleteRuns({
+      scope: 'proj',
+      runKeys: ['r1'],
+      onRecordWritten: (t, k) => written.push(`${t}|${k}`),
+    })
+    expect(res).toMatchObject({ recordType: 'demo-run', requested: 1, deleted: 1, missing: [] })
+    // The run + EVERY derived child + the setup marker are gone.
+    expect(storage.rows.has('proj|demo-run|r1')).toBe(false)
+    for (const suffix of ['-evaluation', '-settest', '-verdict', '-xai-narrative', '-reliability']) {
+      expect(storage.rows.has(`proj|demo-run${suffix}|r1`)).toBe(false)
+    }
+    expect(storage.rows.has('proj|demo-run-unrunnable|s1')).toBe(false)
+    // onRecordWritten fired for the run itself + each removed child (host broadcast).
+    expect(written).toContain('demo-run|r1')
+    expect(written).toContain('demo-run-unrunnable|s1')
+  })
+
+  it('reports missing keys and only counts real deletions', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage)
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { config: { lr: 0.01 }, status: 'completed' },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.deleteRuns({ scope: 'proj', runKeys: ['r1', 'ghost'] })
+    expect(res.requested).toBe(2)
+    expect(res.deleted).toBe(1)
+    expect(res.missing).toEqual(['ghost'])
+  })
+
+  it('resolves the target project when several are registered', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
+    await storage.upsertRecord({ scope: 'proj', type: 'b-run', key: 'r1', content: { config: {}, status: 'completed' } })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(tools.deleteRuns({ scope: 'proj', runKeys: ['r1'] })).rejects.toThrow(/several training projects/)
+    const res = await tools.deleteRuns({ scope: 'proj', runKeys: ['r1'], project: 'B' })
+    expect(res).toMatchObject({ recordType: 'b-run', deleted: 1 })
+  })
+})
+
+describe('validateTrainingSpec (A2 up-front launch gate)', () => {
+  const registerManifest = (storage: MemoryStorage, mm = manifest()) =>
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: mm },
+    })
+
+  it('accepts a valid spec and reports the planned run count', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { lr: [0.01, 0.02, 0.03] } } })
+    expect(res.ok).toBe(true)
+    expect(res.recordType).toBe('demo-run')
+    expect(res.plannedCount).toBe(3)
+  })
+
+  it('rejects an unknown lever with the planner reason', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { nope: [1, 2] } } })
+    expect(res.ok).toBe(false)
+    expect(res.reason).toMatch(/nope/)
+  })
+
+  it('rejects a spec that plans zero runs', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { lr: [] } } })
+    expect(res.ok).toBe(false)
+    expect(res.reason).toMatch(/lr/)
+  })
+})

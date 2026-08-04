@@ -7,6 +7,15 @@
 // record types, with the project's `dir` threaded into every
 // train/judge/propose/evaluate activity.
 
+// Build stamp — logged on load so a STALE embedded app.js is diagnosable. The app view caches app.js until
+// its iframe remounts (a per-load ?v= cache-bust only fires when index.html is re-fetched, i.e. the App view
+// is reopened), so an in-Overseer tab switch keeps running whatever app.js was current when the view opened.
+// Bump this on a perf/behaviour fix so "am I on the new code?" is a one-glance console check.
+const VIEWER_BUILD = '2026-08-04b · perf: O(n) sort + memoised reliability + single-pass toolbar'
+try {
+  console.info('[trainer-viewer] build ' + VIEWER_BUILD)
+} catch {}
+
 const POLL_MS = 3000
 // A faster cadence while an activity is actively RUNNING (calibrating/training/quick task) so phase
 // + per-run status changes surface promptly. Idle/queued/paused states keep the slower POLL_MS.
@@ -1330,6 +1339,22 @@ function computeReliabilityHeuristics() {
     window.Comparison.lockedLeverKeys(manifest, 'dataset')
       .map((k) => `${k}=${cfg[k] === undefined || cfg[k] === null || cfg[k] === '' ? 'n/a' : String(cfg[k])}`)
       .join(' · ')
+  // Precompute the two POOL-INVARIANTS the per-setup robustness needs ONCE, so the loop is O(pool) not
+  // O(setups × pool) — the difference between an instant reliability pass and a multi-minute freeze at 20k
+  // runs. `setupSig` is exactly `canonLever` per locked key, so grouping the pool by it is identical to
+  // xaiLockedMatches' `sameSetupExceptAxis` — same matches, no behaviour change.
+  const standingByKey = hasDs ? datasetStandingByKey(criterion) : {}
+  const matchesBySetup = new Map()
+  if (hasDs) {
+    for (const r of xaiRunPool()) {
+      const s = r && r.summary
+      if (!s || s.status === 'failed' || s.status === 'invalid') continue
+      const sig = setupSig(s.config || {})
+      let arr = matchesBySetup.get(sig)
+      if (!arr) matchesBySetup.set(sig, (arr = []))
+      arr.push(r)
+    }
+  }
   for (const r of runs) {
     const top = modelTop.get(String((r.config && r.config.model_name) || ''))
     if (!top) continue
@@ -1339,7 +1364,8 @@ function computeReliabilityHeuristics() {
     let robustness = 'n/a'
     if (hasDs) {
       const sig = setupSig(r.config)
-      if (!robustBySetup.has(sig)) robustBySetup.set(sig, xaiDatasetRobustness(r.config, criterion).label)
+      if (!robustBySetup.has(sig))
+        robustBySetup.set(sig, robustnessFromMatches(matchesBySetup.get(sig) || [], standingByKey).label)
       robustness = robustBySetup.get(sig)
     }
     const verdict = window.Comparison.assessRunReliability({
@@ -2360,6 +2386,7 @@ function resetDashboardState() {
   reliabilityCache = new Map()
   reliabilityHeuristicCache = new Map()
   reliabilityHeuristicPoolRef = null
+  resetDatasetStandingMemo()
   runsReliabilityFilter = ''
   runsScorecardFilter = ''
   if (runsTextRenderTimer) {
@@ -2456,85 +2483,14 @@ function resetDashboardState() {
   if (activityBody) setHtml(activityBody, '')
 }
 // F.1 cross-app chat: declare this trainer project's data-capability manifest so the Overseer chat's
-// generic project-data tools (queryProjectData / updateProjectRecord / startProjectActivity) advertise
+// generic project-data tools (queryProjectData / createProjectRecord / updateProjectRecord) advertise
 // against these record types. The host persists the `data` block (per Overseer project) and the backend
-// reads it when a chat opens. These editable fields are ALL record edits the chat can make — including a
-// manual verdict override (set `status` + `verdictSource:'manual'`). There is NO bespoke trainer update
-// tool: a hypothesis SPEC change goes through recommendTrainingExperiments (validated + becomes a runnable
-// suggestion; editing a spec changes the hypothesis's identity). Each type's `view` becomes a clickable
-// resource link on returned records (F.2/F.3).
+// reads it when a chat opens. The declaration is single-sourced in viewer/trainerCapabilities.js (the twin
+// of the engine's src/trainerCapabilities.ts) so the viewer, the backend startTrainerActivity/deleteRuns
+// tools, and the A2 parity audit never drift. `activities` is empty — trainer LAUNCHES go through the
+// bespoke, context-injecting `startTrainerActivity` tool, not the generic startProjectActivity path.
 function trainerDataCapabilityManifest(m) {
-  const rt = m.recordType
-  return {
-    types: [
-      {
-        type: rt,
-        label: 'Training run',
-        description: 'A completed run: its config levers, metrics, dataset, objective and status.',
-        view: { view: 'runs', keyParam: 'run' },
-      },
-      {
-        type: rt + '-hypothesis',
-        label: 'Hypothesis',
-        description:
-          'A tested claim about which lever settings help. To override a verdict, set BOTH status (proven/disproved/untested) and verdictSource="manual". Create a new one with a `spec` ({fixed?, sweep?, seeds?, environments?, datasets?, compare?}) using the manifest\'s declared lever names.',
-        editable: true,
-        editableFields: [
-          'title',
-          'claim',
-          'rationale',
-          'verdictNote',
-          'dismissed',
-          'status',
-          'verdictSource',
-        ],
-        creatable: true,
-        creatableFields: ['title', 'claim', 'rationale', 'spec', 'comparison'],
-        createDefaults: { status: 'untested', verdictSource: 'auto', source: 'llm' },
-        view: { view: 'hypotheses', keyParam: 'focus' },
-      },
-      {
-        type: rt + '-paper',
-        label: 'Paper',
-        description: 'A research paper and its testable hypotheses.',
-        editable: true,
-        editableFields: [
-          'title',
-          'claim',
-          'approach',
-          'verdictNote',
-          'url',
-          'authors',
-          'dismissed',
-          'year',
-          'tags',
-        ],
-        creatable: true,
-        creatableFields: ['title', 'claim', 'approach', 'url', 'authors', 'year', 'tags'],
-        createDefaults: { status: 'untested', source: 'research' },
-        view: { view: 'papers', keyParam: 'paper' },
-      },
-      {
-        type: rt + '-scorecard',
-        label: 'Scorecard',
-        description:
-          'A named definition of "good": `gates` (accept/reject predicates over run-summary metrics, each {metric, op (one of >,>=,<,<=,==,!=), value (a number or {metric} to compare against another metric), label?}) + `fitness` (ranking objectives, each {metric, direction (max|min)}), separate from the training reward. The "Default" is seeded from the manifest; create alternates to score the same runs by a different bar. Which card is ACTIVE (drives the Runs table) is set via the Scorecards tab.',
-        editable: true,
-        editableFields: ['name', 'description', 'gates', 'fitness'],
-        creatable: true,
-        creatableFields: ['name', 'description', 'gates', 'fitness'],
-        createDefaults: { source: 'llm' },
-        view: { view: 'scorecards' },
-      },
-      {
-        type: rt + '-xai-suggestion',
-        label: 'AI experiment suggestion',
-        description: 'A runnable experiment the AI recommended.',
-        view: { view: 'xai', params: { scope: 'all' } },
-      },
-    ],
-    activities: ['inspect-trainer', 'scan-models', 'propose-experiments'],
-  }
+  return window.TrainerCapabilities.buildTrainerDataCapabilityManifest(m.recordType)
 }
 function reportDataCapabilities() {
   if (!window.OverseerBridge || !window.OverseerBridge.embedded || !manifest) return
@@ -3075,12 +3031,12 @@ function sortRunsByObjective(runs) {
   const SC = typeof window !== 'undefined' ? window.Scorecard : null
   const card = SC ? activeScorecard() : null
   if (SC && SC.hasScorecard(card)) {
-    return [...runs].sort((a, b) =>
-      SC.compareScorecards(
-        SC.computeScorecard(card, a.summary || {}),
-        SC.computeScorecard(card, b.summary || {}),
-      ),
-    )
+    // Decorate–sort–undecorate: compute each run's scorecard ONCE (not twice PER comparison), then sort on the
+    // cached objects with the SAME comparator. At 20k runs the per-comparison form ran computeScorecard ~700k
+    // times and froze the tab; this is O(n) computes + an O(n log n) numeric-ish sort, behaviourally identical.
+    const decorated = runs.map((r) => ({ r, sc: SC.computeScorecard(card, r.summary || {}) }))
+    decorated.sort((a, b) => SC.compareScorecards(a.sc, b.sc))
+    return decorated.map((d) => d.r)
   }
   const dir = objectiveDirection()
   return [...runs].sort((a, b) => {
@@ -3832,13 +3788,17 @@ function sortRuns(runs) {
   const col = runsSortKey ? runsColumns().find((c) => c.id === runsSortKey) : null
   if (!col) return sortRunsByObjective(runs)
   const dir = runsSortDir === 'asc' ? 1 : -1
-  return [...runs].sort((a, b) => {
-    const va = col.sort(a)
-    const vb = col.sort(b)
+  // Decorate–sort–undecorate: `col.sort` can be expensive (the scorecard column computes a full scorecard).
+  // Computing it once per run instead of twice per comparison keeps a 20k-run sort from freezing the tab.
+  const decorated = runs.map((r) => ({ r, v: col.sort(r) }))
+  decorated.sort((a, b) => {
+    const va = a.v
+    const vb = b.v
     if (typeof va === 'number' || typeof vb === 'number')
       return compareNumeric(Number(va), Number(vb), dir)
     return String(va).localeCompare(String(vb)) * dir
   })
+  return decorated.map((d) => d.r)
 }
 function runVersionOf(r) {
   return String((r.summary && r.summary.pipelineVersion) || '1.0')
@@ -4336,16 +4296,24 @@ function runsToolbarHtml(shownCount, total) {
   // `legacy:…` dataset tags are filterable), minus input-only synonyms (e.g. `fidelity_set: auto`) that no
   // stored run carries — unless one actually does. So the dropdown reflects what you can really filter to.
   const synonyms = new Set(INPUT_SYNONYMS)
-  const leverDropdowns = leverEntries()
-    .filter(([, spec]) => spec.type === 'choice')
+  const choiceLevers = leverEntries().filter(([, spec]) => spec.type === 'choice')
+  // Collect the present values per choice lever + the present pipeline versions in ONE pass over runsCache.
+  // The prior form scanned the whole 20k corpus (and allocated 3 intermediate arrays) PER lever on every
+  // render — O(levers × runs) with heavy GC; this is one walk that fills every lever's value set at once.
+  const presentByLever = new Map(choiceLevers.map(([key]) => [key, new Set()]))
+  const presentVersions = new Set()
+  for (const r of runsCache) {
+    const cfg = (r.summary && r.summary.config) || {}
+    for (const [key] of choiceLevers) {
+      const v = cfg[key]
+      if (v !== undefined && v !== null) presentByLever.get(key).add(String(v))
+    }
+    presentVersions.add(runVersionOf(r))
+  }
+  const leverDropdowns = choiceLevers
     .map(([key, spec]) => {
       const selected = String(runsLeverFilter[key] || '')
-      const present = new Set(
-        runsCache
-          .map((r) => (r.summary.config || {})[key])
-          .filter((v) => v !== undefined && v !== null)
-          .map(String),
-      )
+      const present = presentByLever.get(key)
       const values = [...new Set([...(spec.choices || []).map(String), ...present])].filter(
         (v) => present.has(v) || !synonyms.has(v),
       )
@@ -4361,10 +4329,7 @@ function runsToolbarHtml(shownCount, total) {
     })
     .join('')
   const versions = [
-    ...new Set([
-      ...runsCache.map(runVersionOf),
-      String((manifest && manifest.pipelineVersion) || '1'),
-    ]),
+    ...new Set([...presentVersions, String((manifest && manifest.pipelineVersion) || '1')]),
   ].sort()
   const versionFilter = `<select class="runs-filter-lever${runsVersionFilter ? ' is-changed' : ''}" id="runs-version-filter"${helpAttr("Show only runs from one pipeline version — cross-version scores aren't comparable.")}>
           <option value="">version: any</option>
@@ -7119,19 +7084,42 @@ function xaiModelLeverEffects(focusCfg, criterion) {
 // How a config holds up ACROSS datasets — its robustnessVerdict label + dataset count — computed side-effect
 // free (unlike xaiAxisGroupsFrom, which mutates the By value selection cache) so it's safe to call from the
 // run detail. 'n/a' when the project has no dataset axis or the config has run in fewer than two datasets.
-function xaiDatasetRobustness(focusCfg, criterion) {
-  if (!hasDatasetLevers()) return { label: 'n/a', n: 0 }
+// The per-dataset-environment standing of every run (normalizeByEnvironment) is INVARIANT across focus configs
+// — it only depends on the loaded pool + criterion. Recomputing it inside xaiDatasetRobustness meant a whole-
+// pool (20k) rescan + xaiRuns() rebuild PER call, and computeReliabilityHeuristics calls it once per distinct
+// setup, so a probabilistic-lever project froze for minutes on load (O(setups × pool)). Memoise by pool
+// reference (replaced wholesale on refresh/settle/switch) + criterion, so it's computed ONCE per corpus change.
+let _datasetStandingMemo = { poolRef: null, ck: '', standingByKey: null }
+function resetDatasetStandingMemo() {
+  _datasetStandingMemo = { poolRef: null, ck: '', standingByKey: null }
+}
+function datasetStandingByKey(criterion) {
+  const pool = xaiRunPool()
+  const ck = criterion ? `${criterion.key}|${criterion.direction}` : ''
+  if (_datasetStandingMemo.poolRef === pool && _datasetStandingMemo.ck === ck && _datasetStandingMemo.standingByKey)
+    return _datasetStandingMemo.standingByKey
   const datasetKeys = window.Comparison.axisLeverKeys(manifest, 'dataset')
   const standingByKey = window.Xai.normalizeByEnvironment(xaiRuns(), criterion, datasetKeys)
+  _datasetStandingMemo = { poolRef: pool, ck, standingByKey }
+  return standingByKey
+}
+// Reduce a run's dataset-siblings (its xaiLockedMatches — same setup, varying dataset axis) to a robustness
+// verdict: one standing per distinct dataset signature. Extracted so the bulk reliability pass can feed a
+// PRE-GROUPED match list (see computeReliabilityHeuristics) instead of re-scanning the pool per setup.
+function robustnessFromMatches(matches, standingByKey) {
   const seenSig = new Set()
   const standings = []
-  for (const r of xaiLockedMatches(focusCfg, 'dataset')) {
+  for (const r of matches) {
     const sig = window.Comparison.runAxisSignature(manifest, 'dataset', r)
     if (seenSig.has(sig) || !(r.key in standingByKey)) continue
     seenSig.add(sig)
     standings.push(standingByKey[r.key])
   }
   return window.Comparison.robustnessVerdict(standings)
+}
+function xaiDatasetRobustness(focusCfg, criterion) {
+  if (!hasDatasetLevers()) return { label: 'n/a', n: 0 }
+  return robustnessFromMatches(xaiLockedMatches(focusCfg, 'dataset'), datasetStandingByKey(criterion))
 }
 // Reliability of a run's result: is its edge a genuine learned signal, or a probabilistic threshold tuned to
 // luck? Screens the run's MODEL for a dominant `probabilistic` lever, checks whether the config holds across
@@ -14217,12 +14205,11 @@ async function deleteHypothesis(id) {
 // Also drop a run's derived records so a deleted run fully disappears (no orphan
 // evaluation / verdict / xai-narrative / unrunnable marker keyed by the same run/setup key).
 async function deleteRelatedRunRecords(key, setupKey) {
-  const types = [
-    manifest.recordType + '-evaluation',
-    manifest.recordType + '-verdict',
-    manifest.recordType + '-xai-narrative',
-    manifest.recordType + '-reliability',
-  ]
+  // Single-sourced from the engine cascade (via the trainerCapabilities twin) so viewer + chat deleteRuns
+  // remove exactly the same run-keyed children — no drift. The setup-keyed '-unrunnable' is handled below.
+  const types = window.TrainerCapabilities.TRAINER_RUN_KEYED_CHILD_SUFFIXES.map(
+    (suffix) => manifest.recordType + suffix,
+  )
   reliabilityCache.delete(key)
   for (const type of types) {
     try {

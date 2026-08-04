@@ -2420,6 +2420,78 @@ export interface DiagnoseSearchResult {
 // through `recommendTrainingExperiments` (it's validated + becomes a runnable suggestion, and editing a spec
 // changes the hypothesis's identity anyway).
 
+// --- A2: full AI action parity ------------------------------------------------------------------------
+// The single-source declaration of what a chat agent may do to a trainer project — every mutating/launching
+// user action mapped to a chat capability, so parity can't silently regress (audited by
+// `trainerCapabilities.parity.test.ts` against the viewer's real launch + write sites). The data lives in
+// `trainerCapabilities.ts`; the viewer keeps a pinned JS twin (`viewer/trainerCapabilities.js`). Launches
+// go through the bespoke, context-injecting, validated `startTrainerActivity` tool (the generic
+// `startProjectActivity` path can't inject the mandatory `recordType` or describe an activity's params);
+// record edits ride the generic create/update path via the declared record types below.
+
+/** A background activity a chat may launch (via the bespoke, approval-gated `startTrainerActivity` tool). */
+export interface TrainerLaunchableActivity {
+  activityType: string
+  label: string
+  /** What it does + the params it accepts — surfaced in the tool schema + the chat addendum. */
+  description: string
+  /** Params the launch REQUIRES; a missing one is rejected before admission with a clear message. */
+  requiredParams?: string[]
+  /** Params the launch may optionally take. */
+  optionalParams?: string[]
+  /** True ⇒ the activity needs an API-capable model; a CLI-only model is rejected at launch. */
+  requiresApi?: boolean
+}
+
+/** Where a returned record is viewable inside the embedded app (deep-link template). */
+export interface TrainerCapabilityView {
+  view: string
+  params?: Record<string, string>
+  keyParam?: string
+}
+
+/** One DataStorage record type a chat may query — and optionally create/edit — via the generic tools. */
+export interface TrainerCapabilityRecordType {
+  /** Appended to the manifest `recordType` (e.g. `-environment`; `''` = the run record). Exclusive with fixedType. */
+  suffix?: string
+  /** An absolute record type NOT namespaced by recordType (e.g. `trainer-activity-limits`). Exclusive with suffix. */
+  fixedType?: string
+  label: string
+  description: string
+  editable?: boolean
+  editableFields?: string[]
+  creatable?: boolean
+  creatableFields?: string[]
+  createDefaults?: Record<string, unknown>
+  view?: TrainerCapabilityView
+}
+
+/** A record type the chat deliberately CANNOT touch (UI state / backend-derived / hub registration), with why. */
+export interface TrainerExemptRecord {
+  suffix?: string
+  fixedType?: string
+  reason: string
+}
+
+/** One entry of a built data-capability manifest (structurally a thefactory-tools `DataCapabilityType`). */
+export interface TrainerCapabilityManifestType {
+  type: string
+  label?: string
+  description?: string
+  editable?: boolean
+  editableFields?: string[]
+  creatable?: boolean
+  creatableFields?: string[]
+  createDefaults?: Record<string, unknown>
+  view?: TrainerCapabilityView
+}
+
+/** The reported manifest (structurally a thefactory-tools `DataCapabilityManifest`). */
+export interface TrainerDataCapabilityManifest {
+  types: TrainerCapabilityManifestType[]
+  activities: string[]
+}
+
 export interface AnalyzePaperFromUrlParams {
   scope: string
   projectRoot: string
@@ -3114,6 +3186,54 @@ export interface InvalidateRunsResult {
   pendingAlreadyApplied: boolean
 }
 
+/**
+ * Delete runs + their derived children (A2: the chat-facing, approval-gated destructive verb). Scope-based
+ * like the other chat tools — the recordType is resolved from the host's registered training projects.
+ */
+export interface DeleteRunsParams {
+  /** The HOST project scope the run records live in. */
+  scope: string
+  /** The run ids to delete (each with its derived `-evaluation`/`-verdict`/… children + `-unrunnable` marker). */
+  runKeys: string[]
+  /** Which registered training project, when the scope registers several. */
+  project?: string
+  /** Fired per deleted record so the host can broadcast `data:updated`. */
+  onRecordWritten?: (recordType: string, key: string) => void
+}
+
+export interface DeleteRunsResult {
+  recordType: string
+  /** How many run keys were requested. */
+  requested: number
+  /** How many run records were actually deleted (keys with no run record don't count). */
+  deleted: number
+  /** Requested keys that had no run record. */
+  missing: string[]
+}
+
+/**
+ * Validate an experiment spec against a project's manifest WITHOUT launching — the up-front check the bespoke
+ * `startTrainerActivity` train/explore path runs so a malformed matrix is rejected with a reason the model can
+ * fix, instead of failing asynchronously as a dead activity. Reuses the same `expandExperimentMatrix` gate as
+ * `recommendTrainingExperiments`.
+ */
+export interface ValidateTrainingSpecParams {
+  scope: string
+  spec: ExperimentSpec
+  project?: string
+}
+
+export interface ValidateTrainingSpecResult {
+  ok: boolean
+  recordType: string
+  /** The migrated + validated spec (retired lever values rolled forward), when ok. */
+  spec?: ExperimentSpec
+  /** How many runs the spec plans, when ok. */
+  plannedCount?: number
+  /** Why the spec was rejected, when not ok. */
+  reason?: string
+}
+
 export interface GetRunXaiParams {
   scope: string
   runKey: string
@@ -3324,4 +3444,15 @@ export interface ModelTrainerTools {
    * once, cancel matching pending-queue items. Version-gated so re-runs with the fix are never re-flagged.
    */
   invalidateRuns(params: InvalidateRunsParams): Promise<InvalidateRunsResult>
+  /**
+   * Delete runs + their derived children (A2 destructive chat verb). Resolves the recordType from the scope's
+   * registered training projects; removes each run's `-evaluation`/`-settest`/`-verdict`/`-xai-narrative`/
+   * `-reliability` records and its `-unrunnable` setup marker alongside it, so nothing orphans.
+   */
+  deleteRuns(params: DeleteRunsParams): Promise<DeleteRunsResult>
+  /**
+   * Validate an experiment spec against a project's manifest without launching — the up-front gate the
+   * bespoke train/explore launch runs so a malformed matrix is rejected with a fixable reason.
+   */
+  validateTrainingSpec(params: ValidateTrainingSpecParams): Promise<ValidateTrainingSpecResult>
 }

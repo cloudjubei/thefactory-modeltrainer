@@ -200,3 +200,31 @@ contract's hard requirement is the final `RunSummary`.
 `data | model | train | evaluate | serve` stay separable behind clear interfaces. BlackSwan
 already has this factory skeleton (`data_factory`/`model_factory`/`env_factory`) — its migration
 is mostly conforming the entrypoint + summary + objective + tracking, and pruning dead paths.
+
+---
+
+## 6. AI action parity (the chat can do what the user can do)
+
+Every mutating or launching action a user can take in the project's app has an equivalent, **approval-gated**
+chat capability — so a user can drive the whole loop as a conversation. The surface is declared in ONE place
+(the engine's `trainerCapabilities.ts`, mirrored by the viewer's `trainerCapabilities.js` twin) and audited so
+it can't silently regress:
+
+- **Launches** (train, explore, judge, evaluate, cross-test, mine data, research, …) go through a bespoke
+  `startTrainerActivity` tool that injects the project context (`recordType`/`dir`) the chat can't know and
+  validates a train/explore spec against the manifest BEFORE admitting it. The generic `startProjectActivity`
+  path is deliberately NOT used for trainer activities — it can neither inject that context nor describe an
+  activity's params.
+- **Record edits** (environments, datasets, scorecards, hypotheses, papers, per-run flags, project settings)
+  ride the generic `createProjectRecord`/`updateProjectRecord` tools against the declared record types, each
+  with an editable/creatable field allow-list.
+- **Destructive** verbs (delete runs, with their derived records) are separate tools, ALWAYS shown for
+  explicit approval.
+- **Code** changes (new models / levers / components) are never in-place edits — the AI files a story/feature.
+- **Exempt** from parity, with a stated reason: UI-only state (seen marks, drain order), backend-derived
+  records (evaluations, verdicts, stats), hub registration, and automatic boot maintenance (migrate/invalidate
+  sweeps — not user actions).
+
+**The audit is a hard gate.** A test enumerates the viewer's `startOrEnqueue` / `putData` / `deleteData` sites
+and fails the build if any activity or record type isn't declared launchable/editable or explicitly exempted —
+so adding a new user action without a chat path breaks CI.
