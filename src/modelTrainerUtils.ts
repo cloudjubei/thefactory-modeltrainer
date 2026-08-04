@@ -210,6 +210,54 @@ export function parseDataCatalog(summary: unknown): DataCatalogAssetClass[] {
 }
 
 /**
+ * A6 — the symbols that have ON-DISK coverage across a data catalog's asset classes (the same "has data"
+ * signal the viewer dims on: an instrument counts when its `onDisk` map is non-empty). De-duplicated; the
+ * launchable-asset universe a `choicesFrom:'datacatalog'` lever draws its choices from.
+ */
+export function catalogAssetIds(assetClasses: DataCatalogAssetClass[] | undefined): string[] {
+  const out = new Set<string>()
+  for (const cls of assetClasses ?? [])
+    for (const inst of cls?.instruments ?? [])
+      if (inst?.symbol && inst.onDisk && Object.keys(inst.onDisk).length > 0) out.add(inst.symbol)
+  return [...out]
+}
+
+/**
+ * A6 — return a manifest whose `choicesFrom:'datacatalog'` levers have the on-disk catalog symbols UNIONED into
+ * their `choices` (declared choices kept + deduped), so a newly-mined asset is launchable/validatable without a
+ * manifest edit. Domain-oblivious: only levers carrying the flag are touched. Returns the SAME manifest object
+ * when nothing changes (no catalog assets, or no flagged lever), so callers can cheaply skip a rewrite.
+ */
+export function withCatalogChoices(
+  manifest: TrainerManifest,
+  assetClasses: DataCatalogAssetClass[] | undefined,
+): TrainerManifest {
+  const ids = catalogAssetIds(assetClasses)
+  if (!ids.length) return manifest
+  let changed = false
+  const levers: TrainerManifest['levers'] = {}
+  for (const [name, spec] of Object.entries(manifest.levers)) {
+    if (spec.choicesFrom === 'datacatalog') {
+      const declared = Array.isArray(spec.choices) ? spec.choices : []
+      const seen = new Set(declared.map((c) => String(c)))
+      const merged = [...declared]
+      for (const id of ids)
+        if (!seen.has(String(id))) {
+          merged.push(id)
+          seen.add(String(id))
+        }
+      if (merged.length !== declared.length) {
+        levers[name] = { ...spec, choices: merged }
+        changed = true
+        continue
+      }
+    }
+    levers[name] = spec
+  }
+  return changed ? { ...manifest, levers } : manifest
+}
+
+/**
  * Coerce the asset-linkage edges from a `dataCatalog` command's `{summaryOut}` JSON
  * (`{ linkage: { edges: [...] } }`). Defaults to an empty array — a project without a linkage graph is
  * fine (the Data tab just shows no "related data" chips), never an error.
@@ -1249,7 +1297,7 @@ function hasScorecardMetric(
 }
 
 /** Apply a gate operator; a NaN on either side always fails (an unverifiable run is never accepted). */
-function applyGateOp(actual: number, op: GateOp, bound: number): boolean {
+export function applyGateOp(actual: number, op: GateOp, bound: number): boolean {
   if (!Number.isFinite(actual) || !Number.isFinite(bound)) return false
   switch (op) {
     case '>':

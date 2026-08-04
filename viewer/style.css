@@ -4648,3 +4648,86 @@ select.app-select:focus-visible,
   margin: 2px 0;
   line-height: 1.45;
 }
+
+/* A4.3 — the champion "declare steady" verdict card (single source: rendered from the engine's -diagnosis record). */
+#champion-verdict {
+  flex: 0 0 auto;
+}
+#champion-verdict:empty {
+  display: none;
+}
+.champion-card {
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--muted);
+  border-radius: var(--radius);
+}
+.champion-card.is-steady {
+  border-left-color: var(--ok);
+}
+.champion-card.is-not-steady {
+  border-left-color: var(--bad);
+}
+.champion-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.champion-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.champion-card.is-steady .champion-title {
+  color: var(--ok);
+}
+.champion-card.is-not-steady .champion-title {
+  color: var(--bad);
+}
+.champion-sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.champion-when {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.champion-gates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.champion-gate {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 0;
+  line-height: 1.4;
+}
+.champion-mark {
+  width: 1.2em;
+  flex: 0 0 auto;
+  font-weight: 700;
+  text-align: center;
+}
+.champion-gate.pass .champion-mark {
+  color: var(--ok);
+}
+.champion-gate.fail .champion-mark {
+  color: var(--bad);
+}
+.champion-gate.skip {
+  color: var(--muted);
+}
+.champion-gate-label {
+  color: var(--text);
+}
+.champion-gate-detail {
+  color: var(--muted);
+  font-size: 12px;
+}

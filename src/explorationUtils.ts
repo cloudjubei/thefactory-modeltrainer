@@ -22,10 +22,24 @@ import type {
   ExplorationBudget,
   ExplorationState,
   ExplorationStep,
+  FitnessObjective,
   TrainerManifest,
 } from './modelTrainerTypes.js'
-import { convergenceGatedBySplits, incumbentSplitHoldout, splitLeversOf } from './diagnosticsUtils.js'
-import { aggregateToSetupRuns, criterionValueOf, leverImportances, recommendExperiments } from './xaiUtils.js'
+import {
+  assembleChampionVerdict,
+  convergenceGatedBySplits,
+  incumbentSplitHoldout,
+  splitLeversOf,
+  type SplitHoldout,
+} from './diagnosticsUtils.js'
+import {
+  aggregateToSetupRuns,
+  criterionValueOf,
+  iqm,
+  leverImportances,
+  paretoFrontier,
+  recommendExperiments,
+} from './xaiUtils.js'
 
 // The exploration autopilot's pure core: `nextExplorationStep` is a staged reducer over the run archive.
 // It composes the xAI primitives (importances → basins → acquisition) into the S0→S4 search and emits the
@@ -221,7 +235,36 @@ export function clusterBasins(
       memberRunKeys,
     })
   }
-  return basins.sort((a, b) => (isBetter(a.peakObjective, b.peakObjective, dir) ? -1 : 1))
+  const sorted = basins.sort((a, b) => (isBetter(a.peakObjective, b.peakObjective, dir) ? -1 : 1))
+  return qualifyParetoBasins(sorted, runs, manifest?.fitness)
+}
+
+/**
+ * A6 — Pareto-qualify basins on the scorecard's MULTI-objective `fitness`. With a single objective the scalar
+ * `peakObjective` ranking already suffices, so this only annotates when ≥2 objectives are declared: each
+ * basin's fitness vector is its member runs' robust (IQM) value per objective (a missing metric is mapped to
+ * the WORST value for its direction, so it's dominated), and the non-dominated basins (`paretoFrontier`) are
+ * flagged `onParetoFront` — the trade-off candidates worth keeping even when they aren't the single-scalar best.
+ */
+export function qualifyParetoBasins(
+  basins: Basin[],
+  runs: AnalysisRun[],
+  fitness: FitnessObjective[] | undefined,
+): Basin[] {
+  if (!fitness || fitness.length < 2 || basins.length < 2) return basins
+  const runByKey = new Map(runs.map((r) => [r.key, r]))
+  const points = basins.map((b) =>
+    fitness.map((f) => {
+      const vals = b.memberRunKeys
+        .map((k) => runByKey.get(k))
+        .filter((r): r is AnalysisRun => !!r)
+        .map((r) => criterionValueOf(r, { key: f.metric, direction: f.direction }))
+        .filter((v): v is number => typeof v === 'number' && Number.isFinite(v))
+      return vals.length ? iqm(vals) : f.direction === 'min' ? Infinity : -Infinity
+    }),
+  )
+  const front = new Set(paretoFrontier(points, fitness.map((f) => f.direction)))
+  return basins.map((b, i) => ({ ...b, onParetoFront: front.has(i) }))
 }
 
 const bestBasin = (basins: Basin[], criterion: AnalysisCriterion): Basin | undefined =>
@@ -1112,24 +1155,77 @@ export function gateConvergenceOnSplits(
   const splitLevers = splitLeversOf(manifest)
   if (!splitLevers.length) return step
   const holdout = incumbentSplitHoldout(runs, splitLevers, criterion, { baseline: baselineOf(runs) })
-  if (!convergenceGatedBySplits(holdout) || !holdout.missingSplitConfigs.length || !holdout.incumbentConfig) {
-    return step
+  // 1) Split-consistency gate (existing): the incumbent isn't robust across the split axis AND there are unrun
+  //    splits + budget to try them → replicate it across them before crowning (fixes single-window luck).
+  if (convergenceGatedBySplits(holdout) && holdout.missingSplitConfigs.length && holdout.incumbentConfig) {
+    const base = without(holdout.incumbentConfig, 'seed')
+    const batch: ExperimentRecommendation[] = holdout.missingSplitConfigs.map((sc) => ({
+      kind: 'missing-cell',
+      reason: `split-consistency gate — replicate the incumbent across ${Object.entries(sc)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ')} before crowning it`,
+      runCount: XAI_MIN_SEEDS,
+      spec: { fixed: { ...base, ...sc }, seeds: seedRange(XAI_MIN_SEEDS) },
+      priority: 80,
+    }))
+    return mk(
+      state.stage,
+      batch,
+      `gated: incumbent not yet robust across ${splitLevers.join(', ')} — replicating it across ${batch.length} unrun split(s)`,
+      state,
+      false,
+    )
   }
+  // 2) Champion "declare steady" gate (A4.3): the incumbent is split-robust (or has no unrun splits) but the
+  //    honest composite verdict isn't STEADY, and some evaluated split is thinly seeded → top it up to
+  //    XAI_MIN_SEEDS before accepting the verdict. Bounded (a genuinely-failing, fully-seeded champion has
+  //    nothing to fill → converges as not-steady, which the human then pivots on), and budget-capped above —
+  //    so this can only make convergence STRICTER, never stall.
+  const championFill = championSeedFill(holdout, runs, splitLevers, criterion, manifest)
+  if (championFill.length) {
+    return mk(
+      state.stage,
+      championFill,
+      `gated: incumbent not yet a STEADY champion — seeding ${championFill.length} thin split(s) to ${XAI_MIN_SEEDS} before the verdict`,
+      state,
+      false,
+    )
+  }
+  return step
+}
+
+/**
+ * The A4.3 champion seed-fill: when the manifest declares champion gates and the composite verdict is NOT
+ * steady, top up any EVALUATED split the incumbent has fewer than {@link XAI_MIN_SEEDS} seeds on — so a
+ * not-steady verdict is well-estimated before it's accepted (a thin split can flip a borderline median /
+ * seed-stability). Returns [] when there are no champion gates, the verdict is steady or not-applicable, or
+ * every evaluated split is already well-seeded (nothing productive to do → let it converge honestly).
+ */
+function championSeedFill(
+  holdout: SplitHoldout,
+  runs: AnalysisRun[],
+  splitLevers: string[],
+  criterion: AnalysisCriterion,
+  manifest: TrainerManifest | undefined,
+): ExperimentRecommendation[] {
+  const d = manifest?.diagnostics
+  if (!d || !((d.championGates && d.championGates.length) || d.dsr || d.stability)) return []
+  if (!holdout.incumbentConfig) return []
+  const verdict = assembleChampionVerdict(d, { runs, splitLevers, criterion })
+  if (verdict.steady !== false) return [] // steady, or not applicable → nothing to gate on
   const base = without(holdout.incumbentConfig, 'seed')
-  const batch: ExperimentRecommendation[] = holdout.missingSplitConfigs.map((sc) => ({
-    kind: 'missing-cell',
-    reason: `split-consistency gate — replicate the incumbent across ${Object.entries(sc)
-      .map(([k, v]) => `${k}=${v}`)
-      .join(', ')} before crowning it`,
-    runCount: XAI_MIN_SEEDS,
-    spec: { fixed: { ...base, ...sc }, seeds: seedRange(XAI_MIN_SEEDS) },
-    priority: 80,
-  }))
-  return mk(
-    state.stage,
-    batch,
-    `gated: incumbent not yet robust across ${splitLevers.join(', ')} — replicating it across ${batch.length} unrun split(s)`,
-    state,
-    false,
-  )
+  const batch: ExperimentRecommendation[] = []
+  for (const es of holdout.evaluatedSplits) {
+    if (es.seeds >= XAI_MIN_SEEDS) continue
+    batch.push({
+      kind: 'missing-cell',
+      reason: `champion gate — seed the incumbent to ${XAI_MIN_SEEDS} on ${Object.entries(es.splitConfig)
+        .map(([k, v]) => `${k}=${v}`)
+        .join(', ')} for a sound steady verdict`,
+      runCount: XAI_MIN_SEEDS - es.seeds,
+      spec: { fixed: { ...base, ...es.splitConfig }, seeds: seedRange(XAI_MIN_SEEDS) },
+      priority: 78,
+    })
+  }
+  return batch
 }

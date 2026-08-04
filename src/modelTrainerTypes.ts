@@ -26,6 +26,14 @@ export interface TrainerLeverSpec {
   range?: [number, number]
   /** Allowed values for `choice` levers. */
   choices?: unknown[]
+  /**
+   * Derive this `choice` lever's values from on-disk data instead of (only) the static `choices` list:
+   * `datacatalog` unions the symbols that have on-disk coverage in the project's `-datacatalog` record into
+   * `choices`, so a newly-mined asset becomes launchable without a manifest edit. Declared `choices` are kept
+   * (still dimmed when absent from disk). Domain-oblivious — the engine learns WHICH lever is catalog-linked
+   * from this flag rather than hardcoding `asset`.
+   */
+  choicesFrom?: 'datacatalog'
   /** Plain-language explanation shown as a help tooltip in the launch form (for newcomers). */
   description?: string
   /**
@@ -264,11 +272,20 @@ export interface TrainerDiagnostics {
    */
   championGates?: TrainerGate[]
   /**
-   * A4.3 deflated-Sharpe aggregate gate: the cohort's `metric` (default `oos_sharpe`) deflated for
-   * multiple-testing across the distinct SETUPS tried must clear `threshold` (~0.95), with each run carrying
-   * at least `minObs` observations (min track-record length).
+   * A4.3 deflated-Sharpe aggregate gate: the champion's Sharpe (`metric`, default `oos_sharpe`, median across
+   * its seeds), deflated for multiple-testing across the distinct SETUPS tried, must clear `threshold` (~0.95).
+   * The PSR needs the return distribution's skew / non-excess kurtosis / sample length — read from
+   * `skewMetric` / `kurtosisMetric` / `nObsMetric` (defaults the `oos_ret_skew` / `oos_ret_kurt` / `oos_n_obs`
+   * BlackSwan emits). `minObs`, when set, additionally requires the champion's sample length to reach it.
    */
-  dsr?: { metric?: string; minObs?: number; threshold?: number }
+  dsr?: {
+    metric?: string
+    skewMetric?: string
+    kurtosisMetric?: string
+    nObsMetric?: string
+    minObs?: number
+    threshold?: number
+  }
   /**
    * A4.3 seed-stability gate: the champion setup's `metric` (default the objective) must have a bootstrap CI
    * width across its seeds no wider than `maxCiWidth` — a point estimate that swings with the seed is not steady.
@@ -1239,6 +1256,12 @@ export interface Basin {
   plateaued: boolean
   /** Record keys of the runs assigned to this basin. */
   memberRunKeys: string[]
+  /**
+   * Whether the basin is on the PARETO FRONT of the scorecard's multi-objective `fitness` — non-dominated
+   * across the trade-off objectives (a worth-keeping candidate even if it isn't the single-scalar best). Set
+   * only when ≥2 fitness objectives are declared (single-objective ⇒ the scalar `peakObjective` ranking suffices).
+   */
+  onParetoFront?: boolean
 }
 
 /** Budget + stopping controls for one exploration. */
@@ -2445,9 +2468,15 @@ export interface DiagnoseSearchResult {
 export interface ChampionGate {
   /** Human label (the gate's own label, or a rendered default). */
   label: string
-  /** Which family produced it, e.g. `multi-window-medians` | `dsr` | `capture` | `seed-stability` | `drawdown` | `trades`. */
+  /** Which family produced it, e.g. `cohort-median` | `dsr` | `seed-stability`. */
   kind: string
-  /** Whether the cohort passes this gate. */
+  /**
+   * Whether the gate could be EVALUATED — false when its metric is ABSENT from the champion's runs (e.g. the
+   * capture metrics on a do-nothing run's sentinel). A non-applicable gate is SKIPPED: it never rejects the
+   * champion (only an applicable-and-failing gate does), and `steady` requires ≥1 applicable gate to hold.
+   */
+  applicable: boolean
+  /** True iff the gate is applicable AND the cohort meets it. */
   pass: boolean
   /** One-line evidence — the measured cohort value vs the required bound. */
   detail?: string

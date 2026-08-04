@@ -20,6 +20,8 @@ import {
   resolveModelDeviceForConfig,
   parseDeviceBenchmark,
   parseDataCatalog,
+  catalogAssetIds,
+  withCatalogChoices,
   parseDataLinkage,
   parseMineResult,
   buildDataDiscoveryGoal,
@@ -532,6 +534,48 @@ describe('parseDataCatalog', () => {
     expect(() => parseDataCatalog({})).toThrow(/assetClasses/)
     expect(() => parseDataCatalog(undefined)).toThrow(/assetClasses/)
     expect(() => parseDataCatalog({ assetClasses: 'nope' })).toThrow(/assetClasses/)
+  })
+})
+
+describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from disk)', () => {
+  const inst = (symbol: string, onDisk: Record<string, unknown> = {}) => ({
+    symbol, label: symbol, assetClass: 'crypto', source: 'binance', sourceSymbol: symbol,
+    intervals: ['1h'], directory: 'binance', tier: 1, barCloseTz: 'UTC', onDisk,
+  })
+  const cls = (id: string, instruments: unknown[]) => ({ id, label: id, directory: id, instruments })
+  const catalog = [cls('crypto', [inst('BTCUSDT', { '1h': {} }), inst('DOGEUSDT', { '1h': {} })])] as never
+
+  it('catalogAssetIds returns the on-disk symbols, de-duplicated', () => {
+    const classes = [
+      cls('crypto', [inst('BTCUSDT', { '1h': {} }), inst('ETHUSDT', {})]), // ETH not on disk ⇒ excluded
+      cls('stocks', [inst('NVDA', { '1d': {} }), inst('BTCUSDT', { '1h': {} })]), // dup BTC
+    ] as never
+    expect(catalogAssetIds(classes).sort()).toEqual(['BTCUSDT', 'NVDA'])
+    expect(catalogAssetIds(undefined as never)).toEqual([])
+    expect(catalogAssetIds([cls('crypto', [inst('BTCUSDT', {})])] as never)).toEqual([]) // nothing on disk
+  })
+
+  const manifest = {
+    name: 'x', objective: { name: 'r', direction: 'max' },
+    levers: {
+      asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT'], choicesFrom: 'datacatalog', scope: 'dataset' },
+      lr: { type: 'number', default: 0.01 },
+    },
+  } as unknown as TrainerManifest
+
+  it('unions the on-disk catalog symbols into a choicesFrom:datacatalog lever, keeping the declared ones', () => {
+    const out = withCatalogChoices(manifest, catalog)
+    expect(out.levers.asset.choices).toEqual(['BTCUSDT', 'ETHUSDT', 'DOGEUSDT']) // declared kept, DOGE added, BTC deduped
+    expect(out.levers.lr).toBe(manifest.levers.lr) // a lever without the flag is untouched (same ref)
+  })
+
+  it('leaves a lever WITHOUT the flag alone even if the catalog has assets', () => {
+    const m = { ...manifest, levers: { asset: { type: 'choice', choices: ['BTCUSDT'] } } } as unknown as TrainerManifest
+    expect(withCatalogChoices(m, catalog).levers.asset.choices).toEqual(['BTCUSDT'])
+  })
+
+  it('returns the SAME manifest when the catalog has no on-disk assets (no needless copy)', () => {
+    expect(withCatalogChoices(manifest, [] as never)).toBe(manifest)
   })
 })
 

@@ -151,6 +151,7 @@ import {
   manifestDataFiles,
   parseDataCatalog,
   parseDataLinkage,
+  withCatalogChoices,
   parseMineResult,
   buildDataDiscoveryGoal,
   coerceDataSourceCandidates,
@@ -1495,7 +1496,19 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       abortSignal: params.abortSignal,
     })
 
-    const items = coerceHypothesisItems(parseStructuredItems(res.text), manifest)
+    // A6 — union the on-disk catalog assets into any `choicesFrom:'datacatalog'` lever so a proposal that
+    // references a freshly-mined (but not-yet-manifest-listed) asset survives value validation instead of being
+    // silently dropped. No catalog record yet ⇒ the manifest's declared choices stand.
+    let genManifest = manifest
+    const catalogRec = await deps.storage.readRecord({
+      scope: params.scope,
+      type: `${recordType}-datacatalog`,
+      key: 'current',
+    })
+    if (catalogRec?.content && (catalogRec.content as { assetClasses?: unknown }).assetClasses) {
+      genManifest = withCatalogChoices(manifest, parseDataCatalog(catalogRec.content))
+    }
+    const items = coerceHypothesisItems(parseStructuredItems(res.text), genManifest)
     return { items, recordType, proposedBy, proposedAt, count }
   }
 
@@ -3399,8 +3412,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ]),
     ].filter((m) => m !== 'objective')
     const alignment = alignMetrics.length ? rewardFitnessAlignment(runs, alignMetrics) : undefined
-    // A4.3 composite champion "declare steady" verdict (families wired in follow-up units; scaffold today).
-    const champion = assembleChampionVerdict(manifest.diagnostics)
+    // A4.3 composite champion "declare steady" verdict over the same projected runs + split axis.
+    const champion = assembleChampionVerdict(manifest.diagnostics, { runs, splitLevers, criterion })
     return {
       found: true,
       recordType,

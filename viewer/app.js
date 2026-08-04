@@ -11,7 +11,7 @@
 // its iframe remounts (a per-load ?v= cache-bust only fires when index.html is re-fetched, i.e. the App view
 // is reopened), so an in-Overseer tab switch keeps running whatever app.js was current when the view opened.
 // Bump this on a perf/behaviour fix so "am I on the new code?" is a one-glance console check.
-const VIEWER_BUILD = '2026-08-04c · A3: companion strategy card + activity-status/strategy chat capabilities'
+const VIEWER_BUILD = '2026-08-04e · A6: asset-lever choices derived from the on-disk data catalog'
 try {
   console.info('[trainer-viewer] build ' + VIEWER_BUILD)
 } catch {}
@@ -12210,11 +12210,32 @@ let dataClicksBound = false
 // lever values that have no data on disk. Null until a catalog is read; when null the dimming is a no-op.
 let dataCatalogCache = null
 
+// A6 — union the on-disk catalog symbols into any `choicesFrom:'datacatalog'` lever's `choices` in ONE place
+// (right after the catalog loads), so a freshly-mined asset is offered by EVERY launch/bundle form without
+// patching each render site. Idempotent (dedup), additive (declared choices stay, still dimmed when absent),
+// and domain-oblivious (keys off the flag, not a hardcoded `asset`). Mirrors the engine's `withCatalogChoices`.
+function applyCatalogChoices() {
+  if (!manifest || !dataCatalogCache || !window.DataCatalog) return
+  const onDisk = window.DataCatalog.assetsWithData(dataCatalogCache)
+  if (!onDisk.length) return
+  for (const spec of Object.values(manifest.levers || {})) {
+    if (!spec || spec.choicesFrom !== 'datacatalog') continue
+    const choices = Array.isArray(spec.choices) ? spec.choices : (spec.choices = [])
+    const seen = new Set(choices.map(String))
+    for (const id of onDisk)
+      if (!seen.has(String(id))) {
+        choices.push(id)
+        seen.add(String(id))
+      }
+  }
+}
+
 async function readDataCatalog() {
   if (!manifest) return null
   const recs = await queryRecords(manifest.recordType + '-datacatalog', 'current')
   const content = recs[0] && recs[0].content
   dataCatalogCache = content && Array.isArray(content.assetClasses) ? content : null
+  applyCatalogChoices()
   return dataCatalogCache
 }
 
@@ -20448,10 +20469,96 @@ async function renderCompanionStrategy() {
     `</div>`
 }
 
+// A4.3 — the champion "declare steady" verdict (single source of truth). The verdict logic lives ONLY in the
+// engine (diagnoseSearch → assembleChampionVerdict); the `diagnose` activity persists it as the
+// `{recordType}-diagnosis` record and the viewer only RENDERS that record here — never recomputes it.
+let diagnosing = false
+let _championRec = null
+let _championAutoKicked = false
+async function kickDiagnose() {
+  if (!embedded() || diagnosing) return
+  diagnosing = true
+  paintChampionVerdict()
+  try {
+    await startOrEnqueue('diagnose', trainerActivityParams({}), 'Diagnose the search')
+    invalidateActivitiesCache()
+  } catch {}
+  // The activity writes the -diagnosis record server-side; re-read shortly after it settles.
+  setTimeout(() => {
+    diagnosing = false
+    void renderChampionVerdict()
+  }, 1800)
+}
+function championConfigDeclared() {
+  const d = (manifest && manifest.diagnostics) || {}
+  return !!((d.championGates && d.championGates.length) || d.dsr || d.stability)
+}
+async function renderChampionVerdict() {
+  if (!manifest) return
+  if (!championConfigDeclared()) {
+    const host = byId('champion-verdict')
+    if (host) host.innerHTML = ''
+    return
+  }
+  try {
+    _championRec = (await queryRecords(manifest.recordType + '-diagnosis', 'latest'))[0] || null
+  } catch {
+    _championRec = null
+  }
+  // First open with gates declared but nothing computed yet → kick ONE compute automatically.
+  if (!_championRec && !diagnosing && !_championAutoKicked) {
+    _championAutoKicked = true
+    void kickDiagnose()
+    return
+  }
+  paintChampionVerdict()
+}
+function paintChampionVerdict() {
+  const host = byId('champion-verdict')
+  if (!host || !manifest || !championConfigDeclared()) {
+    if (host) host.innerHTML = ''
+    return
+  }
+  const c = (_championRec && _championRec.content) || null
+  const gates = (c && c.championGates) || []
+  const steady = c ? c.steady : undefined
+  const when = _championRec && _championRec.updatedAt ? new Date(_championRec.updatedAt).toLocaleString() : ''
+  const btn = `<button type="button" class="ghost-btn" data-champion-rediagnose${diagnosing || !embedded() ? ' disabled' : ''}>${diagnosing ? 'Diagnosing…' : c ? 'Re-diagnose' : 'Diagnose'}</button>`
+  if (!c) {
+    host.innerHTML = `<div class="champion-card is-na"><div class="champion-head"><span class="champion-title">🏁 Champion verdict</span>${btn}</div><p class="champion-sub">Not computed yet — the deterministic, honest “declare champion” verdict runs server-side.</p></div>`
+  } else {
+    const cls = steady === true ? 'is-steady' : steady === false ? 'is-not-steady' : 'is-na'
+    const head =
+      steady === true
+        ? 'STEADY — clears every champion gate'
+        : steady === false
+          ? 'NOT STEADY'
+          : 'not applicable'
+    const rows = gates
+      .map((g) => {
+        const skip = g.applicable === false
+        const mark = skip ? '–' : g.pass ? '✓' : '✗'
+        const rcls = skip ? 'skip' : g.pass ? 'pass' : 'fail'
+        return `<li class="champion-gate ${rcls}"><span class="champion-mark">${mark}</span><span class="champion-gate-label">${escapeHtml(g.label || g.kind || '')}</span>${g.detail ? `<span class="champion-gate-detail">${escapeHtml(g.detail)}</span>` : ''}</li>`
+      })
+      .join('')
+    host.innerHTML =
+      `<div class="champion-card ${cls}"><div class="champion-head"><span class="champion-title">🏁 Champion verdict — ${escapeHtml(head)}</span>${btn}</div>` +
+      (rows
+        ? `<ul class="champion-gates">${rows}</ul>`
+        : '<p class="champion-sub">No applicable champion gates on the current cohort.</p>') +
+      (when ? `<p class="champion-when">computed ${escapeHtml(when)}</p>` : '') +
+      `</div>`
+  }
+  const b = host.querySelector('[data-champion-rediagnose]')
+  if (b) b.addEventListener('click', () => void kickDiagnose())
+}
+
 async function renderDiagnosis() {
   const container = byId('diagnosis-body')
   if (!container || !window.Diagnostics) return
   void renderCompanionStrategy()
+  void renderChampionVerdict()
   if (!manifest) {
     container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to diagnose its search.</div>'
     return

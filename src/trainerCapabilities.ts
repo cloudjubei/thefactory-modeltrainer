@@ -81,6 +81,13 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     optionalParams: ['criterionKey', 'criterionDir', 'environment'],
   },
   {
+    activityType: 'diagnose',
+    label: 'Diagnose the search',
+    description:
+      'Compute the deterministic search diagnosis + the composite champion "declare steady" verdict over the run cohort and cache it as the `-diagnosis` record the Diagnosis tab reads. Read-only analysis (no training) — the single source of the champion verdict the viewer renders.',
+    optionalParams: ['project'],
+  },
+  {
     activityType: 'run-xai-analyze',
     label: 'Analyse a run (xAI)',
     description: 'Compute + cache the deterministic xAI analysis of one run (attribution, latent probe, rank).',

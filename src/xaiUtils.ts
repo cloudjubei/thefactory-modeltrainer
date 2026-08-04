@@ -66,7 +66,7 @@ export function medianOf(values: number[]): number {
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2
 }
 
-function stdOf(values: number[]): number {
+export function stdOf(values: number[]): number {
   if (values.length < 2) return 0
   const m = meanOf(values)
   return Math.sqrt(values.reduce((a, b) => a + (b - m) ** 2, 0) / (values.length - 1))
@@ -653,7 +653,7 @@ function erf(x: number): number {
       Math.exp(-ax * ax)
   return sign * y
 }
-function normalCdf(z: number): number {
+export function normalCdf(z: number): number {
   return 0.5 * (1 + erf(z / Math.SQRT2))
 }
 function normalPdf(z: number): number {

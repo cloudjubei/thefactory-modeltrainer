@@ -21,8 +21,8 @@ live in git + memory.)
    reward is a training proxy that for BlackSwan does not equal success (the shipped scorecard defines "good").
 3. **Fully AI-operable, shipped as a template.** Anything a user can do in the app, the API/CLI AI can do via
    tools through the approval gate (shipped) — so a user drives the whole loop as a CONVERSATION where the AI
-   researches/proposes/runs and the human mostly approves (A3); and the app is a SINGLE-PURPOSE template a
-   project copies + a library it consumes for engine + base UI (A5), with BlackSwan the first consumer.
+   researches/proposes/runs and the human mostly approves (companion shipped); and the app is a SINGLE-PURPOSE
+   template a project copies + a library it consumes for engine + base UI (A5), with BlackSwan the first consumer.
 
 ## Repo split (governs where work lands)
 
@@ -40,72 +40,6 @@ live in git + memory.)
 ## A. Build — implementation tasks
 
 Ordered by value. Each is something to **implement**.
-
-### A3. AI companion — drive the whole loop as a conversation with approvals
-
-**Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on the
-shipped full action-parity surface + the approval gate.
-
-**Shipped so far:** the **orient tools** — `diagnoseSearch` (scorecard-ranked incumbent + reward↔fitness
-alignment) and `getActivityStatus` (what's running / queued / recently done, folded from the `activity-run`
-records; auto-callable, cross-project-read allow-listed) — and the chat-owned **campaign-strategy memory**: the
-`-strategy` singleton the AI reads+writes via the generic create/update tools (fields summary/decided/open/
-nextSteps), surfaced as a "Companion strategy" card on the Diagnosis tab so the human sees the AI's thinking.
-Remaining:
-
-- **Wait / resume across long runs** — the **campaign-complete → wake-the-chat-topic** hook so the AI re-engages
-  when its launched runs land. This is generic backend infra (event→agent-turn re-invocation) and now lives in
-  [thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md](../../thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md)
-  § *Autonomous agent orchestration*. v1 fallback works TODAY: the human says "done" and the AI reads results
-  (getActivityStatus → getRunData/getRunXAI) and updates the `-strategy` record — so A3 is usable now; the wake
-  hook is an automation upgrade delivered by that track.
-
-The **approval-inbox VIEW** (the "just approve" seam — a batched approve/reject surface over the AI's pending
-launch / edit / delete actions) is an overseer-clients UI effort, so it moved to
-[thefactory-overseer-web/docs/implementation-plan.md](../../thefactory-overseer-web/docs/implementation-plan.md)
-§F to be tackled with that project's change-review / merge-UI work. The approval MECHANISM already exists here
-(trainer writes are advertised-but-gated per-call); §F is the richer batched VIEW on top of it.
-
-### A4. Honest-by-construction guardrails + the champion stop-condition
-
-**Scope (2026-08-04).** A4 originally also bundled orchestration/autonomy infra — a cross-project launch verb,
-the event→agent-turn wake hook + a scheduler, app-declared activity types, and the spawnPanel self-improvement
-execution path. Those are generic **thefactory-tools / backend** concerns (agents launching + waiting + waking
-on a time/token BUDGET), so they MOVED to
-[thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md](../../thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md)
-§ *Autonomous agent orchestration* — with the full cross-repo seam map + the open budget/autonomy design
-question — to tackle later. That track also owns A3's remaining "wake" hook.
-
-What STAYS here is squarely modeltrainer engine + BlackSwan, and is the plan's **single most important
-follow-up**: **honest-by-construction guardrails + the champion stop-condition** — so an UNATTENDED search over
-thousands of configs cannot manufacture a false winner (the loop climbs on the objective and best-of-N overfits
-by default).
-
-- **End-to-end deflated-Sharpe / multiple-testing verdict.** DSR/PSR primitives exist (`trainer/sharpe.py`)
-  and per-run inputs are emitted (`oos_sharpe`/`n_obs`/skew/kurt), but nothing aggregates them across the
-  window×seed distribution into a pass/fail. Wire it (BlackSwan emits, engine gates). DSR is ported to TS
-  (the engine is a Python-free read path) and pinned to Python golden vectors; `n_trials` counts distinct
-  SETUPS (the multiple-testing framing), and kurtosis is non-excess/Pearson.
-- **Multi-window AND-of-medians acceptance gate.** Per-run acceptance (`computeScorecard`) can crown a config
-  that beats hold in ONE lucky window; `incumbentSplitHoldout` ranks on the MEAN across seeds. Add a
-  manifest-level "beat buy-and-hold net-of-fee in EVERY walk-forward window, MEDIAN across seeds" gate.
-- **Beta / up-vs-down-capture gate.** BlackSwan's recurring failure is "defensive in bear, lags in bull" —
-  beta dressed as alpha. Regime capture is emitted as diagnostic only (`summary.py`, and today omits the
-  market return per regime so no capture ratio can be formed) — emit `up_capture`/`down_capture`/`beta`
-  scalars (with an empty-bucket sentinel for do-nothing runs) and promote to a GATE that rejects profit which
-  only appears when the market rose (a closet-long). This is the only real per-run DATA gap.
-- **One composite "declare champion" verdict tool.** EXTEND `diagnoseSearch` (not a new tool — it already
-  resolves manifest→active scorecard→projected runs→split levers) to AND {robust split verdict + DSR>threshold
-  + beta gate + seed-stable + drawdown-bound + trades_per_day} into ONE machine-readable `steady`/not-steady
-  output + per-gate detail — the loop's stop condition the human approves against. Thresholds live in the
-  manifest-fixed `diagnostics` block (the honesty bar must not be swappable via a lenient scorecard); `steady`
-  AUGMENTS the existing split-luck convergence gate (can only make it stricter, never looser).
-
-Repo split: BlackSwan emits the DSR/beta metrics; this repo (engine) owns the acceptance gate + composite
-verdict. Build order: verdict scaffold (export the shared stats helpers, add the `diagnostics` threshold
-sub-block, extend `DiagnoseSearchResult` with `steady` + `championGates`) → BlackSwan beta/capture emission +
-PSR/DSR golden vectors → the four gate families (multi-window medians · DSR · capture · seed-stability) →
-compose into `steady` + wire the autopilot stop-condition.
 
 ### A5. Single-purpose template + BlackSwan-as-library
 
@@ -136,25 +70,14 @@ template for a shipped single-purpose app).
    monolith. Options A/B work without it.
 6. **Update docs** (`architecture.md`, repo-split table, `model-training-standard.md`) to describe the
    template+library model alongside the hub.
-
-### A6. Follow-ons on the shipped xAI / snapshot / activity features (small + opportunistic — none blocking)
-
-- **xAI traces:** a VIEWER surface for the per-step attention sidecar (fetch the `.attn.jsonl`, animate/scrub
-  the attention over the rollout — the producer is shipped, the viewer only renders the inline aggregate +
-  the snapshot index today); and a **diff-consecutive** arm on the snapshot index (lazily fetch two snapshots'
-  traces and feed them to the shipped `DecisionTraceDiff` — today the index lists snapshots, doesn't diff).
-- **Exploration:** **Pareto basins** in the reducer — qualify/rank basins on the Pareto front using the
-  scorecard's (now shipped) multi-objective `fitness` (today the reducer ranks on a single scalar).
-- **Datasets:** derive the `asset` lever CHOICES themselves from disk (today a manifest list — needs a manifest
-  generator; the on-disk DIMMING of listed-but-absent values is shipped).
-- **On-device verification (test, not build):** mobile parity pass of the conversational-hub surfaces; in-app
-  Data-tab check (both need a device); and the shipped **AI-action-parity** end-to-end smoke — in the running
-  Overseer, confirm a chat `createProjectRecord`/`updateProjectRecord` (e.g. a new environment) surfaces in the
-  viewer and a `startTrainerActivity` train/judge launch round-trips through the queue (needs one Overseer
-  restart for the rebuilt engine dist).
-- **Parked (need a net-new dependency):** generative counterfactual states (a GAN/VAE); step-by-step decision
-  animation replay + scrubber; `seed` still counts as a model lever in the engine's fANOVA (needs a manifest
-  lever `scope:'ignore'` + re-analysis — flag, don't silently change).
+7. **(Deferred to the very END of A5.)** xAI per-step **attention scrubber** + snapshot **diff-consecutive** arm.
+   The producers are shipped (`write_per_step_attention`; the `snapshotTraces` index) but the heavy traces +
+   attention live in JSONL SIDECAR FILES, and today's viewer reads only RECORDS (no file-fetch bridge verb) — so
+   this is blocked in the hub model. Once BlackSwan is its own single-purpose app (steps 1–4), the served viewer
+   bytes AND those sidecars both live inside BlackSwan's checkout, so the viewer can fetch the sidecars DIRECTLY
+   (relative fetch from the same served tree) with NO host→viewer file-read primitive. Then: fetch + animate/scrub
+   the per-step attention over the rollout, and lazily fetch two snapshots' traces → feed the shipped
+   `DecisionTraceDiff`. (This is the whole of the old A6 that was blocked — the rest of A6 shipped.)
 
 ---
 

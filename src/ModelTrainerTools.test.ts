@@ -5836,7 +5836,7 @@ describe('diagnoseSearch (A5 read tool)', () => {
     expect(res.error).toMatch(/registers no training projects/)
   })
 
-  it('carries the composite champion-verdict scaffold — not applicable when no champion config is declared', async () => {
+  it('carries the composite champion verdict — not applicable when no champion config is declared', async () => {
     const storage = memoryStorage()
     await registerManifest(storage, manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }))
     await seedRun(storage, 'a', { lr: 1, window: '2024' }, 5)
@@ -5846,7 +5846,7 @@ describe('diagnoseSearch (A5 read tool)', () => {
     expect(res.steady).toBeUndefined()
   })
 
-  it('reports steady:false (placeholder) once a champion gate is declared, until the families land', async () => {
+  it('ANDs the declared champion gates (median-across-seeds, every window) into a steady verdict', async () => {
     const storage = memoryStorage()
     await registerManifest(
       storage,
@@ -5857,11 +5857,21 @@ describe('diagnoseSearch (A5 read tool)', () => {
         },
       }),
     )
-    await seedRun(storage, 'a', { lr: 1, window: '2024' }, 5)
+    const seedM = (key: string, window: string, rvh: number) =>
+      storage.upsertRecord({
+        scope: 'proj', type: 'demo-run', key,
+        content: { config: { lr: 1, window }, objective: rvh, metrics: { return_vs_hold_pct: rvh }, status: 'completed' },
+      })
+    // The incumbent {lr:1} beats hold (median across seeds) on BOTH windows ⇒ steady.
+    await seedM('a', '2024', 6)
+    await seedM('b', '2024', 4)
+    await seedM('c', '2022', 3)
+    await seedM('d', '2022', 5)
     const { tools } = makeTools(stubRunner(), storage)
     const res = await tools.diagnoseSearch({ scope: 'proj' })
-    expect(res.steady).toBe(false)
-    expect(res.championGates).toEqual([])
+    expect(res.steady).toBe(true)
+    expect(res.championGates).toHaveLength(1)
+    expect(res.championGates![0]).toMatchObject({ applicable: true, pass: true })
   })
 })
 

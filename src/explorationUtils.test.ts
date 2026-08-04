@@ -11,6 +11,7 @@ import {
   localRefineRecs,
   coverageGridRecs,
   gateConvergenceOnSplits,
+  qualifyParetoBasins,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
 import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES, EXPLORATION_LADDER_MAX_REGION_AXES } from './modelTrainerConstants.js'
@@ -1301,5 +1302,114 @@ describe('gateConvergenceOnSplits (A5 split-consistency convergence gate)', () =
     const inProgress = { stage: 'local', batch: [], rationale: 'x', stateNext: state, done: false } as any
     const runs = [run({ lr: 1, window: '2024' }, 20)]
     expect(gateConvergenceOnSplits(inProgress, state, runs, manifest, criterion, true, mk)).toBe(inProgress)
+  })
+
+  // --- A4.3 champion "declare steady" gate (augments the split gate; can only make convergence stricter) ---
+  const runM = (config: any, objective: number, metrics: any, seed = 0) => ({
+    key: JSON.stringify(config) + seed,
+    config,
+    objective,
+    metrics,
+    seed,
+    status: 'completed',
+  })
+  const champManifest = {
+    diagnostics: {
+      splitAxis: { levers: ['window'] },
+      championGates: [{ metric: 'return_vs_hold_pct', op: '>', value: 0 }],
+    },
+    levers: {},
+  } as any
+
+  it('seeds a thinly-seeded NOT-steady incumbent before accepting the champion verdict', () => {
+    // Split-robust (objective beats the baseline on both windows) but the champion gate FAILS on 2022
+    // (return_vs_hold_pct median < 0) ⇒ not steady; only 1 seed per split (< XAI_MIN_SEEDS).
+    const runs = [
+      runM({ lr: 1, window: '2024' }, 10, { return_vs_hold_pct: 5 }),
+      runM({ lr: 1, window: '2022' }, 8, { return_vs_hold_pct: -3 }),
+    ]
+    const out = gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)
+    expect(out.done).toBe(false)
+    expect(out.batch.every((b: any) => b.kind === 'missing-cell')).toBe(true)
+    expect(out.rationale).toMatch(/STEADY champion/)
+    const fixeds = out.batch.map((b: any) => b.spec.fixed)
+    expect(fixeds).toContainEqual({ lr: 1, window: '2024' })
+    expect(fixeds).toContainEqual({ lr: 1, window: '2022' })
+  })
+
+  it('lets a fully-seeded NOT-steady incumbent CONVERGE (no stall — the human pivots on steady:false)', () => {
+    const runs: any[] = []
+    for (let s = 0; s < 5; s++) {
+      runs.push(runM({ lr: 1, window: '2024' }, 10, { return_vs_hold_pct: 5 }, s))
+      runs.push(runM({ lr: 1, window: '2022' }, 8, { return_vs_hold_pct: -3 }, s))
+    }
+    // Still not steady (fails on 2022), but every evaluated split has ≥ XAI_MIN_SEEDS seeds ⇒ nothing to fill.
+    expect(gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)).toBe(converged)
+  })
+
+  it('lets a STEADY incumbent converge (the champion gate holds on every window)', () => {
+    const runs = [
+      runM({ lr: 1, window: '2024' }, 10, { return_vs_hold_pct: 5 }),
+      runM({ lr: 1, window: '2022' }, 8, { return_vs_hold_pct: 4 }),
+    ]
+    expect(gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)).toBe(converged)
+  })
+
+  it('the champion gate never overrides the split-fill (unrun splits are replicated first)', () => {
+    // Incumbent evaluated on only 2024 (missing 2022) ⇒ the split gate fires; champion gate stays out of the way.
+    const runs = [
+      runM({ lr: 1, window: '2024' }, 20, { return_vs_hold_pct: -9 }),
+      runM({ lr: 2, window: '2022' }, 1, { return_vs_hold_pct: 1 }),
+    ]
+    const out = gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)
+    expect(out.done).toBe(false)
+    expect(out.rationale).toMatch(/robust across/) // the split-fill rationale, not the champion one
+  })
+})
+
+describe('qualifyParetoBasins (A6 — Pareto-front basins on multi-objective fitness)', () => {
+  const basin = (id: string, memberRunKeys: string[]): Basin => ({
+    id,
+    region: {},
+    centerConfig: {},
+    peakObjective: 0,
+    peakSeeds: 1,
+    plateaued: false,
+    memberRunKeys,
+  })
+  const rr = (key: string, metrics: Record<string, number>): AnalysisRun => ({
+    key,
+    config: {},
+    objective: metrics.ret ?? 0,
+    metrics,
+    seed: 0,
+    status: 'completed',
+  })
+  const fitness = [
+    { metric: 'ret', direction: 'max' as const },
+    { metric: 'sharpe', direction: 'max' as const },
+  ]
+
+  it('flags the non-dominated trade-off basins and drops the dominated one', () => {
+    const runs = [rr('a', { ret: 10, sharpe: 1 }), rr('b', { ret: 1, sharpe: 10 }), rr('c', { ret: 1, sharpe: 1 })]
+    const out = qualifyParetoBasins([basin('A', ['a']), basin('B', ['b']), basin('C', ['c'])], runs, fitness)
+    const by = new Map(out.map((b) => [b.id, b]))
+    expect(by.get('A')!.onParetoFront).toBe(true) // best on ret
+    expect(by.get('B')!.onParetoFront).toBe(true) // best on sharpe
+    expect(by.get('C')!.onParetoFront).toBe(false) // dominated on both
+  })
+
+  it('does NOT annotate with a single fitness objective (the scalar ranking already suffices)', () => {
+    const runs = [rr('a', { ret: 10 }), rr('b', { ret: 1 })]
+    const out = qualifyParetoBasins([basin('A', ['a']), basin('B', ['b'])], runs, [fitness[0]])
+    expect(out.every((b) => b.onParetoFront === undefined)).toBe(true)
+  })
+
+  it('treats a basin missing a fitness metric as dominated (worst on that axis)', () => {
+    const runs = [rr('a', { ret: 10, sharpe: 5 }), rr('d', { ret: 8 })] // d has no sharpe
+    const out = qualifyParetoBasins([basin('A', ['a']), basin('D', ['d'])], runs, fitness)
+    const by = new Map(out.map((b) => [b.id, b]))
+    expect(by.get('A')!.onParetoFront).toBe(true)
+    expect(by.get('D')!.onParetoFront).toBe(false)
   })
 })
