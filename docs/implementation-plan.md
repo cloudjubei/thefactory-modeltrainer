@@ -71,6 +71,10 @@ The shipped chat action-parity + A3 (companion / approvals) make the AI able to 
 project chat. Three gaps remain before the loop is genuinely hands-off AND trustworthy — all outside that
 scope, and they double as the "keep improving the tooling as we go" side-goal. Ordered by value.
 
+**Decision (2026-08-04):** build ALL of A4 as one push — A4.1's event→agent-turn re-invocation primitive is
+also A3's remaining wake hook, so completing A4 ticks off A3 too. The §F approval-inbox VIEW (overseer-web) is
+deferred until this lands, since it depends on the orchestration + guardrails built here.
+
 1. **Cross-project + unattended orchestration** (thefactory-tools / backend infra — beyond A3's in-chat scope).
    - **Cross-project launch/monitor verb.** A central/overseer agent can only READ a registered training
      project (`queryProjectData` on the fail-closed allowlist, `crossProjectAccess.ts`) or delegate a CODE edit
