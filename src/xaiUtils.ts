@@ -59,7 +59,7 @@ function meanOf(values: number[]): number {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0
 }
 
-function medianOf(values: number[]): number {
+export function medianOf(values: number[]): number {
   if (!values.length) return 0
   const s = [...values].sort((a, b) => a - b)
   const m = Math.floor(s.length / 2)
@@ -156,7 +156,7 @@ function orientedBetterFirst(direction: 'max' | 'min'): (a: number, b: number) =
 }
 
 /** Bootstrap CI + two-sided p of the IQM DIFFERENCE, oriented so positive = better per the criterion. */
-function bootstrapDiff(
+export function bootstrapDiff(
   toValues: number[],
   fromValues: number[],
   direction: 'max' | 'min',
@@ -184,7 +184,7 @@ function bootstrapDiff(
 }
 
 /** Benjamini-Hochberg FDR: returns a rejected[] mask controlling the false-discovery rate at `alpha`. */
-function benjaminiHochberg(pValues: number[], alpha: number): boolean[] {
+export function benjaminiHochberg(pValues: number[], alpha: number): boolean[] {
   const m = pValues.length
   const rejected = new Array<boolean>(m).fill(false)
   if (!m) return rejected

@@ -53,11 +53,12 @@ records; auto-callable, cross-project-read allow-listed) — and the chat-owned 
 nextSteps), surfaced as a "Companion strategy" card on the Diagnosis tab so the human sees the AI's thinking.
 Remaining:
 
-- **Wait / resume across long runs** (blocked on A4.1's event→agent-turn re-invocation primitive). The loop is
-  launch → wait (minutes–hours) → read → decide. Add a **campaign-complete → wake-the-chat-topic** hook so the AI
-  re-engages when its launched runs land and proposes the next step — the open design question is how the backend
-  notifies a chat topic on run completion. v1 fallback works TODAY: the human says "done" and the AI reads results
-  (getActivityStatus → getRunData/getRunXAI) and updates the `-strategy` record.
+- **Wait / resume across long runs** — the **campaign-complete → wake-the-chat-topic** hook so the AI re-engages
+  when its launched runs land. This is generic backend infra (event→agent-turn re-invocation) and now lives in
+  [thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md](../../thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md)
+  § *Autonomous agent orchestration*. v1 fallback works TODAY: the human says "done" and the AI reads results
+  (getActivityStatus → getRunData/getRunXAI) and updates the `-strategy` record — so A3 is usable now; the wake
+  hook is an automation upgrade delivered by that track.
 
 The **approval-inbox VIEW** (the "just approve" seam — a batched approve/reject surface over the AI's pending
 launch / edit / delete actions) is an overseer-clients UI effort, so it moved to
@@ -65,52 +66,46 @@ launch / edit / delete actions) is an overseer-clients UI effort, so it moved to
 §F to be tackled with that project's change-review / merge-UI work. The approval MECHANISM already exists here
 (trainer writes are advertised-but-gated per-call); §F is the richer batched VIEW on top of it.
 
-### A4. Semi-automation follow-ups — close the loop A3 leaves open
+### A4. Honest-by-construction guardrails + the champion stop-condition
 
-The shipped chat action-parity + A3 (companion / approvals) make the AI able to propose → run → read INSIDE one
-project chat. Three gaps remain before the loop is genuinely hands-off AND trustworthy — all outside that
-scope, and they double as the "keep improving the tooling as we go" side-goal. Ordered by value.
+**Scope (2026-08-04).** A4 originally also bundled orchestration/autonomy infra — a cross-project launch verb,
+the event→agent-turn wake hook + a scheduler, app-declared activity types, and the spawnPanel self-improvement
+execution path. Those are generic **thefactory-tools / backend** concerns (agents launching + waiting + waking
+on a time/token BUDGET), so they MOVED to
+[thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md](../../thefactory-tools/docs/OVERSEER_TOOLING_PLAN.md)
+§ *Autonomous agent orchestration* — with the full cross-repo seam map + the open budget/autonomy design
+question — to tackle later. That track also owns A3's remaining "wake" hook.
 
-**Decision (2026-08-04):** build ALL of A4 as one push — A4.1's event→agent-turn re-invocation primitive is
-also A3's remaining wake hook, so completing A4 ticks off A3 too. The §F approval-inbox VIEW (overseer-web) is
-deferred until this lands, since it depends on the orchestration + guardrails built here.
+What STAYS here is squarely modeltrainer engine + BlackSwan, and is the plan's **single most important
+follow-up**: **honest-by-construction guardrails + the champion stop-condition** — so an UNATTENDED search over
+thousands of configs cannot manufacture a false winner (the loop climbs on the objective and best-of-N overfits
+by default).
 
-1. **Cross-project + unattended orchestration** (thefactory-tools / backend infra — beyond A3's in-chat scope).
-   - **Cross-project launch/monitor verb.** A central/overseer agent can only READ a registered training
-     project (`queryProjectData` on the fail-closed allowlist, `crossProjectAccess.ts`) or delegate a CODE edit
-     (`requestProjectFeature`); it CANNOT launch/monitor a BlackSwan campaign from outside. Add an approval-gated
-     cross-project "start-/read-activity" verb so ONE orchestrator drives BlackSwan without living in its chat.
-   - **Event→agent-turn re-invocation** (the primitive A3's wait/resume wake hook sits on). `startProjectActivity` returns
-     202 and the turn ends; nothing re-triggers a completion (`featureRequestResume` injects a message but never
-     runs one). Build the generic backend "re-invoke an agent turn on an async activity-settle event" primitive —
-     plus a **scheduler/cron** variant that wakes the planner on a timer for overnight autonomous progress.
-   - **App-declared activity types** (`docs/GENERIC_ACTIVITY_SYSTEM_PLAN.md`). BlackSwan's activity types are
-     hand-wired backend closures (`activityDefinitions.ts`); every new AI-proposed campaign primitive needs a
-     backend code change + redeploy. Make activity types app-declared data so the loop adds primitives deploy-free.
-2. **Self-improvement EXECUTION path — run the stories, don't just file them.** The shipped action-parity has
-   the AI FILE a story/feature for any manifest/lever/code change; nothing lets it EXECUTE that work. Expose the verifier-gated
-   writer panel (`AgentTaskTools.spawnPanel`, absent from `CLI_AGENT_SPAWN_MCP_TOOL_NAMES`) as an approval-gated
-   orchestrator tool, so the AI picks up its own filed Stories and improves BlackSwan / the engine under a
-   verifier gate — the mechanism that turns "keep improving BlackSwan as we go" into an actual loop.
-3. **Honest-by-construction guardrails + the champion stop-condition** — so an UNATTENDED search over thousands
-   of configs cannot manufacture a false winner (the loop climbs on the objective and best-of-N overfits by
-   default). The single most important follow-up.
-   - **End-to-end deflated-Sharpe / multiple-testing verdict.** DSR/PSR primitives exist (`trainer/sharpe.py`)
-     and per-run inputs are emitted (`oos_sharpe`/`n_obs`/skew/kurt), but nothing aggregates them across the
-     window×seed distribution into a pass/fail. Wire it (BlackSwan emits, engine gates).
-   - **Multi-window AND-of-medians acceptance gate.** Per-run acceptance (`computeScorecard`) can crown a config
-     that beats hold in ONE lucky window; `incumbentSplitHoldout` ranks on the MEAN across seeds. Add a
-     manifest-level "beat buy-and-hold net-of-fee in EVERY walk-forward window, median across seeds" gate.
-   - **Beta / up-vs-down-capture gate.** BlackSwan's recurring failure is "defensive in bear, lags in bull" —
-     beta dressed as alpha. Regime capture is emitted as diagnostic only (`summary.py`); promote it to a GATE
-     that rejects profit which only appears when the market rose (a closet-long).
-   - **One composite "declare champion" verdict tool.** Extend `diagnoseSearch` (or add `evaluateReplication`)
-     to AND {robust split verdict + DSR>threshold + beta gate + seed-stable + drawdown-bound + trades_per_day}
-     into ONE machine-readable steady/not-steady output — the loop's stop condition the human approves against,
-     instead of assembling it ad hoc each round.
+- **End-to-end deflated-Sharpe / multiple-testing verdict.** DSR/PSR primitives exist (`trainer/sharpe.py`)
+  and per-run inputs are emitted (`oos_sharpe`/`n_obs`/skew/kurt), but nothing aggregates them across the
+  window×seed distribution into a pass/fail. Wire it (BlackSwan emits, engine gates). DSR is ported to TS
+  (the engine is a Python-free read path) and pinned to Python golden vectors; `n_trials` counts distinct
+  SETUPS (the multiple-testing framing), and kurtosis is non-excess/Pearson.
+- **Multi-window AND-of-medians acceptance gate.** Per-run acceptance (`computeScorecard`) can crown a config
+  that beats hold in ONE lucky window; `incumbentSplitHoldout` ranks on the MEAN across seeds. Add a
+  manifest-level "beat buy-and-hold net-of-fee in EVERY walk-forward window, MEDIAN across seeds" gate.
+- **Beta / up-vs-down-capture gate.** BlackSwan's recurring failure is "defensive in bear, lags in bull" —
+  beta dressed as alpha. Regime capture is emitted as diagnostic only (`summary.py`, and today omits the
+  market return per regime so no capture ratio can be formed) — emit `up_capture`/`down_capture`/`beta`
+  scalars (with an empty-bucket sentinel for do-nothing runs) and promote to a GATE that rejects profit which
+  only appears when the market rose (a closet-long). This is the only real per-run DATA gap.
+- **One composite "declare champion" verdict tool.** EXTEND `diagnoseSearch` (not a new tool — it already
+  resolves manifest→active scorecard→projected runs→split levers) to AND {robust split verdict + DSR>threshold
+  + beta gate + seed-stable + drawdown-bound + trades_per_day} into ONE machine-readable `steady`/not-steady
+  output + per-gate detail — the loop's stop condition the human approves against. Thresholds live in the
+  manifest-fixed `diagnostics` block (the honesty bar must not be swappable via a lenient scorecard); `steady`
+  AUGMENTS the existing split-luck convergence gate (can only make it stricter, never looser).
 
-Repo split: 1 → thefactory-tools/backend (+ clients for the scheduler surface); 2 → thefactory-tools/backend;
-3 → BlackSwan emits the DSR/beta metrics, this repo (engine) owns the acceptance gate + composite verdict.
+Repo split: BlackSwan emits the DSR/beta metrics; this repo (engine) owns the acceptance gate + composite
+verdict. Build order: verdict scaffold (export the shared stats helpers, add the `diagnostics` threshold
+sub-block, extend `DiagnoseSearchResult` with `steady` + `championGates`) → BlackSwan beta/capture emission +
+PSR/DSR golden vectors → the four gate families (multi-window medians · DSR · capture · seed-stability) →
+compose into `steady` + wire the autopilot stop-condition.
 
 ### A5. Single-purpose template + BlackSwan-as-library
 

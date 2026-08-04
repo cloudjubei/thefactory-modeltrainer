@@ -4,6 +4,8 @@ import {
   ablationPath,
   aggregateRunValues,
   aggregateToSetupRuns,
+  benjaminiHochberg,
+  bootstrapDiff,
   computeConfigSpaceAnalysis,
   paretoFrontier,
   criterionValueOf,
@@ -14,6 +16,7 @@ import {
   iqm,
   leverCouplings,
   leverImportances,
+  medianOf,
   normalizeByEnvironment,
   normalizeConditionalLevers,
   pcaProjection,
@@ -1066,5 +1069,35 @@ describe('normalizeByEnvironment', () => {
     expect(z['b']).toBeCloseTo(0)
     expect(z['c']).toBeGreaterThan(0)
     expect(z['a']).toBeLessThan(0)
+  })
+})
+
+// A4.3 scaffold: these robust-stats helpers were module-private and are now EXPORTED for the champion-verdict
+// families (multi-window medians, DSR deflation, seed-stability). Pin their numeric output so the export — and
+// any later lift into a shared stats module — cannot silently change them (they are deterministic + seeded).
+describe('exported robust-stats helpers (champion-verdict families)', () => {
+  it('medianOf — odd, even, empty', () => {
+    expect(medianOf([3, 1, 2])).toBe(2)
+    expect(medianOf([4, 1, 3, 2])).toBe(2.5)
+    expect(medianOf([])).toBe(0)
+  })
+
+  it('benjaminiHochberg — the BH step-up mask at alpha', () => {
+    // m=3: 0.01<=1/3·0.05, 0.02<=2/3·0.05 reject; 0.5>3/3·0.05 does not ⇒ [T,T,F] (by original index).
+    expect(benjaminiHochberg([0.01, 0.02, 0.5], 0.05)).toEqual([true, true, false])
+    expect(benjaminiHochberg([0.9], 0.05)).toEqual([false])
+    expect(benjaminiHochberg([], 0.05)).toEqual([])
+  })
+
+  it('bootstrapDiff — N<2 point-delta branch (no variance ⇒ never significant)', () => {
+    expect(bootstrapDiff([5], [1], 'max')).toEqual({ ci: [4, 4], pValue: 1, delta: 4 })
+    // direction flips the orientation: min prefers the SMALLER, so [1] beats [5] by 4.
+    expect(bootstrapDiff([1], [5], 'min')).toEqual({ ci: [4, 4], pValue: 1, delta: 4 })
+  })
+
+  it('bootstrapDiff — bootstrap path over constant samples is exactly determined', () => {
+    // Every resample of a constant sample is the same, so every bootstrap diff = 1, ci=[1,1], and NO diff is
+    // <=0 ⇒ pValue 0. This exercises the seeded loop without a fragile snapshot.
+    expect(bootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({ ci: [1, 1], pValue: 0, delta: 1 })
   })
 })

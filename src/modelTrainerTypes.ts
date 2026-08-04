@@ -256,6 +256,24 @@ export interface TrainerDiagnostics {
   riskMetrics?: string[]
   /** An explicit null baseline the incumbent must beat (else the per-run benchmark is used). */
   nullBaseline?: unknown
+  /**
+   * A4.3 champion "declare steady" gates, evaluated at COHORT level (not per run): each {@link TrainerGate}
+   * must hold with its metric taken as the MEDIAN across the champion setup's seeds, on EVERY value of
+   * {@link splitAxis} — the multi-window-AND-of-medians / capture / drawdown / trades families. Thresholds
+   * live HERE (manifest-fixed) so the honesty bar cannot be relaxed by picking a lenient active scorecard.
+   */
+  championGates?: TrainerGate[]
+  /**
+   * A4.3 deflated-Sharpe aggregate gate: the cohort's `metric` (default `oos_sharpe`) deflated for
+   * multiple-testing across the distinct SETUPS tried must clear `threshold` (~0.95), with each run carrying
+   * at least `minObs` observations (min track-record length).
+   */
+  dsr?: { metric?: string; minObs?: number; threshold?: number }
+  /**
+   * A4.3 seed-stability gate: the champion setup's `metric` (default the objective) must have a bootstrap CI
+   * width across its seeds no wider than `maxCiWidth` — a point estimate that swings with the seed is not steady.
+   */
+  stability?: { metric?: string; maxCiWidth: number }
 }
 
 export interface TrainerManifest {
@@ -2412,6 +2430,27 @@ export interface DiagnoseSearchResult {
   alignmentNarrative?: string
   /** A one-paragraph human read + do-next. */
   narrative?: string
+  /**
+   * A4.3 composite champion verdict — `true` iff EVERY declared champion gate holds (see
+   * {@link TrainerDiagnostics.championGates}/`dsr`/`stability`); `false` while any fails. ABSENT when the
+   * manifest declares no champion config (not applicable). AUGMENTS the split verdict — it can only make the
+   * "declare a winner" bar stricter, never looser.
+   */
+  steady?: boolean
+  /** Per-gate detail behind {@link steady}; empty until champion gates are declared + their families evaluated. */
+  championGates?: ChampionGate[]
+}
+
+/** One cohort-level champion gate in the A4.3 composite {@link DiagnoseSearchResult.steady} verdict. */
+export interface ChampionGate {
+  /** Human label (the gate's own label, or a rendered default). */
+  label: string
+  /** Which family produced it, e.g. `multi-window-medians` | `dsr` | `capture` | `seed-stability` | `drawdown` | `trades`. */
+  kind: string
+  /** Whether the cohort passes this gate. */
+  pass: boolean
+  /** One-line evidence — the measured cohort value vs the required bound. */
+  detail?: string
 }
 
 /**

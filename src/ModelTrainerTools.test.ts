@@ -5835,6 +5835,34 @@ describe('diagnoseSearch (A5 read tool)', () => {
     expect(res.found).toBe(false)
     expect(res.error).toMatch(/registers no training projects/)
   })
+
+  it('carries the composite champion-verdict scaffold — not applicable when no champion config is declared', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }))
+    await seedRun(storage, 'a', { lr: 1, window: '2024' }, 5)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.championGates).toEqual([])
+    expect(res.steady).toBeUndefined()
+  })
+
+  it('reports steady:false (placeholder) once a champion gate is declared, until the families land', async () => {
+    const storage = memoryStorage()
+    await registerManifest(
+      storage,
+      manifest({
+        diagnostics: {
+          splitAxis: { levers: ['window'] },
+          championGates: [{ metric: 'return_vs_hold_pct', op: '>', value: 0 }],
+        },
+      }),
+    )
+    await seedRun(storage, 'a', { lr: 1, window: '2024' }, 5)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.diagnoseSearch({ scope: 'proj' })
+    expect(res.steady).toBe(false)
+    expect(res.championGates).toEqual([])
+  })
 })
 
 describe('continueTrainingRun (A3 extra-train)', () => {

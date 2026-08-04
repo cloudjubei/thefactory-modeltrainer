@@ -7,6 +7,7 @@ import {
   narrateSplitHoldout,
   rewardFitnessAlignment,
   narrateAlignment,
+  assembleChampionVerdict,
 } from './diagnosticsUtils'
 import type { AnalysisRun, AnalysisCriterion } from './modelTrainerTypes'
 
@@ -211,5 +212,26 @@ describe('narrateSplitHoldout', () => {
     expect(h({ verdict: 'not-replicated', evaluated: 1, missingSplits: ['b', 'c'] })).toMatch(/only 1 of 3/)
     expect(h({ verdict: 'single-split-luck', evaluated: 3, held: 1 })).toMatch(/single-split luck/)
     expect(h({ verdict: 'robust' })).toMatch(/holds across all 3/)
+  })
+})
+
+describe('assembleChampionVerdict (A4.3 composite-verdict scaffold)', () => {
+  // Scaffold contract: the composition SEAM exists; the four gate families are not wired yet, so it returns an
+  // empty envelope. `steady` is UNDEFINED (not-applicable) when the manifest declares no champion config, and
+  // false (nothing proven steady until the families land) when it declares any — fail-closed, never a vacuous true.
+  it('no champion config ⇒ steady undefined (not applicable), no gates', () => {
+    expect(assembleChampionVerdict(undefined)).toEqual({ championGates: [] })
+    expect(assembleChampionVerdict({})).toEqual({ championGates: [] })
+    expect(assembleChampionVerdict({ splitAxis: { levers: ['w'] } })).toEqual({ championGates: [] })
+  })
+
+  it('any champion config declared ⇒ steady:false placeholder (families not wired), still no gates', () => {
+    expect(assembleChampionVerdict({ championGates: [{ metric: 'return_vs_hold_pct', op: '>', value: 0 }] })).toEqual(
+      { steady: false, championGates: [] },
+    )
+    expect(assembleChampionVerdict({ dsr: { threshold: 0.95 } })).toEqual({ steady: false, championGates: [] })
+    expect(assembleChampionVerdict({ stability: { maxCiWidth: 5 } })).toEqual({ steady: false, championGates: [] })
+    // An EMPTY championGates array is not "declared config" — nothing to prove ⇒ not applicable.
+    expect(assembleChampionVerdict({ championGates: [] })).toEqual({ championGates: [] })
   })
 })

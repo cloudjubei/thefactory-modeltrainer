@@ -236,6 +236,7 @@ import {
   narrateSplitHoldout,
   rewardFitnessAlignment,
   narrateAlignment,
+  assembleChampionVerdict,
 } from './diagnosticsUtils.js'
 
 /**
@@ -3398,6 +3399,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ]),
     ].filter((m) => m !== 'objective')
     const alignment = alignMetrics.length ? rewardFitnessAlignment(runs, alignMetrics) : undefined
+    // A4.3 composite champion "declare steady" verdict (families wired in follow-up units; scaffold today).
+    const champion = assembleChampionVerdict(manifest.diagnostics)
     return {
       found: true,
       recordType,
@@ -3417,6 +3420,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         ? { alignment, alignmentNarrative: narrateAlignment(alignment, rankMetric) }
         : {}),
       narrative: narrateSplitHoldout(holdout, splitLevers, rankMetric, runs.length),
+      championGates: champion.championGates,
+      ...(champion.steady !== undefined ? { steady: champion.steady } : {}),
     }
   }
 

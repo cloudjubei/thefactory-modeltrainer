@@ -5,7 +5,13 @@
 // single-split luck and must be blocked. Pure — the controller (explorationUtils) and a future
 // `diagnoseSearch` chat tool both consume it.
 
-import type { AnalysisRun, AnalysisCriterion, MetricAlignment } from './modelTrainerTypes'
+import type {
+  AnalysisRun,
+  AnalysisCriterion,
+  MetricAlignment,
+  TrainerDiagnostics,
+  ChampionGate,
+} from './modelTrainerTypes'
 
 export type SplitVerdict = 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
 
@@ -152,6 +158,29 @@ export function incumbentSplitHoldout(
  */
 export function convergenceGatedBySplits(holdout: SplitHoldout): boolean {
   return holdout.verdict === 'not-replicated' || holdout.verdict === 'single-split-luck'
+}
+
+/**
+ * A4.3 composite champion "declare steady" verdict (SCAFFOLD). Folds the champion-gate families
+ * (multi-window-AND-of-medians / DSR deflation / beta-capture / seed-stability) into ONE steady/not-steady
+ * envelope with per-gate detail — the loop's stop condition the human approves against. The families are
+ * wired in follow-up units; today it returns the EMPTY envelope, honestly: `steady` is UNDEFINED when the
+ * manifest declares no champion config (not applicable — the verdict stays the split check alone), and
+ * `false` when it declares any (fail-closed — nothing is proven steady until a family evaluates it; never a
+ * vacuous `true`). An empty `championGates: []` array is not "declared config": there is nothing to prove.
+ */
+export function assembleChampionVerdict(diagnostics?: TrainerDiagnostics): {
+  steady?: boolean
+  championGates: ChampionGate[]
+} {
+  const hasConfig = !!(
+    diagnostics &&
+    ((diagnostics.championGates && diagnostics.championGates.length > 0) ||
+      diagnostics.dsr ||
+      diagnostics.stability)
+  )
+  const championGates: ChampionGate[] = []
+  return hasConfig ? { steady: false, championGates } : { championGates }
 }
 
 /** The split levers a manifest declares for split-consistency (`diagnostics.splitAxis.levers`), or []. */
