@@ -112,6 +112,18 @@ describe('trainer capability record types', () => {
     expect(bySuffix.get('-paper')?.editable).toBe(true)
   })
 
+  it('declares the AI-companion strategy record (A3.4) as a chat-owned singleton', () => {
+    // The companion's working memory: the AI reads+writes it to persist its plan across the long
+    // launch→wait→read→decide loop; the human sees it in the app. Chat-owned ⇒ editable AND creatable.
+    const strategy = bySuffix.get('-strategy')
+    expect(strategy?.editable).toBe(true)
+    expect(strategy?.creatable).toBe(true)
+    for (const f of ['summary', 'decided', 'open', 'nextSteps']) {
+      expect(strategy?.editableFields).toContain(f)
+      expect(strategy?.creatableFields).toContain(f)
+    }
+  })
+
   it('the run record + its derived children are covered (queryable run, exempt/edit children)', () => {
     // The run record itself is a declared (queryable, non-editable) type; deletion is the bespoke deleteRuns tool.
     const run = TRAINER_CAPABILITY_RECORD_TYPES.find((t) => t.suffix === '')

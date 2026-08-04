@@ -19,6 +19,7 @@ import {
   runActivityWorkItems,
   uuidv4,
 } from 'thefactory-tools/utils'
+import { ACTIVITY_RUN_TYPE } from 'thefactory-tools/constants'
 import type {
   AnalysisCriterion,
   AnalysisRun,
@@ -64,6 +65,9 @@ import type {
   GetTrainerStateResult,
   DiagnoseSearchParams,
   DiagnoseSearchResult,
+  GetActivityStatusParams,
+  GetActivityStatusResult,
+  ActivityStatusEntry,
   GetRunXaiParams,
   GetRunXaiResult,
   JudgeTrainingRunsParams,
@@ -244,6 +248,53 @@ import {
 // checked by the A2 parity audit), so the chat deleteRuns tool, the migration delete path, and the viewer all
 // cascade identically — a new derived child added there is deleted everywhere with no drift.
 const RUN_KEYED_CHILD_SUFFIXES = TRAINER_RUN_KEYED_CHILD_SUFFIXES
+
+/** The subset of a generic `activity-run` record's content the A3.1 status read tool folds (see {@link foldActivityRun}). */
+interface ActivityRunLike {
+  activityId?: string
+  recordType?: string
+  status?: string
+  steps?: Array<{ done?: unknown; total?: unknown }>
+  resumeToken?: { activityType?: string; params?: { _label?: unknown } }
+  startedAt?: string
+  updatedAt?: string
+  finishedAt?: string
+  costUSD?: number
+  error?: string
+}
+
+/**
+ * Fold one generic `activity-run` record into the trimmed {@link ActivityStatusEntry} the companion reads:
+ * surface the activity KIND from `resumeToken.activityType`, sum step progress, drop the verbose params, and
+ * mark a `running` record `stale` when it has not advanced within `staleMs` (likely orphaned by a restart).
+ */
+function foldActivityRun(a: ActivityRunLike, nowMs: number, staleMs: number): ActivityStatusEntry {
+  const status = (a.status ?? 'running') as ActivityStatusEntry['status']
+  let done = 0
+  let total = 0
+  for (const s of a.steps ?? []) {
+    done += Number(s.done) || 0
+    total += Number(s.total) || 0
+  }
+  const entry: ActivityStatusEntry = {
+    activityId: a.activityId as string,
+    activityType: a.resumeToken?.activityType || 'unknown',
+    status,
+  }
+  const label = a.resumeToken?.params?._label
+  if (typeof label === 'string' && label) entry.label = label
+  if (total > 0) entry.progress = { done, total }
+  if (a.startedAt) entry.startedAt = a.startedAt
+  if (a.updatedAt) entry.updatedAt = a.updatedAt
+  if (a.finishedAt) entry.finishedAt = a.finishedAt
+  if (typeof a.costUSD === 'number') entry.costUSD = a.costUSD
+  if (a.error) entry.error = a.error
+  if (status === 'running' && a.updatedAt) {
+    const updated = Date.parse(a.updatedAt)
+    if (Number.isFinite(updated) && nowMs - updated > staleMs) entry.stale = true
+  }
+  return entry
+}
 
 /**
  * Delete a run record and every record that hangs off its key — the run-keyed children
@@ -3369,6 +3420,53 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // A3.1 orientation read: fold the project's `activity-run` status records into "what's running / queued /
+  // recently done" for the AI companion. The generic activity-run record is the single authoritative status
+  // source (trainer-queue is only a marker); its useful fields are nested (kind in `resumeToken.activityType`,
+  // progress as a `steps[]` array) so this trims + folds them and flags stalled runs by staleness of updatedAt.
+  async function getActivityStatus(params: GetActivityStatusParams): Promise<GetActivityStatusResult> {
+    let manifest: TrainerManifest
+    try {
+      manifest = await resolveProjectManifest(params.scope, params.project)
+    } catch (err) {
+      return { found: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    const recordType = manifest.recordType
+    const records = await deps.storage.listRecords({ scope: params.scope, type: ACTIVITY_RUN_TYPE })
+    const nowMs = Date.parse(now())
+    const STALE_MS = 15 * 60 * 1000
+    const entries: ActivityStatusEntry[] = []
+    for (const rec of records) {
+      const a = (rec.content ?? {}) as ActivityRunLike
+      if (!a.activityId || a.recordType !== recordType) continue
+      entries.push(foldActivityRun(a, nowMs, STALE_MS))
+    }
+    const counts = { running: 0, queued: 0, completed: 0, failed: 0, aborted: 0 }
+    for (const e of entries) {
+      if (e.status === 'running') counts.running++
+      else if (e.status === 'queued') counts.queued++
+      else if (e.status === 'completed') counts.completed++
+      else if (e.status === 'failed') counts.failed++
+      else if (e.status === 'aborted') counts.aborted++
+    }
+    const finishedAtMs = (e: ActivityStatusEntry) => Date.parse(e.finishedAt ?? e.updatedAt ?? '') || 0
+    const recentlyFinished = entries
+      .filter((e) => e.status === 'completed' || e.status === 'failed' || e.status === 'aborted')
+      .sort((x, y) => finishedAtMs(y) - finishedAtMs(x))
+    const recentLimit =
+      typeof params.recentLimit === 'number' && Number.isFinite(params.recentLimit) && params.recentLimit >= 0
+        ? Math.floor(params.recentLimit)
+        : 10
+    return {
+      found: true,
+      recordType,
+      counts,
+      running: entries.filter((e) => e.status === 'running'),
+      queued: entries.filter((e) => e.status === 'queued'),
+      recentlyFinished: recentlyFinished.slice(0, recentLimit),
+    }
+  }
+
   async function getRunData(params: GetRunDataParams): Promise<GetRunDataResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -3804,6 +3902,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzePaperModels,
     xaiNarrate,
     diagnoseSearch,
+    getActivityStatus,
     getRunData,
     getTrainerState,
     getRunXAI,

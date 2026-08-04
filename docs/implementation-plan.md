@@ -46,22 +46,24 @@ Ordered by value. Each is something to **implement**.
 **Goal:** a long conversation where the AI researches/thinks/runs and the human mostly approves. Built on the
 shipped full action-parity surface + the approval gate.
 
-1. **Orient tools.** Promote the shipped `diagnoseSearch` to a chat tool (the AI reads the same Diagnosis plan
-   the user sees) and let it rank candidates on the **scorecard** (not the reward); add campaign/activity-status
-   reads (via `queryProjectData` on activity-run records) so the AI knows what's running / pending / done.
-2. **Approval surface (new VIEW — the "just approve" seam).** A proposals inbox: the AI's pending actions
-   (launch / edit / delete) with rationale + expected cost (runs × ETA) + one-click approve / reject, batched.
-   Reuse the agent change-review design (trust×cadence dials, ChangeSet, approve/reject/tweak). Per-project
-   **trust level**: reads + cheap analyses auto; launches + writes need approval; destructive always explicit.
-3. **Wait / resume across long runs.** The loop is launch → wait (minutes–hours) → read → decide. Add a
-   **campaign-complete → wake-the-chat-topic** hook so the AI re-engages when its launched runs land and proposes
-   the next step (v1 fallback: the human says "done" and the AI reads results). The AI polls status + resumes the
-   strategy across waits.
-4. **Campaign-strategy memory.** A chat-owned `strategy` record the AI reads+writes (which experiments, why,
-   what's decided / open) surfaced in the app so the human sees the AI's thinking — the Diagnosis plan +
-   hypotheses registry are the substrate.
-5. **Decide:** the wake-the-chat hook (how the backend notifies a chat topic on run completion); the approval
-   granularity (per-action vs batched vs trust-tiered — lean on the change-review design).
+**Shipped so far:** the **orient tools** — `diagnoseSearch` (scorecard-ranked incumbent + reward↔fitness
+alignment) and `getActivityStatus` (what's running / queued / recently done, folded from the `activity-run`
+records; auto-callable, cross-project-read allow-listed) — and the chat-owned **campaign-strategy memory**: the
+`-strategy` singleton the AI reads+writes via the generic create/update tools (fields summary/decided/open/
+nextSteps), surfaced as a "Companion strategy" card on the Diagnosis tab so the human sees the AI's thinking.
+Remaining:
+
+- **Wait / resume across long runs** (blocked on A4.1's event→agent-turn re-invocation primitive). The loop is
+  launch → wait (minutes–hours) → read → decide. Add a **campaign-complete → wake-the-chat-topic** hook so the AI
+  re-engages when its launched runs land and proposes the next step — the open design question is how the backend
+  notifies a chat topic on run completion. v1 fallback works TODAY: the human says "done" and the AI reads results
+  (getActivityStatus → getRunData/getRunXAI) and updates the `-strategy` record.
+
+The **approval-inbox VIEW** (the "just approve" seam — a batched approve/reject surface over the AI's pending
+launch / edit / delete actions) is an overseer-clients UI effort, so it moved to
+[thefactory-overseer-web/docs/implementation-plan.md](../../thefactory-overseer-web/docs/implementation-plan.md)
+§F to be tackled with that project's change-review / merge-UI work. The approval MECHANISM already exists here
+(trainer writes are advertised-but-gated per-call); §F is the richer batched VIEW on top of it.
 
 ### A4. Semi-automation follow-ups — close the loop A3 leaves open
 
@@ -74,7 +76,7 @@ scope, and they double as the "keep improving the tooling as we go" side-goal. O
      project (`queryProjectData` on the fail-closed allowlist, `crossProjectAccess.ts`) or delegate a CODE edit
      (`requestProjectFeature`); it CANNOT launch/monitor a BlackSwan campaign from outside. Add an approval-gated
      cross-project "start-/read-activity" verb so ONE orchestrator drives BlackSwan without living in its chat.
-   - **Event→agent-turn re-invocation** (the primitive A3.3's wake hook sits on). `startProjectActivity` returns
+   - **Event→agent-turn re-invocation** (the primitive A3's wait/resume wake hook sits on). `startProjectActivity` returns
      202 and the turn ends; nothing re-triggers a completion (`featureRequestResume` injects a message but never
      runs one). Build the generic backend "re-invoke an agent turn on an async activity-settle event" primitive —
      plus a **scheduler/cron** variant that wakes the planner on a timer for overnight autonomous progress.

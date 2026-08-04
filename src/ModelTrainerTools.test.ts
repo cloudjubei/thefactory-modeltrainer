@@ -3111,6 +3111,103 @@ describe('getTrainerState (chat orientation read tool)', () => {
   })
 })
 
+describe('getActivityStatus (A3.1 campaign/activity-status read tool)', () => {
+  // Reads the generic `activity-run` records (the single authoritative status source; trainer-queue is only
+  // a marker) and folds them into a compact "what's running / queued / recently done" orientation for the AI
+  // companion. NOW is 2026-06-10T12:00:00Z; `updatedAt` older than the stale window flags an orphaned run.
+  async function seedActivities(storage: DataStorage) {
+    await storage.upsertRecord({
+      scope: 'proj', type: 'trainer-project-manifest', key: 'demo',
+      content: { manifest: manifest(), dir: 'Demo' },
+    })
+    const put = (content: Record<string, unknown>) =>
+      storage.upsertRecord({ scope: 'proj', type: 'activity-run', key: content.activityId as string, content })
+    await put({
+      activityId: 'a1', recordType: 'demo-run', status: 'running',
+      steps: [
+        { key: 'calibrate', status: 'completed', done: 1, total: 1 },
+        { key: 'train', status: 'running', done: 3, total: 10 },
+      ],
+      resumeToken: { activityType: 'train', params: { _label: 'lr sweep' } },
+      startedAt: '2026-06-10T11:55:00.000Z', updatedAt: NOW,
+    })
+    await put({
+      activityId: 'a2', recordType: 'demo-run', status: 'queued',
+      steps: [{ key: 'judge', status: 'queued', done: 0, total: 0 }],
+      resumeToken: { activityType: 'judge' }, startedAt: NOW, updatedAt: NOW,
+    })
+    await put({
+      activityId: 'a3', recordType: 'demo-run', status: 'completed',
+      steps: [{ key: 'explore', status: 'completed', done: 12, total: 12 }],
+      resumeToken: { activityType: 'explore' },
+      startedAt: '2026-06-10T08:00:00.000Z', updatedAt: '2026-06-10T11:00:00.000Z',
+      finishedAt: '2026-06-10T11:00:00.000Z', costUSD: 0.42,
+    })
+    await put({
+      activityId: 'a4', recordType: 'demo-run', status: 'failed', error: 'boom',
+      resumeToken: { activityType: 'train' },
+      startedAt: '2026-06-10T09:00:00.000Z', updatedAt: '2026-06-10T10:00:00.000Z',
+      finishedAt: '2026-06-10T10:00:00.000Z',
+    })
+    await put({
+      activityId: 'a5', recordType: 'demo-run', status: 'running',
+      resumeToken: { activityType: 'train' },
+      startedAt: '2026-06-10T09:00:00.000Z', updatedAt: '2026-06-10T09:00:00.000Z', // 3h stale
+    })
+    // A different trainer project's run in the same scope — must be excluded by the recordType filter.
+    await put({ activityId: 'x1', recordType: 'other-run', status: 'running', resumeToken: { activityType: 'train' } })
+  }
+
+  it('folds activity-run records into running/queued/recently-finished with counts, progress, kind, cost', async () => {
+    const storage = memoryStorage()
+    await seedActivities(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.getActivityStatus({ scope: 'proj' })
+    expect(res.found).toBe(true)
+    expect(res.recordType).toBe('demo-run')
+    expect(res.counts).toEqual({ running: 2, queued: 1, completed: 1, failed: 1, aborted: 0 })
+
+    const a1 = res.running!.find((e) => e.activityId === 'a1')!
+    expect(a1.activityType).toBe('train')
+    expect(a1.label).toBe('lr sweep')
+    expect(a1.progress).toEqual({ done: 4, total: 11 }) // folded across steps
+    expect(a1.stale ?? false).toBe(false)
+
+    const a5 = res.running!.find((e) => e.activityId === 'a5')!
+    expect(a5.stale).toBe(true) // running but not updated for 3h
+
+    expect(res.queued!.map((e) => e.activityId)).toEqual(['a2'])
+    expect(res.queued![0].progress).toBeUndefined() // total 0 ⇒ omitted
+
+    // Recently finished, newest first: a3 (11:00) before a4 (10:00).
+    expect(res.recentlyFinished!.map((e) => e.activityId)).toEqual(['a3', 'a4'])
+    expect(res.recentlyFinished![0].costUSD).toBe(0.42)
+    expect(res.recentlyFinished![1].error).toBe('boom')
+
+    // The foreign-recordType run never appears anywhere.
+    const all = [...res.running!, ...res.queued!, ...res.recentlyFinished!]
+    expect(all.some((e) => e.activityId === 'x1')).toBe(false)
+  })
+
+  it('caps recentlyFinished at recentLimit (newest kept)', async () => {
+    const storage = memoryStorage()
+    await seedActivities(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.getActivityStatus({ scope: 'proj', recentLimit: 1 })
+    expect(res.recentlyFinished!.map((e) => e.activityId)).toEqual(['a3'])
+  })
+
+  it('returns found:false with the options when the project is ambiguous', async () => {
+    const storage = memoryStorage()
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.getActivityStatus({ scope: 'proj' })
+    expect(res.found).toBe(false)
+    expect(res.error).toMatch(/several/)
+  })
+})
+
 describe('migrateTrainingRuns', () => {
   const migrations = [
     {

@@ -11,7 +11,7 @@
 // its iframe remounts (a per-load ?v= cache-bust only fires when index.html is re-fetched, i.e. the App view
 // is reopened), so an in-Overseer tab switch keeps running whatever app.js was current when the view opened.
 // Bump this on a perf/behaviour fix so "am I on the new code?" is a one-glance console check.
-const VIEWER_BUILD = '2026-08-04b · perf: O(n) sort + memoised reliability + single-pass toolbar'
+const VIEWER_BUILD = '2026-08-04c · A3: companion strategy card + activity-status/strategy chat capabilities'
 try {
   console.info('[trainer-viewer] build ' + VIEWER_BUILD)
 } catch {}
@@ -20396,9 +20396,62 @@ async function chatAboutDiagnosis(d) {
   })
 }
 
+// A3.4 — surface the AI companion's working memory (the `-strategy` singleton it reads+writes via the chat's
+// generic createProjectRecord/updateProjectRecord tools) so the human sees the AI's plan next to the
+// deterministic Diagnosis. Read-only here; the AI owns the content. Renders nothing heavy — one record read.
+function strategyList(value) {
+  const arr = Array.isArray(value) ? value : value == null || value === '' ? [] : [value]
+  return arr.map((v) => String(v).trim()).filter(Boolean)
+}
+async function renderCompanionStrategy() {
+  const host = byId('companion-strategy')
+  if (!host || !manifest) return
+  // Read ALL strategy records and show the newest — the AI is told to keep ONE singleton (key "latest"), but
+  // a generic createProjectRecord without an explicit key gets a UUID, so newest-wins is robust to either.
+  let rec = null
+  try {
+    const recs = await queryRecords(manifest.recordType + '-strategy')
+    rec = (recs || [])
+      .slice()
+      .sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))[0] || null
+  } catch {
+    rec = null
+  }
+  const c = (rec && rec.content) || null
+  if (!c) {
+    host.innerHTML =
+      '<p class="companion-empty">🧭 The AI companion keeps its campaign plan here — ask it in chat to propose and record a strategy. Nothing yet.</p>'
+    return
+  }
+  const summary = typeof c.summary === 'string' ? c.summary.trim() : ''
+  const sections = [
+    { key: 'nextSteps', label: 'Next steps', items: strategyList(c.nextSteps) },
+    { key: 'decided', label: 'Decided', items: strategyList(c.decided) },
+    { key: 'open', label: 'Open questions', items: strategyList(c.open) },
+  ].filter((s) => s.items.length)
+  const when = rec.updatedAt ? new Date(rec.updatedAt).toLocaleString() : ''
+  const body =
+    (summary ? `<p class="companion-summary">${escapeHtml(summary)}</p>` : '') +
+    sections
+      .map(
+        (s) =>
+          `<div class="companion-section"><div class="companion-section-label">${escapeHtml(s.label)}</div>` +
+          `<ul class="companion-items">${s.items
+            .map((it) => `<li>${escapeHtml(it)}</li>`)
+            .join('')}</ul></div>`,
+      )
+      .join('')
+  host.innerHTML =
+    `<div class="companion-card"><div class="companion-head"><span class="companion-title">🧭 Companion strategy</span>` +
+    `${when ? `<span class="companion-when">updated ${escapeHtml(when)}</span>` : ''}</div>` +
+    (body || '<p class="companion-empty">The AI has a strategy record but it is empty.</p>') +
+    `</div>`
+}
+
 async function renderDiagnosis() {
   const container = byId('diagnosis-body')
   if (!container || !window.Diagnostics) return
+  void renderCompanionStrategy()
   if (!manifest) {
     container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to diagnose its search.</div>'
     return

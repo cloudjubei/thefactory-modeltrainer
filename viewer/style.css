@@ -4582,3 +4582,69 @@ select.app-select:focus-visible,
 .xai-coupling li {
   margin: 2px 0;
 }
+
+/* A3.4 — the AI companion's strategy card, pinned above the Diagnosis body (the human sees the AI's plan). */
+#companion-strategy {
+  flex: 0 0 auto;
+}
+#companion-strategy:empty {
+  display: none;
+}
+.companion-empty {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  background: var(--surface-subtle);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+.companion-card {
+  margin: 0 0 12px;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.companion-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.companion-title {
+  font-weight: 600;
+  color: var(--text);
+}
+.companion-when {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.companion-summary {
+  margin: 0 0 10px;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.companion-section {
+  margin-top: 8px;
+}
+.companion-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 3px;
+}
+.companion-items {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text);
+}
+.companion-items li {
+  margin: 2px 0;
+  line-height: 1.45;
+}

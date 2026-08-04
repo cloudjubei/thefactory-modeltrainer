@@ -2414,6 +2414,57 @@ export interface DiagnoseSearchResult {
   narrative?: string
 }
 
+/**
+ * A chat READ tool (A3.1): what background activities are RUNNING / QUEUED / recently done for a training
+ * project, so the AI companion can orient between launching a campaign and reading its results (the
+ * launch→wait→read→decide loop). Folds the generic `activity-run` status records into a compact digest —
+ * the raw records bury the activity kind in `resumeToken` and carry verbose params, so this trims them.
+ * Read-only ⇒ auto-callable.
+ */
+export interface GetActivityStatusParams {
+  scope: string
+  /** Which registered training project (as {@link GetTrainerStateParams.project}). */
+  project?: string
+  /** Max recently-finished activities to include, newest first (default 10). */
+  recentLimit?: number
+}
+
+/** One activity in {@link GetActivityStatusResult}, trimmed to what an orienting agent needs. */
+export interface ActivityStatusEntry {
+  activityId: string
+  /** train / judge / explore / evaluate / … (from the run's `resumeToken.activityType`). */
+  activityType: string
+  /** The run's display label, when it set one (`resumeToken.params._label`). */
+  label?: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'aborted'
+  /** Step progress folded across the run's steps; omitted until work is planned (`total` > 0). */
+  progress?: { done: number; total: number }
+  startedAt?: string
+  updatedAt?: string
+  finishedAt?: string
+  /** USD spent so far, when tracked. */
+  costUSD?: number
+  /** Failure message, when `status === 'failed'`. */
+  error?: string
+  /** `true` when a `running` record has not advanced for a long time — likely orphaned by a restart. */
+  stale?: boolean
+}
+
+export interface GetActivityStatusResult {
+  found: boolean
+  /** Set (with found:false) when the project can't be resolved (lists the options for a retry). */
+  error?: string
+  recordType?: string
+  /** Tally by lifecycle status across this project's activity runs. */
+  counts?: { running: number; queued: number; completed: number; failed: number; aborted: number }
+  /** Currently executing (or stalled) activities. */
+  running?: ActivityStatusEntry[]
+  /** Accepted but not yet started (waiting for a concurrency slot). */
+  queued?: ActivityStatusEntry[]
+  /** The most recently finished activities (completed/failed/aborted), newest first, capped at recentLimit. */
+  recentlyFinished?: ActivityStatusEntry[]
+}
+
 // In-place record EDITS from a chat (a hypothesis/paper field, a manual verdict override) are handled by
 // the GENERIC cross-app `updateProjectRecord` tool against this project's declared data-capability manifest
 // (`trainerDataCapabilityManifest` in the viewer) — NOT a bespoke trainer tool. A hypothesis SPEC change goes
@@ -3420,6 +3471,12 @@ export interface ModelTrainerTools {
    */
   getTrainerState(params: GetTrainerStateParams): Promise<GetTrainerStateResult>
   diagnoseSearch(params: DiagnoseSearchParams): Promise<DiagnoseSearchResult>
+  /**
+   * Agent-facing READ tool (A3.1): what background activities are running / queued / recently done for a
+   * training project, folded from the generic `activity-run` status records into an agent-sized digest so
+   * the companion can orient between launching a campaign and reading its results. Read-only.
+   */
+  getActivityStatus(params: GetActivityStatusParams): Promise<GetActivityStatusResult>
   /**
    * Agent-facing READ tool: compute the deterministic xAI analysis ({@link RunXaiDigest}) for ONE run by
    * id — the same facts the narrative is built from, returned as structured data (the LLM never computes

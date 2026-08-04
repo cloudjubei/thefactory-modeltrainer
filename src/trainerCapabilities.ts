@@ -349,6 +349,18 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
     editableFields: ['keys'],
   },
   {
+    suffix: '-strategy',
+    label: 'Campaign strategy',
+    description:
+      'The AI companion’s working memory for driving this project — the current plan and reasoning, surfaced in the app so the human sees the AI’s thinking. `summary` = the current strategy in prose; `decided` = settled conclusions (string[]); `open` = open questions (string[]); `nextSteps` = the experiments to run next and why (string[]). Singleton, key "latest" — READ it to resume the plan across the long launch→wait→read→decide loop, and UPDATE it as decisions land. The Diagnosis plan + hypotheses are the evidence it reasons over.',
+    editable: true,
+    editableFields: ['summary', 'decided', 'open', 'nextSteps'],
+    creatable: true,
+    creatableFields: ['summary', 'decided', 'open', 'nextSteps'],
+    createDefaults: { source: 'llm' },
+    view: { view: 'diagnosis' },
+  },
+  {
     fixedType: 'trainer-activity-limits',
     label: 'Activity concurrency limits',
     description:
