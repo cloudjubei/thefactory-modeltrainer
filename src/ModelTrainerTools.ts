@@ -108,6 +108,13 @@ import type {
   TrainingCampaignParams,
   TrainingCampaignProgress,
   TrainingCampaignResult,
+  SideExperimentCampaignParams,
+  SideExperimentCampaignResult,
+  ExperimentAggregateReducer,
+  ExperimentCell,
+  ExperimentRecord,
+  ExperimentStatus,
+  ExperimentVerdict,
   TrainingExperimentSuggestion,
   TrainingHypothesis,
   TrainingPaperRecord,
@@ -220,6 +227,7 @@ import {
   capRunSummaryForStorage,
 } from './modelTrainerUtils.js'
 import {
+  aggregateExperimentCells,
   computeConfigSpaceAnalysis,
   criterionValueOf,
   leverImportances,
@@ -786,6 +794,198 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       direction: manifest.objective.direction,
       ...(calibration ? { calibration } : {}),
       finishedAt: now(),
+    }
+  }
+
+  /**
+   * Run a SIDE-EXPERIMENT: a diagnostic matrix through the SAME project CLI as training, but producing NO
+   * model — the cells persist in ONE `<recordType>-experiment` record (cells + aggregate + verdict), NEVER
+   * a `<recordType>-run` record, so the RL run store stays apples-to-apples pure. The record feeds a thesis
+   * as a second evidence source (linked by `hypothesisId`, or matched by config). Mirrors the train
+   * campaign's plan→resume→run→progress, then reduces the cells into a verdict via a project-supplied
+   * reducer (`params.aggregate`) or the built-in {@link aggregateExperimentCells}.
+   */
+  async function runSideExperimentCampaign(
+    params: SideExperimentCampaignParams,
+  ): Promise<SideExperimentCampaignResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const experimentType = `${recordType}-experiment`
+    const matrix = migrateExperimentSpec(params.matrix, manifest.migrations)
+    // Dedup by cell key: a degenerate matrix (e.g. a repeated sweep value) expands to duplicate configs;
+    // an experiment persists ONE aggregate record, so a duplicate cell would be counted as an extra split
+    // and inflate the verdict. Runs collapse duplicates via upsert-by-key; the experiment must too.
+    const seenItemKeys = new Set<string>()
+    const items = expandExperimentMatrix(manifest, matrix, hashTrainingConfig).filter((it) => {
+      if (seenItemKeys.has(it.key)) return false
+      seenItemKeys.add(it.key)
+      return true
+    })
+    const experimentId = hashTrainingConfig(matrix as unknown as Record<string, unknown>)
+    const total = items.length
+    const repoRef: ComputeRepoRef = { kind: 'local', localPath: params.projectRoot }
+    const runner = resolveRunner(params.computeTarget)
+    const dataFiles = manifestDataFiles(manifest)
+    const { concurrency: runConcurrency, runEnv } = resolveCampaignParallelism({
+      concurrency: params.concurrency,
+      maxThreadsPerRun: manifest.maxThreadsPerRun,
+      availableParallelism: hostParallelism(),
+      maxMemoryBytesPerRun: manifest.maxMemoryBytesPerRun ?? DEFAULT_RUN_MEMORY_ESTIMATE_BYTES,
+      availableMemoryBytes: hostMemoryBudget(),
+    })
+    const ranBy = params.ranBy ?? params.computeTarget ?? DEFAULT_RAN_BY
+    const pipelineVersion = manifest.pipelineVersion ?? '1'
+    const majorOf = (v: string | undefined) => parseInt(String(v ?? '1'), 10) || 1
+    const pipelineMajor = majorOf(pipelineVersion)
+
+    // The prior record seeds resume: its completed cells are skipped and carried into the new record —
+    // but ONLY while it ran under the same pipeline MAJOR. A breaking bump makes those cells incomparable
+    // (the same rule the train campaign applies to skip-if-fresh), so they re-run instead of being carried.
+    const priorRecord = (
+      await deps.storage.readRecord({ scope: params.scope, type: experimentType, key: experimentId })
+    )?.content as ExperimentRecord | undefined
+    const cellByKey = new Map<string, ExperimentCell>()
+    if (priorRecord && majorOf(priorRecord.provenance?.pipelineVersion) === pipelineMajor) {
+      for (const c of priorRecord.cells ?? []) if (c && c.key) cellByKey.set(c.key, c)
+    }
+
+    const emit = async (progress: TrainingCampaignProgress) => {
+      await params.onProgress?.(progress)
+    }
+    const emitItemProgress = (key: string, progress: Record<string, unknown>): Promise<void> => {
+      if (!params.onItemProgress) return Promise.resolve()
+      try {
+        return Promise.resolve(params.onItemProgress(key, progress)).catch(() => {})
+      } catch {
+        return Promise.resolve()
+      }
+    }
+
+    const summary = await runActivityWorkItems<PlannedTrainingItem, ExperimentCell>({
+      items,
+      concurrency: runConcurrency,
+      abortSignal: params.abortSignal,
+      isFresh: async (item) => {
+        if (params.refresh) return false
+        const prior = cellByKey.get(item.key)
+        return !!prior && prior.status === 'completed'
+      },
+      runItem: async (item) => {
+        const handle = runner.runJob({
+          jobId: item.key,
+          repoRef,
+          commandTemplate: manifest.run,
+          config: item.config,
+          dataFiles,
+          ...(runEnv ? { env: runEnv } : {}),
+          abortSignal: params.abortSignal,
+        })
+        const result = await handle.done
+        await emitItemProgress(item.key, { terminal: true, status: result.status })
+        if (result.status === 'aborted') throw new Error(result.error ?? 'aborted')
+        if (result.status !== 'completed') {
+          const error = result.error ?? `experiment cell exited with code ${result.exitCode}`
+          cellByKey.set(item.key, { key: item.key, config: item.config, status: 'failed', error })
+          throw new Error(error)
+        }
+        const runSummary = capRunSummaryForStorage(validateTrainingRunSummary(result.summary))
+        const cell: ExperimentCell = {
+          key: item.key,
+          config: item.config,
+          status: 'completed',
+          objective: runSummary.objective,
+          ...(runSummary.metrics ? { metrics: runSummary.metrics } : {}),
+          ...(typeof runSummary.seed === 'number' ? { seed: runSummary.seed } : {}),
+          ...(runSummary.dataset ? { dataset: runSummary.dataset } : {}),
+        }
+        cellByKey.set(item.key, cell)
+        return cell
+      },
+      onProgress: (progress) => {
+        void emit({
+          phase: 'train',
+          done: progress.done,
+          total: progress.total,
+          skipped: progress.skipped,
+          failed: progress.failed,
+        })
+      },
+    })
+
+    const cells = items.map((item) => cellByKey.get(item.key)).filter((c): c is ExperimentCell => !!c)
+    const completedCells = cells.filter((c) => c.status === 'completed').length
+    const completedOutcomes = summary.outcomes.filter((o) => o.status === 'completed').length
+    const abortedOutcomes = summary.outcomes.filter((o) => o.status === 'aborted').length
+    // Aborted ONLY if the abort actually left planned cells unfinished — an aborted RESUME of an
+    // already-complete experiment (every cell carried forward as completed) must NOT downgrade to 'aborted'.
+    const experimentStatus: ExperimentStatus =
+      abortedOutcomes > 0 && completedCells < total ? 'aborted' : 'completed'
+    const assessedAt = now()
+    const reducer: ExperimentAggregateReducer = params.aggregate ?? aggregateExperimentCells
+    const { aggregate, verdict } = reducer(cells, {
+      manifest,
+      matrix,
+      direction: manifest.objective.direction,
+      benchmark: manifest.hypothesisBenchmark,
+      assessedAt,
+    })
+
+    const record: ExperimentRecord = {
+      id: experimentId,
+      ...(params.hypothesisId ? { hypothesisId: params.hypothesisId } : {}),
+      thesis: params.thesis,
+      ...(params.thesisTarget ? { thesisTarget: params.thesisTarget } : {}),
+      status: experimentStatus,
+      matrix,
+      cells,
+      aggregate,
+      verdict,
+      provenance: {
+        source: params.source ?? 'llm',
+        ...(params.proposedBy ? { proposedBy: params.proposedBy } : {}),
+        ...(params.activityId ? { activityId: params.activityId } : {}),
+        ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+        ranBy,
+        pipelineVersion,
+        createdAt: priorRecord?.provenance?.createdAt ?? assessedAt,
+        updatedAt: assessedAt,
+      },
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: experimentType,
+      key: experimentId,
+      content: record as unknown as Record<string, unknown>,
+    })
+    params.onRecordWritten?.(experimentType, experimentId)
+
+    await emit({
+      phase: 'done',
+      done: summary.done,
+      total,
+      skipped: summary.skipped,
+      failed: summary.failed,
+    })
+    logger?.info('side-experiment finished', {
+      recordType: experimentType,
+      experimentId,
+      planned: total,
+      completed: completedOutcomes,
+      failed: summary.failed,
+      pipelineMajor,
+    })
+
+    return {
+      recordType: experimentType,
+      experimentId,
+      planned: total,
+      completed: completedOutcomes,
+      failed: summary.failed,
+      aborted: abortedOutcomes,
+      skipped: summary.skipped,
+      verdict,
+      finishedAt: assessedAt,
     }
   }
 
@@ -3127,6 +3327,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const hypothesisType = `${recordType}-hypothesis`
     const paperType = `${recordType}-paper`
     const modelType = `${recordType}-model`
+    const experimentType = `${recordType}-experiment`
     const consolidatedAt = now()
 
     const hyps = (await deps.storage.listRecords({ scope: params.scope, type: hypothesisType }))
@@ -3145,6 +3346,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         .filter((m) => m && typeof m.id === 'string')
         .map((m) => [m.id, m] as const),
     )
+    const experimentsById = new Map(
+      (await deps.storage.listRecords({ scope: params.scope, type: experimentType }))
+        .map((r) => r.content as unknown as ExperimentRecord)
+        .filter((e) => e && typeof e.id === 'string')
+        .map((e) => [e.id, e] as const),
+    )
 
     const restrict = params.restrictToIds ? new Set(params.restrictToIds) : null
     const groups = groupHypothesesForConsolidation(hyps, hashTrainingConfig).filter(
@@ -3156,6 +3363,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const changedHyps = new Map<string, TrainingHypothesis>()
     const changedPapers = new Map<string, TrainingPaperRecord>()
     const changedModels = new Map<string, TrainingModel>()
+    const changedExperiments = new Map<string, ExperimentRecord>()
     const toDelete = new Set<string>()
 
     for (const group of groups) {
@@ -3167,6 +3375,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         { members },
         [...papersById.values()],
         [...modelsById.values()],
+        [...experimentsById.values()],
         consolidatedAt,
         hashTrainingConfig,
       )
@@ -3186,6 +3395,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       for (const m of plan.changedModels) {
         modelsById.set(m.id, m)
         changedModels.set(m.id, m)
+      }
+      for (const e of plan.changedExperiments) {
+        experimentsById.set(e.id, e)
+        changedExperiments.set(e.id, e)
       }
       for (const id of plan.deletedIds) {
         hypsById.delete(id)
@@ -3218,6 +3431,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         content: m as unknown as Record<string, unknown>,
       })
       params.onRecordWritten?.(modelType, m.id)
+    }
+    for (const e of changedExperiments.values()) {
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: experimentType,
+        key: e.id,
+        content: e as unknown as Record<string, unknown>,
+      })
+      params.onRecordWritten?.(experimentType, e.id)
     }
     for (const h of changedHyps.values()) {
       await deps.storage.upsertRecord({
@@ -3675,6 +3897,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const hypothesisType = `${recordType}-hypothesis`
       const paperType = `${recordType}-paper`
       const modelType = `${recordType}-model`
+      const experimentType = `${recordType}-experiment`
       const hypRecords = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
       const hyps = hypRecords
         .map((r) => r.content as unknown as TrainingHypothesis)
@@ -3688,7 +3911,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const models = modelRecords
           .map((r) => r.content as unknown as TrainingModel)
           .filter((m) => m && m.id)
-        const plan = planHypothesisSpecMigration(hyps, papers, models, rules, now(), hashTrainingConfig)
+        const experiments = (
+          await deps.storage.listRecords({ scope: params.scope, type: experimentType })
+        )
+          .map((r) => r.content as unknown as ExperimentRecord)
+          .filter((e) => e && e.id)
+        const plan = planHypothesisSpecMigration(
+          hyps,
+          papers,
+          models,
+          experiments,
+          rules,
+          now(),
+          hashTrainingConfig,
+        )
         for (const survivor of plan.writes) {
           await deps.storage.upsertRecord({
             scope: params.scope,
@@ -3716,6 +3952,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             content: model as unknown as Record<string, unknown>,
           })
           params.onRecordWritten?.(modelType, model.id)
+        }
+        for (const experiment of plan.changedExperiments) {
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: experimentType,
+            key: experiment.id,
+            content: experiment as unknown as Record<string, unknown>,
+          })
+          params.onRecordWritten?.(experimentType, experiment.id)
         }
         for (const deadId of plan.deletes) {
           const removed = await deps.storage.deleteRecord({
@@ -3896,6 +4141,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       expandExperimentMatrix(manifest, spec, hashTrainingConfig),
     calibrateTrainingThroughput,
     runTrainingCampaign,
+    runSideExperimentCampaign,
     runExplorationCampaign,
     evaluateTrainingRun,
     evaluateTrainingRuns,

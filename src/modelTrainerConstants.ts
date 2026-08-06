@@ -4,6 +4,12 @@ export const TRAINER_MANIFEST_RELPATH = '.factory/trainer.json'
 /** Default safety cap on planned items per campaign; override via `ExperimentSpec.maxItems`. */
 export const MAX_CAMPAIGN_ITEMS = 500
 
+/**
+ * Minimum benchmark-bearing cells a side-experiment needs before its verdict can be `robust`: one good
+ * split is `single-split-luck`, not proof. Below this a passing screen reads as luck rather than replication.
+ */
+export const EXPERIMENT_MIN_SPLITS = 2
+
 /** Provenance label stamped on run records when the caller names no compute target. */
 export const DEFAULT_RAN_BY = 'local'
 

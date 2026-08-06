@@ -4,6 +4,7 @@ import { dirname, join } from 'path'
 import { describe, it, expect } from 'vitest'
 import {
   TRAINER_CAPABILITY_RECORD_TYPES,
+  TRAINER_CHAT_ONLY_ACTIVITY_TYPES,
   TRAINER_EXEMPT_RECORDS,
   TRAINER_EXEMPT_ACTIVITY_TYPES,
   TRAINER_LAUNCHABLE_ACTIVITY_TYPES,
@@ -99,8 +100,19 @@ describe('A2 parity audit — viewer launch surface', () => {
   })
 
   it('every launchable activity actually exists as a viewer launch (no dead declarations)', () => {
-    const dead = [...TRAINER_LAUNCHABLE_ACTIVITY_TYPES].filter((a) => !usedActivities.has(a))
+    const dead = [...TRAINER_LAUNCHABLE_ACTIVITY_TYPES].filter(
+      (a) => !usedActivities.has(a) && !TRAINER_CHAT_ONLY_ACTIVITY_TYPES.includes(a),
+    )
     expect(dead).toEqual([])
+  })
+
+  it('a chat-only activity is genuinely chat-only (never launched by the viewer)', () => {
+    // The dead-declaration check above skips chat-only types, so this closes the loop in the OTHER
+    // direction: the moment the viewer gains a launch site for one, it must leave the chat-only set (or
+    // the exemption would be silently hiding a real declaration↔viewer mismatch).
+    const viewerDriven = [...TRAINER_CHAT_ONLY_ACTIVITY_TYPES].filter((a) => usedActivities.has(a))
+    expect(viewerDriven).toEqual([])
+    expect(TRAINER_CHAT_ONLY_ACTIVITY_TYPES.length).toBeGreaterThan(0)
   })
 })
 

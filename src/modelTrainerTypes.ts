@@ -1853,9 +1853,11 @@ export interface HypothesisTransition {
   from: HypothesisStatus
   /** The status after the flip. */
   to: HypothesisStatus
-  /** Keys of the runs new since the prior snapshot — the evidence that caused the flip. */
+  /** Keys of the evidence new since the prior snapshot — what caused the flip (run keys and/or `exp:`-prefixed experiment-cell keys). */
   byRunKeys: string[]
-  /** The measured read at the flip (`null` when no runs matched). */
+  /** Which evidence SOURCES contributed the flipping keys (`'run'` and/or `'experiment'`), so the card can attribute a flip to RL runs, a side-experiment, or both. */
+  sources?: string[]
+  /** The measured read at the flip (`null` when no evidence matched). */
   measured: MeasuredSummary | null
 }
 
@@ -1956,6 +1958,175 @@ export interface TrainingHypothesisCampaign {
   failed?: number
   finishedAt?: string
   queueId?: string
+}
+
+// ── Side-experiments — the SECOND evidence source for a thesis ──────────────────────────────────────────
+// A side-experiment is a DIAGNOSTIC: a matrix of cells run through the SAME project CLI as training but
+// producing NO model (baseline scans, breadth analyses, ablations, correctness probes). Its cells persist
+// in ONE `<recordType>-experiment` record — NEVER mixed into the `<recordType>-run` store, so the RL run
+// store stays apples-to-apples pure — and feed a {@link TrainingHypothesis} as evidence ALONGSIDE RL runs
+// (spec-matched, or explicitly linked by `hypothesisId`). One thesis, many sources.
+
+/** The lifecycle state of a side-experiment record (distinct from a verdict and from a campaign phase). */
+export type ExperimentStatus = 'queued' | 'running' | 'completed' | 'aborted'
+
+/**
+ * One executed cell of a side-experiment's matrix — a compact projection of the run it produced
+ * (config + measured metrics), NOT a persisted `<recordType>-run` record. `key` is
+ * `hashTrainingConfig(canonicalConfig)` so a cell hashes IDENTICALLY to the run it would be, letting the
+ * hypothesis layer treat it as evidence interchangeably with a real run.
+ */
+export interface ExperimentCell {
+  /** `hashTrainingConfig` of the canonicalised config — the same identity a `<recordType>-run` record would carry. */
+  key: string
+  /** The resolved config this cell ran. */
+  config: Record<string, unknown>
+  /** Whether the cell's job completed or failed (an aborted cell is not persisted). */
+  status: 'completed' | 'failed'
+  /** The cell's objective (present on completed cells with a finite objective). */
+  objective?: number
+  /** The cell's RunSummary metrics (e.g. `return_vs_hold_pct`) — read by the benchmark/verdict. */
+  metrics?: Record<string, number>
+  /** The seed this cell ran (when the matrix sweeps seeds). */
+  seed?: number
+  /** The dataset the cell ran against (asset/window/fidelity provenance). */
+  dataset?: TrainingRunDataset
+  /** Failure detail for a failed cell. */
+  error?: string
+}
+
+/**
+ * A side-experiment's robustness read — reuses the Diagnosis robustness ladder so an experiment's verdict
+ * reads the SAME as a champion gate / the Diagnosis tab. `robust` requires EVERY benchmark-bearing cell to
+ * clear the bar across ≥2 splits (a single failing split ⇒ `not-replicated`); one good split alone is
+ * `single-split-luck`; no cell reports the benchmark metric ⇒ `unverifiable`.
+ */
+export interface ExperimentVerdict {
+  kind: 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
+  /** Whether the cohort cleared the benchmark robustly (`kind === 'robust'`). */
+  passed: boolean
+  /** Who assessed it — `auto` (the reducer), `llm`, or a `manual` human override. */
+  source: 'auto' | 'llm' | 'manual'
+  /** Plain-language summary of how the verdict was reached (e.g. "3/4 cells clear return_vs_hold_pct>0"). */
+  rationale?: string
+  /** When the verdict was assessed (ISO). */
+  assessedAt: string
+}
+
+/** Where a side-experiment came from + how it ran — the same provenance stamped on run records, consolidated. */
+export interface ExperimentProvenance {
+  /** Who authored the experiment. */
+  source: 'human' | 'llm' | 'paper' | 'migrated-model'
+  /** Provenance label of the proposing model (absent for human entries). */
+  proposedBy?: string
+  /** The activity that ran it, when launched as a background activity. */
+  activityId?: string
+  /** The compute target it ran on. */
+  computeTarget?: string
+  /** Who/what executed it (compute target or `local`). */
+  ranBy?: string
+  /** The pipeline version the cells ran under. */
+  pipelineVersion?: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * The persisted `<recordType>-experiment` record — a diagnostic side-experiment's cells + aggregate +
+ * verdict in ONE record (key = `id = hashTrainingConfig(matrix)`, so identical matrices dedupe). Linked to
+ * a thesis via `hypothesisId`; its cells also match by config, so the hypothesis layer draws on it as an
+ * evidence source alongside RL runs WITHOUT the cells ever entering the `<recordType>-run` store.
+ */
+export interface ExperimentRecord {
+  /** `hashTrainingConfig(matrix)` — the record key; identical matrices dedupe across sources. */
+  id: string
+  /** The {@link TrainingHypothesis} this experiment is evidence for (its `id`); absent for a free-standing diagnostic. */
+  hypothesisId?: string
+  /** The free-text claim this experiment tests (e.g. "long/short trend captures downtrends as profit"). */
+  thesis: string
+  /** The lever this experiment varies to test the thesis (e.g. `allow_shorting`), when it isolates one. */
+  thesisTarget?: string
+  /** Lifecycle state of the experiment. */
+  status: ExperimentStatus
+  /** The diagnostic matrix (an {@link ExperimentSpec}) — both what the cells ran and what they identify. */
+  matrix: ExperimentSpec
+  /** The executed cells (a compact projection of each cell's run). */
+  cells: ExperimentCell[]
+  /** Robust aggregate of the completed cells' objectives (`null` when none completed). */
+  aggregate: RunValueAggregate | null
+  /** The robustness verdict over the cells (auto-derived, LLM, or manual). */
+  verdict?: ExperimentVerdict
+  provenance: ExperimentProvenance
+}
+
+/**
+ * A project-supplied thin reducer that turns a side-experiment's cells into its `aggregate` + `verdict`.
+ * The engine calls it after the cells run; when omitted it falls back to the built-in
+ * `aggregateExperimentCells` (robust IQM aggregate + the benchmark-clearing robustness ladder). A project
+ * supplies this ONLY to inject DOMAIN math (e.g. a trading portfolio/breadth aggregate); the engine stays
+ * domain-oblivious.
+ */
+export type ExperimentAggregateReducer = (
+  cells: ExperimentCell[],
+  ctx: {
+    manifest: TrainerManifest
+    matrix: ExperimentSpec
+    direction: 'max' | 'min'
+    benchmark?: HypothesisBenchmark
+    assessedAt: string
+  },
+) => { aggregate: RunValueAggregate | null; verdict: ExperimentVerdict }
+
+/** Input to {@link ModelTrainerTools.runSideExperimentCampaign} — mirrors the train campaign, minus model-producing bits. */
+export interface SideExperimentCampaignParams {
+  scope: string
+  projectRoot: string
+  manifestRelPath?: string
+  manifest?: TrainerManifest
+  /** The thesis this diagnostic tests (stamped on the record). */
+  thesis: string
+  /** The lever the matrix varies, when it isolates one. */
+  thesisTarget?: string
+  /** The hypothesis this experiment is evidence for — links its cells to that thesis regardless of spec. */
+  hypothesisId?: string
+  /** The diagnostic matrix to run (the same {@link ExperimentSpec} shape training uses). */
+  matrix: ExperimentSpec
+  /** Re-run every cell even if a prior record already has it completed. */
+  refresh?: boolean
+  concurrency?: number
+  computeTarget?: string
+  ranBy?: string
+  activityId?: string
+  abortSignal?: AbortSignal
+  /** Provenance author of the experiment (defaults to `llm`). */
+  source?: ExperimentProvenance['source']
+  proposedBy?: string
+  /** Optional project-supplied domain reducer; defaults to the built-in robust aggregate + verdict. */
+  aggregate?: ExperimentAggregateReducer
+  onProgress?: (progress: TrainingCampaignProgress) => void | Promise<void>
+  onItemProgress?: (key: string, progress: Record<string, unknown>) => void | Promise<void>
+  onRecordWritten?: (recordType: string, key: string) => void
+}
+
+/** The outcome of a side-experiment campaign. */
+export interface SideExperimentCampaignResult {
+  /** The `<recordType>-experiment` type the record was persisted as. */
+  recordType: string
+  /** The experiment record's id (= `hashTrainingConfig(matrix)`). */
+  experimentId: string
+  /** Cells planned by the matrix. */
+  planned: number
+  /** Cells that completed this run. */
+  completed: number
+  /** Cells that failed this run. */
+  failed: number
+  /** Cells aborted before completion. */
+  aborted: number
+  /** Cells skipped as already-completed (resume). */
+  skipped: number
+  /** The verdict the reducer assigned. */
+  verdict?: ExperimentVerdict
+  finishedAt: string
 }
 
 /**
@@ -3387,6 +3558,15 @@ export interface ModelTrainerTools {
   ): Promise<TrainingCalibration | undefined>
   /** Plan → skip-if-fresh → run each item → persist records → report progress. */
   runTrainingCampaign(params: TrainingCampaignParams): Promise<TrainingCampaignResult>
+  /**
+   * Run a diagnostic SIDE-EXPERIMENT (baseline scan, breadth analysis, ablation) through the project's SAME
+   * CLI, persisting its cells + aggregate + verdict in ONE `<recordType>-experiment` record — never a run
+   * record, so the RL run store stays pure. The record is a SECOND evidence source for a thesis alongside
+   * RL runs (linked by `hypothesisId` or matched by config). One thesis, many sources.
+   */
+  runSideExperimentCampaign(
+    params: SideExperimentCampaignParams,
+  ): Promise<SideExperimentCampaignResult>
   /**
    * The exploration autopilot: a closed-loop search that drives the pure strategist — each round reads the
    * run archive, asks for the next batch, persists the {@link ExplorationState} map (pause/steer round-trip),

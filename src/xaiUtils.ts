@@ -7,7 +7,10 @@ import type {
   ConvergencePoint,
   EnvironmentSummary,
   ConfigSurrogate,
+  ExperimentCell,
   ExperimentRecommendation,
+  ExperimentVerdict,
+  HypothesisBenchmark,
   FanovaImportance,
   InteractionGrid,
   LeverCoupling,
@@ -20,6 +23,7 @@ import type {
   RunValueAggregate,
 } from './modelTrainerTypes.js'
 import {
+  EXPERIMENT_MIN_SPLITS,
   XAI_BOOTSTRAP_ITERATIONS,
   XAI_CI_LEVEL,
   XAI_FDR_ALPHA,
@@ -114,6 +118,72 @@ export function aggregateRunValues(values: number[]): RunValueAggregate {
     max: Math.max(...values),
     ci,
   }
+}
+
+// The default success benchmark for a side-experiment when the manifest declares none — the trading line's
+// historical rule (beats buy-and-hold OOS), mirroring the hypothesis layer's DEFAULT_HYPOTHESIS_BENCHMARK.
+const DEFAULT_EXPERIMENT_BENCHMARK: Required<HypothesisBenchmark> = {
+  metric: 'return_vs_hold_pct',
+  threshold: 0,
+  direction: 'max',
+}
+
+/**
+ * The built-in reducer a side-experiment falls back to: a robust IQM aggregate of the completed cells'
+ * objectives, plus a robustness verdict off the benchmark-clearing count. `robust` (the only PASS) needs
+ * EVERY benchmark-bearing cell to clear the bar across ≥{@link EXPERIMENT_MIN_SPLITS} splits — one failing
+ * split ⇒ `not-replicated`, one good split alone ⇒ `single-split-luck`, no cell reporting the metric ⇒
+ * `unverifiable`. A project overrides this per-call to inject domain aggregation (e.g. a trading portfolio
+ * read); the engine's default stays domain-oblivious (objectives + one declared benchmark metric).
+ */
+export function aggregateExperimentCells(
+  cells: ExperimentCell[],
+  opts: {
+    direction: 'max' | 'min'
+    benchmark?: HypothesisBenchmark
+    assessedAt: string
+    minSplits?: number
+  },
+): { aggregate: RunValueAggregate | null; verdict: ExperimentVerdict } {
+  const minSplits =
+    Number.isFinite(Number(opts.minSplits)) && Number(opts.minSplits) > 0
+      ? Math.floor(Number(opts.minSplits))
+      : EXPERIMENT_MIN_SPLITS
+  // The objective aggregate and the benchmark verdict read INDEPENDENT fields off the completed cells: the
+  // aggregate needs a finite objective; the verdict needs the benchmark metric. Decoupled so a cell missing
+  // one still contributes the other.
+  const completed = (cells || []).filter((c) => c && c.status === 'completed')
+  const objectives = completed.map((c) => Number(c.objective)).filter((v) => Number.isFinite(v))
+  const aggregate = objectives.length ? aggregateRunValues(objectives) : null
+
+  const metric = opts.benchmark?.metric || DEFAULT_EXPERIMENT_BENCHMARK.metric
+  const threshold = Number.isFinite(Number(opts.benchmark?.threshold))
+    ? Number(opts.benchmark?.threshold)
+    : DEFAULT_EXPERIMENT_BENCHMARK.threshold
+  const benchDir = opts.benchmark?.direction === 'min' ? 'min' : 'max'
+  const benchValues = completed
+    .map((c) => Number((c.metrics || {})[metric]))
+    .filter((v) => Number.isFinite(v))
+  const n = benchValues.length
+  const k = benchValues.filter((v) => (benchDir === 'min' ? v < threshold : v > threshold)).length
+
+  let kind: ExperimentVerdict['kind']
+  let passed = false
+  if (n === 0) kind = 'unverifiable'
+  // Too few splits to trust: `single-split-luck` ONLY for an ACTUAL single split (n===1) that cleared —
+  // more-than-one-but-still-below-minSplits reads as not-replicated, so the label can never contradict the
+  // n/n rationale even if minSplits is raised.
+  else if (n < minSplits) kind = n === 1 && k > 0 ? 'single-split-luck' : 'not-replicated'
+  else if (k === n) {
+    kind = 'robust'
+    passed = true
+  } else kind = 'not-replicated'
+
+  const rationale =
+    n === 0
+      ? `no cell reports ${metric}`
+      : `${k}/${n} cells clear ${metric}${benchDir === 'min' ? '<' : '>'}${threshold}`
+  return { aggregate, verdict: { kind, passed, source: 'auto', rationale, assessedAt: opts.assessedAt } }
 }
 
 /** Read the criterion's numeric value off a run; `undefined` when absent/non-finite. */

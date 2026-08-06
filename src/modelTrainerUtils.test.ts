@@ -553,6 +553,8 @@ describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from
     expect(catalogAssetIds(classes).sort()).toEqual(['BTCUSDT', 'NVDA'])
     expect(catalogAssetIds(undefined as never)).toEqual([])
     expect(catalogAssetIds([cls('crypto', [inst('BTCUSDT', {})])] as never)).toEqual([]) // nothing on disk
+    // a null class / a class with no instruments array contributes nothing (never throws)
+    expect(catalogAssetIds([{ id: 'x' }, null] as never)).toEqual([])
   })
 
   const manifest = {
@@ -572,6 +574,14 @@ describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from
   it('leaves a lever WITHOUT the flag alone even if the catalog has assets', () => {
     const m = { ...manifest, levers: { asset: { type: 'choice', choices: ['BTCUSDT'] } } } as unknown as TrainerManifest
     expect(withCatalogChoices(m, catalog).levers.asset.choices).toEqual(['BTCUSDT'])
+  })
+
+  it('seeds a datacatalog lever that declares NO choices straight from the on-disk symbols', () => {
+    const m = {
+      name: 'x', objective: { name: 'r', direction: 'max' },
+      levers: { asset: { type: 'choice', choicesFrom: 'datacatalog' } },
+    } as unknown as TrainerManifest
+    expect(withCatalogChoices(m, catalog).levers.asset.choices).toEqual(['BTCUSDT', 'DOGEUSDT'])
   })
 
   it('returns the SAME manifest when the catalog has no on-disk assets (no needless copy)', () => {
@@ -855,6 +865,44 @@ describe('validateTrainerManifest', () => {
     expect(m.benchmarkDevice).toContain('bench_device')
   })
 
+  it('rejects a dataCatalog template without {summaryOut}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), dataCatalog: 'python -m trainer.data' }),
+    ).toThrow(/summaryOut/)
+  })
+
+  it('accepts a valid dataCatalog template and preserves it', () => {
+    const m = validateTrainerManifest({
+      ...manifest(),
+      dataCatalog: 'python -m trainer.data_catalog --summary-out {summaryOut}',
+    })
+    expect(m.dataCatalog).toContain('data_catalog')
+  })
+
+  it('rejects a mineData template without {configPath}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), mineData: 'python -m trainer.mine --summary-out {summaryOut}' }),
+    ).toThrow(/configPath/)
+  })
+
+  it('rejects a mineData template without {summaryOut}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), mineData: 'python -m trainer.mine --config-json {configPath}' }),
+    ).toThrow(/summaryOut/)
+  })
+
+  it('accepts a valid mineData template and preserves it', () => {
+    const m = validateTrainerManifest({
+      ...manifest(),
+      mineData: 'python -m trainer.mine --config-json {configPath} --summary-out {summaryOut}',
+    })
+    expect(m.mineData).toContain('trainer.mine')
+  })
+
+  it('rejects a data declaration that is not an array', () => {
+    expect(() => validateTrainerManifest({ ...manifest(), data: 'nope' })).toThrow(/array/)
+  })
+
   it('accepts a valid evaluate template', () => {
     const m = {
       ...manifest(),
@@ -985,6 +1033,12 @@ describe('expandExperimentMatrix', () => {
         hashByJson,
       ),
     ).toThrow(/compare lever/)
+  })
+
+  it('rejects a valid compare lever that lists no values to compare', () => {
+    expect(() =>
+      expandExperimentMatrix(manifest(), { compare: { lever: 'algo', values: [] } }, hashByJson),
+    ).toThrow(/must list values/)
   })
 
   it('MEMORY-SAFETY: rejects a cartesian blow-up BEFORE materializing it (fails fast, never OOMs)', () => {
@@ -1310,6 +1364,11 @@ describe('blendJudgeScore', () => {
   it('clamps the weight to [0,1]', () => {
     expect(blendJudgeScore(100, 0, 2)).toBe(0)
   })
+
+  it('treats a non-finite score as the low bound (0), never NaN', () => {
+    expect(blendJudgeScore(NaN, 0, 0.5)).toBe(0)
+    expect(blendJudgeScore(100, NaN, 1)).toBe(0)
+  })
 })
 
 describe('coerceVerdictRows', () => {
@@ -1331,6 +1390,13 @@ describe('coerceVerdictRows', () => {
 
   it('returns empty for a non-array', () => {
     expect(coerceVerdictRows('nope' as never)).toEqual([])
+  })
+
+  it('defaults a missing / non-numeric score to 0 (keeping the keyed row)', () => {
+    expect(coerceVerdictRows([{ key: 'a' }, { key: 'b', score: 'high' }])).toEqual([
+      { key: 'a', score: 0, why: '' },
+      { key: 'b', score: 0, why: '' },
+    ])
   })
 })
 
@@ -1875,6 +1941,9 @@ describe('looksLikeDataGathering', () => {
     expect(
       looksLikeDataGathering('Attention beats LSTM', 'compare attn-ppo vs reppo on Sharpe'),
     ).toBe(false)
+  })
+  it('tolerates undefined title/rationale (empty text is not data-gathering)', () => {
+    expect(looksLikeDataGathering(undefined as never, undefined as never)).toBe(false)
   })
 })
 
@@ -3516,6 +3585,9 @@ describe('hypothesisConsolidationKey', () => {
       k({ fixed: { model_name: 'ppo' }, seeds: [0, 1, 2] }),
     )
   })
+  it('treats an undefined spec exactly like an empty one', () => {
+    expect(hypothesisConsolidationKey(undefined)).toBe(hypothesisConsolidationKey({}))
+  })
 })
 
 describe('mergeHypothesisSpecs', () => {
@@ -3554,6 +3626,29 @@ describe('mergeHypothesisSpecs', () => {
       hashTrainingConfig(merged as any),
     )
   })
+  it('an empty member list merges to an empty spec', () => {
+    expect(mergeHypothesisSpecs([])).toEqual({})
+  })
+  it('unions sweep DIMENSIONS across members that each sweep a different lever', () => {
+    // A member missing a swept lever contributes [] to that lever's union — the axis is not lost.
+    const merged = mergeHypothesisSpecs([{ sweep: { lr: [0.1] } }, { sweep: { batch: [32] } }] as any)
+    expect(merged.sweep).toEqual({ batch: [32], lr: [0.1] })
+  })
+  it('unions compare values even when only one member declares the compare block', () => {
+    const merged = mergeHypothesisSpecs([
+      { compare: { lever: 'model_name', values: ['a'] } },
+      { fixed: { x: 1 } },
+    ] as any)
+    expect(merged.compare).toEqual({ lever: 'model_name', values: ['a'] })
+  })
+  it('keeps the first member environments and datasets verbatim', () => {
+    const merged = mergeHypothesisSpecs([
+      { fixed: { m: 'x' }, environments: [{ shorting: true }], datasets: [{ asset: 'btc' }] },
+      { fixed: { m: 'x' } },
+    ] as any)
+    expect(merged.environments).toEqual([{ shorting: true }])
+    expect(merged.datasets).toEqual([{ asset: 'btc' }])
+  })
 })
 
 describe('pickCanonicalHypothesis', () => {
@@ -3589,6 +3684,47 @@ describe('pickCanonicalHypothesis', () => {
     expect(r.conflict).toBe(true)
     expect(r.canonical).toBeNull()
   })
+  it('multiple manual with the SAME status ranks them (not a conflict)', () => {
+    const r = pickCanonicalHypothesis([
+      h({ id: 'a', verdictSource: 'manual', status: 'proven', source: 'llm', createdAt: '2026-02-01' }),
+      h({ id: 'b', verdictSource: 'manual', status: 'proven', source: 'human', createdAt: '2026-03-01' }),
+    ] as any)
+    expect(r.conflict).toBe(false)
+    expect(r.canonical!.id).toBe('b') // human outranks llm within the manual set
+  })
+  it('ranks an unknown source LAST, then by createdAt, then by id (rank tiebreaks)', () => {
+    // unknown source sinks below a known one (priority default of 9)
+    expect(
+      pickCanonicalHypothesis([
+        h({ id: 'x', source: 'mystery' }),
+        h({ id: 'y', source: 'human' }),
+      ] as any).canonical!.id,
+    ).toBe('y')
+    // same source + NO createdAt on either → both fall back to '' → pure id lexical tiebreak
+    expect(
+      pickCanonicalHypothesis([
+        h({ id: 'zeta', source: 'mystery' }),
+        h({ id: 'alpha', source: 'mystery' }),
+      ] as any).canonical!.id,
+    ).toBe('alpha')
+    // same source, different createdAt → earliest wins, asserted in BOTH input orders so the
+    // comparator exercises ta<tb in each direction
+    expect(
+      pickCanonicalHypothesis([
+        h({ id: 'late', source: 'llm', createdAt: '2026-05-01' }),
+        h({ id: 'early', source: 'llm', createdAt: '2026-01-01' }),
+      ] as any).canonical!.id,
+    ).toBe('early')
+    expect(
+      pickCanonicalHypothesis([
+        h({ id: 'early', source: 'llm', createdAt: '2026-01-01' }),
+        h({ id: 'late', source: 'llm', createdAt: '2026-05-01' }),
+      ] as any).canonical!.id,
+    ).toBe('early')
+  })
+  it('returns a null canonical for an empty member list', () => {
+    expect(pickCanonicalHypothesis([])).toEqual({ canonical: null, conflict: false })
+  })
 })
 
 describe('groupHypothesesForConsolidation', () => {
@@ -3619,6 +3755,21 @@ describe('groupHypothesesForConsolidation', () => {
     ]
     expect(groupHypothesesForConsolidation(hyps as any, hashTrainingConfig).length).toBe(0)
   })
+  it('defers a group while a member has a QUEUED campaign', () => {
+    const hyps = [
+      h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }, { campaign: { status: 'queued' } }),
+      h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+    ]
+    expect(groupHypothesesForConsolidation(hyps as any, hashTrainingConfig).length).toBe(0)
+  })
+  it('skips a bucket whose members already share one id (already consolidated)', () => {
+    // Same id + same consolidation key (sweep VALUES differ but keys match) → nothing to merge.
+    const hyps = [
+      h('same', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }),
+      h('same', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+    ]
+    expect(groupHypothesesForConsolidation(hyps as any, hashTrainingConfig).length).toBe(0)
+  })
 })
 
 describe('planHypothesisConsolidation', () => {
@@ -3635,14 +3786,41 @@ describe('planHypothesisConsolidation', () => {
     paperIds: [],
     ...o,
   })
-  const plan = (members: any[], papers: any[] = [], models: any[] = []) =>
+  const plan = (members: any[], papers: any[] = [], models: any[] = [], experiments: any[] = []) =>
     planHypothesisConsolidation(
       { members } as any,
       papers,
       models,
+      experiments,
       '2026-06-30T00:00:00Z',
       hashTrainingConfig,
     )
+  const exp = (id: string, hypothesisId: string) => ({
+    id,
+    hypothesisId,
+    thesis: 't',
+    status: 'completed',
+    matrix: {},
+    cells: [],
+    aggregate: null,
+    provenance: { source: 'llm', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+  })
+
+  it('repoints an experiment linked to an absorbed hypothesis onto the survivor id', () => {
+    const p = plan(
+      [
+        h('h1', { fixed: { m: 'x' }, sweep: { lr: [0.1] } }),
+        h('h2', { fixed: { m: 'x' }, sweep: { lr: [0.2] } }),
+      ],
+      [],
+      [],
+      [exp('e1', 'h1'), exp('e2', 'unrelated')],
+    )
+    const newId = p!.unionRecord.id
+    expect(p!.changedExperiments.map((e) => e.id)).toEqual(['e1'])
+    expect(p!.changedExperiments[0].hypothesisId).toBe(newId)
+    expect(p!.changedExperiments[0].provenance.updatedAt).toBe('2026-06-30T00:00:00Z')
+  })
 
   it('builds a union record at the merged-spec id, lists the others as deleted, unions paperIds', () => {
     const p = plan([
@@ -3789,8 +3967,22 @@ describe('planHypothesisSpecMigration', () => {
     ...o,
   })
   const idOf = (spec: any) => hashTrainingConfig(spec)
-  const run = (hyps: any[], papers: any[] = [], models: any[] = [], rules: any = migrations) =>
-    planHypothesisSpecMigration(hyps as any, papers as any, models as any, rules, '2026-07-16T00:00:00Z', hashTrainingConfig)
+  const run = (
+    hyps: any[],
+    papers: any[] = [],
+    models: any[] = [],
+    rules: any = migrations,
+    experiments: any[] = [],
+  ) =>
+    planHypothesisSpecMigration(
+      hyps as any,
+      papers as any,
+      models as any,
+      experiments as any,
+      rules,
+      '2026-07-16T00:00:00Z',
+      hashTrainingConfig,
+    )
 
   it('no-ops without migrations', () => {
     expect(
@@ -3798,11 +3990,30 @@ describe('planHypothesisSpecMigration', () => {
         [h(idOf({ fixed: { algo: 'old' } }), { fixed: { algo: 'old' } })] as any,
         [],
         [],
+        [],
         undefined,
         '2026-07-16T00:00:00Z',
         hashTrainingConfig,
       ),
-    ).toEqual({ writes: [], deletes: [], changedPapers: [], changedModels: [] })
+    ).toEqual({ writes: [], deletes: [], changedPapers: [], changedModels: [], changedExperiments: [] })
+  })
+
+  it('repoints an experiment linked to a re-keyed hypothesis onto the survivor id', () => {
+    const oldId = idOf({ fixed: { algo: 'old' } })
+    const experiment = {
+      id: 'e1',
+      hypothesisId: oldId,
+      thesis: 't',
+      status: 'completed',
+      matrix: {},
+      cells: [],
+      aggregate: null,
+      provenance: { source: 'llm', createdAt: '2026-01-01', updatedAt: '2026-01-01' },
+    }
+    const p = run([h(oldId, { fixed: { algo: 'old' } })], [], [], migrations, [experiment])
+    const newId = idOf({ fixed: { algo: 'b' } })
+    expect(p.changedExperiments.map((e: any) => e.id)).toEqual(['e1'])
+    expect(p.changedExperiments[0].hypothesisId).toBe(newId)
   })
 
   it('re-keys a hypothesis pinning a retired value to the migrated-spec id', () => {
@@ -3822,6 +4033,7 @@ describe('planHypothesisSpecMigration', () => {
       deletes: [],
       changedPapers: [],
       changedModels: [],
+      changedExperiments: [],
     })
   })
 
@@ -3975,6 +4187,21 @@ describe('estimateRemainingCampaignSeconds (remaining wall-clock from real per-r
         concurrency: 1,
       }),
     ).toBe(20)
+  })
+  it('tolerates a missing durationsMs array (no estimate yet)', () => {
+    expect(
+      estimateRemainingCampaignSeconds({
+        durationsMs: undefined as never,
+        remaining: 5,
+        concurrency: 1,
+      }),
+    ).toBeUndefined()
+  })
+  it('treats a zero / invalid concurrency as serial (1)', () => {
+    // floor(0) || 1 → 1 wave-width, so 5 remaining × 10s = 50s.
+    expect(
+      estimateRemainingCampaignSeconds({ durationsMs: [10000], remaining: 5, concurrency: 0 }),
+    ).toBe(50)
   })
 })
 
@@ -4338,6 +4565,10 @@ describe('plannedMatrixItemCount', () => {
     for (let i = 0; i < 10; i += 1) sweep[`l${i}`] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     expect(plannedMatrixItemCount({ sweep })).toBe(1e10) // computed, never built
   })
+
+  it('treats a non-array sweep value as a zero multiplier (collapses the product to 0)', () => {
+    expect(plannedMatrixItemCount({ sweep: { a: 'oops' as never } })).toBe(0)
+  })
 })
 
 describe('computeScorecard', () => {
@@ -4566,6 +4797,12 @@ describe('selectActiveScorecard', () => {
 
   it('always keeps the manifest objective (cards carry no objective)', () => {
     expect(selectActiveScorecard(manifest, [cardX], 'x').objective).toEqual(manifest.objective)
+  })
+
+  it('defaults gates/fitness to empty for a card that declares neither', () => {
+    const r = selectActiveScorecard(manifest, [{ id: 'bare' }], 'bare')
+    expect(r.gates).toEqual([])
+    expect(r.fitness).toEqual([])
   })
 })
 

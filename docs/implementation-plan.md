@@ -41,38 +41,6 @@ live in git + memory.)
 
 Ordered by value. Each is something to **implement**.
 
-### A4. One thesis, many sources — multi-source hypothesis evidence
-
-**Concept (owner call):** ONE thesis/hypothesis concept, fed from MULTIPLE evidence sources — `<recordType>-run`
-RL MODEL runs AND **side-experiment** runs (diagnostics that produce no model: deterministic-baseline scans,
-breadth analyses, ablations, correctness probes). A thesis may REQUIRE both. The two STORES stay separate (the
-RL run store stays apples-to-apples pure; side-experiments persist separately), and the hypothesis is the
-unifying layer that aggregates evidence across them. **This whole capability is GENERIC and lives in the ENGINE
-so EVERY conformant project reuses it** — it must NOT be re-implemented per project (an earlier BlackSwan-local
-`trainer/experiment.py`/`portfolio.py` was removed for exactly this reason). Engine work:
-
-1. **A side-experiment recordType + campaign.** Register a domain-oblivious `<recordType>-experiment` DataStorage
-   record so a project's side-experiments are queryable/scrutinizable ALONGSIDE its runs — never mixed INTO the
-   `-run` type. Add a **side-experiment campaign** (analogous to the `train` campaign): plan a diagnostic matrix,
-   run each cell via the project's SAME CLI contract (`trainer.run` → RunSummary), and persist an `-experiment`
-   record — `{ hypothesisId?, thesis, status(supports|refutes|inconclusive), matrix, cells:[{config, metrics}],
-   aggregate, verdict, provenance }`. Cells carry the SAME run-config schema as RL runs (so spec-matching unifies
-   them). A project supplies any DOMAIN-specific `aggregate` (e.g. BlackSwan's trading portfolio/breadth math) as
-   a thin project-side reducer the engine invokes — the engine itself stays domain-oblivious.
-2. **Extend the hypothesis evidence layer** (`viewer/hypothesis.js`, node-tested): a hypothesis gathers evidence
-   from BOTH pools — the existing spec-matched `-run` records AND (a) `-experiment` cells whose config matches the
-   spec + (b) any `-experiment` explicitly linked by `hypothesisId`. The verdict aggregates across sources;
-   `transitions[]` records which SOURCE flipped it; `resolveBenchmark` (default `return_vs_hold_pct>0`) per cell.
-3. **Surface by source.** The hypothesis card splits evidence RL-runs vs side-experiments (counts + per-source
-   verdict + the aggregate), so a human sees a thesis proven by a cheap screen, by RL runs, or by both.
-4. **Chat parity.** `createProjectRecord`/`updateProjectRecord` already cover `-hypothesis`; add `-experiment` as a
-   creatable/queryable capability so the AI can file a side-experiment as thesis evidence + link it.
-
-Repo split: the ENGINE owns the entire framework (recordType + campaign + aggregation seam + hypothesis
-integration + viewer). A conformant PROJECT contributes only (a) the runs via the CLI contract and (b) an
-optional thin DOMAIN reducer for its `aggregate`. Keeps the RL run store pure while the ONE thesis draws on
-every source, reusably across all projects.
-
 ### A5. Single-purpose template + BlackSwan-as-library
 
 **Strategy change.** Today's docs prescribe a multi-project HUB (`architecture.md`; projects "registered, not

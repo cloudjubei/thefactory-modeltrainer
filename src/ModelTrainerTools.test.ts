@@ -20,7 +20,12 @@ import type {
   InferenceRequest,
   LLMConfig,
 } from 'thefactory-tools/types'
-import type { ExperimentSpec, TrainerManifest, TrainingCampaignProgress } from './modelTrainerTypes.js'
+import type {
+  ExperimentRecord,
+  ExperimentSpec,
+  TrainerManifest,
+  TrainingCampaignProgress,
+} from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { initExplorationState } from './explorationUtils.js'
 import { hashTrainingConfig, setupKeyOf } from './modelTrainerHelpers.js'
@@ -6076,5 +6081,385 @@ describe('validateTrainingSpec (A2 up-front launch gate)', () => {
     const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { lr: [] } } })
     expect(res.ok).toBe(false)
     expect(res.reason).toMatch(/lr/)
+  })
+})
+
+describe('runSideExperimentCampaign (A4 — the SECOND evidence source)', () => {
+  const clearing = (job: ComputeJob) => ({
+    summary: {
+      objective: (job.config as { lr: number }).lr * 100,
+      metrics: { return_vs_hold_pct: 5 },
+    },
+  })
+
+  it('persists ONE -experiment record (cells+aggregate+verdict) and NEVER a run record', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const matrix: ExperimentSpec = { sweep: { lr: [0.01, 0.02] } }
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 'lr helps',
+      hypothesisId: 'h1',
+      matrix,
+    })
+    expect(result).toMatchObject({
+      recordType: 'demo-run-experiment',
+      experimentId: hashTrainingConfig(matrix),
+      planned: 2,
+      completed: 2,
+      failed: 0,
+      aborted: 0,
+      skipped: 0,
+    })
+    expect(result.verdict?.kind).toBe('robust')
+
+    const exps = await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' })
+    const runs = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
+    expect(exps).toHaveLength(1)
+    expect(runs).toHaveLength(0) // RL run store stays apples-to-apples pure
+
+    const rec = exps[0].content as ExperimentRecord
+    expect(rec.id).toBe(hashTrainingConfig(matrix))
+    expect(rec.hypothesisId).toBe('h1')
+    expect(rec.thesis).toBe('lr helps')
+    expect(rec.status).toBe('completed')
+    expect(rec.cells).toHaveLength(2)
+    expect(rec.aggregate?.n).toBe(2)
+    expect(rec.verdict?.passed).toBe(true)
+    expect(rec.provenance.createdAt).toBe(NOW)
+    expect(rec.provenance.source).toBe('llm')
+  })
+
+  it('invokes a project-supplied aggregate reducer when provided (the domain seam)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const sentinel = {
+      aggregate: null,
+      verdict: {
+        kind: 'robust' as const,
+        passed: true,
+        source: 'llm' as const,
+        rationale: 'domain portfolio read',
+        assessedAt: NOW,
+      },
+    }
+    const aggregate = vi.fn(() => sentinel)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01] } },
+      aggregate,
+    })
+    expect(aggregate).toHaveBeenCalledOnce()
+    expect(result.verdict?.rationale).toBe('domain portfolio read')
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.verdict?.source).toBe('llm')
+  })
+
+  it('records a failed cell without aborting the whole experiment', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({
+      jobResult: (job) =>
+        (job.config as { lr: number }).lr > 0.015
+          ? { summary: { objective: 2, metrics: { return_vs_hold_pct: 5 } } }
+          : { status: 'failed', error: 'boom', exitCode: 1 },
+    })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01, 0.02] } },
+    })
+    expect(result.completed).toBe(1)
+    expect(result.failed).toBe(1)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.cells).toHaveLength(2)
+    expect(rec.cells.filter((c) => c.status === 'failed')).toHaveLength(1)
+  })
+
+  it('resumes — a second run skips cells already completed in the prior record', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const matrix: ExperimentSpec = { sweep: { lr: [0.01, 0.02] } }
+    const base = { scope: 'proj', projectRoot: '/repo', manifest: manifest(), thesis: 't', matrix }
+    await tools.runSideExperimentCampaign(base)
+    const again = await tools.runSideExperimentCampaign(base)
+    expect(again.skipped).toBe(2)
+    expect(again.completed).toBe(0)
+    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' })).toHaveLength(1)
+  })
+
+  it('emits progress and reports the matrix cell count', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const phases: string[] = []
+    await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01, 0.02] } },
+      onProgress: (p: TrainingCampaignProgress) => {
+        phases.push(p.phase)
+      },
+    })
+    expect(phases).toContain('done')
+  })
+})
+
+describe('runSideExperimentCampaign — branch coverage', () => {
+  it('stamps optional provenance/target fields + cell seed, honours refresh/concurrency, emits item progress', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: {
+          objective: 3,
+          metrics: { return_vs_hold_pct: 2 },
+          seed: 7,
+          dataset: { asset: 'GOLD', timeframe: '1d' },
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const terminals: string[] = []
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      thesisTarget: 'allow_shorting',
+      hypothesisId: 'h1',
+      matrix: { sweep: { lr: [0.02] } },
+      refresh: true,
+      concurrency: 1,
+      activityId: 'act-9',
+      source: 'human',
+      proposedBy: 'me',
+      ranBy: 'runner-7',
+      onItemProgress: (_k, p) => {
+        if (p.terminal) terminals.push(String(p.status))
+      },
+    })
+    expect(result.completed).toBe(1)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.thesisTarget).toBe('allow_shorting')
+    expect(rec.cells[0].seed).toBe(7)
+    expect(rec.cells[0].dataset).toMatchObject({ asset: 'GOLD', timeframe: '1d' })
+    expect(rec.provenance).toMatchObject({
+      source: 'human',
+      proposedBy: 'me',
+      activityId: 'act-9',
+      ranBy: 'runner-7',
+    })
+    expect(terminals).toContain('completed')
+  })
+
+  it('yields an unverifiable verdict when completed cells report no benchmark metric', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) }), storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01, 0.02] } },
+    })
+    expect(result.completed).toBe(2)
+    expect(result.verdict?.kind).toBe('unverifiable')
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.aggregate?.n).toBe(2)
+  })
+
+  it('does not collect a cell whose job ended aborted (the abort branch), recording it failed', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({
+      jobResult: () => ({ status: 'aborted', exitCode: null, error: 'aborted', summary: undefined }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01] } },
+    })
+    expect(result.completed).toBe(0)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.cells).toHaveLength(0)
+  })
+
+  it('marks the experiment aborted when the abort signal stops it before any cell runs', async () => {
+    const storage = memoryStorage()
+    const controller = new AbortController()
+    controller.abort()
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01, 0.02] } },
+      abortSignal: controller.signal,
+    })
+    expect(result.aborted).toBeGreaterThan(0)
+    expect(result.completed).toBe(0)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.status).toBe('aborted')
+  })
+})
+
+describe('runSideExperimentCampaign — review fixes', () => {
+  const clearing = (job: ComputeJob) => ({
+    summary: {
+      objective: (job.config as { lr: number }).lr * 100,
+      metrics: { return_vs_hold_pct: 5 },
+    },
+  })
+
+  it('dedupes duplicate matrix cells so a degenerate matrix cannot inflate the verdict', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix: { sweep: { lr: [0.01, 0.01] } }, // duplicate value -> same cell key twice
+    })
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.cells).toHaveLength(1)
+    expect(rec.aggregate?.n).toBe(1)
+    // one distinct config = a single split, NOT robust
+    expect(result.verdict?.kind).toBe('single-split-luck')
+  })
+
+  it('an aborted RESUME of a fully-completed experiment keeps status completed (no corruption)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const matrix: ExperimentSpec = { sweep: { lr: [0.01, 0.02] } }
+    const base = { scope: 'proj', projectRoot: '/repo', manifest: manifest(), thesis: 't', matrix }
+    const first = await tools.runSideExperimentCampaign(base)
+    expect(first.verdict?.kind).toBe('robust')
+    const controller = new AbortController()
+    controller.abort()
+    await tools.runSideExperimentCampaign({ ...base, abortSignal: controller.signal })
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.status).toBe('completed')
+    expect(rec.verdict?.kind).toBe('robust')
+    expect(rec.cells.filter((c) => c.status === 'completed')).toHaveLength(2)
+  })
+})
+
+describe('runSideExperimentCampaign — comparability + provenance edges', () => {
+  const clearing = (job: ComputeJob) => ({
+    summary: {
+      objective: (job.config as { lr: number }).lr * 100,
+      metrics: { return_vs_hold_pct: 5 },
+    },
+  })
+  const matrix: ExperimentSpec = { sweep: { lr: [0.01] } }
+
+  it('re-runs carried-forward cells after a MAJOR pipeline bump (they are no longer comparable)', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: clearing })
+    const { tools } = makeTools(runner, storage)
+    const base = { scope: 'proj', projectRoot: '/repo', thesis: 't', matrix }
+    await tools.runSideExperimentCampaign({ ...base, manifest: manifest({ pipelineVersion: '1' }) })
+    expect(runner.jobs).toHaveLength(1)
+    // Same matrix under the SAME major: the completed cell is skipped (resume).
+    await tools.runSideExperimentCampaign({ ...base, manifest: manifest({ pipelineVersion: '1.3' }) })
+    expect(runner.jobs).toHaveLength(1)
+    // A MAJOR bump makes prior cells incomparable — they must re-run, not be carried forward.
+    const bumped = await tools.runSideExperimentCampaign({
+      ...base,
+      manifest: manifest({ pipelineVersion: '2' }),
+    })
+    expect(runner.jobs).toHaveLength(2)
+    expect(bumped.completed).toBe(1)
+    expect(bumped.skipped).toBe(0)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.provenance.pipelineVersion).toBe('2')
+    expect(rec.cells).toHaveLength(1)
+  })
+
+  it('reports onRecordWritten, honours a compute target, and passes the thread-cap env to each cell', async () => {
+    const storage = memoryStorage()
+    const remote = stubRunner({ jobResult: clearing })
+    const written: [string, string][] = []
+    const tools = createModelTrainerTools({
+      computeRunner: stubRunner(),
+      resolveComputeRunner: () => remote,
+      storage,
+      logger: { info: vi.fn(), warn: vi.fn() },
+      now: () => NOW,
+      availableParallelism: () => 8,
+      availableMemoryBytes: () => Number.MAX_SAFE_INTEGER,
+    })
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest({ maxThreadsPerRun: 2 }),
+      thesis: 't',
+      matrix,
+      computeTarget: 'remote-1',
+      onRecordWritten: (type, key) => written.push([type, key]),
+    })
+    // The compute target's runner ran the cell (not the default one) and is stamped on the record.
+    expect(remote.jobs).toHaveLength(1)
+    expect(remote.jobs[0].env).toBeTruthy()
+    expect(written).toEqual([['demo-run-experiment', result.experimentId]])
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.provenance).toMatchObject({ computeTarget: 'remote-1', ranBy: 'remote-1' })
+  })
+
+  it('survives an onItemProgress sink that throws synchronously (progress is best-effort)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner({ jobResult: clearing }), storage)
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix,
+      onItemProgress: () => {
+        throw new Error('sink exploded')
+      },
+    })
+    expect(result.completed).toBe(1)
+  })
+
+  it('falls back to a generated message when a failed/aborted cell carries no error text', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(
+      stubRunner({ jobResult: () => ({ status: 'failed', exitCode: 3, error: undefined }) }),
+      storage,
+    )
+    const result = await tools.runSideExperimentCampaign({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      thesis: 't',
+      matrix,
+    })
+    expect(result.failed).toBe(1)
+    const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' }))[0]
+      .content as ExperimentRecord
+    expect(rec.cells[0].error).toMatch(/exited with code 3/)
   })
 })

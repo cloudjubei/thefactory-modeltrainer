@@ -302,6 +302,12 @@ const crossTestingKeys = new Set()
 const continueTrainingKeys = new Set()
 let judgementSummary = null
 let hypothesesCache = []
+// A4: the SECOND evidence source. Side-experiment records (`<recordType>-experiment`) loaded once per
+// project; their cells feed a hypothesis's verdict alongside RL runs. `experimentsEpoch` bumps on each
+// (re)load so the per-snapshot verdict memo invalidates; `experimentsProjectEpoch` gates the once-per-project load.
+let experimentsCache = []
+let experimentsEpoch = 0
+let experimentsProjectEpoch = -1
 let proposalSummary = null
 let selectedRunKey = null
 // Activities run CONCURRENTLY up to a budget. Each live activity (campaign / judge /
@@ -1589,6 +1595,53 @@ async function putHypothesis(content) {
     content,
   })
 }
+// A4: load this project's side-experiment records (the second evidence source). Each carries `cells` that
+// the hypothesis layer projects into evidence RunRows.
+async function readExperiments() {
+  if (!manifest) return []
+  const recs = await queryRecords(manifest.recordType + '-experiment')
+  return recs.map((r) => ({ ...(r.content || {}), id: (r.content && r.content.id) || r.key || '' })).filter((e) => e.id)
+}
+// Load the side-experiment cache once per project (bumping `experimentsEpoch` so the verdict memo drops).
+// Best-effort: a query failure leaves an empty pool (verdicts fall back to runs-only), never blocks refresh.
+// Concurrent callers share ONE in-flight load and the project-epoch is committed only AFTER it resolves, so
+// a second caller never reads a still-empty cache and persists runs-only verdicts.
+let experimentsLoadInFlight = null
+async function ensureExperimentsLoaded() {
+  if (experimentsProjectEpoch === projectEpoch) return
+  if (!experimentsLoadInFlight) {
+    const epoch = projectEpoch
+    experimentsLoadInFlight = (async () => {
+      let loaded = []
+      try {
+        loaded = await readExperiments()
+      } catch {
+        loaded = []
+      }
+      // Discard a load that a project switch superseded mid-flight.
+      if (projectEpoch === epoch) {
+        experimentsCache = loaded
+        experimentsProjectEpoch = epoch
+        experimentsEpoch++
+      }
+      experimentsLoadInFlight = null
+    })()
+  }
+  await experimentsLoadInFlight
+}
+// The side-experiment cells that are evidence for a hypothesis (spec-matched or linked by hypothesisId),
+// as source-tagged evidence RunRows the verdict engine reads exactly like runs.
+function experimentRowsFor(h) {
+  if (!experimentsCache.length || !window.Hypothesis) return []
+  return window.Hypothesis.experimentEvidenceRows(h, experimentsCache)
+}
+// The RUN-sourced keys among a persisted matchedKeys list (drops `exp:` experiment-cell keys). Run-only
+// consumers — the run-count chip, the persisted-basis text, the "view matching runs" filter — must never
+// treat an experiment cell as a run (experiment evidence is surfaced separately, by source).
+function runOnlyKeys(keys) {
+  const list = Array.isArray(keys) ? keys : []
+  return window.Hypothesis ? list.filter((k) => window.Hypothesis.sourceOfKey(k) === 'run') : list
+}
 // Load the per-project min-runs-to-judge setting (default DEFAULT_HYPOTHESIS_MIN_RUNS) into the module var.
 async function loadHypothesisMinRuns() {
   hypothesisMinRuns = DEFAULT_HYPOTHESIS_MIN_RUNS
@@ -2396,6 +2449,8 @@ function resetDashboardState() {
   evaluatingKeys.clear()
   judgementSummary = null
   hypothesesCache = []
+  experimentsCache = []
+  experimentsProjectEpoch = -1
   proposalSummary = null
   xaiNarrativeCache.clear()
   xaiLaunchedSpecs.clear()
@@ -13147,9 +13202,7 @@ function hypothesisMatchedRuns(h) {
 }
 function hypothesisMatchedCount(h) {
   if (allRunsCache.length) return hypothesisMatchedRuns(h).length
-  return h && h.evidence && Array.isArray(h.evidence.matchedKeys)
-    ? h.evidence.matchedKeys.length
-    : 0
+  return h && h.evidence ? runOnlyKeys(h.evidence.matchedKeys).length : 0
 }
 // The manifest-declared single-context judging rule ({metric, threshold, direction}); undefined falls
 // back to the trading line's historical default (return_vs_hold_pct > 0) inside hypothesis.js.
@@ -13186,6 +13239,7 @@ function autoSuggestedVerdict(h) {
     hypothesisMinRuns,
     modelNameImplemented,
     hypothesisBenchmark(),
+    experimentRowsFor(h),
   )
 }
 function effectiveHypothesisVerdict(h) {
@@ -13193,7 +13247,7 @@ function effectiveHypothesisVerdict(h) {
   if (allRunsCache.length) {
     // Memoised per snapshot; keyed by the min-runs threshold too, since it changes the verdict without
     // replacing allRunsCache. (Direction / model-implemented only change alongside a data refresh.)
-    const key = h.id ? `${h.id}|${hypothesisMinRuns}` : null
+    const key = h.id ? `${h.id}|${hypothesisMinRuns}|${experimentsEpoch}` : null
     const m = key ? hypScanMemoFor(hypVerdictMemo) : null
     if (m && m.has(key)) return m.get(key)
     const v = window.Hypothesis.effectiveVerdict(
@@ -13203,6 +13257,7 @@ function effectiveHypothesisVerdict(h) {
       hypothesisMinRuns,
       modelNameImplemented,
       hypothesisBenchmark(),
+      experimentRowsFor(h),
     )
     if (m) m.set(key, v)
     return v
@@ -13308,7 +13363,7 @@ function hypothesisCriteriaText() {
 // so the view stays consistent with the run-count chip + verdict badge (which also read persisted state).
 function hypothesisPersistedBasis(h) {
   const ev = (h && h.evidence) || {}
-  const n = Array.isArray(ev.matchedKeys) ? ev.matchedKeys.length : 0
+  const n = runOnlyKeys(ev.matchedKeys).length
   const m = ev.measured || {}
   const verdict = (h && h.status) || 'untested'
   const bench = hypothesisBenchmarkResolved()
@@ -13325,8 +13380,35 @@ function hypothesisPersistedBasis(h) {
     return `<strong>Untested</strong> — only ${Number(m.runs || n)}/${hypothesisMinRuns} matching runs report a result.`
   return `<strong>${escapeHtml(verdict)}</strong> — ${runs}.`
 }
+// A4: a one-line attribution of the side-experiment evidence behind a verdict — how many experiment cells
+// count and whether they clear the benchmark — so a thesis proven by a cheap screen (vs by RL runs, vs by
+// both) is visible. Empty when the hypothesis has no experiment evidence.
+function hypothesisSourceSplitHtml(h, expRows) {
+  if (!expRows || !expRows.length || !window.Hypothesis) return ''
+  const m = window.Hypothesis.measuredBySource(h, [], expRows, objectiveDirection(), hypothesisBenchmark())
+  const e = m.experiment
+  if (!e) return ''
+  const bench = hypothesisBenchmarkResolved()
+  const benchName = metricLabel(bench.metric)
+  // The best BENCHMARK-metric value across the cells (not the objective — they're usually different metrics).
+  const bmVals = expRows.map((r) => runMetricValue(r, bench.metric)).filter(Number.isFinite)
+  const best = bmVals.length
+    ? bench.direction === 'min'
+      ? Math.min(...bmVals)
+      : Math.max(...bmVals)
+    : NaN
+  const clears =
+    e.beatsHold === true
+      ? `best clears the benchmark (${escapeHtml(formatMetricValue(bench.metric, best))} ${escapeHtml(benchName)})`
+      : e.beatsHold === false
+        ? `none clear the benchmark`
+        : `none report ${escapeHtml(benchName)}`
+  return `<p class="card-sub hyp-exp-evidence">Side-experiments: <strong>${e.runs}</strong> cell${e.runs === 1 ? '' : 's'} — ${clears}.</p>`
+}
 function hypothesisEvidenceHtml(h) {
   const id = escapeHtml(h.id)
+  const expRows = experimentRowsFor(h)
+  const expLine = hypothesisSourceSplitHtml(h, expRows)
   const claimed = h.claimedMetrics && Object.keys(h.claimedMetrics).length ? h.claimedMetrics : null
   const claimedRow = claimed
     ? `<p class="card-sub hyp-claimed">Source claims: ${escapeHtml(
@@ -13342,13 +13424,14 @@ function hypothesisEvidenceHtml(h) {
   if (!allRunsCache.length) {
     return `<div class="hyp-evidence">${claimedRow}
       <p class="card-sub hyp-basis">${hypothesisPersistedBasis(h)}</p>
+      ${expLine}
       ${criteria}
       <p class="card-sub hyp-stale-note">This reflects the last full <strong>Refresh</strong>. After launching runs, click <strong>Refresh</strong> (top-right) to re-evaluate the verdict against them.</p>
     </div>`
   }
   const runs = hypothesisMatchedRuns(h)
   if (!runs.length) {
-    return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No runs match this spec yet — launch runs to test it.</p>${criteria}</div>`
+    return `<div class="hyp-evidence">${claimedRow}<p class="card-sub">No runs match this spec yet${expRows.length ? ' — but side-experiment evidence is counted below' : ' — launch runs to test it'}.</p>${expLine}${criteria}</div>`
   }
   const bench = hypothesisBenchmarkResolved()
   const benchName = metricLabel(bench.metric)
@@ -13398,6 +13481,7 @@ function hypothesisEvidenceHtml(h) {
   return `<div class="hyp-evidence">
     ${claimedRow}
     <p class="card-sub hyp-basis">${basis}</p>
+    ${expLine}
     ${criteria}
     <table class="kv-table hyp-runs"><thead><tr><th>run</th><th>${escapeHtml(objectiveName())}</th><th>${escapeHtml(benchName)}</th></tr></thead><tbody>${runRows}</tbody></table>
     ${more}
@@ -13899,6 +13983,8 @@ async function refreshHypothesisVerdicts(hyps) {
   // Evaluate ONLY when the all-runs snapshot is loaded — never against an empty/partial set, which would
   // wrongly zero every verdict to untested. Without a snapshot the persisted verdicts stand.
   if (!allRunsCache.length) return false
+  // A4: load the side-experiment evidence pool once so verdicts aggregate runs + experiment cells.
+  await ensureExperimentsLoaded()
   const epoch = projectEpoch
   const runsRef = allRunsCache
   const direction = objectiveDirection()
@@ -13928,6 +14014,7 @@ async function refreshHypothesisVerdicts(hyps) {
       at,
       minRuns: hypothesisMinRuns,
       benchmark,
+      experimentRows: experimentRowsFor(h),
     })
     if (didChange) {
       // Apply in memory immediately so a re-entrant evaluate sees prev===evidence (changed:false → no
@@ -14093,6 +14180,7 @@ async function renderHypotheses() {
       readModelStats(),
       readModels(),
     ])
+  await ensureExperimentsLoaded()
   hypothesisLiveIds = hypothesesCache.some((h) => h.campaign && h.campaign.status === 'running')
     ? await readLiveActivityIds()
     : new Set()
@@ -14394,10 +14482,11 @@ async function stampHypothesisCampaignResults() {
 function viewHypothesisRuns(id) {
   const h = hypothesesCache.find((x) => x.id === id)
   if (!h) return
-  // Use the all-runs snapshot when loaded, else the hypothesis's persisted matched-run keys.
+  // Use the all-runs snapshot when loaded, else the hypothesis's persisted matched-run keys (RUN-sourced
+  // only — `exp:` experiment-cell keys aren't run keys and would filter the Runs table to nothing).
   const keys = allRunsCache.length
     ? hypothesisMatchedRuns(h).map((r) => r.key)
-    : (h.evidence && Array.isArray(h.evidence.matchedKeys) && h.evidence.matchedKeys) || []
+    : runOnlyKeys(h.evidence && h.evidence.matchedKeys)
   if (!keys.length) return
   openRunsSelection(keys, h.title || shortKey(id), {
     label: 'Hypotheses',

@@ -44,6 +44,80 @@
     )
   }
 
+  // A side-experiment CELL projected into an evidence RunRow so the verdict engine reads it exactly like a
+  // run: same {config, objective, status, metrics} summary, plus a `source` tag and a namespaced key
+  // (`exp:<experimentId>:<cellKey>`) that can never collide with a run key and keeps the source recoverable.
+  function experimentCellRow(experimentId, cell) {
+    const c = cell || {}
+    return {
+      key: 'exp:' + (experimentId || '') + ':' + (c.key || ''),
+      summary: {
+        config: c.config || {},
+        objective: c.objective,
+        status: c.status || 'completed',
+        metrics: c.metrics || {},
+        source: 'experiment',
+        // The UNDERLYING config identity (= the run key this config would have) — for cross-source dedup so
+        // the same physical condition never counts once as a run AND again as an experiment cell.
+        runKey: c.key || '',
+      },
+    }
+  }
+
+  // Drop experiment rows whose underlying config-key equals a matched RUN's key — the run is the
+  // authoritative copy of that condition, so it must not be double-counted toward the verdict / minRuns.
+  function dedupeExperimentRows(matchedRuns, experimentRows) {
+    const runKeys = Object.create(null)
+    const rs = matchedRuns || []
+    for (let i = 0; i < rs.length; i++) runKeys[rs[i].key] = 1
+    return (experimentRows || []).filter((r) => {
+      const uk = (r.summary && r.summary.runKey) || r.key
+      return !runKeys[uk]
+    })
+  }
+
+  // The SECOND evidence source: the side-experiment cells that count for a hypothesis. A cell counts iff its
+  // experiment is LINKED by hypothesisId (regardless of spec — an explicit "this is evidence for that thesis")
+  // OR its config spec-matches (like a run). Source-tagged + deduped by key. Kept SEPARATE from the config
+  // spec-match so a blank/loose-spec hypothesis still gathers its explicitly linked experiment evidence.
+  function experimentEvidenceRows(h, experiments) {
+    const spec = h && h.spec
+    const id = h && h.id
+    const out = []
+    const seen = Object.create(null)
+    const list = experiments || []
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i]
+      if (!e) continue
+      const linked = id != null && e.hypothesisId === id
+      const cells = e.cells || []
+      for (let j = 0; j < cells.length; j++) {
+        const c = cells[j]
+        if (!c) continue
+        if (!linked && !specMatchesConfig(spec, c.config)) continue
+        const row = experimentCellRow(e.id, c)
+        if (seen[row.key]) continue
+        seen[row.key] = 1
+        out.push(row)
+      }
+    }
+    return out
+  }
+
+  // The evidence source an evidence key belongs to: experiment cells carry the `exp:` prefix, everything
+  // else is a run. Lets a transition / the card attribute a flip to RL runs, a side-experiment, or both.
+  function sourceOfKey(key) {
+    return typeof key === 'string' && key.indexOf('exp:') === 0 ? 'experiment' : 'run'
+  }
+
+  // The distinct evidence sources present in a key set (sorted) — e.g. ['experiment','run'].
+  function uniqueSourcesOf(keys) {
+    const seen = Object.create(null)
+    const list = keys || []
+    for (let i = 0; i < list.length; i++) seen[sourceOfKey(list[i])] = 1
+    return Object.keys(seen).sort()
+  }
+
   // A per-snapshot inverted index over runs: leverKey -> String(value) -> [runs carrying that value]. Built
   // ONCE per run snapshot so matching can run over a small candidate SUPERSET rather than the whole set —
   // the accelerator behind a non-blocking verdict refresh. String() coercion is IDENTICAL to
@@ -172,6 +246,19 @@
     }
   }
 
+  // The single-context measured read split by evidence SOURCE — run-sourced, experiment-sourced, and the
+  // combined pool that actually drives the verdict. Powers the card's "proven by a cheap screen / by RL runs
+  // / by both" attribution without changing how the verdict itself is computed (always the combined pool).
+  function measuredBySource(h, runs, experimentRows, direction, benchmark) {
+    const matched = hypothesisMatchingRuns(h && h.spec, runs)
+    const exp = dedupeExperimentRows(matched, experimentRows)
+    return {
+      run: measuredFromRuns(matched, direction, benchmark),
+      experiment: measuredFromRuns(exp, direction, benchmark),
+      combined: measuredFromRuns(matched.concat(exp), direction, benchmark),
+    }
+  }
+
   // The verdict a measured read implies: untested with no beats-hold signal OR too few runs to trust
   // (fewer than `minRuns`), else proven/disproved. A single run can't adequately prove a hypothesis.
   function autoVerdictFor(measured, minRuns) {
@@ -231,15 +318,30 @@
     }))
   }
 
-  // Per-cell measured reads (count/objective/beats-hold) — each computed over ONLY that cell's runs.
-  function measuredByContext(spec, runs, direction, benchmark) {
+  // Per-cell measured reads (count/objective/beats-hold) — each computed over ONLY that cell's evidence.
+  // `experimentRows` (optional) are placed into the context cell they match (by their config), so a
+  // side-experiment can fill a comparison arm that the RL runs haven't covered yet.
+  function measuredByContext(spec, runs, direction, benchmark, experimentRows) {
     const groups = groupRunsByContext(spec, runs)
     if (!groups) return null
-    return groups.map((g) => ({
-      context: g.context,
-      runKeys: g.runs.map((r) => r.key).sort(),
-      measured: measuredFromRuns(g.runs, direction, benchmark),
-    }))
+    // A cross-context COMPARISON holds the `fixed`/`sweep` levers constant across arms, so an experiment
+    // cell enters an arm ONLY if it matches the FULL spec (like a run) — an off-spec linked cell (e.g. a
+    // different asset) must not be attributed to an arm and skew the comparison.
+    const exp = (experimentRows || []).filter((r) =>
+      specMatchesConfig(spec, (r.summary && r.summary.config) || {}),
+    )
+    return groups.map((g) => {
+      const cellExp = dedupeExperimentRows(
+        g.runs,
+        exp.filter((r) => configMatchesCell((r.summary && r.summary.config) || {}, g.context)),
+      )
+      const rows = g.runs.concat(cellExp)
+      return {
+        context: g.context,
+        runKeys: rows.map((r) => r.key).sort(),
+        measured: measuredFromRuns(rows, direction, benchmark),
+      }
+    })
   }
 
   // The verdict a CROSS-CONTEXT comparison implies. `kind` is what the hypothesis claims:
@@ -328,19 +430,21 @@
   // The auto-verdict for a hypothesis: a context-spanning spec reads its cross-context comparison; a
   // single-context spec uses the pooled beats-hold rule. Precedence: decided (proven/disproved) > proposed
   // (blocked on an unimplemented model) > untested.
-  function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark) {
+  function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark, experimentRows) {
     const spec = h && h.spec
+    const exp = experimentRows || []
     let verdict
     if (contextCells(spec).length) {
       verdict = compareContexts(
-        measuredByContext(spec, runs, direction, benchmark),
+        measuredByContext(spec, runs, direction, benchmark, exp),
         h && h.comparison,
         direction,
         minRuns,
       )
     } else {
+      const matched = hypothesisMatchingRuns(spec, runs)
       verdict = autoVerdictFor(
-        measuredFromRuns(hypothesisMatchingRuns(spec, runs), direction, benchmark),
+        measuredFromRuns(matched.concat(dedupeExperimentRows(matched, exp)), direction, benchmark),
         minRuns,
       )
     }
@@ -349,10 +453,11 @@
     return verdict
   }
 
-  // The verdict to SHOW: a manual override wins; otherwise the live auto-verdict from matching runs.
-  function effectiveVerdict(h, runs, direction, minRuns, modelImplemented, benchmark) {
+  // The verdict to SHOW: a manual override wins; otherwise the live auto-verdict from matching evidence
+  // (runs + side-experiment cells).
+  function effectiveVerdict(h, runs, direction, minRuns, modelImplemented, benchmark, experimentRows) {
     if (h && h.verdictSource === 'manual' && VERDICTS.indexOf(h.status) >= 0) return h.status
-    return autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark)
+    return autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark, experimentRows)
   }
 
   // Sorted keys of the runs matching a hypothesis (the evidence-set identity used to detect new runs).
@@ -376,10 +481,24 @@
     const minRuns = (opts && opts.minRuns) || 0
     const modelImplemented = opts && opts.modelImplemented
     const benchmark = opts && opts.benchmark
+    const experimentRows = (opts && opts.experimentRows) || []
     if (h && h.verdictSource === 'manual') return { next: h, transition: null, changed: false }
-    const matchedKeys = matchedKeysOf(h && h.spec, runs)
-    const measured = measuredFromRuns(hypothesisMatchingRuns(h && h.spec, runs), direction, benchmark)
-    const nextStatus = autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark)
+    const matched = hypothesisMatchingRuns(h && h.spec, runs)
+    const dedExp = dedupeExperimentRows(matched, experimentRows)
+    const matchedKeys = matched
+      .map((r) => r.key)
+      .concat(dedExp.map((r) => r.key))
+      .sort()
+    const measured = measuredFromRuns(matched.concat(dedExp), direction, benchmark)
+    const nextStatus = autoVerdictForHypothesis(
+      h,
+      runs,
+      direction,
+      minRuns,
+      modelImplemented,
+      benchmark,
+      experimentRows,
+    )
     const prev = (h && h.evidence) || { matchedKeys: [], status: 'untested' }
     const prevKeys = prev.matchedKeys || []
     const keysChanged =
@@ -400,6 +519,7 @@
         from: prev.status || 'untested',
         to: nextStatus,
         byRunKeys: newKeys,
+        sources: uniqueSourcesOf(newKeys),
         measured,
       }
       next.transitions = (h && h.transitions ? h.transitions : []).concat([transition])
@@ -874,6 +994,9 @@
     specMatchesConfig: specMatchesConfig,
     resolveBenchmark: resolveBenchmark,
     hypothesisMatchingRuns: hypothesisMatchingRuns,
+    experimentEvidenceRows: experimentEvidenceRows,
+    measuredBySource: measuredBySource,
+    sourceOfKey: sourceOfKey,
     buildRunIndex: buildRunIndex,
     candidateRunsFor: candidateRunsFor,
     matchedKeysOf: matchedKeysOf,

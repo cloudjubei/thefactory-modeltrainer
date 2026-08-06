@@ -115,6 +115,46 @@ describe('incumbentSplitHoldout', () => {
     })
     expect(h.verdict).toBe('robust')
   })
+
+  it('ranks by a min-direction durationMs criterion (lower is better) and drops runs missing the metric', () => {
+    const durCrit: AnalysisCriterion = { key: 'durationMs', direction: 'min' }
+    const runs: AnalysisRun[] = [
+      { key: 'f1', config: { lr: 1, window: '2024' }, durationMs: 100, status: 'completed' },
+      { key: 'f2', config: { lr: 1, window: '2022' }, durationMs: 200, status: 'completed' },
+      { key: 's1', config: { lr: 9, window: '2024' }, durationMs: 1000, status: 'completed' },
+      { key: 's2', config: { lr: 9, window: '2022' }, durationMs: 1100, status: 'completed' },
+      { key: 'nodur', config: { lr: 1, window: '2019' }, status: 'completed' }, // no durationMs -> dropped
+    ]
+    const h = incumbentSplitHoldout(runs, ['window'], durCrit, { baseline: 500 })
+    expect(h.incumbentConfig).toMatchObject({ lr: 1 }) // faster setup (mean 150) beats the slow one (mean 1050)
+    expect(h.splitValues).toEqual(['window=2022', 'window=2024']) // the durationMs-less 2019 run is out of the universe
+    expect(h.held).toBe(2) // min-direction: both incumbent splits (100, 200) sit under the 500 baseline
+    expect(h.verdict).toBe('robust')
+  })
+
+  it('is not-replicated with a split axis but no completed runs (empty-completed guard)', () => {
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1, window: '2024' }, objective: 5, status: 'failed' },
+      { key: 'b', config: { lr: 1, window: '2022' }, objective: 5, status: 'running' },
+    ]
+    const h = incumbentSplitHoldout(runs, ['window'], crit)
+    expect(h.verdict).toBe('not-replicated')
+    expect(h.evaluated).toBe(0)
+    expect(h.splitValues).toEqual([])
+    expect(h.incumbentConfig).toBeNull()
+  })
+
+  it('defaults a missing status to completed and drops explicitly non-completed runs', () => {
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1, window: '2024' }, objective: 8 }, // no status -> defaulted to completed
+      { key: 'b', config: { lr: 1, window: '2022' }, objective: 3 }, // no status -> defaulted to completed
+      { key: 'c', config: { lr: 1, window: '2020' }, objective: 99, status: 'failed' }, // dropped from the universe
+    ]
+    const h = incumbentSplitHoldout(runs, ['window'], crit)
+    expect(h.splitValues).toEqual(['window=2022', 'window=2024']) // the failed 2020 split is not covered
+    expect(h.held).toBe(2)
+    expect(h.verdict).toBe('robust')
+  })
 })
 
 describe('rewardFitnessAlignment', () => {
@@ -169,6 +209,28 @@ describe('rewardFitnessAlignment', () => {
     expect(out[0].r).toBeCloseTo(1, 6)
     expect(out[1].r).toBeCloseTo(-1, 6)
   })
+
+  it('drops runs missing the objective (reward proxy) from the correlation', () => {
+    const runs: AnalysisRun[] = [
+      r(1, { m: 1 }),
+      r(2, { m: 2 }),
+      r(3, { m: 3 }),
+      { key: 'no-obj', config: {}, metrics: { m: 4 }, status: 'completed' }, // no objective -> pair dropped
+    ]
+    const a = rewardFitnessAlignment(runs, ['m'])[0]
+    expect(a.n).toBe(3)
+  })
+
+  it('excludes non-completed runs but treats a missing status as completed', () => {
+    const runs: AnalysisRun[] = [
+      r(1, { m: 1 }),
+      r(2, { m: 2 }),
+      { key: 'no-status', config: {}, objective: 3, metrics: { m: 3 } }, // no status -> defaulted to completed, kept
+      { key: 'running', config: {}, objective: 99, metrics: { m: 99 }, status: 'running' }, // not completed, dropped
+    ]
+    const a = rewardFitnessAlignment(runs, ['m'])[0]
+    expect(a.n).toBe(3) // the two r() runs + the status-less run; the running run is excluded
+  })
 })
 
 describe('narrateAlignment', () => {
@@ -186,6 +248,24 @@ describe('narrateAlignment', () => {
   it('is explicit when alignment cannot be measured yet', () => {
     const msg = narrateAlignment([{ metric: 'x', r: null, n: 2 }], 'x')
     expect(msg).toMatch(/can'?t|cannot|not enough|insufficient/i)
+  })
+
+  it('falls back to the first alignment when the primary metric is absent', () => {
+    const msg = narrateAlignment([{ metric: 'other', r: 0.9, n: 40 }], 'missing')
+    expect(msg).toMatch(/good proxy|aligned|tracks/i)
+    expect(msg).toMatch(/other/)
+  })
+
+  it("reports can't-measure when there are no alignments at all", () => {
+    const msg = narrateAlignment([], 'return_vs_hold_pct')
+    expect(msg).toMatch(/can'?t|cannot/i)
+    expect(msg).toMatch(/return_vs_hold_pct/)
+  })
+
+  it('flags an INVERTED reward when the primary metric strongly anti-correlates', () => {
+    const msg = narrateAlignment([{ metric: 'return_vs_hold_pct', r: -0.8, n: 40 }], 'return_vs_hold_pct')
+    expect(msg).toMatch(/INVERTED/)
+    expect(msg).toMatch(/-0\.80/)
   })
 })
 
@@ -212,6 +292,16 @@ describe('narrateSplitHoldout', () => {
     expect(h({ verdict: 'not-replicated', evaluated: 1, missingSplits: ['b', 'c'] })).toMatch(/only 1 of 3/)
     expect(h({ verdict: 'single-split-luck', evaluated: 3, held: 1 })).toMatch(/single-split luck/)
     expect(h({ verdict: 'robust' })).toMatch(/holds across all 3/)
+  })
+
+  it("uses 'the split axis' as the axis name when no split levers are named", () => {
+    const msg = narrateSplitHoldout(
+      { verdict: 'not-replicated', evaluated: 1, held: 0, splitValues: ['a', 'b'], missingSplits: ['b'], missingSplitConfigs: [], evaluatedSplits: [], incumbentConfig: {} },
+      [],
+      'return_vs_hold_pct',
+      50,
+    )
+    expect(msg).toMatch(/the split axis/)
   })
 })
 
@@ -381,5 +471,134 @@ describe('assembleChampionVerdict (A4.3 champion "declare steady" verdict)', () 
     expect(v.championGates.find((g) => g.kind === 'cohort-median')!.pass).toBe(true)
     expect(v.championGates.find((g) => g.kind === 'dsr')!.pass).toBe(false)
     expect(v.steady).toBe(false) // the AND of all applicable families
+  })
+
+  it('groups all runs into ONE window when no split lever is declared', () => {
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1 }, objective: 5, metrics: { return_vs_hold_pct: 6 }, seed: 0, status: 'completed' },
+      { key: 'b', config: { lr: 1 }, objective: 5, metrics: { return_vs_hold_pct: 4 }, seed: 1, status: 'completed' },
+    ]
+    const v = assembleChampionVerdict(
+      { championGates: [{ metric: 'return_vs_hold_pct', op: '>', value: 0 }] },
+      { runs, splitLevers: [], criterion: crit },
+    )
+    // No split axis -> the whole cohort is one window ('·'); median([6,4]) = 5 > 0.
+    expect(v.championGates[0]).toMatchObject({ applicable: true, pass: true, detail: 'holds on all 1 window(s)' })
+    expect(v.steady).toBe(true)
+  })
+
+  it('supports a RATIO gate — the metric is compared against another metric median, not a literal', () => {
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1, window: '2024' }, objective: 5, metrics: { up_capture: 0.9, down_capture: 0.5 }, seed: 0, status: 'completed' },
+      { key: 'b', config: { lr: 1, window: '2024' }, objective: 5, metrics: { up_capture: 0.8, down_capture: 0.4 }, seed: 1, status: 'completed' },
+    ]
+    const v = assembleChampionVerdict(
+      { championGates: [{ metric: 'up_capture', op: '>', value: { metric: 'down_capture' } }] },
+      { runs, splitLevers: ['window'], criterion: crit },
+    )
+    const g = v.championGates[0]
+    expect(g.label).toBe('up_capture > down_capture') // rendered from the referenced-metric name
+    expect(g.applicable).toBe(true)
+    // up_capture median 0.85 vs the resolved down_capture-median bound 0.45.
+    expect(g.pass).toBe(true)
+  })
+
+  it('metricOf returns undefined for a run missing the objective (non-number branch)', () => {
+    const scoreCrit: AnalysisCriterion = { key: 'score', direction: 'max' }
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1, window: '2024' }, objective: 5, metrics: { score: 1 }, seed: 0, status: 'completed' },
+      { key: 'b', config: { lr: 1, window: '2024' }, metrics: { score: 1 }, seed: 1, status: 'completed' }, // no objective
+    ]
+    const v = assembleChampionVerdict(
+      { championGates: [{ metric: 'objective', op: '>', value: 0 }] },
+      { runs, splitLevers: ['window'], criterion: scoreCrit },
+    )
+    const g = v.championGates[0]
+    // run 'b' drops out via metricOf's undefined branch; median([5]) = 5 > 0.
+    expect(g.applicable).toBe(true)
+    expect(g.pass).toBe(true)
+    expect(g.detail).toMatch(/holds on all 1 window\(s\)/)
+  })
+
+  it('defaults the DSR threshold to 0.95 when unset', () => {
+    const runs = [dr(1, '2024', 10, 0.5), dr(1, '2022', 10, 0.5), dr(2, '2024', 1, 0.1), dr(2, '2022', 1, 0.1)]
+    const v = assembleChampionVerdict({ dsr: {} }, { runs, splitLevers: ['window'], criterion: crit })
+    const dsr = v.championGates.find((g) => g.kind === 'dsr')!
+    expect(dsr.label).toBe('deflated Sharpe ≥ 0.95')
+    expect(dsr.applicable).toBe(true)
+  })
+
+  it('skips completed runs that lack the Sharpe metric when counting trials', () => {
+    const runs: AnalysisRun[] = [
+      dr(1, '2024', 10, 0.5),
+      dr(1, '2022', 10, 0.5),
+      dr(2, '2024', 1, 0.1),
+      dr(2, '2022', 1, 0.1),
+      { key: 'no-sharpe', config: { lr: 3, window: '2024' }, objective: 0, metrics: { return_vs_hold_pct: 1 }, seed: 0, status: 'completed' },
+    ]
+    const v = assembleChampionVerdict({ dsr: { threshold: 0.95 } }, { runs, splitLevers: ['window'], criterion: crit })
+    const dsr = v.championGates.find((g) => g.kind === 'dsr')!
+    expect(dsr.applicable).toBe(true)
+    // the Sharpe-less setup {lr:3} is not counted as a trial: n_trials stays 2 (lr1, lr2).
+    expect(dsr.detail).toMatch(/over 2 setup\(s\)/)
+  })
+
+  it('defaults skew=0 / kurt=3 / n_obs=0 when the champion emits only Sharpe (DSR ⇒ 0 on n_obs<2)', () => {
+    const bare = (lr: number, window: string, obj: number, sharpe: number): AnalysisRun => ({
+      key: `${lr}-${window}`,
+      config: { lr, window },
+      objective: obj,
+      metrics: { oos_sharpe: sharpe },
+      seed: 0,
+      status: 'completed',
+    })
+    const runs = [bare(1, '2024', 10, 5), bare(1, '2022', 10, 5), bare(2, '2024', 1, 0.1), bare(2, '2022', 1, 0.1)]
+    const v = assembleChampionVerdict({ dsr: { threshold: 0.95 } }, { runs, splitLevers: ['window'], criterion: crit })
+    const dsr = v.championGates.find((g) => g.kind === 'dsr')!
+    expect(dsr.applicable).toBe(true)
+    // n_obs defaults to 0 -> psr has n<2 -> DSR 0.000 -> under the 0.95 threshold.
+    expect(dsr.detail).toMatch(/DSR 0\.000/)
+    expect(dsr.pass).toBe(false)
+  })
+
+  it('fails the DSR gate when n_obs is below dsr.minObs (obsOk false ⇒ detail cites n_obs)', () => {
+    const runs = [dr(1, '2024', 10, 0.5, 300), dr(1, '2022', 10, 0.5, 300), dr(2, '2024', 1, 0.1, 300), dr(2, '2022', 1, 0.1, 300)]
+    const v = assembleChampionVerdict({ dsr: { threshold: 0.95, minObs: 1000 } }, { runs, splitLevers: ['window'], criterion: crit })
+    const dsr = v.championGates.find((g) => g.kind === 'dsr')!
+    expect(dsr.pass).toBe(false)
+    expect(dsr.detail).toMatch(/n_obs 300 < 1000/)
+  })
+
+  it('honors dsr.minObs when satisfied (no n_obs suffix on the detail)', () => {
+    const runs = [dr(1, '2024', 10, 0.5, 2000), dr(1, '2022', 10, 0.5, 2000), dr(2, '2024', 1, 0.1, 2000), dr(2, '2022', 1, 0.1, 2000)]
+    const v = assembleChampionVerdict({ dsr: { threshold: 0.95, minObs: 1000 } }, { runs, splitLevers: ['window'], criterion: crit })
+    const dsr = v.championGates.find((g) => g.kind === 'dsr')!
+    expect(dsr.detail).not.toMatch(/n_obs/)
+  })
+
+  it('SKIPS the seed-stability gate with fewer than 2 evaluable seeds (fail-closed)', () => {
+    const v = assembleChampionVerdict(
+      { stability: { maxCiWidth: 2 } },
+      { runs: [sr(0, 10)], splitLevers: ['window'], criterion: crit },
+    )
+    const g = v.championGates.find((x) => x.kind === 'seed-stability')!
+    expect(g.applicable).toBe(false)
+    expect(g.detail).toBe('need ≥ 2 seeds')
+    expect(v.steady).toBe(false)
+  })
+
+  it('a RATIO gate FAILS a split where the referenced bound metric is absent (bound ⇒ NaN)', () => {
+    const runs: AnalysisRun[] = [
+      { key: 'a', config: { lr: 1, window: '2024' }, objective: 5, metrics: { up_capture: 0.9 }, seed: 0, status: 'completed' },
+      { key: 'b', config: { lr: 1, window: '2024' }, objective: 5, metrics: { up_capture: 0.8 }, seed: 1, status: 'completed' },
+    ]
+    const v = assembleChampionVerdict(
+      { championGates: [{ metric: 'up_capture', op: '>', value: { metric: 'down_capture' } }] },
+      { runs, splitLevers: ['window'], criterion: crit },
+    )
+    const g = v.championGates[0]
+    // up_capture is present (gate is applicable) but down_capture is absent ⇒ bound NaN ⇒ 0.85 > NaN is false.
+    expect(g.applicable).toBe(true)
+    expect(g.pass).toBe(false)
   })
 })

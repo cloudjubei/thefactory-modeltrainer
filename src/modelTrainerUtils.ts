@@ -33,6 +33,7 @@ import type {
   TrainerLeverSpec,
   TrainerManifest,
   TrainerMigrationRule,
+  ExperimentRecord,
   TrainingHypothesis,
   TrainingModel,
   TrainingPaperRecord,
@@ -801,6 +802,8 @@ export interface HypothesisConsolidationPlan {
   unionRecord: TrainingHypothesis
   changedPapers: TrainingPaperRecord[]
   changedModels: TrainingModel[]
+  /** Side-experiments whose `hypothesisId` was repointed off an absorbed id onto the survivor. */
+  changedExperiments: ExperimentRecord[]
   deletedIds: string[]
   mergedFrom: string[]
 }
@@ -829,6 +832,7 @@ export function planHypothesisConsolidation(
   group: { members: HypothesisLike[] },
   papers: TrainingPaperRecord[],
   models: TrainingModel[],
+  experiments: ExperimentRecord[],
   nowIso: string,
   hashFn: (config: Record<string, unknown>) => string,
 ): HypothesisConsolidationPlan | { skipped: 'conflict'; members: string[] } | null {
@@ -904,10 +908,23 @@ export function planHypothesisConsolidation(
     if (touched) changedModels.push({ ...m, hypothesisIds: top.ids, flavors, updatedAt: nowIso })
   }
 
+  // Repoint side-experiments linked (by hypothesisId) to an absorbed hypothesis onto the survivor, so a
+  // thesis proven ONLY by a linked experiment doesn't lose that evidence when its id is merged away.
+  const changedExperiments: ExperimentRecord[] = []
+  for (const e of experiments || []) {
+    if (!e || !e.hypothesisId || !absorbedIds.has(e.hypothesisId)) continue
+    changedExperiments.push({
+      ...e,
+      hypothesisId: newId,
+      provenance: { ...e.provenance, updatedAt: nowIso },
+    })
+  }
+
   return {
     unionRecord,
     changedPapers,
     changedModels,
+    changedExperiments,
     deletedIds: [...absorbedIds],
     mergedFrom: members.map((m) => m.id),
   }
@@ -922,6 +939,8 @@ export interface HypothesisSpecMigrationPlan {
   changedPapers: TrainingPaperRecord[]
   /** Models/flavors whose hypothesis links were repointed. */
   changedModels: TrainingModel[]
+  /** Side-experiments whose `hypothesisId` was repointed off a re-keyed/deleted id onto the survivor. */
+  changedExperiments: ExperimentRecord[]
 }
 
 /**
@@ -940,6 +959,7 @@ export function planHypothesisSpecMigration(
   hypotheses: TrainingHypothesis[],
   papers: TrainingPaperRecord[],
   models: TrainingModel[],
+  experiments: ExperimentRecord[],
   migrations: TrainerMigrationRule[] | undefined,
   nowIso: string,
   hashFn: (config: Record<string, unknown>) => string,
@@ -949,6 +969,7 @@ export function planHypothesisSpecMigration(
     deletes: [],
     changedPapers: [],
     changedModels: [],
+    changedExperiments: [],
   }
   if (!migrations || migrations.length === 0 || !hypotheses || hypotheses.length === 0) return empty
 
@@ -1051,7 +1072,19 @@ export function planHypothesisSpecMigration(
     if (touched) changedModels.push({ ...m, hypothesisIds: top.ids, flavors, updatedAt: nowIso })
   }
 
-  return { writes, deletes: safeDeletes, changedPapers, changedModels }
+  // Repoint side-experiments linked to a re-keyed/absorbed hypothesis onto the survivor (single-hop, like
+  // paper/model links) so the migrated thesis keeps its explicitly-linked experiment evidence.
+  const changedExperiments: ExperimentRecord[] = []
+  for (const e of experiments || []) {
+    if (!e || !e.hypothesisId || !remap.has(e.hypothesisId)) continue
+    changedExperiments.push({
+      ...e,
+      hypothesisId: remap.get(e.hypothesisId) as string,
+      provenance: { ...e.provenance, updatedAt: nowIso },
+    })
+  }
+
+  return { writes, deletes: safeDeletes, changedPapers, changedModels, changedExperiments }
 }
 
 /**

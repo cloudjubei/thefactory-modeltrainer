@@ -1240,3 +1240,182 @@ describe('buildRunIndex + candidateRunsFor', () => {
     expect(H.candidateRunsFor({ fixed: { model_name: 'ppo' } }, H.buildRunIndex([]))).toEqual([])
   })
 })
+
+// ── A4: one thesis, many sources — side-experiment cells as a SECOND evidence source ────────────────────
+const cell = (
+  key: string,
+  config: Record<string, unknown>,
+  opts: { objective?: number; vh?: number; status?: string } = {},
+) => ({
+  key,
+  config,
+  status: opts.status || 'completed',
+  ...(opts.objective === undefined ? {} : { objective: opts.objective }),
+  ...(opts.vh === undefined ? {} : { metrics: { return_vs_hold_pct: opts.vh } }),
+})
+const experiment = (
+  id: string,
+  cells: ReturnType<typeof cell>[],
+  opts: { hypothesisId?: string } = {},
+) => ({ id, cells, ...(opts.hypothesisId ? { hypothesisId: opts.hypothesisId } : {}) })
+
+describe('experimentEvidenceRows', () => {
+  it('includes cells whose config spec-matches, source-tagged with a prefixed key', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const e = experiment('e1', [
+      cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }),
+      cell('c2', { allow_shorting: false }, { objective: 1, vh: -1 }),
+    ])
+    const rows = H.experimentEvidenceRows(h, [e])
+    expect(rows.map((r: any) => r.key)).toEqual(['exp:e1:c1'])
+    expect(rows[0].summary.source).toBe('experiment')
+    expect(rows[0].summary.objective).toBe(5)
+    expect(rows[0].summary.metrics.return_vs_hold_pct).toBe(2)
+  })
+
+  it('includes EVERY cell of an experiment linked by hypothesisId, regardless of spec match', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const e = experiment(
+      'e1',
+      [cell('c1', { allow_shorting: false }, { vh: 3 }), cell('c2', { foo: 1 }, { vh: 4 })],
+      { hypothesisId: 'h1' },
+    )
+    const rows = H.experimentEvidenceRows(h, [e])
+    expect(rows.map((r: any) => r.key).sort()).toEqual(['exp:e1:c1', 'exp:e1:c2'])
+  })
+
+  it('excludes cells that neither spec-match nor are id-linked', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const e = experiment('e1', [cell('c1', { allow_shorting: false }, { vh: 3 })])
+    expect(H.experimentEvidenceRows(h, [e])).toEqual([])
+  })
+
+  it('dedupes rows by key', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const e = experiment('e1', [
+      cell('c1', { allow_shorting: true }, { vh: 1 }),
+      cell('c1', { allow_shorting: true }, { vh: 1 }),
+    ])
+    expect(H.experimentEvidenceRows(h, [e]).length).toBe(1)
+  })
+})
+
+describe('multi-source verdict aggregation', () => {
+  it('proves a thesis from EXPERIMENT evidence alone when runs are absent', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const e = experiment(
+      'e1',
+      [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }), cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 })],
+      { hypothesisId: 'h1' },
+    )
+    const exp = H.experimentEvidenceRows(h, [e])
+    const v = H.autoVerdictForHypothesis(h, [], 'max', 2, undefined, undefined, exp)
+    expect(v).toBe('proven')
+  })
+
+  it('AGGREGATES across sources — 1 run + 1 experiment cell reach minRuns together', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const runs = [run('r1', { allow_shorting: true }, { objective: 4, vh: 1 })]
+    const e = experiment('e1', [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 })], {
+      hypothesisId: 'h1',
+    })
+    const exp = H.experimentEvidenceRows(h, [e])
+    // minRuns 2: neither source alone reaches it; pooled they do → proven
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 2, undefined, undefined, exp)).toBe('proven')
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 2, undefined, undefined, [])).toBe('untested')
+  })
+
+  it('measuredBySource splits run vs experiment vs combined counts', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const runs = [run('r1', { allow_shorting: true }, { objective: 4, vh: 1 })]
+    const e = experiment('e1', [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 })], {
+      hypothesisId: 'h1',
+    })
+    const exp = H.experimentEvidenceRows(h, [e])
+    const m = H.measuredBySource(h, runs, exp, 'max', undefined)
+    expect(m.run.runs).toBe(1)
+    expect(m.experiment.runs).toBe(1)
+    expect(m.combined.runs).toBe(2)
+  })
+
+  it('evaluateHypothesis records a transition attributed to the experiment source', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } }, verdictSource: 'auto', status: 'untested' }
+    const e = experiment(
+      'e1',
+      [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }), cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 })],
+      { hypothesisId: 'h1' },
+    )
+    const exp = H.experimentEvidenceRows(h, [e])
+    const { next, transition, changed } = H.evaluateHypothesis(h, [], {
+      direction: 'max',
+      at: 'T',
+      minRuns: 2,
+      experimentRows: exp,
+    })
+    expect(changed).toBe(true)
+    expect(next.status).toBe('proven')
+    expect(transition.to).toBe('proven')
+    expect(transition.byRunKeys).toContain('exp:e1:c1')
+    expect(transition.sources).toEqual(['experiment'])
+  })
+
+  it('preserves the manual-override precedence even with experiment evidence', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } }, verdictSource: 'manual', status: 'disproved' }
+    const e = experiment('e1', [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 })], {
+      hypothesisId: 'h1',
+    })
+    const exp = H.experimentEvidenceRows(h, [e])
+    expect(H.effectiveVerdict(h, [], 'max', 1, undefined, undefined, exp)).toBe('disproved')
+    expect(H.evaluateHypothesis(h, [], { experimentRows: exp, minRuns: 1 }).changed).toBe(false)
+  })
+
+  it('does NOT let an off-spec linked cell into a comparison arm (holds fixed levers constant)', () => {
+    const h = {
+      id: 'h1',
+      spec: { fixed: { asset: 'BTC' }, compare: { lever: 'allow_shorting', values: [true, false] } },
+      comparison: { kind: 'beats-baseline', baselineIndex: 1 },
+    }
+    // On BTC the shorting arm (true, obj 3) loses to the baseline (false, obj 5) → disproved.
+    const runs = [
+      run('r1', { asset: 'BTC', allow_shorting: false }, { objective: 5, vh: 1 }),
+      run('r2', { asset: 'BTC', allow_shorting: true }, { objective: 3, vh: 1 }),
+    ]
+    // A linked cell on a DIFFERENT asset (violates fixed asset=BTC) with a huge objective must NOT be
+    // attributed to the BTC shorting arm and flip the verdict.
+    const e = experiment(
+      'e1',
+      [cell('c1', { asset: 'GOLD', allow_shorting: true }, { objective: 100, vh: 9 })],
+      { hypothesisId: 'h1' },
+    )
+    const exp = H.experimentEvidenceRows(h, [e])
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 1, undefined, undefined, exp)).toBe('disproved')
+  })
+
+  it('dedupes an experiment cell whose config equals a matched run (no double-count to minRuns)', () => {
+    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
+    const runs = [run('K', { allow_shorting: true }, { objective: 4, vh: 2 })]
+    // A linked cell with the SAME underlying key 'K' (same config) = the same physical condition.
+    const e = experiment('e1', [cell('K', { allow_shorting: true }, { objective: 4, vh: 2 })], {
+      hypothesisId: 'h1',
+    })
+    const exp = H.experimentEvidenceRows(h, [e])
+    expect(H.measuredBySource(h, runs, exp, 'max', undefined).combined.runs).toBe(1)
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 2, undefined, undefined, exp)).toBe('untested')
+  })
+
+  it('feeds experiment cells into the cross-context comparison branch', () => {
+    const h = {
+      id: 'h1',
+      spec: { compare: { lever: 'allow_shorting', values: [true, false] } },
+      comparison: { kind: 'beats-baseline', baselineIndex: 1 },
+    }
+    // baseline (false) from a run; the shorting arm (true) supplied ONLY by an experiment cell
+    const runs = [run('r1', { allow_shorting: false }, { objective: 1, vh: -1 })]
+    const e = experiment('e1', [cell('c1', { allow_shorting: true }, { objective: 9, vh: 5 })], {
+      hypothesisId: 'h1',
+    })
+    const exp = H.experimentEvidenceRows(h, [e])
+    const v = H.autoVerdictForHypothesis(h, runs, 'max', 1, undefined, undefined, exp)
+    expect(v).toBe('proven')
+  })
+})

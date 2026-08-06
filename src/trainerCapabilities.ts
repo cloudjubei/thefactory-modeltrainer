@@ -44,6 +44,14 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     optionalParams: ['maxRuns', 'maxConcurrent', 'targetObjective'],
   },
   {
+    activityType: 'side-experiment',
+    label: 'Run a side-experiment',
+    description:
+      'Run a DIAGNOSTIC matrix through the project’s training CLI that produces NO model (a baseline scan, breadth analysis, ablation or correctness probe). Its cells persist in ONE `<recordType>-experiment` record — never in the run store, which stays apples-to-apples pure — and count as evidence for a thesis alongside RL runs. Pass `thesis` (the claim it tests) and `matrix` (an experiment spec {fixed?, sweep?, seeds?, environments?, datasets?, compare?} over the manifest lever names, validated before launch), plus `hypothesisId` to link it to a hypothesis so its cells count as that thesis’s evidence.',
+    requiredParams: ['thesis', 'matrix'],
+    optionalParams: ['hypothesisId', 'thesisTarget', 'refresh', 'concurrency'],
+  },
+  {
     activityType: 'judge',
     label: 'Judge runs',
     description:
@@ -212,6 +220,14 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
 export const TRAINER_EXEMPT_ACTIVITY_TYPES: readonly string[] = ['inspect-trainer']
 
 /**
+ * Launchable activities the CHAT can start but the viewer deliberately has no button for — the parity
+ * audit's dead-declaration check skips exactly these (and asserts, in the other direction, that they really
+ * are absent from the viewer, so gaining a button forces removal from this list). `side-experiment` is
+ * AI-driven by design: the AI proposes a diagnostic matrix for a thesis and files the evidence itself.
+ */
+export const TRAINER_CHAT_ONLY_ACTIVITY_TYPES: readonly string[] = ['side-experiment']
+
+/**
  * The DataStorage record types a chat may query — and, where flagged, create/edit — via the generic
  * project-data tools. `suffix` is appended to the manifest `recordType` (`''` = the run record); `fixedType`
  * is an absolute type. The first five reproduce the pre-A2 declaration verbatim; the rest are A2 additions.
@@ -234,6 +250,20 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
     creatableFields: ['title', 'claim', 'rationale', 'spec', 'comparison'],
     createDefaults: { status: 'untested', verdictSource: 'auto', source: 'llm' },
     view: { view: 'hypotheses', keyParam: 'focus' },
+  },
+  {
+    suffix: '-experiment',
+    label: 'Side experiment',
+    description:
+      'A diagnostic side-experiment: a matrix of cells run through the SAME CLI as training but producing NO model (baseline scans, breadth, ablations), persisted as thesis evidence WITHOUT polluting the run store. Link it to a hypothesis with `hypothesisId` so its cells count as that thesis’s evidence alongside RL runs. Create with `thesis`, a `matrix` ({fixed?, sweep?, seeds?, environments?, datasets?, compare?} over declared lever names) and optional `hypothesisId`/`thesisTarget`. Key is the matrix hash.',
+    editable: true,
+    editableFields: ['thesis', 'thesisTarget', 'hypothesisId', 'status'],
+    creatable: true,
+    creatableFields: ['thesis', 'thesisTarget', 'hypothesisId', 'matrix'],
+    createDefaults: { status: 'queued', source: 'llm' },
+    // No keyParam: an experiment's key is its MATRIX hash, not a hypothesis id — passing it as `focus`
+    // would deep-link to a hypothesis that doesn't exist. The link opens the registry the evidence feeds.
+    view: { view: 'hypotheses' },
   },
   {
     suffix: '-paper',

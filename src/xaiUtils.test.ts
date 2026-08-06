@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { AnalysisCriterion, AnalysisRun } from './modelTrainerTypes.js'
+import type { AnalysisCriterion, AnalysisRun, ExperimentCell } from './modelTrainerTypes.js'
 import {
   ablationPath,
+  aggregateExperimentCells,
   aggregateRunValues,
   aggregateToSetupRuns,
   benjaminiHochberg,
@@ -82,6 +83,118 @@ describe('aggregateRunValues', () => {
     const agg = aggregateRunValues([42])
     expect(agg.iqm).toBe(42)
     expect(agg.ci).toEqual([42, 42])
+  })
+})
+
+describe('aggregateExperimentCells', () => {
+  const cell = (
+    key: string,
+    opts: { objective?: number; vh?: number; status?: 'completed' | 'failed' } = {},
+  ): ExperimentCell => ({
+    key,
+    config: {},
+    status: opts.status || 'completed',
+    ...(opts.objective === undefined ? {} : { objective: opts.objective }),
+    ...(opts.vh === undefined ? {} : { metrics: { return_vs_hold_pct: opts.vh } }),
+  })
+  const ctx = { direction: 'max' as const, assessedAt: '2026-08-06T00:00:00Z' }
+
+  it('returns unverifiable with a null aggregate when there are no cells', () => {
+    const { aggregate, verdict } = aggregateExperimentCells([], ctx)
+    expect(aggregate).toBeNull()
+    expect(verdict.kind).toBe('unverifiable')
+    expect(verdict.passed).toBe(false)
+    expect(verdict.source).toBe('auto')
+    expect(verdict.assessedAt).toBe('2026-08-06T00:00:00Z')
+  })
+
+  it('excludes failed cells from the aggregate and the benchmark read', () => {
+    const cells = [cell('a', { objective: 10, vh: 5 }), cell('b', { status: 'failed', vh: 99 })]
+    const { aggregate, verdict } = aggregateExperimentCells(cells, ctx)
+    expect(aggregate?.n).toBe(1)
+    // one completed cell that clears → looked good on a single split, not yet robust
+    expect(verdict.kind).toBe('single-split-luck')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('is unverifiable when completed cells report no benchmark metric (even with objectives)', () => {
+    const cells = [cell('a', { objective: 10 }), cell('b', { objective: 12 })]
+    const { aggregate, verdict } = aggregateExperimentCells(cells, ctx)
+    expect(aggregate?.n).toBe(2)
+    expect(aggregate?.mean).toBe(11)
+    expect(verdict.kind).toBe('unverifiable')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('is single-split-luck when the ONLY benchmark cell clears the bar', () => {
+    const { verdict } = aggregateExperimentCells([cell('a', { objective: 1, vh: 3 })], ctx)
+    expect(verdict.kind).toBe('single-split-luck')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('is not-replicated when the only benchmark cell misses the bar', () => {
+    const { verdict } = aggregateExperimentCells([cell('a', { objective: 1, vh: -3 })], ctx)
+    expect(verdict.kind).toBe('not-replicated')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('is ROBUST (passed) when EVERY benchmark cell clears across ≥2 splits', () => {
+    const cells = [cell('a', { objective: 2, vh: 1 }), cell('b', { objective: 3, vh: 4 })]
+    const { verdict } = aggregateExperimentCells(cells, ctx)
+    expect(verdict.kind).toBe('robust')
+    expect(verdict.passed).toBe(true)
+    expect(verdict.rationale).toContain('2/2')
+  })
+
+  it('is not-replicated when a single split fails (robustness demands ALL clear)', () => {
+    const cells = [cell('a', { vh: 1 }), cell('b', { vh: 2 }), cell('c', { vh: -1 })]
+    const { verdict } = aggregateExperimentCells(cells, ctx)
+    expect(verdict.kind).toBe('not-replicated')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('is not-replicated when no cell clears across multiple splits', () => {
+    const cells = [cell('a', { vh: -1 }), cell('b', { vh: -2 })]
+    const { verdict } = aggregateExperimentCells(cells, ctx)
+    expect(verdict.kind).toBe('not-replicated')
+    expect(verdict.passed).toBe(false)
+  })
+
+  it('honours a min-direction benchmark (clears when the metric is BELOW the threshold)', () => {
+    const benchmark = { metric: 'max_drawdown_pct', threshold: -5, direction: 'min' as const }
+    const cells: ExperimentCell[] = [
+      { key: 'a', config: {}, status: 'completed', objective: 1, metrics: { max_drawdown_pct: -8 } },
+      { key: 'b', config: {}, status: 'completed', objective: 1, metrics: { max_drawdown_pct: -6 } },
+    ]
+    const { verdict } = aggregateExperimentCells(cells, { ...ctx, benchmark })
+    expect(verdict.kind).toBe('robust')
+    expect(verdict.passed).toBe(true)
+  })
+
+  it('respects a tunable minSplits and never labels a multi-split cohort single-split-luck', () => {
+    // Under minSplits=3, two all-clearing cells are NOT enough to be robust, but they are TWO splits — so
+    // the sub-threshold verdict must be not-replicated, never the (single-split) luck label.
+    const cells = [cell('a', { objective: 1, vh: 3 }), cell('b', { objective: 2, vh: 4 })]
+    const v = aggregateExperimentCells(cells, { ...ctx, minSplits: 3 }).verdict
+    expect(v.kind).toBe('not-replicated')
+    expect(v.passed).toBe(false)
+    // A genuine single split still reads as single-split-luck.
+    expect(aggregateExperimentCells([cell('a', { vh: 1 })], { ...ctx, minSplits: 3 }).verdict.kind).toBe(
+      'single-split-luck',
+    )
+  })
+
+  it('aggregates objectives per the objective DIRECTION independent of the benchmark metric', () => {
+    const cells = [
+      cell('a', { objective: 10, vh: 1 }),
+      cell('b', { objective: 20, vh: 1 }),
+      cell('c', { objective: 30, vh: 1 }),
+    ]
+    const { aggregate } = aggregateExperimentCells(cells, ctx)
+    expect(aggregate?.n).toBe(3)
+    expect(aggregate?.min).toBe(10)
+    expect(aggregate?.max).toBe(30)
+    expect(aggregate?.median).toBe(20)
   })
 })
 
@@ -1099,5 +1212,196 @@ describe('exported robust-stats helpers (champion-verdict families)', () => {
     // Every resample of a constant sample is the same, so every bootstrap diff = 1, ci=[1,1], and NO diff is
     // <=0 ⇒ pValue 0. This exercises the seeded loop without a fragile snapshot.
     expect(bootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({ ci: [1, 1], pValue: 0, delta: 1 })
+  })
+})
+
+// Degenerate / edge branches of the engine — empty samples, missing seeds, min-direction orientation, the
+// sampled (vs enumerated) acquisition grid, and the whole-space bundle's null exits. Each pins a concrete
+// output so the branch can't be mutated away silently.
+describe('edge branches', () => {
+  const MINdur: AnalysisCriterion = { key: 'durationMs', direction: 'min' }
+
+  it('aggregateRunValues on an empty sample is the all-zero aggregate with a degenerate CI', () => {
+    expect(aggregateRunValues([])).toEqual({
+      n: 0,
+      mean: 0,
+      iqm: 0,
+      median: 0,
+      std: 0,
+      min: 0,
+      max: 0,
+      ci: [0, 0],
+    })
+  })
+
+  it('fitConfigSurrogate on no runs is an empty, zero-mean surrogate', () => {
+    const s = fitConfigSurrogate([], MAX)
+    expect(s.trees).toEqual([])
+    expect(s.levers).toEqual([])
+    expect(s.mean).toBe(0)
+  })
+
+  it('fanovaImportances returns [] with fewer than two configs', () => {
+    const one = [run('a', { lr: 0.1 }, 10)]
+    expect(fanovaImportances(fitConfigSurrogate(one, MAX), one, MAX)).toEqual([])
+  })
+
+  it('ofatContrasts folds a missing seed to 0 when counting distinct seeds', () => {
+    const runs = [
+      run('a', { lr: 0.1, batch_size: 64 }, 10, { seed: undefined }),
+      run('b', { lr: 0.1, batch_size: 128 }, 20, { seed: undefined }),
+    ]
+    const c = ofatContrasts(runs, 'batch_size', MAX)[0]
+    expect(c.levels.map((l) => l.value).sort()).toEqual(['128', '64'])
+    expect(c.levels.every((l) => l.seeds === 1)).toBe(true) // seed undefined → 0 → one distinct seed
+  })
+
+  it('recommends more seeds even when the sole run carries no seed (nullish → 0)', () => {
+    const runs = [run('a', { lr: 0.1, batch_size: 64 }, 100, { seed: undefined })]
+    const thin = recommendExperiments(runs, MAX).find((r) => r.kind === 'thin-seeds')
+    expect(thin).toBeDefined()
+    expect((thin!.spec.seeds || []).length).toBeGreaterThan(0)
+  })
+
+  it('acquisition SAMPLES (not enumerates) a candidate grid over the cap, deterministically', () => {
+    // 13 × 13 × 13 = 2197 candidate configs exceeds MAX_ACQUISITION_CANDIDATES (2000), forcing the seeded
+    // sampling branch of cappedCartesian rather than the full-enumeration branch.
+    const many = Array.from({ length: 13 }, (_, i) => run(`m${i}`, { a: i, b: i, c: i }, i))
+    const r1 = recommendExperiments(many, MAX)
+    const r2 = recommendExperiments([...many], MAX)
+    expect(Array.isArray(r1)).toBe(true)
+    expect(r1).toEqual(r2) // a seeded sampler ⇒ identical output for identical input
+  })
+
+  describe('ablationPath orientation & no-op', () => {
+    it('orients gains for a MIN criterion (the fastest incumbent predicts at least as low as the baseline)', () => {
+      const runs: AnalysisRun[] = []
+      for (const lr of [0.1, 0.2])
+        for (const gamma of [0.9, 0.99])
+          for (let s = 0; s < 3; s++)
+            runs.push(
+              run(`${lr}-${gamma}-${s}`, { lr, gamma }, 0, {
+                seed: s,
+                durationMs: lr * 1000 + gamma * 10 + s,
+              }),
+            )
+      const path = ablationPath(fitConfigSurrogate(runs, MINdur), runs, MINdur)!
+      expect(path.steps.length).toBeGreaterThanOrEqual(1)
+      expect(path.incumbentPredicted).toBeLessThanOrEqual(path.baselinePredicted)
+    })
+
+    it('is undefined when baseline and incumbent share every lever value (nothing to ablate)', () => {
+      const runs = [run('a', { lr: 0.1 }, 10), run('b', { lr: 0.1 }, 20)]
+      expect(ablationPath(fitConfigSurrogate(runs, MAX), runs, MAX)).toBeUndefined()
+    })
+  })
+
+  describe('pcaProjection degenerate encodings', () => {
+    it('puts all variance on PC1 when two numeric levers are perfectly correlated', () => {
+      const runs = [
+        run('a', { lr: 1, bs: 10 }, 1),
+        run('b', { lr: 2, bs: 20 }, 2),
+        run('c', { lr: 3, bs: 30 }, 3),
+      ]
+      const p = pcaProjection(runs, MAX)!
+      expect(p.features).toBe(2)
+      expect(p.points).toHaveLength(3)
+      expect(p.explainedVariance[0]).toBeCloseTo(1) // one real dimension carries all the variance
+      expect(p.explainedVariance[1]).toBeCloseTo(0) // the deflated 2nd component explains ~zero variance
+      expect(p.explainedVariance[0]).toBeGreaterThan(p.explainedVariance[1])
+    })
+
+    it('returns null with ≥3 distinct setups but no encodable levers', () => {
+      const ds = (candles: number) => ({ asset: 'BTC', timeframe: '1h', candles, from: 'a', to: 'b' })
+      const runs = [
+        run('a', {}, 10, { dataset: ds(100) }),
+        run('b', {}, 20, { dataset: ds(200) }),
+        run('c', {}, 30, { dataset: ds(300) }),
+      ]
+      expect(pcaProjection(runs, MAX)).toBeNull()
+    })
+  })
+
+  describe('aggregateToSetupRuns — seed default & criterion field placement', () => {
+    it('folds a missing seed to 0 in the recorded seed set/list', () => {
+      const runs = [
+        run('a', { lr: 0.1 }, 10, { seed: undefined }),
+        run('b', { lr: 0.1 }, 12, { seed: 1 }),
+      ]
+      const setup = aggregateToSetupRuns(runs, MAX)[0]
+      expect(setup.seedList).toEqual([0, 1]) // undefined → 0, sorted
+      expect(setup.seeds).toBe(2)
+    })
+
+    it('stores the aggregate on durationMs for the runtime criterion', () => {
+      const runs = [
+        run('a', { lr: 0.1 }, 0, { seed: 0, durationMs: 100 }),
+        run('b', { lr: 0.1 }, 0, { seed: 1, durationMs: 200 }),
+      ]
+      const setup = aggregateToSetupRuns(runs, MINdur)[0]
+      expect(setup.durationMs).toBeCloseTo(150) // iqm([100, 200])
+    })
+
+    it('stores the aggregate under a metrics key for a metric criterion', () => {
+      const WIN: AnalysisCriterion = { key: 'win_pct', direction: 'max' }
+      const runs = [
+        run('a', { lr: 0.1 }, 0, { seed: 0, metrics: { win_pct: 40 } }),
+        run('b', { lr: 0.1 }, 0, { seed: 1, metrics: { win_pct: 60 } }),
+      ]
+      const setup = aggregateToSetupRuns(runs, WIN)[0]
+      expect(setup.metrics!.win_pct).toBeCloseTo(50)
+    })
+  })
+
+  describe('computeConfigSpaceAnalysis — direction, missing environment, single setup', () => {
+    function envTimedRuns(): AnalysisRun[] {
+      const out: AnalysisRun[] = []
+      let k = 0
+      for (const transaction_fee of [0.001, 0.01])
+        for (const lr of [0.1, 0.5])
+          for (const seed of [0, 1]) {
+            k++
+            out.push(
+              run(`e${k}`, { transaction_fee, lr }, 0, {
+                seed,
+                durationMs: (transaction_fee === 0.001 ? 100 : 50) + lr * 10,
+                ranAt: `2026-01-${String(k).padStart(2, '0')}`,
+              }),
+            )
+          }
+      return out
+    }
+
+    it('honours a MIN criterion in both the environment best and the convergence curve', () => {
+      const a = computeConfigSpaceAnalysis(envTimedRuns(), MINdur, {
+        contextLevers: ['transaction_fee'],
+      })!
+      expect(a.criterion.direction).toBe('min')
+      expect(a.environments).toHaveLength(2)
+      expect(a.environments[0].best).toBe(101) // MIN over the env's setups (101 < 105)
+      const bests = a.convergence.map((p) => p.best)
+      expect(bests).toHaveLength(4)
+      expect(bests[0]).toBe(101)
+      for (let i = 1; i < bests.length; i++) expect(bests[i]).toBeLessThanOrEqual(bests[i - 1]) // running min
+    })
+
+    it('returns null when the requested environment matches no runs', () => {
+      const a = computeConfigSpaceAnalysis(envTimedRuns(), MAX, {
+        contextLevers: ['transaction_fee'],
+        environment: { transaction_fee: 999 },
+      })
+      expect(a).toBeNull()
+    })
+
+    it('sets ablation to null when there is only a single setup (nothing to ablate)', () => {
+      const runs = [
+        run('a', { lr: 0.1 }, 10, { seed: 0 }),
+        run('b', { lr: 0.1 }, 11, { seed: 1 }),
+        run('c', { lr: 0.1 }, 12, { seed: 2 }),
+      ]
+      const a = computeConfigSpaceAnalysis(runs, MAX)!
+      expect(a).not.toBeNull()
+      expect(a.ablation).toBeNull()
+    })
   })
 })

@@ -29,6 +29,18 @@
       view: { view: 'hypotheses', keyParam: 'focus' },
     },
     {
+      suffix: '-experiment',
+      label: 'Side experiment',
+      description:
+        'A diagnostic side-experiment: a matrix of cells run through the SAME CLI as training but producing NO model (baseline scans, breadth, ablations), persisted as thesis evidence WITHOUT polluting the run store. Link it to a hypothesis with `hypothesisId` so its cells count as that thesis’s evidence alongside RL runs. Create with `thesis`, a `matrix` ({fixed?, sweep?, seeds?, environments?, datasets?, compare?} over declared lever names) and optional `hypothesisId`/`thesisTarget`. Key is the matrix hash.',
+      editable: true,
+      editableFields: ['thesis', 'thesisTarget', 'hypothesisId', 'status'],
+      creatable: true,
+      creatableFields: ['thesis', 'thesisTarget', 'hypothesisId', 'matrix'],
+      createDefaults: { status: 'queued', source: 'llm' },
+      view: { view: 'hypotheses' },
+    },
+    {
       suffix: '-paper',
       label: 'Paper',
       description: 'A research paper and its testable hypotheses.',
