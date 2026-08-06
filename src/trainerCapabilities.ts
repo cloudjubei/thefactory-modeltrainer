@@ -220,14 +220,6 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
 export const TRAINER_EXEMPT_ACTIVITY_TYPES: readonly string[] = ['inspect-trainer']
 
 /**
- * Launchable activities the CHAT can start but the viewer deliberately has no button for — the parity
- * audit's dead-declaration check skips exactly these (and asserts, in the other direction, that they really
- * are absent from the viewer, so gaining a button forces removal from this list). `side-experiment` is
- * AI-driven by design: the AI proposes a diagnostic matrix for a thesis and files the evidence itself.
- */
-export const TRAINER_CHAT_ONLY_ACTIVITY_TYPES: readonly string[] = ['side-experiment']
-
-/**
  * The DataStorage record types a chat may query — and, where flagged, create/edit — via the generic
  * project-data tools. `suffix` is appended to the manifest `recordType` (`''` = the run record); `fixedType`
  * is an absolute type. The first five reproduce the pre-A2 declaration verbatim; the rest are A2 additions.

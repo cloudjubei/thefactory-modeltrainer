@@ -408,6 +408,112 @@
     return `${gate} PROVEN if the ${dir} ${objName} among the other context${n - 1 === 1 ? '' : 's'} beats the baseline (${baseLabel}); DISPROVED if none beat it.`
   }
 
+  // The lever pins a spec constrains: `fixed` (one allowed value), each `sweep` lever (its options) and the
+  // `compare` lever (its values). A run can only match the spec if EVERY pin is satisfied, which is what makes
+  // any single pin usable as an index discriminator.
+  function specPins(spec) {
+    const out = []
+    const fixed = (spec && spec.fixed) || {}
+    const fixedKeys = Object.keys(fixed)
+    for (let i = 0; i < fixedKeys.length; i++) out.push({ key: fixedKeys[i], values: [fixed[fixedKeys[i]]] })
+    const sweep = (spec && spec.sweep) || {}
+    const sweepKeys = Object.keys(sweep)
+    for (let i = 0; i < sweepKeys.length; i++) {
+      const raw = sweep[sweepKeys[i]]
+      out.push({ key: sweepKeys[i], values: Array.isArray(raw) ? raw : [raw] })
+    }
+    const cmp = spec && spec.compare
+    if (cmp && cmp.lever && Array.isArray(cmp.values) && cmp.values.length)
+      out.push({ key: cmp.lever, values: cmp.values })
+    return out.filter((p) => p.values.length)
+  }
+
+  // The DUAL of buildRunIndex: leverKey -> String(value) -> [hypotheses pinning that lever to that value].
+  // Each hypothesis is filed under its MOST SELECTIVE pin (fewest allowed values) — since a run must satisfy
+  // EVERY pin to match, filing under any one pin can never miss a true match, and the narrowest one yields the
+  // smallest bucket. An unpinned spec matches nothing (specMatchesConfig) so it is deliberately not indexed.
+  function buildHypothesisIndex(hypotheses) {
+    const index = new Map()
+    const all = hypotheses || []
+    for (let i = 0; i < all.length; i++) {
+      const pins = specPins(all[i] && all[i].spec)
+      if (!pins.length) continue
+      let disc = pins[0]
+      for (let p = 1; p < pins.length; p++) if (pins[p].values.length < disc.values.length) disc = pins[p]
+      let byVal = index.get(disc.key)
+      if (!byVal) {
+        byVal = new Map()
+        index.set(disc.key, byVal)
+      }
+      for (let v = 0; v < disc.values.length; v++) {
+        const k = String(disc.values[v])
+        const bucket = byVal.get(k)
+        if (bucket) bucket.push(all[i])
+        else byVal.set(k, [all[i]])
+      }
+    }
+    return index
+  }
+
+  // The hypotheses a run could possibly be evidence for — a SUPERSET; specMatchesConfig stays the verifier.
+  function candidateHypothesesFor(run, index) {
+    const cfg = (run && run.summary && run.summary.config) || {}
+    const out = []
+    const seen = new Set()
+    if (!index) return out
+    index.forEach((byVal, leverKey) => {
+      const bucket = byVal.get(String(cfg[leverKey]))
+      if (!bucket) return
+      for (let i = 0; i < bucket.length; i++) {
+        if (seen.has(bucket[i])) continue
+        seen.add(bucket[i])
+        out.push(bucket[i])
+      }
+    })
+    return out
+  }
+
+  // Which hypotheses a set of run CHANGES can affect — the incremental refresh's work list. Two ways in:
+  //   - a changed/added row could newly MATCH a thesis (found via the index, so unrelated theses stay asleep);
+  //   - a thesis's persisted `evidence.matchedKeys` names a changed or REMOVED key, so it depended on it.
+  // The second axis is what makes deletions and edits safe: a re-keyed or deleted run still wakes whoever
+  // counted it, which a "only look at rows newer than T" watermark could never see.
+  function hypothesesAffectedBy(changedRows, removedKeys, hypotheses, index) {
+    const affected = []
+    const seen = new Set()
+    const add = (h) => {
+      if (h && !seen.has(h)) {
+        seen.add(h)
+        affected.push(h)
+      }
+    }
+    const rows = changedRows || []
+    for (let i = 0; i < rows.length; i++) {
+      const cands = candidateHypothesesFor(rows[i], index)
+      for (let c = 0; c < cands.length; c++) add(cands[c])
+    }
+    const touched = new Set(removedKeys || [])
+    for (let i = 0; i < rows.length; i++) if (rows[i] && rows[i].key) touched.add(rows[i].key)
+    const all = hypotheses || []
+    for (let i = 0; i < all.length; i++) {
+      // Never judged (no snapshot) ⇒ always work, or a freshly created thesis would stay untested forever
+      // simply because no run happened to be new on the pass that first saw it.
+      if (all[i] && !all[i].evidence) {
+        add(all[i])
+        continue
+      }
+      if (!touched.size) continue
+      const keys = (all[i] && all[i].evidence && all[i].evidence.matchedKeys) || []
+      for (let k = 0; k < keys.length; k++) {
+        if (touched.has(keys[k])) {
+          add(all[i])
+          break
+        }
+      }
+    }
+    return affected
+  }
+
   // Whether a hypothesis can't yet be TESTED because a model it requires isn't implemented. `modelImplemented`
   // is an injected resolver name -> true (implemented) | false (known but unimplemented) | null (unknown), so
   // this module stays pure (no Models dependency). A fixed model_name is required; a compare over model_name
@@ -994,6 +1100,9 @@
     specMatchesConfig: specMatchesConfig,
     resolveBenchmark: resolveBenchmark,
     hypothesisMatchingRuns: hypothesisMatchingRuns,
+    buildHypothesisIndex: buildHypothesisIndex,
+    candidateHypothesesFor: candidateHypothesesFor,
+    hypothesesAffectedBy: hypothesesAffectedBy,
     experimentEvidenceRows: experimentEvidenceRows,
     measuredBySource: measuredBySource,
     sourceOfKey: sourceOfKey,

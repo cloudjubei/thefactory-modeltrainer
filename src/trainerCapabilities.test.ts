@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
   TRAINER_LAUNCHABLE_ACTIVITIES,
-  TRAINER_CHAT_ONLY_ACTIVITY_TYPES,
   TRAINER_EXEMPT_ACTIVITY_TYPES,
   TRAINER_CAPABILITY_RECORD_TYPES,
   TRAINER_EXEMPT_RECORDS,
@@ -15,8 +14,7 @@ describe('trainer launchable activities', () => {
   const byType = new Map(TRAINER_LAUNCHABLE_ACTIVITIES.map((a) => [a.activityType, a]))
 
   it('covers every chat-launchable trainer activity with a description', () => {
-    // The 25 project operations a user can start from the viewer (both launch paths), plus the CHAT-ONLY
-    // `side-experiment` (no viewer button — see TRAINER_CHAT_ONLY_ACTIVITY_TYPES). inspect-trainer is
+    // The 26 project operations a user can start from the viewer (both launch paths). inspect-trainer is
     // deliberately NOT here — it is the hub bootstrap (re-registers the manifest), an exempt activity.
     const expected = [
       'side-experiment',
@@ -91,14 +89,6 @@ describe('trainer launchable activities', () => {
     expect(TRAINER_EXEMPT_ACTIVITY_TYPES).toContain('inspect-trainer')
   })
 
-  it('marks the chat-only activities as launchable-but-not-viewer-driven', () => {
-    // A chat-only activity is declared launchable (the AI can start it) but has NO viewer button, so the
-    // parity audit's dead-declaration check must skip it — and ONLY it (the set is a subset of launchable).
-    expect([...TRAINER_CHAT_ONLY_ACTIVITY_TYPES]).toEqual(['side-experiment'])
-    for (const t of TRAINER_CHAT_ONLY_ACTIVITY_TYPES) expect(byType.has(t)).toBe(true)
-    // Viewer-driven activities must never be listed chat-only (that would silence the dead-declaration guard).
-    for (const t of ['train', 'judge', 'evaluate']) expect(TRAINER_CHAT_ONLY_ACTIVITY_TYPES).not.toContain(t)
-  })
 })
 
 describe('trainer capability record types', () => {

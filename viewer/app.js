@@ -66,7 +66,12 @@ const LANE_LIMITS_RECORD_TYPE = 'trainer-activity-limits'
 // drain reads so the user can reorder which queued campaign runs next (the Activity tab's ↑/↓/⤒).
 const QUEUE_ORDER_RECORD_TYPE = 'trainer-queue-order'
 // Activity types that run on compute — the experiment lane. Everything else is a task.
-const EXPERIMENT_ACTIVITY_TYPES = new Set(['train', 'evaluate', 'continue-training'])
+const EXPERIMENT_ACTIVITY_TYPES = new Set([
+  'train',
+  'evaluate',
+  'continue-training',
+  'side-experiment',
+])
 // Whether the 2nd ('Tasks') column is collapsed (persisted per session).
 const TASKS_COLLAPSED_SS = 'trainer.tasksCollapsed'
 // activityIds the user PAUSED (vs a backend-down stall). Persisted so a paused campaign still
@@ -1634,6 +1639,30 @@ async function ensureExperimentsLoaded() {
 function experimentRowsFor(h) {
   if (!experimentsCache.length || !window.Hypothesis) return []
   return window.Hypothesis.experimentEvidenceRows(h, experimentsCache)
+}
+// The state of the last completed verdict pass, so the next one can re-evaluate only what a change can reach.
+// `fingerprints` is key -> a cheap digest of the fields a verdict reads, so a RE-RUN (same config ⇒ same key,
+// new metrics) is detected as changed — a key-set diff alone would miss it and leave a stale verdict.
+let hypVerdictPass = null
+function runFingerprints(runs, metric) {
+  const out = new Map()
+  for (const r of runs || []) {
+    const s = r.summary || {}
+    const m = s.metrics || {}
+    // `config` is part of the digest because it decides WHICH theses a run is evidence for, and it is
+    // mutable under a stable record key — a manifest migration rewrites lever values in place, so a
+    // status/objective/metric-only digest would show no movement while the whole corpus changed hands.
+    // `setupKey` is the precomputed config hash when present; else fall back to the config itself.
+    const identity = s.setupKey || JSON.stringify(s.config || null)
+    out.set(r.key, `${s.status}|${s.objective}|${m[metric]}|${identity}`)
+  }
+  return out
+}
+// The verdict inputs carried on the THESIS rather than on the runs. `comparison` drives compareContexts and
+// `verdictSource` gates auto-evaluation entirely, and both can be rewritten in place on an existing id
+// (viewer form, or an agent via the generic update capability) with no run change to detect.
+function hypothesisVerdictInputDigest(h) {
+  return `${JSON.stringify((h && h.comparison) || null)}|${(h && h.verdictSource) || 'auto'}`
 }
 // The RUN-sourced keys among a persisted matchedKeys list (drops `exp:` experiment-cell keys). Run-only
 // consumers — the run-count chip, the persisted-basis text, the "view matching runs" filter — must never
@@ -13171,6 +13200,9 @@ function hypScanMemoFor(wm) {
 // changing runs (a manual override / its clear) would be masked by a stale memo hit until the next refresh
 // reassigned allRunsCache. Callers invalidate the id here so the change shows immediately.
 function forgetHypothesisVerdict(id) {
+  // A verdict changed WITHOUT any run changing (a manual override set or cleared), which the incremental
+  // work list cannot see — drop the pass state so the next refresh fully reconciles.
+  hypVerdictPass = null
   const m = hypVerdictMemo.get(allRunsCache)
   if (!m) return
   const prefix = `${id}|`
@@ -13801,6 +13833,7 @@ function hypothesisCoverageHtml(h, verdict) {
   return `<div class="hyp-coverage">
     <p class="card-sub">Still needed to judge: ${escapeHtml(parts.join(' · '))}.</p>
     <button type="button" class="ghost-btn" data-action="run" data-id="${escapeHtml(h.id)}"${busy ? ' disabled' : ''}${helpAttr('Launch exactly the runs this hypothesis is missing — the planner runs the setups without enough evidence yet and skips the ones already done. The verdict updates as they land.')}>${iconRunSvg(14)} Launch the missing runs</button>
+    <button type="button" class="ghost-btn" data-action="screen" data-id="${escapeHtml(h.id)}"${helpAttr('Screen this thesis CHEAPLY — run its spec as a diagnostic side-experiment (no model trained). The cells are filed as evidence for this hypothesis alongside its runs, and never enter the run store.')}>${iconRunSvg(14)} Screen it (no model)</button>
   </div>`
 }
 // For a structurally BLOCKED hypothesis the remedy is not "run more" — the spec must be rewritten. Surface
@@ -13990,7 +14023,47 @@ async function refreshHypothesisVerdicts(hyps) {
   const direction = objectiveDirection()
   const benchmark = hypothesisBenchmark()
   const at = nowIso()
-  const list = hyps || []
+  // INCREMENTAL work list. A full pass re-evaluates every thesis against every candidate run; after the first
+  // pass only the theses a CHANGE can reach need it. `hypothesesAffectedBy` reaches them two ways: a changed
+  // row that could newly match (via the hypothesis index), and any thesis whose stored `matchedKeys` names a
+  // changed or REMOVED key — so edits and deletions wake their dependants, which a timestamp watermark cannot.
+  // Narrowed ONLY when the judging inputs are unchanged: minRuns / benchmark / direction alter verdicts with no
+  // run change at all, so any of those moving forces a full reconciliation.
+  const fingerprints = runFingerprints(runsRef, hypothesisBenchmarkResolved().metric)
+  const hypDigests = new Map((hyps || []).map((h) => [h.id, hypothesisVerdictInputDigest(h)]))
+  const judging = `${hypothesisMinRuns}|${direction}|${JSON.stringify(benchmark || null)}|${experimentsEpoch}`
+  const prior = hypVerdictPass
+  let list = hyps || []
+  let narrowed = false
+  if (prior && prior.epoch === epoch && prior.judging === judging && window.Hypothesis.hypothesesAffectedBy) {
+    const changedRows = []
+    for (const r of runsRef) if (prior.fingerprints.get(r.key) !== fingerprints.get(r.key)) changedRows.push(r)
+    const removedKeys = []
+    for (const k of prior.fingerprints.keys()) if (!fingerprints.has(k)) removedKeys.push(k)
+    const wake = new Set(
+      window.Hypothesis.hypothesesAffectedBy(
+        changedRows,
+        removedKeys,
+        hyps || [],
+        window.Hypothesis.buildHypothesisIndex(hyps || []),
+      ),
+    )
+    // A verdict input can move with NO run change: `comparison` (kind/baselineIndex/tolerance, read by
+    // compareContexts) or `verdictSource` edited in place on an existing id — including by an agent through
+    // the generic update capability, which has no viewer callback to hook. Diffing a per-thesis digest
+    // catches every such path. A thesis whose persist FAILED last pass is re-woken for the same reason.
+    for (const h of hyps || []) {
+      if (prior.hypDigests.get(h.id) !== hypDigests.get(h.id)) wake.add(h)
+      else if (prior.rewake && prior.rewake.has(h.id)) wake.add(h)
+    }
+    list = (hyps || []).filter((h) => wake.has(h))
+    narrowed = true
+  }
+  if (narrowed && !list.length) {
+    // Nothing to do, but this IS a completed reconciliation of the current state — record it.
+    hypVerdictPass = { epoch, judging, fingerprints, hypDigests, rewake: new Set() }
+    return false
+  }
   const total = list.length
   // What the user currently SEES per card (the pre-refresh badge label) — so we report + animate only the
   // genuine verdict FLIPS. Read from the DOM, NOT recomputed (a recompute would already reflect the new
@@ -14042,7 +14115,15 @@ async function refreshHypothesisVerdicts(hyps) {
   }
   // Persist the flips off the compute path with bounded concurrency (never one awaited write per hypothesis
   // inside the scan). A manual override claimed mid-refresh is skipped.
-  await flushHypothesisVerdictWrites(pendingWrites)
+  const failedWrites = await flushHypothesisVerdictWrites(pendingWrites)
+  // Record the pass ONLY here — a completed loop over the whole work list AND a finished flush. The loop
+  // bails mid-way on a project switch or a new run snapshot; committing up front would have recorded those
+  // un-reached theses as reconciled and excluded them from every later narrowed pass (a permanently stale
+  // verdict). Leaving the prior state in place instead means the next pass diffs from the older baseline
+  // and re-derives everything that has moved since.
+  if (projectEpoch === epoch && allRunsCache === runsRef) {
+    hypVerdictPass = { epoch, judging, fingerprints, hypDigests, rewake: failedWrites || new Set() }
+  }
   if (projectEpoch === epoch && onHyp) {
     if (changed.length) {
       setStatusLine(
@@ -14090,7 +14171,10 @@ function updateHypothesisCardBadge(id, verdict) {
 // must not break rendering); skips any record now carrying a manual override (don't clobber a mid-refresh
 // edit).
 async function flushHypothesisVerdictWrites(list) {
-  if (!list || !list.length) return
+  // Returns the ids whose write FAILED. A dropped write leaves the persisted record stale, so the caller
+  // must re-wake those theses on the next pass rather than treating them as reconciled.
+  const failed = new Set()
+  if (!list || !list.length) return failed
   // A manual override the user saved DURING this (now-yielding) refresh must NOT be clobbered by an auto
   // write — the loop iterated a pre-override snapshot, so its `h` copies still read verdictSource:'auto'.
   // Re-read the live records once and drop any pending write whose record has since become a manual
@@ -14111,11 +14195,13 @@ async function flushHypothesisVerdictWrites(list) {
       try {
         await putHypothesis(h)
       } catch {
-        // best-effort
+        // best-effort for THIS pass, but the id is reported so the next pass re-derives it
+        failed.add(h.id)
       }
     }
   }
   await Promise.all(Array.from({ length: Math.min(POOL, writes.length) }, () => worker()))
+  return failed
 }
 function renderProposeControls() {
   const btn = byId('propose-btn')
@@ -14571,6 +14657,40 @@ async function runHypothesisCampaign(id, button) {
     }
   }
 }
+// Screen a hypothesis with a SIDE-EXPERIMENT: run its own spec as a diagnostic matrix through the project's
+// training CLI, producing NO model. The cells land in ONE `-experiment` record linked by `hypothesisId`, so
+// they count as evidence for this thesis alongside its RL runs while the run store stays apples-to-apples.
+async function screenHypothesis(id, button) {
+  const h = hypothesesCache.find((x) => x.id === id)
+  if (!h) return
+  const epoch = projectEpoch
+  setStatusLine('hypotheses-status', '')
+  let btnLabel
+  if (button) {
+    button.disabled = true
+    btnLabel = button.innerHTML
+    button.innerHTML = `${spinnerHtml()} Launching…`
+  }
+  try {
+    await startOrEnqueue(
+      'side-experiment',
+      trainerComputeParams({ thesis: h.title || h.id, matrix: h.spec, hypothesisId: h.id }),
+      `Screen: ${h.title || h.id}`,
+      { hypothesisId: h.id },
+    )
+    if (epoch !== projectEpoch) return
+    setStatusLine('hypotheses-status', 'Side-experiment launched — see the Activity tab.')
+    if (activeTabId === 'hypotheses') await renderHypotheses()
+  } catch {
+    if (epoch === projectEpoch)
+      setStatusLine('hypotheses-status', 'Could not start the side-experiment — please try again.', true)
+  } finally {
+    if (button && document.body.contains(button)) {
+      button.disabled = false
+      if (btnLabel !== undefined) button.innerHTML = btnLabel
+    }
+  }
+}
 function validateHypothesisSpec(text) {
   let parsed
   try {
@@ -14927,6 +15047,7 @@ function setupHypotheses() {
       if (!btn) return
       const { action, id } = btn.dataset
       if (action === 'run') runHypothesisCampaign(id, btn)
+      else if (action === 'screen') screenHypothesis(id, btn)
       else if (action === 'view-runs') viewHypothesisRuns(id)
       else if (action === 'discuss-hyp') chatAboutHypothesis(id)
       else if (action === 'discuss-hygiene') chatAboutHypothesisHealth()
@@ -19306,6 +19427,11 @@ async function scheduleSettleRefresh() {
   }
   settleRefreshRunning = true
   const epoch = projectEpoch
+  // A settling activity may have been a SIDE-EXPERIMENT, whose cells are hypothesis evidence. The experiment
+  // pool is otherwise loaded once per project (ensureExperimentsLoaded early-returns), so without dropping
+  // the guard here a finished screen would never reach the verdicts. Re-loading bumps `experimentsEpoch`,
+  // which forces the next verdict pass to reconcile fully.
+  experimentsProjectEpoch = -1
   try {
     if (corpusMode === 'memory' && corpusLoaded) {
       // Incremental: pull ONLY the newly-landed runs into the corpus, then re-render from it — never a

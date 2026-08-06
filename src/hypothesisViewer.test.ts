@@ -1419,3 +1419,122 @@ describe('multi-source verdict aggregation', () => {
     expect(v).toBe('proven')
   })
 })
+
+// The DUAL of the run index: index HYPOTHESES by their pinned lever values so an incoming run finds the few
+// theses it could affect, instead of every thesis re-scanning the corpus. Same contract as the run index —
+// it may only ever yield a SUPERSET; specMatchesConfig stays the verifier. A miss here would silently leave
+// a verdict stale, so the soundness property is pinned exhaustively.
+describe('buildHypothesisIndex + candidateHypothesesFor', () => {
+  const hyp = (id: string, spec: any, extra: any = {}) => ({ id, spec, ...extra })
+  const hyps = [
+    hyp('h-ppo', { fixed: { model_name: 'ppo' } }),
+    hyp('h-lr', { sweep: { lr: [0.5, 0.1] } }),
+    hyp('h-both', { fixed: { model_name: 'ppo' }, sweep: { lr: [0.5] } }),
+    hyp('h-cmp', { compare: { lever: 'model_name', values: ['ppo', 'dqn'] } }),
+    hyp('h-bool', { fixed: { shorting: true } }),
+    hyp('h-str', { fixed: { lr: 0.5 } }), // matches the STRING '0.5' too (String-coerced)
+    hyp('h-blank', {}), // an unpinned spec matches NOTHING and must never be a candidate
+  ]
+  const corpus = [
+    run('r1', { model_name: 'ppo', lr: 0.5, gamma: 0.99 }, { vh: 1 }),
+    run('r2', { model_name: 'ppo', lr: 0.1 }, { vh: -1 }),
+    run('r3', { model_name: 'dqn', lr: 0.5 }, { vh: 2 }),
+    run('r4', { model_name: 'a2c', lr: '0.5' }, { vh: 3 }),
+    run('r5', { model_name: 'ppo' }, { vh: 4 }),
+    run('r6', { model_name: 'ppo', lr: 0.5, shorting: true }, { vh: 5 }),
+    run('r7', { model_name: 'sac', lr: 0.3 }, { vh: 6 }),
+  ]
+
+  it('never MISSES a hypothesis the full scan would match (the soundness property)', () => {
+    const index = H.buildHypothesisIndex(hyps)
+    for (const r of corpus) {
+      const truth = hyps
+        .filter((h) => H.specMatchesConfig(h.spec, r.summary.config))
+        .map((h) => h.id)
+        .sort()
+      const viaIndex = H.candidateHypothesesFor(r, index)
+        .filter((h: any) => H.specMatchesConfig(h.spec, r.summary.config))
+        .map((h: any) => h.id)
+        .sort()
+      expect(viaIndex).toEqual(truth)
+    }
+  })
+
+  it('yields a NARROWER set than every hypothesis (the point of the index)', () => {
+    const index = H.buildHypothesisIndex(hyps)
+    const cands = H.candidateHypothesesFor(run('rx', { model_name: 'sac', lr: 0.3 }), index)
+    expect(cands.length).toBeLessThan(hyps.length)
+    expect(cands.map((h: any) => h.id)).not.toContain('h-blank')
+  })
+
+  it('an unpinned (blank) spec is never indexed — it matches nothing', () => {
+    const index = H.buildHypothesisIndex([hyp('h-blank', {})])
+    expect(H.candidateHypothesesFor(corpus[0], index)).toEqual([])
+  })
+
+  it('handles an empty hypothesis set and a run with no config', () => {
+    expect(H.candidateHypothesesFor(corpus[0], H.buildHypothesisIndex([]))).toEqual([])
+    expect(H.candidateHypothesesFor({ key: 'x', summary: {} }, H.buildHypothesisIndex(hyps))).toEqual([])
+  })
+})
+
+describe('hypothesesAffectedBy', () => {
+  const hyp = (id: string, spec: any, matchedKeys: string[] = []) => ({
+    id,
+    spec,
+    evidence: { at: 'T', status: 'untested', matchedKeys, measured: null },
+  })
+  const hyps = [
+    hyp('h-ppo', { fixed: { model_name: 'ppo' } }, ['r1']),
+    hyp('h-dqn', { fixed: { model_name: 'dqn' } }, ['r9']),
+    hyp('h-sac', { fixed: { model_name: 'sac' } }, []),
+  ]
+  const index = H.buildHypothesisIndex(hyps)
+  const ids = (hs: any[]) => hs.map((h) => h.id).sort()
+
+  it('a NEW run only wakes the theses it could match', () => {
+    const added = [run('r2', { model_name: 'ppo' }, { vh: 1 })]
+    expect(ids(H.hypothesesAffectedBy(added, [], hyps, index))).toEqual(['h-ppo'])
+  })
+
+  it('a REMOVED run wakes the thesis that counted it, even though it no longer matches anything', () => {
+    // r9 is gone from the corpus entirely — only the stored matchedKeys can reveal who depended on it.
+    expect(ids(H.hypothesesAffectedBy([], ['r9'], hyps, index))).toEqual(['h-dqn'])
+  })
+
+  it('an UPDATED run wakes both its old dependants and whoever it now matches', () => {
+    // r1 was evidence for h-ppo; it has been re-keyed to a dqn config.
+    const updated = [run('r1', { model_name: 'dqn' }, { vh: 1 })]
+    expect(ids(H.hypothesesAffectedBy(updated, [], hyps, index))).toEqual(['h-dqn', 'h-ppo'])
+  })
+
+  it('an unrelated run wakes nobody (the whole point)', () => {
+    expect(H.hypothesesAffectedBy([run('rz', { model_name: 'a2c' })], [], hyps, index)).toEqual([])
+  })
+
+  it('no changes at all wakes nobody', () => {
+    expect(H.hypothesesAffectedBy([], [], hyps, index)).toEqual([])
+  })
+
+  it('covers experiment-cell evidence keys too (they live in the same matchedKeys)', () => {
+    const withExp = [hyp('h-exp', { fixed: { model_name: 'ppo' } }, ['exp:e1:c1'])]
+    const idx = H.buildHypothesisIndex(withExp)
+    expect(ids(H.hypothesesAffectedBy([], ['exp:e1:c1'], withExp, idx))).toEqual(['h-exp'])
+  })
+})
+
+describe('hypothesesAffectedBy — never-evaluated theses', () => {
+  it('a hypothesis with NO evidence snapshot is always work, even when nothing changed', () => {
+    // A freshly created thesis has never been judged; skipping it because "no runs are new" would leave it
+    // permanently untested.
+    const fresh = { id: 'h-new', spec: { fixed: { model_name: 'ppo' } } }
+    const judged = {
+      id: 'h-old',
+      spec: { fixed: { model_name: 'dqn' } },
+      evidence: { at: 'T', status: 'untested', matchedKeys: [], measured: null },
+    }
+    const hyps = [fresh, judged]
+    const index = H.buildHypothesisIndex(hyps)
+    expect(H.hypothesesAffectedBy([], [], hyps, index).map((h: any) => h.id)).toEqual(['h-new'])
+  })
+})
