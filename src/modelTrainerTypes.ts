@@ -285,6 +285,15 @@ export interface TrainerDiagnostics {
     nObsMetric?: string
     minObs?: number
     threshold?: number
+    /**
+     * The HONEST number of trials the search actually ran, when it is larger than the setups in front of the
+     * gate. Deflation scales with how many configs were tried, and the setups in one comparison are not the
+     * search that produced them — a campaign that swept 20,888 configs and then compares two would otherwise
+     * be deflated as though it had tried two, which is how a multiple-testing artifact gets certified. Applied
+     * as a FLOOR, never a replacement: it can only ever raise the deflation level and lower the DSR, so a
+     * misconfigured value cannot weaken the gate.
+     */
+    nTrials?: number
   }
   /**
    * A4.3 seed-stability gate: the champion setup's `metric` (default the objective) must have a bootstrap CI
@@ -2651,6 +2660,90 @@ export interface ChampionGate {
   pass: boolean
   /** One-line evidence — the measured cohort value vs the required bound. */
   detail?: string
+}
+
+/**
+ * One trial in a corpus-level deflation read: an identity plus the per-run moment bundle BlackSwan emits
+ * (`oos_sharpe` / `oos_ret_skew` / `oos_ret_kurt` / `oos_n_obs`). Structurally satisfied by an
+ * {@link ExperimentCell} and by any run projection carrying a flat `metrics` map, so the SCREEN path can be
+ * deflated without reshaping what it already holds.
+ */
+export interface DeflatedCorpusTrial {
+  /** The trial's identity (an {@link ExperimentCell.key} / run key), echoed onto the verdict. */
+  key?: string
+  /** The trial's emitted metrics — the moment bundle is read from here by metric NAME. */
+  metrics?: Record<string, number>
+}
+
+/** Which metric names carry the moment bundle, the pass bar, and the honest trial count, for {@link DeflatedCorpusVerdict}. */
+export interface DeflatedCorpusOptions {
+  /** Sharpe metric name (default {@link DSR_MOMENT_METRIC_KEYS}.sharpe). */
+  metric?: string
+  /** Return-skew metric name (default {@link DSR_MOMENT_METRIC_KEYS}.skew). */
+  skewMetric?: string
+  /** NON-excess return-kurtosis metric name (default {@link DSR_MOMENT_METRIC_KEYS}.kurtosis). */
+  kurtosisMetric?: string
+  /** Sample-length metric name (default {@link DSR_MOMENT_METRIC_KEYS}.nObs). */
+  nObsMetric?: string
+  /** DSR pass bar (default {@link DEFAULT_DSR_THRESHOLD}). */
+  threshold?: number
+  /**
+   * The HONEST number of trials to deflate by, when it differs from the corpus handed in — a screen searches
+   * far more configs than it persists (this campaign searched ~20,888 and kept ~1,100), and deflating by the
+   * persisted count alone understates the correction. Raising it strictly lowers the DSR. Ignored unless it is
+   * a finite number ≥ 1; `1` is the diagnostic "what would this read WITHOUT deflation?" (SR* = 0).
+   */
+  nTrials?: number
+}
+
+/**
+ * Why a {@link DeflatedCorpusVerdict} could not be evaluated — never conflated with a real rejection.
+ * `candidate-psr-undefined`: the moments are all present but the PSR closed form has no value at them
+ * (fewer than 2 observations, or a non-positive denominator) — the 0 it would otherwise return is the most
+ * damning number this gate prints, and it would be printed from no evidence. `deflation-overflowed`: the
+ * trial count is so large that `1 - 1/nTrials` rounds to 1 and SR* saturates to Infinity.
+ */
+export type DeflatedCorpusNotApplicable =
+  | 'insufficient-trials'
+  | 'no-spread'
+  | 'candidate-moments-missing'
+  | 'candidate-psr-undefined'
+  | 'deflation-overflowed'
+
+/**
+ * A corpus-level deflated verdict on ONE candidate (the surviving lead of a screen), read against the
+ * multiple-testing bar its own corpus implies. The screen path (side-experiment cells) computes neither the
+ * trial count nor the cross-trial Sharpe spread today, so nothing it judges is deflated at all.
+ *
+ * `applicable: false` means the corpus/candidate could not support a verdict — {@link dsr} is then ABSENT
+ * rather than 0, because a fabricated `pass: false` is indistinguishable from a real rejection and someone
+ * will act on it.
+ */
+export interface DeflatedCorpusVerdict {
+  /** Whether a DSR could be computed at all. */
+  applicable: boolean
+  /** True iff applicable AND {@link dsr} ≥ {@link threshold}. */
+  pass: boolean
+  /** Set (with `applicable: false`) when the read was withheld. */
+  notApplicable?: DeflatedCorpusNotApplicable
+  /** Trials in the handed-in corpus that carried a usable Sharpe. */
+  nCorpus: number
+  /** The trial count the deflation actually used — {@link DeflatedCorpusOptions.nTrials} when it applies. */
+  nTrials: number
+  /** Cross-trial Sharpe standard deviation (the spread the deflation level scales). */
+  trialSrStd: number
+  /** SR* — the Sharpe the MAXIMUM of `nTrials` null trials is expected to reach by luck alone. */
+  deflationLevel: number
+  /** The candidate's observed Sharpe; absent when its moment bundle is unusable. */
+  candidateSharpe?: number
+  /** The candidate's deflated Sharpe ratio; ABSENT whenever `applicable` is false. */
+  dsr?: number
+  /** The bar {@link dsr} was read against. */
+  threshold: number
+  /** The candidate's {@link DeflatedCorpusTrial.key}, when it carries one. */
+  candidateKey?: string
+  /** One-line evidence — the measured DSR vs the bar, or what made the read impossible. */
+  detail: string
 }
 
 /**

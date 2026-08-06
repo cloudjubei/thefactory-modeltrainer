@@ -418,6 +418,37 @@ describe('assembleChampionVerdict (A4.3 champion "declare steady" verdict)', () 
     expect(v.steady).toBe(false)
   })
 
+  it('DSR gate deflates by the HONEST trial count, not just the setups in front of it', () => {
+    // The setups in the current comparison are NOT the search that produced the champion. A campaign that
+    // searched 20,888 configs and then compares two of them would otherwise be deflated as though it had
+    // tried two — the lenient direction, and exactly how a multiple-testing artifact gets certified. The
+    // override raises nTrials, which raises the deflation level SR*, which can only lower DSR.
+    const runs = [dr(1, '2024', 10, 0.5), dr(1, '2022', 10, 0.5), dr(2, '2024', 1, 0.1), dr(2, '2022', 1, 0.1)]
+    const ctx = { runs, splitLevers: ['window'], criterion: crit }
+    const bare = assembleChampionVerdict({ dsr: { threshold: 0.95 } }, ctx)
+    expect(bare.championGates.find((g) => g.kind === 'dsr')!.pass).toBe(true)
+
+    const honest = assembleChampionVerdict({ dsr: { threshold: 0.95, nTrials: 20888 } }, ctx)
+    const gate = honest.championGates.find((g) => g.kind === 'dsr')!
+    expect(gate.applicable).toBe(true)
+    expect(gate.pass).toBe(false)
+    expect(gate.detail).toContain('20888')
+  })
+
+  it('the DSR trial-count override is a FLOOR — it can never deflate by fewer trials than were compared', () => {
+    // A gate override must only ever make the gate stricter. Honouring a value below the observed setup
+    // count would let a misconfigured manifest weaken the correction, which is the one direction a gate
+    // must never move.
+    const runs = [dr(1, '2024', 10, 0.5), dr(1, '2022', 10, 0.5), dr(2, '2024', 1, 0.1), dr(2, '2022', 1, 0.1)]
+    const ctx = { runs, splitLevers: ['window'], criterion: crit }
+    for (const nTrials of [0, 1, -5, Number.NaN]) {
+      const g = assembleChampionVerdict({ dsr: { threshold: 0.95, nTrials } }, ctx).championGates.find(
+        (x) => x.kind === 'dsr',
+      )!
+      expect(g.detail).toContain('2 setup(s)')
+    }
+  })
+
   it('DSR gate is skipped when the champion emits no Sharpe metric', () => {
     const v = assembleChampionVerdict({ dsr: { threshold: 0.95 } }, ctxOf([cr('2024', 5, {}), cr('2022', 3, {})]))
     const dsr = v.championGates.find((g) => g.kind === 'dsr')!

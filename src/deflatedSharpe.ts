@@ -4,7 +4,14 @@
 // BlackSwan/trainer/sharpe.py (`psr_from_stats` / `deflated_sharpe_ratio`). Kurtosis is NON-excess (normal == 3),
 // matching the emitted `oos_ret_kurt`. References: Bailey & López de Prado, "The Deflated Sharpe Ratio".
 
-import { normalCdf } from './xaiUtils.js'
+import type {
+  DeflatedCorpusNotApplicable,
+  DeflatedCorpusOptions,
+  DeflatedCorpusTrial,
+  DeflatedCorpusVerdict,
+} from './modelTrainerTypes.js'
+import { DEFAULT_DSR_THRESHOLD, DSR_MOMENT_METRIC_KEYS } from './modelTrainerConstants.js'
+import { normalCdf, stdOf } from './xaiUtils.js'
 
 const EULER_MASCHERONI = 0.5772156649015329
 
@@ -50,6 +57,12 @@ export function normalPpf(p: number): number {
   )
 }
 
+// `1 - g3*SR + (g4-1)/4 * SR^2` — the PSR's variance term. The single source of the closed form: the verdict
+// layer needs it to tell "the PSR is undefined here" from "the PSR is 0 here".
+function psrDenominator(sharpe: number, skewness: number, kurtosis: number): number {
+  return 1 - skewness * sharpe + ((kurtosis - 1) / 4) * sharpe * sharpe
+}
+
 /**
  * PSR from a precomputed moment bundle — the TS twin of `psr_from_stats`. Probability the TRUE Sharpe exceeds
  * `srBenchmark` given the observed Sharpe + the sample's length/skew/kurtosis. 0 when undefined (n < 2 or a
@@ -64,7 +77,7 @@ export function psrFromStats(
 ): number {
   const n = Math.trunc(nObs)
   if (n < 2) return 0
-  const denom = 1 - skewness * sharpe + ((kurtosis - 1) / 4) * sharpe * sharpe
+  const denom = psrDenominator(sharpe, skewness, kurtosis)
   if (!(denom > 0) || !Number.isFinite(denom)) return 0
   const z = ((sharpe - srBenchmark) * Math.sqrt(n - 1)) / Math.sqrt(denom)
   return normalCdf(z)
@@ -96,4 +109,111 @@ export function deflatedSharpeFromStats(
   trialSrStd: number,
 ): number {
   return psrFromStats(sharpe, skewness, kurtosis, nObs, expectedMaxSharpe(nTrials, trialSrStd))
+}
+
+function momentOf(trial: DeflatedCorpusTrial, key: string): number | undefined {
+  const v = trial.metrics?.[key]
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined
+}
+
+/**
+ * The corpus-level deflated verdict the SCREEN path never had: read ONE candidate against the
+ * multiple-testing bar its own corpus implies. `nTrials` and `trialSrStd` — the two quantities a screen
+ * computes nowhere, which is why nothing it judges is deflated — are derived here from the trials handed in
+ * (their count, and the standard deviation of their Sharpes), then fed to {@link deflatedSharpeFromStats}.
+ *
+ * The honest trial count usually EXCEEDS the persisted corpus (configs searched but never written to disk),
+ * so {@link DeflatedCorpusOptions.nTrials} overrides it; raising it strictly lowers the DSR, and the result
+ * reports `nTrials` alongside `nCorpus` so the override is never invisible.
+ *
+ * An unusable corpus (< 2 trials, no cross-trial spread, a trial count too large for SR* to be represented)
+ * or an unreadable candidate (a missing moment, or moments the PSR closed form has no value at) returns
+ * `applicable: false` with NO `dsr` — a screen that reports `pass: false` when it could not evaluate is
+ * indistinguishable from a real rejection, and a DSR of 0 is an earned verdict elsewhere.
+ */
+export function deflatedCorpusVerdict(
+  trials: DeflatedCorpusTrial[],
+  candidate: DeflatedCorpusTrial,
+  options: DeflatedCorpusOptions = {},
+): DeflatedCorpusVerdict {
+  const sharpeKey = options.metric ?? DSR_MOMENT_METRIC_KEYS.sharpe
+  const skewKey = options.skewMetric ?? DSR_MOMENT_METRIC_KEYS.skew
+  const kurtKey = options.kurtosisMetric ?? DSR_MOMENT_METRIC_KEYS.kurtosis
+  const nObsKey = options.nObsMetric ?? DSR_MOMENT_METRIC_KEYS.nObs
+  const threshold = options.threshold ?? DEFAULT_DSR_THRESHOLD
+  const corpusSharpes = trials
+    .map((t) => momentOf(t, sharpeKey))
+    .filter((v): v is number => v !== undefined)
+  const nCorpus = corpusSharpes.length
+  const override = Number(options.nTrials)
+  const nTrials = Number.isFinite(override) && override >= 1 ? Math.floor(override) : nCorpus
+  const trialSrStd = stdOf(corpusSharpes)
+  const deflationLevel = expectedMaxSharpe(nTrials, trialSrStd)
+  const searched =
+    nTrials === nCorpus ? `${nTrials} trial(s)` : `${nTrials} trial(s) (${nCorpus} persisted)`
+  const base = {
+    nCorpus,
+    nTrials,
+    trialSrStd,
+    deflationLevel,
+    threshold,
+    candidateKey: candidate.key,
+  }
+  const withhold = (
+    notApplicable: DeflatedCorpusNotApplicable,
+    detail: string,
+  ): DeflatedCorpusVerdict => ({
+    ...base,
+    applicable: false,
+    pass: false,
+    notApplicable,
+    detail,
+  })
+  if (nCorpus < 2) {
+    return withhold('insufficient-trials', `need ≥ 2 trials reporting ${sharpeKey}, got ${nCorpus}`)
+  }
+  if (!(trialSrStd > 0)) {
+    return withhold('no-spread', `${sharpeKey} has no cross-trial spread over ${searched}`)
+  }
+  if (!Number.isFinite(deflationLevel)) {
+    return withhold(
+      'deflation-overflowed',
+      `deflation level is not representable over ${searched} — trial count too large`,
+    )
+  }
+  const sharpe = momentOf(candidate, sharpeKey)
+  const skew = momentOf(candidate, skewKey)
+  const kurt = momentOf(candidate, kurtKey)
+  const nObs = momentOf(candidate, nObsKey)
+  const absent = [
+    [sharpeKey, sharpe],
+    [skewKey, skew],
+    [kurtKey, kurt],
+    [nObsKey, nObs],
+  ].flatMap(([key, v]) => (v === undefined ? [key as string] : []))
+  if (absent.length) {
+    return withhold('candidate-moments-missing', `candidate missing ${absent.join(', ')}`)
+  }
+  if (Math.trunc(nObs!) < 2) {
+    return withhold(
+      'candidate-psr-undefined',
+      `candidate ${nObsKey} ${nObs} is too short to read (need ≥ 2)`,
+    )
+  }
+  const denom = psrDenominator(sharpe!, skew!, kurt!)
+  if (!(denom > 0) || !Number.isFinite(denom)) {
+    return withhold(
+      'candidate-psr-undefined',
+      `candidate ${skewKey}/${kurtKey} leave the PSR undefined at ${sharpeKey} ${sharpe}`,
+    )
+  }
+  const dsr = deflatedSharpeFromStats(sharpe!, skew!, kurt!, nObs!, nTrials, trialSrStd)
+  return {
+    ...base,
+    applicable: true,
+    pass: dsr >= threshold,
+    candidateSharpe: sharpe,
+    dsr,
+    detail: `DSR ${dsr.toFixed(3)} vs ${threshold} over ${searched} (SR* ${deflationLevel.toFixed(3)})`,
+  }
 }

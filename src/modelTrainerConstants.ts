@@ -14,6 +14,24 @@ export const EXPERIMENT_MIN_SPLITS = 2
 export const DEFAULT_RAN_BY = 'local'
 
 /**
+ * The bar a deflated Sharpe ratio must clear to read as a real edge rather than multiple-testing luck —
+ * Bailey & López de Prado's conventional 95% confidence. Shared by the champion gate and the screen-path
+ * corpus verdict so a lead cannot pass one bar and fail the other.
+ */
+export const DEFAULT_DSR_THRESHOLD = 0.95
+
+/**
+ * The metric names a deflation read expects the moment bundle under — the per-run keys BlackSwan emits.
+ * `kurtosis` is NON-excess (normal == 3), matching the emitted `oos_ret_kurt`.
+ */
+export const DSR_MOMENT_METRIC_KEYS = {
+  sharpe: 'oos_sharpe',
+  skew: 'oos_ret_skew',
+  kurtosis: 'oos_ret_kurt',
+  nObs: 'oos_n_obs',
+} as const
+
+/**
  * Content paths on a run record that hold the unbounded per-step arrays (chart series, ledger, regime
  * spans, the full decision trace). Every list/aggregate scan that does NOT render a chart passes these to
  * `listRecords({ omit })` so the DB backend never reads the heavy subtrees off the socket — detail / xAI

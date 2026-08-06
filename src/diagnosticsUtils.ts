@@ -272,7 +272,10 @@ function evalDsrGate(
     else bySetup.set(k, [v])
   }
   const setupSharpes = [...bySetup.values()].map((vs) => medianOf(vs))
-  const nTrials = setupSharpes.length
+  // The honest trial count is a FLOOR on the observed setups, never a replacement — an override may only ever
+  // deflate harder (see TrainerDiagnostics.dsr.nTrials).
+  const declaredTrials = Number.isFinite(dsr.nTrials) ? Math.floor(dsr.nTrials as number) : 0
+  const nTrials = Math.max(setupSharpes.length, declaredTrials)
   const trialSrStd = stdOf(setupSharpes)
   const incSharpe = medianOf(incSharpes)
   const skewVals = incRuns.map((r) => metricOf(r, skewKey)).filter(finite)
