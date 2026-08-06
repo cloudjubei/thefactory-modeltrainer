@@ -41,18 +41,32 @@ live in git + memory.)
 
 Ordered by value. Each is something to **implement**.
 
-### A5. Single-purpose template + BlackSwan-as-library
+### A5. modeltrainer as the base + a one-time SEED (NOT a live template)
 
-**Strategy change.** Today's docs prescribe a multi-project HUB (`architecture.md`; projects "registered, not
-forked"; repo-split table). New model: modeltrainer is ALSO a SINGLE-PURPOSE template + LIBRARY a project copies
-/ consumes; BlackSwan gets its own app built on it, pulling updates. Both coexist (hub for dev/multi-project;
-template for a shipped single-purpose app).
+**Model (owner-set).** modeltrainer is the BASE that demonstrates ALL generic functionality — the engine and
+the full viewer. A project is **seeded from it ONCE** and then carries on independently: it USES the generic
+functionality and adds only what cannot be generic (BlackSwan: its trading env, its rewards — already in its
+Python + `.factory/trainer.json`). There is deliberately **NO update-absorption path** — a seeded project does
+not track or pull modeltrainer changes, and we do not build machinery for it to. The multi-project HUB stays for
+dev/multi-project use; single-purpose boot is what a seeded app runs.
 
-1. **Single-purpose boot (viewer).** Add `bootProject(manifest, dir)` that boots straight into the dashboard
-   from ONE manifest (load the project's own `.factory/trainer.json` via `inspect-trainer dir:'.'` or bundled),
-   bypassing the home shell; gate the multi-project shell (`projectsCache` / `renderHome` / add-remove-inspect,
-   `app.js:1355-1745`) behind a hub-mode flag. Low risk — `currentProject` has ~10 refs and the dashboard is
-   already single-project (reads `manifest` + `dir`).
+This retires the old "template + LIBRARY consumers pin + updates flow" framing that earlier drafts of A5 (and
+`architecture.md`) carried: the versioned-publish-for-pinning step and the `npm update` + re-copy ceremony are
+**dropped, not built**, and the "override layer so updates still flow" loses its reason to exist — a seeded
+project owns its copy and edits it directly.
+
+1. **Single-purpose boot (viewer). ✅ SHIPPED.** `window.__TRAINER_BOOT__ = {mode:'single', …}` boots straight
+   into ONE project's dashboard, bypassing the hub. Decision extracted to a pure, node-tested module
+   `viewer/boot.js` (`TrainerBoot.resolveBoot(bootConfig, {embedded})` → `{mode, project, manifest,
+   needsInspect, error}`; dual-loaded like `hypothesis.js`, 10 tests in `src/bootViewer.test.ts`). Config forms:
+   a **bundled** manifest (opens directly, works standalone via localStorage) or a **dir** to `inspect-trainer`
+   (embedded only). Any misconfig is fail-SAFE — resolves to the hub with a surfaced banner, so the no-config
+   default is byte-identical to before. `app.js`: `openProject` split so hub and boot share ONE
+   `openResolvedProject` path (no duplication); `bootProject` seeds the single project into
+   `projectsCache`/`manifestsCache` so every downstream read works unchanged; `hubMode` flag hides Back and
+   guards `goHome`. **Remaining in this item:** single-purpose deep-link wiring (embedded boot currently skips
+   the `getDeepLink` pull + `onNavOpen` registration) — a refinement, folded into step 5's de-monolith or done
+   when a single-purpose app first needs in-app deep-links.
 2. **Project override layer.** A thin per-project `project.js` / config the base viewer loads for project chrome
    (labels, presets, extra panels) WITHOUT forking the monolith — so BlackSwan customizes and modeltrainer
    updates still flow.

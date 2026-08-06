@@ -259,6 +259,9 @@ let seenKeysByProject = new Map()
 let homePollSession = 0
 let removeArmedKey = null
 let currentProject = null
+// A5: the hub is the default; a single-purpose boot (window.__TRAINER_BOOT__ {mode:'single'}) flips this to
+// false so the home shell is never shown and Back is hidden — the app IS one project's dashboard.
+let hubMode = true
 // Bumped on every home↔project navigation; long-lived async work captures it
 // and stops when the user has navigated away.
 let projectEpoch = 0
@@ -2598,11 +2601,27 @@ function applyDeepLink(dl) {
 async function openProject(projectKey) {
   const project = projectsCache.find((p) => p.key === projectKey)
   if (!project || !projectHasManifest(projectKey)) return
+  await openResolvedProject(project, manifestsCache.get(projectKey).manifest)
+}
+// Boot straight into ONE project's dashboard (A5 single-purpose), bypassing the hub. Seeds the project +
+// manifest into the same caches the hub populates, so every downstream read (refreshProjectManifest,
+// projectUnseenCount, …) works unchanged, then takes the SAME dashboard-open path as openProject.
+async function bootProject(project, manifestObj) {
+  hubMode = false
+  const back = byId('back-btn')
+  if (back) back.hidden = true
+  if (!projectsCache.some((p) => p.key === project.key)) projectsCache.push(project)
+  manifestsCache.set(project.key, { manifest: manifestObj })
+  await openResolvedProject(project, manifestObj)
+}
+// The shared dashboard-open — everything openProject did AFTER resolving {project, manifest}. Hub and
+// single-purpose boot funnel through here so there is exactly one open path to reason about.
+async function openResolvedProject(project, resolvedManifest) {
   stopHomePoll()
   projectEpoch += 1
   const epoch = projectEpoch
   currentProject = project
-  manifest = manifestsCache.get(projectKey).manifest
+  manifest = resolvedManifest
   removeArmedKey = null
   closeRunnerPairing()
   resetDashboardState()
@@ -2644,6 +2663,9 @@ async function openProject(projectKey) {
   void refreshProjectManifest(project)
 }
 function goHome() {
+  // In single-purpose mode there is no hub to return to — the dashboard IS the app. Ignore any stray Back so
+  // the app can never strand the user on an empty home shell.
+  if (!hubMode) return
   projectEpoch += 1
   currentProject = null
   manifest = null
@@ -21096,8 +21118,16 @@ async function init() {
   setupVisibilityResume()
   setupHelpTooltips()
   showView('home')
+  // A5 single-purpose boot: if the host injected a {mode:'single'} config, open that one project's dashboard
+  // and never show the hub. Resolved BEFORE the embedded gate so a BUNDLED-manifest app boots standalone too
+  // (localStorage fallback); any misconfiguration resolves to the hub with a banner, so this only ADDS a path
+  // — with no config the default is byte-identical to before.
+  const resolved = TrainerBoot.resolveBoot(window.__TRAINER_BOOT__, { embedded: embedded() })
+  if (resolved.error) setBanner(resolved.error)
+  if (resolved.mode === 'single' && (await bootSinglePurpose(resolved))) return
+
   if (!embedded()) {
-    setBanner('Open inside the Overseer to use the viewer.')
+    if (!resolved.error) setBanner('Open inside the Overseer to use the viewer.')
     renderHome()
     return
   }
@@ -21115,6 +21145,35 @@ async function init() {
   }
   await renderHome()
   startHomePoll()
+}
+
+// Drive the single-purpose boot resolved above: load the manifest (bundled, or by inspecting the project's own
+// dir) and open the dashboard. Returns false — falling back to the hub — if the manifest cannot be obtained.
+async function bootSinglePurpose(resolved) {
+  let manifestObj = resolved.manifest
+  if (resolved.needsInspect) {
+    if (!embedded()) return false
+    try {
+      const started = await window.OverseerBridge.startActivity('inspect-trainer', {
+        projectKey: resolved.project.key,
+        dir: resolved.project.dir,
+        ...(resolved.project.manifestRelPath ? { manifestRelPath: resolved.project.manifestRelPath } : {}),
+      })
+      const activityId = started && started.activityId
+      if (activityId) await observeQuickActivity(activityId)
+      manifestsCache = await readManifestRecords()
+      const rec = manifestsCache.get(resolved.project.key)
+      manifestObj = rec && rec.manifest
+    } catch {
+      manifestObj = null
+    }
+    if (!manifestObj) {
+      setBanner("Could not load this project's manifest — showing the hub.")
+      return false
+    }
+  }
+  await bootProject(resolved.project, manifestObj)
+  return true
 }
 
 init()
