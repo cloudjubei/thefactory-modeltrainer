@@ -196,6 +196,11 @@ body.single-purpose #back-btn,
 body.single-purpose #dash-project-name {
   display: none;
 }
+/* The hub landing must never render for a single-purpose app — not even for the moment its manifest is
+   loading. The #id selector outranks `.view`, so this holds even if showView('home') is ever reached. */
+body.single-purpose #view-home {
+  display: none !important;
+}
 /* Global Refresh control: pushed to the right edge of the content area, so it sits just left of
    Overseer's floated activity-model chip (the 160px gutter reserves that chip's space). */
 .dash-refresh {

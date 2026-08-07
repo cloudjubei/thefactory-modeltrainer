@@ -93,14 +93,11 @@ project owns its copy and edits it directly.
 6. **Update docs. ✅ SHIPPED.** `architecture.md` now carries a "Two deployment modes, one codebase" section
    (hub for dev + one-time seed for a shipped single-purpose app) and the "registered, not forked" bullet notes
    the seed as the one place a project takes a copy it then owns.
-7. **THE SOLE REMAINDER — deferred xAI per-step attention scrubber + snapshot diff-consecutive arm.**
-   The producers are shipped (`write_per_step_attention`; the `snapshotTraces` index) but the heavy traces +
-   attention live in JSONL SIDECAR FILES, and today's viewer reads only RECORDS (no file-fetch bridge verb) — so
-   this is blocked in the hub model. Once BlackSwan is its own single-purpose app (steps 1–4), the served viewer
-   bytes AND those sidecars both live inside BlackSwan's checkout, so the viewer can fetch the sidecars DIRECTLY
-   (relative fetch from the same served tree) with NO host→viewer file-read primitive. Then: fetch + animate/scrub
-   the per-step attention over the rollout, and lazily fetch two snapshots' traces → feed the shipped
-   `DecisionTraceDiff`. (This is the whole of the old A6 that was blocked — the rest of A6 shipped.)
+7. ~~xAI per-step attention scrubber + snapshot diff-consecutive arm.~~ **REMOVED (owner call) — not needed.**
+   It was also data-blocked in practice: no real `.attn.jsonl`/`.traces.jsonl` sidecars exist for any run (only
+   model-weight `.zip`s), so there was nothing to scrub.
+
+**A5 is COMPLETE.** modeltrainer is the base + a one-time seed; BlackSwan runs as its own single-purpose app.
 
 ---
 

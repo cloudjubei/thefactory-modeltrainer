@@ -1538,3 +1538,144 @@ describe('hypothesesAffectedBy — never-evaluated theses', () => {
     expect(H.hypothesesAffectedBy([], [], hyps, index).map((h: any) => h.id)).toEqual(['h-new'])
   })
 })
+
+describe('gateVerdict — majority-beats-hold (the campaign gate, faithfully derived)', () => {
+  // a cell in walk-forward window `w` whose benchmark metric (return_vs_hold_pct) is `vh`
+  const cell = (key: string, w: string, vh: number, status = 'completed') => ({
+    key,
+    summary: { config: { walk_forward_window: w }, status, metrics: { return_vs_hold_pct: vh } },
+  })
+  const BENCH = { metric: 'return_vs_hold_pct', threshold: 0, direction: 'max' }
+  const GATE = { kind: 'majority-beats-hold', windowLever: 'walk_forward_window', minWindows: 3 }
+
+  it('PROVEN when a strict majority of cells clear the benchmark in ≥ minWindows windows', () => {
+    const rows = [
+      cell('a1', 'w1', 5), cell('a2', 'w1', 5), cell('a3', 'w1', -1), // w1: 2/3 clear
+      cell('b1', 'w2', 5), cell('b2', 'w2', 5), cell('b3', 'w2', -1), // w2: 2/3
+      cell('c1', 'w3', 5), cell('c2', 'w3', 5), cell('c3', 'w3', -1), // w3: 2/3
+      cell('d1', 'w4', -1), cell('d2', 'w4', -1), cell('d3', 'w4', 5), // w4: 1/3
+    ]
+    expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('proven')
+  })
+
+  it('DISPROVED on the reversal signature — wins ONE window, loses the rest', () => {
+    const rows = [
+      cell('a1', 'w1', 33), cell('a2', 'w1', 30), cell('a3', 'w1', 12), // w1: all clear
+      cell('b1', 'w2', -51), cell('b2', 'w2', -40), cell('b3', 'w2', -60),
+      cell('c1', 'w3', -67), cell('c2', 'w3', -50), cell('c3', 'w3', -70),
+      cell('d1', 'w4', -102), cell('d2', 'w4', -90), cell('d3', 'w4', -110),
+    ]
+    expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('disproved') // 1 window of 4 clears < 3
+  })
+
+  it('majority is STRICT (>50%) — an exact tie does not clear a window', () => {
+    const rows = [cell('a', 'w1', 5), cell('b', 'w1', -1), cell('c', 'w2', 5), cell('d', 'w2', -1)]
+    expect(H.gateVerdict({ ...GATE, minWindows: 1 }, rows, BENCH, 2)).toBe('disproved')
+  })
+
+  it('UNTESTED when fewer than minWindows windows carry measured cells', () => {
+    const rows = [cell('a', 'w1', 5), cell('b', 'w1', 5), cell('c', 'w2', 5), cell('d', 'w2', 5)]
+    expect(H.gateVerdict(GATE, rows, BENCH, 2)).toBe('untested') // only 2 windows, need 3
+  })
+
+  it('UNTESTED when there are fewer than minRuns cells overall', () => {
+    const rows = [cell('a', 'w1', 5), cell('b', 'w2', 5), cell('c', 'w3', 5)]
+    expect(H.gateVerdict(GATE, rows, BENCH, 10)).toBe('untested')
+  })
+
+  it('failed / invalid cells never count toward a window', () => {
+    const rows = [
+      cell('a1', 'w1', 5), cell('a2', 'w1', 5), cell('bad', 'w1', 5, 'failed'),
+      cell('b1', 'w2', 5), cell('b2', 'w2', 5),
+      cell('c1', 'w3', 5), cell('c2', 'w3', 5),
+    ]
+    expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('proven')
+  })
+
+  it('honours a min-direction benchmark (lower is better — clears below the threshold)', () => {
+    const m = (key: string, w: string, v: number) => ({
+      key,
+      summary: { config: { walk_forward_window: w }, status: 'completed', metrics: { cost_bps: v } },
+    })
+    const bench = { metric: 'cost_bps', threshold: 20, direction: 'min' }
+    const low = [m('a', 'w1', 5), m('b', 'w2', 5), m('c', 'w3', 5)] // all below 20 → clear
+    expect(H.gateVerdict(GATE, low, bench, 3)).toBe('proven')
+    const high = [m('a', 'w1', 50), m('b', 'w2', 50), m('c', 'w3', 50)] // above → disproved
+    expect(H.gateVerdict(GATE, high, bench, 3)).toBe('disproved')
+  })
+
+  it('pooled (no windowLever): majority of ALL cells clear → proven, minority → disproved', () => {
+    const g = { kind: 'majority-beats-hold' }
+    expect(H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', 5), cell('c', 'w', -1)], BENCH, 3)).toBe('proven')
+    expect(H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', -1), cell('c', 'w', -1)], BENCH, 3)).toBe('disproved')
+  })
+})
+
+describe('deflatedSharpeFromStats (ported into the verdict engine, pinned to the Python/TS goldens)', () => {
+  it('nTrials=1 reduces to the plain PSR golden', () => {
+    expect(H.deflatedSharpeFromStats(0.1, 0.0, 3.0, 101, 1, 0.5)).toBeCloseTo(0.8407413278013518, 6)
+  })
+  it('a modest Sharpe against a high deflation level collapses to ~0', () => {
+    expect(H.deflatedSharpeFromStats(0.2, 0.0, 3.0, 500, 100, 0.5)).toBeCloseTo(0, 9)
+  })
+})
+
+describe('gateVerdict — deflated-sharpe (the multiple-testing correction, faithfully)', () => {
+  const cell = (key: string, sharpe: number, skew = 0, kurt = 3, nObs = 250) => ({
+    key,
+    summary: {
+      config: {},
+      status: 'completed',
+      metrics: { oos_sharpe: sharpe, oos_ret_skew: skew, oos_ret_kurt: kurt, oos_n_obs: nObs },
+    },
+  })
+  const GATE = { kind: 'deflated-sharpe', threshold: 0.95, nTrials: 1109, trialSrStd: 0.065857 }
+
+  it('DISPROVED — the best candidate cannot survive the deflation level (the GOLD case)', () => {
+    const rows = [cell('a', 0.0905, -1.42, 16.4, 625), cell('b', 0.05), cell('c', 0.03)]
+    expect(H.gateVerdict(GATE, rows, null, 3)).toBe('disproved')
+  })
+  it('PROVEN — a genuine edge clears the deflation level even after correcting for the search', () => {
+    const rows = [cell('a', 2.5, 0, 3, 625), cell('b', 0.1), cell('c', 0.1)]
+    expect(H.gateVerdict(GATE, rows, null, 3)).toBe('proven')
+  })
+  it('a LARGER honest trial count only lowers the DSR (stricter) — never raises it', () => {
+    const rows = [cell('a', 0.35, 0, 3, 625), cell('b', 0.1), cell('c', 0.1)]
+    const lenient = H.gateVerdict({ ...GATE, nTrials: 5 }, rows, null, 3)
+    const strict = H.gateVerdict({ ...GATE, nTrials: 20888 }, rows, null, 3)
+    // whatever the lenient verdict, the strict one is never MORE favourable
+    expect(['proven', 'disproved']).toContain(lenient)
+    if (strict === 'proven') expect(lenient).toBe('proven')
+  })
+  it('UNTESTED without the deflation params, or with too few measured candidates', () => {
+    expect(H.gateVerdict({ kind: 'deflated-sharpe', threshold: 0.95 }, [cell('a', 2.5)], null, 1)).toBe('untested')
+    expect(H.gateVerdict(GATE, [cell('a', 2.5)], null, 3)).toBe('untested')
+  })
+})
+
+describe('a hypothesis GATE overrides the default beats-hold(best) verdict', () => {
+  const cell = (key: string, w: string, vh: number) => ({
+    key,
+    summary: { config: { walk_forward_window: w, signal: 'reversal' }, status: 'completed', metrics: { return_vs_hold_pct: vh } },
+  })
+  it('evaluateHypothesis uses the gate: a big winning cell in ONE window is DISPROVED, not proven-by-best', () => {
+    const h = {
+      id: 'g',
+      spec: { fixed: { signal: 'reversal' }, sweep: { walk_forward_window: ['w1', 'w2', 'w3'] } },
+      gate: { kind: 'majority-beats-hold', windowLever: 'walk_forward_window', minWindows: 3 },
+    }
+    const runs = [
+      cell('a1', 'w1', 50), cell('a2', 'w1', 40), // w1 clears (and best cell is huge)
+      cell('b1', 'w2', -5), cell('b2', 'w2', -5),
+      cell('c1', 'w3', -5), cell('c2', 'w3', -5),
+    ]
+    const out = H.evaluateHypothesis(h, runs, {
+      direction: 'max',
+      at: 'T',
+      minRuns: 2,
+      benchmark: { metric: 'return_vs_hold_pct', threshold: 0, direction: 'max' },
+    })
+    expect(out.next.status).toBe('disproved')
+    expect(out.next.verdictSource).toBe('auto')
+  })
+})

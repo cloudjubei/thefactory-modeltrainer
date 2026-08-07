@@ -533,10 +533,170 @@
     return false
   }
 
-  // The auto-verdict for a hypothesis: a context-spanning spec reads its cross-context comparison; a
-  // single-context spec uses the pooled beats-hold rule. Precedence: decided (proven/disproved) > proposed
-  // (blocked on an unimplemented model) > untested.
+  // --- Deflated Sharpe (Bailey & López de Prado), ported here so a hypothesis can auto-derive a
+  // multiple-testing-corrected verdict. Pinned to the SAME golden vectors as src/deflatedSharpe.ts and
+  // BlackSwan/trainer/sharpe.py (the third copy, same as Python↔TS). Kurtosis is NON-excess (normal == 3). ---
+  const EULER_MASCHERONI = 0.5772156649015329
+  function _erf(x) {
+    const sign = x < 0 ? -1 : 1
+    const ax = Math.abs(x)
+    const t = 1 / (1 + 0.3275911 * ax)
+    const y =
+      1 -
+      ((((1.061405429 * t - 1.453152027) * t + 1.421413741) * t - 0.284496736) * t + 0.254829592) *
+        t *
+        Math.exp(-ax * ax)
+    return sign * y
+  }
+  function _normalCdf(z) {
+    return 0.5 * (1 + _erf(z / Math.SQRT2))
+  }
+  // Acklam's rational inverse-normal approximation (|rel err| < 1.15e-9), same coefficients as deflatedSharpe.ts.
+  const _A = [-3.969683028665376e1, 2.20946098424521e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1, 2.506628277459239e0]
+  const _B = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1]
+  const _C = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0, -2.549732539343734e0, 4.374664141464968e0, 2.938163982698783e0]
+  const _D = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0, 3.754408661907416e0]
+  function _normalPpf(p) {
+    if (p <= 0) return -Infinity
+    if (p >= 1) return Infinity
+    const pLow = 0.02425
+    if (p < pLow) {
+      const q = Math.sqrt(-2 * Math.log(p))
+      return (((((_C[0] * q + _C[1]) * q + _C[2]) * q + _C[3]) * q + _C[4]) * q + _C[5]) / ((((_D[0] * q + _D[1]) * q + _D[2]) * q + _D[3]) * q + 1)
+    }
+    if (p <= 1 - pLow) {
+      const q = p - 0.5
+      const r = q * q
+      return ((((((_A[0] * r + _A[1]) * r + _A[2]) * r + _A[3]) * r + _A[4]) * r + _A[5]) * q) / (((((_B[0] * r + _B[1]) * r + _B[2]) * r + _B[3]) * r + _B[4]) * r + 1)
+    }
+    const q = Math.sqrt(-2 * Math.log(1 - p))
+    return -((((((_C[0] * q + _C[1]) * q + _C[2]) * q + _C[3]) * q + _C[4]) * q + _C[5]) / ((((_D[0] * q + _D[1]) * q + _D[2]) * q + _D[3]) * q + 1))
+  }
+  // PSR: probability the true Sharpe exceeds `srBenchmark` given the sample's length/skew/kurtosis. 0 when
+  // undefined (n < 2 or a non-positive denominator). Kurtosis NON-excess.
+  function psrFromStats(sharpe, skewness, kurtosis, nObs, srBenchmark) {
+    const n = Math.trunc(nObs)
+    const bench = srBenchmark || 0
+    if (n < 2) return 0
+    const denom = 1 - skewness * sharpe + ((kurtosis - 1) / 4) * sharpe * sharpe
+    if (!(denom > 0) || !isFinite(denom)) return 0
+    return _normalCdf(((sharpe - bench) * Math.sqrt(n - 1)) / Math.sqrt(denom))
+  }
+  // SR*: the expected MAX Sharpe over `nTrials` null trials, scaled by the cross-trial Sharpe std. 0 for
+  // < 2 trials or no spread — no multiple testing to correct for.
+  function expectedMaxSharpe(nTrials, trialSrStd) {
+    if (nTrials < 2 || trialSrStd <= 0) return 0
+    const g = EULER_MASCHERONI
+    return trialSrStd * ((1 - g) * _normalPpf(1 - 1 / nTrials) + g * _normalPpf(1 - 1 / (nTrials * Math.E)))
+  }
+  // DSR: PSR measured against the expected-max-Sharpe deflation level for `nTrials` configs tried. >= ~0.95
+  // means the observed Sharpe is unlikely to be multiple-testing luck.
+  function deflatedSharpeFromStats(sharpe, skewness, kurtosis, nObs, nTrials, trialSrStd) {
+    return psrFromStats(sharpe, skewness, kurtosis, nObs, expectedMaxSharpe(nTrials, trialSrStd))
+  }
+
+  // A richer, self-declared VERDICT GATE — for theses whose truth is not "the best cell beats the
+  // benchmark" (the default) but a stricter, pre-registered rule the campaign actually applied. `rows` is the
+  // pooled evidence (matching runs + spec-matching experiment cells). Currently one kind:
+  //   'majority-beats-hold' — a STRICT majority (>50%) of cells must clear `metric` vs `threshold` (per
+  //     `direction`, defaulting to the manifest benchmark). With `windowLever`, that majority must hold in at
+  //     least `minWindows` distinct window values — the "broadens the win, not just the mean" rule that
+  //     rejects a costume that wins one regime and loses the rest.
+  // Untested until there is enough evidence (>= minRuns measured cells, and >= minWindows measured windows
+  // when windowed). Returns 'untested' for an unknown kind rather than guessing.
+  function gateVerdict(gate, rows, benchmark, minRuns) {
+    if (!gate) return 'untested'
+    const live = (rows || []).filter(
+      (r) => r.summary && r.summary.status !== 'failed' && r.summary.status !== 'invalid',
+    )
+    // A multiple-testing-corrected verdict: the BEST candidate's Sharpe must survive the deflation level for
+    // `nTrials` configs searched (SR* scaled by `trialSrStd`). Proven iff its DSR clears `threshold` (0.95).
+    // The deflation params are pre-registered on the gate (a property of the whole search, not the arm), so
+    // the verdict re-derives from the candidate's own moments against a fixed, auditable correction.
+    if (gate.kind === 'deflated-sharpe') {
+      const sm = gate.sharpeMetric || 'oos_sharpe'
+      const skm = gate.skewMetric || 'oos_ret_skew'
+      const km = gate.kurtosisMetric || 'oos_ret_kurt'
+      const nm = gate.nObsMetric || 'oos_n_obs'
+      const threshold = Number.isFinite(Number(gate.threshold)) ? Number(gate.threshold) : 0.95
+      const nTrials = Number(gate.nTrials)
+      const trialSrStd = Number(gate.trialSrStd)
+      if (!Number.isFinite(nTrials) || !Number.isFinite(trialSrStd) || trialSrStd <= 0) return 'untested'
+      const cand = live
+        .map((r) => (r.summary && r.summary.metrics) || {})
+        .filter((m) => [sm, skm, km, nm].every((k) => Number.isFinite(Number(m[k]))))
+      if (!cand.length || (minRuns && cand.length < minRuns)) return 'untested'
+      const best = cand.reduce((a, b) => (Number(b[sm]) > Number(a[sm]) ? b : a))
+      const dsr = deflatedSharpeFromStats(Number(best[sm]), Number(best[skm]), Number(best[km]), Number(best[nm]), nTrials, trialSrStd)
+      return dsr >= threshold ? 'proven' : 'disproved'
+    }
+    if (gate.kind !== 'majority-beats-hold') return 'untested'
+    const bench = resolveBenchmark(benchmark)
+    const metric = typeof gate.metric === 'string' && gate.metric ? gate.metric : bench.metric
+    const threshold = Number.isFinite(Number(gate.threshold)) ? Number(gate.threshold) : bench.threshold
+    const direction = gate.direction === 'min' ? 'min' : gate.direction === 'max' ? 'max' : bench.direction
+    // Whether a row clears the bar; null when the metric is absent/non-finite (an unmeasured cell abstains).
+    const clears = (r) => {
+      const v = Number(((r.summary && r.summary.metrics) || {})[metric])
+      if (!Number.isFinite(v)) return null
+      return direction === 'min' ? v < threshold : v > threshold
+    }
+    if (gate.windowLever) {
+      const byWin = new Map()
+      let totalCells = 0
+      for (let i = 0; i < live.length; i++) {
+        const c = clears(live[i])
+        if (c === null) continue
+        const w = String(((live[i].summary && live[i].summary.config) || {})[gate.windowLever])
+        let g = byWin.get(w)
+        if (!g) {
+          g = { total: 0, clear: 0 }
+          byWin.set(w, g)
+        }
+        g.total++
+        totalCells++
+        if (c) g.clear++
+      }
+      const windows = Array.from(byWin.values())
+      const minWindows = gate.minWindows || windows.length
+      if (windows.length < 2 || windows.length < minWindows || (minRuns && totalCells < minRuns))
+        return 'untested'
+      const majWindows = windows.filter((g) => g.clear * 2 > g.total).length
+      return majWindows >= minWindows ? 'proven' : 'disproved'
+    }
+    const verdicts = live.map(clears).filter((v) => v !== null)
+    if (!verdicts.length || (minRuns && verdicts.length < minRuns)) return 'untested'
+    const clear = verdicts.filter(Boolean).length
+    return clear * 2 > verdicts.length ? 'proven' : 'disproved'
+  }
+
+  // The auto-verdict for a hypothesis: an explicit `gate` (above) wins; else a context-spanning spec reads
+  // its cross-context comparison; else a single-context spec uses the pooled beats-hold rule. Precedence:
+  // decided (proven/disproved) > proposed (blocked on an unimplemented model) > untested.
   function autoVerdictForHypothesis(h, runs, direction, minRuns, modelImplemented, benchmark, experimentRows) {
+    const spec = h && h.spec
+    if (h && h.gate && h.gate.kind) {
+      const matched = hypothesisMatchingRuns(spec, runs)
+      const exp = (experimentRows || []).filter((r) =>
+        specMatchesConfig(spec, (r.summary && r.summary.config) || {}),
+      )
+      const rows = matched.concat(dedupeExperimentRows(matched, exp))
+      const v = gateVerdict(h.gate, rows, benchmark, minRuns)
+      if (v === 'untested' && requiresUnimplementedModel(spec, modelImplemented)) return 'proposed'
+      return v
+    }
+    return autoVerdictForHypothesisDefault(
+      h,
+      runs,
+      direction,
+      minRuns,
+      modelImplemented,
+      benchmark,
+      experimentRows,
+    )
+  }
+
+  function autoVerdictForHypothesisDefault(h, runs, direction, minRuns, modelImplemented, benchmark, experimentRows) {
     const spec = h && h.spec
     const exp = experimentRows || []
     let verdict
@@ -1118,6 +1278,8 @@
     comparisonCriterion: comparisonCriterion,
     effectiveVerdict: effectiveVerdict,
     autoVerdictForHypothesis: autoVerdictForHypothesis,
+    gateVerdict: gateVerdict,
+    deflatedSharpeFromStats: deflatedSharpeFromStats,
     requiresUnimplementedModel: requiresUnimplementedModel,
     evaluateHypothesis: evaluateHypothesis,
     hypothesisHygiene: hypothesisHygiene,

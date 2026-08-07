@@ -55,11 +55,25 @@ cpSync(VIEWER, dest, { recursive: true })
 
 const cfg = { mode: 'single', dir: projectDir, manifestRelPath }
 if (name) cfg.name = name
+// BUNDLE the manifest so the app boots straight into the dashboard SYNCHRONOUSLY — no inspect round-trip, so
+// the hub never flashes and there is no blank loading gap. The dir/manifestRelPath stay in the config, so the
+// viewer still re-inspects in the background on open and self-heals if trainer.json changed since the seed.
+// If the manifest can't be read, fall back to the inspect path (config without an inline manifest).
+const manifestPath = resolve(target, manifestRelPath)
+let bundled = false
+if (existsSync(manifestPath)) {
+  try {
+    cfg.manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
+    bundled = true
+  } catch (e) {
+    console.warn(`could not parse ${manifestPath} (${e.message}); falling back to inspect-on-boot`)
+  }
+}
 // Throws (and aborts the seed) if the config would not open single — a loud failure beats a bricked app.
 writeFileSync(join(dest, 'boot.config.js'), renderBootConfig(cfg))
 
 console.log(`seeded single-purpose viewer → ${dest}`)
-console.log(`boot config: ${JSON.stringify(cfg)}`)
+console.log(`boot: ${bundled ? 'bundled manifest (instant, self-refreshing)' : 'inspect-on-boot'} — ${JSON.stringify({ ...cfg, manifest: bundled ? '<' + (cfg.manifest.recordType || 'manifest') + '>' : undefined })}`)
 console.log('')
 console.log('Final wiring (overseer project metadata, NOT a repo file):')
 console.log(`  metadata.hasApp = true`)

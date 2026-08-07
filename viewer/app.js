@@ -21119,15 +21119,24 @@ async function init() {
   setupTabs()
   setupVisibilityResume()
   setupHelpTooltips()
-  showView('home')
-  // A5 single-purpose boot: if the host injected a {mode:'single'} config, open that one project's dashboard
-  // and never show the hub. Resolved BEFORE the embedded gate so a BUNDLED-manifest app boots standalone too
-  // (localStorage fallback); any misconfiguration resolves to the hub with a banner, so this only ADDS a path
-  // — with no config the default is byte-identical to before.
+  // A5 single-purpose boot: resolve BEFORE painting anything, so the hub landing never flashes while the
+  // async manifest inspect runs. In single mode the hub view is hidden immediately and never rendered; the
+  // dashboard appears once the manifest loads. Any misconfiguration reverts to a usable hub. With no config
+  // (base modeltrainer) this path is skipped and the default is byte-identical to before.
   const resolved = TrainerBoot.resolveBoot(window.__TRAINER_BOOT__, { embedded: embedded() })
-  if (resolved.error) setBanner(resolved.error)
-  if (resolved.mode === 'single' && (await bootSinglePurpose(resolved))) return
+  if (resolved.mode === 'single') {
+    if (document.body) document.body.classList.add('single-purpose')
+    const home = byId('view-home')
+    if (home) home.hidden = true
+    if (resolved.error) setBanner(resolved.error)
+    if (await bootSinglePurpose(resolved)) return
+    // The single-purpose manifest could not be loaded — revert the chrome and fall through to the hub.
+    if (document.body) document.body.classList.remove('single-purpose')
+  } else if (resolved.error) {
+    setBanner(resolved.error)
+  }
 
+  showView('home')
   if (!embedded()) {
     if (!resolved.error) setBanner('Open inside the Overseer to use the viewer.')
     renderHome()
