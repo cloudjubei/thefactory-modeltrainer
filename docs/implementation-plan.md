@@ -67,24 +67,33 @@ project owns its copy and edits it directly.
    guards `goHome`. **Remaining in this item:** single-purpose deep-link wiring (embedded boot currently skips
    the `getDeepLink` pull + `onNavOpen` registration) — a refinement, folded into step 5's de-monolith or done
    when a single-purpose app first needs in-app deep-links.
-2. **Project override layer.** A thin per-project `project.js` / config the base viewer loads for project chrome
-   (labels, presets, extra panels) WITHOUT forking the monolith — so BlackSwan customizes and modeltrainer
-   updates still flow.
-3. **Package + publish.** Engine (`src/`→`dist`) is already a clean npm lib (backend consumes it); the tarball
-   already ships `viewer/` (`files:[dist,viewer]`). Publish a versioned build so consumers pin it.
-4. **BlackSwan consumes modeltrainer.** Constraint: the overseer serves app files ONLY from inside the project's
-   checkout (`files.ts` escape guard), so the viewer bytes must live in BlackSwan. **Option A (recommended):**
-   BlackSwan adds `package.json` depending on `thefactory-modeltrainer`; a postinstall/build copies
-   `node_modules/thefactory-modeltrainer/viewer` → `BlackSwan/app/` (its `appDir`); update via `npm update` +
-   re-copy. **Option B (fallback):** git submodule/subtree of `viewer/` at `BlackSwan/app` (no Node toolchain,
-   commit-pinned). Reject symlink (escape guard). BlackSwan settings: `hasApp:true`, `appDir:"app"`. No Python
-   change — the trainer CLI already conforms; engine stays a backend library (BlackSwan consumes the viewer only).
-5. **`app.js` de-monolith (enabler, not blocker).** The 900KB+ `app.js` is the main reuse/override obstacle;
-   optionally split into loadable chunks like the existing IIFE modules so a template override never edits the
-   monolith. Options A/B work without it.
-6. **Update docs** (`architecture.md`, repo-split table, `model-training-standard.md`) to describe the
-   template+library model alongside the hub.
-7. **(Deferred to the very END of A5.)** xAI per-step **attention scrubber** + snapshot **diff-consecutive** arm.
+2. **The SEED mechanism. ✅ SHIPPED.** A project declares single-purpose mode through a `boot.config.js` the
+   viewer loads BEFORE `boot.js` (added to `index.html`; base modeltrainer ships it EMPTY → hub, so default
+   behaviour is unchanged). The seed writes a project-specific `boot.config.js` that sets `window.__TRAINER_BOOT__`.
+   Pure, node-tested content generator `TrainerBoot.renderBootConfig(cfg)` (in `viewer/boot.js`) round-trips
+   through `resolveBoot`, so a malformed seed can't silently brick the app. `scripts/seed-single-purpose.mjs`
+   copies `viewer/` → a target project's app dir and drops that `boot.config.js`. This REPLACES the old "override
+   layer" — a seeded project owns its copy; it customizes by editing it, not by layering to survive updates that
+   never come.
+3. ~~**Package + publish a versioned build for consumers to pin.**~~ **DROPPED** — no update flow, so nothing
+   pins-for-updates. (The engine `dist` remains a normal npm lib the BACKEND consumes; that is unchanged and is
+   not part of the seed.)
+4. **Seed BlackSwan as its own app. ✅ SHIPPED (files) — one runtime step remains.** The overseer serves app
+   files ONLY from inside the project checkout (`files.ts` escape guard → `metadata.appDir`, checkout-relative,
+   falls back to root), so the viewer bytes must live in BlackSwan. The seed wrote `BlackSwan/app/` (24 files)
+   with a `boot.config.js` of `{mode:'single', dir:'.', name:'BlackSwan', manifestRelPath:'.factory/trainer.json'}`
+   — the `needsInspect` path loads BlackSwan's REAL manifest fresh via `inspect-trainer dir:'.'`, nothing bundled
+   stale. `BlackSwan/app/boot.js` is byte-identical to source (`diff -q` clean). One-time; BlackSwan owns the copy
+   (gitignore-able — regenerable by re-running the seed). No Node toolchain imposed on the Python repo. **Remaining
+   (overseer runtime, NOT a repo file — cannot be done from the repo):** set the BlackSwan project record's
+   `metadata.hasApp=true`, `metadata.appDir="app"`. Until then the App tab won't appear / won't serve `app/`.
+5. ~~**`app.js` de-monolith.**~~ **DROPPED as an A5 requirement** — its only A5 justification was overriding
+   without editing the monolith; a seeded project owns and may edit its copy freely. Optional hygiene, not the
+   seed's blocker.
+6. **Update docs. ✅ SHIPPED.** `architecture.md` now carries a "Two deployment modes, one codebase" section
+   (hub for dev + one-time seed for a shipped single-purpose app) and the "registered, not forked" bullet notes
+   the seed as the one place a project takes a copy it then owns.
+7. **THE SOLE REMAINDER — deferred xAI per-step attention scrubber + snapshot diff-consecutive arm.**
    The producers are shipped (`write_per_step_attention`; the `snapshotTraces` index) but the heavy traces +
    attention live in JSONL SIDECAR FILES, and today's viewer reads only RECORDS (no file-fetch bridge verb) — so
    this is blocked in the hub model. Once BlackSwan is its own single-purpose app (steps 1–4), the served viewer

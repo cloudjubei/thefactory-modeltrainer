@@ -189,6 +189,13 @@ button:focus-visible,
   font-size: 16px;
   font-weight: 700;
 }
+/* Single-purpose app (A5 seed): the dashboard IS the one project, so Back and the project-name title are
+   redundant. The #id selectors outrank `.back-btn` (which is why toggling the `hidden` attribute alone did
+   not hide it). The refresh indicator is intentionally kept. */
+body.single-purpose #back-btn,
+body.single-purpose #dash-project-name {
+  display: none;
+}
 /* Global Refresh control: pushed to the right edge of the content area, so it sits just left of
    Overseer's floated activity-model chip (the 160px gutter reserves that chip's space). */
 .dash-refresh {

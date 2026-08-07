@@ -52,7 +52,9 @@
       // do. Standalone there is no host, so this configuration cannot open; fall back to the (usable) hub and
       // say why rather than boot into a dashboard with no manifest.
       if (!embedded) {
-        return hub('single-purpose boot needs the Overseer host to load the project manifest; showing the hub')
+        return hub(
+          'single-purpose boot needs the Overseer host to load the project manifest; showing the hub',
+        )
       }
       const project = projectFrom(bootConfig, bootConfig.dir, bootConfig.name || 'Trainer')
       return { mode: 'single', project, manifest: null, needsInspect: true, error: null }
@@ -61,7 +63,33 @@
     return hub('single-purpose boot config declared no manifest and no dir; showing the hub')
   }
 
-  const TrainerBoot = { resolveBoot: resolveBoot, usableManifest: usableManifest }
+  // Generate the source of a seeded project's boot.config.js (loaded before boot.js). It is checked through
+  // resolveBoot FIRST and throws if the config would not open a single-purpose dashboard — a seed that would
+  // silently leave the app on the hub (or a blank screen) is a bug, and it fails at seed time rather than in
+  // the user's browser. The config is embedded via JSON.stringify, so any string in it is safely escaped.
+  function renderBootConfig(cfg) {
+    const check = resolveBoot(cfg, { embedded: true })
+    if (check.mode !== 'single') {
+      throw new Error(
+        'renderBootConfig: config does not resolve to a single-purpose boot (' +
+          (check.error || 'not single') +
+          ')',
+      )
+    }
+    return (
+      '// Generated single-purpose boot config (A5 seed) — see scripts/seed-single-purpose.mjs.\n' +
+      '// Base modeltrainer ships this file EMPTY, which leaves the viewer in multi-project hub mode.\n' +
+      'window.__TRAINER_BOOT__ = ' +
+      JSON.stringify(cfg) +
+      '\n'
+    )
+  }
+
+  const TrainerBoot = {
+    resolveBoot: resolveBoot,
+    usableManifest: usableManifest,
+    renderBootConfig: renderBootConfig,
+  }
 
   if (typeof module !== 'undefined' && module.exports) module.exports = TrainerBoot
   if (root) root.TrainerBoot = TrainerBoot

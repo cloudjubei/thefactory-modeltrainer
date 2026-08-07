@@ -18,7 +18,11 @@ mod.paths = []
 mod._compile(readFileSync(mpath, 'utf8'), mpath)
 const B: any = mod.exports
 
-const MANIFEST = { name: 'BlackSwan', recordType: 'blackswan-run', objective: { name: 'x', direction: 'max' } }
+const MANIFEST = {
+  name: 'BlackSwan',
+  recordType: 'blackswan-run',
+  objective: { name: 'x', direction: 'max' },
+}
 const emb = { embedded: true }
 
 describe('resolveBoot — default is the hub, unchanged', () => {
@@ -51,7 +55,14 @@ describe('resolveBoot — single-purpose with a bundled manifest', () => {
   })
   it('honours explicit key / name / dir / manifestRelPath overrides', () => {
     const p = B.resolveBoot(
-      { mode: 'single', manifest: MANIFEST, key: 'k', name: 'N', dir: 'sub', manifestRelPath: '.factory/t.json' },
+      {
+        mode: 'single',
+        manifest: MANIFEST,
+        key: 'k',
+        name: 'N',
+        dir: 'sub',
+        manifestRelPath: '.factory/t.json',
+      },
       emb,
     ).project
     expect(p).toEqual({ key: 'k', name: 'N', dir: 'sub', manifestRelPath: '.factory/t.json' })
@@ -76,6 +87,43 @@ describe('resolveBoot — single-purpose that must inspect its own dir', () => {
     const res = B.resolveBoot({ mode: 'single', dir: '.', manifest: { name: 'x' } }, emb)
     expect(res.needsInspect).toBe(true)
     expect(res.manifest).toBe(null)
+  })
+})
+
+describe('renderBootConfig — the seed writes a boot.config.js that CANNOT silently fail to boot', () => {
+  // Execute the generated source with a fake window, exactly as the browser would, so the round-trip
+  // (config → file → window.__TRAINER_BOOT__ → resolveBoot) is proven end-to-end without a browser.
+  const exec = (src: string) => {
+    const w: any = {}
+    // eslint-disable-next-line no-new-func
+    new Function('window', src)(w)
+    return w.__TRAINER_BOOT__
+  }
+
+  it('a dir-based single config round-trips to a single-purpose boot', () => {
+    const cfg = {
+      mode: 'single',
+      dir: '.',
+      name: 'BlackSwan',
+      manifestRelPath: '.factory/trainer.json',
+    }
+    const src = B.renderBootConfig(cfg)
+    expect(src).toContain('window.__TRAINER_BOOT__')
+    expect(exec(src)).toEqual(cfg)
+    expect(B.resolveBoot(exec(src), { embedded: true }).mode).toBe('single')
+  })
+
+  it('a bundled-manifest single config round-trips too', () => {
+    const cfg = { mode: 'single', manifest: MANIFEST }
+    expect(B.resolveBoot(exec(B.renderBootConfig(cfg)), { embedded: true }).manifest).toEqual(
+      MANIFEST,
+    )
+  })
+
+  it('REFUSES to emit a config that would not boot single — a seed bug fails loud, not silent', () => {
+    expect(() => B.renderBootConfig(null)).toThrow()
+    expect(() => B.renderBootConfig({ mode: 'hub' })).toThrow()
+    expect(() => B.renderBootConfig({ mode: 'single' })).toThrow() // no manifest, no dir
   })
 })
 

@@ -2608,8 +2608,10 @@ async function openProject(projectKey) {
 // projectUnseenCount, …) works unchanged, then takes the SAME dashboard-open path as openProject.
 async function bootProject(project, manifestObj) {
   hubMode = false
-  const back = byId('back-btn')
-  if (back) back.hidden = true
+  // Single-purpose chrome: the app IS this one project, so the Back-to-projects button and the dashboard
+  // project-name title are redundant. A body class hides them via CSS (id-specificity beats `.back-btn`,
+  // which is why the earlier `back.hidden` was overridden and did nothing). The refresh indicator stays.
+  if (document.body) document.body.classList.add('single-purpose')
   if (!projectsCache.some((p) => p.key === project.key)) projectsCache.push(project)
   manifestsCache.set(project.key, { manifest: manifestObj })
   await openResolvedProject(project, manifestObj)

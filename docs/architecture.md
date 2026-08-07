@@ -13,6 +13,17 @@ and every `train`/`judge`/`propose` activity carries the target's `dir`, resolve
 the host checkout. All records live in the host project's scope, namespaced per training
 project by its manifest's `recordType`.
 
+**Two deployment modes, one codebase.** The hub above is the DEV mode — one app manages many training projects.
+The same `viewer/` also ships as a **single-purpose SEED**: a project is stamped from modeltrainer ONCE
+(`scripts/seed-single-purpose.mjs` copies `viewer/` into the project's `appDir` and writes a validated
+`boot.config.js`), after which its copy boots straight into that one project's dashboard — the hub home is never
+shown. The decision lives in the pure `viewer/boot.js` (`TrainerBoot.resolveBoot`); base modeltrainer ships an
+EMPTY `boot.config.js`, so with no seed the viewer is the hub, byte-for-byte as before. A seeded project (e.g.
+BlackSwan, `appDir: "app"`) **owns its copy and carries on independently** — deliberately there is NO
+update-absorption path back to modeltrainer. modeltrainer stays the base that demonstrates all generic
+functionality; a project uses that functionality and adds only what cannot be generic (BlackSwan: its trading
+env and rewards, in its own Python + `.factory/trainer.json`).
+
 ```
 ┌─ Overseer client (web/desktop/mobile) ──────────────────────────────────────┐
 │  App tab (host project) → sandboxed iframe → the hub app (viewer/, appDir)  │
@@ -69,9 +80,11 @@ project by its manifest's `recordType`.
   type from each training project's `manifest.recordType`), so the viewer, badge, and resume
   all work from the same substrate and survive restarts. Run identity = 12-hex hash of the
   resolved config — skip-if-fresh and re-launch idempotency fall out of that.
-- **Training projects are registered, not forked**: a `trainer-project` record ({name, dir})
+- **Training projects are registered, not forked** (hub mode): a `trainer-project` record ({name, dir})
   plus an `inspect-trainer` pass is all it takes to bring a directory under management —
-  no Overseer project per model, no clone.
+  no Overseer project per model, no clone. The single-purpose SEED (above) is the one place a project
+  DOES take a copy of the viewer — a one-time stamp it then owns, chosen precisely so a shipped app can be
+  its own Overseer project without the hub.
 - **The engine never reads model code**: it knows `.factory/trainer.json`, two command
   templates, and the RunSummary shape. Conformance, not integration.
 - **Calibrate-first ETA**: campaigns optionally start with the manifest's tiny calibrate run;
