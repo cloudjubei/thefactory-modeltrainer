@@ -202,12 +202,20 @@
   // CartPole: eval_return_mean ≥ 475); absent, the trading line's historical default applies
   // (return_vs_hold_pct > 0 — beats buy-and-hold OOS).
   const DEFAULT_HYPOTHESIS_BENCHMARK = { metric: 'return_vs_hold_pct', threshold: 0, direction: 'max' }
+  // §C.1 `declared` records whether the manifest actually named a benchmark, so a fallback to the historical
+  // trading default (return_vs_hold_pct) is FAIL-CLOSED WITH A REASON rather than a silent misjudgement.
+  // `quorum` (0..1), when declared, is the minimum FRACTION of runs that must clear the bar — the seed-quorum
+  // that stops one lucky seed proving a hypothesis (best-of-N stays the default when it's absent).
   function resolveBenchmark(benchmark) {
+    const declared = !!(benchmark && typeof benchmark.metric === 'string' && benchmark.metric)
     const b = benchmark || DEFAULT_HYPOTHESIS_BENCHMARK
+    const quorum = Number(b.quorum)
     return {
-      metric: typeof b.metric === 'string' && b.metric ? b.metric : DEFAULT_HYPOTHESIS_BENCHMARK.metric,
+      metric: declared ? benchmark.metric : DEFAULT_HYPOTHESIS_BENCHMARK.metric,
       threshold: Number.isFinite(Number(b.threshold)) ? Number(b.threshold) : 0,
       direction: b.direction === 'min' ? 'min' : 'max',
+      quorum: Number.isFinite(quorum) && quorum > 0 && quorum <= 1 ? quorum : null,
+      declared,
     }
   }
 
@@ -233,17 +241,24 @@
     const values = live
       .map((r) => Number(((r.summary && r.summary.metrics) || {})[bench.metric]))
       .filter(Number.isFinite)
-    const best = values.length
-      ? bench.direction === 'min'
-        ? Math.min.apply(null, values)
-        : Math.max.apply(null, values)
-      : null
-    return {
-      runs: live.length,
-      objective,
-      beatsHold:
-        best === null ? null : bench.direction === 'min' ? best < bench.threshold : best > bench.threshold,
+    const clears = (v) => (bench.direction === 'min' ? v < bench.threshold : v > bench.threshold)
+    let beatsHold = null
+    let reason = null
+    if (!values.length) {
+      // Fail-closed WITH A REASON: no run carries the benchmark metric. When no benchmark was declared this is
+      // the silent trading-default trap (return_vs_hold_pct is absent on a board-game run) — now made explicit.
+      reason = bench.declared
+        ? bench.metric + ' is not reported by any run'
+        : 'no hypothesisBenchmark declared and the default ' + bench.metric + ' is absent — success is unjudged'
+    } else if (bench.quorum !== null) {
+      const cleared = values.filter(clears).length
+      beatsHold = cleared / values.length >= bench.quorum
+      if (!beatsHold) reason = 'only ' + cleared + '/' + values.length + ' runs clear the bar (quorum ' + bench.quorum + ')'
+    } else {
+      const best = bench.direction === 'min' ? Math.min.apply(null, values) : Math.max.apply(null, values)
+      beatsHold = clears(best)
     }
+    return { runs: live.length, objective, beatsHold, reason }
   }
 
   // The single-context measured read split by evidence SOURCE — run-sourced, experiment-sourced, and the

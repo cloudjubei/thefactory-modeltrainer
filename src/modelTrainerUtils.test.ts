@@ -58,6 +58,7 @@ import {
   validateDecisionTrace,
   validateTrainerManifest,
   validateTrainingRunSummary,
+  validateRunProvenance,
   capRunSummaryForStorage,
   plannedMatrixItemCount,
   modelSlug,
@@ -2139,6 +2140,33 @@ describe('parseProgressMarker', () => {
 
   it('returns undefined when the payload is not an object', () => {
     expect(parseProgressMarker('@@PROGRESS 42')).toBeUndefined()
+  })
+})
+
+describe('validateRunProvenance (§C.9 reproducibility soft-flag)', () => {
+  it('flags every missing key when there is no provenance at all', () => {
+    expect(validateRunProvenance({ objective: 0.6 } as never)).toEqual({
+      complete: false,
+      missing: ['gitCommit', 'configHash', 'seed', 'dataVersion'],
+    })
+  })
+
+  it('is complete when the tuple is present (seed satisfied by the top-level seed)', () => {
+    expect(
+      validateRunProvenance({ seed: 3, provenance: { gitCommit: 'a', configHash: 'b', dataVersion: 'v1' } }),
+    ).toEqual({ complete: true, missing: [] })
+  })
+
+  it('accepts a provenance-nested seed too, and flags only the genuinely-absent keys', () => {
+    expect(
+      validateRunProvenance({ provenance: { gitCommit: 'a', seed: 3 } }),
+    ).toEqual({ complete: false, missing: ['configHash', 'dataVersion'] })
+  })
+
+  it('treats empty-string / null provenance values as missing', () => {
+    expect(
+      validateRunProvenance({ seed: 1, provenance: { gitCommit: '', configHash: null, dataVersion: 'v1' } }),
+    ).toEqual({ complete: false, missing: ['gitCommit', 'configHash'] })
   })
 })
 

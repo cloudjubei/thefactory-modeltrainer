@@ -244,6 +244,7 @@ import {
   splitLeversOf,
   narrateSplitHoldout,
   rewardFitnessAlignment,
+  proxyAlignment,
   narrateAlignment,
   assembleChampionVerdict,
 } from './diagnosticsUtils.js'
@@ -3624,7 +3625,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const rankMetric = card.fitness?.[0]?.metric ?? manifest.objective.name
     const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), card)
     const splitLevers = splitLeversOf(manifest)
-    const holdout = incumbentSplitHoldout(runs, splitLevers, criterion)
+    const splitAlpha = manifest.diagnostics?.splitAxis?.alpha
+    const testValues = manifest.diagnostics?.splitAxis?.testValues
+    const holdout = incumbentSplitHoldout(runs, splitLevers, criterion, {
+      ...(splitAlpha !== undefined ? { alpha: splitAlpha } : {}),
+      ...(testValues ? { testValues } : {}),
+    })
     // Reward–success alignment: does the reward/objective actually track the ACTIVE scorecard's success
     // metrics (gates + fitness)? A near-zero primary correlation = a misaligned proxy (BlackSwan's problem).
     const alignMetrics = [
@@ -3634,6 +3640,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ]),
     ].filter((m) => m !== 'objective')
     const alignment = alignMetrics.length ? rewardFitnessAlignment(runs, alignMetrics) : undefined
+    // §C.8 proxy SELECTION-REGRET on the primary success metric (beyond correlation); and an explicit warning
+    // when a success metric exists on the runs but none is DECLARED, so the proxy check can't run silently.
+    const proxy = alignMetrics.includes(rankMetric)
+      ? proxyAlignment(runs, rankMetric, criterion.direction === 'min' ? 'min' : 'max', splitLevers)
+      : undefined
+    const proxySkipped = !alignMetrics.length && runs.some((r) => r.metrics && Object.keys(r.metrics).length > 0)
+    // §C.5 confound advisory: how strongly the objective tracks each declared confound metric.
+    const confoundMetrics = manifest.diagnostics?.confoundMetrics ?? []
+    const confounds = confoundMetrics.length ? rewardFitnessAlignment(runs, confoundMetrics) : undefined
     // A4.3 composite champion "declare steady" verdict over the same projected runs + split axis.
     const champion = assembleChampionVerdict(manifest.diagnostics, { runs, splitLevers, criterion })
     return {
@@ -3651,9 +3666,19 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       },
       incumbent: holdout.incumbentConfig,
       convergenceGated: convergenceGatedBySplits(holdout),
+      ...(holdout.testSplits.length
+        ? { test: { splits: holdout.testSplits, consumed: holdout.testConsumed, held: holdout.testHeld } }
+        : {}),
       ...(alignment
         ? { alignment, alignmentNarrative: narrateAlignment(alignment, rankMetric) }
-        : {}),
+        : proxySkipped
+          ? {
+              alignmentNarrative:
+                'Proxy-vs-true check skipped — declare the true success metric in fitness/gates so the reward can be checked against it.',
+            }
+          : {}),
+      ...(proxy && Number.isFinite(proxy.regret) ? { proxyRegret: proxy.regret } : {}),
+      ...(confounds ? { confounds } : {}),
       narrative: narrateSplitHoldout(holdout, splitLevers, rankMetric, runs.length),
       championGates: champion.championGates,
       ...(champion.steady !== undefined ? { steady: champion.steady } : {}),

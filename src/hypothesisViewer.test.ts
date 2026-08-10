@@ -1084,6 +1084,25 @@ describe('measuredFromRuns with a manifest benchmark', () => {
     expect(H.measuredFromRuns([run('a', {}, { vh: -1 })], 'max').beatsHold).toBe(false)
   })
 
+  it('§C.1 a declared quorum requires that FRACTION of runs to clear the bar (not just the best)', () => {
+    const q = { metric: 'eval_return_mean', threshold: 475, direction: 'max', quorum: 0.5 }
+    // 1 of 5 clears ⇒ 0.2 < 0.5 ⇒ not proven; the lucky best no longer carries the verdict.
+    const lucky = [cartRun('a', 490), cartRun('b', 100), cartRun('c', 100), cartRun('d', 100), cartRun('e', 100)]
+    expect(H.measuredFromRuns(lucky, 'max', q).beatsHold).toBe(false)
+    // 4 of 5 clears ⇒ 0.8 ≥ 0.5 ⇒ proven.
+    const strong = [cartRun('a', 490), cartRun('b', 480), cartRun('c', 495), cartRun('d', 500), cartRun('e', 100)]
+    expect(H.measuredFromRuns(strong, 'max', q).beatsHold).toBe(true)
+  })
+
+  it('§C.1 fail-closed-with-reason: an undeclared benchmark whose default metric is absent explains itself', () => {
+    const m = H.measuredFromRuns([run('a', { model_name: 'ppo' }, { objective: 490 })], 'max', undefined)
+    expect(m.beatsHold).toBe(null)
+    expect(m.reason).toMatch(/no hypothesisBenchmark declared/i)
+    // a DECLARED benchmark whose metric is simply absent gets a different, metric-named reason
+    const declaredMissing = H.measuredFromRuns([run('a', {}, { objective: 490 })], 'max', benchmark)
+    expect(declaredMissing.reason).toMatch(/eval_return_mean is not reported/i)
+  })
+
   it('threads through autoVerdictForHypothesis / effectiveVerdict / evaluateHypothesis', () => {
     const h = { spec: { fixed: { model_name: 'ppo' } } }
     const runs3 = [cartRun('a', 490), cartRun('b', 480, { seed: 1 }), cartRun('c', 495, { seed: 2 })]

@@ -46,6 +46,7 @@ import {
   MAX_CAMPAIGN_ITEMS,
   MAX_DECISION_TRACE_STEPS,
   MAX_SERIES_POINTS,
+  REQUIRED_PROVENANCE_KEYS,
 } from './modelTrainerConstants.js'
 
 const LEVER_TYPES: ReadonlySet<string> = new Set(['number', 'choice', 'boolean'])
@@ -2638,6 +2639,27 @@ export function validateTrainingRunSummary(raw: unknown): TrainingRunSummary {
     throw new Error('run summary requires a numeric objective')
   }
   return summary as unknown as TrainingRunSummary
+}
+
+/**
+ * §C.9 reproducibility SOFT-flag: which of the {@link REQUIRED_PROVENANCE_KEYS} the run's provenance is
+ * missing, so an incomplete fingerprint is VISIBLE (surfaced like a health flag) instead of silently accepted
+ * — {@link validateTrainingRunSummary} still only hard-requires a numeric objective. Domain-oblivious: `seed`
+ * is satisfied by the summary's top-level `seed` OR a `provenance.seed`; the rest are read from `provenance`.
+ * `complete` iff nothing is missing.
+ */
+export function validateRunProvenance(summary: {
+  seed?: unknown
+  provenance?: Record<string, unknown>
+}): { complete: boolean; missing: string[] } {
+  const p = (summary.provenance ?? {}) as Record<string, unknown>
+  const present = (k: string): boolean => {
+    if (k === 'seed') return summary.seed !== undefined || p.seed !== undefined
+    const v = p[k]
+    return v !== undefined && v !== null && v !== ''
+  }
+  const missing = REQUIRED_PROVENANCE_KEYS.filter((k) => !present(k))
+  return { complete: missing.length === 0, missing }
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>

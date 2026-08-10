@@ -1154,7 +1154,13 @@ export function gateConvergenceOnSplits(
   if (!step.done || step.stage !== 'converged' || !budgetLeft) return step
   const splitLevers = splitLeversOf(manifest)
   if (!splitLevers.length) return step
-  const holdout = incumbentSplitHoldout(runs, splitLevers, criterion, { baseline: baselineOf(runs) })
+  const splitAlpha = manifest?.diagnostics?.splitAxis?.alpha
+  const testValues = manifest?.diagnostics?.splitAxis?.testValues
+  const holdout = incumbentSplitHoldout(runs, splitLevers, criterion, {
+    baseline: baselineOf(runs),
+    ...(splitAlpha !== undefined ? { alpha: splitAlpha } : {}),
+    ...(testValues ? { testValues } : {}),
+  })
   // 1) Split-consistency gate (existing): the incumbent isn't robust across the split axis AND there are unrun
   //    splits + budget to try them → replicate it across them before crowning (fixes single-window luck).
   if (convergenceGatedBySplits(holdout) && holdout.missingSplitConfigs.length && holdout.incumbentConfig) {

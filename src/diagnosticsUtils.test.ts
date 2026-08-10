@@ -6,6 +6,8 @@ import {
   splitLeversOf,
   narrateSplitHoldout,
   rewardFitnessAlignment,
+  proxyAlignment,
+  verifyImprovement,
   narrateAlignment,
   assembleChampionVerdict,
 } from './diagnosticsUtils'
@@ -435,6 +437,18 @@ describe('assembleChampionVerdict (A4.3 champion "declare steady" verdict)', () 
     expect(gate.detail).toContain('20888')
   })
 
+  it('the GENERIC diagnostics.searchSpace floor deflates the DSR gate too (one shared search size)', () => {
+    const runs = [dr(1, '2024', 10, 0.5), dr(1, '2022', 10, 0.5), dr(2, '2024', 1, 0.1), dr(2, '2022', 1, 0.1)]
+    const ctx = { runs, splitLevers: ['window'], criterion: crit }
+    expect(
+      assembleChampionVerdict({ dsr: { threshold: 0.95 } }, ctx).championGates.find((g) => g.kind === 'dsr')!.pass,
+    ).toBe(true)
+    const deflated = assembleChampionVerdict({ dsr: { threshold: 0.95 }, searchSpace: { nTrials: 20888 } }, ctx)
+    const g = deflated.championGates.find((x) => x.kind === 'dsr')!
+    expect(g.pass).toBe(false)
+    expect(g.detail).toContain('20888')
+  })
+
   it('the DSR trial-count override is a FLOOR — it can never deflate by fewer trials than were compared', () => {
     // A gate override must only ever make the gate stricter. Honouring a value below the observed setup
     // count would let a misconfigured manifest weaken the correction, which is the one direction a gate
@@ -631,5 +645,292 @@ describe('assembleChampionVerdict (A4.3 champion "declare steady" verdict)', () 
     // up_capture is present (gate is applicable) but down_capture is absent ⇒ bound NaN ⇒ 0.85 > NaN is false.
     expect(g.applicable).toBe(true)
     expect(g.pass).toBe(false)
+  })
+})
+
+describe('assembleChampionVerdict — §C.4 seed-significance gate', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const setup = (name: string, values: number[]): AnalysisRun[] =>
+    values.map((v, i) => ({
+      key: `${name}-${i}`,
+      config: { setup: name, seed: i },
+      metrics: { win_rate: v },
+      objective: v,
+      seed: i,
+      status: 'completed',
+    }))
+  const diag = { significance: { alpha: 0.05 } }
+  const ctx = (runs: AnalysisRun[]) => ({ runs, splitLevers: [] as string[], criterion: WIN })
+
+  it('not steady when the incumbent and runner-up genuinely overlap across seeds (delta straddles 0)', () => {
+    const runs = [...setup('A', [0.7, 0.52, 0.68, 0.54, 0.61]), ...setup('B', [0.55, 0.66, 0.57, 0.64, 0.6])]
+    const v = assembleChampionVerdict(diag, ctx(runs))
+    expect(v.steady).toBe(false)
+    expect(v.championGates[0]).toMatchObject({ kind: 'seed-significance', applicable: true, pass: false })
+  })
+
+  it('steady when the incumbent clearly separates from the runner-up, surfacing the effect + CI', () => {
+    const runs = [...setup('A', [0.86, 0.84, 0.85, 0.85, 0.84]), ...setup('B', [0.55, 0.56, 0.54, 0.55, 0.56])]
+    const v = assembleChampionVerdict(diag, ctx(runs))
+    expect(v.steady).toBe(true)
+    expect(v.championGates[0]).toMatchObject({ kind: 'seed-significance', applicable: true, pass: true })
+    expect(v.championGates[0].effect!.ci[0]).toBeGreaterThan(0) // §C.7 the interval, not just a boolean
+  })
+
+  it('not applicable (skipped, fail-closed) with a single setup — no runner-up', () => {
+    const v = assembleChampionVerdict(diag, ctx(setup('A', [0.9, 0.88, 0.91])))
+    expect(v.championGates[0]).toMatchObject({ kind: 'seed-significance', applicable: false })
+    expect(v.steady).toBe(false)
+  })
+
+  it('not applicable with fewer than 2 seeds a side', () => {
+    const runs = [...setup('A', [0.9]), ...setup('B', [0.5])]
+    expect(assembleChampionVerdict(diag, ctx(runs)).championGates[0]).toMatchObject({
+      kind: 'seed-significance',
+      applicable: false,
+    })
+  })
+})
+
+describe('assembleChampionVerdict — §C.2 best-of-N multiplicity gate', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const setup = (name: string, values: number[]): AnalysisRun[] =>
+    values.map((v, i) => ({
+      key: `${name}-${i}`,
+      config: { setup: name, seed: i },
+      metrics: { win_rate: v },
+      objective: v,
+      seed: i,
+      status: 'completed',
+    }))
+  const noise = (n: number, lo = 0.44, hi = 0.56): AnalysisRun[] =>
+    Array.from({ length: n }, (_, i) => setup(`s${i}`, [lo + (i * (hi - lo)) / (n - 1)])).flat()
+  const ctx = (runs: AnalysisRun[]) => ({ runs, splitLevers: [] as string[], criterion: WIN })
+  const bestOfN = (v: ReturnType<typeof assembleChampionVerdict>) =>
+    v.championGates.find((g) => g.kind === 'best-of-n')
+
+  it('deflates the argmax of a pure-noise best-of-N search (family p ≥ alpha ⇒ fails)', () => {
+    const v = assembleChampionVerdict({ multiplicity: { metric: 'win_rate' } }, ctx(noise(30)))
+    expect(bestOfN(v)).toMatchObject({ applicable: true, pass: false })
+  })
+
+  it('passes a genuine outlier that clears the best-of-N noise ceiling', () => {
+    const runs = [...noise(29), ...setup('real', [0.8])]
+    const v = assembleChampionVerdict({ multiplicity: { metric: 'win_rate' } }, ctx(runs))
+    expect(bestOfN(v)).toMatchObject({ applicable: true, pass: true })
+  })
+
+  it('a declared searchSpace.nTrials floor deflates harder — flips a borderline pass to a fail', () => {
+    const runs = [...noise(5), ...setup('real', [0.62])]
+    const lax = assembleChampionVerdict({ multiplicity: { metric: 'win_rate' } }, ctx(runs))
+    const strict = assembleChampionVerdict(
+      { multiplicity: { metric: 'win_rate' }, searchSpace: { nTrials: 5000 } },
+      ctx(runs),
+    )
+    expect(bestOfN(lax)?.pass).toBe(true)
+    expect(bestOfN(strict)?.pass).toBe(false)
+  })
+
+  it('not applicable with no cross-setup spread (a single setup)', () => {
+    const v = assembleChampionVerdict({ multiplicity: { metric: 'win_rate' } }, ctx(setup('A', [0.9, 0.88, 0.91])))
+    expect(bestOfN(v)).toMatchObject({ applicable: false })
+  })
+})
+
+describe('incumbentSplitHoldout — §C.7 CI-based held-test (opt-in via alpha)', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const r = (split: string, v: number, seed: number): AnalysisRun => ({
+    key: `X-${split}-${seed}`,
+    config: { setup: 'X', split, seed },
+    metrics: { win_rate: v },
+    objective: v,
+    seed,
+    status: 'completed',
+  })
+  const wide = [r('A', 0.9, 0), r('A', 0.3, 1), r('A', 0.36, 2), r('B', 0.85, 0), r('B', 0.32, 1), r('B', 0.35, 2)]
+  const tight = [r('A', 0.85, 0), r('A', 0.86, 1), r('A', 0.84, 2), r('B', 0.83, 0), r('B', 0.86, 1), r('B', 0.85, 2)]
+
+  it('a high-variance split whose mean edges the baseline does NOT hold under alpha', () => {
+    const h = incumbentSplitHoldout(wide, ['split'], WIN, { baseline: 0.5, alpha: 0.05 })
+    expect(h.held).toBe(0)
+    expect(h.verdict).not.toBe('robust')
+    expect(h.splitEffects).toHaveLength(2)
+    expect(h.splitEffects[0]).toMatchObject({ held: false })
+    expect(h.splitEffects[0].ci[0]).toBeLessThan(0)
+  })
+
+  it('a tight split clearly above the baseline holds under alpha, with the CI surfaced', () => {
+    const h = incumbentSplitHoldout(tight, ['split'], WIN, { baseline: 0.5, alpha: 0.05 })
+    expect(h.verdict).toBe('robust')
+    expect(h.held).toBe(2)
+    expect(h.splitEffects.every((e) => e.held && e.ci[0] > 0)).toBe(true)
+  })
+
+  it('without alpha the mean-test verdict + empty splitEffects are preserved', () => {
+    const h = incumbentSplitHoldout(wide, ['split'], WIN, { baseline: 0.5 })
+    expect(h.verdict).toBe('robust')
+    expect(h.splitEffects).toEqual([])
+  })
+})
+
+describe('incumbentSplitHoldout — §C.3 locked held-out TEST role', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const mk = (setup: string, opp: string, v: number): AnalysisRun => ({
+    key: `${setup}-${opp}`,
+    config: { setup, opponent: opp },
+    metrics: { win_rate: v },
+    objective: v,
+    seed: 0,
+    status: 'completed',
+  })
+  const runs = [
+    mk('X', 'rungA', 0.5), mk('X', 'rungB', 0.5), mk('X', 'LOCKED', 0.9), // X wins only on LOCKED
+    mk('Y', 'rungA', 0.55), mk('Y', 'rungB', 0.55), mk('Y', 'LOCKED', 0.5),
+  ]
+
+  it('without a declared test, selection reads every split (X wins via LOCKED); no test accounting', () => {
+    const h = incumbentSplitHoldout(runs, ['opponent'], WIN, { baseline: 0.4 })
+    expect(h.incumbentConfig?.setup).toBe('X')
+    expect(h.testSplits).toEqual([])
+    expect(h.testConsumed).toBe(0)
+  })
+
+  it('declaring the test excludes it from selection and consumes it once', () => {
+    const h = incumbentSplitHoldout(runs, ['opponent'], WIN, { baseline: 0.4, testValues: ['LOCKED'] })
+    expect(h.incumbentConfig?.setup).toBe('Y')
+    expect(h.testSplits).toEqual(['opponent=LOCKED'])
+    expect(h.testConsumed).toBe(1)
+    expect(h.testHeld).toBe(1)
+  })
+
+  it('flags when the incumbent FAILS the locked test (testHeld < testConsumed)', () => {
+    const r2 = [
+      mk('X', 'rungA', 0.5), mk('X', 'rungB', 0.5),
+      mk('Y', 'rungA', 0.6), mk('Y', 'rungB', 0.6), mk('Y', 'LOCKED', 0.3),
+    ]
+    const h = incumbentSplitHoldout(r2, ['opponent'], WIN, { baseline: 0.4, testValues: ['LOCKED'] })
+    expect(h.incumbentConfig?.setup).toBe('Y')
+    expect(h.testConsumed).toBe(1)
+    expect(h.testHeld).toBe(0)
+  })
+})
+
+describe('proxyAlignment (§C.8 selection regret beyond correlation)', () => {
+  const mk = (setup: string, reward: number, win: number, seed: number): AnalysisRun => ({
+    key: `${setup}-${seed}`,
+    config: { setup, seed },
+    metrics: { win_rate: win },
+    objective: reward,
+    seed,
+    status: 'completed',
+  })
+
+  it('reports a positive regret when the reward-best setup is not the truth-best', () => {
+    const runs = [
+      mk('a', 1, 0.5, 0), mk('a', 1, 0.5, 1),
+      mk('b', 2, 0.6, 0), mk('b', 2, 0.6, 1),
+      mk('c', 3, 0.7, 0), mk('c', 3, 0.7, 1), // truth-best 0.70
+      mk('d', 5, 0.62, 0), mk('d', 5, 0.62, 1), // reward-best 0.62
+    ]
+    const pa = proxyAlignment(runs, 'win_rate')
+    expect(pa.n).toBe(4)
+    expect(pa.pearson!).toBeGreaterThan(0.3)
+    expect(pa.regret).toBeCloseTo(0.08, 5)
+  })
+
+  it('regret is 0 when the reward-best setup is also the truth-best (aligned)', () => {
+    const runs = [mk('a', 1, 0.5, 0), mk('a', 1, 0.5, 1), mk('b', 5, 0.9, 0), mk('b', 5, 0.9, 1)]
+    expect(proxyAlignment(runs, 'win_rate').regret).toBeCloseTo(0, 10)
+  })
+
+  it('spearman catches a monotone-nonlinear proxy where ranks agree perfectly (regret 0)', () => {
+    const runs = [
+      mk('a', 1, 0.3, 0), mk('a', 1, 0.3, 1),
+      mk('b', 8, 0.6, 0), mk('b', 8, 0.6, 1),
+      mk('c', 27, 0.9, 0), mk('c', 27, 0.9, 1),
+    ]
+    const pa = proxyAlignment(runs, 'win_rate')
+    expect(pa.spearman).toBeCloseTo(1, 10)
+    expect(pa.regret).toBeCloseTo(0, 10)
+  })
+
+  it('NaN regret + n 0 when no setup carries both the objective and the metric', () => {
+    const pa = proxyAlignment([mk('a', 1, NaN, 0)], 'win_rate')
+    expect(Number.isNaN(pa.regret)).toBe(true)
+    expect(pa.n).toBe(0)
+  })
+})
+
+describe('verifyImprovement (§C.6 first-class adversarial verify)', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const r = (config: Record<string, unknown>, v: number, seed: number): AnalysisRun => ({
+    key: `${JSON.stringify(config)}-${seed}`,
+    config: { ...config, seed },
+    metrics: { win_rate: v },
+    objective: v,
+    seed,
+    status: 'completed',
+  })
+
+  it('flags a naive best-of-12 single-seed sweep as unverifiable (no lens applicable)', () => {
+    const sweep = Array.from({ length: 12 }, (_, i) => r({ setup: `c${i}` }, 0.5 + (i === 7 ? 0.2 : 0), 0))
+    const v = verifyImprovement(sweep, WIN, { baseline: 0.5 })
+    expect(v.unverifiable).toBe(true)
+    expect(v.verified).toBe(false)
+  })
+
+  it('verifies a well-seeded, split-robust champion', () => {
+    const good: AnalysisRun[] = []
+    for (const board of ['A', 'B']) {
+      for (let s = 0; s < 5; s++) good.push(r({ setup: 'win', board }, 0.8 + (s % 2 ? 0.01 : -0.01), s))
+      for (let s = 0; s < 5; s++) good.push(r({ setup: 'weak', board }, 0.55, s))
+    }
+    const v = verifyImprovement(good, WIN, { baseline: 0.5, splitLevers: ['board'] })
+    expect(v.verified).toBe(true)
+  })
+
+  it('nuisance-robust FAILS when the win vanishes at a neighbouring nuisance-lever value', () => {
+    const runs: AnalysisRun[] = []
+    // incumbent at lr=0.1 wins; the nuisance neighbour lr=0.2 (same setup) collapses to baseline
+    for (let s = 0; s < 5; s++) runs.push(r({ setup: 'win', lr: 0.1 }, 0.85, s))
+    for (let s = 0; s < 5; s++) runs.push(r({ setup: 'win', lr: 0.2 }, 0.5, s))
+    for (let s = 0; s < 5; s++) runs.push(r({ setup: 'weak', lr: 0.1 }, 0.55, s))
+    const v = verifyImprovement(runs, WIN, { baseline: 0.6, nuisanceLevers: ['lr'] })
+    const nu = v.checks.find((c) => c.name === 'nuisance-robust')!
+    expect(nu.applicable).toBe(true)
+    expect(nu.pass).toBe(false) // lr=0.2 neighbour at 0.5 < baseline 0.6 → the win is a nuisance artifact
+    expect(v.verified).toBe(false)
+  })
+})
+
+describe('assembleChampionVerdict — §C.5 degeneracy gate', () => {
+  const WIN: AnalysisCriterion = { key: 'win_rate', direction: 'max' }
+  const cohort = (metrics: Record<string, number>[]): AnalysisRun[] =>
+    metrics.map((m, i) => ({ key: `A-${i}`, config: { setup: 'A', seed: i }, metrics: m, objective: m.win_rate, seed: i, status: 'completed' }))
+  const diag = {
+    degenerateWhen: [{ metric: 'draw_rate', op: '==', value: 1 }],
+    championGates: [{ metric: 'win_rate', op: '>' as const, value: 0.5 }],
+    stability: { metric: 'win_rate', maxCiWidth: 0.3 },
+  }
+  const ctx = (runs: AnalysisRun[]) => ({ runs, splitLevers: [] as string[], criterion: WIN })
+
+  it('a degenerate cohort (draw_rate median matches the rule) is not steady', () => {
+    const runs = cohort([{ win_rate: 0.6, draw_rate: 1 }, { win_rate: 0.58, draw_rate: 1 }, { win_rate: 0.62, draw_rate: 1 }])
+    const v = assembleChampionVerdict(diag, ctx(runs))
+    expect(v.championGates.find((g) => g.kind === 'not-degenerate')).toMatchObject({ applicable: true, pass: false })
+    expect(v.steady).toBe(false)
+  })
+
+  it('a healthy cohort passes the degeneracy gate', () => {
+    const runs = cohort([{ win_rate: 0.6, draw_rate: 0 }, { win_rate: 0.58, draw_rate: 0 }, { win_rate: 0.62, draw_rate: 0 }])
+    const v = assembleChampionVerdict(diag, ctx(runs))
+    expect(v.championGates.find((g) => g.kind === 'not-degenerate')).toMatchObject({ applicable: true, pass: true })
+    expect(v.steady).toBe(true)
+  })
+
+  it('is not applicable (skipped) when the degeneracy metric is not emitted', () => {
+    const runs = cohort([{ win_rate: 0.6 }, { win_rate: 0.58 }, { win_rate: 0.62 }])
+    const g = assembleChampionVerdict(diag, ctx(runs)).championGates.find((x) => x.kind === 'not-degenerate')
+    expect(g).toMatchObject({ applicable: false })
   })
 })

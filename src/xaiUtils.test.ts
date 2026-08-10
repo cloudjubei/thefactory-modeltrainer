@@ -7,6 +7,7 @@ import {
   aggregateToSetupRuns,
   benjaminiHochberg,
   bootstrapDiff,
+  pairedBootstrapDiff,
   computeConfigSpaceAnalysis,
   paretoFrontier,
   criterionValueOf,
@@ -1212,6 +1213,34 @@ describe('exported robust-stats helpers (champion-verdict families)', () => {
     // Every resample of a constant sample is the same, so every bootstrap diff = 1, ci=[1,1], and NO diff is
     // <=0 ⇒ pValue 0. This exercises the seeded loop without a fragile snapshot.
     expect(bootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({ ci: [1, 1], pValue: 0, delta: 1 })
+  })
+
+  it('pairedBootstrapDiff — N<2 point-delta branch (no variance ⇒ never significant)', () => {
+    expect(pairedBootstrapDiff([5], [1], 'max')).toEqual({ ci: [4, 4], pValue: 1, delta: 4 })
+  })
+
+  it('pairedBootstrapDiff — constant paired samples are exactly determined', () => {
+    // Constant samples ⇒ every paired resample diff = 1, ci=[1,1], no diff <=0 ⇒ pValue 0.
+    expect(pairedBootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({ ci: [1, 1], pValue: 0, delta: 1 })
+  })
+
+  it('pairedBootstrapDiff — a tight, clear separation excludes 0 and is significant', () => {
+    const d = pairedBootstrapDiff([0.86, 0.84, 0.85, 0.85, 0.84], [0.55, 0.56, 0.54, 0.55, 0.56], 'max')
+    expect(d.ci[0]).toBeGreaterThan(0)
+    expect(d.pValue).toBeLessThan(0.05)
+  })
+
+  it('pairedBootstrapDiff — genuinely-overlapping seeds (A wins some, B wins others) straddle 0 and are not significant', () => {
+    const d = pairedBootstrapDiff([0.7, 0.52, 0.68, 0.54, 0.61], [0.55, 0.66, 0.57, 0.64, 0.6], 'max')
+    expect(d.ci[0]).toBeLessThan(0)
+    expect(d.ci[1]).toBeGreaterThan(0)
+    expect(d.pValue).toBeGreaterThan(0.05)
+  })
+
+  it('pairedBootstrapDiff — truncates to the common length when the two sides differ (degrades, not throws)', () => {
+    const d = pairedBootstrapDiff([0.9, 0.9, 0.9], [0.1, 0.1], 'max')
+    expect(d.delta).toBeCloseTo(0.8, 10)
+    expect(Number.isFinite(d.pValue)).toBe(true)
   })
 })
 

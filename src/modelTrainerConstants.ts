@@ -14,6 +14,14 @@ export const EXPERIMENT_MIN_SPLITS = 2
 export const DEFAULT_RAN_BY = 'local'
 
 /**
+ * §C.9 the reproducibility tuple a run's provenance should carry for a third party to re-derive a verdict
+ * (docs/model-training-standard §4.2): the code version, the exact config, the seed, and the data version.
+ * A run missing any of these is ACCEPTED (never hard-failed) but flagged by {@link validateRunProvenance}.
+ * `seed` is satisfied by the summary's own top-level `seed`, so the check is domain-oblivious.
+ */
+export const REQUIRED_PROVENANCE_KEYS = ['gitCommit', 'configHash', 'seed', 'dataVersion'] as const
+
+/**
  * The bar a deflated Sharpe ratio must clear to read as a real edge rather than multiple-testing luck —
  * Bailey & López de Prado's conventional 95% confidence. Shared by the champion gate and the screen-path
  * corpus verdict so a lead cannot pass one bar and fail the other.

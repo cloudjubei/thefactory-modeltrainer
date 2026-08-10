@@ -254,8 +254,16 @@ export interface TrainerResources {
  */
 /** Diagnosis-tab / search-diagnostician configuration on a {@link TrainerManifest}. */
 export interface TrainerDiagnostics {
-  /** The lever(s) whose distinct values are OOS splits (walk-forward windows / CV folds / datasets). */
-  splitAxis?: { levers: string[]; kind?: string }
+  /**
+   * The lever(s) whose distinct values are OOS splits (walk-forward windows / CV folds / datasets). `alpha`,
+   * when set, upgrades the per-split held-test from mean>baseline to a §C.7 CI-based test — a split "holds"
+   * only when the incumbent's per-seed bootstrap CI vs the baseline EXCLUDES it (p < alpha) — so a high-variance
+   * split whose mean merely edges the baseline no longer reads as robust. Absent ⇒ the mean test (BlackSwan's
+   * walk-forward semantics are unchanged). `testValues` are the split value(s) that are the LOCKED held-out
+   * TEST (§C.3): the incumbent is SELECTED from the non-test splits only, then evaluated on the test ONCE — so
+   * selection and the final certification never read the same split. Absent ⇒ all splits are symmetric.
+   */
+  splitAxis?: { levers: string[]; kind?: string; alpha?: number; testValues?: unknown[] }
   /** Metrics whose given value marks a run degenerate (e.g. `n_trades == 0`). */
   degenerateWhen?: Array<{ metric: string; op: string; value: number }>
   /** Metrics that confound the objective (surfaced by the objective-confound check). */
@@ -300,6 +308,30 @@ export interface TrainerDiagnostics {
    * width across its seeds no wider than `maxCiWidth` — a point estimate that swings with the seed is not steady.
    */
   stability?: { metric?: string; maxCiWidth: number }
+  /**
+   * §C.4 seed-significance gate: the champion's advantage over the RUNNER-UP setup on `metric` (default the
+   * ranking criterion) must be distinguishable from seed noise — the paired-across-seeds bootstrap CI of the
+   * delta must exclude 0 (equivalently p < `alpha`, default 0.05). Skipped (not applicable) when there is no
+   * runner-up (a single setup) or fewer than 2 seeds a side. Stops a champion being crowned on a lucky seed
+   * when a close rival is inside the noise. Inert for consumers that don't declare it (CartPole/tabular).
+   */
+  significance?: { alpha?: number; metric?: string }
+  /**
+   * §C.2 generic best-of-N multiplicity gate — enables {@link ChampionGate} kind `best-of-n`, the metric-
+   * agnostic sibling of `dsr` (DSR is its Sharpe specialisation). Under the null that every distinct setup
+   * shares one true mean, the champion (`metric` median across its seeds, default the criterion) must be an
+   * outlier even against the best-of-N noise ceiling — the order-statistic family p `1 − Φ(z)^nTrials`
+   * (z = the champion's cross-setup z-score) must be < `alpha` (default 0.05). Before this a swept non-Sharpe
+   * metric got NO discount for the search size. nTrials = distinct setups, floored by {@link searchSpace}.
+   */
+  multiplicity?: { metric?: string; alpha?: number }
+  /**
+   * §C.9 the honest number of distinct setups the search actually tried — the multiple-testing count both the
+   * `dsr` and `multiplicity` gates deflate against, lifted OUT of the trading `dsr` block so ANY consumer can
+   * declare it. Applied as a FLOOR on the observed setups (raising it only ever deflates harder), so a search
+   * that swept thousands of configs and now compares a handful is not judged as though it tried only those.
+   */
+  searchSpace?: { nTrials?: number }
 }
 
 export interface TrainerManifest {
@@ -2606,6 +2638,43 @@ export interface MetricAlignment {
   n: number
 }
 
+/**
+ * §C.8 proxy-vs-true alignment beyond correlation. `pearson`/`spearman` say whether the reward CO-MOVES with
+ * the true metric; `regret` is the thing that actually bites when you crown by reward — how much of the true
+ * metric the objective-best setup LEAVES ON THE TABLE versus the true-metric-best setup (≥ 0, direction-aware;
+ * NaN when not computable). A high correlation can still hide a large regret (tail divergence).
+ */
+export interface ProxyAlignment {
+  metric: string
+  pearson: number | null
+  spearman: number | null
+  regret: number
+  /** Distinct setups with BOTH the objective and the metric finite. */
+  n: number
+}
+
+/** One lens of the §C.6 adversarial-verify battery — whether it could run, and whether the claim survived it. */
+export interface VerifyCheck {
+  name: 'seed-stability' | 'split-robust' | 'nuisance-robust' | 'aggregator-agreement'
+  /** False when the check has no data to run (e.g. a single-seed incumbent, no split axis) — then it neither
+   * confirms nor refutes; a claim with NO applicable check is `unverifiable`, never silently verified. */
+  applicable: boolean
+  pass: boolean
+  detail: string
+}
+
+/**
+ * §C.6 the composite adversarial-verify verdict for a claimed improvement. `verified` iff ≥1 lens was
+ * APPLICABLE and every applicable lens held (fail-closed); `unverifiable` when NO lens could run — the naive
+ * "copy CartPole, sweep, take the argmax, declare a winner" path, now flagged instead of silently crowned.
+ */
+export interface VerifyVerdict {
+  verified: boolean
+  unverifiable: boolean
+  incumbentConfig: Record<string, unknown> | null
+  checks: VerifyCheck[]
+}
+
 export interface DiagnoseSearchResult {
   found: boolean
   /** Set (with found:false) when the project can't be resolved. */
@@ -2619,6 +2688,12 @@ export interface DiagnoseSearchResult {
   verdict?: 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
   /** Splits the incumbent was evaluated on, how many it held, the total, and the ones it hasn't run. */
   splits?: { evaluated: number; held: number; total: number; missing: string[] }
+  /**
+   * §C.3 the locked held-out TEST accounting (present only when `diagnostics.splitAxis.testValues` is declared):
+   * the test split value(s), how many were consumed for the final verdict, and how many the incumbent held on —
+   * with the incumbent chosen from the NON-test splits, so selection never read the test.
+   */
+  test?: { splits: string[]; consumed: number; held: number }
   /** The incumbent setup's config, or null when there are no runs. */
   incumbent?: Record<string, unknown> | null
   /** Whether this verdict BLOCKS the exploration autopilot from declaring convergence. */
@@ -2631,6 +2706,18 @@ export interface DiagnoseSearchResult {
   alignment?: MetricAlignment[]
   /** A one-line read of the primary metric's {@link alignment} — the "is the reward a good proxy?" answer. */
   alignmentNarrative?: string
+  /**
+   * §C.8 proxy SELECTION-REGRET for the primary success metric — how much of it crowning by the reward objective
+   * leaves on the table versus the metric-best setup (a positive value can coexist with a high correlation).
+   * Present only when the true metric is declared in fitness/gates.
+   */
+  proxyRegret?: number
+  /**
+   * §C.5 confound advisory: for each declared {@link TrainerDiagnostics.confoundMetrics}, the correlation of the
+   * run objective with that metric — a strong correlation warns the objective may be tracking a confound (e.g. a
+   * first-player-seat advantage) rather than true skill. Present only when confound metrics are declared.
+   */
+  confounds?: MetricAlignment[]
   /** A one-paragraph human read + do-next. */
   narrative?: string
   /**
@@ -2660,6 +2747,12 @@ export interface ChampionGate {
   pass: boolean
   /** One-line evidence — the measured cohort value vs the required bound. */
   detail?: string
+  /**
+   * §C.7 the structured effect behind the verdict — the delta and its bootstrap CI (and two-sided p) — so a
+   * gate reports an INTERVAL, not only a boolean + string. Populated by gates that compute one (e.g. the
+   * seed-significance gate); absent on gates that reduce to a point comparison (a plain median threshold).
+   */
+  effect?: { delta: number; ci: [number, number]; pValue?: number }
 }
 
 /**

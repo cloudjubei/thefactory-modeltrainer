@@ -253,6 +253,38 @@ export function bootstrapDiff(
   return { ci, pValue, delta }
 }
 
+/**
+ * The PAIRED twin of {@link bootstrapDiff}: `toValues[i]` and `fromValues[i]` are the SAME seed, so each
+ * bootstrap iteration resamples pair INDICES (both sides drawn together) instead of the two samples
+ * independently — the shared-seed variance cancels, giving a tighter, honest CI of the IQM difference.
+ * The caller aligns the two arrays by seed and truncates to the common length; with < 2 pairs no variance
+ * is available so it degrades to the point delta with pValue 1 (never significant), matching bootstrapDiff.
+ */
+export function pairedBootstrapDiff(
+  toValues: number[],
+  fromValues: number[],
+  direction: 'max' | 'min',
+): { ci: [number, number]; pValue: number; delta: number } {
+  const n = Math.min(toValues.length, fromValues.length)
+  const to = toValues.slice(0, n)
+  const from = fromValues.slice(0, n)
+  const orient = (a: number, b: number) => (direction === 'max' ? a - b : b - a)
+  const delta = orient(iqm(to), iqm(from))
+  if (n < 2) return { ci: [delta, delta], pValue: 1, delta }
+  const rng = makeRng(seedFrom([...to, NaN, ...from].map((v) => (Number.isNaN(v) ? 0 : v))))
+  const diffs: number[] = []
+  for (let i = 0; i < XAI_BOOTSTRAP_ITERATIONS; i++) {
+    const idx = to.map(() => Math.floor(rng() * n))
+    diffs.push(orient(iqm(idx.map((j) => to[j])), iqm(idx.map((j) => from[j]))))
+  }
+  diffs.sort((a, b) => a - b)
+  const lo = (1 - XAI_CI_LEVEL) / 2
+  const ci: [number, number] = [percentileOf(diffs, lo), percentileOf(diffs, 1 - lo)]
+  const below = diffs.filter((d) => d <= 0).length / diffs.length
+  const pValue = Math.min(1, 2 * Math.min(below, 1 - below))
+  return { ci, pValue, delta }
+}
+
 /** Benjamini-Hochberg FDR: returns a rejected[] mask controlling the false-discovery rate at `alpha`. */
 export function benjaminiHochberg(pValues: number[], alpha: number): boolean[] {
   const m = pValues.length

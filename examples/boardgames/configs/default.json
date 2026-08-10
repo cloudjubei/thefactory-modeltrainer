@@ -1,0 +1,8 @@
+{
+  "game": "connect4",
+  "model_name": "mcts",
+  "mcts_sims": 80,
+  "opponent": "random",
+  "eval_games": 40,
+  "seed": 0
+}
