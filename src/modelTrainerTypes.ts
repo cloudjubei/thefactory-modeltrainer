@@ -1480,6 +1480,31 @@ export interface ExplorationCampaignResult {
 }
 
 /** The machine-readable result a conformant run writes via `--summary-out`. */
+/** One move in a {@link SampleGameReplay}: which player moved, the action index, and a short label. */
+export interface SampleGameReplayMove {
+  player: number
+  action: number
+  label?: string
+}
+
+/**
+ * A sampled game a run captured so it can be replayed move-by-move in the viewer / by an agent. A consumer
+ * (e.g. the board-game harness) emits it under the summary's `sample_game` key. `frames[0]` is the initial
+ * board and `frames[i+1]` is the board AFTER `moves[i]` (both ASCII), so a stepper walks them in lockstep.
+ */
+export interface SampleGameReplay {
+  /** The opponent the sampled game was played against (present on training runs). */
+  opponent?: string
+  /** Seat (player index) the model under test occupied. */
+  model_seat: number
+  /** Winning player index, or `null` for a draw. */
+  winner: number | null
+  /** Ordered move log; `moves[i]` produced `frames[i+1]`. */
+  moves: SampleGameReplayMove[]
+  /** ASCII board renders; `frames[0]` is the initial board, `frames[i+1]` the board after `moves[i]`. */
+  frames: string[]
+}
+
 export interface TrainingRunSummary {
   /** The objective metric value (matches the manifest's `objective.name`). */
   objective: number
@@ -1509,6 +1534,8 @@ export interface TrainingRunSummary {
   ledger?: TradeLedgerEntry[]
   /** Present on evaluate runs: which checkpoint was re-tested and how hard. */
   evaluation?: { checkpoint?: string; episodes?: number }
+  /** A sampled game captured for move-by-move replay (e.g. board-game runs). */
+  sample_game?: SampleGameReplay
 }
 
 export interface EvaluateTrainingRunParams {
@@ -3593,6 +3620,25 @@ export interface GetRunDataResult {
   error?: string
 }
 
+export interface GetRunGameParams {
+  /** The HOST project scope the run records live in. */
+  scope: string
+  /** The run id (config-hash key). The recordType is resolved from the host's registered training projects. */
+  runKey: string
+}
+
+export interface GetRunGameResult {
+  found: boolean
+  /** The training project's record type the run was found under. */
+  recordType?: string
+  /** The sampled game, ready to replay move-by-move. */
+  game?: SampleGameReplay
+  /** A move-by-move ASCII transcript of `game` (frames interleaved with move labels + the result). */
+  transcript?: string
+  /** Set when the run wasn't found, or was found but carries no sampled game. */
+  error?: string
+}
+
 export interface MigrateTrainingRunsParams {
   /** The HOST project scope the run + queue records live in. */
   scope: string
@@ -3899,6 +3945,12 @@ export interface ModelTrainerTools {
    */
   getRunData(params: GetRunDataParams): Promise<GetRunDataResult>
   /**
+   * Agent-facing READ tool: fetch ONE run's sampled game so it can be replayed move-by-move (board-game
+   * runs capture one under the summary's `sample_game`). Returns the typed replay + an ASCII transcript, or
+   * a not-found / no-game reason. Read-only.
+   */
+  getRunGame(params: GetRunGameParams): Promise<GetRunGameResult>
+  /**
    * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
    * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a
    * seeded discuss-bundle. Read-only.
@@ -3946,4 +3998,63 @@ export interface ModelTrainerTools {
    * bespoke train/explore launch runs so a malformed matrix is rejected with a fixable reason.
    */
   validateTrainingSpec(params: ValidateTrainingSpecParams): Promise<ValidateTrainingSpecResult>
+}
+
+/**
+ * A pre-registered hypothesis / verdict record from a project's experiment trail, as much of it as the
+ * evidence-battery report needs. Domain-agnostic: any conformant trail (BlackSwan or otherwise) supplies these.
+ */
+export interface BatteryHypothesis {
+  id: string
+  type: string
+  title?: string
+  status?: string
+  gate?: { kind?: string; metric?: string }
+  spec?: { sweep?: Record<string, unknown>; fixed?: Record<string, unknown> }
+  claim?: string
+  rationale?: string
+}
+
+/** One probe row in the battery (a single pre-registered hypothesis + its verdict + swept-cell count). */
+export interface ExperimentBatteryProbe {
+  id: string
+  title: string
+  status: string
+  gate: string
+  cells: number
+}
+
+/** A family (signal class) grouping of probes in the battery. */
+export interface ExperimentBatteryFamily {
+  type: string
+  family: string
+  probes: ExperimentBatteryProbe[]
+  cells: number
+}
+
+/** The structured evidence battery: families of probes + roll-up stats (the machine-readable §D artifact). */
+export interface ExperimentBattery {
+  families: ExperimentBatteryFamily[]
+  stats: { probes: number; families: number; cellsRun: number; byStatus: Record<string, number> }
+}
+
+/** How to fold trail records into families: map each record `type` to a human family label, and order them. */
+export interface BatteryBuildOptions {
+  familyOf?: (type: string) => string
+  familyOrder?: string[]
+}
+
+/** A domain-narrative block rendered into the report (the caller owns this HTML; it is trusted, not escaped). */
+export interface BatterySection {
+  heading: string
+  html: string
+}
+
+/** Options for the self-contained HTML battery report (the domain narrative + framing come from the caller). */
+export interface BatteryReportOptions {
+  title: string
+  subtitle?: string
+  generatedNote?: string
+  sections?: BatterySection[]
+  footerHtml?: string
 }

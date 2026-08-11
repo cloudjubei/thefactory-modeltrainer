@@ -3,6 +3,8 @@ import type { TrainerManifest, TrainingRunSummary } from './modelTrainerTypes.js
 import { MAX_DECISION_TRACE_STEPS, MAX_SERIES_POINTS } from './modelTrainerConstants.js'
 import {
   blendJudgeScore,
+  extractSampleGame,
+  renderReplayText,
   parseProgressMarker,
   buildAnalyzePaperSystemPrompt,
   buildJudgeSystemPrompt,
@@ -59,6 +61,7 @@ import {
   validateTrainerManifest,
   validateTrainingRunSummary,
   validateRunProvenance,
+  describeRunFailures,
   capRunSummaryForStorage,
   plannedMatrixItemCount,
   modelSlug,
@@ -2140,6 +2143,33 @@ describe('parseProgressMarker', () => {
 
   it('returns undefined when the payload is not an object', () => {
     expect(parseProgressMarker('@@PROGRESS 42')).toBeUndefined()
+  })
+})
+
+describe('describeRunFailures (Explore stop-message diagnosis)', () => {
+  it('surfaces the newest failed run error + last log line', () => {
+    const records = [
+      { content: { status: 'completed', objective: 0.9 } },
+      { content: { status: 'failed', error: 'unknown config keys: [device]', ranAt: '2026-08-10T09:00:00Z' } },
+      { content: { status: 'failed', error: 'python3: command not found', ranAt: '2026-08-10T10:00:00Z', logTail: ['/bin/sh: python3: command not found'] } },
+    ]
+    const out = describeRunFailures(records)
+    expect(out).toContain('python3: command not found') // newest first
+    expect(out).toContain('unknown config keys')
+    expect(out.startsWith(' Last failures:')).toBe(true)
+  })
+
+  it('collapses a multi-line error to its first line and appends the log tail once', () => {
+    const out = describeRunFailures(
+      [{ content: { status: 'failed', error: 'Traceback...\nValueError: bad', ranAt: 't', logTail: ['ValueError: bad'] } }],
+      1,
+    )
+    expect(out).toBe(' Last failure:\n• Traceback... — ValueError: bad')
+  })
+
+  it('is empty when there are no failed runs', () => {
+    expect(describeRunFailures([{ content: { status: 'completed' } }])).toBe('')
+    expect(describeRunFailures([])).toBe('')
   })
 })
 
@@ -4963,5 +4993,100 @@ describe('compareScorecards', () => {
     const cards = [rej(50), acc(2), acc(8), rej(90)]
     const sorted = [...cards].sort(compareScorecards)
     expect(sorted.map((c) => c.fitness[0].value)).toEqual([8, 2, 90, 50])
+  })
+})
+
+describe('extractSampleGame (typed replay from a stored run record)', () => {
+  const wellFormed = {
+    sample_game: {
+      opponent: 'random',
+      model_seat: 0,
+      winner: 1,
+      moves: [
+        { player: 0, action: 3, label: 'col 3' },
+        { player: 1, action: 2, label: 'col 2' },
+      ],
+      frames: ['FRAME_A', 'FRAME_B', 'FRAME_C'],
+    },
+  }
+
+  it('pulls a well-formed sample_game into a typed replay', () => {
+    const game = extractSampleGame(wellFormed)
+    expect(game).toBeDefined()
+    expect(game?.model_seat).toBe(0)
+    expect(game?.winner).toBe(1)
+    expect(game?.opponent).toBe('random')
+    expect(game?.frames).toEqual(['FRAME_A', 'FRAME_B', 'FRAME_C'])
+    expect(game?.moves).toEqual([
+      { player: 0, action: 3, label: 'col 3' },
+      { player: 1, action: 2, label: 'col 2' },
+    ])
+  })
+
+  it('returns undefined when the record carries no sample_game', () => {
+    expect(extractSampleGame({})).toBeUndefined()
+    expect(extractSampleGame({ sample_game: null })).toBeUndefined()
+  })
+
+  it('returns undefined when frames are missing or not a string array', () => {
+    expect(extractSampleGame({ sample_game: { model_seat: 0, winner: null, moves: [] } })).toBeUndefined()
+    expect(
+      extractSampleGame({ sample_game: { model_seat: 0, winner: null, moves: [], frames: [1, 2, 3] } }),
+    ).toBeUndefined()
+  })
+
+  it('preserves a draw (winner null) and drops malformed move entries', () => {
+    const game = extractSampleGame({
+      sample_game: {
+        model_seat: 1,
+        winner: null,
+        moves: [{ player: 0, action: 4, label: 'col 4' }, { bogus: true }, 'nope'],
+        frames: ['A', 'B'],
+      },
+    })
+    expect(game?.winner).toBeNull()
+    expect(game?.model_seat).toBe(1)
+    expect(game?.moves).toEqual([{ player: 0, action: 4, label: 'col 4' }])
+  })
+
+  it('defaults model_seat to 0 when absent', () => {
+    const game = extractSampleGame({ sample_game: { winner: 0, moves: [], frames: ['A'] } })
+    expect(game?.model_seat).toBe(0)
+  })
+})
+
+describe('renderReplayText (agent-facing move-by-move transcript)', () => {
+  const game = {
+    opponent: 'heuristic',
+    model_seat: 0,
+    winner: 0 as number | null,
+    moves: [
+      { player: 0, action: 3, label: 'col 3' },
+      { player: 1, action: 2, label: 'col 2' },
+    ],
+    frames: ['FRAME_A', 'FRAME_B', 'FRAME_C'],
+  }
+
+  it('shows every frame, each move with its label, and the result', () => {
+    const text = renderReplayText(game)
+    expect(text).toContain('FRAME_A')
+    expect(text).toContain('FRAME_B')
+    expect(text).toContain('FRAME_C')
+    expect(text).toContain('col 3')
+    expect(text).toContain('col 2')
+    expect(text).toContain('Move 1')
+    expect(text).toContain('Move 2')
+    expect(text).toContain('model wins') // winner 0 === model_seat 0
+  })
+
+  it('labels the opponent and reports a draw when winner is null', () => {
+    const text = renderReplayText({ ...game, winner: null })
+    expect(text).toContain('heuristic')
+    expect(text).toContain('draw')
+  })
+
+  it('names the opponent as the winner when the model lost', () => {
+    const text = renderReplayText({ ...game, winner: 1 })
+    expect(text).toContain('heuristic wins')
   })
 })

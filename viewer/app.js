@@ -9798,6 +9798,7 @@ function renderRunDetail(key) {
     ${crossTestUiEnabled() ? crossTestSectionHtml(run) : ''}
     ${continueTrainUiEnabled() ? continueTrainSectionHtml(run) : ''}
     ${scorecardSectionHtml(run)}
+    ${s.sample_game ? `<h3>Game replay</h3><div class="game-host" data-run="${escapeHtml(run.key)}"></div>` : ''}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
@@ -9814,6 +9815,11 @@ function renderRunDetail(key) {
     <p class="card-sub">configHash <code>${escapeHtml(run.key)}</code></p></div>`
   setHtml(panel, html)
   panel.hidden = false
+  if (s.sample_game && window.Game && window.Game.render) {
+    try {
+      window.Game.render(panel.querySelector('.game-host'), s.sample_game)
+    } catch (_e) {}
+  }
   syncRunsMdLayout()
   // Continue-training section joins over the whole-corpus lineage — fetch it lazily the first time a detail
   // that needs it opens (then it re-renders this detail with the filled-in parent/children matrix).

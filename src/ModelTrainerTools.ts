@@ -61,6 +61,8 @@ import type {
   ExperimentSpec,
   GetRunDataParams,
   GetRunDataResult,
+  GetRunGameParams,
+  GetRunGameResult,
   GetTrainerStateParams,
   GetTrainerStateResult,
   DiagnoseSearchParams,
@@ -225,6 +227,9 @@ import {
   validateDecisionTrace,
   validateTrainingRunSummary,
   capRunSummaryForStorage,
+  describeRunFailures,
+  extractSampleGame,
+  renderReplayText,
 } from './modelTrainerUtils.js'
 import {
   aggregateExperimentCells,
@@ -688,7 +693,36 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           }
           throw new Error(error)
         }
-        const runSummary = capRunSummaryForStorage(validateTrainingRunSummary(result.summary))
+        // The process exited 0, but its summary might be unreadable/invalid (e.g. the runner read no summary,
+        // or `objective` is missing). Left to throw, the run would vanish — no completed record AND no failed
+        // record (this is past the non-completed branch), which reads to the operator as "0 runs" with no clue.
+        // Record it as FAILED with the reason instead, so the failure is always visible (see describeRunFailures).
+        let runSummary: ReturnType<typeof capRunSummaryForStorage>
+        try {
+          runSummary = capRunSummaryForStorage(validateTrainingRunSummary(result.summary))
+        } catch (err) {
+          const error = `run exited 0 but its summary was rejected: ${err instanceof Error ? err.message : String(err)}`
+          await deps.storage.upsertRecord({
+            scope: params.scope,
+            type: recordType,
+            key: item.key,
+            content: {
+              status: 'failed',
+              error,
+              ...(result.logTail?.length ? { logTail: result.logTail } : {}),
+              config: canonicalRunConfig(item.config),
+              setupKey: setupKeyOf(item.config),
+              pipelineVersion,
+              ...thesisFields,
+              ...(params.activityId ? { activityId: params.activityId } : {}),
+              ranAt: now(),
+              ranBy,
+              durationMs: result.durationMs,
+            },
+          })
+          params.onRecordWritten?.(recordType, item.key)
+          throw new Error(error)
+        }
         const artifacts = sanitizeRunArtifacts(runSummary.artifacts)
         await deps.storage.upsertRecord({
           scope: params.scope,
@@ -1103,10 +1137,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const fruitful = settledStatus === 'completed' && producedNew
         working.failStreak = fruitful ? 0 : (working.failStreak ?? 0) + 1
         if ((working.failStreak ?? 0) >= EXPLORATION_MAX_CHILD_FAILURES) {
+          const allRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+          const failureDetail = describeRunFailures(allRecords)
           const stopped = appendLog(
             working,
             working.stage,
-            `${working.failStreak} consecutive batches produced no new runs — stopping (check the run logs / config)`,
+            `${working.failStreak} consecutive batches produced no new runs — stopping (check the run logs / config).${failureDetail}`,
             0,
           )
           await persist(stopped)
@@ -3739,6 +3775,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { found: true, recordType: resolved.recordType, run: trimRunForAgent(resolved.content) }
   }
 
+  async function getRunGame(params: GetRunGameParams): Promise<GetRunGameResult> {
+    const resolved = await resolveRunRecord(params.scope, params.runKey)
+    if (!resolved)
+      return { found: false, error: `no completed run "${params.runKey}" found in this project` }
+    const game = extractSampleGame(resolved.content)
+    if (!game)
+      return {
+        found: true,
+        recordType: resolved.recordType,
+        error: `run "${params.runKey}" captured no sampled game (its summary has no sample_game)`,
+      }
+    return {
+      found: true,
+      recordType: resolved.recordType,
+      game,
+      transcript: renderReplayText(game),
+    }
+  }
+
   async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -4193,6 +4248,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     diagnoseSearch,
     getActivityStatus,
     getRunData,
+    getRunGame,
     getTrainerState,
     getRunXAI,
     analyzeConfigSpace,

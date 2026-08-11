@@ -78,15 +78,14 @@ def _read_config_object(path: Path) -> dict[str, Any]:
 
 
 def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
-    raw = dict(raw)
+    # Read the declared levers and IGNORE any other key — the engine legitimately injects config it owns
+    # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
-    unknown = set(raw) - known
-    if unknown:
-        raise ValueError(f"unknown config keys: {sorted(unknown)}")
+    filtered = {k: v for k, v in raw.items() if k in known}
     for int_key in ("mcts_sims", "eval_games", "seed"):
-        if int_key in raw:
-            raw[int_key] = int(raw[int_key])
-    config = TrainerConfig(**raw)
+        if int_key in filtered:
+            filtered[int_key] = int(filtered[int_key])
+    config = TrainerConfig(**filtered)
     validate_config(config)
     return config
 

@@ -180,6 +180,100 @@ regime estimate improve a cost-surviving decision anywhere?
   mechanical de-risking (cash ~36% of the time) that costs return and nets out under Sharpe. Adversarially
   verified (null-survives). **Do not redo.** A learned/multivariate regime model over the same macro would face
   the same near-zero signal + few-regime-cycles power wall; not worth building.
+- **GOLD macro world model — PROBED, INCONCLUSIVE/underpowered null** (`probe-gold-worldmodel`,
+  `probe-gold-worldmodel-inverse`). The world model generalised beyond crypto: `trainer/worldmodel.py` conditions
+  a long/short/flat GOLD position on its three canonical macro drivers (real rate DFII10↓, broad dollar
+  DTWEXBGS↓, breakeven DGS10−DFII10↑) joined point-in-time (pit_fusion); thesis + inverse control; 4 mutation-
+  proven leakage guards; run + adversarially verified (2 skeptics + synthesis) via the committed BlackSwan
+  `experiments/` tooling. **EDGE = NULL** (no DSR-deflated, hold-beating, majority-passing cell; best |t|~0.93).
+  The thesis FOUGHT the 2023-24 gold bull (−12%, −9% vs hold +12%, +27%) — gold **decoupled** from its textbook
+  drivers (rallied into high real rates + strong USD on central-bank/de-dollarization demand the macro series
+  can't see). Recorded **INCONCLUSIVE, not disproved** (that overclaims): the verification caught **two real
+  defects** — (a) the composite is **collinear** (DFII10 double-counted across the real-rate + breakeven legs,
+  → a real-rate trend follower with USD as tiebreaker), and (b) a **DTWEXBGS publication-lag look-ahead** (fixed:
+  `_ASOF_LAG_DAYS` + re-mine; verified immaterial). The inverse's tempting 2024 cell (+38.5%, t~2.27) is
+  **beta + multiplicity + mechanically-coupled**, ~zero alpha over hold — NOT an edge.
+- **GOLD world model FAIR TEST + real-rate-alone — RAN, now DISPROVED (composite-scoped)** (`probe-gold-worldmodel-fair`,
+  `probe-gold-realrate`). The two INCONCLUSIVE caveats were resolved: **de-collinearised** (breakeven from the
+  standalone T10YIE, DFII10 counted once) and the **2020-21** favorable regime **added** (5 windows 2020-24). The
+  composite STILL nulls (best thesis t~0.48; underperforms hold in every bull window), and the skeptic's own
+  falsifiable prediction — "it goes long and wins in the 2020-21 real-rate collapse" — is **directionally REFUTED**
+  (2020: gold +24% but the fair thesis made +8%, negative alpha, t~0.48). The **real-rate-ALONE** arm was run to
+  close the "equal-weight vote masked a predictive driver" escape hatch — it **also nulls** (best t~0.95; 2020
+  only +9.8% vs +24%). So the null generalises from the composite to the isolated real-rate channel. **Scope/power
+  caveat (recorded):** this disproves the macro-composite + real-rate channel as gold timers, NOT "no macro model
+  can time gold" — the ~252-obs DSR gate (critical t~2.7) can't reject a modest Sharpe-0.3-0.8 edge, so the verdict
+  rests on the powered directional refutation, not a zero-edge CI.
+- **SILVER + COPPER world models — RAN, INCONCLUSIVE (partial models)** (`probe-silver-worldmodel`,
+  `probe-copper-worldmodel`; adversarially verified). Same monetary drivers on **silver** null (even the
+  favorable-regime high-beta best case underperformed hold) — but silver_macro3 omits silver's **industrial**
+  channel, so "no evidence for," not "against". **Copper** = a financial-conditions-only model (USD/rates/curve);
+  its 2020 cell (t~1.61) is COVID-reflation **beta**, and its **real drivers (China demand, LME inventories) are
+  absent** — so the *full* copper model is untested. Third latent leak fixed en route: **T10YIE** publish-time
+  stamped 16:15 (was 08:30) to match its H.15 siblings (immaterial to daily/next-bar; consistency).
+
+**B7. Positioning / flow — CFTC COT (the last free, previously-untested signal class).** `trainer/cot.py` +
+`scripts/fetch_cot.py` (free CFTC Socrata API, managed-money net/OI, 1052 weeks 2006-2026, GOLD/SILVER/COPPER;
+release-lagged join + contrarian-invert both mutation-proven). Structural story: crowded specs are FORCED
+unwinders. Ran + adversarially verified (3 workflows) via the `experiments/` tooling.
+- **COT level-extreme (expanding quantile), contrarian + momentum — INCONCLUSIVE** (`probe-cot-{gold,silver,copper}-*`).
+  No majority-passing DSR edge; every tempting cell is single-window beta + multiplicity; the winning *arm*
+  regime-tracks price (2020 momentum year / 2023 contrarian year) → it's price-timing, COT redundant. Flaw the
+  verification caught (my error): the expanding quantile anchored to the 2010-11 mania made gold's extreme
+  UNREACHABLE (gold fired 0 trades in 2020/21) — the same non-stationarity trap the attention probe recorded.
+- **COT INDEX (trailing 3yr Williams min-max) — the fix, INCONCLUSIVE** (`probe-cotidx-*`). Fixed the gold hole
+  (gold now fires in 2020); the LEVEL-extreme sub-class now tested under **two independent normalizations** (both
+  arms, 3 metals, 5 windows) and **zero cells clear the gate**. The program's two highest cells died on mechanism:
+  copper-momentum 2020 (t~2.63) = reflation **beta** (mirror copper-contrarian t~−2.64; non-persistent; fails
+  best-of-20 DSR); silver-contrarian 2023 (t~2.12) = the **expected best-of-N outlier** (E[max]~2.0-2.1),
+  single-window, and its cross-spec appearance is one event via two correlated lenses, not replication.
+  **INCONCLUSIVE not disproved:** power (best-of-10/20 at ~252 obs can't reject a modest Sharpe-0.4-0.8 persistent
+  edge) + one untested variant.
+- **COT FLOW/CHANGE (weekly delta) — RAN, INCONCLUSIVE; positioning class CLOSED** (`probe-cotflow-*`, verified).
+  The last untested variant of the managed-money extreme→side machinery. Even WEAKER than the level (max cell
+  silver-flow-momentum 2024 t~1.74, below even naive 1.96 and below the level's expected best-of-N outlier ~2.0);
+  the wins are regime-tracking **beta** exactly as pre-registered (momentum arms carry up/reflation years,
+  contrarian the reverting year) — managed-money delta is collinear with price momentum (already null).
+- **CROSS-SECTIONAL COT (market-neutral relative value) — RAN, INCONCLUSIVE; commodity positioning class fully
+  CLOSED** (`probe-cross-cot-*`, verified). The structurally-different thread: a dollar-neutral long-least-crowded
+  / short-most-crowded book across a 6-commodity basket (GOLD/SILVER/COPPER/WTI/CORN/WHEAT — metals+energy+ags),
+  so the common commodity **beta** that made every single-asset tempting cell a beta artifact CANCELS. It still
+  nulls — mirror arms, regime-tracking (cross-momentum wins trends, contrarian wins chop), no cell clears
+  best-of-20 DSR or the majority gate. **The beta-neutral construction did not manufacture an edge; it replaced
+  single-asset beta with cross-sectional momentum-factor redundancy**, confirmed EMPIRICALLY: the per-bar Spearman
+  ρ(COT-index rank vs 126d trailing-return rank) = **+0.45 mean / +0.54 median, 87% of bars positive** — managed
+  money is a CTA/trend cohort, so its ranking ≈ the price-momentum ranking. (Data note: the skeptics' assumed WTI
+  negative-price artifact was VERIFIED FALSE — yfinance CL=F lacks April-2020; `px>0` filter + forward-fill.)
+  **The COMMODITY managed-money positioning class is now CLOSED across all constructions** (single-asset level /
+  Williams index / flow / cross-sectional), all defeated by collinearity-with-price. Commercials/hedgers is NOT
+  an independent residual (COT adding-up identity → commercial net mirrors managed-money net).
+- **CROSS-ASSET-CLASS COT (financial futures) — RAN, DISPROVED; the cross-asset hypothesis is REFUTED**
+  (`probe-cotfin-{spy,ief,tlt}-*`). The one genuinely-different free universe: CFTC **TFF leveraged-funds**
+  positioning on equity (E-mini S&P), 10y notes (IEF), long bonds (TLT), where specs include real hedgers /
+  risk-parity so the CTA-collinearity is weaker. It STILL nulls — pooled over **12 windows 2010-2021**, contrarian
+  arms mean Sharpe ~0 / coinflip, momentum arms negative (IEF momentum t~−2.2 = bond positioning mean-reverts, but
+  the contrarian mirror ~0, no exploitable edge). **Positioning class now closed across BOTH commodity AND
+  financial universes.** (TFF COT coverage 2006-2022.)
+
+**"Try harder to disprove properly" — the EXTENDED-HISTORY pass (INCONCLUSIVE → DISPROVED).** The 26 inconclusive
+verdicts rested only on the power caveat: the 5-window (2020-24) DSR gate couldn't reject a *modest* persistent
+edge. Fix: extend the OOS. Added `--start` to `backfill_market`, mined all commodity + financial **price back to
+2006** (matching COT + macro), and added walk-forward windows **2008-2019** — giving **17 independent yearly
+windows (2008-2024)** across the GFC / 2011 / 2015-16 / 2018 / 2020. Re-tested every inconclusive family
+in-process (single config, no lever-selection): **COT** (level/index/flow × 3 metals) per-window Sharpe mean ~0,
+|t_win|<1.5, 29-59% positive — a coinflip; **cross-sectional COT** redundancy measured (ρ=0.45 with price-momentum);
+**world models** (gold/silver/copper) mean Sharpe ~0-to-negative with **no alpha over hold** (the earlier weak
+positive was best-of-lookback selection + long-biased asset beta that UNDERPERFORMS buy-and-hold). A modest edge
+(Sharpe 0.3-0.8) would show t_win>2 and >65% positive — none does. **All 26 upgraded INCONCLUSIVE → DISPROVED**
+(residual: only a tiny sub-0.15-Sharpe edge is inherently non-excludable — a limit, not a live thread).
+
+**Infrastructure shipped by these probes.** (1) **Commodities are now a tradeable class** — `_load_bars` resolves
+each instrument's native interval (crypto `-1m-`, commodities/stocks/fx/etfs `-1d-`), so GOLD/WTI/SILVER/COPPER/
+CORN/WHEAT load (backward-compatible; 30 loader tests green). (2) **BlackSwan `experiments/` tooling** — a
+committed, reproducible registry + runner (`list` / `preregister` / `run` / `analyze`, idempotent-safe so a
+materialised verdict is never clobbered), so every probe is recorded and re-runnable rather than living in
+scratchpad. This is the paper-trail substrate: the DB hypothesis trail (`blackswan-experiments`) holds all 21
+probe verdicts.
 
 **Data correctness rules (enforce in the loader for ALL of the above).** Store minimal raw only (derive at
 runtime); **join by TIMESTAMP, never date string** (each row carries `barCloseTz`); macro is point-in-time
@@ -379,7 +473,17 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
   search space (§C.2.9), the leakage guards proven to bite, the DSR/multiplicity math, the
   adversarial-verification record (§C.2.6), and a data/code provenance manifest a third party can re-run to the
   same verdicts. This is §C.2.9 taken one step further — from "reproducible internally" to "**a referee can
-  re-derive every number**."
+  re-derive every number**." **SHIPPED.** The generic render capability is in modeltrainer — pure, domain-oblivious
+  `batteryReportUtils.ts` (`buildBattery(trail, {familyOf, familyOrder})` → structured `ExperimentBattery`;
+  `renderBatteryHtml(battery, {title, sections, …})` → a **single self-contained, shareable static HTML page**:
+  inline CSS, no scripts, no external assets, theme-aware, XSS-escaped; types in `modelTrainerTypes.ts`, direct
+  tests). BlackSwan's `experiments/export.mjs` supplies the family labels + narrative and writes
+  `experiments/battery.json` (diffable machine evidence) + `experiments/BATTERY.html` (the paper's spine):
+  **55 pre-registered probes, 13 families, 1,206 backtested cells — 55 disproved, 0 inconclusive, 0 surviving**
+  (after the extended-history disproof pass and the cross-asset COT extension),
+  with the honest-scope claim, the reproduce-and-refute (Mou 2011) entry, the recurring failure-signature section,
+  and the power caveat. **This IS the publishable no-edge battery.** (Next enrichment: richer per-probe verdict
+  extraction — currently gate + status + cells + title.)
 - **Reproduce-and-refute workflow.** A repeatable pipeline that takes a published claim, re-implements it as a
   conformant probe (thin CLI contract, no engine changes), runs it under the discipline, and records whether it
   survives + WHY it flips if not. Each reproduced paper becomes another entry in the trail and another row in the

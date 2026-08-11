@@ -1106,6 +1106,20 @@ describe('normalizeConditionalLevers', () => {
     expect(normalizeConditionalLevers(cfg, aw)).toEqual({ A: 'other', B: 'n/a', C: 'n/a' })
     expect(cfg).toEqual({ A: 'other', B: 'on', C: 5 }) // input not mutated
   })
+
+  it('tolerates a SINGLE (non-array) appliesWhen value instead of crashing (vals.map bug)', () => {
+    // A manifest may declare `appliesWhen: { model_name: 'mcts' }` (a bare value). leverApplies must coerce
+    // it to an array; the old `vals.map` threw "vals.map is not a function" and dropped every run silently.
+    const aw = { mcts_sims: { model_name: 'mcts' } } as unknown as Record<string, Record<string, unknown[]>>
+    expect(normalizeConditionalLevers({ model_name: 'mcts', mcts_sims: 80 }, aw)).toEqual({
+      model_name: 'mcts',
+      mcts_sims: 80,
+    })
+    expect(normalizeConditionalLevers({ model_name: 'random', mcts_sims: 80 }, aw)).toEqual({
+      model_name: 'random',
+      mcts_sims: 'n/a',
+    })
+  })
 })
 
 describe('normalizeByEnvironment', () => {

@@ -1212,7 +1212,7 @@ export const CONDITIONAL_NA = 'n/a'
 
 /** A conditional lever applies to a config only when every one of its `appliesWhen` conditions is met. */
 export function leverApplies(config: Record<string, unknown>, conds: Record<string, unknown[]>): boolean {
-  return Object.entries(conds).every(([k, vals]) => vals.map(String).includes(String(config[k])))
+  return Object.entries(conds).every(([k, raw]) => (Array.isArray(raw) ? raw : [raw]).map(String).includes(String(config[k])))
 }
 
 /**

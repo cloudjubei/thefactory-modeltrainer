@@ -22,16 +22,44 @@ incumbent is selected on the lower rungs and certified once on the test.
 
 ## Run it
 
+The manifest runs `.venv/bin/python` (a concrete path, so the Overseer's runner finds it regardless of its
+`PATH` — an Electron app launched from Finder has a minimal `PATH` where bare `python3` may not resolve). The
+dependency-light cores (`random` / `heuristic` / `mcts`) need only the standard library, so the venv needs **no
+packages** — create it once:
+
 ```sh
 cd examples/boardgames
-python3 -m harness.run --calibrate --summary-out /tmp/bg-cal.json
-python3 -m harness.run --config-json configs/default.json --summary-out /tmp/bg-sum.json
+python3 -m venv .venv                 # once — no pip installs needed for the light cores
+.venv/bin/python -m harness.run --calibrate --summary-out /tmp/bg-cal.json
+.venv/bin/python -m harness.run --config-json configs/default.json --summary-out /tmp/bg-sum.json
 # re-test a saved checkpoint against a chosen opponent:
-python3 -m harness.run --evaluate --config-json /tmp/eval.json --summary-out /tmp/bg-eval.json
+.venv/bin/python -m harness.run --evaluate --config-json /tmp/eval.json --summary-out /tmp/bg-eval.json
 ```
 
-The dependency-light cores (`random` / `heuristic` / `mcts`) need only the standard library. `harness.load_policy`
-turns a checkpoint back into a playable `act(game, state, rng)` — the seam a live test drives.
+(The neural core will add `torch` to this venv later.) `harness.load_policy` turns a checkpoint back into a
+playable `act(game, state, rng)` — the seam a live test drives.
+
+## Watch or play against a model
+
+`harness.play` is the human-facing surface over a trained checkpoint (it reuses `load_policy` and the same
+replay a run samples, so it needs no packages either):
+
+```sh
+# PLAY against a saved model in the terminal (you drop columns; it answers):
+.venv/bin/python -m harness.play --checkpoint checkpoints/<hash>.json --vs human
+# ...or against an inline core without a checkpoint:
+.venv/bin/python -m harness.play --model mcts --mcts-sims 200 --vs human
+
+# WATCH the model play an opponent rung, move by move:
+.venv/bin/python -m harness.play --checkpoint checkpoints/<hash>.json --vs mcts
+
+# REPLAY the exact game a run sampled (from its summary's sample_game block):
+.venv/bin/python -m harness.play --from-summary /tmp/bg-sum.json
+```
+
+`--seat 0|1` sets who moves first (the model takes `--seat`; in a human game you take the other seat). The
+current cores are search/rules, so "the model" is the search at the checkpoint's strength; a learned neural
+core saves weights beside the same checkpoint spec and plays through this command unchanged.
 
 ## Architecture
 

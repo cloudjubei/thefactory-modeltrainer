@@ -2757,6 +2757,50 @@ describe('getRunData / getRunXAI (agent read tools)', () => {
     const { tools } = makeTools(stubRunner(), storage)
     expect((await tools.getRunData({ scope: 'proj', runKey: 'failed1' })).found).toBe(false)
   })
+
+  it('getRunGame returns the typed replay + transcript for a run that captured a sampled game', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'g1', 6, {
+      metrics: { win_rate: 1 },
+      sample_game: {
+        opponent: 'random',
+        model_seat: 0,
+        winner: 0,
+        moves: [{ player: 0, action: 3, label: 'col 3' }],
+        frames: ['. . .', 'X . .'],
+      },
+    })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunGame({ scope: 'proj', runKey: 'g1' })
+    expect(result.found).toBe(true)
+    expect(result.recordType).toBe('demo-run')
+    expect(result.game?.frames).toEqual(['. . .', 'X . .'])
+    expect(result.game?.opponent).toBe('random')
+    expect(result.transcript).toContain('col 3')
+    expect(result.transcript).toContain('model wins')
+    expect(result.error).toBeUndefined()
+  })
+
+  it('getRunGame reports found:true with a reason when the run captured no game', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    await seedRun(storage, 'nogame', 6, { metrics: { win_rate: 1 } })
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunGame({ scope: 'proj', runKey: 'nogame' })
+    expect(result.found).toBe(true)
+    expect(result.game).toBeUndefined()
+    expect(result.error).toMatch(/no sample_game/)
+  })
+
+  it('getRunGame returns found:false for an unknown run id', async () => {
+    const storage = memoryStorage()
+    await seedProject(storage)
+    const { tools } = makeTools(stubRunner(), storage)
+    const result = await tools.getRunGame({ scope: 'proj', runKey: 'ghost' })
+    expect(result.found).toBe(false)
+    expect(result.game).toBeUndefined()
+  })
 })
 
 describe('analyzePaperFromUrl', () => {

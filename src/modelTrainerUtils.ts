@@ -38,6 +38,8 @@ import type {
   TrainingModel,
   TrainingPaperRecord,
   TrainingRunSummary,
+  SampleGameReplay,
+  SampleGameReplayMove,
 } from './modelTrainerTypes.js'
 import type { ClaimVerdict } from 'thefactory-tools/types'
 import {
@@ -2662,8 +2664,94 @@ export function validateRunProvenance(summary: {
   return { complete: missing.length === 0, missing }
 }
 
+/**
+ * Format the most recent FAILED run records into a short, human-readable tail for a stop/diagnosis message —
+ * so a search that produced no completed runs shows WHY (the run's `error` + the last `logTail` line) instead
+ * of leaving the operator to hunt through logs. Newest first, at most `max` failures. Empty string when none.
+ */
+export function describeRunFailures(records: Array<{ content?: unknown }>, max = 2): string {
+  const failed = records
+    .map(
+      (r) =>
+        r.content as
+          | { status?: string; error?: string; ranAt?: string; logTail?: string[] }
+          | undefined,
+    )
+    .filter((c): c is { status?: string; error?: string; ranAt?: string; logTail?: string[] } =>
+      !!c && c.status === 'failed' && typeof c.error === 'string' && c.error.length > 0,
+    )
+    .sort((a, b) => String(b.ranAt ?? '').localeCompare(String(a.ranAt ?? '')))
+  if (!failed.length) return ''
+  const lines = failed.slice(0, Math.max(1, max)).map((c) => {
+    const tail = c.logTail?.length ? c.logTail[c.logTail.length - 1] : ''
+    const err = (c.error ?? '').split('\n')[0]
+    return `• ${err}${tail && !err.includes(tail) ? ` — ${tail}` : ''}`
+  })
+  return ` Last failure${failed.length > 1 ? 's' : ''}:\n${lines.join('\n')}`
+}
+
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v)
+
+const isReplayMove = (v: unknown): v is SampleGameReplayMove =>
+  isPlainObject(v) && typeof v.player === 'number' && typeof v.action === 'number'
+
+/**
+ * Pull a stored run record's `sample_game` into a typed {@link SampleGameReplay}, defensively — a game with
+ * no ASCII `frames` can't be replayed, so it returns `undefined` rather than a half-populated replay.
+ * Malformed move entries are dropped; `model_seat` defaults to 0; `winner` keeps `null` (a draw).
+ */
+export function extractSampleGame(
+  content: Record<string, unknown> | undefined | null,
+): SampleGameReplay | undefined {
+  const raw = (content as { sample_game?: unknown } | undefined)?.sample_game
+  if (!isPlainObject(raw)) return undefined
+  const frames = raw.frames
+  if (!Array.isArray(frames) || frames.length === 0 || !frames.every((f) => typeof f === 'string')) {
+    return undefined
+  }
+  const moves: SampleGameReplayMove[] = Array.isArray(raw.moves)
+    ? raw.moves.filter(isReplayMove).map((m) => ({
+        player: m.player,
+        action: m.action,
+        ...(typeof m.label === 'string' ? { label: m.label } : {}),
+      }))
+    : []
+  const game: SampleGameReplay = {
+    model_seat: typeof raw.model_seat === 'number' ? raw.model_seat : 0,
+    winner: typeof raw.winner === 'number' ? raw.winner : null,
+    moves,
+    frames: frames as string[],
+  }
+  if (typeof raw.opponent === 'string') game.opponent = raw.opponent
+  return game
+}
+
+function replayResultLine(winner: number | null, labels: Record<number, string>): string {
+  if (winner === null) return 'Result: draw'
+  return `Result: ${labels[winner] ?? `seat ${winner}`} wins`
+}
+
+/**
+ * Format a {@link SampleGameReplay} into a move-by-move ASCII transcript — a header, the initial board, then
+ * each move (`Move N: <who> plays <label>`) followed by the board it produced, and a final result line. The
+ * model's seat is labelled `model`; the other (2-player) seat is the `opponent` name (or `opponent`).
+ */
+export function renderReplayText(game: SampleGameReplay): string {
+  const other = game.opponent || 'opponent'
+  const labels: Record<number, string> = { [game.model_seat]: 'model', [1 - game.model_seat]: other }
+  const lines: string[] = [
+    `Replay — model is seat ${game.model_seat}${game.opponent ? `, opponent '${game.opponent}'` : ''}`,
+  ]
+  if (game.frames.length) lines.push(game.frames[0])
+  game.moves.forEach((mv, i) => {
+    const who = labels[mv.player] ?? `seat ${mv.player}`
+    lines.push(`Move ${i + 1}: ${who} plays ${mv.label ?? mv.action}`)
+    if (i + 1 < game.frames.length) lines.push(game.frames[i + 1])
+  })
+  lines.push(replayResultLine(game.winner, labels))
+  return lines.join('\n')
+}
 
 const isFiniteNumber = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
