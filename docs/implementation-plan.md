@@ -479,11 +479,61 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
   inline CSS, no scripts, no external assets, theme-aware, XSS-escaped; types in `modelTrainerTypes.ts`, direct
   tests). BlackSwan's `experiments/export.mjs` supplies the family labels + narrative and writes
   `experiments/battery.json` (diffable machine evidence) + `experiments/BATTERY.html` (the paper's spine):
-  **55 pre-registered probes, 13 families, 1,206 backtested cells — 55 disproved, 0 inconclusive, 0 surviving**
-  (after the extended-history disproof pass and the cross-asset COT extension),
+  **65 pre-registered probes, 18 families, 1,818 backtested cells — 63 disproved, 2 inconclusive** (after the
+  extended-history disproof pass, the cross-asset COT extension, and the full published-anomaly family group below —
+  the two inconclusives are cross-sectional reversal + pairs mean-reversion, the same weak relative-value effect and
+  the honestly-recorded open threads),
   with the honest-scope claim, the reproduce-and-refute (Mou 2011) entry, the recurring failure-signature section,
   and the power caveat. **This IS the publishable no-edge battery.** (Next enrichment: richer per-probe verdict
   extraction — currently gate + status + cells + title.)
+- **PUBLISHED-ANOMALY BATTERY (the academic canon the paper must confront) — a new family group.** The §B trail
+  covered crypto + commodities + positioning; the paper is only credible if it also confronts the classic
+  academic anomalies the literature claims DO survive. Built as DSR-gated probes on the free, **survivorship-free**
+  daily panel (7 commodities + SPY/TLT/IEF/UUP, 2006-→), 17 deep-history OOS windows 2008-2024, realistic 5bps/side
+  cost, mutation-proven leakage guards, adversarial verification. Each new module reuses the cross-sectional
+  plumbing (`align_prices`/`backtest`/`tradeable_mask`) + `summary.py` metrics verbatim.
+  - **Time-series momentum / trend-following (the flagship — Moskowitz-Ooi-Pedersen 2012; the CTA industry).**
+    `trainer/tsmom.py` — long/short by sign of trailing 3-12m return, inverse-vol sized, monthly rebalance.
+    **DISPROVED**, adversarially verified (4-agent panel: all 3 skeptics refuted=false, synthesis DISPROVED).
+    Textbook **McLean-Pontiff post-publication DECAY**: pre-2012 annualized Sharpe **+0.51** (the edge was real
+    in-sample; canonical 2008/2010 trend years faithfully reproduced — a positive control), post-2012 **−0.18**;
+    full 17-window t_win −0.10, annualized −0.02. Gross ≈ net (a gross null, not a cost kill); a live one-bar
+    leakage mutation barely moved the Sharpe. Scoped to this construction; 17 windows exclude any annualized
+    Sharpe > ~0.36, residual sub-0.2 admitted.
+  - **Cross-sectional momentum / reversal (Jegadeesh-Titman 1993).** `trainer/xsection.py` on the survivorship-free
+    basket (supersedes the B1-era survivorship-biased-megacap null). **Momentum DISPROVED — and it INVERTS**: the
+    published long-winners/short-losers book is significantly NEGATIVE (t_win −2.26, −12%/yr) on the commodity-heavy
+    free universe. Its mirror, **cross-sectional REVERSAL, is recorded INCONCLUSIVE — the battery's ONE open
+    thread** (its only positive finding): cost-surviving (+0.43 annualized, survives 40bps) BUT time-unstable
+    (concentrated 2016-2024, a coinflip 2008-2015), lookback-fragile (strong 63/252, weak 126), and the
+    guaranteed-positive side of a pre-registered mirror pair so it sits at the best-of-6 multiplicity max (t~2 <
+    DSR-critical ~2.5). Flagged for the "try harder" follow-up (out-of-basket replication + commodities-vs-financials
+    decomposition + leave-one-out + regime test — the same power-and-replication treatment that upgraded the COT
+    inconclusives).
+  - **Low-volatility / Betting-Against-Beta (Frazzini-Pedersen 2014).** `trainer/lowvol.py` — long low-beta /
+    short high-beta AND trailing-vol ranked (both persisted). **DISPROVED**, adversarially verified (skeptic +
+    jackknife): a coinflip (t≈0, negative net) across all formation windows; the one edge-like cell is entirely
+    the 2008 GFC long-Treasuries/short-oil trade. Caveat recorded: equal-weight book (realized β≈−2.1) is not a
+    faithful beta-neutralized FP-BAB, and equity cross-sections are data-gated/untested.
+  - **Calendar / seasonal (turn-of-month — Lakonishok-Smidt; sell-in-May — Bouman-Jacobsen; Monday — French).**
+    `trainer/seasonal.py` — exposure-balanced (market-drift-neutral) calendar spread on SPY. **DISPROVED**,
+    adversarially verified: turn-of-month null-to-negative, the Monday effect fully DECAYED (gross t≈0, net
+    cost-bled); sell-in-May a weak **disproved-marginal** tilt (pooled daily t 0.85, carried by ~2 of 17 years).
+  - **Pairs / statistical arbitrage (Gatev-Goetzmann-Rouwenhorst 2006).** `trainer/pairs.py` — distance pairs,
+    fade divergence / close on convergence, formation-only selection + one-bar lag (mutation-proven). **INCONCLUSIVE
+    — the SECOND open thread**: a weak, PERSISTENT (both sub-periods), cost-surviving (to 40bps) mean-reversion
+    tilt (≈+0.35 annualized, 12/17 windows) that does not clear multiplicity (per-config t~1.5). Its inverse
+    (chase divergence) is DISPROVED-negative.
+  - **The two inconclusive threads are ONE effect.** Cross-sectional reversal and pairs mean-reversion are both
+    weak, cost-surviving, sub-significant RELATIVE-VALUE / mean-reversion tilts on the commodity-heavy panel — the
+    free data's one residual signal cluster. This is the paper's honest "what we couldn't kill" section, and the
+    motivated **"try harder" follow-up**: out-of-basket replication (does mean-reversion persist on a larger/
+    different universe?), commodities-vs-financials decomposition + leave-one-out (is it one asset/pair?), and a
+    joint test of whether the two are the same underlying factor — the same power-and-replication treatment that
+    upgraded the COT inconclusives to disproved.
+  - **Headline:** the battery is no longer "0 inconclusive" — TWO honestly-recorded open threads (both mean-reversion).
+    That STRENGTHENS the paper: a battery that finds a residual effect, stress-tests it, and shows it is not bankable
+    is far more credible than an all-null sweep. `node experiments/export.mjs` regenerates the exact counts.
 - **Reproduce-and-refute workflow.** A repeatable pipeline that takes a published claim, re-implements it as a
   conformant probe (thin CLI contract, no engine changes), runs it under the discipline, and records whether it
   survives + WHY it flips if not. Each reproduced paper becomes another entry in the trail and another row in the

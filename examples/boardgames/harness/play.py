@@ -136,6 +136,124 @@ def _model_act(game: Game, args: argparse.Namespace) -> tuple[ActFn, str]:
     return (lambda g, s, r: agent.act(g, s, r)), args.model
 
 
+# --- stateless serve RPC (the in-app "play against a model" oracle) --------------------------------------
+# The app can't run Python, so each of the human's turns is one stateless call: the client sends the FULL move
+# history, the server replays it, lets the model reply while it's the model's turn, and returns the resulting
+# board + whose move it is + the legal moves + terminal/winner. No server session state — fully resumable.
+
+
+def _model_act_from_request(game: Game, request: dict) -> ActFn:
+    checkpoint = request.get("checkpoint")
+    if checkpoint:
+        return load_policy(checkpoint)
+    cfg = {
+        "model_name": request.get("model_name", "mcts"),
+        "mcts_sims": int(request.get("mcts_sims", 200)),
+        "game": game.name,
+    }
+    agent: Agent = resolve_agent(cfg["model_name"], cfg, personas_for(game.name))
+    return lambda g, s, r: agent.act(g, s, r)
+
+
+def _resolve_game_name(request: dict) -> str:
+    if request.get("game"):
+        return str(request["game"])
+    checkpoint = request.get("checkpoint")
+    if checkpoint:
+        try:
+            spec = json.loads(Path(checkpoint).read_text())
+            if spec.get("game"):
+                return str(spec["game"])
+        except Exception:
+            pass
+    return "connect4"
+
+
+def serve_move(game: Game, model_act: ActFn, actions: list, human_seat: int, rng: random.Random) -> dict:
+    """Replay `actions` from the initial state, then let the model reply while it is its turn."""
+    model_seat = 1 - human_seat
+    state: State = game.initial_state(rng)
+    frames: list[str] = [game.render(state)]
+    moves: list[dict] = []
+    flat: list[int] = []
+
+    def _apply(action: int) -> None:
+        nonlocal state
+        player = game.current_player(state)
+        label = game.action_label(state, action)
+        state = game.step(state, action, rng)
+        moves.append({"player": player, "action": action, "label": label})
+        flat.append(action)
+        frames.append(game.render(state))
+
+    for a in actions:
+        _apply(int(a))
+    while not game.is_terminal(state) and game.current_player(state) == model_seat:
+        _apply(model_act(game, state, rng))
+
+    terminal = game.is_terminal(state)
+    return {
+        "mode": "move",
+        "game": game.name,
+        "model_seat": model_seat,
+        "human_seat": human_seat,
+        "actions": flat,
+        "moves": moves,
+        "frames": frames,
+        "num_actions": game.num_actions,
+        "to_move": None if terminal else game.current_player(state),
+        "legal_actions": [] if terminal else game.legal_actions(state),
+        "terminal": terminal,
+        "winner": game.winner(state),
+    }
+
+
+def serve_autoplay(
+    game: Game, model: Agent, opponent: Agent, model_seat: int, rng: random.Random, opponent_name: str
+) -> dict:
+    """Auto-play one full game of the model vs an opponent and return the whole replay."""
+    result = play_match(game, model, opponent, model_seat, rng, capture=True)
+    replay = result.replay or {}
+    return {
+        "mode": "autoplay",
+        "game": game.name,
+        "model_seat": model_seat,
+        "opponent": opponent_name,
+        "winner": replay.get("winner"),
+        "moves": replay.get("moves", []),
+        "frames": replay.get("frames", []),
+    }
+
+
+def run_serve(request: dict) -> dict:
+    """Dispatch a serve request ('move' | 'autoplay') to the right handler, reporting any failure as {error}."""
+    try:
+        mode = request.get("mode")
+        game = resolve_game(_resolve_game_name(request))
+        rng = random.Random(int(request.get("seed", 0)))
+        if mode == "move":
+            return serve_move(
+                game,
+                _model_act_from_request(game, request),
+                request.get("actions") or [],
+                int(request.get("human_seat", 0)),
+                rng,
+            )
+        if mode == "autoplay":
+            opponent = str(request.get("opponent", "random"))
+            opp_agent = resolve_agent(
+                opponent,
+                {"model_name": opponent, "mcts_sims": int(request.get("opponent_sims", OPPONENT_MCTS_SIMS)), "game": game.name},
+                personas_for(game.name),
+            )
+            return serve_autoplay(
+                game, _FnAgent(_model_act_from_request(game, request)), opp_agent, int(request.get("model_seat", 0)), rng, opponent
+            )
+        return {"error": f"unknown serve mode {mode!r} (expected 'move' or 'autoplay')"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="harness.play", description="Watch, replay, or play against a model.")
     parser.add_argument("--from-summary", type=Path, help="render the sample_game a run summary captured, then exit")
@@ -147,7 +265,19 @@ def main() -> None:
     parser.add_argument("--seat", type=int, default=0, help="the model's (and in a human game, YOUR) seat is the other; 0 moves first")
     parser.add_argument("--opponent-sims", type=int, default=OPPONENT_MCTS_SIMS, help="strength of an mcts opponent to watch against")
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--serve", action="store_true", help="stateless RPC mode: read a request JSON, write the result JSON")
+    parser.add_argument("--config-json", type=Path, help="serve mode: the request JSON ({mode, checkpoint|model_name, actions, ...})")
+    parser.add_argument("--summary-out", type=Path, help="serve mode: where to write the result JSON")
     args = parser.parse_args()
+
+    if args.serve:
+        if not args.config_json or not args.summary_out:
+            parser.error("--serve requires --config-json and --summary-out")
+        request = json.loads(Path(args.config_json).read_text())
+        result = run_serve(request)
+        Path(args.summary_out).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.summary_out).write_text(json.dumps(result, indent=2) + "\n")
+        return
 
     game = resolve_game(args.game)
     rng = random.Random(args.seed)

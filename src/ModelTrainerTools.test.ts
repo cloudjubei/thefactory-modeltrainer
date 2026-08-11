@@ -2803,6 +2803,163 @@ describe('getRunData / getRunXAI (agent read tools)', () => {
   })
 })
 
+describe('playBoardGame (interactive play RPC)', () => {
+  function playTools(
+    runner: ComputeRunner,
+    storage: DataStorage,
+    resolveProjectPath?: (scope: string) => string | undefined,
+  ) {
+    return createModelTrainerTools({
+      computeRunner: runner,
+      storage,
+      ...(resolveProjectPath ? { resolveProjectPath } : {}),
+      logger: { info: vi.fn(), warn: vi.fn() },
+      now: () => NOW,
+      availableMemoryBytes: () => Number.MAX_SAFE_INTEGER,
+    })
+  }
+  const PLAY = 'py -m harness.play --serve --config-json {configPath} --summary-out {summaryOut}'
+  async function seedPlayProject(storage: DataStorage, withPlay = true) {
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'bg',
+      content: {
+        manifest: withPlay ? { ...manifest(), play: PLAY } : manifest(),
+        dir: 'examples/boardgames',
+      },
+    })
+  }
+  async function seedPlayableRun(storage: DataStorage) {
+    await seedRun(storage, 'g1', 6, {
+      config: { game: 'connect4', model_name: 'mcts', mcts_sims: 80 },
+      artifacts: { checkpoint: '/abs/ckpt.json' },
+    })
+  }
+
+  it('runs the manifest play command in the project checkout and returns the serve result (move)', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    await seedPlayableRun(storage)
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: { mode: 'move', frames: ['.', 'X'], to_move: 0, terminal: false, legal_actions: [0, 1] },
+      }),
+    })
+    const tools = playTools(runner, storage, () => '/host/checkout')
+    const res = await tools.playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'move',
+      actions: [3],
+      humanSeat: 0,
+      seed: 0,
+    })
+    expect(res.ok).toBe(true)
+    expect(res.recordType).toBe('demo-run')
+    expect(res.result).toMatchObject({ mode: 'move', to_move: 0 })
+    const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
+    expect(job.commandTemplate).toBe(PLAY)
+    expect(job.repoRef).toEqual({ kind: 'local', localPath: '/host/checkout/examples/boardgames' })
+    expect(job.config).toMatchObject({
+      mode: 'move',
+      checkpoint: '/abs/ckpt.json',
+      game: 'connect4',
+      actions: [3],
+      human_seat: 0,
+    })
+  })
+
+  it('threads the opponent + model seat for autoplay', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    await seedPlayableRun(storage)
+    const runner = stubRunner({
+      jobResult: () => ({ summary: { mode: 'autoplay', frames: ['.'], moves: [], winner: 0 } }),
+    })
+    const tools = playTools(runner, storage, () => '/host/checkout')
+    const res = await tools.playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'autoplay',
+      opponent: 'heuristic',
+      modelSeat: 1,
+      seed: 2,
+    })
+    expect(res.ok).toBe(true)
+    const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
+    expect(job.config).toMatchObject({ mode: 'autoplay', opponent: 'heuristic', model_seat: 1, seed: 2 })
+  })
+
+  it('errors when the project declares no play command', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage, false)
+    await seedPlayableRun(storage)
+    const res = await playTools(stubRunner(), storage, () => '/x').playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'move',
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/play/i)
+  })
+
+  it('errors when the run is unknown', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    const res = await playTools(stubRunner(), storage, () => '/x').playBoardGame({
+      scope: 'proj',
+      runKey: 'ghost',
+      mode: 'move',
+    })
+    expect(res.ok).toBe(false)
+  })
+
+  it('errors when the project checkout path cannot be resolved', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    await seedPlayableRun(storage)
+    const res = await playTools(stubRunner(), storage, () => undefined).playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'move',
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/checkout path/i)
+  })
+
+  it('surfaces a serve-level error from the result summary', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    await seedPlayableRun(storage)
+    const runner = stubRunner({ jobResult: () => ({ summary: { error: 'illegal move: column 9' } }) })
+    const res = await playTools(runner, storage, () => '/x').playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'move',
+      actions: [9],
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/illegal move/)
+  })
+
+  it('reports a failed play command', async () => {
+    const storage = memoryStorage()
+    await seedPlayProject(storage)
+    await seedPlayableRun(storage)
+    const runner = stubRunner({
+      jobResult: () => ({ status: 'failed', exitCode: 1, error: 'boom', summary: undefined, logTail: ['traceback'] }),
+    })
+    const res = await playTools(runner, storage, () => '/x').playBoardGame({
+      scope: 'proj',
+      runKey: 'g1',
+      mode: 'move',
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toMatch(/failed/)
+  })
+})
+
 describe('analyzePaperFromUrl', () => {
   const HYPS = [
     {

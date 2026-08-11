@@ -337,6 +337,14 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest evaluate template must contain {summaryOut}')
     }
   }
+  if (m.play !== undefined) {
+    if (typeof m.play !== 'string' || !m.play.includes('{configPath}')) {
+      throw new Error('trainer manifest play template must contain {configPath}')
+    }
+    if (!m.play.includes('{summaryOut}')) {
+      throw new Error('trainer manifest play template must contain {summaryOut}')
+    }
+  }
   const objective = m.objective as Record<string, unknown> | undefined
   if (!objective || typeof objective.name !== 'string' || !objective.name) {
     throw new Error('trainer manifest requires an objective name')

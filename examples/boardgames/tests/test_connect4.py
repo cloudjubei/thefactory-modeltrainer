@@ -115,3 +115,20 @@ def test_observation_is_perspective_encoded():
     assert len(obs0) == ROWS * COLS + 1
     assert obs0[3] == 1.0  # own piece from player 0's view
     assert obs1[3] == -1.0  # same cell is the opponent from player 1's view
+
+
+def test_state_key_collapses_transpositions_and_separates_positions():
+    game = Connect4()
+
+    def replay(actions):
+        s = game.initial_state()
+        for a in actions:
+            s = game.step(s, a)
+        return s
+
+    # Same board reached two ways (each player's own moves reordered) → identical key.
+    a = replay([0, 1, 2, 3])  # p0: col0,col2 ; p1: col1,col3
+    b = replay([2, 1, 0, 3])  # p0: col2,col0 ; p1: col1,col3
+    assert game.state_key(a) == game.state_key(b)
+    # A genuinely different position → different key.
+    assert game.state_key(a) != game.state_key(replay([0, 1, 2, 4]))

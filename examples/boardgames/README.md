@@ -41,8 +41,15 @@ playable `act(game, state, rng)` — the seam a live test drives.
 
 ## Watch or play against a model
 
-`harness.play` is the human-facing surface over a trained checkpoint (it reuses `load_policy` and the same
-replay a run samples, so it needs no packages either):
+**In-app is the primary surface.** A completed run's detail in the Overseer viewer shows a **Game replay**
+stepper (from the summary's `sample_game`) and, when the manifest declares a `play` command, a **Play against
+this model** board. Interactive play routes each turn through the backend: the viewer → `playBoardGame` trainer
+tool → the manifest's `play` command (`harness.play --serve`) → the run's checkpoint. The same tool is
+chat-invocable (`playBoardGame` with `mode: 'move' | 'autoplay'`), so an agent can play or watch too. The
+`--serve` mode below is that oracle; the interactive CLI is a convenience for local dev.
+
+`harness.play` is also a direct human-facing surface over a trained checkpoint (it reuses `load_policy` and the
+same replay a run samples, so it needs no packages either):
 
 ```sh
 # PLAY against a saved model in the terminal (you drop columns; it answers):
@@ -57,20 +64,49 @@ replay a run samples, so it needs no packages either):
 .venv/bin/python -m harness.play --from-summary /tmp/bg-sum.json
 ```
 
-`--seat 0|1` sets who moves first (the model takes `--seat`; in a human game you take the other seat). The
-current cores are search/rules, so "the model" is the search at the checkpoint's strength; a learned neural
-core saves weights beside the same checkpoint spec and plays through this command unchanged.
+`--seat 0|1` sets who moves first (the model takes `--seat`; in a human game you take the other seat).
+
+## The cores (`model_name`)
+
+- **`random`** — legal move at random. **`heuristic`** — win/block/centre rules.
+- **`mcts`** — a real UCT tree search: selection → expansion → random rollout → back-up, with a
+  **transposition table** (positions reached different ways share statistics) that **persists across the
+  agent's moves in a game**. Strength scales with `mcts_sims`. It is SEARCH, not learning — no parameters, no
+  memory across games.
+- **`alphazero`** — a **learned** policy+value net (`harness/neural.py`, needs torch) trained by self-play,
+  then used to *guide* the MCTS (PUCT priors + a value head instead of random rollouts). A training run
+  produces a `.pt` weights file beside the checkpoint; the knowledge is in the weights and **generalises**
+  across positions (what a transposition table cannot). Levers: `az_iterations`, `az_selfplay_games`,
+  `az_sims`, `az_epochs`, `az_warm_start`.
+  - **Warm-start + league** (`harness/champions.py`): a run does NOT relearn from zero. It **warm-starts from
+    the best champion** on disk, trains with self-play MIXED with games against a **league** (strong mcts +
+    heuristic + past champions), then is measured against a strong mcts + the champion and **promoted only if
+    it beats the incumbent** (≥55%). Set `az_warm_start: 0` for a reproducible from-scratch run. Self-play is
+    the main strength engine (balanced games); the league is a minority + the yardstick. Getting a genuinely
+    strong model takes real budget + several compounding runs — a single tiny run stays weak.
+
+```sh
+# TRAIN a learned model (needs torch — .venv/bin/pip install torch numpy):
+.venv/bin/python -m harness.run --config-json az.json --summary-out /tmp/az.json
+#   az.json: {"model_name":"alphazero","opponent":"mcts","eval_games":20,
+#             "az_iterations":6,"az_selfplay_games":24,"az_sims":80,"az_epochs":6}
+# then PLAY it (loads the trained net) exactly like any other checkpoint:
+.venv/bin/python -m harness.play --checkpoint checkpoints/<hash>.json --vs human
+```
 
 ## Architecture
 
 ```
 harness/
-  game.py       # the Game protocol — OBSERVATION-based, so hidden-info games fit the same harness
-  agents.py     # random / heuristic / mcts cores + the extensible opponent REGISTRY (personas, champions)
+  game.py       # the Game protocol (OBSERVATION-based + a state_key for transpositions)
+  agents.py     # random / heuristic / real-UCT mcts cores + the extensible opponent REGISTRY
+  neural.py     # the alphazero core: net + net-guided MCTS + self-play + LEAGUE training + weight I/O (torch)
+  champions.py  # the champion store — warm-start from the best net + a pool of past champions (cross-run memory)
   selfplay.py   # match play + ladder evaluation + §C metrics + cost + sampled replay
   summary.py    # the RunSummary builder
   config.py     # the --config-json contract + provenance + cost constants
-  run.py        # CLI + checkpoint save + load_policy seam
+  play.py       # watch / replay / interactive-play surface (incl. the --serve RPC the in-app board drives)
+  run.py        # CLI + training path + checkpoint/weights save + load_policy seam
   registry.py   # where a new game (and a luck game's personas) is wired in
 games/
   connect4.py   # game #1 — perfect-information, deterministic reference
@@ -86,8 +122,9 @@ catan (trading) · altered (deckbuild + play — a **two-model adversarial** har
 
 ## Forward milestones
 
-- **Neural self-play core** — `ppo_selfplay` / `alphazero` as `model_name` levers (torch is available); the
-  harness is unchanged.
+- **Neural self-play core** — ✓ SHIPPED: `alphazero` as a `model_name` lever (`harness/neural.py`). Trains a
+  policy+value net by self-play, saves weights, plays through the same replay/play tooling. Next: a `ppo`
+  variant; a larger/residual net; per-game net shapes (the current net is connect4-shaped).
 - **Personas + league play** — the luck-based games (skull, flip7, skull_king) are tested against fixed
   protocol **personas**; once models beat them, new models train against a growing pool of **past champions +
   personas** (the AlphaGo/AlphaStar insight). The opponent registry already accepts personas and `champion:<ref>`

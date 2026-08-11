@@ -50,6 +50,52 @@ def test_mcts_counts_the_simulations_it_spends():
     assert agent.sims_used == 50
 
 
+def _replay(game, actions):
+    state = game.initial_state(random.Random(0))
+    for a in actions:
+        state = game.step(state, a)
+    return state
+
+
+def test_mcts_takes_an_immediate_win():
+    game = Connect4()
+    # player 0 has three in column 3 (rows 0-2) and is to move: col 3 completes a vertical four.
+    state = _replay(game, [3, 0, 3, 1, 3, 2])
+    assert game.current_player(state) == 0
+    assert MctsAgent(sims=200).act(game, state, random.Random(0)) == 3
+
+
+def test_mcts_blocks_an_immediate_threat():
+    game = Connect4()
+    # player 1 has three in column 3; player 0 is to move and MUST block col 3 or lose next turn. A real
+    # tree search sees the opponent's winning reply and blocks; flat Monte-Carlo often misses it.
+    state = _replay(game, [0, 3, 1, 3, 2, 3])
+    assert game.current_player(state) == 0
+    assert MctsAgent(sims=400).act(game, state, random.Random(0)) == 3
+
+
+def test_mcts_builds_a_tree_beyond_the_root():
+    game = Connect4()
+    agent = MctsAgent(sims=200)
+    agent.act(game, game.initial_state(random.Random(0)), random.Random(0))
+    # A real UCT tree expands past the root + its 7 children (8 nodes); flat MC would keep only the root.
+    assert len(agent._tree) > 8
+
+
+def test_mcts_reuses_its_tree_across_moves():
+    game = Connect4()
+    agent = MctsAgent(sims=150)
+    rng = random.Random(3)
+    state = game.initial_state(rng)
+    agent.act(game, state, rng)
+    n1 = len(agent._tree)
+    state = game.step(state, 3)  # our move
+    state = game.step(state, 2)  # opponent reply
+    agent.act(game, state, rng)
+    n2 = len(agent._tree)
+    assert n2 >= n1  # the transposition table persists across moves (memory), it is not reset each turn
+
+
 def test_resolve_agent_builds_baselines_and_rejects_unknown():
     assert isinstance(resolve_agent("random", {}), RandomAgent)
     assert isinstance(resolve_agent("heuristic", {}), HeuristicAgent)

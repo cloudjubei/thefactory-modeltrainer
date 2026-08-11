@@ -83,6 +83,11 @@
     // data.query, and watch the nav-panel activity spinner.
     startActivity: (activityType, params) =>
       call('activities.start', { activityType: activityType, params: params }, 30000),
+    // Run ONE safe (read / interactive-RPC) trainer tool synchronously and return its result — the seam the
+    // Game panel's "Play against this model" board drives (`playBoardGame`). `timeoutMs` is generous because a
+    // strong per-move search runs server-side. Compute-spending tools are NOT reachable here.
+    callTrainerTool: (name, args, timeoutMs) =>
+      call('trainer.tool', { name: name, args: args }, timeoutMs || 60000),
     // `timeoutMs` overrides the default 8s guard — the History popup lists a large project's FULL activity
     // set, whose serialization can exceed 8s (an under-tight timeout rejects and looks like "no history").
     listActivities: (timeoutMs) => call('activities.list', undefined, timeoutMs),

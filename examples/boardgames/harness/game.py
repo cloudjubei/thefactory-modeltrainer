@@ -50,3 +50,7 @@ class Game(Protocol):
     # Optional: a short label for an action (defaults to str(action)) — for readable move logs.
     def action_label(self, state: State, action: int) -> str: ...
 
+    # Optional: a hashable CANONICAL key for a position, so the MCTS transposition table collapses states
+    # reached by different move orders. When a game omits it, the search falls back to the observation.
+    def state_key(self, state: State) -> object: ...
+

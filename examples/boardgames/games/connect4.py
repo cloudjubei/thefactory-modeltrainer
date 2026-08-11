@@ -109,6 +109,11 @@ class Connect4:
     def action_label(self, state: C4State, action: int) -> str:
         return f"col {action}"
 
+    def state_key(self, state: C4State) -> tuple:
+        """Canonical position key for the transposition table: the board + side to move (the board already
+        determines whether the game is over)."""
+        return (state.board, state.to_move)
+
     # --- internals ---
     def _landing_row(self, board: tuple, col: int) -> int:
         if not 0 <= col < COLS:

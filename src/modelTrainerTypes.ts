@@ -395,6 +395,14 @@ export interface TrainerManifest {
    */
   mineData?: string
   /**
+   * Command template (`{configPath}` play request + `{summaryOut}` result) that answers an INTERACTIVE
+   * play request statelessly: given a checkpoint (or inline model) + the move history so far, it replays the
+   * game and returns the model's reply (mode `move`) or auto-plays a full game vs an opponent (mode
+   * `autoplay`). Powers the viewer's "Play against this model" board + the `playBoardGame` tool. Omit if the
+   * project has no playable artifact. The config it receives is a {@link PlayBoardGameRequest}.
+   */
+  play?: string
+  /**
    * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
    * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
    * in parallel (instead of the safe sequential default that leaves cores idle), and exports this many
@@ -1820,6 +1828,12 @@ export interface ModelTrainerToolsDeps {
   computeRunner: ComputeRunner
   /** Resolve a named compute target (e.g. a paired remote runner) to its runner. */
   resolveComputeRunner?: (target: string) => ComputeRunner | undefined
+  /**
+   * Resolve a project SCOPE to its host filesystem checkout path — needed by the synchronous
+   * {@link ModelTrainerTools.playBoardGame} RPC, which runs the manifest's `play` command in the project's
+   * checkout (the training sub-dir is joined on top from the manifest record). Omit if no project runs play.
+   */
+  resolveProjectPath?: (scope: string) => Promise<string | undefined> | string | undefined
   storage: DataStorage
   /** Required for judging/proposing; the train/calibrate surface works without it. */
   inferenceExecutor?: InferenceExecutor
@@ -3639,6 +3653,60 @@ export interface GetRunGameResult {
   error?: string
 }
 
+/** The stateless play request the manifest's `play` command receives as its `{configPath}` JSON. */
+export interface PlayBoardGameRequest {
+  mode: 'move' | 'autoplay'
+  game?: string
+  checkpoint?: string
+  model_name?: string
+  mcts_sims?: number
+  seed?: number
+  /** move mode: the full action history so far (both players), in play order. */
+  actions?: number[]
+  /** move mode: which seat the human occupies (the model takes the other). */
+  human_seat?: number
+  /** autoplay mode: the opponent rung to play a full game against. */
+  opponent?: string
+  /** autoplay mode: which seat the model occupies. */
+  model_seat?: number
+}
+
+export interface PlayBoardGameParams {
+  /** The HOST project scope the run records live in. */
+  scope: string
+  /** The run whose trained model (checkpoint) you play against / watch. */
+  runKey: string
+  /** `move` = advance an interactive game one turn; `autoplay` = watch a full model-vs-opponent game. */
+  mode: 'move' | 'autoplay'
+  /** move mode: the full action history so far (both players), in play order. */
+  actions?: number[]
+  /** move mode: which seat the human occupies (default 0 = human moves first). */
+  humanSeat?: number
+  /** autoplay mode: the opponent to play a full game against (default 'random'). */
+  opponent?: string
+  /** autoplay mode: which seat the model occupies (default 0). */
+  modelSeat?: number
+  /** Deterministic seed (default 0). */
+  seed?: number
+  /** Named compute target (resolved via the deps' `resolveComputeRunner`); omit for local. */
+  computeTarget?: string
+  abortSignal?: AbortSignal
+}
+
+export interface PlayBoardGameResult {
+  ok: boolean
+  /** The training project's record type the run was found under. */
+  recordType?: string
+  /**
+   * The serve output: for `move`, the resulting board ({ frames, moves, actions, to_move, legal_actions,
+   * num_actions, terminal, winner, model_seat, human_seat }); for `autoplay`, a full replay
+   * ({ frames, moves, model_seat, opponent, winner }).
+   */
+  result?: Record<string, unknown>
+  /** Set when the run/checkpoint couldn't be resolved, the project has no play command, or the run failed. */
+  error?: string
+}
+
 export interface MigrateTrainingRunsParams {
   /** The HOST project scope the run + queue records live in. */
   scope: string
@@ -3950,6 +4018,13 @@ export interface ModelTrainerTools {
    * a not-found / no-game reason. Read-only.
    */
   getRunGame(params: GetRunGameParams): Promise<GetRunGameResult>
+  /**
+   * Interactive PLAY over a run's trained model — the stateless RPC the viewer's "Play against this model"
+   * board and the `playBoardGame` tool drive. `move` replays the given history and returns the model's reply
+   * + the new board; `autoplay` returns a full model-vs-opponent replay. Runs the project's manifest `play`
+   * command in its checkout.
+   */
+  playBoardGame(params: PlayBoardGameParams): Promise<PlayBoardGameResult>
   /**
    * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
    * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a

@@ -1,4 +1,5 @@
 import * as os from 'node:os'
+import * as nodepath from 'node:path'
 import type {
   ClaimVerdict,
   ComputeRepoRef,
@@ -63,6 +64,8 @@ import type {
   GetRunDataResult,
   GetRunGameParams,
   GetRunGameResult,
+  PlayBoardGameParams,
+  PlayBoardGameResult,
   GetTrainerStateParams,
   GetTrainerStateResult,
   DiagnoseSearchParams,
@@ -264,6 +267,9 @@ import {
 // checked by the A2 parity audit), so the chat deleteRuns tool, the migration delete path, and the viewer all
 // cascade identically — a new derived child added there is deleted everywhere with no drift.
 const RUN_KEYED_CHILD_SUFFIXES = TRAINER_RUN_KEYED_CHILD_SUFFIXES
+
+/** Wall-clock cap for one interactive `playBoardGame` turn — a strong per-move search still returns well under this. */
+const PLAY_TIMEOUT_MS = 120_000
 
 /** The subset of a generic `activity-run` record's content the A3.1 status read tool folds (see {@link foldActivityRun}). */
 interface ActivityRunLike {
@@ -2892,17 +2898,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     scope: string,
     runKey: string,
   ): Promise<
-    { recordType: string; manifest: TrainerManifest; content: Record<string, unknown> } | undefined
+    | { recordType: string; manifest: TrainerManifest; dir?: string; content: Record<string, unknown> }
+    | undefined
   > {
     const manifests = await deps.storage.listRecords({ scope, type: 'trainer-project-manifest' })
     for (const mr of manifests) {
-      const manifest = (mr.content as { manifest?: TrainerManifest } | undefined)?.manifest
+      const mrContent = mr.content as { manifest?: TrainerManifest; dir?: string } | undefined
+      const manifest = mrContent?.manifest
       if (!manifest?.recordType) continue
       const rec = await deps.storage.readRecord({ scope, type: manifest.recordType, key: runKey })
       if (rec && (rec.content as { status?: string })?.status === 'completed') {
         return {
           recordType: manifest.recordType,
           manifest,
+          dir: mrContent?.dir,
           content: rec.content as Record<string, unknown>,
         }
       }
@@ -3794,6 +3803,65 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  async function playBoardGame(params: PlayBoardGameParams): Promise<PlayBoardGameResult> {
+    const resolved = await resolveRunRecord(params.scope, params.runKey)
+    if (!resolved)
+      return { ok: false, error: `no completed run "${params.runKey}" found in this project` }
+    if (!resolved.manifest.play)
+      return {
+        ok: false,
+        recordType: resolved.recordType,
+        error: `this training project declares no "play" command — its models are not interactively playable`,
+      }
+    const base = await deps.resolveProjectPath?.(params.scope)
+    if (!base)
+      return {
+        ok: false,
+        recordType: resolved.recordType,
+        error: `could not resolve the project checkout path for scope "${params.scope}"`,
+      }
+    const projectRoot = nodepath.resolve(base, resolved.dir ?? '.')
+
+    const config = (resolved.content.config ?? {}) as Record<string, unknown>
+    const checkpoint = (resolved.content.artifacts as { checkpoint?: string } | undefined)?.checkpoint
+    const request: Record<string, unknown> = {
+      mode: params.mode,
+      ...(config.game ? { game: config.game } : {}),
+      ...(checkpoint ? { checkpoint } : {}),
+      ...(config.model_name ? { model_name: config.model_name } : {}),
+      ...(config.mcts_sims !== undefined ? { mcts_sims: config.mcts_sims } : {}),
+      seed: params.seed ?? 0,
+      ...(params.mode === 'move'
+        ? { actions: params.actions ?? [], human_seat: params.humanSeat ?? 0 }
+        : { opponent: params.opponent ?? 'random', model_seat: params.modelSeat ?? 0 }),
+    }
+
+    const runner = resolveRunner(params.computeTarget)
+    const handle = runner.runJob({
+      jobId: `play-${params.runKey}-${params.mode}`,
+      repoRef: { kind: 'local', localPath: projectRoot },
+      commandTemplate: resolved.manifest.play,
+      config: request,
+      dataFiles: manifestDataFiles(resolved.manifest),
+      timeoutMs: PLAY_TIMEOUT_MS,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
+      return {
+        ok: false,
+        recordType: resolved.recordType,
+        error: `play command ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`,
+      }
+    }
+    const summary = (result.summary ?? {}) as Record<string, unknown>
+    if (typeof summary.error === 'string') {
+      return { ok: false, recordType: resolved.recordType, error: summary.error }
+    }
+    return { ok: true, recordType: resolved.recordType, result: summary }
+  }
+
   async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -4249,6 +4317,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     getActivityStatus,
     getRunData,
     getRunGame,
+    playBoardGame,
     getTrainerState,
     getRunXAI,
     analyzeConfigSpace,

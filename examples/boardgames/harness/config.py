@@ -10,10 +10,14 @@ from pathlib import Path
 from typing import Any
 
 GAME_CHOICES = ("connect4",)
-MODEL_NAME_CHOICES = ("random", "heuristic", "mcts")
+MODEL_NAME_CHOICES = ("random", "heuristic", "mcts", "alphazero")
 OPPONENT_CHOICES = ("random", "heuristic", "mcts")
 MCTS_SIMS_RANGE = (1, 5000)
 EVAL_GAMES_RANGE = (2, 5000)
+AZ_ITERATIONS_RANGE = (1, 100)
+AZ_SELFPLAY_GAMES_RANGE = (1, 500)
+AZ_SIMS_RANGE = (1, 2000)
+AZ_EPOCHS_RANGE = (1, 50)
 
 # §C cost accounting — documented estimate constants (a local run has no invoice, so energy/$ are ESTIMATES).
 WATTS_PER_CORE = 12.0  # rough sustained draw of one busy CPU core; override per machine if you measure it.
@@ -33,6 +37,12 @@ class TrainerConfig:
     opponent: str = "random"
     eval_games: int = 40
     seed: int = 0
+    # alphazero levers (used only when model_name == "alphazero"; pinned n/a otherwise by the engine):
+    az_iterations: int = 8
+    az_selfplay_games: int = 24
+    az_sims: int = 100
+    az_epochs: int = 5
+    az_warm_start: int = 1  # 1 = warm-start from the champion (cumulative); 0 = train from scratch (reproducible)
 
 
 @dataclass(frozen=True)
@@ -55,6 +65,16 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"eval_games must be in {EVAL_GAMES_RANGE}, got {config.eval_games}")
     if not isinstance(config.seed, int):
         raise ValueError(f"seed must be an int, got {config.seed!r}")
+    if not AZ_ITERATIONS_RANGE[0] <= config.az_iterations <= AZ_ITERATIONS_RANGE[1]:
+        raise ValueError(f"az_iterations must be in {AZ_ITERATIONS_RANGE}, got {config.az_iterations}")
+    if not AZ_SELFPLAY_GAMES_RANGE[0] <= config.az_selfplay_games <= AZ_SELFPLAY_GAMES_RANGE[1]:
+        raise ValueError(f"az_selfplay_games must be in {AZ_SELFPLAY_GAMES_RANGE}, got {config.az_selfplay_games}")
+    if not AZ_SIMS_RANGE[0] <= config.az_sims <= AZ_SIMS_RANGE[1]:
+        raise ValueError(f"az_sims must be in {AZ_SIMS_RANGE}, got {config.az_sims}")
+    if not AZ_EPOCHS_RANGE[0] <= config.az_epochs <= AZ_EPOCHS_RANGE[1]:
+        raise ValueError(f"az_epochs must be in {AZ_EPOCHS_RANGE}, got {config.az_epochs}")
+    if config.az_warm_start not in (0, 1):
+        raise ValueError(f"az_warm_start must be 0 or 1, got {config.az_warm_start}")
 
 
 def load_config(path: Path) -> TrainerConfig:
@@ -82,9 +102,12 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "eval_games", "seed"):
+    for int_key in ("mcts_sims", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
+    if "az_warm_start" in filtered:
+        v = filtered["az_warm_start"]
+        filtered["az_warm_start"] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0
     config = TrainerConfig(**filtered)
     validate_config(config)
     return config

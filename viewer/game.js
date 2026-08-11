@@ -26,7 +26,19 @@
     '.game-replay .g-btn:hover{border-color:var(--accent)}' +
     '.game-replay .g-btn:disabled{opacity:.4;cursor:default}' +
     '.game-replay .g-range{flex:1;min-width:120px;accent-color:var(--accent)}' +
-    '.game-replay .g-count{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);min-width:74px;text-align:right}'
+    '.game-replay .g-count{font-variant-numeric:tabular-nums;font-size:12px;color:var(--muted);min-width:74px;text-align:right}' +
+    '.game-play{display:flex;flex-direction:column;gap:10px;margin:6px 0 8px}' +
+    '.game-play .gp-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}' +
+    '.game-play .gp-cols{display:flex;gap:4px;flex-wrap:wrap}' +
+    '.game-play .gp-col{min-width:34px;min-height:34px;border-radius:6px;cursor:pointer;background:var(--accent-soft);' +
+    'color:var(--text);border:1px solid var(--border);font-size:14px;font-variant-numeric:tabular-nums}' +
+    '.game-play .gp-col:hover:not(:disabled){border-color:var(--accent)}' +
+    '.game-play .gp-col:disabled{opacity:.35;cursor:default}' +
+    '.game-play .gp-status{font-size:13px;min-height:1.2em;color:var(--text)}' +
+    '.game-play .gp-status.gp-err{color:var(--bad)}' +
+    '.game-play select,.game-play .gp-btn{padding:4px 10px;border-radius:6px;background:var(--surface);color:var(--text);' +
+    'border:1px solid var(--border);font-size:13px;cursor:pointer}' +
+    '.game-play .gp-btn:disabled{opacity:.5;cursor:default}'
 
   function ensureCss() {
     if (typeof document === 'undefined' || document.getElementById('game-replay-css')) return
@@ -218,5 +230,135 @@
       .replace(/>/g, '&gt;')
   }
 
-  root.Game = { render: render }
+  // --- interactive play: you vs the trained model, one stateless RPC per turn ------------------------------
+  // opts = { runKey, callTool(name, args) -> Promise }. Each turn sends the FULL move history; the server
+  // replays it, lets the model reply, and returns the new board + legal moves + terminal/winner.
+  function renderPlay(host, opts) {
+    if (!host || !opts || typeof opts.callTool !== 'function') return
+    ensureCss()
+    host.className = 'game-play'
+    host.innerHTML = ''
+    var st = { humanSeat: 0, seed: 0, actions: [], data: null, busy: false }
+
+    var setupRow = document.createElement('div')
+    setupRow.className = 'gp-row'
+    var seatSel = document.createElement('select')
+    ;[
+      ['0', 'You move first'],
+      ['1', 'Model moves first'],
+    ].forEach(function (o) {
+      var op = document.createElement('option')
+      op.value = o[0]
+      op.textContent = o[1]
+      seatSel.appendChild(op)
+    })
+    var startBtn = document.createElement('button')
+    startBtn.className = 'gp-btn'
+    startBtn.type = 'button'
+    startBtn.textContent = 'Start game'
+    setupRow.appendChild(seatSel)
+    setupRow.appendChild(startBtn)
+
+    var board = document.createElement('pre')
+    board.className = 'g-board'
+    board.style.display = 'none'
+    var cols = document.createElement('div')
+    cols.className = 'gp-cols'
+    var status = document.createElement('div')
+    status.className = 'gp-status'
+
+    host.appendChild(setupRow)
+    host.appendChild(board)
+    host.appendChild(cols)
+    host.appendChild(status)
+
+    function setStatus(txt, isErr) {
+      status.textContent = txt
+      status.className = 'gp-status' + (isErr ? ' gp-err' : '')
+    }
+
+    function renderCols() {
+      startBtn.disabled = st.busy
+      cols.innerHTML = ''
+      var sg = st.data
+      if (!sg || !sg.num_actions) return
+      var legal = sg.legal_actions || []
+      var interactive = !st.busy && !sg.terminal
+      for (var c = 0; c < sg.num_actions; c++) {
+        ;(function (col) {
+          var b = document.createElement('button')
+          b.className = 'gp-col'
+          b.type = 'button'
+          b.textContent = String(col)
+          b.disabled = !interactive || legal.indexOf(col) < 0
+          b.addEventListener('click', function () {
+            if (!b.disabled) doMove(st.actions.concat([col]))
+          })
+          cols.appendChild(b)
+        })(c)
+      }
+    }
+
+    function paintBoard(sg) {
+      var frames = sg.frames || []
+      board.style.display = frames.length ? 'block' : 'none'
+      board.textContent = frames.length ? frames[frames.length - 1] : ''
+      startBtn.textContent = 'New game'
+      if (sg.terminal) {
+        var w = sg.winner
+        var msg =
+          w === null || w === undefined
+            ? 'a draw.'
+            : w === sg.model_seat
+              ? 'the model wins.'
+              : 'you win!'
+        setStatus('Game over — ' + msg, false)
+      } else {
+        setStatus('Your move — pick a column.', false)
+      }
+    }
+
+    function doMove(actions) {
+      st.busy = true
+      renderCols()
+      setStatus('Thinking…', false)
+      opts
+        .callTool('playBoardGame', {
+          runId: opts.runKey,
+          mode: 'move',
+          actions: actions,
+          humanSeat: st.humanSeat,
+          seed: st.seed,
+        })
+        .then(function (res) {
+          st.busy = false
+          if (!res || res.ok === false || (res && res.error)) {
+            setStatus('Error: ' + ((res && res.error) || 'play failed'), true)
+            renderCols()
+            return
+          }
+          var sg = res.result || {}
+          st.data = sg
+          st.actions = Array.isArray(sg.actions) ? sg.actions : actions
+          paintBoard(sg)
+          renderCols()
+        })
+        .catch(function (e) {
+          st.busy = false
+          setStatus('Error: ' + ((e && e.message) || e), true)
+          renderCols()
+        })
+    }
+
+    startBtn.addEventListener('click', function () {
+      st.humanSeat = parseInt(seatSel.value, 10) || 0
+      st.actions = []
+      st.data = null
+      doMove([])
+    })
+
+    setStatus('Choose who moves first, then press Start.', false)
+  }
+
+  root.Game = { render: render, renderPlay: renderPlay }
 })(typeof window !== 'undefined' ? window : this)

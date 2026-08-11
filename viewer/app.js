@@ -3688,6 +3688,11 @@ function vsHoldValue(s) {
 function evalEnabled() {
   return !!(manifest && manifest.evaluate)
 }
+// Whether you can PLAY against a run's model in-app: the project declares a `play` command AND we're embedded
+// in Overseer (the interactive move RPC routes through the host bridge; standalone has no backend to run it).
+function playEnabled() {
+  return !!(manifest && manifest.play) && !!(window.OverseerBridge && window.OverseerBridge.embedded)
+}
 // Whether cross-testing (replaying a kept checkpoint on OTHER assets / an extended window) is available:
 // the manifest must re-test checkpoints (`evaluate`), declare how to keep them (`keepCheckpointKey`), and
 // have an asset choice to vary. Existing settest data keeps the UI visible even if the manifest regresses.
@@ -9799,6 +9804,7 @@ function renderRunDetail(key) {
     ${continueTrainUiEnabled() ? continueTrainSectionHtml(run) : ''}
     ${scorecardSectionHtml(run)}
     ${s.sample_game ? `<h3>Game replay</h3><div class="game-host" data-run="${escapeHtml(run.key)}"></div>` : ''}
+    ${playEnabled() ? `<h3>Play against this model</h3><div class="game-play-host" data-run="${escapeHtml(run.key)}"></div>` : ''}
     <h3>Metrics</h3>
     ${metricsTableHtml(s.metrics)}
     ${oldRunChartHintHtml(s)}
@@ -9818,6 +9824,14 @@ function renderRunDetail(key) {
   if (s.sample_game && window.Game && window.Game.render) {
     try {
       window.Game.render(panel.querySelector('.game-host'), s.sample_game)
+    } catch (_e) {}
+  }
+  if (playEnabled() && window.Game && window.Game.renderPlay) {
+    try {
+      window.Game.renderPlay(panel.querySelector('.game-play-host'), {
+        runKey: run.key,
+        callTool: (n, a) => window.OverseerBridge.callTrainerTool(n, a),
+      })
     } catch (_e) {}
   }
   syncRunsMdLayout()

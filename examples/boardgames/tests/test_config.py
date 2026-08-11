@@ -35,3 +35,27 @@ def test_validate_rejects_bad_choice_and_out_of_range():
         validate_config(TrainerConfig(mcts_sims=0))
     with pytest.raises(ValueError):
         validate_config(TrainerConfig(eval_games=1))
+
+
+def test_load_config_accepts_alphazero_and_coerces_az_levers(tmp_path):
+    p = _write(tmp_path, {
+        "model_name": "alphazero", "az_iterations": "2", "az_selfplay_games": "8",
+        "az_sims": "30", "az_epochs": "3", "az_warm_start": "0",
+    })
+    cfg = load_config(p)
+    assert cfg.model_name == "alphazero"
+    assert cfg.az_iterations == 2 and cfg.az_selfplay_games == 8 and cfg.az_sims == 30 and cfg.az_epochs == 3
+    assert cfg.az_warm_start == 0  # coerced from the string "0"
+
+
+def test_az_warm_start_defaults_on_and_rejects_bad_value():
+    assert TrainerConfig(model_name="alphazero").az_warm_start == 1
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(model_name="alphazero", az_warm_start=2))
+
+
+def test_validate_rejects_out_of_range_az_levers():
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(model_name="alphazero", az_sims=0))
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(model_name="alphazero", az_iterations=0))

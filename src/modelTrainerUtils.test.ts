@@ -869,6 +869,26 @@ describe('validateTrainerManifest', () => {
     expect(m.benchmarkDevice).toContain('bench_device')
   })
 
+  it('rejects a play template without {configPath}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), play: 'python -m harness.play --serve --summary-out {summaryOut}' }),
+    ).toThrow(/configPath/)
+  })
+
+  it('rejects a play template without {summaryOut}', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), play: 'python -m harness.play --serve --config-json {configPath}' }),
+    ).toThrow(/summaryOut/)
+  })
+
+  it('accepts a valid play template and preserves it', () => {
+    const m = validateTrainerManifest({
+      ...manifest(),
+      play: 'python -m harness.play --serve --config-json {configPath} --summary-out {summaryOut}',
+    })
+    expect(m.play).toContain('--serve')
+  })
+
   it('rejects a dataCatalog template without {summaryOut}', () => {
     expect(() =>
       validateTrainerManifest({ ...manifest(), dataCatalog: 'python -m trainer.data' }),
