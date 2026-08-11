@@ -84,6 +84,11 @@ same replay a run samples, so it needs no packages either):
     it beats the incumbent** (≥55%). Set `az_warm_start: 0` for a reproducible from-scratch run. Self-play is
     the main strength engine (balanced games); the league is a minority + the yardstick. Getting a genuinely
     strong model takes real budget + several compounding runs — a single tiny run stays weak.
+  - **Champion autopilot** (in-app): the `train-champion` activity — a "Train champion" launcher in the
+    viewer's Exploration tab, and the `startTrainerActivity` chat tool — automates the compounding: it keeps
+    training warm-started generations, promoting the stronger net, until strength plateaus / a target vs the
+    strong-mcts yardstick is hit / the generation budget is spent. This is the "keep looking for the best
+    model" loop for a LEARNED core — distinct from the config-space Exploration autopilot (grid-search).
 
 ```sh
 # TRAIN a learned model (needs torch — .venv/bin/pip install torch numpy):

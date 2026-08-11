@@ -25,6 +25,7 @@ import type {
   ExperimentSpec,
   TrainerManifest,
   TrainingCampaignProgress,
+  ChampionTrainingState,
 } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { initExplorationState } from './explorationUtils.js'
@@ -2957,6 +2958,94 @@ describe('playBoardGame (interactive play RPC)', () => {
     })
     expect(res.ok).toBe(false)
     expect(res.error).toMatch(/failed/)
+  })
+})
+
+describe('runChampionTraining (champion autopilot loop)', () => {
+  const championManifest = manifest({
+    levers: {
+      model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+      az_warm_start: { type: 'number', default: 1 },
+      az_sims: { type: 'number', default: 40 },
+      opponent: { type: 'choice', choices: ['random', 'mcts'], default: 'random' },
+      eval_games: { type: 'number', default: 40 },
+      seed: { type: 'number', default: 0 },
+    },
+  })
+
+  function runnerFor(seq: Record<number, { promoted: boolean; strong: number }>) {
+    return stubRunner({
+      jobResult: (job) => {
+        const seed = Number((job.config as { seed?: number }).seed ?? 0)
+        const p = seq[seed] ?? { promoted: false, strong: 0.5 }
+        return {
+          summary: {
+            objective: p.strong,
+            alphazero: { promoted: p.promoted },
+            metrics: { win_rate_vs_strong_mcts: p.strong, win_rate_vs_champion: p.promoted ? 0.6 : 0.3 },
+          },
+        }
+      },
+    })
+  }
+
+  it('loops generations, reads promotion + strength, stops on plateau, and persists the ladder', async () => {
+    const storage = memoryStorage()
+    const runner = runnerFor({
+      1: { promoted: true, strong: 0.5 },
+      2: { promoted: true, strong: 0.7 },
+      3: { promoted: false, strong: 0.6 },
+      4: { promoted: false, strong: 0.6 },
+    })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: championManifest,
+      maxGenerations: 10,
+      patience: 2,
+      opponent: 'mcts',
+      evalGames: 6,
+    })
+    expect(result.stopReason).toBe('plateau')
+    expect(result.generations).toBe(4)
+    expect(result.bestVsStrongMcts).toBe(0.7)
+    expect(result.history.map((h) => h.promoted)).toEqual([true, true, false, false])
+    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current' }))
+      ?.content as ChampionTrainingState
+    expect(state.stage).toBe('converged')
+    expect(state.history.length).toBe(4)
+  })
+
+  it('stops at the generation budget when it keeps improving', async () => {
+    const storage = memoryStorage()
+    const runner = runnerFor({ 1: { promoted: true, strong: 0.5 }, 2: { promoted: true, strong: 0.6 }, 3: { promoted: true, strong: 0.7 } })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: championManifest,
+      maxGenerations: 3,
+      patience: 5,
+    })
+    expect(result.stopReason).toBe('budget')
+    expect(result.generations).toBe(3)
+  })
+
+  it('stops as soon as the strength target is reached', async () => {
+    const storage = memoryStorage()
+    const runner = runnerFor({ 1: { promoted: true, strong: 0.96 } })
+    const { tools } = makeTools(runner, storage)
+    const result = await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: championManifest,
+      maxGenerations: 10,
+      patience: 3,
+      targetStrength: 0.9,
+    })
+    expect(result.stopReason).toBe('reached-target')
+    expect(result.generations).toBe(1)
   })
 })
 

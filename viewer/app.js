@@ -3693,6 +3693,53 @@ function evalEnabled() {
 function playEnabled() {
   return !!(manifest && manifest.play) && !!(window.OverseerBridge && window.OverseerBridge.embedded)
 }
+// The champion-training autopilot applies to a LEARNED core: enabled when the project declares `alphazero` as
+// a model_name choice and we're embedded (the loop launches a backend activity).
+let championLaunching = false
+function championEnabled() {
+  const mn = manifest && manifest.levers && manifest.levers.model_name
+  return !!(
+    mn &&
+    Array.isArray(mn.choices) &&
+    mn.choices.indexOf('alphazero') >= 0 &&
+    window.OverseerBridge &&
+    window.OverseerBridge.embedded
+  )
+}
+async function renderChampionPanel() {
+  const host = byId('champion-panel')
+  if (!host) return
+  if (!championEnabled() || !window.Champion) {
+    host.innerHTML = ''
+    return
+  }
+  let rows = []
+  try {
+    rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-champion', key: 'current' })
+  } catch {
+    rows = []
+  }
+  const rec = Array.isArray(rows) ? rows[0] : rows
+  window.Champion.render(host, {
+    state: rec ? rec.content || rec : null,
+    launching: championLaunching,
+    onLaunch: onLaunchChampion,
+  })
+}
+async function onLaunchChampion(config) {
+  if (championLaunching) return
+  championLaunching = true
+  await renderChampionPanel()
+  try {
+    await window.OverseerBridge.startActivity('train-champion', trainerActivityParams(config))
+    showToast('Champion training started')
+  } catch {
+    showToast('Launch failed')
+  } finally {
+    championLaunching = false
+    await renderChampionPanel()
+  }
+}
 // Whether cross-testing (replaying a kept checkpoint on OTHER assets / an extended window) is available:
 // the manifest must re-test checkpoints (`evaluate`), declare how to keep them (`keepCheckpointKey`), and
 // have an asset choice to vary. Existing settest data keeps the UI visible even if the manifest regresses.
@@ -20351,6 +20398,7 @@ async function renderExploration(fromPoll) {
     container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to explore its config space.</div>'
     return
   }
+  void renderChampionPanel()
   const recordType = manifest.recordType
   // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
   // heavy re-scans pile up and the spinner never settles. The in-flight render paints the fresh state.

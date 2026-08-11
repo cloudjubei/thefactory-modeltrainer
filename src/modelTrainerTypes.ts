@@ -1819,6 +1819,74 @@ export interface CalibrateTrainingParams {
   abortSignal?: AbortSignal
 }
 
+export type ChampionStopReason = 'reached-target' | 'plateau' | 'budget' | 'aborted'
+
+/** One generation of the champion-training ladder — the outcome of one warm-started training run. */
+export interface ChampionGeneration {
+  generation: number
+  runKey: string
+  /** Whether this generation's net beat the incumbent champion and was crowned. */
+  promoted: boolean
+  /** Win-rate vs the strong-mcts yardstick (the honest strength signal). */
+  winRateVsStrongMcts?: number
+  /** Win-rate vs the incumbent champion (the promotion gate's number). */
+  winRateVsChampion?: number
+  ranAt: string
+}
+
+/** The champion-training autopilot's persisted state (`{recordType}-champion`, key `current`). */
+export interface ChampionTrainingState {
+  stage: 'training' | 'converged'
+  generation: number
+  /** Consecutive generations that failed to beat the champion. */
+  plateauCount: number
+  bestVsStrongMcts: number
+  history: ChampionGeneration[]
+  stopReason?: ChampionStopReason
+  updatedAt: string
+}
+
+export interface ChampionTrainingProgress {
+  phase: 'generation' | 'done'
+  generation: number
+  maxGenerations: number
+  promoted?: boolean
+  bestVsStrongMcts: number
+  stopReason?: ChampionStopReason
+}
+
+export interface ChampionTrainingParams {
+  /** The HOST project scope the run records live in. */
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Hard cap on generations — each is one (expensive) training run; the loop is cost-bounded by this. */
+  maxGenerations: number
+  /** Stop early once win-rate vs the strong-mcts yardstick reaches this (0..1). */
+  targetStrength?: number
+  /** Stop after this many consecutive generations that fail to beat the champion (default 3). */
+  patience?: number
+  /** alphazero hyperparameters applied to every generation (e.g. `az_sims`, `az_iterations`, …). */
+  hyperparams?: Record<string, unknown>
+  /** The eval opponent rung (the run objective) + games per generation. */
+  opponent?: string
+  evalGames?: number
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onProgress?: (p: ChampionTrainingProgress) => void
+  onRecordWritten?: (type: string, key: string) => void
+  activityId?: string
+}
+
+export interface ChampionTrainingResult {
+  recordType: string
+  generations: number
+  bestVsStrongMcts: number
+  stopReason: ChampionStopReason
+  history: ChampionGeneration[]
+}
+
 export interface TrainerLogger {
   info: (message: string, meta?: Record<string, unknown>) => void
   warn: (message: string, meta?: Record<string, unknown>) => void
@@ -4025,6 +4093,14 @@ export interface ModelTrainerTools {
    * command in its checkout.
    */
   playBoardGame(params: PlayBoardGameParams): Promise<PlayBoardGameResult>
+  /**
+   * The champion-training AUTOPILOT for a learned core: a cost-bounded loop that keeps training warm-started
+   * generations (each a sequential run that continues the champion + trains vs the league) and PROMOTES the
+   * stronger net, until strength plateaus / a target is reached / the generation budget is spent. This is the
+   * "keep looking for the best model" search for a compounding learned model (vs the config-space exploration
+   * autopilot). Persists a `{recordType}-champion` state record.
+   */
+  runChampionTraining(params: ChampionTrainingParams): Promise<ChampionTrainingResult>
   /**
    * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
    * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a

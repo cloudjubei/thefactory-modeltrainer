@@ -5,6 +5,7 @@ import {
   blendJudgeScore,
   extractSampleGame,
   renderReplayText,
+  nextChampionStep,
   parseProgressMarker,
   buildAnalyzePaperSystemPrompt,
   buildJudgeSystemPrompt,
@@ -5013,6 +5014,57 @@ describe('compareScorecards', () => {
     const cards = [rej(50), acc(2), acc(8), rej(90)]
     const sorted = [...cards].sort(compareScorecards)
     expect(sorted.map((c) => c.fitness[0].value)).toEqual([8, 2, 90, 50])
+  })
+})
+
+describe('nextChampionStep (champion-training autopilot stop decision)', () => {
+  const opts = { maxGenerations: 10, patience: 3 }
+
+  it('resets plateau on promotion and increments it on a failure, tracking the best strength as a running max', () => {
+    const promoted = nextChampionStep(
+      { plateauCount: 2, bestVsStrongMcts: 0.4 },
+      { generation: 3, promoted: true, winRateVsStrongMcts: 0.6 },
+      opts,
+    )
+    expect(promoted.plateauCount).toBe(0)
+    expect(promoted.bestVsStrongMcts).toBe(0.6)
+    expect(promoted.done).toBe(false)
+
+    const failed = nextChampionStep(
+      { plateauCount: 1, bestVsStrongMcts: 0.6 },
+      { generation: 4, promoted: false, winRateVsStrongMcts: 0.5 },
+      opts,
+    )
+    expect(failed.plateauCount).toBe(2)
+    expect(failed.bestVsStrongMcts).toBe(0.6) // running max, not the lower latest value
+    expect(failed.done).toBe(false)
+  })
+
+  it('stops on plateau after `patience` consecutive non-promotions', () => {
+    const r = nextChampionStep({ plateauCount: 2, bestVsStrongMcts: 0.6 }, { generation: 5, promoted: false }, opts)
+    expect(r.plateauCount).toBe(3)
+    expect(r.done).toBe(true)
+    expect(r.stopReason).toBe('plateau')
+  })
+
+  it('stops on the generation budget', () => {
+    const r = nextChampionStep(
+      { plateauCount: 0, bestVsStrongMcts: 0.6 },
+      { generation: 10, promoted: true, winRateVsStrongMcts: 0.7 },
+      opts,
+    )
+    expect(r.done).toBe(true)
+    expect(r.stopReason).toBe('budget')
+  })
+
+  it('stops when the strength target is reached (takes precedence over budget/plateau)', () => {
+    const r = nextChampionStep(
+      { plateauCount: 5, bestVsStrongMcts: 0.9 },
+      { generation: 10, promoted: false, winRateVsStrongMcts: 0.97 },
+      { ...opts, targetStrength: 0.95 },
+    )
+    expect(r.done).toBe(true)
+    expect(r.stopReason).toBe('reached-target')
   })
 })
 

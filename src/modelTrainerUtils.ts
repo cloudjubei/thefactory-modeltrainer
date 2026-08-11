@@ -40,6 +40,7 @@ import type {
   TrainingRunSummary,
   SampleGameReplay,
   SampleGameReplayMove,
+  ChampionStopReason,
 } from './modelTrainerTypes.js'
 import type { ClaimVerdict } from 'thefactory-tools/types'
 import {
@@ -2733,6 +2734,27 @@ export function extractSampleGame(
   }
   if (typeof raw.opponent === 'string') game.opponent = raw.opponent
   return game
+}
+
+/**
+ * The champion-training autopilot's stop decision after one generation: reset the plateau counter on a
+ * promotion (the net got stronger) or increment it on a failure, track the best strength as a running max,
+ * and stop on `targetStrength` (reached), the generation budget, or `patience` consecutive non-promotions
+ * (a plateau — the model can no longer beat its own champion at these settings). Pure: the loop persists +
+ * emits; this only decides.
+ */
+export function nextChampionStep(
+  state: { plateauCount: number; bestVsStrongMcts: number },
+  latest: { generation: number; promoted: boolean; winRateVsStrongMcts?: number },
+  opts: { maxGenerations: number; patience: number; targetStrength?: number },
+): { done: boolean; stopReason?: ChampionStopReason; plateauCount: number; bestVsStrongMcts: number } {
+  const plateauCount = latest.promoted ? 0 : state.plateauCount + 1
+  const bestVsStrongMcts = Math.max(state.bestVsStrongMcts, latest.winRateVsStrongMcts ?? 0)
+  let stopReason: ChampionStopReason | undefined
+  if (opts.targetStrength !== undefined && bestVsStrongMcts >= opts.targetStrength) stopReason = 'reached-target'
+  else if (latest.generation >= opts.maxGenerations) stopReason = 'budget'
+  else if (plateauCount >= opts.patience) stopReason = 'plateau'
+  return { done: stopReason !== undefined, stopReason, plateauCount, bestVsStrongMcts }
 }
 
 function replayResultLine(winner: number | null, labels: Record<number, string>): string {

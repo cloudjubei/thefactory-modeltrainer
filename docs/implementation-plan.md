@@ -479,10 +479,11 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
   inline CSS, no scripts, no external assets, theme-aware, XSS-escaped; types in `modelTrainerTypes.ts`, direct
   tests). BlackSwan's `experiments/export.mjs` supplies the family labels + narrative and writes
   `experiments/battery.json` (diffable machine evidence) + `experiments/BATTERY.html` (the paper's spine):
-  **65 pre-registered probes, 18 families, 1,818 backtested cells — 63 disproved, 2 inconclusive** (after the
-  extended-history disproof pass, the cross-asset COT extension, and the full published-anomaly family group below —
-  the two inconclusives are cross-sectional reversal + pairs mean-reversion, the same weak relative-value effect and
-  the honestly-recorded open threads),
+  **71 pre-registered probes, 21 families, 2,004 backtested cells — 69 disproved, 2 inconclusive** (after the
+  extended-history disproof pass, the cross-asset COT extension, the full published-anomaly family group below, the
+  Baltussen 2021 "Global Factor Premiums" foil, the pre-FOMC drift (Lucca-Moench, SPY+BTC) and overnight-vs-intraday
+  (Lou-Polk-Skouras) probes, and the energy carry/basis test — the two inconclusives are cross-sectional reversal +
+  pairs mean-reversion, the same weak relative-value effect and the honestly-recorded open threads),
   with the honest-scope claim, the reproduce-and-refute (Mou 2011) entry, the recurring failure-signature section,
   and the power caveat. **This IS the publishable no-edge battery.** (Next enrichment: richer per-probe verdict
   extraction — currently gate + status + cells + title.)
@@ -524,6 +525,20 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
     — the SECOND open thread**: a weak, PERSISTENT (both sub-periods), cost-surviving (to 40bps) mean-reversion
     tilt (≈+0.35 annualized, 12/17 windows) that does not clear multiplicity (per-config t~1.5). Its inverse
     (chase divergence) is DISPROVED-negative.
+  - **The multi-asset FOIL — Baltussen (2021) "Global Factor Premiums" — the paper's spine.** `trainer/globalfactors.py`
+    (reuses trend/momentum/low-beta build_weights; adds VALUE = 5yr cross-sectional reversal + the diversified equal-risk
+    combination; `cf-*` deep-train windows so value's 5yr formation always exists). **DISPROVED but SCOPE-LIMITED**
+    (3-skeptic adversarial panel, all refuted=false, synthesis SCOPE-LIMITED). Baltussen's diversified premium FAILS
+    TO REPLICATE on the free tradeable slice (t=−1.20, 4/13 windows; no construction — unit-gross/equal-vol/drop-momentum
+    — rescues it). **Honesty corrections the panel forced (mandatory for the paper):** the collapse is PANEL COMPOSITION,
+    not cost (momentum inverts even at zero fee; the financials momentum cross-section is a *degenerate empty book* —
+    4 ETFs cannot form a k=3 book); it is a 4-of-6-factor, commodity-heavy, equal-weight PROXY, not his vol-scaled
+    cross-asset engine; and value (the sole positive, +1.43 = commodity 5yr reversal = a third expression of the
+    residual) is sub-significant, so the LTA reading is directional. **We do NOT claim to refute his full multi-asset
+    result** (needs equity single-stock/FX/term-structure data). Lead with the LTA horse-race; Baltussen is a scoped
+    supporting piece. **The panel catching this overclaim is itself a demonstration of the adversarial-verification
+    methods contribution.** Source papers stored in the Library (66 `blackswan-run-paper` entities; see
+    `experiments/SOURCES_TO_REPLICATE.md` + `CONCLUSIONS.md`).
   - **The two inconclusive threads are ONE effect.** Cross-sectional reversal and pairs mean-reversion are both
     weak, cost-surviving, sub-significant RELATIVE-VALUE / mean-reversion tilts on the commodity-heavy panel — the
     free data's one residual signal cluster. This is the paper's honest "what we couldn't kill" section, and the

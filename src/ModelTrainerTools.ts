@@ -66,6 +66,10 @@ import type {
   GetRunGameResult,
   PlayBoardGameParams,
   PlayBoardGameResult,
+  ChampionTrainingParams,
+  ChampionTrainingResult,
+  ChampionTrainingState,
+  ChampionGeneration,
   GetTrainerStateParams,
   GetTrainerStateResult,
   DiagnoseSearchParams,
@@ -233,6 +237,7 @@ import {
   describeRunFailures,
   extractSampleGame,
   renderReplayText,
+  nextChampionStep,
 } from './modelTrainerUtils.js'
 import {
   aggregateExperimentCells,
@@ -3862,6 +3867,123 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { ok: true, recordType: resolved.recordType, result: summary }
   }
 
+  async function runChampionTraining(params: ChampionTrainingParams): Promise<ChampionTrainingResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const stateType = `${recordType}-champion`
+    const patience = params.patience ?? 3
+    const opponent = params.opponent ?? 'mcts'
+    const evalGames = params.evalGames ?? 40
+
+    const existing = await deps.storage.readRecord({ scope: params.scope, type: stateType, key: 'current' })
+    const prior = existing?.content as ChampionTrainingState | undefined
+    // A fresh launch keeps the cumulative ladder (generation / best / history) but resets the plateau budget,
+    // so each launch gets a full `patience` fresh attempts to improve (e.g. with new hyperparameters).
+    const state: ChampionTrainingState = {
+      stage: 'training',
+      generation: prior?.generation ?? 0,
+      plateauCount: 0,
+      bestVsStrongMcts: prior?.bestVsStrongMcts ?? 0,
+      history: prior?.history ?? [],
+      updatedAt: now(),
+    }
+
+    let genThisRun = 0
+    while (true) {
+      if (params.abortSignal?.aborted) {
+        state.stopReason = 'aborted'
+        break
+      }
+      genThisRun += 1
+      const generation = state.generation + 1
+
+      // One warm-started generation. concurrency:1 so it runs SEQUENTIALLY — each generation warm-starts from
+      // the champion the previous generation left on disk (a parallel launch would race the champion store).
+      const campaign = await runTrainingCampaign({
+        scope: params.scope,
+        projectRoot: params.projectRoot,
+        manifest,
+        spec: {
+          fixed: {
+            model_name: 'alphazero',
+            az_warm_start: 1,
+            opponent,
+            eval_games: evalGames,
+            ...(params.hyperparams ?? {}),
+          },
+          seeds: [generation],
+        },
+        concurrency: 1,
+        ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+        ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+        ...(params.onRecordWritten ? { onRecordWritten: params.onRecordWritten } : {}),
+        ...(params.activityId ? { activityId: params.activityId } : {}),
+      })
+      const runKey = campaign.keys[0]
+      const runRec = runKey
+        ? await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
+        : undefined
+      const content = (runRec?.content ?? {}) as {
+        status?: string
+        alphazero?: { promoted?: boolean }
+        metrics?: Record<string, number>
+      }
+      if (!runKey || content.status !== 'completed') {
+        // The generation's run failed — the ladder can't continue from a missing champion, so stop cleanly.
+        state.stopReason = 'aborted'
+        state.updatedAt = now()
+        await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+        params.onRecordWritten?.(stateType, 'current')
+        break
+      }
+
+      const promoted = !!content.alphazero?.promoted
+      const winRateVsStrongMcts = content.metrics?.win_rate_vs_strong_mcts
+      const decision = nextChampionStep(state, { generation: genThisRun, promoted, winRateVsStrongMcts }, {
+        maxGenerations: params.maxGenerations,
+        patience,
+        ...(params.targetStrength !== undefined ? { targetStrength: params.targetStrength } : {}),
+      })
+      const genRecord: ChampionGeneration = {
+        generation,
+        runKey,
+        promoted,
+        ...(winRateVsStrongMcts !== undefined ? { winRateVsStrongMcts } : {}),
+        ...(content.metrics?.win_rate_vs_champion !== undefined
+          ? { winRateVsChampion: content.metrics.win_rate_vs_champion }
+          : {}),
+        ranAt: now(),
+      }
+      state.generation = generation
+      state.plateauCount = decision.plateauCount
+      state.bestVsStrongMcts = decision.bestVsStrongMcts
+      state.history = [...state.history, genRecord]
+      state.stage = decision.done ? 'converged' : 'training'
+      state.stopReason = decision.stopReason
+      state.updatedAt = now()
+      await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+      params.onRecordWritten?.(stateType, 'current')
+      await params.onProgress?.({
+        phase: decision.done ? 'done' : 'generation',
+        generation,
+        maxGenerations: params.maxGenerations,
+        promoted,
+        bestVsStrongMcts: decision.bestVsStrongMcts,
+        ...(decision.stopReason ? { stopReason: decision.stopReason } : {}),
+      })
+      if (decision.done) break
+    }
+
+    return {
+      recordType,
+      generations: state.generation,
+      bestVsStrongMcts: state.bestVsStrongMcts,
+      stopReason: state.stopReason ?? 'budget',
+      history: state.history,
+    }
+  }
+
   async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
     const resolved = await resolveRunRecord(params.scope, params.runKey)
     if (!resolved)
@@ -4318,6 +4440,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     getRunData,
     getRunGame,
     playBoardGame,
+    runChampionTraining,
     getTrainerState,
     getRunXAI,
     analyzeConfigSpace,
