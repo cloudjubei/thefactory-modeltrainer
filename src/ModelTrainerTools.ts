@@ -70,6 +70,11 @@ import type {
   ChampionTrainingResult,
   ChampionTrainingState,
   ChampionGeneration,
+  RateModelsParams,
+  RateModelsResult,
+  LeaderboardEntry,
+  LeaderboardRecord,
+  RatingPairing,
   GetTrainerStateParams,
   GetTrainerStateResult,
   DiagnoseSearchParams,
@@ -238,6 +243,8 @@ import {
   extractSampleGame,
   renderReplayText,
   nextChampionStep,
+  fitRatingFromPairings,
+  primaryFitness,
 } from './modelTrainerUtils.js'
 import {
   aggregateExperimentCells,
@@ -275,6 +282,9 @@ const RUN_KEYED_CHILD_SUFFIXES = TRAINER_RUN_KEYED_CHILD_SUFFIXES
 
 /** Wall-clock cap for one interactive `playBoardGame` turn — a strong per-move search still returns well under this. */
 const PLAY_TIMEOUT_MS = 120_000
+
+/** Wall-clock cap for a whole `rate-models` gauntlet — many models × spine rungs; generous but bounded. */
+const RATE_MODELS_TIMEOUT_MS = 30 * 60_000
 
 /** The subset of a generic `activity-run` record's content the A3.1 status read tool folds (see {@link foldActivityRun}). */
 interface ActivityRunLike {
@@ -807,7 +817,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           (r) =>
             r.key && r.content?.status === 'completed' && typeof r.content.objective === 'number',
         )
-        .map((r) => ({ key: r.key, objective: r.content.objective as number })),
+        // Rank by the comparable rating for a game project (ratingAnchors), else the raw objective.
+        .map((r) => ({ key: r.key, objective: primaryFitness(r.content as Record<string, unknown>, manifest) })),
       manifest.objective.direction,
     )
 
@@ -1112,10 +1123,17 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         key: stateKey,
       })) as { content?: ExplorationState } | undefined
       // persisted state carries stage/basins AND any viewer-set paused/steer; params.budget can widen it.
-      const base = persisted?.content ?? initExplorationState(manifest, params.budget)
+      let base = persisted?.content ?? initExplorationState(manifest, params.budget)
+      // Ranking-basis self-heal: a project that declared `ratingAnchors` AFTER exploring under raw win-rate has
+      // a persisted noiseFloor/regret/basins in objective units, meaningless against rating-scale peaks —
+      // recalibrate from scratch rather than trust stale margins (one-time; stamped below so it doesn't repeat).
+      if (manifest.ratingAnchors && persisted?.content && persisted.content.rankBasis !== 'rating') {
+        base = initExplorationState(manifest, params.budget)
+      }
       const working: ExplorationState = {
         ...base,
         budget: { ...base.budget, ...(params.budget ?? {}) },
+        rankBasis: manifest.ratingAnchors ? 'rating' : 'objective',
       }
 
       // Reconcile any in-flight child from a prior round / a resumed controller BEFORE planning, so a
@@ -1137,7 +1155,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
 
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
-      const runs = recordsToAnalysisRuns(runsRecords, await resolveActiveScorecard(params.scope, manifest))
+      const runs = recordsToAnalysisRuns(runsRecords, manifest, await resolveActiveScorecard(params.scope, manifest))
       const completedKeys = new Set(runsRecords.map((r) => r.key))
 
       // Fail-guard: a just-settled child that produced NO new completed runs was fruitless (failed / empty
@@ -2703,10 +2721,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
   function recordsToAnalysisRuns(
     records: { key: string; content: Record<string, unknown> }[],
+    manifest: Pick<TrainerManifest, 'ratingAnchors'>,
     card?: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
   ): AnalysisRun[] {
     return records.map((r) => {
-      const objective = r.content.objective as number
+      // The RANK value: the comparable strength rating for a game project (ratingAnchors), else the raw
+      // objective UNCHANGED. This single projection flips best/incumbent/regret/frontier for anchored
+      // projects; gate ACCEPTANCE below stays on the RAW objective (gates are about the reward, not the rank).
+      const rawObjective = r.content.objective as number
+      const objective = primaryFitness(r.content, manifest)
       const metrics = r.content.metrics as Record<string, number> | undefined
       return {
         key: r.key,
@@ -2719,7 +2742,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         status: 'completed',
         // Scorecard acceptance (gates) — only when the active scorecard is supplied so the verdict layer can
         // prefer accepted runs; omitted otherwise so pure analysis over all runs is unaffected.
-        accepted: card ? computeScorecard(card, { objective, metrics }).accepted : undefined,
+        accepted: card ? computeScorecard(card, { objective: rawObjective, metrics }).accepted : undefined,
         ranAt:
           ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
             (r.content.ranAt as string | undefined)) ||
@@ -2753,7 +2776,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       .filter(([, spec]) => spec.scope === 'ignore')
       .map(([name]) => name)
     const records = await listCompletedRuns(params.scope, recordType, true)
-    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records), criterion, {
+    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records, manifest), criterion, {
       contextLevers,
       environment: params.environment,
       appliesWhen,
@@ -2805,7 +2828,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     )
 
     // The analysed run set drops context + ignore levers, so importances reflect only tunable MODEL knobs.
-    const runs = recordsToAnalysisRuns(records).map((r) => ({
+    const runs = recordsToAnalysisRuns(records, manifest).map((r) => ({
       ...r,
       config: stripBy(r.config, nonModelLevers),
     }))
@@ -3619,7 +3642,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     ])
     let best: { key: string; objective: number } | undefined
     for (const r of runs) {
-      const o = Number((r.content as { objective?: unknown }).objective)
+      // Rank by the comparable rating for a game project (ratingAnchors), else the raw objective.
+      const o = primaryFitness(r.content as Record<string, unknown>, manifest)
       if (!Number.isFinite(o)) continue
       if (!best || (direction === 'max' ? o > best.objective : o < best.objective))
         best = { key: r.key, objective: o }
@@ -3673,7 +3697,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const card = await resolveActiveScorecard(params.scope, manifest)
     const criterion: AnalysisCriterion = primaryFitnessCriterion(card)
     const rankMetric = card.fitness?.[0]?.metric ?? manifest.objective.name
-    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), card)
+    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest, card)
     const splitLevers = splitLeversOf(manifest)
     const splitAlpha = manifest.diagnostics?.splitAxis?.alpha
     const testValues = manifest.diagnostics?.splitAxis?.testValues
@@ -3900,34 +3924,69 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
       // One warm-started generation. concurrency:1 so it runs SEQUENTIALLY — each generation warm-starts from
       // the champion the previous generation left on disk (a parallel launch would race the champion store).
-      const campaign = await runTrainingCampaign({
-        scope: params.scope,
-        projectRoot: params.projectRoot,
-        manifest,
-        spec: {
-          fixed: {
-            model_name: 'alphazero',
-            az_warm_start: 1,
-            opponent,
-            eval_games: evalGames,
-            ...(params.hyperparams ?? {}),
-          },
-          seeds: [generation],
+      const spec = {
+        fixed: {
+          model_name: 'alphazero',
+          az_warm_start: 1,
+          opponent,
+          eval_games: evalGames,
+          ...(params.hyperparams ?? {}),
         },
-        concurrency: 1,
-        ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
-        ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
-        ...(params.onRecordWritten ? { onRecordWritten: params.onRecordWritten } : {}),
-        ...(params.activityId ? { activityId: params.activityId } : {}),
-      })
-      const runKey = campaign.keys[0]
-      const runRec = runKey
-        ? await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
-        : undefined
-      const content = (runRec?.content ?? {}) as {
+        seeds: [generation],
+      }
+      let runKey: string | undefined
+      let content: {
         status?: string
         alphazero?: { promoted?: boolean }
         metrics?: Record<string, number>
+        config?: { seed?: number; model_name?: string }
+      } = {}
+      if (params.launchTrainCampaign) {
+        // Durable-controller mode: launch the generation as a STANDARD `train` experiment (so the RL training
+        // run shows under Experiments + shares the experiment lane), await it, then read THIS generation's
+        // completed run back (uniquely identified by its seed = the generation number).
+        const { activityId } = await params.launchTrainCampaign(spec, {
+          concurrency: 1,
+          label: `Champion generation ${generation}`,
+        })
+        if (activityId && params.awaitActivity) {
+          const status = await params.awaitActivity(activityId)
+          if (status === undefined) {
+            state.stopReason = 'aborted'
+            break
+          }
+        }
+        const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+        const match = runs.find((r) => {
+          const c = r.content as {
+            status?: string
+            config?: { seed?: number; model_name?: string }
+          } | undefined
+          return (
+            c?.status === 'completed' &&
+            c?.config?.model_name === 'alphazero' &&
+            Number(c?.config?.seed) === generation
+          )
+        })
+        runKey = match?.key ?? undefined
+        content = (match?.content ?? {}) as typeof content
+      } else {
+        const campaign = await runTrainingCampaign({
+          scope: params.scope,
+          projectRoot: params.projectRoot,
+          manifest,
+          spec,
+          concurrency: 1,
+          ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
+          ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+          ...(params.onRecordWritten ? { onRecordWritten: params.onRecordWritten } : {}),
+          ...(params.activityId ? { activityId: params.activityId } : {}),
+        })
+        runKey = campaign.keys[0]
+        const runRec = runKey
+          ? await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
+          : undefined
+        content = (runRec?.content ?? {}) as typeof content
       }
       if (!runKey || content.status !== 'completed') {
         // The generation's run failed — the ladder can't continue from a missing champion, so stop cleanly.
@@ -3982,6 +4041,102 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       stopReason: state.stopReason ?? 'budget',
       history: state.history,
     }
+  }
+
+  async function writeLeaderboard(
+    scope: string,
+    recordType: string,
+    entries: LeaderboardEntry[],
+    spine: LeaderboardRecord['spine'],
+    gamesPerRung: number,
+    onRecordWritten?: (type: string, key: string) => void,
+  ): Promise<void> {
+    const content: LeaderboardRecord = { entries, spine, gamesPerRung, ranAt: now() }
+    await deps.storage.upsertRecord({ scope, type: `${recordType}-leaderboard`, key: 'current', content })
+    onRecordWritten?.(`${recordType}-leaderboard`, 'current')
+  }
+
+  async function rateModels(params: RateModelsParams): Promise<RateModelsResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    if (!manifest.gauntlet) throw new Error('this training project declares no "gauntlet" command')
+    const spine = manifest.ratingSpine
+    if (!spine?.length) throw new Error('this training project declares no "ratingSpine"')
+    const gamesPerRung = params.gamesPerRung ?? 40
+
+    // Collect the completed runs to rate — those with a checkpoint the gauntlet can play.
+    const allRuns = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    const wanted = params.runKeys ? new Set(params.runKeys) : undefined
+    const models: Array<{ id: string; checkpoint: string; modelName?: string; game?: string }> = []
+    let skipped = 0
+    for (const r of allRuns) {
+      const c = r.content as
+        | { status?: string; artifacts?: { checkpoint?: string }; config?: { model_name?: string; game?: string } }
+        | undefined
+      if (!c || c.status !== 'completed' || r.key == null) continue
+      if (wanted && !wanted.has(r.key)) continue
+      const checkpoint = c.artifacts?.checkpoint
+      if (!checkpoint) {
+        skipped++
+        continue
+      }
+      models.push({
+        id: r.key,
+        checkpoint,
+        ...(c.config?.model_name ? { modelName: c.config.model_name } : {}),
+        ...(c.config?.game ? { game: c.config.game } : {}),
+      })
+    }
+    if (!models.length) {
+      await writeLeaderboard(params.scope, recordType, [], spine, gamesPerRung, params.onRecordWritten)
+      return { recordType, entries: [], skipped }
+    }
+
+    const request = {
+      game: models[0].game ?? 'connect4',
+      models: models.map((m) => ({ id: m.id, checkpoint: m.checkpoint })),
+      rungs: spine.map((s) => ({
+        id: s.id,
+        kind: s.kind,
+        rating: s.rating,
+        ...(s.sims !== undefined ? { sims: s.sims } : {}),
+        ...(s.weightsPath ? { weights_path: s.weightsPath } : {}),
+      })),
+      games_per_rung: gamesPerRung,
+      base_seed: params.baseSeed ?? 0,
+      opening_plies: params.openingPlies ?? 4,
+    }
+    const runner = resolveRunner(params.computeTarget)
+    const handle = runner.runJob({
+      jobId: `rate-${recordType}-${models.length}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.gauntlet,
+      config: request,
+      dataFiles: manifestDataFiles(manifest),
+      timeoutMs: RATE_MODELS_TIMEOUT_MS,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
+      throw new Error(`gauntlet ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+    }
+    const summary = (result.summary ?? {}) as {
+      ratings?: Array<{ model_id: string; pairings?: RatingPairing[]; error?: string }>
+    }
+    const nameByKey = new Map(models.map((m) => [m.id, m.modelName]))
+    const entries: LeaderboardEntry[] = []
+    for (const row of summary.ratings ?? []) {
+      if (!row.pairings || row.error) continue
+      const rating = fitRatingFromPairings(row.pairings)
+      if (!rating) continue
+      const modelName = nameByKey.get(row.model_id)
+      entries.push({ runKey: row.model_id, ...(modelName ? { modelName } : {}), ...rating, pairings: row.pairings })
+    }
+    entries.sort((a, b) => b.lowerBound - a.lowerBound)
+    await writeLeaderboard(params.scope, recordType, entries, spine, gamesPerRung, params.onRecordWritten)
+    return { recordType, entries, skipped }
   }
 
   async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
@@ -4441,6 +4596,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     getRunGame,
     playBoardGame,
     runChampionTraining,
+    rateModels,
     getTrainerState,
     getRunXAI,
     analyzeConfigSpace,

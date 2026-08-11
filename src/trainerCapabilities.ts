@@ -44,6 +44,20 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     optionalParams: ['maxRuns', 'maxConcurrent', 'targetObjective'],
   },
   {
+    activityType: 'train-champion',
+    label: 'Train champion (autopilot)',
+    description:
+      'Start the champion-training autopilot for a LEARNED core (e.g. alphazero): keep training WARM-STARTED generations against the league and PROMOTING the stronger net until strength plateaus / a target win-rate vs the strong-mcts yardstick is hit / the generation budget is spent. Each generation runs as a standard `train` experiment (so the RL training shows under Experiments). This is the compounding "find the best model" loop — distinct from explore (config-space search). `hyperparams` carries the per-generation alphazero levers (e.g. {az_sims, az_iterations, az_selfplay_games, az_epochs}).',
+    optionalParams: ['maxGenerations', 'targetStrength', 'patience', 'opponent', 'evalGames', 'hyperparams'],
+  },
+  {
+    activityType: 'rate-models',
+    label: 'Rate models (leaderboard)',
+    description:
+      'Rank every completed model on ONE COMPARABLE strength scale by playing each against the manifest’s fixed gauntlet spine (+ champions) — no retraining. This replaces "win-rate vs whatever opponent the lever picked": a run that only beat `random` can no longer outrank one that beat a strong `mcts`. Writes a `{recordType}-leaderboard` ranked by the conservative lower bound. Use to answer "which model is actually strongest?" and "is the champion getting better?".',
+    optionalParams: ['runKeys', 'gamesPerRung'],
+  },
+  {
     activityType: 'side-experiment',
     label: 'Run a side-experiment',
     description:

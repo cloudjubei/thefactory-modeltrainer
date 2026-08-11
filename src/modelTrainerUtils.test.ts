@@ -6,6 +6,10 @@ import {
   extractSampleGame,
   renderReplayText,
   nextChampionStep,
+  fitRatingFromPairings,
+  buildLeaderboardFromRuns,
+  extractRunPairings,
+  primaryFitness,
   parseProgressMarker,
   buildAnalyzePaperSystemPrompt,
   buildJudgeSystemPrompt,
@@ -888,6 +892,17 @@ describe('validateTrainerManifest', () => {
       play: 'python -m harness.play --serve --config-json {configPath} --summary-out {summaryOut}',
     })
     expect(m.play).toContain('--serve')
+  })
+
+  it('rejects a gauntlet template missing a placeholder and preserves a valid one', () => {
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), gauntlet: 'python -m harness.gauntlet --summary-out {summaryOut}' }),
+    ).toThrow(/configPath/)
+    const m = validateTrainerManifest({
+      ...manifest(),
+      gauntlet: 'python -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}',
+    })
+    expect(m.gauntlet).toContain('gauntlet')
   })
 
   it('rejects a dataCatalog template without {summaryOut}', () => {
@@ -5014,6 +5029,101 @@ describe('compareScorecards', () => {
     const cards = [rej(50), acc(2), acc(8), rej(90)]
     const sorted = [...cards].sort(compareScorecards)
     expect(sorted.map((c) => c.fitness[0].value)).toEqual([8, 2, 90, 50])
+  })
+})
+
+describe('fitRatingFromPairings (pinned Bradley-Terry model rating)', () => {
+  it('a 50% result vs an 800 anchor lands the model near 800', () => {
+    const r = fitRatingFromPairings([{ opponentRating: 800, score: 0.5, games: 200 }])!
+    expect(Math.abs(r.rating - 800)).toBeLessThan(40)
+  })
+
+  it('a strong-opponent pairing gives a tighter, higher lower bound than a saturated weak-only one', () => {
+    const weakOnly = fitRatingFromPairings([{ opponentRating: 0, score: 1.0, games: 40, opponent: 'random' }])!
+    const withStrong = fitRatingFromPairings([
+      { opponentRating: 0, score: 1.0, games: 40, opponent: 'random' },
+      { opponentRating: 800, score: 0.4, games: 40, opponent: 'mcts' },
+    ])!
+    expect(withStrong.lowerBound).toBeGreaterThan(weakOnly.lowerBound)
+    expect(withStrong.ciHigh - withStrong.ciLow).toBeLessThan(weakOnly.ciHigh - weakOnly.ciLow)
+  })
+
+  it('flags a model that only ever beat weak opponents and gives it a wide interval', () => {
+    const r = fitRatingFromPairings([{ opponentRating: 0, score: 1.0, games: 20, opponent: 'random' }])!
+    expect(r.flags).toContain('weak-opponent-only')
+    expect(r.ciHigh - r.ciLow).toBeGreaterThan(300)
+  })
+
+  it('more games tighten the interval', () => {
+    const few = fitRatingFromPairings([{ opponentRating: 800, score: 0.6, games: 10 }])!
+    const many = fitRatingFromPairings([{ opponentRating: 800, score: 0.6, games: 300 }])!
+    expect(many.ciHigh - many.ciLow).toBeLessThan(few.ciHigh - few.ciLow)
+  })
+
+  it('returns undefined with no pairings', () => {
+    expect(fitRatingFromPairings([])).toBeUndefined()
+  })
+})
+
+describe('buildLeaderboardFromRuns (comparable ranking from stored pairings)', () => {
+  const anchors = { random: 0, heuristic: 400, mcts: 800, mcts_strong: 1100 }
+  const run = (key: string, opponent: string, winRate: number, extra: Record<string, number> = {}) => ({
+    key,
+    content: {
+      status: 'completed',
+      config: { opponent, model_name: 'x' },
+      metrics: { win_rate: winRate, games: 40, ...extra },
+    },
+  })
+
+  it('ranks a solid-vs-mcts model ABOVE a perfect-vs-random model (de-pollution)', () => {
+    const board = buildLeaderboardFromRuns(
+      [run('perfect-random', 'random', 1.0), run('solid-mcts', 'mcts', 0.55)],
+      anchors,
+    )
+    expect(board[0].runKey).toBe('solid-mcts')
+    expect(board.find((e) => e.runKey === 'perfect-random')!.flags).toContain('weak-opponent-only')
+  })
+
+  it('folds win_rate_vs_strong_mcts in as a second pairing', () => {
+    const board = buildLeaderboardFromRuns([run('az', 'random', 1.0, { win_rate_vs_strong_mcts: 0.7 })], anchors)
+    expect(board[0].pairings.length).toBe(2)
+    expect(board[0].flags).not.toContain('weak-opponent-only')
+  })
+
+  it('skips runs whose opponent is not a declared anchor', () => {
+    const board = buildLeaderboardFromRuns(
+      [{ key: 'weird', content: { status: 'completed', config: { opponent: 'ghost' }, metrics: { win_rate: 0.5, games: 40 } } }],
+      anchors,
+    )
+    expect(board).toEqual([])
+  })
+})
+
+describe('primaryFitness (rating-or-objective ranking value)', () => {
+  const anchored = { ratingAnchors: { random: 0, mcts: 800 } }
+  const plain = {}
+
+  it('returns the raw objective UNCHANGED when the project declares no ratingAnchors (identity)', () => {
+    expect(primaryFitness({ objective: 0.9 }, plain)).toBe(0.9)
+    expect(primaryFitness({ objective: -3.2 }, plain)).toBe(-3.2) // not transformed, incl. negative/min-style values
+  })
+
+  it('returns the rating lower bound when anchors + an anchor pairing exist', () => {
+    const content = { objective: 0.55, config: { opponent: 'mcts' }, metrics: { win_rate: 0.55, games: 40 } }
+    const expected = fitRatingFromPairings(extractRunPairings(content, anchored.ratingAnchors))!.lowerBound
+    expect(primaryFitness(content, anchored)).toBe(expected)
+  })
+
+  it('de-pollutes: a 1.0-vs-random run scores BELOW a 0.7-vs-mcts run', () => {
+    const a = { objective: 1.0, config: { opponent: 'random' }, metrics: { win_rate: 1.0, games: 40 } }
+    const b = { objective: 0.7, config: { opponent: 'mcts' }, metrics: { win_rate: 0.7, games: 40 } }
+    expect(primaryFitness(a, anchored)).toBeLessThan(primaryFitness(b, anchored))
+  })
+
+  it('falls back to the raw objective when anchors are declared but no anchor pairing is extractable', () => {
+    const content = { objective: 0.42, config: { opponent: 'ghost' }, metrics: { win_rate: 0.42, games: 40 } }
+    expect(primaryFitness(content, anchored)).toBe(0.42)
   })
 })
 

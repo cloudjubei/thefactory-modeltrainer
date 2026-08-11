@@ -41,6 +41,9 @@ import type {
   SampleGameReplay,
   SampleGameReplayMove,
   ChampionStopReason,
+  RatingPairing,
+  ModelRating,
+  LeaderboardEntry,
 } from './modelTrainerTypes.js'
 import type { ClaimVerdict } from 'thefactory-tools/types'
 import {
@@ -344,6 +347,24 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
     }
     if (!m.play.includes('{summaryOut}')) {
       throw new Error('trainer manifest play template must contain {summaryOut}')
+    }
+  }
+  if (m.gauntlet !== undefined) {
+    if (typeof m.gauntlet !== 'string' || !m.gauntlet.includes('{configPath}')) {
+      throw new Error('trainer manifest gauntlet template must contain {configPath}')
+    }
+    if (!m.gauntlet.includes('{summaryOut}')) {
+      throw new Error('trainer manifest gauntlet template must contain {summaryOut}')
+    }
+  }
+  if (m.ratingAnchors !== undefined) {
+    if (typeof m.ratingAnchors !== 'object' || Array.isArray(m.ratingAnchors)) {
+      throw new Error('trainer manifest ratingAnchors must be an object of opponent → rating')
+    }
+    // A rating is always higher-better, so ratingAnchors (which repoints ranking through the rating) requires
+    // a max objective — a min+anchors manifest would rank inverted.
+    if ((m.objective as { direction?: string } | undefined)?.direction === 'min') {
+      throw new Error('a trainer manifest with ratingAnchors must have objective.direction "max"')
     }
   }
   const objective = m.objective as Record<string, unknown> | undefined
@@ -2755,6 +2776,143 @@ export function nextChampionStep(
   else if (latest.generation >= opts.maxGenerations) stopReason = 'budget'
   else if (plateauCount >= opts.patience) stopReason = 'plateau'
   return { done: stopReason !== undefined, stopReason, plateauCount, bestVsStrongMcts }
+}
+
+// --- comparable cross-model strength rating (the shared yardstick) --------------------------------------
+// Every run's raw win-rate is vs WHATEVER opponent its lever picked, so the numbers aren't comparable (beating
+// `random` 100% is not on the same scale as beating `mcts` 40%). We instead fit each model a rating on ONE
+// scale by treating its stored win-rates vs FIXED-rating anchors as pairings, and rank by the conservative
+// LOWER BOUND — so a model only ever tested against weak opponents cannot rank high off a saturated 100%.
+const ELO_SCALE = 400 // points per 10× odds (standard Elo)
+const RATING_PRIOR = 400 // a virtual pseudo-game at 0.5 vs this rating keeps 100%/0% fits finite
+const RATING_PRIOR_GAMES = 1
+const WEAK_OPPONENT_MAX = 400 // opponents at/below this are the weak tier (random/heuristic)
+const RATING_Z = 1.96
+
+/**
+ * Fit a model's comparable rating from its pairings vs known-rating opponents — a pinned Bradley-Terry / Elo
+ * MLE (opponents' ratings are fixed, only the model's rating is free), regularized by one virtual pseudo-game
+ * so a saturated 100%/0% record stays finite (with a correspondingly wide interval). Returns `undefined` for
+ * no pairings.
+ */
+export function fitRatingFromPairings(pairings: RatingPairing[]): ModelRating | undefined {
+  if (!pairings.length) return undefined
+  const K = Math.LN10 / ELO_SCALE
+  const expected = (r: number, o: number): number => 1 / (1 + Math.pow(10, (o - r) / ELO_SCALE))
+  const all: RatingPairing[] = [
+    ...pairings,
+    { opponentRating: RATING_PRIOR, score: 0.5, games: RATING_PRIOR_GAMES },
+  ]
+  // The regularized log-likelihood is concave in the rating, so its derivative crosses zero once — bisect it.
+  const dLL = (r: number): number =>
+    all.reduce((acc, p) => acc + p.games * (p.score - expected(r, p.opponentRating)), 0)
+  let lo = -3000
+  let hi = 5000
+  for (let i = 0; i < 64; i++) {
+    const mid = (lo + hi) / 2
+    if (dLL(mid) > 0) lo = mid
+    else hi = mid
+  }
+  const rating = (lo + hi) / 2
+  const info =
+    all.reduce((acc, p) => {
+      const e = expected(rating, p.opponentRating)
+      return acc + p.games * e * (1 - e)
+    }, 0) *
+    K *
+    K
+  const stderr = info > 1e-9 ? 1 / Math.sqrt(info) : 3000
+  const games = pairings.reduce((a, p) => a + p.games, 0)
+  const flags: string[] = []
+  const facedStrong = pairings.some((p) => p.opponentRating > WEAK_OPPONENT_MAX && p.games > 0)
+  const allSaturatedWins = pairings.every((p) => p.score >= 0.999)
+  if (!facedStrong && allSaturatedWins) flags.push('weak-opponent-only')
+  const ciLow = Math.round(rating - RATING_Z * stderr)
+  return {
+    rating: Math.round(rating),
+    lowerBound: ciLow,
+    ciLow,
+    ciHigh: Math.round(rating + RATING_Z * stderr),
+    games,
+    flags,
+  }
+}
+
+/** Turn a stored run record into the pairings its rating is fit from: its `win_rate` vs its `opponent` anchor,
+ * plus `win_rate_vs_strong_mcts` vs the fixed strong anchor when present. */
+export function extractRunPairings(
+  content: Record<string, unknown>,
+  anchors: Record<string, number>,
+): RatingPairing[] {
+  const config = (content.config ?? {}) as { opponent?: string }
+  const metrics = (content.metrics ?? {}) as Record<string, number>
+  const games = typeof metrics.games === 'number' && metrics.games > 0 ? metrics.games : 0
+  const pairings: RatingPairing[] = []
+  const opp = config.opponent
+  if (opp && anchors[opp] !== undefined && typeof metrics.win_rate === 'number' && games > 0) {
+    pairings.push({ opponentRating: anchors[opp], score: metrics.win_rate, games, opponent: opp })
+  }
+  if (anchors.mcts_strong !== undefined && typeof metrics.win_rate_vs_strong_mcts === 'number') {
+    pairings.push({
+      opponentRating: anchors.mcts_strong,
+      score: metrics.win_rate_vs_strong_mcts,
+      games: Math.max(games, 10),
+      opponent: 'mcts_strong',
+    })
+  }
+  return pairings
+}
+
+/**
+ * Build a comparable leaderboard from completed runs using ONLY already-stored numbers (zero new games): each
+ * run's win-rates-vs-anchors become pairings, fit to a rating, ranked by the conservative lower bound. This
+ * de-pollutes rankings on day one — a "perfect vs random" run drops below a solidly-measured one.
+ */
+export function buildLeaderboardFromRuns(
+  runs: Array<{ key?: string | null; content?: Record<string, unknown> }>,
+  anchors: Record<string, number>,
+): LeaderboardEntry[] {
+  const entries: LeaderboardEntry[] = []
+  for (const r of runs) {
+    const content = (r.content ?? {}) as Record<string, unknown>
+    if ((content as { status?: string }).status !== 'completed') continue
+    const pairings = extractRunPairings(content, anchors)
+    if (!pairings.length) continue
+    const rating = fitRatingFromPairings(pairings)
+    if (!rating) continue
+    const modelName = (content.config as { model_name?: string } | undefined)?.model_name
+    entries.push({
+      runKey: r.key ?? '',
+      ...(typeof modelName === 'string' ? { modelName } : {}),
+      ...rating,
+      pairings,
+    })
+  }
+  entries.sort((a, b) => b.lowerBound - a.lowerBound)
+  return entries
+}
+
+/**
+ * The value a run is RANKED by — its comparable strength rating when the project declares `ratingAnchors`
+ * (a game with a shared-strength scale) AND the run has an anchor pairing, else its raw direction-aware
+ * `objective` UNCHANGED. This is the seam that flips "best run" + the exploration frontier from the polluted
+ * win-rate-vs-whatever-opponent to the comparable rating — but ONLY for game projects: with no `ratingAnchors`
+ * (cartpole/tabular/BlackSwan) it is exactly `content.objective`, so those consumers stay byte-identical.
+ * Higher is better (a rating always is); a `ratingAnchors` manifest must therefore be `direction: 'max'`.
+ */
+export function primaryFitness(
+  content: Record<string, unknown>,
+  manifest: Pick<TrainerManifest, 'ratingAnchors'>,
+): number {
+  const anchors = manifest.ratingAnchors
+  if (anchors) {
+    const pairings = extractRunPairings(content, anchors)
+    if (pairings.length) {
+      const rating = fitRatingFromPairings(pairings)
+      if (rating) return rating.lowerBound
+    }
+  }
+  return content.objective as number
 }
 
 function replayResultLine(winner: number | null, labels: Record<number, string>): string {

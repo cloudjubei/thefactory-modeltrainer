@@ -71,6 +71,7 @@ const EXPERIMENT_ACTIVITY_TYPES = new Set([
   'evaluate',
   'continue-training',
   'side-experiment',
+  'rate-models',
 ])
 // Whether the 2nd ('Tasks') column is collapsed (persisted per session).
 const TASKS_COLLAPSED_SS = 'trainer.tasksCollapsed'
@@ -3738,6 +3739,46 @@ async function onLaunchChampion(config) {
   } finally {
     championLaunching = false
     await renderChampionPanel()
+  }
+}
+// The comparable-strength leaderboard: enabled when the project declares a `gauntlet` command (a fixed
+// reference spine to rate every model against) and we're embedded.
+let leaderboardRating = false
+function rateModelsEnabled() {
+  return !!(manifest && manifest.gauntlet) && !!(window.OverseerBridge && window.OverseerBridge.embedded)
+}
+async function renderLeaderboardPanel() {
+  const host = byId('leaderboard-panel')
+  if (!host) return
+  if (!rateModelsEnabled() || !window.Leaderboard) {
+    host.innerHTML = ''
+    return
+  }
+  let rows = []
+  try {
+    rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-leaderboard', key: 'current' })
+  } catch {
+    rows = []
+  }
+  const rec = Array.isArray(rows) ? rows[0] : rows
+  window.Leaderboard.render(host, {
+    record: rec ? rec.content || rec : null,
+    rating: leaderboardRating,
+    onRate: onRateModels,
+  })
+}
+async function onRateModels(config) {
+  if (leaderboardRating) return
+  leaderboardRating = true
+  await renderLeaderboardPanel()
+  try {
+    await window.OverseerBridge.startActivity('rate-models', trainerActivityParams(config))
+    showToast('Rating models…')
+  } catch {
+    showToast('Rate failed')
+  } finally {
+    leaderboardRating = false
+    await renderLeaderboardPanel()
   }
 }
 // Whether cross-testing (replaying a kept checkpoint on OTHER assets / an extended window) is available:
@@ -20399,6 +20440,7 @@ async function renderExploration(fromPoll) {
     return
   }
   void renderChampionPanel()
+  void renderLeaderboardPanel()
   const recordType = manifest.recordType
   // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
   // heavy re-scans pile up and the spinner never settles. The in-flight render paints the fresh state.

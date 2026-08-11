@@ -403,6 +403,24 @@ export interface TrainerManifest {
    */
   play?: string
   /**
+   * Command template (`{configPath}` gauntlet request + `{summaryOut}` result) that plays each model against a
+   * FIXED reference spine (+ champions) and emits comparable {@link RatingPairing}[] per model — the games
+   * behind the strength leaderboard. Powers the `rate-models` capability. Omit if the project has no such
+   * gauntlet. The config declares the models + rungs; the result is `{ ratings: [{ model_id, pairings }] }`.
+   */
+  gauntlet?: string
+  /**
+   * Fixed rating ANCHORS for the comparable-strength leaderboard: a map from a known reference opponent (an
+   * `opponent` lever value like `random`/`heuristic`/`mcts`, or a metric-implied reference like `mcts_strong`
+   * for a run's `win_rate_vs_strong_mcts`) to its FROZEN rating on the shared Elo-like scale. Frozen so the
+   * ruler never moves and every run's rating stays comparable across campaigns + time. A run's stored
+   * `win_rate` vs its `opponent` (and any extra vs-anchor metrics) become pairings the rating is fit from.
+   */
+  ratingAnchors?: Record<string, number>
+  /** The FIXED gauntlet spine (reference rungs + frozen ratings) the `rate-models` capability plays every
+   * model against. Frozen so ratings stay comparable across campaigns. */
+  ratingSpine?: RatingSpineRung[]
+  /**
    * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
    * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
    * in parallel (instead of the safe sequential default that leaves cores idle), and exports this many
@@ -1356,6 +1374,11 @@ export interface ExplorationState {
   recordType: string
   /** The single north-star being optimised (copied from the manifest). */
   objective: TrainerObjective
+  /** Which scale the objective-unit fields (noiseFloor/regret/basin peaks) were computed in: `rating` once a
+   * `ratingAnchors` project ranks by the comparable rating, else `objective` (raw). A mismatch on load (an
+   * anchored project whose state predates rating-ranking) forces a recalibrate so stale win-rate-unit margins
+   * are never trusted against rating-scale peaks. */
+  rankBasis?: 'rating' | 'objective'
   stage: ExplorationStage
   /** Seed-noise floor measured in S0 — the std of the objective across seeds of one config. */
   noiseFloor?: number
@@ -1877,6 +1900,19 @@ export interface ChampionTrainingParams {
   onProgress?: (p: ChampionTrainingProgress) => void
   onRecordWritten?: (type: string, key: string) => void
   activityId?: string
+  /**
+   * Durable-controller mode: launch each generation as a STANDARD `train` activity (so the RL training run
+   * shows under Experiments + shares the experiment lane, not the generic task basket) and return its id.
+   * Omit to run the generation IN-PROCESS via {@link ModelTrainerTools.runChampionTraining}'s own campaign
+   * call — the path unit tests exercise.
+   */
+  launchTrainCampaign?: (
+    spec: ExperimentSpec,
+    opts: { concurrency?: number; label?: string },
+  ) => Promise<{ activityId?: string }>
+  /** Await a launched generation to terminal; paired with {@link launchTrainCampaign}. `undefined` ⇒ the
+   * controller itself was aborted mid-wait (stop, leaving the child for a Stop to clean up). */
+  awaitActivity?: (activityId: string) => Promise<string | undefined>
 }
 
 export interface ChampionTrainingResult {
@@ -1885,6 +1921,88 @@ export interface ChampionTrainingResult {
   bestVsStrongMcts: number
   stopReason: ChampionStopReason
   history: ChampionGeneration[]
+}
+
+/** One measured pairing of a model against an opponent of KNOWN (fixed-anchor or already-rated) strength — the
+ * atom the comparable-strength rating is fit from. */
+export interface RatingPairing {
+  /** The opponent's rating on the shared scale. */
+  opponentRating: number
+  /** The model's observed score (win-rate; a draw counts 0.5) in [0,1]. */
+  score: number
+  /** How many games the score is over. */
+  games: number
+  /** Opponent label (provenance + the weak-opponent flag). */
+  opponent?: string
+}
+
+/** A model's comparable strength on the shared (Elo-like) scale — the yardstick that replaces "win-rate vs
+ * whatever opponent the lever picked". */
+export interface ModelRating {
+  /** Point estimate on the shared scale. */
+  rating: number
+  /** The conservative lower bound (rating − 1.96·stderr) — what the leaderboard RANKS by, so a model only
+   * ever tested against weak opponents cannot rank high on a saturated 100%. */
+  lowerBound: number
+  /** 95% confidence interval. */
+  ciLow: number
+  ciHigh: number
+  /** Total games the estimate rests on. */
+  games: number
+  /** e.g. `weak-opponent-only` (only faced weak anchors — the rating is a loose lower bound). */
+  flags: string[]
+}
+
+export interface LeaderboardEntry extends ModelRating {
+  runKey: string
+  modelName?: string
+  /** The pairings the rating was fit from (provenance). */
+  pairings: RatingPairing[]
+}
+
+/** One rung of the FIXED gauntlet spine — a reference opponent of known strength every model is measured
+ * against. Declared by the manifest so the spine (and its frozen ratings) live with the consumer. */
+export interface RatingSpineRung {
+  id: string
+  /** How to build the reference agent. `mcts` uses `sims`; `champion`/`alphazero` load `weightsPath`. */
+  kind: 'random' | 'heuristic' | 'mcts' | 'champion' | 'alphazero'
+  sims?: number
+  /** The rung's FROZEN rating on the shared scale. */
+  rating: number
+  weightsPath?: string
+}
+
+export interface RateModelsParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Which completed runs to rate (their checkpoints); omit for every completed run with a checkpoint. */
+  runKeys?: string[]
+  /** Games per rung (default 40). */
+  gamesPerRung?: number
+  baseSeed?: number
+  openingPlies?: number
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+  activityId?: string
+}
+
+export interface RateModelsResult {
+  recordType: string
+  /** Models rated, ranked best-first by the conservative lower bound. */
+  entries: LeaderboardEntry[]
+  /** Runs skipped because they had no checkpoint to play. */
+  skipped: number
+}
+
+/** The persisted `{recordType}-leaderboard` record — the comparable strength ranking. */
+export interface LeaderboardRecord {
+  entries: LeaderboardEntry[]
+  spine: RatingSpineRung[]
+  ranAt: string
+  gamesPerRung: number
 }
 
 export interface TrainerLogger {
@@ -4101,6 +4219,14 @@ export interface ModelTrainerTools {
    * autopilot). Persists a `{recordType}-champion` state record.
    */
   runChampionTraining(params: ChampionTrainingParams): Promise<ChampionTrainingResult>
+  /**
+   * Rate every completed model on ONE comparable scale — play each against the manifest's fixed gauntlet
+   * spine, fit a pinned rating, and write a `{recordType}-leaderboard` ranked by the conservative lower bound.
+   * This is the shared yardstick that replaces "win-rate vs whatever opponent the lever picked": a run that
+   * only beat `random` can no longer outrank one that beat a strong mcts. No retraining — ranks existing
+   * checkpoints.
+   */
+  rateModels(params: RateModelsParams): Promise<RateModelsResult>
   /**
    * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
    * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a

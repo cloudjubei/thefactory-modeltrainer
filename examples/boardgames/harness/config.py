@@ -27,6 +27,9 @@ PRICE_PER_KWH = 0.30  # USD; a generic grid price for the $ estimate.
 # from the model's own `mcts_sims` knob — otherwise the test opponent would scale with the model and win-rate
 # against it would sit at ~0.5 by construction, making the held-out test meaningless.
 OPPONENT_MCTS_SIMS = 120
+# A FIXED-strength reference for the comparable-strength yardstick (`win_rate_vs_strong_mcts`) — frozen so
+# that metric is a pairing against a stable rating anchor (mcts@400), comparable across runs + campaigns.
+STRONG_MCTS_SIMS = 400
 
 
 @dataclass(frozen=True)

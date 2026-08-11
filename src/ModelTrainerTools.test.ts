@@ -3032,6 +3032,41 @@ describe('runChampionTraining (champion autopilot loop)', () => {
     expect(result.generations).toBe(3)
   })
 
+  it('durable-controller mode: launches each generation as a child `train` activity and reads its run back by seed', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const launched: string[] = []
+    const result = await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: championManifest,
+      maxGenerations: 2,
+      patience: 5,
+      launchTrainCampaign: async (spec, opts) => {
+        const seed = (spec.seeds as number[])[0]
+        launched.push(opts.label ?? '')
+        // simulate the spawned `train` activity writing this generation's completed run
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run',
+          key: `run-${seed}`,
+          content: {
+            status: 'completed',
+            config: { model_name: 'alphazero', seed },
+            alphazero: { promoted: true },
+            metrics: { win_rate_vs_strong_mcts: 0.5 + seed * 0.1 },
+          },
+        })
+        return { activityId: `child-${seed}` }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    expect(launched.length).toBe(2) // one child train experiment per generation
+    expect(result.generations).toBe(2)
+    expect(result.stopReason).toBe('budget')
+    expect(result.history.map((h) => h.runKey)).toEqual(['run-1', 'run-2'])
+  })
+
   it('stops as soon as the strength target is reached', async () => {
     const storage = memoryStorage()
     const runner = runnerFor({ 1: { promoted: true, strong: 0.96 } })
@@ -3046,6 +3081,93 @@ describe('runChampionTraining (champion autopilot loop)', () => {
     })
     expect(result.stopReason).toBe('reached-target')
     expect(result.generations).toBe(1)
+  })
+})
+
+describe('rateModels (comparable-strength leaderboard)', () => {
+  const rateManifest = manifest({
+    gauntlet: 'py -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}',
+    ratingSpine: [
+      { id: 'random', kind: 'random', rating: 0 },
+      { id: 'mcts', kind: 'mcts', sims: 120, rating: 800 },
+    ],
+  })
+
+  it('runs the gauntlet on checkpointed runs, fits ratings, and writes a sorted leaderboard', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'weak', 5, { config: { game: 'connect4', model_name: 'random' }, artifacts: { checkpoint: '/a.json' } })
+    await seedRun(storage, 'strong', 9, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/b.json' } })
+    await seedRun(storage, 'nockpt', 3, { config: { model_name: 'mcts' } }) // no checkpoint → skipped
+    const runner = stubRunner({
+      jobResult: () => ({
+        summary: {
+          ratings: [
+            { model_id: 'weak', pairings: [{ opponentRating: 0, score: 0.5, games: 20 }] },
+            {
+              model_id: 'strong',
+              pairings: [
+                { opponentRating: 0, score: 1.0, games: 20 },
+                { opponentRating: 800, score: 0.6, games: 20 },
+              ],
+            },
+          ],
+        },
+      }),
+    })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.rateModels({ scope: 'proj', projectRoot: '/x', manifest: rateManifest })
+    expect(res.skipped).toBe(1)
+    expect(res.entries.map((e) => e.runKey)).toEqual(['strong', 'weak']) // strong ranks above the weak-only one
+    const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
+    expect(job.commandTemplate).toContain('gauntlet')
+    expect(((job.config as { models: { id: string }[] }).models.map((m) => m.id)).sort()).toEqual(['strong', 'weak'])
+    expect((job.config as { rungs: unknown[] }).rungs.length).toBe(2)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    expect((rec?.content as { entries: unknown[] }).entries.length).toBe(2)
+  })
+
+  it('errors when the project declares no gauntlet command', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 5, { artifacts: { checkpoint: '/a.json' } })
+    const { tools } = makeTools(stubRunner(), storage)
+    await expect(tools.rateModels({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
+      /gauntlet/,
+    )
+  })
+})
+
+describe('best-run repoint — ranks by rating for a ratingAnchors project, raw objective otherwise', () => {
+  async function seedTwoRuns(storage: DataStorage, m: TrainerManifest) {
+    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'p', content: { manifest: m, dir: '.' } })
+    // A: a "perfect" 1.0 win-rate vs the WEAK random opponent. B: 0.7 vs a strong mcts.
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'A',
+      content: { status: 'completed', objective: 1.0, config: { opponent: 'random' }, metrics: { win_rate: 1.0, games: 40 } },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'B',
+      content: { status: 'completed', objective: 0.7, config: { opponent: 'mcts' }, metrics: { win_rate: 0.7, games: 40 } },
+    })
+  }
+
+  it('best run FLIPS to the strong-vs-mcts run under ratingAnchors (the perfect-vs-random 1.0 is no longer best)', async () => {
+    const storage = memoryStorage()
+    await seedTwoRuns(storage, manifest({ ratingAnchors: { random: 0, mcts: 800 } }))
+    const { tools } = makeTools(stubRunner(), storage)
+    const state = await tools.getTrainerState({ scope: 'proj' })
+    expect(state.runs?.best?.key).toBe('B')
+  })
+
+  it('best run stays the raw-objective max (A) with no ratingAnchors — byte-identical', async () => {
+    const storage = memoryStorage()
+    await seedTwoRuns(storage, manifest())
+    const { tools } = makeTools(stubRunner(), storage)
+    const state = await tools.getTrainerState({ scope: 'proj' })
+    expect(state.runs?.best?.key).toBe('A')
   })
 })
 

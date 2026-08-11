@@ -15,7 +15,14 @@ from pathlib import Path
 from typing import Callable
 
 from harness.agents import Agent, resolve_agent
-from harness.config import OPPONENT_MCTS_SIMS, TrainerConfig, config_hash, load_config, load_eval_config
+from harness.config import (
+    OPPONENT_MCTS_SIMS,
+    STRONG_MCTS_SIMS,
+    TrainerConfig,
+    config_hash,
+    load_config,
+    load_eval_config,
+)
 from harness.game import Game, State
 from harness.registry import personas_for, resolve_game
 from harness.selfplay import evaluate_vs_opponent
@@ -141,7 +148,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
 
     device = "cpu"
     az_sims = int(config.az_sims)
-    strong_sims = max(az_sims, OPPONENT_MCTS_SIMS)
+    strong_sims = STRONG_MCTS_SIMS  # a FIXED reference so win_rate_vs_strong_mcts is a comparable anchor
 
     # WARM-START from the strongest saved net (cumulative), unless the run asks to start fresh.
     init_net = None
