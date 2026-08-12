@@ -153,6 +153,13 @@ def resolve_agent(name: str, cfg: dict, personas: dict[str, Callable[[dict], Age
         from harness.neural import build_alphazero_agent
 
         return build_alphazero_agent(cfg)
+    if name == "oracle":
+        # Perfect-play Connect 4 reference (torch-free). Fast on mid/late positions; solving from the opening
+        # is a minutes-long search in pure Python, so it's the benchmark labeller / endgame reference, not a
+        # from-scratch opening opponent (that role belongs to a depth-limited near-perfect variant).
+        from harness.solver import OracleAgent
+
+        return OracleAgent()
     if personas and name in personas:
         return personas[name](cfg)
     if name.startswith("champion:"):

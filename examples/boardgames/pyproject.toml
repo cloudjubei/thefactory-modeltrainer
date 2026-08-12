@@ -7,3 +7,6 @@ requires-python = ">=3.10"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "slow: deep exact solves (e.g. solving from the opening) — excluded by `-m 'not slow'`",
+]

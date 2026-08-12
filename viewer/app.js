@@ -3707,21 +3707,55 @@ function championEnabled() {
     window.OverseerBridge.embedded
   )
 }
-// When Improve is the primary flow (a learned-core game project), reframe the raw config-space exploration
-// engine below it as an ADVANCED action, so a user isn't torn between two launchers. For non-game projects
-// (BlackSwan/cartpole) exploration IS the main surface, so the header stays empty.
+// When Improve is the primary flow (a learned-core game project), the raw config-space exploration engine below
+// it is an ADVANCED action, collapsed by default so a user isn't torn between two launchers. For non-game
+// projects (BlackSwan/cartpole) exploration IS the main surface, so the header stays empty and the body shows.
+let explorationAdvancedOpen = false
 function renderExplorationAdvancedHead() {
   const host = byId('exploration-advanced-head')
+  const body = byId('exploration-body')
   if (!host) return
   if (!championEnabled()) {
     host.innerHTML = ''
+    if (body) body.style.display = ''
     return
   }
+  if (body) body.style.display = explorationAdvancedOpen ? '' : 'none'
+  const caret = explorationAdvancedOpen ? '▾' : '▸'
   host.innerHTML =
-    '<div style="margin:18px 0 4px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;' +
-    'font-weight:600;color:var(--text)">Advanced — search new model architectures</div>' +
-    '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;max-width:640px;line-height:1.5">' +
-    'You don’t need this for the main loop. Use it to sweep hyperparameters and find new configs to Improve from.</div>'
+    '<button type="button" id="expl-adv-toggle" style="display:flex;align-items:center;gap:8px;width:100%;' +
+    'text-align:left;margin:16px 0 0;padding:12px 2px;border:0;border-top:1px solid var(--border);background:none;' +
+    'color:var(--muted);font-size:13px;font-weight:600;cursor:pointer">' +
+    caret +
+    ' Advanced — search new model architectures</button>' +
+    (explorationAdvancedOpen
+      ? '<div style="font-size:12px;color:var(--muted);margin:0 0 8px;max-width:640px;line-height:1.5">' +
+        'You don’t need this for the main loop. Sweep hyperparameters to find new configs to Improve from.</div>'
+      : '')
+  const btn = byId('expl-adv-toggle')
+  if (btn)
+    btn.onclick = () => {
+      explorationAdvancedOpen = !explorationAdvancedOpen
+      renderExplorationAdvancedHead()
+      // Force a fresh engine render when revealing (a hidden body may have skipped its heavy render / heatmap sizing).
+      if (explorationAdvancedOpen) void renderExploration()
+    }
+}
+// Is an Improve (train-champion controller) activity live right now? Drives the panel's running state so the
+// tab reflects "Improving…" even before the first generation's record lands.
+async function championActivityRunning() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    const all = (res && res.activities) || []
+    return all.some(
+      (a) =>
+        a.activityType === 'train-champion' &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        ['running', 'starting', 'queued'].includes(a.status),
+    )
+  } catch {
+    return false
+  }
 }
 async function renderChampionPanel() {
   const host = byId('champion-panel')
@@ -3737,9 +3771,11 @@ async function renderChampionPanel() {
     rows = []
   }
   const rec = Array.isArray(rows) ? rows[0] : rows
+  const running = await championActivityRunning()
   window.Champion.render(host, {
     state: rec ? rec.content || rec : null,
     launching: championLaunching,
+    running,
     onLaunch: onLaunchChampion,
   })
 }
@@ -3749,7 +3785,7 @@ async function onLaunchChampion(config) {
   await renderChampionPanel()
   try {
     await window.OverseerBridge.startActivity('train-champion', trainerActivityParams(config))
-    showToast('Champion training started')
+    showToast('Improve started')
   } catch {
     showToast('Launch failed')
   } finally {
@@ -20459,6 +20495,13 @@ async function renderExploration(fromPoll) {
   void renderLeaderboardPanel()
   renderExplorationAdvancedHead()
   const recordType = manifest.recordType
+  // Game project with Advanced collapsed: the Improve panel + leaderboard above ARE the tab. Skip the heavy
+  // config-space engine render (and its hidden-canvas heatmap), but keep polling so the Improve panel stays
+  // live (running state + the leaderboard climbing) — the poll re-runs renderChampionPanel every tick.
+  if (championEnabled() && !explorationAdvancedOpen) {
+    await scheduleExplorationPoll(recordType, false)
+    return
+  }
   // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
   // heavy re-scans pile up and the spinner never settles. The in-flight render paints the fresh state.
   if (explorationRendering) return

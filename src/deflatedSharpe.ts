@@ -217,3 +217,158 @@ export function deflatedCorpusVerdict(
     detail: `DSR ${dsr.toFixed(3)} vs ${threshold} over ${searched} (SR* ${deflationLevel.toFixed(3)})`,
   }
 }
+
+// --- powered-null primitives (TS twins of trainer/sharpe.py; pinned to its golden vectors) ------------------
+// A null is only informative once it is POWERED: "nothing cleared t>3" is indistinguishable from "the sample
+// had no power" until you report the smallest effect it could have detected and a confidence bound on the true
+// Sharpe. These reuse the SAME non-normality-adjusted variance term as the PSR (the Lo / Mertens SE), so the
+// Sharpe SE, the minimum detectable effect, and the DSR all speak one geometry. Per-observation Sharpe units.
+
+export type PoweredNullClass = 'survivor' | 'powered-null' | 'inconclusive'
+
+export interface PoweredNullVerdict {
+  verdict: PoweredNullClass
+  se: number
+  lowerBound: number
+  upperBound: number
+  mde: number
+  powerAtEcon: number
+}
+
+/** Lo (2002) / Mertens non-normality-adjusted SE of the per-observation Sharpe: sqrt(denom/(n-1)) with the PSR
+ * denominator (`kurtosis` NON-excess). Infinity when undefined (n < 2 or a non-positive denominator). */
+export function sharpeStandardError(
+  sharpe: number,
+  skewness: number,
+  kurtosis: number,
+  nObs: number,
+): number {
+  const n = Math.trunc(nObs)
+  if (n < 2) return Infinity
+  const denom = psrDenominator(sharpe, skewness, kurtosis)
+  if (!(denom > 0) || !Number.isFinite(denom)) return Infinity
+  return Math.sqrt(denom / (n - 1))
+}
+
+/** Two-sided (1-alpha) confidence interval for the true per-observation Sharpe. (-Inf, Inf) when SE undefined. */
+export function sharpeConfidenceInterval(
+  sharpe: number,
+  skewness: number,
+  kurtosis: number,
+  nObs: number,
+  alpha = 0.05,
+): [number, number] {
+  const se = sharpeStandardError(sharpe, skewness, kurtosis, nObs)
+  if (!Number.isFinite(se)) return [-Infinity, Infinity]
+  const z = normalPpf(1 - alpha / 2)
+  return [sharpe - z * se, sharpe + z * se]
+}
+
+/** Power of the one-sided level-alpha test H0: SR<=0 to detect a true per-obs Sharpe `srAlt` at `nObs`. */
+export function sharpePower(
+  srAlt: number,
+  nObs: number,
+  alpha = 0.05,
+  skewness = 0,
+  kurtosis = 3,
+): number {
+  const n = Math.trunc(nObs)
+  if (n < 2) return 0
+  const denom = psrDenominator(srAlt, skewness, kurtosis)
+  if (!(denom > 0) || !Number.isFinite(denom)) return 0
+  return normalCdf((srAlt * Math.sqrt(n)) / Math.sqrt(denom) - normalPpf(1 - alpha))
+}
+
+/** Smallest true per-obs Sharpe a one-sided level-alpha test detects at `power` given `nObs`; iterated because
+ * the moment-adjusted denominator depends on the effect (seeded at the normal denom=1 solution). Inf for n<2. */
+export function minimumDetectableSharpe(
+  nObs: number,
+  alpha = 0.05,
+  power = 0.8,
+  skewness = 0,
+  kurtosis = 3,
+): number {
+  const n = Math.trunc(nObs)
+  if (n < 2) return Infinity
+  const za = normalPpf(1 - alpha)
+  const zb = normalPpf(power)
+  let sr = (za + zb) / Math.sqrt(n)
+  for (let i = 0; i < 64; i++) {
+    const denom = psrDenominator(sr, skewness, kurtosis)
+    if (!(denom > 0) || !Number.isFinite(denom)) break
+    const nxt = (za + zb) * Math.sqrt(denom / n)
+    if (Math.abs(nxt - sr) < 1e-13) {
+      sr = nxt
+      break
+    }
+    sr = nxt
+  }
+  return sr
+}
+
+/** Benjamini-Hochberg FDR at level q. Returns a boolean array aligned to `pvalues` (true = reject). Step-up:
+ * reject the largest-rank ordered p with p_(k) <= (k/m)*q, and everything ranked below it. */
+export function benjaminiHochberg(pvalues: number[], q = 0.05): boolean[] {
+  const m = pvalues.length
+  if (m === 0) return []
+  const order = pvalues.map((_, i) => i).sort((a, b) => pvalues[a] - pvalues[b])
+  let kmax = -1
+  for (let k = 0; k < m; k++) {
+    if (pvalues[order[k]] <= (q * (k + 1)) / m) kmax = k
+  }
+  const reject = new Array<boolean>(m).fill(false)
+  for (let k = 0; k <= kmax; k++) reject[order[k]] = true
+  return reject
+}
+
+/** Lo (2002) / Newey-West variance-inflation factor for the Sharpe SE under serial correlation:
+ * eta = 1 + 2*sum_{k=1..q} (1 - k/(q+1)) * rho_k (`autocorrs` = [rho_1, rho_2, ...], first q used, Bartlett-
+ * weighted). Floored at a small positive so strong negative autocorrelation shrinks but never inverts the
+ * variance. eta = 1 for q < 1. TS twin of `newey_west_inflation`. */
+export function neweyWestInflation(autocorrs: number[], q: number): number {
+  const qq = Math.trunc(q)
+  if (qq < 1) return 1
+  let s = 0
+  for (let k = 1; k <= qq && k <= autocorrs.length; k++) {
+    s += (1 - k / (qq + 1)) * autocorrs[k - 1]
+  }
+  return Math.max(1 + 2 * s, 1e-6)
+}
+
+/** Benjamini-Yekutieli FDR under ARBITRARY dependence: BH with q scaled by 1/H_m, H_m = sum_{i=1..m} 1/i.
+ * Strictly no less conservative than BH. TS twin of `benjamini_yekutieli`. */
+export function benjaminiYekutieli(pvalues: number[], q = 0.05): boolean[] {
+  const m = pvalues.length
+  if (m === 0) return []
+  let hm = 0
+  for (let i = 1; i <= m; i++) hm += 1 / i
+  return benjaminiHochberg(pvalues, q / hm)
+}
+
+/** Per-cell POWERED verdict (per-obs Sharpe units) via one-sided (1-alpha) bounds on the true Sharpe:
+ * survivor = lower bound > 0; powered-null = upper bound < `srEcon` (we REJECT a true Sharpe >= the
+ * economically meaningful level — an earned null); inconclusive = neither (the sample cannot rule out
+ * `srEcon`, so absence of evidence is not evidence). Also returns SE, both bounds, the MDE, and power at
+ * `srEcon`. TS twin of `powered_null_verdict`. */
+export function poweredNullVerdict(
+  sharpe: number,
+  skewness: number,
+  kurtosis: number,
+  nObs: number,
+  srEcon: number,
+  alpha = 0.05,
+  power = 0.8,
+): PoweredNullVerdict {
+  const se = sharpeStandardError(sharpe, skewness, kurtosis, nObs)
+  const mde = minimumDetectableSharpe(nObs, alpha, power, skewness, kurtosis)
+  const powerAtEcon = sharpePower(srEcon, nObs, alpha, skewness, kurtosis)
+  if (!Number.isFinite(se)) {
+    return { verdict: 'inconclusive', se, lowerBound: -Infinity, upperBound: Infinity, mde, powerAtEcon }
+  }
+  const za = normalPpf(1 - alpha)
+  const lowerBound = sharpe - za * se
+  const upperBound = sharpe + za * se
+  const verdict: PoweredNullClass =
+    lowerBound > 0 ? 'survivor' : upperBound < srEcon ? 'powered-null' : 'inconclusive'
+  return { verdict, se, lowerBound, upperBound, mde, powerAtEcon }
+}

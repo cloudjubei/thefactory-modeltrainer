@@ -3037,6 +3037,7 @@ describe('runChampionTraining (champion autopilot loop)', () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)
     const launched: string[] = []
+    const refreshFlags: Array<boolean | undefined> = []
     const result = await tools.runChampionTraining({
       scope: 'proj',
       projectRoot: '/x',
@@ -3046,6 +3047,7 @@ describe('runChampionTraining (champion autopilot loop)', () => {
       launchTrainCampaign: async (spec, opts) => {
         const seed = (spec.seeds as number[])[0]
         launched.push(opts.label ?? '')
+        refreshFlags.push(opts.refresh)
         // simulate the spawned `train` activity writing this generation's completed run
         await storage.upsertRecord({
           scope: 'proj',
@@ -3063,6 +3065,9 @@ describe('runChampionTraining (champion autopilot loop)', () => {
       awaitActivity: async () => 'completed',
     })
     expect(launched.length).toBe(2) // one child train experiment per generation
+    // Every generation forces refresh:true — a warm-start re-run at a new seed must never be vetoed by a
+    // seed-stripped `unrunnable`/explored setup marker (else the whole ladder silently no-ops forever).
+    expect(refreshFlags).toEqual([true, true])
     expect(result.generations).toBe(2)
     expect(result.stopReason).toBe('budget')
     expect(result.history.map((h) => h.runKey)).toEqual(['run-1', 'run-2'])

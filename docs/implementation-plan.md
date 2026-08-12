@@ -349,6 +349,16 @@ open questions it raises. Retire nothing already shipped; extend it.
    across the swept trials — so "config X is best of 50" is discounted for the search size? DSR is Sharpe-
    specific; generalise the same math to any metric (accuracy, win-rate, loss) with its own trial-variance.
 
+   **SHIPPED (powered-null primitives, `src/deflatedSharpe.ts`, golden-pinned to `BlackSwan/trainer/sharpe.py`):**
+   `sharpeStandardError` (Lo/Mertens non-normality SE, reuses the PSR denominator), `sharpeConfidenceInterval`,
+   `minimumDetectableSharpe`, `sharpePower`, `benjaminiHochberg` (FDR), and `poweredNullVerdict` (survivor /
+   powered-null / inconclusive via one-sided CI bounds). The point: a null is only informative once POWERED — a
+   swept-search that clears nothing is indistinguishable from one with no power until you report the minimum
+   detectable effect + a CI on the true metric. `poweredNullVerdict` labels a cell **inconclusive** (not
+   "disproved") when the sample cannot rule out the economically meaningful effect. BlackSwan's cross-asset
+   factor battery used exactly this to retire an over-claimed "zero survivors" into "5 powered-null / 11
+   inconclusive / 0 FDR-survivor" — the general lesson the engine's gates should encode for any consumer.
+
 3. **Held-out TEST discipline (not just validation).** Model selection tunes on validation; a LOCKED test set
    the selection never touched is the only honest final number. Audit: does modeltrainer enforce/track a
    train/val/TEST split where TEST is consumed ONCE, post-selection, and flags reuse? Or is it consumer-
@@ -402,13 +412,11 @@ The case exercises the gaps by construction:
 - **Multiplicity (§C.2.2):** sweeping algorithm / network / reward configs and picking the best inflates — the
   first thing to correct for.
 
-**Open questions for the case (decide with the owner, who supplies the specific game + constraints):** which
-game(s) — start with ONE small, fully-observable, two-player perfect-information game (Connect-Four / small
-board scale) so training is cheap and ground truth crisp, then a harder one; which RL algorithm(s) — self-play
-PPO / AlphaZero-style MCTS / tabular for the trivial baseline; the OPPONENT LADDER that defines the test set;
-the compute budget + whether remote runners are needed; how the win-rate scorecard + the proxy (episode reward)
-relate (§C.2.8). The owner will name the specific game(s) and constraints; scope the first probe to the cheapest
-game that makes the seed-variance + multiplicity gaps (§C.2.2/4) bite.
+**RESOLVED with the owner:** the first game is **Connect 4** (small, fully-observable, two-player,
+perfect-information — cheap training + crisp ground truth); cores are `random`/`heuristic`/`mcts`/`alphazero`
+(AlphaZero-style, self-play + warm-start league); the opponent ladder is the fixed rating spine. The crisp
+target is now **"solved"** — the `alphazero` core reaches the known-optimal winning strategy, measured against a
+perfect-play oracle (see §C.4 "Connect-4 SOLVED"). Harder games follow (README game roadmap).
 
 ### C.4 — Engine gates SHIPPED; what remains
 
@@ -433,6 +441,39 @@ Remaining (forward):
   league play** for the luck games (champion pool onto the `opponent` axis via `choicesFrom`); the
   **specialist-vs-generalist-finetuned** §C hypothesis (needs a HuggingFace survey); and a **BoardGameArena**
   live-play bridge (drives `load_policy`) as the final real-world test.
+- **Connect-4 SOLVED — the crisp end-state of §C.3 (ACTIVE).** Connect 4 has ground truth (first player wins
+  with perfect play). Today the `alphazero` core plateaus WEAK (on disk: champion frozen at gen12, gens 13–15
+  trained but never promoted; the owner can still beat it) — so "reach the known winning strategy" is the crux,
+  not a nicety. Build, staged: (1) a perfect-play **oracle** — a torch-free `harness/solver.py` (bitboard
+  negamax + alpha-beta + transposition + a one-time opening book) exposed as an `OracleAgent`, registered as a
+  `connect4` persona AND the top rung of the rating spine, so every model is measured against perfect play;
+  known-answer TDD (centre is the unique optimal opening, empty board is a P1 win, takes wins / blocks losses).
+  (2) **near-perfect ladder rungs** — MCTS with a tactical (heuristic) rollout + immediate win/loss checks at
+  ~2–5k sims, and a depth-limited oracle rung (the heuristic stays an honest weak floor; the full Allis rule
+  engine is not worth chasing). (3) an alphazero setup that actually reaches it — a small **ResNet**, a real
+  budget (~40–60 iters × 150–250 self-play × 200–800 sims × 8–10 epochs, ~100k buffer), the oracle in the
+  league, and **oracle distillation** (pretrain the net on solver-labelled optimal-move + value targets) as the
+  biggest lever. (4) a **measurable SOLVED criterion** — `oracle_optimality_rate` (model's greedy move ∈ the
+  solver's optimal-move SET over a fixed benchmark corpus, `harness/benchmark.py`) ≥ 0.99 AND
+  `wins_as_p1_vs_oracle == 1.0`; NOT win-rate-vs-oracle (degenerate 0.5 under seat alternation, below the 0.55
+  spine threshold). Surface a `health: solved` badge + the `oracle_*` metrics. This is the trigger that unblocks
+  the model-comparison view (§E).
+- **Unified single "find the best model" process + Runs→Models view (ACTIVE).** Collapse the two autopilots
+  (config-space Exploration + champion Improve) into ONE reducer with stages `screen-new → search → improve →
+  converged`. On start/resume a `leverSetHash` + `screenedChoices` in `ExplorationState` re-screens any
+  newly-added `model_name` choice FIRST (closes the "new models are never checked" gap — `stepScreen` today only
+  screens while the archive is under a sample floor). A **learned/compound core** (declared via a manifest
+  `compoundCores: [{modelName, warmStartLever}]`) climbs a warm-start ladder in a new `improve` stage
+  (`nextChampionStep` folded in, `concurrency:1`) instead of independent grid points; the comparable leaderboard
+  refreshes each round. UI: **one surface at a time** via a `unifiedProcessState()` selector (idle-never-run /
+  improving / searching / converged / has-champion / needs-attention — a LIVE activity always wins, a
+  `processMode` flag disambiguates only the idle case), replacing the rejected stacked-panels + collapse layout.
+  **The primary view becomes MODELS ranked by strength (the leaderboard promoted to the main surface); a "Run"
+  becomes one training STEP in a model's history (its ladder), not a top-level flat list** — model identity
+  spans runs via the champion lineage. Delete `runChampionTraining` / `trainChampionActivity` (bodies fold into
+  the one `explore` controller; repoint-and-DELETE, no shim). Open decision: the compound-core signal is an
+  explicit manifest `compoundCores` field (preferred, one line in `trainer.json`) vs derived from a
+  `*_warm_start` lever gated by `appliesWhen` (zero-config but fragile).
 - **Expose `verifyImprovement` as a chat tool/activity** — the engine function is done; the thin remaining
   piece is the thefactory-backend `trainerTools` schema + dispatch wrapper.
 - **S9 leakage tail** (lowest value, do when it bites): a per-split membership signature
@@ -626,3 +667,10 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
 - **GPU + sandbox profile for training images** — `--read-only` rootfs vs ML caches; `--gpus` is wired but
   unexercised.
 - **Judge/proposer model transport** — `ModelSelection` (API vs CLI), revisit once the CLI inference stage lands.
+- **Model comparison view (DEFERRED — act ONLY once Connect-4 is SOLVED).** A side-by-side surface comparing
+  champions / architectures head-to-head on the ONE gauntlet scale, with the §C gate battery per model.
+  Deferred deliberately: comparison is only meaningful once ≥1 model provably reaches ground truth on
+  Connect-4 (the §C.4 "Connect-4 SOLVED" milestone with a *steady* verdict) — before that there is nothing
+  certified to compare against, and a comparison UI would invite the §C.2.2 multiplicity error the gates exist
+  to catch. Trigger: Connect-4-solved lands steady. Scope then: a READ surface over the existing
+  `{recordType}-leaderboard` records (the Models view), not a new activity.

@@ -5,6 +5,14 @@ import {
   expectedMaxSharpe,
   deflatedSharpeFromStats,
   deflatedCorpusVerdict,
+  sharpeStandardError,
+  sharpeConfidenceInterval,
+  sharpePower,
+  minimumDetectableSharpe,
+  benjaminiHochberg,
+  poweredNullVerdict,
+  neweyWestInflation,
+  benjaminiYekutieli,
 } from './deflatedSharpe.js'
 import type { DeflatedCorpusTrial } from './modelTrainerTypes.js'
 
@@ -337,5 +345,64 @@ describe('deflatedCorpusVerdict (the screen path’s deflated verdict)', () => {
       expect(earnedZero.dsr).toBe(0)
       expect(earnedZero.notApplicable).toBeUndefined()
     })
+  })
+})
+
+// Powered-null primitives — pinned to golden vectors from BlackSwan/trainer/sharpe.py (same scipy reference).
+describe('powered-null primitives (TS twins of trainer/sharpe.py)', () => {
+  it('sharpeStandardError matches the Lo variance and withholds when undefined', () => {
+    expect(sharpeStandardError(0.1, 0, 3, 101)).toBeCloseTo(0.1002496882788171, 12)
+    expect(sharpeStandardError(0.1, 0, 3, 1)).toBe(Infinity)
+    expect(sharpeStandardError(5, 3, 3, 100)).toBe(Infinity) // denominator goes non-positive
+  })
+
+  it('sharpeConfidenceInterval is the two-sided Lo interval', () => {
+    const [lo, hi] = sharpeConfidenceInterval(0.2, 0, 3, 401, 0.05)
+    expect(lo).toBeCloseTo(0.10102667029562956, 9)
+    expect(hi).toBeCloseTo(0.29897332970437046, 9)
+  })
+
+  it('minimumDetectableSharpe shrinks with n and round-trips through sharpePower', () => {
+    const mde500 = minimumDetectableSharpe(500, 0.05, 0.8)
+    expect(mde500).toBeCloseTo(0.11154388408393644, 8)
+    expect(minimumDetectableSharpe(2000, 0.05, 0.8)).toBeCloseTo(0.055642286206179635, 8)
+    expect(sharpePower(mde500, 500, 0.05)).toBeCloseTo(0.8, 6) // power at the MDE == target
+    expect(sharpePower(0, 300, 0.05)).toBeCloseTo(0.05, 6) // power at the null == alpha (AS-approx CDF)
+    expect(sharpePower(0.2, 300, 0.05)).toBeCloseTo(0.9628789167094413, 6)
+  })
+
+  it('benjaminiHochberg is step-up and order-invariant', () => {
+    expect(benjaminiHochberg([0.001, 0.04, 0.5, 0.5], 0.05)).toEqual([true, false, false, false])
+    expect(benjaminiHochberg([0.03, 0.012], 0.05)).toEqual([true, true])
+    expect(benjaminiHochberg([0.9, 0.8], 0.05)).toEqual([false, false])
+    expect(benjaminiHochberg([], 0.05)).toEqual([])
+  })
+
+  it('poweredNullVerdict separates a powered null from an underpowered one and a survivor', () => {
+    const tight = poweredNullVerdict(0, 0, 3, 100000, 0.05, 0.05)
+    expect(tight.verdict).toBe('powered-null')
+    expect(tight.upperBound).toBeCloseTo(0.005201509886370025, 9)
+
+    const small = poweredNullVerdict(0, 0, 3, 30, 0.05, 0.05)
+    expect(small.verdict).toBe('inconclusive')
+    expect(small.upperBound).toBeGreaterThan(0.05)
+
+    const win = poweredNullVerdict(0.3, 0, 3, 500, 0.05, 0.05)
+    expect(win.verdict).toBe('survivor')
+    expect(win.lowerBound).toBeCloseTo(0.22472770991680835, 9)
+  })
+
+  it('neweyWestInflation matches the Bartlett-weighted formula and floors negatives', () => {
+    expect(neweyWestInflation([0, 0, 0], 3)).toBeCloseTo(1, 12)
+    expect(neweyWestInflation([0.5], 1)).toBeCloseTo(1.5, 12) // 1 + 2*(1-1/2)*0.5
+    expect(neweyWestInflation([0.9], 0)).toBe(1)
+    expect(neweyWestInflation([-1], 1)).toBeCloseTo(1e-6, 12)
+  })
+
+  it('benjaminiYekutieli is no less conservative than BH', () => {
+    const p = [0.001, 0.02, 0.5, 0.6]
+    const by = benjaminiYekutieli(p, 0.05)
+    expect(by.filter(Boolean).length).toBeLessThanOrEqual(benjaminiHochberg(p, 0.05).filter(Boolean).length)
+    expect(by).toEqual([true, false, false, false]) // H_4=2.0833; k=1 thr = 0.05/2.0833/4 = 0.006 >= 0.001
   })
 })

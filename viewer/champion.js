@@ -29,6 +29,7 @@
     '.champion .ch-field input,.champion .ch-field select{padding:5px 8px;border-radius:6px;background:var(--surface-subtle);' +
     'color:var(--text);border:1px solid var(--border);font-size:13px;width:104px}' +
     '.champion .ch-status{font-size:13px;color:var(--text);margin-top:14px;font-weight:500}' +
+    '.champion .ch-status.running{color:var(--accent)}' +
     '.champion .ch-hint{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.5;max-width:640px}' +
     '.champion table{border-collapse:collapse;margin-top:12px;font-size:12px;width:100%;max-width:520px}' +
     '.champion th,.champion td{text-align:left;padding:4px 10px;border-bottom:1px solid var(--border);font-variant-numeric:tabular-nums}' +
@@ -70,7 +71,10 @@
   }
 
   // The "what do I do next" line — the whole point of the one-button flow is that the user is never guessing.
-  function nextStepHint(state) {
+  function nextStepHint(state, active) {
+    if (active) {
+      return 'Improving… each generation warm-starts from the current champion, plays the league, and is added to the leaderboard below. Also shows in the Experiments tab.'
+    }
     if (!state || !state.generation) {
       return 'Press Improve to start. It runs as an experiment (watch it in the Experiments tab); the leaderboard below climbs after every generation.'
     }
@@ -97,7 +101,7 @@
     var sub = document.createElement('div')
     sub.className = 'ch-sub'
     sub.textContent =
-      'Trains a stronger version, plays it against a league of your best models, and keeps the winner — over and over, until it stops getting better. Every generation is scored on one fixed scale, so the leaderboard below shows real progress.'
+      'Trains stronger versions against a league of your best models and keeps the winner — over and over. Watch the leaderboard climb.'
     host.appendChild(head)
     host.appendChild(sub)
 
@@ -114,13 +118,14 @@
       oppSel.appendChild(op)
     })
 
+    var active = !!(opts.launching || opts.running)
     var cta = document.createElement('div')
     cta.className = 'ch-cta'
     var btn = document.createElement('button')
     btn.className = 'ch-btn'
     btn.type = 'button'
-    btn.textContent = opts.launching ? 'Starting…' : 'Improve'
-    btn.disabled = !!opts.launching
+    btn.textContent = opts.launching ? 'Starting…' : opts.running ? 'Improving…' : 'Improve'
+    btn.disabled = active
     btn.addEventListener('click', function () {
       if (typeof opts.onLaunch !== 'function') return
       opts.onLaunch({
@@ -151,22 +156,27 @@
       form.classList.toggle('open')
     })
 
-    if (state) {
+    if (state || active) {
       var status = document.createElement('div')
-      status.className = 'ch-status'
-      var best = pct(state.bestVsStrongMcts)
-      status.textContent =
-        'Generation ' +
-        (state.generation || 0) +
-        ' · best vs strong mcts ' +
-        best +
-        (state.stage === 'converged' ? ' · stopped (' + (state.stopReason || 'done') + ')' : ' · improving…')
+      status.className = 'ch-status' + (active ? ' running' : '')
+      var best = pct(state && state.bestVsStrongMcts)
+      var doneGen = (state && state.generation) || 0
+      if (active) {
+        // While it runs, the record for the in-flight generation hasn't landed yet — show it as the next one.
+        status.textContent =
+          '● Improving — generation ' + (doneGen + 1) + ' · best vs strong mcts ' + best + ' · running…'
+      } else if (state && state.stage === 'converged') {
+        status.textContent =
+          'Generation ' + doneGen + ' · best vs strong mcts ' + best + ' · stopped (' + (state.stopReason || 'done') + ')'
+      } else {
+        status.textContent = 'Generation ' + doneGen + ' · best vs strong mcts ' + best
+      }
       host.appendChild(status)
     }
 
     var hint = document.createElement('div')
     hint.className = 'ch-hint'
-    hint.textContent = nextStepHint(state)
+    hint.textContent = nextStepHint(state, active)
     host.appendChild(hint)
 
     if (state) {

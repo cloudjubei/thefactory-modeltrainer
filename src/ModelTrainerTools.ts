@@ -3949,6 +3949,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const { activityId } = await params.launchTrainCampaign(spec, {
           concurrency: 1,
           label: `Champion generation ${generation}`,
+          // A warm-start generation is a DELIBERATE re-run at a new seed — never let a seed-stripped
+          // `unrunnable`/explored setup marker veto it (that silently no-ops the whole ladder forever).
+          refresh: true,
         })
         if (activityId && params.awaitActivity) {
           const status = await params.awaitActivity(activityId)
@@ -3978,6 +3981,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
           manifest,
           spec,
           concurrency: 1,
+          refresh: true,
           ...(params.computeTarget ? { computeTarget: params.computeTarget } : {}),
           ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
           ...(params.onRecordWritten ? { onRecordWritten: params.onRecordWritten } : {}),

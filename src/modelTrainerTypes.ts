@@ -1483,7 +1483,7 @@ export interface ExplorationCampaignParams {
    */
   launchTrainCampaign?: (
     spec: ExperimentSpec,
-    opts: { concurrency?: number; label?: string },
+    opts: { concurrency?: number; label?: string; refresh?: boolean },
   ) => Promise<{ activityId?: string }>
   /**
    * Await a launched activity to a terminal status; paired with {@link launchTrainCampaign}. Resolves with
@@ -1908,7 +1908,7 @@ export interface ChampionTrainingParams {
    */
   launchTrainCampaign?: (
     spec: ExperimentSpec,
-    opts: { concurrency?: number; label?: string },
+    opts: { concurrency?: number; label?: string; refresh?: boolean },
   ) => Promise<{ activityId?: string }>
   /** Await a launched generation to terminal; paired with {@link launchTrainCampaign}. `undefined` ⇒ the
    * controller itself was aborted mid-wait (stop, leaving the child for a Stop to clean up). */

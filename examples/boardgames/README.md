@@ -127,6 +127,24 @@ catan (trading) · altered (deckbuild + play — a **two-model adversarial** har
 
 ## Forward milestones
 
+- **Connect-4 SOLVED** (ACTIVE — the crisp end-state) — Connect 4 has ground truth (first player wins with
+  perfect play). Today `alphazero` plateaus weak (champion stuck at gen12; later generations never promote), so
+  reaching the known winning strategy is the priority. Build: a perfect-play **oracle** (`harness/solver.py`:
+  bitboard negamax+αβ+transposition+opening book) as a persona + the top rating rung; near-perfect ladder rungs
+  (tactical-rollout MCTS, depth-limited oracle); an alphazero setup that reaches it (ResNet + real budget +
+  **oracle distillation** + oracle in the league); and a measurable SOLVED bar — `oracle_optimality_rate ≥ 0.99`
+  (greedy move ∈ the solver's optimal set over a fixed benchmark) AND `wins_as_p1_vs_oracle == 1.0` (NOT
+  win-rate vs oracle, which is a degenerate 0.5). Surfaced as a `health: solved` badge.
+- **Unified "find the best model" process + Models-first view** (ACTIVE) — one process, not two launchers:
+  Exploration (search configs) and Improve (warm-start champion ladder) fold into a single reducer
+  (`screen-new → search → improve → converged`) that re-screens newly-added `model_name` choices on
+  start/resume. The Exploration tab shows ONE surface at a time by state (a live run always wins). The primary
+  view becomes **Models ranked by strength** (the leaderboard); a **Run becomes one training step in a model's
+  history**, not a flat list — model identity spans runs via the champion lineage.
+- **Model comparison** (DEFERRED — only after Connect-4 is solved) — a side-by-side of champions/architectures
+  on the one gauntlet scale with the §C gates per model; a read surface over the leaderboard records. See
+  `docs/implementation-plan.md` §E for why it waits (nothing certified to compare until a model reaches ground
+  truth).
 - **Neural self-play core** — ✓ SHIPPED: `alphazero` as a `model_name` lever (`harness/neural.py`). Trains a
   policy+value net by self-play, saves weights, plays through the same replay/play tooling. Next: a `ppo`
   variant; a larger/residual net; per-game net shapes (the current net is connect4-shaped).

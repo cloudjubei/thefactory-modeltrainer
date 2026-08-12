@@ -63,7 +63,7 @@
     var sub = document.createElement('div')
     sub.className = 'lb-sub'
     sub.textContent =
-      'Comparable strength on ONE scale. Ranked by the confident lower bound, so a 100% only against a weak opponent cannot rank high. It updates automatically as you Improve; play the full gauntlet to confirm with fresh games.'
+      'Every model on one comparable scale, ranked by the confident lower bound (a 100% against a weak opponent can’t rank high). Updates as you Improve.'
     host.appendChild(head)
     host.appendChild(sub)
 
