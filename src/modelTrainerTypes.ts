@@ -1964,9 +1964,12 @@ export interface LeaderboardEntry extends ModelRating {
  * against. Declared by the manifest so the spine (and its frozen ratings) live with the consumer. */
 export interface RatingSpineRung {
   id: string
-  /** How to build the reference agent. `mcts` uses `sims`; `champion`/`alphazero` load `weightsPath`. */
-  kind: 'random' | 'heuristic' | 'mcts' | 'champion' | 'alphazero'
+  /** How to build the reference agent. `mcts` uses `sims`; `oracle` (a depth-limited near-perfect solver) uses
+   * `depth`; `champion`/`alphazero` load `weightsPath`. */
+  kind: 'random' | 'heuristic' | 'mcts' | 'oracle' | 'champion' | 'alphazero'
   sims?: number
+  /** Search depth for an `oracle` rung (the near-perfect solver). */
+  depth?: number
   /** The rung's FROZEN rating on the shared scale. */
   rating: number
   weightsPath?: string

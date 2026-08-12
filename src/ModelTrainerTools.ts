@@ -4129,6 +4129,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         kind: s.kind,
         rating: s.rating,
         ...(s.sims !== undefined ? { sims: s.sims } : {}),
+        ...(s.depth !== undefined ? { depth: s.depth } : {}),
         ...(s.weightsPath ? { weights_path: s.weightsPath } : {}),
       })),
       games_per_rung: gamesPerRung,

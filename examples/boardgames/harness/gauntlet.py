@@ -37,6 +37,11 @@ def _rung_factory(rung: dict, game: Game) -> Callable[[], Agent]:
     if kind == "mcts":
         sims = int(rung.get("sims", 120))
         return lambda: MctsAgent(sims=sims)
+    if kind == "oracle":
+        from harness.solver import NearPerfectOracle
+
+        depth = int(rung.get("depth", 12))
+        return lambda: NearPerfectOracle(depth=depth)
     if kind in ("champion", "alphazero"):
         from harness.neural import AlphaZeroAgent, load_net
 

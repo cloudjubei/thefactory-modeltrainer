@@ -252,6 +252,50 @@ def optimal_columns(state: C4State, tt: dict[int, int] | None = None) -> list[in
     return sorted(c for c, v in values.items() if v == best)
 
 
+_WIN = 100_000  # terminal magnitude — far above any heuristic leaf so a real win/loss always dominates
+_INF = 10**9
+
+
+def _heuristic_eval(position: int, mask: int) -> int:
+    """A small positional score (to-move perspective) for depth-limited leaves: threats created minus
+    threats conceded, plus centre control. Deliberately tiny so it never outweighs a real win/loss."""
+    my = bin(_compute_winning_position(position, mask)).count("1")
+    opp = bin(_compute_winning_position(position ^ mask, mask)).count("1")
+    center = _column_mask(WIDTH // 2)
+    my_c = bin(position & center).count("1")
+    opp_c = bin((position ^ mask) & center).count("1")
+    return 3 * (my - opp) + (my_c - opp_c)
+
+
+def _dl_negamax(position: int, mask: int, moves: int, depth: int, alpha: int, beta: int) -> int:
+    """Depth-limited negamax with the same tactical layer as the exact solver (immediate win, forced-loss
+    anticipation, never play under an opponent's winning square) but a heuristic leaf once `depth` runs out —
+    so it stays fast enough to play from the opening while remaining tactically sharp. Exact whenever `depth`
+    covers the plies remaining (the leaf is then never reached)."""
+    if _can_win_next(position, mask):
+        return _WIN - moves
+    if moves >= _TOTAL:
+        return 0
+    possible = _possible_non_losing_moves(position, mask)
+    if possible == 0:  # opponent has an unstoppable win next move
+        return -(_WIN - moves)
+    if depth <= 0:
+        return _heuristic_eval(position, mask)
+    best = -_INF
+    for c in _CENTER_ORDER:
+        move = possible & _column_mask(c)
+        if not move:
+            continue
+        score = -_dl_negamax(position ^ mask, mask | move, moves + 1, depth - 1, -beta, -alpha)
+        if score > best:
+            best = score
+        if best > alpha:
+            alpha = best
+        if alpha >= beta:
+            break
+    return best
+
+
 class OracleAgent:
     """Plays game-theoretically optimal Connect 4 — the perfect-play reference. Among equally-optimal moves it
     prefers the fastest win / slowest loss (the strong score), tie-broken centre-first for determinism."""
@@ -273,3 +317,35 @@ class OracleAgent:
         best_cols = [c for c, v in values.items() if v == best]
         best_cols.sort(key=_CENTER_ORDER.index)
         return best_cols[0]
+
+
+class NearPerfectOracle:
+    """A fast, tactically-perfect Connect 4 opponent — depth-limited negamax (default 10 plies) with the exact
+    solver's tactical layer. Unlike the exact `OracleAgent` it plays the OPENING in milliseconds, so it's the
+    strong reference the models train against and the top rung of the rating spine. It is EXACT once the search
+    depth covers the plies left (endgames); earlier it is near-perfect, blundering only beyond its horizon."""
+
+    kind = "oracle_depth"
+
+    def __init__(self, depth: int = 10):
+        self.depth = int(depth)
+
+    def act(self, game, state, rng: random.Random) -> int:
+        position, mask, _ = to_bitboard(state)
+        legal = [c for c in range(WIDTH) if _can_play(mask, c)]
+        if not legal:
+            raise ValueError("oracle asked to move in a terminal position")
+        wins = [c for c in legal if _is_winning_move(position, mask, c)]
+        if wins:
+            wins.sort(key=_CENTER_ORDER.index)
+            return wins[0]
+        possible = _possible_non_losing_moves(position, mask)
+        candidates = legal if possible == 0 else [c for c in legal if possible & _column_mask(c)]
+        moves = bin(mask).count("1")
+        best_col, best_val = candidates[0], -_INF
+        for c in sorted(candidates, key=_CENTER_ORDER.index):
+            move = (mask + _bottom_mask_col(c)) & _column_mask(c)
+            val = -_dl_negamax(position ^ mask, mask | move, moves + 1, self.depth - 1, -_INF, _INF)
+            if val > best_val:
+                best_val, best_col = val, c
+        return best_col

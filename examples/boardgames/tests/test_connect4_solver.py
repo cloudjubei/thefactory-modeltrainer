@@ -13,9 +13,11 @@ import random
 
 import pytest
 
+import time
+
 from games.connect4 import COLS, ROWS, C4State, Connect4
 from harness import solver
-from harness.solver import OracleAgent, move_values, optimal_columns
+from harness.solver import NearPerfectOracle, OracleAgent, move_values, optimal_columns
 
 # Solving from the OPENING is a minutes-long deep search in pure Python (mid/late positions are instant — see
 # the brute-force cross-check). The two headline-theory tests below are therefore opt-in: set
@@ -134,6 +136,35 @@ def test_solver_matches_bruteforce_move_for_move(seed):
     # the oracle plays a move that is optimal by brute force, and prefers to actually win (strong tie-break)
     best = max(truth.values())
     assert OracleAgent().act(game, state, random.Random(0)) in [c for c, v in truth.items() if v == best]
+
+
+# --- the depth-limited near-perfect oracle (the fast opponent / spine rung) ------------------------------
+
+def test_near_perfect_takes_the_win_and_blocks_the_loss():
+    game, win = _play([0, 0, 1, 1, 2, 2])  # P0 can complete at 3
+    assert NearPerfectOracle(depth=6).act(game, win, random.Random(0)) == 3
+    game, block = _play([6, 0, 5, 1, 6, 2])  # P0 must block P1's threat at 3
+    assert NearPerfectOracle(depth=6).act(game, block, random.Random(0)) == 3
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_near_perfect_is_exact_when_depth_covers_the_endgame(seed):
+    # With ~8 plies left and depth 12, the heuristic leaf is never reached → play is provably OPTIMAL.
+    game = Connect4()
+    state = _deep_position(game, plies_left=8, seed=seed)
+    if state is None:
+        pytest.skip("no deep non-terminal position sampled")
+    solver._TT.clear()
+    assert NearPerfectOracle(depth=12).act(game, state, random.Random(0)) in optimal_columns(state)
+
+
+def test_near_perfect_plays_the_opening_fast():
+    game = Connect4()
+    state = game.initial_state(random.Random(0))
+    t0 = time.perf_counter()
+    move = NearPerfectOracle(depth=9).act(game, state, random.Random(0))
+    assert time.perf_counter() - t0 < 5.0  # milliseconds-to-seconds, unlike the exact solver's minutes
+    assert move in range(COLS)
 
 
 # --- slow: the headline theory (deep solves from the opening) -------------------------------------------

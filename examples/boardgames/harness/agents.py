@@ -160,6 +160,11 @@ def resolve_agent(name: str, cfg: dict, personas: dict[str, Callable[[dict], Age
         from harness.solver import OracleAgent
 
         return OracleAgent()
+    if name == "oracle_depth":
+        # The fast, tactically-perfect reference opponent — depth-limited near-perfect solver.
+        from harness.solver import NearPerfectOracle
+
+        return NearPerfectOracle(depth=int(cfg.get("oracle_depth", 10)))
     if personas and name in personas:
         return personas[name](cfg)
     if name.startswith("champion:"):

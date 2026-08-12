@@ -331,6 +331,31 @@ def train_net(
     return last
 
 
+def distill_examples(
+    game: Game, n: int, min_moves: int, seed: int, device: str = "cpu"
+) -> list[tuple[torch.Tensor, list[float], float]]:
+    """Supervised (state, optimal-policy, value) examples LABELLED BY THE PERFECT ORACLE — the biggest lever
+    for reaching optimal play. The policy target is uniform over the oracle's OPTIMAL move set; the value is the
+    position's game-theoretic sign (mover perspective). Sampled from fast-to-solve (mid/late) positions, so it
+    teaches tactical perfection cheaply; the opening layer is left to self-play against the oracle league."""
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import move_values
+
+    examples: list[tuple[torch.Tensor, list[float], float]] = []
+    for state in sample_solvable_positions(game, n, min_moves, seed):
+        values = move_values(state, weak=True)
+        if not values:
+            continue
+        best = max(values.values())
+        optimal = [c for c, v in values.items() if v == best]
+        pi = [0.0] * COLS
+        for c in optimal:
+            pi[c] = 1.0 / len(optimal)
+        value = 1.0 if best > 0 else (-1.0 if best < 0 else 0.0)
+        examples.append((encode(game, state), pi, value))
+    return examples
+
+
 def train_alphazero(
     game: Game,
     iterations: int = 8,
@@ -346,16 +371,23 @@ def train_alphazero(
     init_net: Connect4Net | None = None,
     opponent_pool: list[Callable[[], Agent]] | None = None,
     pool_frac: float = 0.5,
+    distill_positions: int = 0,
+    distill_min_moves: int = 16,
     log: Callable[[str], None] | None = None,
 ) -> tuple[Connect4Net, list[dict]]:
-    """The AlphaZero loop with WARM-START + LEAGUE. Starts from `init_net` (the champion) when given instead of
-    a random net — so training compounds across runs rather than restarting from zero. Each iteration mixes
-    pure self-play with games against the `opponent_pool` (strong mcts / heuristic / past champions) at rate
-    `pool_frac`, then trains on the accumulated buffer. Returns the trained net + a per-iteration history."""
+    """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
+    champion) when given instead of a random net — so training compounds across runs rather than restarting
+    from zero. When `distill_positions > 0` it first imprints the net on oracle-labelled optimal play and keeps
+    those examples in EVERY training pass (a persistent 'this is the perfect move' anchor). Each iteration then
+    mixes pure self-play with games against the `opponent_pool` (strong mcts / heuristic / near-perfect oracle /
+    past champions) at rate `pool_frac`, and trains on the accumulated buffer + the distilled anchor."""
     rng = random.Random(seed)
     torch.manual_seed(seed)
     net = init_net if init_net is not None else Connect4Net(channels=channels).to(device)
     buffer: list[tuple[torch.Tensor, list[float], float]] = []
+    distilled = distill_examples(game, distill_positions, distill_min_moves, seed, device) if distill_positions > 0 else []
+    if distilled:
+        train_net(net, distilled, epochs, batch_size, lr, device)  # imprint optimal play before self-play
     history: list[dict] = []
     for it in range(iterations):
         learner = AlphaZeroAgent(net, sims=sims, device=device)
@@ -369,12 +401,14 @@ def train_alphazero(
             else:
                 fresh.extend(self_play_game(game, learner, rng))
         buffer = (buffer + fresh)[-buffer_cap:]
-        loss = train_net(net, buffer, epochs, batch_size, lr, device)
+        loss = train_net(net, buffer + distilled, epochs, batch_size, lr, device)
         history.append(
-            {"iteration": it + 1, "examples": len(fresh), "vs_pool_games": vs_pool, "buffer": len(buffer), "loss": loss}
+            {"iteration": it + 1, "examples": len(fresh), "vs_pool_games": vs_pool, "buffer": len(buffer),
+             "distilled": len(distilled), "loss": loss}
         )
         if log:
-            log(f"iter {it + 1}/{iterations}: +{len(fresh)} ex ({vs_pool} vs-pool), buffer {len(buffer)}, loss {loss:.3f}")
+            log(f"iter {it + 1}/{iterations}: +{len(fresh)} ex ({vs_pool} vs-pool), buffer {len(buffer)}, "
+                f"distilled {len(distilled)}, loss {loss:.3f}")
     return net, history
 
 

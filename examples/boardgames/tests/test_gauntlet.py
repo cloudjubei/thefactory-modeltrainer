@@ -1,14 +1,30 @@
 import random
 
 from games.connect4 import Connect4
-from harness.agents import HeuristicAgent
-from harness.gauntlet import _model_factory, climb_spine, run_gauntlet
+from harness.agents import HeuristicAgent, RandomAgent
+from harness.gauntlet import _model_factory, _rung_factory, climb_spine, run_gauntlet
 
 SPINE = [
     {"id": "random", "kind": "random", "rating": 0},
     {"id": "heuristic", "kind": "heuristic", "rating": 400},
     {"id": "mcts60", "kind": "mcts", "sims": 60, "rating": 700},
 ]
+
+
+def test_rung_factory_builds_the_near_perfect_oracle_rung():
+    game = Connect4()
+    factory = _rung_factory({"id": "oracle", "kind": "oracle", "depth": 8, "rating": 2000}, game)
+    agent = factory()
+    assert agent.kind == "oracle_depth"
+    assert agent.act(game, game.initial_state(random.Random(0)), random.Random(0)) in range(7)
+
+
+def test_the_oracle_rung_beats_a_random_model():
+    game = Connect4()
+    spine = [{"id": "oracle", "kind": "oracle", "depth": 6, "rating": 2000}]
+    pairings = climb_spine(game, lambda: RandomAgent(), spine, n=4, base_seed=0, opening_plies=2, model_idx=0)
+    assert pairings[0]["opponent"] == "oracle"
+    assert pairings[0]["score"] < 0.5  # random cannot beat near-perfect play
 
 
 def test_model_factory_constructs_a_fresh_agent_per_game():

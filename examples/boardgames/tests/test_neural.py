@@ -162,3 +162,21 @@ def test_head_to_head_diversifies_games_via_random_openings():
         game, lambda: AlphaZeroAgent(net, sims=10), lambda: AlphaZeroAgent(net, sims=10), n=20, rng=random.Random(0)
     )
     assert 0.0 < r["win_rate"] < 1.0  # random openings make the n games genuinely distinct
+
+
+def test_distill_examples_targets_match_the_oracle():
+    from harness.benchmark import sample_solvable_positions
+    from harness.neural import distill_examples
+    from harness.solver import optimal_columns
+
+    game = Connect4()
+    n, min_moves, seed = 6, 28, 3  # late-game → fast exact solves
+    states = sample_solvable_positions(game, n, min_moves, seed)
+    examples = distill_examples(game, n, min_moves, seed)
+    assert examples and len(examples) == len(states)
+    for (x, pi, value), state in zip(examples, states):
+        assert x.shape == (2, 6, 7)
+        optimal = optimal_columns(state)
+        assert sorted(i for i, p in enumerate(pi) if p > 0) == optimal  # mass exactly on the optimal set
+        assert all(abs(pi[c] - 1.0 / len(optimal)) < 1e-6 for c in optimal)  # uniform over it
+        assert value in (-1.0, 0.0, 1.0)

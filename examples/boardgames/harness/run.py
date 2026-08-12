@@ -90,8 +90,30 @@ def _run_training(config_path: Path | None, summary_out: Path, calibrate: bool) 
         summary["metrics"].update(az_metrics)
     if az_report:
         summary["alphazero"] = az_report
+    if not calibrate:
+        summary["metrics"].update(_benchmark_metrics(game, config, eval_cfg))
     write_summary(summary, summary_out)
     print(f"win_rate={ev.win_rate:.3f} vs {config.opponent} cost=${summary['cost']['estCostUsd']:.6f} summary={summary_out}")
+
+
+def _benchmark_metrics(game: Game, config: TrainerConfig, eval_cfg: dict) -> dict:
+    """`oracle_optimality_rate` for this run's policy — the honest 'distance to solved' gauge (how often the
+    model plays a game-theoretically optimal move vs the perfect oracle, on a fixed late-game corpus). Only
+    Connect 4 has a solver; off when `benchmark_positions == 0`."""
+    if config.game != "connect4" or config.benchmark_positions <= 0:
+        return {}
+    from harness.benchmark import evaluate_optimality
+    from harness.config import BENCHMARK_MIN_MOVES, BENCHMARK_SEED
+
+    agent = resolve_agent(config.model_name, eval_cfg)
+    brng = random.Random(config.seed + 4242)
+    return evaluate_optimality(
+        game,
+        lambda s: agent.act(game, s, brng),
+        n=config.benchmark_positions,
+        min_moves=BENCHMARK_MIN_MOVES,
+        seed=BENCHMARK_SEED,
+    )
 
 
 def _run_evaluation(config_path: Path, summary_out: Path) -> None:
@@ -145,6 +167,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     from harness import champions
     from harness.agents import HeuristicAgent, MctsAgent
     from harness.neural import AlphaZeroAgent, head_to_head, load_net, save_net, train_alphazero
+    from harness.solver import NearPerfectOracle
 
     device = "cpu"
     az_sims = int(config.az_sims)
@@ -159,8 +182,11 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
             init_net = load_net(cp, device)
             parent_gen = champions.champion_generation(config.game)
 
-    # LEAGUE opponent pool: a strong search opponent, the heuristic, and recent past champions.
+    # LEAGUE opponent pool: a strong search opponent, the heuristic, a NEAR-PERFECT oracle (a perfect-play
+    # reality check that punishes any residual blunder), and recent past champions. Only Connect 4 has a solver.
     pool = [lambda: MctsAgent(sims=OPPONENT_MCTS_SIMS), lambda: HeuristicAgent()]
+    if config.game == "connect4":
+        pool.append(lambda: NearPerfectOracle(depth=6))  # depth 6 → fast league games, still tactically perfect
     for cpath in champions.champion_pool_paths(config.game, k=3):
         cnet = load_net(cpath, device)
         pool.append(lambda cnet=cnet: AlphaZeroAgent(cnet, sims=az_sims, device=device))
@@ -177,8 +203,10 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         init_net=init_net,
         opponent_pool=pool,
         # Self-play (balanced ~50% games) is the main strength engine; the league is a MINORITY of games —
-        # facing a far-stronger fixed mcts yields mostly-losing games, a weak learning signal on its own.
+        # facing a far-stronger fixed opponent yields mostly-losing games, a weak learning signal on its own.
         pool_frac=0.35,
+        # ORACLE DISTILLATION — supervised optimal-move targets, the biggest lever for reaching perfect play.
+        distill_positions=config.az_distill_positions,
         log=print,
     )
     train_seconds = time.perf_counter() - t0
