@@ -26,6 +26,7 @@ import type {
   TrainerManifest,
   TrainingCampaignProgress,
   ChampionTrainingState,
+  LeaderboardRecord,
 } from './modelTrainerTypes.js'
 import { createModelTrainerTools } from './ModelTrainerTools.js'
 import { initExplorationState } from './explorationUtils.js'
@@ -3082,6 +3083,49 @@ describe('runChampionTraining (champion autopilot loop)', () => {
     expect(result.stopReason).toBe('reached-target')
     expect(result.generations).toBe(1)
   })
+
+  it('refreshes the comparable leaderboard from stored numbers each generation when ratingAnchors is declared', async () => {
+    const storage = memoryStorage()
+    const runner = runnerFor({
+      1: { promoted: true, strong: 0.4 },
+      2: { promoted: true, strong: 0.7 },
+    })
+    const anchored = manifest({
+      levers: championManifest.levers,
+      ratingAnchors: { random: 0, mcts: 800, mcts_strong: 1100 },
+      ratingSpine: [{ id: 'random', kind: 'random', rating: 0 }],
+    })
+    const { tools } = makeTools(runner, storage)
+    await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: anchored,
+      maxGenerations: 2,
+      patience: 5,
+    })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    const content = rec?.content as LeaderboardRecord
+    expect(content).toBeTruthy()
+    expect(content.basis).toBe('stored')
+    // both generations rated from their stored win_rate_vs_strong_mcts; the stronger gen-2 ranks on top
+    expect(content.entries.length).toBe(2)
+    expect(content.entries[0].lowerBound).toBeGreaterThan(content.entries[1].lowerBound)
+  })
+
+  it('does not write a leaderboard for a project without ratingAnchors', async () => {
+    const storage = memoryStorage()
+    const runner = runnerFor({ 1: { promoted: true, strong: 0.6 } })
+    const { tools } = makeTools(runner, storage)
+    await tools.runChampionTraining({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: championManifest,
+      maxGenerations: 1,
+      patience: 5,
+    })
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    expect(rec).toBeFalsy()
+  })
 })
 
 describe('rateModels (comparable-strength leaderboard)', () => {
@@ -3124,6 +3168,7 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     expect((job.config as { rungs: unknown[] }).rungs.length).toBe(2)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
     expect((rec?.content as { entries: unknown[] }).entries.length).toBe(2)
+    expect((rec?.content as LeaderboardRecord).basis).toBe('gauntlet')
   })
 
   it('errors when the project declares no gauntlet command', async () => {

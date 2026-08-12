@@ -25,7 +25,12 @@
     '.leaderboard .lb-rating{font-weight:600;color:var(--text)}' +
     '.leaderboard .lb-flag{color:var(--warn);font-size:11px}' +
     '.leaderboard .lb-climb{color:var(--muted);font-size:11px}' +
-    '.leaderboard .lb-empty{font-size:12px;color:var(--muted)}'
+    '.leaderboard .lb-empty{font-size:12px;color:var(--muted)}' +
+    '.leaderboard .lb-basis{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;' +
+    'margin:0 0 10px;border:1px solid var(--border)}' +
+    '.leaderboard .lb-basis.verified{color:var(--ok);border-color:var(--ok)}' +
+    '.leaderboard .lb-basis.estimate{color:var(--muted)}' +
+    '.leaderboard .lb-btn.secondary{background:var(--surface-subtle);color:var(--text);border:1px solid var(--border)}'
 
   function ensureCss() {
     if (typeof document === 'undefined' || document.getElementById('leaderboard-css')) return
@@ -58,9 +63,19 @@
     var sub = document.createElement('div')
     sub.className = 'lb-sub'
     sub.textContent =
-      'Comparable strength on ONE scale — each model played the fixed reference spine. Ranked by the confident lower bound, so a 100% only against a weak opponent cannot rank high.'
+      'Comparable strength on ONE scale. Ranked by the confident lower bound, so a 100% only against a weak opponent cannot rank high. It updates automatically as you Improve; play the full gauntlet to confirm with fresh games.'
     host.appendChild(head)
     host.appendChild(sub)
+
+    var verified = record && record.basis === 'gauntlet'
+    if (record) {
+      var badge = document.createElement('span')
+      badge.className = 'lb-basis ' + (verified ? 'verified' : 'estimate')
+      badge.textContent = verified
+        ? '✔ Verified — played the full reference gauntlet'
+        : '~ Live estimate — from games already recorded'
+      host.appendChild(badge)
+    }
 
     var row = document.createElement('div')
     row.className = 'lb-row'
@@ -74,9 +89,10 @@
     field.appendChild(lbl)
     field.appendChild(gamesIn)
     var btn = document.createElement('button')
-    btn.className = 'lb-btn'
+    // Secondary once a board exists — Improve keeps it live, so this is the optional "confirm with real games" step.
+    btn.className = 'lb-btn' + (record ? ' secondary' : '')
     btn.type = 'button'
-    btn.textContent = opts.rating ? 'Rating…' : record ? 'Re-rate models' : 'Rate models'
+    btn.textContent = opts.rating ? 'Playing gauntlet…' : verified ? 'Re-verify (gauntlet)' : 'Verify on full gauntlet'
     btn.disabled = !!opts.rating
     btn.addEventListener('click', function () {
       if (typeof opts.onRate === 'function') opts.onRate({ gamesPerRung: num(gamesIn.value, 40) })
@@ -91,7 +107,7 @@
       empty.className = 'lb-empty'
       empty.textContent = opts.rating
         ? 'Playing the gauntlet…'
-        : 'No leaderboard yet — click “Rate models” to rank every checkpoint on one comparable scale.'
+        : 'No leaderboard yet — press Improve above to start (the board fills after the first generation), or play the full gauntlet now.'
       host.appendChild(empty)
       return
     }

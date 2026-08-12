@@ -2003,6 +2003,10 @@ export interface LeaderboardRecord {
   spine: RatingSpineRung[]
   ranAt: string
   gamesPerRung: number
+  /** How the ratings were produced: `gauntlet` = fresh games played vs the reference spine (the verified
+   * ranking); `stored` = fit from already-recorded win-rates with zero new games (the live estimate the
+   * Improve loop refreshes after every generation, so the board climbs without re-playing the gauntlet). */
+  basis?: 'gauntlet' | 'stored'
 }
 
 export interface TrainerLogger {

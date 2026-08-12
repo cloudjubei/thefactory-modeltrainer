@@ -3707,6 +3707,22 @@ function championEnabled() {
     window.OverseerBridge.embedded
   )
 }
+// When Improve is the primary flow (a learned-core game project), reframe the raw config-space exploration
+// engine below it as an ADVANCED action, so a user isn't torn between two launchers. For non-game projects
+// (BlackSwan/cartpole) exploration IS the main surface, so the header stays empty.
+function renderExplorationAdvancedHead() {
+  const host = byId('exploration-advanced-head')
+  if (!host) return
+  if (!championEnabled()) {
+    host.innerHTML = ''
+    return
+  }
+  host.innerHTML =
+    '<div style="margin:18px 0 4px;padding-top:14px;border-top:1px solid var(--border);font-size:13px;' +
+    'font-weight:600;color:var(--text)">Advanced — search new model architectures</div>' +
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:8px;max-width:640px;line-height:1.5">' +
+    'You don’t need this for the main loop. Use it to sweep hyperparameters and find new configs to Improve from.</div>'
+}
 async function renderChampionPanel() {
   const host = byId('champion-panel')
   if (!host) return
@@ -20441,6 +20457,7 @@ async function renderExploration(fromPoll) {
   }
   void renderChampionPanel()
   void renderLeaderboardPanel()
+  renderExplorationAdvancedHead()
   const recordType = manifest.recordType
   // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
   // heavy re-scans pile up and the spinner never settles. The in-flight render paints the fresh state.

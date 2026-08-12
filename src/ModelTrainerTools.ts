@@ -244,6 +244,7 @@ import {
   renderReplayText,
   nextChampionStep,
   fitRatingFromPairings,
+  buildLeaderboardFromRuns,
   primaryFitness,
 } from './modelTrainerUtils.js'
 import {
@@ -4023,6 +4024,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       state.updatedAt = now()
       await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
       params.onRecordWritten?.(stateType, 'current')
+      // Live scoreboard: rebuild the comparable leaderboard from stored numbers so the board climbs each
+      // generation without re-playing the gauntlet (a no-op for projects that declare no `ratingAnchors`).
+      await refreshStoredLeaderboard(params.scope, recordType, manifest, params.onRecordWritten)
       await params.onProgress?.({
         phase: decision.done ? 'done' : 'generation',
         generation,
@@ -4049,11 +4053,31 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     entries: LeaderboardEntry[],
     spine: LeaderboardRecord['spine'],
     gamesPerRung: number,
+    basis: LeaderboardRecord['basis'],
     onRecordWritten?: (type: string, key: string) => void,
   ): Promise<void> {
-    const content: LeaderboardRecord = { entries, spine, gamesPerRung, ranAt: now() }
+    const content: LeaderboardRecord = { entries, spine, gamesPerRung, basis, ranAt: now() }
     await deps.storage.upsertRecord({ scope, type: `${recordType}-leaderboard`, key: 'current', content })
     onRecordWritten?.(`${recordType}-leaderboard`, 'current')
+  }
+
+  // Refresh the comparable leaderboard from ALREADY-STORED win-rates (zero new games): every completed run's
+  // win-rates-vs-anchors are fit to a rating on one scale. The Improve loop calls this after each generation so
+  // the board climbs live; `rateModels` supersedes it on demand with a fresh-games gauntlet (`basis: gauntlet`).
+  async function refreshStoredLeaderboard(
+    scope: string,
+    recordType: string,
+    manifest: TrainerManifest,
+    onRecordWritten?: (type: string, key: string) => void,
+  ): Promise<void> {
+    if (!manifest.ratingAnchors) return
+    const runs = (await deps.storage.listRecords({
+      scope,
+      type: recordType,
+      omit: HEAVY_RUN_FIELDS,
+    })) as Array<{ key?: string | null; content?: Record<string, unknown> }>
+    const entries = buildLeaderboardFromRuns(runs, manifest.ratingAnchors)
+    await writeLeaderboard(scope, recordType, entries, manifest.ratingSpine ?? [], 0, 'stored', onRecordWritten)
   }
 
   async function rateModels(params: RateModelsParams): Promise<RateModelsResult> {
@@ -4089,7 +4113,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       })
     }
     if (!models.length) {
-      await writeLeaderboard(params.scope, recordType, [], spine, gamesPerRung, params.onRecordWritten)
+      await writeLeaderboard(params.scope, recordType, [], spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
       return { recordType, entries: [], skipped }
     }
 
@@ -4135,7 +4159,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       entries.push({ runKey: row.model_id, ...(modelName ? { modelName } : {}), ...rating, pairings: row.pairings })
     }
     entries.sort((a, b) => b.lowerBound - a.lowerBound)
-    await writeLeaderboard(params.scope, recordType, entries, spine, gamesPerRung, params.onRecordWritten)
+    await writeLeaderboard(params.scope, recordType, entries, spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
     return { recordType, entries, skipped }
   }
 
