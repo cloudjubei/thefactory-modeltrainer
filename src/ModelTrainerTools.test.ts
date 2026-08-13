@@ -3133,6 +3133,108 @@ describe('runChampionTraining (champion autopilot loop)', () => {
   })
 })
 
+describe('runAutopilot (single-Start process orchestrates screen → search → improve → done)', () => {
+  const autopilotManifest = manifest({
+    levers: {
+      model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+      seed: { type: 'number', default: 0 },
+    },
+    learnedCores: ['alphazero'],
+  })
+
+  it('walks the phases as each child changes the state, and stops when nothing is left', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const launched: string[] = []
+    // Each child sub-process is stubbed to write the state it would produce, so the next round's signals advance.
+    const launchActivity = async (type: string, params: Record<string, unknown>) => {
+      launched.push(type)
+      if (type === 'train') {
+        const core = ((params.spec as { fixed: { model_name: string } }).fixed.model_name)
+        for (let s = 1; s <= 2; s++) {
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run',
+            key: `${core}-${s}`,
+            content: { status: 'completed', config: { model_name: core, seed: s } },
+          })
+        }
+      } else if (type === 'explore') {
+        await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+      } else if (type === 'train-champion') {
+        await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+      }
+      return { activityId: `child-${launched.length}` }
+    }
+    const result = await tools.runAutopilot({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: autopilotManifest,
+      maxRounds: 10,
+      launchActivity,
+      awaitActivity: async () => 'completed',
+    })
+    // screen mcts → screen alphazero → search (explore) → improve (train-champion) → done
+    expect(launched).toEqual(['train', 'train', 'explore', 'train-champion'])
+    expect(result.stopReason).toBe('done')
+    expect(result.rounds).toBe(4)
+    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+      stage: string
+    }
+    expect(state.stage).toBe('done')
+  })
+
+  it('treats a no-new-runs explore round as exhausted so improve still runs (the search-never-converges backstop)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    // All cores already screened → screen is skipped. Explore will add NO new runs and NOT stamp converged.
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    const launched: string[] = []
+    const result = await tools.runAutopilot({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: autopilotManifest,
+      maxRounds: 10,
+      launchActivity: async (type: string) => {
+        launched.push(type)
+        // explore: no convergence stamp, no new runs (covered space); train-champion: plateaus.
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: `c${launched.length}` }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    expect(launched).toEqual(['explore', 'train-champion']) // search exhausted → improve → done
+    expect(result.stopReason).toBe('done')
+  })
+
+  it('stops at the round budget instead of looping forever when a child makes no progress', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    let calls = 0
+    const result = await tools.runAutopilot({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: autopilotManifest,
+      maxRounds: 3,
+      launchActivity: async () => {
+        calls++
+        return { activityId: `c${calls}` } // writes NOTHING → signals never advance
+      },
+      awaitActivity: async () => 'completed',
+    })
+    expect(result.stopReason).toBe('budget')
+    expect(calls).toBe(3) // capped at maxRounds
+  })
+})
+
 describe('rateModels (comparable-strength leaderboard)', () => {
   const rateManifest = manifest({
     gauntlet: 'py -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}',

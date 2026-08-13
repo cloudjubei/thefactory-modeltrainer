@@ -51,6 +51,13 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     optionalParams: ['maxGenerations', 'targetStrength', 'patience', 'opponent', 'evalGames', 'hyperparams'],
   },
   {
+    activityType: 'autopilot',
+    label: 'Start (autopilot)',
+    description:
+      'The single "Start" button: ONE durable process that works out the next thing to do and does it — screen any newly-added architecture (a model_name choice with too few runs), then search the config space (explore), then improve the champion for a LEARNED core (train-champion) — orchestrating those existing sub-processes as children and stopping only when nothing is left without new input. This is "the whole point of model trainer": press once and it drives itself. `maxRounds` caps the number of sub-process rounds (a backstop).',
+    optionalParams: ['maxRounds', 'minScreenRuns', 'screenSeeds', 'improveParams', 'searchParams'],
+  },
+  {
     activityType: 'rate-models',
     label: 'Rate models (leaderboard)',
     description:

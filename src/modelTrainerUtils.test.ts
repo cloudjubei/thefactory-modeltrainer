@@ -6,6 +6,8 @@ import {
   extractSampleGame,
   renderReplayText,
   nextChampionStep,
+  nextAutopilotStep,
+  deriveAutopilotSignals,
   fitRatingFromPairings,
   buildLeaderboardFromRuns,
   extractRunPairings,
@@ -5054,6 +5056,16 @@ describe('fitRatingFromPairings (pinned Bradley-Terry model rating)', () => {
     expect(r.ciHigh - r.ciLow).toBeGreaterThan(300)
   })
 
+  it('caps a weak-opponent-only rating so a big win vs a weak anchor cannot outrank a strong-measured model', () => {
+    // The exact bug: mcts@3409 got 97.86% vs heuristic (400) over 3267 games — a confident WEAK-anchor extrapolation.
+    const weakBig = fitRatingFromPairings([{ opponentRating: 400, score: 0.9786, games: 3267, opponent: 'heuristic' }])!
+    expect(weakBig.flags).toContain('weak-opponent-only') // now fires even though 0.9786 < the 0.999 saturation bar
+    expect(weakBig.lowerBound).toBeLessThanOrEqual(600) // capped near the strongest anchor it actually faced (400)+200
+    // a model genuinely measured against the strong 1100 anchor out-ranks it
+    const strongMeasured = fitRatingFromPairings([{ opponentRating: 1100, score: 0.5, games: 50, opponent: 'mcts_strong' }])!
+    expect(strongMeasured.lowerBound).toBeGreaterThan(weakBig.lowerBound)
+  })
+
   it('more games tighten the interval', () => {
     const few = fitRatingFromPairings([{ opponentRating: 800, score: 0.6, games: 10 }])!
     const many = fitRatingFromPairings([{ opponentRating: 800, score: 0.6, games: 300 }])!
@@ -5167,6 +5179,16 @@ describe('nextChampionStep (champion-training autopilot stop decision)', () => {
     expect(r.stopReason).toBe('budget')
   })
 
+  it('reports plateau (not budget) when it plateaus exactly at the generation budget — so the autopilot stops', () => {
+    const r = nextChampionStep(
+      { plateauCount: 2, bestVsStrongMcts: 0.6 },
+      { generation: 10, promoted: false, winRateVsStrongMcts: 0.6 }, // hits maxGenerations AND patience
+      { maxGenerations: 10, patience: 3 },
+    )
+    expect(r.done).toBe(true)
+    expect(r.stopReason).toBe('plateau') // plateau wins over budget
+  })
+
   it('stops when the strength target is reached (takes precedence over budget/plateau)', () => {
     const r = nextChampionStep(
       { plateauCount: 5, bestVsStrongMcts: 0.9 },
@@ -5175,6 +5197,87 @@ describe('nextChampionStep (champion-training autopilot stop decision)', () => {
     )
     expect(r.done).toBe(true)
     expect(r.stopReason).toBe('reached-target')
+  })
+})
+
+describe('nextAutopilotStep (the single-Start process decides the next thing to do)', () => {
+  const base = {
+    unscreenedCores: [],
+    searchConverged: true,
+    learnedCores: ['alphazero'],
+    hasStartingPoint: true,
+    championPlateaued: false,
+  }
+
+  it('screens a newly-added architecture FIRST (before searching or improving)', () => {
+    const d = nextAutopilotStep({ ...base, unscreenedCores: ['ppo', 'resnet'], searchConverged: false, championPlateaued: false })
+    expect(d.action).toBe('screen')
+    expect(d.target).toBe('ppo') // the first unscreened one
+  })
+
+  it('searches the config space while exploration has not converged (once nothing new to screen)', () => {
+    const d = nextAutopilotStep({ ...base, searchConverged: false })
+    expect(d.action).toBe('search')
+  })
+
+  it('improves the champion once search has converged and a learnable core has a starting point', () => {
+    const d = nextAutopilotStep({ ...base, searchConverged: true, championPlateaued: false })
+    expect(d.action).toBe('improve')
+  })
+
+  it('search takes precedence over improve — a plateaued champion still yields to unfinished search', () => {
+    const d = nextAutopilotStep({ ...base, searchConverged: false, championPlateaued: true })
+    expect(d.action).toBe('search')
+  })
+
+  it('is DONE only when nothing is left: screened, search converged, champion plateaued', () => {
+    const d = nextAutopilotStep({ ...base, championPlateaued: true })
+    expect(d.action).toBe('done')
+  })
+
+  it('is DONE after search converges when there is no learnable core to improve', () => {
+    const d = nextAutopilotStep({ ...base, learnedCores: [], championPlateaued: false })
+    expect(d.action).toBe('done')
+  })
+
+  it('does not improve without a starting point — stays done rather than climbing from nothing', () => {
+    const d = nextAutopilotStep({ ...base, hasStartingPoint: false })
+    expect(d.action).toBe('done')
+  })
+})
+
+describe('deriveAutopilotSignals (live state → signals)', () => {
+  const input = {
+    modelChoices: ['random', 'heuristic', 'mcts', 'alphazero'],
+    learnedCores: ['alphazero'],
+    completedRunCountByCore: { random: 5, heuristic: 5, mcts: 5, alphazero: 5 },
+    minScreenRuns: 2,
+    explorationConverged: true,
+    championStopReason: undefined as undefined | 'plateau' | 'budget' | 'reached-target' | 'aborted',
+  }
+
+  it('flags a core with too few runs as unscreened', () => {
+    const s = deriveAutopilotSignals({ ...input, completedRunCountByCore: { mcts: 5, alphazero: 1 } })
+    expect(s.unscreenedCores).toEqual(['random', 'heuristic', 'alphazero']) // <2 runs (alphazero:1, others:0)
+  })
+
+  it('has a starting point once any core has a completed run', () => {
+    expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: { mcts: 1 } }).hasStartingPoint).toBe(true)
+    expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: {} }).hasStartingPoint).toBe(false)
+  })
+
+  it('counts the champion as plateaued only on plateau / reached-target, not budget or aborted', () => {
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(true)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(true)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'budget' }).championPlateaued).toBe(false)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'aborted' }).championPlateaued).toBe(false)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: undefined }).championPlateaued).toBe(false)
+  })
+
+  it('passes exploration convergence + learned cores straight through', () => {
+    const s = deriveAutopilotSignals({ ...input, explorationConverged: false })
+    expect(s.searchConverged).toBe(false)
+    expect(s.learnedCores).toEqual(['alphazero'])
   })
 })
 

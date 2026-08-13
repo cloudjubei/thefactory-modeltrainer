@@ -420,6 +420,10 @@ export interface TrainerManifest {
   /** The FIXED gauntlet spine (reference rungs + frozen ratings) the `rate-models` capability plays every
    * model against. Frozen so ratings stay comparable across campaigns. */
   ratingSpine?: RatingSpineRung[]
+  /** model_name choices that are LEARNABLE — a warm-start ladder can compound them across generations (e.g.
+   * `["alphazero"]`). The single-Start autopilot climbs these via `improve`; a project with none never enters
+   * the improve phase (its search-and-stop is the whole loop). */
+  learnedCores?: string[]
   /**
    * How many math threads ONE run of this project wants (its `run` command's per-process thread cap).
    * When set, a campaign with no explicit `concurrency` packs `floor(hostCpus / maxThreadsPerRun)` runs
@@ -1843,6 +1847,98 @@ export interface CalibrateTrainingParams {
 }
 
 export type ChampionStopReason = 'reached-target' | 'plateau' | 'budget' | 'aborted'
+
+// --- the single "Start" autopilot: ONE process that works out the next thing to do ----------------------
+/** What the autopilot should do next. `screen` = probe a newly-added architecture; `search` = explore the
+ * config space; `improve` = climb the champion (warm-start ladder); `done` = nothing left without new input. */
+export type AutopilotAction = 'screen' | 'search' | 'improve' | 'done'
+
+/** The derived state the autopilot decides from — kept a plain data bag so the decision is a PURE function. */
+export interface AutopilotSignals {
+  /** model_name choices declared by the manifest but not yet sufficiently sampled (a new architecture added). */
+  unscreenedCores: string[]
+  /** The config-space exploration has converged (its search is exhausted for now). */
+  searchConverged: boolean
+  /** model_name choices that are LEARNABLE — a warm-start ladder can compound them (e.g. alphazero). */
+  learnedCores: string[]
+  /** There is at least one completed run to improve a champion from (search produced a starting point). */
+  hasStartingPoint: boolean
+  /** The champion ladder has stopped improving (plateau / budget / target reached). */
+  championPlateaued: boolean
+}
+
+/** The autopilot's decision: the next action + a one-line reason (surfaced to the user) + an optional target. */
+export interface AutopilotDecision {
+  action: AutopilotAction
+  reason: string
+  target?: string
+}
+
+export type AutopilotStopReason = 'done' | 'budget' | 'aborted'
+
+/** One round of the autopilot loop — the child sub-process it launched and why. */
+export interface AutopilotRound {
+  round: number
+  action: AutopilotAction
+  reason: string
+  target?: string
+  childId?: string
+  ranAt: string
+}
+
+/** The autopilot's durable state (`{recordType}-autopilot`, key `current`) — what it's doing now + its log. */
+export interface AutopilotState {
+  stage: 'running' | 'done'
+  round: number
+  /** The action currently in flight (drives the viewer's step-adaptive display). */
+  currentAction?: AutopilotAction
+  currentReason?: string
+  currentTarget?: string
+  history: AutopilotRound[]
+  stopReason?: AutopilotStopReason
+  updatedAt: string
+}
+
+export interface AutopilotProgress {
+  round: number
+  action: AutopilotAction
+  reason: string
+  done: boolean
+}
+
+export interface AutopilotParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Hard cap on autopilot rounds (each launches a whole sub-process) — a backstop against an endless loop. */
+  maxRounds: number
+  /** A model_name choice is "screened" once it has at least this many completed runs (default 2). */
+  minScreenRuns?: number
+  /** Seeds to sample when screening a new architecture (default 2). */
+  screenSeeds?: number
+  /** Passed through to the `improve` (train-champion) sub-process. */
+  improveParams?: Record<string, unknown>
+  /** Passed through to the `search` (explore) sub-process. */
+  searchParams?: Record<string, unknown>
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  activityId?: string
+  onProgress?: (p: AutopilotProgress) => void
+  onRecordWritten?: (type: string, key: string) => void
+  /** Launch a child sub-process (`explore` / `train` / `train-champion`) and return its id; the backend host
+   * injects the base params (recordType/dir/manifestRelPath). Omit to no-op (the pure-decision unit tests). */
+  launchActivity?: (type: string, params: Record<string, unknown>) => Promise<{ activityId?: string }>
+  /** Await a launched child to terminal; `undefined` ⇒ the autopilot itself was aborted mid-wait. */
+  awaitActivity?: (id: string) => Promise<string | undefined>
+}
+
+export interface AutopilotResult {
+  recordType: string
+  rounds: number
+  stopReason: AutopilotStopReason
+  history: AutopilotRound[]
+}
 
 /** One generation of the champion-training ladder — the outcome of one warm-started training run. */
 export interface ChampionGeneration {
@@ -4226,6 +4322,9 @@ export interface ModelTrainerTools {
    * autopilot). Persists a `{recordType}-champion` state record.
    */
   runChampionTraining(params: ChampionTrainingParams): Promise<ChampionTrainingResult>
+  /** The single-Start autopilot — one durable process that screens new architectures, searches the config
+   * space, and improves the champion in turn, stopping only when nothing is left without new input. */
+  runAutopilot(params: AutopilotParams): Promise<AutopilotResult>
   /**
    * Rate every completed model on ONE comparable scale — play each against the manifest's fixed gauntlet
    * spine, fit a pinned rating, and write a `{recordType}-leaderboard` ranked by the conservative lower bound.

@@ -21,6 +21,7 @@ describe('trainer launchable activities', () => {
       'train',
       'explore',
       'train-champion',
+      'autopilot',
       'rate-models',
       'judge',
       'evaluate',

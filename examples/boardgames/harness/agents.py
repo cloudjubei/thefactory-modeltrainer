@@ -74,6 +74,23 @@ def state_key(game: Game, state: State) -> object:
     return (tuple(game.observation(state, game.current_player(state))), game.current_player(state))
 
 
+# --- generic one-ply tactical helpers (domain-oblivious — only the Game protocol) -----------------------
+def _hands_opponent_win(game: Game, state: State, action: int) -> bool:
+    """Would playing `action` let the opponent win on their very next move? (never walk into a mate-in-1)."""
+    s2 = game.step(state, action)
+    if game.is_terminal(s2):
+        return False
+    opp = game.current_player(s2)
+    return any(game.step(s2, b).winner == opp for b in game.legal_actions(s2))
+
+
+def _tactical_move(game: Game, state: State, rng: random.Random) -> int:
+    """A tactically-sane rollout move: the game's heuristic (win / block / centre) when it exposes one, else
+    uniform-random. This is what stops MCTS's Monte-Carlo returns from being tactically blind."""
+    fn = getattr(game, "heuristic_action", None)
+    return fn(state, rng) if fn is not None else rng.choice(game.legal_actions(state))
+
+
 class MctsAgent:
     """Generic UCT Monte-Carlo Tree Search over the game protocol — a REAL tree, strength scales with `sims`.
 
@@ -98,13 +115,23 @@ class MctsAgent:
         if len(legal) == 1:
             self.sims_used += 1
             return legal[0]
+        me = game.current_player(state)
+        # Tactical guards, BEFORE trusting visit counts — the two sources of the residual ~1.5% loss:
+        # (1) take an immediate win outright; (2) never play a move that hands the opponent a mate-in-1
+        # (unless every move does). Combined with the tactical rollout below, this drives loss toward 0.
+        wins = [a for a in legal if game.step(state, a).winner == me]
+        if wins:
+            self.sims_used += 1
+            return wins[0]
+        safe = [a for a in legal if not _hands_opponent_win(game, state, a)]
+        candidates = safe or legal
         root_key = state_key(game, state)
         for _ in range(self.sims):
             self.sims_used += 1
             self._simulate(game, state, root_key, rng)
         root = self._tree[root_key]
-        # robust child: the most-visited action, ties broken by mean value
-        return max(legal, key=lambda a: (root.child_n[a], root.child_w[a] / root.child_n[a] if root.child_n[a] else 0.0))
+        # robust child: the most-visited SAFE action, ties broken by mean value
+        return max(candidates, key=lambda a: (root.child_n[a], root.child_w[a] / root.child_n[a] if root.child_n[a] else 0.0))
 
     def _simulate(self, game: Game, state: State, root_key: object, rng: random.Random) -> None:
         path: list[tuple[_Node, int, int]] = []  # (node, action, mover) edges walked this simulation
@@ -129,7 +156,7 @@ class MctsAgent:
 
     def _rollout(self, game: Game, state: State, rng: random.Random) -> list[float]:
         while not game.is_terminal(state):
-            state = game.step(state, rng.choice(game.legal_actions(state)), rng)
+            state = game.step(state, _tactical_move(game, state, rng), rng)
         return game.returns(state)
 
 

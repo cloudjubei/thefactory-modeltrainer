@@ -74,6 +74,18 @@ def test_mcts_blocks_an_immediate_threat():
     assert MctsAgent(sims=400).act(game, state, random.Random(0)) == 3
 
 
+def test_mcts_takes_the_win_without_needing_search():
+    game = Connect4()
+    state = _replay(game, [3, 0, 3, 1, 3, 2])  # P0 completes column 3 vertically
+    assert MctsAgent(sims=1).act(game, state, random.Random(0)) == 3  # the tactical guard, not search depth
+
+
+def test_mcts_never_hands_the_opponent_a_mate_in_one():
+    game = Connect4()
+    state = _replay(game, [0, 3, 1, 3, 2, 3])  # P1 threatens column 3; every other move loses on the spot
+    assert MctsAgent(sims=1).act(game, state, random.Random(0)) == 3  # blocks even at a single simulation
+
+
 def test_mcts_builds_a_tree_beyond_the_root():
     game = Connect4()
     agent = MctsAgent(sims=200)

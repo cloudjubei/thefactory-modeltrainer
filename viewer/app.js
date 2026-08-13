@@ -102,7 +102,7 @@ const PROPOSE_HELP_TEXT =
   "Sends the manifest's levers, the run history and the verdicts to the LLM and asks for new experiment specs likely to beat the best run. Proposals are validated against the levers, deduped by spec, and land below as untested hypotheses that auto-verify against your runs."
 const NO_RUNNERS_HINT = 'No runners paired — manage them in the Compute Runners panel.'
 const TABS = [
-  { id: 'runs', label: 'Runs', icon: iconRunsSvg },
+  { id: 'runs', label: 'Results', icon: iconRunsSvg },
   { id: 'hypotheses', label: 'Hypotheses', icon: iconHypothesisSvg },
   { id: 'papers', label: 'Papers', icon: iconPaperSvg },
   { id: 'models', label: 'Models', icon: iconModelSvg },
@@ -355,6 +355,9 @@ let runsVersionFilter = ''
 let comparisonAgg = 'full'
 let comparisonSortKey = 'objective'
 let comparisonSortDir = 'desc'
+// The Models (Results) view's own sortable-column state, independent of the comparison sort.
+let modelsSortKey = 'score'
+let modelsSortDir = 'desc'
 // The last-rendered comparison rows, keyed by axis signature → { keys, label }, so a row click can drill
 // into exactly those runs.
 let comparisonGroupsCache = new Map()
@@ -2518,7 +2521,8 @@ function resetDashboardState() {
   // read allRunsCache directly) can't paint the PREVIOUS project's runs, and the lock re-initialises to the
   // new project's best run. modelStatsCache/Stale reset so the freshness note + latest-refresh frontier are
   // per-project too (favoritesCache reloads in renderRuns).
-  runsViewMode = 'runs'
+  // A game project (ratingAnchors) opens on the MODELS scoreboard by default; other projects keep the flat runs list.
+  runsViewMode = manifest && manifest.ratingAnchors ? 'models' : 'runs'
   allRunsCache = []
   corpusMode = null
   corpusLoaded = false
@@ -3421,7 +3425,7 @@ function drillIntoComparison(sig) {
   if (!group || !group.keys.length) return
   const mode = runsViewMode
   openRunsSelection(group.keys, group.label, {
-    label: mode === 'dataset' ? 'By dataset' : 'By environment',
+    label: mode === 'dataset' ? 'By dataset' : mode === 'environment' ? 'By environment' : mode === 'models' ? 'Models' : 'Results',
     back: () => {
       runsViewMode = mode
       runsPage = 0
@@ -3436,6 +3440,15 @@ function toggleComparisonSort(key) {
   else {
     comparisonSortKey = key
     comparisonSortDir = key === 'axis' ? 'asc' : 'desc'
+  }
+  renderRunsTable()
+}
+// Click-to-sort for the Models (Results) view — model label ascends first, the numeric columns descend first.
+function toggleModelsSort(key) {
+  if (modelsSortKey === key) modelsSortDir = modelsSortDir === 'asc' ? 'desc' : 'asc'
+  else {
+    modelsSortKey = key
+    modelsSortDir = key === 'model' ? 'asc' : 'desc'
   }
   renderRunsTable()
 }
@@ -3720,6 +3733,17 @@ function renderExplorationAdvancedHead() {
     if (body) body.style.display = ''
     return
   }
+  // STEP-ADAPTIVE: while the autopilot is on its SEARCH step, the config-space engine below IS the live view —
+  // force it open with a "searching" header instead of the manual "Advanced" toggle.
+  if (autopilotStep === 'search') {
+    if (body) body.style.display = ''
+    host.innerHTML =
+      '<div style="margin:16px 0 8px;padding:12px 2px;border-top:1px solid var(--border);' +
+      'font-size:13px;font-weight:600;color:var(--accent)">● Searching the config space</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin:0 0 8px;max-width:640px;line-height:1.5">' +
+      'The autopilot is sweeping configs to find a stronger setup — this is its live search.</div>'
+    return
+  }
   if (body) body.style.display = explorationAdvancedOpen ? '' : 'none'
   const caret = explorationAdvancedOpen ? '▾' : '▸'
   host.innerHTML =
@@ -3757,10 +3781,114 @@ async function championActivityRunning() {
     return false
   }
 }
+// The single "Start" autopilot — one durable process that screens new architectures, searches the config
+// space, then improves the champion, stopping when nothing's left. This is the primary control of the tab;
+// the champion "Improve" panel + the advanced search below it are the manual overrides it drives.
+let autopilotLaunching = false
+// The autopilot's live step ('screen'|'search'|'improve'|'done'|null) — drives the STEP-ADAPTIVE view: the
+// config-space heatmap auto-opens while 'search'; the champion ladder already surfaces its own running state.
+let autopilotStep = null
+function autopilotEnabled() {
+  // Only where it adds value over plain exploration: a project with a LEARNABLE core to compound (the improve
+  // phase). Without one, the autopilot would just duplicate the explore engine, so the Start button stays off.
+  return !!(
+    manifest &&
+    Array.isArray(manifest.learnedCores) &&
+    manifest.learnedCores.length &&
+    window.OverseerBridge &&
+    window.OverseerBridge.embedded
+  )
+}
+async function autopilotActivityRunning() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    const all = (res && res.activities) || []
+    return all.some(
+      (a) =>
+        a.activityType === 'autopilot' &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        ['running', 'starting', 'queued'].includes(a.status),
+    )
+  } catch {
+    return false
+  }
+}
+const AUTOPILOT_STEP_LABEL = {
+  screen: 'Screening a new architecture',
+  search: 'Searching the config space',
+  improve: 'Improving the champion',
+  done: 'Done',
+}
+async function renderAutopilotPanel() {
+  const host = byId('autopilot-panel')
+  if (!host) return
+  if (!autopilotEnabled()) {
+    host.innerHTML = ''
+    autopilotStep = null
+    return
+  }
+  let state = null
+  try {
+    const rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-autopilot', key: 'current' })
+    const rec = Array.isArray(rows) ? rows[0] : rows
+    state = rec ? rec.content || rec : null
+  } catch {
+    state = null
+  }
+  const running = await autopilotActivityRunning()
+  const active = running || autopilotLaunching
+  // Publish the live step so the exploration view can adapt (heatmap while searching); cleared when not running.
+  autopilotStep = running ? (state && state.currentAction ? state.currentAction : 'search') : null
+  let status
+  if (active) {
+    const action = state && state.currentAction ? state.currentAction : 'search'
+    const label = AUTOPILOT_STEP_LABEL[action] || 'Working'
+    const reason = state && state.currentReason ? state.currentReason : ''
+    status =
+      `<div class="ap-status ap-running">● ${escapeHtml(label)}${state && state.round ? ` · round ${state.round}` : ''}</div>` +
+      (reason ? `<div class="ap-hint">${escapeHtml(reason)}</div>` : '')
+  } else if (state && state.stage === 'done' && state.stopReason === 'budget') {
+    // Hit the per-launch round cap, NOT genuine convergence — there may well be more to do.
+    status =
+      `<div class="ap-status">⏸ Paused at the round cap (${state.round || 0} rounds).</div>` +
+      `<div class="ap-hint">It stopped on the round budget, not because it ran out of things to do — press Start to continue where it left off.</div>`
+  } else if (state && state.stage === 'done') {
+    status =
+      `<div class="ap-status">✔ Converged — nothing left to improve without new input (${state.round || 0} rounds).</div>` +
+      `<div class="ap-hint">Add a new architecture or widen a lever, then press Start again.</div>`
+  } else {
+    status =
+      `<div class="ap-hint">Press Start — the process works out the next thing to do: screen any new architecture, search the config space, then improve the champion. It stops only when there's nothing left without your input.</div>`
+  }
+  host.innerHTML =
+    `<div class="ap-panel">` +
+    `<div class="ap-head">Find the best model</div>` +
+    `<div class="ap-cta"><button type="button" class="ap-btn" id="autopilot-start"${active ? ' disabled' : ''}>${autopilotLaunching ? 'Starting…' : running ? 'Running…' : 'Start'}</button></div>` +
+    status +
+    `</div>`
+  const btn = byId('autopilot-start')
+  if (btn) btn.onclick = onStartAutopilot
+}
+async function onStartAutopilot() {
+  if (autopilotLaunching) return
+  autopilotLaunching = true
+  await renderAutopilotPanel()
+  try {
+    await window.OverseerBridge.startActivity('autopilot', trainerActivityParams({ maxRounds: 12 }))
+    showToast('Started')
+  } catch {
+    showToast('Start failed')
+  } finally {
+    autopilotLaunching = false
+    await renderAutopilotPanel()
+  }
+}
 async function renderChampionPanel() {
   const host = byId('champion-panel')
   if (!host) return
-  if (!championEnabled() || !window.Champion) {
+  // Unified: when the autopilot drives everything, its Start panel IS the control — the manual "Improve" panel
+  // would be a redundant second launcher, so it's hidden (the autopilot surfaces the improve step itself).
+  if (!championEnabled() || !window.Champion || autopilotEnabled()) {
     host.innerHTML = ''
     return
   }
@@ -3791,46 +3919,6 @@ async function onLaunchChampion(config) {
   } finally {
     championLaunching = false
     await renderChampionPanel()
-  }
-}
-// The comparable-strength leaderboard: enabled when the project declares a `gauntlet` command (a fixed
-// reference spine to rate every model against) and we're embedded.
-let leaderboardRating = false
-function rateModelsEnabled() {
-  return !!(manifest && manifest.gauntlet) && !!(window.OverseerBridge && window.OverseerBridge.embedded)
-}
-async function renderLeaderboardPanel() {
-  const host = byId('leaderboard-panel')
-  if (!host) return
-  if (!rateModelsEnabled() || !window.Leaderboard) {
-    host.innerHTML = ''
-    return
-  }
-  let rows = []
-  try {
-    rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-leaderboard', key: 'current' })
-  } catch {
-    rows = []
-  }
-  const rec = Array.isArray(rows) ? rows[0] : rows
-  window.Leaderboard.render(host, {
-    record: rec ? rec.content || rec : null,
-    rating: leaderboardRating,
-    onRate: onRateModels,
-  })
-}
-async function onRateModels(config) {
-  if (leaderboardRating) return
-  leaderboardRating = true
-  await renderLeaderboardPanel()
-  try {
-    await window.OverseerBridge.startActivity('rate-models', trainerActivityParams(config))
-    showToast('Rating models…')
-  } catch {
-    showToast('Rate failed')
-  } finally {
-    leaderboardRating = false
-    await renderLeaderboardPanel()
   }
 }
 // Whether cross-testing (replaying a kept checkpoint on OTHER assets / an extended window) is available:
@@ -4693,7 +4781,12 @@ function runsViewModeHtml() {
           'The runs you last opened from a By value / By dataset / By environment row (or another “runs ↗”). ← Back returns to where you opened it.',
         )
       : ''
-  return `<div class="runs-viewmode">${btn('runs', 'Runs')}${favBtn}${datasetBtn}${envBtn}${robustBtn}${selBtn}</div>`
+  const modelsBtn = btn(
+    'models',
+    'Models',
+    'Each row is a whole MODEL (a config; its seeds / champion generations pooled), ranked by comparable strength — this sorted view IS the scoreboard. Click a model to open its runs.',
+  )
+  return `<div class="runs-viewmode">${modelsBtn}${btn('runs', 'All runs')}${favBtn}${datasetBtn}${envBtn}${robustBtn}${selBtn}</div>`
 }
 function toggleRunsSort(id) {
   if (runsSortKey === id) runsSortDir = runsSortDir === 'asc' ? 'desc' : 'asc'
@@ -4841,6 +4934,153 @@ function comparisonRankControlsHtml(axis, cols) {
 // Render the Runs "By dataset / By environment" view: POOL every run the standard Runs filters keep, group by
 // the axis value, and show each group's [min · avg · max] of the standard Runs columns — "which
 // dataset/environment produces the best results", ranked by a chosen criterion.
+// A concise identity label for a MODEL (a setup = a config minus the seed): its model_name plus the first few
+// distinguishing model levers, e.g. "alphazero · az_sims=100 · opponent=mcts".
+function modelSetupLabel(run) {
+  const cfg = (run.summary && run.summary.config) || {}
+  const model = cfg.model_name || cfg.algo || 'model'
+  const parts = []
+  const levers = (manifest && manifest.levers) || {}
+  for (const [name, spec] of Object.entries(levers)) {
+    if (name === 'seed' || name === 'model_name' || name === 'algo') continue
+    if ((spec.scope || 'model') !== 'model') continue
+    const v = cfg[name]
+    if (v === undefined || v === null || v === 'n/a' || v === '') continue
+    parts.push(`${name}=${v}`)
+    if (parts.length >= 3) break
+  }
+  return parts.length ? `${model} · ${parts.join(' · ')}` : String(model)
+}
+
+// runKey → comparable strength (rating lower bound) from the stored leaderboard record, so a model's strength
+// is read from the SAME rating math the engine already computed (no duplication in the viewer).
+async function leaderboardStrengthMap() {
+  const map = new Map()
+  try {
+    const recs = await queryRecords(manifest.recordType + '-leaderboard', 'current')
+    const rec = (recs && (recs.find((r) => r.key === 'current') || recs[0])) || null
+    const entries = rec && (rec.content || rec).entries
+    if (Array.isArray(entries)) {
+      for (const e of entries) {
+        if (e && e.runKey != null && typeof e.lowerBound === 'number') {
+          const prev = map.get(e.runKey)
+          if (prev === undefined || e.lowerBound > prev) map.set(e.runKey, e.lowerBound)
+        }
+      }
+    }
+  } catch {
+    // no leaderboard yet — strengths show as "—" until a run is rated
+  }
+  return map
+}
+
+function formatModelScore(v) {
+  if (v === null || v === undefined || !isFinite(v)) return '—'
+  return Math.abs(v) >= 100 ? String(Math.round(v)) : Number(v).toFixed(3)
+}
+
+// Results = MODELS. Each row is one model (a setup = config minus seed), pooling its runs (a champion's
+// warm-start generations, or a config's seed replicas). Ranked by comparable STRENGTH (the rating) when the
+// project declares ratingAnchors, else by best objective. Clicking a row opens that model's runs — so the
+// "Runs" become a model's training history, and this single sorted view IS the scoreboard (no separate panel).
+async function renderModelsView(body) {
+  closeRunDetail()
+  renderCompare()
+  let corpus = []
+  try {
+    corpus = await loadRawCorpus(manifest.recordType)
+  } catch {
+    corpus = runsCache
+  }
+  const filtered = applyRunsFilters(corpus)
+  const completed = filtered.filter((r) => r.summary && r.summary.status === 'completed')
+  const anchored = !!(manifest && manifest.ratingAnchors)
+  const dir = (manifest && manifest.objective && manifest.objective.direction) || 'max'
+  const strengthByRun = anchored ? await leaderboardStrengthMap() : new Map()
+  // The metric a model is ranked by, PER RUN: comparable strength (anchored) else the raw objective. The row
+  // shows the TOP run (the seed/checkpoint you'd deploy); Spread shows how the model's runs ranged (stability).
+  const higherIsBetter = anchored || dir !== 'min'
+  const scoreOfRun = (r) =>
+    anchored ? strengthByRun.get(r.key) : typeof r.summary.objective === 'number' ? r.summary.objective : undefined
+  const groups = new Map()
+  for (const r of completed) {
+    const sk = setupKeyForRun(r) || r.key
+    let g = groups.get(sk)
+    if (!g) {
+      g = { setupKey: sk, keys: [], label: modelSetupLabel(r), vals: [] }
+      groups.set(sk, g)
+    }
+    g.keys.push(r.key)
+    const v = scoreOfRun(r)
+    if (typeof v === 'number') g.vals.push(v)
+  }
+  const models = [...groups.values()].map((g) => {
+    const has = g.vals.length > 0
+    return {
+      ...g,
+      best: has ? (higherIsBetter ? Math.max(...g.vals) : Math.min(...g.vals)) : null,
+      min: has ? Math.min(...g.vals) : null,
+      max: has ? Math.max(...g.vals) : null,
+    }
+  })
+  const spreadMag = (g) => (g.keys.length <= 1 || g.min == null ? -1 : g.max - g.min)
+  models.sort((a, b) => {
+    let cmp
+    if (modelsSortKey === 'model') cmp = String(a.label).localeCompare(String(b.label))
+    else if (modelsSortKey === 'runs') cmp = a.keys.length - b.keys.length
+    else if (modelsSortKey === 'spread') cmp = spreadMag(a) - spreadMag(b)
+    else {
+      const av = a.best == null ? -Infinity : higherIsBetter ? a.best : -a.best
+      const bv = b.best == null ? -Infinity : higherIsBetter ? b.best : -b.best
+      cmp = av - bv
+    }
+    return modelsSortDir === 'asc' ? cmp : -cmp
+  })
+  // Reuse the comparison row-click path: a setup-row's data-cmp-sig opens its keys in the Runs view.
+  comparisonGroupsCache = new Map(models.map((g) => [g.setupKey, { keys: g.keys, label: g.label }]))
+  const scoreLabel = anchored ? 'Strength' : `best ${escapeHtml((manifest.objective && manifest.objective.name) || 'objective')}`
+  const toolbar = runsToolbarHtml(completed.length, corpus.length)
+  if (!corpus.length) {
+    setHtml(body, `${toolbar}<div class="empty-hint">No completed runs yet — launch a campaign.</div>`)
+    return
+  }
+  if (!models.length) {
+    setHtml(body, `${toolbar}<div class="empty-hint">No models match the active filter — clear a filter above.</div>`)
+    return
+  }
+  const arrowOf = (k) => (modelsSortKey === k ? (modelsSortDir === 'asc' ? ' ▲' : ' ▼') : '')
+  const rows = models
+    .map((g) => {
+      const spread =
+        g.keys.length <= 1
+          ? '<span class="card-sub">single</span>'
+          : g.min == null
+            ? '—'
+            : `${formatModelScore(g.min)} … ${formatModelScore(g.max)}`
+      return `<tr class="setup-row" data-cmp-sig="${escapeHtml(g.setupKey)}" title="Open this model's runs">
+        <td>${escapeHtml(g.label)}</td>
+        <td class="num" style="font-weight:600">${g.best == null ? '—' : formatModelScore(g.best)}</td>
+        <td class="num">${g.keys.length}</td>
+        <td class="num">${spread}</td>
+      </tr>`
+    })
+    .join('')
+  const legend = anchored
+    ? "Each row is one MODEL (a config; its seeds / champion generations pooled). <strong>Strength</strong> is the top run's comparable rating; <strong>Spread</strong> is how its runs ranged (tight = stable; for a champion, how far it climbed). Click a row to open its runs; click a header to sort."
+    : "Each row is one MODEL (a config; its seeds pooled). The score is the <strong>top seed</strong> — the one you'd deploy; <strong>Spread</strong> is how the seeds ranged (tight = stable; wide = the top may be a lucky seed). Click a row to open its runs; click a header to sort."
+  setHtml(
+    body,
+    `${toolbar}` +
+      `<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>` +
+      `<th class="cmp-th" data-model-sort="model"${helpAttr('The model — its config (minus the seed). Seeds / champion generations of the same config are one row.')}>Model${arrowOf('model')}</th>` +
+      `<th class="cmp-th num" data-model-sort="score"${helpAttr(anchored ? "Comparable strength (rating) of the model's TOP run — this sorted column is the scoreboard." : "The model's TOP seed — the best-faring run, the one you'd deploy.")}>${scoreLabel}${arrowOf('score')}</th>` +
+      `<th class="cmp-th num" data-model-sort="runs"${helpAttr('How many runs / seeds back this model.')}>Runs${arrowOf('runs')}</th>` +
+      `<th class="cmp-th num" data-model-sort="spread"${helpAttr("The min … max across the model's runs — how STABLE the top result is. Sort by this to surface the least-stable models. Click the row for the per-seed detail.")}>Spread${arrowOf('spread')}</th>` +
+      `</tr></thead><tbody>${rows}</tbody></table></div>` +
+      `<p class="runs-legend">${legend}</p>`,
+  )
+}
+
 function renderComparisonView(body) {
   const axis = runsViewMode
   const axisNoun = axis === 'dataset' ? 'dataset' : 'environment'
@@ -5003,6 +5243,12 @@ function renderRunsTable() {
   const body = byId('runs-body')
   const spark = byId('runs-sparkline')
   if (!body) return
+  // Results = Models: each row is a whole model (a setup), ranked by strength — the scoreboard.
+  if (runsViewMode === 'models') {
+    if (spark) spark.hidden = true
+    void renderModelsView(body)
+    return
+  }
   // By dataset / By environment are self-contained comparison views (own toolbar + aggregated table).
   if (runsViewMode === 'dataset' || runsViewMode === 'environment') {
     if (spark) spark.hidden = true
@@ -10749,6 +10995,11 @@ function setupRuns() {
       if (event.target.closest('#cmp-rank-dir')) {
         comparisonSortDir = comparisonSortDir === 'asc' ? 'desc' : 'asc'
         renderRunsTable()
+        return
+      }
+      const modelTh = event.target.closest('.cmp-th[data-model-sort]')
+      if (modelTh) {
+        toggleModelsSort(modelTh.dataset.modelSort)
         return
       }
       const cmpTh = event.target.closest('.cmp-th[data-cmp-sort]')
@@ -20491,14 +20742,15 @@ async function renderExploration(fromPoll) {
     container.innerHTML = '<div style="padding:26px;color:#8a97a9">Open a project to explore its config space.</div>'
     return
   }
+  await renderAutopilotPanel() // sets autopilotStep BEFORE the step-adaptive decisions below
   void renderChampionPanel()
-  void renderLeaderboardPanel()
+  // The comparable-strength ranking now lives in the Results tab (Models view) — no separate leaderboard here.
   renderExplorationAdvancedHead()
   const recordType = manifest.recordType
-  // Game project with Advanced collapsed: the Improve panel + leaderboard above ARE the tab. Skip the heavy
-  // config-space engine render (and its hidden-canvas heatmap), but keep polling so the Improve panel stays
-  // live (running state + the leaderboard climbing) — the poll re-runs renderChampionPanel every tick.
-  if (championEnabled() && !explorationAdvancedOpen) {
+  // Game project: the autopilot / champion panels above ARE the tab. Skip the heavy config-space engine render
+  // (and its hidden-canvas heatmap) UNLESS the user expanded Advanced OR the autopilot is on its SEARCH step —
+  // then the heatmap auto-opens so the view adapts to what the process is doing. Keep polling either way.
+  if (championEnabled() && !explorationAdvancedOpen && autopilotStep !== 'search') {
     await scheduleExplorationPoll(recordType, false)
     return
   }

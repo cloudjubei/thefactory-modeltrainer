@@ -70,6 +70,12 @@ import type {
   ChampionTrainingResult,
   ChampionTrainingState,
   ChampionGeneration,
+  ChampionStopReason,
+  AutopilotParams,
+  AutopilotResult,
+  AutopilotState,
+  AutopilotSignals,
+  AutopilotStopReason,
   RateModelsParams,
   RateModelsResult,
   LeaderboardEntry,
@@ -243,6 +249,8 @@ import {
   extractSampleGame,
   renderReplayText,
   nextChampionStep,
+  nextAutopilotStep,
+  deriveAutopilotSignals,
   fitRatingFromPairings,
   buildLeaderboardFromRuns,
   primaryFitness,
@@ -4051,6 +4059,151 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // The single-Start autopilot: ONE durable process that works out the next thing to do and does it, until
+  // there's nothing left without new input. Each round it re-derives signals from live state, asks the pure
+  // `nextAutopilotStep`, and launches the matching sub-process as a CHILD (reusing the existing controllers):
+  // `screen` → a `train` batch pinning the new architecture; `search` → an `explore`; `improve` → a
+  // `train-champion` ladder. It awaits each child, re-derives, and loops. Persists `{recordType}-autopilot`.
+  async function runAutopilot(params: AutopilotParams): Promise<AutopilotResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    const stateType = `${recordType}-autopilot`
+    const minScreenRuns = params.minScreenRuns ?? 2
+    const screenSeeds = params.screenSeeds ?? 2
+    const modelChoices = ((manifest.levers?.model_name?.choices as string[] | undefined) ?? []).map(String)
+    const learnedCores = manifest.learnedCores ?? []
+
+    const existing = await deps.storage.readRecord({ scope: params.scope, type: stateType, key: 'current' })
+    const prior = existing?.content as AutopilotState | undefined
+    const state: AutopilotState = {
+      stage: 'running',
+      round: prior?.round ?? 0,
+      history: prior?.history ?? [],
+      updatedAt: now(),
+    }
+
+    const persist = async (): Promise<void> => {
+      state.updatedAt = now()
+      await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+      params.onRecordWritten?.(stateType, 'current')
+    }
+
+    // A `search` (explore) child runs the WHOLE exploration campaign; on a mature/covered space it can exit
+    // "nothing new to run" WITHOUT stamping stage=converged, which would otherwise leave the autopilot issuing
+    // `search` forever and never reaching `improve`. So we ALSO treat search as converged once a search round
+    // adds zero new completed runs (the space is covered) — the backstop that unblocks the improve phase.
+    let searchExhausted = false
+    const totalCompleted = async (): Promise<number> => {
+      const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
+      return runs.reduce((n, r) => n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0), 0)
+    }
+    const deriveSignals = async (): Promise<AutopilotSignals> => {
+      const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
+      const completedRunCountByCore: Record<string, number> = {}
+      for (const r of runs) {
+        const c = r.content as { status?: string; config?: { model_name?: string } } | undefined
+        if (c?.status !== 'completed') continue
+        const core = c.config?.model_name
+        if (typeof core === 'string') completedRunCountByCore[core] = (completedRunCountByCore[core] ?? 0) + 1
+      }
+      const expl = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-exploration`, key: 'current' })
+      const explState = expl?.content as { stage?: string; done?: boolean } | undefined
+      const explorationConverged = searchExhausted || !!(explState && (explState.done || explState.stage === 'converged'))
+      const champ = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-champion`, key: 'current' })
+      const stopReason = (champ?.content as { stopReason?: ChampionStopReason } | undefined)?.stopReason
+      return deriveAutopilotSignals({
+        modelChoices,
+        learnedCores,
+        completedRunCountByCore,
+        minScreenRuns,
+        explorationConverged,
+        ...(stopReason ? { championStopReason: stopReason } : {}),
+      })
+    }
+
+    let stopReason: AutopilotStopReason = 'done'
+    let roundsThisRun = 0
+    while (true) {
+      if (params.abortSignal?.aborted) {
+        stopReason = 'aborted'
+        break
+      }
+      const decision = nextAutopilotStep(await deriveSignals())
+      state.currentAction = decision.action
+      state.currentReason = decision.reason
+      state.currentTarget = decision.target
+      if (decision.action === 'done') {
+        state.stage = 'done'
+        state.stopReason = 'done'
+        stopReason = 'done'
+        await persist()
+        await params.onProgress?.({ round: state.round, action: 'done', reason: decision.reason, done: true })
+        break
+      }
+      if (roundsThisRun >= params.maxRounds) {
+        stopReason = 'budget'
+        break
+      }
+      roundsThisRun += 1
+      state.round += 1
+      // Persist "now doing X" BEFORE launching, so the viewer's step-adaptive display reflects the live step.
+      await persist()
+      await params.onProgress?.({ round: state.round, action: decision.action, reason: decision.reason, done: false })
+
+      let childType: string
+      let childParams: Record<string, unknown>
+      if (decision.action === 'improve') {
+        childType = 'train-champion'
+        childParams = { ...(params.improveParams ?? {}) }
+      } else if (decision.action === 'screen') {
+        childType = 'train'
+        childParams = {
+          spec: { fixed: { model_name: decision.target }, seeds: Array.from({ length: screenSeeds }, (_, i) => i + 1) },
+        }
+      } else {
+        childType = 'explore'
+        childParams = { ...(params.searchParams ?? {}) }
+      }
+
+      const searchBefore = decision.action === 'search' ? await totalCompleted() : 0
+      let childId: string | undefined
+      if (params.launchActivity) {
+        const res = await params.launchActivity(childType, childParams)
+        childId = res.activityId
+        if (childId && params.awaitActivity) {
+          const status = await params.awaitActivity(childId)
+          if (status === undefined) {
+            stopReason = 'aborted'
+            break
+          }
+        }
+      }
+      // A search round that produced no new runs means the config space is covered — mark search exhausted so
+      // the next decision falls through to `improve` instead of re-searching a fully-covered space forever.
+      if (decision.action === 'search' && (await totalCompleted()) <= searchBefore) searchExhausted = true
+      state.history = [
+        ...state.history,
+        {
+          round: state.round,
+          action: decision.action,
+          reason: decision.reason,
+          ...(decision.target ? { target: decision.target } : {}),
+          ...(childId ? { childId } : {}),
+          ranAt: now(),
+        },
+      ]
+      await persist()
+    }
+
+    if (stopReason !== 'done') {
+      state.stopReason = stopReason
+      state.stage = stopReason === 'aborted' ? 'running' : 'done'
+      await persist()
+    }
+    return { recordType, rounds: state.round, stopReason, history: state.history }
+  }
+
   async function writeLeaderboard(
     scope: string,
     recordType: string,
@@ -4625,6 +4778,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     getRunGame,
     playBoardGame,
     runChampionTraining,
+    runAutopilot,
     rateModels,
     getTrainerState,
     getRunXAI,

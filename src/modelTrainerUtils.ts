@@ -41,6 +41,8 @@ import type {
   SampleGameReplay,
   SampleGameReplayMove,
   ChampionStopReason,
+  AutopilotSignals,
+  AutopilotDecision,
   RatingPairing,
   ModelRating,
   LeaderboardEntry,
@@ -2772,10 +2774,67 @@ export function nextChampionStep(
   const plateauCount = latest.promoted ? 0 : state.plateauCount + 1
   const bestVsStrongMcts = Math.max(state.bestVsStrongMcts, latest.winRateVsStrongMcts ?? 0)
   let stopReason: ChampionStopReason | undefined
+  // Plateau is checked BEFORE budget: a champion that stops promoting AT its generation budget has genuinely
+  // plateaued, so it must report 'plateau' (a terminal the autopilot treats as done) rather than 'budget'
+  // (which the autopilot reads as "still improving, give it another round" — an infinite improve loop).
   if (opts.targetStrength !== undefined && bestVsStrongMcts >= opts.targetStrength) stopReason = 'reached-target'
-  else if (latest.generation >= opts.maxGenerations) stopReason = 'budget'
   else if (plateauCount >= opts.patience) stopReason = 'plateau'
+  else if (latest.generation >= opts.maxGenerations) stopReason = 'budget'
   return { done: stopReason !== undefined, stopReason, plateauCount, bestVsStrongMcts }
+}
+
+/**
+ * The single-Start autopilot's brain: given the derived {@link AutopilotSignals}, decide the ONE next thing to
+ * do. The order is deliberate — a newly-added architecture is screened first, then the config space is searched
+ * to convergence, then a learnable core's champion is climbed; only when all three are exhausted is it `done`
+ * (which is exactly "the process stops when there really isn't much more to do without external input"). Pure,
+ * so it is fully unit-testable and the controller just re-derives the signals each round and dispatches.
+ */
+/**
+ * Turn the raw, already-read state (per-core run counts, exploration convergence, champion stop reason) into
+ * the {@link AutopilotSignals} the decision reads — pure, so the controller's live reads stay separable from
+ * the logic. A core is "screened" once it has ≥ `minScreenRuns` completed runs; the champion counts as
+ * plateaued only on `plateau`/`reached-target` (a `budget` stop just means this round's budget was spent, so
+ * the autopilot gives it another round rather than declaring it done).
+ */
+export function deriveAutopilotSignals(input: {
+  modelChoices: string[]
+  learnedCores: string[]
+  completedRunCountByCore: Record<string, number>
+  minScreenRuns: number
+  explorationConverged: boolean
+  championStopReason?: ChampionStopReason
+}): AutopilotSignals {
+  const unscreenedCores = input.modelChoices.filter(
+    (c) => (input.completedRunCountByCore[c] ?? 0) < input.minScreenRuns,
+  )
+  const hasStartingPoint = Object.values(input.completedRunCountByCore).some((n) => n > 0)
+  const championPlateaued =
+    input.championStopReason === 'plateau' || input.championStopReason === 'reached-target'
+  return {
+    unscreenedCores,
+    searchConverged: input.explorationConverged,
+    learnedCores: input.learnedCores,
+    hasStartingPoint,
+    championPlateaued,
+  }
+}
+
+export function nextAutopilotStep(s: AutopilotSignals): AutopilotDecision {
+  if (s.unscreenedCores.length) {
+    const target = s.unscreenedCores[0]
+    return { action: 'screen', target, reason: `screen the new architecture "${target}"` }
+  }
+  if (!s.searchConverged) {
+    return { action: 'search', reason: 'search the config space for a stronger setup' }
+  }
+  if (s.learnedCores.length && s.hasStartingPoint && !s.championPlateaued) {
+    return { action: 'improve', reason: 'improve the champion (warm-start ladder)' }
+  }
+  return {
+    action: 'done',
+    reason: 'nothing left to do without new input — new architectures screened, search converged, champion plateaued',
+  }
 }
 
 // --- comparable cross-model strength rating (the shared yardstick) --------------------------------------
@@ -2788,6 +2847,10 @@ const RATING_PRIOR = 400 // a virtual pseudo-game at 0.5 vs this rating keeps 10
 const RATING_PRIOR_GAMES = 1
 const WEAK_OPPONENT_MAX = 400 // opponents at/below this are the weak tier (random/heuristic)
 const RATING_Z = 1.96
+// A run that only ever faced weak opponents cannot RANK above its strongest-faced anchor by more than this —
+// beating a weak opponent, however confidently, is weak & non-transitive evidence of strength (a 97.86%-vs-
+// heuristic run must not out-rank a model genuinely measured against a strong opponent on a tight CI).
+const WEAK_EXTRAPOLATION_MARGIN = 200
 
 /**
  * Fit a model's comparable rating from its pairings vs known-rating opponents — a pinned Bradley-Terry / Elo
@@ -2825,17 +2888,19 @@ export function fitRatingFromPairings(pairings: RatingPairing[]): ModelRating | 
   const games = pairings.reduce((a, p) => a + p.games, 0)
   const flags: string[] = []
   const facedStrong = pairings.some((p) => p.opponentRating > WEAK_OPPONENT_MAX && p.games > 0)
-  const allSaturatedWins = pairings.every((p) => p.score >= 0.999)
-  if (!facedStrong && allSaturatedWins) flags.push('weak-opponent-only')
+  if (!facedStrong) flags.push('weak-opponent-only')
   const ciLow = Math.round(rating - RATING_Z * stderr)
-  return {
-    rating: Math.round(rating),
-    lowerBound: ciLow,
-    ciLow,
-    ciHigh: Math.round(rating + RATING_Z * stderr),
-    games,
-    flags,
+  const ciHigh = Math.round(rating + RATING_Z * stderr)
+  // `lowerBound` is the RANKING metric; `ciLow`/`ciHigh` keep the raw fit interval for display. When the run
+  // never faced a strong opponent, cap the ranking near its strongest-faced anchor so a confident win vs a
+  // weak one (large N shrinks the CI) can't extrapolate to the top of the leaderboard. This is the fix for a
+  // high-sim mcts that only ever played `heuristic` out-ranking a model actually measured vs strong play.
+  let lowerBound = ciLow
+  if (!facedStrong) {
+    const maxFacedAnchor = Math.max(...pairings.map((p) => p.opponentRating))
+    lowerBound = Math.min(lowerBound, maxFacedAnchor + WEAK_EXTRAPOLATION_MARGIN)
   }
+  return { rating: Math.round(rating), lowerBound, ciLow, ciHigh, games, flags }
 }
 
 /** Turn a stored run record into the pairings its rating is fit from: its `win_rate` vs its `opponent` anchor,
