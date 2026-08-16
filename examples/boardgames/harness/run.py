@@ -171,6 +171,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
 
     device = "cpu"
     az_sims = int(config.az_sims)
+    az_solve_endgame = int(config.az_solve_endgame)  # the DEPLOYED agent's exact-endgame cutoff — eval with it too
     strong_sims = STRONG_MCTS_SIMS  # a FIXED reference so win_rate_vs_strong_mcts is a comparable anchor
 
     # WARM-START from the strongest saved net (cumulative), unless the run asks to start fresh.
@@ -217,7 +218,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     n_eval = max(10, config.eval_games)
 
     def model_factory() -> Agent:
-        return AlphaZeroAgent(load_net(weights_path, device), sims=az_sims, device=device)
+        return AlphaZeroAgent(load_net(weights_path, device), sims=az_sims, device=device, solve_endgame=az_solve_endgame)
 
     vs_strong = head_to_head(game, model_factory, lambda: MctsAgent(sims=strong_sims), n_eval, eval_rng)
     az_metrics = {"win_rate_vs_strong_mcts": round(vs_strong["win_rate"], 4)}
@@ -228,7 +229,11 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     if incumbent:
         inc_net = load_net(incumbent, device)
         vs_champ = head_to_head(
-            game, model_factory, lambda: AlphaZeroAgent(inc_net, sims=az_sims, device=device), n_eval, eval_rng
+            game,
+            model_factory,
+            lambda: AlphaZeroAgent(inc_net, sims=az_sims, device=device, solve_endgame=az_solve_endgame),
+            n_eval,
+            eval_rng,
         )
         az_metrics["win_rate_vs_champion"] = round(vs_champ["win_rate"], 4)
         if vs_champ["win_rate"] >= PROMOTION_THRESHOLD:
@@ -244,7 +249,12 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         "champion_generation": champions.champion_generation(config.game),
         "league_pool_size": len(pool),
     }
-    extra_spec = {"az_weights": weights_path, "az_channels": 32, "az_sims": az_sims}
+    extra_spec = {
+        "az_weights": weights_path,
+        "az_channels": 32,
+        "az_sims": az_sims,
+        "az_solve_endgame": int(config.az_solve_endgame),
+    }
     return weights_path, extra_spec, az_report, az_metrics, train_seconds
 
 
@@ -261,7 +271,7 @@ def load_policy(checkpoint_path: str | Path) -> Callable[[Game, State, random.Ra
     spec = json.loads(Path(checkpoint_path).read_text())
     config = load_checkpoint_config(spec)
     cfg = asdict(config)
-    for k in ("az_weights", "az_channels", "az_sims"):  # learned-core artifacts the spec carries
+    for k in ("az_weights", "az_channels", "az_sims", "az_solve_endgame"):  # learned-core artifacts the spec carries
         if k in spec:
             cfg[k] = spec[k]
     agent: Agent = resolve_agent(config.model_name, cfg, personas_for(config.game))

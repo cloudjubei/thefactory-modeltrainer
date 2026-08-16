@@ -3819,6 +3819,25 @@ const AUTOPILOT_STEP_LABEL = {
   improve: 'Improving the champion',
   done: 'Done',
 }
+// A human summary of what the MOST RECENT Start press did (from state.lastRun) — so the panel reports this
+// run's work, not the project's lifetime round count (which accumulates across every press and misleads).
+function autopilotRunSummary(state) {
+  const lr = state && state.lastRun
+  if (!lr) return ''
+  const parts = []
+  if (lr.screened) parts.push(`screened ${lr.screened} architecture${lr.screened === 1 ? '' : 's'}`)
+  if (lr.searched) parts.push('searched the config space')
+  if (lr.improved) parts.push(`ran the champion improver ${lr.improved === 1 ? 'once' : lr.improved + '×'}`)
+  return parts.length ? ` — this run: ${parts.join(', ')}` : ' — this run: nothing new to do'
+}
+// The honest "why it stopped + what unlocks more". When improve actually re-ran and still plateaued, the
+// current architecture is at its ceiling; raising it (a stronger net / wider lever) is the real next lever.
+function autopilotDoneHint(state) {
+  const lr = state && state.lastRun
+  if (lr && lr.improved)
+    return 'The champion was re-trained and still plateaued — it is at the current architecture’s ceiling. Add a stronger architecture or widen a lever to push further, then press Start again.'
+  return 'Add a new architecture or widen a lever, then press Start again.'
+}
 async function renderAutopilotPanel() {
   const host = byId('autopilot-panel')
   if (!host) return
@@ -3850,12 +3869,12 @@ async function renderAutopilotPanel() {
   } else if (state && state.stage === 'done' && state.stopReason === 'budget') {
     // Hit the per-launch round cap, NOT genuine convergence — there may well be more to do.
     status =
-      `<div class="ap-status">⏸ Paused at the round cap (${state.round || 0} rounds).</div>` +
+      `<div class="ap-status">⏸ Paused at the round cap${autopilotRunSummary(state)}.</div>` +
       `<div class="ap-hint">It stopped on the round budget, not because it ran out of things to do — press Start to continue where it left off.</div>`
   } else if (state && state.stage === 'done') {
     status =
-      `<div class="ap-status">✔ Converged — nothing left to improve without new input (${state.round || 0} rounds).</div>` +
-      `<div class="ap-hint">Add a new architecture or widen a lever, then press Start again.</div>`
+      `<div class="ap-status">✔ Converged — nothing left to do without new input${autopilotRunSummary(state)}.</div>` +
+      `<div class="ap-hint">${autopilotDoneHint(state)}</div>`
   } else {
     status =
       `<div class="ap-hint">Press Start — the process works out the next thing to do: screen any new architecture, search the config space, then improve the champion. It stops only when there's nothing left without your input.</div>`

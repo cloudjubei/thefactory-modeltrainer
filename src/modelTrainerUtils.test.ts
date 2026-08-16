@@ -5266,12 +5266,32 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
     expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: {} }).hasStartingPoint).toBe(false)
   })
 
-  it('counts the champion as plateaued only on plateau / reached-target, not budget or aborted', () => {
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(true)
+  it('counts a plateau as done only AFTER a fresh improve attempt this run; reached-target is always done', () => {
+    // reached-target means the champion is as strong as required — genuinely done, no fresh attempt warranted.
     expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(true)
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'budget' }).championPlateaued).toBe(false)
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'aborted' }).championPlateaued).toBe(false)
-    expect(deriveAutopilotSignals({ ...input, championStopReason: undefined }).championPlateaued).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: false }).championPlateaued,
+    ).toBe(true)
+    // a plateau counts as done ONLY once we've actually re-attempted improve THIS run...
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: true }).championPlateaued,
+    ).toBe(true)
+    // ...a plateau left by a PRIOR run must NOT block a fresh improve attempt (the champion loop resets its
+    // plateau budget per launch, so the autopilot has to re-select improve at least once per Start).
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: false }).championPlateaued,
+    ).toBe(false)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(false)
+    // budget / aborted are never a plateau, even after an attempt.
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: true }).championPlateaued,
+    ).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'aborted', improvedThisRun: true }).championPlateaued,
+    ).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: undefined, improvedThisRun: true }).championPlateaued,
+    ).toBe(false)
   })
 
   it('passes exploration convergence + learned cores straight through', () => {

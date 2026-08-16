@@ -35,6 +35,16 @@ def test_validate_rejects_bad_choice_and_out_of_range():
         validate_config(TrainerConfig(mcts_sims=0))
     with pytest.raises(ValueError):
         validate_config(TrainerConfig(eval_games=1))
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(mcts_solve_endgame=-1))
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(mcts_solve_endgame=99))
+
+
+def test_mcts_solve_endgame_defaults_off_and_coerces(tmp_path):
+    assert TrainerConfig().mcts_solve_endgame == 0  # pure mcts by default
+    cfg = load_config(_write(tmp_path, {"model_name": "mcts", "mcts_solve_endgame": "12"}))
+    assert cfg.mcts_solve_endgame == 12
 
 
 def test_load_config_accepts_alphazero_and_coerces_az_levers(tmp_path):

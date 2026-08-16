@@ -104,9 +104,13 @@ class MctsAgent:
 
     kind = "mcts"
 
-    def __init__(self, sims: int = 80, c_puct: float = 1.4):
+    def __init__(self, sims: int = 80, c_puct: float = 1.4, solve_endgame: int = 0):
         self.sims = max(1, int(sims))
         self.c_puct = c_puct
+        # Opt-in EXACT-ENDGAME cutoff (empty-cell threshold): once a game exposes `exact_optimal_actions` and the
+        # position is small enough to solve outright, play a provably-optimal move instead of trusting the tree —
+        # so a deep-tactical miss can't cost a lost endgame. 0 = pure MCTS (the fixed-strength reference rungs).
+        self.solve_endgame = int(solve_endgame)
         self.sims_used = 0
         self._tree: dict[object, _Node] = {}
 
@@ -123,6 +127,12 @@ class MctsAgent:
         if wins:
             self.sims_used += 1
             return wins[0]
+        if self.solve_endgame > 0:
+            solve = getattr(game, "exact_optimal_actions", None)
+            optimal = solve(state, self.solve_endgame) if solve is not None else None
+            if optimal:
+                self.sims_used += 1
+                return min(optimal, key=lambda a: abs(a - (game.num_actions // 2)))
         safe = [a for a in legal if not _hands_opponent_win(game, state, a)]
         candidates = safe or legal
         root_key = state_key(game, state)
@@ -165,7 +175,9 @@ class MctsAgent:
 _BASELINE: dict[str, Callable[[dict], Agent]] = {
     "random": lambda cfg: RandomAgent(),
     "heuristic": lambda cfg: HeuristicAgent(),
-    "mcts": lambda cfg: MctsAgent(sims=int(cfg.get("mcts_sims", 80))),
+    "mcts": lambda cfg: MctsAgent(
+        sims=int(cfg.get("mcts_sims", 80)), solve_endgame=int(cfg.get("mcts_solve_endgame", 0))
+    ),
 }
 
 

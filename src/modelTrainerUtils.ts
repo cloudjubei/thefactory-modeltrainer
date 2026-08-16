@@ -2793,9 +2793,11 @@ export function nextChampionStep(
 /**
  * Turn the raw, already-read state (per-core run counts, exploration convergence, champion stop reason) into
  * the {@link AutopilotSignals} the decision reads — pure, so the controller's live reads stay separable from
- * the logic. A core is "screened" once it has ≥ `minScreenRuns` completed runs; the champion counts as
- * plateaued only on `plateau`/`reached-target` (a `budget` stop just means this round's budget was spent, so
- * the autopilot gives it another round rather than declaring it done).
+ * the logic. A core is "screened" once it has ≥ `minScreenRuns` completed runs. The champion counts as done
+ * when the target strength was reached, OR when it plateaued AFTER a fresh improve attempt THIS run
+ * (`improvedThisRun`). A `plateau`/`budget` left by a PRIOR run does NOT count: the champion loop resets its
+ * plateau budget on every launch (a full `patience` of fresh attempts), so the autopilot must re-select improve
+ * at least once per Start rather than refusing forever off a stale flag — else pressing Start does nothing.
  */
 export function deriveAutopilotSignals(input: {
   modelChoices: string[]
@@ -2804,13 +2806,15 @@ export function deriveAutopilotSignals(input: {
   minScreenRuns: number
   explorationConverged: boolean
   championStopReason?: ChampionStopReason
+  improvedThisRun?: boolean
 }): AutopilotSignals {
   const unscreenedCores = input.modelChoices.filter(
     (c) => (input.completedRunCountByCore[c] ?? 0) < input.minScreenRuns,
   )
   const hasStartingPoint = Object.values(input.completedRunCountByCore).some((n) => n > 0)
   const championPlateaued =
-    input.championStopReason === 'plateau' || input.championStopReason === 'reached-target'
+    input.championStopReason === 'reached-target' ||
+    (!!input.improvedThisRun && input.championStopReason === 'plateau')
   return {
     unscreenedCores,
     searchConverged: input.explorationConverged,

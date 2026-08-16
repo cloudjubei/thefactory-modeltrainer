@@ -91,6 +91,40 @@ def test_training_reduces_loss_on_self_play_data():
     assert after < before  # the net learns to fit its own self-play targets
 
 
+def test_alphazero_solve_endgame_plays_perfectly_on_late_positions():
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import optimal_columns
+
+    game = _game()
+    torch.manual_seed(0)
+    # An UNTRAINED net would blunder late positions; with the exact-endgame cutoff on, greedy play is
+    # game-theoretically optimal regardless of the net — the solver, not the value head, chooses the endgame.
+    agent = AlphaZeroAgent(Connect4Net(), sims=1, solve_endgame=40)
+    states = sample_solvable_positions(game, n=15, min_moves=30, seed=5)
+    assert states
+    for s in states:
+        assert agent.act(game, s, random.Random(0)) in optimal_columns(s)
+
+
+def test_alphazero_solve_endgame_off_by_default_and_skipped_while_exploring():
+    game = _game()
+    # Off by default (self-play must keep exploring, not collapse onto solver moves).
+    assert AlphaZeroAgent(Connect4Net(), sims=5).solve_endgame == 0
+    # Even with the cutoff on, a non-zero temperature (self-play exploration) skips it — the solver is a
+    # GREEDY-play optimisation, never a training-time shortcut that would starve exploration.
+    agent = AlphaZeroAgent(Connect4Net(), sims=5, solve_endgame=40, temperature=1.0)
+    s = game.initial_state(random.Random(0))
+    for c in [3, 3, 3, 4]:  # a few stones down, still far from a cheap solve anyway
+        s = game.step(s, c)
+    assert agent.act(game, s, random.Random(0)) in game.legal_actions(s)  # plays via search, not a crash
+
+
+def test_build_alphazero_agent_reads_solve_endgame(tmp_path):
+    save_net(Connect4Net(), str(tmp_path / "w.pt"))
+    agent = build_alphazero_agent({"az_weights": str(tmp_path / "w.pt"), "az_sims": 8, "az_solve_endgame": 14})
+    assert agent.solve_endgame == 14
+
+
 def test_save_load_weights_roundtrip(tmp_path):
     torch.manual_seed(1)
     net = Connect4Net()

@@ -3215,6 +3215,82 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(result.stopReason).toBe('done')
   })
 
+  it('re-attempts improve on a fresh Start even when a PRIOR run left the champion plateaued', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    // Everything already screened + search converged, and a PRIOR run left a champion plateau on disk.
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+    const launched: string[] = []
+    const result = await tools.runAutopilot({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: autopilotManifest,
+      maxRounds: 10,
+      launchActivity: async (type: string) => {
+        launched.push(type)
+        return { activityId: `c${launched.length}` } // train-champion re-runs but leaves the plateau in place
+      },
+      awaitActivity: async () => 'completed',
+    })
+    // The stale plateau does NOT short-circuit to done: improve is re-attempted once this run, THEN it's done.
+    expect(launched).toEqual(['train-champion'])
+    expect(result.stopReason).toBe('done')
+    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+      lastRun?: { rounds: number; improved: number; searched: number; stopReason: string }
+    }
+    expect(state.lastRun).toMatchObject({ rounds: 1, improved: 1, stopReason: 'done' })
+  })
+
+  it('reports THIS run in lastRun, not the lifetime round count carried across Start presses', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    // A prior autopilot state with a big cumulative round count (as if the user pressed Start many times).
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-autopilot',
+      key: 'current',
+      content: { stage: 'done', round: 47, history: [], updatedAt: 't' },
+    })
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    const result = await tools.runAutopilot({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: autopilotManifest,
+      maxRounds: 10,
+      launchActivity: async (type: string) => {
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: 't' }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    // This press only ran improve once → rounds THIS run is 1, even though the lifetime counter is now 48.
+    expect(result.rounds).toBe(1)
+    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+      round: number
+      lastRun?: { rounds: number }
+    }
+    expect(state.round).toBe(48) // lifetime accumulates
+    expect(state.lastRun?.rounds).toBe(1) // but the summary is per-press
+  })
+
   it('stops at the round budget instead of looping forever when a child makes no progress', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)

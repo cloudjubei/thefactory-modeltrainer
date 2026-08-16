@@ -72,6 +72,7 @@ import type {
   ChampionGeneration,
   ChampionStopReason,
   AutopilotParams,
+  AutopilotAction,
   AutopilotResult,
   AutopilotState,
   AutopilotSignals,
@@ -4094,6 +4095,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // `search` forever and never reaching `improve`. So we ALSO treat search as converged once a search round
     // adds zero new completed runs (the space is covered) — the backstop that unblocks the improve phase.
     let searchExhausted = false
+    // A prior run's champion plateau must not permanently veto improve: the champion loop resets its plateau
+    // budget per launch, so each Start gets a fresh attempt. We only treat a plateau as "done" once we've
+    // actually re-run improve THIS invocation (see deriveAutopilotSignals).
+    let improvedThisRun = false
     const totalCompleted = async (): Promise<number> => {
       const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
       return runs.reduce((n, r) => n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0), 0)
@@ -4118,12 +4123,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         completedRunCountByCore,
         minScreenRuns,
         explorationConverged,
+        improvedThisRun,
         ...(stopReason ? { championStopReason: stopReason } : {}),
       })
     }
 
     let stopReason: AutopilotStopReason = 'done'
     let roundsThisRun = 0
+    const tally: Record<AutopilotAction, number> = { screen: 0, search: 0, improve: 0, done: 0 }
     while (true) {
       if (params.abortSignal?.aborted) {
         stopReason = 'aborted'
@@ -4146,6 +4153,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         break
       }
       roundsThisRun += 1
+      tally[decision.action] += 1
       state.round += 1
       // Persist "now doing X" BEFORE launching, so the viewer's step-adaptive display reflects the live step.
       await persist()
@@ -4182,6 +4190,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // A search round that produced no new runs means the config space is covered — mark search exhausted so
       // the next decision falls through to `improve` instead of re-searching a fully-covered space forever.
       if (decision.action === 'search' && (await totalCompleted()) <= searchBefore) searchExhausted = true
+      // We've now genuinely re-attempted improve this run: a plateau from here on is a real "done" (not stale).
+      if (decision.action === 'improve') improvedThisRun = true
       state.history = [
         ...state.history,
         {
@@ -4196,12 +4206,20 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       await persist()
     }
 
+    // Record what THIS press did so the viewer reports it (instead of the project's lifetime `round` count).
+    state.lastRun = {
+      rounds: roundsThisRun,
+      screened: tally.screen,
+      searched: tally.search,
+      improved: tally.improve,
+      stopReason,
+    }
     if (stopReason !== 'done') {
       state.stopReason = stopReason
       state.stage = stopReason === 'aborted' ? 'running' : 'done'
-      await persist()
     }
-    return { recordType, rounds: state.round, stopReason, history: state.history }
+    await persist()
+    return { recordType, rounds: roundsThisRun, stopReason, history: state.history }
   }
 
   async function writeLeaderboard(

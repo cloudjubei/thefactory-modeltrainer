@@ -108,6 +108,40 @@ def test_mcts_reuses_its_tree_across_moves():
     assert n2 >= n1  # the transposition table persists across moves (memory), it is not reset each turn
 
 
+def test_exact_optimal_actions_gates_on_solve_cost():
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import optimal_columns
+
+    game = Connect4()
+    # The opening (42 empty cells) is a minutes-long exact solve → refused under a cheap threshold.
+    assert game.exact_optimal_actions(game.initial_state(), max_empty=14) is None
+    late = sample_solvable_positions(game, n=1, min_moves=32, seed=1)[0]  # ≤ ~10 empty → instant solve
+    assert game.exact_optimal_actions(late, max_empty=40) == optimal_columns(late)
+    assert game.exact_optimal_actions(late, max_empty=0) is None  # explicitly disabled
+
+
+def test_mcts_solve_endgame_plays_perfectly_on_late_positions():
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import optimal_columns
+
+    game = Connect4()
+    # With the exact-endgame cutoff on, even a ONE-simulation mcts is game-theoretically optimal in the endgame:
+    # the solver, not the tree, chooses. This is the mechanism that drives its endgame loss rate to zero.
+    solver_mcts = MctsAgent(sims=1, solve_endgame=40)
+    states = sample_solvable_positions(game, n=20, min_moves=30, seed=7)
+    assert states
+    for s in states:
+        assert solver_mcts.act(game, s, random.Random(0)) in optimal_columns(s)
+
+
+def test_mcts_solve_endgame_is_off_by_default_so_reference_rungs_stay_pure():
+    # The fixed-strength reference rungs (opponent mcts) must NOT gain solver assistance, or the rating anchors
+    # would shift — the cutoff is strictly opt-in.
+    assert MctsAgent(sims=10).solve_endgame == 0
+    assert resolve_agent("mcts", {}).solve_endgame == 0
+    assert resolve_agent("mcts", {"mcts_sims": 25, "mcts_solve_endgame": 12}).solve_endgame == 12
+
+
 def test_resolve_agent_builds_baselines_and_rejects_unknown():
     assert isinstance(resolve_agent("random", {}), RandomAgent)
     assert isinstance(resolve_agent("heuristic", {}), HeuristicAgent)

@@ -15,6 +15,7 @@ MODEL_NAME_CHOICES = ("random", "heuristic", "mcts", "alphazero")
 # reference opponent (the exact `oracle` is a benchmark labeller, too slow to PLAY from the opening in Python).
 OPPONENT_CHOICES = ("random", "heuristic", "mcts", "oracle_depth")
 MCTS_SIMS_RANGE = (1, 5000)
+MCTS_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for mcts's opt-in exact-endgame cutoff (0 = pure mcts)
 ORACLE_DEPTH_RANGE = (1, 20)
 BENCHMARK_POSITIONS_RANGE = (0, 500)
 BENCHMARK_MIN_MOVES = 20  # score positions with ≥ this many stones down so the exact oracle solve stays fast
@@ -25,6 +26,7 @@ AZ_SELFPLAY_GAMES_RANGE = (1, 500)
 AZ_SIMS_RANGE = (1, 2000)
 AZ_EPOCHS_RANGE = (1, 50)
 AZ_DISTILL_RANGE = (0, 2000)
+AZ_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for the trained net's opt-in exact-endgame cutoff
 
 # §C cost accounting — documented estimate constants (a local run has no invoice, so energy/$ are ESTIMATES).
 WATTS_PER_CORE = 12.0  # rough sustained draw of one busy CPU core; override per machine if you measure it.
@@ -44,6 +46,7 @@ class TrainerConfig:
     game: str = "connect4"
     model_name: str = "mcts"
     mcts_sims: int = 80
+    mcts_solve_endgame: int = 0  # >0 = mcts plays a perfect endgame once ≤ this many cells are empty (0 = pure)
     opponent: str = "random"
     eval_games: int = 40
     seed: int = 0
@@ -56,6 +59,7 @@ class TrainerConfig:
     az_epochs: int = 5
     az_warm_start: int = 1  # 1 = warm-start from the champion (cumulative); 0 = train from scratch (reproducible)
     az_distill_positions: int = 96  # oracle-labelled optimal-play examples to imprint each run (0 = no distillation)
+    az_solve_endgame: int = 0  # >0 = the trained net plays a PERFECT endgame once ≤ this many cells are empty
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,8 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"opponent must be one of {OPPONENT_CHOICES}, got {config.opponent!r}")
     if not MCTS_SIMS_RANGE[0] <= config.mcts_sims <= MCTS_SIMS_RANGE[1]:
         raise ValueError(f"mcts_sims must be in {MCTS_SIMS_RANGE}, got {config.mcts_sims}")
+    if not MCTS_SOLVE_ENDGAME_RANGE[0] <= config.mcts_solve_endgame <= MCTS_SOLVE_ENDGAME_RANGE[1]:
+        raise ValueError(f"mcts_solve_endgame must be in {MCTS_SOLVE_ENDGAME_RANGE}, got {config.mcts_solve_endgame}")
     if not ORACLE_DEPTH_RANGE[0] <= config.oracle_depth <= ORACLE_DEPTH_RANGE[1]:
         raise ValueError(f"oracle_depth must be in {ORACLE_DEPTH_RANGE}, got {config.oracle_depth}")
     if not BENCHMARK_POSITIONS_RANGE[0] <= config.benchmark_positions <= BENCHMARK_POSITIONS_RANGE[1]:
@@ -94,6 +100,8 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_warm_start must be 0 or 1, got {config.az_warm_start}")
     if not AZ_DISTILL_RANGE[0] <= config.az_distill_positions <= AZ_DISTILL_RANGE[1]:
         raise ValueError(f"az_distill_positions must be in {AZ_DISTILL_RANGE}, got {config.az_distill_positions}")
+    if not AZ_SOLVE_ENDGAME_RANGE[0] <= config.az_solve_endgame <= AZ_SOLVE_ENDGAME_RANGE[1]:
+        raise ValueError(f"az_solve_endgame must be in {AZ_SOLVE_ENDGAME_RANGE}, got {config.az_solve_endgame}")
 
 
 def load_config(path: Path) -> TrainerConfig:
@@ -121,7 +129,7 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_solve_endgame"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
     if "az_warm_start" in filtered:

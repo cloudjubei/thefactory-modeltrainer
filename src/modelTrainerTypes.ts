@@ -1863,7 +1863,9 @@ export interface AutopilotSignals {
   learnedCores: string[]
   /** There is at least one completed run to improve a champion from (search produced a starting point). */
   hasStartingPoint: boolean
-  /** The champion ladder has stopped improving (plateau / budget / target reached). */
+  /** The champion is done for now: the target strength was reached, OR it plateaued AFTER a fresh improve
+   * attempt THIS run. A plateau left by a PRIOR run does NOT count — each Start gets a fresh attempt (the
+   * champion loop resets its plateau budget per launch), so the autopilot must not refuse to re-select improve. */
   championPlateaued: boolean
 }
 
@@ -1875,6 +1877,17 @@ export interface AutopilotDecision {
 }
 
 export type AutopilotStopReason = 'done' | 'budget' | 'aborted'
+
+/** A summary of what a SINGLE Start press did — so the viewer reports THIS run's work (not the project's
+ * lifetime round count). `rounds` is the number of sub-processes this press launched; the tallies break them
+ * down by kind so the message can say e.g. "searched the space, ran the champion improver twice". */
+export interface AutopilotRunSummary {
+  rounds: number
+  screened: number
+  searched: number
+  improved: number
+  stopReason: AutopilotStopReason
+}
 
 /** One round of the autopilot loop — the child sub-process it launched and why. */
 export interface AutopilotRound {
@@ -1896,6 +1909,8 @@ export interface AutopilotState {
   currentTarget?: string
   history: AutopilotRound[]
   stopReason?: AutopilotStopReason
+  /** What the most recent Start press did — the viewer reports this instead of the lifetime `round`. */
+  lastRun?: AutopilotRunSummary
   updatedAt: string
 }
 
@@ -1935,6 +1950,7 @@ export interface AutopilotParams {
 
 export interface AutopilotResult {
   recordType: string
+  /** Rounds THIS invocation launched (not the project's lifetime total). */
   rounds: number
   stopReason: AutopilotStopReason
   history: AutopilotRound[]

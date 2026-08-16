@@ -108,6 +108,7 @@ class AlphaZeroAgent:
         add_noise: bool = False,
         dirichlet_alpha: float = 0.9,
         noise_frac: float = 0.25,
+        solve_endgame: int = 0,
     ):
         self.net = net
         self.sims = max(1, int(sims))
@@ -117,6 +118,10 @@ class AlphaZeroAgent:
         self.add_noise = add_noise
         self.dirichlet_alpha = dirichlet_alpha
         self.noise_frac = noise_frac
+        # Opt-in EXACT-ENDGAME cutoff (empty-cell threshold): once the position is cheap to solve, play a
+        # provably-optimal move instead of the net-guided search — a perfect endgame the value head needn't
+        # approximate, driving loss toward 0 / optimality toward 1. 0 = pure net-guided MCTS (self-play default).
+        self.solve_endgame = int(solve_endgame)
         self.sims_used = 0
         self._nodes: dict[object, _AZNode] = {}
 
@@ -179,6 +184,14 @@ class AlphaZeroAgent:
         if len(legal) == 1:
             self.sims_used += 1
             return legal[0]
+        # Exact-endgame cutoff (greedy play only — self-play keeps exploring): a solved position is played
+        # perfectly, so the net is never asked to approximate an endgame the solver can nail outright.
+        if self.solve_endgame > 0 and self.temperature <= 1e-6:
+            solve = getattr(game, "exact_optimal_actions", None)
+            optimal = solve(state, self.solve_endgame) if solve is not None else None
+            if optimal:
+                self.sims_used += 1
+                return min(optimal, key=lambda a: abs(a - (game.num_actions // 2)))
         pi = self.run_search(game, state, rng)
         return sample_action(pi, self.temperature, rng)
 
@@ -431,4 +444,9 @@ def build_alphazero_agent(cfg: dict) -> Agent:
     device = str(cfg.get("device", "cpu"))
     weights = cfg.get("az_weights") or cfg.get("weights")
     net = load_net(weights, device) if weights else Connect4Net(channels=int(cfg.get("az_channels", 32))).to(device)
-    return AlphaZeroAgent(net, sims=int(cfg.get("az_sims", cfg.get("mcts_sims", 100))), device=device)
+    return AlphaZeroAgent(
+        net,
+        sims=int(cfg.get("az_sims", cfg.get("mcts_sims", 100))),
+        device=device,
+        solve_endgame=int(cfg.get("az_solve_endgame", 0)),
+    )

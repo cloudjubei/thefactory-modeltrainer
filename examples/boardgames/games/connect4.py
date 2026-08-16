@@ -114,6 +114,19 @@ class Connect4:
         determines whether the game is over)."""
         return (state.board, state.to_move)
 
+    def exact_optimal_actions(self, state: C4State, max_empty: int) -> list[int] | None:
+        """The game-theoretically OPTIMAL move set — but only when the position is cheap to solve exactly
+        (≤ `max_empty` empty cells), else `None`. The opt-in seam a domain-oblivious search agent uses to play a
+        PERFECT endgame (`MctsAgent(solve_endgame=…)`), so its residual deep-tactical misses can't lose an
+        endgame it could have solved outright. `max_empty <= 0` disables it."""
+        if state.done or max_empty <= 0:
+            return None
+        if sum(1 for v in state.board if v == 0) > max_empty:
+            return None
+        from harness.solver import optimal_columns
+
+        return optimal_columns(state) or None
+
     # --- internals ---
     def _landing_row(self, board: tuple, col: int) -> int:
         if not 0 <= col < COLS:
