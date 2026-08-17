@@ -79,6 +79,12 @@ import type {
   AutopilotStopReason,
   RateModelsParams,
   RateModelsResult,
+  TournamentParams,
+  TournamentResult,
+  TournamentRecord,
+  BuildBookParams,
+  BuildBookResult,
+  BuildBookCoverage,
   LeaderboardEntry,
   LeaderboardRecord,
   RatingPairing,
@@ -4301,6 +4307,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         rating: s.rating,
         ...(s.sims !== undefined ? { sims: s.sims } : {}),
         ...(s.depth !== undefined ? { depth: s.depth } : {}),
+        ...(s.book_solve_endgame !== undefined ? { book_solve_endgame: s.book_solve_endgame } : {}),
         ...(s.weightsPath ? { weights_path: s.weightsPath } : {}),
       })),
       games_per_rung: gamesPerRung,
@@ -4337,6 +4344,181 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     entries.sort((a, b) => b.lowerBound - a.lowerBound)
     await writeLeaderboard(params.scope, recordType, entries, spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
     return { recordType, entries, skipped }
+  }
+
+  // Direct head-to-head PLAY-OFF: pit models against each other (round-robin) + the oracle → a win-matrix,
+  // standings from ACTUAL games (not a fitted rating), the first-player win rate (Connect 4's move-advantage
+  // signal), champion self-play, and a per-model optimality verdict (wins-as-P1 vs the oracle). Writes a
+  // `{recordType}-tournament` record the Results "Play-off" reads.
+  async function runTournament(params: TournamentParams): Promise<TournamentResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    if (!manifest.tournament) throw new Error('this training project declares no "tournament" command')
+    const gamesPerPair = params.gamesPerPair ?? 10
+    const includeReferences = params.includeReferences ?? true
+    const includeOracle = params.includeOracle ?? true
+    const topN = params.topN ?? 3
+    // Round-robin is O(n²) and strong search agents are slow, so cap reference strength (a heavy mcts@1000 rung
+    // would make one play-off take ~an hour). The user can raise it explicitly; heavy rungs stay opt-in.
+    const maxReferenceSims = params.maxReferenceSims ?? 500
+
+    // Map completed run key → its checkpoint (+ model name / game) — only runs with a checkpoint can play.
+    const allRuns = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+    const ckptByKey = new Map<string, { checkpoint: string; modelName?: string; game?: string }>()
+    for (const r of allRuns) {
+      const c = r.content as
+        | { status?: string; artifacts?: { checkpoint?: string }; config?: { model_name?: string; game?: string } }
+        | undefined
+      if (!c || c.status !== 'completed' || r.key == null) continue
+      const checkpoint = c.artifacts?.checkpoint
+      if (!checkpoint) continue
+      ckptByKey.set(r.key, {
+        checkpoint,
+        ...(c.config?.model_name ? { modelName: c.config.model_name } : {}),
+        ...(c.config?.game ? { game: c.config.game } : {}),
+      })
+    }
+
+    // Competitors: the explicit run keys, else the top-N from the stored leaderboard (ranked by lower bound).
+    let keys = params.runKeys
+    if (!keys) {
+      const lb = await deps.storage.readRecord({
+        scope: params.scope,
+        type: `${recordType}-leaderboard`,
+        key: 'current',
+      })
+      const entries = (lb?.content as LeaderboardRecord | undefined)?.entries ?? []
+      keys = entries.map((e) => e.runKey).filter((k) => ckptByKey.has(k)).slice(0, topN)
+    }
+    let skipped = 0
+    const competitors: Array<Record<string, unknown>> = []
+    for (const k of keys) {
+      const info = ckptByKey.get(k)
+      if (!info) {
+        skipped++
+        continue
+      }
+      competitors.push({
+        id: k,
+        label: info.modelName ? `${info.modelName} · ${k.slice(0, 6)}` : k,
+        checkpoint: info.checkpoint,
+      })
+    }
+
+    // Reference rungs (mcts / heuristic / random) as competitors, so a model's win vs strong search is visible.
+    const spine = manifest.ratingSpine ?? []
+    if (includeReferences) {
+      for (const rung of spine) {
+        if (rung.kind === 'mcts') {
+          if ((rung.sims ?? 120) > maxReferenceSims) continue // skip pathologically-slow strong search rungs
+          competitors.push({ id: rung.id, label: `mcts@${rung.sims ?? 120}`, model_name: 'mcts', mcts_sims: rung.sims ?? 120 })
+        } else if (rung.kind === 'heuristic') competitors.push({ id: rung.id, label: 'heuristic', model_name: 'heuristic' })
+        else if (rung.kind === 'random') competitors.push({ id: rung.id, label: 'random', model_name: 'random' })
+        else if (rung.kind === 'book') {
+          // The deployable optimal agent (opening book + exact endgame + near-perfect fallback). Including it as
+          // a competitor lets the play-off CROWN an optimal-play reference and measure everyone's distance to it.
+          competitors.push({
+            id: rung.id,
+            label: 'book (optimal)',
+            model_name: 'book',
+            ...(rung.book_solve_endgame != null ? { book_solve_endgame: rung.book_solve_endgame } : {}),
+            ...(rung.depth != null ? { oracle_depth: rung.depth } : {}),
+          })
+        }
+      }
+    }
+    // A near-perfect oracle is the optimality yardstick; cap its search depth so the play-off stays tractable.
+    const oracleRung = spine.find((r) => r.kind === 'oracle')
+    const game = [...ckptByKey.values()].find((v) => v.game)?.game ?? 'connect4'
+
+    const request = {
+      game,
+      competitors,
+      include_oracle: includeOracle && !!oracleRung,
+      oracle_depth: Math.min(oracleRung?.depth ?? 12, 10),
+      games_per_pair: gamesPerPair,
+      base_seed: params.baseSeed ?? 0,
+      opening_plies: params.openingPlies ?? 2,
+      ...(params.selfPlayRunKeys ? { self_play_ids: params.selfPlayRunKeys } : {}),
+    }
+    const runner = resolveRunner(params.computeTarget)
+    const handle = runner.runJob({
+      jobId: `tournament-${recordType}-${competitors.length}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.tournament,
+      config: request,
+      dataFiles: manifestDataFiles(manifest),
+      timeoutMs: RATE_MODELS_TIMEOUT_MS,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
+      throw new Error(`tournament ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+    }
+    const summary = (result.summary ?? {}) as Omit<TournamentRecord, 'ranAt'>
+    const record: TournamentRecord = { ...summary, ranAt: now() }
+    await deps.storage.upsertRecord({ scope: params.scope, type: `${recordType}-tournament`, key: 'current', content: record })
+    params.onRecordWritten?.(`${recordType}-tournament`, 'current')
+    return { recordType, standings: record.standings ?? [], skipped }
+  }
+
+  async function buildBook(params: BuildBookParams): Promise<BuildBookResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    if (!manifest.buildBook) throw new Error('this training project declares no "buildBook" command')
+    const game = params.game ?? (manifest.levers?.game?.default as string | undefined) ?? 'connect4'
+    // Default to the fast, productive SEED mode (cheap midgame subtrees grow real coverage); pass seedGames=0
+    // for the long-running from-root OPENING accumulator instead.
+    const seedGames = params.seedGames ?? 400
+    const request: Record<string, unknown> = { game }
+    if (params.maxPlies != null) request.max_plies = params.maxPlies
+    if (params.minPlies != null) request.min_plies = params.minPlies
+    request.max_positions = params.maxPositions ?? 8000
+    request.deadline_seconds = params.deadlineSeconds ?? 120
+    if (seedGames > 0) {
+      request.seed_games = seedGames
+      request.seed_plies = params.seedPlies ?? 28
+    }
+    const runner = resolveRunner(params.computeTarget)
+    const handle = runner.runJob({
+      jobId: `build-book-${recordType}-${game}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.buildBook,
+      config: request,
+      dataFiles: manifestDataFiles(manifest),
+      timeoutMs: RATE_MODELS_TIMEOUT_MS,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
+      throw new Error(`build-book ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+    }
+    const summary = (result.summary ?? {}) as {
+      game?: string
+      added?: number
+      total?: number
+      coverage?: BuildBookCoverage
+      build?: unknown
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: `${recordType}-book`,
+      key: 'current',
+      content: { ...summary, ranAt: now() },
+    })
+    params.onRecordWritten?.(`${recordType}-book`, 'current')
+    const coverage = summary.coverage ?? { plies: 0, reachable: 0, booked: 0, fraction: 0 }
+    return {
+      recordType,
+      game: summary.game ?? game,
+      added: summary.added ?? 0,
+      total: summary.total ?? 0,
+      coverage,
+    }
   }
 
   async function getRunXAI(params: GetRunXaiParams): Promise<GetRunXaiResult> {
@@ -4798,6 +4980,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     runChampionTraining,
     runAutopilot,
     rateModels,
+    runTournament,
+    buildBook,
     getTrainerState,
     getRunXAI,
     analyzeConfigSpace,

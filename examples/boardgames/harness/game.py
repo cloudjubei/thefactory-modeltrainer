@@ -54,3 +54,24 @@ class Game(Protocol):
     # reached by different move orders. When a game omits it, the search falls back to the observation.
     def state_key(self, state: State) -> object: ...
 
+
+@runtime_checkable
+class SolvableGame(Game, Protocol):
+    """A Game that also exposes the per-game hooks the optimal-play book engine (harness/book.py) needs. Only
+    these four are game-specific; the tablebase, incremental builder, early-termination, symmetry augmentation
+    and BookAgent are all game-agnostic and consume this interface. A new solvable game is one file:
+      - `ply(state)`          — pieces placed (the book builder orders deepest/cheapest-first by it);
+      - `canonical_key(state)`— a symmetry-reduced integer key (a position and its symmetric images collapse);
+      - `position_value(state, book)` — exact value to the player to move (win +1 / draw 0 / loss -1), the
+        solver, which may read `book` for already-solved children (the bottom-up wall-break);
+      - `symmetries()`        — the exploitable symmetries as action (source→dest) permutations, for net
+        augmentation; identity-only when a game has none (the rest still works, just no space saving)."""
+
+    def ply(self, state: State) -> int: ...
+
+    def canonical_key(self, state: State) -> int: ...
+
+    def position_value(self, state: State, book: Any = None) -> int: ...
+
+    def symmetries(self) -> list[list[int]]: ...
+

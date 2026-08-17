@@ -410,6 +410,20 @@ export interface TrainerManifest {
    */
   gauntlet?: string
   /**
+   * Command template (`{configPath}` tournament request + `{summaryOut}` result) that plays competitors
+   * DIRECTLY against each other (a round-robin) + the oracle — the "who actually wins" + "is it optimal"
+   * evidence behind the Play-off view. Powers the `tournament` capability. Omit if the project has no such
+   * head-to-head. Result: `{ competitors, matrix, standings, firstPlayerWinRate, selfPlay, optimality }`.
+   */
+  tournament?: string
+  /**
+   * Command template (`{configPath}` build request + `{summaryOut}` result) that EXTENDS the project's committed
+   * optimal-play opening BOOK for a solved game — a bounded, resumable pass that solves+stores more of the
+   * reachable frontier (symmetry-reduced), persisting a book file so coverage accumulates across runs. Powers
+   * the `build-book` capability. Omit for projects without a solver. Result: `{ added, total, coverage, build }`.
+   */
+  buildBook?: string
+  /**
    * Fixed rating ANCHORS for the comparable-strength leaderboard: a map from a known reference opponent (an
    * `opponent` lever value like `random`/`heuristic`/`mcts`, or a metric-implied reference like `mcts_strong`
    * for a run's `win_rate_vs_strong_mcts`) to its FROZEN rating on the shared Elo-like scale. Frozen so the
@@ -2077,11 +2091,14 @@ export interface LeaderboardEntry extends ModelRating {
 export interface RatingSpineRung {
   id: string
   /** How to build the reference agent. `mcts` uses `sims`; `oracle` (a depth-limited near-perfect solver) uses
-   * `depth`; `champion`/`alphazero` load `weightsPath`. */
-  kind: 'random' | 'heuristic' | 'mcts' | 'oracle' | 'champion' | 'alphazero'
+   * `depth`; `book` (the deployable optimal agent: opening book + exact endgame + near-perfect fallback) uses
+   * `depth` + `bookSolveEndgame`; `champion`/`alphazero` load `weightsPath`. */
+  kind: 'random' | 'heuristic' | 'mcts' | 'oracle' | 'book' | 'champion' | 'alphazero'
   sims?: number
-  /** Search depth for an `oracle` rung (the near-perfect solver). */
+  /** Search depth for an `oracle`/`book` rung's near-perfect solver. */
   depth?: number
+  /** Empty-cell threshold for a `book` rung's exact-endgame cutoff (JSON manifest key: `book_solve_endgame`). */
+  book_solve_endgame?: number
   /** The rung's FROZEN rating on the shared scale. */
   rating: number
   weightsPath?: string
@@ -2122,6 +2139,133 @@ export interface LeaderboardRecord {
    * ranking); `stored` = fit from already-recorded win-rates with zero new games (the live estimate the
    * Improve loop refreshes after every generation, so the board climbs without re-playing the gauntlet). */
   basis?: 'gauntlet' | 'stored'
+}
+
+// --- direct head-to-head tournament (the "who actually wins" + "is it optimal" evidence) -----------------
+/** A competitor in a play-off — a trained model's run, a reference rung, or the oracle. */
+export interface TournamentCompetitor {
+  id: string
+  label: string
+}
+/** One head-to-head result (seat-alternated) — plus who won as the FIRST player (the move-advantage signal). */
+export interface TournamentMatchup {
+  a: string
+  b: string
+  a_win: number
+  draw: number
+  b_win: number
+  first_player_win_rate: number
+  games: number
+}
+/** A competitor's standing from ACTUAL games (not a fitted rating): score = wins + ½·draws over its matches. */
+export interface TournamentStanding {
+  id: string
+  label: string
+  score: number
+  matches: number
+  scorePerMatch: number
+  rank: number
+}
+/** A model's self-play result — from the standard opening a perfect player lets the first mover win ~100%. */
+export interface TournamentSelfPlay {
+  first_player_win_rate: number
+  draw_rate: number
+  first_player_loss_rate: number
+  games: number
+}
+/** Optimality proof vs the oracle: as the FIRST player an optimal model wins (Connect 4 is a first-player win). */
+export interface TournamentOptimality {
+  wins_as_p1_vs_oracle: number
+  games: number
+  verdict: 'optimal' | 'near-optimal' | 'suboptimal'
+}
+/** The persisted `{recordType}-tournament` record — the play-off's win-matrix, standings + optimality verdicts. */
+export interface TournamentRecord {
+  game: string
+  competitors: TournamentCompetitor[]
+  matrix: TournamentMatchup[]
+  standings: TournamentStanding[]
+  firstPlayerWinRate: number
+  gamesPerPair: number
+  selfPlay: Record<string, TournamentSelfPlay>
+  optimality: Record<string, TournamentOptimality>
+  ranAt: string
+}
+
+export interface TournamentParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Explicit competitor run keys; omit to take the top `topN` from the stored leaderboard. */
+  runKeys?: string[]
+  /** How many top-leaderboard models to enter when `runKeys` is omitted (default 3). */
+  topN?: number
+  /** Also enter the manifest's reference rungs (mcts/heuristic) as competitors (default true). */
+  includeReferences?: boolean
+  /** Skip reference mcts rungs above this sim count — round-robin is O(n²) and strong search is slow (default 500). */
+  maxReferenceSims?: number
+  /** Enter the near-perfect oracle so each model's result vs it is the optimality proof (default true). */
+  includeOracle?: boolean
+  gamesPerPair?: number
+  openingPlies?: number
+  baseSeed?: number
+  /** Self-play these competitor ids (default: the top one) — the first-player-wins move-advantage test. */
+  selfPlayRunKeys?: string[]
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+  activityId?: string
+}
+
+export interface TournamentResult {
+  recordType: string
+  standings: TournamentStanding[]
+  /** Competitors that were skipped (no checkpoint to play). */
+  skipped: number
+}
+
+export interface BuildBookParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** Which solved game's book to extend (default the manifest's first game / 'connect4'). */
+  game?: string
+  /** Shallowest opening depth (stones) to try to cover this pass (from-root mode). */
+  maxPlies?: number
+  /** Only store positions at or below this ply floor — band the work deep-first. */
+  minPlies?: number
+  /** Cap positions solved this pass (the bound that makes it a bounded, resumable step). */
+  maxPositions?: number
+  /** Wall-clock budget for this pass in seconds (the deadline the solve loop honours). */
+  deadlineSeconds?: number
+  /** Seed-sample this many MIDGAME roots and cover their cheap subtrees (fast coverage from the endgame back). */
+  seedGames?: number
+  /** Ply depth of the sampled midgame seeds (seed mode). */
+  seedPlies?: number
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+  activityId?: string
+}
+
+export interface BuildBookCoverage {
+  plies: number
+  reachable: number
+  booked: number
+  fraction: number
+}
+
+export interface BuildBookResult {
+  recordType: string
+  game: string
+  /** Positions added to the book this pass. */
+  added: number
+  /** Total positions in the committed book after this pass. */
+  total: number
+  /** Honest opening-coverage gauge (how much of the reachable opening is exact) — never overclaim past it. */
+  coverage: BuildBookCoverage
 }
 
 export interface TrainerLogger {
@@ -4349,6 +4493,13 @@ export interface ModelTrainerTools {
    * checkpoints.
    */
   rateModels(params: RateModelsParams): Promise<RateModelsResult>
+  runTournament(params: TournamentParams): Promise<TournamentResult>
+  /**
+   * Extend the project's committed optimal-play opening BOOK for a solved game — one bounded, resumable pass
+   * (solve+store more of the symmetry-reduced reachable frontier, persist the book file). Each call grows
+   * coverage; the deployable `book` agent and book-accelerated distillation read from it. Powers `build-book`.
+   */
+  buildBook(params: BuildBookParams): Promise<BuildBookResult>
   /**
    * Agent-facing READ tool: a one-shot orientation summary of a training project (objective, version, lever
    * counts, run count + best, hypothesis verdict census, paper/model counts) so a chat can orient without a

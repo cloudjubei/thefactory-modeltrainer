@@ -1,6 +1,7 @@
 from harness.champions import (
     best_champion_path,
     champion_generation,
+    champion_is_distilled,
     champion_pool_paths,
     promote_champion,
 )
@@ -8,6 +9,16 @@ from harness.champions import (
 
 def _saver(text):
     return lambda path: open(path, "w").write(text)
+
+
+def test_distilled_flag_drives_the_warm_start_decision(tmp_path):
+    # A fresh store / a non-distilled champion → not distilled (a distillation run must start FRESH from it).
+    assert champion_is_distilled("connect4", store_dir=tmp_path) is False
+    promote_champion(_saver("w1"), "connect4", store_dir=tmp_path)
+    assert champion_is_distilled("connect4", store_dir=tmp_path) is False
+    # Once a DISTILLED champion is crowned, warm-starting from it is safe.
+    promote_champion(_saver("w2"), "connect4", store_dir=tmp_path, distilled=True)
+    assert champion_is_distilled("connect4", store_dir=tmp_path) is True
 
 
 def test_empty_store_has_no_champion(tmp_path):

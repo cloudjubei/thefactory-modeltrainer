@@ -3215,10 +3215,11 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(result.stopReason).toBe('done')
   })
 
-  it('re-attempts improve on a fresh Start even when a PRIOR run left the champion plateaued', async () => {
+  it('re-attempts improve on a fresh Start even when a PRIOR run left a stale reached-target/plateau', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)
-    // Everything already screened + search converged, and a PRIOR run left a champion plateau on disk.
+    // Everything already screened + search converged, and a PRIOR (manual) Improve left a stale reached-target
+    // on disk — the exact flag that used to make Start short-circuit to "done" doing no work.
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
@@ -3228,7 +3229,7 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
     await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'reached-target' } })
     const launched: string[] = []
     const result = await tools.runAutopilot({
       scope: 'proj',
@@ -3360,6 +3361,147 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     const { tools } = makeTools(stubRunner(), storage)
     await expect(tools.rateModels({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
       /gauntlet/,
+    )
+  })
+})
+
+describe('runTournament (direct head-to-head play-off + optimality proof)', () => {
+  const tourManifest = manifest({
+    tournament: 'py -m harness.tournament --config-json {configPath} --summary-out {summaryOut}',
+    ratingSpine: [
+      { id: 'mcts120', kind: 'mcts', sims: 120, rating: 800 },
+      { id: 'oracle', kind: 'oracle', depth: 12, rating: 2000 },
+    ],
+  })
+  const tourSummary = {
+    game: 'connect4',
+    competitors: [{ id: 'champ', label: 'alphazero · champ' }, { id: 'oracle', label: 'oracle' }],
+    matrix: [{ a: 'champ', b: 'oracle', a_win: 0.4, draw: 0.1, b_win: 0.5, first_player_win_rate: 0.9, games: 12 }],
+    standings: [
+      { id: 'oracle', label: 'oracle', score: 0.55, matches: 1, scorePerMatch: 0.55, rank: 1 },
+      { id: 'champ', label: 'alphazero · champ', score: 0.45, matches: 1, scorePerMatch: 0.45, rank: 2 },
+    ],
+    firstPlayerWinRate: 0.9,
+    gamesPerPair: 12,
+    selfPlay: { champ: { first_player_win_rate: 0.83, draw_rate: 0.0, first_player_loss_rate: 0.17, games: 12 } },
+    optimality: { champ: { wins_as_p1_vs_oracle: 0.75, games: 12, verdict: 'near-optimal' } },
+  }
+
+  it('enters top-N leaderboard models + reference rungs + the oracle, runs the round-robin, and writes the record', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
+    await seedRun(storage, 'weak', 4, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/w.json' } })
+    // The stored leaderboard defines the top-N ranking (champ first).
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-leaderboard',
+      key: 'current',
+      content: { entries: [{ runKey: 'champ' }, { runKey: 'weak' }], spine: [], gamesPerRung: 0, ranAt: 't' },
+    })
+    const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, topN: 1 })
+    const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
+    expect(job.commandTemplate).toContain('tournament')
+    const cfg = job.config as { competitors: Array<{ id: string }>; include_oracle: boolean; oracle_depth: number }
+    // top-1 model (champ) + the mcts reference rung; oracle handled by include_oracle (its depth carried through)
+    expect(cfg.competitors.map((c) => c.id)).toEqual(['champ', 'mcts120'])
+    expect(cfg.include_oracle).toBe(true)
+    expect(cfg.oracle_depth).toBe(10) // spine oracle depth 12 capped at 10 to keep the play-off tractable
+    // the play-off record is persisted for the Results view, and standings come back
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-tournament', key: 'current' })
+    expect((rec?.content as { standings: unknown[] }).standings.length).toBe(2)
+    expect((rec?.content as { optimality: Record<string, unknown> }).optimality.champ).toBeDefined()
+    expect(res.standings[0].id).toBe('oracle')
+  })
+
+  it('honours explicit competitor runKeys over the leaderboard', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/a.json' } })
+    await seedRun(storage, 'b', 8, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/b.json' } })
+    const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['b'], includeReferences: false, includeOracle: false })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as { competitors: Array<{ id: string }>; include_oracle: boolean }
+    expect(cfg.competitors.map((c) => c.id)).toEqual(['b'])
+    expect(cfg.include_oracle).toBe(false)
+  })
+
+  it('errors when the project declares no tournament command', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
+      /tournament/,
+    )
+  })
+
+  it('enters the book agent as an optimal-play competitor when the spine declares a book rung', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
+    const withBook = manifest({
+      tournament: 'py -m harness.tournament --config-json {configPath} --summary-out {summaryOut}',
+      ratingSpine: [
+        { id: 'mcts120', kind: 'mcts', sims: 120, rating: 800 },
+        { id: 'book', kind: 'book', book_solve_endgame: 22, depth: 12, rating: 1900 },
+        { id: 'oracle', kind: 'oracle', depth: 12, rating: 2000 },
+      ],
+    })
+    const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: withBook, runKeys: ['champ'] })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as {
+      competitors: Array<{ id: string; model_name?: string; book_solve_endgame?: number }>
+    }
+    const book = cfg.competitors.find((c) => c.id === 'book')
+    expect(book?.model_name).toBe('book')
+    expect(book?.book_solve_endgame).toBe(22)
+  })
+})
+
+describe('buildBook (extend the optimal-play opening book)', () => {
+  const bookManifest = manifest({
+    buildBook: 'py -m harness.book --config-json {configPath} --summary-out {summaryOut}',
+  })
+  const bookSummary = {
+    game: 'connect4',
+    added: 1200,
+    total: 61200,
+    coverage: { plies: 10, reachable: 100002, booked: 12, fraction: 0.00012 },
+    build: { solved: 1200 },
+  }
+
+  it('runs the buildBook command (seed mode) and writes the -book record with honest coverage', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.buildBook({
+      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 300, deadlineSeconds: 60,
+    })
+    const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
+    expect(job.commandTemplate).toContain('harness.book')
+    const cfg = job.config as { game: string; seed_games: number; deadline_seconds: number }
+    expect(cfg.game).toBe('connect4')
+    expect(cfg.seed_games).toBe(300)
+    expect(cfg.deadline_seconds).toBe(60)
+    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-book', key: 'current' })
+    expect((rec?.content as { total: number }).total).toBe(61200)
+    expect(res.added).toBe(1200)
+    expect(res.coverage.fraction).toBeCloseTo(0.00012)
+  })
+
+  it('omits seed params for the from-root accumulator mode (seedGames 0)', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 9 })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    expect(cfg.seed_games).toBeUndefined()
+    expect(cfg.max_plies).toBe(9)
+  })
+
+  it('errors when the project declares no buildBook command', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    await expect(tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
+      /buildBook/,
     )
   })
 })

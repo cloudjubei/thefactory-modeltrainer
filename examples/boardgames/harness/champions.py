@@ -28,6 +28,13 @@ def champion_generation(game_name: str, store_dir: Path = CHAMPION_DIR) -> int:
     return int(_read_meta(game_name, store_dir).get("generation", 0))
 
 
+def champion_is_distilled(game_name: str, store_dir: Path = CHAMPION_DIR) -> bool:
+    """Whether the current champion was trained WITH oracle distillation. A pre-distillation champion has a
+    broken opening (edge-first), so warm-starting a distillation run from it inherits that flaw — the run should
+    start FRESH instead. Once a distilled champion exists, warm-starting from it compounds safely."""
+    return bool(_read_meta(game_name, store_dir).get("distilled", False))
+
+
 def best_champion_path(game_name: str, store_dir: Path = CHAMPION_DIR) -> str | None:
     """Weights path of the current best champion, or None when the store is empty / the file is missing."""
     best = _read_meta(game_name, store_dir).get("best")
@@ -41,10 +48,11 @@ def champion_pool_paths(game_name: str, k: int = 3, store_dir: Path = CHAMPION_D
 
 
 def promote_champion(
-    saver: Callable[[str], None], game_name: str, store_dir: Path = CHAMPION_DIR
+    saver: Callable[[str], None], game_name: str, store_dir: Path = CHAMPION_DIR, distilled: bool = False
 ) -> tuple[str, int]:
     """Crown a new champion: write its weights (via `saver(path)`) as generation N+1 and record it as `best`.
-    Returns (weights_path, generation)."""
+    `distilled` marks whether it was trained with oracle distillation (drives the warm-start decision). Returns
+    (weights_path, generation)."""
     store_dir.mkdir(parents=True, exist_ok=True)
     gen = champion_generation(game_name, store_dir) + 1
     wpath = store_dir / f"{game_name}-gen{gen}.pt"
@@ -52,6 +60,6 @@ def promote_champion(
     meta = _read_meta(game_name, store_dir)
     history = meta.get("history", [])
     history.append(str(wpath))
-    meta.update({"generation": gen, "best": str(wpath), "history": history[-10:]})
+    meta.update({"generation": gen, "best": str(wpath), "history": history[-10:], "distilled": bool(distilled)})
     _meta_path(game_name, store_dir).write_text(json.dumps(meta, indent=2) + "\n")
     return str(wpath), gen

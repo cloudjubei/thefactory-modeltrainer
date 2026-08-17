@@ -359,6 +359,14 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest gauntlet template must contain {summaryOut}')
     }
   }
+  if (m.tournament !== undefined) {
+    if (typeof m.tournament !== 'string' || !m.tournament.includes('{configPath}')) {
+      throw new Error('trainer manifest tournament template must contain {configPath}')
+    }
+    if (!m.tournament.includes('{summaryOut}')) {
+      throw new Error('trainer manifest tournament template must contain {summaryOut}')
+    }
+  }
   if (m.ratingAnchors !== undefined) {
     if (typeof m.ratingAnchors !== 'object' || Array.isArray(m.ratingAnchors)) {
       throw new Error('trainer manifest ratingAnchors must be an object of opponent → rating')
@@ -2794,10 +2802,11 @@ export function nextChampionStep(
  * Turn the raw, already-read state (per-core run counts, exploration convergence, champion stop reason) into
  * the {@link AutopilotSignals} the decision reads — pure, so the controller's live reads stay separable from
  * the logic. A core is "screened" once it has ≥ `minScreenRuns` completed runs. The champion counts as done
- * when the target strength was reached, OR when it plateaued AFTER a fresh improve attempt THIS run
- * (`improvedThisRun`). A `plateau`/`budget` left by a PRIOR run does NOT count: the champion loop resets its
- * plateau budget on every launch (a full `patience` of fresh attempts), so the autopilot must re-select improve
- * at least once per Start rather than refusing forever off a stale flag — else pressing Start does nothing.
+ * ONLY when it stopped improving (`plateau`/`reached-target`) AFTER a fresh improve attempt THIS run
+ * (`improvedThisRun`). A terminal left by a PRIOR run — INCLUDING `reached-target` (e.g. a past manual Improve
+ * that met a target since removed) — must NOT count: the champion loop resets its plateau budget on every
+ * launch (a full `patience` of fresh attempts), so the autopilot has to re-select improve at least once per
+ * Start rather than refusing forever off a stale flag — else pressing Start does nothing.
  */
 export function deriveAutopilotSignals(input: {
   modelChoices: string[]
@@ -2813,8 +2822,8 @@ export function deriveAutopilotSignals(input: {
   )
   const hasStartingPoint = Object.values(input.completedRunCountByCore).some((n) => n > 0)
   const championPlateaued =
-    input.championStopReason === 'reached-target' ||
-    (!!input.improvedThisRun && input.championStopReason === 'plateau')
+    !!input.improvedThisRun &&
+    (input.championStopReason === 'plateau' || input.championStopReason === 'reached-target')
   return {
     unscreenedCores,
     searchConverged: input.explorationConverged,

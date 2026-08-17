@@ -114,6 +114,33 @@ class Connect4:
         determines whether the game is over)."""
         return (state.board, state.to_move)
 
+    def symmetries(self) -> list[list[int]]:
+        """The board's exploitable symmetries as ACTION (column) source-permutations `dest <- src`: identity and
+        the left↔right mirror about the centre column. A game-theoretic value is invariant under these, so they
+        both halve the search (canonical keys) and AUGMENT net training (a position + its mirror teach the same
+        thing). A game with no symmetry returns just the identity."""
+        return [list(range(COLS)), list(range(COLS - 1, -1, -1))]
+
+    # --- SolvableGame hooks (the per-game parts the book engine needs; see docs/optimal-play-trainer-plan.md) ---
+    def ply(self, state: C4State) -> int:
+        """Stones placed — the frontier depth the book builder orders by (deepest, cheapest, first)."""
+        return sum(1 for v in state.board if v != 0)
+
+    def canonical_key(self, state: C4State) -> int:
+        """The SYMMETRY-CANONICAL key (mirror-reduced), so the book stores a position and its reflection once."""
+        from harness.solver import canonical_key, to_bitboard
+
+        position, mask, _ = to_bitboard(state)
+        return canonical_key(position, mask)
+
+    def position_value(self, state: C4State, book=None) -> int:
+        """Exact WEAK value to the player to move (win +1 / draw 0 / loss -1), via the bitboard solver, reading
+        `book` for already-solved children (the bottom-up wall-break)."""
+        from harness.solver import move_values
+
+        vals = move_values(state, weak=True, book=book)
+        return max(vals.values()) if vals else 0
+
     def exact_optimal_actions(self, state: C4State, max_empty: int) -> list[int] | None:
         """The game-theoretically OPTIMAL move set — but only when the position is cheap to solve exactly
         (≤ `max_empty` empty cells), else `None`. The opt-in seam a domain-oblivious search agent uses to play a

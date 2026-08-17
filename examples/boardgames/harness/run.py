@@ -174,10 +174,14 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     az_solve_endgame = int(config.az_solve_endgame)  # the DEPLOYED agent's exact-endgame cutoff — eval with it too
     strong_sims = STRONG_MCTS_SIMS  # a FIXED reference so win_rate_vs_strong_mcts is a comparable anchor
 
-    # WARM-START from the strongest saved net (cumulative), unless the run asks to start fresh.
+    # WARM-START from the strongest saved net (cumulative), unless the run asks to start fresh. BUT: a
+    # distillation run must NOT warm-start from a PRE-distillation champion — that net has a broken edge-first
+    # opening the imprint can't fully overwrite, so it stays sub-optimal. Start FRESH in that case; once a
+    # distilled champion exists, warm-starting from it compounds safely.
+    distilling = config.game == "connect4" and int(config.az_distill_games) > 0
     init_net = None
     parent_gen = 0
-    if config.az_warm_start:
+    if config.az_warm_start and (not distilling or champions.champion_is_distilled(config.game)):
         cp = champions.best_champion_path(config.game)
         if cp:
             init_net = load_net(cp, device)
@@ -191,6 +195,27 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     for cpath in champions.champion_pool_paths(config.game, k=3):
         cnet = load_net(cpath, device)
         pool.append(lambda cnet=cnet: AlphaZeroAgent(cnet, sims=az_sims, device=device))
+
+    # BROAD OPENING→endgame oracle distillation — the lever that teaches the net to OPEN CENTRE and hold the
+    # first-player win (a warm-started net otherwise keeps its broken edge-first opening and loses to the oracle).
+    # Built ONCE and cached (FIXED seed → one anchor reused by every generation), so it costs nothing after gen 1.
+    distill_corpus = None
+    if config.game == "connect4" and int(config.az_distill_games) > 0:
+        from harness.book import load_book
+        from harness.neural import build_distill_corpus
+
+        book = load_book(config.game)  # exact opening labels wherever the committed book reaches
+        spec = {
+            "games": int(config.az_distill_games),
+            "seed": 0,
+            "oracle_depth": 8,
+            "exact_max_empty": 14,
+            "book_entries": len(book),  # a grown book re-keys the cache so opening labels get more exact
+            "late": {"n": int(config.az_distill_positions), "min_moves": 20},
+        }
+        distill_corpus = build_distill_corpus(
+            game, spec, cache_dir=str(CHECKPOINT_DIR / "distill_cache"), log=print, book=book,
+        )
 
     t0 = time.perf_counter()
     net, _hist = train_alphazero(
@@ -206,8 +231,10 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         # Self-play (balanced ~50% games) is the main strength engine; the league is a MINORITY of games —
         # facing a far-stronger fixed opponent yields mostly-losing games, a weak learning signal on its own.
         pool_frac=0.35,
-        # ORACLE DISTILLATION — supervised optimal-move targets, the biggest lever for reaching perfect play.
+        # ORACLE DISTILLATION — supervised optimal-move targets, the biggest lever for reaching perfect play. A
+        # broad cached corpus (opening→endgame) when `az_distill_games>0`; else the late-only sampled positions.
         distill_positions=config.az_distill_positions,
+        distill_corpus=distill_corpus,
         log=print,
     )
     train_seconds = time.perf_counter() - t0
@@ -237,10 +264,10 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         )
         az_metrics["win_rate_vs_champion"] = round(vs_champ["win_rate"], 4)
         if vs_champ["win_rate"] >= PROMOTION_THRESHOLD:
-            champions.promote_champion(lambda p: save_net(net, p), config.game)
+            champions.promote_champion(lambda p: save_net(net, p), config.game, distilled=distilling)
             promoted = True
     else:
-        champions.promote_champion(lambda p: save_net(net, p), config.game)
+        champions.promote_champion(lambda p: save_net(net, p), config.game, distilled=distilling)
         promoted = True
 
     az_report = {

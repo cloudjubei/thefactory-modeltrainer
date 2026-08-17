@@ -184,3 +184,39 @@ def test_centre_is_the_unique_optimal_opening():
     game = Connect4()
     state = game.initial_state(random.Random(0))
     assert optimal_columns(state) == [COLS // 2]  # column 3 only
+
+
+def _mirror_state(state):
+    """Reflect a C4State left↔right (column c ↔ COLS-1-c) — the game's one non-trivial symmetry."""
+    m = [0] * (ROWS * COLS)
+    for r in range(ROWS):
+        for c in range(COLS):
+            m[r * COLS + (COLS - 1 - c)] = state.board[r * COLS + c]
+    return C4State(board=tuple(m), to_move=state.to_move, winner=state.winner, done=state.done)
+
+
+def test_mirror_is_involution_and_canonical_key_is_symmetric():
+    from harness.solver import _mirror, canonical_key, to_bitboard
+
+    for x in (0, 1, 0b1010101, (1 << 20) | (1 << 3) | 1):
+        assert _mirror(_mirror(x)) == x
+    game = Connect4()
+    rng = random.Random(7)
+    checked = 0
+    for _ in range(20):
+        s = game.initial_state(rng)
+        for _ in range(rng.randint(22, 30)):  # late positions → the exact solve is cheap
+            if s.done or not game.legal_actions(s):
+                break
+            s = game.step(s, rng.choice(game.legal_actions(s)))
+        if s.done or len(game.legal_actions(s)) < 2:
+            continue
+        ms = _mirror_state(s)
+        p, m, _ = to_bitboard(s)
+        pm, mm, _ = to_bitboard(ms)
+        # a position and its mirror map to the SAME canonical key (so they share one table entry)...
+        assert canonical_key(p, m) == canonical_key(pm, mm)
+        # ...and their optimal move sets are exact reflections of each other.
+        assert sorted(optimal_columns(ms)) == sorted(COLS - 1 - c for c in optimal_columns(s))
+        checked += 1
+    assert checked >= 5

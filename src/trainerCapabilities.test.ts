@@ -14,7 +14,7 @@ describe('trainer launchable activities', () => {
   const byType = new Map(TRAINER_LAUNCHABLE_ACTIVITIES.map((a) => [a.activityType, a]))
 
   it('covers every chat-launchable trainer activity with a description', () => {
-    // The 28 project operations a user can start from the viewer (both launch paths). inspect-trainer is
+    // Every project operation a user can start from the viewer (both launch paths). inspect-trainer is
     // deliberately NOT here — it is the hub bootstrap (re-registers the manifest), an exempt activity.
     const expected = [
       'side-experiment',
@@ -23,6 +23,8 @@ describe('trainer launchable activities', () => {
       'train-champion',
       'autopilot',
       'rate-models',
+      'tournament',
+      'build-book',
       'judge',
       'evaluate',
       'cross-test',

@@ -69,3 +69,11 @@ def test_validate_rejects_out_of_range_az_levers():
         validate_config(TrainerConfig(model_name="alphazero", az_sims=0))
     with pytest.raises(ValueError):
         validate_config(TrainerConfig(model_name="alphazero", az_iterations=0))
+    with pytest.raises(ValueError):
+        validate_config(TrainerConfig(model_name="alphazero", az_distill_games=-1))
+
+
+def test_az_distill_games_defaults_off_and_coerces(tmp_path):
+    assert TrainerConfig().az_distill_games == 0
+    cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_distill_games": "80"}))
+    assert cfg.az_distill_games == 80

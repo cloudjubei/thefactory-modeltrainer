@@ -65,6 +65,35 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     optionalParams: ['runKeys', 'gamesPerRung'],
   },
   {
+    activityType: 'tournament',
+    label: 'Play-off (head-to-head)',
+    description:
+      'Pit models DIRECTLY against each other in a round-robin (+ the near-perfect oracle) so the true winner comes from ACTUAL games, not a fitted rating — answering "which model actually wins the most?" more convincingly than the leaderboard. Also proves optimality for a solved game two ways: the FIRST-PLAYER win rate (Connect 4 is a first-player win, so an optimal model played against ITSELF lets whoever moves first win ~100%) and each model’s result as the first player vs the oracle (`wins_as_p1_vs_oracle` → an optimal model beats even perfect play). Writes a `{recordType}-tournament` record. `runKeys` picks competitors (else the top `topN` from the leaderboard); `includeReferences`/`includeOracle` add the spine rungs + oracle; `selfPlayRunKeys` chooses who plays themselves.',
+    optionalParams: [
+      'runKeys',
+      'topN',
+      'includeReferences',
+      'includeOracle',
+      'gamesPerPair',
+      'selfPlayRunKeys',
+    ],
+  },
+  {
+    activityType: 'build-book',
+    label: 'Build opening book',
+    description:
+      'Extend the project’s committed OPTIMAL-PLAY opening book for a solved game — one bounded, resumable pass that solves+stores more of the symmetry-reduced reachable frontier and persists it, so coverage accumulates across runs. This is what makes provably-optimal play COMPUTABLE: the deployable `book` agent (opening book + exact endgame + near-perfect fallback) and book-accelerated exact distillation both read from it, and the more it covers the larger a model’s provably-optimal region. Defaults to the fast SEED mode (cheap midgame subtrees grow real coverage fast); pass `seedGames:0` for the long-running from-root OPENING accumulator. Writes a `{recordType}-book` record with honest coverage. `maxPositions`/`deadlineSeconds` bound the pass.',
+    optionalParams: [
+      'game',
+      'maxPlies',
+      'minPlies',
+      'maxPositions',
+      'deadlineSeconds',
+      'seedGames',
+      'seedPlies',
+    ],
+  },
+  {
     activityType: 'side-experiment',
     label: 'Run a side-experiment',
     description:

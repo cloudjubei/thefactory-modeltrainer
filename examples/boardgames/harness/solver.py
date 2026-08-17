@@ -33,8 +33,31 @@ _BOARD_MASK = _BOTTOM_MASK * ((1 << HEIGHT) - 1)  # the 42 playable cells
 
 # Persistent transposition table (position+mask key -> encoded upper bound). Capped for memory safety: past the
 # cap we stop inserting (correctness is unaffected — only the shared cache stops growing).
+# The transposition table is a PERSISTENT, symmetry-canonical opening/endgame book: it survives across solves
+# (load_book/save_book) and accumulates the hard mid-depth frontier, so the opening — which thrashed a small
+# in-memory table (the measured 158s/position at move 10) — becomes tractable as the frontier fills in. Each
+# entry is a proven upper bound on the position's intrinsic score, valid in any later search (see _negamax).
 _TT: dict[int, int] = {}
-_TT_CAP = 2_000_000
+_TT_CAP = 6_000_000
+
+
+def load_book(path: str) -> int:
+    """Load a persisted transposition/book file into the shared table (accumulating). Returns entries loaded."""
+    from harness.tablebase import Tablebase
+
+    tb = Tablebase.load(path)
+    _TT.update(tb._v)
+    return len(tb._v)
+
+
+def save_book(path: str) -> int:
+    """Persist the shared transposition/book table so the next run starts warm. Returns entries written."""
+    from harness.tablebase import Tablebase
+
+    tb = Tablebase(cap=_TT_CAP)
+    tb._v = dict(_TT)
+    tb.save(path)
+    return len(_TT)
 
 
 def _bottom_mask_col(c: int) -> int:
@@ -47,6 +70,27 @@ def _top_mask_col(c: int) -> int:
 
 def _column_mask(c: int) -> int:
     return ((1 << HEIGHT) - 1) << (c * _H1)
+
+
+_COL_BITS = (1 << _H1) - 1  # the 7 bits of one column (6 rows + sentinel)
+
+
+def _mirror(x: int) -> int:
+    """Reflect a bitboard left↔right about the centre column (column c ↔ column WIDTH-1-c). The game-theoretic
+    value is mirror-invariant, so canonicalising every transposition key to this reflection halves the table."""
+    m = 0
+    for c in range(WIDTH):
+        m |= ((x >> (c * _H1)) & _COL_BITS) << ((WIDTH - 1 - c) * _H1)
+    return m
+
+
+def canonical_key(position: int, mask: int) -> int:
+    """The SYMMETRY-REDUCED transposition key: the smaller of the position's Pons key (`position + mask`) and
+    its left-right mirror's. A position and its reflection therefore share ONE table entry — ~50% fewer to
+    solve/store, and any two lines that are mirror images reuse each other's search."""
+    k = position + mask
+    km = _mirror(position) + _mirror(mask)
+    return k if k <= km else km
 
 
 def _half(x: int) -> int:
@@ -153,7 +197,7 @@ def _negamax(position: int, mask: int, moves: int, alpha: int, beta: int, tt: di
         beta = max_score
         if alpha >= beta:
             return beta
-    key = position + mask
+    key = canonical_key(position, mask)  # symmetry-reduced → a position and its mirror share this entry
     entry = tt.get(key)
     if entry is not None:  # the table stores an upper bound (encoded +1 off MIN_SCORE)
         tt_max = entry + MIN_SCORE - 1
@@ -222,9 +266,14 @@ def to_bitboard(state: C4State) -> tuple[int, int, int]:
     return position, mask, moves
 
 
-def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = None) -> dict[int, int]:
+def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = None, book=None) -> dict[int, int]:
     """Game-theoretic value of every legal column from the mover's perspective (higher = better). The optimal
-    SET is the argmax; `weak` scores by outcome (win/draw/loss), `weak=False` by outcome-then-speed."""
+    SET is the argmax; `weak` scores by outcome (win/draw/loss), `weak=False` by outcome-then-speed.
+
+    `book` (any `.get(canonical_key) -> value|None`, the exact WEAK opening/endgame store) short-circuits a
+    child that is already solved: instead of re-searching it we read its stored value. This is the bottom-up
+    wall-break — once the deeper frontier is booked, a shallower position's children are all instant lookups,
+    so its own solve collapses to a handful of table hits. Only consulted when `weak` (the store is weak-valued)."""
     tt = _TT if tt is None else tt
     if state.done:
         return {}
@@ -237,15 +286,20 @@ def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = N
             values[c] = 1 if weak else (_TOTAL + 1 - moves) // 2
             continue
         pos2, mask2 = position ^ mask, mask | ((mask + _bottom_mask_col(c)) & _column_mask(c))
+        if book is not None and weak:
+            bv = book.get(canonical_key(pos2, mask2))
+            if bv is not None:  # child stored from the CHILD-mover's view → negate for our side
+                values[c] = max(-1, min(1, -bv))
+                continue
         s = -_solve(pos2, mask2, moves + 1, weak, tt)
         values[c] = max(-1, min(1, s)) if weak else s
     return values
 
 
-def optimal_columns(state: C4State, tt: dict[int, int] | None = None) -> list[int]:
+def optimal_columns(state: C4State, tt: dict[int, int] | None = None, book=None) -> list[int]:
     """The set of outcome-optimal columns — every move that preserves the best achievable result. A model's
     move is 'optimal' iff it lies in this set (multiple moves can be equally optimal)."""
-    values = move_values(state, weak=True, tt=tt)
+    values = move_values(state, weak=True, tt=tt, book=book)
     if not values:
         return []
     best = max(values.values())

@@ -204,6 +204,19 @@ def resolve_agent(name: str, cfg: dict, personas: dict[str, Callable[[dict], Age
         from harness.solver import NearPerfectOracle
 
         return NearPerfectOracle(depth=int(cfg.get("oracle_depth", 10)))
+    if name == "book":
+        # The deployable optimal agent: opening book + exact endgame solver + a near-perfect fallback. Loads
+        # the project-committed book for the game; provably optimal wherever the book/solver reach, fast always.
+        from harness.book import load_book
+        from harness.bookagent import BookAgent
+
+        gname = cfg.get("game", "connect4")
+        return BookAgent(
+            load_book(gname),
+            gname,
+            solve_endgame=int(cfg.get("book_solve_endgame", 22)),
+            depth=int(cfg.get("oracle_depth", 12)),
+        )
     if personas and name in personas:
         return personas[name](cfg)
     if name.startswith("champion:"):

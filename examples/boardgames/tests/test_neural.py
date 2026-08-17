@@ -8,6 +8,7 @@ from harness.agents import HeuristicAgent, RandomAgent
 from harness.neural import (
     AlphaZeroAgent,
     Connect4Net,
+    augment_examples,
     build_alphazero_agent,
     encode,
     head_to_head,
@@ -18,6 +19,23 @@ from harness.neural import (
     train_net,
     vs_opponent_game,
 )
+
+
+def test_augment_examples_mirrors_board_and_policy():
+    g = Connect4()
+    x = torch.zeros(2, 6, 7)
+    x[0, 0, 0] = 1.0  # own stone in column 0
+    aug = augment_examples([(x, [1.0, 0, 0, 0, 0, 0, 0], 1.0)], g.symmetries())
+    assert len(aug) == 2  # identity + mirror
+    mx, mpi, mv = aug[1]
+    assert mv == 1.0
+    assert mpi == [0, 0, 0, 0, 0, 0, 1.0]  # policy mass reflected to column 6
+    assert float(mx[0, 0, 6]) == 1.0 and float(mx[0, 0, 0]) == 0.0
+
+
+def test_augment_examples_identity_only_is_copy():
+    x = torch.zeros(2, 6, 7)
+    assert len(augment_examples([(x, [0.0] * 7, 0.0)], [[0, 1, 2, 3, 4, 5, 6]])) == 1
 
 
 def _game():
@@ -196,6 +214,34 @@ def test_head_to_head_diversifies_games_via_random_openings():
         game, lambda: AlphaZeroAgent(net, sims=10), lambda: AlphaZeroAgent(net, sims=10), n=20, rng=random.Random(0)
     )
     assert 0.0 < r["win_rate"] < 1.0  # random openings make the n games genuinely distinct
+
+
+def test_oracle_distill_games_labels_the_opening_including_centre_first():
+    from harness.neural import oracle_distill_games
+
+    game = Connect4()
+    ex = oracle_distill_games(game, n_games=4, seed=0, oracle_depth=6, exact_max_empty=10)
+    assert ex
+    for x, pi, z in ex:
+        assert tuple(x.shape) == (2, 6, 7)
+        assert abs(sum(pi) - 1.0) < 1e-4
+        assert z in (-1.0, 0.0, 1.0)
+    # game 0 has the learner as the FIRST player, so the very first labelled example is the EMPTY board — and its
+    # optimal label must be CENTRE (col 3), the move the champion's broken opening failed to play.
+    x0, pi0, _ = ex[0]
+    assert float(x0.sum()) == 0.0  # empty board
+    assert max(range(7), key=lambda c: pi0[c]) == 3  # centre-first
+
+
+def test_build_distill_corpus_caches_to_disk(tmp_path):
+    from harness.neural import build_distill_corpus
+
+    game = Connect4()
+    spec = {"games": 4, "seed": 1, "oracle_depth": 6, "exact_max_empty": 10, "late": {"n": 3, "min_moves": 28}}
+    a = build_distill_corpus(game, spec, cache_dir=str(tmp_path))
+    assert a and len(list(tmp_path.glob("*.pt"))) == 1  # a cache file was written
+    b = build_distill_corpus(game, spec, cache_dir=str(tmp_path))  # second call HITS the cache
+    assert len(a) == len(b)
 
 
 def test_distill_examples_targets_match_the_oracle():

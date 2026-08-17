@@ -13,6 +13,9 @@ import {
   poweredNullVerdict,
   neweyWestInflation,
   benjaminiYekutieli,
+  effectiveTrialsParticipation,
+  correlationMatrix,
+  effectiveTrials,
 } from './deflatedSharpe.js'
 import type { DeflatedCorpusTrial } from './modelTrainerTypes.js'
 
@@ -404,5 +407,61 @@ describe('powered-null primitives (TS twins of trainer/sharpe.py)', () => {
     const by = benjaminiYekutieli(p, 0.05)
     expect(by.filter(Boolean).length).toBeLessThanOrEqual(benjaminiHochberg(p, 0.05).filter(Boolean).length)
     expect(by).toEqual([true, false, false, false]) // H_4=2.0833; k=1 thr = 0.05/2.0833/4 = 0.006 >= 0.001
+  })
+})
+
+describe('effectiveTrials (TS twin of effective_trials.py participation ratio)', () => {
+  const eye = (m: number): number[][] =>
+    Array.from({ length: m }, (_, i) => Array.from({ length: m }, (_, j) => (i === j ? 1 : 0)))
+
+  it('identity correlation -> M (all independent)', () => {
+    expect(effectiveTrialsParticipation(eye(12))).toBeCloseTo(12, 10)
+  })
+
+  it('rank-one (all-ones) correlation -> 1 (perfectly redundant)', () => {
+    const ones = Array.from({ length: 10 }, () => new Array(10).fill(1))
+    expect(effectiveTrialsParticipation(ones)).toBeCloseTo(1, 10)
+  })
+
+  it('2x2 rho=0.5 -> 1.6 (golden vs Python)', () => {
+    expect(effectiveTrialsParticipation([[1, 0.5], [0.5, 1]])).toBeCloseTo(1.6, 10)
+  })
+
+  it('3x3 equicorrelation rho=0.3 -> 2.542372881355932 (golden vs Python)', () => {
+    const c = [[1, 0.3, 0.3], [0.3, 1, 0.3], [0.3, 0.3, 1]]
+    expect(effectiveTrialsParticipation(c)).toBeCloseTo(2.542372881355932, 10)
+  })
+
+  it('is bounded in [1, M]', () => {
+    expect(effectiveTrialsParticipation([[1, 0.9], [0.9, 1]])).toBeGreaterThanOrEqual(1)
+    expect(effectiveTrialsParticipation([[1, 0.9], [0.9, 1]])).toBeLessThanOrEqual(2)
+  })
+
+  it('empty / singleton degrade cleanly', () => {
+    expect(effectiveTrials([])).toBe(0)
+    expect(effectiveTrials([[0.1, 0.2, 0.3]])).toBe(1)
+  })
+
+  it('correlationMatrix of duplicated series is all-ones -> effectiveTrials ~ 1', () => {
+    const base = [1, -2, 3, -1, 0.5, -0.5, 2, -3]
+    const fam = [base.slice(), base.slice(), base.slice(), base.slice()]
+    const c = correlationMatrix(fam)
+    expect(c[0][1]).toBeCloseTo(1, 9)
+    expect(effectiveTrials(fam)).toBeCloseTo(1, 6)
+  })
+
+  it('correlationMatrix of near-independent series -> effectiveTrials ~ M', () => {
+    const rand = (seed: number) => {
+      let s = seed
+      return () => {
+        s = (s * 1103515245 + 12345) & 0x7fffffff
+        return s / 0x7fffffff - 0.5
+      }
+    }
+    const fam = Array.from({ length: 6 }, (_, k) => {
+      const r = rand(k + 1)
+      return Array.from({ length: 4000 }, () => r())
+    })
+    expect(effectiveTrials(fam)).toBeGreaterThan(5)
   })
 })

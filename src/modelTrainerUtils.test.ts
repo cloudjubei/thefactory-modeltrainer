@@ -5266,21 +5266,23 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
     expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: {} }).hasStartingPoint).toBe(false)
   })
 
-  it('counts a plateau as done only AFTER a fresh improve attempt this run; reached-target is always done', () => {
-    // reached-target means the champion is as strong as required — genuinely done, no fresh attempt warranted.
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(true)
-    expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: false }).championPlateaued,
-    ).toBe(true)
-    // a plateau counts as done ONLY once we've actually re-attempted improve THIS run...
+  it('counts the champion as done only AFTER a fresh improve attempt this run — a stale terminal never blocks', () => {
+    // A plateau/reached-target counts as done ONLY once we've actually re-attempted improve THIS run...
     expect(
       deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: true }).championPlateaued,
     ).toBe(true)
-    // ...a plateau left by a PRIOR run must NOT block a fresh improve attempt (the champion loop resets its
-    // plateau budget per launch, so the autopilot has to re-select improve at least once per Start).
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: true }).championPlateaued,
+    ).toBe(true)
+    // ...a terminal left by a PRIOR run must NOT block a fresh improve attempt — INCLUDING reached-target (e.g.
+    // a past manual Improve that met a since-removed target), the exact stale flag that made Start do nothing.
     expect(
       deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: false }).championPlateaued,
     ).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: false }).championPlateaued,
+    ).toBe(false)
+    expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(false)
     expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(false)
     // budget / aborted are never a plateau, even after an attempt.
     expect(

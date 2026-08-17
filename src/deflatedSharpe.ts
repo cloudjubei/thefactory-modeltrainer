@@ -96,6 +96,62 @@ export function expectedMaxSharpe(nTrials: number, trialSrStd: number): number {
 }
 
 /**
+ * Effective number of INDEPENDENT trials from a correlation matrix, in [1, M] — the participation ratio
+ * (Σλ)² / Σλ² = trace(C)² / Σ_ij C_ij² (an algebraic identity, so no eigendecomposition is needed). An
+ * automated/LLM search emits highly CORRELATED strategies, so deflating a Deflated-Sharpe by the raw trial count
+ * over-penalizes and false-negatives genuine alpha; deflate by this instead. Independent → M, one dominant factor
+ * → 1. TS twin of `effective_trials.py::effective_trials_participation`.
+ */
+export function effectiveTrialsParticipation(corr: number[][]): number {
+  const m = corr.length
+  if (m === 0) return 0
+  if (m === 1) return 1
+  let trace = 0
+  let sumSq = 0
+  for (let i = 0; i < m; i++) {
+    trace += corr[i][i]
+    const row = corr[i]
+    for (let j = 0; j < m; j++) sumSq += row[j] * row[j]
+  }
+  if (sumSq <= 0) return 1
+  const val = (trace * trace) / sumSq
+  return Math.min(Math.max(val, 1), m)
+}
+
+/** Pearson correlation matrix of a set of equal-length series (`returns[s]` = one strategy's return stream);
+ * constant series become zero rows/cols. Truncates to the shortest series. */
+export function correlationMatrix(returns: number[][]): number[][] {
+  const m = returns.length
+  if (m === 0) return []
+  const n = Math.min(...returns.map((r) => r.length))
+  const z: number[][] = returns.map((r) => {
+    const v = r.slice(0, n)
+    const mean = v.reduce((a, b) => a + b, 0) / n
+    const d = v.map((x) => x - mean)
+    const sd = Math.sqrt(d.reduce((a, b) => a + b * b, 0) / n)
+    return sd > 0 ? d.map((x) => x / sd) : new Array(n).fill(0)
+  })
+  const c: number[][] = Array.from({ length: m }, () => new Array(m).fill(0))
+  for (let i = 0; i < m; i++) {
+    for (let j = i; j < m; j++) {
+      let s = 0
+      for (let t = 0; t < n; t++) s += z[i][t] * z[j][t]
+      c[i][j] = c[j][i] = s / n
+    }
+  }
+  return c
+}
+
+/** Effective independent trials from a set of equal-length strategy return series (participation ratio of their
+ * correlation matrix). TS twin of `effective_trials.py::effective_trials`. */
+export function effectiveTrials(returns: number[][]): number {
+  const m = returns.length
+  if (m === 0) return 0
+  if (m === 1) return 1
+  return effectiveTrialsParticipation(correlationMatrix(returns))
+}
+
+/**
  * DSR from a precomputed moment bundle: PSR measured against the expected-max-Sharpe deflation level for
  * `nTrials` configs tried. DSR > ~0.95 means the observed Sharpe is unlikely to be multiple-testing luck.
  * TS twin of `deflated_sharpe_ratio` — the honesty gate's aggregate over the search.

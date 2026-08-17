@@ -42,6 +42,15 @@ def _rung_factory(rung: dict, game: Game) -> Callable[[], Agent]:
 
         depth = int(rung.get("depth", 12))
         return lambda: NearPerfectOracle(depth=depth)
+    if kind == "book":
+        from harness.book import load_book
+        from harness.bookagent import BookAgent
+
+        gname = game.name
+        se = int(rung.get("book_solve_endgame", 22))
+        depth = int(rung.get("depth", 12))
+        book = load_book(gname)  # load ONCE; a fresh agent per game shares the book
+        return lambda: BookAgent(book, gname, solve_endgame=se, depth=depth)
     if kind in ("champion", "alphazero"):
         from harness.neural import AlphaZeroAgent, load_net
 
@@ -63,11 +72,24 @@ def _model_factory(model: dict, game: Game) -> Callable[[], Agent]:
 
             net = load_net(spec["az_weights"])
             sims = int(spec.get("az_sims", 100))
-            return lambda: AlphaZeroAgent(net, sims=sims)
+            se = int(spec.get("az_solve_endgame", 0))
+            return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
         cfg = dict(spec)
         return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
+    if model.get("az_weights"):  # a learned net passed by weights directly (e.g. a champion .pt, no spec file)
+        from harness.neural import AlphaZeroAgent, load_net
+
+        net = load_net(model["az_weights"])
+        sims = int(model.get("az_sims", 100))
+        se = int(model.get("az_solve_endgame", 0))
+        return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
     model_name = model.get("model_name", "mcts")
-    cfg = {"model_name": model_name, "mcts_sims": int(model.get("mcts_sims", 120)), "game": game.name}
+    cfg = {
+        "model_name": model_name,
+        "mcts_sims": int(model.get("mcts_sims", 120)),
+        "mcts_solve_endgame": int(model.get("mcts_solve_endgame", 0)),
+        "game": game.name,
+    }
     return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
 
 

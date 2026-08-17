@@ -72,6 +72,8 @@ const EXPERIMENT_ACTIVITY_TYPES = new Set([
   'continue-training',
   'side-experiment',
   'rate-models',
+  'tournament',
+  'build-book',
 ])
 // Whether the 2nd ('Tasks') column is collapsed (persisted per session).
 const TASKS_COLLAPSED_SS = 'trainer.tasksCollapsed'
@@ -3773,7 +3775,7 @@ async function championActivityRunning() {
     const all = (res && res.activities) || []
     return all.some(
       (a) =>
-        a.activityType === 'train-champion' &&
+        quickActivityType(a) === 'train-champion' &&
         (!a.recordType || a.recordType === manifest.recordType) &&
         ['running', 'starting', 'queued'].includes(a.status),
     )
@@ -3799,16 +3801,28 @@ function autopilotEnabled() {
     window.OverseerBridge.embedded
   )
 }
-async function autopilotActivityRunning() {
+// Is the autopilot actively working? The `autopilot` activity is a long-lived PARENT task that spends most of
+// its life AWAITING a child (screen `train` / `explore` / improve `train-champion`, itself spawning a `train`
+// generation) — so the visibly-live work is the CHILD, and keying only off the parent's own status leaves the
+// panel showing "Start" the whole time it's improving. So we treat it as running when the autopilot's OWN
+// persisted state says it's mid-run AND any activity it drives is live (the state gate stops a manual
+// Advanced-explore, or a stale aborted state, from falsely reading as running).
+async function autopilotActivityRunning(state) {
   try {
     const res = await window.OverseerBridge.listActivities()
     const all = (res && res.activities) || []
-    return all.some(
-      (a) =>
-        a.activityType === 'autopilot' &&
-        (!a.recordType || a.recordType === manifest.recordType) &&
-        ['running', 'starting', 'queued'].includes(a.status),
-    )
+    const rt = manifest.recordType
+    // The listActivities response carries the type in `resumeToken.activityType`, NOT a top-level
+    // `activityType` (the API schema omits it) — read it via quickActivityType or every check silently misses.
+    const isLive = (a, types) =>
+      types.includes(quickActivityType(a)) &&
+      (!a.recordType || a.recordType === rt) &&
+      ['running', 'starting', 'queued'].includes(a.status)
+    if (all.some((a) => isLive(a, ['autopilot']))) return true
+    if (state && state.stage === 'running') {
+      return all.some((a) => isLive(a, ['train-champion', 'explore', 'train']))
+    }
+    return false
   } catch {
     return false
   }
@@ -3854,7 +3868,7 @@ async function renderAutopilotPanel() {
   } catch {
     state = null
   }
-  const running = await autopilotActivityRunning()
+  const running = await autopilotActivityRunning(state)
   const active = running || autopilotLaunching
   // Publish the live step so the exploration view can adapt (heatmap while searching); cleared when not running.
   autopilotStep = running ? (state && state.currentAction ? state.currentAction : 'search') : null
@@ -3863,8 +3877,21 @@ async function renderAutopilotPanel() {
     const action = state && state.currentAction ? state.currentAction : 'search'
     const label = AUTOPILOT_STEP_LABEL[action] || 'Working'
     const reason = state && state.currentReason ? state.currentReason : ''
+    // While improving, the meaningful progress is the champion GENERATION (what shows in the activity list),
+    // not the autopilot's lifetime round counter — read it from the champion record for a clear signal.
+    let detail = ''
+    if (action === 'improve') {
+      try {
+        const crows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-champion', key: 'current' })
+        const crec = Array.isArray(crows) ? crows[0] : crows
+        const cst = crec ? crec.content || crec : null
+        if (cst && typeof cst.generation === 'number') detail = ` · generation ${cst.generation + 1}`
+      } catch {
+        // best-effort; fall back to the plain label
+      }
+    }
     status =
-      `<div class="ap-status ap-running">● ${escapeHtml(label)}${state && state.round ? ` · round ${state.round}` : ''}</div>` +
+      `<div class="ap-status ap-running">● ${escapeHtml(label)}${escapeHtml(detail)}</div>` +
       (reason ? `<div class="ap-hint">${escapeHtml(reason)}</div>` : '')
   } else if (state && state.stage === 'done' && state.stopReason === 'budget') {
     // Hit the per-launch round cap, NOT genuine convergence — there may well be more to do.
@@ -4998,6 +5025,188 @@ function formatModelScore(v) {
   return Math.abs(v) >= 100 ? String(Math.round(v)) : Number(v).toFixed(3)
 }
 
+// --- PLAY-OFF: pit models head-to-head (+ the oracle) so the winner comes from REAL games, and prove optimal
+// play for a solved game (first-player-wins self-play + wins-as-P1 vs the oracle). Sits atop the Results view.
+let playoffLaunching = false
+let playoffPollTimer = null
+let bookLaunching = false
+function playoffEnabled() {
+  return !!(manifest && manifest.tournament && window.OverseerBridge && window.OverseerBridge.embedded)
+}
+function bookEnabled() {
+  return !!(manifest && manifest.buildBook && window.OverseerBridge && window.OverseerBridge.embedded)
+}
+async function bookRunning() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return ((res && res.activities) || []).some(
+      (a) =>
+        quickActivityType(a) === 'build-book' &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        ['running', 'starting', 'queued'].includes(a.status),
+    )
+  } catch {
+    return false
+  }
+}
+// The optimal-play BOOK line inside the Play-off panel: shows honest opening coverage and a Build button that
+// extends it (the deployable `book` competitor plays from it, so growing it grows the provably-optimal region).
+async function renderBookLine() {
+  if (!bookEnabled()) return ''
+  let rec = null
+  try {
+    const rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-book', key: 'current' })
+    const r = Array.isArray(rows) ? rows[0] : rows
+    rec = r ? r.content || r : null
+  } catch {
+    rec = null
+  }
+  const running = bookLaunching || (await bookRunning())
+  const btn = `<button type="button" class="po-btn" id="build-book"${running ? ' disabled' : ''}>${
+    bookLaunching ? 'Starting…' : running ? 'Building…' : 'Build book'
+  }</button>`
+  const cov = rec && rec.coverage
+  const covBits = cov
+    ? `opening coverage ≤${cov.plies} plies: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> (${cov.booked}/${cov.reachable}) · book size <strong>${rec.total || 0}</strong>`
+    : `no book yet — build one to make optimal opening play <em>exact</em> (endgames are already exact).`
+  return `<div class="po-book"><div class="po-book-head"><strong>Optimal-play book</strong>${btn}</div><div class="po-hint">${covBits}</div></div>`
+}
+async function onBuildBook() {
+  if (bookLaunching) return
+  bookLaunching = true
+  renderRunsTable()
+  try {
+    await window.OverseerBridge.startActivity('build-book', trainerActivityParams({}))
+    showToast('Book build started')
+  } catch (e) {
+    const msg = (e && (e.message || e.error)) || String(e)
+    showToast(`Book build failed to start: ${msg}`)
+  } finally {
+    bookLaunching = false
+    schedulePlayoffPoll()
+    renderRunsTable()
+  }
+}
+async function playoffRunning() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return ((res && res.activities) || []).some(
+      (a) =>
+        quickActivityType(a) === 'tournament' &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        ['running', 'starting', 'queued'].includes(a.status),
+    )
+  } catch {
+    return false
+  }
+}
+function poVerdictBadge(o) {
+  if (!o) return ''
+  const pct = Math.round((o.wins_as_p1_vs_oracle || 0) * 100)
+  if (o.verdict === 'optimal') return `<span class="po-badge po-optimal">✓ optimal vs oracle</span>`
+  if (o.verdict === 'near-optimal') return `<span class="po-badge po-near">≈ ${pct}% wins as P1 vs oracle</span>`
+  return `<span class="po-badge po-sub">${pct}% wins as P1 vs oracle</span>`
+}
+function labelOfCompetitor(rec, id) {
+  const c = (rec.competitors || []).find((x) => x.id === id)
+  return (c && c.label) || id
+}
+async function renderPlayoffPanel() {
+  if (!playoffEnabled()) return ''
+  let rec = null
+  try {
+    const rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-tournament', key: 'current' })
+    const r = Array.isArray(rows) ? rows[0] : rows
+    rec = r ? r.content || r : null
+  } catch {
+    rec = null
+  }
+  const running = playoffLaunching || (await playoffRunning())
+  const btn = `<button type="button" class="po-btn" id="run-playoff"${running ? ' disabled' : ''}>${
+    playoffLaunching ? 'Starting…' : running ? 'Running…' : rec ? 'Re-run play-off' : 'Run play-off'
+  }</button>`
+  let body = ''
+  if (running && !rec) {
+    body = `<div class="po-hint">Playing the models against each other + the oracle… this can take a few minutes (strong search + oracle games are slow).</div>`
+  } else if (rec && Array.isArray(rec.standings)) {
+    const winner = rec.standings.find((s) => s.id !== 'oracle') || rec.standings[0]
+    const standings = rec.standings
+      .map((s) => {
+        const opt = rec.optimality && rec.optimality[s.id]
+        const isWinner = winner && s.id === winner.id
+        return `<tr class="${isWinner ? 'po-winner' : ''}">
+          <td class="num">${s.rank}</td>
+          <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">perfect</span>' : ''}</td>
+          <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
+          <td>${poVerdictBadge(opt)}</td>
+        </tr>`
+      })
+      .join('')
+    const fpwr = Math.round((rec.firstPlayerWinRate || 0) * 100)
+    const selfIds = Object.keys(rec.selfPlay || {})
+    const selfBits = selfIds
+      .map((id) => {
+        const sp = rec.selfPlay[id]
+        return `<div class="po-self"><strong>${escapeHtml(labelOfCompetitor(rec, id))}</strong> vs itself: first player wins <strong>${Math.round(
+          (sp.first_player_win_rate || 0) * 100,
+        )}%</strong>${sp.draw_rate ? ` · draws ${Math.round(sp.draw_rate * 100)}%` : ''}${
+          sp.first_player_loss_rate ? ` · <span class="po-sub">first player LOSES ${Math.round(sp.first_player_loss_rate * 100)}%</span>` : ''
+        } <span class="card-sub">(perfect play → 100%)</span></div>`
+      })
+      .join('')
+    const matrixRows = (rec.matrix || [])
+      .map(
+        (m) =>
+          `<tr><td>${escapeHtml(labelOfCompetitor(rec, m.a))}</td><td>${escapeHtml(labelOfCompetitor(rec, m.b))}</td>` +
+          `<td class="num">${Math.round(m.a_win * 100)}%</td><td class="num">${Math.round(m.draw * 100)}%</td><td class="num">${Math.round(
+            m.b_win * 100,
+          )}%</td><td class="num">${Math.round((m.first_player_win_rate || 0) * 100)}%</td></tr>`,
+      )
+      .join('')
+    body =
+      `<div class="po-winner-line">🏆 True winner (most games won): <strong>${escapeHtml(winner ? winner.label : '—')}</strong></div>` +
+      `<div class="po-hint">Standings are from ACTUAL head-to-head games. A model that wins as the first player vs the oracle is playing optimally (Connect 4 is a first-player win).</div>` +
+      `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th class="num">#</th><th>Competitor</th><th class="num" ${helpAttr('Share of match points won across its games (win=1, draw=½).')}>Won</th><th>Optimality (vs oracle)</th></tr></thead><tbody>${standings}</tbody></table></div>` +
+      `<div class="po-move-adv">Move-advantage: the first mover wins <strong>${fpwr}%</strong> of decisive games overall.</div>` +
+      (selfBits ? `<div class="po-selfplay">${selfBits}</div>` : '') +
+      `<details class="po-matrix"><summary>Win matrix (${(rec.matrix || []).length} pairings, ${rec.gamesPerPair || 0} games each)</summary>` +
+      `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th>A</th><th>B</th><th class="num">A win</th><th class="num">draw</th><th class="num">B win</th><th class="num" ${helpAttr('How often the FIRST player won this pairing — the move-advantage signal.')}>P1 win</th></tr></thead><tbody>${matrixRows}</tbody></table></div></details>`
+  } else {
+    body = `<div class="po-hint">Run a play-off to see which model actually wins the most head-to-head — and whether any model plays <strong>optimally</strong> (beats the oracle as first player / lets the first mover win 100% in self-play).</div>`
+  }
+  const bookLine = await renderBookLine()
+  return `<div class="playoff"><div class="po-head"><strong>Play-off — head-to-head</strong>${btn}</div>${body}${bookLine}</div>`
+}
+async function onRunPlayoff() {
+  if (playoffLaunching) return
+  playoffLaunching = true
+  renderRunsTable()
+  try {
+    await window.OverseerBridge.startActivity('tournament', trainerActivityParams({}))
+    showToast('Play-off started')
+  } catch (e) {
+    const msg = (e && (e.message || e.error)) || String(e)
+    showToast(`Play-off failed to start: ${msg}`)
+  } finally {
+    playoffLaunching = false
+    schedulePlayoffPoll()
+    renderRunsTable()
+  }
+}
+function schedulePlayoffPoll() {
+  if (playoffPollTimer) {
+    clearTimeout(playoffPollTimer)
+    playoffPollTimer = null
+  }
+  playoffPollTimer = setTimeout(async () => {
+    playoffPollTimer = null
+    if (activeTabId !== 'runs' || runsViewMode !== 'models' || (!playoffEnabled() && !bookEnabled())) return
+    const running = (await playoffRunning()) || (await bookRunning())
+    renderRunsTable() // re-render the panel (picks up the finished record, or the live "Running…" state)
+    if (running) schedulePlayoffPoll()
+  }, 3000)
+}
+
 // Results = MODELS. Each row is one model (a setup = config minus seed), pooling its runs (a champion's
 // warm-start generations, or a config's seed replicas). Ranked by comparable STRENGTH (the rating) when the
 // project declares ratingAnchors, else by best objective. Clicking a row opens that model's runs — so the
@@ -5015,6 +5224,14 @@ async function renderModelsView(body) {
   const completed = filtered.filter((r) => r.summary && r.summary.status === 'completed')
   const anchored = !!(manifest && manifest.ratingAnchors)
   const dir = (manifest && manifest.objective && manifest.objective.direction) || 'max'
+  const playoff = await renderPlayoffPanel()
+  const wirePlayoff = () => {
+    const b = byId('run-playoff')
+    if (b) b.onclick = onRunPlayoff
+    const bb = byId('build-book')
+    if (bb) bb.onclick = onBuildBook
+    if (playoffLaunching || bookLaunching) schedulePlayoffPoll()
+  }
   const strengthByRun = anchored ? await leaderboardStrengthMap() : new Map()
   // The metric a model is ranked by, PER RUN: comparable strength (anchored) else the raw objective. The row
   // shows the TOP run (the seed/checkpoint you'd deploy); Spread shows how the model's runs ranged (stability).
@@ -5060,11 +5277,13 @@ async function renderModelsView(body) {
   const scoreLabel = anchored ? 'Strength' : `best ${escapeHtml((manifest.objective && manifest.objective.name) || 'objective')}`
   const toolbar = runsToolbarHtml(completed.length, corpus.length)
   if (!corpus.length) {
-    setHtml(body, `${toolbar}<div class="empty-hint">No completed runs yet — launch a campaign.</div>`)
+    setHtml(body, `${playoff}${toolbar}<div class="empty-hint">No completed runs yet — launch a campaign.</div>`)
+    wirePlayoff()
     return
   }
   if (!models.length) {
-    setHtml(body, `${toolbar}<div class="empty-hint">No models match the active filter — clear a filter above.</div>`)
+    setHtml(body, `${playoff}${toolbar}<div class="empty-hint">No models match the active filter — clear a filter above.</div>`)
+    wirePlayoff()
     return
   }
   const arrowOf = (k) => (modelsSortKey === k ? (modelsSortDir === 'asc' ? ' ▲' : ' ▼') : '')
@@ -5089,7 +5308,7 @@ async function renderModelsView(body) {
     : "Each row is one MODEL (a config; its seeds pooled). The score is the <strong>top seed</strong> — the one you'd deploy; <strong>Spread</strong> is how the seeds ranged (tight = stable; wide = the top may be a lucky seed). Click a row to open its runs; click a header to sort."
   setHtml(
     body,
-    `${toolbar}` +
+    `${playoff}${toolbar}` +
       `<div class="table-wrap"><table class="runs-table cmp-table"><thead><tr>` +
       `<th class="cmp-th" data-model-sort="model"${helpAttr('The model — its config (minus the seed). Seeds / champion generations of the same config are one row.')}>Model${arrowOf('model')}</th>` +
       `<th class="cmp-th num" data-model-sort="score"${helpAttr(anchored ? "Comparable strength (rating) of the model's TOP run — this sorted column is the scoreboard." : "The model's TOP seed — the best-faring run, the one you'd deploy.")}>${scoreLabel}${arrowOf('score')}</th>` +
@@ -5098,6 +5317,7 @@ async function renderModelsView(body) {
       `</tr></thead><tbody>${rows}</tbody></table></div>` +
       `<p class="runs-legend">${legend}</p>`,
   )
+  wirePlayoff()
 }
 
 function renderComparisonView(body) {
@@ -19695,7 +19915,7 @@ async function resumeRunningActivity() {
   }
   if (epoch !== projectEpoch || !manifest) return
   // The `explore` controller lives in the Exploration tab, not the Activity Task lane — don't re-track it.
-  const mine = activities.filter((a) => a.recordType === manifest.recordType && a.activityType !== 'explore')
+  const mine = activities.filter((a) => a.recordType === manifest.recordType && quickActivityType(a) !== 'explore')
   const tracked = (id) => [...liveActivities.values()].some((e) => e.activityId === id)
   // Track everything the host is RUNNING or has QUEUED (the host owns concurrency now), so each
   // shows + observes to settlement regardless of any client-side budget.
@@ -20693,7 +20913,7 @@ async function explorationPollSignature(recordType) {
     try {
       const res = await window.OverseerBridge.listActivities()
       actSig = ((res && res.activities) || [])
-        .filter((a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType))
+        .filter((a) => quickActivityType(a) === 'explore' && (!a.recordType || a.recordType === recordType))
         .map((a) => a.activityId + ':' + a.status)
         .sort()
         .join(',')
@@ -20726,7 +20946,7 @@ async function explorationDiscoveryTick() {
     const res = await window.OverseerBridge.listActivities()
     liveExplore = ((res && res.activities) || []).some(
       (a) =>
-        a.activityType === 'explore' &&
+        quickActivityType(a) === 'explore' &&
         a.recordType === manifest.recordType &&
         (a.status === 'running' || a.status === 'starting' || a.status === 'queued'),
     )
@@ -20770,7 +20990,8 @@ async function renderExploration(fromPoll) {
   // (and its hidden-canvas heatmap) UNLESS the user expanded Advanced OR the autopilot is on its SEARCH step —
   // then the heatmap auto-opens so the view adapts to what the process is doing. Keep polling either way.
   if (championEnabled() && !explorationAdvancedOpen && autopilotStep !== 'search') {
-    await scheduleExplorationPoll(recordType, false)
+    // Poll faster while the autopilot is live (autopilotStep set) so its round/step reflects promptly.
+    await scheduleExplorationPoll(recordType, autopilotStep != null)
     return
   }
   // Drop a trigger that arrives while a render is already running (a poll under an unfinished render) — else the
@@ -20840,7 +21061,7 @@ async function renderExploration(fromPoll) {
     const res = await window.OverseerBridge.listActivities()
     const all = (res && res.activities) || []
     const mine = all.filter(
-      (a) => a.activityType === 'explore' && (!a.recordType || a.recordType === recordType),
+      (a) => quickActivityType(a) === 'explore' && (!a.recordType || a.recordType === recordType),
     )
     liveExploreCount = mine.filter((a) => ['running', 'starting', 'queued'].includes(a.status)).length
     activity =

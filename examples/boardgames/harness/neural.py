@@ -311,6 +311,26 @@ def head_to_head(
     return {"win_rate": w / games, "draw_rate": d / games, "loss_rate": (games - w - d) / games, "games": n}
 
 
+def augment_examples(
+    examples: list[tuple[torch.Tensor, list[float], float]], perms: list[list[int]] | None
+) -> list[tuple[torch.Tensor, list[float], float]]:
+    """Multiply training examples by a game's symmetries (Lever 2 for the net). Each `perm` is a column
+    source-permutation `dest <- src`: it reorders the board planes' column axis and the policy vector identically;
+    the value is invariant. Bakes symmetry-invariance into the net and multiplies data — worth more the harder the
+    game is to encode. Identity-only (or no perms) is a plain copy."""
+    if not perms or len(perms) <= 1:
+        return list(examples)
+    identity = list(range(len(perms[0])))
+    out: list[tuple[torch.Tensor, list[float], float]] = []
+    for x, pi, v in examples:
+        for perm in perms:
+            if perm == identity:
+                out.append((x, list(pi), v))
+            else:
+                out.append((x[..., perm], [pi[s] for s in perm], v))
+    return out
+
+
 def train_net(
     net: Connect4Net,
     examples: list[tuple[torch.Tensor, list[float], float]],
@@ -369,6 +389,103 @@ def distill_examples(
     return examples
 
 
+def oracle_distill_games(
+    game: Game,
+    n_games: int,
+    seed: int,
+    oracle_depth: int = 14,
+    exact_max_empty: int = 22,
+    device: str = "cpu",
+    book=None,
+) -> list[tuple[torch.Tensor, list[float], float]]:
+    """Distillation over the OPTIMAL-PLAY DISTRIBUTION (opening → endgame) — the layer `distill_examples`
+    (late-only) can't reach, and the measured reason a champion keeps losing to the oracle: its OPENING plays an
+    EDGE column first instead of centre, throwing away the first-player win. The fix is supervised optimal moves
+    from the STANDARD start: the LEARNER seat plays optimally (labelled) while its OPPONENT varies (a tight
+    near-perfect oracle on some games, a RANDOM agent on others — so the net learns the optimal RESPONSE to any
+    deviation, not just the single main line). Label the learner's positions: policy = the EXACT optimal move-set
+    from the OPENING BOOK where it reaches (`book`, instant one-ply lookup — the upgrade that makes opening labels
+    truly optimal), else the exact solver when cheap (≤ `exact_max_empty` empty cells), else the near-perfect
+    oracle's move; value = the game OUTCOME (mover view). No minutes-long from-the-opening solves — the book/oracle
+    carry the opening, the solver labels mid/late. The learner labels the EMPTY board (→ centre)."""
+    from harness.agents import RandomAgent
+    from harness.book import book_optimal_actions
+    from harness.solver import NearPerfectOracle, optimal_columns
+
+    rng = random.Random(seed)
+    oracle = NearPerfectOracle(depth=oracle_depth)
+    opponents: list[Callable[[], Agent]] = [lambda: NearPerfectOracle(depth=oracle_depth), lambda: RandomAgent()]
+
+    def label(state: State) -> tuple[list[float], int]:
+        empty = sum(1 for v in state.board if v == 0)
+        optimal = book_optimal_actions(book, game, state) if book is not None else None  # exact opening (instant)
+        if optimal is None and empty <= exact_max_empty:
+            optimal = optimal_columns(state)  # exact endgame
+        if optimal:
+            pi = [0.0] * COLS
+            for c in optimal:
+                pi[c] = 1.0 / len(optimal)
+            action = optimal[0] if len(optimal) == 1 else min(optimal, key=lambda c: abs(c - COLS // 2))
+            return pi, action
+        action = oracle.act(game, state, rng)
+        return [1.0 if c == action else 0.0 for c in range(COLS)], action
+
+    examples: list[tuple[torch.Tensor, list[float], float]] = []
+    for g in range(n_games):
+        learner_seat = g % 2  # alternate seats so the net learns BOTH first- and second-player optimal play
+        opponent = opponents[g % len(opponents)]()
+        state = game.initial_state(rng)
+        pending: list[tuple[torch.Tensor, list[float], int]] = []
+        while not game.is_terminal(state):
+            mover = game.current_player(state)
+            if mover == learner_seat:
+                pi, action = label(state)
+                pending.append((encode(game, state), pi, mover))
+            else:
+                action = opponent.act(game, state, rng)
+            state = game.step(state, action, rng)
+        returns = game.returns(state)
+        examples.extend((x, pi, returns[mover]) for (x, pi, mover) in pending)
+    return examples
+
+
+def build_distill_corpus(
+    game: Game, spec: dict, cache_dir: str | None = None, device: str = "cpu",
+    log: Callable[[str], None] | None = None, book=None,
+) -> list[tuple[torch.Tensor, list[float], float]]:
+    """Build (or LOAD from disk) a broad distillation corpus per `spec`, so the expensive solves happen ONCE and
+    every champion generation reuses the same optimal-play anchor. `spec` = { games, seed, oracle_depth,
+    exact_max_empty, opening_plies, late: {n, min_moves} }. `book` upgrades the opening labels to EXACT wherever
+    it reaches (include a `book` identity field in `spec` so a grown book re-keys the cache). Cached by a hash of
+    the spec under `cache_dir`."""
+    import hashlib
+    import json
+    import os
+
+    key = hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
+    path = os.path.join(cache_dir, f"{game.name}-distill-{key}.pt") if cache_dir else None
+    if path and os.path.isfile(path):
+        blob = torch.load(path, map_location=device)
+        if log:
+            log(f"distill corpus: {len(blob['v'])} examples (cache hit)")
+        return [(x, list(pi), float(v)) for x, pi, v in zip(blob["x"], blob["pi"], blob["v"])]
+    examples: list[tuple[torch.Tensor, list[float], float]] = []
+    if int(spec.get("games", 0)) > 0:
+        examples += oracle_distill_games(
+            game, int(spec["games"]), int(spec.get("seed", 0)), int(spec.get("oracle_depth", 14)),
+            int(spec.get("exact_max_empty", 22)), device, book=book,
+        )
+    late = spec.get("late") or {}
+    if int(late.get("n", 0)) > 0:
+        examples += distill_examples(game, int(late["n"]), int(late.get("min_moves", 16)), int(spec.get("seed", 0)), device)
+    if path and examples:
+        os.makedirs(cache_dir, exist_ok=True)
+        torch.save({"x": [e[0] for e in examples], "pi": [e[1] for e in examples], "v": [e[2] for e in examples]}, path)
+    if log:
+        log(f"distill corpus: {len(examples)} examples (cache {'built' if path else 'no-cache'})")
+    return examples
+
+
 def train_alphazero(
     game: Game,
     iterations: int = 8,
@@ -386,6 +503,8 @@ def train_alphazero(
     pool_frac: float = 0.5,
     distill_positions: int = 0,
     distill_min_moves: int = 16,
+    distill_corpus: list[tuple[torch.Tensor, list[float], float]] | None = None,
+    augment: bool = True,
     log: Callable[[str], None] | None = None,
 ) -> tuple[Connect4Net, list[dict]]:
     """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
@@ -398,7 +517,15 @@ def train_alphazero(
     torch.manual_seed(seed)
     net = init_net if init_net is not None else Connect4Net(channels=channels).to(device)
     buffer: list[tuple[torch.Tensor, list[float], float]] = []
-    distilled = distill_examples(game, distill_positions, distill_min_moves, seed, device) if distill_positions > 0 else []
+    perms = game.symmetries() if augment and hasattr(game, "symmetries") else None
+    # A prebuilt BROAD corpus (opening→endgame, cached) is the persistent anchor when given — the layer that
+    # teaches the OPENING to hold the first-player win; else fall back to the late-only sampled distillation.
+    distilled = (
+        distill_corpus
+        if distill_corpus is not None
+        else (distill_examples(game, distill_positions, distill_min_moves, seed, device) if distill_positions > 0 else [])
+    )
+    distilled = augment_examples(distilled, perms)  # a position + its mirror are the same exact lesson
     if distilled:
         train_net(net, distilled, epochs, batch_size, lr, device)  # imprint optimal play before self-play
     history: list[dict] = []
@@ -413,6 +540,7 @@ def train_alphazero(
                 vs_pool += 1
             else:
                 fresh.extend(self_play_game(game, learner, rng))
+        fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
         buffer = (buffer + fresh)[-buffer_cap:]
         loss = train_net(net, buffer + distilled, epochs, batch_size, lr, device)
         history.append(

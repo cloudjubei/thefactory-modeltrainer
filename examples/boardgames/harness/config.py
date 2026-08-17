@@ -13,7 +13,7 @@ GAME_CHOICES = ("connect4",)
 MODEL_NAME_CHOICES = ("random", "heuristic", "mcts", "alphazero")
 # `oracle_depth` = the depth-limited near-perfect solver (harness/solver.py) — a fast, tactically-perfect
 # reference opponent (the exact `oracle` is a benchmark labeller, too slow to PLAY from the opening in Python).
-OPPONENT_CHOICES = ("random", "heuristic", "mcts", "oracle_depth")
+OPPONENT_CHOICES = ("random", "heuristic", "mcts", "oracle_depth", "book")
 MCTS_SIMS_RANGE = (1, 5000)
 MCTS_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for mcts's opt-in exact-endgame cutoff (0 = pure mcts)
 ORACLE_DEPTH_RANGE = (1, 20)
@@ -26,6 +26,7 @@ AZ_SELFPLAY_GAMES_RANGE = (1, 500)
 AZ_SIMS_RANGE = (1, 2000)
 AZ_EPOCHS_RANGE = (1, 50)
 AZ_DISTILL_RANGE = (0, 2000)
+AZ_DISTILL_GAMES_RANGE = (0, 2000)
 AZ_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for the trained net's opt-in exact-endgame cutoff
 
 # §C cost accounting — documented estimate constants (a local run has no invoice, so energy/$ are ESTIMATES).
@@ -58,7 +59,8 @@ class TrainerConfig:
     az_sims: int = 100
     az_epochs: int = 5
     az_warm_start: int = 1  # 1 = warm-start from the champion (cumulative); 0 = train from scratch (reproducible)
-    az_distill_positions: int = 96  # oracle-labelled optimal-play examples to imprint each run (0 = no distillation)
+    az_distill_positions: int = 96  # late-game oracle-labelled examples to imprint each run (0 = no late distillation)
+    az_distill_games: int = 0  # broad OPENING→endgame oracle-distillation games (0 = off); teaches centre-first play
     az_solve_endgame: int = 0  # >0 = the trained net plays a PERFECT endgame once ≤ this many cells are empty
 
 
@@ -100,6 +102,8 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_warm_start must be 0 or 1, got {config.az_warm_start}")
     if not AZ_DISTILL_RANGE[0] <= config.az_distill_positions <= AZ_DISTILL_RANGE[1]:
         raise ValueError(f"az_distill_positions must be in {AZ_DISTILL_RANGE}, got {config.az_distill_positions}")
+    if not AZ_DISTILL_GAMES_RANGE[0] <= config.az_distill_games <= AZ_DISTILL_GAMES_RANGE[1]:
+        raise ValueError(f"az_distill_games must be in {AZ_DISTILL_GAMES_RANGE}, got {config.az_distill_games}")
     if not AZ_SOLVE_ENDGAME_RANGE[0] <= config.az_solve_endgame <= AZ_SOLVE_ENDGAME_RANGE[1]:
         raise ValueError(f"az_solve_endgame must be in {AZ_SOLVE_ENDGAME_RANGE}, got {config.az_solve_endgame}")
 
@@ -129,7 +133,7 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_solve_endgame"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
     if "az_warm_start" in filtered:
