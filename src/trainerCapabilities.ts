@@ -57,13 +57,10 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
       'The single "Start" button: ONE durable process that works out the next thing to do and does it — screen any newly-added architecture (a model_name choice with too few runs), then search the config space (explore), then improve the champion for a LEARNED core (train-champion) — orchestrating those existing sub-processes as children and stopping only when nothing is left without new input. This is "the whole point of model trainer": press once and it drives itself. `maxRounds` caps the number of sub-process rounds (a backstop).',
     optionalParams: ['maxRounds', 'minScreenRuns', 'screenSeeds', 'improveParams', 'searchParams'],
   },
-  {
-    activityType: 'rate-models',
-    label: 'Rate models (leaderboard)',
-    description:
-      'Rank every completed model on ONE COMPARABLE strength scale by playing each against the manifest’s fixed gauntlet spine (+ champions) — no retraining. This replaces "win-rate vs whatever opponent the lever picked": a run that only beat `random` can no longer outrank one that beat a strong `mcts`. Writes a `{recordType}-leaderboard` ranked by the conservative lower bound. Use to answer "which model is actually strongest?" and "is the champion getting better?".',
-    optionalParams: ['runKeys', 'gamesPerRung'],
-  },
+  // NOTE: `rate-models` and `build-book` are deliberately NOT launchable here. They are AUTOPILOT-INTERNAL
+  // finalization steps — the single-Start autopilot spawns them as child activities (via spawnChildActivity,
+  // which resolves ACTIVITY_DEFINITIONS, not this list) once training settles, so the user never runs them by
+  // hand. Their backend ActivityDefinitions still exist for that; they simply aren't standalone chat/UI actions.
   {
     activityType: 'tournament',
     label: 'Play-off (head-to-head)',
@@ -76,21 +73,6 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
       'includeOracle',
       'gamesPerPair',
       'selfPlayRunKeys',
-    ],
-  },
-  {
-    activityType: 'build-book',
-    label: 'Build opening book',
-    description:
-      'Extend the project’s committed OPTIMAL-PLAY opening book for a solved game — one bounded, resumable pass that solves+stores more of the symmetry-reduced reachable frontier and persists it, so coverage accumulates across runs. This is what makes provably-optimal play COMPUTABLE: the deployable `book` agent (opening book + exact endgame + near-perfect fallback) and book-accelerated exact distillation both read from it, and the more it covers the larger a model’s provably-optimal region. Defaults to the fast SEED mode (cheap midgame subtrees grow real coverage fast); pass `seedGames:0` for the long-running from-root OPENING accumulator. Writes a `{recordType}-book` record with honest coverage. `maxPositions`/`deadlineSeconds` bound the pass.',
-    optionalParams: [
-      'game',
-      'maxPlies',
-      'minPlies',
-      'maxPositions',
-      'deadlineSeconds',
-      'seedGames',
-      'seedPlies',
     ],
   },
   {

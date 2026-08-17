@@ -5244,6 +5244,35 @@ describe('nextAutopilotStep (the single-Start process decides the next thing to 
     const d = nextAutopilotStep({ ...base, hasStartingPoint: false })
     expect(d.action).toBe('done')
   })
+
+  // Finalization: once training settles, a single Start produces the results without the user running them.
+  const settled = { ...base, championPlateaued: true, canBuildBook: true, canRate: true, canPlayOff: true }
+
+  it('after training settles, extends the optimal-play book FIRST', () => {
+    expect(nextAutopilotStep(settled).action).toBe('build-book')
+  })
+
+  it('rates the models once the book has been extended this Start', () => {
+    expect(nextAutopilotStep({ ...settled, bookBuiltThisRun: true }).action).toBe('rate')
+  })
+
+  it('runs the play-off once the book + rating are done this Start', () => {
+    expect(nextAutopilotStep({ ...settled, bookBuiltThisRun: true, ratedThisRun: true }).action).toBe('play-off')
+  })
+
+  it('is DONE once every declared finalize step ran this Start', () => {
+    expect(
+      nextAutopilotStep({ ...settled, bookBuiltThisRun: true, ratedThisRun: true, playedOffThisRun: true }).action,
+    ).toBe('done')
+  })
+
+  it('skips finalize steps the project does not declare (non-solvable/non-tournament → straight to done)', () => {
+    expect(nextAutopilotStep({ ...base, championPlateaued: true }).action).toBe('done')
+  })
+
+  it('finalize NEVER preempts training — an unfinished improve still wins over build-book', () => {
+    expect(nextAutopilotStep({ ...base, championPlateaued: false, canBuildBook: true }).action).toBe('improve')
+  })
 })
 
 describe('deriveAutopilotSignals (live state → signals)', () => {
@@ -5300,6 +5329,18 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
     const s = deriveAutopilotSignals({ ...input, explorationConverged: false })
     expect(s.searchConverged).toBe(false)
     expect(s.learnedCores).toEqual(['alphazero'])
+  })
+
+  it('passes the finalize capabilities + per-run flags through (defaulting unset flags to false)', () => {
+    const s = deriveAutopilotSignals({ ...input, canBuildBook: true, canRate: true, canPlayOff: true, bookBuiltThisRun: true })
+    expect([s.canBuildBook, s.canRate, s.canPlayOff]).toEqual([true, true, true])
+    expect(s.bookBuiltThisRun).toBe(true)
+    expect([s.ratedThisRun, s.playedOffThisRun]).toEqual([false, false])
+  })
+
+  it('defaults every finalize capability to false when the project declares none', () => {
+    const s = deriveAutopilotSignals(input)
+    expect([s.canBuildBook, s.canRate, s.canPlayOff]).toEqual([false, false, false])
   })
 })
 

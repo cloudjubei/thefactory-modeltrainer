@@ -66,3 +66,64 @@ def test_self_play_ids_are_honoured():
     }
     res = run_tournament(req)
     assert "heur" in res["selfPlay"] and res["selfPlay"]["heur"]["games"] == 4
+
+
+def test_run_tournament_streams_per_pairing_progress_markers():
+    events = []
+    req = {
+        "game": "connect4",
+        "competitors": [
+            {"id": "rand", "label": "random", "model_name": "random"},
+            {"id": "heur", "label": "heuristic", "model_name": "heuristic"},
+        ],
+        "include_oracle": True,
+        "oracle_depth": 4,
+        "games_per_pair": 4,
+        "self_play_ids": ["heur"],
+    }
+    res = run_tournament(req, on_progress=events.append)
+    phases = [e["phase"] for e in events]
+    assert phases[0] == "start"
+    start = events[0]
+    assert start["pairings"] == 3  # 3 competitors → 3 pairs
+    assert [c["id"] for c in start["competitors"]] == [c["id"] for c in res["competitors"]]
+    # one round-robin marker per pairing, with a growing done count + partial standings + the pair result
+    rr = [e for e in events if e["phase"] == "roundrobin"]
+    assert [e["done"] for e in rr] == [1, 2, 3]
+    assert all(e["total"] == 3 and "standings" in e and "pair" in e for e in rr)
+    # the LAST partial standings match the final standings (same live accumulators)
+    assert [s["id"] for s in rr[-1]["standings"]] == [s["id"] for s in res["standings"]]
+    # one self-play marker + one optimality marker per non-oracle competitor
+    assert [e["id"] for e in events if e["phase"] == "selfplay"] == ["heur"]
+    assert {e["id"] for e in events if e["phase"] == "optimality"} == {"rand", "heur"}
+
+
+def test_progress_callback_does_not_change_the_result():
+    req = {
+        "game": "connect4",
+        "competitors": [{"id": "heur", "model_name": "heuristic"}, {"id": "rand", "model_name": "random"}],
+        "games_per_pair": 4,
+    }
+    base = run_tournament(req)
+    assert run_tournament(req, on_progress=lambda _p: None) == base  # byte-identical with a callback
+
+
+def test_parallel_round_robin_is_wellformed_and_deterministic():
+    # 4 fast competitors → 6 pairings ≥ the parallel threshold → exercises the process-pool path end to end.
+    req = {
+        "game": "connect4",
+        "competitors": [
+            {"id": "heur", "label": "heuristic", "model_name": "heuristic"},
+            {"id": "rand", "label": "random", "model_name": "random"},
+            {"id": "m10", "label": "mcts@10", "model_name": "mcts", "mcts_sims": 10},
+            {"id": "m5", "label": "mcts@5", "model_name": "mcts", "mcts_sims": 5},
+        ],
+        "games_per_pair": 4,
+        "opening_plies": 2,
+    }
+    a = run_tournament(req)
+    b = run_tournament(req)
+    assert a == b  # each pairing carries its own seed → deterministic despite parallel completion order
+    assert len(a["matrix"]) == 6  # every pairing present, re-sorted into (i,j) order
+    assert [s["rank"] for s in a["standings"]] == [1, 2, 3, 4]
+    assert a["standings"][0]["id"] != "rand"  # random shouldn't top the tournament

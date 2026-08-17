@@ -306,6 +306,44 @@ export function sharpeStandardError(
   return Math.sqrt(denom / (n - 1))
 }
 
+/**
+ * Serial-correlation-robust (Lo 2002) Sharpe SE from a precomputed moment bundle plus the return series'
+ * autocorrelations: the i.i.d. Lo/Mertens SE times sqrt(Newey-West inflation) at Bartlett lag q. TS twin of
+ * `sharpe_standard_error_hac` (stats form). Infinity when the i.i.d. SE is undefined.
+ */
+export function sharpeStandardErrorHacFromStats(
+  sharpe: number,
+  skewness: number,
+  kurtosis: number,
+  nObs: number,
+  autocorrs: number[],
+  q: number,
+): number {
+  const seIid = sharpeStandardError(sharpe, skewness, kurtosis, nObs)
+  if (!Number.isFinite(seIid)) return Infinity
+  return seIid * Math.sqrt(neweyWestInflation(autocorrs, q))
+}
+
+/**
+ * PSR computed with the Lo-2002 HAC Sharpe SE instead of the i.i.d. SE the standard PSR uses. The Bailey-Lopez de
+ * Prado PSR adjusts for skew/kurtosis but OMITS the autocorrelation correction, so for serially-dependent PnL it
+ * is ANTI-CONSERVATIVE (fires too early); this deflates by sqrt(Newey-West inflation). TS twin of
+ * `probabilistic_sharpe_ratio_hac` (stats form). 0 when the SE is undefined.
+ */
+export function probabilisticSharpeRatioHacFromStats(
+  sharpe: number,
+  skewness: number,
+  kurtosis: number,
+  nObs: number,
+  autocorrs: number[],
+  q: number,
+  srBenchmark = 0,
+): number {
+  const se = sharpeStandardErrorHacFromStats(sharpe, skewness, kurtosis, nObs, autocorrs, q)
+  if (!Number.isFinite(se) || se <= 0) return 0
+  return normalCdf((sharpe - srBenchmark) / se)
+}
+
 /** Two-sided (1-alpha) confidence interval for the true per-observation Sharpe. (-Inf, Inf) when SE undefined. */
 export function sharpeConfidenceInterval(
   sharpe: number,

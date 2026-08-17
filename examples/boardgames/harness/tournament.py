@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing
+import os
+import random
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable
-import random
 
 from harness.game import Game
 from harness.gauntlet import _model_factory
@@ -26,11 +29,84 @@ from harness.registry import resolve_game
 
 ORACLE_ID = "oracle"
 
+# --- PARALLEL round-robin: each pairing / optimality check is independent, and the near-perfect agents are slow
+# (an oracle move from the opening is ~seconds), so a sequential O(n²) round-robin can blow past the job budget.
+# We fan the matches across CPU cores. A worker builds the game + agent factories ONCE (nets loaded once per
+# worker), then plays whichever matches it's handed. Each task carries its OWN seed, so results are identical to
+# the sequential path regardless of completion order — the final matrix is re-sorted into (i,j) order. Any pool
+# failure (or a small run) falls back to in-process sequential, so this never breaks a play-off, only speeds it.
+_WORKER: dict = {}
+
+
+def _init_worker(request: dict) -> None:
+    try:
+        import torch
+
+        torch.set_num_threads(1)  # each worker is single-threaded so N workers don't oversubscribe the cores
+    except Exception:
+        pass
+    game = resolve_game(request.get("game", "connect4"))
+    _WORKER["game"] = game
+    _WORKER["factories"] = _factories(request, game)[1]
+
+
+def _pair_task(args: tuple) -> tuple:
+    a, b, n, seed_key, opening_plies = args
+    res = play_match(_WORKER["game"], _WORKER["factories"][a], _WORKER["factories"][b], n, random.Random(seed_key), opening_plies)
+    return a, b, res
+
+
+def _opt_task(args: tuple) -> tuple:
+    cid, m, seed_key = args
+    game, factories = _WORKER["game"], _WORKER["factories"]
+    oracle = factories[ORACLE_ID]
+    rng = random.Random(seed_key)
+    wins = 0
+    for _ in range(m):  # model ALWAYS first vs the oracle (Connect 4 is a first-player win under perfect play)
+        model, opp = factories[cid](), oracle()
+        state = game.initial_state(rng)
+        while not game.is_terminal(state):
+            mover = game.current_player(state)
+            state = game.step(state, (model if mover == 0 else opp).act(game, state, rng))
+        if game.winner(state) == 0:
+            wins += 1
+    return cid, wins
+
+
+def _imap_indexed(request: dict, fn: Callable, tasks: list, min_tasks: int = 4):
+    """Yield (original_index, result) as each task finishes — parallel across a spawned process pool when there's
+    enough work + cores, else in-process sequential. A pool that can't even be CREATED (sandbox forbids it) falls
+    back cleanly with no double-execution; only after tasks are running do errors propagate (they surface as a
+    failed play-off, and the already-streamed partial standings are preserved)."""
+    ex = None
+    if len(tasks) >= min_tasks and (os.cpu_count() or 1) >= 2:
+        try:
+            ex = ProcessPoolExecutor(
+                max_workers=min(os.cpu_count() or 2, len(tasks), 8),
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_init_worker,
+                initargs=(request,),
+            )
+        except Exception:
+            ex = None
+    if ex is not None:
+        try:
+            futures = {ex.submit(fn, t): i for i, t in enumerate(tasks)}
+            for fut in as_completed(futures):
+                yield futures[fut], fut.result()
+        finally:
+            ex.shutdown(wait=True)
+        return
+    for i, t in enumerate(tasks):
+        yield i, fn(t)
+
 
 def _oracle_factory(depth: int) -> Callable[[], object]:
     from harness.solver import NearPerfectOracle
 
-    return lambda: NearPerfectOracle(depth=depth)
+    # Exact-endgame cutoff makes the oracle EXACT once few cells remain AND far faster than depth-searching the
+    # endgame — the difference between a play-off that finishes in minutes and one that times out.
+    return lambda: NearPerfectOracle(depth=depth, solve_endgame=22)
 
 
 def play_match(
@@ -95,9 +171,25 @@ def _factories(request: dict, game: Game) -> tuple[list[dict], dict]:
     return competitors, factories
 
 
-def run_tournament(request: dict) -> dict:
+def _standings(competitors: list[dict], wins: dict, played: dict) -> list[dict]:
+    """Rank competitors by match score-per-match (win=1, draw=½), highest first. Works on PARTIAL accumulators
+    too (fewer matches played), so the same rows feed both the live progress stream and the final result."""
+    label_of = {c["id"]: c["label"] for c in competitors}
+    rows = sorted(
+        ({"id": cid, "label": label_of.get(cid, cid), "score": wins[cid], "matches": played[cid],
+          "scorePerMatch": (wins[cid] / played[cid]) if played[cid] else 0.0} for cid in [c["id"] for c in competitors]),
+        key=lambda s: s["scorePerMatch"], reverse=True,
+    )
+    for rank, s in enumerate(rows, 1):
+        s["rank"] = rank
+    return rows
+
+
+def run_tournament(request: dict, on_progress: Callable[[dict], None] | None = None) -> dict:
     """Round-robin every competitor pair, rank by match score, and measure optimality (self-play first-player
-    win rate + wins-as-P1 vs the oracle)."""
+    win rate + wins-as-P1 vs the oracle). `on_progress`, when given, is called with a `start` marker, then one
+    `roundrobin` marker per pairing (carrying the growing partial standings), then one `selfplay`/`optimality`
+    marker per competitor — the live stream the viewer renders. It does NOT affect the returned result."""
     game = resolve_game(request.get("game", "connect4"))
     n = int(request.get("games_per_pair", 20))
     base_seed = int(request.get("base_seed", 0))
@@ -105,35 +197,69 @@ def run_tournament(request: dict) -> dict:
     competitors, factories = _factories(request, game)
     ids = [c["id"] for c in competitors]
 
-    matrix: list[dict] = []
+    def emit(payload: dict) -> None:
+        if on_progress is not None:
+            on_progress(payload)
+
+    pairings_total = len(ids) * (len(ids) - 1) // 2
+    self_play_ids = [cid for cid in (request.get("self_play_ids") or [c for c in ids if c != ORACLE_ID][:1]) if factories.get(cid)]
+    has_oracle = bool(factories.get(ORACLE_ID))
+    optimality_total = sum(1 for c in competitors if c["id"] != ORACLE_ID) if has_oracle else 0
+    emit({
+        "phase": "start", "game": game.name,
+        "competitors": [{"id": c["id"], "label": c["label"]} for c in competitors],
+        "pairings": pairings_total, "selfPlayCount": len(self_play_ids),
+        "optimalityCount": optimality_total, "gamesPerPair": n,
+    })
+
+    # Round-robin, fanned across cores (each pairing is independent). Keep the matrix in (i,j) order for a
+    # deterministic result; accumulate standings + stream a marker as each pairing finishes (completion order).
+    _WORKER["game"], _WORKER["factories"] = game, factories  # used by the in-process sequential fallback
+    pairs = [(ids[i], ids[j]) for i in range(len(ids)) for j in range(i + 1, len(ids))]
+    pair_seeds = [base_seed * 100003 + i * 1009 + j for i in range(len(ids)) for j in range(i + 1, len(ids))]
+    pair_tasks = [(a, b, n, pair_seeds[k], opening_plies) for k, (a, b) in enumerate(pairs)]
+    matrix_by_idx: list[dict | None] = [None] * len(pairs)
     wins = {cid: 0.0 for cid in ids}
     played = {cid: 0 for cid in ids}
     fp_games = fp_wins = 0
-    for i in range(len(ids)):
-        for j in range(i + 1, len(ids)):
-            a, b = ids[i], ids[j]
-            rng = random.Random(base_seed * 100003 + i * 1009 + j)
-            res = play_match(game, factories[a], factories[b], n, rng, opening_plies)
-            matrix.append({"a": a, "b": b, "a_win": res["a_win"], "draw": res["draw"], "b_win": res["b_win"],
-                           "first_player_win_rate": res["first_player_win_rate"], "games": n})
-            wins[a] += res["a_win"] + 0.5 * res["draw"]
-            wins[b] += res["b_win"] + 0.5 * res["draw"]
-            played[a] += 1
-            played[b] += 1
-            fp_games += n
-            fp_wins += round(res["first_player_win_rate"] * n)
+    done = 0
+    for idx, (a, b, res) in _imap_indexed(request, _pair_task, pair_tasks):
+        pair = {"a": a, "b": b, "a_win": res["a_win"], "draw": res["draw"], "b_win": res["b_win"],
+                "first_player_win_rate": res["first_player_win_rate"], "games": n}
+        matrix_by_idx[idx] = pair
+        wins[a] += res["a_win"] + 0.5 * res["draw"]
+        wins[b] += res["b_win"] + 0.5 * res["draw"]
+        played[a] += 1
+        played[b] += 1
+        fp_games += n
+        fp_wins += round(res["first_player_win_rate"] * n)
+        done += 1
+        emit({
+            "phase": "roundrobin", "done": done, "total": pairings_total, "pair": pair,
+            "standings": _standings(competitors, wins, played),
+            "firstPlayerWinRate": (fp_wins / fp_games) if fp_games else 0.0,
+        })
+    matrix = [m for m in matrix_by_idx if m is not None]
 
-    standings = sorted(
-        ({"id": cid, "label": next(c["label"] for c in competitors if c["id"] == cid),
-          "score": wins[cid], "matches": played[cid],
-          "scorePerMatch": (wins[cid] / played[cid]) if played[cid] else 0.0} for cid in ids),
-        key=lambda s: s["scorePerMatch"], reverse=True,
-    )
-    for rank, s in enumerate(standings, 1):
-        s["rank"] = rank
+    standings = _standings(competitors, wins, played)
 
-    self_play = _self_play(request, game, factories, n, base_seed)
-    optimality = _optimality(game, competitors, factories, n, base_seed) if factories.get(ORACLE_ID) else {}
+    self_play = _self_play(request, game, factories, n, base_seed, on_progress=on_progress, ids=self_play_ids)
+
+    # Optimality vs the oracle — also fanned across cores (each competitor's model-first games are independent).
+    optimality: dict = {}
+    if has_oracle:
+        m = max(4, min(n, 12))
+        opt_tasks = [(c["id"], m, base_seed * 31 + hash(c["id"]) % 1000) for c in competitors if c["id"] != ORACLE_ID]
+        opt_done = 0
+        for _idx, (cid, w) in _imap_indexed(request, _opt_task, opt_tasks, min_tasks=3):
+            rate = w / m
+            entry = {
+                "wins_as_p1_vs_oracle": rate, "games": m,
+                "verdict": "optimal" if rate >= 0.999 else ("near-optimal" if rate >= 0.5 else "suboptimal"),
+            }
+            optimality[cid] = entry
+            opt_done += 1
+            emit({"phase": "optimality", "id": cid, "done": opt_done, "total": len(opt_tasks), **entry})
 
     return {
         "game": game.name,
@@ -147,56 +273,30 @@ def run_tournament(request: dict) -> dict:
     }
 
 
-def _self_play(request: dict, game: Game, factories: dict, n: int, base_seed: int) -> dict:
+def _self_play(
+    request: dict, game: Game, factories: dict, n: int, base_seed: int,
+    on_progress: Callable[[dict], None] | None = None, ids: list[str] | None = None,
+) -> dict:
     """Each requested competitor plays ITSELF: from the STANDARD opening a perfect player lets the first mover
     win every game, so first_player_win_rate → 1.0 is the move-advantage / optimality signal."""
-    ids = request.get("self_play_ids")
-    if not ids:
-        ids = [cid for cid in factories if cid != ORACLE_ID][:1]  # default: the first (top) competitor
+    if ids is None:
+        ids = request.get("self_play_ids") or [cid for cid in factories if cid != ORACLE_ID][:1]
+    targets = [cid for cid in ids if factories.get(cid)]
     out: dict = {}
-    for cid in ids:
-        f = factories.get(cid)
-        if not f:
-            continue
+    done = 0
+    for cid in targets:
         rng = random.Random(base_seed * 7 + hash(cid) % 1000)
-        res = play_match(game, f, f, n, rng, opening_plies=0)  # standard opening → pure move advantage
-        out[cid] = {
+        res = play_match(game, factories[cid], factories[cid], n, rng, opening_plies=0)  # standard opening
+        entry = {
             "first_player_win_rate": res["first_player_win_rate"],
             "draw_rate": res["draw"],
             "first_player_loss_rate": res["first_player_loss_rate"],
             "games": n,
         }
-    return out
-
-
-def _optimality(game: Game, competitors: list[dict], factories: dict, n: int, base_seed: int) -> dict:
-    """Per competitor (excluding the oracle): as the FIRST player vs the oracle from the standard opening, an
-    optimal model wins (Connect 4 is a first-player win) → wins_as_p1_vs_oracle == 1.0 is the optimality proof."""
-    oracle = factories[ORACLE_ID]
-    out: dict = {}
-    m = max(4, min(n, 12))
-    for c in competitors:
-        cid = c["id"]
-        if cid == ORACLE_ID:
-            continue
-        rng = random.Random(base_seed * 31 + hash(cid) % 1000)
-        # model ALWAYS first (a_seat forced): play_match alternates, so run model-first games explicitly.
-        wins = 0
-        for k in range(m):
-            model, opp = factories[cid](), oracle()
-            state = game.initial_state(rng)
-            while not game.is_terminal(state):
-                mover = game.current_player(state)
-                action = (model if mover == 0 else opp).act(game, state, rng)
-                state = game.step(state, action)
-            if game.winner(state) == 0:
-                wins += 1
-        rate = wins / m
-        out[cid] = {
-            "wins_as_p1_vs_oracle": rate,
-            "games": m,
-            "verdict": "optimal" if rate >= 0.999 else ("near-optimal" if rate >= 0.5 else "suboptimal"),
-        }
+        out[cid] = entry
+        done += 1
+        if on_progress is not None:
+            on_progress({"phase": "selfplay", "id": cid, "done": done, "total": len(targets), **entry})
     return out
 
 
@@ -205,7 +305,12 @@ def main() -> None:
     parser.add_argument("--config-json", type=Path, required=True)
     parser.add_argument("--summary-out", type=Path, required=True)
     args = parser.parse_args()
-    result = run_tournament(json.loads(Path(args.config_json).read_text()))
+
+    def _emit(payload: dict) -> None:
+        # `flush=True` is load-bearing: without it stdout buffers until exit and the slow oracle tail never streams.
+        print("@@PROGRESS " + json.dumps(payload), flush=True)
+
+    result = run_tournament(json.loads(Path(args.config_json).read_text()), on_progress=_emit)
     Path(args.summary_out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.summary_out).write_text(json.dumps(result, indent=2) + "\n")
 

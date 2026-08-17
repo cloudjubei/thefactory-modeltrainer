@@ -3820,7 +3820,10 @@ async function autopilotActivityRunning(state) {
       ['running', 'starting', 'queued'].includes(a.status)
     if (all.some((a) => isLive(a, ['autopilot']))) return true
     if (state && state.stage === 'running') {
-      return all.some((a) => isLive(a, ['train-champion', 'explore', 'train']))
+      // Any child the autopilot drives — training (screen/search/improve) OR finalization (book/rate/play-off).
+      return all.some((a) =>
+        isLive(a, ['train-champion', 'explore', 'train', 'build-book', 'rate-models', 'tournament']),
+      )
     }
     return false
   } catch {
@@ -3831,6 +3834,9 @@ const AUTOPILOT_STEP_LABEL = {
   screen: 'Screening a new architecture',
   search: 'Searching the config space',
   improve: 'Improving the champion',
+  'build-book': 'Building the optimal-play book',
+  rate: 'Rating the models',
+  'play-off': 'Running the play-off',
   done: 'Done',
 }
 // A human summary of what the MOST RECENT Start press did (from state.lastRun) — so the panel reports this
@@ -3842,15 +3848,19 @@ function autopilotRunSummary(state) {
   if (lr.screened) parts.push(`screened ${lr.screened} architecture${lr.screened === 1 ? '' : 's'}`)
   if (lr.searched) parts.push('searched the config space')
   if (lr.improved) parts.push(`ran the champion improver ${lr.improved === 1 ? 'once' : lr.improved + '×'}`)
+  if (lr.bookBuilt) parts.push('extended the optimal-play book')
+  if (lr.rated) parts.push('rated the models')
+  if (lr.playedOff) parts.push('ran the play-off')
   return parts.length ? ` — this run: ${parts.join(', ')}` : ' — this run: nothing new to do'
 }
-// The honest "why it stopped + what unlocks more". When improve actually re-ran and still plateaued, the
-// current architecture is at its ceiling; raising it (a stronger net / wider lever) is the real next lever.
+// The honest "why it stopped + what unlocks more". When the play-off ran, the RESULTS are ready (in the Results
+// view); when improve re-ran and still plateaued, the current architecture is at its ceiling.
 function autopilotDoneHint(state) {
   const lr = state && state.lastRun
+  const resultsReady = lr && lr.playedOff ? 'Your results are ready — see the play-off (true winner + optimality) in the Results tab. ' : ''
   if (lr && lr.improved)
-    return 'The champion was re-trained and still plateaued — it is at the current architecture’s ceiling. Add a stronger architecture or widen a lever to push further, then press Start again.'
-  return 'Add a new architecture or widen a lever, then press Start again.'
+    return `${resultsReady}The champion was re-trained and still plateaued — it is at the current architecture’s ceiling. Add a stronger architecture or widen a lever to push further, then press Start again.`
+  return `${resultsReady}Add a new architecture or widen a lever, then press Start again.`
 }
 async function renderAutopilotPanel() {
   const host = byId('autopilot-panel')
@@ -3870,13 +3880,17 @@ async function renderAutopilotPanel() {
   }
   const running = await autopilotActivityRunning(state)
   const active = running || autopilotLaunching
+  // The persisted state is only trustworthy once THIS run has stamped stage='running'. On a fresh Start the
+  // record still holds the PREVIOUS run's terminal state (e.g. stage='done', currentAction='done'), so treat it
+  // as stale until the new run overwrites it — otherwise the panel briefly shows "● Done" while it's starting.
+  const liveState = active && state && state.stage === 'running'
   // Publish the live step so the exploration view can adapt (heatmap while searching); cleared when not running.
-  autopilotStep = running ? (state && state.currentAction ? state.currentAction : 'search') : null
+  autopilotStep = running && liveState && state.currentAction ? state.currentAction : running ? 'search' : null
   let status
   if (active) {
-    const action = state && state.currentAction ? state.currentAction : 'search'
-    const label = AUTOPILOT_STEP_LABEL[action] || 'Working'
-    const reason = state && state.currentReason ? state.currentReason : ''
+    const action = liveState && state.currentAction ? state.currentAction : null
+    const label = action ? AUTOPILOT_STEP_LABEL[action] || 'Working' : 'Starting…'
+    const reason = liveState && state.currentReason ? state.currentReason : ''
     // While improving, the meaningful progress is the champion GENERATION (what shows in the activity list),
     // not the autopilot's lifetime round counter — read it from the champion record for a clear signal.
     let detail = ''
@@ -3904,7 +3918,7 @@ async function renderAutopilotPanel() {
       `<div class="ap-hint">${autopilotDoneHint(state)}</div>`
   } else {
     status =
-      `<div class="ap-hint">Press Start — the process works out the next thing to do: screen any new architecture, search the config space, then improve the champion. It stops only when there's nothing left without your input.</div>`
+      `<div class="ap-hint">Press Start — one process drives the whole thing: screen any new architecture, search the config space, improve the champion, then produce your results (extend the optimal-play book, rate the models, run the play-off). It stops only when there's nothing left without your input.</div>`
   }
   host.innerHTML =
     `<div class="ap-panel">` +
@@ -5027,65 +5041,14 @@ function formatModelScore(v) {
 
 // --- PLAY-OFF: pit models head-to-head (+ the oracle) so the winner comes from REAL games, and prove optimal
 // play for a solved game (first-player-wins self-play + wins-as-P1 vs the oracle). Sits atop the Results view.
+// The autopilot ("Start" in Exploration) runs this — plus the opening book + strength rating — AUTOMATICALLY as
+// its finalization steps, so the user never runs them by hand. This panel is where the RESULTS land: the last
+// completed play-off is ALWAYS shown (with a timestamp) and stays visible while a fresh one recomputes, so the
+// user always sees the established result rather than a blank spinner, and can trigger a new one.
 let playoffLaunching = false
 let playoffPollTimer = null
-let bookLaunching = false
 function playoffEnabled() {
   return !!(manifest && manifest.tournament && window.OverseerBridge && window.OverseerBridge.embedded)
-}
-function bookEnabled() {
-  return !!(manifest && manifest.buildBook && window.OverseerBridge && window.OverseerBridge.embedded)
-}
-async function bookRunning() {
-  try {
-    const res = await window.OverseerBridge.listActivities()
-    return ((res && res.activities) || []).some(
-      (a) =>
-        quickActivityType(a) === 'build-book' &&
-        (!a.recordType || a.recordType === manifest.recordType) &&
-        ['running', 'starting', 'queued'].includes(a.status),
-    )
-  } catch {
-    return false
-  }
-}
-// The optimal-play BOOK line inside the Play-off panel: shows honest opening coverage and a Build button that
-// extends it (the deployable `book` competitor plays from it, so growing it grows the provably-optimal region).
-async function renderBookLine() {
-  if (!bookEnabled()) return ''
-  let rec = null
-  try {
-    const rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-book', key: 'current' })
-    const r = Array.isArray(rows) ? rows[0] : rows
-    rec = r ? r.content || r : null
-  } catch {
-    rec = null
-  }
-  const running = bookLaunching || (await bookRunning())
-  const btn = `<button type="button" class="po-btn" id="build-book"${running ? ' disabled' : ''}>${
-    bookLaunching ? 'Starting…' : running ? 'Building…' : 'Build book'
-  }</button>`
-  const cov = rec && rec.coverage
-  const covBits = cov
-    ? `opening coverage ≤${cov.plies} plies: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> (${cov.booked}/${cov.reachable}) · book size <strong>${rec.total || 0}</strong>`
-    : `no book yet — build one to make optimal opening play <em>exact</em> (endgames are already exact).`
-  return `<div class="po-book"><div class="po-book-head"><strong>Optimal-play book</strong>${btn}</div><div class="po-hint">${covBits}</div></div>`
-}
-async function onBuildBook() {
-  if (bookLaunching) return
-  bookLaunching = true
-  renderRunsTable()
-  try {
-    await window.OverseerBridge.startActivity('build-book', trainerActivityParams({}))
-    showToast('Book build started')
-  } catch (e) {
-    const msg = (e && (e.message || e.error)) || String(e)
-    showToast(`Book build failed to start: ${msg}`)
-  } finally {
-    bookLaunching = false
-    schedulePlayoffPoll()
-    renderRunsTable()
-  }
 }
 async function playoffRunning() {
   try {
@@ -5100,6 +5063,52 @@ async function playoffRunning() {
     return false
   }
 }
+// A play-off that ended in 'failed' (e.g. it timed out) — so a "finished but nothing changed" run reads as a
+// clear failure to the user instead of silence.
+async function playoffFailed() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return ((res && res.activities) || []).some(
+      (a) =>
+        quickActivityType(a) === 'tournament' &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        a.status === 'failed',
+    )
+  } catch {
+    return false
+  }
+}
+// Any activity this Results panel reflects — the play-off itself, plus the book + rating steps the autopilot runs
+// alongside it — so the panel keeps refreshing (picking up new coverage / strength / standings) while the
+// autopilot finalizes, without the user touching anything.
+async function anyResultsActivityRunning() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    return ((res && res.activities) || []).some(
+      (a) =>
+        ['tournament', 'build-book', 'rate-models'].includes(quickActivityType(a)) &&
+        (!a.recordType || a.recordType === manifest.recordType) &&
+        ['running', 'starting', 'queued'].includes(a.status),
+    )
+  } catch {
+    return false
+  }
+}
+// A READ-ONLY note on the optimal-play book's opening coverage (the autopilot builds it — no manual button).
+async function bookCoverageNote() {
+  if (!(manifest && manifest.buildBook)) return ''
+  let rec = null
+  try {
+    const rows = await window.OverseerBridge.queryData({ type: manifest.recordType + '-book', key: 'current' })
+    const r = Array.isArray(rows) ? rows[0] : rows
+    rec = r ? r.content || r : null
+  } catch {
+    rec = null
+  }
+  const cov = rec && rec.coverage
+  if (!cov) return ''
+  return `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is exact (${rec.total || 0} positions booked); endgames are always exact. The autopilot grows this each run.</div>`
+}
 function poVerdictBadge(o) {
   if (!o) return ''
   const pct = Math.round((o.wins_as_p1_vs_oracle || 0) * 100)
@@ -5110,6 +5119,51 @@ function poVerdictBadge(o) {
 function labelOfCompetitor(rec, id) {
   const c = (rec.competitors || []).find((x) => x.id === id)
   return (c && c.label) || id
+}
+// The completed-play-off body: standings + optimality + move-advantage + self-play + the win matrix.
+function renderPlayoffResults(rec) {
+  const winner = rec.standings.find((s) => s.id !== 'oracle') || rec.standings[0]
+  const standings = rec.standings
+    .map((s) => {
+      const opt = rec.optimality && rec.optimality[s.id]
+      const isWinner = winner && s.id === winner.id
+      return `<tr class="${isWinner ? 'po-winner' : ''}">
+        <td class="num">${s.rank}</td>
+        <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">perfect</span>' : ''}</td>
+        <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
+        <td>${poVerdictBadge(opt)}</td>
+      </tr>`
+    })
+    .join('')
+  const fpwr = Math.round((rec.firstPlayerWinRate || 0) * 100)
+  const selfBits = Object.keys(rec.selfPlay || {})
+    .map((id) => {
+      const sp = rec.selfPlay[id]
+      return `<div class="po-self"><strong>${escapeHtml(labelOfCompetitor(rec, id))}</strong> vs itself: first player wins <strong>${Math.round(
+        (sp.first_player_win_rate || 0) * 100,
+      )}%</strong>${sp.draw_rate ? ` · draws ${Math.round(sp.draw_rate * 100)}%` : ''}${
+        sp.first_player_loss_rate ? ` · <span class="po-sub">first player LOSES ${Math.round(sp.first_player_loss_rate * 100)}%</span>` : ''
+      } <span class="card-sub">(perfect play → 100%)</span></div>`
+    })
+    .join('')
+  const matrixRows = (rec.matrix || [])
+    .map(
+      (m) =>
+        `<tr><td>${escapeHtml(labelOfCompetitor(rec, m.a))}</td><td>${escapeHtml(labelOfCompetitor(rec, m.b))}</td>` +
+        `<td class="num">${Math.round(m.a_win * 100)}%</td><td class="num">${Math.round(m.draw * 100)}%</td><td class="num">${Math.round(
+          m.b_win * 100,
+        )}%</td><td class="num">${Math.round((m.first_player_win_rate || 0) * 100)}%</td></tr>`,
+    )
+    .join('')
+  return (
+    `<div class="po-winner-line">🏆 True winner (most games won): <strong>${escapeHtml(winner ? winner.label : '—')}</strong></div>` +
+    `<div class="po-hint">Standings are from ACTUAL head-to-head games. A model that wins as the first player vs the oracle is playing optimally (Connect 4 is a first-player win).</div>` +
+    `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th class="num">#</th><th>Competitor</th><th class="num" ${helpAttr('Share of match points won across its games (win=1, draw=½).')}>Won</th><th>Optimality (vs oracle)</th></tr></thead><tbody>${standings}</tbody></table></div>` +
+    `<div class="po-move-adv">Move-advantage: the first mover wins <strong>${fpwr}%</strong> of decisive games overall.</div>` +
+    (selfBits ? `<div class="po-selfplay">${selfBits}</div>` : '') +
+    `<details class="po-matrix"><summary>Win matrix (${(rec.matrix || []).length} pairings, ${rec.gamesPerPair || 0} games each)</summary>` +
+    `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th>A</th><th>B</th><th class="num">A win</th><th class="num">draw</th><th class="num">B win</th><th class="num" ${helpAttr('How often the FIRST player won this pairing — the move-advantage signal.')}>P1 win</th></tr></thead><tbody>${matrixRows}</tbody></table></div></details>`
+  )
 }
 async function renderPlayoffPanel() {
   if (!playoffEnabled()) return ''
@@ -5122,60 +5176,67 @@ async function renderPlayoffPanel() {
     rec = null
   }
   const running = playoffLaunching || (await playoffRunning())
-  const btn = `<button type="button" class="po-btn" id="run-playoff"${running ? ' disabled' : ''}>${
-    playoffLaunching ? 'Starting…' : running ? 'Running…' : rec ? 'Re-run play-off' : 'Run play-off'
-  }</button>`
-  let body = ''
-  if (running && !rec) {
-    body = `<div class="po-hint">Playing the models against each other + the oracle… this can take a few minutes (strong search + oracle games are slow).</div>`
-  } else if (rec && Array.isArray(rec.standings)) {
-    const winner = rec.standings.find((s) => s.id !== 'oracle') || rec.standings[0]
-    const standings = rec.standings
-      .map((s) => {
-        const opt = rec.optimality && rec.optimality[s.id]
-        const isWinner = winner && s.id === winner.id
-        return `<tr class="${isWinner ? 'po-winner' : ''}">
-          <td class="num">${s.rank}</td>
-          <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">perfect</span>' : ''}</td>
-          <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
-          <td>${poVerdictBadge(opt)}</td>
-        </tr>`
-      })
-      .join('')
-    const fpwr = Math.round((rec.firstPlayerWinRate || 0) * 100)
-    const selfIds = Object.keys(rec.selfPlay || {})
-    const selfBits = selfIds
-      .map((id) => {
-        const sp = rec.selfPlay[id]
-        return `<div class="po-self"><strong>${escapeHtml(labelOfCompetitor(rec, id))}</strong> vs itself: first player wins <strong>${Math.round(
-          (sp.first_player_win_rate || 0) * 100,
-        )}%</strong>${sp.draw_rate ? ` · draws ${Math.round(sp.draw_rate * 100)}%` : ''}${
-          sp.first_player_loss_rate ? ` · <span class="po-sub">first player LOSES ${Math.round(sp.first_player_loss_rate * 100)}%</span>` : ''
-        } <span class="card-sub">(perfect play → 100%)</span></div>`
-      })
-      .join('')
-    const matrixRows = (rec.matrix || [])
-      .map(
-        (m) =>
-          `<tr><td>${escapeHtml(labelOfCompetitor(rec, m.a))}</td><td>${escapeHtml(labelOfCompetitor(rec, m.b))}</td>` +
-          `<td class="num">${Math.round(m.a_win * 100)}%</td><td class="num">${Math.round(m.draw * 100)}%</td><td class="num">${Math.round(
-            m.b_win * 100,
-          )}%</td><td class="num">${Math.round((m.first_player_win_rate || 0) * 100)}%</td></tr>`,
-      )
-      .join('')
-    body =
-      `<div class="po-winner-line">🏆 True winner (most games won): <strong>${escapeHtml(winner ? winner.label : '—')}</strong></div>` +
-      `<div class="po-hint">Standings are from ACTUAL head-to-head games. A model that wins as the first player vs the oracle is playing optimally (Connect 4 is a first-player win).</div>` +
-      `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th class="num">#</th><th>Competitor</th><th class="num" ${helpAttr('Share of match points won across its games (win=1, draw=½).')}>Won</th><th>Optimality (vs oracle)</th></tr></thead><tbody>${standings}</tbody></table></div>` +
-      `<div class="po-move-adv">Move-advantage: the first mover wins <strong>${fpwr}%</strong> of decisive games overall.</div>` +
-      (selfBits ? `<div class="po-selfplay">${selfBits}</div>` : '') +
-      `<details class="po-matrix"><summary>Win matrix (${(rec.matrix || []).length} pairings, ${rec.gamesPerPair || 0} games each)</summary>` +
-      `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th>A</th><th>B</th><th class="num">A win</th><th class="num">draw</th><th class="num">B win</th><th class="num" ${helpAttr('How often the FIRST player won this pairing — the move-advantage signal.')}>P1 win</th></tr></thead><tbody>${matrixRows}</tbody></table></div></details>`
-  } else {
-    body = `<div class="po-hint">Run a play-off to see which model actually wins the most head-to-head — and whether any model plays <strong>optimally</strong> (beats the oracle as first player / lets the first mover win 100% in self-play).</div>`
+  // The progress record holds LIVE partial standings while a play-off runs, and — if it timed out / failed — the
+  // last PARTIAL it computed (marked `incomplete`), so the user keeps the results they were watching instead of
+  // losing them. The completed `-tournament/current` record is never a partial, so a failed re-run never
+  // overwrites the last-good results. Prefer: live > last-complete > incomplete-partial.
+  let progRec = null
+  try {
+    const pr = await window.OverseerBridge.queryData({ type: manifest.recordType + '-tournament-progress', key: 'current' })
+    const p = Array.isArray(pr) ? pr[0] : pr
+    progRec = p ? p.content || p : null
+  } catch {
+    progRec = null
   }
-  const bookLine = await renderBookLine()
-  return `<div class="playoff"><div class="po-head"><strong>Play-off — head-to-head</strong>${btn}</div>${body}${bookLine}</div>`
+  const progHasStandings = progRec && Array.isArray(progRec.standings) && progRec.standings.length
+  const recComplete = rec && Array.isArray(rec.standings) && rec.standings.length
+  const live = !!(running && progHasStandings)
+  const incompletePartial = !running && !recComplete && !!(progHasStandings && progRec.status === 'incomplete')
+  const view = live ? progRec : recComplete ? rec : incompletePartial ? progRec : rec
+  const hasResults = view && Array.isArray(view.standings) && view.standings.length
+  const when =
+    hasResults && view.ranAt && !live
+      ? `<span class="po-when">${incompletePartial ? 'incomplete · ' : 'computed '}${escapeHtml(formatRelative(view.ranAt))}</span>`
+      : ''
+  const btn = `<button type="button" class="po-btn" id="run-playoff"${running ? ' disabled' : ''}>${
+    playoffLaunching ? 'Starting…' : running ? 'Running…' : hasResults ? 'Re-run play-off' : 'Run play-off'
+  }</button>`
+  // The LIVE banner: while running, name the competitors + show real per-pairing progress (from the streamed
+  // record); the established/partial standings render below it, so it's never a contentless spinner.
+  let banner = ''
+  if (running) {
+    const compSrc =
+      (live && Array.isArray(view.competitors) && view.competitors) ||
+      (rec && Array.isArray(rec.competitors) && rec.competitors) ||
+      []
+    const names = compSrc.length
+      ? ` Competitors: ${compSrc.map((c) => escapeHtml(c.label)).slice(0, 8).join(', ')}${compSrc.length > 8 ? '…' : ''}.`
+      : ''
+    const prog = live && view.progress
+    let progressBit
+    if (prog && prog.phase === 'roundrobin') {
+      progressBit = ` <strong>${prog.played}/${prog.total} pairings played</strong> — standings below are live and filling in.`
+    } else if (prog) {
+      progressBit = ` Finalizing (${prog.phase === 'optimality' ? 'optimality vs the oracle' : prog.phase === 'selfplay' ? 'self-play' : 'wrapping up'})…`
+    } else if (hasResults) {
+      progressBit = ' The results below are the previous run until this finishes.'
+    } else {
+      progressBit = ' This can take a few minutes (strong search + oracle games are slow).'
+    }
+    banner = `<div class="po-running"><span class="po-spinner"></span> Running the play-off — head-to-head (round-robin) + optimality vs the oracle.${names}${progressBit}</div>`
+  } else if (incompletePartial) {
+    const p = view.progress || {}
+    banner = `<div class="po-running po-failed">This play-off didn't finish (it likely timed out on the slow oracle/search games)${p.played != null && p.total != null ? ` after ${p.played}/${p.total} pairings` : ''} — the PARTIAL standings it computed are below. Press Re-run to try again (now faster).</div>`
+  } else if (await playoffFailed()) {
+    banner = `<div class="po-running po-failed">A recent play-off didn't complete (it may have timed out) — the results below are from the last run that did finish. Press Re-run to try again (now faster).</div>`
+  }
+  const results = hasResults
+    ? renderPlayoffResults(view)
+    : running
+      ? ''
+      : `<div class="po-hint">Press <strong>Start</strong> in Exploration — it trains and then runs the play-off for you automatically. (Or Re-run it here.) It shows which model actually wins the most head-to-head, and whether any plays <strong>optimally</strong> — beats the oracle as first player / lets the first mover win 100% in self-play.</div>`
+  const coverage = await bookCoverageNote()
+  return `<div class="playoff"><div class="po-head"><strong>Play-off — head-to-head</strong>${when}${btn}</div>${banner}${results}${coverage}</div>`
 }
 async function onRunPlayoff() {
   if (playoffLaunching) return
@@ -5200,9 +5261,9 @@ function schedulePlayoffPoll() {
   }
   playoffPollTimer = setTimeout(async () => {
     playoffPollTimer = null
-    if (activeTabId !== 'runs' || runsViewMode !== 'models' || (!playoffEnabled() && !bookEnabled())) return
-    const running = (await playoffRunning()) || (await bookRunning())
-    renderRunsTable() // re-render the panel (picks up the finished record, or the live "Running…" state)
+    if (activeTabId !== 'runs' || runsViewMode !== 'models' || !playoffEnabled()) return
+    const running = await anyResultsActivityRunning()
+    renderRunsTable() // re-render the panel (picks up the finished record, or the live "Recomputing" state)
     if (running) schedulePlayoffPoll()
   }, 3000)
 }
@@ -5228,9 +5289,10 @@ async function renderModelsView(body) {
   const wirePlayoff = () => {
     const b = byId('run-playoff')
     if (b) b.onclick = onRunPlayoff
-    const bb = byId('build-book')
-    if (bb) bb.onclick = onBuildBook
-    if (playoffLaunching || bookLaunching) schedulePlayoffPoll()
+    // Keep the panel live while a play-off (or the autopilot's book/rating finalization) computes, so results
+    // populate on their own — the user just watches.
+    if (playoffLaunching) schedulePlayoffPoll()
+    else anyResultsActivityRunning().then((r) => r && schedulePlayoffPoll())
   }
   const strengthByRun = anchored ? await leaderboardStrengthMap() : new Map()
   // The metric a model is ranked by, PER RUN: comparable strength (anchored) else the raw objective. The row
@@ -20553,9 +20615,12 @@ function renderActivityNow() {
     .sort((a, b) => b.startedAt - a.startedAt)
   const queued = queuedEntriesInOrder()
   const pending = [...paused, ...queued] // paused on top of the queue
-  // The `explore` controller is driven from the Exploration tab (pause/resume there) and spawns its own
-  // standard `train` experiments — so it never renders here as a Task.
-  const isTaskEntry = (e) => !isExperimentActivityType(e.activityType) && e.activityType !== 'explore'
+  // Sub-controllers driven from the Exploration tab that spawn their OWN standard `train` experiments never
+  // render here as a top-level Task: `explore` (config-space search) and `train-champion` (the autopilot's
+  // improve step). The single `autopilot` task is the one main row; its leaf experiments show in the lane. So
+  // the user sees ONE main activity, not "autopilot + train-champion" side by side.
+  const isTaskEntry = (e) =>
+    !isExperimentActivityType(e.activityType) && e.activityType !== 'explore' && e.activityType !== 'train-champion'
   const experimentEntries = blocks.filter((e) => isExperimentActivityType(e.activityType))
   const taskEntries = blocks.filter(isTaskEntry)
   const experimentQueue = pending.filter((e) => isExperimentActivityType(e.activityType))

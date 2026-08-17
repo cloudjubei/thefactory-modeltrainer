@@ -82,6 +82,7 @@ import type {
   TournamentParams,
   TournamentResult,
   TournamentRecord,
+  TournamentProgress,
   BuildBookParams,
   BuildBookResult,
   BuildBookCoverage,
@@ -4105,6 +4106,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // budget per launch, so each Start gets a fresh attempt. We only treat a plateau as "done" once we've
     // actually re-run improve THIS invocation (see deriveAutopilotSignals).
     let improvedThisRun = false
+    // The finalization steps (produce the results) each run at most once per Start — tracked here so the brain
+    // doesn't loop on them and a single Start ends with the book extended, models rated, and the play-off run.
+    let bookBuiltThisRun = false
+    let ratedThisRun = false
+    let playedOffThisRun = false
     const totalCompleted = async (): Promise<number> => {
       const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
       return runs.reduce((n, r) => n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0), 0)
@@ -4130,13 +4136,21 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         minScreenRuns,
         explorationConverged,
         improvedThisRun,
+        canBuildBook: !!manifest.buildBook,
+        canRate: !!manifest.gauntlet,
+        canPlayOff: !!manifest.tournament,
+        bookBuiltThisRun,
+        ratedThisRun,
+        playedOffThisRun,
         ...(stopReason ? { championStopReason: stopReason } : {}),
       })
     }
 
     let stopReason: AutopilotStopReason = 'done'
     let roundsThisRun = 0
-    const tally: Record<AutopilotAction, number> = { screen: 0, search: 0, improve: 0, done: 0 }
+    const tally: Record<AutopilotAction, number> = {
+      screen: 0, search: 0, improve: 0, 'build-book': 0, rate: 0, 'play-off': 0, done: 0,
+    }
     while (true) {
       if (params.abortSignal?.aborted) {
         stopReason = 'aborted'
@@ -4175,6 +4189,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         childParams = {
           spec: { fixed: { model_name: decision.target }, seeds: Array.from({ length: screenSeeds }, (_, i) => i + 1) },
         }
+      } else if (decision.action === 'build-book') {
+        childType = 'build-book'
+        childParams = {}
+      } else if (decision.action === 'rate') {
+        childType = 'rate-models'
+        childParams = {}
+      } else if (decision.action === 'play-off') {
+        childType = 'tournament'
+        childParams = {}
       } else {
         childType = 'explore'
         childParams = { ...(params.searchParams ?? {}) }
@@ -4198,6 +4221,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (decision.action === 'search' && (await totalCompleted()) <= searchBefore) searchExhausted = true
       // We've now genuinely re-attempted improve this run: a plateau from here on is a real "done" (not stale).
       if (decision.action === 'improve') improvedThisRun = true
+      // Each finalize step runs once per Start — mark it done so the brain advances to the next result.
+      if (decision.action === 'build-book') bookBuiltThisRun = true
+      if (decision.action === 'rate') ratedThisRun = true
+      if (decision.action === 'play-off') playedOffThisRun = true
       state.history = [
         ...state.history,
         {
@@ -4218,6 +4245,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       screened: tally.screen,
       searched: tally.search,
       improved: tally.improve,
+      bookBuilt: tally['build-book'],
+      rated: tally.rate,
+      playedOff: tally['play-off'],
       stopReason,
     }
     if (stopReason !== 'done') {
@@ -4355,13 +4385,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     if (!manifest.tournament) throw new Error('this training project declares no "tournament" command')
-    const gamesPerPair = params.gamesPerPair ?? 10
+    const gamesPerPair = params.gamesPerPair ?? 4
     const includeReferences = params.includeReferences ?? true
     const includeOracle = params.includeOracle ?? true
-    const topN = params.topN ?? 3
-    // Round-robin is O(n²) and strong search agents are slow, so cap reference strength (a heavy mcts@1000 rung
-    // would make one play-off take ~an hour). The user can raise it explicitly; heavy rungs stay opt-in.
-    const maxReferenceSims = params.maxReferenceSims ?? 500
+    const topN = params.topN ?? 2
+    // Round-robin is O(n²) and the strong search / near-perfect agents are slow (a from-the-opening oracle move
+    // is ~seconds), so a full spine + high oracle depth can blow past the 30-min job budget. Cap reference
+    // strength so only fast-enough rungs enter by default (mcts@120 in, mcts@400/1000 out); raise it explicitly
+    // for a heavier, slower play-off.
+    const maxReferenceSims = params.maxReferenceSims ?? 250
 
     // Map completed run key → its checkpoint (+ model name / game) — only runs with a checkpoint can play.
     const allRuns = await deps.storage.listRecords({ scope: params.scope, type: recordType })
@@ -4436,7 +4468,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       game,
       competitors,
       include_oracle: includeOracle && !!oracleRung,
-      oracle_depth: Math.min(oracleRung?.depth ?? 12, 10),
+      // Play-off oracle at depth 6 + the exact-endgame cutoff: EXACT in the endgame, ~6-ply-perfect in the
+      // opening, and ~0.5s/game vs ~2.8s at depth 8 — the difference between a play-off that finishes in ~a
+      // minute and one that times out. (The exact `OracleAgent` stays available for a fully-rigorous check.)
+      oracle_depth: Math.min(oracleRung?.depth ?? 12, 6),
       games_per_pair: gamesPerPair,
       base_seed: params.baseSeed ?? 0,
       opening_plies: params.openingPlies ?? 2,
@@ -4452,6 +4487,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       timeoutMs: RATE_MODELS_TIMEOUT_MS,
       ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
     })
+    if (params.onProgress) {
+      // Stream the harness's `@@PROGRESS` markers LIVE (subscribe before awaiting `done` so a synchronously
+      // streamed first line can't slip past). The activity turns each marker into a partial progress record.
+      handle.onLog((line) => {
+        const marker = parseProgressMarker(line)
+        if (marker && typeof marker.phase === 'string') params.onProgress?.(marker as unknown as TournamentProgress)
+      })
+    }
     const result = await handle.done
     if (result.status !== 'completed') {
       const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''

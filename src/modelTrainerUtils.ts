@@ -2816,6 +2816,12 @@ export function deriveAutopilotSignals(input: {
   explorationConverged: boolean
   championStopReason?: ChampionStopReason
   improvedThisRun?: boolean
+  canBuildBook?: boolean
+  canRate?: boolean
+  canPlayOff?: boolean
+  bookBuiltThisRun?: boolean
+  ratedThisRun?: boolean
+  playedOffThisRun?: boolean
 }): AutopilotSignals {
   const unscreenedCores = input.modelChoices.filter(
     (c) => (input.completedRunCountByCore[c] ?? 0) < input.minScreenRuns,
@@ -2830,6 +2836,12 @@ export function deriveAutopilotSignals(input: {
     learnedCores: input.learnedCores,
     hasStartingPoint,
     championPlateaued,
+    canBuildBook: !!input.canBuildBook,
+    canRate: !!input.canRate,
+    canPlayOff: !!input.canPlayOff,
+    bookBuiltThisRun: !!input.bookBuiltThisRun,
+    ratedThisRun: !!input.ratedThisRun,
+    playedOffThisRun: !!input.playedOffThisRun,
   }
 }
 
@@ -2844,9 +2856,21 @@ export function nextAutopilotStep(s: AutopilotSignals): AutopilotDecision {
   if (s.learnedCores.length && s.hasStartingPoint && !s.championPlateaued) {
     return { action: 'improve', reason: 'improve the champion (warm-start ladder)' }
   }
+  // Training has SETTLED — now FINALIZE, so a single Start produces the results the user actually wants and they
+  // never have to run these by hand. Each runs at most once per Start; a project that doesn't declare the
+  // capability skips straight past (so a non-solvable / non-tournament project still goes directly to done).
+  if (s.canBuildBook && !s.bookBuiltThisRun) {
+    return { action: 'build-book', reason: 'extend the optimal-play opening book (makes optimal play computable)' }
+  }
+  if (s.canRate && !s.ratedThisRun) {
+    return { action: 'rate', reason: 'rate every model on the comparable-strength gauntlet' }
+  }
+  if (s.canPlayOff && !s.playedOffThisRun) {
+    return { action: 'play-off', reason: 'run the head-to-head play-off + optimality check (the true winner)' }
+  }
   return {
     action: 'done',
-    reason: 'nothing left to do without new input — new architectures screened, search converged, champion plateaued',
+    reason: 'nothing left without new input — models are converged and the results are ready',
   }
 }
 

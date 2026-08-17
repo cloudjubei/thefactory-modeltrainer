@@ -1863,9 +1863,12 @@ export interface CalibrateTrainingParams {
 export type ChampionStopReason = 'reached-target' | 'plateau' | 'budget' | 'aborted'
 
 // --- the single "Start" autopilot: ONE process that works out the next thing to do ----------------------
-/** What the autopilot should do next. `screen` = probe a newly-added architecture; `search` = explore the
- * config space; `improve` = climb the champion (warm-start ladder); `done` = nothing left without new input. */
-export type AutopilotAction = 'screen' | 'search' | 'improve' | 'done'
+/** What the autopilot should do next. Training: `screen` = probe a newly-added architecture; `search` = explore
+ * the config space; `improve` = climb the champion (warm-start ladder). Then FINALIZE (once training settles, so
+ * the user never runs these by hand): `build-book` = extend the optimal-play opening book; `rate` = rate every
+ * model on the comparable gauntlet; `play-off` = the head-to-head tournament + optimality check. `done` = nothing
+ * left without new input, and the results are ready. */
+export type AutopilotAction = 'screen' | 'search' | 'improve' | 'build-book' | 'rate' | 'play-off' | 'done'
 
 /** The derived state the autopilot decides from — kept a plain data bag so the decision is a PURE function. */
 export interface AutopilotSignals {
@@ -1881,6 +1884,19 @@ export interface AutopilotSignals {
    * attempt THIS run. A plateau left by a PRIOR run does NOT count — each Start gets a fresh attempt (the
    * champion loop resets its plateau budget per launch), so the autopilot must not refuse to re-select improve. */
   championPlateaued: boolean
+  // --- FINALIZATION capability + per-Start progress (each finalize step runs at most once per Start) ---
+  /** The project declares a `buildBook` command (a solved game with an opening book to extend). */
+  canBuildBook?: boolean
+  /** The project declares a `gauntlet` (so models can be rated on the comparable-strength spine). */
+  canRate?: boolean
+  /** The project declares a `tournament` (so the head-to-head play-off + optimality can run). */
+  canPlayOff?: boolean
+  /** The book was already extended THIS Start (don't loop on it). */
+  bookBuiltThisRun?: boolean
+  /** Models were already rated THIS Start. */
+  ratedThisRun?: boolean
+  /** The play-off already ran THIS Start. */
+  playedOffThisRun?: boolean
 }
 
 /** The autopilot's decision: the next action + a one-line reason (surfaced to the user) + an optional target. */
@@ -1900,6 +1916,9 @@ export interface AutopilotRunSummary {
   screened: number
   searched: number
   improved: number
+  bookBuilt: number
+  rated: number
+  playedOff: number
   stopReason: AutopilotStopReason
 }
 
@@ -2192,6 +2211,30 @@ export interface TournamentRecord {
   ranAt: string
 }
 
+/** A LIVE progress marker streamed (via `@@PROGRESS` stdout) while the play-off computes — one `start`, then one
+ * `roundrobin` per pairing (carrying the growing partial `standings`), then one `selfplay`/`optimality` per
+ * competitor. The activity folds these into a `{recordType}-tournament-progress` record the viewer renders live. */
+export type TournamentProgress =
+  | {
+      phase: 'start'
+      game: string
+      competitors: TournamentCompetitor[]
+      pairings: number
+      selfPlayCount: number
+      optimalityCount: number
+      gamesPerPair: number
+    }
+  | {
+      phase: 'roundrobin'
+      done: number
+      total: number
+      pair: TournamentMatchup
+      standings: TournamentStanding[]
+      firstPlayerWinRate: number
+    }
+  | ({ phase: 'selfplay'; id: string; done: number; total: number } & TournamentSelfPlay)
+  | ({ phase: 'optimality'; id: string; done: number; total: number } & TournamentOptimality)
+
 export interface TournamentParams {
   scope: string
   projectRoot: string
@@ -2215,6 +2258,9 @@ export interface TournamentParams {
   computeTarget?: string
   abortSignal?: AbortSignal
   onRecordWritten?: (type: string, key: string) => void
+  /** Called with each LIVE progress marker the play-off streams (see {@link TournamentProgress}) — the activity
+   * turns these into a `{recordType}-tournament-progress` record so the viewer shows partial standings mid-run. */
+  onProgress?: (marker: TournamentProgress) => void
   activityId?: string
 }
 

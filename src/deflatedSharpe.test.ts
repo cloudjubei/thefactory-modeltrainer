@@ -16,6 +16,8 @@ import {
   effectiveTrialsParticipation,
   correlationMatrix,
   effectiveTrials,
+  probabilisticSharpeRatioHacFromStats,
+  sharpeStandardErrorHacFromStats,
 } from './deflatedSharpe.js'
 import type { DeflatedCorpusTrial } from './modelTrainerTypes.js'
 
@@ -463,5 +465,36 @@ describe('effectiveTrials (TS twin of effective_trials.py participation ratio)',
       return Array.from({ length: 4000 }, () => r())
     })
     expect(effectiveTrials(fam)).toBeGreaterThan(5)
+  })
+})
+
+describe('probabilisticSharpeRatioHac (TS twin of sharpe.py HAC-PSR, stats form)', () => {
+  it('newey-west inflation matches Python', () => {
+    expect(neweyWestInflation([0.3, 0.1], 2)).toBeCloseTo(1.4666666666666668, 12)
+  })
+
+  it('HAC-PSR golden vs Python (positive autocorrelation deflates PSR below iid)', () => {
+    // case1: sr=0.1, iid moments, n=500, autocorr [0.3,0.1] q=2
+    expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0.3, 0.1], 2)).toBeCloseTo(0.9671108142040388, 6)
+    expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0.3, 0.1], 2)).toBeLessThan(
+      psrFromStats(0.1, 0.0, 3.0, 500),
+    )
+  })
+
+  it('HAC-PSR golden with skew/kurt + benchmark vs Python', () => {
+    expect(
+      probabilisticSharpeRatioHacFromStats(0.15, -0.5, 4.0, 1000, [0.2, 0.1, 0.05], 3, 0.05),
+    ).toBeCloseTo(0.994359895853477, 6)
+  })
+
+  it('equals the iid PSR when there is no autocorrelation', () => {
+    expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0, 0], 2)).toBeCloseTo(
+      psrFromStats(0.1, 0.0, 3.0, 500),
+      9,
+    )
+  })
+
+  it('0 when the SE is undefined', () => {
+    expect(probabilisticSharpeRatioHacFromStats(5.0, 5.0, 3.0, 100, [0.2], 1)).toBe(0)
   })
 })

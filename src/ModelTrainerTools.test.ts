@@ -3184,6 +3184,47 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(state.stage).toBe('done')
   })
 
+  it('after training settles it FINALIZES automatically — build book → rate → play-off (no manual clicks)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const finalizeManifest = manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+        seed: { type: 'number', default: 0 },
+      },
+      learnedCores: ['alphazero'],
+      buildBook: 'py -m harness.book --config-json {configPath} --summary-out {summaryOut}',
+      gauntlet: 'py -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}',
+      tournament: 'py -m harness.tournament --config-json {configPath} --summary-out {summaryOut}',
+    })
+    // Already screened + search converged, so the loop goes straight to improve then FINALIZE.
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    const launched: string[] = []
+    const result = await tools.runAutopilot({
+      scope: 'proj', projectRoot: '/x', manifest: finalizeManifest, maxRounds: 10,
+      launchActivity: async (type: string) => {
+        launched.push(type)
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: `c${launched.length}` }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    // improve (train-champion) settles → book → rate → play-off → done, each exactly once
+    expect(launched).toEqual(['train-champion', 'build-book', 'rate-models', 'tournament'])
+    expect(result.stopReason).toBe('done')
+    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+      lastRun?: { bookBuilt: number; rated: number; playedOff: number }
+    }
+    expect(state.lastRun).toMatchObject({ bookBuilt: 1, rated: 1, playedOff: 1 })
+  })
+
   it('treats a no-new-runs explore round as exhausted so improve still runs (the search-never-converges backstop)', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)
@@ -3407,7 +3448,7 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     // top-1 model (champ) + the mcts reference rung; oracle handled by include_oracle (its depth carried through)
     expect(cfg.competitors.map((c) => c.id)).toEqual(['champ', 'mcts120'])
     expect(cfg.include_oracle).toBe(true)
-    expect(cfg.oracle_depth).toBe(10) // spine oracle depth 12 capped at 10 to keep the play-off tractable
+    expect(cfg.oracle_depth).toBe(6) // spine oracle depth 12 capped at 6 (+ exact endgame) to keep the play-off fast
     // the play-off record is persisted for the Results view, and standings come back
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-tournament', key: 'current' })
     expect((rec?.content as { standings: unknown[] }).standings.length).toBe(2)
@@ -3454,6 +3495,44 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     const book = cfg.competitors.find((c) => c.id === 'book')
     expect(book?.model_name).toBe('book')
     expect(book?.book_solve_endgame).toBe(22)
+  })
+
+  it('streams the harness @@PROGRESS markers to onProgress (live per-pairing progress)', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'a', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/a.json' } })
+    const lines = [
+      '@@PROGRESS {"phase":"start","game":"connect4","competitors":[{"id":"a","label":"a"}],"pairings":1,"selfPlayCount":1,"optimalityCount":0,"gamesPerPair":4}',
+      'incidental engine log line (ignored)',
+      '@@PROGRESS {"phase":"roundrobin","done":1,"total":1,"pair":{"a":"a","b":"m","a_win":0.5,"draw":0,"b_win":0.5,"first_player_win_rate":0.5,"games":4},"standings":[{"id":"a","label":"a","score":0.5,"matches":1,"scorePerMatch":0.5,"rank":1}],"firstPlayerWinRate":0.5}',
+    ]
+    const streamingRunner: ComputeRunner = {
+      async calibrate() {
+        return { secondsObserved: 1, unitsPerSecond: 1 }
+      },
+      runJob(job: ComputeJob): ComputeJobHandle {
+        let resolveDone: (r: ComputeJobResult) => void = () => {}
+        const done = new Promise<ComputeJobResult>((res) => {
+          resolveDone = res
+        })
+        return {
+          jobId: job.jobId,
+          onLog: (cb: (line: string) => void) => {
+            for (const l of lines) cb(l)
+            resolveDone({ jobId: job.jobId, status: 'completed', exitCode: 0, summary: tourSummary, logTail: [], durationMs: 1 })
+          },
+          done,
+          abort: () => {},
+        }
+      },
+    }
+    const { tools } = makeTools(streamingRunner, storage)
+    const markers: Array<Record<string, unknown>> = []
+    await tools.runTournament({
+      scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['a'],
+      includeReferences: false, includeOracle: false, onProgress: (m) => markers.push(m as unknown as Record<string, unknown>),
+    })
+    expect(markers.map((m) => m.phase)).toEqual(['start', 'roundrobin']) // the noise line was ignored
+    expect((markers[1].standings as Array<{ id: string }>)[0].id).toBe('a')
   })
 })
 

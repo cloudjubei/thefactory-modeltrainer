@@ -158,6 +158,19 @@ def test_near_perfect_is_exact_when_depth_covers_the_endgame(seed):
     assert NearPerfectOracle(depth=12).act(game, state, random.Random(0)) in optimal_columns(state)
 
 
+@pytest.mark.parametrize("seed", range(6))
+def test_near_perfect_solve_endgame_cutoff_is_exact_even_at_shallow_depth(seed):
+    # The exact-endgame cutoff plays the OPTIMAL move once few cells remain, even with a shallow search depth
+    # that couldn't see the end — so the oracle stays perfect in the endgame while being fast to run.
+    game = Connect4()
+    state = _deep_position(game, plies_left=10, seed=seed)
+    if state is None:
+        pytest.skip("no deep non-terminal position sampled")
+    solver._TT.clear()
+    empty = sum(1 for v in state.board if v == 0)
+    assert NearPerfectOracle(depth=2, solve_endgame=empty).act(game, state, random.Random(0)) in optimal_columns(state)
+
+
 def test_near_perfect_plays_the_opening_fast():
     game = Connect4()
     state = game.initial_state(random.Random(0))

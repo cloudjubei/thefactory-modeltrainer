@@ -41,7 +41,7 @@ def _rung_factory(rung: dict, game: Game) -> Callable[[], Agent]:
         from harness.solver import NearPerfectOracle
 
         depth = int(rung.get("depth", 12))
-        return lambda: NearPerfectOracle(depth=depth)
+        return lambda: NearPerfectOracle(depth=depth, solve_endgame=22)
     if kind == "book":
         from harness.book import load_book
         from harness.bookagent import BookAgent
@@ -90,6 +90,11 @@ def _model_factory(model: dict, game: Game) -> Callable[[], Agent]:
         "mcts_solve_endgame": int(model.get("mcts_solve_endgame", 0)),
         "game": game.name,
     }
+    # Thread the agent-strength knobs a `book` / `oracle_depth` competitor carries, or it silently falls back to
+    # the DEFAULT depth (12) — a ~30× slower opening search that makes the whole play-off time out.
+    for k in ("oracle_depth", "book_solve_endgame"):
+        if k in model:
+            cfg[k] = int(model[k])
     return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
 
 

@@ -381,8 +381,13 @@ class NearPerfectOracle:
 
     kind = "oracle_depth"
 
-    def __init__(self, depth: int = 10):
+    def __init__(self, depth: int = 10, solve_endgame: int = 0):
         self.depth = int(depth)
+        # Opt-in EXACT-ENDGAME cutoff (empty-cell threshold): once a position is cheap to solve exactly, play the
+        # provably-optimal move via the bitboard solver instead of the depth-limited search — this is both EXACT
+        # (perfect endgame, no horizon blunder) and much FASTER than depth-searching the whole endgame, which is
+        # what makes the oracle affordable as a play-off opponent over many games. 0 = pure depth-limited.
+        self.solve_endgame = int(solve_endgame)
 
     def act(self, game, state, rng: random.Random) -> int:
         position, mask, _ = to_bitboard(state)
@@ -393,6 +398,11 @@ class NearPerfectOracle:
         if wins:
             wins.sort(key=_CENTER_ORDER.index)
             return wins[0]
+        if self.solve_endgame > 0 and (_TOTAL - bin(mask).count("1")) <= self.solve_endgame:
+            optimal = optimal_columns(state)  # exact + fast once few cells remain
+            if optimal:
+                optimal.sort(key=_CENTER_ORDER.index)
+                return optimal[0]
         possible = _possible_non_losing_moves(position, mask)
         candidates = legal if possible == 0 else [c for c in legal if possible & _column_mask(c)]
         moves = bin(mask).count("1")
