@@ -1173,6 +1173,28 @@ export function plannedMatrixItemCount(spec: ExperimentSpec): number {
   return sweptCount + explicitCount
 }
 
+/**
+ * Strip the `fixed` / `configs` entries of a MACHINE-derived spec down to declared manifest levers. The
+ * exploration strategist re-proposes configs lifted from the run archive, whose persisted config legitimately
+ * carries operational fields the trainer accepts but the manifest does not declare as tunable levers (e.g. a
+ * reference opponent's search depth). {@link expandExperimentMatrix} is strict by design — it rejects any such
+ * key to catch typos in HUMAN-authored specs — so a strategist spec must be sanitized first or the whole
+ * planning round throws. Only `fixed` and explicit `configs` (the run-config-derived surfaces) are pruned;
+ * `sweep` / `compare` / bundles name levers the strategist chose deliberately and stay strictly validated.
+ */
+export function sanitizeStrategistSpec(spec: ExperimentSpec, manifest: TrainerManifest): ExperimentSpec {
+  const leverKeys = new Set(Object.keys(manifest.levers))
+  const keepLevers = (config: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(config)) if (leverKeys.has(k)) out[k] = v
+    return out
+  }
+  const next: ExperimentSpec = { ...spec }
+  if (spec.fixed) next.fixed = keepLevers(spec.fixed)
+  if (spec.configs) next.configs = spec.configs.map((e) => ({ ...e, config: keepLevers(e.config) }))
+  return next
+}
+
 export function expandExperimentMatrix(
   manifest: TrainerManifest,
   spec: ExperimentSpec,

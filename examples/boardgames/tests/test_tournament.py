@@ -1,8 +1,29 @@
 import random
+from concurrent.futures import Future
 
+import harness.tournament as tour
 from harness.registry import resolve_game
 from harness.agents import HeuristicAgent, RandomAgent
 from harness.tournament import play_match, run_tournament, ORACLE_ID
+
+
+class _WedgedPool:
+    """A pool that delivers ONLY the pre-chosen submit-indices and leaves the rest pending forever — a stand-in
+    for a worker OOM-killed under memory pressure, whose futures never complete (the real-world play-off stall)."""
+
+    def __init__(self, resolved: set[int]):
+        self._resolved = set(resolved)
+        self._n = 0
+
+    def submit(self, fn, task):
+        i, self._n = self._n, self._n + 1
+        fut: Future = Future()
+        if i in self._resolved:
+            fut.set_result(("POOL", task))
+        return fut  # unresolved futures stay pending → the pool "wedges" on them
+
+    def shutdown(self, wait=False, cancel_futures=False):
+        pass
 
 
 def _game():
@@ -127,3 +148,23 @@ def test_parallel_round_robin_is_wellformed_and_deterministic():
     assert len(a["matrix"]) == 6  # every pairing present, re-sorted into (i,j) order
     assert [s["rank"] for s in a["standings"]] == [1, 2, 3, 4]
     assert a["standings"][0]["id"] != "rand"  # random shouldn't top the tournament
+
+
+def test_imap_indexed_finishes_stragglers_in_process_when_the_pool_wedges(monkeypatch):
+    # A wedged pool (some futures never complete) must NOT hang the play-off: after a stall window with zero
+    # progress, the undelivered tasks are finished IN-PROCESS so every task index is yielded exactly once.
+    tasks = list(range(6))
+    resolved = {0, 2, 4}  # the pool delivers these; 1, 3, 5 wedge forever
+    monkeypatch.setattr(tour, "_make_pool", lambda request, tasks, min_tasks: _WedgedPool(resolved))
+    out = dict(tour._imap_indexed({}, lambda t: ("SEQ", t), tasks, min_tasks=1, stall_s=0.05))
+    assert set(out) == set(tasks)  # nothing lost, nothing hung
+    for i in tasks:
+        tag, value = out[i]
+        assert value == i
+        assert tag == ("POOL" if i in resolved else "SEQ")  # wedged ones were recovered in-process
+
+
+def test_imap_indexed_runs_sequentially_below_the_parallel_threshold():
+    # Below the parallel threshold `_make_pool` returns None; every task still runs, in index order.
+    got = list(tour._imap_indexed({}, lambda t: t * t, [3, 4, 5], min_tasks=99, stall_s=0.05))
+    assert got == [(0, 9), (1, 16), (2, 25)]

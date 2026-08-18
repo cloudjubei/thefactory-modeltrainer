@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { TrainerManifest, TrainingRunSummary } from './modelTrainerTypes.js'
+import type { ExperimentSpec, TrainerManifest, TrainingRunSummary } from './modelTrainerTypes.js'
 import { MAX_DECISION_TRACE_STEPS, MAX_SERIES_POINTS } from './modelTrainerConstants.js'
 import {
   blendJudgeScore,
@@ -57,6 +57,7 @@ import {
   looksLikeDataGathering,
   extractPaperText,
   expandExperimentMatrix,
+  sanitizeStrategistSpec,
   normalizeObjectiveScores,
   pickBestRun,
   totalCampaignUnits,
@@ -1264,6 +1265,38 @@ describe('expandExperimentMatrix', () => {
         hashByJson,
       ),
     ).toThrow(/100/)
+  })
+})
+
+describe('sanitizeStrategistSpec', () => {
+  it('drops fixed keys the manifest does not declare as levers, keeping the real levers', () => {
+    const spec: ExperimentSpec = {
+      fixed: { lr: 0.02, oracle_depth: 10, benchmark_positions: 200 },
+      seeds: [0, 1],
+    }
+    const out = sanitizeStrategistSpec(spec, manifest())
+    expect(out.fixed).toEqual({ lr: 0.02 })
+    expect(out.seeds).toEqual([0, 1])
+  })
+
+  it('drops non-lever keys from each explicit configs entry while preserving its key', () => {
+    const spec: ExperimentSpec = {
+      configs: [{ config: { algo: 'b', steps: 50, oracle_depth: 8 }, key: 'run-1' }],
+    }
+    const out = sanitizeStrategistSpec(spec, manifest())
+    expect(out.configs).toEqual([{ config: { algo: 'b', steps: 50 }, key: 'run-1' }])
+  })
+
+  it('turns a run-config-derived spec that WOULD be rejected into an expandable one', () => {
+    const dirty: ExperimentSpec = { fixed: { lr: 0.01, algo: 'a', oracle_depth: 10 }, seeds: [0] }
+    expect(() => expandExperimentMatrix(manifest(), dirty, hashByJson)).toThrow(/oracle_depth/)
+    const clean = sanitizeStrategistSpec(dirty, manifest())
+    expect(() => expandExperimentMatrix(manifest(), clean, hashByJson)).not.toThrow()
+  })
+
+  it('leaves an already-lever-clean spec unchanged', () => {
+    const spec: ExperimentSpec = { fixed: { lr: 0.01 }, sweep: { algo: ['a', 'b'] }, seeds: [0] }
+    expect(sanitizeStrategistSpec(spec, manifest())).toEqual(spec)
   })
 })
 

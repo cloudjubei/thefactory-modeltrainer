@@ -19,7 +19,7 @@ import json
 import multiprocessing
 import os
 import random
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from pathlib import Path
 from typing import Callable
 
@@ -28,6 +28,11 @@ from harness.gauntlet import _model_factory
 from harness.registry import resolve_game
 
 ORACLE_ID = "oracle"
+
+# A whole window this long with ZERO pairings finishing means a worker was killed (OOM under memory pressure)
+# and left its futures pending forever — the play-off "stuck at N/M" stall. A single boardgame pairing is a few
+# seconds, so this is comfortably above healthy progress and only trips on a genuinely wedged pool.
+POOL_STALL_TIMEOUT_S = 30.0
 
 # --- PARALLEL round-robin: each pairing / optimality check is independent, and the near-perfect agents are slow
 # (an oracle move from the opening is ~seconds), so a sequential O(n²) round-robin can blow past the job budget.
@@ -73,32 +78,54 @@ def _opt_task(args: tuple) -> tuple:
     return cid, wins
 
 
-def _imap_indexed(request: dict, fn: Callable, tasks: list, min_tasks: int = 4):
+def _make_pool(request: dict, tasks: list, min_tasks: int):
+    """A spawned process pool for the matches, or None when it isn't worth it / can't be created (too few tasks,
+    single core, or a sandbox that forbids spawning) — in which case the caller runs everything in-process."""
+    if len(tasks) < min_tasks or (os.cpu_count() or 1) < 2:
+        return None
+    try:
+        return ProcessPoolExecutor(
+            max_workers=min(os.cpu_count() or 2, len(tasks), 8),
+            mp_context=multiprocessing.get_context("spawn"),
+            initializer=_init_worker,
+            initargs=(request,),
+        )
+    except Exception:
+        return None
+
+
+def _imap_indexed(request: dict, fn: Callable, tasks: list, min_tasks: int = 4, stall_s: float = POOL_STALL_TIMEOUT_S):
     """Yield (original_index, result) as each task finishes — parallel across a spawned process pool when there's
-    enough work + cores, else in-process sequential. A pool that can't even be CREATED (sandbox forbids it) falls
-    back cleanly with no double-execution; only after tasks are running do errors propagate (they surface as a
-    failed play-off, and the already-streamed partial standings are preserved)."""
-    ex = None
-    if len(tasks) >= min_tasks and (os.cpu_count() or 1) >= 2:
-        try:
-            ex = ProcessPoolExecutor(
-                max_workers=min(os.cpu_count() or 2, len(tasks), 8),
-                mp_context=multiprocessing.get_context("spawn"),
-                initializer=_init_worker,
-                initargs=(request,),
-            )
-        except Exception:
-            ex = None
-    if ex is not None:
-        try:
-            futures = {ex.submit(fn, t): i for i, t in enumerate(tasks)}
-            for fut in as_completed(futures):
-                yield futures[fut], fut.result()
-        finally:
-            ex.shutdown(wait=True)
+    enough work + cores, else in-process sequential. Crucially, this NEVER hangs: a pool that can't be created
+    falls back to sequential, and a pool that WEDGES (a worker OOM-killed under memory pressure leaves its futures
+    pending forever — the "stuck at N/M pairings" stall) is detected by a stall window with zero progress, after
+    which the undelivered tasks are finished IN-PROCESS. Results stream in completion order (live standings)."""
+    ex = _make_pool(request, tasks, min_tasks)
+    if ex is None:
+        for i, t in enumerate(tasks):
+            yield i, fn(t)
         return
+    done: set[int] = set()
+    try:
+        futures = {ex.submit(fn, t): i for i, t in enumerate(tasks)}
+        pending = set(futures)
+        while pending:
+            finished, pending = wait(pending, timeout=stall_s, return_when=FIRST_COMPLETED)
+            if not finished:
+                break  # a full stall window with no completions ⇒ a wedged worker; finish the rest in-process
+            for fut in finished:
+                i = futures[fut]
+                try:
+                    res = fut.result()
+                except Exception:
+                    continue  # a broken task ⇒ leave it to the in-process tail below rather than fail the play-off
+                done.add(i)
+                yield i, res
+    finally:
+        ex.shutdown(wait=False, cancel_futures=True)
     for i, t in enumerate(tasks):
-        yield i, fn(t)
+        if i not in done:
+            yield i, fn(t)
 
 
 def _oracle_factory(depth: int) -> Callable[[], object]:

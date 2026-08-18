@@ -242,6 +242,7 @@ import {
   discoverManifestModelCandidates,
   modelBindingNames,
   expandExperimentMatrix,
+  sanitizeStrategistSpec,
   estimateRemainingCampaignSeconds,
   normalizeObjectiveScores,
   computeScorecard,
@@ -1105,7 +1106,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       for (const rec of recs) {
         const items = expandExperimentMatrix(
           manifest,
-          migrateExperimentSpec(rec.spec, manifest.migrations),
+          sanitizeStrategistSpec(migrateExperimentSpec(rec.spec, manifest.migrations), manifest),
           hashTrainingConfig,
         )
         for (const it of items) {
