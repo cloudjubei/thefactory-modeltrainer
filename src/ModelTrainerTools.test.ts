@@ -3444,11 +3444,17 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     const res = await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, topN: 1 })
     const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
     expect(job.commandTemplate).toContain('tournament')
-    const cfg = job.config as { competitors: Array<{ id: string }>; include_oracle: boolean; oracle_depth: number }
+    const cfg = job.config as {
+      competitors: Array<{ id: string }>
+      include_oracle: boolean
+      oracle_depth: number
+      max_sims: number
+    }
     // top-1 model (champ) + the mcts reference rung; oracle handled by include_oracle (its depth carried through)
     expect(cfg.competitors.map((c) => c.id)).toEqual(['champ', 'mcts120'])
     expect(cfg.include_oracle).toBe(true)
     expect(cfg.oracle_depth).toBe(6) // spine oracle depth 12 capped at 6 (+ exact endgame) to keep the play-off fast
+    expect(cfg.max_sims).toBe(250) // EVERY competitor's search bounded so a high-sim leaderboard model can't time out the round-robin
     // the play-off record is persisted for the Results view, and standings come back
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-tournament', key: 'current' })
     expect((rec?.content as { standings: unknown[] }).standings.length).toBe(2)

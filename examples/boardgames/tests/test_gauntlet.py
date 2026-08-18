@@ -34,6 +34,22 @@ def test_model_factory_constructs_a_fresh_agent_per_game():
     assert a is not b  # fresh instance per game → no transposition-table bleed across the gauntlet's games
 
 
+def test_model_factory_caps_mcts_sims_to_max_sims():
+    # A leaderboard's top model can be a 3409-sim mcts (~30s/game) — pathologically slow in a round-robin.
+    # A play-off passes max_sims so every competitor's search is bounded and the round-robin stays tractable.
+    game = Connect4()
+    capped = _model_factory({"model_name": "mcts", "mcts_sims": 3409}, game, max_sims=250)()
+    assert capped.sims == 250
+    uncapped = _model_factory({"model_name": "mcts", "mcts_sims": 3409}, game)()
+    assert uncapped.sims == 3409  # no cap by default (the gauntlet path is unchanged)
+
+
+def test_model_factory_does_not_raise_sims_below_max():
+    game = Connect4()
+    agent = _model_factory({"model_name": "mcts", "mcts_sims": 40}, game, max_sims=250)()
+    assert agent.sims == 40  # cap only lowers a too-expensive model, never inflates a cheap one
+
+
 def test_climb_stops_after_the_first_rung_it_fails_to_clear():
     game = Connect4()
     pairings = climb_spine(game, lambda: HeuristicAgent(), SPINE, n=6, base_seed=0, opening_plies=4, model_idx=0)

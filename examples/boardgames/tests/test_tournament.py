@@ -1,4 +1,5 @@
 import random
+import time
 from concurrent.futures import Future
 
 import harness.tournament as tour
@@ -76,6 +77,20 @@ def test_run_tournament_round_robins_ranks_and_scores_optimality():
     assert "rand" in res["selfPlay"]
     assert 0.0 <= res["selfPlay"]["rand"]["first_player_win_rate"] <= 1.0
     assert 0.0 <= res["firstPlayerWinRate"] <= 1.0
+
+
+def test_oracle_label_shows_its_search_depth():
+    # A depth-limited oracle is EXACT only in the endgame; the label must state its depth so a depth-6 yardstick
+    # isn't mistaken for perfect play (deeper vs shallower is 50/50 head-to-head — the seat decides, not depth).
+    res = run_tournament({
+        "game": "connect4",
+        "competitors": [{"id": "heur", "model_name": "heuristic"}],
+        "include_oracle": True,
+        "oracle_depth": 6,
+        "games_per_pair": 2,
+    })
+    oracle = next(c for c in res["competitors"] if c["id"] == ORACLE_ID)
+    assert oracle["label"] == "oracle (depth 6)"
 
 
 def test_self_play_ids_are_honoured():
@@ -168,3 +183,33 @@ def test_imap_indexed_runs_sequentially_below_the_parallel_threshold():
     # Below the parallel threshold `_make_pool` returns None; every task still runs, in index order.
     got = list(tour._imap_indexed({}, lambda t: t * t, [3, 4, 5], min_tasks=99, stall_s=0.05))
     assert got == [(0, 9), (1, 16), (2, 25)]
+
+
+def test_play_off_with_pathological_high_sim_models_completes_and_is_wellformed():
+    # THE REAL failure: a leaderboard's top models are high-sim mcts (mcts@2000 is ~15s/game — a 4-game
+    # pairing alone would blow a play-off's budget). With max_sims the whole round-robin + optimality must
+    # FINISH with every pairing present, quickly. Uncapped, two such models pairing is minutes.
+    req = {
+        "game": "connect4",
+        "competitors": [
+            {"id": "big1", "label": "mcts·big1", "model_name": "mcts", "mcts_sims": 2000},
+            {"id": "big2", "label": "mcts·big2", "model_name": "mcts", "mcts_sims": 2000},
+            {"id": "heur", "label": "heuristic", "model_name": "heuristic"},
+            {"id": "rand", "label": "random", "model_name": "random"},
+        ],
+        "include_oracle": True,
+        "oracle_depth": 6,
+        "games_per_pair": 4,
+        "opening_plies": 2,
+        "max_sims": 80,
+    }
+    t = time.time()
+    res = run_tournament(req)
+    elapsed = time.time() - t
+    # 5 competitors (incl. oracle) → C(5,2)=10 pairings, ALL present, everyone played their full round-robin
+    assert len(res["matrix"]) == 10
+    assert all(s["matches"] == 4 for s in res["standings"])
+    assert [s["rank"] for s in res["standings"]] == [1, 2, 3, 4, 5]
+    assert res["standings"][-1]["id"] == "rand"  # random is bottom (sanity)
+    # the cap makes it tractable — uncapped this is minutes; capped it is seconds even sequentially
+    assert elapsed < 120, f"play-off took {elapsed:.0f}s — the max_sims cap is not bounding search cost"

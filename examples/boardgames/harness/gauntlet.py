@@ -60,9 +60,17 @@ def _rung_factory(rung: dict, game: Game) -> Callable[[], Agent]:
     raise ValueError(f"unknown rung kind {kind!r}")
 
 
-def _model_factory(model: dict, game: Game) -> Callable[[], Agent]:
+def _cap_sims(sims: int, max_sims: int | None) -> int:
+    """Bound a search agent's per-move sims. A play-off round-robin is O(n²) games; a leaderboard's top model
+    can be a several-thousand-sim mcts (~30s/game) that would blow the whole budget, so callers that must stay
+    tractable pass `max_sims`. `None` = no cap (the gauntlet path, where each model climbs at its own strength)."""
+    return min(sims, max_sims) if max_sims else sims
+
+
+def _model_factory(model: dict, game: Game, max_sims: int | None = None) -> Callable[[], Agent]:
     """A fresh-per-game agent factory for a model under test — parse the checkpoint spec ONCE, construct a
-    NEW agent per game (so a search/net transposition table can't bleed across games)."""
+    NEW agent per game (so a search/net transposition table can't bleed across games). `max_sims` bounds the
+    per-move search cost of EVERY competitor (mcts + net) so a round-robin can't time out on a huge-sim model."""
     checkpoint = model.get("checkpoint")
     if checkpoint:
         spec = json.loads(Path(checkpoint).read_text())
@@ -71,22 +79,24 @@ def _model_factory(model: dict, game: Game) -> Callable[[], Agent]:
             from harness.neural import AlphaZeroAgent, load_net
 
             net = load_net(spec["az_weights"])
-            sims = int(spec.get("az_sims", 100))
+            sims = _cap_sims(int(spec.get("az_sims", 100)), max_sims)
             se = int(spec.get("az_solve_endgame", 0))
             return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
         cfg = dict(spec)
+        if "mcts_sims" in cfg:
+            cfg["mcts_sims"] = _cap_sims(int(cfg["mcts_sims"]), max_sims)
         return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
     if model.get("az_weights"):  # a learned net passed by weights directly (e.g. a champion .pt, no spec file)
         from harness.neural import AlphaZeroAgent, load_net
 
         net = load_net(model["az_weights"])
-        sims = int(model.get("az_sims", 100))
+        sims = _cap_sims(int(model.get("az_sims", 100)), max_sims)
         se = int(model.get("az_solve_endgame", 0))
         return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
     model_name = model.get("model_name", "mcts")
     cfg = {
         "model_name": model_name,
-        "mcts_sims": int(model.get("mcts_sims", 120)),
+        "mcts_sims": _cap_sims(int(model.get("mcts_sims", 120)), max_sims),
         "mcts_solve_endgame": int(model.get("mcts_solve_endgame", 0)),
         "game": game.name,
     }

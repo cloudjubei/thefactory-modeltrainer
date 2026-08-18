@@ -4473,6 +4473,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // opening, and ~0.5s/game vs ~2.8s at depth 8 — the difference between a play-off that finishes in ~a
       // minute and one that times out. (The exact `OracleAgent` stays available for a fully-rigorous check.)
       oracle_depth: Math.min(oracleRung?.depth ?? 12, 6),
+      // Bound EVERY competitor's per-move search, not just the reference rungs: a leaderboard's top model can be
+      // a several-thousand-sim mcts (~30s/game) that alone blows the round-robin's budget. The cap makes the
+      // play-off both tractable AND a compute-normalised comparison (an mcts only "wins" here by real play, not
+      // by out-searching everyone 30×). Alphazero nets carry small az_sims already; this clamps those too.
+      max_sims: maxReferenceSims,
       games_per_pair: gamesPerPair,
       base_seed: params.baseSeed ?? 0,
       opening_plies: params.openingPlies ?? 2,

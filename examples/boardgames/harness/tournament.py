@@ -188,13 +188,16 @@ def _factories(request: dict, game: Game) -> tuple[list[dict], dict]:
     """Resolve the competitor list (+ the oracle when asked) to (competitor-meta, id→factory)."""
     competitors: list[dict] = []
     factories: dict = {}
+    max_sims = request.get("max_sims")
+    max_sims = int(max_sims) if max_sims else None
     for idx, c in enumerate(request.get("competitors", [])):
         cid = str(c.get("id", idx))
         competitors.append({"id": cid, "label": c.get("label", cid)})
-        factories[cid] = _model_factory(c, game)
+        factories[cid] = _model_factory(c, game, max_sims=max_sims)
     if request.get("include_oracle") and game.name == "connect4":
-        competitors.append({"id": ORACLE_ID, "label": "oracle (near-perfect)"})
-        factories[ORACLE_ID] = _oracle_factory(int(request.get("oracle_depth", 14)))
+        oracle_depth = int(request.get("oracle_depth", 14))
+        competitors.append({"id": ORACLE_ID, "label": f"oracle (depth {oracle_depth})"})
+        factories[ORACLE_ID] = _oracle_factory(oracle_depth)
     return competitors, factories
 
 

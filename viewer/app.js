@@ -5129,7 +5129,7 @@ function renderPlayoffResults(rec) {
       const isWinner = winner && s.id === winner.id
       return `<tr class="${isWinner ? 'po-winner' : ''}">
         <td class="num">${s.rank}</td>
-        <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">perfect</span>' : ''}</td>
+        <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">endgame-exact reference</span>' : ''}</td>
         <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
         <td>${poVerdictBadge(opt)}</td>
       </tr>`
@@ -5157,7 +5157,7 @@ function renderPlayoffResults(rec) {
     .join('')
   return (
     `<div class="po-winner-line">🏆 True winner (most games won): <strong>${escapeHtml(winner ? winner.label : '—')}</strong></div>` +
-    `<div class="po-hint">Standings are from ACTUAL head-to-head games. A model that wins as the first player vs the oracle is playing optimally (Connect 4 is a first-player win).</div>` +
+    `<div class="po-hint">Standings are from ACTUAL head-to-head games. The oracle is a <strong>depth-limited</strong> reference — provably exact in the endgame, strong-but-beatable in the opening (its depth is in its name). Beating it as the first player is strong evidence a model converts the first-player win (Connect 4 is a first-player win under perfect play).</div>` +
     `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th class="num">#</th><th>Competitor</th><th class="num" ${helpAttr('Share of match points won across its games (win=1, draw=½).')}>Won</th><th>Optimality (vs oracle)</th></tr></thead><tbody>${standings}</tbody></table></div>` +
     `<div class="po-move-adv">Move-advantage: the first mover wins <strong>${fpwr}%</strong> of decisive games overall.</div>` +
     (selfBits ? `<div class="po-selfplay">${selfBits}</div>` : '') +
