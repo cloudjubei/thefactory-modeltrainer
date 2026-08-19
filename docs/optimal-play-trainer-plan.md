@@ -124,6 +124,249 @@ DRAW (tic-tac-toe's true value), demonstrating the identical engine yields optim
   document how a new game plugs in (key, symmetries, solver-or-seed). Prove on a 2nd game (tic-tac-toe: trivially
   fully-solvable, exercises the 8-fold dihedral symmetry) that the same engine yields an optimal book-agent.
 
+## Next enhancements (queued — documented now, to tackle soon)
+
+These extend the shipped engine; not yet built.
+
+### E1 — Player-colour (p1↔p2) collapse — INVESTIGATED, NOT A WIN (2026-08-19)
+
+The earlier idea (and two research passes) claimed a mover-relative key would collapse colour-swap pairs and
+~halve the generic book. **Measured on tic-tac-toe: it saves 0 entries** — enumerating all 4,520 reachable
+non-terminal positions gives **627 distinct current keys and 627 distinct mover-relative keys**. Reason: in a
+strictly-ALTERNATING game the side-to-move is determined by the piece counts, so a position's colour-swapped /
+turn-swapped twin has the wrong parity and is **UNREACHABLE** — there are never two reachable positions to merge.
+The `* 2 + to_move` turn bit in `tictactoe.canonical_key` is redundant (turn is a function of the board) but
+harmless, and it splits nothing.
+
+What the intuition ("colour doesn't matter once a value is known") really wants is **mover-relative VALUE
+storage**, and that is ALREADY how everything works: `position_value` / the solver / the book store the value
+from the side-to-move's perspective (win +1 / draw 0 / loss −1) and every lookahead negates child values
+(`book.py:91`, `solver.py:289-292`), so a stored value applies regardless of which physical colour is on the
+move. The real geometric saving is the board symmetry — Connect 4's left↔right mirror and tic-tac-toe's full
+8-fold dihedral — which is already exploited. **No code change; keep the mirror/dihedral canonicalisation as-is.**
+(A game that is NOT strictly alternating — passes, variable move counts — could in principle benefit; revisit
+per-game only if such a game appears.)
+
+### E2 — Related follow-ups (candidates)
+
+- **Grow real opening coverage.** Connect 4 opening coverage is honestly ~0% (the committed book is
+  midgame/endgame only). Longer / offline `build-book` accumulation (bottom-up, symmetry-reduced) is what lifts
+  `wins_as_p1_vs_oracle` toward a genuine optimality proof — the accumulator design is already in place, it just
+  needs the compute budget to climb the frontier upward.
+- **A stronger play-off yardstick.** The play-off oracle is depth-6 (endgame-exact, but beatable in the
+  opening), so "optimality vs oracle" is a yardstick, not a proof. A stronger yardstick depends on the
+  opening-coverage growth above (a deeper *live* oracle stays minutes/move in the opening — the wall).
+
+## Phase 6 — Generic SELF-PRODUCED approximate book (current focus)
+
+Reframes Tier 1 of the deep-research proposal. We do **NOT** import external databases (Tromp / bitbully) — the
+whole point is a system that PRODUCES its own opening knowledge for ANY game, even when that knowledge is
+incomplete. Connect 4 is only the honing example. The book graduates from an exact-only tablebase into a
+generic store that mixes PROVEN and APPROXIMATE knowledge and upgrades one into the other over successive runs.
+
+### The richer entry (supersedes the scalar Tablebase value)
+Per canonical key, store:
+- `status`: `PROVEN_WIN | PROVEN_LOSS | PROVEN_DRAW | ESTIMATE` — a single int8 column.
+- `value`: exact {−1, 0, +1} when proven; else an estimate in [−1, +1] (mover-relative tendency).
+- `best_actions`: a **bitmask** (`num_actions ≤ 64` → one uint64) of the optimal set (proven) or top moves
+  (estimate). This is the one-ply-lookahead move set, the model's policy target, AND the IMPLICIT principal
+  variation — walking `best_actions` from a position reproduces the winning/drawing LINE, so "raw paths" are
+  reconstructible on demand and need not be stored per entry (a `principal_variation(book, game, state)` walk).
+- `wdl` (optional): win/draw/loss counts behind an ESTIMATE (uint16×3) — the win/loss RATIO indicator a deep
+  model reads to grade moves where nothing is proven yet.
+- `n` / confidence: sample size behind an estimate (so estimates are comparable + upgradable).
+- `depth_to_end` (optional): signed distance-to-result for fastest-win / slowest-loss.
+
+Persisted COLUMNAR (parallel numpy arrays like today's `.npz`) so winner/loser/draw filtering is a vectorised
+mask and lookups stay O(1). Values stay MOVER-RELATIVE (colour-agnostic — see E1).
+
+### The evaluator ladder (exact → bounded-proof → estimate)
+`evaluate(game, state, book, budget) -> Entry`, tried in order, each reusing already-booked children:
+1. terminal → PROVEN from the winner.
+2. book hit → return the stored entry.
+3. cheap EXACT: `position_value` / `exact_optimal_actions` resolves within budget (endgame / small tree) → PROVEN.
+4. bounded PROOF: an MCTS-Solver / depth-limited αβ that treats booked children as PROVEN leaves; if it resolves
+   the position within a node/time budget → PROVEN (+ `best_actions`). This is the wall-break — a shallow proof
+   collapses to child lookups.
+5. ESTIMATE: N bounded games / rollouts (a supplied agent factory, or a learned value head) → a win/draw/loss
+   ratio → ESTIMATE (+ `best_actions` by estimated value + `n`).
+
+Bottom-up minimax over booked children UPGRADES estimates → proofs automatically: a parent is `PROVEN_WIN` if any
+child is a proven loss for the child's mover; `PROVEN_LOSS` if every child is a proven win for the opponent;
+`PROVEN_DRAW` if the best child is a proven draw and none is a proven win. Each pass proves more and sharpens the
+rest. **"Opening solved" = a root/opening position reaches `PROVEN_WIN` with a stored winning line.**
+
+### The builder
+Extends today's `build_book`: enumerate a bounded, symmetry-reduced frontier; order deepest + hub-first;
+`evaluate(...)` each; store the richer entry; RESUMABLE + ACCUMULATING (re-runs deepen coverage AND upgrade
+ESTIMATE→PROVEN). Priority eviction keeps proofs over estimates and hubs over leaves.
+
+### Storage / operation optimisations (the user's third requirement)
+- `best_actions` as a uint64 bitmask → O(1) store, fast set ops, cheap PV reconstruction.
+- `status` as int8 → vectorised "all proven wins / losses / draws" and "100%-blocked = `PROVEN_DRAW`" filters.
+- in-memory dict for build/play; columnar `.npz` on disk; a sorted-key + bisect read path if the book outgrows RAM.
+
+### Generic via the SolvableGame hooks
+Reuses `canonical_key` / `ply` / `legal_actions` / `step` / `is_terminal` / `winner`, the exact `position_value`
+/ `exact_optimal_actions` (proof rungs), and a NEW pluggable `estimator(game, state) -> (value, best_actions,
+wdl)` (estimate rung; default = N bounded self-play games with a supplied agent, or a learned value head). A new
+game plugs in exactly as tic-tac-toe / connect4 do.
+
+### How the deep model consumes it
+The richer entry IS the distillation target: policy = `best_actions`, value = proven value or estimate, with the
+`wdl` ratio + confidence as auxiliary signals. Proven entries give EXACT supervision; estimates give a GRADED
+signal on the frontier the proofs haven't reached — so the model learns from the book everywhere, not only where
+it is solved.
+
+### Measurable success criteria
+- `optimality_verified_plies` (shipped in Tier 0) climbs toward full game length as PROVEN opening coverage grows.
+- proven-opening count (ply ≤ K) and `book_coverage` (proven fraction of the reachable opening) climb per build.
+- `wins_as_p1_vs_oracle` / self-play first-player-win climb toward 1.0 as PROVEN coverage reaches the root.
+- tic-tac-toe stays the reference: the generic builder reaches 100% PROVEN coverage and a provably-optimal book
+  agent (regression on the existing tests).
+
+### Honesty rails (Phase 6)
+- An ESTIMATE is a BELIEF, not a proof — label it; never report an estimated opening as "solved".
+- The approximate win/loss ratio is only as good as the estimator (bounded search / rollouts); it sharpens as
+  proofs replace it.
+- The wall is unchanged for PROOFS (a cold exact opening solve stays expensive); estimates exist to give the
+  model useful gradient NOW while proofs accumulate bottom-up.
+
+### First buildable milestone — SHIPPED (2026-08-19, TDD; 168 boardgames + 1846 TS green)
+- **Richer `Tablebase` entry** (`harness/tablebase.py`): `PROVEN`/`ESTIMATE` status + value + `best_actions`
+  bitmask + confidence `n`, persisted columnar. **Backward-compatible**: `get()` unchanged; a new
+  `proven_value()` returns a value only for PROOFS, so every exact consumer (`book_optimal_actions`,
+  `book_value`, `play_until_decided`, the solver's `book=` short-circuit) was repointed to it and now ignores
+  estimates by construction; legacy value-only `.npz` (committed books + the solver `.tt`) load as all-PROVEN.
+- **Generic bounded-search estimator** `estimate_position` + the **evaluator ladder** `evaluate` (`harness/
+  book.py`): terminal → PROVEN; PROVEN book hit → keep; FREE minimax over booked-PROVEN children → PROVEN; cheap
+  exact (`exact_optimal_actions` ≤ `max_exact_empty`) → PROVEN; else a net-independent bounded-self-play ESTIMATE
+  (+ `best_actions` + `n`).
+- **Builder wiring**: `build_book(..., estimator=, max_exact_empty=)` — default path byte-identical (exact,
+  value-only); estimator mode stores rich entries and **skips only PROOFS, re-evaluating ESTIMATEs** (the eager
+  free upgrade). Proven end-to-end: ttt proves the WHOLE tree bottom-up from terminals with the estimator NEVER
+  called (max_exact_empty=0), and the connect4 opening band yields ESTIMATE entries carrying `best_actions` + `n`.
+- **`principal_variation`** reconstructs the raw line from stored optimal moves (Q2).
+
+NEXT: wire the richer targets (proven value + `best_actions` policy + estimate/`wdl`) into distillation; grow real
+connect4 opening PROVEN coverage (bottom-up + estimator); MCTS-Solver proven-value backup as oracle LEAVES. **DESIGN DECISIONS (resolved 2026-08-19):**
+- **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value.** The book must be an
+  INDEPENDENT reference that CORRECTS the net's opening errors; sourcing estimates from the net is circular
+  (book ≈ net → distilling book→net teaches nothing). Search also works on day one for a new game with no
+  trained net, shares the proof rung's substrate (degrades gracefully, sharpens as booked children accumulate).
+  The net may LATER serve as the search PRIOR to strengthen it per-sim — but the stored estimate is always the
+  search result, never the net's value.
+- **(b) RECONSTRUCT PVs from the stored optimal moves; never persist explicit paths.** Shipped: `book.principal_
+  variation(book, game, state)` walks the optimal set to a terminal (terminal / unbooked / cycle / max-len
+  guards). A proven line reconstructs in full (its winning continuation was booked when it was proven); a thin
+  region yields an honest partial line.
+- **(c) HYBRID upgrade cadence: eager for the FREE upgrade, on-demand for the EXPENSIVE one.** An estimate whose
+  children are now ALL booked is upgraded to a proof by a pure MINIMAX LOOKUP over those children — nearly free,
+  and already part of the bottom-up pass, so do it EAGERLY (keeps proven-coverage monotone every build). An
+  estimate whose children are NOT all booked needs NEW search to prove — that is real compute, so do it
+  ON-DEMAND (a play-time query, a priority/regret-guided frontier expansion, or a focused build on a region), not
+  speculatively every pass.
+
+## Tier 0 (research proposal) — SHIPPED (2026-08-19)
+The three "free wins" that unblock measuring everything above: (1) the exact-endgame cutoff is now ON by default
+for DEPLOYED/eval nets (`DEFAULT_AZ_SOLVE_ENDGAME=22`; the `AlphaZeroAgent` class default stays 0 so self-play
+exploration is unaffected); (2) a generic, opening-inclusive `optimality_trace` (`harness/benchmark.py`) reports
+`first_blunder_ply` + `optimality_verified_plies` (how deep the agent's ACTUAL line is provably optimal) — the
+yardstick Phase 6 will move; (3) an `opening_value` metric (the net's value on the standard opening) exposes the
+value-label contamination behind the forfeited first-player win. All TDD; tic-tac-toe proves the trace verifies a
+full game once coverage exists.
+
+## Scaling doctrine — Connect 4 → Checkers → Chess → Go (what "solve" means, and what we'd need)
+
+Stress-testing the design against chess (state ~10^46, tree ~10^123, UNSOLVED) confirms the architecture and
+names the gaps. Every strong engine is the SAME four organs — a **proof store at the edges**, a **cached book**,
+a **learned evaluator**, and a **search that backs proofs up** — differing only in which organ carries the
+weight. Our components already map 1:1: Tablebase PROVEN layer = endgame tablebase; `build_book` = opening book;
+the AlphaZero net = the learned eval; the `evaluate` ladder / MCTS = the search. **The PROVEN/ESTIMATE split IS
+how real engines actually work** — Stockfish's Syzygy WDL/DTZ = our PROVEN; its NNUE eval = our ESTIMATE; a value
+graduates to PROVEN only on a tablebase hit or a resolved terminal, exactly our ladder. So for a chess-class game
+"solve" HONESTLY becomes **"play near-optimally; proofs exist only at the edges (≤7-man tablebases + forced
+mates)"** — the proven fraction is ~10⁻³¹ of the state space. Publish `book_coverage` as the headline; never call
+it solved.
+
+**Tiers (what changes as complexity grows):**
+- **Tier 0 — Connect 4 class (≤~10²¹), SOLVABLE.** Current design is correct and complete: BFS-enumerate, exact
+  solve bottom-up. "Solve" = literally weakly solve. No change.
+- **Tier 1 — Checkers class (~10²¹–10³¹), SOLVABLE via retrograde (Chinook).** Add a generic RETROGRADE endgame-DB
+  builder (backward from terminals) + a forward best-first PROOF-TREE driver that stops each line on a DB hit.
+  Full-frontier BFS is replaced by retrograde + best-first forward proof.
+- **Tier 2 — Chess class (~10⁴⁶), UNSOLVED.** Abandon enumeration and rollouts. Must have, in order: (a) a game
+  plug-in with bitboards + full legal move-gen + **incremental Zobrist** behind the hooks (`symmetries()` =
+  identity — no board symmetry to exploit); (b) a learned eval as the PRIMARY strength (NNUE — a tiny int8
+  incrementally-updatable net under alpha-beta — vs a large policy/value net under MCTS); (c) a real search
+  (alpha-beta+TT or PUCT-MCTS) using the net as the ESTIMATE and backing proofs up; (d) endgame-tablebase IMPORT
+  (Syzygy) + probe-in-search as PROVEN entries; (e) a SAMPLED / best-first book with drop-out tolerance
+  (reach-probability priority), never enumeration; (f) forced-mate detection propagated as exact proofs.
+- **Tier 3 — Go class (~10¹⁷¹), UNSOLVED.** Tablebases vanish; proofs shrink to forced sequences; strength is
+  entirely net + MCTS (KataGo). "Solve" = "play superhuman"; PROVEN fraction → 0.
+
+**The 5 concrete gaps in our current design** (each with the generic abstraction it needs):
+1. **Rollout estimator** (`estimate_position`/`_rollout_outcome`) is tactically blind past ~10¹² states → the
+   `evaluate` seam already takes a pluggable `estimator`; supply a **search+net Evaluator** (alpha-beta+NNUE or
+   PUCT+net) at the leaf and retire the full-game-rollout path for hard games.
+2. **Full-frontier enumeration** in `build_book` explodes at branching ~35 → a **sampled / best-first
+   `FrontierSource`** yielding `(position, reach_probability)`, stored by priority (the Tablebase already evicts
+   by priority). Enumeration stays only as the Tier-0/1 path.
+3. **Connect4-specific solver fallback** — `book.py` falls back to the Pons bitboard when a game omits hooks;
+   that's nonsense for any other game. Route ALL exact solving through the game hooks and **DELETE the connect4
+   fallback from the generic layer** (matches "thefactory stays generic"). Add a generic retrograde routine + an
+   external-tablebase import hook.
+4. **Board-shape-specific net** → derive the net input from `observation()` with a **swappable architecture**
+   (NNUE for alpha-beta, or a residual net for MCTS) + a training loop that scales.
+5. **Symmetry assumptions** → plain incremental Zobrist with `symmetries()` = identity where none exists (the
+   ~50% mirror saving simply vanishes — set the expectation, it's not a regression).
+
+**Cross-cutting invariants to bank now:** keep the PROVEN/ESTIMATE gating (`proven_value`); make the estimator a
+pluggable search+net Evaluator; swap enumeration for a sampled FrontierSource once bᵈ exceeds budget; put all
+exact solving behind hooks; require per-game incremental Zobrist; live search must prefer proofs over estimates;
+report an honest coverage number as the headline.
+
+## Deferred phase — "Lean-Model Frontier" (make finding the best model the best it can be)
+
+The step AFTER the general system is proven — runs once the Connect-4 SOLVED bar is reached by SOME architecture
+(`oracle_optimality_rate ≥ 0.99` AND `wins_as_p1_vs_oracle == 1.0`). GOAL: the **leanest + fastest** net that
+still holds the SOLVED bar — the winning point on the **strength × cost** Pareto frontier, not the biggest net.
+
+**Why lean, and why "more ResNet depth won't help HERE" (turned from assertion into a measured number):** on
+SIMPLE/near-solved games capacity SATURATES (the AlphaZero-Zipf study shows Checkers/Oware Elo scaling *negatively*
+past a size threshold), so on fully-solved Connect 4 adding blocks is predicted inert — matching our measurement
+(a 32-ch 2-conv net already ~0.983 late-game; the residual gap is OPENING coverage + SEARCH, localised by
+`optimality_verified_plies` / `first_blunder_ply`, not value-head capacity). NNUE is the doctrine's exemplar: a
+tiny cheap net + huge search beats a big net + shallow search, because the cheap net BUYS more search — so spend
+the capacity budget on search + coverage, not parameters. Capacity only re-enters as a lever at Tier 2+.
+
+**Method — reuse the exploration autopilot we already have** (it's lever-agnostic + multi-objective Pareto is
+already wired); the additions are small and mechanical:
+1. Add architecture LEVERS: `az_channels`, `az_blocks` (+ optional `az_residual`/`az_quant`) on the config,
+   threaded into the net (today hardcodes 32ch/2-conv), declared model-scoped in the manifest.
+2. Add a **net-cost metric** to the cost block (`paramCount`, `checkpointBytes`, `msPerMove`) — the one real gap;
+   compute-cost is captured, net size/latency isn't.
+3. Point the autopilot at those levers with `fitness = [oracle_optimality_rate max, params-or-ms/move min]` →
+   `qualifyParetoBasins`/`paretoFrontier` emit the strength×cost frontier for free.
+4. Multi-fidelity: `az_iterations` as the Hyperband/ASHA budget ladder; **fast proxy fitness** = fixed-corpus
+   `oracle_optimality_rate` + `optimality_verified_plies` (gated above `archiveNoiseFloor` so we home in without
+   chasing noise), with zero-cost NAS proxies (NASWOT/SynFlow) to pre-prune obviously-bad shapes and
+   distillation-top-1-vs-oracle for cheap ranking. (Supernets/OFA/DARTS are OVERKILL for a ~dozens-of-configs
+   space — noted.)
+5. **Reason about which lever matters, measured:** fANOVA TOTAL-effect (already in the types) — a lever whose
+   total-effect on optimality sits at/below the noise floor is INERT; that is how "depth is inert HERE" becomes
+   data (`az_channels`/`az_blocks` below floor while `az_distill_games`/`az_sims` carry the variance), gated by
+   `LeverImportance.confident`. Plus AblationPath + controlled single-lever sweeps + sample-efficiency curves.
+6. Then DISTILL the champion into the leanest arch that holds the bar (book/oracle teacher), and prune + int8
+   (the NNUE recipe) for deploy latency — reported on the cost axis, never regressing the bar.
+
+**Measurable success:** the autopilot emits a Pareto frontier with ≥1 point at `oracle_optimality_rate ≥ 0.99`
+AND `wins_as_p1_vs_oracle == 1.0` whose params/ms-move ≤ the 32ch/2-conv baseline; the fANOVA total-effect of the
+capacity levers is below `archiveNoiseFloor` with `confident == true` (the recorded "capacity wasn't the
+bottleneck — coverage + search were"); a distilled student within 0.01 optimality of the teacher at ≤ its param
+count; an int8+pruned deploy net that holds the bar with a measured ms/move reduction. HONESTY: this is a
+compression / frontier phase, not strength-discovery — it can only trim a net that ALREADY solves.
+
 ## Honesty rails
 
 - The book is only as sound as its solver; a value-only entry is a proof of outcome, not of the line — playing

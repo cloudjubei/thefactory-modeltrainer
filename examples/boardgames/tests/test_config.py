@@ -2,7 +2,14 @@ import json
 
 import pytest
 
-from harness.config import TrainerConfig, load_config, validate_config
+from harness.config import DEFAULT_AZ_SOLVE_ENDGAME, TrainerConfig, load_config, validate_config
+
+
+def test_trained_net_defaults_to_the_exact_endgame_cutoff():
+    # A DEPLOYED/eval net must play the endgame exactly (provably perfect + cheap), not approximate it with the
+    # value head — so the default is ON. (Self-play exploration keeps it off via the AlphaZeroAgent class default.)
+    assert TrainerConfig().az_solve_endgame == DEFAULT_AZ_SOLVE_ENDGAME
+    assert DEFAULT_AZ_SOLVE_ENDGAME > 0
 
 
 def _write(tmp_path, obj):

@@ -1,11 +1,15 @@
 import random
 
 from games.connect4 import COLS, ROWS, C4State, Connect4
+from games.tictactoe import TicTacToe
+from harness.agents import HeuristicAgent
 from harness.book import (
     book_coverage,
     book_optimal_actions,
     book_value,
     build_book,
+    estimate_position,
+    evaluate,
     play_until_decided,
     position_value,
     run_build_book,
@@ -13,6 +17,77 @@ from harness.book import (
 )
 from harness.bookagent import BookAgent
 from harness.solver import move_values, optimal_columns
+from harness.tablebase import ESTIMATE, PROVEN, Tablebase
+
+
+def _c4_with_immediate_win():
+    game = Connect4()
+    s = game.initial_state(random.Random(0))
+    for c in [0, 1, 0, 1, 0, 2]:  # p0 stacks three in column 0; it is p0's move with col 0 winning
+        s = game.step(s, c)
+    return game, s
+
+
+def test_estimate_position_finds_the_immediate_win():
+    game, s = _c4_with_immediate_win()
+    value, mask, n = estimate_position(game, s, lambda: HeuristicAgent(), games=2)
+    assert value == 1.0  # the winning move's child is TERMINAL → value +1 to the mover
+    assert (mask >> 0) & 1  # column 0 (the win) is in the best-actions set
+
+
+def test_evaluate_estimates_when_unprovable_and_proves_when_solvable():
+    game = TicTacToe()
+    est = lambda g, st: estimate_position(g, st, lambda: HeuristicAgent(), games=2)
+    book = Tablebase(cap=10_000)
+    s = game.initial_state(random.Random(0))
+    belief = evaluate(game, s, book, est, max_exact_empty=0)  # empty book + no cheap solve → a BELIEF
+    assert belief.status == ESTIMATE and belief.n > 0
+    proof = evaluate(game, s, book, est, max_exact_empty=9)  # whole ttt tree is solvable → a PROOF
+    assert proof.status == PROVEN and proof.value == 0.0 and proof.best_actions != 0  # optimal ttt = draw
+
+
+def test_build_book_estimator_mode_proves_ttt_bottom_up_without_calling_the_estimator():
+    # With an estimator wired but max_exact_empty=0, the WHOLE ttt tree still proves — bottom-up (deepest-first),
+    # every position's children are already booked/terminal, so the FREE minimax proof fires and the estimator
+    # is never reached. This is the eager upgrade end to end: proofs propagate up from the terminals.
+    game = TicTacToe()
+
+    def forbidden(g, st):
+        raise AssertionError("estimator must not be reached — the tree proves bottom-up from terminals")
+
+    book = Tablebase(cap=10_000)
+    build_book(game, book, max_plies=9, max_positions=100_000, estimator=forbidden, max_exact_empty=0)
+    assert book_coverage(game, book, plies=9)["fraction"] == 1.0
+    e = book.entry(game.canonical_key(game.initial_state(random.Random(0))))
+    assert e.status == PROVEN and e.value == 0.0 and e.best_actions != 0  # proven draw + stored optimal moves
+
+
+def test_build_book_estimator_mode_estimates_the_unprovable_opening():
+    # A shallow band whose children aren't booked and which is too deep to solve cheaply → ESTIMATE entries that
+    # carry best_actions + a sample size, and stay INVISIBLE to exact consumers (proven_value None).
+    game = Connect4()
+    book = Tablebase(cap=100_000)
+    est = lambda g, st: estimate_position(g, st, lambda: HeuristicAgent(), games=1)
+    build_book(game, book, max_plies=3, min_plies=3, max_positions=20, estimator=est, max_exact_empty=0)
+    entries = [book.entry(k) for k in book.keys()]
+    assert entries and all(e.status == ESTIMATE and e.n > 0 for e in entries)
+    assert all(book.proven_value(k) is None for k in book.keys())  # a belief is never trusted as a proof
+
+
+def test_evaluate_proves_a_parent_from_its_booked_children_for_free():
+    game = TicTacToe()
+    never = lambda g, st: (0.0, 0, 0)  # the estimator must NOT be reached — the proof comes from children
+    book = Tablebase(cap=10_000)
+    s = game.initial_state(random.Random(0))
+    for a in [0, 3, 1, 4]:  # X at 0,1 · O at 3,4 · X to move and can win by completing the top row (0,1,2)
+        s = game.step(s, a)
+    for a in game.legal_actions(s):  # book the non-terminal children as proven → parent proves by minimax
+        child = game.step(s, a)
+        if not game.is_terminal(child):
+            book.put_proven(game.canonical_key(child), game.position_value(child))
+    proof = evaluate(game, s, book, never, max_exact_empty=0)
+    assert proof.status == PROVEN and proof.value == 1.0  # X has a forced win here
+    assert (proof.best_actions >> 2) & 1  # the winning move (cell 2) is in the optimal set
 from harness.tablebase import Tablebase
 
 game = Connect4()

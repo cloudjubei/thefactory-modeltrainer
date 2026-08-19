@@ -76,22 +76,24 @@ def _model_factory(model: dict, game: Game, max_sims: int | None = None) -> Call
         spec = json.loads(Path(checkpoint).read_text())
         model_name = spec.get("model_name", "mcts")
         if model_name == "alphazero" and spec.get("az_weights"):
+            from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
             from harness.neural import AlphaZeroAgent, load_net
 
             net = load_net(spec["az_weights"])
             sims = _cap_sims(int(spec.get("az_sims", 100)), max_sims)
-            se = int(spec.get("az_solve_endgame", 0))
+            se = int(spec.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
             return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
         cfg = dict(spec)
         if "mcts_sims" in cfg:
             cfg["mcts_sims"] = _cap_sims(int(cfg["mcts_sims"]), max_sims)
         return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
     if model.get("az_weights"):  # a learned net passed by weights directly (e.g. a champion .pt, no spec file)
+        from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
         from harness.neural import AlphaZeroAgent, load_net
 
         net = load_net(model["az_weights"])
         sims = _cap_sims(int(model.get("az_sims", 100)), max_sims)
-        se = int(model.get("az_solve_endgame", 0))
+        se = int(model.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
         return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
     model_name = model.get("model_name", "mcts")
     cfg = {

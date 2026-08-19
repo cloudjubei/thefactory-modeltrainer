@@ -2,7 +2,8 @@ import random
 
 from games.tictactoe import TicTacToe
 from harness.agents import RandomAgent
-from harness.book import book_coverage, book_optimal_actions, build_book
+from harness.benchmark import exact_reference, optimality_trace
+from harness.book import book_coverage, book_optimal_actions, build_book, principal_variation
 from harness.bookagent import BookAgent
 from harness.tablebase import Tablebase
 
@@ -61,3 +62,28 @@ def test_book_agent_never_loses_from_either_seat():
                 mover = game.current_player(s)
                 s = game.step(s, agent.act(game, s, rng) if mover == seat else opp.act(game, s, rng))
             assert game.winner(s) != (1 - seat)  # the optimal agent never loses
+
+
+def test_optimality_trace_verifies_the_whole_game_via_a_full_book():
+    # The GENERIC opening-inclusive gauge: on a fully-booked game the reference reaches every ply, so the
+    # optimal agent's line is verified end-to-end with NO blunder — the proof that first-blunder-ply is exact
+    # once opening coverage exists (on connect4 today it verifies only the covered late plies, honestly).
+    book = Tablebase(cap=10_000)
+    build_book(game, book, max_plies=9, max_positions=100_000)
+    ref = exact_reference(game, book=book, max_empty=9)
+    agent = BookAgent(book, "tictactoe", solve_endgame=0)
+    trace = optimality_trace(game, lambda s: agent.act(game, s, random.Random(0)), ref)
+    assert trace["first_blunder_ply"] is None
+    assert trace["verified_plies"] == trace["plies_played"] > 0
+
+
+def test_principal_variation_reconstructs_the_optimal_line_on_demand():
+    # Q2: the 'raw path' to the outcome is RECONSTRUCTED from stored optimal moves, not stored per entry.
+    book = Tablebase(cap=10_000)
+    build_book(game, book, max_plies=9, max_positions=100_000)
+    pv = principal_variation(book, game, game.initial_state(random.Random(0)))
+    s = game.initial_state(random.Random(0))
+    for a in pv:
+        assert a in book_optimal_actions(book, game, s)  # every reconstructed move is optimal
+        s = game.step(s, a)
+    assert game.is_terminal(s) and game.winner(s) is None  # the full line reaches ttt's optimal DRAW

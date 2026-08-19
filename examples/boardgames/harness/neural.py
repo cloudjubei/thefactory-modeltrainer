@@ -59,6 +59,17 @@ def encode(game: Game, state: State) -> torch.Tensor:
     return torch.stack([plane_own, plane_opp])
 
 
+def net_value(net: "Connect4Net", game: Game, state: State, device: str = "cpu") -> float:
+    """The net's value-head estimate for `state`, from the SIDE-TO-MOVE's perspective (+1 = the mover wins). On
+    the standard opening of a first-player-win game a correctly-trained net returns ~+1; a value near 0 or
+    negative reveals the self-play VALUE label (a draw/loss from WEAK play) has contaminated the opening belief —
+    the mechanism behind a champion throwing away the forced first-player win."""
+    net.eval()
+    with torch.no_grad():
+        _logits, value = net(encode(game, state).unsqueeze(0).to(device))
+    return float(value[0, 0])
+
+
 # --- net-guided MCTS -------------------------------------------------------------------------------------
 
 
@@ -409,43 +420,48 @@ def oracle_distill_games(
     oracle's move; value = the game OUTCOME (mover view). No minutes-long from-the-opening solves — the book/oracle
     carry the opening, the solver labels mid/late. The learner labels the EMPTY board (→ centre)."""
     from harness.agents import RandomAgent
-    from harness.book import book_optimal_actions
+    from harness.book import book_optimal_actions, book_value
     from harness.solver import NearPerfectOracle, optimal_columns
 
     rng = random.Random(seed)
     oracle = NearPerfectOracle(depth=oracle_depth)
     opponents: list[Callable[[], Agent]] = [lambda: NearPerfectOracle(depth=oracle_depth), lambda: RandomAgent()]
 
-    def label(state: State) -> tuple[list[float], int]:
+    def label(state: State) -> tuple[list[float], int, float | None]:
         empty = sum(1 for v in state.board if v == 0)
         optimal = book_optimal_actions(book, game, state) if book is not None else None  # exact opening (instant)
         if optimal is None and empty <= exact_max_empty:
             optimal = optimal_columns(state)  # exact endgame
+        # VALUE relabel: where the book PROVES this position, use its exact mover-relative value as the target,
+        # not the noisy game outcome — the fix for the opening value-label contamination that forfeits the win.
+        bv = book_value(book, game, state) if book is not None else None
         if optimal:
             pi = [0.0] * COLS
             for c in optimal:
                 pi[c] = 1.0 / len(optimal)
             action = optimal[0] if len(optimal) == 1 else min(optimal, key=lambda c: abs(c - COLS // 2))
-            return pi, action
+            return pi, action, bv
         action = oracle.act(game, state, rng)
-        return [1.0 if c == action else 0.0 for c in range(COLS)], action
+        return [1.0 if c == action else 0.0 for c in range(COLS)], action, bv
 
     examples: list[tuple[torch.Tensor, list[float], float]] = []
     for g in range(n_games):
         learner_seat = g % 2  # alternate seats so the net learns BOTH first- and second-player optimal play
         opponent = opponents[g % len(opponents)]()
         state = game.initial_state(rng)
-        pending: list[tuple[torch.Tensor, list[float], int]] = []
+        pending: list[tuple[torch.Tensor, list[float], int, float | None]] = []
         while not game.is_terminal(state):
             mover = game.current_player(state)
             if mover == learner_seat:
-                pi, action = label(state)
-                pending.append((encode(game, state), pi, mover))
+                pi, action, bv = label(state)
+                pending.append((encode(game, state), pi, mover, bv))
             else:
                 action = opponent.act(game, state, rng)
             state = game.step(state, action, rng)
         returns = game.returns(state)
-        examples.extend((x, pi, returns[mover]) for (x, pi, mover) in pending)
+        examples.extend(
+            (x, pi, bv if bv is not None else returns[mover]) for (x, pi, mover, bv) in pending
+        )
     return examples
 
 
@@ -572,9 +588,11 @@ def build_alphazero_agent(cfg: dict) -> Agent:
     device = str(cfg.get("device", "cpu"))
     weights = cfg.get("az_weights") or cfg.get("weights")
     net = load_net(weights, device) if weights else Connect4Net(channels=int(cfg.get("az_channels", 32))).to(device)
+    from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
+
     return AlphaZeroAgent(
         net,
         sims=int(cfg.get("az_sims", cfg.get("mcts_sims", 100))),
         device=device,
-        solve_endgame=int(cfg.get("az_solve_endgame", 0)),
+        solve_endgame=int(cfg.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME)),
     )

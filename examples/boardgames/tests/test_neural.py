@@ -13,12 +13,26 @@ from harness.neural import (
     encode,
     head_to_head,
     load_net,
+    oracle_distill_games,
     save_net,
     self_play_game,
     train_alphazero,
     train_net,
     vs_opponent_game,
 )
+from harness.tablebase import Tablebase
+
+
+def test_oracle_distillation_relabels_the_value_target_from_the_proven_book():
+    # The value-label contamination fix: where the book PROVES a position's value, distillation uses THAT (exact,
+    # mover-relative) instead of the noisy self-play OUTCOME — so a proven opening keeps its true value even when
+    # the labelled game happened to end differently.
+    game = Connect4()
+    book = Tablebase(cap=100)
+    empty = game.initial_state(random.Random(0))
+    book.put_proven(game.canonical_key(empty), 0)  # a distinctive PROVEN opening value (draw) the outcome won't be
+    ex = oracle_distill_games(game, n_games=2, seed=0, oracle_depth=4, book=book)  # shallow oracle → fast
+    assert ex[0][2] == 0.0  # first learner example = the empty board → its value target is the book's proof
 
 
 def test_augment_examples_mirrors_board_and_policy():
@@ -141,6 +155,25 @@ def test_build_alphazero_agent_reads_solve_endgame(tmp_path):
     save_net(Connect4Net(), str(tmp_path / "w.pt"))
     agent = build_alphazero_agent({"az_weights": str(tmp_path / "w.pt"), "az_sims": 8, "az_solve_endgame": 14})
     assert agent.solve_endgame == 14
+
+
+def test_build_alphazero_agent_defaults_the_endgame_cutoff_on(tmp_path):
+    from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
+
+    save_net(Connect4Net(), str(tmp_path / "w.pt"))
+    # A deployed agent (no explicit az_solve_endgame in its spec — e.g. a champion crowned before the default
+    # changed) must still play the endgame exactly, so the registry seam defaults the cutoff ON.
+    agent = build_alphazero_agent({"az_weights": str(tmp_path / "w.pt"), "az_sims": 8})
+    assert agent.solve_endgame == DEFAULT_AZ_SOLVE_ENDGAME > 0
+
+
+def test_net_value_is_a_side_to_move_scalar_in_range():
+    from harness.neural import net_value
+
+    game = _game()
+    torch.manual_seed(0)
+    v = net_value(Connect4Net(), game, game.initial_state(random.Random(0)))
+    assert isinstance(v, float) and -1.0 <= v <= 1.0  # the opening value-belief gauge (should → +1 once trained)
 
 
 def test_save_load_weights_roundtrip(tmp_path):

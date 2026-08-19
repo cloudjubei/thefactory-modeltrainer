@@ -28,6 +28,10 @@ AZ_EPOCHS_RANGE = (1, 50)
 AZ_DISTILL_RANGE = (0, 2000)
 AZ_DISTILL_GAMES_RANGE = (0, 2000)
 AZ_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for the trained net's opt-in exact-endgame cutoff
+# A DEPLOYED / eval net plays the endgame with the EXACT solver once ≤ this many cells are empty (provably
+# perfect + ~ms). ON by default so a crowned champion never approximates a solvable endgame with the value head;
+# self-play keeps it OFF via the AlphaZeroAgent class default so exploration isn't collapsed onto solver moves.
+DEFAULT_AZ_SOLVE_ENDGAME = 22
 
 # §C cost accounting — documented estimate constants (a local run has no invoice, so energy/$ are ESTIMATES).
 WATTS_PER_CORE = 12.0  # rough sustained draw of one busy CPU core; override per machine if you measure it.
@@ -61,7 +65,7 @@ class TrainerConfig:
     az_warm_start: int = 1  # 1 = warm-start from the champion (cumulative); 0 = train from scratch (reproducible)
     az_distill_positions: int = 96  # late-game oracle-labelled examples to imprint each run (0 = no late distillation)
     az_distill_games: int = 0  # broad OPENING→endgame oracle-distillation games (0 = off); teaches centre-first play
-    az_solve_endgame: int = 0  # >0 = the trained net plays a PERFECT endgame once ≤ this many cells are empty
+    az_solve_endgame: int = DEFAULT_AZ_SOLVE_ENDGAME  # trained net plays a PERFECT endgame once ≤ this many empty
 
 
 @dataclass(frozen=True)

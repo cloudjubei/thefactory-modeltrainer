@@ -20,7 +20,7 @@ from typing import Callable
 
 from harness.game import Game, State
 from harness.solver import canonical_key, move_values, to_bitboard
-from harness.tablebase import Tablebase
+from harness.tablebase import ESTIMATE, PROVEN, Entry, Tablebase
 
 BOOK_DIR = Path(__file__).resolve().parent.parent / "books"
 
@@ -67,8 +67,9 @@ def position_value(game: Game, state: State, book: Tablebase | None = None, weak
 
 
 def book_value(book: Tablebase, game: Game, state: State) -> int | None:
-    """The stored value for a position (player-to-move perspective), or None if it isn't booked."""
-    return book.get(_key(game, state))
+    """The PROVEN value for a position (player-to-move perspective), or None if it isn't proven in the book — a
+    mere ESTIMATE is not a value you can play optimally from, so exact consumers see only proofs."""
+    return book.proven_value(_key(game, state))
 
 
 def book_optimal_actions(book: Tablebase, game: Game, state: State) -> list[int] | None:
@@ -85,12 +86,139 @@ def book_optimal_actions(book: Tablebase, game: Game, state: State) -> list[int]
         if game.is_terminal(child):
             vals[a] = 1 if game.winner(child) == me else 0
             continue
-        bv = book.get(_key(game, child))
+        bv = book.proven_value(_key(game, child))  # PROVEN children only — an estimate can't guarantee optimal play
         if bv is None:
             return None
         vals[a] = -bv  # stored from the child-mover's view → negate for our side
     best = max(vals.values())
     return sorted(a for a, v in vals.items() if v == best)
+
+
+def principal_variation(book: Tablebase, game: Game, state: State, max_len: int = 1000) -> list[int]:
+    """Reconstruct the optimal LINE from `state` by walking the book's optimal moves (one-ply lookahead over
+    stored values) to a terminal — the 'raw path' to the winning/drawing outcome, materialised ON DEMAND so it
+    never needs storing per entry. A PROVEN line reconstructs in full (the winning continuation was booked when
+    the position was proven); where the book is too thin the walk stops early (an honest PARTIAL line). Stops at
+    a terminal, an unbooked position, a repeated position (cycle guard for non-progressing games), or `max_len`."""
+    line: list[int] = []
+    seen: set[int] = set()
+    s = state
+    for _ in range(max_len):
+        if game.is_terminal(s):
+            break
+        key = _key(game, s)
+        if key in seen:
+            break
+        seen.add(key)
+        acts = book_optimal_actions(book, game, s)
+        if not acts:
+            break
+        move = min(acts, key=lambda a: (abs(a - game.num_actions // 2), a))  # centre-first, deterministic
+        line.append(move)
+        s = game.step(s, move)
+    return line
+
+
+# --- the generic APPROXIMATE evaluator (Phase 6): exact where cheap, a bounded-search belief otherwise ------
+def _bitmask(actions) -> int:
+    m = 0
+    for a in actions:
+        m |= 1 << int(a)
+    return m
+
+
+def _terminal_value(game: Game, state: State, me: int) -> float:
+    w = game.winner(state)
+    return 1.0 if w == me else (0.0 if w is None else -1.0)
+
+
+def _rollout_outcome(game: Game, state: State, agent_factory: Callable, me: int, rng: random.Random) -> float:
+    """Play one bounded self-play game from `state` (both seats from `agent_factory` — a FRESH agent per seat so
+    no search state bleeds) and return the outcome for player `me` (+1 win / 0 draw / −1 loss)."""
+    seats = [agent_factory(), agent_factory()]
+    s = state
+    while not game.is_terminal(s):
+        s = game.step(s, seats[game.current_player(s)].act(game, s, rng))
+    return _terminal_value(game, s, me)
+
+
+def estimate_position(
+    game: Game, state: State, agent_factory: Callable, games: int = 10, rng: random.Random | None = None
+) -> tuple[float, int, int]:
+    """A bounded-SEARCH value estimate for a position we cannot (yet) prove — one-ply lookahead where each child
+    is scored by `games` bounded self-play games from `agent_factory`. Returns (value_to_mover, best_actions
+    bitmask, sample_size). Game-agnostic and independent of any trained net (so the book CORRECTS a net, not
+    mirrors it); it sharpens automatically as booked children make the rollouts sharper."""
+    rng = rng or random.Random(0)
+    me = game.current_player(state)
+    child_vals: dict[int, float] = {}
+    total = 0
+    for a in game.legal_actions(state):
+        child = game.step(state, a)
+        if game.is_terminal(child):
+            child_vals[a] = _terminal_value(game, child, me)
+            continue
+        score = 0.0
+        for _ in range(games):
+            score += _rollout_outcome(game, child, agent_factory, me, rng)
+            total += 1
+        child_vals[a] = score / games
+    if not child_vals:
+        return 0.0, 0, 0
+    best = max(child_vals.values())
+    return best, _bitmask(a for a, v in child_vals.items() if v >= best - 1e-9), total
+
+
+def _prove(game: Game, state: State, book: Tablebase, max_exact_empty: int) -> tuple[float, int] | None:
+    """Try to PROVE a position's value → (value_to_mover, best_actions) or None. (1) FREE: minimax over children
+    that are already terminal or PROVEN in the book (no search — the eager bottom-up upgrade). (2) cheap EXACT:
+    a game-solvable position (`exact_optimal_actions` within `max_exact_empty`) → solve it outright."""
+    legal = game.legal_actions(state)
+    if not legal:
+        return None
+    me = game.current_player(state)
+    vals: dict[int, int] = {}
+    all_resolved = True
+    for a in legal:
+        child = game.step(state, a)
+        if game.is_terminal(child):
+            vals[a] = int(_terminal_value(game, child, me))
+            continue
+        bv = book.proven_value(_key(game, child))  # PROVEN children only — an estimate can't prove a parent
+        if bv is None:
+            all_resolved = False
+            break
+        vals[a] = -bv
+    if all_resolved:
+        best = max(vals.values())
+        return float(best), _bitmask(a for a, v in vals.items() if v == best)
+    solve = getattr(game, "exact_optimal_actions", None)
+    acts = solve(state, max_exact_empty) if solve is not None else None
+    if acts:
+        return float(position_value(game, state, book=book)), _bitmask(acts)
+    return None
+
+
+def evaluate(
+    game: Game,
+    state: State,
+    book: Tablebase,
+    estimator: Callable[[Game, State], tuple[float, int, int]],
+    max_exact_empty: int = 0,
+) -> Entry:
+    """The evaluator LADDER → an `Entry`: terminal → PROVEN; an already-PROVEN book hit → keep it; a proof from
+    booked children or a cheap exact solve → PROVEN (+ best_actions); else an ESTIMATE from bounded search. This
+    is how a position graduates from a belief to a proof as the book fills beneath it."""
+    if game.is_terminal(state):
+        return Entry(status=PROVEN, value=_terminal_value(game, state, game.current_player(state)), best_actions=0, n=0)
+    existing = book.entry(_key(game, state))
+    if existing is not None and existing.status == PROVEN:
+        return existing
+    proven = _prove(game, state, book, max_exact_empty)
+    if proven is not None:
+        return Entry(status=PROVEN, value=proven[0], best_actions=proven[1], n=0)
+    value, best_actions, n = estimator(game, state)
+    return Entry(status=ESTIMATE, value=value, best_actions=best_actions, n=n)
 
 
 def sample_seeds(game: Game, n: int, plies: int, seed: int = 0) -> list[State]:
@@ -138,7 +266,7 @@ def play_until_decided(
     ply = 0
     while not game.is_terminal(state):
         if book is not None and ply >= opening_plies:
-            bv = book.get(key_of(state))
+            bv = book.proven_value(key_of(state))  # end early only on a PROOF, never a mere estimate
             if bv is not None:
                 mover = game.current_player(state)
                 if bv > 0:
@@ -166,14 +294,21 @@ def build_book(
     weak: bool = True,
     deadline: float | None = None,
     log: Callable[[str], None] | None = None,
+    estimator: Callable[[Game, State], tuple[float, int, int]] | None = None,
+    max_exact_empty: int = 0,
 ) -> dict:
     """Solve+store the reachable frontier BOTTOM-UP (deepest ply first, hub positions prioritised), bounded and
     resumable. Enumerate reachable non-terminal positions (from `roots`, default the initial position) with
     ≤ `max_plies` stones down, dedup by canonical key, count transposition in-degree (hub priority), then solve
     deepest-first so each shallower solve reads its already-booked children. Only positions with ≥ `min_plies`
     stones are stored (band the work: cover the cheap deep band first, then lower the floor on the next run).
-    Stops at `max_positions` / `deadline`; already-booked positions are skipped, so re-invoking EXTENDS coverage
-    rather than redoing it."""
+    PROVEN positions are skipped (resumable), but ESTIMATE positions are RE-EVALUATED so a later run upgrades a
+    belief to a proof the moment its children are booked — so re-invoking EXTENDS coverage rather than redoing it.
+
+    Default (no `estimator`): every position is solved EXACTLY (`position_value`) and stored value-only — the
+    unchanged exact builder. With an `estimator` (Phase 6): each position runs the `evaluate` ladder — PROVEN
+    (from booked children or a cheap ≤ `max_exact_empty` exact solve) with its `best_actions`, else a bounded-
+    search ESTIMATE — so a game whose opening is too deep to solve still gets a graded, model-usable book."""
     if roots is None:
         roots = [game.initial_state(random.Random(0))]
     seen: dict[int, tuple[State, int]] = {}
@@ -210,11 +345,18 @@ def build_book(
             break
         if ply < min_plies:
             continue
-        if ck in book:
+        if book.is_proven(ck):  # a PROOF is final; an ESTIMATE is re-evaluated below (eager upgrade)
             skipped += 1
             continue
-        val = position_value(game, state, book=book, weak=weak)
-        book.put(ck, val, priority=indeg.get(ck, 0) + ply)
+        priority = indeg.get(ck, 0) + ply
+        if estimator is not None:
+            e = evaluate(game, state, book, estimator, max_exact_empty=max_exact_empty)
+            if e.status == PROVEN:
+                book.put_proven(ck, int(e.value), best_actions=e.best_actions, priority=priority)
+            else:
+                book.put_estimate(ck, e.value, best_actions=e.best_actions, n=e.n, priority=priority)
+        else:
+            book.put(ck, position_value(game, state, book=book, weak=weak), priority=priority)
         solved += 1
         if log and solved % 25 == 0:
             log(f"book: solved {solved}, booked {len(book)}, ply≈{ply}")

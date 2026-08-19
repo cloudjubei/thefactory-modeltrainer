@@ -34,6 +34,21 @@ def test_model_factory_constructs_a_fresh_agent_per_game():
     assert a is not b  # fresh instance per game → no transposition-table bleed across the gauntlet's games
 
 
+def test_model_factory_defaults_the_az_endgame_cutoff_on(tmp_path):
+    # The play-off / gauntlet build AZ competitors from checkpoint specs; a champion crowned before the default
+    # changed has NO az_solve_endgame in its spec, yet a DEPLOYED net must play the endgame exactly.
+    import json
+
+    from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
+    from harness.neural import Connect4Net, save_net
+
+    save_net(Connect4Net(), str(tmp_path / "w.pt"))
+    spec = {"game": "connect4", "model_name": "alphazero", "az_weights": str(tmp_path / "w.pt"), "az_sims": 8}
+    (tmp_path / "ckpt.json").write_text(json.dumps(spec))
+    agent = _model_factory({"checkpoint": str(tmp_path / "ckpt.json")}, Connect4())()
+    assert agent.solve_endgame == DEFAULT_AZ_SOLVE_ENDGAME > 0
+
+
 def test_model_factory_caps_mcts_sims_to_max_sims():
     # A leaderboard's top model can be a 3409-sim mcts (~30s/game) — pathologically slow in a round-robin.
     # A play-off passes max_sims so every competitor's search is bounded and the round-robin stays tractable.

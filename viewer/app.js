@@ -5068,12 +5068,16 @@ async function playoffRunning() {
 async function playoffFailed() {
   try {
     const res = await window.OverseerBridge.listActivities()
-    return ((res && res.activities) || []).some(
-      (a) =>
-        quickActivityType(a) === 'tournament' &&
-        (!a.recordType || a.recordType === manifest.recordType) &&
-        a.status === 'failed',
+    const tourneys = ((res && res.activities) || []).filter(
+      (a) => quickActivityType(a) === 'tournament' && (!a.recordType || a.recordType === manifest.recordType),
     )
+    if (!tourneys.length) return false
+    // ONLY the most recent play-off's outcome matters. `.some(failed)` would keep the "didn't complete" banner
+    // on forever after a single stale failure (e.g. an earlier timeout), even once a later run has succeeded —
+    // so scope to the latest attempt by time and report a failure only if THAT one failed.
+    const when = (a) => String(a.finishedAt || a.updatedAt || a.startedAt || '')
+    const latest = tourneys.reduce((a, b) => (when(b) >= when(a) ? b : a))
+    return latest.status === 'failed'
   } catch {
     return false
   }

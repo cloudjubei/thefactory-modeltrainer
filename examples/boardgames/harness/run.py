@@ -102,18 +102,28 @@ def _benchmark_metrics(game: Game, config: TrainerConfig, eval_cfg: dict) -> dic
     Connect 4 has a solver; off when `benchmark_positions == 0`."""
     if config.game != "connect4" or config.benchmark_positions <= 0:
         return {}
-    from harness.benchmark import evaluate_optimality
-    from harness.config import BENCHMARK_MIN_MOVES, BENCHMARK_SEED
+    from harness.benchmark import evaluate_optimality, exact_reference, optimality_trace
+    from harness.book import load_book
+    from harness.config import BENCHMARK_MIN_MOVES, BENCHMARK_SEED, DEFAULT_AZ_SOLVE_ENDGAME
 
     agent = resolve_agent(config.model_name, eval_cfg)
     brng = random.Random(config.seed + 4242)
-    return evaluate_optimality(
+    result = evaluate_optimality(
         game,
         lambda s: agent.act(game, s, brng),
         n=config.benchmark_positions,
         min_moves=BENCHMARK_MIN_MOVES,
         seed=BENCHMARK_SEED,
     )
+    # Opening-INCLUSIVE trace: how deep the agent's ACTUAL line is provably optimal (book + cheap endgame solve)
+    # and the first ply it deviates (-1 = optimal throughout the verified region). Unlike `oracle_optimality_rate`
+    # (a late-game positional sample) this follows the real game from the start, so `optimality_verified_plies`
+    # exposes exactly how much of the opening is still unverified — it climbs as the opening book fills.
+    ref = exact_reference(game, book=load_book(config.game), max_empty=DEFAULT_AZ_SOLVE_ENDGAME)
+    trace = optimality_trace(game, lambda s: agent.act(game, s, random.Random(config.seed + 99)), ref)
+    result["optimality_verified_plies"] = trace["verified_plies"]
+    result["first_blunder_ply"] = -1 if trace["first_blunder_ply"] is None else trace["first_blunder_ply"]
+    return result
 
 
 def _run_evaluation(config_path: Path, summary_out: Path) -> None:
@@ -166,7 +176,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     incumbent. Returns (weights_path, extra_spec, az_report, az_metrics, train_seconds)."""
     from harness import champions
     from harness.agents import HeuristicAgent, MctsAgent
-    from harness.neural import AlphaZeroAgent, head_to_head, load_net, save_net, train_alphazero
+    from harness.neural import AlphaZeroAgent, head_to_head, load_net, net_value, save_net, train_alphazero
     from harness.solver import NearPerfectOracle
 
     device = "cpu"
@@ -249,6 +259,10 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
 
     vs_strong = head_to_head(game, model_factory, lambda: MctsAgent(sims=strong_sims), n_eval, eval_rng)
     az_metrics = {"win_rate_vs_strong_mcts": round(vs_strong["win_rate"], 4)}
+    # Opening value-belief: the net's value on the standard opening. Connect 4 is a first-player WIN, so a
+    # correctly-trained net should read ~+1 here; ~0 or negative flags the value-label contamination (weak
+    # self-play teaching the opening is a draw/loss) that makes a champion forfeit the forced win.
+    az_metrics["opening_value"] = round(net_value(net, game, game.initial_state(random.Random(config.seed)), device), 4)
 
     # PROMOTION gate: beat the incumbent champion (or be the first) to be crowned.
     incumbent = champions.best_champion_path(config.game)

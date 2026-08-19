@@ -287,7 +287,7 @@ def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = N
             continue
         pos2, mask2 = position ^ mask, mask | ((mask + _bottom_mask_col(c)) & _column_mask(c))
         if book is not None and weak:
-            bv = book.get(canonical_key(pos2, mask2))
+            bv = book.proven_value(canonical_key(pos2, mask2))  # PROOFS only — an estimate isn't an exact bound
             if bv is not None:  # child stored from the CHILD-mover's view → negate for our side
                 values[c] = max(-1, min(1, -bv))
                 continue

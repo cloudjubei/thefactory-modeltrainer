@@ -4,8 +4,33 @@ does not — so `oracle_optimality_rate` is a real, monotone 'how close to solve
 import random
 
 from games.connect4 import Connect4
-from harness.benchmark import evaluate_optimality, optimality_rate, sample_solvable_positions
-from harness.solver import OracleAgent
+from harness.benchmark import (
+    evaluate_optimality,
+    exact_reference,
+    optimality_rate,
+    optimality_trace,
+    sample_solvable_positions,
+)
+from harness.solver import OracleAgent, optimal_columns
+
+
+def test_optimality_trace_localises_the_first_blunder_and_counts_verified_plies():
+    game = Connect4()
+    ref = lambda s: [3]  # injected ground truth: column 3 is the only optimal move everywhere (no slow solve)
+    good = optimality_trace(game, lambda s: 3, ref, max_plies=5)
+    assert good["first_blunder_ply"] is None and good["verified_plies"] == 5
+    bad = optimality_trace(game, lambda s: game.legal_actions(s)[0], ref, max_plies=5)
+    assert bad["first_blunder_ply"] == 0  # plays column 0 on the empty board → first deviation at ply 0
+
+
+def test_exact_reference_is_none_without_ground_truth_and_exact_in_the_endgame():
+    game = Connect4()
+    # No book + no cheap solve in the opening → None (the trace treats that ply as UNVERIFIED, not a blunder).
+    assert exact_reference(game, book=None, max_empty=0)(game.initial_state(random.Random(0))) is None
+    # A late position within the cheap-solve threshold → the exact optimal set.
+    late = sample_solvable_positions(game, n=1, min_moves=30, seed=3)[0]
+    ref = exact_reference(game, book=None, max_empty=42)(late)
+    assert ref is not None and set(ref) == set(optimal_columns(late))
 
 
 def test_oracle_is_optimal_in_every_position():
