@@ -248,11 +248,113 @@ it is solved.
   called (max_exact_empty=0), and the connect4 opening band yields ESTIMATE entries carrying `best_actions` + `n`.
 - **`principal_variation`** reconstructs the raw line from stored optimal moves (Q2).
 
-NEXT: wire the richer targets (proven value + `best_actions` policy + estimate/`wdl`) into distillation; grow real
-connect4 opening PROVEN coverage (bottom-up + estimator); MCTS-Solver proven-value backup as oracle LEAVES. **DESIGN DECISIONS (resolved 2026-08-19):**
-- **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value.** The book must be an
-  INDEPENDENT reference that CORRECTS the net's opening errors; sourcing estimates from the net is circular
-  (book ≈ net → distilling book→net teaches nothing). Search also works on day one for a new game with no
+- **Distillation value-relabel** (SHIPPED): `oracle_distill_games` now takes the VALUE target from the book's
+  PROVEN value where available, not the noisy self-play outcome — the fix for the opening value-label
+  contamination that forfeits the first-player win (test: a proven opening value overrides the game outcome).
+- **Proof leaves in MCTS** (SHIPPED): `MctsAgent(book=…)` backs up the EXACT proven/solvable value at a
+  descended leaf instead of a rollout (`_proven_returns`; the root is always expanded so `act` can still rank
+  moves). Reference rungs stay pure (opt-in). So book coverage pays off in PLAY, and a book-aware agent makes the
+  estimator's rollouts sharper. (The safe "oracle-leaves" half of MCTS-Solver — proven-win/loss SELECTION +
+  propagation, and the AlphaZero-core port, are the follow-up.)
+
+- **Real-game coverage-loop PROVEN (SHIPPED, 2 durable connect4 tests + a live demo).** Correctness: a
+  bottom-up midgame book's `book_optimal_actions` equals an INDEPENDENT from-scratch solve on every position of
+  its principal variation (the book plays exactly what a fresh solver would). Loop: booking a subtree lifts a
+  real line's `optimality_verified_plies`. Live demo on the oracle's 34-ply game: **14/34 verified with no book
+  → 21/34 after booking the ply-13→24 midgame band** (200k positions, 187s), first-blunder None, and 9/9 of the
+  line's booked midgame positions matched an independent solve. The opening (ply 0-13) stays honestly unverified
+  — the 158s wall — so deeper coverage is the accumulator grind, exactly as the plan predicted.
+- **Accumulator RUN (2026-08-20).** Bottom-up bands seeded progressively shallower on a real 23-ply near-perfect
+  line, into one growing book — `optimality_verified_plies` climbed **monotonically 3 → 7 → 9 → 11 → 13/23**
+  (booking from ply 16→14→12→10), with cost rising steeply toward the opening (**6s → 14s → 78s → 336s/band**;
+  book 0 → 182k), the wall. Uses the existing `build_book` (banded + resumable) — no new code. Two honest
+  findings, BOTH SINCE CLOSED (see next bullet): (a) reaching the deep opening (ply 0-9 here) is a compute-bound
+  grind — multiprocessing the many-position bands would speed it, but a single hard opening solve stays serial;
+  (b) `build_book`'s deadline is checked BETWEEN positions, not during a solve, so one cold opening solve
+  (minutes) overruns the band budget (the ply-10 band ran 336s against an 80s deadline).
+- **Parallel band solver + per-position cap + within-band deadline — SHIPPED (2026-08-20, 4 TDD tests).**
+  `build_book(workers=N, max_position_seconds=S)` solves each ply-band across a spawn `ProcessPoolExecutor`
+  (`_solve_frontier_banded`): positions in a band are independent given the deeper booked band, so each worker
+  gets the current book snapshot (`_band_init`) for child short-circuits and solves are booked AS THEY COMPLETE
+  (`as_completed`). Each solve is wall-clock-capped (`_run_bounded`, SIGALRM; a worker is the main thread of its
+  own process so the cap holds there) — a hard position is DEFERRED (`None`), booked later once its children are
+  cheap. Same-run RE-MEASURED parallel (8 workers, 3s cap) vs the sequential baseline above: **ply 12 78s→66s,
+  ply 10 336s→186s (1.8×)** — the speedup GROWS with band depth (deep bands are compute-bound; shallow bands the
+  pool spawn barely helps: ply 16 6s→10s), 0 deferred through ply 10 (no single ply-≥10 solve exceeds 3s; the
+  336s was the *aggregate*). Closes (a). For (b): the per-position cap bounds any single solve, AND the
+  deadline/`max_positions` budget is now checked WITHIN a band (not just between bands) — booking as solves
+  complete and cancelling the not-yet-started ones — so a time-bounded run stops within ~`max_seconds` of its
+  deadline. Proven by `test_build_book_respects_the_deadline_within_a_band` (a ply-14 band that grinds ~30s
+  unguarded returns in <4s under a 0.4s deadline). Parity (`test_build_book_parallel_matches_sequential`):
+  `workers=4` yields the byte-identical book to the sequential build. GOTCHA (bit us once): spawn re-imports
+  `__main__`, so an ad-hoc driver script calling `build_book(workers>1)` at module top-level recursively spawns —
+  the driver MUST sit under `if __name__ == "__main__":` (the real `run_build_book` tool path is inside a
+  function, so it is unaffected; the parity test passes under pytest for the same reason).
+
+- **Anti-drift ANCHOR — SHIPPED** (`neural._mix_training_set`, TDD): the exact distilled anchor is held at a
+  FIXED fraction (`distill_fraction=0.34`, DQfD-style) of every training pass instead of concatenated into the
+  8000-buffer where it diluted to ~5% — the fix for the net drifting off the optimal opening it was distilled on.
+- **AlphaZero-core PROOF LEAVES — SHIPPED** (`AlphaZeroAgent(book=…)` + `_proven_value`, TDD): the net's search
+  backs up the EXACT value at a booked/endgame-solvable leaf instead of the value head's estimate — truth
+  propagates through the PUCT tree (completes the MctsAgent proof-leaves). Opt-in (no book + solve_endgame 0 →
+  pure net, self-play unchanged); the deployed champion (solve_endgame 22) gets exact endgames in search.
+- **MCTS-Solver SELECTION / PROPAGATION half — SHIPPED (2026-08-20, both cores, 9 TDD tests).** The leaf half
+  only backed up exact values; this makes a proof PROPAGATE. Shared pure algebra in `agents.py`
+  (`prove_node`/`child_move_value`/`mover_returns`, negamax with a win short-circuit) maintains a `_proven`
+  overlay (position key → +1/0/-1, mover-relative): a node is a proven WIN the instant one child is a proven loss
+  for the opponent, a proven LOSS/DRAW only when EVERY child is proven. In `MctsAgent`, each simulation seeds the
+  overlay at its leaf and propagates deepest-first up the visited path; a proven node is then treated as a leaf
+  (selection pruning), the root's proof is played outright, and the sim loop STOPS the moment the root is proven.
+  Verified: the root becomes a *derived* proof (not a high average) and the move is optimal with a tiny budget
+  (`sims=60`); the search terminates early (`sims_used < 100` of 500); a proof bubbles up through TWO plies from
+  solved grandchildren the leaves alone can't reach; a drawn root proves via the all-children branch; and a
+  20-position differential sweep vs the exact solver plays optimally everywhere (a sign bug would misplay). In
+  `AlphaZeroAgent` the same overlay is populated as a search byproduct (writes only — descent/backup untouched, so
+  the self-play visit-count policy π is provably intact: `run_search` spends its full budget over all legal moves)
+  and CONSUMED only in greedy deployment (`temperature<=0`): an untrained net still plays a propagated proven win.
+  Reference purity guarded both cores: no book + `solve_endgame=0` → the overlay is inert (`_proven == {}`, full
+  sim budget), so the fixed-strength rungs and self-play dynamics are byte-identical.
+
+- **Book-aware DEFAULT estimator — SHIPPED (2026-08-20, `book.make_book_estimator`, 2 TDD tests + wired into
+  `run_build_book`).** Realises design decision (a): the estimator that grades an unprovable position is now a
+  factory returning book-aware **MCTS-Solver self-play** (`MctsAgent(book=…, solve_endgame=…)`, a fresh agent per
+  seat) — not the hand-rolled `HeuristicAgent` the tests used, and never a trained net. Its bounded games back up
+  EXACT values wherever the book/solver reaches beneath the position, so the estimate is grounded in proofs and
+  sharpens as coverage grows. Proven where its search reaches ground truth: on a solvable endgame the estimate
+  COLLAPSES onto `position_value` exactly and its best set == `optimal_columns` (both weak-outcome semantics).
+  `run_build_book` gained opt-in GRADED mode (`estimate_games>0` → build the estimator + pass `max_exact_empty`),
+  so the graded opening book is producible from the tool/CLI with no minutes-long solve; proofs still win the
+  evaluator ladder, estimates stay invisible to exact consumers (`proven_value` None).
+- **Book → net SOFT distillation targets — SHIPPED (2026-08-20, `neural.book_distill_examples` + wired into
+  `train_alphazero`, 3 TDD tests).** Closes the book→net learning loop: the net now learns from the WHOLE book, not
+  only the exact late-solve corpus. For each covered position the policy target is uniform over the entry's stored
+  `best_actions` and the value target is the entry's value — EXACT for a proof, the bounded-search belief (kept
+  SOFT) for an estimate — so the graded opening the exact labeller can't reach becomes trainable signal. Proofs
+  outweigh beliefs by whole-copy REPLICATION (`proof_copies` vs `estimate_copies`, the same oversampling the
+  distill anchor already uses) — no per-example loss weights, so `augment_examples`/`_mix_training_set` are
+  untouched. `train_alphazero(book=…, book_distill_positions=…)` folds these into the persistent distill anchor
+  beside the oracle distillation. Uncovered / `best_actions`-less positions are skipped. NOTE: the payoff scales
+  with opening coverage — until the accumulator fills the graded opening, the book supplies mostly late proofs
+  (which the oracle corpus already had); the value lands once coverage climbs toward the root.
+- **In-app grind launch path COMPLETE + robust (2026-08-20, TS + backend, 6 TDD tests).** The opening grind runs
+  IN-APP via `Exploration → Start → autopilot → build-book → buildBook → run_build_book`. The new Python knobs
+  (`workers`, `max_position_seconds`, graded `estimate_*`, `max_enumerate`) are now wired the whole way:
+  `BuildBookParams` + `buildBook()` map them and ALWAYS set a per-position cap (`max_position_seconds=5`) by
+  default so no pass can hang on a single opening solve (proven byte-identical to the plain build); the backend
+  `buildBookActivity` forwards them; and the autopilot's build-book child takes its config from a new manifest
+  `bookBuild` object (numeric knobs, validated). **Decision (user, 2026-08-20): each Start runs the GRADED opening
+  grind** — the boardgames manifest `bookBuild` = `{seedGames:0, maxPlies:10, estimateGames:3, estimateSims:24,
+  estimateSolveEndgame:14, maxExactEmpty:22, maxEnumerate:30000}`, so every Start extends the graded opening book
+  (bounded ~120s, resumable), feeding the soft-distillation targets. Smoke-verified: the exact config adds ESTIMATE
+  entries for the deep opening under a short deadline with no hang. (Requires the backend restart to load the new
+  dist, per the usual convention.)
+
+NEXT: run it — press Start in Exploration and watch opening coverage + the graded book grow across Starts; the
+exact-proof accumulator (option 2, parallel band solver) remains available via `bookBuild` for a proofs-first pass.
+**DESIGN DECISIONS (resolved 2026-08-19):**
+- **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value — SHIPPED (see above).** The
+  book must be an INDEPENDENT reference that CORRECTS the net's opening errors; sourcing estimates from the net is
+  circular (book ≈ net → distilling book→net teaches nothing). Search also works on day one for a new game with no
   trained net, shares the proof rung's substrate (degrades gracefully, sharpens as booked children accumulate).
   The net may LATER serve as the search PRIOR to strengthen it per-sim — but the stored estimate is always the
   search result, never the net's value.
@@ -275,6 +377,33 @@ exploration is unaffected); (2) a generic, opening-inclusive `optimality_trace` 
 yardstick Phase 6 will move; (3) an `opening_value` metric (the net's value on the standard opening) exposes the
 value-label contamination behind the forfeited first-player win. All TDD; tic-tac-toe proves the trace verifies a
 full game once coverage exists.
+
+## Solver speed — the 158s opening wall (attacked 2026-08-19)
+
+Research verdict (Pons tutorial + Numba, grounded in profiling): **the 158s is the pure-Python execution tax
+(~30–100× vs C++; ours ~145K pos/s vs C++ ~12M), not algorithm — our solver is already at Pons's fastest**
+(dynamic threat-count move ordering, non-losing pruning, tight weak `[-1,1]` window, and a symmetry-canonical TT
+that is *ahead* of the tutorial). No move-ordering/TT tweak closes an 80× gap; PNS/df-pn is the wrong lever (it
+proves one boolean, not the per-move values a labeller needs).
+
+- **Pure-Python free wins — SHIPPED, 2.4×** (2.9s→1.2s on a ply-12 solve; guarded by a `_mirror`-vs-reference
+  test + the brute-force cross-check): unrolled `_mirror` (was a 7-iter loop on every TT probe = 19%), a
+  `_COL_MASKS` table, and native `int.bit_count()` popcount. Extrapolates the ply-10 wall ~158s → ~65s.
+- **THE on-demand answer — AMORTIZATION via the bottom-up book (no dependency, generic).** Solve deep offline
+  once; a shallower opening solve then reads its booked children and **collapses to lookups** — exactly why Pons
+  ships an opening book. PROVEN deterministically (`test_connect4_solve_collapses_to_lookups_when_the_frontier_
+  below_is_booked`): once the frontier one ply below is booked, a solve that searched 3008 nodes searches **0**,
+  same answer. So "fast on-demand" = a good solver + a self-produced book beneath it, which we already have.
+- **Numba cold-solve accelerator — ATTEMPTED, ABANDONED (2026-08-19).** Wrote a full `@njit` transliteration
+  (`solver_numba.py`: bitboard negamax + array open-addressing TT, faithful to the pure algorithm). Numba's njit
+  **could not compile the recursive `_negamax` in bounded time** — the compile stalled for minutes across six
+  fixes (explicit signatures on every function, `cache=False`, removing the in-recursion `np.empty`, removing
+  runtime-indexed global arrays), even though a *trivial* recursive njit compiles in 0.0s. Could not isolate the
+  exact trigger without unbounded debugging, so the backend was **deleted and numba uninstalled** to keep the
+  pure-Python baseline clean. If cold-arbitrary speed is ever needed: (a) a from-scratch ITERATIVE explicit-stack
+  njit rewrite (uncertain, given Numba's resistance here), or (b) bind a compiled C solver (bitbully) behind the
+  connect4 hook — both bigger, both optional. **The amortization book already delivers on-demand speed with zero
+  dependency, so this is not on the critical path.**
 
 ## Scaling doctrine — Connect 4 → Checkers → Chess → Go (what "solve" means, and what we'd need)
 

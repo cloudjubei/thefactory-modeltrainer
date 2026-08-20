@@ -424,6 +424,13 @@ export interface TrainerManifest {
    */
   buildBook?: string
   /**
+   * Per-pass configuration for the autopilot's `build-book` step (camelCase `BuildBookParams` knobs: `seedGames`,
+   * `maxPlies`, `maxPositions`, `maxEnumerate`, `deadlineSeconds`, `workers`, `maxPositionSeconds`, `estimateGames`,
+   * `estimateSims`, `estimateSolveEndgame`, `maxExactEmpty`). Omit for the fast seed-mode default; set
+   * `{ seedGames: 0, estimateGames: N, … }` to grind the GRADED opening each Start instead. Numbers only.
+   */
+  bookBuild?: Record<string, number>
+  /**
    * Fixed rating ANCHORS for the comparable-strength leaderboard: a map from a known reference opponent (an
    * `opponent` lever value like `random`/`heuristic`/`mcts`, or a metric-implied reference like `mcts_strong`
    * for a run's `win_rate_vs_strong_mcts`) to its FROZEN rating on the shared Elo-like scale. Frozen so the
@@ -2284,12 +2291,28 @@ export interface BuildBookParams {
   minPlies?: number
   /** Cap positions solved this pass (the bound that makes it a bounded, resumable step). */
   maxPositions?: number
+  /** Cap positions ENUMERATED this pass — bounds a from-root opening pass so a deep max_plies can't fan out forever. */
+  maxEnumerate?: number
   /** Wall-clock budget for this pass in seconds (the deadline the solve loop honours). */
   deadlineSeconds?: number
   /** Seed-sample this many MIDGAME roots and cover their cheap subtrees (fast coverage from the endgame back). */
   seedGames?: number
   /** Ply depth of the sampled midgame seeds (seed mode). */
   seedPlies?: number
+  /** Solve each ply-band across this many worker processes (the parallel accumulator). Default 1 (sequential). */
+  workers?: number
+  /** Cap EACH solve at this many wall-clock seconds — a hard opening position is DEFERRED (booked later once its
+   * children are cheap) instead of blowing the pass. The robustness default that stops a from-root grind hanging. */
+  maxPositionSeconds?: number
+  /** GRADED mode: score this many bounded book-aware self-play games per unprovable position → an ESTIMATE entry
+   * (value + best_actions the deep model can use). 0 = exact-only. */
+  estimateGames?: number
+  /** Search sims per move for the graded estimator's agents. */
+  estimateSims?: number
+  /** Endgame-solve cutoff (empty cells) for the graded estimator's agents — grounds its rollouts in exact play. */
+  estimateSolveEndgame?: number
+  /** Cheap-exact ladder cutoff (empty cells) used before falling back to an estimate. */
+  maxExactEmpty?: number
   computeTarget?: string
   abortSignal?: AbortSignal
   onRecordWritten?: (type: string, key: string) => void

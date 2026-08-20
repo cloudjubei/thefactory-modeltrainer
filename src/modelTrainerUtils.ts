@@ -367,6 +367,14 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest tournament template must contain {summaryOut}')
     }
   }
+  if (m.bookBuild !== undefined) {
+    if (typeof m.bookBuild !== 'object' || m.bookBuild === null || Array.isArray(m.bookBuild)) {
+      throw new Error('trainer manifest bookBuild must be an object of numeric build knobs')
+    }
+    if (Object.values(m.bookBuild as Record<string, unknown>).some((v) => typeof v !== 'number')) {
+      throw new Error('trainer manifest bookBuild values must all be numbers')
+    }
+  }
   if (m.ratingAnchors !== undefined) {
     if (typeof m.ratingAnchors !== 'object' || Array.isArray(m.ratingAnchors)) {
       throw new Error('trainer manifest ratingAnchors must be an object of opponent → rating')

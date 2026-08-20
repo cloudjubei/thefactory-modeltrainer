@@ -91,6 +91,50 @@ def _tactical_move(game: Game, state: State, rng: random.Random) -> int:
     return fn(state, rng) if fn is not None else rng.choice(game.legal_actions(state))
 
 
+# --- MCTS-Solver proof algebra (shared by the rollout and net-guided cores) --------------------------------
+# A `proven` overlay maps a position key → its DERIVED game-theoretic sign (+1 win / 0 draw / -1 loss, relative
+# to the side to move). These pure functions seed it at leaves and PROPAGATE it up a search path by negamax with
+# a win short-circuit, so an internal node — even the root — can become a genuine PROOF rather than a mere average.
+def _sign(v: float) -> float:
+    return 1.0 if v > 0 else (-1.0 if v < 0 else 0.0)
+
+
+def mover_returns(game: Game, state: State, mover_value: float) -> list[float]:
+    """Zero-sum per-player returns from a single mover-relative value: the mover gets it, the opponent its
+    negation (2-player; a lone value otherwise)."""
+    r = [0.0] * game.num_players
+    m = game.current_player(state)
+    r[m] = mover_value
+    if game.num_players == 2:
+        r[1 - m] = -mover_value
+    return r
+
+
+def child_move_value(game: Game, state: State, action: int, proven: dict) -> float | None:
+    """The PROVEN value (sign) to the mover of playing `action`, or None if not yet proven: a terminal child reads
+    its own result; a proven non-terminal child negates its stored opponent-relative value (zero-sum, 2-player)."""
+    child = game.step(state, action)
+    if game.is_terminal(child):
+        return _sign(game.returns(child)[game.current_player(state)])
+    ck = state_key(game, child)
+    if ck in proven and game.num_players == 2:
+        return -proven[ck]
+    return None
+
+
+def prove_node(game: Game, state: State, key: object, proven: dict) -> None:
+    """Try to prove `state` from its children (negamax, win short-circuit): a WINNING move proves it at once;
+    otherwise it is proven only when EVERY child is (then the best child value stands). Idempotent — a proven
+    value is final, so it is never rewritten."""
+    if key in proven:
+        return
+    vals = [child_move_value(game, state, a, proven) for a in game.legal_actions(state)]
+    if any(v == 1.0 for v in vals):
+        proven[key] = 1.0
+    elif vals and all(v is not None for v in vals):
+        proven[key] = max(vals)
+
+
 class MctsAgent:
     """Generic UCT Monte-Carlo Tree Search over the game protocol — a REAL tree, strength scales with `sims`.
 
@@ -104,15 +148,44 @@ class MctsAgent:
 
     kind = "mcts"
 
-    def __init__(self, sims: int = 80, c_puct: float = 1.4, solve_endgame: int = 0):
+    def __init__(self, sims: int = 80, c_puct: float = 1.4, solve_endgame: int = 0, book=None):
         self.sims = max(1, int(sims))
         self.c_puct = c_puct
         # Opt-in EXACT-ENDGAME cutoff (empty-cell threshold): once a game exposes `exact_optimal_actions` and the
         # position is small enough to solve outright, play a provably-optimal move instead of trusting the tree —
         # so a deep-tactical miss can't cost a lost endgame. 0 = pure MCTS (the fixed-strength reference rungs).
         self.solve_endgame = int(solve_endgame)
+        # Opt-in PROOF LEAVES: a `book` (proven-value store) makes the search back up the EXACT outcome wherever a
+        # position is proven/solvable instead of a noisy rollout — truth propagates through the tree, so book
+        # coverage pays off in PLAY. None = pure rollout MCTS (the reference rungs stay a fixed-strength baseline).
+        self.book = book
         self.sims_used = 0
         self._tree: dict[object, _Node] = {}
+        # SELECTION half of MCTS-Solver: a position key → its DERIVED game-theoretic sign (+1 win / 0 draw / -1 loss,
+        # mover-relative). Seeded at proof leaves and PROPAGATED up (negamax with a win short-circuit) so an internal
+        # node — even the root — becomes a genuine PROOF, not a high average: a proven node prunes selection and lets
+        # the search STOP early. Inert unless a proof source exists, so the fixed-strength reference rungs are unchanged.
+        self._proven: dict[object, float] = {}
+        self._solving = book is not None or self.solve_endgame > 0
+
+    def _proven_returns(self, game: Game, state: State) -> list[float] | None:
+        """The EXACT per-player returns if this position is proven (booked) or cheap to solve (≤ solve_endgame),
+        else None (the caller falls back to a rollout). Zero-sum: the mover gets the proven mover-relative value,
+        the opponent its negation. This is the 'proof leaf' that lets a rollout collapse onto ground truth."""
+        v = None
+        if self.book is not None:
+            from harness.book import book_value
+
+            v = book_value(self.book, game, state)  # proven value to the mover, or None
+        if v is None and self.solve_endgame > 0:
+            solve = getattr(game, "exact_optimal_actions", None)
+            if solve is not None and solve(state, self.solve_endgame) is not None:
+                from harness.book import position_value
+
+                v = position_value(game, state)
+        if v is None:
+            return None
+        return mover_returns(game, state, float(v))
 
     def act(self, game: Game, state: State, rng: random.Random) -> int:
         legal = game.legal_actions(state)
@@ -139,30 +212,55 @@ class MctsAgent:
         for _ in range(self.sims):
             self.sims_used += 1
             self._simulate(game, state, root_key, rng)
+            if self._solving and root_key in self._proven:  # the root is fully proven — more search cannot change it
+                break
+        if self._solving:
+            # SELECTION half: if the search PROVED a win, play it outright (a proven loss is already shunned by the
+            # value-tiebroken robust child below, which ranks a proof-leaf's -1 beneath every drawing move).
+            proven_win = [a for a in legal if child_move_value(game, state, a, self._proven) == 1.0]
+            if proven_win:
+                return min(proven_win, key=lambda a: abs(a - (game.num_actions // 2)))
         root = self._tree[root_key]
         # robust child: the most-visited SAFE action, ties broken by mean value
         return max(candidates, key=lambda a: (root.child_n[a], root.child_w[a] / root.child_n[a] if root.child_n[a] else 0.0))
 
     def _simulate(self, game: Game, state: State, root_key: object, rng: random.Random) -> None:
-        path: list[tuple[_Node, int, int]] = []  # (node, action, mover) edges walked this simulation
+        path: list[tuple[_Node, int, int, State]] = []  # (node, action, mover, node_state) edges walked this sim
         s = state
         key = root_key
         while True:
             if game.is_terminal(s):
                 returns = game.returns(s)
+                if self._solving:
+                    self._proven.setdefault(key, _sign(returns[game.current_player(s)]))
+                break
+            if self._solving and key != root_key and key in self._proven:
+                # a node PROVEN in a prior simulation → treat as a leaf; do not descend a solved subtree
+                returns = mover_returns(game, s, self._proven[key])
                 break
             node = self._tree.get(key)
-            if node is None:  # EXPAND this leaf, then evaluate it with a random rollout
-                self._tree[key] = _Node(game.legal_actions(s))
+            if node is None:
+                # PROOF LEAF (descended positions only — the root is always expanded so `act` can rank its moves):
+                # back up the exact outcome like a terminal, no rollout, and RECORD it so the proof can propagate up.
+                if key != root_key:
+                    proven = self._proven_returns(game, s)
+                    if proven is not None:
+                        returns = proven
+                        self._proven[key] = _sign(proven[game.current_player(s)])
+                        break
+                self._tree[key] = _Node(game.legal_actions(s))  # EXPAND this leaf, evaluate with a random rollout
                 returns = self._rollout(game, s, rng)
                 break
             mover = game.current_player(s)
             action = node.select(self.c_puct)
-            path.append((node, action, mover))
+            path.append((node, action, mover, s))
             s = game.step(s, action, rng)
             key = state_key(game, s)
-        for node, action, mover in path:
+        for node, action, mover, _s in path:
             node.update(action, returns[mover])
+        if self._solving:  # PROPAGATE proofs deepest-first: a child just proven can now prove its parent, up to the root
+            for _node, _action, _mover, s_node in reversed(path):
+                prove_node(game, s_node, state_key(game, s_node), self._proven)
 
     def _rollout(self, game: Game, state: State, rng: random.Random) -> list[float]:
         while not game.is_terminal(state):

@@ -829,6 +829,16 @@ describe('validateTrainerManifest', () => {
     expect(m.description).toBe('Trades BTC under real fees.')
   })
 
+  it('accepts a bookBuild config of numeric knobs (the autopilot build-book pass)', () => {
+    const m = validateTrainerManifest({ ...manifest(), bookBuild: { seedGames: 0, estimateGames: 3, maxPlies: 10 } })
+    expect(m.bookBuild).toEqual({ seedGames: 0, estimateGames: 3, maxPlies: 10 })
+  })
+
+  it('rejects a bookBuild that is not an object of numbers', () => {
+    expect(() => validateTrainerManifest({ ...manifest(), bookBuild: [1, 2] })).toThrow(/bookBuild/)
+    expect(() => validateTrainerManifest({ ...manifest(), bookBuild: { maxPlies: 'deep' } })).toThrow(/bookBuild/)
+  })
+
   it('rejects a missing name', () => {
     expect(() => validateTrainerManifest({ ...manifest(), name: '' })).toThrow(/name/)
   })

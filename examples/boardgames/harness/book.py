@@ -13,8 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import signal
+import threading
 import time
 from collections import deque
+from itertools import groupby
 from pathlib import Path
 from typing import Callable
 
@@ -169,6 +172,26 @@ def estimate_position(
     return best, _bitmask(a for a, v in child_vals.items() if v >= best - 1e-9), total
 
 
+def make_book_estimator(
+    book: Tablebase, sims: int = 64, solve_endgame: int = 14, games: int = 8, seed: int = 0
+) -> Callable[[Game, State], tuple[float, int, int]]:
+    """The DEFAULT bounded-SEARCH estimator (Phase 6 design decision (a)): score an unprovable position by one-ply
+    lookahead where each child is played out by BOOK-AWARE MCTS-Solver self-play. The agents read PROVEN booked
+    children and solve cheap endgames, so their games back up EXACT values wherever the book/solver reaches — the
+    estimate is grounded in proofs beneath it (never a trained net, so the book CORRECTS a net rather than mirrors
+    it) and sharpens toward a proof as coverage grows under it. A FRESH agent per seat (no search-state bleed).
+    Returns an `estimator(game, state) -> (value_to_mover, best_actions, n)` closure over the growing `book`."""
+    from harness.agents import MctsAgent
+
+    rng = random.Random(seed)
+
+    def _estimator(game: Game, state: State) -> tuple[float, int, int]:
+        factory = lambda: MctsAgent(sims=sims, solve_endgame=solve_endgame, book=book)
+        return estimate_position(game, state, factory, games=games, rng=rng)
+
+    return _estimator
+
+
 def _prove(game: Game, state: State, book: Tablebase, max_exact_empty: int) -> tuple[float, int] | None:
     """Try to PROVE a position's value → (value_to_mover, best_actions) or None. (1) FREE: minimax over children
     that are already terminal or PROVEN in the book (no search — the eager bottom-up upgrade). (2) cheap EXACT:
@@ -283,6 +306,138 @@ def play_until_decided(
     return (game.winner(state), ply, False)
 
 
+class _SolveTimeout(Exception):
+    pass
+
+
+def _run_bounded(fn: Callable, seconds: float):
+    """Run `fn()` with a wall-clock cap (SIGALRM). Raises `_SolveTimeout` on overrun; no cap when `seconds<=0` or
+    off the main thread (a parallel worker IS the main thread of its own process, so per-position caps still hold
+    there; a threaded server context simply gets no cap rather than a crash). Politely restores the prior handler."""
+    if seconds <= 0 or threading.current_thread() is not threading.main_thread():
+        return fn()
+
+    def _handler(signum, frame):
+        raise _SolveTimeout()
+
+    prev = signal.signal(signal.SIGALRM, _handler)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        return fn()
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, prev)
+
+
+def _solve_exact_bounded(game: Game, state: State, book: Tablebase, weak: bool, max_seconds: float):
+    """The exact value of `state`, or None if the solve overran `max_seconds` — DEFERRED, not failed: a later
+    band/run books its children, after which the same solve is a cheap one-ply lookup (the bottom-up point). A
+    partially-populated solver transposition table is left behind as valid bounds, so the deferral costs nothing."""
+    try:
+        return _run_bounded(lambda: position_value(game, state, book=book, weak=weak), max_seconds)
+    except _SolveTimeout:
+        return None
+
+
+# --- parallel band solving: positions at the SAME ply are independent given the DEEPER (already-booked) band ---
+_BAND: dict = {}
+
+
+def _band_init(game_name: str, book_values: dict, weak: bool, max_seconds: float) -> None:
+    from harness.registry import resolve_game
+
+    _BAND["game"] = resolve_game(game_name)
+    tb = Tablebase(cap=max(1, len(book_values) + 1))
+    tb._v = dict(book_values)  # the exact accumulator stores PROVEN values, so proven_value works from _v alone
+    _BAND["book"] = tb
+    _BAND["weak"] = bool(weak)
+    _BAND["secs"] = float(max_seconds)
+
+
+def _band_task(item):
+    ck, state = item
+    return ck, _solve_exact_bounded(_BAND["game"], state, _BAND["book"], _BAND["weak"], _BAND["secs"])
+
+
+def _deadline_hit(deadline: float | None) -> bool:
+    return deadline is not None and time.perf_counter() >= deadline
+
+
+def _solve_frontier_banded(
+    game: Game, book: Tablebase, order: list, indeg: dict, min_plies: int, max_positions: int, weak: bool,
+    deadline: float | None, workers: int, max_seconds: float, log: Callable[[str], None] | None,
+) -> tuple[int, int, int]:
+    """Solve the ordered frontier ply-band by ply-band (deepest first). Within a band every position is
+    independent given the deeper booked band, so a band is solved across a PROCESS POOL (each worker gets the
+    current book snapshot for child short-circuits); each solve is capped at `max_seconds` (a hard position is
+    DEFERRED). Results are booked AS THEY COMPLETE and the `deadline`/`max_positions` budget is honoured WITHIN a
+    band, not merely between bands — so a time-bounded run stops within ~`max_seconds` of its deadline instead of
+    grinding a whole band first (cancelling the not-yet-started solves). Falls back to in-process sequential if a
+    pool can't be created. Returns (solved, skipped, deferred); the final book equals the sequential build when the
+    budget is not hit (exact solves are deterministic)."""
+    solved = skipped = deferred = 0
+
+    def _book(ck: int, p: int, val) -> bool:  # book one result; True once the deadline/max_positions budget is spent
+        nonlocal solved, deferred
+        if val is None:
+            deferred += 1
+        else:
+            book.put(ck, int(val), priority=indeg.get(ck, 0) + p)
+            solved += 1
+        return solved >= max_positions or _deadline_hit(deadline)
+
+    for ply, grp in groupby(order, key=lambda kv: kv[1][1]):  # `order` is sorted -ply → deepest band first
+        if _deadline_hit(deadline) or solved >= max_positions:
+            break
+        band = []
+        for ck, (state, p) in grp:
+            if p < min_plies:
+                continue
+            if book.is_proven(ck):
+                skipped += 1
+                continue
+            band.append((ck, state, p))
+        if not band:
+            continue
+        stop = False
+        ex = None
+        if workers > 1 and len(band) >= 2:
+            import multiprocessing
+            from concurrent.futures import ProcessPoolExecutor, as_completed
+
+            try:
+                ex = ProcessPoolExecutor(
+                    max_workers=min(workers, len(band)),
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=_band_init,
+                    initargs=(game.name, dict(book._v), weak, max_seconds),
+                )
+            except Exception:
+                ex = None
+        if ex is not None:
+            pri = {ck: p for ck, _st, p in band}
+            futures = {ex.submit(_band_task, (ck, st)): ck for ck, st, _p in band}
+            try:
+                for fut in as_completed(futures):
+                    ck = futures[fut]
+                    _, val = fut.result()
+                    if _book(ck, pri[ck], val):
+                        stop = True
+                        break
+            finally:
+                ex.shutdown(wait=True, cancel_futures=True)
+        else:
+            for ck, st, p in band:
+                if _book(ck, p, _solve_exact_bounded(game, st, book, weak, max_seconds)):
+                    stop = True
+                    break
+        if log:
+            log(f"book: ply {ply} band → {solved} solved, {deferred} deferred, {len(book)} total")
+        if stop:
+            break
+    return solved, skipped, deferred
+
+
 def build_book(
     game: Game,
     book: Tablebase,
@@ -296,6 +451,8 @@ def build_book(
     log: Callable[[str], None] | None = None,
     estimator: Callable[[Game, State], tuple[float, int, int]] | None = None,
     max_exact_empty: int = 0,
+    workers: int = 1,
+    max_position_seconds: float = 0.0,
 ) -> dict:
     """Solve+store the reachable frontier BOTTOM-UP (deepest ply first, hub positions prioritised), bounded and
     resumable. Enumerate reachable non-terminal positions (from `roots`, default the initial position) with
@@ -337,33 +494,42 @@ def build_book(
                     dq.append(c)
 
     order = sorted(seen.items(), key=lambda kv: (-kv[1][1], -indeg.get(kv[0], 0)))
-    solved = skipped = 0
-    for ck, (state, ply) in order:
-        if deadline is not None and time.perf_counter() >= deadline:
-            break
-        if solved >= max_positions:
-            break
-        if ply < min_plies:
-            continue
-        if book.is_proven(ck):  # a PROOF is final; an ESTIMATE is re-evaluated below (eager upgrade)
-            skipped += 1
-            continue
-        priority = indeg.get(ck, 0) + ply
-        if estimator is not None:
-            e = evaluate(game, state, book, estimator, max_exact_empty=max_exact_empty)
-            if e.status == PROVEN:
-                book.put_proven(ck, int(e.value), best_actions=e.best_actions, priority=priority)
+    deferred = 0
+    if estimator is None and (workers > 1 or max_position_seconds > 0):
+        # PARALLEL / time-capped exact accumulator (the deep-opening grind): solve bands across cores, cap each
+        # solve so one hard position can't blow the budget (it's deferred, then cheap once its children are booked).
+        solved, skipped, deferred = _solve_frontier_banded(
+            game, book, order, indeg, min_plies, max_positions, weak, deadline, workers, max_position_seconds, log,
+        )
+    else:
+        solved = skipped = 0
+        for ck, (state, ply) in order:
+            if deadline is not None and time.perf_counter() >= deadline:
+                break
+            if solved >= max_positions:
+                break
+            if ply < min_plies:
+                continue
+            if book.is_proven(ck):  # a PROOF is final; an ESTIMATE is re-evaluated below (eager upgrade)
+                skipped += 1
+                continue
+            priority = indeg.get(ck, 0) + ply
+            if estimator is not None:
+                e = evaluate(game, state, book, estimator, max_exact_empty=max_exact_empty)
+                if e.status == PROVEN:
+                    book.put_proven(ck, int(e.value), best_actions=e.best_actions, priority=priority)
+                else:
+                    book.put_estimate(ck, e.value, best_actions=e.best_actions, n=e.n, priority=priority)
             else:
-                book.put_estimate(ck, e.value, best_actions=e.best_actions, n=e.n, priority=priority)
-        else:
-            book.put(ck, position_value(game, state, book=book, weak=weak), priority=priority)
-        solved += 1
-        if log and solved % 25 == 0:
-            log(f"book: solved {solved}, booked {len(book)}, ply≈{ply}")
+                book.put(ck, position_value(game, state, book=book, weak=weak), priority=priority)
+            solved += 1
+            if log and solved % 25 == 0:
+                log(f"book: solved {solved}, booked {len(book)}, ply≈{ply}")
 
     stats = {
         "solved": solved,
         "skipped": skipped,
+        "deferred": deferred,
         "enumerated": len(seen),
         "booked_total": len(book),
         "max_plies": max_plies,
@@ -385,6 +551,7 @@ def book_coverage(game: Game, book: Tablebase, plies: int = 8, max_enumerate: in
     seen.add(ck0)
     dq.append(root)
     booked = 1 if ck0 in book else 0
+    proven = 1 if book.is_proven(ck0) else 0  # a booked entry may be a graded ESTIMATE, not a proof — count them apart
     while dq and len(seen) < max_enumerate:
         s = dq.popleft()
         if _ply(game, s) >= plies:
@@ -398,18 +565,24 @@ def book_coverage(game: Game, book: Tablebase, plies: int = 8, max_enumerate: in
                 seen.add(ck)
                 if ck in book:
                     booked += 1
+                    if book.is_proven(ck):
+                        proven += 1
                 if len(seen) < max_enumerate:
                     dq.append(c)
     reachable = len(seen)
-    return {"plies": plies, "reachable": reachable, "booked": booked,
-            "fraction": (booked / reachable) if reachable else 0.0}
+    return {"plies": plies, "reachable": reachable, "booked": booked, "proven": proven,
+            "fraction": (booked / reachable) if reachable else 0.0,
+            "provenFraction": (proven / reachable) if reachable else 0.0}
 
 
 def run_build_book(request: dict, log: Callable[[str], None] | None = print, book_dir: str | None = None) -> dict:
     """Extend the project-committed book for a game: warm the solver's TT accelerator from prior runs, solve+
     store a bounded frontier band (deepest-first), persist BOTH the exact book and the accelerator, and report
-    coverage. Resumable — each call extends coverage. Request: { game, max_plies, min_plies, max_positions,
-    deadline_seconds }."""
+    coverage. Resumable — each call extends coverage. Request keys: `game`, `max_plies`, `min_plies`,
+    `max_positions`, `max_enumerate`, `deadline_seconds`; SEED mode `seed_games`/`seed_plies`; ROBUSTNESS
+    `workers` (parallel band solving) + `max_position_seconds` (per-solve cap → DEFERRED, no hang); GRADED mode
+    `estimate_games`/`estimate_sims`/`estimate_solve_endgame`/`max_exact_empty` (book-aware search beliefs for the
+    deep opening the solver can't reach)."""
     from harness import solver
     from harness.registry import resolve_game
 
@@ -432,9 +605,30 @@ def run_build_book(request: dict, log: Callable[[str], None] | None = print, boo
     if seed_games > 0:
         roots = sample_seeds(game, seed_games, int(request.get("seed_plies", 26)), int(request.get("seed", 0)))
 
+    # Opt-in GRADED mode (Phase 6): where a position is too deep to solve, store a book-aware bounded-SEARCH
+    # ESTIMATE (value + best_actions + sample size a deep model can use) instead of nothing — the graded opening
+    # book that needs no minutes-long solve. `estimate_games>0` enables it; proofs still win the evaluator ladder.
+    estimator = None
+    max_exact_empty = int(request.get("max_exact_empty", 0))
+    estimate_games = int(request.get("estimate_games", 0))
+    if estimate_games > 0:
+        estimator = make_book_estimator(
+            book, sims=int(request.get("estimate_sims", 64)),
+            solve_endgame=int(request.get("estimate_solve_endgame", 14)), games=estimate_games,
+            seed=int(request.get("seed", 0)),
+        )
+
+    # Robustness knobs (the parallel/deadline-safe accumulator): `workers` solves each ply-band across a process
+    # pool; `max_position_seconds` caps EACH solve so one hard opening position is DEFERRED (booked later) instead
+    # of blowing the pass budget — a from-root opening grind can't hang the activity. Both are no-ops in exact mode
+    # when left at their defaults (unchanged sequential build).
+    workers = int(request.get("workers", 1))
+    max_position_seconds = float(request.get("max_position_seconds", 0.0))
+
     build = build_book(
         game, book, roots=roots, max_plies=max_plies, min_plies=min_plies, max_positions=max_positions,
-        max_enumerate=max_enumerate, deadline=deadline, log=log,
+        max_enumerate=max_enumerate, deadline=deadline, log=log, estimator=estimator, max_exact_empty=max_exact_empty,
+        workers=workers, max_position_seconds=max_position_seconds,
     )
     book.save(book_path(game.name, book_dir))
     if game.name == "connect4":

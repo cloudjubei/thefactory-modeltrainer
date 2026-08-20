@@ -3225,6 +3225,39 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(state.lastRun).toMatchObject({ bookBuilt: 1, rated: 1, playedOff: 1 })
   })
 
+  it('passes the manifest bookBuild config to the build-book child (the graded-opening grind)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const gradedManifest = manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+        seed: { type: 'number', default: 0 },
+      },
+      learnedCores: ['alphazero'],
+      buildBook: 'py -m harness.book --config-json {configPath} --summary-out {summaryOut}',
+      bookBuild: { seedGames: 0, estimateGames: 5, maxPlies: 8 },
+    })
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    const paramsByType: Record<string, unknown> = {}
+    await tools.runAutopilot({
+      scope: 'proj', projectRoot: '/x', manifest: gradedManifest, maxRounds: 10,
+      launchActivity: async (type: string, p: unknown) => {
+        paramsByType[type] = p
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: type }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    expect(paramsByType['build-book']).toEqual({ seedGames: 0, estimateGames: 5, maxPlies: 8 })
+  })
+
   it('treats a no-new-runs explore round as exhausted so improve still runs (the search-never-converges backstop)', async () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)
@@ -3581,6 +3614,35 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
     expect(cfg.seed_games).toBeUndefined()
     expect(cfg.max_plies).toBe(9)
+  })
+
+  it('always caps each solve (robustness default) so a from-root grind cannot hang the pass', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 12 })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    expect(cfg.max_position_seconds).toBe(5) // every solve is bounded by default
+    expect(cfg.workers).toBeUndefined() // parallelism stays opt-in
+  })
+
+  it('forwards the parallel + graded knobs into the python request', async () => {
+    const storage = memoryStorage()
+    const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.buildBook({
+      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 12,
+      workers: 4, maxPositionSeconds: 3, estimateGames: 8, estimateSims: 48, estimateSolveEndgame: 16, maxExactEmpty: 20,
+      maxEnumerate: 30000,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    expect(cfg.workers).toBe(4)
+    expect(cfg.max_position_seconds).toBe(3)
+    expect(cfg.estimate_games).toBe(8)
+    expect(cfg.estimate_sims).toBe(48)
+    expect(cfg.estimate_solve_endgame).toBe(16)
+    expect(cfg.max_exact_empty).toBe(20)
+    expect(cfg.max_enumerate).toBe(30000)
   })
 
   it('errors when the project declares no buildBook command', async () => {

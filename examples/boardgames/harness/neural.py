@@ -21,7 +21,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from harness.agents import Agent, state_key
+from harness.agents import Agent, _sign, child_move_value, prove_node, state_key
 from harness.game import Game, State
 
 ROWS, COLS = 6, 7  # connect4 board dims (this first neural core is connect4-shaped; moves stay generic)
@@ -120,6 +120,7 @@ class AlphaZeroAgent:
         dirichlet_alpha: float = 0.9,
         noise_frac: float = 0.25,
         solve_endgame: int = 0,
+        book=None,
     ):
         self.net = net
         self.sims = max(1, int(sims))
@@ -129,12 +130,38 @@ class AlphaZeroAgent:
         self.add_noise = add_noise
         self.dirichlet_alpha = dirichlet_alpha
         self.noise_frac = noise_frac
+        # Opt-in PROOF LEAVES: a `book` (proven values) makes the search back up the EXACT outcome at a booked or
+        # endgame-solvable leaf instead of the value HEAD's estimate — truth propagates through the tree, so book
+        # coverage pays off in play and self-play value targets get exact where a proof exists. None = pure net.
+        self.book = book
         # Opt-in EXACT-ENDGAME cutoff (empty-cell threshold): once the position is cheap to solve, play a
         # provably-optimal move instead of the net-guided search — a perfect endgame the value head needn't
         # approximate, driving loss toward 0 / optimality toward 1. 0 = pure net-guided MCTS (self-play default).
         self.solve_endgame = int(solve_endgame)
         self.sims_used = 0
         self._nodes: dict[object, _AZNode] = {}
+        # SELECTION half of MCTS-Solver (see agents.prove_node): proofs seeded at leaves PROPAGATE up so the root
+        # can become a genuine PROOF. Consumed in GREEDY deployment only — self-play keeps its visit-count policy
+        # untouched (propagation writes this overlay but never changes descent/backup). Inert without a proof source.
+        self._proven: dict[object, float] = {}
+        self._solving = book is not None or self.solve_endgame > 0
+
+    def _proven_value(self, game: Game, state: State) -> float | None:
+        """The EXACT value to the side-to-move if this position is proven (booked) or cheap to solve
+        (≤ solve_endgame), else None. Lets a search leaf collapse onto ground truth instead of the value head."""
+        if self.book is not None:
+            from harness.book import book_value
+
+            bv = book_value(self.book, game, state)
+            if bv is not None:
+                return float(bv)
+        if self.solve_endgame > 0:
+            solve = getattr(game, "exact_optimal_actions", None)
+            if solve is not None and solve(state, self.solve_endgame) is not None:
+                from harness.book import position_value
+
+                return float(position_value(game, state))
+        return None
 
     def _policy_value(self, game: Game, state: State) -> tuple[dict[int, float], float]:
         self.net.eval()
@@ -157,24 +184,34 @@ class AlphaZeroAgent:
         return node
 
     def _simulate(self, game: Game, state: State, root_key: object, rng: random.Random) -> None:
-        path: list[tuple[_AZNode, int, int]] = []
+        path: list[tuple[_AZNode, int, int, State]] = []  # (node, action, mover, node_state)
         s = state
         key = root_key
         while True:
             node = self._nodes.get(key)
             if node is None or game.is_terminal(s):
+                leaf_player = game.current_player(s)
                 if game.is_terminal(s):
-                    leaf_player = game.current_player(s)
                     v = game.returns(s)[leaf_player]
+                    if self._solving:
+                        self._proven.setdefault(key, _sign(v))
                 else:
-                    leaf_player = game.current_player(s)
-                    v = self._expand(game, s, key, rng, root=False).value
-                for n, a, mover in path:
+                    pv = self._proven_value(game, s)  # PROOF LEAF: exact value (booked/solvable), else the net
+                    if pv is not None:
+                        v = pv
+                        if self._solving:
+                            self._proven[key] = _sign(pv)
+                    else:
+                        v = self._expand(game, s, key, rng, root=False).value
+                for n, a, mover, _s in path:
                     n.update(a, v if mover == leaf_player else -v)
+                if self._solving:  # PROPAGATE proofs up — writes the overlay only, never touches visits, so π is unchanged
+                    for _n, _a, _mover, s_node in reversed(path):
+                        prove_node(game, s_node, state_key(game, s_node), self._proven)
                 return
             mover = game.current_player(s)
             action = node.select(self.c_puct)
-            path.append((node, action, mover))
+            path.append((node, action, mover, s))
             s = game.step(s, action, rng)
             key = state_key(game, s)
 
@@ -204,6 +241,12 @@ class AlphaZeroAgent:
                 self.sims_used += 1
                 return min(optimal, key=lambda a: abs(a - (game.num_actions // 2)))
         pi = self.run_search(game, state, rng)
+        if self._solving and self.temperature <= 1e-6:
+            # SELECTION half (greedy deployment only — self-play keeps its π): if the search PROVED a win, play it,
+            # even where an untrained value head would not. The proof came from propagated booked/solvable leaves.
+            proven_win = [a for a in legal if child_move_value(game, state, a, self._proven) == 1.0]
+            if proven_win:
+                return min(proven_win, key=lambda a: abs(a - (game.num_actions // 2)))
         return sample_action(pi, self.temperature, rng)
 
 
@@ -400,6 +443,36 @@ def distill_examples(
     return examples
 
 
+def book_distill_examples(
+    game: Game, book, states, proof_copies: int = 3, estimate_copies: int = 1, device: str = "cpu"
+) -> list[tuple[torch.Tensor, list[float], float]]:
+    """(state, soft-policy, value) examples LABELLED BY THE BOOK — the bridge that lets the net learn from the
+    GRADED opening the exact labeller can't reach. For each covered `state` the policy target is uniform over the
+    entry's stored `best_actions` and the value target is the entry's value (exact for a PROOF, the bounded-search
+    belief for an ESTIMATE, kept SOFT). Proofs outweigh beliefs by whole-copy REPLICATION (`proof_copies` vs
+    `estimate_copies`) — the same oversampling the distill anchor uses, so no per-example loss weights are needed.
+    Positions the book does not cover, or that carry no `best_actions`, are skipped."""
+    from harness.book import _key
+    from harness.tablebase import PROVEN
+
+    examples: list[tuple[torch.Tensor, list[float], float]] = []
+    for state in states:
+        if game.is_terminal(state):
+            continue
+        entry = book.entry(_key(game, state))
+        if entry is None or not entry.best_actions:
+            continue
+        acts = [c for c in range(COLS) if (entry.best_actions >> c) & 1]
+        if not acts:
+            continue
+        pi = [0.0] * COLS
+        for c in acts:
+            pi[c] = 1.0 / len(acts)
+        copies = proof_copies if entry.status == PROVEN else estimate_copies
+        examples.extend([(encode(game, state), pi, float(entry.value))] * max(0, copies))
+    return examples
+
+
 def oracle_distill_games(
     game: Game,
     n_games: int,
@@ -502,6 +575,21 @@ def build_distill_corpus(
     return examples
 
 
+def _mix_training_set(buffer: list, distilled: list, distill_fraction: float) -> list:
+    """Keep the exact distilled anchor at a FIXED FRACTION of each training pass (a DQfD-style fixed-ratio mix),
+    so it never dilutes below `distill_fraction` as the self-play buffer grows — the fix for the net DRIFTING off
+    the optimal opening it was distilled on (plain `buffer + distilled` sinks the ~400 anchor examples to ~5% of
+    an 8000-buffer). Oversamples the small anchor by whole copies to hit the ratio (equivalent to weighting it in
+    the loss). No anchor → the buffer unchanged; no buffer / fraction 0 → the old plain concatenation."""
+    if not distilled:
+        return list(buffer)
+    if not buffer or distill_fraction <= 0:
+        return list(buffer) + list(distilled)
+    frac = min(distill_fraction, 0.9)
+    k = max(1, round(frac / (1 - frac) * len(buffer) / len(distilled)))
+    return list(buffer) + list(distilled) * k
+
+
 def train_alphazero(
     game: Game,
     iterations: int = 8,
@@ -520,6 +608,12 @@ def train_alphazero(
     distill_positions: int = 0,
     distill_min_moves: int = 16,
     distill_corpus: list[tuple[torch.Tensor, list[float], float]] | None = None,
+    distill_fraction: float = 0.34,
+    book=None,
+    book_distill_positions: int = 0,
+    book_distill_min_moves: int = 6,
+    book_proof_copies: int = 3,
+    book_estimate_copies: int = 1,
     augment: bool = True,
     log: Callable[[str], None] | None = None,
 ) -> tuple[Connect4Net, list[dict]]:
@@ -541,6 +635,15 @@ def train_alphazero(
         if distill_corpus is not None
         else (distill_examples(game, distill_positions, distill_min_moves, seed, device) if distill_positions > 0 else [])
     )
+    if book is not None and book_distill_positions > 0:
+        # Fold the BOOK's proofs + graded-opening beliefs into the anchor: soft optimal-move policy targets the
+        # exact late-only labeller can't reach, proofs oversampled over estimates.
+        from harness.benchmark import sample_solvable_positions
+
+        book_states = sample_solvable_positions(game, book_distill_positions, book_distill_min_moves, seed)
+        distilled = distilled + book_distill_examples(
+            game, book, book_states, proof_copies=book_proof_copies, estimate_copies=book_estimate_copies, device=device
+        )
     distilled = augment_examples(distilled, perms)  # a position + its mirror are the same exact lesson
     if distilled:
         train_net(net, distilled, epochs, batch_size, lr, device)  # imprint optimal play before self-play
@@ -558,7 +661,7 @@ def train_alphazero(
                 fresh.extend(self_play_game(game, learner, rng))
         fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
         buffer = (buffer + fresh)[-buffer_cap:]
-        loss = train_net(net, buffer + distilled, epochs, batch_size, lr, device)
+        loss = train_net(net, _mix_training_set(buffer, distilled, distill_fraction), epochs, batch_size, lr, device)
         history.append(
             {"iteration": it + 1, "examples": len(fresh), "vs_pool_games": vs_pool, "buffer": len(buffer),
              "distilled": len(distilled), "loss": loss}

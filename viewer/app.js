@@ -5111,7 +5111,12 @@ async function bookCoverageNote() {
   }
   const cov = rec && rec.coverage
   if (!cov) return ''
-  return `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is exact (${rec.total || 0} positions booked); endgames are always exact. The autopilot grows this each run.</div>`
+  // Honest split: `booked` counts graded ESTIMATEs too, so only `provenFraction` is genuinely exact (older records
+  // without it were exact-only → treat all booked as proven). Never label an estimate "exact".
+  const provenFrac = typeof cov.provenFraction === 'number' ? cov.provenFraction : cov.fraction
+  const estFrac = Math.max(0, cov.fraction - provenFrac)
+  const estNote = estFrac > 0.0005 ? `, ${(estFrac * 100).toFixed(1)}% graded estimates` : ''
+  return `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is booked — ${(provenFrac * 100).toFixed(1)}% proven-exact${estNote} (${rec.total || 0} positions); endgames are always exact. The autopilot grows this each Start.</div>`
 }
 function poVerdictBadge(o) {
   if (!o) return ''

@@ -68,20 +68,31 @@ def _top_mask_col(c: int) -> int:
     return 1 << (c * _H1 + HEIGHT - 1)
 
 
+_COL_MASKS = tuple(((1 << HEIGHT) - 1) << (c * _H1) for c in range(WIDTH))  # per-column playable-cell masks
+
+
 def _column_mask(c: int) -> int:
-    return ((1 << HEIGHT) - 1) << (c * _H1)
+    return _COL_MASKS[c]
 
 
 _COL_BITS = (1 << _H1) - 1  # the 7 bits of one column (6 rows + sentinel)
+# One full-column (7-bit) mask per column, for the unrolled mirror below.
+_MC = tuple(_COL_BITS << (c * _H1) for c in range(WIDTH))
 
 
 def _mirror(x: int) -> int:
     """Reflect a bitboard left↔right about the centre column (column c ↔ column WIDTH-1-c). The game-theoretic
-    value is mirror-invariant, so canonicalising every transposition key to this reflection halves the table."""
-    m = 0
-    for c in range(WIDTH):
-        m |= ((x >> (c * _H1)) & _COL_BITS) << ((WIDTH - 1 - c) * _H1)
-    return m
+    value is mirror-invariant, so canonicalising every transposition key to this reflection halves the table.
+    UNROLLED (no per-column Python loop): this runs on every TT probe, so it was ~19% of a cold opening solve."""
+    return (
+        ((x & _MC[0]) << (6 * _H1))
+        | ((x & _MC[1]) << (4 * _H1))
+        | ((x & _MC[2]) << (2 * _H1))
+        | (x & _MC[3])
+        | ((x & _MC[4]) >> (2 * _H1))
+        | ((x & _MC[5]) >> (4 * _H1))
+        | ((x & _MC[6]) >> (6 * _H1))
+    )
 
 
 def canonical_key(position: int, mask: int) -> int:
@@ -176,7 +187,7 @@ def _possible_non_losing_moves(position: int, mask: int) -> int:
 
 def _move_score(position: int, mask: int, move: int) -> int:
     winning = _compute_winning_position(position | move, mask)
-    return bin(winning).count("1")
+    return winning.bit_count()  # native popcount (Python 3.10+) — this runs per candidate move in ordering
 
 
 def _negamax(position: int, mask: int, moves: int, alpha: int, beta: int, tt: dict[int, int]) -> int:
@@ -208,7 +219,7 @@ def _negamax(position: int, mask: int, moves: int, alpha: int, beta: int, tt: di
 
     ordered = []
     for c in _CENTER_ORDER:
-        move = possible & _column_mask(c)
+        move = possible & _COL_MASKS[c]
         if move:
             ordered.append((_move_score(position, mask, move), move))
     ordered.sort(key=lambda t: t[0], reverse=True)
@@ -313,11 +324,11 @@ _INF = 10**9
 def _heuristic_eval(position: int, mask: int) -> int:
     """A small positional score (to-move perspective) for depth-limited leaves: threats created minus
     threats conceded, plus centre control. Deliberately tiny so it never outweighs a real win/loss."""
-    my = bin(_compute_winning_position(position, mask)).count("1")
-    opp = bin(_compute_winning_position(position ^ mask, mask)).count("1")
+    my = _compute_winning_position(position, mask).bit_count()
+    opp = _compute_winning_position(position ^ mask, mask).bit_count()
     center = _column_mask(WIDTH // 2)
-    my_c = bin(position & center).count("1")
-    opp_c = bin((position ^ mask) & center).count("1")
+    my_c = (position & center).bit_count()
+    opp_c = ((position ^ mask) & center).bit_count()
     return 3 * (my - opp) + (my_c - opp_c)
 
 
@@ -398,14 +409,14 @@ class NearPerfectOracle:
         if wins:
             wins.sort(key=_CENTER_ORDER.index)
             return wins[0]
-        if self.solve_endgame > 0 and (_TOTAL - bin(mask).count("1")) <= self.solve_endgame:
+        if self.solve_endgame > 0 and (_TOTAL - mask.bit_count()) <= self.solve_endgame:
             optimal = optimal_columns(state)  # exact + fast once few cells remain
             if optimal:
                 optimal.sort(key=_CENTER_ORDER.index)
                 return optimal[0]
         possible = _possible_non_losing_moves(position, mask)
         candidates = legal if possible == 0 else [c for c in legal if possible & _column_mask(c)]
-        moves = bin(mask).count("1")
+        moves = mask.bit_count()
         best_col, best_val = candidates[0], -_INF
         for c in sorted(candidates, key=_CENTER_ORDER.index):
             move = (mask + _bottom_mask_col(c)) & _column_mask(c)

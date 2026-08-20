@@ -23,6 +23,39 @@ from harness.neural import (
 from harness.tablebase import Tablebase
 
 
+def test_alphazero_proven_value_reads_the_book_and_the_solvable_endgame():
+    from games.connect4 import Connect4
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import move_values
+    from harness.tablebase import Tablebase
+
+    game = Connect4()
+    torch.manual_seed(0)
+    late = sample_solvable_positions(game, n=1, min_moves=30, seed=2)[0]
+    proven = max(move_values(late, weak=True).values())  # the mover's exact value here
+
+    book = Tablebase(cap=100)
+    book.put_proven(game.canonical_key(late), proven)
+    assert AlphaZeroAgent(Connect4Net(), sims=1, book=book)._proven_value(game, late) == float(proven)
+    # no book but a solvable endgame → exact solve value (the search backs up truth, not the net's estimate)
+    assert AlphaZeroAgent(Connect4Net(), sims=1, solve_endgame=40)._proven_value(game, late) is not None
+    # no book, no solve_endgame (self-play default) → None, so exploration/self-play is unchanged
+    assert AlphaZeroAgent(Connect4Net(), sims=1)._proven_value(game, late) is None
+
+
+def test_mix_training_set_holds_the_anchor_at_a_fixed_fraction():
+    from harness.neural import _mix_training_set
+
+    buffer = list(range(8000))
+    distilled = list(range(400))  # plain concatenation → 400/8400 ≈ 4.8% (dilutes to noise as the buffer fills)
+    mixed = _mix_training_set(buffer, distilled, 0.34)
+    anchor_frac = (len(mixed) - len(buffer)) / len(mixed)
+    assert 0.28 < anchor_frac < 0.40  # the exact-play anchor is held near its target, not diluted
+    assert _mix_training_set(buffer, distilled, 0.0) == buffer + distilled  # 0 = the old plain concatenation
+    assert _mix_training_set([], distilled, 0.34) == distilled  # no self-play yet → just the anchor
+    assert _mix_training_set(buffer, [], 0.34) == buffer  # no anchor → the buffer unchanged
+
+
 def test_oracle_distillation_relabels_the_value_target_from_the_proven_book():
     # The value-label contamination fix: where the book PROVES a position's value, distillation uses THAT (exact,
     # mover-relative) instead of the noisy self-play OUTCOME — so a proven opening keeps its true value even when
@@ -293,3 +326,115 @@ def test_distill_examples_targets_match_the_oracle():
         assert sorted(i for i, p in enumerate(pi) if p > 0) == optimal  # mass exactly on the optimal set
         assert all(abs(pi[c] - 1.0 / len(optimal)) < 1e-6 for c in optimal)  # uniform over it
         assert value in (-1.0, 0.0, 1.0)
+
+
+# --- MCTS-Solver: proof PROPAGATION half in the net-guided core (greedy deployment only) -------------------
+def _c4_win(game, empties):
+    """The first sampled connect4 position with exactly `empties` empty cells that is a proven WIN for the mover
+    and NOT a mate-in-1 — so the search must DERIVE a proof (children solve, the win propagates to the root)."""
+    from harness.benchmark import sample_solvable_positions
+
+    target_ply = 42 - empties
+    for seed in range(200):
+        for s in sample_solvable_positions(game, n=4, min_moves=target_ply, seed=seed):
+            if sum(1 for v in s.board if v != 0) != target_ply:
+                continue
+            me = game.current_player(s)
+            if any(game.step(s, a).winner == me for a in game.legal_actions(s)):
+                continue
+            if game.position_value(s) == 1:
+                return s
+    return None
+
+
+def test_alphazero_solver_proves_the_root_and_plays_the_winning_move():
+    from harness.agents import state_key
+    from harness.solver import optimal_columns
+
+    game = _game()
+    torch.manual_seed(0)
+    pos = _c4_win(game, empties=12)  # a proven win, NOT a mate-in-1
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    # An UNTRAINED net would blunder here; but the root is NOT directly solvable (12 empty > solve_endgame) while its
+    # children ARE — greedy play must derive the proof by propagation and play the win, not trust the value head.
+    agent = AlphaZeroAgent(Connect4Net(), sims=80, solve_endgame=empties - 1)
+    move = agent.act(game, pos, random.Random(0))
+    assert agent._proven[state_key(game, pos)] == 1.0  # the root became a DERIVED proof
+    assert move in optimal_columns(pos)  # and greedy play is game-theoretically optimal
+
+
+def test_alphazero_solver_leaves_self_play_policy_intact():
+    # Self-play safety: the overlay must NOT prune the tree or stop the search early, or the visit-count policy π
+    # (the training target) would be distorted. Even WITH a solver active, run_search spends the full budget and
+    # returns a policy over every legal move.
+    game = _game()
+    torch.manual_seed(0)
+    pos = _c4_win(game, empties=12)
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=50, solve_endgame=empties - 1, temperature=1.0, add_noise=True)
+    pi = agent.run_search(game, pos, random.Random(0))
+    assert set(pi) == set(game.legal_actions(pos))  # π covers all legal moves (no pruning collapsed it)
+    assert abs(sum(pi.values()) - 1.0) < 1e-9
+    assert agent.sims_used == 50  # the full search budget ran — no early proof termination in self-play
+
+
+def test_alphazero_solver_off_without_book_or_solver_stays_pure():
+    from harness.agents import state_key
+
+    game = _game()
+    torch.manual_seed(0)
+    pos = _c4_win(game, empties=12)
+    assert pos is not None
+    agent = AlphaZeroAgent(Connect4Net(), sims=60)  # pure net: no book, solve_endgame 0
+    agent.act(game, pos, random.Random(0))
+    assert agent._proven == {}  # the solver overlay is inert without a proof source
+    assert state_key  # (imported for symmetry with the sibling tests)
+
+
+# --- book → net: best_actions / estimate value as SOFT distillation targets --------------------------------
+def test_book_distill_examples_weights_proofs_over_estimates():
+    from harness.neural import book_distill_examples
+
+    game = _game()
+    torch.manual_seed(0)
+    book = Tablebase(cap=100)
+    a = game.initial_state(random.Random(0))  # an ESTIMATE: a soft belief (value 0.4, one best move)
+    b = game.step(a, 3)  # a PROVEN entry: exact (value 1.0, two optimal moves)
+    book.put_estimate(game.canonical_key(a), 0.4, best_actions=(1 << 3), n=5)
+    book.put_proven(game.canonical_key(b), 1, best_actions=(1 << 3) | (1 << 4))
+    ex = book_distill_examples(game, book, [a, b], proof_copies=3, estimate_copies=1)
+    est = [e for e in ex if abs(e[2] - 0.4) < 1e-6]
+    prf = [e for e in ex if e[2] == 1.0]
+    assert len(est) == 1 and len(prf) == 3  # a proof outweighs a belief by whole-copy replication (no loss weights)
+    assert abs(est[0][1][3] - 1.0) < 1e-6  # estimate policy: all mass on its single best move (soft value kept: 0.4)
+    assert abs(prf[0][1][3] - 0.5) < 1e-6 and abs(prf[0][1][4] - 0.5) < 1e-6  # proof policy: uniform over the set
+
+
+def test_book_distill_examples_skips_uncovered_and_actionless_positions():
+    from harness.neural import book_distill_examples
+
+    game = _game()
+    torch.manual_seed(0)
+    book = Tablebase(cap=100)
+    covered = game.initial_state(random.Random(0))
+    uncovered = game.step(covered, 0)  # never booked → skipped
+    book.put_proven(game.canonical_key(covered), 0, best_actions=0)  # booked but NO best_actions → skipped
+    assert book_distill_examples(game, book, [covered, uncovered]) == []
+
+
+def test_train_alphazero_folds_in_book_distillation():
+    from harness.benchmark import sample_solvable_positions
+
+    game = _game()
+    torch.manual_seed(0)
+    states = sample_solvable_positions(game, 4, 6, seed=0)
+    book = Tablebase(cap=100)
+    for s in states:  # give each sampled opening position a book belief so distillation covers it
+        book.put_estimate(game.canonical_key(s), 0.2, best_actions=(1 << game.legal_actions(s)[0]), n=3)
+    net, hist = train_alphazero(
+        game, iterations=1, selfplay_games=1, sims=4, epochs=1, seed=0,
+        book=book, book_distill_positions=4, book_distill_min_moves=6,
+    )
+    assert isinstance(net, Connect4Net) and len(hist) == 1  # ran with book distillation folded into the anchor

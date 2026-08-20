@@ -3,7 +3,40 @@ import random
 import pytest
 
 from games.connect4 import Connect4
+from games.tictactoe import TicTacToe
 from harness.agents import HeuristicAgent, MctsAgent, RandomAgent, resolve_agent
+from harness.book import build_book
+from harness.tablebase import Tablebase
+
+
+def test_mcts_proven_returns_reads_the_book_as_an_exact_leaf():
+    game = TicTacToe()
+    book = Tablebase(cap=10_000)
+    build_book(game, book, max_plies=9, max_positions=100_000)  # a full PROVEN book
+    agent = MctsAgent(sims=4, book=book)
+    s = game.initial_state(random.Random(0))
+    r = agent._proven_returns(game, s)  # the empty board is a proven DRAW for ttt → zero-sum [0, 0]
+    assert r == [0.0, 0.0]
+    # a bookless, non-solving agent has no proof to lean on here → falls back to a rollout (None)
+    assert MctsAgent(sims=4)._proven_returns(game, s) is None
+
+
+def test_book_aware_mcts_plays_optimally_from_either_seat_with_few_sims():
+    # With every leaf a PROVEN exact value, the search backs up truth instead of noisy rollouts → optimal play
+    # from a tiny sim budget. On tic-tac-toe (a draw) the book-aware agent never loses from either seat.
+    game = TicTacToe()
+    book = Tablebase(cap=10_000)
+    build_book(game, book, max_plies=9, max_positions=100_000)
+    agent = MctsAgent(sims=6, book=book)
+    opp = RandomAgent()
+    rng = random.Random(3)
+    for seat in (0, 1):
+        for _ in range(20):
+            s = game.initial_state(rng)
+            while not game.is_terminal(s):
+                mover = game.current_player(s)
+                s = game.step(s, agent.act(game, s, rng) if mover == seat else opp.act(game, s, rng))
+            assert game.winner(s) != (1 - seat)  # the book-aware agent never loses
 
 
 def test_random_agent_only_plays_legal_moves():
@@ -151,3 +184,140 @@ def test_resolve_agent_builds_baselines_and_rejects_unknown():
         resolve_agent("nope", {})
     with pytest.raises(NotImplementedError):
         resolve_agent("champion:abc", {})
+
+
+# --- MCTS-Solver: proof PROPAGATION / SELECTION half (proven leaves already covered above) -----------------
+_C4_FIND_CACHE: dict = {}
+
+
+def _find_c4_position(game, empties, value):
+    """The first sampled connect4 position with exactly `empties` empty cells, exact mover value `value`, and (for
+    a win) NO immediate mate-in-1 — so the search cannot short-circuit and a proof must be DERIVED. Memoised so
+    two tests sharing a target scan only once."""
+    from games.connect4 import COLS, ROWS
+    from harness.benchmark import sample_solvable_positions
+
+    ck = (empties, value)
+    if ck in _C4_FIND_CACHE:
+        return _C4_FIND_CACHE[ck]
+    target_ply = COLS * ROWS - empties
+    found = None
+    for seed in range(200):
+        for s in sample_solvable_positions(game, n=4, min_moves=target_ply, seed=seed):
+            if sum(1 for v in s.board if v != 0) != target_ply:
+                continue
+            me = game.current_player(s)
+            if value > 0 and any(game.step(s, a).winner == me for a in game.legal_actions(s)):
+                continue
+            if game.position_value(s) != value:
+                continue
+            found = s
+            break
+        if found is not None:
+            break
+    _C4_FIND_CACHE[ck] = found
+    return found
+
+
+def _find_ttt_draw(game, empties):
+    """A ply-(9-empties) tic-tac-toe position that is a proven DRAW with no immediate win, so a fixed-`empties`
+    frontier below it forces the all-children (draw) branch of the solver."""
+    target_ply = 9 - empties
+    for seed in range(500):
+        r = random.Random(seed)
+        s = game.initial_state(r)
+        while sum(1 for v in s.board if v != 0) < target_ply and not game.is_terminal(s):
+            s = game.step(s, r.choice(game.legal_actions(s)))
+        if game.is_terminal(s) or sum(1 for v in s.board if v != 0) != target_ply:
+            continue
+        me = game.current_player(s)
+        if any(game.step(s, a).winner == me for a in game.legal_actions(s)):
+            continue
+        if game.position_value(s) == 0:
+            return s
+    return None
+
+
+def test_mcts_solver_proves_the_root_and_plays_the_winning_move():
+    from harness.agents import state_key
+    from harness.solver import optimal_columns
+
+    game = Connect4()
+    pos = _find_c4_position(game, empties=12, value=1)  # a proven win that is NOT a mate-in-1 → a proof must be derived
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    agent = MctsAgent(sims=60, solve_endgame=empties - 1)  # root (12 empty) NOT directly solved; children (11) are
+    move = agent.act(game, pos, random.Random(0))
+    assert agent._proven[state_key(game, pos)] == 1.0  # the root is now a DERIVED proof, not a mere high average
+    assert move in optimal_columns(pos)  # and the played move is game-theoretically optimal
+
+
+def test_mcts_solver_stops_searching_once_the_root_is_proven():
+    game = Connect4()
+    pos = _find_c4_position(game, empties=12, value=1)
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    agent = MctsAgent(sims=500, solve_endgame=empties - 1)
+    agent.act(game, pos, random.Random(0))
+    assert agent.sims_used < 100  # search terminated as soon as the win was proven, not after the full 500 budget
+
+
+def test_mcts_solver_propagates_a_proof_through_two_plies():
+    from harness.agents import state_key
+
+    game = Connect4()
+    pos = _find_c4_position(game, empties=8, value=1)  # a proven win, 8 empty cells
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    agent = MctsAgent(sims=400, solve_endgame=empties - 2)  # children (7 empty) NOT solvable; grandchildren (6) ARE
+    agent.act(game, pos, random.Random(0))
+    assert agent._proven[state_key(game, pos)] == 1.0  # the proof bubbled UP from solved grandchildren — leaves alone can't
+
+
+def test_mcts_solver_proves_a_drawn_root_when_every_child_resolves():
+    from harness.agents import state_key
+
+    game = TicTacToe()
+    pos = _find_ttt_draw(game, empties=4)  # a proven draw: no winning move, so the root proves only via ALL children
+    assert pos is not None
+    empties = sum(1 for v in pos.board if v == 0)
+    agent = MctsAgent(sims=200, solve_endgame=empties - 1)  # root not directly solved; every child is
+    agent.act(game, pos, random.Random(0))
+    assert agent._proven[state_key(game, pos)] == 0.0  # ALL children resolved → the root is proven a DRAW, not a win/loss
+
+
+def test_mcts_solver_matches_the_oracle_across_many_positions():
+    # Differential check against ground truth: on many DISTINCT winning midgame positions whose root is NOT directly
+    # solvable (children/grandchildren are), the propagated proof must make the played move game-theoretically
+    # OPTIMAL. A sign error or a bad all-children/short-circuit rule would misplay at least one of these.
+    from harness.benchmark import sample_solvable_positions
+    from harness.solver import optimal_columns
+
+    game = Connect4()
+    checked = 0
+    for seed in range(220):
+        for s in sample_solvable_positions(game, n=3, min_moves=30, seed=seed):
+            empties = sum(1 for v in s.board if v == 0)
+            if not (10 <= empties <= 13):
+                continue
+            me = game.current_player(s)
+            if any(game.step(s, a).winner == me for a in game.legal_actions(s)):
+                continue  # skip mate-in-1: the tactical guard, not a derived proof, would answer it
+            if game.position_value(s) != 1:
+                continue  # a proven WIN → propagation resolves it deterministically
+            agent = MctsAgent(sims=150, solve_endgame=empties - 2)  # root & children NOT solvable; grandchildren ARE
+            assert agent.act(game, s, random.Random(0)) in optimal_columns(s)
+            checked += 1
+            if checked >= 20:
+                return
+    assert checked >= 20  # the corpus really exercised the two-ply propagation path
+
+
+def test_mcts_without_book_or_solver_derives_no_proofs_so_reference_rungs_stay_pure():
+    game = Connect4()
+    pos = _find_c4_position(game, empties=8, value=1)
+    assert pos is not None
+    agent = MctsAgent(sims=200)  # pure rollout MCTS: no book, solve_endgame=0
+    agent.act(game, pos, random.Random(0))
+    assert agent._proven == {}  # the solver overlay is inert without a proof source
+    assert agent.sims_used == 200  # and it spends its FULL budget — no early proof termination

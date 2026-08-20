@@ -46,6 +46,22 @@ def _bits(cells):
 
 # --- instant: the bitboard primitives -------------------------------------------------------------------
 
+def test_mirror_matches_the_reference_column_swap_and_is_an_involution():
+    # The unrolled `_mirror` (hot-path optimisation) must be bit-identical to the plain column-swap reference,
+    # and a self-inverse — canonical_key correctness (and every deep solve) rides on it.
+    def ref(x):
+        m = 0
+        for c in range(solver.WIDTH):
+            m |= ((x >> (c * solver._H1)) & solver._COL_BITS) << ((solver.WIDTH - 1 - c) * solver._H1)
+        return m
+
+    rng = random.Random(0)
+    for _ in range(2000):
+        x = rng.getrandbits(solver.WIDTH * solver._H1)
+        assert solver._mirror(x) == ref(x)
+        assert solver._mirror(solver._mirror(x)) == x
+
+
 def test_alignment_detects_every_line_direction():
     assert solver._alignment(_bits([(0, 0), (1, 0), (2, 0), (3, 0)]))  # horizontal
     assert solver._alignment(_bits([(0, 0), (0, 1), (0, 2), (0, 3)]))  # vertical

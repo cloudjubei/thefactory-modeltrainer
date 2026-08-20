@@ -4192,7 +4192,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         }
       } else if (decision.action === 'build-book') {
         childType = 'build-book'
-        childParams = {}
+        // Per-project build config (e.g. the GRADED opening grind) from the manifest; empty → the seed-mode default.
+        childParams = { ...(manifest.bookBuild ?? {}) }
       } else if (decision.action === 'rate') {
         childType = 'rate-models'
         childParams = {}
@@ -4526,11 +4527,23 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (params.maxPlies != null) request.max_plies = params.maxPlies
     if (params.minPlies != null) request.min_plies = params.minPlies
     request.max_positions = params.maxPositions ?? 8000
+    if (params.maxEnumerate != null) request.max_enumerate = params.maxEnumerate
     request.deadline_seconds = params.deadlineSeconds ?? 120
+    // ROBUSTNESS default: cap every solve so one hard opening position is DEFERRED, not left to run for minutes and
+    // blow the pass — makes even a from-root grind safe to run inside a bounded activity. Parallelism stays opt-in.
+    request.max_position_seconds = params.maxPositionSeconds ?? 5
+    if (params.workers != null) request.workers = params.workers
     if (seedGames > 0) {
       request.seed_games = seedGames
       request.seed_plies = params.seedPlies ?? 28
     }
+    // GRADED mode (opt-in): grade the deep opening the exact solver can't reach with book-aware search estimates.
+    if (params.estimateGames != null && params.estimateGames > 0) {
+      request.estimate_games = params.estimateGames
+      if (params.estimateSims != null) request.estimate_sims = params.estimateSims
+      if (params.estimateSolveEndgame != null) request.estimate_solve_endgame = params.estimateSolveEndgame
+    }
+    if (params.maxExactEmpty != null) request.max_exact_empty = params.maxExactEmpty
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({
       jobId: `build-book-${recordType}-${game}`,
