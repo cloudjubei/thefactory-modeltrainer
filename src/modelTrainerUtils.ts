@@ -2857,9 +2857,17 @@ export function deriveAutopilotSignals(input: {
     (c) => (input.completedRunCountByCore[c] ?? 0) < input.minScreenRuns,
   )
   const hasStartingPoint = Object.values(input.completedRunCountByCore).some((n) => n > 0)
+  // "This Start's improve round is complete" — the gate that lets the autopilot advance from improve to FINALIZE
+  // (build-book / rate / play-off). True once a fresh improve ran AND the champion hit a per-Start terminal:
+  // 'plateau'/'reached-target' (converged) OR 'budget' (spent its per-launch generation allotment). 'budget' MUST
+  // count, or a champion that keeps making weak promotions never plateaus, stops on 'budget' every launch, and the
+  // autopilot re-selects improve every round — monopolising the Start so it never produces the book/rating/play-off
+  // the user actually wants. The warm-start ladder persists, so the NEXT Start resumes improving from where it left.
   const championPlateaued =
     !!input.improvedThisRun &&
-    (input.championStopReason === 'plateau' || input.championStopReason === 'reached-target')
+    (input.championStopReason === 'plateau' ||
+      input.championStopReason === 'reached-target' ||
+      input.championStopReason === 'budget')
   return {
     unscreenedCores,
     searchConverged: input.explorationConverged,

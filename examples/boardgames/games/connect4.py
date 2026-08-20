@@ -121,7 +121,7 @@ class Connect4:
         thing). A game with no symmetry returns just the identity."""
         return [list(range(COLS)), list(range(COLS - 1, -1, -1))]
 
-    # --- SolvableGame hooks (the per-game parts the book engine needs; see docs/optimal-play-trainer-plan.md) ---
+    # --- SolvableGame hooks (the per-game parts the book engine needs; see docs/implementation-plan.md (§C.5)) ---
     def ply(self, state: C4State) -> int:
         """Stones placed — the frontier depth the book builder orders by (deepest, cheapest, first)."""
         return sum(1 for v in state.board if v != 0)

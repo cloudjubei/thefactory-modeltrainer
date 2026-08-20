@@ -5356,10 +5356,16 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
     ).toBe(false)
     expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(false)
     expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(false)
-    // budget / aborted are never a plateau, even after an attempt.
+    // 'budget' (the per-launch generation allotment is spent) ALSO ends this Start's improve round — so a champion
+    // that never plateaus can't monopolise the Start; the autopilot advances to finalize (build-book/rate/play-off)
+    // and the next Start resumes the warm-start ladder. (Only counts after a fresh attempt THIS run.)
     expect(
       deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: true }).championPlateaued,
+    ).toBe(true)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: false }).championPlateaued,
     ).toBe(false)
+    // 'aborted' is never a terminal that finalizes — the autopilot loop handles abort by breaking out.
     expect(
       deriveAutopilotSignals({ ...input, championStopReason: 'aborted', improvedThisRun: true }).championPlateaued,
     ).toBe(false)

@@ -1,5 +1,5 @@
 """A persistent, game-AGNOSTIC solved-position store — the opening-book / endgame-tablebase backing that makes
-a solved game *computably* optimal (see docs/optimal-play-trainer-plan.md).
+a solved game *computably* optimal (see docs/implementation-plan.md (§C.5)).
 
 It knows nothing about any game: a game supplies canonical integer keys (symmetry-reduced) and the values'
 meaning (e.g. a game-theoretic score, or a search bound). Bounded with PRIORITY eviction — when full, the
