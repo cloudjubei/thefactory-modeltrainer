@@ -27,15 +27,16 @@ from harness.registry import personas_for, resolve_game
 WIN_THRESHOLD = 0.55  # a rung is "cleared" at ≥ this score; the first rung below it stops the climb
 
 
-def _rung_factory(rung: dict, game: Game) -> Callable[[], Agent]:
-    """A fresh-per-game agent factory for one reference rung."""
+def _rung_factory(rung: dict, game: Game, max_sims: int | None = None) -> Callable[[], Agent]:
+    """A fresh-per-game agent factory for one reference rung. `max_sims` caps the search rungs (mcts) so a rating
+    pass stays fast — the MODEL under test is never capped (it is rated at full strength)."""
     kind = rung.get("kind")
     if kind == "random":
         return lambda: RandomAgent()
     if kind == "heuristic":
         return lambda: HeuristicAgent()
     if kind == "mcts":
-        sims = int(rung.get("sims", 120))
+        sims = _cap_sims(int(rung.get("sims", 120)), max_sims)
         return lambda: MctsAgent(sims=sims)
     if kind == "oracle":
         from harness.solver import NearPerfectOracle
@@ -118,12 +119,13 @@ def climb_spine(
     base_seed: int,
     opening_plies: int,
     model_idx: int,
+    max_sims: int | None = None,
 ) -> list[dict]:
     """Climb the (rating-sorted, weakest-first) spine; stop after the first rung the model fails to clear."""
     pairings: list[dict] = []
     for i, rung in enumerate(rungs):
         rng = random.Random(base_seed * 100003 + model_idx * 101 + i)
-        res = head_to_head(game, model_factory, _rung_factory(rung, game), n, rng, opening_plies=opening_plies)
+        res = head_to_head(game, model_factory, _rung_factory(rung, game, max_sims), n, rng, opening_plies=opening_plies)
         score = res["win_rate"] + 0.5 * res["draw_rate"]
         # camelCase keys: this output IS the engine's RatingPairing[] contract (fed to fitRatingFromPairings).
         pairings.append(
@@ -146,11 +148,12 @@ def run_gauntlet(request: dict) -> dict:
     n = int(request.get("games_per_rung", 40))
     base_seed = int(request.get("base_seed", 0))
     opening_plies = int(request.get("opening_plies", 4))
+    max_sims = int(request["max_sims"]) if request.get("max_sims") else None  # caps the mcts RUNGS, not the model
     ratings: list[dict] = []
     for idx, model in enumerate(request.get("models", [])):
         model_id = str(model.get("id", idx))
         try:
-            pairings = climb_spine(game, _model_factory(model, game), rungs, n, base_seed, opening_plies, idx)
+            pairings = climb_spine(game, _model_factory(model, game), rungs, n, base_seed, opening_plies, idx, max_sims)
             ratings.append({"model_id": model_id, "pairings": pairings, "rungs_played": len(pairings)})
         except Exception as e:
             ratings.append({"model_id": model_id, "error": str(e)})

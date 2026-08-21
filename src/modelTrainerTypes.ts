@@ -431,6 +431,31 @@ export interface TrainerManifest {
    */
   bookBuild?: Record<string, number>
   /**
+   * Per-Start configuration for the autopilot's IMPROVE step (the champion round). Keeps Start interactive by
+   * bounding one round: `maxGenerations` generations (default light), optional `patience`/`targetStrength`, and
+   * `hyperparams` — the per-generation training levers (e.g. `{ az_iterations, az_selfplay_games, az_sims,
+   * az_distill_games, eval_games }`) — usually LIGHTER than the manifest defaults so a Start finishes improve fast
+   * and proceeds to finalize (build-book / rate / play-off). The warm-start ladder still compounds across Starts.
+   * An explicit `improveParams` passed to the autopilot overrides this. Omit for the full-budget default.
+   */
+  improve?: {
+    maxGenerations?: number
+    patience?: number
+    targetStrength?: number
+    hyperparams?: Record<string, number>
+  }
+  /**
+   * Per-Start configuration for the autopilot's RATE step (the comparable-strength gauntlet). Bounds it so a
+   * project with hundreds of accumulated checkpoints doesn't rate them ALL against the full spine (369 models × 7
+   * rungs × 40 games is many hours): `maxModels` rates the most-recent N, `gamesPerRung` fewer games, and
+   * `maxReferenceSims` caps the mcts reference rungs (the model under test is always rated at full strength).
+   */
+  rate?: {
+    maxModels?: number
+    gamesPerRung?: number
+    maxReferenceSims?: number
+  }
+  /**
    * Fixed rating ANCHORS for the comparable-strength leaderboard: a map from a known reference opponent (an
    * `opponent` lever value like `random`/`heuristic`/`mcts`, or a metric-implied reference like `mcts_strong`
    * for a run's `win_rate_vs_strong_mcts`) to its FROZEN rating on the shared Elo-like scale. Frozen so the
@@ -2139,6 +2164,11 @@ export interface RateModelsParams {
   runKeys?: string[]
   /** Games per rung (default 40). */
   gamesPerRung?: number
+  /** Cap the number of models rated (the MOST RECENT are kept) — bounds the gauntlet so a project with hundreds of
+   * accumulated checkpoints doesn't rate them all (369 models × 7 rungs × 40 games is hours). 0 / omit = all. */
+  maxModels?: number
+  /** Cap the SIMS of the reference-mcts rungs (e.g. clamp an mcts@1000 rung to 300) so a rating pass stays fast. */
+  maxReferenceSims?: number
   baseSeed?: number
   openingPlies?: number
   computeTarget?: string

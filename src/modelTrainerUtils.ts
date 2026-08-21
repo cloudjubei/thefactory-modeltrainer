@@ -375,6 +375,36 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest bookBuild values must all be numbers')
     }
   }
+  if (m.improve !== undefined) {
+    if (typeof m.improve !== 'object' || m.improve === null || Array.isArray(m.improve)) {
+      throw new Error('trainer manifest improve must be an object of autopilot improve knobs')
+    }
+    const imp = m.improve as Record<string, unknown>
+    if (imp.hyperparams !== undefined) {
+      if (typeof imp.hyperparams !== 'object' || imp.hyperparams === null || Array.isArray(imp.hyperparams)) {
+        throw new Error('trainer manifest improve.hyperparams must be an object of numeric levers')
+      }
+      if (Object.values(imp.hyperparams as Record<string, unknown>).some((v) => typeof v !== 'number')) {
+        throw new Error('trainer manifest improve.hyperparams values must all be numbers')
+      }
+    }
+    for (const k of ['maxGenerations', 'patience', 'targetStrength']) {
+      if (imp[k] !== undefined && typeof imp[k] !== 'number') {
+        throw new Error(`trainer manifest improve.${k} must be a number`)
+      }
+    }
+  }
+  if (m.rate !== undefined) {
+    if (typeof m.rate !== 'object' || m.rate === null || Array.isArray(m.rate)) {
+      throw new Error('trainer manifest rate must be an object of gauntlet knobs')
+    }
+    const rt = m.rate as Record<string, unknown>
+    for (const k of ['maxModels', 'gamesPerRung', 'maxReferenceSims']) {
+      if (rt[k] !== undefined && typeof rt[k] !== 'number') {
+        throw new Error(`trainer manifest rate.${k} must be a number`)
+      }
+    }
+  }
   if (m.ratingAnchors !== undefined) {
     if (typeof m.ratingAnchors !== 'object' || Array.isArray(m.ratingAnchors)) {
       throw new Error('trainer manifest ratingAnchors must be an object of opponent → rating')

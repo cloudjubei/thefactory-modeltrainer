@@ -836,6 +836,72 @@ it is solved.
   (bounded ~120s, resumable), feeding the soft-distillation targets. Smoke-verified: the exact config adds ESTIMATE
   entries for the deep opening under a short deadline with no hang. (Requires the backend restart to load the new
   dist, per the usual convention.)
+- **Autopilot INTERACTIVITY — Start now cycles end-to-end in minutes (2026-08-21, TS + backend + gauntlet.py, TDD).**
+  A 12h+ Start exposed three stalls, all fixed so `Start` reliably reaches its results: (1) **endless improve** —
+  `deriveAutopilotSignals` treated only `plateau`/`reached-target` as improve-done, so a champion that never
+  plateaus (weak-promotion churn stops on `'budget'`) made the autopilot re-select improve every round forever
+  (reached champion gen 60 without finalizing); now `'budget'` (the per-launch generation allotment spent) also ends
+  the round → finalize. (2) **40-min improve generations** — the champion used the heavy manifest defaults; a new
+  manifest `improve` field (`{maxGenerations, patience?, targetStrength?, hyperparams}`) gives the autopilot a
+  bounded LIGHT budget (boardgames: 1 gen, az_iterations 2 / selfplay 8 / sims 80 / distill_games 16 / eval 20 →
+  **~2 min/gen measured** vs ~40). (3) **9.5h rate step** — `rateModels` rated ALL **369** accumulated checkpoints ×
+  7 rungs × 40 games incl. mcts@1000 / oracle@12; new manifest `rate` field + `RateModelsParams` bound it to the
+  most-recent `maxModels` (16) with fewer `gamesPerRung` (12) and `maxReferenceSims` capping the mcts RUNGS
+  (gauntlet.py `_rung_factory(max_sims)`; the model stays full-strength). Plus a viewer **Stop** button that aborts
+  every live activity the process is running (parent autopilot + wedged children) — the panel had no way to stop
+  itself. All three configs are manifest-driven (validated) and the autopilot's improve/rate children read them.
+- **Results HONESTY — play-off numbers were noise + crowned the wrong player (2026-08-21, verified).** The play-off
+  ran `gamesPerPair=4`, so BOTH the head-to-head win% AND the optimality verdict (`m = min(n,12)` = 4 games as P1
+  vs a DEPTH-6 oracle) were statistical noise — a champion goes 4/4 by opening luck and gets a "✓ optimal" badge.
+  VERIFIED at 30 games/pair (m=12): a real champion scores **0/12 as P1 vs the depth-6 oracle → suboptimal**, so
+  the user's `alphazero·d1f978` "✓ optimal" was a 4-game fluke. And the viewer crowned "🏆 True winner (most games
+  won)" = the highest round-robin win% (a non-optimal mcts), which for a SOLVED game (seat-noisy random openings) is
+  the wrong arbiter. FIXES: (1) `gamesPerPair` default 4→**12** (reliable win% + m=12 optimality); (2) viewer
+  `renderPlayoffResults` ranks by OPTIMALITY first (converts the first-player win) then head-to-head, crowns the
+  optimal player (not the win% leader), shows sample sizes, and reconciles the three views — play-off *Optimal?*
+  (the arbiter for a solved game), head-to-head *win%* (seat-noisy, secondary), Models *Strength* (a separate
+  continuous gauntlet scale); (3) never overclaim — "✓ optimal vs oracle" → "converts the first-player win (beats
+  the depth-N reference as P1, n games)"; the `book (optimal)` competitor → `book (exact where solved)` (its opening
+  coverage is ~0%, so it is endgame-exact, not optimal). Self-play first-player-win is framed as CORROBORATING
+  optimality, not proving it (a strong-imperfect P1 can also reach 100%).
+
+#### SOLVE-IT PLAN — get a MODEL that plays Connect 4 perfectly (2026-08-21)
+
+The game is solved (proven first-player win; we have an exact solver). What is NOT done: a trained MODEL that plays
+perfectly. Honest current state — NO model has been tested against, let alone beaten, the EXACT solver; optimality
+was only ever measured vs a depth-6 PROXY (weak, beatable in the opening); the opening book is 0% covered.
+
+**Definition of SOLVED (measurable, no proxies):** a model M is optimal iff, as FIRST player from the empty board,
+it beats the EXACT solver (perfect defender) in 100% of games — it converts the proven first-player win against
+perfect play. Corroborated by: M's entire main line is proven-optimal (`optimality_verified_plies` = full game,
+`first_blunder_ply` = none) and, as second player, M never loses a position that is a draw/win under perfect play.
+Headline metric: `wins_as_p1_vs_EXACT_oracle == 1.0`.
+
+**Phase 1 — HONEST MEASUREMENT (the optimality ladder).** (1) Make the play-off/optimality oracle configurable up
+to the EXACT solver (`OracleAgent`), label it "oracle (exact)"; the viewer already gates the ✓/"solved" verdict on
+an exact label (never on a proxy). (2) The LADDER: test M vs depth 6→8→10→12→exact, report the deepest rung it
+clears (its "optimality frontier"). (3) `optimality_verified_plies` on M's ACTUAL line vs the EXACT reference — the
+honest distance-to-solved. Cost: exact-oracle games are minutes/move from the opening → keep the round-robin on the
+fast proxy, run the EXACT P1-conversion check on few games only.
+
+**Phase 2 — MAKE THE MODEL PERFECT (the winning-strategy grind, not the whole space).** The first-player win lives
+in the opening (ply 0-~14). KEY INSIGHT: don't prove ALL ≤14-ply positions — prove the WINNING-STRATEGY TREE (our
+optimal move at each of our nodes + EVERY opponent reply we must answer), a bounded subtree the exact solver walks
+from the root down. (a) Grind that PV+refutations tree into the book (the parallel, deadline-safe accumulator, from
+the endgame back). Tracked by opening `provenFraction` climbing 0%→100% of the reachable winning line. (b) Teach
+the model: a book-aware agent plays the proven strategy + exact endgames immediately (a perfect but lookup-bound
+player); DISTILL the proven `best_actions` into the NET so it plays the perfect opening FAST without lookup (the
+soft-target wiring). (c) VERIFY vs the exact solver as P1 → 100% = solved.
+
+**Phase 3 — the real win + generalisation.** A distilled NET (fast, no lookup) that beats the exact solver as P1 =
+a fast perfect model — the ML result the slow solver can't give. The processes (exact reference, verified-plies,
+proof accumulation, distillation, the optimality ladder, "not-yet" honesty) generalise to unsolved games (chess:
+no exact oracle, but a strong reference + verified-plies + self-improvement + honest reporting are the same
+machinery). Getting it RIGHT on Connect 4, where we hold ground truth, validates the process before scaling.
+
+**Milestones (measurable, NONE done yet):** M0 exact-oracle ladder + verified-plies-vs-exact (the next step) · M1
+winning-strategy book `provenFraction` 0%→100% (the grind) · M2 book-aware agent converts P1 vs EXACT solver
+50%→100% · M3 distilled NET converts P1 vs EXACT solver = 100% → SOLVED. Bottleneck is M1; the rest follows.
 
 NEXT: run it — press Start in Exploration and watch opening coverage + the graded book grow across Starts; the
 exact-proof accumulator (option 2, parallel band solver) remains available via `bookBuild` for a proofs-first pass.

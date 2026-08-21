@@ -839,6 +839,21 @@ describe('validateTrainerManifest', () => {
     expect(() => validateTrainerManifest({ ...manifest(), bookBuild: { maxPlies: 'deep' } })).toThrow(/bookBuild/)
   })
 
+  it('accepts an improve config (bounded budget + numeric hyperparams) and rejects malformed ones', () => {
+    const good = { maxGenerations: 1, hyperparams: { az_iterations: 2, az_sims: 80 } }
+    expect(validateTrainerManifest({ ...manifest(), improve: good }).improve).toEqual(good)
+    expect(() => validateTrainerManifest({ ...manifest(), improve: [1] })).toThrow(/improve/)
+    expect(() => validateTrainerManifest({ ...manifest(), improve: { maxGenerations: 'lots' } })).toThrow(/improve/)
+    expect(() => validateTrainerManifest({ ...manifest(), improve: { hyperparams: { az_sims: 'many' } } })).toThrow(/improve/)
+  })
+
+  it('accepts a rate config (bounded gauntlet knobs) and rejects malformed ones', () => {
+    const good = { maxModels: 16, gamesPerRung: 12, maxReferenceSims: 300 }
+    expect(validateTrainerManifest({ ...manifest(), rate: good }).rate).toEqual(good)
+    expect(() => validateTrainerManifest({ ...manifest(), rate: [1] })).toThrow(/rate/)
+    expect(() => validateTrainerManifest({ ...manifest(), rate: { maxModels: 'all' } })).toThrow(/rate/)
+  })
+
   it('rejects a missing name', () => {
     expect(() => validateTrainerManifest({ ...manifest(), name: '' })).toThrow(/name/)
   })

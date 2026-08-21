@@ -65,6 +65,15 @@ def test_model_factory_does_not_raise_sims_below_max():
     assert agent.sims == 40  # cap only lowers a too-expensive model, never inflates a cheap one
 
 
+def test_rung_factory_caps_the_mcts_reference_rung_sims():
+    # A bounded rate pass caps the reference RUNGS (the mcts spine) so a rating pass stays fast — the model under
+    # test is rated at full strength; only the opponents are slowed down.
+    game = Connect4()
+    rung = {"id": "mcts1000", "kind": "mcts", "sims": 1000, "rating": 1400}
+    assert _rung_factory(rung, game, max_sims=300)().sims == 300
+    assert _rung_factory(rung, game)().sims == 1000  # uncapped by default (the full gauntlet path)
+
+
 def test_climb_stops_after_the_first_rung_it_fails_to_clear():
     game = Connect4()
     pairings = climb_spine(game, lambda: HeuristicAgent(), SPINE, n=6, base_seed=0, opening_plies=4, model_idx=0)

@@ -4184,7 +4184,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       let childParams: Record<string, unknown>
       if (decision.action === 'improve') {
         childType = 'train-champion'
-        childParams = { ...(params.improveParams ?? {}) }
+        // Manifest `improve` sets a bounded, usually-light per-Start budget (so improve finishes fast and Start
+        // reaches finalize); an explicit improveParams overrides it.
+        childParams = { ...(manifest.improve ?? {}), ...(params.improveParams ?? {}) }
       } else if (decision.action === 'screen') {
         childType = 'train'
         childParams = {
@@ -4196,7 +4198,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         childParams = { ...(manifest.bookBuild ?? {}) }
       } else if (decision.action === 'rate') {
         childType = 'rate-models'
-        childParams = {}
+        // Manifest `rate` bounds the gauntlet (most-recent N models, fewer games, capped reference sims) so the
+        // rate step stays interactive instead of rating every accumulated checkpoint against the full spine.
+        childParams = { ...(manifest.rate ?? {}) }
       } else if (decision.action === 'play-off') {
         childType = 'tournament'
         childParams = {}
@@ -4301,15 +4305,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const spine = manifest.ratingSpine
     if (!spine?.length) throw new Error('this training project declares no "ratingSpine"')
     const gamesPerRung = params.gamesPerRung ?? 40
+    const maxModels = params.maxModels ?? 0
 
     // Collect the completed runs to rate — those with a checkpoint the gauntlet can play.
     const allRuns = await deps.storage.listRecords({ scope: params.scope, type: recordType })
     const wanted = params.runKeys ? new Set(params.runKeys) : undefined
-    const models: Array<{ id: string; checkpoint: string; modelName?: string; game?: string }> = []
+    const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+    let models: Array<{ id: string; checkpoint: string; ts: number; modelName?: string; game?: string }> = []
     let skipped = 0
     for (const r of allRuns) {
       const c = r.content as
-        | { status?: string; artifacts?: { checkpoint?: string }; config?: { model_name?: string; game?: string } }
+        | {
+            status?: string
+            artifacts?: { checkpoint?: string }
+            config?: { model_name?: string; game?: string }
+            finishedAt?: number
+            updatedAt?: number
+            startedAt?: number
+            ranAt?: number
+          }
         | undefined
       if (!c || c.status !== 'completed' || r.key == null) continue
       if (wanted && !wanted.has(r.key)) continue
@@ -4321,9 +4335,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       models.push({
         id: r.key,
         checkpoint,
+        ts: num(c.finishedAt) || num(c.updatedAt) || num(c.ranAt) || num(c.startedAt),
         ...(c.config?.model_name ? { modelName: c.config.model_name } : {}),
         ...(c.config?.game ? { game: c.config.game } : {}),
       })
+    }
+    // Bound the gauntlet: rate the MOST RECENT `maxModels` (the latest champion generations you care about), not
+    // every accumulated checkpoint — the difference between a ~minutes pass and a multi-hour one.
+    if (maxModels > 0 && models.length > maxModels) {
+      models = [...models].sort((a, b) => b.ts - a.ts).slice(0, maxModels)
     }
     if (!models.length) {
       await writeLeaderboard(params.scope, recordType, [], spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
@@ -4345,6 +4365,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       games_per_rung: gamesPerRung,
       base_seed: params.baseSeed ?? 0,
       opening_plies: params.openingPlies ?? 4,
+      ...(params.maxReferenceSims && params.maxReferenceSims > 0 ? { max_sims: params.maxReferenceSims } : {}),
     }
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({
@@ -4387,7 +4408,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     if (!manifest.tournament) throw new Error('this training project declares no "tournament" command')
-    const gamesPerPair = params.gamesPerPair ?? 4
+    // 12 games/pair (was 4): the optimality check plays min(n,12) games as P1 vs the oracle, so a too-small n makes
+    // BOTH the win% AND the "converts the first-player win" verdict noise — a model can go 4/4 by opening luck.
+    const gamesPerPair = params.gamesPerPair ?? 12
     const includeReferences = params.includeReferences ?? true
     const includeOracle = params.includeOracle ?? true
     const topN = params.topN ?? 2
@@ -4450,11 +4473,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         } else if (rung.kind === 'heuristic') competitors.push({ id: rung.id, label: 'heuristic', model_name: 'heuristic' })
         else if (rung.kind === 'random') competitors.push({ id: rung.id, label: 'random', model_name: 'random' })
         else if (rung.kind === 'book') {
-          // The deployable optimal agent (opening book + exact endgame + near-perfect fallback). Including it as
-          // a competitor lets the play-off CROWN an optimal-play reference and measure everyone's distance to it.
+          // The deployable book agent (opening book + exact endgame + near-perfect fallback). It is exact only
+          // WHERE it has coverage (endgames always; the opening only as the book fills), so it is NOT labelled
+          // "optimal" — the optimality column measures whether it actually converts the first-player win.
           competitors.push({
             id: rung.id,
-            label: 'book (optimal)',
+            label: 'book (exact where solved)',
             model_name: 'book',
             ...(rung.book_solve_endgame != null ? { book_solve_endgame: rung.book_solve_endgame } : {}),
             ...(rung.depth != null ? { oracle_depth: rung.depth } : {}),

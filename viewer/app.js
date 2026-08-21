@@ -3830,6 +3830,29 @@ async function autopilotActivityRunning(state) {
     return false
   }
 }
+// The ids of EVERY live activity the "Find the best model" process is running — the parent `autopilot` task AND
+// any child it drives (train-champion / train / explore / build-book / rate-models / tournament). The Stop button
+// aborts them all: cancelling only child experiments (or aborting just the parent) can leave a wedged child
+// running, which is why the panel can stay stuck on "Running…". Returns [] on error / nothing live.
+async function liveAutopilotActivityIds() {
+  try {
+    const res = await window.OverseerBridge.listActivities()
+    const all = (res && res.activities) || []
+    const rt = manifest.recordType
+    const types = ['autopilot', 'train-champion', 'explore', 'train', 'build-book', 'rate-models', 'tournament']
+    return all
+      .filter(
+        (a) =>
+          types.includes(quickActivityType(a)) &&
+          (!a.recordType || a.recordType === rt) &&
+          ['running', 'starting', 'queued'].includes(a.status),
+      )
+      .map((a) => a.activityId || a.id)
+      .filter(Boolean)
+  } catch {
+    return []
+  }
+}
 const AUTOPILOT_STEP_LABEL = {
   screen: 'Screening a new architecture',
   search: 'Searching the config space',
@@ -3920,14 +3943,35 @@ async function renderAutopilotPanel() {
     status =
       `<div class="ap-hint">Press Start — one process drives the whole thing: screen any new architecture, search the config space, improve the champion, then produce your results (extend the optimal-play book, rate the models, run the play-off). It stops only when there's nothing left without your input.</div>`
   }
+  // When running, offer a STOP that aborts the WHOLE process — every live activity it drives (parent autopilot +
+  // any wedged child), since cancelling child experiments alone can leave the panel stuck on "Running…".
+  const stopIds = running ? await liveAutopilotActivityIds() : []
+  const stopBtn = stopIds.length
+    ? `<button type="button" class="ghost-btn" id="autopilot-stop"${helpAttr('Stop “Find the best model” — aborts the running autopilot and every step it is running.')}>Stop</button>`
+    : ''
   host.innerHTML =
     `<div class="ap-panel">` +
     `<div class="ap-head">Find the best model</div>` +
-    `<div class="ap-cta"><button type="button" class="ap-btn" id="autopilot-start"${active ? ' disabled' : ''}>${autopilotLaunching ? 'Starting…' : running ? 'Running…' : 'Start'}</button></div>` +
+    `<div class="ap-cta"><button type="button" class="ap-btn" id="autopilot-start"${active ? ' disabled' : ''}>${autopilotLaunching ? 'Starting…' : running ? 'Running…' : 'Start'}</button>${stopBtn}</div>` +
     status +
     `</div>`
   const btn = byId('autopilot-start')
   if (btn) btn.onclick = onStartAutopilot
+  const sBtn = byId('autopilot-stop')
+  if (sBtn)
+    sBtn.onclick = async () => {
+      sBtn.disabled = true
+      showToast('Stopping…')
+      for (const id of stopIds) {
+        try {
+          await abortActivityById(id)
+        } catch {
+          /* best-effort: abort as many as we can */
+        }
+      }
+      invalidateActivitiesCache()
+      await renderAutopilotPanel()
+    }
 }
 async function onStartAutopilot() {
   if (autopilotLaunching) return
@@ -5118,32 +5162,86 @@ async function bookCoverageNote() {
   const estNote = estFrac > 0.0005 ? `, ${(estFrac * 100).toFixed(1)}% graded estimates` : ''
   return `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is booked — ${(provenFrac * 100).toFixed(1)}% proven-exact${estNote} (${rec.total || 0} positions); endgames are always exact. The autopilot grows this each Start.</div>`
 }
-function poVerdictBadge(o) {
-  if (!o) return ''
-  const pct = Math.round((o.wins_as_p1_vs_oracle || 0) * 100)
-  if (o.verdict === 'optimal') return `<span class="po-badge po-optimal">✓ optimal vs oracle</span>`
-  if (o.verdict === 'near-optimal') return `<span class="po-badge po-near">≈ ${pct}% wins as P1 vs oracle</span>`
-  return `<span class="po-badge po-sub">${pct}% wins as P1 vs oracle</span>`
+function poOptCell(o) {
+  if (!o) return '<span class="card-sub">—</span>'
+  if (o.verdict === 'optimal') return '<span class="po-badge po-optimal">✓</span>'
+  if (o.verdict === 'near-optimal') return '<span class="po-badge po-near">≈</span>'
+  return '<span class="po-badge po-sub">✗</span>'
 }
 function labelOfCompetitor(rec, id) {
   const c = (rec.competitors || []).find((x) => x.id === id)
   return (c && c.label) || id
 }
-// The completed-play-off body: standings + optimality + move-advantage + self-play + the win matrix.
-function renderPlayoffResults(rec) {
-  const winner = rec.standings.find((s) => s.id !== 'oracle') || rec.standings[0]
-  const standings = rec.standings
-    .map((s) => {
-      const opt = rec.optimality && rec.optimality[s.id]
-      const isWinner = winner && s.id === winner.id
-      return `<tr class="${isWinner ? 'po-winner' : ''}">
-        <td class="num">${s.rank}</td>
-        <td>${escapeHtml(s.label)}${s.id === 'oracle' ? ' <span class="po-ref">endgame-exact reference</span>' : ''}</td>
+// The completed-play-off body. For a SOLVED game, "best" = plays optimally (converts the first-player win). The
+// table is RANKED by that arbiter column (Converts P1), so the rank tracks a single monotonic number; head-to-head
+// win% and Strength are separate, secondary columns. Per-row context (n, reference) lives in the HEADERS, not cells.
+function renderPlayoffResults(rec, strengthMap) {
+  const oracleComp = (rec.competitors || []).find((c) => c.id === 'oracle')
+  const oracleDepth = oracleComp ? (oracleComp.label.match(/depth (\d+)/) || [])[1] || null : null
+  const refLabel = oracleDepth ? `the depth-${oracleDepth} reference` : 'the reference'
+  const refShort = oracleDepth ? `d${oracleDepth} ref` : 'ref'
+  const optOf = (id) => (rec.optimality && rec.optimality[id]) || null
+  const p1rate = (id) => {
+    const o = optOf(id)
+    return o ? o.wins_as_p1_vs_oracle || 0 : -1
+  }
+  const optN = (() => {
+    const f = Object.values(rec.optimality || {})[0]
+    return f ? f.games || 0 : 0
+  })()
+  const isOptimal = (id) => {
+    const o = optOf(id)
+    return !!(o && o.verdict === 'optimal')
+  }
+  const gpp = rec.gamesPerPair || 0
+  // Rank by the ARBITER: how well it converts the first-player win (as P1 vs the reference), then head-to-head as
+  // the tie-break — so the Converts-P1 column decreases monotonically down the ranks (the user's request).
+  const ranked = rec.standings
+    .filter((s) => s.id !== 'oracle') // the oracle is the yardstick, not a ranked competitor
+    .slice()
+    .sort((a, b) => p1rate(b.id) - p1rate(a.id) || b.scorePerMatch - a.scorePerMatch)
+  const winner = ranked[0]
+  // "Optimal" / "solved" is ONLY claimable against the EXACT solver (perfect play). The play-off's reference is a
+  // depth-limited PROXY unless its label says "exact", so a high Converts-P1 here is progress, never proof.
+  const oracleIsExact = !!(oracleComp && /exact/i.test(oracleComp.label))
+  const winnerSolved = winner && oracleIsExact && isOptimal(winner.id)
+  const winnerP1 = winner ? Math.round(p1rate(winner.id) * 100) : 0
+  const selfP1 = winner ? Math.round((rec.selfPlay && rec.selfPlay[winner.id] ? rec.selfPlay[winner.id].first_player_win_rate || 0 : 0) * 100) : 0
+  const verdictLine = !winner
+    ? '—'
+    : winnerSolved
+      ? `🏆 <strong>${escapeHtml(winner.label)}</strong> plays Connect 4 OPTIMALLY — it beats the EXACT solver as first player (converts the proven first-player win against perfect play). This model has solved it.`
+      : `<strong>Goal: a model that plays Connect 4 perfectly</strong> — i.e. beats the EXACT solver as first player. <strong>No model has been shown to do that.</strong> Progress leader: <strong>${escapeHtml(winner.label)}</strong> — converts ${winnerP1}% of the first-player win vs ${refLabel}${selfP1 ? ` (${selfP1}% as P1 in self-play)` : ''}. ⚠ ${oracleIsExact ? 'still short of 100% vs the exact solver' : `depth-${oracleDepth || '?'} is a weak PROXY (beatable in the opening) — this is progress, NOT proof`}.`
+  // Strength = MEASURED rating only (from the gauntlet). Reference rungs DEFINE the scale by a fixed anchor — that
+  // is an assumption, not a measurement (e.g. book's anchor assumes full coverage it doesn't have), so we don't
+  // print it as this book's strength. That was the "1900 book loses to 965 alphazero" nonsense.
+  const strengthOf = (id) => (strengthMap && strengthMap.has(id) ? Math.round(strengthMap.get(id)) : null)
+  const standings = ranked
+    .map((s, i) => {
+      const o = optOf(s.id)
+      const p1 = o ? `${Math.round((o.wins_as_p1_vs_oracle || 0) * 100)}%` : '—'
+      const optCell = !o ? '<span class="card-sub">—</span>' : oracleIsExact ? poOptCell(o) : '<span class="card-sub" title="untested — the reference here is a depth-limited proxy, not the exact solver">proxy</span>'
+      const str = strengthOf(s.id)
+      return `<tr class="${s.id === winner.id ? 'po-winner' : ''}">
+        <td class="num">${i + 1}</td>
+        <td>${escapeHtml(s.label)}</td>
+        <td class="num">${optCell}</td>
+        <td class="num">${p1}</td>
         <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
-        <td>${poVerdictBadge(opt)}</td>
+        <td class="num">${str != null ? str : '<span class="card-sub">—</span>'}</td>
       </tr>`
     })
     .join('')
+  const tableHead =
+    `<tr><th class="num">#</th><th>Competitor</th>` +
+    `<th class="num" ${helpAttr('Proven OPTIMAL = beats the EXACT solver as first player. This play-off used a depth-limited PROXY, so optimality is untested ("proxy"). Raise the oracle to the exact solver to turn this into a real ✓/✗.')}>Optimal?<br>(vs exact)</th>` +
+    `<th class="num" ${helpAttr(`How often it beats the depth-${oracleDepth || '?'} PROXY reference as FIRST player (n=${optN}). Progress toward optimal — the table is ranked by this. A high % is NOT proof; the proxy is beatable in the opening.`)}>Converts P1<br>(vs ${refShort})</th>` +
+    `<th class="num" ${helpAttr('Share of match points won across its head-to-head games (win=1, draw=½). Seat-noisy for a solved game — NOT the arbiter, so it need not track the rank.')}>Head-to-head<br>(${gpp}/pair)</th>` +
+    `<th class="num" ${helpAttr('MEASURED comparable-strength rating (Elo-like) from the gauntlet. Shown only for rated models; the reference rungs define the scale by assumption, so no number is shown for them.')}>Strength</th></tr>`
+  const oracleStanding = rec.standings.find((s) => s.id === 'oracle')
+  const oracleRow = oracleComp
+    ? `<div class="po-hint">Reference — <strong>${escapeHtml(oracleComp.label)}</strong> won ${oracleStanding ? (oracleStanding.scorePerMatch * 100).toFixed(0) : '?'}% of its head-to-head games (a yardstick, not ranked). It is exact in the endgame and only ${oracleDepth || '?'}-ply in the opening, so "converts the P1 win" means "beats THIS reference as first player" — strong evidence, not a full game-theoretic proof.</div>`
+    : ''
   const fpwr = Math.round((rec.firstPlayerWinRate || 0) * 100)
   const selfBits = Object.keys(rec.selfPlay || {})
     .map((id) => {
@@ -5152,7 +5250,7 @@ function renderPlayoffResults(rec) {
         (sp.first_player_win_rate || 0) * 100,
       )}%</strong>${sp.draw_rate ? ` · draws ${Math.round(sp.draw_rate * 100)}%` : ''}${
         sp.first_player_loss_rate ? ` · <span class="po-sub">first player LOSES ${Math.round(sp.first_player_loss_rate * 100)}%</span>` : ''
-      } <span class="card-sub">(perfect play → 100%)</span></div>`
+      } <span class="card-sub">(a perfect P1 always wins → 100%; but a strong-imperfect P1 vs an imperfect P2 can also reach 100%, so this corroborates optimality, it doesn't prove it)</span></div>`
     })
     .join('')
   const matrixRows = (rec.matrix || [])
@@ -5165,9 +5263,10 @@ function renderPlayoffResults(rec) {
     )
     .join('')
   return (
-    `<div class="po-winner-line">🏆 True winner (most games won): <strong>${escapeHtml(winner ? winner.label : '—')}</strong></div>` +
-    `<div class="po-hint">Standings are from ACTUAL head-to-head games. The oracle is a <strong>depth-limited</strong> reference — provably exact in the endgame, strong-but-beatable in the opening (its depth is in its name). Beating it as the first player is strong evidence a model converts the first-player win (Connect 4 is a first-player win under perfect play).</div>` +
-    `<div class="table-wrap"><table class="runs-table po-table"><thead><tr><th class="num">#</th><th>Competitor</th><th class="num" ${helpAttr('Share of match points won across its games (win=1, draw=½).')}>Won</th><th>Optimality (vs oracle)</th></tr></thead><tbody>${standings}</tbody></table></div>` +
+    `<div class="po-winner-line">${verdictLine}</div>` +
+    `<div class="po-hint">Connect 4 (the GAME) is solved — a proven first-player win, and our exact solver plays it perfectly. What is NOT solved is having a trained MODEL that plays perfectly. <strong>Converts P1</strong> (the ranking column) measures progress toward that vs a fast depth-6 PROXY oracle — a higher % is closer, but NOT proof (the proxy is beatable in the opening; only the exact solver proves it). <strong>Head-to-head</strong> is who won the most games (seat-noisy). <strong>Strength</strong> is the measured gauntlet rating — three different questions, so a row can lead one column and trail another.</div>` +
+    `<div class="table-wrap"><table class="runs-table po-table"><thead>${tableHead}</thead><tbody>${standings}</tbody></table></div>` +
+    oracleRow +
     `<div class="po-move-adv">Move-advantage: the first mover wins <strong>${fpwr}%</strong> of decisive games overall.</div>` +
     (selfBits ? `<div class="po-selfplay">${selfBits}</div>` : '') +
     `<details class="po-matrix"><summary>Win matrix (${(rec.matrix || []).length} pairings, ${rec.gamesPerPair || 0} games each)</summary>` +
@@ -5240,10 +5339,10 @@ async function renderPlayoffPanel() {
     banner = `<div class="po-running po-failed">A recent play-off didn't complete (it may have timed out) — the results below are from the last run that did finish. Press Re-run to try again (now faster).</div>`
   }
   const results = hasResults
-    ? renderPlayoffResults(view)
+    ? renderPlayoffResults(view, await leaderboardStrengthMap())
     : running
       ? ''
-      : `<div class="po-hint">Press <strong>Start</strong> in Exploration — it trains and then runs the play-off for you automatically. (Or Re-run it here.) It shows which model actually wins the most head-to-head, and whether any plays <strong>optimally</strong> — beats the oracle as first player / lets the first mover win 100% in self-play.</div>`
+      : `<div class="po-hint">Press <strong>Start</strong> in Exploration — it trains and then runs the play-off for you automatically. (Or Re-run it here.) It shows whether any model plays <strong>optimally</strong> — converts the first-player win vs the reference — plus head-to-head wins and comparable strength.</div>`
   const coverage = await bookCoverageNote()
   return `<div class="playoff"><div class="po-head"><strong>Play-off — head-to-head</strong>${when}${btn}</div>${banner}${results}${coverage}</div>`
 }

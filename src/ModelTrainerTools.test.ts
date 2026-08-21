@@ -3258,6 +3258,73 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(paramsByType['build-book']).toEqual({ seedGames: 0, estimateGames: 5, maxPlies: 8 })
   })
 
+  it('passes the manifest improve config to the train-champion child (bounded, light per Start)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+        seed: { type: 'number', default: 0 },
+      },
+      learnedCores: ['alphazero'],
+      improve: { maxGenerations: 1, hyperparams: { az_iterations: 2, az_sims: 80 } },
+    })
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    const paramsByType: Record<string, unknown> = {}
+    await tools.runAutopilot({
+      scope: 'proj', projectRoot: '/x', manifest: m, maxRounds: 4,
+      launchActivity: async (type: string, p: unknown) => {
+        paramsByType[type] = p
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: type }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    // The autopilot's improve round runs with the manifest's bounded/light budget (not the full manual defaults).
+    expect(paramsByType['train-champion']).toEqual({ maxGenerations: 1, hyperparams: { az_iterations: 2, az_sims: 80 } })
+  })
+
+  it('passes the manifest rate config to the rate-models child (bounded gauntlet)', async () => {
+    const storage = memoryStorage()
+    const { tools } = makeTools(stubRunner(), storage)
+    const m = manifest({
+      levers: {
+        model_name: { type: 'choice', choices: ['mcts', 'alphazero'], default: 'mcts' },
+        seed: { type: 'number', default: 0 },
+      },
+      learnedCores: ['alphazero'],
+      gauntlet: 'py -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}',
+      rate: { maxModels: 16, gamesPerRung: 12, maxReferenceSims: 300 },
+    })
+    for (const core of ['mcts', 'alphazero'])
+      for (let s = 1; s <= 2; s++)
+        await storage.upsertRecord({
+          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          content: { status: 'completed', config: { model_name: core, seed: s } },
+        })
+    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    const paramsByType: Record<string, unknown> = {}
+    await tools.runAutopilot({
+      scope: 'proj', projectRoot: '/x', manifest: m, maxRounds: 6,
+      launchActivity: async (type: string, p: unknown) => {
+        paramsByType[type] = p
+        if (type === 'train-champion')
+          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        return { activityId: type }
+      },
+      awaitActivity: async () => 'completed',
+    })
+    // No buildBook declared → improve settles → straight to the BOUNDED rate step.
+    expect(paramsByType['rate-models']).toEqual({ maxModels: 16, gamesPerRung: 12, maxReferenceSims: 300 })
+  })
+
   it('reaches build-book even when the champion stops on BUDGET (never plateaus) — improve runs once, then finalizes', async () => {
     // The endless-improve fix: a champion that spends its per-launch generation budget without plateauing must NOT
     // make Start re-select improve every round forever (which is why the book never got updated). One budgeted
@@ -3464,6 +3531,32 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
     expect((rec?.content as { entries: unknown[] }).entries.length).toBe(2)
     expect((rec?.content as LeaderboardRecord).basis).toBe('gauntlet')
+  })
+
+  it('bounds the gauntlet to the most-recent maxModels + caps the reference sims', async () => {
+    const storage = memoryStorage()
+    // 5 checkpointed runs with increasing finishedAt; maxModels=2 keeps only the 2 newest (a 369-model project
+    // rates a handful, not all of them) — the fix for the multi-hour rate step.
+    for (let i = 1; i <= 5; i++)
+      await seedRun(storage, `m${i}`, i, {
+        config: { game: 'connect4', model_name: 'mcts' },
+        artifacts: { checkpoint: `/m${i}.json` },
+        finishedAt: i * 1000,
+      })
+    const runner = stubRunner({ jobResult: () => ({ summary: { ratings: [] } }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.rateModels({
+      scope: 'proj', projectRoot: '/x', manifest: rateManifest,
+      maxModels: 2, gamesPerRung: 12, maxReferenceSims: 300,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as {
+      models: { id: string }[]
+      games_per_rung: number
+      max_sims: number
+    }
+    expect(cfg.models.map((m) => m.id).sort()).toEqual(['m4', 'm5']) // only the 2 newest checkpoints
+    expect(cfg.games_per_rung).toBe(12)
+    expect(cfg.max_sims).toBe(300)
   })
 
   it('errors when the project declares no gauntlet command', async () => {
