@@ -83,18 +83,26 @@ def book_optimal_actions(book: Tablebase, game: Game, state: State) -> list[int]
     if not legal:
         return None
     me = game.current_player(state)
-    vals: dict[int, int] = {}
+    vals: dict[int, int | None] = {}
     for a in legal:
         child = game.step(state, a)
         if game.is_terminal(child):
             vals[a] = 1 if game.winner(child) == me else 0
             continue
         bv = book.proven_value(_key(game, child))  # PROVEN children only — an estimate can't guarantee optimal play
-        if bv is None:
-            return None
-        vals[a] = -bv  # stored from the child-mover's view → negate for our side
-    best = max(vals.values())
-    return sorted(a for a, v in vals.items() if v == best)
+        vals[a] = None if bv is None else -bv  # stored from the child-mover's view → negate for our side
+    v = book.proven_value(_key(game, state))  # the position's OWN proven value, if proven
+    if v is not None:
+        # PROVEN position: a move whose known child achieves the proven value V is optimal, and unproven siblings
+        # can't beat V (it is the max), so they are irrelevant. This is what makes the winning-strategy grind —
+        # which books only the SINGLE optimal line at a strategist node — playable: one booked achiever is enough.
+        achievers = sorted(a for a, cv in vals.items() if cv is not None and cv == v)
+        if achievers:
+            return achievers
+    if any(cv is None for cv in vals.values()):
+        return None  # position not proven AND a child missing → too thin to guarantee the optimal set
+    best = max(cv for cv in vals.values() if cv is not None)
+    return sorted(a for a, cv in vals.items() if cv == best)
 
 
 def principal_variation(book: Tablebase, game: Game, state: State, max_len: int = 1000) -> list[int]:
@@ -193,26 +201,33 @@ def make_book_estimator(
 
 
 def _prove(game: Game, state: State, book: Tablebase, max_exact_empty: int) -> tuple[float, int] | None:
-    """Try to PROVE a position's value → (value_to_mover, best_actions) or None. (1) FREE: minimax over children
-    that are already terminal or PROVEN in the book (no search — the eager bottom-up upgrade). (2) cheap EXACT:
-    a game-solvable position (`exact_optimal_actions` within `max_exact_empty`) → solve it outright."""
+    """Try to PROVE a position's value → (value_to_mover, best_actions) or None. (1) a proven/terminal WINNING
+    child proves the node a win outright (siblings irrelevant — one win is enough, which is what lets the pruned
+    winning-strategy grind prove a node from its single booked winning line); (2) FREE minimax once EVERY child is
+    terminal/PROVEN (the eager bottom-up upgrade); (3) cheap EXACT: a ≤ `max_exact_empty` solvable position."""
     legal = game.legal_actions(state)
     if not legal:
         return None
     me = game.current_player(state)
     vals: dict[int, int] = {}
+    wins: list[int] = []
     all_resolved = True
     for a in legal:
         child = game.step(state, a)
         if game.is_terminal(child):
-            vals[a] = int(_terminal_value(game, child, me))
-            continue
-        bv = book.proven_value(_key(game, child))  # PROVEN children only — an estimate can't prove a parent
-        if bv is None:
-            all_resolved = False
-            break
-        vals[a] = -bv
-    if all_resolved:
+            cv = int(_terminal_value(game, child, me))
+        else:
+            bv = book.proven_value(_key(game, child))  # PROVEN children only — an estimate can't prove a parent
+            if bv is None:
+                all_resolved = False
+                continue
+            cv = -bv
+        vals[a] = cv
+        if cv == 1:
+            wins.append(a)
+    if wins:
+        return 1.0, _bitmask(wins)
+    if all_resolved and vals:
         best = max(vals.values())
         return float(best), _bitmask(a for a, v in vals.items() if v == best)
     solve = getattr(game, "exact_optimal_actions", None)
@@ -438,6 +453,136 @@ def _solve_frontier_banded(
     return solved, skipped, deferred
 
 
+def _prove_bounded(
+    game: Game, state: State, book: Tablebase, max_exact_empty: int, max_seconds: float
+) -> tuple[float, int] | None:
+    """PROVE (value_to_mover, best_actions_bitmask) for `state`, bounded — or None if the exact solve overran
+    `max_seconds` (DEFERRED, retried once its children are booked). (1) the FREE/cheap path (`_prove`): minimax
+    over already-booked/terminal children, or a ≤ `max_exact_empty` cheap solve; else (2) a bounded FULL solve
+    (a strategist node in the deep opening whose children aren't booked yet) via the game's exact hooks."""
+    proven = _prove(game, state, book, max_exact_empty)
+    if proven is not None:
+        return proven
+    solve = getattr(game, "exact_optimal_actions", None)
+    if solve is None:
+        return None
+
+    def _full() -> tuple[float, int] | None:
+        acts = solve(state, 10**9)  # huge empty budget forces a full solve → the exact optimal SET
+        if not acts:
+            return None
+        return float(position_value(game, state, book=book)), _bitmask(acts)
+
+    try:
+        return _run_bounded(_full, max_seconds)
+    except _SolveTimeout:
+        return None
+
+
+def prove_winning_strategy(
+    game: Game,
+    book: Tablebase,
+    root: State | None = None,
+    strategist: int = 0,
+    max_plies: int = 14,
+    max_exact_empty: int = 22,
+    deadline: float | None = None,
+    max_positions: int = 10**9,
+    max_seconds: float = 0.0,
+    log: Callable[[str], None] | None = None,
+) -> dict:
+    """Prove the STRATEGIST's WINNING-STRATEGY TREE into the book — the directed M1 grind that is far smaller than
+    the whole opening (SOLVE-IT §C.5 Phase 2). The tree from `root`: at a STRATEGIST node we need only ONE optimal
+    move (a single winning line answers our obligation), so we follow just that child; at an OPPONENT node we must
+    answer EVERY legal reply, so we recurse into all. It bottoms out where the solver finishes cheaply (≤
+    `max_exact_empty` empties) or at `max_plies`, and PROVES bottom-up (post-order): a node is proved for free once
+    its children are booked (`_prove`), else by a bounded full solve. BOUNDED (`deadline` / `max_positions`) and
+    RESUMABLE (proven nodes are skipped; a solve that overruns `max_seconds` is DEFERRED and retried next pass once
+    the frontier beneath it is booked and the solve collapses to lookups — the endgame-back grind). `max_seconds`
+    MUST be > 0 for a from-opening grind or a single hard solve runs unbounded. Returns proof/deferral counts."""
+    if root is None:
+        root = game.initial_state(random.Random(0))
+    stats = {"proven": 0, "deferred": 0, "visited": 0, "leaves": 0}
+    solve_hook = getattr(game, "exact_optimal_actions", None)
+    mid = game.num_actions // 2
+
+    def _cheap(state: State):
+        return solve_hook(state, max_exact_empty) if solve_hook is not None else None
+
+    def _spent() -> bool:
+        return stats["proven"] >= max_positions or _deadline_hit(deadline)
+
+    def _child_value(state: State, action: int) -> float | None:
+        """The mover-relative value of `action` from booked/terminal children only (None if the child is unproven)."""
+        child = game.step(state, action)
+        if game.is_terminal(child):
+            return _terminal_value(game, child, game.current_player(state))
+        bv = book.proven_value(_key(game, child))
+        return None if bv is None else -bv
+
+    def rec(state: State, in_path: frozenset) -> bool | None:
+        if game.is_terminal(state):
+            return True
+        ck = _key(game, state)
+        if book.is_proven(ck):
+            return True
+        if _spent() or ck in in_path:
+            return None
+        stats["visited"] += 1
+        ply = _ply(game, state)
+        acts = _cheap(state)  # LEAF A: the solver finishes cheaply → a proven leaf (value + optimal set)
+        if acts is not None:
+            book.put_proven(ck, int(position_value(game, state, book=book)), best_actions=_bitmask(acts), priority=ply)
+            stats["proven"] += 1
+            stats["leaves"] += 1
+            return True
+        if ply >= max_plies:  # LEAF B: the ply cap with no cheap solve → a bounded full solve
+            pv = _prove_bounded(game, state, book, max_exact_empty, max_seconds)
+            if pv is None:
+                stats["deferred"] += 1
+                return None
+            book.put_proven(ck, int(pv[0]), best_actions=pv[1], priority=ply)
+            stats["proven"] += 1
+            stats["leaves"] += 1
+            return True
+        in_path = in_path | {ck}
+        if game.current_player(state) == strategist:
+            # DISCOVER this node's value + optimal set (a bounded solve; NOT booked yet), descend ONE optimal line,
+            # then book the node from that now-booked achiever — so a proven strategist node ALWAYS has its winning
+            # line booked beneath it (resumable: a proven node is safe to skip; playable: the book knows its move).
+            disc = _prove_bounded(game, state, book, max_exact_empty, max_seconds)
+            if disc is None:
+                stats["deferred"] += 1
+                return None
+            value = disc[0]
+            opt = [c for c in range(game.num_actions) if (disc[1] >> c) & 1] or game.legal_actions(state)
+            if rec(game.step(state, min(opt, key=lambda a: (abs(a - mid), a))), in_path) is not True:
+                return None  # the chosen line is not fully booked (budget) → leave unproven for a resume
+            achievers = [a for a in game.legal_actions(state) if _child_value(state, a) == value]
+            if not achievers:
+                stats["deferred"] += 1
+                return None
+            book.put_proven(ck, int(value), best_actions=_bitmask(achievers), priority=ply)
+            stats["proven"] += 1
+            return True
+        for a in game.legal_actions(state):  # OPPONENT node: answer EVERY reply, book only once all are proven
+            child = game.step(state, a)
+            if not game.is_terminal(child) and rec(child, in_path) is not True:
+                return None
+        pv = _prove(game, state, book, max_exact_empty)  # all replies booked → free minimax (never a fresh solve)
+        if pv is None:
+            stats["deferred"] += 1
+            return None
+        book.put_proven(ck, int(pv[0]), best_actions=pv[1], priority=ply)
+        stats["proven"] += 1
+        return True
+
+    rec(root, frozenset())
+    if log:
+        log(f"winning-strategy: +{stats['proven']} proven ({stats['leaves']} leaves), {stats['deferred']} deferred")
+    return stats
+
+
 def build_book(
     game: Game,
     book: Tablebase,
@@ -575,6 +720,56 @@ def book_coverage(game: Game, book: Tablebase, plies: int = 8, max_enumerate: in
             "provenFraction": (proven / reachable) if reachable else 0.0}
 
 
+def winning_strategy_coverage(
+    game: Game, book: Tablebase, root: State | None = None, strategist: int = 0, max_plies: int = 14,
+    max_exact_empty: int = 0, max_enumerate: int = 200_000,
+) -> dict:
+    """The honest M1 tracker: how much of the STRATEGIST's winning-strategy tree from `root` is PROVEN in the book
+    (SOLVE-IT §C.5 Phase 2). Enumerate that tree — at a strategist node follow the book's believed-optimal move
+    (the entry's `best_actions` where present, else all legal, since we can't yet prune), at an opponent node every
+    reply — to `max_plies` or a terminal / ≤ `max_exact_empty` solvable leaf. `provenFraction` climbs 0→1 as the
+    grind books the tree from the endgame back; `root_proven`/`root_value` expose whether the whole strategy exists
+    (a proven WIN from the opening = a lookup-perfect first player); `complete` = every enumerated node is proven."""
+    if root is None:
+        root = game.initial_state(random.Random(0))
+    solve_hook = getattr(game, "exact_optimal_actions", None)
+    mid = game.num_actions // 2
+    root_key = _key(game, root)
+    seen: set[int] = {root_key}
+    dq: deque[tuple[State, int]] = deque([(root, root_key)])
+    nodes = proven = 0
+    while dq and len(seen) < max_enumerate:
+        state, ck = dq.popleft()
+        if game.is_terminal(state):
+            continue
+        nodes += 1
+        if book.is_proven(ck):
+            proven += 1
+        if solve_hook is not None and max_exact_empty > 0 and solve_hook(state, max_exact_empty) is not None:
+            continue  # a solvable leaf — the solver finishes below here; counted, not expanded
+        if _ply(game, state) >= max_plies:
+            continue
+        acts = book_optimal_actions(book, game, state) if game.current_player(state) == strategist else None
+        if acts:
+            follow = [min(acts, key=lambda a: (abs(a - mid), a))]  # one proven optimal line (orientation-safe)
+        else:
+            follow = game.legal_actions(state)  # opponent replies, or an unproven strategist node (can't prune yet)
+        for a in follow:
+            child = game.step(state, a)
+            cck = _key(game, child)
+            if cck not in seen:
+                seen.add(cck)
+                dq.append((child, cck))
+    root_val = book.proven_value(root_key)
+    return {
+        "nodes": nodes, "proven": proven,
+        "provenFraction": (proven / nodes) if nodes else 0.0,
+        "root_proven": root_val is not None, "root_value": root_val,
+        "complete": nodes > 0 and proven == nodes and root_val is not None,
+        "strategist": strategist, "max_plies": max_plies,
+    }
+
+
 def run_build_book(request: dict, log: Callable[[str], None] | None = print, book_dir: str | None = None) -> dict:
     """Extend the project-committed book for a game: warm the solver's TT accelerator from prior runs, solve+
     store a bounded frontier band (deepest-first), persist BOTH the exact book and the accelerator, and report
@@ -582,7 +777,8 @@ def run_build_book(request: dict, log: Callable[[str], None] | None = print, boo
     `max_positions`, `max_enumerate`, `deadline_seconds`; SEED mode `seed_games`/`seed_plies`; ROBUSTNESS
     `workers` (parallel band solving) + `max_position_seconds` (per-solve cap → DEFERRED, no hang); GRADED mode
     `estimate_games`/`estimate_sims`/`estimate_solve_endgame`/`max_exact_empty` (book-aware search beliefs for the
-    deep opening the solver can't reach)."""
+    deep opening the solver can't reach); WINNING-STRATEGY mode `winning_strategy`/`strategist` (SOLVE-IT M1 — prove
+    the directed winning-strategy tree, reporting a `winningStrategy` coverage that climbs toward a proven strategy)."""
     from harness import solver
     from harness.registry import resolve_game
 
@@ -625,11 +821,24 @@ def run_build_book(request: dict, log: Callable[[str], None] | None = print, boo
     workers = int(request.get("workers", 1))
     max_position_seconds = float(request.get("max_position_seconds", 0.0))
 
-    build = build_book(
-        game, book, roots=roots, max_plies=max_plies, min_plies=min_plies, max_positions=max_positions,
-        max_enumerate=max_enumerate, deadline=deadline, log=log, estimator=estimator, max_exact_empty=max_exact_empty,
-        workers=workers, max_position_seconds=max_position_seconds,
-    )
+    # Opt-in WINNING-STRATEGY mode (SOLVE-IT §C.5 M1): instead of the breadth-first opening accumulator, prove the
+    # STRATEGIST's directed winning-strategy tree (our one optimal move + every opponent reply) — far smaller than
+    # the whole opening, and the actual path to a lookup-perfect player. Bounded + resumable, from the endgame back.
+    winning_strategy = bool(request.get("winning_strategy", False))
+    strategist = int(request.get("strategist", 0))
+    ws_empty = int(request.get("max_exact_empty", 22)) if winning_strategy else max_exact_empty
+    if winning_strategy:
+        build = prove_winning_strategy(
+            game, book, root=(roots[0] if roots else None), strategist=strategist, max_plies=max_plies,
+            max_exact_empty=ws_empty, deadline=deadline, max_positions=max_positions,
+            max_seconds=max_position_seconds, log=log,
+        )
+    else:
+        build = build_book(
+            game, book, roots=roots, max_plies=max_plies, min_plies=min_plies, max_positions=max_positions,
+            max_enumerate=max_enumerate, deadline=deadline, log=log, estimator=estimator,
+            max_exact_empty=max_exact_empty, workers=workers, max_position_seconds=max_position_seconds,
+        )
     book.save(book_path(game.name, book_dir))
     if game.name == "connect4":
         solver.save_book(tt_cache_path(game.name, book_dir))
@@ -641,10 +850,18 @@ def run_build_book(request: dict, log: Callable[[str], None] | None = print, boo
         "coverage": coverage,
         "build": build,
     }
+    if winning_strategy:
+        result["winningStrategy"] = winning_strategy_coverage(
+            game, book, root=(roots[0] if roots else None), strategist=strategist,
+            max_plies=min(max_plies, 12), max_exact_empty=ws_empty,
+        )
     if log:
+        ws = result.get("winningStrategy")
+        extra = (f"; winning-strategy proven {ws['proven']}/{ws['nodes']} "
+                 f"({ws['provenFraction'] * 100:.1f}%){' — COMPLETE' if ws['complete'] else ''}") if ws else ""
         log(f"book: +{result['added']} (total {result['total']}); "
             f"opening coverage ≤{coverage['plies']} plies = {coverage['booked']}/{coverage['reachable']} "
-            f"({coverage['fraction'] * 100:.1f}%)")
+            f"({coverage['fraction'] * 100:.1f}%){extra}")
     return result
 
 

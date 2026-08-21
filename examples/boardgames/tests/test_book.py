@@ -426,6 +426,19 @@ def test_play_until_decided_ends_early_and_is_sound():
     assert not early2 and w_full == winner
 
 
+def test_run_build_book_winning_strategy_mode_proves_ttt(tmp_path):
+    # SOLVE-IT M1 through the in-app entrypoint: winning-strategy mode proves the strategist's tree and reports a
+    # `winningStrategy` coverage. On tic-tac-toe (fully solvable, max_exact_empty=0) it COMPLETES in one pass.
+    res = run_build_book(
+        {"game": "tictactoe", "winning_strategy": True, "strategist": 0, "max_plies": 9, "max_exact_empty": 0,
+         "max_positions": 100000},
+        log=None, book_dir=str(tmp_path),
+    )
+    ws = res["winningStrategy"]
+    assert ws["complete"] is True and ws["provenFraction"] == 1.0 and ws["root_proven"] is True
+    assert res["added"] > 1  # a real tree was booked, not a single solver-leaf
+
+
 def test_run_build_book_plumbing(tmp_path):
     # deadline 0 → no expensive opening solves; exercises warm/build/persist/coverage glue into a temp dir.
     res = run_build_book(

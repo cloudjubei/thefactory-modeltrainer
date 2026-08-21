@@ -136,6 +136,14 @@ def _oracle_factory(depth: int) -> Callable[[], object]:
     return lambda: NearPerfectOracle(depth=depth, solve_endgame=22)
 
 
+def _exact_oracle_factory() -> Callable[[], object]:
+    from harness.solver import OracleAgent
+
+    # PERFECT play — the SOLVE-IT ground-truth defender (§C.5). Solving from the opening is minutes/move in pure
+    # Python, so this is the opt-in EXACT gate, run on FEW games only; the round-robin stays on the fast proxy.
+    return lambda: OracleAgent()
+
+
 def play_match(
     game: Game,
     a_factory: Callable[[], object],
@@ -195,9 +203,15 @@ def _factories(request: dict, game: Game) -> tuple[list[dict], dict]:
         competitors.append({"id": cid, "label": c.get("label", cid)})
         factories[cid] = _model_factory(c, game, max_sims=max_sims)
     if request.get("include_oracle") and game.name == "connect4":
-        oracle_depth = int(request.get("oracle_depth", 14))
-        competitors.append({"id": ORACLE_ID, "label": f"oracle (depth {oracle_depth})"})
-        factories[ORACLE_ID] = _oracle_factory(oracle_depth)
+        if request.get("oracle_exact"):
+            # The EXACT solver as the reference — the ONLY oracle a "solved" verdict may be gated on (the viewer
+            # keys the ✓ off an "exact" label). Slow from the opening, so used with FEW games_per_pair.
+            competitors.append({"id": ORACLE_ID, "label": "oracle (exact)"})
+            factories[ORACLE_ID] = _exact_oracle_factory()
+        else:
+            oracle_depth = int(request.get("oracle_depth", 14))
+            competitors.append({"id": ORACLE_ID, "label": f"oracle (depth {oracle_depth})"})
+            factories[ORACLE_ID] = _oracle_factory(oracle_depth)
     return competitors, factories
 
 
@@ -276,20 +290,27 @@ def run_tournament(request: dict, on_progress: Callable[[dict], None] | None = N
     self_play = _self_play(request, game, factories, n, base_seed, on_progress=on_progress, ids=self_play_ids)
 
     # Optimality vs the oracle — also fanned across cores (each competitor's model-first games are independent).
+    # `oracle_exact` makes this the SOLVE-IT gate: only a win vs PERFECT play proves a model plays perfectly; vs a
+    # depth-limited proxy it is progress evidence, never proof (the viewer keeps that distinction, gated on the label).
+    oracle_is_exact = bool(request.get("oracle_exact")) and game.name == "connect4"
     optimality: dict = {}
     if has_oracle:
-        m = max(4, min(n, 12))
+        m = max(2, min(n, 12)) if oracle_is_exact else max(4, min(n, 12))  # exact is slow → fewer games
         opt_tasks = [(c["id"], m, base_seed * 31 + hash(c["id"]) % 1000) for c in competitors if c["id"] != ORACLE_ID]
         opt_done = 0
         for _idx, (cid, w) in _imap_indexed(request, _opt_task, opt_tasks, min_tasks=3):
             rate = w / m
             entry = {
-                "wins_as_p1_vs_oracle": rate, "games": m,
-                "verdict": "optimal" if rate >= 0.999 else ("near-optimal" if rate >= 0.5 else "suboptimal"),
+                "wins_as_p1_vs_oracle": rate, "games": m, "oracle_exact": oracle_is_exact,
+                "solved": bool(oracle_is_exact and rate >= 0.999),
+                "verdict": "optimal" if (oracle_is_exact and rate >= 0.999)
+                else ("converts-proxy" if rate >= 0.999 else ("near-optimal" if rate >= 0.5 else "suboptimal")),
             }
             optimality[cid] = entry
             opt_done += 1
             emit({"phase": "optimality", "id": cid, "done": opt_done, "total": len(opt_tasks), **entry})
+
+    ladder = _optimality_ladders(request, game, factories, competitors, base_seed, on_progress)
 
     return {
         "game": game.name,
@@ -300,7 +321,34 @@ def run_tournament(request: dict, on_progress: Callable[[dict], None] | None = N
         "gamesPerPair": n,
         "selfPlay": self_play,
         "optimality": optimality,
+        "optimalityLadder": ladder,
     }
+
+
+def _optimality_ladders(
+    request: dict, game: Game, factories: dict, competitors: list[dict], base_seed: int,
+    on_progress: Callable[[dict], None] | None,
+) -> dict:
+    """Opt-in (`ladder: true`) HONEST optimality ladder per competitor (Connect 4): the deepest oracle it converts
+    the first-player win against — depth-6→8→10→12→EXACT (SOLVE-IT §C.5 M0). Few games (the exact rung is slow);
+    only the exact rung's clear is `solved`. Off by default so the round-robin stays fast."""
+    if not request.get("ladder") or game.name != "connect4":
+        return {}
+    from harness.benchmark import optimality_ladder
+
+    games = int(request.get("ladder_games", 2))
+    depths = tuple(request.get("ladder_depths", (6, 8, 10, 12)))
+    out: dict = {}
+    done = 0
+    targets = [c["id"] for c in competitors if c["id"] != ORACLE_ID and factories.get(c["id"])]
+    for cid in targets:
+        res = optimality_ladder(game, factories[cid], games=games, seed=base_seed * 17 + hash(cid) % 1000, depths=depths)
+        out[cid] = res
+        done += 1
+        if on_progress is not None:
+            on_progress({"phase": "ladder", "id": cid, "done": done, "total": len(targets),
+                         "frontier": res["frontier"], "solved": res["solved"]})
+    return out
 
 
 def _self_play(

@@ -899,12 +899,48 @@ proof accumulation, distillation, the optimality ladder, "not-yet" honesty) gene
 no exact oracle, but a strong reference + verified-plies + self-improvement + honest reporting are the same
 machinery). Getting it RIGHT on Connect 4, where we hold ground truth, validates the process before scaling.
 
-**Milestones (measurable, NONE done yet):** M0 exact-oracle ladder + verified-plies-vs-exact (the next step) · M1
-winning-strategy book `provenFraction` 0%→100% (the grind) · M2 book-aware agent converts P1 vs EXACT solver
-50%→100% · M3 distilled NET converts P1 vs EXACT solver = 100% → SOLVED. Bottleneck is M1; the rest follows.
+**Milestones:** M0 exact-oracle ladder + verified-plies-vs-exact · M1 winning-strategy book `provenFraction`
+0%→100% (the grind) · M2 book-aware agent converts P1 vs EXACT solver 50%→100% · M3 distilled NET converts P1 vs
+EXACT solver = 100% → SOLVED. Bottleneck is M1; the rest follows.
 
-NEXT: run it — press Start in Exploration and watch opening coverage + the graded book grow across Starts; the
-exact-proof accumulator (option 2, parallel band solver) remains available via `bookBuild` for a proofs-first pass.
+#### SOLVE-IT — the MACHINERY for all three phases is SHIPPED + demonstrated end-to-end (2026-08-21, TDD)
+
+Every claim is measured against the EXACT solver — "the truth and only the truth". Green: `tests/test_solve_it.py`
+(11) + `test_run_build_book_winning_strategy_mode_proves_ttt` + tournament/utils/tools TS. A single proof run
+closes the whole pipeline on tic-tac-toe (a game we FULLY solve) and on a Connect 4 forced-win subtree.
+
+- **M0 — HONEST MEASUREMENT (shipped).** `benchmark.p1_conversion` (model as FIRST player from any start; wins vs
+  draws vs losses, `not_lost_rate` for drawn games), `optimality_ladder` (depth-6→8→10→12→EXACT, reports the
+  deepest rung the model converts the win against — its "frontier"; only the exact rung sets `solved`), and
+  `verify_solved` (the ONE gate that may say "plays perfectly" — rate vs the EXACT oracle). A generic
+  `agents.ExactOptimalAgent` is the exact oracle for any SolvableGame. Tournament: `oracle_exact` swaps the
+  reference to the EXACT solver labelled "oracle (exact)" (the viewer already gates ✓ on that label; verdict
+  `optimal`/`solved` are now unreachable via the proxy — a proxy clear is `converts-proxy`), and opt-in `ladder`
+  computes the per-competitor frontier. Both off by default (the round-robin stays on the fast proxy).
+- **M1 — THE WINNING-STRATEGY GRIND (shipped).** `book.prove_winning_strategy` proves the STRATEGIST's directed
+  tree — our ONE optimal move at each of our nodes + EVERY opponent reply — far smaller than the whole opening.
+  Bounded (`deadline`/`max_positions`) + resumable (an internal node is booked ONLY once its required descendants
+  are, so a proven node is safe to skip AND playable; a hard solve that overruns `max_seconds` is DEFERRED and
+  retried once the frontier beneath it is booked — the endgame-back grind). `_prove` gained a win short-circuit
+  (a proven winning child proves a node, siblings irrelevant), and `book_optimal_actions` now returns a booked
+  achiever of a proven position's value — together they make the pruned single-line strategy playable from the
+  book (symmetry-safe, child-derived — never raw `best_actions`). `winning_strategy_coverage` is the honest M1
+  tracker (`provenFraction` 0→1, `root_proven`/`complete`). Wired through `run_build_book` (`winning_strategy`
+  mode) → `BuildBookParams.winningStrategy`/`strategist` → the backend `build-book` activity → manifest `bookBuild`
+  (numbers + booleans). Proven to COMPLETE tic-tac-toe (100%, both seats never lose) and a real multi-node C4
+  forced-win subtree; the from-opening C4 grind is the same tool, run in-app across Starts once the graded/seed
+  grind has built the deep-book substrate the top-down solves collapse onto.
+- **M2/M3 — CONVERT + DISTIL (shipped, demonstrated).** From the proven book, `BookAgent` CONVERTS the forced win
+  vs the EXACT solver (`verify_solved.solved == True`) — a lookup-perfect player; on tic-tac-toe a full book never
+  loses either seat. The distillation targets are exactly the proven optimal play (`book_distill_examples` policy
+  support = the optimal set, value = the exact game-theoretic value) — so a net that fits the anchor plays
+  perfectly. Training a net to 100%-vs-exact is the remaining COMPUTE (the existing distill wiring +
+  `verify_solved` gate); the structural correctness of what it learns is pinned.
+
+NEXT: run it — press Start in Exploration and watch the opening `provenFraction` (the M1 substrate) grow across
+Starts; once it is substantial, run `build-book` in winning-strategy mode (`bookBuild.winningStrategy=true`, or ask
+the AI) to prove the directed tree, then the play-off with `oracleExact`/`ladder` for the honest frontier + the
+exact SOLVED gate. The exact-proof accumulator (parallel band solver) also remains available via `bookBuild`.
 **DESIGN DECISIONS (resolved 2026-08-19):**
 - **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value — SHIPPED (see above).** The
   book must be an INDEPENDENT reference that CORRECTS the net's opening errors; sourcing estimates from the net is

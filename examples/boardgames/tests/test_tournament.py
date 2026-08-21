@@ -93,6 +93,30 @@ def test_oracle_label_shows_its_search_depth():
     assert oracle["label"] == "oracle (depth 6)"
 
 
+def test_exact_oracle_competitor_is_labelled_and_perfect():
+    # SOLVE-IT M0: `oracle_exact` swaps the reference to the EXACT solver, labelled "oracle (exact)" — the ONLY
+    # label the viewer gates a "solved" verdict on. (Behaviour from the empty board is a cold opening solve, so
+    # the conversion itself is covered in test_solve_it from shallow roots; here we pin the wiring.)
+    from harness.solver import OracleAgent
+
+    competitors, factories = tour._factories(
+        {"game": "connect4", "competitors": [{"id": "heur", "model_name": "heuristic"}],
+         "include_oracle": True, "oracle_exact": True}, _game())
+    oracle = next(c for c in competitors if c["id"] == ORACLE_ID)
+    assert oracle["label"] == "oracle (exact)"
+    assert isinstance(factories[ORACLE_ID](), OracleAgent)
+
+
+def test_optimality_ladder_is_off_by_default_and_gated_to_connect4():
+    res = run_tournament({
+        "game": "connect4",
+        "competitors": [{"id": "heur", "model_name": "heuristic"}, {"id": "rand", "model_name": "random"}],
+        "games_per_pair": 4,
+    })
+    assert res["optimalityLadder"] == {}  # opt-in only, so the round-robin stays fast
+    assert tour._optimality_ladders({"ladder": True}, resolve_game("tictactoe"), {}, [], 0, None) == {}  # c4 only
+
+
 def test_self_play_ids_are_honoured():
     req = {
         "game": "connect4",

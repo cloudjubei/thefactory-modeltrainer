@@ -28,6 +28,27 @@ class RandomAgent:
         return rng.choice(game.legal_actions(state))
 
 
+class ExactOptimalAgent:
+    """Perfect play for ANY SolvableGame via its `exact_optimal_actions` hook — the game-AGNOSTIC exact oracle
+    (Connect 4's `OracleAgent` is the tuned, fast-win-preferring specialisation for that game). Among equally
+    optimal moves it plays centre-first, deterministically. On a game whose opening is expensive to solve
+    (Connect 4) it is only affordable in the endgame; on a small game (tic-tac-toe) it is perfect everywhere,
+    instantly — so it is the exact reference for the generic SOLVE-IT verification / ladder on such games."""
+
+    kind = "exact"
+
+    def __init__(self, max_empty: int = 10**9):
+        self.max_empty = int(max_empty)
+
+    def act(self, game: Game, state: State, rng: random.Random) -> int:
+        solve = getattr(game, "exact_optimal_actions", None)
+        acts = solve(state, self.max_empty) if solve is not None else None
+        if not acts:
+            raise ValueError("ExactOptimalAgent needs a SolvableGame position it can resolve within max_empty")
+        mid = game.num_actions // 2
+        return min(acts, key=lambda a: (abs(a - mid), a))
+
+
 class HeuristicAgent:
     kind = "heuristic"
 

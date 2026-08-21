@@ -86,6 +86,7 @@ import type {
   BuildBookParams,
   BuildBookResult,
   BuildBookCoverage,
+  WinningStrategyCoverage,
   LeaderboardEntry,
   LeaderboardRecord,
   RatingPairing,
@@ -4507,6 +4508,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       base_seed: params.baseSeed ?? 0,
       opening_plies: params.openingPlies ?? 2,
       ...(params.selfPlayRunKeys ? { self_play_ids: params.selfPlayRunKeys } : {}),
+      // SOLVE-IT M0 (opt-in): swap the optimality reference to the EXACT solver, and/or compute the per-competitor
+      // optimality ladder. Both are slow from the opening, so they are off unless the caller asks.
+      ...(params.oracleExact ? { oracle_exact: true } : {}),
+      ...(params.ladder ? { ladder: true, ladder_games: params.ladderGames ?? 2 } : {}),
     }
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({
@@ -4568,6 +4573,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (params.estimateSolveEndgame != null) request.estimate_solve_endgame = params.estimateSolveEndgame
     }
     if (params.maxExactEmpty != null) request.max_exact_empty = params.maxExactEmpty
+    // WINNING-STRATEGY mode (SOLVE-IT M1): prove the directed winning-strategy tree from the opening instead of the
+    // breadth-first accumulator. Seed mode is meaningless here (the tree is rooted at the empty board), so drop it.
+    if (params.winningStrategy) {
+      request.winning_strategy = true
+      request.strategist = params.strategist ?? 0
+      delete request.seed_games
+      delete request.seed_plies
+    }
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({
       jobId: `build-book-${recordType}-${game}`,
@@ -4588,6 +4601,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       added?: number
       total?: number
       coverage?: BuildBookCoverage
+      winningStrategy?: WinningStrategyCoverage
       build?: unknown
     }
     await deps.storage.upsertRecord({
@@ -4604,6 +4618,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       added: summary.added ?? 0,
       total: summary.total ?? 0,
       coverage,
+      ...(summary.winningStrategy ? { winningStrategy: summary.winningStrategy } : {}),
     }
   }
 

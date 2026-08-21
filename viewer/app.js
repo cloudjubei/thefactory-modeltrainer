@@ -5160,13 +5160,32 @@ async function bookCoverageNote() {
   const provenFrac = typeof cov.provenFraction === 'number' ? cov.provenFraction : cov.fraction
   const estFrac = Math.max(0, cov.fraction - provenFrac)
   const estNote = estFrac > 0.0005 ? `, ${(estFrac * 100).toFixed(1)}% graded estimates` : ''
-  return `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is booked — ${(provenFrac * 100).toFixed(1)}% proven-exact${estNote} (${rec.total || 0} positions); endgames are always exact. The autopilot grows this each Start.</div>`
+  let note = `<div class="po-hint">Optimal-play book: <strong>${(cov.fraction * 100).toFixed(1)}%</strong> of the ≤${cov.plies}-ply opening is booked — ${(provenFrac * 100).toFixed(1)}% proven-exact${estNote} (${rec.total || 0} positions); endgames are always exact. The autopilot grows this each Start.</div>`
+  // SOLVE-IT M1 (§C.5): the directed winning-strategy proof, when the last build ran that mode. `complete`/
+  // `root_proven` means the WHOLE strategy is booked → a lookup-perfect first player from the opening.
+  const ws = rec.winningStrategy
+  if (ws && typeof ws.provenFraction === 'number') {
+    const pct = (ws.provenFraction * 100).toFixed(1)
+    note += ws.complete || ws.root_proven
+      ? `<div class="po-hint">🏆 <strong>Winning strategy PROVEN</strong> — the first-player win is booked from the opening (${ws.proven || 0} nodes). A lookup player is now perfect; the remaining step is distilling it into a fast net.</div>`
+      : `<div class="po-hint">Winning strategy (SOLVE-IT M1): <strong>${pct}%</strong> of the reachable strategy tree proven (${ws.proven || 0}/${ws.nodes || 0} nodes). This is the honest distance to a PROVEN perfect model — it climbs from the endgame back each Start. NOT solved until the root itself is proven.</div>`
+  }
+  return note
 }
 function poOptCell(o) {
   if (!o) return '<span class="card-sub">—</span>'
-  if (o.verdict === 'optimal') return '<span class="po-badge po-optimal">✓</span>'
+  // ✓ ONLY when it converts the win vs the EXACT solver (`solved`); the verdict is 'optimal' only in that case.
+  if (o.solved || o.verdict === 'optimal') return '<span class="po-badge po-optimal">✓</span>'
   if (o.verdict === 'near-optimal') return '<span class="po-badge po-near">≈</span>'
   return '<span class="po-badge po-sub">✗</span>'
+}
+// One competitor's SOLVE-IT optimality frontier — the deepest oracle it converts the first-player win against.
+// Only "exact" is proof; a depth-N frontier is progress. Blank when the ladder wasn't run.
+function poLadderCell(lad) {
+  if (!lad || !lad.frontier) return '<span class="card-sub">—</span>'
+  if (lad.solved || lad.frontier === 'exact') return '<span class="po-badge po-optimal" title="converts the first-player win vs the EXACT solver — proven optimal">exact ✓</span>'
+  if (lad.frontier === 'none') return '<span class="po-badge po-sub" title="does not convert the win against even the shallowest oracle">none</span>'
+  return `<span class="po-badge po-near" title="deepest oracle it beats as P1 — progress, not proof (only the exact rung proves it)">${escapeHtml(lad.frontier)}</span>`
 }
 function labelOfCompetitor(rec, id) {
   const c = (rec.competitors || []).find((x) => x.id === id)
@@ -5216,6 +5235,8 @@ function renderPlayoffResults(rec, strengthMap) {
   // is an assumption, not a measurement (e.g. book's anchor assumes full coverage it doesn't have), so we don't
   // print it as this book's strength. That was the "1900 book loses to 965 alphazero" nonsense.
   const strengthOf = (id) => (strengthMap && strengthMap.has(id) ? Math.round(strengthMap.get(id)) : null)
+  const ladderOf = (id) => (rec.optimalityLadder && rec.optimalityLadder[id]) || null
+  const hasLadder = !!(rec.optimalityLadder && Object.keys(rec.optimalityLadder).length)
   const standings = ranked
     .map((s, i) => {
       const o = optOf(s.id)
@@ -5226,6 +5247,7 @@ function renderPlayoffResults(rec, strengthMap) {
         <td class="num">${i + 1}</td>
         <td>${escapeHtml(s.label)}</td>
         <td class="num">${optCell}</td>
+        ${hasLadder ? `<td class="num">${poLadderCell(ladderOf(s.id))}</td>` : ''}
         <td class="num">${p1}</td>
         <td class="num">${(s.scorePerMatch * 100).toFixed(0)}%</td>
         <td class="num">${str != null ? str : '<span class="card-sub">—</span>'}</td>
@@ -5235,6 +5257,7 @@ function renderPlayoffResults(rec, strengthMap) {
   const tableHead =
     `<tr><th class="num">#</th><th>Competitor</th>` +
     `<th class="num" ${helpAttr('Proven OPTIMAL = beats the EXACT solver as first player. This play-off used a depth-limited PROXY, so optimality is untested ("proxy"). Raise the oracle to the exact solver to turn this into a real ✓/✗.')}>Optimal?<br>(vs exact)</th>` +
+    (hasLadder ? `<th class="num" ${helpAttr('SOLVE-IT M0: the DEEPEST oracle this model converts the first-player win against — depth-6→8→10→12→exact. Only "exact ✓" is proof of optimal play; a depth-N frontier is progress.')}>Frontier<br>(ladder)</th>` : '') +
     `<th class="num" ${helpAttr(`How often it beats the depth-${oracleDepth || '?'} PROXY reference as FIRST player (n=${optN}). Progress toward optimal — the table is ranked by this. A high % is NOT proof; the proxy is beatable in the opening.`)}>Converts P1<br>(vs ${refShort})</th>` +
     `<th class="num" ${helpAttr('Share of match points won across its head-to-head games (win=1, draw=½). Seat-noisy for a solved game — NOT the arbiter, so it need not track the rank.')}>Head-to-head<br>(${gpp}/pair)</th>` +
     `<th class="num" ${helpAttr('MEASURED comparable-strength rating (Elo-like) from the gauntlet. Shown only for rated models; the reference rungs define the scale by assumption, so no number is shown for them.')}>Strength</th></tr>`

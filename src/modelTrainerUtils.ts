@@ -369,10 +369,11 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
   }
   if (m.bookBuild !== undefined) {
     if (typeof m.bookBuild !== 'object' || m.bookBuild === null || Array.isArray(m.bookBuild)) {
-      throw new Error('trainer manifest bookBuild must be an object of numeric build knobs')
+      throw new Error('trainer manifest bookBuild must be an object of build knobs')
     }
-    if (Object.values(m.bookBuild as Record<string, unknown>).some((v) => typeof v !== 'number')) {
-      throw new Error('trainer manifest bookBuild values must all be numbers')
+    // Numbers, plus the winning-strategy mode's booleans (SOLVE-IT M1: `winningStrategy`).
+    if (Object.values(m.bookBuild as Record<string, unknown>).some((v) => typeof v !== 'number' && typeof v !== 'boolean')) {
+      throw new Error('trainer manifest bookBuild values must all be numbers or booleans')
     }
   }
   if (m.improve !== undefined) {

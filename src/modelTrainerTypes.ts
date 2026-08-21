@@ -427,9 +427,11 @@ export interface TrainerManifest {
    * Per-pass configuration for the autopilot's `build-book` step (camelCase `BuildBookParams` knobs: `seedGames`,
    * `maxPlies`, `maxPositions`, `maxEnumerate`, `deadlineSeconds`, `workers`, `maxPositionSeconds`, `estimateGames`,
    * `estimateSims`, `estimateSolveEndgame`, `maxExactEmpty`). Omit for the fast seed-mode default; set
-   * `{ seedGames: 0, estimateGames: N, … }` to grind the GRADED opening each Start instead. Numbers only.
+   * `{ seedGames: 0, estimateGames: N, … }` to grind the GRADED opening each Start instead. SOLVE-IT M1: set
+   * `{ winningStrategy: true, strategist: 0, … }` to prove the directed winning-strategy tree (needs deep-book
+   * coverage first, so run the graded/seed grind for a while before switching). Numbers + booleans.
    */
-  bookBuild?: Record<string, number>
+  bookBuild?: Record<string, number | boolean>
   /**
    * Per-Start configuration for the autopilot's IMPROVE step (the champion round). Keeps Start interactive by
    * bounding one round: `maxGenerations` generations (default light), optional `patience`/`targetStrength`, and
@@ -2229,11 +2231,25 @@ export interface TournamentSelfPlay {
   first_player_loss_rate: number
   games: number
 }
-/** Optimality proof vs the oracle: as the FIRST player an optimal model wins (Connect 4 is a first-player win). */
+/** Optimality proof vs the oracle: as the FIRST player an optimal model wins (Connect 4 is a first-player win).
+ * `verdict: 'optimal'` (and `solved`) are ONLY reachable when `oracle_exact` — beating a depth-limited proxy is
+ * progress ('converts-proxy'), never proof (SOLVE-IT §C.5). */
 export interface TournamentOptimality {
   wins_as_p1_vs_oracle: number
   games: number
-  verdict: 'optimal' | 'near-optimal' | 'suboptimal'
+  verdict: 'optimal' | 'converts-proxy' | 'near-optimal' | 'suboptimal'
+  /** Whether the oracle was the EXACT solver (not the depth proxy) — the gate for a truthful "solved" claim. */
+  oracle_exact?: boolean
+  /** Converts the first-player win vs the EXACT oracle (only ever true when `oracle_exact`). */
+  solved?: boolean
+}
+/** One competitor's SOLVE-IT optimality ladder — the deepest oracle rung it converts the first-player win against. */
+export interface TournamentLadder {
+  rungs: Array<{ label: string; kind: string; depth: number | null; rate: number; games: number; cleared: boolean }>
+  /** Deepest cleared rung's label ('none' | 'depth-N' | 'exact'). */
+  frontier: string
+  /** Cleared the EXACT rung — the only truthful "solved" signal. */
+  solved: boolean
 }
 /** The persisted `{recordType}-tournament` record — the play-off's win-matrix, standings + optimality verdicts. */
 export interface TournamentRecord {
@@ -2245,6 +2261,8 @@ export interface TournamentRecord {
   gamesPerPair: number
   selfPlay: Record<string, TournamentSelfPlay>
   optimality: Record<string, TournamentOptimality>
+  /** Present only when the ladder was requested (SOLVE-IT M0) — per-competitor optimality frontier. */
+  optimalityLadder?: Record<string, TournamentLadder>
   ranAt: string
 }
 
@@ -2271,6 +2289,7 @@ export type TournamentProgress =
     }
   | ({ phase: 'selfplay'; id: string; done: number; total: number } & TournamentSelfPlay)
   | ({ phase: 'optimality'; id: string; done: number; total: number } & TournamentOptimality)
+  | { phase: 'ladder'; id: string; done: number; total: number; frontier: string; solved: boolean }
 
 export interface TournamentParams {
   scope: string
@@ -2287,6 +2306,15 @@ export interface TournamentParams {
   maxReferenceSims?: number
   /** Enter the near-perfect oracle so each model's result vs it is the optimality proof (default true). */
   includeOracle?: boolean
+  /** SOLVE-IT M0 (§C.5): use the EXACT solver as the oracle (labelled "oracle (exact)") instead of the fast
+   * depth-limited proxy — the ONLY reference a "solved" verdict may be gated on. Slow from the opening, so the
+   * optimality check runs on FEW games; off by default (the round-robin stays on the fast proxy). */
+  oracleExact?: boolean
+  /** SOLVE-IT M0: also compute the per-competitor optimality LADDER (deepest oracle it converts the first-player
+   * win against — depth-6→8→10→12→exact). Opt-in (slow: the exact rung solves the opening); off by default. */
+  ladder?: boolean
+  /** Games per rung for the optimality ladder (default 2 — the exact rung is expensive). */
+  ladderGames?: number
   gamesPerPair?: number
   openingPlies?: number
   baseSeed?: number
@@ -2343,6 +2371,12 @@ export interface BuildBookParams {
   estimateSolveEndgame?: number
   /** Cheap-exact ladder cutoff (empty cells) used before falling back to an estimate. */
   maxExactEmpty?: number
+  /** SOLVE-IT M1 (§C.5): prove the STRATEGIST's directed winning-strategy tree (our one optimal move + every
+   * opponent reply) instead of the breadth-first opening — far smaller, the actual path to a lookup-perfect player.
+   * Bounded + resumable; each Start extends it from the endgame back, `winningStrategy.provenFraction` climbing 0→1. */
+  winningStrategy?: boolean
+  /** Which seat's winning strategy to prove (default 0 — the first player, whom Connect 4 is a proven win for). */
+  strategist?: number
   computeTarget?: string
   abortSignal?: AbortSignal
   onRecordWritten?: (type: string, key: string) => void
@@ -2354,6 +2388,24 @@ export interface BuildBookCoverage {
   reachable: number
   booked: number
   fraction: number
+  /** Of the reachable opening, how much is a PROOF (not a graded estimate) — the honest "exact" number. */
+  provenFraction?: number
+}
+
+/** SOLVE-IT M1 tracker — how much of the strategist's winning-strategy tree is proven into the book. */
+export interface WinningStrategyCoverage {
+  /** Reachable internal nodes of the winning-strategy tree enumerated this measurement. */
+  nodes: number
+  /** How many of those are PROVEN in the book. */
+  proven: number
+  /** proven / nodes — climbs 0→1 as the grind books the tree from the endgame back. */
+  provenFraction: number
+  /** Whether the root itself is proven (the whole strategy exists → a lookup-perfect player from here). */
+  root_proven: boolean
+  /** The root's proven game-theoretic value (>0 = a proven forced win), or null if not yet proven. */
+  root_value: number | null
+  /** Every enumerated node is proven — the strategy tree is fully booked to the measured frontier. */
+  complete: boolean
 }
 
 export interface BuildBookResult {
@@ -2365,6 +2417,8 @@ export interface BuildBookResult {
   total: number
   /** Honest opening-coverage gauge (how much of the reachable opening is exact) — never overclaim past it. */
   coverage: BuildBookCoverage
+  /** Present only in winning-strategy mode (SOLVE-IT M1): the proven fraction of the winning-strategy tree. */
+  winningStrategy?: WinningStrategyCoverage
 }
 
 export interface TrainerLogger {

@@ -3637,6 +3637,22 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     expect(cfg.include_oracle).toBe(false)
   })
 
+  it('forwards the SOLVE-IT M0 exact-oracle + ladder knobs to the play-off request (off by default)', async () => {
+    const storage = memoryStorage()
+    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
+    const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
+    const { tools } = makeTools(runner, storage)
+    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['champ'] })
+    const off = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    expect(off.oracle_exact).toBeUndefined()
+    expect(off.ladder).toBeUndefined() // opt-in only, so the round-robin stays on the fast proxy
+    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['champ'], oracleExact: true, ladder: true, ladderGames: 3 })
+    const on = (runner as unknown as { jobs: ComputeJob[] }).jobs[1].config as Record<string, unknown>
+    expect(on.oracle_exact).toBe(true)
+    expect(on.ladder).toBe(true)
+    expect(on.ladder_games).toBe(3)
+  })
+
   it('errors when the project declares no tournament command', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     await expect(tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
@@ -3773,6 +3789,25 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     expect(cfg.estimate_solve_endgame).toBe(16)
     expect(cfg.max_exact_empty).toBe(20)
     expect(cfg.max_enumerate).toBe(30000)
+  })
+
+  it('maps the SOLVE-IT M1 winning-strategy mode into the request and surfaces its coverage', async () => {
+    const storage = memoryStorage()
+    const wsSummary = {
+      ...bookSummary,
+      winningStrategy: { nodes: 40, proven: 12, provenFraction: 0.3, root_proven: false, root_value: null, complete: false },
+    }
+    const runner = stubRunner({ jobResult: () => ({ summary: wsSummary }) })
+    const { tools } = makeTools(runner, storage)
+    const res = await tools.buildBook({
+      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 300, winningStrategy: true, strategist: 0, maxPlies: 12,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    expect(cfg.winning_strategy).toBe(true)
+    expect(cfg.strategist).toBe(0)
+    expect(cfg.seed_games).toBeUndefined() // seed mode is meaningless for a from-opening directed proof
+    expect(res.winningStrategy?.provenFraction).toBeCloseTo(0.3)
+    expect(res.winningStrategy?.complete).toBe(false)
   })
 
   it('errors when the project declares no buildBook command', async () => {

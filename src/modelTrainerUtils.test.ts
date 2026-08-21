@@ -834,9 +834,15 @@ describe('validateTrainerManifest', () => {
     expect(m.bookBuild).toEqual({ seedGames: 0, estimateGames: 3, maxPlies: 10 })
   })
 
-  it('rejects a bookBuild that is not an object of numbers', () => {
+  it('rejects a bookBuild that is not an object of numbers or booleans', () => {
     expect(() => validateTrainerManifest({ ...manifest(), bookBuild: [1, 2] })).toThrow(/bookBuild/)
     expect(() => validateTrainerManifest({ ...manifest(), bookBuild: { maxPlies: 'deep' } })).toThrow(/bookBuild/)
+  })
+
+  it('accepts the SOLVE-IT M1 winning-strategy bookBuild (booleans allowed alongside numbers)', () => {
+    const cfg = { winningStrategy: true, strategist: 0, maxPlies: 12, maxExactEmpty: 22 }
+    const m = validateTrainerManifest({ ...manifest(), bookBuild: cfg })
+    expect(m.bookBuild).toEqual(cfg)
   })
 
   it('accepts an improve config (bounded budget + numeric hyperparams) and rejects malformed ones', () => {
