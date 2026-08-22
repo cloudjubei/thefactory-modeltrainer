@@ -94,6 +94,8 @@ import type {
   GetTrainerStateResult,
   DiagnoseSearchParams,
   DiagnoseSearchResult,
+  VerifyImprovementParams,
+  VerifyImprovementResult,
   GetActivityStatusParams,
   GetActivityStatusResult,
   ActivityStatusEntry,
@@ -286,6 +288,7 @@ import {
   proxyAlignment,
   narrateAlignment,
   assembleChampionVerdict,
+  verifyImprovement as verifyImprovementCore,
 } from './diagnosticsUtils.js'
 
 /**
@@ -3778,6 +3781,46 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
+  // §C.6 adversarial-verify as a read tool: "try to REFUTE this winner". Mirrors diagnoseSearch's setup
+  // (manifest → active scorecard → criterion → projected runs → split axis) then runs the four-lens battery and
+  // narrates it. Baseline defaults to the manifest's declared null baseline; nuisance levers to the manifest's.
+  async function verifyImprovement(params: VerifyImprovementParams): Promise<VerifyImprovementResult> {
+    let manifest: TrainerManifest
+    try {
+      manifest = await resolveProjectManifest(params.scope, params.project)
+    } catch (err) {
+      return { found: false, error: err instanceof Error ? err.message : String(err) }
+    }
+    const recordType = manifest.recordType
+    const card = await resolveActiveScorecard(params.scope, manifest)
+    const criterion: AnalysisCriterion = primaryFitnessCriterion(card)
+    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest, card)
+    const splitLevers = splitLeversOf(manifest)
+    const nullBaseline = manifest.diagnostics?.nullBaseline
+    const baseline = params.baseline ?? (typeof nullBaseline === 'number' ? nullBaseline : 0)
+    const alpha = params.alpha ?? manifest.diagnostics?.splitAxis?.alpha ?? 0.05
+    const nuisanceLevers = params.nuisanceLevers ?? manifest.diagnostics?.nuisanceLevers ?? []
+    const verdict = verifyImprovementCore(runs, criterion, { baseline, alpha, splitLevers, nuisanceLevers })
+    const applied = verdict.checks.filter((c) => c.applicable)
+    const passed = applied.filter((c) => c.pass).map((c) => c.name)
+    const failed = applied.filter((c) => !c.pass).map((c) => c.name)
+    const narrative = verdict.unverifiable
+      ? `UNVERIFIABLE — no refutation lens could run (needs ≥2 seeds on the incumbent, a declared split axis, and/or nuisance levers). The winner rests on a point estimate; re-run with more seeds / declare a split axis before crowning.`
+      : verdict.verified
+        ? `VERIFIED — the winner survived all ${applied.length} applicable refutation lens(es) [${passed.join(', ')}] against baseline ${baseline}. The claimed improvement holds.`
+        : `REFUTED — failed [${failed.join(', ')}]${passed.length ? ` (passed [${passed.join(', ')}])` : ''}. Do not crown: the edge does not survive adversarial verification.`
+    return {
+      found: true,
+      recordType,
+      baseline,
+      verified: verdict.verified,
+      unverifiable: verdict.unverifiable,
+      incumbent: verdict.incumbentConfig,
+      checks: verdict.checks,
+      narrative,
+    }
+  }
+
   // A3.1 orientation read: fold the project's `activity-run` status records into "what's running / queued /
   // recently done" for the AI companion. The generic activity-run record is the single authoritative status
   // source (trainer-queue is only a marker); its useful fields are nested (kind in `resumeToken.activityType`,
@@ -5074,6 +5117,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     analyzePaperModels,
     xaiNarrate,
     diagnoseSearch,
+    verifyImprovement,
     getActivityStatus,
     getRunData,
     getRunGame,

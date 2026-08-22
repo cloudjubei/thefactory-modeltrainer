@@ -441,23 +441,11 @@ Remaining (forward):
   league play** for the luck games (champion pool onto the `opponent` axis via `choicesFrom`); the
   **specialist-vs-generalist-finetuned** §C hypothesis (needs a HuggingFace survey); and a **BoardGameArena**
   live-play bridge (drives `load_policy`) as the final real-world test.
-- **Connect-4 SOLVED — the crisp end-state of §C.3 (ACTIVE).** Connect 4 has ground truth (first player wins
-  with perfect play). Today the `alphazero` core plateaus WEAK (on disk: champion frozen at gen12, gens 13–15
-  trained but never promoted; the owner can still beat it) — so "reach the known winning strategy" is the crux,
-  not a nicety. Build, staged: (1) a perfect-play **oracle** — a torch-free `harness/solver.py` (bitboard
-  negamax + alpha-beta + transposition + a one-time opening book) exposed as an `OracleAgent`, registered as a
-  `connect4` persona AND the top rung of the rating spine, so every model is measured against perfect play;
-  known-answer TDD (centre is the unique optimal opening, empty board is a P1 win, takes wins / blocks losses).
-  (2) **near-perfect ladder rungs** — MCTS with a tactical (heuristic) rollout + immediate win/loss checks at
-  ~2–5k sims, and a depth-limited oracle rung (the heuristic stays an honest weak floor; the full Allis rule
-  engine is not worth chasing). (3) an alphazero setup that actually reaches it — a small **ResNet**, a real
-  budget (~40–60 iters × 150–250 self-play × 200–800 sims × 8–10 epochs, ~100k buffer), the oracle in the
-  league, and **oracle distillation** (pretrain the net on solver-labelled optimal-move + value targets) as the
-  biggest lever. (4) a **measurable SOLVED criterion** — `oracle_optimality_rate` (model's greedy move ∈ the
-  solver's optimal-move SET over a fixed benchmark corpus, `harness/benchmark.py`) ≥ 0.99 AND
-  `wins_as_p1_vs_oracle == 1.0`; NOT win-rate-vs-oracle (degenerate 0.5 under seat alternation, below the 0.55
-  spine threshold). Surface a `health: solved` badge + the `oracle_*` metrics. This is the trigger that unblocks
-  the model-comparison view (§E).
+- **Connect-4 SOLVED — the crisp end-state of §C.3 → its own program in §C.5 (ACTIVE).** The oracle, near-perfect
+  ladder rungs, distillation, and the measurable SOLVED criterion (`wins_as_p1_vs_EXACT_oracle == 1.0`) are all
+  built. The remaining work is the COMPUTE grind (M1 winning-strategy proof → M2/M3 verify+distil) and a net
+  training pass — tracked in **§C.5 "The pending work"**. This is still the trigger that unblocks the
+  model-comparison view (§E).
 - **Unified single "find the best model" process + Runs→Models view (ACTIVE).** Collapse the two autopilots
   (config-space Exploration + champion Improve) into ONE reducer with stages `screen-new → search → improve →
   converged`. On start/resume a `leverSetHash` + `screenedChoices` in `ExplorationState` re-screens any
@@ -474,8 +462,6 @@ Remaining (forward):
   the one `explore` controller; repoint-and-DELETE, no shim). Open decision: the compound-core signal is an
   explicit manifest `compoundCores` field (preferred, one line in `trainer.json`) vs derived from a
   `*_warm_start` lever gated by `appliesWhen` (zero-config but fragile).
-- **Expose `verifyImprovement` as a chat tool/activity** — the engine function is done; the thin remaining
-  piece is the thefactory-backend `trainerTools` schema + dispatch wrapper.
 - **S9 leakage tail** (lowest value, do when it bites): a per-split membership signature
   (`RunSummary.splitSignature`) + a train/eval-overlap disjointness detector; and relocate the trading fidelity
   predicate (`isRunAffectedByFidelity*`) out of shared `modelTrainerUtils` into BlackSwan (repoint-and-DELETE).
@@ -483,517 +469,95 @@ Remaining (forward):
   benchmark (not hard-required — preserves BlackSwan's `return_vs_hold_pct`); best-of-N BESIDE DSR sharing one
   `nTrials` floor; reuse / `unverifiable` flags advisory, not hard-block.
 
-### C.5 — Optimal-play trainer (boardgames) — detailed log
-
-The full engineering record for the §C.4 "Connect-4 SOLVED" milestone: **making a solved game
-*computably* optimal, and generalizing it.**
-
-#### The wall we hit (measured)
-
-Reaching **provably optimal** play requires playing the **opening** perfectly. Exact solving costs
-`~16ms` at move 20, `~1.4s` at move 12, but **~158 seconds per position at move 10** — the in-memory
-transposition table (capped at 2M) thrashes on the opening subtree. So:
-
-- exact **opening** labels for the net are infeasible one-at-a-time, and
-- no fast/learned agent can be made provably optimal without help in the opening.
-
-What already works and stays: **oracle-opening distillation** (fixes the net's broken edge-first opening →
-centre-first; SHIPPED), the **exact endgame cutoff** (`solve_endgame` — provably-perfect endgame; SHIPPED),
-the **Play-off** (objective who-wins + `wins_as_p1_vs_oracle` optimality gauge; SHIPPED).
-
-#### The idea (user's three levers) — this is exactly how Connect 4 was actually solved
-
-A persistent **opening book + endgame tablebase**, **symmetry-reduced**, with **early game termination**.
-Composed correctly these break the wall and make an *exactly optimal, fast* agent, and they generalize.
-
-##### Lever 1 — a persistent solved-position store (tablebase / book)
-
-Store the game-theoretic value (win / loss / draw under optimal play — optionally the signed distance-to-end)
-of *some* positions, keyed by a canonical position key, persisted to disk and **accumulated across runs**.
-
-- **Value-only + one-ply lookahead is enough to PLAY optimally**: at a position, look up each child's stored
-  value and pick the negamax-best move. No need to store best-moves separately (the "rainbow" walk-to-the-win
-  is then implicit); storing the strong (signed-distance) value additionally gives fastest-win / slowest-loss.
-- **Priority to keep**: *hub* positions (high transposition in-degree — reached from many move orders, so one
-  solve saves many) and *hard* positions (deep solves). Bounded size with priority eviction.
-- **Why it breaks the wall**: build it **bottom-up** (store the deep frontier first). Once moves 12–18 are in
-  the book, solving a move-8 position is *shallow* — its children are instant lookups. The 158s solve becomes
-  a handful of table hits. Each training/exploration run extends the frontier upward ("over time we store the
-  difficult ones") until the opening is covered.
-
-##### Lever 2 — symmetry (mirror) canonicalization
-
-Connect 4 is symmetric under left↔right reflection about the centre column. Canonicalize every key to
-`min(key, mirror(key))`:
-
-- **~50% fewer positions** to solve and store (a position and its mirror share one entry).
-- game-theoretic value is **mirror-invariant**, so value-only lookups need **no** move-remapping.
-- **the net gets it too**: canonical (or symmetry-augmented) encoding → the net learns a symmetry-invariant
-  policy for free → ~2× data efficiency + consistency. (Generalizes to richer symmetry groups; see below.)
-
-##### Lever 3 — early game termination
-
-During self-play, evaluation, the Play-off, distillation labelling, *and* inside the solver: the moment a
-position's value is known (book hit), **end the game / cut the search** with that outcome instead of playing
-it out.
-
-- speeds up **everything** (fewer plies per game; solved subtrees never re-expanded);
-- lets even the **net** agent "know" the result — a game that reaches a stored won/lost/drawn position ends
-  immediately with the true result, so we neither waste time nor let the net misplay a decided position.
-
-#### How they combine → the deliverables
-
-1. **Exact opening labels become feasible** (book-accelerated solving) → distillation trains the net on *true*
-   optimal moves in the opening, not depth-limited approximations → the net approaches optimal.
-2. **A deployable, provably-optimal, FAST agent**: opening = book (one-ply table lookup, instant) + endgame =
-   solver cutoff (exact) + net as the fallback where the book is thin. No 158s solves at play time.
-3. **Everything stays visibly testable** in the Play-off: `wins_as_p1_vs_oracle → 1.0`, champion self-play
-   first-player-wins → 100%, and the book-agent shows as optimal.
-
-#### Generalization (Connect 4 is just the first game)
-
-Keep the engine game-agnostic; put only the hard parts behind per-game hooks. As games get more complex and
-harder to encode, the reusable engine (below) is what carries over — **especially the net trainer**.
-
-- **Tablebase (Lever 1)** — fully game-agnostic: `bytes canonical_key → value`. Knows nothing about any game.
-- **`SolvableGame` protocol** (extends `Game`) — the per-game hooks:
-  - `canonical_key(state) -> bytes` — symmetry-reduced position key.
-  - `symmetries() -> [Symmetry]` — each `Symmetry` maps an encoded input tensor **and** a policy vector (for
-    net augmentation) and the position key (for canonicalization). Connect 4 = {identity, mirror}. Square-board
-    games (tic-tac-toe/gomoku) = the 8 dihedral maps. A game with no exploitable symmetry returns `{identity}`
-    and simply gets no space saving — the rest still works.
-  - `solve(state, book) -> value` — the exact solver (Connect 4 = the bitboard negamax; a game with none just
-    has no book → no early-termination, but the same framework).
-- **Early termination (Lever 3)** — a generic `play_until_decided(game, agents, book)` used by every game path.
-- **Net trainer** — the encoding + architecture is the per-game frontier. The engine helps it three ways that
-  matter more as games get complex: (a) **symmetry augmentation** (declared once per game) multiplies data and
-  bakes in invariance; (b) **book-accelerated exact distillation** gives the net *ground-truth* targets wherever
-  the game is solvable, so the net doesn't have to discover them; (c) **early termination** on book hits keeps
-  self-play cheap. For games with no solver, the book is seeded from strong-agent agreement / self-play consensus
-  instead of exact solves — same store, weaker guarantee.
-
-#### Status — ALL PHASES SHIPPED (TDD; 137 boardgames tests green)
-
-Phases 1–5 are complete. `harness/book.py` (builder + `book_optimal_actions` + `play_until_decided` +
-`build-book` CLI + seed mode), `harness/bookagent.py` (the deployable `book` agent), `harness/tablebase.py`,
-the solver's symmetry-canonical persistent TT, net symmetry augmentation, and the `SolvableGame` hooks on
-both `connect4` and the new fully-solved `tictactoe` all landed with direct tests. Wired to the app: a
-`build-book` capability/activity + a "Build book" button in the Play-off panel, and the `book` agent enters
-the Play-off + gauntlet as an optimal-play competitor (a `book` rung in the manifest ratingSpine).
-
-**The honest coverage picture (measured).** Cold opening solves cost `~2ms` at ply 16, `~120ms` at ply 14,
-`~4s` at ply 12, `~9s` at ply 10, and MINUTES near the empty board; enumerating the deep frontier from the root
-blows up breadth-first. So full opening coverage is a genuine long-running ACCUMULATOR (each `build-book` run
-extends it, persisted + symmetry-reduced), not a one-shot — exactly the design. What ships working today:
-a committed **60k-position** connect4 midgame/endgame book (seed mode; opening coverage honestly ~0% and
-reported as such), the exact endgame solver (always perfect), and the depth-limited oracle for the unbooked
-middle. **Tic-tac-toe is the crisp complete proof**: its whole tree solves instantly, the book completes to
-100% coverage, and the `book` agent is provably optimal — it tops the Play-off and its self-play is a 100%
-DRAW (tic-tac-toe's true value), demonstrating the identical engine yields optimal play end-to-end.
-
-#### Phased plan (each phase TDD, each ends with a measurement)
-
-- **Phase 1 — Foundation + wall-break proof.** `harness/tablebase.py` (persistent store: get/put/contains/
-  load/save, compact value codec, size cap + priority eviction, game-agnostic). Connect 4 `_mirror` + canonical
-  key. Solver reads the book (exact cutoff on hit) and `solve_and_store` writes it. **Measurement**: batch-solve
-  opening positions with a warmed/symmetry book vs cold — show the batch (and a re-solve, and a mirror) go from
-  seconds to ~instant. *(this is the proof it's computable)*
-- **Phase 2 — Incremental opening-book builder + a `build-book` trainer activity.** A bounded, resumable pass
-  that solves+stores the reachable frontier bottom-up, priority-ordered (hub/hard first), persisting to a
-  project-committed book file. Runs incrementally (each Start extends it). Exposed as a chat-invocable capability.
-- **Phase 3 — Book-accelerated exact distillation + the deployable optimal agent.** Rewire `oracle_distill_games`
-  / `build_distill_corpus` to pull *exact* opening labels from the book (fall back to the depth-oracle only where
-  the book is thin). Add a `book` agent (opening book + endgame solver + net fallback) — provably optimal + fast;
-  register it as a ratingSpine rung + opponent so the Play-off can crown it and measure everyone vs it.
-- **Phase 4 — Symmetry in the net + early-termination everywhere.** Canonical/augmented encoding via
-  `Game.symmetries()`; `play_until_decided` in self-play, evaluation, gauntlet, tournament. **Measurement**:
-  training + play-off wall-clock down; `wins_as_p1_vs_oracle` of the distilled champion up toward 1.0.
-- **Phase 5 — Generalize.** Land the `SolvableGame` protocol; make tablebase/early-term/symmetry consume it;
-  document how a new game plugs in (key, symmetries, solver-or-seed). Prove on a 2nd game (tic-tac-toe: trivially
-  fully-solvable, exercises the 8-fold dihedral symmetry) that the same engine yields an optimal book-agent.
-
-#### Next enhancements (queued — documented now, to tackle soon)
-
-These extend the shipped engine; not yet built.
-
-##### E1 — Player-colour (p1↔p2) collapse — INVESTIGATED, NOT A WIN (2026-08-19)
-
-The earlier idea (and two research passes) claimed a mover-relative key would collapse colour-swap pairs and
-~halve the generic book. **Measured on tic-tac-toe: it saves 0 entries** — enumerating all 4,520 reachable
-non-terminal positions gives **627 distinct current keys and 627 distinct mover-relative keys**. Reason: in a
-strictly-ALTERNATING game the side-to-move is determined by the piece counts, so a position's colour-swapped /
-turn-swapped twin has the wrong parity and is **UNREACHABLE** — there are never two reachable positions to merge.
-The `* 2 + to_move` turn bit in `tictactoe.canonical_key` is redundant (turn is a function of the board) but
-harmless, and it splits nothing.
-
-What the intuition ("colour doesn't matter once a value is known") really wants is **mover-relative VALUE
-storage**, and that is ALREADY how everything works: `position_value` / the solver / the book store the value
-from the side-to-move's perspective (win +1 / draw 0 / loss −1) and every lookahead negates child values
-(`book.py:91`, `solver.py:289-292`), so a stored value applies regardless of which physical colour is on the
-move. The real geometric saving is the board symmetry — Connect 4's left↔right mirror and tic-tac-toe's full
-8-fold dihedral — which is already exploited. **No code change; keep the mirror/dihedral canonicalisation as-is.**
-(A game that is NOT strictly alternating — passes, variable move counts — could in principle benefit; revisit
-per-game only if such a game appears.)
-
-##### E2 — Related follow-ups (candidates)
-
-- **Grow real opening coverage.** Connect 4 opening coverage is honestly ~0% (the committed book is
-  midgame/endgame only). Longer / offline `build-book` accumulation (bottom-up, symmetry-reduced) is what lifts
-  `wins_as_p1_vs_oracle` toward a genuine optimality proof — the accumulator design is already in place, it just
-  needs the compute budget to climb the frontier upward.
-- **A stronger play-off yardstick.** The play-off oracle is depth-6 (endgame-exact, but beatable in the
-  opening), so "optimality vs oracle" is a yardstick, not a proof. A stronger yardstick depends on the
-  opening-coverage growth above (a deeper *live* oracle stays minutes/move in the opening — the wall).
-
-#### Phase 6 — Generic SELF-PRODUCED approximate book (current focus)
-
-Reframes Tier 1 of the deep-research proposal. We do **NOT** import external databases (Tromp / bitbully) — the
-whole point is a system that PRODUCES its own opening knowledge for ANY game, even when that knowledge is
-incomplete. Connect 4 is only the honing example. The book graduates from an exact-only tablebase into a
-generic store that mixes PROVEN and APPROXIMATE knowledge and upgrades one into the other over successive runs.
-
-##### The richer entry (supersedes the scalar Tablebase value)
-Per canonical key, store:
-- `status`: `PROVEN_WIN | PROVEN_LOSS | PROVEN_DRAW | ESTIMATE` — a single int8 column.
-- `value`: exact {−1, 0, +1} when proven; else an estimate in [−1, +1] (mover-relative tendency).
-- `best_actions`: a **bitmask** (`num_actions ≤ 64` → one uint64) of the optimal set (proven) or top moves
-  (estimate). This is the one-ply-lookahead move set, the model's policy target, AND the IMPLICIT principal
-  variation — walking `best_actions` from a position reproduces the winning/drawing LINE, so "raw paths" are
-  reconstructible on demand and need not be stored per entry (a `principal_variation(book, game, state)` walk).
-- `wdl` (optional): win/draw/loss counts behind an ESTIMATE (uint16×3) — the win/loss RATIO indicator a deep
-  model reads to grade moves where nothing is proven yet.
-- `n` / confidence: sample size behind an estimate (so estimates are comparable + upgradable).
-- `depth_to_end` (optional): signed distance-to-result for fastest-win / slowest-loss.
-
-Persisted COLUMNAR (parallel numpy arrays like today's `.npz`) so winner/loser/draw filtering is a vectorised
-mask and lookups stay O(1). Values stay MOVER-RELATIVE (colour-agnostic — see E1).
-
-##### The evaluator ladder (exact → bounded-proof → estimate)
-`evaluate(game, state, book, budget) -> Entry`, tried in order, each reusing already-booked children:
-1. terminal → PROVEN from the winner.
-2. book hit → return the stored entry.
-3. cheap EXACT: `position_value` / `exact_optimal_actions` resolves within budget (endgame / small tree) → PROVEN.
-4. bounded PROOF: an MCTS-Solver / depth-limited αβ that treats booked children as PROVEN leaves; if it resolves
-   the position within a node/time budget → PROVEN (+ `best_actions`). This is the wall-break — a shallow proof
-   collapses to child lookups.
-5. ESTIMATE: N bounded games / rollouts (a supplied agent factory, or a learned value head) → a win/draw/loss
-   ratio → ESTIMATE (+ `best_actions` by estimated value + `n`).
-
-Bottom-up minimax over booked children UPGRADES estimates → proofs automatically: a parent is `PROVEN_WIN` if any
-child is a proven loss for the child's mover; `PROVEN_LOSS` if every child is a proven win for the opponent;
-`PROVEN_DRAW` if the best child is a proven draw and none is a proven win. Each pass proves more and sharpens the
-rest. **"Opening solved" = a root/opening position reaches `PROVEN_WIN` with a stored winning line.**
-
-##### The builder
-Extends today's `build_book`: enumerate a bounded, symmetry-reduced frontier; order deepest + hub-first;
-`evaluate(...)` each; store the richer entry; RESUMABLE + ACCUMULATING (re-runs deepen coverage AND upgrade
-ESTIMATE→PROVEN). Priority eviction keeps proofs over estimates and hubs over leaves.
-
-##### Storage / operation optimisations (the user's third requirement)
-- `best_actions` as a uint64 bitmask → O(1) store, fast set ops, cheap PV reconstruction.
-- `status` as int8 → vectorised "all proven wins / losses / draws" and "100%-blocked = `PROVEN_DRAW`" filters.
-- in-memory dict for build/play; columnar `.npz` on disk; a sorted-key + bisect read path if the book outgrows RAM.
-
-##### Generic via the SolvableGame hooks
-Reuses `canonical_key` / `ply` / `legal_actions` / `step` / `is_terminal` / `winner`, the exact `position_value`
-/ `exact_optimal_actions` (proof rungs), and a NEW pluggable `estimator(game, state) -> (value, best_actions,
-wdl)` (estimate rung; default = N bounded self-play games with a supplied agent, or a learned value head). A new
-game plugs in exactly as tic-tac-toe / connect4 do.
-
-##### How the deep model consumes it
-The richer entry IS the distillation target: policy = `best_actions`, value = proven value or estimate, with the
-`wdl` ratio + confidence as auxiliary signals. Proven entries give EXACT supervision; estimates give a GRADED
-signal on the frontier the proofs haven't reached — so the model learns from the book everywhere, not only where
-it is solved.
-
-##### Measurable success criteria
-- `optimality_verified_plies` (shipped in Tier 0) climbs toward full game length as PROVEN opening coverage grows.
-- proven-opening count (ply ≤ K) and `book_coverage` (proven fraction of the reachable opening) climb per build.
-- `wins_as_p1_vs_oracle` / self-play first-player-win climb toward 1.0 as PROVEN coverage reaches the root.
-- tic-tac-toe stays the reference: the generic builder reaches 100% PROVEN coverage and a provably-optimal book
-  agent (regression on the existing tests).
-
-##### Honesty rails (Phase 6)
-- An ESTIMATE is a BELIEF, not a proof — label it; never report an estimated opening as "solved".
-- The approximate win/loss ratio is only as good as the estimator (bounded search / rollouts); it sharpens as
-  proofs replace it.
-- The wall is unchanged for PROOFS (a cold exact opening solve stays expensive); estimates exist to give the
-  model useful gradient NOW while proofs accumulate bottom-up.
-
-##### First buildable milestone — SHIPPED (2026-08-19, TDD; 168 boardgames + 1846 TS green)
-- **Richer `Tablebase` entry** (`harness/tablebase.py`): `PROVEN`/`ESTIMATE` status + value + `best_actions`
-  bitmask + confidence `n`, persisted columnar. **Backward-compatible**: `get()` unchanged; a new
-  `proven_value()` returns a value only for PROOFS, so every exact consumer (`book_optimal_actions`,
-  `book_value`, `play_until_decided`, the solver's `book=` short-circuit) was repointed to it and now ignores
-  estimates by construction; legacy value-only `.npz` (committed books + the solver `.tt`) load as all-PROVEN.
-- **Generic bounded-search estimator** `estimate_position` + the **evaluator ladder** `evaluate` (`harness/
-  book.py`): terminal → PROVEN; PROVEN book hit → keep; FREE minimax over booked-PROVEN children → PROVEN; cheap
-  exact (`exact_optimal_actions` ≤ `max_exact_empty`) → PROVEN; else a net-independent bounded-self-play ESTIMATE
-  (+ `best_actions` + `n`).
-- **Builder wiring**: `build_book(..., estimator=, max_exact_empty=)` — default path byte-identical (exact,
-  value-only); estimator mode stores rich entries and **skips only PROOFS, re-evaluating ESTIMATEs** (the eager
-  free upgrade). Proven end-to-end: ttt proves the WHOLE tree bottom-up from terminals with the estimator NEVER
-  called (max_exact_empty=0), and the connect4 opening band yields ESTIMATE entries carrying `best_actions` + `n`.
-- **`principal_variation`** reconstructs the raw line from stored optimal moves (Q2).
-
-- **Distillation value-relabel** (SHIPPED): `oracle_distill_games` now takes the VALUE target from the book's
-  PROVEN value where available, not the noisy self-play outcome — the fix for the opening value-label
-  contamination that forfeits the first-player win (test: a proven opening value overrides the game outcome).
-- **Proof leaves in MCTS** (SHIPPED): `MctsAgent(book=…)` backs up the EXACT proven/solvable value at a
-  descended leaf instead of a rollout (`_proven_returns`; the root is always expanded so `act` can still rank
-  moves). Reference rungs stay pure (opt-in). So book coverage pays off in PLAY, and a book-aware agent makes the
-  estimator's rollouts sharper. (The safe "oracle-leaves" half of MCTS-Solver — proven-win/loss SELECTION +
-  propagation, and the AlphaZero-core port, are the follow-up.)
-
-- **Real-game coverage-loop PROVEN (SHIPPED, 2 durable connect4 tests + a live demo).** Correctness: a
-  bottom-up midgame book's `book_optimal_actions` equals an INDEPENDENT from-scratch solve on every position of
-  its principal variation (the book plays exactly what a fresh solver would). Loop: booking a subtree lifts a
-  real line's `optimality_verified_plies`. Live demo on the oracle's 34-ply game: **14/34 verified with no book
-  → 21/34 after booking the ply-13→24 midgame band** (200k positions, 187s), first-blunder None, and 9/9 of the
-  line's booked midgame positions matched an independent solve. The opening (ply 0-13) stays honestly unverified
-  — the 158s wall — so deeper coverage is the accumulator grind, exactly as the plan predicted.
-- **Accumulator RUN (2026-08-20).** Bottom-up bands seeded progressively shallower on a real 23-ply near-perfect
-  line, into one growing book — `optimality_verified_plies` climbed **monotonically 3 → 7 → 9 → 11 → 13/23**
-  (booking from ply 16→14→12→10), with cost rising steeply toward the opening (**6s → 14s → 78s → 336s/band**;
-  book 0 → 182k), the wall. Uses the existing `build_book` (banded + resumable) — no new code. Two honest
-  findings, BOTH SINCE CLOSED (see next bullet): (a) reaching the deep opening (ply 0-9 here) is a compute-bound
-  grind — multiprocessing the many-position bands would speed it, but a single hard opening solve stays serial;
-  (b) `build_book`'s deadline is checked BETWEEN positions, not during a solve, so one cold opening solve
-  (minutes) overruns the band budget (the ply-10 band ran 336s against an 80s deadline).
-- **Parallel band solver + per-position cap + within-band deadline — SHIPPED (2026-08-20, 4 TDD tests).**
-  `build_book(workers=N, max_position_seconds=S)` solves each ply-band across a spawn `ProcessPoolExecutor`
-  (`_solve_frontier_banded`): positions in a band are independent given the deeper booked band, so each worker
-  gets the current book snapshot (`_band_init`) for child short-circuits and solves are booked AS THEY COMPLETE
-  (`as_completed`). Each solve is wall-clock-capped (`_run_bounded`, SIGALRM; a worker is the main thread of its
-  own process so the cap holds there) — a hard position is DEFERRED (`None`), booked later once its children are
-  cheap. Same-run RE-MEASURED parallel (8 workers, 3s cap) vs the sequential baseline above: **ply 12 78s→66s,
-  ply 10 336s→186s (1.8×)** — the speedup GROWS with band depth (deep bands are compute-bound; shallow bands the
-  pool spawn barely helps: ply 16 6s→10s), 0 deferred through ply 10 (no single ply-≥10 solve exceeds 3s; the
-  336s was the *aggregate*). Closes (a). For (b): the per-position cap bounds any single solve, AND the
-  deadline/`max_positions` budget is now checked WITHIN a band (not just between bands) — booking as solves
-  complete and cancelling the not-yet-started ones — so a time-bounded run stops within ~`max_seconds` of its
-  deadline. Proven by `test_build_book_respects_the_deadline_within_a_band` (a ply-14 band that grinds ~30s
-  unguarded returns in <4s under a 0.4s deadline). Parity (`test_build_book_parallel_matches_sequential`):
-  `workers=4` yields the byte-identical book to the sequential build. GOTCHA (bit us once): spawn re-imports
-  `__main__`, so an ad-hoc driver script calling `build_book(workers>1)` at module top-level recursively spawns —
-  the driver MUST sit under `if __name__ == "__main__":` (the real `run_build_book` tool path is inside a
-  function, so it is unaffected; the parity test passes under pytest for the same reason).
-
-- **Anti-drift ANCHOR — SHIPPED** (`neural._mix_training_set`, TDD): the exact distilled anchor is held at a
-  FIXED fraction (`distill_fraction=0.34`, DQfD-style) of every training pass instead of concatenated into the
-  8000-buffer where it diluted to ~5% — the fix for the net drifting off the optimal opening it was distilled on.
-- **AlphaZero-core PROOF LEAVES — SHIPPED** (`AlphaZeroAgent(book=…)` + `_proven_value`, TDD): the net's search
-  backs up the EXACT value at a booked/endgame-solvable leaf instead of the value head's estimate — truth
-  propagates through the PUCT tree (completes the MctsAgent proof-leaves). Opt-in (no book + solve_endgame 0 →
-  pure net, self-play unchanged); the deployed champion (solve_endgame 22) gets exact endgames in search.
-- **MCTS-Solver SELECTION / PROPAGATION half — SHIPPED (2026-08-20, both cores, 9 TDD tests).** The leaf half
-  only backed up exact values; this makes a proof PROPAGATE. Shared pure algebra in `agents.py`
-  (`prove_node`/`child_move_value`/`mover_returns`, negamax with a win short-circuit) maintains a `_proven`
-  overlay (position key → +1/0/-1, mover-relative): a node is a proven WIN the instant one child is a proven loss
-  for the opponent, a proven LOSS/DRAW only when EVERY child is proven. In `MctsAgent`, each simulation seeds the
-  overlay at its leaf and propagates deepest-first up the visited path; a proven node is then treated as a leaf
-  (selection pruning), the root's proof is played outright, and the sim loop STOPS the moment the root is proven.
-  Verified: the root becomes a *derived* proof (not a high average) and the move is optimal with a tiny budget
-  (`sims=60`); the search terminates early (`sims_used < 100` of 500); a proof bubbles up through TWO plies from
-  solved grandchildren the leaves alone can't reach; a drawn root proves via the all-children branch; and a
-  20-position differential sweep vs the exact solver plays optimally everywhere (a sign bug would misplay). In
-  `AlphaZeroAgent` the same overlay is populated as a search byproduct (writes only — descent/backup untouched, so
-  the self-play visit-count policy π is provably intact: `run_search` spends its full budget over all legal moves)
-  and CONSUMED only in greedy deployment (`temperature<=0`): an untrained net still plays a propagated proven win.
-  Reference purity guarded both cores: no book + `solve_endgame=0` → the overlay is inert (`_proven == {}`, full
-  sim budget), so the fixed-strength rungs and self-play dynamics are byte-identical.
-
-- **Book-aware DEFAULT estimator — SHIPPED (2026-08-20, `book.make_book_estimator`, 2 TDD tests + wired into
-  `run_build_book`).** Realises design decision (a): the estimator that grades an unprovable position is now a
-  factory returning book-aware **MCTS-Solver self-play** (`MctsAgent(book=…, solve_endgame=…)`, a fresh agent per
-  seat) — not the hand-rolled `HeuristicAgent` the tests used, and never a trained net. Its bounded games back up
-  EXACT values wherever the book/solver reaches beneath the position, so the estimate is grounded in proofs and
-  sharpens as coverage grows. Proven where its search reaches ground truth: on a solvable endgame the estimate
-  COLLAPSES onto `position_value` exactly and its best set == `optimal_columns` (both weak-outcome semantics).
-  `run_build_book` gained opt-in GRADED mode (`estimate_games>0` → build the estimator + pass `max_exact_empty`),
-  so the graded opening book is producible from the tool/CLI with no minutes-long solve; proofs still win the
-  evaluator ladder, estimates stay invisible to exact consumers (`proven_value` None).
-- **Book → net SOFT distillation targets — SHIPPED (2026-08-20, `neural.book_distill_examples` + wired into
-  `train_alphazero`, 3 TDD tests).** Closes the book→net learning loop: the net now learns from the WHOLE book, not
-  only the exact late-solve corpus. For each covered position the policy target is uniform over the entry's stored
-  `best_actions` and the value target is the entry's value — EXACT for a proof, the bounded-search belief (kept
-  SOFT) for an estimate — so the graded opening the exact labeller can't reach becomes trainable signal. Proofs
-  outweigh beliefs by whole-copy REPLICATION (`proof_copies` vs `estimate_copies`, the same oversampling the
-  distill anchor already uses) — no per-example loss weights, so `augment_examples`/`_mix_training_set` are
-  untouched. `train_alphazero(book=…, book_distill_positions=…)` folds these into the persistent distill anchor
-  beside the oracle distillation. Uncovered / `best_actions`-less positions are skipped. NOTE: the payoff scales
-  with opening coverage — until the accumulator fills the graded opening, the book supplies mostly late proofs
-  (which the oracle corpus already had); the value lands once coverage climbs toward the root.
-- **In-app grind launch path COMPLETE + robust (2026-08-20, TS + backend, 6 TDD tests).** The opening grind runs
-  IN-APP via `Exploration → Start → autopilot → build-book → buildBook → run_build_book`. The new Python knobs
-  (`workers`, `max_position_seconds`, graded `estimate_*`, `max_enumerate`) are now wired the whole way:
-  `BuildBookParams` + `buildBook()` map them and ALWAYS set a per-position cap (`max_position_seconds=5`) by
-  default so no pass can hang on a single opening solve (proven byte-identical to the plain build); the backend
-  `buildBookActivity` forwards them; and the autopilot's build-book child takes its config from a new manifest
-  `bookBuild` object (numeric knobs, validated). **Decision (user, 2026-08-20): each Start runs the GRADED opening
-  grind** — the boardgames manifest `bookBuild` = `{seedGames:0, maxPlies:10, estimateGames:3, estimateSims:24,
-  estimateSolveEndgame:14, maxExactEmpty:22, maxEnumerate:30000}`, so every Start extends the graded opening book
-  (bounded ~120s, resumable), feeding the soft-distillation targets. Smoke-verified: the exact config adds ESTIMATE
-  entries for the deep opening under a short deadline with no hang. (Requires the backend restart to load the new
-  dist, per the usual convention.)
-- **Autopilot INTERACTIVITY — Start now cycles end-to-end in minutes (2026-08-21, TS + backend + gauntlet.py, TDD).**
-  A 12h+ Start exposed three stalls, all fixed so `Start` reliably reaches its results: (1) **endless improve** —
-  `deriveAutopilotSignals` treated only `plateau`/`reached-target` as improve-done, so a champion that never
-  plateaus (weak-promotion churn stops on `'budget'`) made the autopilot re-select improve every round forever
-  (reached champion gen 60 without finalizing); now `'budget'` (the per-launch generation allotment spent) also ends
-  the round → finalize. (2) **40-min improve generations** — the champion used the heavy manifest defaults; a new
-  manifest `improve` field (`{maxGenerations, patience?, targetStrength?, hyperparams}`) gives the autopilot a
-  bounded LIGHT budget (boardgames: 1 gen, az_iterations 2 / selfplay 8 / sims 80 / distill_games 16 / eval 20 →
-  **~2 min/gen measured** vs ~40). (3) **9.5h rate step** — `rateModels` rated ALL **369** accumulated checkpoints ×
-  7 rungs × 40 games incl. mcts@1000 / oracle@12; new manifest `rate` field + `RateModelsParams` bound it to the
-  most-recent `maxModels` (16) with fewer `gamesPerRung` (12) and `maxReferenceSims` capping the mcts RUNGS
-  (gauntlet.py `_rung_factory(max_sims)`; the model stays full-strength). Plus a viewer **Stop** button that aborts
-  every live activity the process is running (parent autopilot + wedged children) — the panel had no way to stop
-  itself. All three configs are manifest-driven (validated) and the autopilot's improve/rate children read them.
-- **Results HONESTY — play-off numbers were noise + crowned the wrong player (2026-08-21, verified).** The play-off
-  ran `gamesPerPair=4`, so BOTH the head-to-head win% AND the optimality verdict (`m = min(n,12)` = 4 games as P1
-  vs a DEPTH-6 oracle) were statistical noise — a champion goes 4/4 by opening luck and gets a "✓ optimal" badge.
-  VERIFIED at 30 games/pair (m=12): a real champion scores **0/12 as P1 vs the depth-6 oracle → suboptimal**, so
-  the user's `alphazero·d1f978` "✓ optimal" was a 4-game fluke. And the viewer crowned "🏆 True winner (most games
-  won)" = the highest round-robin win% (a non-optimal mcts), which for a SOLVED game (seat-noisy random openings) is
-  the wrong arbiter. FIXES: (1) `gamesPerPair` default 4→**12** (reliable win% + m=12 optimality); (2) viewer
-  `renderPlayoffResults` ranks by OPTIMALITY first (converts the first-player win) then head-to-head, crowns the
-  optimal player (not the win% leader), shows sample sizes, and reconciles the three views — play-off *Optimal?*
-  (the arbiter for a solved game), head-to-head *win%* (seat-noisy, secondary), Models *Strength* (a separate
-  continuous gauntlet scale); (3) never overclaim — "✓ optimal vs oracle" → "converts the first-player win (beats
-  the depth-N reference as P1, n games)"; the `book (optimal)` competitor → `book (exact where solved)` (its opening
-  coverage is ~0%, so it is endgame-exact, not optimal). Self-play first-player-win is framed as CORROBORATING
-  optimality, not proving it (a strong-imperfect P1 can also reach 100%).
-
-#### SOLVE-IT PLAN — get a MODEL that plays Connect 4 perfectly (2026-08-21)
-
-The game is solved (proven first-player win; we have an exact solver). What is NOT done: a trained MODEL that plays
-perfectly. Honest current state — NO model has been tested against, let alone beaten, the EXACT solver; optimality
-was only ever measured vs a depth-6 PROXY (weak, beatable in the opening); the opening book is 0% covered.
-
-**Definition of SOLVED (measurable, no proxies):** a model M is optimal iff, as FIRST player from the empty board,
-it beats the EXACT solver (perfect defender) in 100% of games — it converts the proven first-player win against
-perfect play. Corroborated by: M's entire main line is proven-optimal (`optimality_verified_plies` = full game,
-`first_blunder_ply` = none) and, as second player, M never loses a position that is a draw/win under perfect play.
-Headline metric: `wins_as_p1_vs_EXACT_oracle == 1.0`.
-
-**Phase 1 — HONEST MEASUREMENT (the optimality ladder).** (1) Make the play-off/optimality oracle configurable up
-to the EXACT solver (`OracleAgent`), label it "oracle (exact)"; the viewer already gates the ✓/"solved" verdict on
-an exact label (never on a proxy). (2) The LADDER: test M vs depth 6→8→10→12→exact, report the deepest rung it
-clears (its "optimality frontier"). (3) `optimality_verified_plies` on M's ACTUAL line vs the EXACT reference — the
-honest distance-to-solved. Cost: exact-oracle games are minutes/move from the opening → keep the round-robin on the
-fast proxy, run the EXACT P1-conversion check on few games only.
-
-**Phase 2 — MAKE THE MODEL PERFECT (the winning-strategy grind, not the whole space).** The first-player win lives
-in the opening (ply 0-~14). KEY INSIGHT: don't prove ALL ≤14-ply positions — prove the WINNING-STRATEGY TREE (our
-optimal move at each of our nodes + EVERY opponent reply we must answer), a bounded subtree the exact solver walks
-from the root down. (a) Grind that PV+refutations tree into the book (the parallel, deadline-safe accumulator, from
-the endgame back). Tracked by opening `provenFraction` climbing 0%→100% of the reachable winning line. (b) Teach
-the model: a book-aware agent plays the proven strategy + exact endgames immediately (a perfect but lookup-bound
-player); DISTILL the proven `best_actions` into the NET so it plays the perfect opening FAST without lookup (the
-soft-target wiring). (c) VERIFY vs the exact solver as P1 → 100% = solved.
-
-**Phase 3 — the real win + generalisation.** A distilled NET (fast, no lookup) that beats the exact solver as P1 =
-a fast perfect model — the ML result the slow solver can't give. The processes (exact reference, verified-plies,
-proof accumulation, distillation, the optimality ladder, "not-yet" honesty) generalise to unsolved games (chess:
-no exact oracle, but a strong reference + verified-plies + self-improvement + honest reporting are the same
-machinery). Getting it RIGHT on Connect 4, where we hold ground truth, validates the process before scaling.
-
-**Milestones:** M0 exact-oracle ladder + verified-plies-vs-exact · M1 winning-strategy book `provenFraction`
-0%→100% (the grind) · M2 book-aware agent converts P1 vs EXACT solver 50%→100% · M3 distilled NET converts P1 vs
-EXACT solver = 100% → SOLVED. Bottleneck is M1; the rest follows.
-
-#### SOLVE-IT — the MACHINERY for all three phases is SHIPPED + demonstrated end-to-end (2026-08-21, TDD)
-
-Every claim is measured against the EXACT solver — "the truth and only the truth". Green: `tests/test_solve_it.py`
-(11) + `test_run_build_book_winning_strategy_mode_proves_ttt` + tournament/utils/tools TS. A single proof run
-closes the whole pipeline on tic-tac-toe (a game we FULLY solve) and on a Connect 4 forced-win subtree.
-
-- **M0 — HONEST MEASUREMENT (shipped).** `benchmark.p1_conversion` (model as FIRST player from any start; wins vs
-  draws vs losses, `not_lost_rate` for drawn games), `optimality_ladder` (depth-6→8→10→12→EXACT, reports the
-  deepest rung the model converts the win against — its "frontier"; only the exact rung sets `solved`), and
-  `verify_solved` (the ONE gate that may say "plays perfectly" — rate vs the EXACT oracle). A generic
-  `agents.ExactOptimalAgent` is the exact oracle for any SolvableGame. Tournament: `oracle_exact` swaps the
-  reference to the EXACT solver labelled "oracle (exact)" (the viewer already gates ✓ on that label; verdict
-  `optimal`/`solved` are now unreachable via the proxy — a proxy clear is `converts-proxy`), and opt-in `ladder`
-  computes the per-competitor frontier. Both off by default (the round-robin stays on the fast proxy).
-- **M1 — THE WINNING-STRATEGY GRIND (shipped).** `book.prove_winning_strategy` proves the STRATEGIST's directed
-  tree — our ONE optimal move at each of our nodes + EVERY opponent reply — far smaller than the whole opening.
-  Bounded (`deadline`/`max_positions`) + resumable (an internal node is booked ONLY once its required descendants
-  are, so a proven node is safe to skip AND playable; a hard solve that overruns `max_seconds` is DEFERRED and
-  retried once the frontier beneath it is booked — the endgame-back grind). `_prove` gained a win short-circuit
-  (a proven winning child proves a node, siblings irrelevant), and `book_optimal_actions` now returns a booked
-  achiever of a proven position's value — together they make the pruned single-line strategy playable from the
-  book (symmetry-safe, child-derived — never raw `best_actions`). `winning_strategy_coverage` is the honest M1
-  tracker (`provenFraction` 0→1, `root_proven`/`complete`). Wired through `run_build_book` (`winning_strategy`
-  mode) → `BuildBookParams.winningStrategy`/`strategist` → the backend `build-book` activity → manifest `bookBuild`
-  (numbers + booleans). Proven to COMPLETE tic-tac-toe (100%, both seats never lose) and a real multi-node C4
-  forced-win subtree; the from-opening C4 grind is the same tool, run in-app across Starts once the graded/seed
-  grind has built the deep-book substrate the top-down solves collapse onto.
-- **M2/M3 — CONVERT + DISTIL (shipped, demonstrated).** From the proven book, `BookAgent` CONVERTS the forced win
-  vs the EXACT solver (`verify_solved.solved == True`) — a lookup-perfect player; on tic-tac-toe a full book never
-  loses either seat. The distillation targets are exactly the proven optimal play (`book_distill_examples` policy
-  support = the optimal set, value = the exact game-theoretic value) — so a net that fits the anchor plays
-  perfectly. Training a net to 100%-vs-exact is the remaining COMPUTE (the existing distill wiring +
-  `verify_solved` gate); the structural correctness of what it learns is pinned.
-
-NEXT: run it — press Start in Exploration and watch the opening `provenFraction` (the M1 substrate) grow across
-Starts; once it is substantial, run `build-book` in winning-strategy mode (`bookBuild.winningStrategy=true`, or ask
-the AI) to prove the directed tree, then the play-off with `oracleExact`/`ladder` for the honest frontier + the
-exact SOLVED gate. The exact-proof accumulator (parallel band solver) also remains available via `bookBuild`.
-**DESIGN DECISIONS (resolved 2026-08-19):**
-- **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value — SHIPPED (see above).** The
-  book must be an INDEPENDENT reference that CORRECTS the net's opening errors; sourcing estimates from the net is
-  circular (book ≈ net → distilling book→net teaches nothing). Search also works on day one for a new game with no
-  trained net, shares the proof rung's substrate (degrades gracefully, sharpens as booked children accumulate).
-  The net may LATER serve as the search PRIOR to strengthen it per-sim — but the stored estimate is always the
-  search result, never the net's value.
-- **(b) RECONSTRUCT PVs from the stored optimal moves; never persist explicit paths.** Shipped: `book.principal_
-  variation(book, game, state)` walks the optimal set to a terminal (terminal / unbooked / cycle / max-len
-  guards). A proven line reconstructs in full (its winning continuation was booked when it was proven); a thin
-  region yields an honest partial line.
-- **(c) HYBRID upgrade cadence: eager for the FREE upgrade, on-demand for the EXPENSIVE one.** An estimate whose
-  children are now ALL booked is upgraded to a proof by a pure MINIMAX LOOKUP over those children — nearly free,
-  and already part of the bottom-up pass, so do it EAGERLY (keeps proven-coverage monotone every build). An
-  estimate whose children are NOT all booked needs NEW search to prove — that is real compute, so do it
-  ON-DEMAND (a play-time query, a priority/regret-guided frontier expansion, or a focused build on a region), not
-  speculatively every pass.
-
-#### Tier 0 (research proposal) — SHIPPED (2026-08-19)
-The three "free wins" that unblock measuring everything above: (1) the exact-endgame cutoff is now ON by default
-for DEPLOYED/eval nets (`DEFAULT_AZ_SOLVE_ENDGAME=22`; the `AlphaZeroAgent` class default stays 0 so self-play
-exploration is unaffected); (2) a generic, opening-inclusive `optimality_trace` (`harness/benchmark.py`) reports
-`first_blunder_ply` + `optimality_verified_plies` (how deep the agent's ACTUAL line is provably optimal) — the
-yardstick Phase 6 will move; (3) an `opening_value` metric (the net's value on the standard opening) exposes the
-value-label contamination behind the forfeited first-player win. All TDD; tic-tac-toe proves the trace verifies a
-full game once coverage exists.
-
-#### Solver speed — the 158s opening wall (attacked 2026-08-19)
-
-Research verdict (Pons tutorial + Numba, grounded in profiling): **the 158s is the pure-Python execution tax
-(~30–100× vs C++; ours ~145K pos/s vs C++ ~12M), not algorithm — our solver is already at Pons's fastest**
-(dynamic threat-count move ordering, non-losing pruning, tight weak `[-1,1]` window, and a symmetry-canonical TT
-that is *ahead* of the tutorial). No move-ordering/TT tweak closes an 80× gap; PNS/df-pn is the wrong lever (it
-proves one boolean, not the per-move values a labeller needs).
-
-- **Pure-Python free wins — SHIPPED, 2.4×** (2.9s→1.2s on a ply-12 solve; guarded by a `_mirror`-vs-reference
-  test + the brute-force cross-check): unrolled `_mirror` (was a 7-iter loop on every TT probe = 19%), a
-  `_COL_MASKS` table, and native `int.bit_count()` popcount. Extrapolates the ply-10 wall ~158s → ~65s.
-- **THE on-demand answer — AMORTIZATION via the bottom-up book (no dependency, generic).** Solve deep offline
-  once; a shallower opening solve then reads its booked children and **collapses to lookups** — exactly why Pons
-  ships an opening book. PROVEN deterministically (`test_connect4_solve_collapses_to_lookups_when_the_frontier_
-  below_is_booked`): once the frontier one ply below is booked, a solve that searched 3008 nodes searches **0**,
-  same answer. So "fast on-demand" = a good solver + a self-produced book beneath it, which we already have.
-- **Numba cold-solve accelerator — ATTEMPTED, ABANDONED (2026-08-19).** Wrote a full `@njit` transliteration
-  (`solver_numba.py`: bitboard negamax + array open-addressing TT, faithful to the pure algorithm). Numba's njit
-  **could not compile the recursive `_negamax` in bounded time** — the compile stalled for minutes across six
-  fixes (explicit signatures on every function, `cache=False`, removing the in-recursion `np.empty`, removing
-  runtime-indexed global arrays), even though a *trivial* recursive njit compiles in 0.0s. Could not isolate the
-  exact trigger without unbounded debugging, so the backend was **deleted and numba uninstalled** to keep the
-  pure-Python baseline clean. If cold-arbitrary speed is ever needed: (a) a from-scratch ITERATIVE explicit-stack
-  njit rewrite (uncertain, given Numba's resistance here), or (b) bind a compiled C solver (bitbully) behind the
-  connect4 hook — both bigger, both optional. **The amortization book already delivers on-demand speed with zero
-  dependency, so this is not on the critical path.**
+### C.5 — Optimal-play trainer (boardgames) — the SOLVE-IT program
+
+**Goal (§C.3's crisp end-state):** a trained MODEL that plays Connect 4 PERFECTLY — as FIRST player from the
+empty board it beats the EXACT solver (perfect defence) in 100% of games (`wins_as_p1_vs_EXACT_oracle == 1.0`).
+The game is solved (proven first-player win, we hold an exact solver); a fast, perfect MODEL is not. Honing on
+Connect 4 (where we hold ground truth) validates a process that generalizes to unsolved games — chess/Go have no
+exact oracle, but a strong reference + verified-plies + self-improvement + honest reporting are the same
+machinery (see the Scaling doctrine below).
+
+**Definition of SOLVED (measurable, no proxies):** M is optimal iff, as first player, it converts the proven
+first-player win against the EXACT solver 100%. Corroborated by: M's entire main line is proven-optimal
+(`optimality_verified_plies` = full game, `first_blunder_ply` = none) and, as second player, M never loses a
+drawn/won position. Only a win vs the EXACT solver counts — a depth-limited oracle is a beatable PROXY (evidence,
+not proof); the viewer gates every ✓ / "solved" on the exact label.
+
+#### Shipped foundation (context for the pending grind)
+
+The whole apparatus exists and is green (TDD); the remaining work is COMPUTE + a net-training pass, not new
+machinery.
+
+- **Store + solver.** `harness/tablebase.py` (PROVEN/ESTIMATE columnar store; `proven_value` so exact consumers
+  ignore estimates; priority eviction; symmetry-canonical keys). `harness/solver.py` (Pons bitboard negamax +
+  persistent symmetry-canonical TT; `OracleAgent` exact / `NearPerfectOracle` depth-limited). `SolvableGame`
+  hooks on `connect4` + fully-solved `tictactoe`.
+- **Book builder** `harness/book.py` — bounded + resumable + accumulating, modes: SEED (midgame subtrees), GRADED
+  (book-aware bounded-search ESTIMATEs for the deep opening), PARALLEL/deadline-safe exact accumulator (`workers`,
+  `max_position_seconds` → DEFERRED, no hang), and WINNING-STRATEGY (`prove_winning_strategy` — the directed M1
+  tree). Plus `book_optimal_actions` / `principal_variation` / `play_until_decided` / `book_coverage` /
+  `winning_strategy_coverage`.
+- **Agents.** `BookAgent` (opening book + exact endgame + fallback); MCTS-Solver in BOTH cores (`MctsAgent`,
+  `AlphaZeroAgent`) — proof leaves + SELECTION/propagation (a node is a proven win the instant one child is a
+  proven loss); `ExactOptimalAgent` (generic exact oracle). Exact-endgame cutoff ON by default for deployed nets
+  (`DEFAULT_AZ_SOLVE_ENDGAME=22`).
+- **SOLVE-IT M0–M3 machinery (2026-08-21, TDD — `tests/test_solve_it.py`).** M0: `benchmark.p1_conversion` /
+  `optimality_ladder` (depth-6→8→10→12→EXACT frontier) / `verify_solved` (the ONE gate that may say "perfect");
+  tournament `oracle_exact` + opt-in `ladder` (verdict `optimal`/`solved` unreachable via the proxy →
+  `converts-proxy`). M1: `prove_winning_strategy` proves the strategist's directed tree (our one optimal move +
+  every opponent reply), bounded/resumable/endgame-back; `winning_strategy_coverage` is the honest tracker. M2/M3:
+  BookAgent converts vs the exact solver; `book_distill_examples` targets = exactly the proven optimal set + exact
+  value. Demonstrated end-to-end: tic-tac-toe fully solved (both seats never lose) + a real C4 forced-win subtree
+  converts.
+- **Distillation + net.** `oracle_distill_games` (value-relabel from the proven book), `book_distill_examples`
+  (soft targets, proofs oversampled), `_mix_training_set` anti-drift anchor (`distill_fraction=0.34`),
+  `train_alphazero(book=…)`.
+- **In-app + honesty.** `Exploration → Start → autopilot → build-book / improve / rate / play-off`, all
+  manifest-driven (`bookBuild` numbers+booleans, `improve`, `rate`); Start cycles in minutes; the viewer never
+  overclaims (book coverage split proven/estimate; play-off ranks by Converts-P1; ✓ gated on the exact label;
+  winning-strategy `provenFraction` + ladder frontier surfaced).
+- **Solver speed (settled).** The 158s opening wall is the pure-Python execution tax (~30–100× vs C++), already
+  at Pons's fastest; amortization via the bottom-up book delivers on-demand speed with ZERO dependency (a booked
+  frontier collapses a 3008-node solve to 0). If cold-arbitrary speed is ever needed: an iterative explicit-stack
+  Numba rewrite (Numba could not compile the recursive negamax) or bind a compiled C solver (bitbully) behind the
+  connect4 hook — both optional, off the critical path.
+
+#### The pending work — close M1 → M3 (the compute grind)
+
+Milestones: **M1** winning-strategy `provenFraction` 0→100% (the grind — the bottleneck) · **M2** book-aware agent
+converts P1 vs EXACT = 100% · **M3** distilled NET converts P1 vs EXACT = 100% → SOLVED.
+
+1. **Grow the deep-book substrate FIRST.** From a COLD book the top-down `prove_winning_strategy` STALLS at the
+   opening root (its root solve times out before anything beneath is booked). So each Start's default build-book
+   runs the GRADED/SEED grind, which climbs `book_coverage.provenFraction` (the M1 substrate the viewer shows)
+   from the endgame back — the productive per-Start work and the current manifest default.
+2. **Prove the directed winning-strategy tree.** Once opening coverage is substantial, run build-book in
+   winning-strategy mode (`bookBuild.winningStrategy=true`, or ask the AI to launch `build-book` with
+   `winningStrategy`). `prove_winning_strategy` then collapses its top-down solves onto the booked substrate and
+   books the directed tree; `winningStrategy.provenFraction` → 1 and `root_proven`/`complete` flip when the
+   strategy exists. The parallel exact accumulator stays available for a proofs-first pass.
+3. **Verify + distil (M2 → M3).** Run the play-off with `oracleExact` + `ladder` for the honest frontier and the
+   exact SOLVED gate (`verify_solved`). BookAgent should convert once the strategy is proven. Then distil into the
+   net (`train_alphazero(book=…)`, targets are the proven optimal play) and re-verify: a distilled NET that
+   converts P1 vs the EXACT solver = a fast perfect model, the ML result the slow solver can't give. The wiring +
+   gate exist; this is a training pass, cost-bounded.
+
+Watch across Starts: opening `provenFraction` (substrate) → winning-strategy `provenFraction`/`complete` (M1) →
+BookAgent `verify_solved.solved` (M2) → distilled-net `verify_solved.solved` (M3 = SOLVED). Nothing claims SOLVED
+until a net beats the EXACT solver as P1, 100%.
+
+#### Design decisions (resolved — reference)
+
+- **(a) Estimator = bounded SEARCH (MCTS-Solver self-play), never the raw net value.** The book must be an
+  INDEPENDENT reference that CORRECTS the net (net-sourced estimates are circular: book ≈ net → distilling
+  book→net teaches nothing). The net may LATER serve as the search PRIOR, but the stored estimate is always the
+  search result.
+- **(b) RECONSTRUCT PVs from stored optimal moves; never persist explicit paths** (`principal_variation` walks the
+  optimal set to a terminal; a proven line reconstructs in full, a thin region yields an honest partial line).
+- **(c) HYBRID upgrade cadence:** EAGER for the free upgrade (all children booked → minimax lookup, keeps
+  proven-coverage monotone every build); ON-DEMAND for the expensive one (children not all booked → new search
+  only when queried / region-focused, never speculatively every pass).
 
 #### Scaling doctrine — Connect 4 → Checkers → Chess → Go (what "solve" means, and what we'd need)
 

@@ -268,6 +268,9 @@ export interface TrainerDiagnostics {
   degenerateWhen?: Array<{ metric: string; op: string; value: number }>
   /** Metrics that confound the objective (surfaced by the objective-confound check). */
   confoundMetrics?: string[]
+  /** Levers declared IRRELEVANT to the outcome — the §C.6 nuisance-robust verify lens checks that sibling setups
+   * differing ONLY on one of these still clear the baseline (so a win isn't an artifact of a nuisance knob). */
+  nuisanceLevers?: string[]
   /** Risk metrics surfaced alongside the objective. */
   riskMetrics?: string[]
   /** An explicit null baseline the incumbent must beat (else the per-run benchmark is used). */
@@ -3268,6 +3271,37 @@ export interface DiagnoseSearchParams {
   project?: string
 }
 
+export interface VerifyImprovementParams {
+  scope: string
+  /** Which registered training project (as {@link GetTrainerStateParams.project}). */
+  project?: string
+  /** The bar the incumbent must beat; defaults to the manifest's `diagnostics.nullBaseline`, else 0. */
+  baseline?: number
+  /** Significance level for the seed-stability lens; defaults to `diagnostics.splitAxis.alpha`, else 0.05. */
+  alpha?: number
+  /** Override the nuisance levers checked by the nuisance-robust lens (default: `diagnostics.nuisanceLevers`). */
+  nuisanceLevers?: string[]
+}
+
+/**
+ * A read-only §C.6 adversarial-verify of the search's CLAIMED best setup — "try to refute this winner". Runs up
+ * to four independent lenses (seed-stability, split-robust, nuisance-robust, aggregator-agreement); `verified`
+ * iff ≥1 was applicable and every applicable lens held; `unverifiable` when NONE could run (the naive
+ * single-seed, no-split sweep a point-estimate crowning would pass silently), narrated for the AI.
+ */
+export interface VerifyImprovementResult {
+  found: boolean
+  error?: string
+  recordType?: string
+  /** The bar used (echoed so the caller sees which baseline the verdict is against). */
+  baseline?: number
+  verified?: boolean
+  unverifiable?: boolean
+  incumbent?: Record<string, unknown> | null
+  checks?: VerifyCheck[]
+  narrative?: string
+}
+
 /**
  * A read-only diagnosis of whether the search has a robust candidate — the server-side split-consistency
  * verdict (the same check the Diagnosis tab + the exploration convergence gate use), narrated for the AI.
@@ -4660,6 +4694,7 @@ export interface ModelTrainerTools {
    */
   getTrainerState(params: GetTrainerStateParams): Promise<GetTrainerStateResult>
   diagnoseSearch(params: DiagnoseSearchParams): Promise<DiagnoseSearchResult>
+  verifyImprovement(params: VerifyImprovementParams): Promise<VerifyImprovementResult>
   /**
    * Agent-facing READ tool (A3.1): what background activities are running / queued / recently done for a
    * training project, folded from the generic `activity-run` status records into an agent-sized digest so

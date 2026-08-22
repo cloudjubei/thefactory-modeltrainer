@@ -6974,6 +6974,67 @@ describe('diagnoseSearch (A5 read tool)', () => {
   })
 })
 
+describe('verifyImprovement (§C.6 adversarial-verify read tool)', () => {
+  const registerManifest = (storage: any, m: any) =>
+    storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'demo', content: { manifest: m } })
+  const seedRun = (storage: any, key: string, config: any, objective: number) =>
+    storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective, status: 'completed' } })
+
+  it('VERIFIES a winner that survives the applicable refutation lenses (seed-stability + aggregator)', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest({ diagnostics: { nullBaseline: 0 } }))
+    // incumbent {lr:1}: 3 seeds all well above baseline 0; a clearly weaker {lr:2}.
+    await seedRun(storage, 'a1', { lr: 1, seed: 1 }, 20)
+    await seedRun(storage, 'a2', { lr: 1, seed: 2 }, 22)
+    await seedRun(storage, 'a3', { lr: 1, seed: 3 }, 19)
+    await seedRun(storage, 'b1', { lr: 2, seed: 1 }, 5)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.verifyImprovement({ scope: 'proj' })
+    expect(res.found).toBe(true)
+    expect(res.baseline).toBe(0) // taken from diagnostics.nullBaseline
+    expect(res.incumbent).toMatchObject({ lr: 1 })
+    const seed = res.checks?.find((c) => c.name === 'seed-stability')
+    expect(seed).toMatchObject({ applicable: true, pass: true })
+    expect(res.verified).toBe(true)
+    expect(res.unverifiable).toBe(false)
+    expect(res.narrative).toMatch(/VERIFIED/)
+  })
+
+  it('is UNVERIFIABLE on a single-seed, no-split sweep (never silently crowned)', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest())
+    await seedRun(storage, 'a', { lr: 1 }, 5) // one seed, one setup → no lens can run
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.verifyImprovement({ scope: 'proj' })
+    expect(res.found).toBe(true)
+    expect(res.unverifiable).toBe(true)
+    expect(res.verified).toBe(false)
+    expect(res.narrative).toMatch(/UNVERIFIABLE/)
+  })
+
+  it('runs the nuisance-robust lens from the manifest declaration and honours a params baseline override', async () => {
+    const storage = memoryStorage()
+    await registerManifest(storage, manifest({ diagnostics: { nullBaseline: 0, nuisanceLevers: ['batch'] } }))
+    // {lr:1} across two batch siblings (a declared nuisance), both seeds above baseline.
+    await seedRun(storage, 'a1', { lr: 1, seed: 1, batch: 8 }, 20)
+    await seedRun(storage, 'a2', { lr: 1, seed: 2, batch: 8 }, 21)
+    await seedRun(storage, 'a3', { lr: 1, seed: 1, batch: 16 }, 18)
+    await seedRun(storage, 'a4', { lr: 1, seed: 2, batch: 16 }, 19)
+    const { tools } = makeTools(stubRunner(), storage)
+    const res = await tools.verifyImprovement({ scope: 'proj', baseline: 10 })
+    expect(res.baseline).toBe(10) // params override wins over the manifest's nullBaseline
+    const nu = res.checks?.find((c) => c.name === 'nuisance-robust')
+    expect(nu?.applicable).toBe(true) // the declared batch nuisance had a sibling to check
+  })
+
+  it('errors cleanly when the project has no manifest', async () => {
+    const { tools } = makeTools(stubRunner(), memoryStorage())
+    const res = await tools.verifyImprovement({ scope: 'nope' })
+    expect(res.found).toBe(false)
+    expect(res.error).toBeTruthy()
+  })
+})
+
 describe('continueTrainingRun (A3 extra-train)', () => {
   const contManifest = () =>
     manifest({
