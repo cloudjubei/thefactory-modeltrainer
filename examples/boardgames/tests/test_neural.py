@@ -10,6 +10,8 @@ from harness.neural import (
     Connect4Net,
     augment_examples,
     build_alphazero_agent,
+    completed_q_policy,
+    completed_q_values,
     encode,
     head_to_head,
     load_net,
@@ -20,6 +22,7 @@ from harness.neural import (
     train_net,
     vs_opponent_game,
 )
+from harness.solver import optimal_columns
 from harness.tablebase import Tablebase
 
 
@@ -438,3 +441,195 @@ def test_train_alphazero_folds_in_book_distillation():
         book=book, book_distill_positions=4, book_distill_min_moves=6,
     )
     assert isinstance(net, Connect4Net) and len(hist) == 1  # ran with book distillation folded into the anchor
+
+
+# --- GUMBEL + COMPLETED-Q POLICY TARGET (plan §C.5 priority #1) -----------------------------------------------
+def _win_in_1_root(seed: int):
+    """A non-terminal Connect 4 position where the side to move has an IMMEDIATE winning move and ≥2 legal
+    replies — a tactical position whose optimal set the exact solver knows, and where terminal backup gives the
+    winning move Q=+1 regardless of the net, so the improvement is attributable to the OPERATOR, not a trained net."""
+    game = Connect4()
+    rng = random.Random(seed)
+    for _ in range(40000):
+        s = game.initial_state(rng)
+        while not s.done:
+            legal = game.legal_actions(s)
+            if len(legal) >= 2 and any(game.step(s, a).winner == s.to_move for a in legal):
+                return s
+            s = game.step(s, rng.choice(legal))
+    raise AssertionError("no win-in-1 root found — widen the search")
+
+
+def test_completed_q_values_uses_v_mix_for_unvisited_actions():
+    # An unvisited action is COMPLETED with v_mix (the visited siblings' prior-weighted Q blended with the root
+    # value), NOT an arbitrary 0 — the rule that keeps the target sane when few actions were visited at low sims.
+    prior = {0: 0.5, 1: 0.5}
+    child_n = {0: 0, 1: 4}
+    child_w = {0: 0.0, 1: 4.0}  # action 1 visited 4× with mean Q = +1
+    q, sum_n, max_n = completed_q_values(prior, child_n, child_w, root_value=0.0, legal=[0, 1])
+    assert q[1] == 1.0  # a visited action keeps its OWN mean Q
+    # v_mix = (root_value + sum_n · (Σπ·Q / Σπ_visited)) / (1 + sum_n) = (0 + 4·(0.5·1 / 0.5)) / 5 = 0.8
+    assert abs(q[0] - 0.8) < 1e-9
+    assert sum_n == 4 and max_n == 4
+
+
+def test_completed_q_policy_is_a_policy_improvement_over_a_bad_prior():
+    # THE GUARANTEE (Danihelka 2022): given Q that clearly favours action 2 but a prior that wrongly favours
+    # action 0, the completed-Q policy shifts mass ONTO the high-Q action — more than the prior, and more than the
+    # (uniform) visit-count policy would at low sims. This is the σ / v_mix correctness gate the plan requires.
+    prior = {0: 0.8, 1: 0.1, 2: 0.1}
+    child_n = {0: 2, 1: 2, 2: 2}          # equal visits → the raw visit-count policy is uniform (1/3 each)
+    child_w = {0: -2.0, 1: 0.0, 2: 2.0}   # Q: 0 → -1, 1 → 0, 2 → +1
+    pi = completed_q_policy(prior, child_n, child_w, root_value=0.0, legal=[0, 1, 2])
+    assert abs(sum(pi.values()) - 1.0) < 1e-9 and all(p >= 0.0 for p in pi.values())
+    assert max(pi, key=pi.get) == 2   # picks the high-Q action, NOT the prior's wrong favourite
+    assert pi[2] > prior[2]           # improvement OVER the prior
+    assert pi[2] > 1 / 3              # BEATS the uniform visit-count policy at low sims
+    assert pi[0] < prior[0]           # and demotes the prior's wrong favourite
+
+
+def test_gumbel_search_returns_a_valid_improved_policy_within_budget():
+    game = Connect4()
+    root = _win_in_1_root(seed=1)
+    torch.manual_seed(0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=8, gumbel=True)
+    agent._nodes = {}
+    pi = agent.run_search(game, root, random.Random(0))
+    legal = game.legal_actions(root)
+    assert set(pi) == set(legal) and abs(sum(pi.values()) - 1.0) < 1e-6 and all(p >= 0.0 for p in pi.values())
+    assert agent.sims_used <= 8  # an HONEST budget: no more simulations than a raw n=8 search
+    wins = [a for a in legal if game.step(root, a).winner == root.to_move]
+    assert agent._gumbel_selected in wins  # guaranteed improvement + terminal backup ⇒ it selects the win
+
+
+def test_completed_q_policy_beats_visit_counts_at_low_sims_on_tactical_positions():
+    # THE #1 GATE (plan §C.5): at n=8 sims the completed-Q policy concentrates MORE mass on the exact-optimal move
+    # than the raw visit-count policy across a set of tactical Connect-4 positions — measured against the solver,
+    # with NO trained net (a fresh net), so the gain is attributable to the operator. Trust it only once this holds.
+    game = Connect4()
+    roots = [_win_in_1_root(seed=s) for s in range(1, 9)]
+    torch.manual_seed(0)
+    net = Connect4Net()
+    q_mass = v_mass = 0.0
+    gumbel_hits = visit_hits = 0
+    for r in roots:
+        opt = set(optimal_columns(r))
+        va = AlphaZeroAgent(net, sims=8, gumbel=False)
+        va._nodes = {}
+        vpi = va.run_search(game, r, random.Random(0))
+        ga = AlphaZeroAgent(net, sims=8, gumbel=True)
+        ga._nodes = {}
+        gpi = ga.run_search(game, r, random.Random(0))
+        v_mass += sum(vpi.get(a, 0.0) for a in opt)
+        q_mass += sum(gpi.get(a, 0.0) for a in opt)
+        visit_hits += max(vpi, key=vpi.get) in opt
+        gumbel_hits += max(gpi, key=gpi.get) in opt
+    assert q_mass > v_mass          # completed-Q puts MORE mass on optimal — it BEATS the visit-count target
+    assert gumbel_hits >= visit_hits  # and never argmaxes the optimal move LESS often than visit counts
+    assert gumbel_hits == len(roots)  # in fact it converts every immediate win (the improvement guarantee)
+
+
+def test_self_play_with_gumbel_plays_the_selected_action_and_stores_completed_q_targets():
+    # Gumbel self-play plays the Sequential-Halving winner (`_gumbel_selected`) and stores the completed-Q
+    # improved policy as the target — no Dirichlet noise (Gumbel supplies the root exploration itself).
+    game = Connect4()
+    torch.manual_seed(0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=8, gumbel=True)
+    ex = self_play_game(game, agent, random.Random(0))
+    assert agent.add_noise is False  # Gumbel replaces Dirichlet — no double exploration
+    assert len(ex) > 0
+    x, pi, z = ex[0]
+    assert tuple(x.shape) == (2, 6, 7) and abs(sum(pi) - 1.0) < 1e-4 and z in (-1.0, 0.0, 1.0)
+
+
+def test_gumbel_search_is_deterministic_and_noise_free_when_greedy():
+    # Gumbel noise is a SELF-PLAY exploration device; at greedy eval (temperature 0) it must be OFF, so greedy
+    # deployment is deterministic and doesn't self-sabotage by spreading root visits. Two greedy searches with
+    # DIFFERENT rng streams must agree on both the policy and the selected move.
+    game = Connect4()
+    root = _win_in_1_root(seed=3)
+    torch.manual_seed(0)
+    net = Connect4Net()
+    a = AlphaZeroAgent(net, sims=8, gumbel=True, temperature=0.0)
+    a._nodes = {}
+    pa = a.run_search(game, root, random.Random(1))
+    b = AlphaZeroAgent(net, sims=8, gumbel=True, temperature=0.0)
+    b._nodes = {}
+    pb = b.run_search(game, root, random.Random(999))  # a different rng stream
+    assert a._gumbel_selected == b._gumbel_selected  # noise-free ⇒ rng-independent selection
+    assert pa == pb  # and an identical completed-Q target
+
+
+def test_completed_q_policy_preserves_q_magnitude_soft_on_ties_peaky_on_decisive():
+    # The calibration GUARD (the σ/normalisation fix): the completed-Q target must scale with the CARDINAL Q gap,
+    # not its rank. Near-tied Q's stay a SOFT target (no manufactured confidence); a decisive win/loss gap peaks.
+    # This fails under per-root min-max (which stretches any nonzero gap to full [0,1] → near-one-hot on noise).
+    near = completed_q_policy({0: 0.5, 1: 0.5}, {0: 4, 1: 4}, {0: 2.80, 1: 2.88}, 0.0, [0, 1])  # Q 0.70 vs 0.72
+    assert 0.2 < near[0] < 0.8 and 0.2 < near[1] < 0.8  # near-tied ⇒ neither action collapses to ~0/~1
+    decisive = completed_q_policy({0: 0.5, 1: 0.5}, {0: 4, 1: 4}, {0: -4.0, 1: 4.0}, 0.0, [0, 1])  # Q -1 vs +1
+    assert decisive[1] > 0.9  # a genuine win/loss gap ⇒ the target peaks on the winning move
+
+
+def test_n_step_value_targets_bootstrap_from_target_net_else_terminal_outcome():
+    # #3: the n-step value target replaces the raw-MC outcome (contaminated by LATER blunders) with the lagged
+    # target-net value n plies ahead, sign-corrected to the mover (n even → same mover, n odd → opponent), and
+    # falls back to the real terminal outcome only when the terminal is within n plies.
+    from harness.neural import n_step_value_targets
+
+    vt = [0.1, -0.2, 0.3, -0.4, 0.5]        # lagged target-net values, mover-relative, 5 pending positions
+    outcome = [1.0, -1.0, 1.0, -1.0, 1.0]   # P0 wins → mover-relative MC outcomes alternate
+    t2 = n_step_value_targets(vt, outcome, n=2)  # even → sign +1
+    assert t2[0] == 0.3 and t2[1] == -0.4 and t2[2] == 0.5      # bootstrap vt[i+2]
+    assert t2[3] == -1.0 and t2[4] == 1.0                       # terminal within 2 → real outcome
+    t1 = n_step_value_targets(vt, outcome, n=1)  # odd → sign −1
+    assert abs(t1[0] - 0.2) < 1e-9 and abs(t1[3] - (-0.5)) < 1e-9  # bootstrap −vt[i+1]
+    assert t1[4] == 1.0                                          # last position: terminal next ply
+    # n large enough that EVERY position's terminal is within n → pure MC (no bootstrap), i.e. current behaviour
+    assert n_step_value_targets(vt, outcome, n=5) == outcome
+
+
+def test_train_alphazero_with_n_step_value_target_and_lagged_net_runs():
+    # #3 integration: the loop runs with the n-step value target off a lagged target net (refreshed every k iters),
+    # producing a net and history — the value label now bootstraps off the target net, not the raw final outcome.
+    game = Connect4()
+    net, hist = train_alphazero(
+        game, iterations=3, selfplay_games=2, sims=4, epochs=1, seed=0,
+        gumbel=True, value_n_step=6, target_refresh=2,
+    )
+    assert isinstance(net, Connect4Net) and len(hist) == 3
+
+
+def test_reanalyze_examples_relabels_states_with_the_current_net():
+    # #2 Reanalyze: re-running the CURRENT net's search over stored states regenerates fresh (policy, value)
+    # targets — a valid distribution + a bounded search-improved value — so old buffer entries are de-staled for
+    # ~free (no new self-play). Deterministic (greedy, seeded).
+    from harness.neural import reanalyze_examples
+
+    game = Connect4()
+    torch.manual_seed(0)
+    net = Connect4Net()
+    agent = AlphaZeroAgent(net, sims=16, gumbel=True, temperature=0.0)
+    states = []
+    for s in range(3):  # three distinct mid-game states from short random playouts
+        st = game.initial_state(random.Random(s))
+        for _ in range(4 + s):
+            st = game.step(st, random.Random(s).choice(game.legal_actions(st)))
+        states.append(st)
+    ex = reanalyze_examples(game, agent, states, random.Random(0))
+    assert len(ex) == len(states)
+    for x, pi, v in ex:
+        assert tuple(x.shape) == (2, 6, 7)
+        assert abs(sum(pi) - 1.0) < 1e-5 and all(p >= 0.0 for p in pi)
+        assert -1.0 <= v <= 1.0
+
+
+def test_train_alphazero_with_reanalyze_runs_and_relabels_the_buffer():
+    # #2 integration: the loop runs with a state-carrying buffer and re-labels a fraction of it with the current
+    # net each iteration (history records the reanalyzed count), on top of the n-step value target + gumbel search.
+    game = Connect4()
+    net, hist = train_alphazero(
+        game, iterations=3, selfplay_games=2, sims=4, epochs=1, seed=0,
+        gumbel=True, value_n_step=6, target_refresh=2, reanalyze_frac=0.5,
+    )
+    assert isinstance(net, Connect4Net) and len(hist) == 3
+    assert any(h["reanalyzed"] > 0 for h in hist)  # at least one later iteration re-labelled buffer entries

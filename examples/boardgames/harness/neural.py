@@ -102,10 +102,82 @@ class _AZNode:
         self.total += 1
 
 
+def completed_q_values(
+    prior: dict[int, float],
+    child_n: dict[int, int],
+    child_w: dict[int, float],
+    root_value: float,
+    legal: list[int],
+) -> tuple[dict[int, float], int, int]:
+    """COMPLETED Q-values (Danihelka 2022) — every legal action gets a Q, even the ones the search never visited.
+    A visited action keeps its own mean Q (`child_w/child_n`); an UNVISITED action is completed with `v_mix`, the
+    root value blended with the visited children's prior-weighted mean Q. This is what makes a low-sim policy
+    target sane: with only a handful of visits over a wide root, the raw visit counts have no improvement
+    guarantee, but the completed-Q set does. Returns `(q, sum_n, max_n)` (the visit totals feed σ's scale)."""
+    sum_n = sum(child_n[a] for a in legal)
+    max_n = max((child_n[a] for a in legal), default=0)
+    visited = [a for a in legal if child_n[a] > 0]
+    if visited and sum_n > 0:
+        sum_pi_visited = sum(prior[a] for a in visited) or 1e-12
+        weighted_q = sum(prior[a] * (child_w[a] / child_n[a]) for a in visited)
+        v_mix = (root_value + sum_n * (weighted_q / sum_pi_visited)) / (1 + sum_n)
+    else:
+        v_mix = root_value
+    q = {a: (child_w[a] / child_n[a] if child_n[a] > 0 else v_mix) for a in legal}
+    return q, sum_n, max_n
+
+
+V_MIN, V_MAX = -1.0, 1.0  # the game's value bounds (loss/win); a tanh value head + {-1,0,1} outcomes live here
+
+
+def _norm_q(q_val: float) -> float:
+    """Normalise a completed-Q value to [0,1] against the FIXED value range [V_MIN, V_MAX] — NOT a per-root
+    min-max. Softmax is shift-invariant, so σ then acts on the CARDINAL Q gap (q_a − q_b)/2: near-tied actions
+    stay near-uniform, a genuine win/loss gap peaks. Per-root min-max instead stretches any nonzero gap to the
+    full [0,1] range, manufacturing a near-one-hot target from low-sim search NOISE — the measured cause of the
+    completed-Q-trained net regressing. Fixed-range is the actual generic/chess-safe choice (MuZero known bounds)."""
+    return min(1.0, max(0.0, (q_val - V_MIN) / (V_MAX - V_MIN)))
+
+
+def completed_q_policy(
+    prior: dict[int, float],
+    child_n: dict[int, int],
+    child_w: dict[int, float],
+    root_value: float,
+    legal: list[int],
+    c_visit: float = 50.0,
+    c_scale: float = 1.0,
+) -> dict[int, float]:
+    """The IMPROVED policy target: `softmax(logits + σ(completedQ))` over legal actions, where `logits = log π`
+    (the net prior) and `σ(q̂) = (c_visit + maxN)·c_scale·q̂` with the completed-Q values normalised to [0,1]
+    against the FIXED value range (`_norm_q`), so σ scales with the true Q magnitude. Unlike raw visit fractions
+    this is a GUARANTEED policy improvement over the prior even at 2–32 sims, so it gives the net a corrective
+    gradient the visit-count target cannot — the fix for the structural low-sim plateau."""
+    q, _sum_n, max_n = completed_q_values(prior, child_n, child_w, root_value, legal)
+    scale = (c_visit + max_n) * c_scale
+    logits = {a: math.log(max(prior[a], 1e-12)) + scale * _norm_q(q[a]) for a in legal}
+    mx = max(logits.values())
+    exps = {a: math.exp(logits[a] - mx) for a in legal}
+    z = sum(exps.values()) or 1.0
+    return {a: exps[a] / z for a in legal}
+
+
+def _sample_gumbel(rng: random.Random) -> float:
+    """One Gumbel(0) sample: −log(−log U), U ~ Uniform(0,1). Added to the root logits it turns argmax into a
+    draw ∝ the prior — the exploration Gumbel AlphaZero uses at the root INSTEAD of Dirichlet noise."""
+    return -math.log(-math.log(rng.random() + 1e-12) + 1e-12)
+
+
 class AlphaZeroAgent:
     """Net-guided MCTS. `sims` PUCT simulations per move; leaves scored by the value head (no random rollout).
     Holds a transposition table across its moves in a game, like `mcts`. `temperature`/`add_noise` are the
-    self-play EXPLORATION knobs (0 temperature + no noise = greedy play, used for evaluation)."""
+    self-play EXPLORATION knobs (0 temperature + no noise = greedy play, used for evaluation).
+
+    With `gumbel=True` the ROOT uses Gumbel action-selection + Sequential Halving and returns the completed-Q
+    improved policy (Danihelka 2022) instead of raw visit fractions — a guaranteed per-move policy improvement
+    that holds at low sims, so the same strength needs far fewer simulations. The interior stays PUCT (it only
+    supplies the Q estimates the root completes over). `gumbel_m` = how many root actions Sequential Halving
+    considers; `c_visit`/`c_scale` set σ's scale."""
 
     kind = "alphazero"
 
@@ -121,6 +193,10 @@ class AlphaZeroAgent:
         noise_frac: float = 0.25,
         solve_endgame: int = 0,
         book=None,
+        gumbel: bool = False,
+        gumbel_m: int = 16,
+        c_visit: float = 50.0,
+        c_scale: float = 0.1,
     ):
         self.net = net
         self.sims = max(1, int(sims))
@@ -130,6 +206,14 @@ class AlphaZeroAgent:
         self.add_noise = add_noise
         self.dirichlet_alpha = dirichlet_alpha
         self.noise_frac = noise_frac
+        # GUMBEL root (opt-in): Sequential Halving + completed-Q policy target. `gumbel_m` root actions considered;
+        # `_gumbel_selected` records the action Sequential Halving chose (the move to PLAY), separate from the
+        # completed-Q TARGET run_search returns. See `completed_q_policy` / `_gumbel_search`.
+        self.gumbel = bool(gumbel)
+        self.gumbel_m = max(2, int(gumbel_m))
+        self.c_visit = float(c_visit)
+        self.c_scale = float(c_scale)
+        self._gumbel_selected: int | None = None
         # Opt-in PROOF LEAVES: a `book` (proven values) makes the search back up the EXACT outcome at a booked or
         # endgame-solvable leaf instead of the value HEAD's estimate — truth propagates through the tree, so book
         # coverage pays off in play and self-play value targets get exact where a proof exists. None = pure net.
@@ -183,7 +267,9 @@ class AlphaZeroAgent:
         self._nodes[key] = node
         return node
 
-    def _simulate(self, game: Game, state: State, root_key: object, rng: random.Random) -> None:
+    def _simulate(
+        self, game: Game, state: State, root_key: object, rng: random.Random, first_action: int | None = None
+    ) -> None:
         path: list[tuple[_AZNode, int, int, State]] = []  # (node, action, mover, node_state)
         s = state
         key = root_key
@@ -210,13 +296,17 @@ class AlphaZeroAgent:
                         prove_node(game, s_node, state_key(game, s_node), self._proven)
                 return
             mover = game.current_player(s)
-            action = node.select(self.c_puct)
+            # Gumbel Sequential Halving forces the ROOT's first descent to a chosen action; the interior stays PUCT.
+            action = first_action if (first_action is not None and not path) else node.select(self.c_puct)
             path.append((node, action, mover, s))
             s = game.step(s, action, rng)
             key = state_key(game, s)
 
     def run_search(self, game: Game, state: State, rng: random.Random) -> dict[int, float]:
-        """Run the searches and return the visit-count policy π over actions (the self-play training target)."""
+        """Run the searches and return the policy π over actions (the self-play training target). Default = the
+        raw visit-count policy; `gumbel=True` = the completed-Q improved policy from a Sequential-Halving root."""
+        if self.gumbel:
+            return self._gumbel_search(game, state, rng)
         root_key = state_key(game, state)
         if root_key not in self._nodes:
             self._expand(game, state, root_key, rng, root=True)
@@ -226,6 +316,63 @@ class AlphaZeroAgent:
         root = self._nodes[root_key]
         total = sum(root.child_n.values()) or 1
         return {a: root.child_n[a] / total for a in root.legal}
+
+    def _gumbel_scores(
+        self, root: _AZNode, logits: dict[int, float], gumbel: dict[int, float]
+    ) -> dict[int, float]:
+        """The Sequential-Halving ranking score g(a) + logit(a) + σ(completedQ(a)) — the SAME σ(completedQ) the
+        returned policy target uses, so the action Sequential Halving keeps and the target's argmax agree."""
+        q, _sum_n, max_n = completed_q_values(root.prior, root.child_n, root.child_w, root.value, root.legal)
+        scale = (self.c_visit + max_n) * self.c_scale
+        return {a: gumbel[a] + logits[a] + scale * _norm_q(q[a]) for a in root.legal}
+
+    def _gumbel_search(self, game: Game, state: State, rng: random.Random) -> dict[int, float]:
+        """Gumbel AlphaZero root: sample Gumbel noise on the prior logits, take the top `gumbel_m` actions, then
+        Sequential Halving — repeatedly give the survivors equal visits and drop the worse half by the g+logit+σ(Q)
+        score — until one remains (recorded as `_gumbel_selected`, the move to play). Returns the completed-Q
+        improved policy over ALL legal actions as the training target. Total simulations ≤ `sims` (an honest
+        budget, comparable to a raw n-sim search)."""
+        root_key = state_key(game, state)
+        if root_key not in self._nodes:
+            self._expand(game, state, root_key, rng, root=True)
+        root = self._nodes[root_key]
+        legal = list(root.legal)
+        if len(legal) == 1:
+            self.sims_used += 1
+            self._gumbel_selected = legal[0]
+            return {legal[0]: 1.0}
+        logits = {a: math.log(max(root.prior[a], 1e-12)) for a in legal}
+        # Gumbel noise is the SELF-PLAY exploration device; at greedy eval (temperature 0) it is OFF, so greedy
+        # deployment is deterministic and doesn't weaken play by scattering the few root visits.
+        explore = self.temperature > 1e-6
+        gumbel = {a: (_sample_gumbel(rng) if explore else 0.0) for a in legal}
+        m = min(self.gumbel_m, len(legal))
+        considered = sorted(legal, key=lambda a: gumbel[a] + logits[a], reverse=True)[:m]
+        budget = self.sims
+        remaining = list(considered)
+        while budget > 0 and len(remaining) > 1:
+            phases_left = max(1, math.ceil(math.log2(len(remaining))))
+            phase_budget = budget if phases_left == 1 else max(len(remaining), budget // phases_left)
+            per = max(1, min(phase_budget, budget) // len(remaining))
+            for a in remaining:
+                for _ in range(per):
+                    if budget <= 0:
+                        break
+                    self.sims_used += 1
+                    self._simulate(game, state, root_key, rng, first_action=a)
+                    budget -= 1
+            scores = self._gumbel_scores(root, logits, gumbel)
+            remaining.sort(key=lambda a: scores[a], reverse=True)
+            remaining = remaining[: max(1, len(remaining) // 2)]
+        while budget > 0:  # any rounding remainder refines the surviving action (keeps total sims ≈ budget)
+            self.sims_used += 1
+            self._simulate(game, state, root_key, rng, first_action=remaining[0])
+            budget -= 1
+        scores = self._gumbel_scores(root, logits, gumbel)
+        self._gumbel_selected = remaining[0] if len(remaining) == 1 else max(considered, key=lambda a: scores[a])
+        return completed_q_policy(
+            root.prior, root.child_n, root.child_w, root.value, legal, self.c_visit, self.c_scale
+        )
 
     def act(self, game: Game, state: State, rng: random.Random) -> int:
         legal = game.legal_actions(state)
@@ -275,13 +422,73 @@ def _dirichlet(n: int, alpha: float, rng: random.Random) -> list[float]:
 # --- self-play + training --------------------------------------------------------------------------------
 
 
-def self_play_game(
-    game: Game, agent: AlphaZeroAgent, rng: random.Random, temp_moves: int = 8
+def _root_search_value(agent: "AlphaZeroAgent", game: Game, state: State) -> float:
+    """The SEARCH-improved root value (mover-relative): the visit-weighted mean of the root children's Q after the
+    search, i.e. the backed-up root value — a stronger estimate than the raw net value, and what Reanalyze uses to
+    refresh a stored position's value target with the current net."""
+    node = agent._nodes.get(state_key(game, state))
+    if node is None:
+        return 0.0
+    total = sum(node.child_n[a] for a in node.legal)
+    if total == 0:
+        return float(node.value)
+    return sum(node.child_w[a] for a in node.legal) / total
+
+
+def reanalyze_examples(
+    game: Game, agent: "AlphaZeroAgent", states: list[State], rng: random.Random
 ) -> list[tuple[torch.Tensor, list[float], float]]:
-    """Play ONE self-play game and return training examples (encoded board, visit-count policy, outcome)."""
+    """MuZero REANALYZE (#2) — re-label stored positions with the CURRENT net for ~free data efficiency. For each
+    stored `state`, re-run the current agent's GREEDY search (temperature 0 → the improved policy target, no
+    exploration noise) to regenerate a fresh policy target AND the search-improved value. Old buffer entries were
+    labelled by a weaker past net; refreshing them with the current, stronger net de-stales the targets without any
+    new self-play. Returns `(encoded, pi_vec, value)` ready for the training buffer."""
+    agent.temperature = 0.0
+    out: list[tuple[torch.Tensor, list[float], float]] = []
+    for state in states:
+        if game.is_terminal(state):
+            continue
+        agent._nodes = {}
+        pi = agent.run_search(game, state, rng)
+        pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
+        value = max(-1.0, min(1.0, _root_search_value(agent, game, state)))
+        out.append((encode(game, state), pi_vec, value))
+    return out
+
+
+def n_step_value_targets(vt: list[float], outcome_for: list[float], n: int) -> list[float]:
+    """The n-step / TD value target (MuZero) — the fix for opening value-label CONTAMINATION. The raw-MC target
+    labels every position with the FINAL game outcome, so an opening gets blamed for a blunder 20 plies later. The
+    n-step target instead bootstraps from the LAGGED target-net's value `n` plies ahead (`vt[i+n]`, sign-corrected
+    to mover-i: n even → same mover +1, n odd → opponent −1), falling back to the real terminal `outcome_for[i]`
+    only when the terminal is within n plies. Large n → mostly real outcome (low bias); small n → mostly bootstrap
+    (low variance, but needs a decent target net). `n ≥ trajectory length` reproduces the pure-MC target exactly."""
+    length = len(vt)
+    sign = 1.0 if n % 2 == 0 else -1.0
+    return [outcome_for[i] if i + n >= length else sign * vt[i + n] for i in range(length)]
+
+
+def _value_batch(net: "Connect4Net", xs: list[torch.Tensor], device: str = "cpu") -> list[float]:
+    """The value head over a batch of already-encoded positions (mover-relative), for the lagged target net."""
+    if not xs:
+        return []
+    net.eval()
+    with torch.no_grad():
+        _logits, value = net(torch.stack(xs).to(device))
+    return [float(value[i, 0]) for i in range(len(xs))]
+
+
+def self_play_game(
+    game: Game, agent: AlphaZeroAgent, rng: random.Random, temp_moves: int = 8,
+    target_net: "Connect4Net | None" = None, n_step: int = 0, device: str = "cpu",
+    return_states: bool = False,
+) -> list:
+    """Play ONE self-play game and return training examples (encoded board, policy, value). With `return_states`,
+    each example is prefixed with the game STATE `(state, x, pi, v)` so the buffer can be REANALYZED (#2) — the
+    stored state is what lets the current net re-search and re-label the position later."""
     agent._nodes = {}
-    agent.add_noise = True
-    pending: list[tuple[torch.Tensor, list[float], int]] = []
+    agent.add_noise = not agent.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
+    pending: list[tuple[State, torch.Tensor, list[float], int]] = []
     state = game.initial_state(rng)
     move = 0
     while not game.is_terminal(state):
@@ -289,11 +496,22 @@ def self_play_game(
         pi = agent.run_search(game, state, rng)
         player = game.current_player(state)
         pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
-        pending.append((encode(game, state), pi_vec, player))
-        state = game.step(state, sample_action(pi, agent.temperature, rng), rng)
+        pending.append((state, encode(game, state), pi_vec, player))
+        # Gumbel PLAYS the Sequential-Halving winner (exploration already baked into the Gumbel noise); the raw
+        # loop samples the visit-count policy at the temperature schedule.
+        action = agent._gumbel_selected if agent.gumbel else sample_action(pi, agent.temperature, rng)
+        state = game.step(state, action, rng)
         move += 1
     returns = game.returns(state)
-    return [(x, pi_vec, returns[player]) for (x, pi_vec, player) in pending]
+    outcome_for = [returns[player] for (_s, _x, _pi, player) in pending]
+    if n_step > 0 and target_net is not None:
+        vt = _value_batch(target_net, [x for (_s, x, _pi, _p) in pending], device)  # lagged target-net bootstrap
+        values = n_step_value_targets(vt, outcome_for, n_step)
+    else:
+        values = outcome_for  # raw-MC outcome (default / unchanged)
+    if return_states:
+        return [(s, x, pi_vec, v) for (s, x, pi_vec, _p), v in zip(pending, values)]
+    return [(x, pi_vec, v) for (_s, x, pi_vec, _p), v in zip(pending, values)]
 
 
 def vs_opponent_game(
@@ -308,7 +526,7 @@ def vs_opponent_game(
     / a past champion). Training examples are collected from ONLY the learner's moves — we learn to BEAT the
     opponent, we don't imitate it."""
     learner._nodes = {}
-    learner.add_noise = True
+    learner.add_noise = not learner.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
     pending: list[tuple[torch.Tensor, list[float], int]] = []
     state = game.initial_state(rng)
     move = 0
@@ -319,7 +537,7 @@ def vs_opponent_game(
             pi = learner.run_search(game, state, rng)
             pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
             pending.append((encode(game, state), pi_vec, player))
-            action = sample_action(pi, learner.temperature, rng)
+            action = learner._gumbel_selected if learner.gumbel else sample_action(pi, learner.temperature, rng)
         else:
             action = opponent.act(game, state, rng)
         state = game.step(state, action, rng)
@@ -615,6 +833,12 @@ def train_alphazero(
     book_proof_copies: int = 3,
     book_estimate_copies: int = 1,
     augment: bool = True,
+    gumbel: bool = False,
+    gumbel_m: int = 16,
+    c_scale: float = 0.1,
+    value_n_step: int = 0,
+    target_refresh: int = 4,
+    reanalyze_frac: float = 0.0,
     log: Callable[[str], None] | None = None,
 ) -> tuple[Connect4Net, list[dict]]:
     """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
@@ -648,26 +872,57 @@ def train_alphazero(
     if distilled:
         train_net(net, distilled, epochs, batch_size, lr, device)  # imprint optimal play before self-play
     history: list[dict] = []
+    # LAGGED TARGET NET for the n-step value target (#3): a frozen copy refreshed every `target_refresh` iters, so
+    # self-play VALUE labels bootstrap off a STABLE net instead of chasing the live weights (and off the target
+    # net's mid-game read n plies ahead instead of the noisy final outcome — the opening-contamination fix).
+    import copy
+
+    target_net = copy.deepcopy(net) if value_n_step > 0 else None
+    # REANALYZE (#2) holds STATES in the buffer so old entries can be re-labelled by the current net. The training
+    # set is always the (x, pi, v) view; the state is carried only to re-search. `state_buffer` mirrors `buffer`.
+    state_buffer: list[tuple[State, torch.Tensor, list[float], float]] = []
     for it in range(iterations):
-        learner = AlphaZeroAgent(net, sims=sims, device=device)
-        fresh: list[tuple[torch.Tensor, list[float], float]] = []
+        if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
+            target_net = copy.deepcopy(net)  # refresh the lag every k iters
+        learner = AlphaZeroAgent(net, sims=sims, device=device, gumbel=gumbel, gumbel_m=gumbel_m, c_scale=c_scale)
         vs_pool = 0
-        for _ in range(selfplay_games):
-            if opponent_pool and rng.random() < pool_frac:
-                opponent = opponent_pool[rng.randrange(len(opponent_pool))]()
-                fresh.extend(vs_opponent_game(game, learner, opponent, rng.randint(0, 1), rng))
-                vs_pool += 1
-            else:
-                fresh.extend(self_play_game(game, learner, rng))
-        fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
-        buffer = (buffer + fresh)[-buffer_cap:]
+        reanalyzed = 0
+        if reanalyze_frac > 0.0:
+            fresh_s: list[tuple[State, torch.Tensor, list[float], float]] = []
+            for _ in range(selfplay_games):
+                fresh_s.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
+                                              device=device, return_states=True))
+            state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
+            # Re-label a random sample of the buffer with the CURRENT net (fresh policy + search-improved value).
+            k = int(reanalyze_frac * len(state_buffer))
+            if it > 0 and k > 0:
+                idxs = rng.sample(range(len(state_buffer)), k)
+                relabelled = reanalyze_examples(game, learner, [state_buffer[i][0] for i in idxs], rng)
+                # POLICY-ONLY refresh: replace the POLICY target with the current net's, but KEEP the stored n-step
+                # VALUE target — measured: overwriting the value with a search-root estimate DEGRADES the n-step
+                # value (the #3 lever), so reanalyze must not touch it.
+                for i, (x, pi, _v_search) in zip(idxs, relabelled):
+                    state_buffer[i] = (state_buffer[i][0], x, pi, state_buffer[i][3])
+                reanalyzed = len(relabelled)
+            buffer = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
+        else:
+            fresh: list[tuple[torch.Tensor, list[float], float]] = []
+            for _ in range(selfplay_games):
+                if opponent_pool and rng.random() < pool_frac:
+                    opponent = opponent_pool[rng.randrange(len(opponent_pool))]()
+                    fresh.extend(vs_opponent_game(game, learner, opponent, rng.randint(0, 1), rng))
+                    vs_pool += 1
+                else:
+                    fresh.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step, device=device))
+            fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
+            buffer = (buffer + fresh)[-buffer_cap:]
         loss = train_net(net, _mix_training_set(buffer, distilled, distill_fraction), epochs, batch_size, lr, device)
         history.append(
-            {"iteration": it + 1, "examples": len(fresh), "vs_pool_games": vs_pool, "buffer": len(buffer),
-             "distilled": len(distilled), "loss": loss}
+            {"iteration": it + 1, "examples": len(buffer), "vs_pool_games": vs_pool, "reanalyzed": reanalyzed,
+             "buffer": len(buffer), "distilled": len(distilled), "loss": loss}
         )
         if log:
-            log(f"iter {it + 1}/{iterations}: +{len(fresh)} ex ({vs_pool} vs-pool), buffer {len(buffer)}, "
+            log(f"iter {it + 1}/{iterations}: buffer {len(buffer)} ({vs_pool} vs-pool, {reanalyzed} reanalyzed), "
                 f"distilled {len(distilled)}, loss {loss:.3f}")
     return net, history
 

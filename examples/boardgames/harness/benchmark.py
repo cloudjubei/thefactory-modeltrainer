@@ -172,6 +172,33 @@ def verify_solved(
     return {**res, "solved": res["rate"] >= 0.999}
 
 
+def sim_scaling_curve(
+    game: Game,
+    model_factory: Callable[[int], object],
+    reference_factory: Callable[[], object],
+    sims_list: tuple[int, ...] = (2, 8, 32, 128),
+    games: int = 20,
+    seed: int = 0,
+    start: State | None = None,
+    strategist: int = 0,
+) -> dict:
+    """STRENGTH-PER-COMPUTE (the generic near-optimal headline, solver-OPTIONAL). Measure the model's first-player
+    conversion vs a FIXED reference at each simulation budget — `model_factory(sims)` builds the model with that
+    many sims. A near-optimal model shows a curve that FLATTENS early (little gain from few→many sims) AND whose
+    low-sim point is already high: it has internalised optimal play rather than searching its way there each move.
+    `reference_factory` is the EXACT oracle for the Connect-4 audit, or a frozen champion for the chess-realistic
+    metric (no solver needed). `flatness = rate(max sims) − rate(min sims)` (→0 = the strength is in the NET, the
+    win-per-sim goal); `auc` = the mean conversion across budgets (area-under-curve, the one-number summary)."""
+    points: list[dict] = []
+    for s in sims_list:
+        res = p1_conversion(game, lambda s=s: model_factory(s), reference_factory, games, seed=seed,
+                            start=start, strategist=strategist)
+        points.append({"sims": s, "rate": res["rate"], "not_lost_rate": res["not_lost_rate"]})
+    low, high = points[0]["rate"], points[-1]["rate"]
+    return {"points": points, "low_sim_rate": low, "high_sim_rate": high, "flatness": high - low,
+            "auc": sum(p["rate"] for p in points) / len(points)}
+
+
 def sample_solvable_positions(game: Game, n: int, min_moves: int, seed: int) -> list[State]:
     """`n` random-play, non-terminal positions with at least `min_moves` stones already down (so the exact
     solve is cheap) and at least two legal replies (so 'optimal move' is a real choice)."""

@@ -10,7 +10,9 @@ from harness.benchmark import (
     optimality_rate,
     optimality_trace,
     sample_solvable_positions,
+    sim_scaling_curve,
 )
+from harness.agents import RandomAgent
 from harness.solver import OracleAgent, optimal_columns
 
 
@@ -53,3 +55,20 @@ def test_a_weaker_policy_scores_below_the_oracle():
     assert res_oracle["oracle_optimality_rate"] == 1.0
     assert res_random["oracle_optimality_rate"] < res_oracle["oracle_optimality_rate"]
     assert res_random["oracle_positions"] == len(states)
+
+
+def test_sim_scaling_curve_reports_strength_per_budget():
+    # The strength-per-COMPUTE headline: conversion vs a fixed reference at each sim budget. A model that ignores
+    # its sim budget (the near-perfect oracle plays identically at every budget) yields a perfectly FLAT curve —
+    # all strength is in the policy, not bought with search — and as first player it crushes a random reference.
+    from harness.solver import NearPerfectOracle
+
+    game = Connect4()
+    curve = sim_scaling_curve(game, lambda sims: NearPerfectOracle(depth=8, solve_endgame=22),
+                              lambda: RandomAgent(), sims_list=(2, 8), games=4, seed=0)
+    assert [p["sims"] for p in curve["points"]] == [2, 8]
+    assert all(0.0 <= p["rate"] <= 1.0 for p in curve["points"])
+    assert curve["low_sim_rate"] == curve["points"][0]["rate"]
+    assert curve["high_sim_rate"] == curve["points"][-1]["rate"]
+    # identical play at both budgets ⇒ flatness is EXACTLY 0 and auc == the (high) shared rate
+    assert curve["flatness"] == 0.0 and curve["auc"] == curve["low_sim_rate"] and curve["low_sim_rate"] >= 0.75

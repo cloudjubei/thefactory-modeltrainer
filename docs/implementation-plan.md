@@ -6,6 +6,12 @@ _data + the thin CLI contract_, not engine code.
 
 ## North star (frames prioritization)
 
+> **★ OVERARCHING RULE — no matter what we work on:** build EVERYTHING as **reusable, chat-reachable modeltrainer
+> tools**. Any capability we need becomes a first-class harness capability + a `.factory/trainer.json` activity + a
+> chat/agentic tool (`ModelTrainerTools` / backend `trainerTools`) — never a one-off script — and is designed generic
+> so it serves OTHER trainings/model work too (the LLM-tool-parity rule: every UI/engine capability is chat-invocable).
+> Prototyping in a script is fine; it is not DONE until promoted to a reusable tool and the script is deleted.
+
 1. **Best generic pipeline for creating ANY model** end to end (propose → run → judge → explore), a
    self-explanatory results UI, a minimal-storage data layer, and guidance from "here's my problem" to
    "here's what data to mine." **SHIPPED and hardened** — incl. the hypothesis/verdict trail with declared
@@ -525,69 +531,32 @@ proven book, optimality ladder, verify_solved). The go-forward WORK is the effic
   Numba rewrite (Numba could not compile the recursive negamax) or bind a compiled C solver (bitbully) behind the
   connect4 hook — both optional, off the critical path.
 
-#### THE GO-FORWARD DIRECTION — an efficient GENERIC near-optimal LEARNING process (2026-08-24)
+#### VALIDATED FOUNDATION — the generic near-optimal recipe (2026-08-24, superseded as the FORWARD thrust by §C.6)
 
-**REFRAME (decisive, user-directed).** The goal is NOT to brute-force *solve* Connect 4 — that does not scale (chess
-is unsolvable; a compiled solver is off the table because it teaches us nothing generic). The goal is the most
-COMPUTE-EFFICIENT GENERIC process that produces a near-optimal MODEL, validated on Connect 4 (where the exact solver
-lets us MEASURE distance-to-optimal) and designed to run UNCHANGED on a harder unknown game (chess/Go, no solver).
-The solver + the 61k-position proven book are the MEASURING STICK + an optional teacher — NOT the engine. The
-brute-force winning-strategy grind (`prove_winning_strategy` / `_parallel`, best-first + parallel leaf-solve +
-targeted-expansion) is BUILT, correct, resumable, and its book is kept as a reference oracle — but it is NOT the
-path to a strong model. (Measured: full C4 solve is genuinely many-hours in pure Python; center-first deviates
-extensively so the true winning tree is large. It stays available as an audit/teacher, not the thrust.)
+This §C.5 investigation is COMPLETE; it produced the first portfolio entry (the large-perfect-info arm). Blow-by-blow
+detail lives in memory `project_modeltrainer_solve_it_shipped`; the forward action is now §C.6 (the process portfolio).
 
-**Diagnosis — the champion's depth-6 plateau is a STRUCTURAL weak optimum, not undertraining** (workflow-scrutinised,
-grounded in `harness/neural.py`): (1) the self-play POLICY target is raw MCTS visit fractions (`run_search`) — which
-has NO policy-improvement guarantee at low sims when the root does not visit every action (our regime: `az_sims 80`,
-7-wide root, Dirichlet noise stealing visits), so the net fixates on the prior and never gets a corrective gradient
-— *the plateau mechanism*; (2) the VALUE target is the raw MC outcome of weak self-play (`self_play_game`) — the
-code's own `net_value` docstring names this as the cause of opening value-label contamination that forfeits the P1
-win; (3) NO target recycling (no Reanalyze / target net) — stale weak-net targets trained on forever; (4) measured
-strength comes from oracle/book DISTILLATION — a Connect-4-only crutch, so the GENERIC self-play loop (the part that
-must transfer to chess) is the weakest-per-sim part and is exactly what plateaus. More sims/games cannot fix a
-structural cap.
+**VALIDATED GENERIC RECIPE** — MEASURED on the C4 calibration harness, distillation OFF, all levers game-agnostic
+(→ chess): **Gumbel/Sequential-Halving completed-Q SEARCH (deploy + self-play) + calibrated completed-Q policy target
+(fixed-range σ `_norm_q`, c_scale=0.1) + n-step value target off a lagged target net (n≈8, k=2).** All in
+`harness/neural.py`, TDD (`tests/test_neural.py`, 51-pass suite). oracle-match 0.887–0.893, +0.067/+0.087 over the
+visit-count baseline (2-seed replicated), dominant at EVERY sim budget under both searches. **Leverage ranked by
+measurement (the key finding, via the disentanglement grid net×deploy-search×sims): value-target ≫ deployment-search
+(Gumbel) > policy-target (completed-Q, neutral alone); Reanalyze not-a-win at this small scale (data-limited/large-scale
+lever — primitives shipped).** The completed-Q min-max-normalisation bug (near-one-hot target from search noise) was
+caught by a 5-agent adversarial workflow vs Danihelka 2022 and fixed (fixed-range σ) — the methodology, not just the
+result, is the asset.
 
-**The plan — buy strength-per-COMPUTE via better operators + target recycling. All levers are GENERIC (no game
-knowledge), so the same list is the grandmaster-chess recipe (Leela/KataGo/MuZero machinery):**
-1. **Gumbel action-selection + Sequential Halving + completed-Q policy target** (`AlphaZeroAgent.run_search` + a new
-   `completed_q_target` helper). GUARANTEED per-move policy improvement even at 2–32 sims → dissolves the
-   visit-count failure mode; lets sims fall ~3–6× for equal improvement. The standard low-sim operator (Danihelka
-   2022; MuZero/MiniZero on Go/chess/Atari). **GATE it: a Connect-4 unit test that the completed-Q policy BEATS the
-   raw visit-count policy at n=8 sims, BEFORE trusting it. [HIGHEST LEVERAGE — do first.]**
-2. **MuZero Reanalyze** — store raw trajectories (not pre-baked `(pi,v)`), then re-run the CURRENT-net search over
-   sampled buffer positions + the ~700 on-disk checkpoints to regenerate targets for ~free. Core of EfficientZero
-   sample efficiency; de-stales the contaminated opening labels. (Buffer-schema migration is the main cost/risk.)
-3. **n-step/TD value target off a lagged target net** (refresh every k iters) — kills the opening value
-   contamination; better bias/variance than raw MC. Start large-n / long-k.
-4. **KataGo Playout-Cap Randomization** (~1.37× games/compute on Go — re-measure on the narrow board).
-5. **Forced Playouts + Policy-Target Pruning** (~1.25×) — explores underrated moves (the missed centre opening),
-   prunes target noise. Verify it composes with the Gumbel root, not the old PUCT self-play.
-6. **Run distillation OFF as the PRIMARY arm** — so gains are attributable to the generic loop, not the
-   non-transferable crutch. Connect-4 numbers DROP short-term (expected/correct); keep the distilled arm as a
-   ceiling reference.
+**Solver-optional MEASUREMENT (the generic part):** sim-scaling curve; search-consistency KL(prior‖post-search)→0;
+best-response robustness. Oracle AUDIT (C4 only): oracle-move-match + depth-6→8→10 conversion ladder + `verify_solved`.
+Calibrate the oracle-free proxies against the oracle ONCE, then rely on them for chess.
 
-**Near-solve MEASUREMENT — strength-per-SIMULATION, solver-optional (the part that makes it generic):**
-- WITHOUT an oracle (chess-realistic, the PRIMARY metric): (a) **SIM-SCALING CURVE** — win-rate vs a frozen
-  reference at sims ∈ {2,8,32,128}; near-optimal ⇔ the curve FLATTENS early AND the low-sim point is already high
-  (report area-under-curve per 1k sims = the strength-per-compute headline); (b) **SEARCH-CONSISTENCY GAP** —
-  KL(prior ‖ post-search completed-Q policy) averaged over self-play → collapses toward 0 as the net nears optimal
-  (a monotone internal signal, no opponent needed); (c) **BEST-RESPONSE ROBUSTNESS** — train a cheap adversary vs
-  the frozen champion; near-optimal ⇔ it cannot be exploited above the game value (the HONEST replacement for the
-  meaningless 100% self-play P1-win).
-- WITH the oracle (Connect-4 AUDIT only): oracle-move-match over the 61k book + the depth-6→8→10 conversion ladder.
-  CALIBRATE (a)–(c) against it ONCE (confirm they rank checkpoints the same way the oracle does), then rely on the
-  oracle-free proxies alone for chess.
-
-**Risks/guardrails:** Gumbel/completed-Q is intricate — a σ(completedQ)/`v_mix` bug can silently make a WORSE target
-than visit counts (hence the n=8 gate). Reanalyze needs a buffer-schema migration + exact `encode()` reconstruction
-or targets are mislabelled. n-step/TD can diverge if the target-net refresh is too fast (start conservative).
-Distillation-off will drop absolute Connect-4 strength short-term (correct, not a regression). KataGo multipliers
-are Go/19×19 — directional, re-measure. Forced-playouts + Gumbel-root composition needs checking (they were built
-for PUCT+visit-count).
-
-NEXT: implement **#1 (Gumbel + completed-Q)**, TDD (the completed-Q-beats-visit-counts test FIRST), measured by the
-sim-scaling curve + the depth-8 conversion — with distillation OFF so the gain is attributable to the generic loop.
+**SCALE-UP FINDING (24×48, distill OFF) — the motivating gap for §C.6:** strong MID-GAME (oracle 0.887) but
+**frontier=none on the opening-conversion ladder** (does not convert the P1 forced win). Pure self-play generalises
+tactics fast but is slow on precise OPENING theory (the last mile to *solved*); a teacher (distill/book) fixes it but
+is game-specific. "Best process" bifurcates on **has-teacher?** and **need-solved-vs-grandmaster?** — exactly what the
+portfolio must select on. (Reference: the brute-force winning-strategy book grind is built/correct/resumable and kept
+as an audit oracle + optional teacher, NOT the generic thrust.)
 
 #### Design decisions (resolved — reference)
 
@@ -698,6 +667,137 @@ compression / frontier phase, not strength-discovery — it can only trim a net 
   optimally from it still needs the one-ply lookahead (cheap) or the endgame solver.
 - For unsolvable games the "book" holds *beliefs* (agent-consensus), not proofs — label it as such in the UI.
 - Report book coverage honestly (how much of the reachable opening is exact) so "optimal" is never overclaimed.
+
+### C.6 — The process PORTFOLIO & meta-selection framework — THE MAIN COURSE (2026-08-25)
+
+**The mission.** One recipe won't fit all games. Build a PORTFOLIO of learning processes with CHARACTERISED trade-offs
++ a META-SELECTOR so a NEW unseen game is auto-classified and routed to the best process to reach solvability (where
+feasible) and ≥ grandmaster play, FAST — up to real-time games (StarCraft/Dota). Then, over many games, learn the best
+way to build such models. Literature-grounded (8-agent survey, folded here from the retired `game-learning-portfolio.md`).
+
+**THREE GOVERNING DIRECTIVES (user, 2026-08-25) — apply to every task under §C.6:**
+1. **MEASURE, don't argue.** The transferable asset is the METHOD (disentanglement grid → leverage ranking → learn
+   features→process online), not any single recipe. Every lever/process claim is a measured A/B on the calibration
+   harness with a pre-registered metric·corpus·threshold.
+2. **Build as reusable, CHAT-REACHABLE modeltrainer TOOLS — never one-off scripts.** Any capability we need becomes a
+   first-class harness capability + a chat/agentic tool (the LLM-tool-parity rule), especially anything reusable across
+   OTHER trainings/model work. The current `scripts/gumbel_ab.py` / `gumbel_disentangle.py` / `scale_up.py` are
+   PROTOTYPES to be promoted into capabilities + activities + chat tools (see "Tools to build" below); delete the
+   scripts once promoted (repoint-and-delete).
+3. **PROVE it's good, then rinse-and-repeat improve ALL areas.** Producing the process is not enough — we must
+   rigorously PROVE a produced model/process is good (the evaluation spine below), publish that evidence, and loop:
+   survey → hypothesise → test → prove → improve every area → add a game → repeat.
+
+**Immediate driving case (user-chosen): push Connect-4 to SOLVED** — close the opening-conversion gap the scale-up
+exposed (frontier=none: strong mid-game 0.887 but converts 0% of the P1 forced win). This is the strictest possible
+end-to-end test of the loop, and every piece built to close it (opening exploration, verify-solved eval, the
+disentanglement/prove-it tooling) is built GENERIC and chat-reachable so it serves the whole portfolio. Diagnose first
+(is the net DRAWING = sound-but-not-converting, or LOSING = weak opening?) via the `verify_solved`/ladder eval tool,
+then attack: opening exploration (playout-cap randomization / temperature / forced-playouts to discover centre-first),
+value-target accuracy at the opening, scale — teacher (book/oracle distillation) only as the last resort / ceiling
+reference, since it doesn't transfer.
+
+#### Taxonomy — the axes that DECIDE which process wins (each cheaply probed off the `Game` interface)
+
+| Axis | Values | Why it FLIPS the process (+ detection) |
+|---|---|---|
+| **Information** | perfect vs imperfect/hidden | THE switch. Hidden info ⇒ solution is a stochastic **Nash**; minimax/PUCT over `state_key` is UNSOUND (exploitable; self-play cycles). Route → CFR/ReBeL/R-NaD; metric → **exploitability/NashConv**. Detect: does `observation` reconstruct `state_key`? |
+| **Determinism / chance** | deterministic \| small-known \| large/unknown | `step` random ⇒ targets become EXPECTATIONS ⇒ value-target VARIANCE dominates (attacks our #1 lever). Small-known → afterstate + expectimax; unknown → Stochastic-MuZero. Detect: fixed action × rng seeds → distinct outcomes. |
+| **Solvability tier vs budget** | strong \| weak \| ultra-weak \| unsolvable | Certificate vs Elo, and whether an exact oracle exists to calibrate. Storage/verification is the *strong*-solve wall, not search. |
+| **Action structure** | small-discrete \| combinatorial \| continuous \| simultaneous | Child enumeration needs small-discrete. Else Sampled(+Gumbel) + autoregressive/factored heads + masking; simultaneous breaks `current_player`. |
+| **Players & sum** | 1 (MDP) \| 2p0s \| n-player/general-sum | 2p0s well-behaved (Nash exists; negamax duality). Beyond it → league/population over single-track self-play. |
+| **Reward density & horizon** | dense \| sparse-short \| sparse-long | Long-sparse ⇒ must BOOTSTRAP (our n-step lever) + often shaping/imitation warm-start. |
+| **Tree non-uniformity / transpositions** | balanced \| forced-threat \| DAG-heavy | Sub-router in the solvable class: alpha-beta vs **df-pn/threat-space**; high transposition ⇒ GHI handling. |
+| **Simulator cost** | cheap known \| unknown/expensive | Cheap ⇒ real model (AlphaZero). Else learned latent model (MuZero) pays its approximation error (our grid: latent/Reanalyze net-negative on a cheap-sim game). |
+| **Real-time / latency** | untimed \| real-time tick | Latency ⇒ reactive forward-pass policy, search → train-time ⇒ model-free actor-critic + league. Our search+completed-Q recipe is the WRONG default here. |
+| **Symmetry richness** | rich \| weak/none | Storage multiplier for strong solve + free sample multiplier (augmentation). `SolvableGame.symmetries()`. |
+
+#### The process portfolio (trade-offs + repo maturity)
+
+| Process | Best for | Trade-offs | Repo |
+|---|---|---|---|
+| Forward alpha-beta/negamax + TT + ordering | solvable-PI small branching; also the calibration ORACLE | lowest wall-clock/mem to a weak result, zero training; proves one root only | **shipped** (C4-specific) |
+| Backward retrograde / tablebases | strong solves that fit storage | total coverage + O(1) perfect play; enormous compute+**storage** (the wall), needs invertible moves | **partial** (store; no predecessor hook) |
+| Best-first proof search (PNS/df-pn + GHI, threat-space) | high-branching forced-threat (Gomoku/Qubic) | best node-efficiency on skewed trees; memory-hungry, GHI risk | **absent** (top solver gap) |
+| **Validated AlphaZero recipe** (Gumbel completed-Q + calibrated policy + n-step value/lagged net) | large unsolvable PI, cheap sim, enumerable actions | strong generic default, guaranteed low-sim improvement; high self-play compute, UNSOUND under hidden info | **shipped** |
+| KataGo efficiency stack (playout-cap, forced-playouts+prune, global pool, aux heads) | max Elo-per-compute on any board game | ~50× aggregate savings, mostly game-agnostic; new hyperparameters | **absent** (highest-value transfer) |
+| MuZero family (learned model+Reanalyze; Sampled; Stochastic; EfficientZero) | unknown/expensive dynamics, large/continuous chance/actions | max generality; model-learning compute + latent bias; only MATCHES AZ on cheap-sim PI | **partial** (reanalyze; measured not-a-win small-scale) |
+| Afterstate TD(λ) + expectimax/\*-minimax | stochastic small-known-chance + clean afterstate (2048/backgammon/Pig) | best sample-eff + wall-clock; caps without search, needs hand afterstate | **absent** |
+| CFR family → Deep-CFR/NFSP → ReBeL/SoG → R-NaD | hidden-info 2p0s across scale | ONLY sound family under hidden info; tabular exact but O(\|infosets\|). **Our lagged target-net ≡ R-NaD's lagged reference** | **absent** |
+| Model-free actor-critic + league (PPO/IMPALA/SAC; PFSP+exploiters+PBT) | real-time, partial-obs, huge/continuous/multi-agent | only viable where planning is impossible; sample-hungry, no certificate, shaping can distort objective | **absent** (Elo ladder + Agent registry are substrate) |
+| **Meta-selector** (SATzilla/Rice hardness-selection + AutoRL PBT/SH) | the algorithm-selection problem itself | low decision-time compute for large savings; cold-start extrapolates badly OOD | **absent** (disentanglement grid = first labelled points) |
+
+#### Meta-selection framework — the decision procedure for an unseen game (build as a chat tool)
+
+1. **Probe features** (no training, short rollouts + flags): chance branching, information (observation-partition vs
+   state_key), players/sum, action metrics, horizon, reward density, symmetry, solvability tier.
+2. **Rule-based router (presolver)** → a CANDIDATE SET (never one guess): imperfect → {CFR+/Deep-CFR/ReBeL/R-NaD by
+   scale}; chance → {afterstate-TD+expectimax / Stochastic-MuZero}; real-time/simultaneous/continuous → {model-free +
+   league}; else PI → {retrograde / alpha-beta / df-pn / validated-AZ+KataGo} by tier + tree shape.
+3. **Score candidates on the generalised disentanglement grid** (class-correct metric: distance-to-optimal vs oracle
+   where one exists, else Elo±CI ladder w/ common-random-numbers, imperfect-info gated on exploitability). AutoRL inner
+   loop. Pick least regret-to-target per compute.
+4. **Learn online.** Every run appends a (features → per-process performance) point; upgrade the router to a learned
+   predictor. Meta-success = low regret vs oracle-best on a HELD-OUT game suite at fixed budget.
+
+#### The PROVE-IT-GOOD evaluation spine (directive #3 — a first-class, chat-reachable capability)
+
+A produced model/process is not "good" until PROVEN so, honestly. The spine (extend the shipped `benchmark`/tournament
+capabilities, expose each as a chat tool): (a) **distance-to-optimal** vs the exact oracle where one exists
+(`optimality_rate`, `verify_solved`, the ladder); (b) **certificate check** (H9: tablebase self-consistency — a net at
+100% corpus-optimal is NOT solved until off-corpus positions verify); (c) **strength-per-compute** (sim-scaling curve,
+AUC); (d) **oracle-free proxies** for the chess regime (search-consistency KL→0; best-response/exploitability
+robustness) calibrated ONCE against the oracle; (e) **statistical rigor** (mean±CI, paired/common-random-number seeds,
+≥2-seed replication — already our discipline). The evaluation IS a mission output (feeds §D publication).
+
+#### TOOLS to build (promote prototypes → reusable chat-reachable capabilities; directive #2)
+
+Turn the throwaway scripts into first-class modeltrainer capabilities (`harness/` capability + `.factory/trainer.json`
+activity + `src/ModelTrainerTools.ts`/backend `trainerTools.ts` chat tool), each generic and reusable:
+- **`disentangle` capability** — the net×lever×deploy-search×sims grid + leverage ranking, on ANY `SolvableGame`
+  (generalise `gumbel_disentangle.py`; the meta-selector's scoring engine).
+- **`process-eval` capability** — the PROVE-IT-GOOD spine above, one call → the scorecard (ladder + verify_solved +
+  certificate + sim-scaling + proxies), chat-reachable.
+- **`train-generic` activity** — the validated recipe as manifest knobs (gumbel/c_scale/n_step/target_refresh/reanalyze)
+  already in `train_alphazero`; expose via `.factory/trainer.json` + chat (supersedes the ad-hoc `scale_up.py`).
+- **`game feature-probe` tool** — the meta-selector stage-1 feature extractor off the `Game` interface.
+- **`process registry`** — a uniform PROCESS API so router/portfolio members are pluggable (today only AZ+solver+book
+  are wired with no common abstraction).
+- Interface extensions as the sequencing demands them: `chance_outcomes`/`afterstate`, predecessor enumeration,
+  `information_set_key`/`sample_world`/`public_state`, simultaneous-move, factored/continuous actions, game-derived net.
+
+#### Hypothesis register (15; each has metric·corpus·threshold — the rinse-and-repeat backlog)
+
+**Testable NOW on the shipped Connect-4/TTT harness (STEP 0):**
+- **H1** value≫search>policy REPLICATES on TTT (class property, not a C4 artifact). *[high]*
+- **H2** value-target is the VARIANCE-limited lever — value-target noise degrades > policy-target noise; lag/multi-target
+  recover it (chance-variance proxy before a stochastic plug-in). *[high]*
+- **H3** net move-ordering SPEEDS the exact solver, reduction grows with hardness (net-proposes/exact-disposes). *[high]*
+- **H4** Gumbel beats PUCT only at LOW sims; crossover sim rises with m (action-width). *[high]*
+- **H5** lagged-net value ≡ R-NaD lagged reference — a KL-to-lagged-policy term speeds/stabilises self-play (the
+  anti-cycling bridge to imperfect info). *[high]*
+- **H6** symmetry-aug gain scales with group order (TTT D4 > C4 mirror). *[med]*
+- **H7** Reanalyze is SCALE-conditional (Δ turns positive as capacity/iters grow, else record the ceiling). *[med]*
+- **H8** optimal n grows with horizon (argmax-n(C4) > argmax-n(TTT)). *[med]*
+- **H9** 100% corpus-optimal ≠ solved — certificate self-consistency surfaces off-corpus errors. *[med]*
+- **H10** distillation ~null once the value recipe is in place (keeps the C4-specific crutch out of the default). *[low]*
+
+**Plugin-gated (drive the sequencing):**
+- **H11** afterstate value is the DOMINANT stochastic lever when a clean afterstate exists (Pig/2048). *[med]*
+- **H12** win-rate MIS-RANKS under hidden info; exploitability/NashConv required (Kuhn→Leduc). *[med]*
+- **H13** CFR+ beats neural-BR below an infoset-count crossover K (routing feature = infoset-count). *[med]*
+- **H14** proof-cost head beats win-prob value for guiding proof search, advantage grows with hardness (Gomoku+df-pn). *[med]*
+- **H15** cheap interface features predict the winning arm → rule-based router beats the single-fixed-recipe on
+  held-out regret. *[high — the meta-goal]*
+
+**First experiments (all NOW, all cheap; run as the new `disentangle`/`process-eval` tools, not scripts):** E1 (H1)
+disentangle on TTT vs exact solver; E2 (H2) value- vs policy-target noise-injection on C4; E3 (H3) net move-ordering in
+the alpha-beta solver on fixed C4 endgames; E4 (H4) add an m-axis to the sim-sweep; E5 (H5) KL-to-lagged-policy in C4
+self-play. **Sequencing (one axis per plug-in, keep an exact oracle as long as feasible):** STEP 0 exhaust H1–H10 on
+C4+TTT + build the feature-probe (H15) + the Connect-4-to-SOLVED driving case; STEP 1 stochastic (Pig→2048: afterstate/
+chance, H11); STEP 2 imperfect (Kuhn→Leduc: NashConv H12 / CFR-route H13); STEP 3 high-branching (Gomoku/Qubic + df-pn:
+proof-cost H14); STEP 4 real-time/simultaneous (model-free + league — route AWAY from AZ). H15 graduates the router
+from rule-based to learned once each arm has ≥3 labelled game-instances.
 
 ## D. Publish the evidence — a scientific paper (a mission-level OUTPUT of the engine)
 

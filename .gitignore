@@ -9,4 +9,4 @@ examples/*/mlruns/
 examples/*/.factory/trainer/
 examples/**/__pycache__/
 
-.factory/
+.factory/examples/boardgames/gumbel_ab_nets/
