@@ -469,14 +469,15 @@ Remaining (forward):
   benchmark (not hard-required — preserves BlackSwan's `return_vs_hold_pct`); best-of-N BESIDE DSR sharing one
   `nTrials` floor; reuse / `unverifiable` flags advisory, not hard-block.
 
-### C.5 — Optimal-play trainer (boardgames) — the SOLVE-IT program
+### C.5 — Optimal-play trainer (boardgames) — the efficient GENERIC near-optimal learning process (Connect 4 as the calibration harness)
 
-**Goal (§C.3's crisp end-state):** a trained MODEL that plays Connect 4 PERFECTLY — as FIRST player from the
-empty board it beats the EXACT solver (perfect defence) in 100% of games (`wins_as_p1_vs_EXACT_oracle == 1.0`).
-The game is solved (proven first-player win, we hold an exact solver); a fast, perfect MODEL is not. Honing on
-Connect 4 (where we hold ground truth) validates a process that generalizes to unsolved games — chess/Go have no
-exact oracle, but a strong reference + verified-plies + self-improvement + honest reporting are the same
-machinery (see the Scaling doctrine below).
+**Goal (reframed 2026-08-24, user-directed):** the most COMPUTE-EFFICIENT GENERIC learning process that produces a
+NEAR-OPTIMAL trained MODEL, validated on Connect 4 (where the exact solver lets us measure distance-to-optimal) and
+designed to run UNCHANGED on a harder unknown game (chess/Go) where nothing can be solved. NOT brute-force solving,
+NOT a compiled solver — those teach nothing generic. Connect 4 is the calibration harness: its exact solver +
+proven book let us PROVE that our generic (solver-free) near-optimal proxies actually track optimality, before we
+point them at a game we can't solve. The Connect-4 AUDIT ceiling stays `wins_as_p1_vs_EXACT_oracle == 1.0` (a model
+that beats the exact solver as P1), but the go-forward THRUST is the efficient generic loop below, not the solve.
 
 **Definition of SOLVED (measurable, no proxies):** M is optimal iff, as first player, it converts the proven
 first-player win against the EXACT solver 100%. Corroborated by: M's entire main line is proven-optimal
@@ -484,10 +485,11 @@ first-player win against the EXACT solver 100%. Corroborated by: M's entire main
 drawn/won position. Only a win vs the EXACT solver counts — a depth-limited oracle is a beatable PROXY (evidence,
 not proof); the viewer gates every ✓ / "solved" on the exact label.
 
-#### Shipped foundation (context for the pending grind)
+#### Shipped foundation (context — the measurement + reference apparatus)
 
-The whole apparatus exists and is green (TDD); the remaining work is COMPUTE + a net-training pass, not new
-machinery.
+The measurement/reference apparatus below exists and is green (TDD) — it is the CALIBRATION HARNESS (exact solver,
+proven book, optimality ladder, verify_solved). The go-forward WORK is the efficient generic LEARNING loop (Gumbel
++ Reanalyze + targets, next subsection), NOT more of this — this stays as the audit oracle + optional teacher.
 
 - **Store + solver.** `harness/tablebase.py` (PROVEN/ESTIMATE columnar store; `proven_value` so exact consumers
   ignore estimates; priority eviction; symmetry-canonical keys). `harness/solver.py` (Pons bitboard negamax +
@@ -523,38 +525,69 @@ machinery.
   Numba rewrite (Numba could not compile the recursive negamax) or bind a compiled C solver (bitbully) behind the
   connect4 hook — both optional, off the critical path.
 
-#### The pending work — close M1 → M3 (the compute grind)
+#### THE GO-FORWARD DIRECTION — an efficient GENERIC near-optimal LEARNING process (2026-08-24)
 
-Milestones: **M1** winning-strategy `provenFraction` 0→100% + `root_proven` (the grind) · **M2** book-aware agent
-converts P1 vs EXACT = 100% · **M3** distilled NET converts P1 vs EXACT = 100% → SOLVED.
+**REFRAME (decisive, user-directed).** The goal is NOT to brute-force *solve* Connect 4 — that does not scale (chess
+is unsolvable; a compiled solver is off the table because it teaches us nothing generic). The goal is the most
+COMPUTE-EFFICIENT GENERIC process that produces a near-optimal MODEL, validated on Connect 4 (where the exact solver
+lets us MEASURE distance-to-optimal) and designed to run UNCHANGED on a harder unknown game (chess/Go, no solver).
+The solver + the 61k-position proven book are the MEASURING STICK + an optional teacher — NOT the engine. The
+brute-force winning-strategy grind (`prove_winning_strategy` / `_parallel`, best-first + parallel leaf-solve +
+targeted-expansion) is BUILT, correct, resumable, and its book is kept as a reference oracle — but it is NOT the
+path to a strong model. (Measured: full C4 solve is genuinely many-hours in pure Python; center-first deviates
+extensively so the true winning tree is large. It stays available as an audit/teacher, not the thrust.)
 
-**BEST-FIRST unblock (2026-08-24).** Measured reality: even with a 500k-entry warm TT, a single ply-12 opening
-solve is > 120s, so the earlier prover (which did a top-down full solve at each strategist node to find its move)
-STALLED at the root — a cold grind couldn't start. Fixed: `prove_winning_strategy` now does a **best-first WIN
-search** at strategist nodes — descend the moves in a cheap `guide` order (CENTRE-FIRST by default; an oracle
-guide is opt-in via `guide_depth`) and the FIRST descended child that proves a win settles the node BOTTOM-UP, no
-top-down solve. Because a forced win exists and centre-first descends Connect 4's winning line, this runs from
-COLD with **zero deferrals**: measured **~365 proven nodes/s** (centre-first, `max_exact_empty=24` → cheap ply-18
-leaves), climbing the tree from the leaves up. So the substrate-first sequencing is no longer needed — the grind
-IS the substrate build and the directed proof at once.
+**Diagnosis — the champion's depth-6 plateau is a STRUCTURAL weak optimum, not undertraining** (workflow-scrutinised,
+grounded in `harness/neural.py`): (1) the self-play POLICY target is raw MCTS visit fractions (`run_search`) — which
+has NO policy-improvement guarantee at low sims when the root does not visit every action (our regime: `az_sims 80`,
+7-wide root, Dirichlet noise stealing visits), so the net fixates on the prior and never gets a corrective gradient
+— *the plateau mechanism*; (2) the VALUE target is the raw MC outcome of weak self-play (`self_play_game`) — the
+code's own `net_value` docstring names this as the cause of opening value-label contamination that forfeits the P1
+win; (3) NO target recycling (no Reanalyze / target net) — stale weak-net targets trained on forever; (4) measured
+strength comes from oracle/book DISTILLATION — a Connect-4-only crutch, so the GENERIC self-play loop (the part that
+must transfer to chess) is the weakest-per-sim part and is exactly what plateaus. More sims/games cannot fix a
+structural cap.
 
-1. **Run the winning-strategy grind (the manifest default now).** `bookBuild = {winningStrategy:true, strategist:0,
-   maxPlies:42, maxExactEmpty:24, maxPositionSeconds:2, deadlineSeconds:1500}` — each Start proves ~25 min of the
-   directed tree bottom-up (resumable; proven nodes skipped across Starts). Watch `winningStrategy.provenFraction`
-   climb and `root_proven` flip when the whole strategy is booked (= a lookup-perfect first player exists).
-   Tuning: LOWER `maxExactEmpty` = cheaper leaves but a deeper/larger tree; ~24 balances throughput vs tree size.
-2. **Verify (M2).** Play-off with `ladder` (fast depth rungs, ON by default now — shows the depth-6→8 frontier)
-   and, for the definitive gate, `ladderExact`/`oracleExact` → `verify_solved` vs the EXACT solver. Once the
-   strategy is proven, BookAgent (book + exact endgame) converts P1 vs exact = 100% → **a genuine Connect 4
-   solution** (a fast lookup player, no minutes-long solves at play).
-3. **Distil (M3).** `train_alphazero(book=…)` — the proven `best_actions` + exact values are the targets — then
-   re-verify vs the EXACT solver. A distilled NET that converts P1 vs exact = a fast perfect model with no lookup,
-   the ML result the slow solver can't give. Wiring + gate exist; a training pass.
+**The plan — buy strength-per-COMPUTE via better operators + target recycling. All levers are GENERIC (no game
+knowledge), so the same list is the grandmaster-chess recipe (Leela/KataGo/MuZero machinery):**
+1. **Gumbel action-selection + Sequential Halving + completed-Q policy target** (`AlphaZeroAgent.run_search` + a new
+   `completed_q_target` helper). GUARANTEED per-move policy improvement even at 2–32 sims → dissolves the
+   visit-count failure mode; lets sims fall ~3–6× for equal improvement. The standard low-sim operator (Danihelka
+   2022; MuZero/MiniZero on Go/chess/Atari). **GATE it: a Connect-4 unit test that the completed-Q policy BEATS the
+   raw visit-count policy at n=8 sims, BEFORE trusting it. [HIGHEST LEVERAGE — do first.]**
+2. **MuZero Reanalyze** — store raw trajectories (not pre-baked `(pi,v)`), then re-run the CURRENT-net search over
+   sampled buffer positions + the ~700 on-disk checkpoints to regenerate targets for ~free. Core of EfficientZero
+   sample efficiency; de-stales the contaminated opening labels. (Buffer-schema migration is the main cost/risk.)
+3. **n-step/TD value target off a lagged target net** (refresh every k iters) — kills the opening value
+   contamination; better bias/variance than raw MC. Start large-n / long-k.
+4. **KataGo Playout-Cap Randomization** (~1.37× games/compute on Go — re-measure on the narrow board).
+5. **Forced Playouts + Policy-Target Pruning** (~1.25×) — explores underrated moves (the missed centre opening),
+   prunes target noise. Verify it composes with the Gumbel root, not the old PUCT self-play.
+6. **Run distillation OFF as the PRIMARY arm** — so gains are attributable to the generic loop, not the
+   non-transferable crutch. Connect-4 numbers DROP short-term (expected/correct); keep the distilled arm as a
+   ceiling reference.
 
-Watch: winning-strategy `provenFraction`/`root_proven` (M1) → BookAgent `verify_solved.solved` (M2, the first real
-solution) → distilled-net `verify_solved.solved` (M3). Nothing claims SOLVED until a model beats the EXACT solver
-as P1, 100%. (The current alphazero champion converts only the depth-6 PROXY and LOSES to depth-8 — measured — so
-it is far from optimal; the book grind, not more champion generations, is the path.)
+**Near-solve MEASUREMENT — strength-per-SIMULATION, solver-optional (the part that makes it generic):**
+- WITHOUT an oracle (chess-realistic, the PRIMARY metric): (a) **SIM-SCALING CURVE** — win-rate vs a frozen
+  reference at sims ∈ {2,8,32,128}; near-optimal ⇔ the curve FLATTENS early AND the low-sim point is already high
+  (report area-under-curve per 1k sims = the strength-per-compute headline); (b) **SEARCH-CONSISTENCY GAP** —
+  KL(prior ‖ post-search completed-Q policy) averaged over self-play → collapses toward 0 as the net nears optimal
+  (a monotone internal signal, no opponent needed); (c) **BEST-RESPONSE ROBUSTNESS** — train a cheap adversary vs
+  the frozen champion; near-optimal ⇔ it cannot be exploited above the game value (the HONEST replacement for the
+  meaningless 100% self-play P1-win).
+- WITH the oracle (Connect-4 AUDIT only): oracle-move-match over the 61k book + the depth-6→8→10 conversion ladder.
+  CALIBRATE (a)–(c) against it ONCE (confirm they rank checkpoints the same way the oracle does), then rely on the
+  oracle-free proxies alone for chess.
+
+**Risks/guardrails:** Gumbel/completed-Q is intricate — a σ(completedQ)/`v_mix` bug can silently make a WORSE target
+than visit counts (hence the n=8 gate). Reanalyze needs a buffer-schema migration + exact `encode()` reconstruction
+or targets are mislabelled. n-step/TD can diverge if the target-net refresh is too fast (start conservative).
+Distillation-off will drop absolute Connect-4 strength short-term (correct, not a regression). KataGo multipliers
+are Go/19×19 — directional, re-measure. Forced-playouts + Gumbel-root composition needs checking (they were built
+for PUCT+visit-count).
+
+NEXT: implement **#1 (Gumbel + completed-Q)**, TDD (the completed-Q-beats-visit-counts test FIRST), measured by the
+sim-scaling curve + the depth-8 conversion — with distillation OFF so the gain is attributable to the generic loop.
 
 #### Design decisions (resolved — reference)
 
