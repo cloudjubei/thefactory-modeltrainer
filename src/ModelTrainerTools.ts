@@ -4247,7 +4247,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         childParams = { ...(manifest.rate ?? {}) }
       } else if (decision.action === 'play-off') {
         childType = 'tournament'
-        childParams = {}
+        // Run the fast optimality LADDER so the play-off shows each model's frontier (e.g. converts depth-6 but
+        // loses depth-8) — the honest "how close to optimal" the depth-6 proxy alone hides. Exact rung stays off.
+        childParams = { ladder: true }
       } else {
         childType = 'explore'
         childParams = { ...(params.searchParams ?? {}) }
@@ -4554,7 +4556,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // SOLVE-IT M0 (opt-in): swap the optimality reference to the EXACT solver, and/or compute the per-competitor
       // optimality ladder. Both are slow from the opening, so they are off unless the caller asks.
       ...(params.oracleExact ? { oracle_exact: true } : {}),
-      ...(params.ladder ? { ladder: true, ladder_games: params.ladderGames ?? 2 } : {}),
+      ...(params.ladder
+        ? { ladder: true, ladder_games: params.ladderGames ?? 2, ...(params.ladderExact ? { ladder_exact: true } : {}) }
+        : {}),
     }
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({

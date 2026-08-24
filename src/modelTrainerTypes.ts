@@ -2314,10 +2314,14 @@ export interface TournamentParams {
    * optimality check runs on FEW games; off by default (the round-robin stays on the fast proxy). */
   oracleExact?: boolean
   /** SOLVE-IT M0: also compute the per-competitor optimality LADDER (deepest oracle it converts the first-player
-   * win against — depth-6→8→10→12→exact). Opt-in (slow: the exact rung solves the opening); off by default. */
+   * win against). Fast by default — depth-6→8→10→12 only, which already shows the frontier (e.g. converts
+   * depth-6 but loses depth-8). Off by default; cheap enough to leave on for a Connect 4 play-off. */
   ladder?: boolean
-  /** Games per rung for the optimality ladder (default 2 — the exact rung is expensive). */
+  /** Games per rung for the optimality ladder (default 2). */
   ladderGames?: number
+  /** Also run the EXACT-solver rung of the ladder (the true SOLVED gate). Slow — solves the opening — so off by
+   * default; the depth rungs already show progress. Turn on for a deliberate, rigorous optimality proof. */
+  ladderExact?: boolean
   gamesPerPair?: number
   openingPlies?: number
   baseSeed?: number

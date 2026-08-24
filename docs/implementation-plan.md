@@ -525,27 +525,36 @@ machinery.
 
 #### The pending work — close M1 → M3 (the compute grind)
 
-Milestones: **M1** winning-strategy `provenFraction` 0→100% (the grind — the bottleneck) · **M2** book-aware agent
+Milestones: **M1** winning-strategy `provenFraction` 0→100% + `root_proven` (the grind) · **M2** book-aware agent
 converts P1 vs EXACT = 100% · **M3** distilled NET converts P1 vs EXACT = 100% → SOLVED.
 
-1. **Grow the deep-book substrate FIRST.** From a COLD book the top-down `prove_winning_strategy` STALLS at the
-   opening root (its root solve times out before anything beneath is booked). So each Start's default build-book
-   runs the GRADED/SEED grind, which climbs `book_coverage.provenFraction` (the M1 substrate the viewer shows)
-   from the endgame back — the productive per-Start work and the current manifest default.
-2. **Prove the directed winning-strategy tree.** Once opening coverage is substantial, run build-book in
-   winning-strategy mode (`bookBuild.winningStrategy=true`, or ask the AI to launch `build-book` with
-   `winningStrategy`). `prove_winning_strategy` then collapses its top-down solves onto the booked substrate and
-   books the directed tree; `winningStrategy.provenFraction` → 1 and `root_proven`/`complete` flip when the
-   strategy exists. The parallel exact accumulator stays available for a proofs-first pass.
-3. **Verify + distil (M2 → M3).** Run the play-off with `oracleExact` + `ladder` for the honest frontier and the
-   exact SOLVED gate (`verify_solved`). BookAgent should convert once the strategy is proven. Then distil into the
-   net (`train_alphazero(book=…)`, targets are the proven optimal play) and re-verify: a distilled NET that
-   converts P1 vs the EXACT solver = a fast perfect model, the ML result the slow solver can't give. The wiring +
-   gate exist; this is a training pass, cost-bounded.
+**BEST-FIRST unblock (2026-08-24).** Measured reality: even with a 500k-entry warm TT, a single ply-12 opening
+solve is > 120s, so the earlier prover (which did a top-down full solve at each strategist node to find its move)
+STALLED at the root — a cold grind couldn't start. Fixed: `prove_winning_strategy` now does a **best-first WIN
+search** at strategist nodes — descend the moves in a cheap `guide` order (CENTRE-FIRST by default; an oracle
+guide is opt-in via `guide_depth`) and the FIRST descended child that proves a win settles the node BOTTOM-UP, no
+top-down solve. Because a forced win exists and centre-first descends Connect 4's winning line, this runs from
+COLD with **zero deferrals**: measured **~365 proven nodes/s** (centre-first, `max_exact_empty=24` → cheap ply-18
+leaves), climbing the tree from the leaves up. So the substrate-first sequencing is no longer needed — the grind
+IS the substrate build and the directed proof at once.
 
-Watch across Starts: opening `provenFraction` (substrate) → winning-strategy `provenFraction`/`complete` (M1) →
-BookAgent `verify_solved.solved` (M2) → distilled-net `verify_solved.solved` (M3 = SOLVED). Nothing claims SOLVED
-until a net beats the EXACT solver as P1, 100%.
+1. **Run the winning-strategy grind (the manifest default now).** `bookBuild = {winningStrategy:true, strategist:0,
+   maxPlies:42, maxExactEmpty:24, maxPositionSeconds:2, deadlineSeconds:1500}` — each Start proves ~25 min of the
+   directed tree bottom-up (resumable; proven nodes skipped across Starts). Watch `winningStrategy.provenFraction`
+   climb and `root_proven` flip when the whole strategy is booked (= a lookup-perfect first player exists).
+   Tuning: LOWER `maxExactEmpty` = cheaper leaves but a deeper/larger tree; ~24 balances throughput vs tree size.
+2. **Verify (M2).** Play-off with `ladder` (fast depth rungs, ON by default now — shows the depth-6→8 frontier)
+   and, for the definitive gate, `ladderExact`/`oracleExact` → `verify_solved` vs the EXACT solver. Once the
+   strategy is proven, BookAgent (book + exact endgame) converts P1 vs exact = 100% → **a genuine Connect 4
+   solution** (a fast lookup player, no minutes-long solves at play).
+3. **Distil (M3).** `train_alphazero(book=…)` — the proven `best_actions` + exact values are the targets — then
+   re-verify vs the EXACT solver. A distilled NET that converts P1 vs exact = a fast perfect model with no lookup,
+   the ML result the slow solver can't give. Wiring + gate exist; a training pass.
+
+Watch: winning-strategy `provenFraction`/`root_proven` (M1) → BookAgent `verify_solved.solved` (M2, the first real
+solution) → distilled-net `verify_solved.solved` (M3). Nothing claims SOLVED until a model beats the EXACT solver
+as P1, 100%. (The current alphazero champion converts only the depth-6 PROXY and LOSES to depth-8 — measured — so
+it is far from optimal; the book grind, not more champion generations, is the path.)
 
 #### Design decisions (resolved — reference)
 

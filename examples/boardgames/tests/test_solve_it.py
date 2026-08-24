@@ -119,6 +119,28 @@ def test_prove_winning_strategy_completes_a_connect4_forced_win_subtree():
     assert set(book_optimal_actions(book, game, root)) == set(optimal_columns(root))  # and it is genuinely optimal
 
 
+def test_prove_winning_strategy_parallel_matches_sequential_and_proves_the_root():
+    # The PARALLEL leaf-solver must reach the SAME proven result as the sequential prover (exact solves are
+    # deterministic): the root is proven a win, BookAgent converts, and every booked value agrees.
+    from harness.book import prove_winning_strategy_parallel
+
+    game = Connect4()
+    root = _c4_mover_win_root(empties=14, seed=1, require_deep=True)
+
+    seq = Tablebase(cap=1_000_000)
+    prove_winning_strategy(game, seq, root=root, strategist=root.to_move, max_plies=42, max_exact_empty=8)
+
+    par = Tablebase(cap=1_000_000)
+    stats = prove_winning_strategy_parallel(game, par, root=root, strategist=root.to_move, max_plies=42,
+                                            max_exact_empty=8, workers=4, max_seconds=10)
+    assert stats["root_proven"] is True and par.proven_value(_key(game, root)) > 0
+    assert set(book_optimal_actions(par, game, root)) == set(optimal_columns(root))  # genuinely optimal
+    # the parallel book converts the win vs the exact solver, exactly like the sequential one
+    res = verify_solved(game, lambda: BookAgent(par, "connect4", solve_endgame=8), games=2, start=root,
+                        strategist=root.to_move)
+    assert res["solved"] is True
+
+
 def test_prove_winning_strategy_is_bounded_and_resumable():
     # max_exact_empty=0 forces the WHOLE tree to be proven node-by-node (no solver shortcut) so bounding is real.
     game = TicTacToe()

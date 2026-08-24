@@ -338,11 +338,16 @@ def _optimality_ladders(
 
     games = int(request.get("ladder_games", 2))
     depths = tuple(request.get("ladder_depths", (6, 8, 10, 12)))
+    # The EXACT rung solves the opening (minutes/move), so it is OPT-IN — by default the ladder runs the fast
+    # depth rungs only, which already show the frontier (e.g. converts depth-6 but LOSES depth-8). The exact
+    # rung is the deliberate, slow SOLVED gate, enabled with `ladder_exact`.
+    include_exact = bool(request.get("ladder_exact", False))
     out: dict = {}
     done = 0
     targets = [c["id"] for c in competitors if c["id"] != ORACLE_ID and factories.get(c["id"])]
     for cid in targets:
-        res = optimality_ladder(game, factories[cid], games=games, seed=base_seed * 17 + hash(cid) % 1000, depths=depths)
+        res = optimality_ladder(game, factories[cid], games=games, seed=base_seed * 17 + hash(cid) % 1000,
+                                depths=depths, include_exact=include_exact)
         out[cid] = res
         done += 1
         if on_progress is not None:
