@@ -420,6 +420,14 @@ export interface TrainerManifest {
    */
   tournament?: string
   /**
+   * Command template (`{configPath}` scorecard request + `{summaryOut}` result) that runs the PROVE-IT-GOOD
+   * scorecard for one model — the honest "how close to optimal, and is it proven?" verdict. Composes the
+   * measurement primitives (optimality ladder + sim-scaling curve + mid-game distance-to-optimal + P1
+   * conversion/not-lost; optional EXACT `verify_solved` gate). Powers the `process-eval` capability and the
+   * meta-selector's process scoring. Result: `{ ladder, sim_scaling, oracle_match, p1, verify_solved?, verdict, headline }`.
+   */
+  processEval?: string
+  /**
    * Command template (`{configPath}` build request + `{summaryOut}` result) that EXTENDS the project's committed
    * optimal-play opening BOOK for a solved game — a bounded, resumable pass that solves+stores more of the
    * reachable frontier (symmetry-reduced), persisting a book file so coverage accumulates across runs. Powers
@@ -2341,6 +2349,60 @@ export interface TournamentResult {
   standings: TournamentStanding[]
   /** Competitors that were skipped (no checkpoint to play). */
   skipped: number
+}
+
+/** The PROVE-IT-GOOD scorecard for one model (plan §C.6): how close to optimal, and is it PROVEN so? Only the
+ * exact-oracle `verify_solved`/ladder-exact rung earns `verdict: 'solved'`; a depth-proxy win is `near-optimal`
+ * (unproven) at most. Written as the `{recordType}-scorecard` record. */
+export interface ScorecardRecord {
+  game: string
+  model: string
+  ladder?: { frontier: string; rungs: unknown[] }
+  sim_scaling?: { points: unknown[]; auc: number; flatness: number }
+  oracle_match?: number
+  p1?: { rate: number; not_lost_rate: number; wins: number; draws: number; losses: number; games: number }
+  verify_solved?: { solved: boolean } & Record<string, unknown>
+  verdict: string
+  headline: string
+  ranAt: string
+}
+
+export interface ProcessEvalProgress {
+  phase: string
+  [k: string]: unknown
+}
+
+export interface ProcessEvalParams {
+  scope: string
+  projectRoot: string
+  manifest?: TrainerManifest
+  manifestRelPath?: string
+  /** The completed run to score (uses its checkpoint). Omit to score an explicit `model` spec. */
+  runKey?: string
+  /** An explicit model spec to score (`{ checkpoint | az_weights, az_sims, az_gumbel, az_c_scale, label }`) —
+   * overrides `runKey`. */
+  model?: Record<string, unknown>
+  game?: string
+  games?: number
+  ladderDepths?: number[]
+  simsCurve?: number[]
+  referenceDepth?: number
+  corpus?: { n?: number; minMoves?: number; seed?: number }
+  /** Run the slow EXACT `verify_solved` gate — the only check that may certify "solved". Off by default (the fast
+   * depth-proxy ladder + distance-to-optimal already show the frontier). */
+  exact?: boolean
+  computeTarget?: string
+  abortSignal?: AbortSignal
+  onRecordWritten?: (type: string, key: string) => void
+  onProgress?: (marker: ProcessEvalProgress) => void
+  activityId?: string
+}
+
+export interface ProcessEvalResult {
+  recordType: string
+  verdict: string
+  headline: string
+  card: ScorecardRecord
 }
 
 export interface BuildBookParams {
@@ -4685,6 +4747,12 @@ export interface ModelTrainerTools {
    */
   rateModels(params: RateModelsParams): Promise<RateModelsResult>
   runTournament(params: TournamentParams): Promise<TournamentResult>
+  /**
+   * Score ONE model with the PROVE-IT-GOOD scorecard (§C.6): optimality ladder + sim-scaling + distance-to-optimal
+   * + P1 conversion/not-lost → an honest verdict; only the EXACT-oracle `verify_solved` gate certifies "solved".
+   * Writes a `{recordType}-process-eval` record. Powers the `process-eval` capability + the meta-selector scoring.
+   */
+  runProcessEval(params: ProcessEvalParams): Promise<ProcessEvalResult>
   /**
    * Extend the project's committed optimal-play opening BOOK for a solved game — one bounded, resumable pass
    * (solve+store more of the symmetry-reduced reachable frontier, persist the book file). Each call grows

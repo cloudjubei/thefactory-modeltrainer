@@ -10749,6 +10749,10 @@ function detailAnalyzeRowHtml(run, ctx) {
     btns.push(
       `<button type="button" class="ghost-btn" data-action="evaluate" data-key="${k}" title="Re-test the saved checkpoint out-of-sample">▶ Evaluate</button>`,
     )
+  if (checkpoint && !isRunActivityInFlight('process-eval', run.key))
+    btns.push(
+      `<button type="button" class="ghost-btn" data-action="score-run" data-key="${k}" title="Prove-it-good scorecard: optimality ladder + sim-scaling + distance-to-optimal + P1 conversion (only the exact oracle certifies ‘solved’)">✓ Score</button>`,
+    )
   if (crossTestUiEnabled() && checkpoint && !crossTestsCache.get(run.key) && !crossTestingKeys.has(run.key))
     btns.push(
       `<button type="button" class="ghost-btn" data-action="cross-test" data-key="${k}" title="Replay the checkpoint on assets/windows it wasn’t trained on — a robustness read, no retraining">⇄ Robustness</button>`,
@@ -11222,6 +11226,27 @@ async function onJudgeRun(key) {
       setStatusLine('run-analyze-status', 'Could not start judging — please try again.', true)
   }
 }
+// Score ONE run's model with the PROVE-IT-GOOD scorecard (optimality ladder + sim-scaling + distance-to-optimal +
+// P1 conversion; only the exact-oracle gate certifies "solved"). Writes a `{recordType}-process-eval` record.
+async function onScoreRun(key) {
+  if (!embedded()) {
+    setStatusLine('run-analyze-status', 'Open inside the Overseer to score runs.', false)
+    return
+  }
+  if (!findRun(key)) return
+  if (isRunActivityInFlight('process-eval', key)) {
+    setStatusLine('run-analyze-status', 'Already scoring this run.')
+    return
+  }
+  const epoch = projectEpoch
+  try {
+    await startOrEnqueue('process-eval', trainerActivityParams({ runKey: key }), `Score ${shortKey(key)}`)
+    if (selectedRunKey === key && epoch === projectEpoch) renderRunDetail(key)
+  } catch {
+    if (epoch === projectEpoch)
+      setStatusLine('run-analyze-status', 'Could not start scoring — please try again.', true)
+  }
+}
 // Generate the LLM xAI narrative for ONE run — its side effect is the persisted LLM reliability verdict, so
 // this is the detail's one-click "verify reliability with AI". Mirrors onXaiNarrateClick but keys on an
 // explicit run rather than the xAI tab's focus, so it works straight from the run detail.
@@ -11541,6 +11566,8 @@ function setupRuns() {
       if (event.target.closest('#run-detail-close')) closeRunDetail()
       const judgeRunBtn = event.target.closest('button[data-action="judge-run"]')
       if (judgeRunBtn) onJudgeRun(judgeRunBtn.dataset.key)
+      const scoreRunBtn = event.target.closest('button[data-action="score-run"]')
+      if (scoreRunBtn) onScoreRun(scoreRunBtn.dataset.key)
       const relVerifyBtn = event.target.closest('button[data-action="reliability-verify"]')
       if (relVerifyBtn) narrateRun(relVerifyBtn.dataset.key)
       const evalBtn = event.target.closest('button[data-action="evaluate"]')

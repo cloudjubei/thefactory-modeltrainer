@@ -367,6 +367,14 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest tournament template must contain {summaryOut}')
     }
   }
+  if (m.processEval !== undefined) {
+    if (typeof m.processEval !== 'string' || !m.processEval.includes('{configPath}')) {
+      throw new Error('trainer manifest processEval template must contain {configPath}')
+    }
+    if (!m.processEval.includes('{summaryOut}')) {
+      throw new Error('trainer manifest processEval template must contain {summaryOut}')
+    }
+  }
   if (m.bookBuild !== undefined) {
     if (typeof m.bookBuild !== 'object' || m.bookBuild === null || Array.isArray(m.bookBuild)) {
       throw new Error('trainer manifest bookBuild must be an object of build knobs')

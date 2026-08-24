@@ -68,6 +68,23 @@ def _cap_sims(sims: int, max_sims: int | None) -> int:
     return min(sims, max_sims) if max_sims else sims
 
 
+def _az_factory(spec: dict, weights: str, max_sims: int | None) -> Callable[[], Agent]:
+    """Build a per-game AlphaZero agent factory from a checkpoint spec, threading the DEPLOYMENT operator knobs
+    (`az_gumbel` / `az_gumbel_m` / `az_c_scale`) so a net trained under the validated recipe is DEPLOYED under the
+    Gumbel/Sequential-Halving completed-Q search it was measured to be strongest with — not silently downgraded to
+    plain PUCT. Defaults keep prior behaviour (gumbel off) for old checkpoints."""
+    from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
+    from harness.neural import AlphaZeroAgent, load_net
+
+    net = load_net(weights)
+    sims = _cap_sims(int(spec.get("az_sims", 100)), max_sims)
+    se = int(spec.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
+    gumbel = bool(spec.get("az_gumbel", False))
+    gumbel_m = int(spec.get("az_gumbel_m", 16))
+    c_scale = float(spec.get("az_c_scale", 0.1))
+    return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se, gumbel=gumbel, gumbel_m=gumbel_m, c_scale=c_scale)
+
+
 def _model_factory(model: dict, game: Game, max_sims: int | None = None) -> Callable[[], Agent]:
     """A fresh-per-game agent factory for a model under test — parse the checkpoint spec ONCE, construct a
     NEW agent per game (so a search/net transposition table can't bleed across games). `max_sims` bounds the
@@ -77,25 +94,13 @@ def _model_factory(model: dict, game: Game, max_sims: int | None = None) -> Call
         spec = json.loads(Path(checkpoint).read_text())
         model_name = spec.get("model_name", "mcts")
         if model_name == "alphazero" and spec.get("az_weights"):
-            from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
-            from harness.neural import AlphaZeroAgent, load_net
-
-            net = load_net(spec["az_weights"])
-            sims = _cap_sims(int(spec.get("az_sims", 100)), max_sims)
-            se = int(spec.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
-            return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
+            return _az_factory(spec, spec["az_weights"], max_sims)
         cfg = dict(spec)
         if "mcts_sims" in cfg:
             cfg["mcts_sims"] = _cap_sims(int(cfg["mcts_sims"]), max_sims)
         return lambda: resolve_agent(model_name, cfg, personas_for(game.name))
     if model.get("az_weights"):  # a learned net passed by weights directly (e.g. a champion .pt, no spec file)
-        from harness.config import DEFAULT_AZ_SOLVE_ENDGAME
-        from harness.neural import AlphaZeroAgent, load_net
-
-        net = load_net(model["az_weights"])
-        sims = _cap_sims(int(model.get("az_sims", 100)), max_sims)
-        se = int(model.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
-        return lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=se)
+        return _az_factory(model, model["az_weights"], max_sims)
     model_name = model.get("model_name", "mcts")
     cfg = {
         "model_name": model_name,

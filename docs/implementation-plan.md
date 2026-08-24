@@ -688,14 +688,18 @@ way to build such models. Literature-grounded (8-agent survey, folded here from 
    rigorously PROVE a produced model/process is good (the evaluation spine below), publish that evidence, and loop:
    survey → hypothesise → test → prove → improve every area → add a game → repeat.
 
-**Immediate driving case (user-chosen): push Connect-4 to SOLVED** — close the opening-conversion gap the scale-up
-exposed (frontier=none: strong mid-game 0.887 but converts 0% of the P1 forced win). This is the strictest possible
-end-to-end test of the loop, and every piece built to close it (opening exploration, verify-solved eval, the
-disentanglement/prove-it tooling) is built GENERIC and chat-reachable so it serves the whole portfolio. Diagnose first
-(is the net DRAWING = sound-but-not-converting, or LOSING = weak opening?) via the `verify_solved`/ladder eval tool,
-then attack: opening exploration (playout-cap randomization / temperature / forced-playouts to discover centre-first),
-value-target accuracy at the opening, scale — teacher (book/oracle distillation) only as the last resort / ceiling
-reference, since it doesn't transfer.
+**Immediate driving case (user-chosen): push Connect-4 to SOLVED.** DIAGNOSED via the new `process-eval` tool
+(`harness/process_eval.py`, the reusable PROVE-IT-GOOD scorecard): the 24×48 net is tactically STRONG mid-game
+(distance-to-optimal 0.88) but **LOSES the opening as P1 — 0 wins / 0 draws / 10 LOSSES vs even a depth-4 oracle**
+(frontier=none). Not just failing to convert — actively playing into losing lines a SHALLOW defender exploits (never
+discovered the centre-first forced win; distillation-off self-play didn't explore the opening enough, and the balanced
+self-play outcomes leave the opening VALUE ~0 so there's no gradient toward the win). A red flag to explain: sim-scaling
+INVERTS (8 sims beats the ref, 32 loses it) — more deterministic search converging to a WORSE opening move (or the
+~1-deterministic-line small-sample at games=10; re-measure with more games/opening-plies). **ATTACK (generic first,
+teacher last):** (a) OPENING EXPLORATION — the missing lever: KataGo playout-cap randomization + forced-playouts, and/or
+stronger early-move exploration, so self-play actually visits centre-first; (b) VALUE accuracy at the opening; (c)
+SCALE; (d) TEACHER (book/oracle opening distillation) only as the last resort / ceiling reference since it doesn't
+transfer. Every piece is built GENERIC + chat-reachable so it serves the whole portfolio.
 
 #### Taxonomy — the axes that DECIDE which process wins (each cheaply probed off the `Game` interface)
 

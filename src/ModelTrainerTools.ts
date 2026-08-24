@@ -80,6 +80,10 @@ import type {
   RateModelsParams,
   RateModelsResult,
   TournamentParams,
+  ProcessEvalParams,
+  ProcessEvalResult,
+  ProcessEvalProgress,
+  ScorecardRecord,
   TournamentResult,
   TournamentRecord,
   TournamentProgress,
@@ -4590,6 +4594,70 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { recordType, standings: record.standings ?? [], skipped }
   }
 
+  async function runProcessEval(params: ProcessEvalParams): Promise<ProcessEvalResult> {
+    const manifest =
+      params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
+    const recordType = manifest.recordType
+    if (!manifest.processEval) throw new Error('this training project declares no "processEval" command')
+
+    // Resolve the model to score: an explicit spec, else a completed run's checkpoint.
+    let model = params.model
+    let recordKey = 'current'
+    if (!model && params.runKey) {
+      const rec = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+      const c = rec?.content as { artifacts?: { checkpoint?: string }; config?: { game?: string } } | undefined
+      const checkpoint = c?.artifacts?.checkpoint
+      if (!checkpoint) throw new Error(`run ${params.runKey} has no checkpoint to score`)
+      model = { checkpoint, label: params.runKey.slice(0, 8) }
+      recordKey = params.runKey
+    }
+    if (!model) throw new Error('runProcessEval needs a `model` spec or a `runKey`')
+
+    const game =
+      params.game ??
+      (model.game as string | undefined) ??
+      (manifest.levers?.game?.default as string | undefined) ??
+      'connect4'
+    const request: Record<string, unknown> = {
+      game,
+      model,
+      games: params.games ?? 12,
+      ...(params.ladderDepths ? { ladder_depths: params.ladderDepths } : {}),
+      ...(params.simsCurve ? { sims_curve: params.simsCurve } : {}),
+      ...(params.referenceDepth != null ? { reference_depth: params.referenceDepth } : {}),
+      ...(params.corpus
+        ? { corpus: { n: params.corpus.n, min_moves: params.corpus.minMoves, seed: params.corpus.seed } }
+        : {}),
+      ...(params.exact ? { exact: true } : {}),
+    }
+    const runner = resolveRunner(params.computeTarget)
+    const handle = runner.runJob({
+      jobId: `process-eval-${recordType}-${recordKey}`,
+      repoRef: { kind: 'local', localPath: params.projectRoot },
+      commandTemplate: manifest.processEval,
+      config: request,
+      dataFiles: manifestDataFiles(manifest),
+      timeoutMs: RATE_MODELS_TIMEOUT_MS,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })
+    if (params.onProgress) {
+      handle.onLog((line) => {
+        const marker = parseProgressMarker(line)
+        if (marker && typeof marker.phase === 'string') params.onProgress?.(marker as unknown as ProcessEvalProgress)
+      })
+    }
+    const result = await handle.done
+    if (result.status !== 'completed') {
+      const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
+      throw new Error(`process-eval ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+    }
+    const card = (result.summary ?? {}) as Omit<ScorecardRecord, 'ranAt'>
+    const record: ScorecardRecord = { ...card, ranAt: now() }
+    await deps.storage.upsertRecord({ scope: params.scope, type: `${recordType}-process-eval`, key: recordKey, content: record })
+    params.onRecordWritten?.(`${recordType}-process-eval`, recordKey)
+    return { recordType, verdict: record.verdict, headline: record.headline, card: record }
+  }
+
   async function buildBook(params: BuildBookParams): Promise<BuildBookResult> {
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
@@ -5130,6 +5198,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     runAutopilot,
     rateModels,
     runTournament,
+    runProcessEval,
     buildBook,
     getTrainerState,
     getRunXAI,

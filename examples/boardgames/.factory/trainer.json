@@ -7,6 +7,7 @@
   "play": ".venv/bin/python -m harness.play --serve --config-json {configPath} --summary-out {summaryOut}",
   "gauntlet": ".venv/bin/python -m harness.gauntlet --config-json {configPath} --summary-out {summaryOut}",
   "tournament": ".venv/bin/python -m harness.tournament --config-json {configPath} --summary-out {summaryOut}",
+  "processEval": ".venv/bin/python -m harness.process_eval --config-json {configPath} --summary-out {summaryOut}",
   "buildBook": ".venv/bin/python -m harness.book --config-json {configPath} --summary-out {summaryOut}",
   "bookBuild": {
     "winningStrategy": true,
@@ -34,46 +35,282 @@
     "gamesPerRung": 12,
     "maxReferenceSims": 300
   },
-  "objective": { "name": "win_rate", "direction": "max" },
-  "learnedCores": ["alphazero"],
-  "ratingAnchors": { "random": 0, "heuristic": 400, "mcts": 800, "mcts_strong": 1100 },
-  "ratingSpine": [
-    { "id": "random", "kind": "random", "rating": 0 },
-    { "id": "heuristic", "kind": "heuristic", "rating": 400 },
-    { "id": "mcts120", "kind": "mcts", "sims": 120, "rating": 800 },
-    { "id": "mcts400", "kind": "mcts", "sims": 400, "rating": 1100 },
-    { "id": "mcts1000", "kind": "mcts", "sims": 1000, "rating": 1400 },
-    { "id": "book", "kind": "book", "book_solve_endgame": 22, "depth": 6, "rating": 1900 },
-    { "id": "oracle", "kind": "oracle", "depth": 12, "rating": 2000 }
+  "objective": {
+    "name": "win_rate",
+    "direction": "max"
+  },
+  "learnedCores": [
+    "alphazero"
   ],
-  "hypothesisBenchmark": { "metric": "win_rate", "threshold": 0.5, "quorum": 0.5 },
+  "ratingAnchors": {
+    "random": 0,
+    "heuristic": 400,
+    "mcts": 800,
+    "mcts_strong": 1100
+  },
+  "ratingSpine": [
+    {
+      "id": "random",
+      "kind": "random",
+      "rating": 0
+    },
+    {
+      "id": "heuristic",
+      "kind": "heuristic",
+      "rating": 400
+    },
+    {
+      "id": "mcts120",
+      "kind": "mcts",
+      "sims": 120,
+      "rating": 800
+    },
+    {
+      "id": "mcts400",
+      "kind": "mcts",
+      "sims": 400,
+      "rating": 1100
+    },
+    {
+      "id": "mcts1000",
+      "kind": "mcts",
+      "sims": 1000,
+      "rating": 1400
+    },
+    {
+      "id": "book",
+      "kind": "book",
+      "book_solve_endgame": 22,
+      "depth": 6,
+      "rating": 1900
+    },
+    {
+      "id": "oracle",
+      "kind": "oracle",
+      "depth": 12,
+      "rating": 2000
+    }
+  ],
+  "hypothesisBenchmark": {
+    "metric": "win_rate",
+    "threshold": 0.5,
+    "quorum": 0.5
+  },
   "levers": {
-    "game": { "type": "choice", "choices": ["connect4"], "default": "connect4" },
-    "model_name": { "type": "choice", "choices": ["random", "heuristic", "mcts", "alphazero"], "default": "mcts" },
-    "mcts_sims": { "type": "number", "default": 80, "range": [1, 5000], "appliesWhen": { "model_name": ["mcts"] } },
-    "mcts_solve_endgame": { "type": "number", "default": 0, "range": [0, 30], "appliesWhen": { "model_name": ["mcts"] } },
-    "az_iterations": { "type": "number", "default": 6, "range": [1, 100], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_selfplay_games": { "type": "number", "default": 18, "range": [1, 500], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_sims": { "type": "number", "default": 140, "range": [1, 2000], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_epochs": { "type": "number", "default": 6, "range": [1, 50], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_distill_positions": { "type": "number", "default": 200, "range": [0, 2000], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_distill_games": { "type": "number", "default": 80, "range": [0, 2000], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_solve_endgame": { "type": "number", "default": 22, "range": [0, 30], "appliesWhen": { "model_name": ["alphazero"] } },
-    "az_warm_start": { "type": "number", "default": 1, "range": [0, 1], "appliesWhen": { "model_name": ["alphazero"] } },
-    "opponent": { "type": "choice", "choices": ["random", "heuristic", "mcts"], "default": "random" },
-    "eval_games": { "type": "number", "default": 40, "range": [2, 5000] },
-    "seed": { "type": "number", "default": 0 }
+    "game": {
+      "type": "choice",
+      "choices": [
+        "connect4"
+      ],
+      "default": "connect4"
+    },
+    "model_name": {
+      "type": "choice",
+      "choices": [
+        "random",
+        "heuristic",
+        "mcts",
+        "alphazero"
+      ],
+      "default": "mcts"
+    },
+    "mcts_sims": {
+      "type": "number",
+      "default": 80,
+      "range": [
+        1,
+        5000
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "mcts"
+        ]
+      }
+    },
+    "mcts_solve_endgame": {
+      "type": "number",
+      "default": 0,
+      "range": [
+        0,
+        30
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "mcts"
+        ]
+      }
+    },
+    "az_iterations": {
+      "type": "number",
+      "default": 6,
+      "range": [
+        1,
+        100
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_selfplay_games": {
+      "type": "number",
+      "default": 18,
+      "range": [
+        1,
+        500
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_sims": {
+      "type": "number",
+      "default": 140,
+      "range": [
+        1,
+        2000
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_epochs": {
+      "type": "number",
+      "default": 6,
+      "range": [
+        1,
+        50
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_distill_positions": {
+      "type": "number",
+      "default": 200,
+      "range": [
+        0,
+        2000
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_distill_games": {
+      "type": "number",
+      "default": 80,
+      "range": [
+        0,
+        2000
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_solve_endgame": {
+      "type": "number",
+      "default": 22,
+      "range": [
+        0,
+        30
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "az_warm_start": {
+      "type": "number",
+      "default": 1,
+      "range": [
+        0,
+        1
+      ],
+      "appliesWhen": {
+        "model_name": [
+          "alphazero"
+        ]
+      }
+    },
+    "opponent": {
+      "type": "choice",
+      "choices": [
+        "random",
+        "heuristic",
+        "mcts"
+      ],
+      "default": "random"
+    },
+    "eval_games": {
+      "type": "number",
+      "default": 40,
+      "range": [
+        2,
+        5000
+      ]
+    },
+    "seed": {
+      "type": "number",
+      "default": 0
+    }
   },
   "diagnostics": {
-    "splitAxis": { "levers": ["opponent"], "testValues": ["mcts"] },
-    "significance": { "alpha": 0.05 },
-    "multiplicity": { "metric": "win_rate", "alpha": 0.05 },
-    "stability": { "metric": "win_rate", "maxCiWidth": 0.25 },
-    "championGates": [{ "metric": "win_rate", "op": ">", "value": 0.5 }],
-    "degenerateWhen": [{ "metric": "draw_rate", "op": "==", "value": 1 }],
-    "confoundMetrics": ["first_player_seat_winrate"]
+    "splitAxis": {
+      "levers": [
+        "opponent"
+      ],
+      "testValues": [
+        "mcts"
+      ]
+    },
+    "significance": {
+      "alpha": 0.05
+    },
+    "multiplicity": {
+      "metric": "win_rate",
+      "alpha": 0.05
+    },
+    "stability": {
+      "metric": "win_rate",
+      "maxCiWidth": 0.25
+    },
+    "championGates": [
+      {
+        "metric": "win_rate",
+        "op": ">",
+        "value": 0.5
+      }
+    ],
+    "degenerateWhen": [
+      {
+        "metric": "draw_rate",
+        "op": "==",
+        "value": 1
+      }
+    ],
+    "confoundMetrics": [
+      "first_player_seat_winrate"
+    ]
   },
-  "eta": { "unitsLever": "eval_games" },
+  "eta": {
+    "unitsLever": "eval_games"
+  },
   "data": [],
-  "resources": { "gpu": false, "memory": "1g", "cpus": 2 }
+  "resources": {
+    "gpu": false,
+    "memory": "1g",
+    "cpus": 2
+  }
 }

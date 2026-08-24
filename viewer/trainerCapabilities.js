@@ -212,6 +212,7 @@
     '-verdict',
     '-xai-narrative',
     '-reliability',
+    '-process-eval',
   ]
 
   var TrainerCapabilities = {

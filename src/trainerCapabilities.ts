@@ -76,6 +76,13 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     ],
   },
   {
+    activityType: 'process-eval',
+    label: 'Score a model (prove-it-good)',
+    description:
+      'Run the PROVE-IT-GOOD scorecard for ONE model: how close to optimal is it, and is it PROVEN so? Composes the measurement primitives into an honest verdict — the optimality LADDER (deepest oracle it converts the first-player win against), the SIM-SCALING curve (strength-per-compute), mid-game DISTANCE-TO-OPTIMAL vs the exact solver, and P1 conversion/not-lost (the draw-vs-loss diagnostic). Only the EXACT-oracle `verify_solved` gate (`exact: true`, slow) may certify "solved"; a depth-proxy win is "near-optimal" (unproven) at most. Writes a `{recordType}-process-eval` record. `runKey` scores a completed run (its checkpoint); `model` scores an explicit spec.',
+    optionalParams: ['runKey', 'model', 'games', 'ladderDepths', 'simsCurve', 'referenceDepth', 'corpus', 'exact'],
+  },
+  {
     activityType: 'side-experiment',
     label: 'Run a side-experiment',
     description:
@@ -446,6 +453,7 @@ export const TRAINER_EXEMPT_RECORDS: TrainerExemptRecord[] = [
   { suffix: '-evaluation', reason: 'Derived by the evaluate activity; cascade-deleted with the run.' },
   { suffix: '-settest', reason: 'Derived by the cross-test activity; cascade-deleted with the run.' },
   { suffix: '-verdict', reason: 'Derived by the judge activity; cascade-deleted with the run.' },
+  { suffix: '-process-eval', reason: 'Derived by the process-eval activity (scorecard); cascade-deleted with the run.' },
   { suffix: '-xai-narrative', reason: 'Derived by the xai-narrate activity; cascade-deleted with the run.' },
   { fixedType: 'trainer-seen', reason: 'Per-user UI state — which runs have been seen (unseen badge).' },
   { fixedType: 'trainer-queue', reason: 'Infra — host activity-queue markers.' },
@@ -465,6 +473,7 @@ export const TRAINER_RUN_KEYED_CHILD_SUFFIXES: readonly string[] = [
   '-verdict',
   '-xai-narrative',
   '-reliability',
+  '-process-eval',
 ]
 
 /** The SETUP-keyed marker removed with a run (keyed by the run's setupKey, not its run key). */
