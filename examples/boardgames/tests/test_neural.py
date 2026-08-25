@@ -46,6 +46,63 @@ def test_alphazero_proven_value_reads_the_book_and_the_solvable_endgame():
     assert AlphaZeroAgent(Connect4Net(), sims=1)._proven_value(game, late) is None
 
 
+def test_proven_value_write_through_memoizes_once():
+    # §C.7 #2: with BOTH a book AND solve_endgame, a cheap-solvable endgame is solved ONCE and written back
+    # (value-only), so a second visit is a free lookup — the amortisation that makes the online loop pay off.
+    from games.connect4 import Connect4
+    from harness.benchmark import sample_solvable_positions
+    from harness.book import _key
+    from harness.tablebase import Tablebase
+
+    game = Connect4()
+    late = sample_solvable_positions(game, n=1, min_moves=30, seed=5)[0]
+    book = Tablebase(cap=100)
+    agent = AlphaZeroAgent(Connect4Net(), sims=1, book=book, solve_endgame=40)
+    assert agent.endgame_solves == 0 and agent.endgame_hits == 0
+
+    v1 = agent._proven_value(game, late)  # first visit: solves + writes through
+    assert v1 is not None
+    key = _key(game, late)
+    assert book.is_proven(key)  # the solve was recorded into the run tablebase
+    assert agent.endgame_solves == 1 and agent.endgame_hits == 0
+    assert book.entry(key).best_actions == 0  # VALUE-ONLY: no best_actions (mirror column-flip bug is dodged)
+
+    v2 = agent._proven_value(game, late)  # second visit: pure lookup, no re-solve
+    assert v2 == v1
+    assert agent.endgame_solves == 1 and agent.endgame_hits == 1
+
+
+def test_exact_targets_override_selfplay_value_sign():
+    # §C.7 #2: a proven value in the endgame tablebase REPLACES the self-play value target for that position,
+    # mover-relative direct-assign (NO negation — canonical_key and outcome_for are both side-to-move-relative).
+    from games.connect4 import Connect4
+    from harness.book import _key
+    from harness.tablebase import Tablebase
+
+    game = Connect4()
+    torch.manual_seed(0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=8)  # NO book on the agent → search/trajectory unaffected by the pin
+    base = self_play_game(game, agent, random.Random(11), return_states=True)  # (state, x, pi, v)
+    assert base, "self-play produced no examples"
+    j = len(base) - 1  # a near-terminal pending position
+    state_j, _x, _pi, v_nat = base[j]
+    sentinel = -1 if v_nat >= 0 else 1  # opposite sign + nonzero → guards a spurious negation
+
+    tb = Tablebase(cap=100)
+    tb.put_proven(_key(game, state_j), sentinel)
+    # reuse the SAME agent (identical net weights) + reseed the SAME rng → the search-driving randomness, and thus
+    # the trajectory, is reproduced exactly; the pin only rewrites the value TARGET, never the play.
+    over = self_play_game(game, agent, random.Random(11),
+                          return_states=True, endgame_tb=tb, exact_value_targets=True)
+    by_key = {_key(game, s): v for (s, _x, _pi, v) in over}
+    assert by_key[_key(game, state_j)] == float(sentinel)  # the booked position's target was overridden, sign intact
+    # a DIFFERENT, unbooked position keeps its natural target (targeted override, not a blanket relabel)
+    if len(base) >= 2:
+        state_0 = base[0][0]
+        if _key(game, state_0) != _key(game, state_j):
+            assert by_key[_key(game, state_0)] == base[0][3]
+
+
 def test_mix_training_set_holds_the_anchor_at_a_fixed_fraction():
     from harness.neural import _mix_training_set
 
@@ -646,3 +703,19 @@ def test_self_play_opening_plies_trains_from_diverse_off_line_positions():
     assert float(ex0[0][0].sum()) == 0.0  # canonical: first recorded position is the empty board
     ex4 = self_play_game(game, agent, random.Random(0), opening_plies=4)
     assert float(ex4[0][0].sum()) == 4.0  # diverse: first recorded position already carries the 4 opening stones
+
+
+def test_train_alphazero_buffer_persists_across_calls():
+    # §C.7 batched training must be equivalent to a continuous run: return the replay buffer and accept it back so
+    # a resumed batch does NOT restart from an empty buffer (which would starve a big net that needs more data).
+    from games.connect4 import Connect4
+    game = Connect4()
+    net, hist, buf = train_alphazero(game, iterations=1, selfplay_games=4, sims=6, epochs=1, seed=0,
+                                     buffer_cap=5000, return_buffer=True)
+    assert isinstance(buf, list) and len(buf) > 0  # the accumulated (x, pi, v) examples come back
+    # Seed a fresh call with that buffer: after 1 iter it must hold MORE than a from-empty call (init + fresh).
+    _n2, _h2, buf_seeded = train_alphazero(game, iterations=1, selfplay_games=4, sims=6, seed=1,
+                                           buffer_cap=50000, init_buffer=buf, return_buffer=True)
+    _n3, _h3, buf_fresh = train_alphazero(game, iterations=1, selfplay_games=4, sims=6, seed=1,
+                                          buffer_cap=50000, return_buffer=True)
+    assert len(buf_seeded) > len(buf_fresh)  # the persisted buffer carried forward

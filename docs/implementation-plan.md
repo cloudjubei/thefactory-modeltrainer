@@ -714,6 +714,79 @@ Remaining gap = OFF-LINE ROBUSTNESS (from diverse openings the net still loses ~
 confound of random-opening lost positions); improving via diverse self-play + broad optimal distillation (trend:
 off-line not-lost 33%→54%).
 
+#### §C.7 — PURE self-play is not enough (measured), and the #1/#2/#3 process (2026-08-25)
+
+**PURE self-play negative result (net-vs-net, NO crutch — the honest generic test).** 100 iters × 120 games ≈ **12,000
+games**, Gumbel + 8-step value, 48 sims, 32-ch net, `az_pool_frac=0` (verified `0 vs-pool` every iter — the earlier
+"pure" run was CONTAMINATED by a `NearPerfectOracle(depth=6)` league opponent at `pool_frac=0.35`; fixed by the new
+`az_pool_frac` knob). Champion `ab21b4bbc345`. Measured (net-only, no solver): **oracle-match 0.79** (~21% of moves
+diverge); **opening value 0.10** (true = +1 forced win — the net never learned P1 is winning); two champions from
+diverse openings **P1 W/D/L 0.46/0.11/0.43** (a proven P1-win game a near-optimal pair ~never loses as P1); ladder
+frontier **none** (doesn't clear a depth-6 oracle off-line); P1 vs depth-8 with diverse openings **8W/3D/13L (loses
+54%)**; converts **14/16** proven forced wins with search (loses 2 outright). `process-eval` verdict: **"strong but not
+near-optimal"** — main-line strong (beats depth-8 100% at every sim budget on its canonical line, late-game match
+0.925), OFF-LINE brittle. So the earlier "near-optimal" champion's strength came from the SOLVER crutch (oracle league +
+distillation + endgame cutoff), NOT the generic process. This directly answers the user's intuition: 12k pure games at
+this compute do NOT robustly solve even C4.
+
+**The target process (user, 2026-08-25) = #1 → #2 → #3, confirmed against the code:**
+- **#1 AlphaZero self-play → optimal: BUILT.** The pure run IS #1; at this compute it's strong-but-brittle. In-#1 levers
+  to close the gap: more sims, bigger net, more iters, forced diverse-opening coverage.
+- **#2 record endgame while playing → drastic speedup: BUILT (2026-08-25, TDD, 8 steps).** **HONESTY CORRECTION (forced
+  by the design review): pure #1 training solves ZERO endgames** (the learner has no book/solve during self-play), so #2
+  is NOT "avoid re-solving" — nothing to amortise there. The real mechanism is **exact endgame VALUES as training
+  targets → the value head converges to a fixed quality target in fewer iters/wall-clock**, plus memoising the solves #2
+  itself introduces. The loop (all in `harness/`): one run-owned **value-only** `Tablebase`; `AlphaZeroAgent._proven_value`
+  is a **write-through memo** (solve each endgame ONCE via `position_value(...,book=self.book)`, `put_proven` value-only,
+  `endgame_solves`/`endgame_hits` gauge); `self_play_game` gains `exact_value_targets` (mover-relative direct-assign
+  override); `extend_endgame_frontier` = end-of-iteration **budgeted retrograde climb** via `book._prove` only (free
+  minimax + winning-child + ≤`max_empty` cheap solve — inherently bounded, never `_prove_bounded`'s unbounded solve that
+  hangs on worker threads); `train_alphazero` wires it behind `_endgame_enabled(game, tb)` (needs `canonical_key` +
+  `exact_optimal_actions` → **generic degradation**: byte-identical to #1 when absent); `run.py` builds/persists the
+  run tablebase (200k cap given the OOM history), summary block `alphazero.endgame` {booked, frontier_empties, solves,
+  hits} + `endgame_hit_rate`. **Value-only avoids the `best_actions` mirror column-flip bug** (policy-distill deferred).
+  8 `az_endgame_*` levers in `.factory/trainer.json` (default OFF) → chat-reachable via train/side-experiment. Tests:
+  `test_endgame_selfplay.py` + additions to `test_neural.py`/`test_config.py` (99 pass, no regressions). Smoke run: iter
+  2 = 44 solves / 104 memo-hits, store 57, frontier climbed to 36 empties. **PROVING speedup:** compute-to-target A/B
+  (τ = net-only `oracle_optimality_rate` ≥ 0.85, per-iter `opening_value` proxy now in history), matched seed, ≥2 seeds
+  — RUNNING. `endgame_hit_rate` is reported as a boundedness gauge, NEVER as the vs-#1 number.
+- **#3 robustness / rule learning: partially built.** The self-play distribution + ladder ARE the exploitability signal
+  (the 43% off-line P1-loss is the "exploit the shortcomings" number). Next: exploitability-descent training (freeze
+  champion, train adversary, fold refutations into the buffer) + forced diverse-opening coverage; rule/invariant
+  learning later.
+
+**#2 PROOF (A/B, 2 seeds, 2026-08-25):** endgame-on vs pure-#1, matched seed, net-only τ=oracle_optimality_rate.
+**Both seeds: B(#2) 0.9667 vs A(#1) 0.9500, Δτ=+0.0167** (B booked ~48-54K endgame positions). Small but perfectly
+consistent — on the late-game corpus the 20K-param net is near-saturated (both clear τ=0.85 at 0.95), so exact targets
+have little room; #2's payoff should grow with the scaled net + at the opening/off-line frontier. This REINFORCES that
+capacity is the dominant lever.
+
+**WHY PURE SELF-PLAY UNDERPERFORMED (4-lens research, 2026-08-25) — no wall of principle, we under-resourced it.**
+Pure self-play DOES near-solve C4 in the literature (agent-built AZ beat Pons 7/8; AlphaZero.jl near-solver). Root
+causes ranked: (DOMINANT) **under-capacity net** — NOT the 5x5 receptive field (a red herring: linear heads flatten
+the whole board, sight is global) but the **bare single-Linear heads** that cannot represent the nonlinear AND-of-threats
+(forks) or odd/even threat-parity; ~20.6K params vs the ~1.6M (5-19 blocks x128) reproduction floor, 50-1000x under.
+(DOMINANT, coupled) **value-target chicken-and-egg** — equal-strength self-play from a won-but-unconverted opening → ~50/50
+outcomes → MSE-optimal value ≈ 0 (= our opening_value 0.10); +1 only emerges once the policy can convert, which the
+capacity ceiling prevents. (MAJOR) **compute under-resourcing** (48 sims vs 200-800; buffer 8-24K vs 400K-1M → forgets
+off-line lines; N=1 seed) — real but secondary. Plus two METHOD BUGS scaling won't fix: (a) **n-step SUPPRESSES opening
+value** at this net size (measured pure-MC +0.38 vs n8 +0.26) — contradicts the code's "binding lever" claim; (b) champions
+crowned under plain PUCT though trained with Gumbel.
+
+**SCALED-NET BUILD SHIPPED (2026-08-25, TDD, full suite 249 pass).** Net capacity is now CONFIG-DRIVEN (§C.7 levers):
+`Connect4Net(channels, blocks, residual, batchnorm, head_hidden)` — DEFAULT reproduces the legacy 20K net (306 old
+checkpoints + tests unaffected), `residual=True` builds a ResNet tower + MLP head towers; save_net/load_net persist the
+arch (old blobs → legacy). Levers `az_channels/az_blocks/az_residual/az_batchnorm/az_head_hidden` in config + manifest
+(chat-reachable). Method bugs fixed: n-step honest default (manifest 8→0; comment corrected), deploy-operator match
+(`_az_deploy` passes gumbel to eval + promotion gate), net_value docstring honesty. Warm-start arch-guard (won't pin a
+legacy shape onto a scaled config). **Batched/resumable driver `harness/scaled_run.py`** (the user's requirement — train
+in BATCHES, checkpoint each, resume): pure self-play, per-batch metrics = opening_value on the TRUE empty board +
+net-only oracle_optimality_rate + **off-line P1-loss vs depth-8 oracle from 50 fixed openings** (the pre-registered
+robustness metric). **FALSIFIABLE TEST RUNNING:** 1.79M-param net (128x6+BN+head64), 96 sims, pure-MC, 320 games/batch,
+24 batches, seed 0 (seeds 1-2 to follow). Verdict CONFIRMS under-resourcing if off-line P1-loss ≤15% AND opening_value
+≥+0.7 (95% CI excl +0.3); REFUTES (residual problem) if loss >40% OR opening_value ≤+0.3. See
+[[project_modeltrainer_endgame_from_play]].
+
 **Immediate driving case (user-chosen): push Connect-4 to SOLVED — PROGRESSING, with an HONEST correction.**
 **(2026-08-25) recipe-into-real-training-path + teacher → main-line opening SOUND but the net is MAIN-LINE-BRITTLE.**
 A run via the wired `harness.run` tool (recipe: gumbel + n=8/k=2 + distillation teacher, 10×24) → mid-game oracle-match

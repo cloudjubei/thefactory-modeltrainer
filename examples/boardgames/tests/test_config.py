@@ -84,3 +84,76 @@ def test_az_distill_games_defaults_off_and_coerces(tmp_path):
     assert TrainerConfig().az_distill_games == 0
     cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_distill_games": "80"}))
     assert cfg.az_distill_games == 80
+
+
+def test_az_endgame_defaults_keep_the_loop_off():
+    # The online endgame-tablebase-from-play loop is OPT-IN — defaults must leave it fully OFF so a run is
+    # byte-identical to pure #1 self-play (the honest baseline). Only the accuracy knobs carry non-zero defaults.
+    c = TrainerConfig(model_name="alphazero")
+    assert c.az_endgame_tablebase == 0  # master switch OFF
+    assert c.az_endgame_max_empty == 14  # matches the estimate_solve_endgame default (ms-cheap solves)
+    assert c.az_endgame_exact_targets == 1  # inert while the store is empty; only bites once the switch is on
+    assert c.az_endgame_extend_positions == 2000
+    assert c.az_endgame_extend_seconds == 5.0
+    assert c.az_endgame_cap == 200000  # conservative RAM bound given the OOM history
+    assert c.az_endgame_warm_start == 0
+    assert c.az_endgame_persist == 0
+
+
+def test_az_endgame_knobs_coerce_from_strings(tmp_path):
+    cfg = load_config(_write(tmp_path, {
+        "model_name": "alphazero", "az_endgame_tablebase": "1", "az_endgame_max_empty": "16",
+        "az_endgame_exact_targets": "0", "az_endgame_extend_positions": "500",
+        "az_endgame_extend_seconds": "8", "az_endgame_cap": "50000",
+        "az_endgame_warm_start": "1", "az_endgame_persist": "1",
+    }))
+    assert cfg.az_endgame_tablebase == 1 and cfg.az_endgame_max_empty == 16
+    assert cfg.az_endgame_exact_targets == 0 and cfg.az_endgame_extend_positions == 500
+    assert cfg.az_endgame_extend_seconds == 8.0 and cfg.az_endgame_cap == 50000
+    assert cfg.az_endgame_warm_start == 1 and cfg.az_endgame_persist == 1
+
+
+def test_az_net_capacity_levers_default_to_legacy_and_coerce(tmp_path):
+    c = TrainerConfig(model_name="alphazero")
+    assert c.az_channels == 32 and c.az_blocks == 0 and c.az_residual == 0
+    assert c.az_batchnorm == 0 and c.az_head_hidden == 0  # default = today's 20K-param legacy net
+    cfg = load_config(_write(tmp_path, {
+        "model_name": "alphazero", "az_channels": "128", "az_blocks": "6",
+        "az_residual": "1", "az_batchnorm": "1", "az_head_hidden": "64",
+    }))
+    assert cfg.az_channels == 128 and cfg.az_blocks == 6 and cfg.az_residual == 1
+    assert cfg.az_batchnorm == 1 and cfg.az_head_hidden == 64
+
+
+def test_validate_rejects_out_of_range_capacity_levers():
+    for bad in (
+        TrainerConfig(model_name="alphazero", az_channels=4),
+        TrainerConfig(model_name="alphazero", az_channels=9999),
+        TrainerConfig(model_name="alphazero", az_blocks=-1),
+        TrainerConfig(model_name="alphazero", az_blocks=99),
+        TrainerConfig(model_name="alphazero", az_residual=2),
+        TrainerConfig(model_name="alphazero", az_batchnorm=2),
+        TrainerConfig(model_name="alphazero", az_head_hidden=-1),
+        TrainerConfig(model_name="alphazero", az_head_hidden=99999),
+    ):
+        with pytest.raises(ValueError):
+            validate_config(bad)
+
+
+def test_validate_rejects_out_of_range_endgame_knobs():
+    for bad in (
+        TrainerConfig(model_name="alphazero", az_endgame_tablebase=2),
+        TrainerConfig(model_name="alphazero", az_endgame_exact_targets=2),
+        TrainerConfig(model_name="alphazero", az_endgame_warm_start=2),
+        TrainerConfig(model_name="alphazero", az_endgame_persist=2),
+        TrainerConfig(model_name="alphazero", az_endgame_max_empty=-1),
+        TrainerConfig(model_name="alphazero", az_endgame_max_empty=99),
+        TrainerConfig(model_name="alphazero", az_endgame_extend_positions=-1),
+        TrainerConfig(model_name="alphazero", az_endgame_extend_positions=10**9),
+        TrainerConfig(model_name="alphazero", az_endgame_extend_seconds=-1.0),
+        TrainerConfig(model_name="alphazero", az_endgame_extend_seconds=999.0),
+        TrainerConfig(model_name="alphazero", az_endgame_cap=100),  # below the floor
+        TrainerConfig(model_name="alphazero", az_endgame_cap=10**12),
+    ):
+        with pytest.raises(ValueError):
+            validate_config(bad)

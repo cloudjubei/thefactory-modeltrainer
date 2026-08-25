@@ -28,6 +28,19 @@ AZ_EPOCHS_RANGE = (1, 50)
 AZ_DISTILL_RANGE = (0, 2000)
 AZ_DISTILL_GAMES_RANGE = (0, 2000)
 AZ_SOLVE_ENDGAME_RANGE = (0, 30)  # empty-cell threshold for the trained net's opt-in exact-endgame cutoff
+# §C.7 online endgame-tablebase-from-play (#2) — records/solves endgames DURING self-play into a run-owned
+# tablebase, memoises them, and injects their EXACT values as training targets so the value head converges to a
+# fixed quality target in fewer iterations. All OFF by default (a run stays byte-identical to pure #1).
+AZ_ENDGAME_MAX_EMPTY_RANGE = (0, 20)  # empties threshold for the record + cheap-solve cap (cost cliff toward 20)
+AZ_ENDGAME_EXTEND_POSITIONS_RANGE = (0, 200000)  # per-iteration retrograde-extension budget (positions proven)
+AZ_ENDGAME_EXTEND_SECONDS_RANGE = (0.0, 120.0)  # per-iteration extension deadline (checked between positions)
+AZ_ENDGAME_CAP_RANGE = (10000, 50000000)  # run-tablebase capacity = RAM bound (floor guards a useless store)
+# §C.7 NET CAPACITY levers — the reproduction floor for strong C4 is 5-19 residual blocks x 128 filters (~1.6M
+# params); the legacy default (blocks=0/residual=0) is the ~20K-param net that under-fit. The SAME seam scales the
+# net per game (connect4 -> chess/Go) instead of hard-coding a 2-conv shape.
+AZ_CHANNELS_RANGE = (8, 512)      # conv filter width
+AZ_BLOCKS_RANGE = (0, 40)         # residual blocks (depth); needs az_residual+az_batchnorm to train deep
+AZ_HEAD_HIDDEN_RANGE = (0, 1024)  # policy/value head-tower hidden width (0 = bare legacy linear readout)
 # A DEPLOYED / eval net plays the endgame with the EXACT solver once ≤ this many cells are empty (provably
 # perfect + ~ms). ON by default so a crowned champion never approximates a solvable endgame with the value head;
 # self-play keeps it OFF via the AlphaZeroAgent class default so exploration isn't collapsed onto solver moves.
@@ -69,10 +82,29 @@ class TrainerConfig:
     # The VALIDATED GENERIC recipe (plan §C.6) — off by default (preserves the classic loop); enable via the manifest.
     az_gumbel: int = 0  # 1 = Gumbel/Sequential-Halving completed-Q search + policy target (the measured deploy/target win)
     az_c_scale: float = 0.1  # completed-Q σ scale (calibrated default; only used when az_gumbel)
-    az_value_n_step: int = 0  # n-step/TD value target off a lagged net (0 = raw-MC outcome); the measured BINDING lever
+    az_value_n_step: int = 0  # n-step/TD value target off a lagged net (0 = raw-MC outcome). NOT a free win: at
+    # small net size it bootstraps off a lagged copy whose OWN opening belief is ~0 and MEASURABLY SUPPRESSES opening
+    # value (pure-MC +0.38 vs n8 +0.26); keep 0 below ~1M params, re-measure once the value tower can hold a belief.
     az_target_refresh: int = 2  # refresh the lagged value target net every k iterations (only used when az_value_n_step>0)
     az_selfplay_opening_plies: int = 0  # random opening plies per self-play game (0 = canonical) — off-line coverage = ROBUSTNESS
     az_buffer_cap: int = 8000  # replay-buffer size (positions). Raise for LARGE self-play runs so the net trains on a wide history, not just the last ~2 iterations (the AlphaZero sliding window).
+    az_pool_frac: float = 0.35  # fraction of self-play games played vs the LEAGUE (past champions + a near-perfect oracle). 0 = PURE self-play (net vs net only, NO solver-derived opponent) — the honest generic test.
+    # §C.7 online endgame-tablebase-from-play (#2) — all OFF by default; the master switch alone keeps a run
+    # byte-identical to pure #1, AND the loop is only CONSTRUCTED for a game exposing canonical_key + exact_optimal_actions.
+    az_endgame_tablebase: int = 0  # master switch. 0 = no run tablebase, learner book=None/solve_endgame=0 (= pure #1)
+    az_endgame_max_empty: int = 14  # empties threshold: the learner's record solve_endgame + the extension's cheap-solve cap
+    az_endgame_exact_targets: int = 1  # 1 = override self-play value targets with run_tb.proven_value near terminals (inert while empty)
+    az_endgame_extend_positions: int = 2000  # per-iteration retrograde-extension budget (positions proven)
+    az_endgame_extend_seconds: float = 5.0  # per-iteration extension deadline (thread-safe, checked between positions)
+    az_endgame_cap: int = 200000  # run-tablebase capacity = RAM bound (conservative given the OOM history)
+    az_endgame_warm_start: int = 0  # 1 = seed run_tb from the committed load_book (default OFF for clean A/B provenance)
+    az_endgame_persist: int = 0  # 1 = save the grown run_tb to a RUN-OWNED path at run end (never the committed book)
+    # §C.7 net capacity — default = legacy 20K-param net; residual+batchnorm+blocks+head_hidden = the scaled ResNet.
+    az_channels: int = 32  # conv filter width (was hard-coded 32)
+    az_blocks: int = 0  # residual blocks (depth); >0 requires az_residual
+    az_residual: int = 0  # 1 = ResNet tower + head towers; 0 = legacy 2-conv/bare-linear net
+    az_batchnorm: int = 0  # 1 = BatchNorm (required to train a deep tower)
+    az_head_hidden: int = 0  # policy/value head-tower hidden width (0 = bare linear readout)
 
 
 @dataclass(frozen=True)
@@ -117,6 +149,26 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_distill_games must be in {AZ_DISTILL_GAMES_RANGE}, got {config.az_distill_games}")
     if not AZ_SOLVE_ENDGAME_RANGE[0] <= config.az_solve_endgame <= AZ_SOLVE_ENDGAME_RANGE[1]:
         raise ValueError(f"az_solve_endgame must be in {AZ_SOLVE_ENDGAME_RANGE}, got {config.az_solve_endgame}")
+    for name in ("az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist"):
+        if getattr(config, name) not in (0, 1):
+            raise ValueError(f"{name} must be 0 or 1, got {getattr(config, name)}")
+    if not AZ_ENDGAME_MAX_EMPTY_RANGE[0] <= config.az_endgame_max_empty <= AZ_ENDGAME_MAX_EMPTY_RANGE[1]:
+        raise ValueError(f"az_endgame_max_empty must be in {AZ_ENDGAME_MAX_EMPTY_RANGE}, got {config.az_endgame_max_empty}")
+    if not AZ_ENDGAME_EXTEND_POSITIONS_RANGE[0] <= config.az_endgame_extend_positions <= AZ_ENDGAME_EXTEND_POSITIONS_RANGE[1]:
+        raise ValueError(f"az_endgame_extend_positions must be in {AZ_ENDGAME_EXTEND_POSITIONS_RANGE}, got {config.az_endgame_extend_positions}")
+    if not AZ_ENDGAME_EXTEND_SECONDS_RANGE[0] <= config.az_endgame_extend_seconds <= AZ_ENDGAME_EXTEND_SECONDS_RANGE[1]:
+        raise ValueError(f"az_endgame_extend_seconds must be in {AZ_ENDGAME_EXTEND_SECONDS_RANGE}, got {config.az_endgame_extend_seconds}")
+    if not AZ_ENDGAME_CAP_RANGE[0] <= config.az_endgame_cap <= AZ_ENDGAME_CAP_RANGE[1]:
+        raise ValueError(f"az_endgame_cap must be in {AZ_ENDGAME_CAP_RANGE}, got {config.az_endgame_cap}")
+    for name in ("az_residual", "az_batchnorm"):
+        if getattr(config, name) not in (0, 1):
+            raise ValueError(f"{name} must be 0 or 1, got {getattr(config, name)}")
+    if not AZ_CHANNELS_RANGE[0] <= config.az_channels <= AZ_CHANNELS_RANGE[1]:
+        raise ValueError(f"az_channels must be in {AZ_CHANNELS_RANGE}, got {config.az_channels}")
+    if not AZ_BLOCKS_RANGE[0] <= config.az_blocks <= AZ_BLOCKS_RANGE[1]:
+        raise ValueError(f"az_blocks must be in {AZ_BLOCKS_RANGE}, got {config.az_blocks}")
+    if not AZ_HEAD_HIDDEN_RANGE[0] <= config.az_head_hidden <= AZ_HEAD_HIDDEN_RANGE[1]:
+        raise ValueError(f"az_head_hidden must be in {AZ_HEAD_HIDDEN_RANGE}, got {config.az_head_hidden}")
 
 
 def load_config(path: Path) -> TrainerConfig:
@@ -144,12 +196,13 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
-    if "az_c_scale" in filtered:
-        filtered["az_c_scale"] = float(filtered["az_c_scale"])
-    for bool_key in ("az_warm_start", "az_gumbel"):
+    for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds"):
+        if float_key in filtered:
+            filtered[float_key] = float(filtered[float_key])
+    for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm"):
         if bool_key in filtered:
             v = filtered[bool_key]
             filtered[bool_key] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0

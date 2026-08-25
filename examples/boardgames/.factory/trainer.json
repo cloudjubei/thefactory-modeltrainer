@@ -30,7 +30,7 @@
       "eval_games": 20,
       "az_gumbel": true,
       "az_c_scale": 0.1,
-      "az_value_n_step": 8,
+      "az_value_n_step": 0,
       "az_target_refresh": 2,
       "az_selfplay_opening_plies": 6
     }
@@ -248,6 +248,84 @@
           "alphazero"
         ]
       }
+    },
+    "az_endgame_tablebase": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_max_empty": {
+      "type": "number",
+      "default": 14,
+      "range": [0, 20],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_exact_targets": {
+      "type": "number",
+      "default": 1,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_extend_positions": {
+      "type": "number",
+      "default": 2000,
+      "range": [0, 200000],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_extend_seconds": {
+      "type": "number",
+      "default": 5,
+      "range": [0, 120],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_cap": {
+      "type": "number",
+      "default": 200000,
+      "range": [10000, 50000000],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_warm_start": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_endgame_persist": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_channels": {
+      "type": "number",
+      "default": 32,
+      "range": [8, 512],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_blocks": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 40],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_residual": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_batchnorm": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_head_hidden": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1024],
+      "appliesWhen": { "model_name": ["alphazero"] }
     },
     "opponent": {
       "type": "choice",

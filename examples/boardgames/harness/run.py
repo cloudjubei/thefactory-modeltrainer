@@ -189,13 +189,23 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     # opening the imprint can't fully overwrite, so it stays sub-optimal. Start FRESH in that case; once a
     # distilled champion exists, warm-starting from it compounds safely.
     distilling = config.game == "connect4" and int(config.az_distill_games) > 0
+    # §C.7 capacity levers → the net architecture this run trains (legacy default unless residual/blocks set).
+    net_arch = {"channels": int(config.az_channels), "blocks": int(config.az_blocks),
+                "residual": bool(config.az_residual), "batchnorm": bool(config.az_batchnorm),
+                "head_hidden": int(config.az_head_hidden)}
     init_net = None
     parent_gen = 0
     if config.az_warm_start and (not distilling or champions.champion_is_distilled(config.game)):
         cp = champions.best_champion_path(config.game)
         if cp:
-            init_net = load_net(cp, device)
-            parent_gen = champions.champion_generation(config.game)
+            cand = load_net(cp, device)
+            # Only warm-start when the champion's ARCHITECTURE matches this run's — else the levers would be
+            # silently ignored (a legacy champion would pin the 20K-param shape). Mismatch ⇒ start fresh.
+            if all(cand.arch.get(k) == net_arch[k] for k in net_arch):
+                init_net = cand
+                parent_gen = champions.champion_generation(config.game)
+            else:
+                print(f"warm-start SKIPPED: champion arch {cand.arch} != configured {net_arch} → training fresh")
 
     # LEAGUE opponent pool: a strong search opponent, the heuristic, a NEAR-PERFECT oracle (a perfect-play
     # reality check that punishes any residual blunder), and recent past champions. Only Connect 4 has a solver.
@@ -227,6 +237,23 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
             game, spec, cache_dir=str(CHECKPOINT_DIR / "distill_cache"), log=print, book=book,
         )
 
+    # §C.7 #2 ONLINE ENDGAME TABLEBASE-FROM-PLAY: a RUN-OWNED value-only store the self-play loop records/solves
+    # into and reads back — off unless the switch is on AND the game exposes the exact hooks (else pure #1).
+    from harness.neural import _endgame_enabled
+    from harness.tablebase import Tablebase
+
+    run_tb = None
+    if int(config.az_endgame_tablebase) and _endgame_enabled(game, Tablebase(cap=int(config.az_endgame_cap))):
+        run_tb = Tablebase(cap=int(config.az_endgame_cap))
+        if int(config.az_endgame_warm_start):  # seed from the COMMITTED opening book (values only; never written back)
+            from harness.book import load_book
+
+            seed_book = load_book(config.game)
+            for k in list(seed_book.keys()):
+                pv = seed_book.proven_value(k)
+                if pv is not None:
+                    run_tb.put_proven(k, int(pv))
+
     t0 = time.perf_counter()
     net, _hist = train_alphazero(
         game,
@@ -237,10 +264,12 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         seed=config.seed,
         device=device,
         init_net=init_net,
-        opponent_pool=pool,
+        # PURITY: pool_frac=0 ⇒ no league games at all (net vs net only), so a solver-derived oracle opponent never
+        # touches training — the honest generic self-play test. The pool is still built (cheap) but never sampled.
+        opponent_pool=(pool if config.az_pool_frac > 0 else None),
         # Self-play (balanced ~50% games) is the main strength engine; the league is a MINORITY of games —
         # facing a far-stronger fixed opponent yields mostly-losing games, a weak learning signal on its own.
-        pool_frac=0.35,
+        pool_frac=config.az_pool_frac,
         # ORACLE DISTILLATION — supervised optimal-move targets, the biggest lever for reaching perfect play. A
         # broad cached corpus (opening→endgame) when `az_distill_games>0`; else the late-only sampled positions.
         distill_positions=config.az_distill_positions,
@@ -252,6 +281,13 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         target_refresh=config.az_target_refresh,
         selfplay_opening_plies=config.az_selfplay_opening_plies,
         buffer_cap=config.az_buffer_cap,
+        # §C.7 #2 online endgame loop (inert when run_tb is None / the game lacks the exact hooks).
+        endgame_tb=run_tb,
+        endgame_max_empty=int(config.az_endgame_max_empty),
+        endgame_exact_targets=int(config.az_endgame_exact_targets),
+        endgame_extend_positions=int(config.az_endgame_extend_positions),
+        endgame_extend_seconds=float(config.az_endgame_extend_seconds),
+        net_arch=net_arch,
         log=print,
     )
     train_seconds = time.perf_counter() - t0
@@ -261,8 +297,14 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     eval_rng = random.Random(config.seed + 1)
     n_eval = max(10, config.eval_games)
 
+    # DEPLOY UNDER THE TRAINED OPERATOR (§C.7 method-bug fix): a Gumbel-trained net is measurably weaker under
+    # plain PUCT, so eval + the promotion gate must build the agent with the SAME gumbel operator it was trained with.
+    def _az_deploy(net) -> Agent:
+        return AlphaZeroAgent(net, sims=az_sims, device=device, solve_endgame=az_solve_endgame,
+                              gumbel=bool(config.az_gumbel), c_scale=float(config.az_c_scale))
+
     def model_factory() -> Agent:
-        return AlphaZeroAgent(load_net(weights_path, device), sims=az_sims, device=device, solve_endgame=az_solve_endgame)
+        return _az_deploy(load_net(weights_path, device))
 
     vs_strong = head_to_head(game, model_factory, lambda: MctsAgent(sims=strong_sims), n_eval, eval_rng)
     az_metrics = {"win_rate_vs_strong_mcts": round(vs_strong["win_rate"], 4)}
@@ -279,7 +321,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         vs_champ = head_to_head(
             game,
             model_factory,
-            lambda: AlphaZeroAgent(inc_net, sims=az_sims, device=device, solve_endgame=az_solve_endgame),
+            lambda: _az_deploy(inc_net),
             n_eval,
             eval_rng,
         )
@@ -296,10 +338,34 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         "promoted": promoted,
         "champion_generation": champions.champion_generation(config.game),
         "league_pool_size": len(pool),
+        # Per-iteration curve (loss + cheap opening_value quality probe + endgame growth) — the #2-vs-#1 A/B reads this.
+        "history": _hist,
     }
+    # §C.7 #2 evidence: aggregate the per-iteration endgame gauges. `endgame_hit_rate` = solves AVOIDED by the memo
+    # (reuse of the loop's OWN solves — a boundedness gauge, NOT a vs-#1 speedup number); `frontier_empties` = how
+    # far the proven frontier climbed opening-ward (priority == empties by construction).
+    eg_hist = [h for h in _hist if "endgame_total" in h]
+    if run_tb is not None and eg_hist:
+        solves = sum(h["endgame_solves"] for h in eg_hist)
+        hits = sum(h["endgame_hits"] for h in eg_hist)
+        frontier_empties = max(run_tb._p.values(), default=0)
+        az_report["endgame"] = {
+            "booked": len(run_tb),
+            "proven_this_run": sum(h["endgame_booked"] for h in eg_hist),
+            "frontier_empties": int(frontier_empties),
+            "solves": solves,
+            "hits": hits,
+            "targets_overridden": int(config.az_endgame_exact_targets),
+        }
+        az_metrics["endgame_booked"] = len(run_tb)
+        az_metrics["endgame_frontier_empties"] = int(frontier_empties)
+        az_metrics["endgame_hit_rate"] = round(hits / (hits + solves), 4) if (hits + solves) else 0.0
+        if int(config.az_endgame_persist):  # RUN-OWNED path — never the committed book artifact
+            run_tb.save(str(CHECKPOINT_DIR / "endgame_runs" / f"{config.game}-{config_hash(config)}.npz"))
+            az_report["endgame"]["persisted"] = f"endgame_runs/{config.game}-{config_hash(config)}.npz"
     extra_spec = {
         "az_weights": weights_path,
-        "az_channels": 32,
+        "az_channels": int(config.az_channels),
         "az_sims": az_sims,
         "az_solve_endgame": int(config.az_solve_endgame),
         # Carry the DEPLOYMENT operator so the checkpoint plays under the search it was trained/measured strongest
