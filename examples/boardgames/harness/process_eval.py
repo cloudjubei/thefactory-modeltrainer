@@ -25,6 +25,7 @@ from harness.benchmark import (
     p1_conversion,
     sample_solvable_positions,
     sim_scaling_curve,
+    verify_forced_win_conversion,
     verify_solved,
 )
 from harness.game import Game
@@ -32,11 +33,12 @@ from harness.gauntlet import _model_factory
 from harness.registry import resolve_game
 
 
-def _neural_model_at(spec: dict, game: Game) -> Callable[[int], object] | None:
+def _neural_model_at(spec: dict, game: Game, solve_endgame: int | None = None) -> Callable[[int], object] | None:
     """A sims-parameterised builder `sims -> agent` for the sim-scaling curve (`sim_scaling_curve` calls it as
     `model_factory(sims)` and treats the result as the agent, a FRESH one per game). Loads a neural checkpoint's net
     ONCE and rebuilds the agent at each budget under its DEPLOYMENT operator (gumbel knobs from the spec). None for
-    non-neural specs (the curve is skipped)."""
+    non-neural specs (the curve is skipped). `solve_endgame` overrides the spec's exact-endgame cutoff — pass 0 to
+    grade the NET ALONE (so a measurement reflects the learned policy, not the injected exact solver)."""
     weights = spec.get("az_weights") or (
         json.loads(Path(spec["checkpoint"]).read_text()).get("az_weights") if spec.get("checkpoint") else None
     )
@@ -49,7 +51,7 @@ def _neural_model_at(spec: dict, game: Game) -> Callable[[int], object] | None:
     from harness.neural import AlphaZeroAgent, load_net
 
     net = load_net(weights)
-    se = int(resolved.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME))
+    se = int(resolved.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME)) if solve_endgame is None else int(solve_endgame)
     gumbel = bool(resolved.get("az_gumbel", False))
     gumbel_m = int(resolved.get("az_gumbel_m", 16))
     c_scale = float(resolved.get("az_c_scale", 0.1))
@@ -67,13 +69,24 @@ def scorecard_verdict(card: dict) -> tuple[str, str]:
     if (vs and vs.get("solved")) or frontier == "exact":
         return "solved", "converts the first-player win vs the EXACT oracle — proven perfect."
     om = card.get("oracle_match")
+    net_om = card.get("net_oracle_match")  # the HONEST net-alone optimality (no solver crutch); prefer it
+    judge_om = net_om if net_om is not None else om
+    fw = card.get("exact_forced_wins") or {}
+    fw_rate, fw_total = fw.get("rate"), fw.get("total", 0)
+    # EXACT-proven near-optimal: converts EVERY proven forced win vs the exact solver (not a proxy) AND the NET
+    # plays near-optimally — the strongest verdict short of the full (opening-wall) solve.
+    if fw_total and fw_rate == 1.0 and judge_om is not None and judge_om >= 0.90:
+        net_note = f", net-alone distance-to-optimal {net_om:.2f}" if net_om is not None else ""
+        return "near-optimal (exact-proven)", (
+            f"converts {fw['converted']}/{fw_total} PROVEN forced wins vs the EXACT solver{net_note} — exact "
+            f"near-optimality evidence (only the full from-opening solve remains, which needs the book).")
     not_lost = (card.get("p1") or {}).get("not_lost_rate", 0.0)
     deep = frontier.startswith("depth-") and int(frontier.split("-")[1]) >= 10
-    if om is not None and om >= 0.95 and not_lost >= 0.95 and deep:
-        return "near-optimal", f"clears {frontier}, never loses (not-lost {not_lost:.2f}), distance-to-optimal {om:.2f} — near-optimal but unproven."
-    if om is not None and om >= 0.80:
-        return "strong", f"distance-to-optimal {om:.2f}, frontier {frontier} — strong but not near-optimal."
-    return "developing", f"distance-to-optimal {om if om is None else round(om, 2)}, frontier {frontier} — still developing."
+    if judge_om is not None and judge_om >= 0.95 and not_lost >= 0.95 and deep:
+        return "near-optimal", f"clears {frontier}, never loses (not-lost {not_lost:.2f}), distance-to-optimal {judge_om:.2f} — near-optimal but unproven."
+    if judge_om is not None and judge_om >= 0.80:
+        return "strong", f"distance-to-optimal {judge_om:.2f}, frontier {frontier} — strong but not near-optimal."
+    return "developing", f"distance-to-optimal {judge_om if judge_om is None else round(judge_om, 2)}, frontier {frontier} — still developing."
 
 
 def process_scorecard(request: dict, on_progress: Callable[[dict], None] | None = None) -> dict:
@@ -87,6 +100,9 @@ def process_scorecard(request: dict, on_progress: Callable[[dict], None] | None 
     ref_depth = int(request.get("reference_depth", 8))
     exact = bool(request.get("exact", False))
     strategist = int(request.get("strategist", 0))
+    # Diverse random openings per rung so a deterministic model+oracle don't collapse to ONE line (a robust
+    # frontier; default 2). The EXACT verify_solved gate stays deterministic-canonical (opening_plies=0).
+    opening_plies = int(request.get("opening_plies", 2))
     model_spec = request.get("model", {})
 
     def emit(payload: dict) -> None:
@@ -98,7 +114,8 @@ def process_scorecard(request: dict, on_progress: Callable[[dict], None] | None 
     emit({"phase": "start", "game": game.name, "model": label, "exact": exact})
 
     # Fast depth-proxy ladder (the champion's real frontier); exact rung opt-in.
-    ladder = optimality_ladder(game, mf, games=games, depths=depths, include_exact=exact)  # audits P1 (strategist 0)
+    ladder = optimality_ladder(game, mf, games=games, depths=depths, include_exact=exact,
+                               opening_plies=opening_plies)  # audits P1 (strategist 0), diverse openings
     emit({"phase": "ladder", "frontier": ladder["frontier"], "rungs": ladder["rungs"]})
 
     # Strength-per-compute vs a fast reference, and P1 conversion/not-lost (the draw-vs-loss diagnostic).
@@ -114,11 +131,13 @@ def process_scorecard(request: dict, on_progress: Callable[[dict], None] | None 
         }
         emit({"phase": "sim_scaling", **card["sim_scaling"]})
     if game.name == "connect4":
-        p1 = p1_conversion(game, mf, ref, games=games, strategist=strategist)
+        p1 = p1_conversion(game, mf, ref, games=games, strategist=strategist, opening_plies=opening_plies)
         card["p1"] = {k: p1[k] for k in ("rate", "not_lost_rate", "wins", "draws", "losses", "games")}
         emit({"phase": "p1", **card["p1"]})
 
     # Mid-game distance-to-optimal on a shared solver corpus (Connect-4; a generic-game oracle is a §C.6 gap).
+    # HONEST split: `oracle_match` = the DEPLOYED model (with its exact-endgame cutoff), `net_oracle_match` = the
+    # NET ALONE (solve_endgame OFF) — so the scorecard never credits the injected solver for the net's optimality.
     if game.name == "connect4":
         cspec = request.get("corpus", {})
         corpus = sample_solvable_positions(game, int(cspec.get("n", 120)), int(cspec.get("min_moves", 16)),
@@ -127,9 +146,26 @@ def process_scorecard(request: dict, on_progress: Callable[[dict], None] | None 
         card["oracle_match"] = round(
             evaluate_optimality(game, lambda s: agent.act(game, s, random.Random(0)), states=corpus)["oracle_optimality_rate"], 3
         )
-        emit({"phase": "oracle_match", "oracle_match": card["oracle_match"]})
+        net_at = _neural_model_at(model_spec, game, solve_endgame=0)  # NET ONLY (no exact-endgame crutch)
+        if net_at is not None:
+            net_agent = net_at(int((sims_curve or [32])[-1]))
+            card["net_oracle_match"] = round(
+                evaluate_optimality(game, lambda s: net_agent.act(game, s, random.Random(0)), states=corpus)["oracle_optimality_rate"], 3
+            )
+        emit({"phase": "oracle_match", "oracle_match": card["oracle_match"], "net_oracle_match": card.get("net_oracle_match")})
 
-    # The EXACT gate (opt-in, slow) — the ONLY claim allowed to say "solved".
+    # EXACT proof, FAST (default on): does the model convert PROVEN forced wins vs the EXACT solver from few-empty
+    # roots? This is exact near-optimality evidence that SIDESTEPS the from-opening wall — the runnable proof.
+    fw = request.get("forced_win_roots", {})
+    if game.name == "connect4" and fw.get("n", 8) > 0:
+        # empties=24 (default): above the solve_endgame cutoff, so the NET plays the opening/midgame conversion
+        # before the solver finishes the ≤22-empty endgame — the honest deployed-conversion proof (not all-solver).
+        card["exact_forced_wins"] = verify_forced_win_conversion(
+            game, mf, n_roots=int(fw.get("n", 8)), empties=int(fw.get("empties", 24)), seed=int(fw.get("seed", 0))
+        )
+        emit({"phase": "exact_forced_wins", **{k: card["exact_forced_wins"][k] for k in ("converted", "total", "rate")}})
+
+    # The EXACT-from-opening gate (opt-in, SLOW — the opening wall) — only run when explicitly asked.
     if exact:
         card["verify_solved"] = verify_solved(game, mf, games=games, strategist=strategist)
         emit({"phase": "verify_solved", **card["verify_solved"]})

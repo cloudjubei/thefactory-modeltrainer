@@ -27,7 +27,12 @@
       "az_epochs": 3,
       "az_distill_positions": 96,
       "az_distill_games": 16,
-      "eval_games": 20
+      "eval_games": 20,
+      "az_gumbel": true,
+      "az_c_scale": 0.1,
+      "az_value_n_step": 8,
+      "az_target_refresh": 2,
+      "az_selfplay_opening_plies": 6
     }
   },
   "rate": {

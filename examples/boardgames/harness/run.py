@@ -245,6 +245,13 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         # broad cached corpus (opening→endgame) when `az_distill_games>0`; else the late-only sampled positions.
         distill_positions=config.az_distill_positions,
         distill_corpus=distill_corpus,
+        # The VALIDATED GENERIC recipe (plan §C.6) — enabled via the manifest; defaults preserve the classic loop.
+        gumbel=bool(config.az_gumbel),
+        c_scale=config.az_c_scale,
+        value_n_step=config.az_value_n_step,
+        target_refresh=config.az_target_refresh,
+        selfplay_opening_plies=config.az_selfplay_opening_plies,
+        buffer_cap=config.az_buffer_cap,
         log=print,
     )
     train_seconds = time.perf_counter() - t0
@@ -295,6 +302,10 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         "az_channels": 32,
         "az_sims": az_sims,
         "az_solve_endgame": int(config.az_solve_endgame),
+        # Carry the DEPLOYMENT operator so the checkpoint plays under the search it was trained/measured strongest
+        # with (a gumbel-trained net deployed under plain PUCT is measurably weaker — see _az_factory).
+        "az_gumbel": bool(config.az_gumbel),
+        "az_c_scale": config.az_c_scale,
     }
     return weights_path, extra_spec, az_report, az_metrics, train_seconds
 

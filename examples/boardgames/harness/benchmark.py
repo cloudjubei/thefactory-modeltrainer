@@ -90,21 +90,31 @@ def p1_conversion(
     seed: int = 0,
     start: State | None = None,
     strategist: int = 0,
+    opening_plies: int = 0,
 ) -> dict:
     """Play `games` games with the MODEL as the FIRST player (seat `strategist`, default 0) against `opponent`
     from `start` (default the empty board) and count how often the model reaches at least a DRAW (the winning
     seat of a first-player-win game must WIN; a drawn game's optimal seat must not LOSE). For a first-player-win
     game an optimal model converts the first move into a win every time vs perfect defence — `rate == 1.0`
     against the EXACT oracle is the definition of a solved model. A FRESH agent per game (no search-state bleed);
-    deterministic per `seed`. Returns {wins, draws, losses, games, rate} where `rate` counts wins (a P1-win game)."""
+    deterministic per `seed`. `opening_plies` > 0 plays that many RANDOM opening moves before the agents take over,
+    so a deterministic model+opponent no longer collapse to ONE repeated line — the rungs then sample DIVERSE
+    defences (a robust frontier; a weak deterministic oracle can otherwise steer the single line off-distribution).
+    Returns {wins, draws, losses, games, rate} where `rate` counts wins (a P1-win game)."""
     rng = random.Random(seed)
     wins = draws = losses = 0
     for _ in range(max(1, games)):
         model, opp = model_factory(), opponent_factory()
         s = game.initial_state(rng) if start is None else start
+        ply = 0
         while not game.is_terminal(s):
+            if ply < opening_plies:
+                s = game.step(s, rng.choice(game.legal_actions(s)))
+                ply += 1
+                continue
             agent = model if game.current_player(s) == strategist else opp
             s = game.step(s, agent.act(game, s, rng))
+            ply += 1
         w = game.winner(s)
         if w == strategist:
             wins += 1
@@ -125,6 +135,7 @@ def optimality_ladder(
     depths: tuple[int, ...] = (6, 8, 10, 12),
     include_exact: bool = True,
     start: State | None = None,
+    opening_plies: int = 0,
 ) -> dict:
     """The HONEST optimality ladder (Connect 4): test the model as first player against a rung of ever-stronger
     oracles — depth-6→8→10→12 near-perfect, then the EXACT solver — and report the DEEPEST rung it converts the
@@ -144,7 +155,7 @@ def optimality_ladder(
     frontier = "none"
     solved = False
     for r in rungs:
-        res = p1_conversion(game, model_factory, r["factory"], games, seed=seed, start=start)
+        res = p1_conversion(game, model_factory, r["factory"], games, seed=seed, start=start, opening_plies=opening_plies)
         cleared = res["rate"] >= 0.999
         out.append({"label": r["label"], "kind": r["kind"], "depth": r["depth"],
                     "rate": res["rate"], "games": res["games"], "cleared": cleared})
@@ -170,6 +181,57 @@ def verify_solved(
     res = p1_conversion(game, model_factory, exact_opponent_factory(game, max_empty), games, seed=seed,
                         start=start, strategist=strategist)
     return {**res, "solved": res["rate"] >= 0.999}
+
+
+def sample_forced_win_roots(game: Game, n: int, empties: int = 14, seed: int = 0) -> list[State]:
+    """`n` non-terminal positions with exactly `empties` empty cells where the SIDE TO MOVE has a PROVEN forced win
+    (`position_value > 0`). These are small, FAST-to-solve roots: verifying the model converts them against the EXACT
+    solver is an exact proof that SIDESTEPS the opening wall (solving a 14-empty position is milliseconds, not the
+    ~minutes a from-the-opening solve costs). The reachable-set count is game-specific; Connect 4 has 42 cells."""
+    from harness.book import position_value
+
+    total_cells = getattr(game, "num_cells", None) or (getattr(game, "ROWS", 6) * getattr(game, "COLS", 7))
+    target_stones = total_cells - empties
+    rng = random.Random(seed)
+    out: list[State] = []
+    attempts = 0
+    while len(out) < n and attempts < n * 20000:
+        attempts += 1
+        s = game.initial_state(rng)
+        while sum(1 for v in s.board if v != 0) < target_stones:
+            nxt = game.step(s, rng.choice(game.legal_actions(s)))
+            if game.is_terminal(nxt):
+                s = None
+                break
+            s = nxt
+        if s is None or game.is_terminal(s):
+            continue
+        if sum(1 for v in s.board if v == 0) != empties or position_value(game, s) <= 0:
+            continue
+        out.append(s)
+    return out
+
+
+def verify_forced_win_conversion(
+    game: Game, model_factory: Callable[[], object], n_roots: int = 8, empties: int = 14,
+    games_per_root: int = 1, seed: int = 0, max_empty: int = 10**9,
+) -> dict:
+    """EXACT proof, FAST: does the model convert PROVEN forced wins against the EXACT solver, from `n_roots`
+    forced-win roots (few empties ⇒ each solve is cheap)? For each root the model plays the winning side vs perfect
+    defence; a proven win the model fails to convert is a hard suboptimality certificate. Returns
+    {converted, total, rate, roots} — `rate == 1.0` is an EXACT (not proxy) near-optimality proof over these roots,
+    obtained without the from-the-opening solve. The complement to `verify_solved` (which needs the opening wall)."""
+    roots = sample_forced_win_roots(game, n_roots, empties=empties, seed=seed)
+    converted = 0
+    details: list[dict] = []
+    for i, root in enumerate(roots):
+        res = verify_solved(game, model_factory, games=games_per_root, seed=seed + i, start=root,
+                            strategist=root.to_move, max_empty=max_empty)
+        ok = res["rate"] >= 0.999
+        converted += 1 if ok else 0
+        details.append({"empties": empties, "converted": ok, "wins": res["wins"], "losses": res["losses"]})
+    total = len(roots)
+    return {"converted": converted, "total": total, "rate": (converted / total) if total else 0.0, "roots": details}
 
 
 def sim_scaling_curve(

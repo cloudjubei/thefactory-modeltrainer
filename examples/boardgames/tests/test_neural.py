@@ -633,3 +633,16 @@ def test_train_alphazero_with_reanalyze_runs_and_relabels_the_buffer():
     )
     assert isinstance(net, Connect4Net) and len(hist) == 3
     assert any(h["reanalyzed"] > 0 for h in hist)  # at least one later iteration re-labelled buffer entries
+
+
+def test_self_play_opening_plies_trains_from_diverse_off_line_positions():
+    # The ROBUSTNESS lever: with opening_plies>0, self-play's first RECORDED position is already off the canonical
+    # start (the random opening's stones are down), so the net trains on off-main-line positions — the fix for a
+    # net that plays the main line perfectly but LOSES away from it. The random plies themselves aren't recorded.
+    game = Connect4()
+    torch.manual_seed(0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=6, gumbel=True)
+    ex0 = self_play_game(game, agent, random.Random(0), opening_plies=0)
+    assert float(ex0[0][0].sum()) == 0.0  # canonical: first recorded position is the empty board
+    ex4 = self_play_game(game, agent, random.Random(0), opening_plies=4)
+    assert float(ex4[0][0].sum()) == 4.0  # diverse: first recorded position already carries the 4 opening stones

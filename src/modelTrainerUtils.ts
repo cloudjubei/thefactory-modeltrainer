@@ -2888,9 +2888,11 @@ export function deriveAutopilotSignals(input: {
   canBuildBook?: boolean
   canRate?: boolean
   canPlayOff?: boolean
+  canProcessEval?: boolean
   bookBuiltThisRun?: boolean
   ratedThisRun?: boolean
   playedOffThisRun?: boolean
+  scoredThisRun?: boolean
 }): AutopilotSignals {
   const unscreenedCores = input.modelChoices.filter(
     (c) => (input.completedRunCountByCore[c] ?? 0) < input.minScreenRuns,
@@ -2916,9 +2918,11 @@ export function deriveAutopilotSignals(input: {
     canBuildBook: !!input.canBuildBook,
     canRate: !!input.canRate,
     canPlayOff: !!input.canPlayOff,
+    canProcessEval: !!input.canProcessEval,
     bookBuiltThisRun: !!input.bookBuiltThisRun,
     ratedThisRun: !!input.ratedThisRun,
     playedOffThisRun: !!input.playedOffThisRun,
+    scoredThisRun: !!input.scoredThisRun,
   }
 }
 
@@ -2944,6 +2948,9 @@ export function nextAutopilotStep(s: AutopilotSignals): AutopilotDecision {
   }
   if (s.canPlayOff && !s.playedOffThisRun) {
     return { action: 'play-off', reason: 'run the head-to-head play-off + optimality check (the true winner)' }
+  }
+  if (s.canProcessEval && !s.scoredThisRun) {
+    return { action: 'score', reason: 'PROVE it — the near-optimality scorecard (ladder + exact forced-win conversion + distance-to-optimal)' }
   }
   return {
     action: 'done',

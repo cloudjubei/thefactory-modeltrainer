@@ -4160,6 +4160,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let bookBuiltThisRun = false
     let ratedThisRun = false
     let playedOffThisRun = false
+    let scoredThisRun = false
     const totalCompleted = async (): Promise<number> => {
       const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
       return runs.reduce((n, r) => n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0), 0)
@@ -4188,9 +4189,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         canBuildBook: !!manifest.buildBook,
         canRate: !!manifest.gauntlet,
         canPlayOff: !!manifest.tournament,
+        canProcessEval: !!manifest.processEval,
         bookBuiltThisRun,
         ratedThisRun,
         playedOffThisRun,
+        scoredThisRun,
         ...(stopReason ? { championStopReason: stopReason } : {}),
       })
     }
@@ -4198,7 +4201,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let stopReason: AutopilotStopReason = 'done'
     let roundsThisRun = 0
     const tally: Record<AutopilotAction, number> = {
-      screen: 0, search: 0, improve: 0, 'build-book': 0, rate: 0, 'play-off': 0, done: 0,
+      screen: 0, search: 0, improve: 0, 'build-book': 0, rate: 0, 'play-off': 0, score: 0, done: 0,
     }
     while (true) {
       if (params.abortSignal?.aborted) {
@@ -4254,6 +4257,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         // Run the fast optimality LADDER so the play-off shows each model's frontier (e.g. converts depth-6 but
         // loses depth-8) — the honest "how close to optimal" the depth-6 proxy alone hides. Exact rung stays off.
         childParams = { ladder: true }
+      } else if (decision.action === 'score') {
+        childType = 'process-eval'
+        // PROVE the champion: the near-optimality scorecard (ladder + FAST exact forced-win conversion vs the real
+        // solver + distance-to-optimal). No runKey ⇒ scores the top-leaderboard model (the champion).
+        childParams = {}
       } else {
         childType = 'explore'
         childParams = { ...(params.searchParams ?? {}) }
@@ -4281,6 +4289,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (decision.action === 'build-book') bookBuiltThisRun = true
       if (decision.action === 'rate') ratedThisRun = true
       if (decision.action === 'play-off') playedOffThisRun = true
+      if (decision.action === 'score') scoredThisRun = true
       state.history = [
         ...state.history,
         {
@@ -4600,18 +4609,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const recordType = manifest.recordType
     if (!manifest.processEval) throw new Error('this training project declares no "processEval" command')
 
-    // Resolve the model to score: an explicit spec, else a completed run's checkpoint.
+    // Resolve the model to score: an explicit spec, else a run's checkpoint. No runKey ⇒ the top-leaderboard run
+    // (the champion) — so the autopilot's `score` finalize step proves the champion with no params.
     let model = params.model
+    let runKey = params.runKey
+    if (!model && !runKey) {
+      const lb = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-leaderboard`, key: 'current' })
+      const entries = (lb?.content as LeaderboardRecord | undefined)?.entries ?? []
+      runKey = entries[0]?.runKey
+    }
     let recordKey = 'current'
-    if (!model && params.runKey) {
-      const rec = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+    if (!model && runKey) {
+      const rec = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
       const c = rec?.content as { artifacts?: { checkpoint?: string }; config?: { game?: string } } | undefined
       const checkpoint = c?.artifacts?.checkpoint
-      if (!checkpoint) throw new Error(`run ${params.runKey} has no checkpoint to score`)
-      model = { checkpoint, label: params.runKey.slice(0, 8) }
-      recordKey = params.runKey
+      if (!checkpoint) throw new Error(`run ${runKey} has no checkpoint to score`)
+      model = { checkpoint, label: runKey.slice(0, 8) }
+      recordKey = runKey
     }
-    if (!model) throw new Error('runProcessEval needs a `model` spec or a `runKey`')
+    if (!model) throw new Error('runProcessEval needs a `model` spec, a `runKey`, or a leaderboard champion to score')
 
     const game =
       params.game ??

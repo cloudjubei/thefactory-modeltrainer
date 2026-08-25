@@ -66,6 +66,13 @@ class TrainerConfig:
     az_distill_positions: int = 96  # late-game oracle-labelled examples to imprint each run (0 = no late distillation)
     az_distill_games: int = 0  # broad OPENING→endgame oracle-distillation games (0 = off); teaches centre-first play
     az_solve_endgame: int = DEFAULT_AZ_SOLVE_ENDGAME  # trained net plays a PERFECT endgame once ≤ this many empty
+    # The VALIDATED GENERIC recipe (plan §C.6) — off by default (preserves the classic loop); enable via the manifest.
+    az_gumbel: int = 0  # 1 = Gumbel/Sequential-Halving completed-Q search + policy target (the measured deploy/target win)
+    az_c_scale: float = 0.1  # completed-Q σ scale (calibrated default; only used when az_gumbel)
+    az_value_n_step: int = 0  # n-step/TD value target off a lagged net (0 = raw-MC outcome); the measured BINDING lever
+    az_target_refresh: int = 2  # refresh the lagged value target net every k iterations (only used when az_value_n_step>0)
+    az_selfplay_opening_plies: int = 0  # random opening plies per self-play game (0 = canonical) — off-line coverage = ROBUSTNESS
+    az_buffer_cap: int = 8000  # replay-buffer size (positions). Raise for LARGE self-play runs so the net trains on a wide history, not just the last ~2 iterations (the AlphaZero sliding window).
 
 
 @dataclass(frozen=True)
@@ -137,12 +144,15 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
-    if "az_warm_start" in filtered:
-        v = filtered["az_warm_start"]
-        filtered["az_warm_start"] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0
+    if "az_c_scale" in filtered:
+        filtered["az_c_scale"] = float(filtered["az_c_scale"])
+    for bool_key in ("az_warm_start", "az_gumbel"):
+        if bool_key in filtered:
+            v = filtered[bool_key]
+            filtered[bool_key] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0
     config = TrainerConfig(**filtered)
     validate_config(config)
     return config

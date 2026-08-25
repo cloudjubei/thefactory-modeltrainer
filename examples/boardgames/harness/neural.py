@@ -481,15 +481,23 @@ def _value_batch(net: "Connect4Net", xs: list[torch.Tensor], device: str = "cpu"
 def self_play_game(
     game: Game, agent: AlphaZeroAgent, rng: random.Random, temp_moves: int = 8,
     target_net: "Connect4Net | None" = None, n_step: int = 0, device: str = "cpu",
-    return_states: bool = False,
+    return_states: bool = False, opening_plies: int = 0,
 ) -> list:
     """Play ONE self-play game and return training examples (encoded board, policy, value). With `return_states`,
     each example is prefixed with the game STATE `(state, x, pi, v)` so the buffer can be REANALYZED (#2) — the
-    stored state is what lets the current net re-search and re-label the position later."""
+    stored state is what lets the current net re-search and re-label the position later. `opening_plies` > 0 plays
+    that many RANDOM opening moves before net-guided play begins (those plies are NOT recorded as training
+    examples) — so the net TRAINS on positions reached from DIVERSE openings, not just its own main line. This is
+    the robustness lever: a net trained only on its canonical line loses AWAY from it (measured); off-line coverage
+    teaches it to never lose a drawable position. Generic (no game knowledge)."""
     agent._nodes = {}
     agent.add_noise = not agent.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
     pending: list[tuple[State, torch.Tensor, list[float], int]] = []
     state = game.initial_state(rng)
+    for _ in range(opening_plies):  # DIVERSE random opening (unrecorded) → off-main-line training coverage
+        if game.is_terminal(state):
+            break
+        state = game.step(state, rng.choice(game.legal_actions(state)), rng)
     move = 0
     while not game.is_terminal(state):
         agent.temperature = 1.0 if move < temp_moves else 0.0
@@ -839,6 +847,7 @@ def train_alphazero(
     value_n_step: int = 0,
     target_refresh: int = 4,
     reanalyze_frac: float = 0.0,
+    selfplay_opening_plies: int = 0,
     log: Callable[[str], None] | None = None,
 ) -> tuple[Connect4Net, list[dict]]:
     """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
@@ -891,7 +900,7 @@ def train_alphazero(
             fresh_s: list[tuple[State, torch.Tensor, list[float], float]] = []
             for _ in range(selfplay_games):
                 fresh_s.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
-                                              device=device, return_states=True))
+                                              device=device, return_states=True, opening_plies=selfplay_opening_plies))
             state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
             # Re-label a random sample of the buffer with the CURRENT net (fresh policy + search-improved value).
             k = int(reanalyze_frac * len(state_buffer))
@@ -913,7 +922,8 @@ def train_alphazero(
                     fresh.extend(vs_opponent_game(game, learner, opponent, rng.randint(0, 1), rng))
                     vs_pool += 1
                 else:
-                    fresh.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step, device=device))
+                    fresh.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
+                                                device=device, opening_plies=selfplay_opening_plies))
             fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
             buffer = (buffer + fresh)[-buffer_cap:]
         loss = train_net(net, _mix_training_set(buffer, distilled, distill_fraction), epochs, batch_size, lr, device)
@@ -953,4 +963,8 @@ def build_alphazero_agent(cfg: dict) -> Agent:
         sims=int(cfg.get("az_sims", cfg.get("mcts_sims", 100))),
         device=device,
         solve_endgame=int(cfg.get("az_solve_endgame", DEFAULT_AZ_SOLVE_ENDGAME)),
+        # Deploy under the trained-for search operator (a gumbel-trained net is measurably weaker under plain PUCT).
+        gumbel=bool(cfg.get("az_gumbel", False)),
+        gumbel_m=int(cfg.get("az_gumbel_m", 16)),
+        c_scale=float(cfg.get("az_c_scale", 0.1)),
     )

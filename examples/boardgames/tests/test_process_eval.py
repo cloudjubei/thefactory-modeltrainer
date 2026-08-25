@@ -12,6 +12,9 @@ def test_scorecard_verdict_only_the_exact_oracle_earns_solved():
     assert v == "near-optimal" and "unproven" in why
     assert scorecard_verdict({"ladder": {"frontier": "depth-6"}, "oracle_match": 0.85, "p1": {"not_lost_rate": 0.6}})[0] == "strong"
     assert scorecard_verdict({"ladder": {"frontier": "none"}, "oracle_match": 0.5, "p1": {"not_lost_rate": 0.4}})[0] == "developing"
+    # EXACT-proven near-optimal: converts EVERY proven forced win vs the EXACT solver + mid-game optimal (not a proxy)
+    v2, why2 = scorecard_verdict({"exact_forced_wins": {"rate": 1.0, "converted": 8, "total": 8}, "oracle_match": 1.0})
+    assert v2 == "near-optimal (exact-proven)" and "EXACT solver" in why2
 
 
 def test_process_scorecard_runs_end_to_end_and_yields_an_honest_card():
@@ -21,14 +24,14 @@ def test_process_scorecard_runs_end_to_end_and_yields_an_honest_card():
     card = process_scorecard(
         {"game": "connect4", "model": {"model_name": "heuristic", "label": "heuristic"},
          "games": 4, "ladder_depths": [6], "reference_depth": 6, "corpus": {"n": 6, "min_moves": 28, "seed": 1},
-         "exact": False},
+         "forced_win_roots": {"n": 0}, "exact": False},  # forced-win proof off for a fast smoke
         on_progress=events.append,
     )
     assert card["game"] == "connect4" and card["model"] == "heuristic"
     assert "ladder" in card and "frontier" in card["ladder"]
     assert set(card["p1"]) >= {"rate", "not_lost_rate"}
     assert 0.0 <= card["oracle_match"] <= 1.0
-    assert card["verdict"] in {"solved", "near-optimal", "strong", "developing"}
+    assert card["verdict"] in {"solved", "near-optimal", "near-optimal (exact-proven)", "strong", "developing"}
     assert card["verify_solved"] is None if "verify_solved" in card else True  # exact off ⇒ no solved claim
     assert card["verdict"] != "solved"  # never solved without the exact oracle
     assert events[0]["phase"] == "start" and events[-1]["phase"] == "done"

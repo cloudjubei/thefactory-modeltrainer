@@ -9,6 +9,7 @@ from harness.benchmark import (
     exact_reference,
     optimality_rate,
     optimality_trace,
+    p1_conversion,
     sample_solvable_positions,
     sim_scaling_curve,
 )
@@ -72,3 +73,35 @@ def test_sim_scaling_curve_reports_strength_per_budget():
     assert curve["high_sim_rate"] == curve["points"][-1]["rate"]
     # identical play at both budgets ⇒ flatness is EXACTLY 0 and auc == the (high) shared rate
     assert curve["flatness"] == 0.0 and curve["auc"] == curve["low_sim_rate"] and curve["low_sim_rate"] >= 0.75
+
+
+def test_p1_conversion_opening_plies_diversifies_the_lines():
+    # The ladder-rigor fix: with DETERMINISTIC agents and no random openings, every game is the SAME line, so a
+    # rung's rate is one repeated game (the depth-4-vs-depth-6 inversion artifact). `opening_plies` diversifies.
+    class _Leftmost:  # fully deterministic — always the leftmost legal column
+        def act(self, game, state, rng):
+            return game.legal_actions(state)[0]
+
+    game = Connect4()
+    lf = lambda: _Leftmost()
+    det = p1_conversion(game, lf, lf, games=10, seed=1, opening_plies=0)  # one line ×10 → a single outcome bucket
+    assert sum(1 for v in (det["wins"], det["draws"], det["losses"]) if v > 0) == 1
+    div = p1_conversion(game, lf, lf, games=10, seed=1, opening_plies=6)  # random openings → diverse lines
+    assert sum(1 for v in (div["wins"], div["draws"], div["losses"]) if v > 0) >= 2
+
+
+def test_verify_forced_win_conversion_is_an_exact_proof_without_the_opening_wall():
+    # FAST exact proof: optimal play converts PROVEN forced wins vs the EXACT solver from few-empty roots (each
+    # solve is milliseconds, not the from-opening minutes); a random model fails to convert them. This is the
+    # runnable exact near-optimality evidence the opening wall otherwise blocks.
+    from harness.benchmark import sample_forced_win_roots, verify_forced_win_conversion
+    from harness.solver import OracleAgent
+    from harness.agents import RandomAgent
+
+    game = Connect4()
+    roots = sample_forced_win_roots(game, n=3, empties=12, seed=1)
+    assert len(roots) == 3 and all(sum(1 for v in r.board if v == 0) == 12 for r in roots)
+    opt = verify_forced_win_conversion(game, lambda: OracleAgent(), n_roots=3, empties=12, seed=1)
+    assert opt["rate"] == 1.0 and opt["converted"] == 3  # perfect play converts every proven forced win
+    weak = verify_forced_win_conversion(game, lambda: RandomAgent(), n_roots=3, empties=12, seed=1)
+    assert weak["rate"] < 1.0  # a random model throws proven wins away → exact suboptimality certificate

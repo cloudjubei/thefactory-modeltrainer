@@ -1913,7 +1913,7 @@ export type ChampionStopReason = 'reached-target' | 'plateau' | 'budget' | 'abor
  * the user never runs these by hand): `build-book` = extend the optimal-play opening book; `rate` = rate every
  * model on the comparable gauntlet; `play-off` = the head-to-head tournament + optimality check. `done` = nothing
  * left without new input, and the results are ready. */
-export type AutopilotAction = 'screen' | 'search' | 'improve' | 'build-book' | 'rate' | 'play-off' | 'done'
+export type AutopilotAction = 'screen' | 'search' | 'improve' | 'build-book' | 'rate' | 'play-off' | 'score' | 'done'
 
 /** The derived state the autopilot decides from — kept a plain data bag so the decision is a PURE function. */
 export interface AutopilotSignals {
@@ -1936,12 +1936,16 @@ export interface AutopilotSignals {
   canRate?: boolean
   /** The project declares a `tournament` (so the head-to-head play-off + optimality can run). */
   canPlayOff?: boolean
+  /** The project declares a `processEval` command (so the champion can be PROVEN with the near-optimality scorecard). */
+  canProcessEval?: boolean
   /** The book was already extended THIS Start (don't loop on it). */
   bookBuiltThisRun?: boolean
   /** Models were already rated THIS Start. */
   ratedThisRun?: boolean
   /** The play-off already ran THIS Start. */
   playedOffThisRun?: boolean
+  /** The champion was already SCORED (prove-it-good scorecard) THIS Start. */
+  scoredThisRun?: boolean
 }
 
 /** The autopilot's decision: the next action + a one-line reason (surfaced to the user) + an optional target. */
