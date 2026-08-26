@@ -1106,11 +1106,24 @@ def train_alphazero(
     _pool = _tmpdir = None
     if parallel_ok:
         import multiprocessing as _mp
+        import os as _os
         import tempfile
 
         _tmpdir = tempfile.mkdtemp(prefix="az_sp_")  # UNIQUE per process ⇒ the 3 concurrent seeds never collide
+        # THREAD DECOUPLING (macOS Accelerate follows OMP_NUM_THREADS, NOT torch.set_num_threads): spawn the
+        # self-play workers with 1 BLAS thread each — measured 2.46x self-play speedup, vs a 27-thread thrash at
+        # OMP=3 — while the PARENT keeps its OMP threads for TRAINING (its BLAS is already initialised). spawn
+        # children inherit os.environ AT SPAWN TIME, so set it around Pool() only, then restore.
+        _saved = {k: _os.environ.get(k) for k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "MKL_NUM_THREADS")}
+        for k in _saved:
+            _os.environ[k] = "1"
         _pool = _mp.get_context("spawn").Pool(int(selfplay_workers), initializer=_selfplay_worker_init,
                                               initargs=(game.name,))  # daemonic workers ⇒ die with the parent
+        for k, v in _saved.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
     for it in range(iterations):
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
