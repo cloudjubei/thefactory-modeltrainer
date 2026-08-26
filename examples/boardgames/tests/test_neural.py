@@ -719,3 +719,42 @@ def test_train_alphazero_buffer_persists_across_calls():
     _n3, _h3, buf_fresh = train_alphazero(game, iterations=1, selfplay_games=4, sims=6, seed=1,
                                           buffer_cap=50000, return_buffer=True)
     assert len(buf_seeded) > len(buf_fresh)  # the persisted buffer carried forward
+
+
+def test_selfplay_worker_reproduces_single_game(tmp_path):
+    # §C.7 parallel self-play CORRECTNESS: a worker playing game-seed S must produce EXACTLY the same examples as
+    # sequential self_play_game with random.Random(S) on the same net (search RNG is the passed rng, not torch global).
+    from harness.neural import _SELFPLAY_WORKER, _selfplay_worker, save_net
+    from harness.registry import resolve_game
+    game = Connect4()
+    torch.manual_seed(0)
+    net = Connect4Net()
+    p = str(tmp_path / "net.pt"); save_net(net, p)
+    _SELFPLAY_WORKER.clear(); _SELFPLAY_WORKER["game"] = resolve_game("connect4")
+    task = (p, 0, None, None, 8, True, 16, 0.1, 0, 2, 8, 12345)  # sims8 gumbel gm16 cs.1 nstep0 open2 temp8 seed12345
+    wex = _selfplay_worker(task)
+    ag = AlphaZeroAgent(load_net(p), sims=8, gumbel=True, gumbel_m=16, c_scale=0.1)
+    sex = self_play_game(game, ag, random.Random(12345), temp_moves=8, target_net=None, n_step=0, opening_plies=2)
+    assert len(wex) == len(sex) and len(wex) > 0
+    for (xw, piw, vw), (xs, pis, vs) in zip(wex, sex):
+        assert piw == pis and vw == vs and torch.equal(xw, xs)
+
+
+def test_parallel_selfplay_trains_and_returns_valid_buffer():
+    # End-to-end: workers>1 fans self-play across processes, trains, returns a valid buffer (spawn path exercised).
+    game = Connect4()
+    net, hist, buf = train_alphazero(game, iterations=1, selfplay_games=4, sims=6, epochs=1, seed=0,
+                                     buffer_cap=5000, selfplay_workers=2, gumbel=True, return_buffer=True)
+    assert isinstance(buf, list) and len(buf) > 0
+    x, pi, v = buf[0]
+    assert tuple(x.shape) == (2, 6, 7) and len(pi) == 7 and -1.0 <= float(v) <= 1.0
+
+
+def test_parallel_falls_back_when_endgame_on():
+    # With the endgame loop armed, parallel MUST fall back to sequential (shared tablebase can't cross processes).
+    from harness.tablebase import Tablebase
+    game = Connect4()
+    tb = Tablebase(cap=200000)
+    net, hist, buf = train_alphazero(game, iterations=2, selfplay_games=6, sims=6, epochs=1, seed=3,
+                                     endgame_tb=tb, endgame_max_empty=14, selfplay_workers=3, return_buffer=True)
+    assert len(tb) > 0  # endgame fired ⇒ it took the sequential endgame path, not the parallel bypass

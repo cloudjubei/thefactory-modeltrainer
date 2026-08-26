@@ -129,6 +129,7 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             endgame_tb=run_tb, endgame_max_empty=int(request.get("endgame_max_empty", 14)),
             endgame_exact_targets=int(request.get("endgame_exact_targets", 1)),
             init_buffer=init_buffer, return_buffer=True,
+            selfplay_workers=int(request.get("selfplay_workers", 1)),
         )
         save_net(net, str(run_dir / f"ckpt_{b}.pt"))
         torch.save(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts

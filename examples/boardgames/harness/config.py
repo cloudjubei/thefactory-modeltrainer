@@ -105,6 +105,7 @@ class TrainerConfig:
     az_residual: int = 0  # 1 = ResNet tower + head towers; 0 = legacy 2-conv/bare-linear net
     az_batchnorm: int = 0  # 1 = BatchNorm (required to train a deep tower)
     az_head_hidden: int = 0  # policy/value head-tower hidden width (0 = bare linear readout)
+    az_selfplay_workers: int = 1  # §C.7 parallel self-play worker processes (1 = sequential); fills idle cores
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,8 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_blocks must be in {AZ_BLOCKS_RANGE}, got {config.az_blocks}")
     if not AZ_HEAD_HIDDEN_RANGE[0] <= config.az_head_hidden <= AZ_HEAD_HIDDEN_RANGE[1]:
         raise ValueError(f"az_head_hidden must be in {AZ_HEAD_HIDDEN_RANGE}, got {config.az_head_hidden}")
+    if not 1 <= config.az_selfplay_workers <= 32:
+        raise ValueError(f"az_selfplay_workers must be in (1, 32), got {config.az_selfplay_workers}")
 
 
 def load_config(path: Path) -> TrainerConfig:
@@ -196,7 +199,7 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_selfplay_workers"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
     for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds"):

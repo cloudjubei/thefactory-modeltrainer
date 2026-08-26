@@ -327,6 +327,12 @@
       "range": [0, 1024],
       "appliesWhen": { "model_name": ["alphazero"] }
     },
+    "az_selfplay_workers": {
+      "type": "number",
+      "default": 1,
+      "range": [1, 32],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
     "opponent": {
       "type": "choice",
       "choices": [

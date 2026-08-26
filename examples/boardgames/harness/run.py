@@ -288,6 +288,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         endgame_extend_positions=int(config.az_endgame_extend_positions),
         endgame_extend_seconds=float(config.az_endgame_extend_seconds),
         net_arch=net_arch,
+        selfplay_workers=int(config.az_selfplay_workers),
         log=print,
     )
     train_seconds = time.perf_counter() - t0

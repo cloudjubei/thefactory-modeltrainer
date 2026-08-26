@@ -940,6 +940,64 @@ def _mix_training_set(buffer: list, distilled: list, distill_fraction: float) ->
     return list(buffer) + list(distilled) * k
 
 
+# --- parallel self-play (§C.7 speedup) ------------------------------------------------------------------
+# Self-play is sequential (one tiny 6x7 forward at a time), so a single process uses ~1 core and the rest sit
+# idle. These play the per-iteration GAMES across worker processes to fill the idle cores. macOS uses 'spawn',
+# so the worker fn + initializer are MODULE-LEVEL and args are picklable; the net is shared ONCE per iteration
+# via a temp file (version = iteration) that each worker version-caches, never re-serialised per game.
+_SELFPLAY_WORKER: dict = {}
+
+
+def _selfplay_worker_init(game_name: str) -> None:
+    import torch as _torch
+
+    _torch.set_num_threads(1)  # tiny forwards don't use threads; 1/worker ⇒ W workers = W cores, no oversubscription
+    from harness.registry import resolve_game
+
+    _SELFPLAY_WORKER.clear()
+    _SELFPLAY_WORKER["game"] = resolve_game(game_name)
+
+
+def _selfplay_worker(task: tuple):
+    (net_path, net_ver, tgt_path, tgt_ver, sims, gumbel, gumbel_m, c_scale, n_step, opening_plies,
+     temp_moves, game_seed) = task
+    st = _SELFPLAY_WORKER
+    if st.get("net_ver") != net_ver:  # reload only when the iteration's weights changed
+        st["net"] = load_net(net_path)
+        st["net_ver"] = net_ver
+    tgt = None
+    if tgt_path is not None:
+        if st.get("tgt_ver") != tgt_ver:
+            st["tgt"] = load_net(tgt_path)
+            st["tgt_ver"] = tgt_ver
+        tgt = st["tgt"]
+    agent = AlphaZeroAgent(st["net"], sims=sims, gumbel=gumbel, gumbel_m=gumbel_m, c_scale=c_scale)
+    return self_play_game(st["game"], agent, random.Random(game_seed), temp_moves=temp_moves,
+                          target_net=tgt, n_step=n_step, opening_plies=opening_plies)
+
+
+def _run_parallel_selfplay(pool, tmpdir: str, net, target_net, version: int, n_games: int, sims: int,
+                           gumbel: bool, gumbel_m: int, c_scale: float, n_step: int, opening_plies: int,
+                           rng: random.Random, temp_moves: int = 8) -> list:
+    """Play `n_games` self-play games across `pool`'s workers using the CURRENT net. Deterministic per (parent
+    rng, n_games): the parent draws each game's seed, so the set of games is reproducible; workers never mutate
+    shared state. Returns the flat (x, pi, v) examples (UN-augmented — the caller augments once, as sequentially)."""
+    import os
+
+    net_path = os.path.join(tmpdir, "net.pt")
+    save_net(net, net_path)  # 7MB, written ONCE per iteration (pool.map is synchronous ⇒ no read/write race)
+    tgt_path = None
+    if target_net is not None:
+        tgt_path = os.path.join(tmpdir, "target.pt")
+        save_net(target_net, tgt_path)
+    tasks = [(net_path, version, tgt_path, version, sims, gumbel, gumbel_m, c_scale, n_step, opening_plies,
+              temp_moves, rng.randrange(2**31)) for _ in range(n_games)]
+    out: list = []
+    for game_examples in pool.map(_selfplay_worker, tasks):
+        out.extend(game_examples)
+    return out
+
+
 def _endgame_enabled(game: Game, endgame_tb) -> bool:
     """§C.7 #2 GENERIC GATE: the online endgame loop runs ONLY when a run tablebase is present AND the game exposes
     the exact hooks (canonical_key + exact_optimal_actions). Absent either, the caller builds the learner with
@@ -991,6 +1049,7 @@ def train_alphazero(
     net_arch: dict | None = None,
     init_buffer: list | None = None,
     return_buffer: bool = False,
+    selfplay_workers: int = 1,
     log: Callable[[str], None] | None = None,
 ):
     """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
@@ -1040,6 +1099,18 @@ def train_alphazero(
     # §C.7 #2: the online endgame loop is armed only for a game with the exact hooks — else pure #1 (no crash).
     endgame_on = _endgame_enabled(game, endgame_tb)
     eg_targets = endgame_on and bool(endgame_exact_targets)
+    # §C.7 PARALLEL self-play: only the PURE-#1 path is safe to fan out (no shared endgame tablebase, no league
+    # opponent, no reanalyze state-buffer). Otherwise stay sequential (byte-identical). Needs a game name to respawn.
+    parallel_ok = (int(selfplay_workers) > 1 and opponent_pool is None and reanalyze_frac == 0.0
+                   and not endgame_on and getattr(game, "name", None) is not None)
+    _pool = _tmpdir = None
+    if parallel_ok:
+        import multiprocessing as _mp
+        import tempfile
+
+        _tmpdir = tempfile.mkdtemp(prefix="az_sp_")  # UNIQUE per process ⇒ the 3 concurrent seeds never collide
+        _pool = _mp.get_context("spawn").Pool(int(selfplay_workers), initializer=_selfplay_worker_init,
+                                              initargs=(game.name,))  # daemonic workers ⇒ die with the parent
     for it in range(iterations):
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
@@ -1073,6 +1144,11 @@ def train_alphazero(
                     state_buffer[i] = (state_buffer[i][0], x, pi, state_buffer[i][3])
                 reanalyzed = len(relabelled)
             buffer = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
+        elif parallel_ok:  # PURE-#1 fanned out across worker processes (fills the idle cores; ~2-2.5x faster)
+            fresh = _run_parallel_selfplay(_pool, _tmpdir, net, target_net, it, selfplay_games, sims, gumbel,
+                                           gumbel_m, c_scale, value_n_step, selfplay_opening_plies, rng)
+            fresh = augment_examples(fresh, perms)
+            buffer = (buffer + fresh)[-buffer_cap:]
         else:
             fresh: list[tuple[torch.Tensor, list[float], float]] = []
             for _ in range(selfplay_games):
@@ -1110,6 +1186,12 @@ def train_alphazero(
                        if endgame_on else "")
             log(f"iter {it + 1}/{iterations}: buffer {len(buffer)} ({vs_pool} vs-pool, {reanalyzed} reanalyzed), "
                 f"distilled {len(distilled)}, loss {loss:.3f}{eg_note}")
+    if _pool is not None:
+        _pool.close()
+        _pool.join()
+        import shutil
+
+        shutil.rmtree(_tmpdir, ignore_errors=True)
     if return_buffer:
         return net, history, buffer
     return net, history
