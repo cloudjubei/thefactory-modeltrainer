@@ -782,10 +782,55 @@ arch (old blobs → legacy). Levers `az_channels/az_blocks/az_residual/az_batchn
 legacy shape onto a scaled config). **Batched/resumable driver `harness/scaled_run.py`** (the user's requirement — train
 in BATCHES, checkpoint each, resume): pure self-play, per-batch metrics = opening_value on the TRUE empty board +
 net-only oracle_optimality_rate + **off-line P1-loss vs depth-8 oracle from 50 fixed openings** (the pre-registered
-robustness metric). **FALSIFIABLE TEST RUNNING:** 1.79M-param net (128x6+BN+head64), 96 sims, pure-MC, 320 games/batch,
-24 batches, seed 0 (seeds 1-2 to follow). Verdict CONFIRMS under-resourcing if off-line P1-loss ≤15% AND opening_value
-≥+0.7 (95% CI excl +0.3); REFUTES (residual problem) if loss >40% OR opening_value ≤+0.3. See
-[[project_modeltrainer_endgame_from_play]].
+robustness metric). **FALSIFIABLE TEST — DONE (3 seeds, 1.79M net 128x6+BN+head64, 96 sims, pure-MC, ~16k games/seed).** RESULT (last-3-batch
+avg, mean over seeds): **off-line P1-loss 0.278** (seeds .233/.317/.283) vs tiny-net 0.43-0.54 @12k — a ~40% relative drop;
+**opening_value -0.05** (seeds -0.198/+0.024/+0.029) — FLAT/negative, no climb; oracle 0.96. VERDICT: pre-registered
+thresholds (loss ≤0.15 AND openval ≥+0.7) NOT met. HONEST SPLIT — the two dominant causes separated cleanly: (1) CAPACITY
+is a real under-resourcing (bigger net → substantially better off-line robustness at matched compute) but NOT sufficient
+alone at 16k games; (2) VALUE-COLLAPSE is NOT fixed by capacity/compute — opening_value stayed ~0 across all seeds, tripping
+the pre-registered "keep hunting, don't just add compute" condition. So "we under-resourced it" was HALF-right: scale earns
+robustness, but near-optimal pure self-play needs to BREAK the value-collapse via the exact-target lever (#2 endgame targets)
+/ distillation — NOT just a bigger net. NEXT: rerun scaled net with az_endgame_tablebase=1 (or distillation) → does
+opening_value climb + off-line loss reach ≤0.15? See [[project_modeltrainer_endgame_from_play]].
+
+**#1 FOLLOW-UP — DISTILLATION SOLVES THE VALUE-COLLAPSE (2026-08-27).** Two arms on the scaled net (128x6+BN+head64,
+96 sims, seed 0): **DISTILL** (az_distill_games=80, oracle-labelled opening→endgame corpus, wired into scaled_run.py as
+distill_corpus) vs **ENDGAME** (az_endgame_tablebase=1). RESULT: **DISTILL opening_value 0→+0.938→+1.000→+1.000 in ONE-TWO
+batches (400-800 games)** — the C4 opening is now correctly read as a P1 WIN, which 16k games of pure self-play never
+learned. ENDGAME opening_value stayed FLAT (+0.16→+0.09→-0.00) — the endgame frontier can't climb 30+ plies to the opening,
+so it's the wrong depth for the OPENING belief (right for endgame accuracy). CONFIRMS the dual-cause thesis: capacity→
+robustness, exact-OPENING-targets→value-collapse. CAVEAT: off-line loss still high early (~0.7 @1200 games, undertrained) —
+watching whether distill's robustness now converges FASTER/LOWER than pure self-play with the correct value signal.
+**#3 SHARPENED:** distillation works but is a SOLVER CRUTCH (oracle labels); the generic solver-free #3 must reproduce
+this WITHOUT the oracle — endgame-lever and pure-exploration both leave opening_value flat, so #3 likely needs a
+CURRICULUM/LEAGUE (stronger opponent forces conversion-learning → outcomes label the opening +1). Design #3 after the
+distill robustness trajectory lands.
+
+**#1 DISTILL COMPLETE (8k games, scaled net) — value-collapse SOLVED + robustness ~4x faster.** FINAL (last-3 avg):
+**opening_value +0.998** (locked +1.0 from batch 1, held all 20 batches) — the C4 opening now correctly read as a P1 WIN
+that 16k pure games never learned; **off-line P1-loss 0.208** (0.75→0.21 trajectory) — reached pure's 16k-game robustness
+(0.28) by ~4k games, finishing BELOW it at half the compute. Strict near-optimal ≤0.15 NOT hit in 8k games (plateaued
+~0.20-0.25) — partly the random-opening metric FLOOR (some diverse openings are theoretically P1-lost regardless of play;
+a cleaner check = forced-win conversion from proven-won roots). NET: near-optimal C4 via a generic process = capacity
+(scaled net) + exact OPENING targets (distillation) — both levers, two causes, confirmed end-to-end. CAVEAT: distillation
+LABELS openings with an ORACLE (solver crutch, absent for chess/Go) → #3 must reproduce this solver-free (curriculum/league,
+in design). Run: checkpoints/scaled_runs/s1_distill.
+
+**#3 SOLVER-FREE LEAGUE — BUILT (2026-08-28, TDD, 25 affected tests green).** Reproduce distillation's opening-value fix
+WITHOUT an oracle so it transfers to chess/Go. Mechanism (design workflow wf_60de0c54-470): the learner plays weak→strong
+SOLVER-FREE opponents from the TRUE opening (vs_opponent_game, no opening_plies skip) so game OUTCOMES label the empty
+board +1. `harness/league.py` (NEW): build_solver_free_pool = RandomAgent + HeuristicAgent(gated on heuristic_action) +
+MctsAgent[30,120] (solve_endgame=0, book=None) + AlphaZeroAgent over the RUN'S OWN arch-matched ckpt snapshots
+(select_snapshot_spread weak→recent) — NO NearPerfectOracle/book/legacy-champions. train_alphazero: `league_p1_frac`
+(seat-priority ~0.7 onto the won P1 seat), `opening_anchor_cap`+`league_anchor_frac` (self-generated opening anchor:
+accumulate seat-0 empty-board examples with TRUE outcomes, pin via _mix_training_set so the ~200 opening examples aren't
+diluted in 400k buffer), `league_frozen_self` (batch-start deepcopy = equal-strength honesty rung). Wired into scaled_run
+(league_* request knobs) + config (az_league asserts solver-free) + manifest + run.py (drops the oracle append).
+**DECISIVE metric = off-line P1-loss vs eval-only depth-8 oracle** (NEVER in training) — can't be gamed by beating weak
+play; opening_value is DEMOTED to a sanity signal (near-tautological, the league trains the empty board). EMPIRICAL ARM
+RUNNING: scaled net seed 0, 20 batches, league_frac=0.4/p1_frac=0.7/snapshots=4/frozen_self=1/anchor_frac=0.25, NO
+oracle/distill/endgame. Open crux: can solver-free opponents (max = mcts@120 + frozen-self, both < depth-8 oracle) close
+off-line loss to distillation's ~0.21, or plateau above? Run: checkpoints/scaled_runs/s3_league.
 
 **Immediate driving case (user-chosen): push Connect-4 to SOLVED — PROGRESSING, with an HONEST correction.**
 **(2026-08-25) recipe-into-real-training-path + teacher → main-line opening SOUND but the net is MAIN-LINE-BRITTLE.**

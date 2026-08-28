@@ -333,6 +333,30 @@
       "range": [1, 32],
       "appliesWhen": { "model_name": ["alphazero"] }
     },
+    "az_league": {
+      "type": "number",
+      "default": 0,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_league_p1_frac": {
+      "type": "number",
+      "default": 0.7,
+      "range": [0, 1],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_league_snapshots": {
+      "type": "number",
+      "default": 4,
+      "range": [0, 20],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
+    "az_league_anchor_frac": {
+      "type": "number",
+      "default": 0.25,
+      "range": [0, 0.9],
+      "appliesWhen": { "model_name": ["alphazero"] }
+    },
     "opponent": {
       "type": "choice",
       "choices": [

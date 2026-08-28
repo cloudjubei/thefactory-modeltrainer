@@ -1050,6 +1050,10 @@ def train_alphazero(
     init_buffer: list | None = None,
     return_buffer: bool = False,
     selfplay_workers: int = 1,
+    league_p1_frac: float = 0.5,
+    opening_anchor_cap: int = 0,
+    league_anchor_frac: float = 0.0,
+    league_frozen_self: bool = False,
     log: Callable[[str], None] | None = None,
 ):
     """The AlphaZero loop with WARM-START + LEAGUE + optional ORACLE DISTILLATION. Starts from `init_net` (the
@@ -1124,6 +1128,18 @@ def train_alphazero(
                 _os.environ.pop(k, None)
             else:
                 _os.environ[k] = v
+    # §C.7 #3 SOLVER-FREE LEAGUE: the opening anchor accumulates seat-0 (empty-board) league examples with their
+    # TRUE outcomes (honest, never win-filtered) so the opening signal isn't diluted below distillation's pin; the
+    # frozen-self rung is a batch-start deepcopy — an equal-strength opponent that beats a genuinely-lost opening,
+    # the counter-pressure keeping the anchor honest. league off ⇒ opponent_pool is None ⇒ all inert.
+    opening_anchor: list = []
+    _league_pool = None
+    if opponent_pool is not None:
+        _league_pool = list(opponent_pool)
+        if league_frozen_self:
+            _frozen = copy.deepcopy(net)
+            _league_pool.append(lambda fn=_frozen: AlphaZeroAgent(fn, sims=sims, device=device, gumbel=gumbel,
+                                                                  gumbel_m=gumbel_m, c_scale=c_scale))
     for it in range(iterations):
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
@@ -1166,8 +1182,16 @@ def train_alphazero(
             fresh: list[tuple[torch.Tensor, list[float], float]] = []
             for _ in range(selfplay_games):
                 if opponent_pool and rng.random() < pool_frac:
-                    opponent = opponent_pool[rng.randrange(len(opponent_pool))]()
-                    fresh.extend(vs_opponent_game(game, learner, opponent, rng.randint(0, 1), rng))
+                    # SEAT-PRIORITY: sit the learner on the won P1 seat most of the time (where the collapse lives
+                    # and opening_value is read), so wins from the TRUE opening label the empty board +1 via outcomes.
+                    learner_seat = 0 if rng.random() < league_p1_frac else 1
+                    opponent = _league_pool[rng.randrange(len(_league_pool))]()
+                    ex_lg = vs_opponent_game(game, learner, opponent, learner_seat, rng)
+                    fresh.extend(ex_lg)
+                    if learner_seat == 0 and opening_anchor_cap > 0 and ex_lg:
+                        opening_anchor.append(ex_lg[0])  # empty board + its TRUE outcome (honest, not win-filtered)
+                        if len(opening_anchor) > opening_anchor_cap:
+                            del opening_anchor[: len(opening_anchor) - opening_anchor_cap]
                     vs_pool += 1
                 elif endgame_on:  # collect STATES for the frontier extension (return_states only changes the shape)
                     ex = self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step, device=device,
@@ -1184,7 +1208,11 @@ def train_alphazero(
         if endgame_on:  # RETROGRADE climb: prove the iteration's frontier positions backward from booked terminals
             eg_booked = extend_endgame_frontier(game, endgame_tb, eg_visited, endgame_max_empty,
                                                 endgame_extend_positions, endgame_extend_seconds)
-        loss = train_net(net, _mix_training_set(buffer, distilled, distill_fraction), epochs, batch_size, lr, device)
+        # ANCHOR: the solver-free opening anchor (league) is pinned at league_anchor_frac via the SAME fixed-fraction
+        # mix the oracle distillation uses — so a few-hundred empty-board examples aren't diluted in a 400k buffer.
+        _anchor = distilled + opening_anchor
+        _afrac = league_anchor_frac if opening_anchor else distill_fraction
+        loss = train_net(net, _mix_training_set(buffer, _anchor, _afrac), epochs, batch_size, lr, device)
         # CHEAP per-iteration quality probe (one forward pass): the net's value on the standard opening. Connect 4
         # is a first-player WIN, so this should climb toward +1 — the live curve the #2-vs-#1 A/B compares.
         opening_value = round(net_value(net, game, game.initial_state(random.Random(seed)), device), 4)

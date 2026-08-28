@@ -207,14 +207,23 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
             else:
                 print(f"warm-start SKIPPED: champion arch {cand.arch} != configured {net_arch} → training fresh")
 
-    # LEAGUE opponent pool: a strong search opponent, the heuristic, a NEAR-PERFECT oracle (a perfect-play
-    # reality check that punishes any residual blunder), and recent past champions. Only Connect 4 has a solver.
-    pool = [lambda: MctsAgent(sims=OPPONENT_MCTS_SIMS), lambda: HeuristicAgent()]
-    if config.game == "connect4":
-        pool.append(lambda: NearPerfectOracle(depth=6))  # depth 6 → fast league games, still tactically perfect
-    for cpath in champions.champion_pool_paths(config.game, k=3):
-        cnet = load_net(cpath, device)
-        pool.append(lambda cnet=cnet: AlphaZeroAgent(cnet, sims=az_sims, device=device))
+    # LEAGUE opponent pool. Default: a strong search opponent, the heuristic, a NEAR-PERFECT oracle (perfect-play
+    # reality check), and recent past champions. §C.7 #3: when az_league, use the SOLVER-FREE pool instead (drops the
+    # oracle) so opening value-collapse is broken WITHOUT a solver — the generic path that transfers to chess/Go.
+    if int(config.az_league):
+        from harness.league import build_solver_free_pool
+
+        pool = build_solver_free_pool(config.game and game, CHECKPOINT_DIR, [], net_arch, {
+            "include_random": True, "include_heuristic": True, "mcts_sims": [30, OPPONENT_MCTS_SIMS],
+            "snapshots": 0, "gumbel": bool(config.az_gumbel), "c_scale": float(config.az_c_scale),
+        })  # no oracle, no legacy champions (arch-mismatched); frozen-self supplied inside train_alphazero
+    else:
+        pool = [lambda: MctsAgent(sims=OPPONENT_MCTS_SIMS), lambda: HeuristicAgent()]
+        if config.game == "connect4":
+            pool.append(lambda: NearPerfectOracle(depth=6))  # depth 6 → fast league games, still tactically perfect
+        for cpath in champions.champion_pool_paths(config.game, k=3):
+            cnet = load_net(cpath, device)
+            pool.append(lambda cnet=cnet: AlphaZeroAgent(cnet, sims=az_sims, device=device))
 
     # BROAD OPENING→endgame oracle distillation — the lever that teaches the net to OPEN CENTRE and hold the
     # first-player win (a warm-started net otherwise keeps its broken edge-first opening and loses to the oracle).
@@ -266,14 +275,20 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         init_net=init_net,
         # PURITY: pool_frac=0 ⇒ no league games at all (net vs net only), so a solver-derived oracle opponent never
         # touches training — the honest generic self-play test. The pool is still built (cheap) but never sampled.
-        opponent_pool=(pool if config.az_pool_frac > 0 else None),
+        opponent_pool=(pool if (config.az_pool_frac > 0 or config.az_league) else None),
         # Self-play (balanced ~50% games) is the main strength engine; the league is a MINORITY of games —
         # facing a far-stronger fixed opponent yields mostly-losing games, a weak learning signal on its own.
         pool_frac=config.az_pool_frac,
+        # §C.7 #3 solver-free league levers (inert unless az_league: opponent_pool None + these defaults preserve behaviour).
+        league_p1_frac=float(config.az_league_p1_frac),
+        opening_anchor_cap=(4000 if int(config.az_league) else 0),
+        league_anchor_frac=float(config.az_league_anchor_frac),
+        league_frozen_self=bool(config.az_league),
         # ORACLE DISTILLATION — supervised optimal-move targets, the biggest lever for reaching perfect play. A
         # broad cached corpus (opening→endgame) when `az_distill_games>0`; else the late-only sampled positions.
-        distill_positions=config.az_distill_positions,
-        distill_corpus=distill_corpus,
+        # §C.7 #3: az_league is SOLVER-FREE — auto-disable the mild default late-game oracle distillation.
+        distill_positions=(0 if int(config.az_league) else config.az_distill_positions),
+        distill_corpus=(None if int(config.az_league) else distill_corpus),
         # The VALIDATED GENERIC recipe (plan §C.6) — enabled via the manifest; defaults preserve the classic loop.
         gumbel=bool(config.az_gumbel),
         c_scale=config.az_c_scale,

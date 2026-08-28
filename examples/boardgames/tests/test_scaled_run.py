@@ -34,3 +34,18 @@ def test_batches_checkpoint_and_resume(tmp_path):
     assert len(lines2) == 2  # exactly one NEW line appended on resume (batch 0 not re-run)
     # iterations_done is cumulative across batches
     assert json.loads(lines2[-1])["iterations_done"] == 2
+
+
+def test_scaled_run_league_routes_games_and_off_is_pure(tmp_path):
+    from harness.scaled_run import run_scaled_experiment
+    arch = {"channels": 16, "blocks": 1, "residual": True, "batchnorm": True, "head_hidden": 8}
+    base = {"game": "connect4", "net_arch": arch, "seed": 0, "sims": 6, "iters_per_batch": 1, "games": 8,
+            "epochs": 1, "buffer_cap": 2000, "opening_plies": 2, "batches": 1, "benchmark_positions": 4,
+            "offline_openings": 2}
+    # league ON: some games routed to the solver-free pool
+    on = run_scaled_experiment({**base, "run_dir": str(tmp_path / "on"), "league": True, "league_frac": 1.0,
+                                "league_snapshots": 0, "league_frozen_self": True})
+    assert on["metrics"][0]["league_vs_pool"] > 0
+    # league OFF: pure self-play, no pool games
+    off = run_scaled_experiment({**base, "run_dir": str(tmp_path / "off")})
+    assert off["metrics"][0]["league_vs_pool"] == 0

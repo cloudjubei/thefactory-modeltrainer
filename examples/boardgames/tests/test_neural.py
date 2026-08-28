@@ -758,3 +758,36 @@ def test_parallel_falls_back_when_endgame_on():
     net, hist, buf = train_alphazero(game, iterations=2, selfplay_games=6, sims=6, epochs=1, seed=3,
                                      endgame_tb=tb, endgame_max_empty=14, selfplay_workers=3, return_buffer=True)
     assert len(tb) > 0  # endgame fired ⇒ it took the sequential endgame path, not the parallel bypass
+
+
+def test_league_seat_priority_biases_to_p1(monkeypatch):
+    # §C.7 #3: league_p1_frac sets P(learner on the won P1 seat). Mutation-guards the seat draw.
+    from harness import neural
+    from harness.agents import RandomAgent
+    game = Connect4()
+    seats = []
+
+    def fake_vs(g, learner, opp, seat, rng):
+        seats.append(seat)
+        return [(neural.encode(g, g.initial_state(rng)), [1.0] + [0.0] * 6, 1.0)]
+
+    monkeypatch.setattr(neural, "vs_opponent_game", fake_vs)
+    neural.train_alphazero(game, iterations=1, selfplay_games=15, sims=6, epochs=1, seed=0,
+                           opponent_pool=[lambda: RandomAgent()], pool_frac=1.0, league_p1_frac=1.0)
+    assert seats and all(s == 0 for s in seats)
+    seats.clear()
+    neural.train_alphazero(game, iterations=1, selfplay_games=15, sims=6, epochs=1, seed=0,
+                           opponent_pool=[lambda: RandomAgent()], pool_frac=1.0, league_p1_frac=0.0)
+    assert seats and all(s == 1 for s in seats)
+
+
+def test_league_trains_with_anchor_and_frozen_self():
+    # The full solver-free league path (real RandomAgent pool + opening anchor + frozen-self) trains cleanly.
+    from harness.agents import RandomAgent
+    game = Connect4()
+    net, hist, buf = train_alphazero(game, iterations=2, selfplay_games=8, sims=6, epochs=1, seed=1,
+                                     opponent_pool=[lambda: RandomAgent()], pool_frac=0.5,
+                                     league_p1_frac=0.7, opening_anchor_cap=50, league_anchor_frac=0.25,
+                                     league_frozen_self=True, return_buffer=True)
+    assert isinstance(buf, list) and len(buf) > 0
+    assert any(h["vs_pool_games"] > 0 for h in hist)  # league games actually happened

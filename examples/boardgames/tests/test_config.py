@@ -157,3 +157,21 @@ def test_validate_rejects_out_of_range_endgame_knobs():
     ):
         with pytest.raises(ValueError):
             validate_config(bad)
+
+
+def test_az_league_levers_and_solver_free_assertion(tmp_path):
+    c = TrainerConfig(model_name="alphazero")
+    assert c.az_league == 0 and c.az_league_p1_frac == 0.7 and c.az_league_snapshots == 4
+    cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_league": "1", "az_pool_frac": "0.4",
+                                        "az_league_p1_frac": "0.8", "az_league_snapshots": "6",
+                                        "az_league_anchor_frac": "0.3"}))
+    assert cfg.az_league == 1 and cfg.az_league_p1_frac == 0.8 and cfg.az_league_snapshots == 6
+    # league MUST be solver-free: distillation / endgame with it is rejected
+    for bad in (
+        TrainerConfig(model_name="alphazero", az_league=1, az_distill_games=80),
+        TrainerConfig(model_name="alphazero", az_league=1, az_endgame_tablebase=1),
+        TrainerConfig(model_name="alphazero", az_league=2),
+        TrainerConfig(model_name="alphazero", az_league_p1_frac=1.5),
+    ):
+        with pytest.raises(ValueError):
+            validate_config(bad)

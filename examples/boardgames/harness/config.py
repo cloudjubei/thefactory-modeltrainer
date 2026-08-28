@@ -106,6 +106,12 @@ class TrainerConfig:
     az_batchnorm: int = 0  # 1 = BatchNorm (required to train a deep tower)
     az_head_hidden: int = 0  # policy/value head-tower hidden width (0 = bare linear readout)
     az_selfplay_workers: int = 1  # §C.7 parallel self-play worker processes (1 = sequential); fills idle cores
+    # §C.7 #3 SOLVER-FREE LEAGUE — break opening value-collapse WITHOUT an oracle (weak→strong non-oracle opponents +
+    # seat-priority + a self-generated opening anchor). Reuses az_pool_frac as the league fraction. Default OFF.
+    az_league: int = 0  # master switch; 1 = solver-free league (asserts az_distill_games==0 AND az_endgame_tablebase==0)
+    az_league_p1_frac: float = 0.7  # P(learner on the won P1 seat) in league games — concentrates opening coverage
+    az_league_snapshots: int = 4  # run-own arch-matched ckpt snapshots folded in as weak→recent AZ opponents
+    az_league_anchor_frac: float = 0.25  # fixed-fraction pin for the self-generated opening anchor (0 = off)
 
 
 @dataclass(frozen=True)
@@ -172,6 +178,16 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_head_hidden must be in {AZ_HEAD_HIDDEN_RANGE}, got {config.az_head_hidden}")
     if not 1 <= config.az_selfplay_workers <= 32:
         raise ValueError(f"az_selfplay_workers must be in (1, 32), got {config.az_selfplay_workers}")
+    if config.az_league not in (0, 1):
+        raise ValueError(f"az_league must be 0 or 1, got {config.az_league}")
+    if config.az_league and (config.az_distill_games > 0 or config.az_endgame_tablebase):
+        raise ValueError("az_league=1 must be SOLVER-FREE: set az_distill_games=0 and az_endgame_tablebase=0 (the mild default az_distill_positions is auto-disabled)")
+    if not 0.0 <= config.az_league_p1_frac <= 1.0:
+        raise ValueError(f"az_league_p1_frac must be in [0,1], got {config.az_league_p1_frac}")
+    if not 0.0 <= config.az_league_anchor_frac < 1.0:
+        raise ValueError(f"az_league_anchor_frac must be in [0,1), got {config.az_league_anchor_frac}")
+    if not 0 <= config.az_league_snapshots <= 20:
+        raise ValueError(f"az_league_snapshots must be in [0,20], got {config.az_league_snapshots}")
 
 
 def load_config(path: Path) -> TrainerConfig:
@@ -199,13 +215,13 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_selfplay_workers"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_selfplay_workers", "az_league_snapshots"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
-    for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds"):
+    for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds", "az_league_p1_frac", "az_league_anchor_frac"):
         if float_key in filtered:
             filtered[float_key] = float(filtered[float_key])
-    for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm"):
+    for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm", "az_league"):
         if bool_key in filtered:
             v = filtered[bool_key]
             filtered[bool_key] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0

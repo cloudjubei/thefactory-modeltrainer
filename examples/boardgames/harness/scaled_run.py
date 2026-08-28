@@ -95,6 +95,21 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
     endgame = bool(request.get("endgame", False))
     benchmark_positions = int(request.get("benchmark_positions", 60))
     offline_openings = int(request.get("offline_openings", 50))
+    # §C.7 #3 SOLVER-FREE LEAGUE — break opening value-collapse WITHOUT an oracle (see harness/league.py).
+    league = bool(request.get("league", False))
+    league_frac = float(request.get("league_frac", 0.4))  # forwarded as pool_frac; kept < 1 so a self-play majority anchors honest values
+    league_p1_frac = float(request.get("league_p1_frac", 0.7))
+    league_anchor_frac = float(request.get("league_anchor_frac", 0.25))
+    league_anchor_cap = int(request.get("league_anchor_cap", 4000))
+    league_frozen_self = bool(request.get("league_frozen_self", True))
+    league_cfg = {
+        "include_random": bool(request.get("league_include_random", True)),
+        "include_heuristic": bool(request.get("league_include_heuristic", True)),
+        "mcts_sims": request.get("league_mcts_sims", [30, 120]),
+        "snapshots": int(request.get("league_snapshots", 4)),
+        "snapshot_sims": int(request.get("league_snapshot_sims", sims)),
+        "gumbel": gumbel, "c_scale": c_scale,
+    }
 
     def emit(p: dict) -> None:
         if on_progress:
@@ -115,6 +130,21 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
     metrics_path = run_dir / "metrics.jsonl"
     emit({"phase": "resume", "completed_batches": done, "start_batch": start, "arch": net_arch})
 
+    # EXACT-TARGET distillation (§C.7 #1 — the direct fix for opening value-collapse): a broad oracle-labelled
+    # opening→endgame corpus imprinted every training pass, so the OPENING carries its true value instead of the
+    # ~0 self-play collapses to. Built ONCE and cached under run_dir. distill_games=0 ⇒ off (pure self-play).
+    distill_games = int(request.get("distill_games", 0))
+    distill_positions = int(request.get("distill_positions", 0))
+    distill_corpus = None
+    if distill_games > 0 or distill_positions > 0:
+        from harness.neural import build_distill_corpus
+
+        spec = {"games": distill_games, "seed": seed, "oracle_depth": int(request.get("distill_oracle_depth", 8)),
+                "exact_max_empty": 22, "opening_plies": opening_plies,
+                "late": {"n": distill_positions, "min_moves": 20}}
+        distill_corpus = build_distill_corpus(game, spec, cache_dir=str(run_dir), log=None)
+        emit({"phase": "distill_corpus", "examples": len(distill_corpus)})
+
     all_metrics: list[dict] = []
     if metrics_path.exists():
         all_metrics = [json.loads(l) for l in metrics_path.read_text().splitlines() if l.strip()]
@@ -122,6 +152,11 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
     import torch
 
     for b in range(start, batches):
+        opp_pool = None
+        if league:  # rebuild each batch so the ladder grows with the run's own fresh snapshots
+            from harness.league import build_solver_free_pool
+
+            opp_pool = build_solver_free_pool(game, run_dir, list(range(b)), net_arch, league_cfg)
         net, hist, buf = train_alphazero(
             game, iterations=iters_per_batch, selfplay_games=games, sims=sims, epochs=epochs,
             seed=seed * 1000 + b, init_net=init_net, net_arch=net_arch, buffer_cap=buffer_cap,
@@ -130,6 +165,11 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             endgame_exact_targets=int(request.get("endgame_exact_targets", 1)),
             init_buffer=init_buffer, return_buffer=True,
             selfplay_workers=int(request.get("selfplay_workers", 1)),
+            distill_corpus=distill_corpus,
+            distill_fraction=float(request.get("distill_fraction", 0.34)),
+            opponent_pool=opp_pool, pool_frac=(league_frac if league else 0.0),
+            league_p1_frac=league_p1_frac, opening_anchor_cap=(league_anchor_cap if league else 0),
+            league_anchor_frac=league_anchor_frac, league_frozen_self=league_frozen_self,
         )
         save_net(net, str(run_dir / f"ckpt_{b}.pt"))
         torch.save(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts
@@ -138,7 +178,8 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             run_tb.save(str(tb_path))
         m = batch_metrics(game, net, seed, sims, benchmark_positions, offline_openings, opening_plies, gumbel, c_scale)
         rec = {"batch": b, "iterations_done": (b + 1) * iters_per_batch, "final_loss": round(hist[-1]["loss"], 4),
-               "endgame_total": (len(run_tb) if run_tb is not None else 0), **m}
+               "endgame_total": (len(run_tb) if run_tb is not None else 0),
+               "league_vs_pool": sum(h["vs_pool_games"] for h in hist), **m}
         with metrics_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
         all_metrics.append(rec)
