@@ -180,8 +180,10 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_selfplay_workers must be in (1, 32), got {config.az_selfplay_workers}")
     if config.az_league not in (0, 1):
         raise ValueError(f"az_league must be 0 or 1, got {config.az_league}")
-    if config.az_league and (config.az_distill_games > 0 or config.az_endgame_tablebase):
-        raise ValueError("az_league=1 must be SOLVER-FREE: set az_distill_games=0 and az_endgame_tablebase=0 (the mild default az_distill_positions is auto-disabled)")
+    if config.az_league and config.az_distill_games > 0:
+        # league REPLACES oracle OPENING distillation (redundant + defeats the solver-free point). The grow-as-you-go
+        # ENDGAME table (az_endgame_tablebase) is COMPLEMENTARY (endgame precision) and allowed alongside the league.
+        raise ValueError("az_league=1 replaces oracle opening distillation: set az_distill_games=0 (endgame tablebase is allowed)")
     if not 0.0 <= config.az_league_p1_frac <= 1.0:
         raise ValueError(f"az_league_p1_frac must be in [0,1], got {config.az_league_p1_frac}")
     if not 0.0 <= config.az_league_anchor_frac < 1.0:

@@ -832,6 +832,26 @@ RUNNING: scaled net seed 0, 20 batches, league_frac=0.4/p1_frac=0.7/snapshots=4/
 oracle/distill/endgame. Open crux: can solver-free opponents (max = mcts@120 + frozen-self, both < depth-8 oracle) close
 off-line loss to distillation's ~0.21, or plateau above? Run: checkpoints/scaled_runs/s3_league.
 
+**#3 LEAGUE COMPLETE (8k games, NO oracle) — solver-free value-collapse fix VALIDATED (partial).** FINAL (last-4 avg):
+**opening_value +0.60** (0→+0.6 trajectory; noisy but robustly positive — pure never left ~0), **off-line P1-loss 0.375**
+(0.75→~0.28-0.375; dipped to 0.275 @b18). THREE-WAY on the scaled net: pure ~0/0.28@16k · DISTILL(oracle) +1.0/0.21@8k ·
+LEAGUE(NO oracle) +0.60/0.375@8k. VERDICT: the solver-free league GENUINELY breaks the value-collapse from play outcomes
+alone (the chess/Go-transferable mechanism) and improves robustness, but doesn't fully match oracle distillation — its
+best teacher (mcts@120 + frozen-self) is sub-depth-8-oracle, the expected ceiling. Trajectory still improving/noisy →
+stronger solver-free opponents (higher-sim MCTS, more snapshots) + more games would likely narrow the gap. **COMPLETE
+ANSWER to "why did self-play fail":** near-optimal generic C4 = CAPACITY (scaled net) + BREAK THE VALUE-COLLAPSE — cleanly
+via oracle distillation (+1.0/0.21) OR solver-free via league (+0.60/0.375, the transferable one). Both end-to-end confirmed.
+
+**"MAKE IT BETTER" RUN (2026-08-30/31) — combined recipe, solver-free, IMPROVED.** Scaled net + STRONGER league
+(mcts 60/200, 6 snapshots@128) + grow-as-you-go ENDGAME table ON (#2, filled ~199k positions) + 24 batches/9.6k games.
+FINAL (last-4 avg): **opening_value +0.878** (peaked +0.955 @b18) — up from first league's +0.60, NEAR the oracle's +1.0;
+**off-line P1-loss 0.356** (best 0.30) — modest gain over 0.375. So the combined recipe closed most of the OPENING-belief
+gap to the oracle solver-free, but the ROBUSTNESS gap (0.36 vs oracle 0.21) only narrowed slightly = the sub-oracle
+TEACHER CEILING (best solver-free teacher mcts@200+frozen-self < depth-8 oracle). Next lever to close it: even stronger
+solver-free opponents (higher-sim MCTS / deeper self-play) + more games — measurable, not a wall. Config relaxed:
+az_league now COEXISTS with az_endgame_tablebase (complementary: league=opening, endgame table=endgame precision); only
+az_distill_games (oracle opening crutch) is mutually exclusive with league. Run: checkpoints/scaled_runs/better1.
+
 **Immediate driving case (user-chosen): push Connect-4 to SOLVED — PROGRESSING, with an HONEST correction.**
 **(2026-08-25) recipe-into-real-training-path + teacher → main-line opening SOUND but the net is MAIN-LINE-BRITTLE.**
 A run via the wired `harness.run` tool (recipe: gumbel + n=8/k=2 + distillation teacher, 10×24) → mid-game oracle-match

@@ -166,12 +166,13 @@ def test_az_league_levers_and_solver_free_assertion(tmp_path):
                                         "az_league_p1_frac": "0.8", "az_league_snapshots": "6",
                                         "az_league_anchor_frac": "0.3"}))
     assert cfg.az_league == 1 and cfg.az_league_p1_frac == 0.8 and cfg.az_league_snapshots == 6
-    # league MUST be solver-free: distillation / endgame with it is rejected
+    # league replaces oracle OPENING distillation (rejected), but the grow-as-you-go ENDGAME table is complementary (allowed)
     for bad in (
         TrainerConfig(model_name="alphazero", az_league=1, az_distill_games=80),
-        TrainerConfig(model_name="alphazero", az_league=1, az_endgame_tablebase=1),
         TrainerConfig(model_name="alphazero", az_league=2),
         TrainerConfig(model_name="alphazero", az_league_p1_frac=1.5),
     ):
         with pytest.raises(ValueError):
             validate_config(bad)
+    validate_config(TrainerConfig(model_name="alphazero", az_league=1, az_endgame_tablebase=1,
+                                  az_distill_positions=0))  # league + grow-as-you-go endgame table = OK
