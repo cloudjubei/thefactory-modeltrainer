@@ -852,6 +852,116 @@ solver-free opponents (higher-sim MCTS / deeper self-play) + more games — meas
 az_league now COEXISTS with az_endgame_tablebase (complementary: league=opening, endgame table=endgame precision); only
 az_distill_games (oracle opening crutch) is mutually exclusive with league. Run: checkpoints/scaled_runs/better1.
 
+**⭐ CLEAN METRIC REFRAMES THE GAP (2026-08-31): the solver-free LEAGUE is the BEST at real near-optimality.** The
+off-line-P1-loss proxy (league 0.36 vs distill 0.21) has a big IRREDUCIBLE FLOOR — it counts losses from RANDOM diverse
+openings, many of which are theoretically P1-LOST regardless of play. On the CLEAN metric (verify_forced_win_conversion:
+does the net convert positions that ARE proven-won, net-only, vs the exact solver, empties=24, 16 roots): **better1-LEAGUE
+15/16 = 0.938 > distill-ORACLE 14/16 = 0.875 > pure 13/16 = 0.812**. So the generic, SOLVER-FREE league process reaches
+near-optimal (0.94) and EDGES OUT the oracle-based distillation — the "robustness gap" was largely a metric artifact,
+not real weakness. LESSON (again): pick the metric that measures near-optimality (proven-win conversion), NOT a proxy
+with a floor. Measurement: scratch/measure_champs.py.
+
+**⭐ "PUSH THE LAST ROBUSTNESS GAP" = PLATEAU, not breakthrough (2026-08-31, COMPLETE).** Resumed better1 batch 24→40 (16
+more batches) with the STRONGEST solver-free teachers yet: league mcts 100/300 sims, 8 snapshots @200 sims, league_frac
+0.45, opening_plies 6, endgame table ON. FINAL b40: opening_value +0.755 (last-4 avg), off-line P1-loss 0.317 (best recent
+0.267) — NO gain over the pre-push b23 (+0.90/0.30). DECISIVE clean-metric head-to-head (verify_forced_win_conversion,
+net-only, n_roots=**32**, empties=24, seed=7): **pre-push b23 = 31/32 = 0.969 > final b39 = 29/32 = 0.906.** b23 leads at
+BOTH n=16 (15/16 vs 14/16) and n=32 — a consistent ~2-root edge that never once favors the extra training (within noise,
+but the push clearly did not help). VERDICT: **ckpt_23 is the near-optimal champion — 0.969 forced-win conversion,
+net-only, no solver.** The residual off-line-loss gap to the oracle (0.30 vs 0.21) is NOT teacher-strength-limited — it is
+the METHOD/ARCHITECTURE CEILING for this 1.79M net; more of the same solver-free teacher does not break it. Closing it
+further needs a DIFFERENT lever (bigger net, a different value target, or a genuinely stronger-than-depth-8 teacher), not
+more league games. This closes the #1/#2/#3 arc: generic solver-free self-play reaches ~0.97 near-optimality on C4, and we
+now know precisely where its ceiling is and why.
+
+### §C.8 — NEXT-LEVERS ROADMAP (2026-08-31): what actually moves a MEASURED ceiling
+
+Source: an 11-agent literature+adversarial-critique workflow over 5 questions (efficiency / net-arch / generic solver /
+constraint-programming / leftover items). **Honest filter kept throughout: separate levers that can raise the 0.969 forced-win
+ceiling from levers that only make training cheaper or more robust — we MEASURED that more league games / stronger teachers do
+NOT move the ceiling, so ordering leads with the ceiling-movers.** Tags: `[verified]` = citation confirmed against source this
+session; `[unverified]` = flagged by the critic as unconfirmed, treat the specific number as directional; `[reasoning]` =
+inference from our harness. Priority order below is the recommended execution order.
+
+**A. CEILING-MOVERS — the only levers that can beat 0.969 (do these to break the plateau).**
+
+1. **Net-architecture SCREEN → pick the best arch** [Q2] — RUNNING (see ACTION). Isolates the architecture variable; names
+   the arch to commit to. The residual gap is a MEASURED architecture/method ceiling, so this is the front of the queue.
+2. **Global-pooling branch** (`az_global_pool`, new; whole-board mean+max → small FC → added back per-channel inside `_ResBlock`,
+   `neural.py:41-58`) [Q2]. Best-evidenced ceiling lever: fits C4's **odd/even threat-parity / Allis zugzwang** — a whole-board
+   count stacked local convs represent poorly `[reasoning]`; `[verified]` KataGo +176 Elo / 1.6×. Does NOT contradict our
+   "receptive-field is a red herring" note (that was head sight; this is mid-tower global conditioning). *Test:* A/B the ckpt_23
+   recipe ± branch, `verify_forced_win_conversion` n=32.
+3. **Classification / distributional value head** (replace tanh scalar + MSE at `neural.py:99-110,194,738-768` with a K-bin
+   categorical head + cross-entropy) [Q2]. Attacks value-collapse at the root where MSE-optimal ≈ 0. `[verified]` Farebrother
+   "Stop Regressing" 2024 (incl. searchless chess). *Test:* opening-value climb-rate + conversion vs ckpt_23; stacks with
+   `az_endgame_exact_targets`.
+4. **Auxiliary heads** (ownership / opponent-reply targets) [Q2] — `[verified]` KataGo ~190 Elo / 1.65×; enriches the value
+   gradient, directly targets value-collapse, and STACKS with #3. *Test:* games-to-threshold + conversion vs ckpt_23.
+5. **Exploitability-descent / learned-adversary loop** [Q5-T1, Q4] — the ONE solver-free, chess-scale robustness bound
+   `[verified]` Timbers 2020; substrate exists (`champions.py`, `vs_opponent_game`). This is also where Q4's sound idea lands:
+   **nogood/conflict-learning = refutation-replay** — when an opponent refutes an opening we keep entering, store
+   `(canonical_key, refutation)`, up-weight it in the buffer, and force it via `opening_plies` until the net stops re-entering.
+   *Escalation rule:* if #2-#4 + the best swept arch still can't beat 0.969, the ceiling is genuinely representational-plus-
+   value-target and THIS is the next move — not more search or more league games.
+
+**B. EFFICIENCY — makes training cheaper/monotone; FUNDS section A, does NOT raise the ceiling.**
+
+6. **Promotion GATE on champion crowning** [Q1] — buildable from existing `head_to_head` / `verify_forced_win_conversion`:
+   only crown a checkpoint if it beats the current one. *Sharpest cheap win:* our own push regressed b23→b39; a gate would have
+   KEPT b23 and it kills the lucky-seed-checkpoint risk `[reasoning]`. (Weight-EMA/SWA is a code-add companion, NOT an existing
+   knob — do not present it as a free flag.)
+7. **Cut training sims 96 → ~32** (`az_sims`, `config.py:76`; keep eval/deploy sims high — already decoupled) [Q1]. Gumbel
+   completed-Q + `gumbel_m=16` ≥ all 7 columns ⇒ 96 is likely 2-3× above the efficient frontier `[reasoning]`. *Test:* an
+   equal-wall-clock sweep over `az_sims ∈ {16,24,48,96}`. NOTE the "MiniZero 9-16×" figure the research cited was `[unverified]`
+   / misattributed — settle it empirically, do not cite the number.
+8. **Reanalyze** (`reanalyze_frac` 0→0.25, machinery present `neural.py:516-534`) [Q1] — reuses buffered positions; cheap once
+   sims are low. Speeds convergence to the SAME ceiling.
+9. **KataGo playout-cap randomization** [Q5-T1] — good fit for value-collapse (more games → more value signal). SKIP the
+   forced-playout-pruning half — redundant with our Gumbel completed-Q path `[reasoning]`.
+
+**C. SOLVER / CORRECTNESS — cheap, bounded, complementary (not ceiling-movers on their own).**
+
+10. **Net policy → move-ordering into the existing αβ solver** (`solver.py` + `tablebase.py` eviction priority) [Q3] — cheapest
+    solver win, no new algorithm; ~1.3-2× more positions proven per fixed `az_endgame_extend_seconds` `[unverified]` ("Neural
+    MoveMap" number unconfirmed — directional). Yields exact MID-game targets a few plies above today's frontier, NOT empty-board
+    proofs (opening wall is minutes-long in pure Python; net ordering shifts it, doesn't dissolve it).
+11. **Proof-as-exact-refutation into the buffer** [Q3] — fold proven-LOSS lines into training; doubles as a rigorous solver-free
+    C4 correctness check (proof-agreement card in `process_eval`).
+
+**D. MEASUREMENT / ENABLERS.**
+
+12. **`disentangle` capability** (promote `gumbel_disentangle.py`) [Q5-T1] — the measurement engine that unlocks the H1-H10
+    hypothesis program on any `SolvableGame`; prerequisite for most hypothesis work.
+13. **Mixed-openings self-play** (some games 0 opening-plies, some >0) [Q5-T1] — the cheapest concrete robustness experiment left
+    and the fix for the diverse-opening dilution confound.
+14. **LBR cheap-screen** (wrap `NearPerfectOracle(depth=k)` as a restricted best-responder) [Q5-T1] — always-on cheap
+    exploitability refuter, reuses the existing oracle.
+
+**E. EXPLICITLY DECLINED / GATED — recorded so we do not revisit prematurely.**
+
+- **EfficientZero** (learned-model + reward-prefix tricks are moot on a perfect simulator with terminal reward) and
+  **prioritized replay** (de-prioritizes the opening positions that most need signal) [Q1] `[verified/reasoning]`.
+- **Attention/transformer, GNN, nested-bottleneck on C4** [Q2] — right levers, wrong board: transformers win on 19×19 Go where
+  conv can't span; GNNs on relational topologies like chess piece-graphs (`[verified]` AlphaGateau NeurIPS 2024, a chess-transfer
+  item); nested-bottleneck only pays ≥256ch.
+- **CP / SAT / QBF as the engine** [Q4] — CATEGORY ERROR: game-depth = QBF-alternation-depth is the complexity wall; generic
+  solvers stall at 4×4 tic-tac-toe where specialized minimax wins `[verified]`. The two big CP ideas (canonical-key transposition
+  + left-right symmetry breaking) are ALREADY ours (`solver.py:83-105`, `tablebase.py`/`book.py`, `augment_examples`
+  `neural.py:718`); the only new borrowable idea (nogood learning) is item #5.
+- **Full generic df-pn + GHI engine / EWS** [Q3] `[unverified]` and the **per-game-class portfolio** (df-pn for high-branching
+  threat games; afterstate-TD/expectimax for stochastic; CFR→Deep-CFR/NFSP→R-NaD for hidden-info; MuZero) [Q5-T2/3] — real
+  backlog but GATED on actually moving to a harder game class. Do NOT pull forward.
+
+**ACTION IN FLIGHT — net-arch SCREEN** (`checkpoints/scaled_runs/archscreen/`): 8 archs (20.6K→4.74M params, verified),
+recipe = **distillation + endgame exact-targets** so each net reaches ITS OWN representational ceiling — isolates the arch
+variable (the oracle is a MEASUREMENT crutch here, not part of the deployed generic process). Ranking is RELATIVE across archs
+(NOT vs 0.969 — this is a cheap screen); the winner is carried into the full solver-free league recipe for the real vs-0.969
+test, and only crowned after a second-seed re-run (standing don't-trust-one-sweep rule). Bounded: 2,560 games/arch, sims 48,
+one arch at a time, niced + OMP-capped (BLAS-thrash guard), resumable, ~12-15h; smoke-tested green. PROCESS NOTE: a workflow
+subagent auto-launched a FIRST sweep as pure-#1; the critic caught that pure-#1 collapses for every arch (0.812 even at 16k
+games ⇒ no discrimination) — killed and relaunched with this distill+endgame screen.
+
 **Immediate driving case (user-chosen): push Connect-4 to SOLVED — PROGRESSING, with an HONEST correction.**
 **(2026-08-25) recipe-into-real-training-path + teacher → main-line opening SOUND but the net is MAIN-LINE-BRITTLE.**
 A run via the wired `harness.run` tool (recipe: gumbel + n=8/k=2 + distillation teacher, 10×24) → mid-game oracle-match
