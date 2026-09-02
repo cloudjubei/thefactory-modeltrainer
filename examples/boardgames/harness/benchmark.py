@@ -234,6 +234,42 @@ def verify_forced_win_conversion(
     return {"converted": converted, "total": total, "rate": (converted / total) if total else 0.0, "roots": details}
 
 
+def lbr_screen(
+    game: Game, model_factory: Callable[[], object], depths: list[int], n_openings: int = 20,
+    opening_plies: int = 4, seed: int = 0, oracle_solve_endgame: int = 22,
+) -> dict:
+    """LBR cheap-screen (§C.8 #14): the model plays BOTH seats against depth-k RESTRICTED best responders
+    (`NearPerfectOracle(depth=k)`) from a fixed diverse-opening corpus. The per-depth loss rate profiles
+    exploitability: how deep a refuter must look before it exploits the policy. An always-on, oracle-reusing
+    robustness gauge — far cheaper than a learned adversary, strictly weaker (a k-ply screen, not a bound)."""
+    from harness.solver import NearPerfectOracle
+
+    by_depth: list[dict] = []
+    for depth in depths:
+        seats_out = {}
+        losses = 0
+        for model_seat in (0, 1):
+            w = d = l = 0
+            for i in range(n_openings):
+                rng = random.Random(seed * 100003 + i)
+                state = game.initial_state(rng)
+                for _ in range(opening_plies):
+                    if game.is_terminal(state):
+                        break
+                    state = game.step(state, rng.choice(game.legal_actions(state)))
+                seats = {model_seat: model_factory(),
+                         1 - model_seat: NearPerfectOracle(depth=depth, solve_endgame=oracle_solve_endgame)}
+                while not game.is_terminal(state):
+                    state = game.step(state, seats[game.current_player(state)].act(game, state, rng))
+                r = game.returns(state)[model_seat]
+                w, d, l = w + (r > 0), d + (r == 0), l + (r < 0)
+            seats_out["as_p1" if model_seat == 0 else "as_p2"] = {
+                "win": w / n_openings, "draw": d / n_openings, "loss": l / n_openings}
+            losses += l
+        by_depth.append({"depth": depth, **seats_out, "exploit_rate": losses / (2 * n_openings)})
+    return {"by_depth": by_depth, "games_per_depth": 2 * n_openings, "opening_plies": opening_plies, "seed": seed}
+
+
 def sim_scaling_curve(
     game: Game,
     model_factory: Callable[[int], object],

@@ -67,3 +67,124 @@ def test_residual_value_head_has_a_real_nonlinearity():
     net = Connect4Net(channels=32, blocks=2, residual=True, batchnorm=False, head_hidden=32)
     linears = [m for m in net.value_head.modules() if isinstance(m, torch.nn.Linear)]
     assert len(linears) >= 2  # hidden + output ⇒ can represent the nonlinear AND-of-threats / parity
+
+
+def test_global_pool_defaults_off_and_legacy_arch_unchanged():
+    # §C.8 lever #2 is OPT-IN: the default arch must stay byte-identical (old checkpoints, running screens).
+    net = Connect4Net(channels=32, blocks=2, residual=True, batchnorm=True, head_hidden=32)
+    assert net.arch["global_pool"] is False
+    assert all(getattr(b, "gpool_fc", None) is None for b in net.blocks)
+    legacy = Connect4Net()
+    assert legacy.arch["global_pool"] is False and legacy.arch["value_bins"] == 0
+
+
+def test_global_pool_branch_exists_gets_gradient_and_roundtrips(tmp_path):
+    # KataGo-style whole-board conditioning (§C.8 #2): every block carries a mean+max pool → FC → per-channel
+    # bias path, it must actually TRAIN (gradient flows), and the arch must round-trip through save/load.
+    net = Connect4Net(channels=16, blocks=2, residual=True, batchnorm=True, head_hidden=8, global_pool=True)
+    assert net.arch["global_pool"] is True
+    for b in net.blocks:
+        assert b.gpool_fc is not None and b.gpool_fc.out_features == 16 and b.gpool_fc.in_features == 32
+    g = Connect4()
+    # Probe with NON-EMPTY positions at batch 2: on the all-zero empty board BatchNorm zeroes every constant
+    # activation, so block-0's pooled input (and thus its weight grad) is legitimately 0 — an input artifact.
+    rng = __import__("random").Random(3)
+    states = []
+    for _ in range(2):
+        s = g.initial_state(rng)
+        for _ in range(4):
+            s = g.step(s, rng.choice(g.legal_actions(s)))
+        states.append(s)
+    x = torch.stack([encode(g, s) for s in states])
+    p, v = net(x)
+    assert p.shape == (2, 7) and v.shape == (2, 1) and all(-1.0 <= float(vi) <= 1.0 for vi in v[:, 0])
+    (p.sum() + v.sum()).backward()
+    grads = [b.gpool_fc.weight.grad for b in net.blocks]
+    assert all(gr is not None and float(gr.abs().sum()) > 0 for gr in grads)  # the pool path is live, not dead
+    net.eval()
+    with torch.no_grad():
+        p0, v0 = net(x)
+    path = str(tmp_path / "gpool.pt")
+    save_net(net, path)
+    back = load_net(path)
+    assert back.arch == net.arch and back.blocks[0].gpool_fc is not None
+    with torch.no_grad():
+        p1, v1 = back(x)
+    assert torch.allclose(p0, p1, atol=1e-5) and torch.allclose(v0, v1, atol=1e-5)
+
+
+def test_value_bins_head_returns_scalar_expectation_and_roundtrips(tmp_path):
+    # §C.8 lever #3: categorical value head. CONSUMERS stay untouched — forward still returns a scalar in
+    # [-1, 1] (the expectation over the bin support), so MCTS/eval/probes need no changes.
+    net = Connect4Net(channels=16, blocks=2, residual=True, batchnorm=True, head_hidden=8, value_bins=9)
+    assert net.arch["value_bins"] == 9
+    assert net.value_support.shape == (9,)
+    assert float(net.value_support[0]) == -1.0 and float(net.value_support[-1]) == 1.0
+    g = Connect4()
+    x = encode(g, g.initial_state(__import__("random").Random(4))).unsqueeze(0)
+    net.eval()
+    p, v = net(x)
+    assert p.shape == (1, 7) and v.shape == (1, 1) and -1.0 <= float(v[0, 0]) <= 1.0
+    logits_p, bin_logits = net.forward_train(x)
+    assert bin_logits.shape == (1, 9)  # the TRAIN path exposes the distribution for cross-entropy
+    with torch.no_grad():
+        p0, v0 = net(x)
+    path = str(tmp_path / "bins.pt")
+    save_net(net, path)
+    back = load_net(path)
+    assert back.arch == net.arch
+    with torch.no_grad():
+        p1, v1 = back(x)
+    assert torch.allclose(p0, p1, atol=1e-5) and torch.allclose(v0, v1, atol=1e-5)
+
+
+def test_value_bins_on_the_legacy_tower_too():
+    # The lever is arch-orthogonal: a non-residual net with bins still returns a scalar expectation.
+    net = Connect4Net(channels=8, value_bins=5)
+    g = Connect4()
+    x = encode(g, g.initial_state(__import__("random").Random(5))).unsqueeze(0)
+    p, v = net(x)
+    assert v.shape == (1, 1) and -1.0 <= float(v[0, 0]) <= 1.0
+    _p, bl = net.forward_train(x)
+    assert bl.shape == (1, 5)
+
+
+def test_forward_train_matches_forward_for_scalar_nets():
+    # With bins OFF, forward_train IS forward — one train path, no drift between the two.
+    net = Connect4Net(channels=16, blocks=1, residual=True, batchnorm=False, head_hidden=8)
+    net.eval()
+    g = Connect4()
+    x = encode(g, g.initial_state(__import__("random").Random(6))).unsqueeze(0)
+    with torch.no_grad():
+        p0, v0 = net(x)
+        p1, v1 = net.forward_train(x)
+    assert torch.allclose(p0, p1) and torch.allclose(v0, v1)
+
+
+def test_aux_heads_default_off_and_require_the_residual_tower():
+    # §C.8 #4 aux heads are OPT-IN (default net byte-identical) and read SPATIAL trunk features — scaled tower only.
+    import pytest
+
+    net = Connect4Net(channels=16, blocks=1, residual=True, batchnorm=False, head_hidden=8)
+    assert net.arch["aux_heads"] is False and not hasattr(net, "own_head")
+    with pytest.raises(ValueError):
+        Connect4Net(channels=8, aux_heads=True)  # legacy tower has no aux seam
+
+
+def test_aux_heads_forward_aux_shapes_and_roundtrip(tmp_path):
+    # forward stays (p, v) — consumers untouched; forward_aux adds ownership map (tanh, per-cell) + reply logits.
+    net = Connect4Net(channels=16, blocks=1, residual=True, batchnorm=False, head_hidden=8, aux_heads=True)
+    assert net.arch["aux_heads"] is True
+    g = Connect4()
+    x = encode(g, g.initial_state(__import__("random").Random(7))).unsqueeze(0)
+    net.eval()
+    p, v = net(x)
+    assert p.shape == (1, 7) and v.shape == (1, 1)
+    p2, v2, own, reply = net.forward_aux(x)
+    assert torch.allclose(p, p2) and torch.allclose(v, v2)
+    assert own.shape == (1, 42) and float(own.abs().max()) <= 1.0
+    assert reply.shape == (1, 7)
+    path = str(tmp_path / "aux.pt")
+    save_net(net, path)
+    back = load_net(path)
+    assert back.arch == net.arch and hasattr(back, "own_head") and hasattr(back, "reply_head")

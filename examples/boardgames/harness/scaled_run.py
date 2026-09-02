@@ -24,6 +24,54 @@ def _deploy_agent(net, arch: dict, sims: int, gumbel: bool, c_scale: float):
     return AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=gumbel, c_scale=c_scale, temperature=0.0)
 
 
+GATE_PROBE_SEED = 1013  # HELD OUT from the measurement seed (7) — review-confirmed: with seed=7 the gate's 12
+# roots were literally the first 12 of the final n=32 scorecard's roots, so the gate max-selected the champion
+# on 37.5% of the exact final measurement. Gate selection and final measurement must never share roots.
+
+
+def _write_json_atomic(path: Path, obj: dict) -> None:
+    """temp+rename write (same failure class as the FileStorage partial-read incident: a kill mid-write must
+    never leave truncated JSON for the next resume to crash on)."""
+    import os
+
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(obj))
+    os.replace(tmp, path)
+
+
+def _read_json_tolerant(path: Path) -> dict | None:
+    """A corrupt/truncated file (crashed mid-write, pre-atomic era) degrades to 'absent', never a crash."""
+    try:
+        return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def gate_probe(game, net, roots: int, sims: int) -> float:
+    """The gate's per-batch probe (§C.8 #6): net-only forced-win conversion over `roots` PROVEN-won positions —
+    the clean near-optimality metric, on a fixed HELD-OUT seed so batches compare like-for-like without ever
+    touching the final-measurement roots."""
+    from harness.benchmark import verify_forced_win_conversion
+
+    r = verify_forced_win_conversion(
+        game, lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=True, c_scale=0.1),
+        n_roots=roots, empties=24, games_per_root=1, seed=GATE_PROBE_SEED, max_empty=22)
+    return float(r["rate"])
+
+
+def update_gate(run_dir: Path, batch: int, rate: float, net) -> bool:
+    """Crown `net` as champion.pt ONLY on a STRICTLY better probe rate (ties keep the incumbent — §C.8 #6: the
+    push run's b23→b39 regression is exactly what this prevents). Returns whether promotion happened."""
+    champ_path = Path(run_dir) / "champion.json"
+    blob = _read_json_tolerant(champ_path) if champ_path.exists() else None
+    best = blob["rate"] if blob else None
+    if best is not None and rate <= best:
+        return False
+    save_net(net, str(Path(run_dir) / "champion.pt"))
+    _write_json_atomic(champ_path, {"batch": batch, "rate": rate})
+    return True
+
+
 def offline_p1_loss(game, net, sims: int, n_openings: int, opening_plies: int, seed: int,
                     gumbel: bool = True, c_scale: float = 0.1, oracle_depth: int = 8) -> dict:
     """Champion plays P1 from `n_openings` FIXED diverse random openings vs a depth-`oracle_depth` oracle; return
@@ -96,6 +144,21 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
     benchmark_positions = int(request.get("benchmark_positions", 60))
     offline_openings = int(request.get("offline_openings", 50))
     # §C.7 #3 SOLVER-FREE LEAGUE — break opening value-collapse WITHOUT an oracle (see harness/league.py).
+    gate_roots = int(request.get("gate_roots", 0))
+    # §C.8 #5 refutation-replay: a run-owned nogood store, persisted per batch so RESUME keeps its refuted lines.
+    refutation_frac = float(request.get("refutation_frac", 0.0))
+    refutation_store = None
+    refut_path = None
+    if refutation_frac > 0.0:
+        from harness.refutation import RefutationStore
+
+        if not request.get("league", False):
+            # review-confirmed: nogoods are ONLY added from P1-seat league losses — without the league the store
+            # stays empty forever and the knob silently does nothing. Refuse the dead config, don't fake it.
+            raise ValueError("refutation_frac > 0 requires league=true (nogoods come from league losses)")
+        refut_path = Path(request["run_dir"]) / "refutations.json"
+        blob = _read_json_tolerant(refut_path) if refut_path.exists() else None
+        refutation_store = RefutationStore.from_json(blob) if blob else RefutationStore()
     league = bool(request.get("league", False))
     league_frac = float(request.get("league_frac", 0.4))  # forwarded as pool_frac; kept < 1 so a self-play majority anchors honest values
     league_p1_frac = float(request.get("league_p1_frac", 0.7))
@@ -161,8 +224,16 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             game, iterations=iters_per_batch, selfplay_games=games, sims=sims, epochs=epochs,
             seed=seed * 1000 + b, init_net=init_net, net_arch=net_arch, buffer_cap=buffer_cap,
             gumbel=gumbel, c_scale=c_scale, value_n_step=value_n_step, selfplay_opening_plies=opening_plies,
+            opening_plies_zero_frac=float(request.get("opening_plies_zero_frac", 0.0)),
+            reanalyze_frac=float(request.get("reanalyze_frac", 0.0)),
+            endgame_net_priority=bool(request.get("endgame_net_priority", 0)),
+            refutation_frac=refutation_frac,
+            refutation_prefix_plies=int(request.get("refutation_prefix_plies", 6)),
+            refutation_store=refutation_store,
             endgame_tb=run_tb, endgame_max_empty=int(request.get("endgame_max_empty", 14)),
             endgame_exact_targets=int(request.get("endgame_exact_targets", 1)),
+            endgame_extend_positions=int(request.get("endgame_extend_positions", 2000)),
+            endgame_extend_seconds=float(request.get("endgame_extend_seconds", 5.0)),
             init_buffer=init_buffer, return_buffer=True,
             selfplay_workers=int(request.get("selfplay_workers", 1)),
             distill_corpus=distill_corpus,
@@ -173,6 +244,8 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         )
         save_net(net, str(run_dir / f"ckpt_{b}.pt"))
         torch.save(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts
+        if refutation_store is not None:
+            _write_json_atomic(refut_path, refutation_store.to_json())
         init_buffer = buf
         if run_tb is not None:
             run_tb.save(str(tb_path))
@@ -180,6 +253,9 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         rec = {"batch": b, "iterations_done": (b + 1) * iters_per_batch, "final_loss": round(hist[-1]["loss"], 4),
                "endgame_total": (len(run_tb) if run_tb is not None else 0),
                "league_vs_pool": sum(h["vs_pool_games"] for h in hist), **m}
+        if gate_roots > 0:  # §C.8 #6: probe + promote-only-on-strictly-better, so a late slide never uncrowns the best
+            rec["gate_rate"] = gate_probe(game, net, gate_roots, sims)
+            update_gate(run_dir, b, rec["gate_rate"], net)
         with metrics_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
         all_metrics.append(rec)

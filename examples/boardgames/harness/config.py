@@ -105,6 +105,10 @@ class TrainerConfig:
     az_residual: int = 0  # 1 = ResNet tower + head towers; 0 = legacy 2-conv/bare-linear net
     az_batchnorm: int = 0  # 1 = BatchNorm (required to train a deep tower)
     az_head_hidden: int = 0  # policy/value head-tower hidden width (0 = bare linear readout)
+    # §C.8 ceiling levers (both OPT-IN; default net byte-identical): whole-board conditioning + categorical value.
+    az_global_pool: int = 0  # 1 = KataGo-style global-pool branch in every res block (whole-board mean+max→FC→bias)
+    az_value_bins: int = 0  # K>=3 = categorical value head over K bins (cross-entropy, not tanh+MSE); 0 = legacy scalar
+    az_aux_heads: int = 0  # 1 = auxiliary ownership+opponent-reply heads (requires az_residual; self-play auto-records)
     az_selfplay_workers: int = 1  # §C.7 parallel self-play worker processes (1 = sequential); fills idle cores
     # §C.7 #3 SOLVER-FREE LEAGUE — break opening value-collapse WITHOUT an oracle (weak→strong non-oracle opponents +
     # seat-priority + a self-generated opening anchor). Reuses az_pool_frac as the league fraction. Default OFF.
@@ -167,9 +171,13 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_endgame_extend_seconds must be in {AZ_ENDGAME_EXTEND_SECONDS_RANGE}, got {config.az_endgame_extend_seconds}")
     if not AZ_ENDGAME_CAP_RANGE[0] <= config.az_endgame_cap <= AZ_ENDGAME_CAP_RANGE[1]:
         raise ValueError(f"az_endgame_cap must be in {AZ_ENDGAME_CAP_RANGE}, got {config.az_endgame_cap}")
-    for name in ("az_residual", "az_batchnorm"):
+    for name in ("az_residual", "az_batchnorm", "az_global_pool", "az_aux_heads"):
         if getattr(config, name) not in (0, 1):
             raise ValueError(f"{name} must be 0 or 1, got {getattr(config, name)}")
+    if config.az_value_bins != 0 and not 3 <= config.az_value_bins <= 128:
+        raise ValueError(f"az_value_bins must be 0 (scalar) or in (3, 128), got {config.az_value_bins}")
+    if config.az_aux_heads and not config.az_residual:
+        raise ValueError("az_aux_heads=1 requires az_residual=1 (aux heads read the spatial trunk)")
     if not AZ_CHANNELS_RANGE[0] <= config.az_channels <= AZ_CHANNELS_RANGE[1]:
         raise ValueError(f"az_channels must be in {AZ_CHANNELS_RANGE}, got {config.az_channels}")
     if not AZ_BLOCKS_RANGE[0] <= config.az_blocks <= AZ_BLOCKS_RANGE[1]:
@@ -217,13 +225,13 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_selfplay_workers", "az_league_snapshots"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_value_bins", "az_selfplay_workers", "az_league_snapshots"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
     for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds", "az_league_p1_frac", "az_league_anchor_frac"):
         if float_key in filtered:
             filtered[float_key] = float(filtered[float_key])
-    for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm", "az_league"):
+    for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm", "az_global_pool", "az_aux_heads", "az_league"):
         if bool_key in filtered:
             v = filtered[bool_key]
             filtered[bool_key] = 1 if (v is True or str(v).strip().lower() in ("1", "true", "yes")) else 0

@@ -216,6 +216,41 @@ def test_training_reduces_loss_on_self_play_data():
     assert after < before  # the net learns to fit its own self-play targets
 
 
+def test_two_hot_targets_project_onto_the_support():
+    # §C.8 #3: a scalar target in [-1,1] becomes a two-hot distribution over the bin support — mass sums to 1,
+    # an exact bin centre gets ALL of it, and an off-centre value splits linearly between its two neighbours.
+    from harness.neural import _two_hot
+
+    support = torch.linspace(-1.0, 1.0, 5)  # centres at -1, -0.5, 0, 0.5, 1
+    d = _two_hot(torch.tensor([[0.0]]), support)
+    assert d.shape == (1, 5)
+    assert float(d.sum()) == 1.0 and float(d[0, 2]) == 1.0
+    d = _two_hot(torch.tensor([[0.25]]), support)  # halfway between 0 and 0.5
+    assert abs(float(d[0, 2]) - 0.5) < 1e-6 and abs(float(d[0, 3]) - 0.5) < 1e-6
+    d = _two_hot(torch.tensor([[-1.0], [1.0]]), support)  # clamped edges stay valid one-hots
+    assert float(d[0, 0]) == 1.0 and float(d[1, 4]) == 1.0
+
+
+def test_training_reduces_loss_with_a_categorical_value_head():
+    # The bins path must LEARN through the same train_net entry (cross-entropy on the bin logits) and the
+    # deployed scalar expectation must move toward the target sign — no consumer sees the distribution.
+    game = _game()
+    torch.manual_seed(0)
+    data = []
+    for i in range(3):
+        data += self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=10), random.Random(i))
+    net = Connect4Net(channels=16, blocks=1, residual=True, batchnorm=False, head_hidden=8, value_bins=11)
+    torch.manual_seed(0)
+    first = train_net(net, data, epochs=1, batch_size=32, lr=1e-2, device="cpu")
+    last = train_net(net, data, epochs=10, batch_size=32, lr=1e-2, device="cpu")
+    assert last < first  # loss falls through the categorical path
+    net.eval()
+    won = [e for e in data if e[2] == 1.0][:8]
+    with torch.no_grad():
+        vals = [float(net(e[0].unsqueeze(0))[1][0, 0]) for e in won]
+    assert sum(vals) / max(1, len(vals)) > 0.0  # expectation tracks the +1 targets it was trained on
+
+
 def test_alphazero_solve_endgame_plays_perfectly_on_late_positions():
     from harness.benchmark import sample_solvable_positions
     from harness.solver import optimal_columns
@@ -767,7 +802,7 @@ def test_league_seat_priority_biases_to_p1(monkeypatch):
     game = Connect4()
     seats = []
 
-    def fake_vs(g, learner, opp, seat, rng):
+    def fake_vs(g, learner, opp, seat, rng, record=None):
         seats.append(seat)
         return [(neural.encode(g, g.initial_state(rng)), [1.0] + [0.0] * 6, 1.0)]
 
@@ -791,3 +826,176 @@ def test_league_trains_with_anchor_and_frozen_self():
                                      league_frozen_self=True, return_buffer=True)
     assert isinstance(buf, list) and len(buf) > 0
     assert any(h["vs_pool_games"] > 0 for h in hist)  # league games actually happened
+
+
+def test_mixed_openings_zero_frac_routes_games_to_the_canonical_line():
+    # §C.8 #13 mixed-openings: zero_frac=1.0 ⇒ EVERY game starts canonical (empty-board example present);
+    # zero_frac=0.0 with opening_plies>0 ⇒ every game starts off-line (no empty-board example). The mix is the
+    # cheap robustness fix: canonical-line sharpness AND off-line coverage from one buffer.
+    from harness.neural import train_alphazero
+
+    def run(zero_frac):
+        _net, _hist, buf = train_alphazero(
+            _game(), iterations=1, selfplay_games=2, sims=6, epochs=1, seed=3, gumbel=True,
+            selfplay_opening_plies=6, opening_plies_zero_frac=zero_frac, return_buffer=True,
+            net_arch={"channels": 8})
+        return buf
+
+    assert any(float(x.abs().sum()) == 0.0 for (x, _pi, _v) in run(1.0))   # canonical: empty board recorded
+    assert not any(float(x.abs().sum()) == 0.0 for (x, _pi, _v) in run(0.0))  # off-line only: never the empty board
+
+
+def test_frontier_order_is_deepest_first_then_most_uncertain():
+    # §C.8 #10 (rescoped): net-prioritised frontier — the retrograde invariant (deepest first, children before
+    # parents) stays PRIMARY; the net's |value| only breaks ties WITHIN a ply tier (uncertain first), so a tight
+    # budget is spent where exact targets teach the most.
+    from games.connect4 import Connect4
+    from harness.neural import _frontier_order
+
+    game = Connect4()
+    rng = random.Random(0)
+    s0 = game.initial_state(rng)
+    a = game.step(s0, 3, rng)                       # ply 1
+    b = game.step(s0, 0, rng)                       # ply 1
+    deep = game.step(game.step(s0, 1, rng), 2, rng)  # ply 2 (deepest — must come first regardless of net)
+    vals = {id(a): 0.9, id(b): 0.1, id(deep): 0.95}
+    order = _frontier_order(game, [a, deep, b], lambda states: [vals[id(s)] for s in states])
+    assert order[0] is deep                          # depth beats uncertainty
+    assert order[1] is b and order[2] is a           # same ply: |0.1| < |0.9| ⇒ b (uncertain) first
+    plain = _frontier_order(game, [a, deep, b], None)  # no net ⇒ legacy deepest-first ordering only
+    assert plain[0] is deep
+
+
+def test_self_play_record_aux_targets_are_mover_relative_and_reply_correct():
+    # §C.8 #4: with record_aux, each example carries (own, reply) — own = the FINAL board from THIS position's
+    # mover perspective (so consecutive examples are exact negations), reply = the next action played (-1 last).
+    game = _game()
+    torch.manual_seed(0)
+    ex = self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(4), record_aux=True)
+    assert all(len(e) == 5 for e in ex)
+    for i, (_x, _pi, _v, own, reply) in enumerate(ex):
+        assert own.shape == (42,) and set(own.tolist()) <= {-1.0, 0.0, 1.0}
+        if i < len(ex) - 1:
+            assert reply in range(7)
+            assert torch.equal(own, -ex[i + 1][3])  # same final board, opposite mover perspective
+        else:
+            assert reply == -1  # the last position has no opponent reply
+    pieces = int(ex[0][3].abs().sum())
+    assert pieces >= len(ex)  # final board holds at least one piece per recorded ply
+
+
+def test_augment_mirrors_aux_ownership_and_reply():
+    g = Connect4()
+    x = torch.zeros(2, 6, 7)
+    own = torch.zeros(42)
+    own[0] = 1.0  # a piece at row 0, column 0 of the final board
+    aug = augment_examples([(x, [1.0, 0, 0, 0, 0, 0, 0], 1.0, own, 0)], g.symmetries())
+    _mx, mpi, _mv, mown, mreply = aug[1]
+    assert mpi == [0, 0, 0, 0, 0, 0, 1.0]
+    assert float(mown[6]) == 1.0 and float(mown[0]) == 0.0  # ownership mirrored to column 6
+    assert mreply == 6  # the reply column mirrors with the board
+    aug2 = augment_examples([(x, [0.0] * 7, 0.0, own, -1)], g.symmetries())
+    assert aug2[1][4] == -1  # no-reply marker survives augmentation
+
+
+def test_train_net_learns_through_aux_heads_on_mixed_data():
+    # Aux losses apply ONLY to examples that carry targets; plain 3-tuples (league/distill) train alongside them.
+    game = _game()
+    torch.manual_seed(0)
+    aux_data, plain = [], []
+    for i in range(3):
+        aux_data += self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(i), record_aux=True)
+        plain += self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(100 + i))
+    net = Connect4Net(channels=16, blocks=1, residual=True, batchnorm=False, head_hidden=8, aux_heads=True)
+    torch.manual_seed(0)
+    first = train_net(net, aux_data + plain, epochs=1, batch_size=32, lr=1e-2, device="cpu")
+    last = train_net(net, aux_data + plain, epochs=8, batch_size=32, lr=1e-2, device="cpu")
+    assert last < first  # the mixed batch trains end-to-end through policy+value+aux
+    g = net.own_head.weight.grad if hasattr(net.own_head, "weight") else None  # aux head actually received gradient
+    # (gradient presence is asserted structurally: training moved the aux head's parameters)
+    before = [p.clone() for p in net.own_head.parameters()]
+    train_net(net, aux_data, epochs=1, batch_size=32, lr=1e-2, device="cpu")
+    assert any(not torch.equal(b, p) for b, p in zip(before, net.own_head.parameters()))
+
+
+def test_train_alphazero_with_aux_heads_end_to_end():
+    # §C.8 #4 plumbing: an aux-headed arch auto-records targets in self-play, augments them through the mirror,
+    # and trains through the aux losses — one iteration end-to-end, no extra knobs.
+    net, hist = train_alphazero(
+        _game(), iterations=1, selfplay_games=2, sims=6, epochs=1, seed=1, gumbel=True,
+        net_arch={"channels": 8, "blocks": 1, "residual": True, "batchnorm": False,
+                  "head_hidden": 8, "aux_heads": True})
+    assert net.arch["aux_heads"] is True and len(hist) == 1
+
+
+def test_self_play_forced_opening_replays_the_scripted_prefix():
+    # §C.8 #5: a refuted opening is FORCE-replayed (scripted, unrecorded — no fake policy targets for moves the
+    # search didn't choose); recording starts at the position the refutation reached.
+    game = _game()
+    torch.manual_seed(0)
+    ex = self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=6), random.Random(2),
+                        return_states=True, forced_opening=[3, 3, 3])
+    first_state = ex[0][0]
+    assert sum(1 for v in first_state.board if v != 0) == 3  # recording begins AFTER the 3-ply prefix
+    cols = [i % 7 for i, v in enumerate(first_state.board) if v != 0]
+    assert cols == [3, 3, 3]  # and the prefix is exactly the scripted line
+
+
+def test_vs_opponent_game_record_captures_actions_and_result():
+    from harness.agents import RandomAgent
+
+    game = _game()
+    torch.manual_seed(0)
+    rec = {}
+    ex = vs_opponent_game(game, AlphaZeroAgent(Connect4Net(), sims=6), RandomAgent(), 0,
+                          random.Random(5), record=rec)
+    assert ex and rec["actions"] and all(a in range(7) for a in rec["actions"])
+    assert rec["learner_return"] in (-1.0, 0.0, 1.0)
+    assert len(rec["actions"]) >= len(ex)  # every recorded learner position came from a played move
+
+
+def test_train_alphazero_refutation_replay_stocks_and_replays_nogoods():
+    # Integration: a stocked store + refutation_frac=1.0 ⇒ self-play games replay the refuted prefix; the buffer
+    # then contains positions FROM that line (the nogood is being trained against, not ignored).
+    from harness.refutation import RefutationStore
+
+    game = _game()
+    store = RefutationStore(cap=8)
+    store.add((3, 3, 3))
+    _net, _hist, buf = train_alphazero(
+        game, iterations=1, selfplay_games=2, sims=6, epochs=1, seed=6, gumbel=True,
+        net_arch={"channels": 8}, refutation_frac=1.0, refutation_store=store, return_buffer=True)
+    target = None
+    rng = random.Random(0)
+    s = game.initial_state(rng)
+    for a in (3, 3, 3):
+        s = game.step(s, a, rng)
+    target = encode(game, s)
+    assert any(torch.equal(x, target) for (x, _pi, _v) in buf)  # the refuted line's position is in the buffer
+
+
+def test_resolve_refutation_uses_the_actual_result_not_the_training_target():
+    # Review-confirmed HIGH bug guard: with n-step/exact-target training, the first example's VALUE TARGET is a
+    # bootstrapped estimate — retirement must track the game's ACTUAL per-seat returns instead.
+    from harness.neural import _nogood_prefix, _resolve_refutation
+    from harness.refutation import RefutationStore
+
+    store = RefutationStore(cap=4, retire_after=1)
+    store.add((3, 3))
+    _resolve_refutation(store, (3, 3), {"returns": [-1.0, 1.0]})  # P1 actually LOST the replay
+    assert len(store) == 1  # loss ⇒ the nogood stays, whatever any value target claimed
+    _resolve_refutation(store, (3, 3), {"returns": [1.0, -1.0]})  # P1 actually won
+    assert len(store) == 0  # survival ⇒ retire (retire_after=1)
+    store.add((0,))
+    _resolve_refutation(store, (0,), None)  # no record (defensive) → no state change, no crash
+    _resolve_refutation(store, (0,), {})
+    assert len(store) == 1
+
+
+def test_nogood_prefix_never_stores_the_full_game():
+    # Review-confirmed: a full-game prefix replays to a terminal state with ZERO examples and could never retire.
+    from harness.neural import _nogood_prefix
+
+    assert _nogood_prefix([0, 3, 1, 3, 0, 3, 1, 3], plies=8) == (0, 3, 1, 3, 0, 3, 1)  # final move excluded
+    assert _nogood_prefix([0, 3, 1, 3, 0, 3, 1, 3], plies=4) == (0, 3, 1, 3)  # cap still applies
+    assert _nogood_prefix([5], plies=6) == ()  # a 1-move game stores nothing (add() drops empty prefixes)

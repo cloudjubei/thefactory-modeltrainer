@@ -192,7 +192,8 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
     # §C.7 capacity levers → the net architecture this run trains (legacy default unless residual/blocks set).
     net_arch = {"channels": int(config.az_channels), "blocks": int(config.az_blocks),
                 "residual": bool(config.az_residual), "batchnorm": bool(config.az_batchnorm),
-                "head_hidden": int(config.az_head_hidden)}
+                "head_hidden": int(config.az_head_hidden), "global_pool": bool(config.az_global_pool),
+                "value_bins": int(config.az_value_bins), "aux_heads": bool(config.az_aux_heads)}
     init_net = None
     parent_gen = 0
     if config.az_warm_start and (not distilling or champions.champion_is_distilled(config.game)):

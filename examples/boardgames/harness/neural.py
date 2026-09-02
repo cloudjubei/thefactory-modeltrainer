@@ -40,21 +40,30 @@ def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Module:
 
 class _ResBlock(nn.Module):
     """A pre-activation-free residual block (conv-[bn]-relu-conv-[bn] + skip) — BatchNorm+residual are what make a
-    DEEP tower trainable; adding depth to the plain legacy stack without them silently fails to train."""
+    DEEP tower trainable; adding depth to the plain legacy stack without them silently fails to train. With
+    `global_pool` (§C.8 #2, KataGo-style) the block also conditions mid-tower on WHOLE-BOARD aggregates
+    (per-channel mean+max → FC → per-channel bias) — the aggregate a stack of 3×3 convs represents poorly but
+    odd/even threat-parity (Allis zugzwang) needs."""
 
-    def __init__(self, filters: int, batchnorm: bool):
+    def __init__(self, filters: int, batchnorm: bool, global_pool: bool = False):
         super().__init__()
         self.conv1 = nn.Conv2d(filters, filters, 3, padding=1)
         self.conv2 = nn.Conv2d(filters, filters, 3, padding=1)
         self.bn1 = nn.BatchNorm2d(filters) if batchnorm else None
         self.bn2 = nn.BatchNorm2d(filters) if batchnorm else None
+        self.gpool_fc = nn.Linear(2 * filters, filters) if global_pool else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         h = self.conv1(x)
         h = self.bn1(h) if self.bn1 is not None else h
         h = F.relu(h)
+        pooled = torch.cat([h.mean(dim=(2, 3)), h.amax(dim=(2, 3))], dim=1) if self.gpool_fc is not None else None
         h = self.conv2(h)
         h = self.bn2(h) if self.bn2 is not None else h
+        if pooled is not None:
+            # Bias AFTER bn2 (before the skip-add): a per-channel-constant added before BatchNorm is exactly
+            # cancelled by its mean subtraction (provably dead at batch size 1) — here nothing normalizes it away.
+            h = h + self.gpool_fc(pooled)[:, :, None, None]
         return F.relu(h + x)
 
 
@@ -64,38 +73,48 @@ class Connect4Net(nn.Module):
     strong-C4 floor. Architecture is persisted with the weights (see save_net/load_net) so any net round-trips."""
 
     def __init__(self, channels: int = 32, blocks: int = 0, residual: bool = False,
-                 batchnorm: bool = False, head_hidden: int = 0, input_planes: int = 2):
+                 batchnorm: bool = False, head_hidden: int = 0, input_planes: int = 2,
+                 global_pool: bool = False, value_bins: int = 0, aux_heads: bool = False):
         super().__init__()
+        if aux_heads and not residual:
+            raise ValueError("aux_heads requires the residual tower (spatial trunk features)")
         # The architecture is a CONFIG, persisted with the weights so any net round-trips. The DEFAULT reproduces
         # the legacy 2-conv/bare-linear-head net EXACTLY (same module names) so the 306 old checkpoints still load;
         # `residual=True` builds the deep tower (§C.7: the capacity the 20K-param toy lacked). See save_net/load_net.
+        # §C.8 ceiling levers, both OPT-IN so every existing checkpoint/config is untouched: `global_pool` threads
+        # whole-board aggregates through the tower; `value_bins=K>0` swaps the tanh scalar for a K-bin categorical
+        # value head (consumers still see a scalar — forward returns the expectation over the support).
         self.arch = {"channels": int(channels), "blocks": int(blocks), "residual": bool(residual),
-                     "batchnorm": bool(batchnorm), "head_hidden": int(head_hidden), "input_planes": int(input_planes)}
+                     "batchnorm": bool(batchnorm), "head_hidden": int(head_hidden), "input_planes": int(input_planes),
+                     "global_pool": bool(global_pool), "value_bins": int(value_bins), "aux_heads": bool(aux_heads)}
         self.residual = bool(residual)
+        self.value_bins = int(value_bins)
+        if self.value_bins > 0:
+            self.register_buffer("value_support", torch.linspace(-1.0, 1.0, self.value_bins))
+        v_out = self.value_bins if self.value_bins > 0 else 1
         if not self.residual:
             self.conv1 = nn.Conv2d(input_planes, channels, 3, padding=1)
             self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
             self.policy_head = nn.Linear(channels * ROWS * COLS, COLS)
-            self.value_head = nn.Linear(channels * ROWS * COLS, 1)
+            self.value_head = nn.Linear(channels * ROWS * COLS, v_out)
             return
         # SCALED: stem → residual tower → policy/value HEAD TOWERS (a hidden layer, not a bare linear — the
         # dominant nonlinearity gap that let forks / odd-even parity be represented).
         self.stem = nn.Conv2d(input_planes, channels, 3, padding=1)
         self.stem_bn = nn.BatchNorm2d(channels) if batchnorm else None
-        self.blocks = nn.ModuleList([_ResBlock(channels, batchnorm) for _ in range(max(1, blocks))])
+        self.blocks = nn.ModuleList([_ResBlock(channels, batchnorm, global_pool) for _ in range(max(1, blocks))])
         self.p_conv = nn.Conv2d(channels, 2, 1)
         self.p_bn = nn.BatchNorm2d(2) if batchnorm else None
         self.policy_head = _mlp(2 * ROWS * COLS, head_hidden, COLS)
         self.v_conv = nn.Conv2d(channels, 1, 1)
         self.v_bn = nn.BatchNorm2d(1) if batchnorm else None
-        self.value_head = _mlp(1 * ROWS * COLS, max(1, head_hidden), 1)  # value ALWAYS gets a hidden layer
+        self.value_head = _mlp(1 * ROWS * COLS, max(1, head_hidden), v_out)  # value ALWAYS gets a hidden layer
+        if aux_heads:  # §C.8 #4: ownership map (per-cell, from the spatial trunk) + opponent-reply logits
+            self.own_head = nn.Conv2d(channels, 1, 1)
+            self.reply_head = _mlp(2 * ROWS * COLS, head_hidden, COLS)
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if not self.residual:
-            h = F.relu(self.conv1(x))
-            h = F.relu(self.conv2(h))
-            h = h.flatten(1)
-            return self.policy_head(h), torch.tanh(self.value_head(h))
+    def _body(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Residual tower → (policy features, value features, SPATIAL trunk) — the aux heads read the trunk."""
         h = self.stem(x)
         h = self.stem_bn(h) if self.stem_bn is not None else h
         h = F.relu(h)
@@ -107,7 +126,39 @@ class Connect4Net(nn.Module):
         v = self.v_conv(h)
         v = self.v_bn(v) if self.v_bn is not None else v
         v = F.relu(v).flatten(1)
-        return self.policy_head(p), torch.tanh(self.value_head(v))
+        return p, v, h
+
+    def _trunk(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Shared body → (policy logits, RAW value-head output: scalar pre-tanh, or K bin logits)."""
+        if not self.residual:
+            h = F.relu(self.conv1(x))
+            h = F.relu(self.conv2(h))
+            h = h.flatten(1)
+            return self.policy_head(h), self.value_head(h)
+        p, v, _h = self._body(x)
+        return self.policy_head(p), self.value_head(v)
+
+    def forward_aux(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """TRAIN-path forward with the aux targets (§C.8 #4): (policy logits, value in train form — bin logits
+        when categorical, tanh scalar otherwise — ownership map in [-1,1] per cell, opponent-reply logits)."""
+        p_feat, v_feat, h = self._body(x)
+        v_raw = self.value_head(v_feat)
+        v_out = v_raw if self.value_bins > 0 else torch.tanh(v_raw)
+        return (self.policy_head(p_feat), v_out,
+                torch.tanh(self.own_head(h)).flatten(1), self.reply_head(p_feat))
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, v_raw = self._trunk(x)
+        if self.value_bins > 0:  # deployed value = EXPECTATION over the support — consumers still see a scalar
+            return logits, (F.softmax(v_raw, dim=1) * self.value_support).sum(dim=1, keepdim=True)
+        return logits, torch.tanh(v_raw)
+
+    def forward_train(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """TRAIN-path forward: with bins, the value output is the K bin LOGITS (for cross-entropy); without,
+        identical to forward — one path, no drift."""
+        if self.value_bins > 0:
+            return self._trunk(x)
+        return self.forward(x)
 
 
 def encode(game: Game, state: State) -> torch.Tensor:
@@ -560,7 +611,8 @@ def self_play_game(
     game: Game, agent: AlphaZeroAgent, rng: random.Random, temp_moves: int = 8,
     target_net: "Connect4Net | None" = None, n_step: int = 0, device: str = "cpu",
     return_states: bool = False, opening_plies: int = 0,
-    endgame_tb=None, exact_value_targets: bool = False,
+    endgame_tb=None, exact_value_targets: bool = False, record_aux: bool = False,
+    forced_opening: list[int] | None = None, record: dict | None = None,
 ) -> list:
     """Play ONE self-play game and return training examples (encoded board, policy, value). With `return_states`,
     each example is prefixed with the game STATE `(state, x, pi, v)` so the buffer can be REANALYZED (#2) — the
@@ -572,11 +624,18 @@ def self_play_game(
     agent._nodes = {}
     agent.add_noise = not agent.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
     pending: list[tuple[State, torch.Tensor, list[float], int]] = []
+    actions: list[int] = []
     state = game.initial_state(rng)
-    for _ in range(opening_plies):  # DIVERSE random opening (unrecorded) → off-main-line training coverage
-        if game.is_terminal(state):
-            break
-        state = game.step(state, rng.choice(game.legal_actions(state)), rng)
+    if forced_opening:  # §C.8 #5: replay a REFUTED line exactly (scripted, unrecorded — the search didn't pick
+        for a in forced_opening:  # these moves, so they get no policy targets); recording starts where it led.
+            if game.is_terminal(state) or a not in game.legal_actions(state):
+                break
+            state = game.step(state, a, rng)
+    else:
+        for _ in range(opening_plies):  # DIVERSE random opening (unrecorded) → off-main-line training coverage
+            if game.is_terminal(state):
+                break
+            state = game.step(state, rng.choice(game.legal_actions(state)), rng)
     move = 0
     while not game.is_terminal(state):
         agent.temperature = 1.0 if move < temp_moves else 0.0
@@ -587,9 +646,15 @@ def self_play_game(
         # Gumbel PLAYS the Sequential-Halving winner (exploration already baked into the Gumbel noise); the raw
         # loop samples the visit-count policy at the temperature schedule.
         action = agent._gumbel_selected if agent.gumbel else sample_action(pi, agent.temperature, rng)
+        actions.append(action)
         state = game.step(state, action, rng)
         move += 1
     returns = game.returns(state)
+    if record is not None:
+        # The ACTUAL game result, per seat — review-confirmed bug guard: the refutation resolver must read THIS,
+        # never the (n-step-bootstrapped / tablebase-overridden) training TARGET, and it is filled even when the
+        # forced prefix consumed the whole game and zero examples were recorded.
+        record["returns"] = list(returns)
     outcome_for = [returns[player] for (_s, _x, _pi, player) in pending]
     if n_step > 0 and target_net is not None:
         vt = _value_batch(target_net, [x for (_s, x, _pi, _p) in pending], device)  # lagged target-net bootstrap
@@ -605,13 +670,68 @@ def self_play_game(
             float(pv) if (pv := endgame_tb.proven_value(_key(game, s))) is not None else v
             for (s, _x, _pi, _p), v in zip(pending, values)
         ]
+    if record_aux:
+        # §C.8 #4 aux targets, mover-relative like everything else: `own` = the FINAL board read through THIS
+        # position's mover perspective (game.observation — generic, no C4 knowledge); `reply` = the opponent's
+        # actual next move (-1 for the last position). Consecutive examples are exact negations of each other.
+        owns = [torch.tensor(game.observation(state, p)[: ROWS * COLS], dtype=torch.float32)
+                for (_s, _x, _pi, p) in pending]
+        replies = [actions[i + 1] if i + 1 < len(actions) else -1 for i in range(len(pending))]
+        if return_states:
+            return [(s, x, pi_vec, v, o, r)
+                    for (s, x, pi_vec, _p), v, o, r in zip(pending, values, owns, replies)]
+        return [(x, pi_vec, v, o, r)
+                for (_s, x, pi_vec, _p), v, o, r in zip(pending, values, owns, replies)]
     if return_states:
         return [(s, x, pi_vec, v) for (s, x, pi_vec, _p), v in zip(pending, values)]
     return [(x, pi_vec, v) for (_s, x, pi_vec, _p), v in zip(pending, values)]
 
 
+def _nogood_prefix(actions: list[int], plies: int) -> tuple[int, ...]:
+    """The prefix stored for a refuted game (§C.8 #5): capped at `plies` and ALWAYS excluding the final move —
+    a full-game prefix replays to a terminal state with zero recorded examples (review-confirmed dead weight),
+    so the replay must keep at least one ply to diverge on."""
+    return tuple(int(a) for a in actions[: min(int(plies), len(actions) - 1)])
+
+
+def _resolve_refutation(store, forced, record: dict | None) -> None:
+    """After a forced replay of a refuted line (§C.8 #5): did P1 lose it AGAIN? Read from the game's ACTUAL
+    per-seat returns (self_play_game's `record`) — review-confirmed bug: the first example's VALUE TARGET is
+    n-step-bootstrapped / tablebase-overridden, so judging by it made retirement track the net's opinion instead
+    of the replay outcome. The record is filled even for a replay that recorded zero examples (terminal prefix),
+    so a nogood can always retire."""
+    if store is None or not forced or not record or "returns" not in record:
+        return
+    store.resolve(tuple(forced), lost=float(record["returns"][0]) < 0)
+
+
+def _frontier_order(game: Game, states, value_fn):
+    """Frontier processing order (§C.8 #10, rescoped): ply-DESC stays PRIMARY (children before parents — the
+    retrograde invariant the climb depends on); a `value_fn` (batched net values) only breaks ties WITHIN a ply
+    tier, most-UNCERTAIN (|v| smallest) first — so a tight proof budget is spent where an exact target corrects
+    the net the most. `value_fn=None` reproduces the legacy deepest-first order exactly."""
+    from harness.book import _ply
+
+    if value_fn is None:
+        return sorted(states, key=lambda s: _ply(game, s), reverse=True)
+    conf = {id(s): abs(float(v)) for s, v in zip(states, value_fn(states))}
+    return sorted(states, key=lambda s: (-_ply(game, s), conf[id(s)]))
+
+
+def _batched_net_values(net: "Connect4Net", game: Game, states, device: str = "cpu") -> list[float]:
+    """One batched forward over `states` → mover-relative scalar values (the §C.8 #10 priority signal: a single
+    net call for the whole frontier, never per-node inside the prover — per-node NN ordering would be a large
+    SLOWDOWN in a µs-node pure-python prover)."""
+    if not states:
+        return []
+    net.eval()
+    with torch.no_grad():
+        _p, v = net(torch.stack([encode(game, s) for s in states]).to(device))
+    return [float(vi) for vi in v[:, 0]]
+
+
 def extend_endgame_frontier(game: Game, run_tb, states, max_empty: int, max_positions: int,
-                            deadline_seconds: float) -> int:
+                            deadline_seconds: float, value_fn=None) -> int:
     """RETROGRADE frontier climb: try to PROVE each of `states` and write the result (VALUE-ONLY) into `run_tb`,
     processing DEEPEST-first so a just-proven child lets its shallower parent prove in the SAME pass. Uses only
     book._prove (a winning/terminal child, free minimax once every child is proven, or a ≤ `max_empty` cheap solve
@@ -631,7 +751,7 @@ def extend_endgame_frontier(game: Game, run_tb, states, max_empty: int, max_posi
         k = _key(game, s)
         if k not in seen and run_tb.proven_value(k) is None:  # skip already-proven (no wasted re-prove)
             seen[k] = s
-    ordered = sorted(seen.values(), key=lambda s: _ply(game, s), reverse=True)  # deepest first → children before parents
+    ordered = _frontier_order(game, list(seen.values()), value_fn)  # deepest first → children before parents
     deadline = time.monotonic() + deadline_seconds if deadline_seconds > 0 else None
     proven = 0
     for s in ordered:
@@ -653,13 +773,16 @@ def vs_opponent_game(
     learner_seat: int,
     rng: random.Random,
     temp_moves: int = 6,
+    record: dict | None = None,
 ) -> list[tuple[torch.Tensor, list[float], float]]:
     """League game: the LEARNER (net-guided, exploring) plays an arbitrary opponent (a strong mcts / heuristic
     / a past champion). Training examples are collected from ONLY the learner's moves — we learn to BEAT the
-    opponent, we don't imitate it."""
+    opponent, we don't imitate it. A caller-supplied `record` dict is filled with the played `actions` and the
+    `learner_return` — the refutation-replay loop (§C.8 #5) reads it to learn WHICH lines the opponent refutes."""
     learner._nodes = {}
     learner.add_noise = not learner.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
     pending: list[tuple[torch.Tensor, list[float], int]] = []
+    actions: list[int] = []
     state = game.initial_state(rng)
     move = 0
     while not game.is_terminal(state):
@@ -672,9 +795,13 @@ def vs_opponent_game(
             action = learner._gumbel_selected if learner.gumbel else sample_action(pi, learner.temperature, rng)
         else:
             action = opponent.act(game, state, rng)
+        actions.append(action)
         state = game.step(state, action, rng)
         move += 1
     returns = game.returns(state)
+    if record is not None:
+        record["actions"] = actions
+        record["learner_return"] = returns[learner_seat]
     return [(x, pi_vec, returns[player]) for (x, pi_vec, player) in pending]
 
 
@@ -725,14 +852,41 @@ def augment_examples(
     if not perms or len(perms) <= 1:
         return list(examples)
     identity = list(range(len(perms[0])))
-    out: list[tuple[torch.Tensor, list[float], float]] = []
-    for x, pi, v in examples:
+    out: list[tuple] = []
+    for e in examples:
+        x, pi, v = e[0], e[1], e[2]
         for perm in perms:
             if perm == identity:
-                out.append((x, list(pi), v))
+                base = (x, list(pi), v)
             else:
-                out.append((x[..., perm], [pi[s] for s in perm], v))
+                base = (x[..., perm], [pi[s] for s in perm], v)
+            if len(e) >= 5:  # aux targets (§C.8 #4) transform with the board: ownership by column, reply by index
+                own, reply = e[3], e[4]
+                if perm == identity:
+                    out.append(base + (own, reply))
+                else:
+                    own_m = own.reshape(ROWS, COLS)[:, perm].reshape(-1)
+                    out.append(base + (own_m, perm.index(reply) if reply >= 0 else -1))
+            else:
+                out.append(base)
     return out
+
+
+def _two_hot(values: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
+    """Project scalar targets in [-1,1] onto a bin support as TWO-HOT distributions (§C.8 #3): an exact bin
+    centre takes all the mass, anything between two centres splits linearly. This is what turns value learning
+    into classification (cross-entropy) instead of the MSE whose optimum under 50/50 outcomes is the ~0 collapse."""
+    k = support.shape[0]
+    v = values.reshape(-1).clamp(float(support[0]), float(support[-1]))
+    step = (float(support[-1]) - float(support[0])) / (k - 1)
+    pos = (v - float(support[0])) / step
+    lo = pos.floor().long().clamp(0, k - 1)
+    hi = (lo + 1).clamp(0, k - 1)
+    frac = (pos - lo.float()).unsqueeze(1)
+    dist = torch.zeros(v.shape[0], k, device=values.device)
+    dist.scatter_(1, lo.unsqueeze(1), 1.0 - frac)
+    dist.scatter_add_(1, hi.unsqueeze(1), frac)
+    return dist
 
 
 def train_net(
@@ -743,12 +897,23 @@ def train_net(
     lr: float,
     device: str,
 ) -> float:
-    """One training pass over the buffer (policy cross-entropy + value MSE). Returns the final mean loss."""
+    """One training pass over the buffer (policy cross-entropy + value MSE — or value cross-entropy against a
+    two-hot target when the net carries a categorical value head). Returns the final mean loss."""
     if not examples:
         return 0.0
+    bins = int(net.arch.get("value_bins", 0))
+    aux_on = bool(net.arch.get("aux_heads", False))
     x = torch.stack([e[0] for e in examples]).to(device)
     target_p = torch.tensor([e[1] for e in examples], dtype=torch.float32).to(device)
     target_v = torch.tensor([[e[2]] for e in examples], dtype=torch.float32).to(device)
+    target_dist = _two_hot(target_v, net.value_support) if bins > 0 else None
+    if aux_on:
+        # §C.8 #4: aux targets apply ONLY to examples that carry them — league/distill 3-tuples train alongside
+        # aux-recorded self-play with their ownership/reply terms masked out (weight 0), never faked.
+        zeros = torch.zeros(ROWS * COLS)
+        target_own = torch.stack([e[3] if len(e) >= 5 else zeros for e in examples]).to(device)
+        target_reply = torch.tensor([e[4] if len(e) >= 5 else -1 for e in examples], dtype=torch.long).to(device)
+        aux_mask = torch.tensor([1.0 if len(e) >= 5 else 0.0 for e in examples]).to(device)
     opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
     net.train()
     last = 0.0
@@ -757,10 +922,25 @@ def train_net(
         perm = torch.randperm(n)
         for i in range(0, n, batch_size):
             b = perm[i : i + batch_size]
-            logits, value = net(x[b])
+            if aux_on:
+                logits, value, own_pred, reply_logits = net.forward_aux(x[b])
+            else:
+                logits, value = net.forward_train(x[b])
             policy_loss = -(target_p[b] * F.log_softmax(logits, dim=1)).sum(1).mean()
-            value_loss = F.mse_loss(value, target_v[b])
+            if bins > 0:
+                value_loss = -(target_dist[b] * F.log_softmax(value, dim=1)).sum(1).mean()
+            else:
+                value_loss = F.mse_loss(value, target_v[b])
             loss = policy_loss + value_loss
+            if aux_on:
+                m = aux_mask[b]
+                if float(m.sum()) > 0:
+                    own_per = ((own_pred - target_own[b]) ** 2).mean(1)  # per-example ownership MSE
+                    loss = loss + 0.15 * (own_per * m).sum() / m.sum()
+                    rb = target_reply[b]
+                    valid = rb >= 0  # last-move examples (and masked 3-tuples, rb=-1) carry no reply target
+                    if bool(valid.any()):
+                        loss = loss + 0.15 * F.cross_entropy(reply_logits[valid], rb[valid])
             opt.zero_grad()
             loss.backward()
             opt.step()
@@ -1041,6 +1221,11 @@ def train_alphazero(
     target_refresh: int = 4,
     reanalyze_frac: float = 0.0,
     selfplay_opening_plies: int = 0,
+    opening_plies_zero_frac: float = 0.0,
+    endgame_net_priority: bool = False,
+    refutation_frac: float = 0.0,
+    refutation_prefix_plies: int = 6,
+    refutation_store=None,
     endgame_tb=None,
     endgame_max_empty: int = 14,
     endgame_exact_targets: int = 1,
@@ -1067,6 +1252,11 @@ def train_alphazero(
     # net_arch (§C.7 capacity levers) overrides the legacy `channels`-only shape; init_net (warm start / batch resume)
     # wins over both so a resumed run keeps its architecture.
     net = init_net if init_net is not None else Connect4Net(**(net_arch or {"channels": channels})).to(device)
+    # §C.8 #4: an aux-headed net auto-records its own targets in self-play (no extra knob to forget); the
+    # reanalyze state-buffer path drops aux fields, so the combination is refused rather than silently degraded.
+    aux_on = bool(net.arch.get("aux_heads", False))
+    if aux_on and reanalyze_frac > 0.0:
+        raise ValueError("aux_heads + reanalyze_frac are not combinable (the state buffer drops aux targets)")
     # init_buffer/return_buffer (§C.7 batched training): carry the replay buffer ACROSS batches so a resumed run is
     # equivalent to a continuous one — a big net starved of history relearns from scratch each batch. (Non-reanalyze path.)
     buffer: list[tuple[torch.Tensor, list[float], float]] = list(init_buffer) if init_buffer else []
@@ -1105,7 +1295,23 @@ def train_alphazero(
     eg_targets = endgame_on and bool(endgame_exact_targets)
     # §C.7 PARALLEL self-play: only the PURE-#1 path is safe to fan out (no shared endgame tablebase, no league
     # opponent, no reanalyze state-buffer). Otherwise stay sequential (byte-identical). Needs a game name to respawn.
+    # §C.8 #13 mixed openings: 0 < frac ≤ 1 sends that share of self-play games to the CANONICAL line (0 plies)
+    # and the rest to diverse openings — sharpness AND coverage from one buffer. frac == 0.0 draws NOTHING from
+    # rng, so existing runs stay byte-identical.
+    def _game_plies(r: random.Random) -> int:
+        if opening_plies_zero_frac > 0.0 and r.random() < opening_plies_zero_frac:
+            return 0
+        return selfplay_opening_plies
+
+    # §C.8 #5 refutation-replay: nogoods live in `_refut_store` (caller-supplied for persistence across batches,
+    # else run-local). frac == 0.0 with no store leaves EVERYTHING untouched — no extra rng draws, no records.
+    _refut_store = refutation_store
+    if _refut_store is None and refutation_frac > 0.0:
+        from harness.refutation import RefutationStore
+
+        _refut_store = RefutationStore()
     parallel_ok = (int(selfplay_workers) > 1 and opponent_pool is None and reanalyze_frac == 0.0
+                   and opening_plies_zero_frac == 0.0 and not aux_on and refutation_frac == 0.0
                    and not endgame_on and getattr(game, "name", None) is not None)
     _pool = _tmpdir = None
     if parallel_ok:
@@ -1155,7 +1361,7 @@ def train_alphazero(
             fresh_s: list[tuple[State, torch.Tensor, list[float], float]] = []
             for _ in range(selfplay_games):
                 fresh_s.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
-                                              device=device, return_states=True, opening_plies=selfplay_opening_plies,
+                                              device=device, return_states=True, opening_plies=_game_plies(rng),
                                               endgame_tb=(endgame_tb if endgame_on else None),
                                               exact_value_targets=eg_targets))
             if endgame_on:
@@ -1186,7 +1392,11 @@ def train_alphazero(
                     # and opening_value is read), so wins from the TRUE opening label the empty board +1 via outcomes.
                     learner_seat = 0 if rng.random() < league_p1_frac else 1
                     opponent = _league_pool[rng.randrange(len(_league_pool))]()
-                    ex_lg = vs_opponent_game(game, learner, opponent, learner_seat, rng)
+                    _rec = {} if (_refut_store is not None and learner_seat == 0) else None
+                    ex_lg = vs_opponent_game(game, learner, opponent, learner_seat, rng, record=_rec)
+                    if _rec is not None and _rec.get("learner_return", 0.0) < 0:
+                        # the opponent REFUTED a line the learner entered as P1 → store its opening as a nogood
+                        _refut_store.add(_nogood_prefix(_rec["actions"], refutation_prefix_plies))
                     fresh.extend(ex_lg)
                     if learner_seat == 0 and opening_anchor_cap > 0 and ex_lg:
                         opening_anchor.append(ex_lg[0])  # empty board + its TRUE outcome (honest, not win-filtered)
@@ -1194,20 +1404,34 @@ def train_alphazero(
                             del opening_anchor[: len(opening_anchor) - opening_anchor_cap]
                     vs_pool += 1
                 elif endgame_on:  # collect STATES for the frontier extension (return_states only changes the shape)
+                    _forced = (_refut_store.sample(rng)
+                               if _refut_store is not None and refutation_frac > 0.0
+                               and rng.random() < refutation_frac else None)
+                    _frec = {} if _forced else None
                     ex = self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step, device=device,
-                                        opening_plies=selfplay_opening_plies, return_states=True,
-                                        endgame_tb=endgame_tb, exact_value_targets=eg_targets)
+                                        opening_plies=_game_plies(rng), return_states=True,
+                                        endgame_tb=endgame_tb, exact_value_targets=eg_targets, record_aux=aux_on,
+                                        forced_opening=list(_forced) if _forced else None, record=_frec)
+                    _resolve_refutation(_refut_store, _forced, _frec)
                     eg_visited.extend(s for (s, *_rest) in ex)
-                    fresh.extend((x, pi, v) for (_s, x, pi, v) in ex)
+                    fresh.extend(tuple(e[1:]) for e in ex)  # drop the state prefix; aux fields (if any) ride along
                 else:  # unchanged pure-#1 path (byte-identical when the loop is off)
-                    fresh.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
-                                                device=device, opening_plies=selfplay_opening_plies))
+                    _forced = (_refut_store.sample(rng)
+                               if _refut_store is not None and refutation_frac > 0.0
+                               and rng.random() < refutation_frac else None)
+                    _frec = {} if _forced else None
+                    ex = self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
+                                        device=device, opening_plies=_game_plies(rng), record_aux=aux_on,
+                                        forced_opening=list(_forced) if _forced else None, record=_frec)
+                    _resolve_refutation(_refut_store, _forced, _frec)
+                    fresh.extend(ex)
             fresh = augment_examples(fresh, perms)  # symmetry-augment self-play too (2× data, invariance baked in)
             buffer = (buffer + fresh)[-buffer_cap:]
         eg_booked = 0
         if endgame_on:  # RETROGRADE climb: prove the iteration's frontier positions backward from booked terminals
+            _vfn = (lambda ss: _batched_net_values(net, game, ss, device)) if endgame_net_priority else None
             eg_booked = extend_endgame_frontier(game, endgame_tb, eg_visited, endgame_max_empty,
-                                                endgame_extend_positions, endgame_extend_seconds)
+                                                endgame_extend_positions, endgame_extend_seconds, value_fn=_vfn)
         # ANCHOR: the solver-free opening anchor (league) is pinned at league_anchor_frac via the SAME fixed-fraction
         # mix the oracle distillation uses — so a few-hundred empty-board examples aren't diluted in a 400k buffer.
         _anchor = distilled + opening_anchor

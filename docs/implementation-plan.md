@@ -887,45 +887,58 @@ inference from our harness. Priority order below is the recommended execution or
 
 1. **Net-architecture SCREEN → pick the best arch** [Q2] — RUNNING (see ACTION). Isolates the architecture variable; names
    the arch to commit to. The residual gap is a MEASURED architecture/method ceiling, so this is the front of the queue.
-2. **Global-pooling branch** (`az_global_pool`, new; whole-board mean+max → small FC → added back per-channel inside `_ResBlock`,
-   `neural.py:41-58`) [Q2]. Best-evidenced ceiling lever: fits C4's **odd/even threat-parity / Allis zugzwang** — a whole-board
-   count stacked local convs represent poorly `[reasoning]`; `[verified]` KataGo +176 Elo / 1.6×. Does NOT contradict our
-   "receptive-field is a red herring" note (that was head sight; this is mid-tower global conditioning). *Test:* A/B the ckpt_23
-   recipe ± branch, `verify_forced_win_conversion` n=32.
-3. **Classification / distributional value head** (replace tanh scalar + MSE at `neural.py:99-110,194,738-768` with a K-bin
-   categorical head + cross-entropy) [Q2]. Attacks value-collapse at the root where MSE-optimal ≈ 0. `[verified]` Farebrother
-   "Stop Regressing" 2024 (incl. searchless chess). *Test:* opening-value climb-rate + conversion vs ckpt_23; stacks with
-   `az_endgame_exact_targets`.
-4. **Auxiliary heads** (ownership / opponent-reply targets) [Q2] — `[verified]` KataGo ~190 Elo / 1.65×; enriches the value
-   gradient, directly targets value-collapse, and STACKS with #3. *Test:* games-to-threshold + conversion vs ckpt_23.
-5. **Exploitability-descent / learned-adversary loop** [Q5-T1, Q4] — the ONE solver-free, chess-scale robustness bound
-   `[verified]` Timbers 2020; substrate exists (`champions.py`, `vs_opponent_game`). This is also where Q4's sound idea lands:
-   **nogood/conflict-learning = refutation-replay** — when an opponent refutes an opening we keep entering, store
-   `(canonical_key, refutation)`, up-weight it in the buffer, and force it via `opening_plies` until the net stops re-entering.
-   *Escalation rule:* if #2-#4 + the best swept arch still can't beat 0.969, the ceiling is genuinely representational-plus-
-   value-target and THIS is the next move — not more search or more league games.
+2. **Global-pooling branch — BUILT 2026-09-01** (`az_global_pool` lever, config+manifest; `_ResBlock.gpool_fc`: whole-board
+   mean+max → FC → per-channel bias) [Q2]. Best-evidenced ceiling lever: fits C4's **odd/even threat-parity / Allis zugzwang** —
+   a whole-board count stacked local convs represent poorly `[reasoning]`; `[verified]` KataGo +176 Elo / 1.6×. Does NOT
+   contradict our "receptive-field is a red herring" note (that was head sight; this is mid-tower global conditioning).
+   BUILD GOTCHA (mutation-test caught it): a per-channel-constant bias added BEFORE BatchNorm is exactly cancelled by its mean
+   subtraction (provably dead at batch 1) — the bias is applied AFTER bn2, before the skip-add, where nothing normalizes it away.
+   *Test to run:* A/B the ckpt_23 recipe ± branch, `verify_forced_win_conversion` n=32.
+3. **Classification / distributional value head — BUILT 2026-09-01** (`az_value_bins` lever, config+manifest; K-bin categorical
+   head + two-hot cross-entropy via `_two_hot`; `forward` still returns the SCALAR expectation over the support so every
+   consumer — MCTS, probes, eval — is untouched; `forward_train` exposes the bin logits) [Q2]. Attacks value-collapse at the
+   root where MSE-optimal ≈ 0. `[verified]` Farebrother "Stop Regressing" 2024 (incl. searchless chess). *Test to run:*
+   opening-value climb-rate + conversion vs ckpt_23; stacks with `az_endgame_exact_targets`.
+4. **Auxiliary heads — BUILT 2026-09-02** (`az_aux_heads` lever, requires residual; `own_head` 1×1-conv ownership map +
+   `reply_head` opponent-reply logits; `forward_aux`; self-play AUTO-records mover-relative aux targets as 5-tuples when the
+   net carries the heads — no extra knob; `augment_examples` mirrors ownership by column and reply by index; `train_net`
+   masks aux losses (0.15 own-MSE + 0.15 reply-CE) to zero for 3-tuple league/distill examples; aux+reanalyze refused —
+   the state buffer drops aux fields) [Q2] — `[verified]` KataGo ~190 Elo / 1.65×; targets value-collapse, STACKS with #3.
+   *Test to run:* games-to-threshold + conversion vs ckpt_23.
+5. **Exploitability-descent — CHEAP FORM (refutation-replay) BUILT 2026-09-02** (`harness/refutation.py` RefutationStore:
+   add/sample/resolve, retire only after N CONSECUTIVE survivals, JSON persistence; P1-seat league LOSSES store the opening
+   prefix as a nogood via `vs_opponent_game(record=)`; self-play force-replays a sampled nogood with prob `refutation_frac`
+   via `self_play_game(forced_opening=)` — scripted UNRECORDED prefix, no fake policy targets; `_resolve_refutation` checks
+   whether P1 lost it AGAIN (parity sign-flip); scaled_run knobs `refutation_frac`/`refutation_prefix_plies` +
+   `refutations.json` per-batch persistence for resume) [Q5-T1, Q4 nogood-learning]. The STRONG form (a LEARNED adversary =
+   the Timbers-2020 solver-free bound `[verified]`) remains the escalation build. *Escalation rule:* if #2-#4 + the best
+   swept arch still can't beat 0.969, the ceiling is genuinely representational-plus-value-target and the learned-adversary
+   loop is the next move — not more search or more league games.
 
 **B. EFFICIENCY — makes training cheaper/monotone; FUNDS section A, does NOT raise the ceiling.**
 
-6. **Promotion GATE on champion crowning** [Q1] — buildable from existing `head_to_head` / `verify_forced_win_conversion`:
-   only crown a checkpoint if it beats the current one. *Sharpest cheap win:* our own push regressed b23→b39; a gate would have
-   KEPT b23 and it kills the lucky-seed-checkpoint risk `[reasoning]`. (Weight-EMA/SWA is a code-add companion, NOT an existing
-   knob — do not present it as a free flag.)
+6. **Promotion GATE on champion crowning — BUILT 2026-09-01** (`gate_roots` request knob in scaled_run: per-batch
+   `gate_probe` = net-only forced-win conversion on a fixed seed; `update_gate` crowns champion.pt/champion.json ONLY on a
+   STRICTLY better rate — ties keep the incumbent) [Q1]. *Sharpest cheap win:* our own push regressed b23→b39; this gate would
+   have KEPT b23 and it kills the lucky-seed-checkpoint risk `[reasoning]`. First consumer: the auto-queued carry-forward run.
+   (Weight-EMA/SWA is a code-add companion, NOT an existing knob — do not present it as a free flag.)
 7. **Cut training sims 96 → ~32** (`az_sims`, `config.py:76`; keep eval/deploy sims high — already decoupled) [Q1]. Gumbel
    completed-Q + `gumbel_m=16` ≥ all 7 columns ⇒ 96 is likely 2-3× above the efficient frontier `[reasoning]`. *Test:* an
    equal-wall-clock sweep over `az_sims ∈ {16,24,48,96}`. NOTE the "MiniZero 9-16×" figure the research cited was `[unverified]`
    / misattributed — settle it empirically, do not cite the number.
-8. **Reanalyze** (`reanalyze_frac` 0→0.25, machinery present `neural.py:516-534`) [Q1] — reuses buffered positions; cheap once
-   sims are low. Speeds convergence to the SAME ceiling.
+8. **Reanalyze — EXPOSED 2026-09-02** (`reanalyze_frac` request knob in scaled_run; machinery pre-existed in
+   train_alphazero) [Q1] — reuses buffered positions; cheap once sims are low. Speeds convergence to the SAME ceiling.
 9. **KataGo playout-cap randomization** [Q5-T1] — good fit for value-collapse (more games → more value signal). SKIP the
    forced-playout-pruning half — redundant with our Gumbel completed-Q path `[reasoning]`.
 
 **C. SOLVER / CORRECTNESS — cheap, bounded, complementary (not ceiling-movers on their own).**
 
-10. **Net policy → move-ordering into the existing αβ solver** (`solver.py` + `tablebase.py` eviction priority) [Q3] — cheapest
-    solver win, no new algorithm; ~1.3-2× more positions proven per fixed `az_endgame_extend_seconds` `[unverified]` ("Neural
-    MoveMap" number unconfirmed — directional). Yields exact MID-game targets a few plies above today's frontier, NOT empty-board
-    proofs (opening wall is minutes-long in pure Python; net ordering shifts it, doesn't dissolve it).
+10. **Net → frontier PRIORITIZATION — BUILT 2026-09-02, honestly RESCOPED** (`endgame_net_priority` knob →
+    `_frontier_order`: ply-DESC stays PRIMARY — the retrograde children-before-parents invariant — with the net's |value|
+    ASC as the WITHIN-TIER tiebreak, so a tight proof budget lands on the positions the net is most UNCERTAIN about; one
+    batched net call per frontier via `_batched_net_values`) [Q3]. RESCOPE RATIONALE: per-NODE net move-ordering (the
+    "Neural MoveMap" idea `[unverified]`) would be a large SLOWDOWN in our µs-node pure-python prover (net call ≈ ms) —
+    selection, not per-node ordering, is where a net pays here.
 11. **Proof-as-exact-refutation into the buffer** [Q3] — fold proven-LOSS lines into training; doubles as a rigorous solver-free
     C4 correctness check (proof-agreement card in `process_eval`).
 
@@ -933,10 +946,13 @@ inference from our harness. Priority order below is the recommended execution or
 
 12. **`disentangle` capability** (promote `gumbel_disentangle.py`) [Q5-T1] — the measurement engine that unlocks the H1-H10
     hypothesis program on any `SolvableGame`; prerequisite for most hypothesis work.
-13. **Mixed-openings self-play** (some games 0 opening-plies, some >0) [Q5-T1] — the cheapest concrete robustness experiment left
-    and the fix for the diverse-opening dilution confound.
-14. **LBR cheap-screen** (wrap `NearPerfectOracle(depth=k)` as a restricted best-responder) [Q5-T1] — always-on cheap
-    exploitability refuter, reuses the existing oracle.
+13. **Mixed-openings self-play — BUILT 2026-09-02** (`opening_plies_zero_frac` knob: that share of self-play games starts
+    CANONICAL, the rest from diverse openings — sharpness AND coverage from one buffer; NO rng draw when 0.0, so existing
+    runs stay byte-identical) [Q5-T1] — the cheapest concrete robustness experiment left; the experiment itself queues
+    behind the pipeline.
+14. **LBR cheap-screen — BUILT 2026-09-02** (`lbr_screen` in benchmark.py: the model plays BOTH seats vs
+    `NearPerfectOracle(depth=k)` best-responders over a fixed diverse-opening corpus → per-depth exploit_rate profile;
+    deterministic instrument) [Q5-T1] — always-on cheap exploitability refuter; first profile run on ckpt_23 in flight.
 
 **E. EXPLICITLY DECLINED / GATED — recorded so we do not revisit prematurely.**
 
@@ -952,6 +968,32 @@ inference from our harness. Priority order below is the recommended execution or
 - **Full generic df-pn + GHI engine / EWS** [Q3] `[unverified]` and the **per-game-class portfolio** (df-pn for high-branching
   threat games; afterstate-TD/expectimax for stochastic; CFR→Deep-CFR/NFSP→R-NaD for hidden-info; MuZero) [Q5-T2/3] — real
   backlog but GATED on actually moving to a harder game class. Do NOT pull forward.
+
+**ADVERSARIAL REVIEW OF THE §C.8 BUILDS (2026-09-02, 17-agent workflow, every finding EXECUTION-verified; all fixed
+same-day, regression tests added):** ⭐ POSITIVE: an empirical HEAD-vs-worktree A/B confirmed all new flags at defaults are
+BYTE-IDENTICAL (buffers, weights, rng streams) — the queued runs pick up this code safely; ab_bins/ab_gpool train-path
+consistency also verified. FIXED (high): (1) the refutation resolver judged replays by the first example's VALUE TARGET —
+n-step-bootstrapped/tablebase-overridden — so retirement tracked the net's OPINION, not the outcome; now `self_play_game`
+fills a `record` with the game's ACTUAL per-seat returns and `_resolve_refutation` reads only that (works even for
+zero-example replays). (2) gate probe shared seed=7 with the final scorecard — its 12 roots were literally the first 12 of
+the final 32, max-selecting the champion on 37.5% of the measurement; gate now uses held-out `GATE_PROBE_SEED=1013`.
+(3) the carry-forward launcher lived in a SESSION task while the detached A/B chain waited on its output (split-brain,
+dies with VS Code); replaced by ONE self-contained detached pipeline script (run_pipeline_chain.sh). FIXED (med/low):
+terminal-prefix nogoods could never retire (`_nogood_prefix` always excludes the final move); store eviction was
+oldest-ADDED not oldest-REFUTED (resolve(lost) now freshens); refutations.json/champion.json writes were non-atomic with
+crash-prone readers (temp+rename `_write_json_atomic` + tolerant reads — the FileStorage incident class); refutation
+without league silently inert (now refused); endgame_extend_positions/seconds were silently dropped by scaled_run (now
+forwarded). ACCEPTED, not fixed: one-way checkpoint compat (OLD code can't read NEW 9-key-arch checkpoints — no old-code
+readers exist); refutations.json lags a mid-batch abort (consistent with ckpt/buffer semantics); JSON string "0" for a
+bool knob coerces truthy (configs use real booleans).
+
+**PIPELINE IN FLIGHT (2026-09-02, all detached/resumable, one training process at a time):** screen (below) → auto-scored,
+best NON-champion arch auto-carried into the full b23 recipe + gate (`carry_<arch>`) → then `ab_chain` (scratchpad
+run_ab_chain.sh, detached) runs the two ceiling A/B arms SEQUENTIALLY on the champion arch — `ab_gpool` (global_pool=1,
+1.98M params) and `ab_bins` (value_bins=21) — each the exact b23 recipe (league 60/200 + snap6@128 + endgame, 24 batches,
+seed 0) with `gate_roots=12`, ending with an n=32 scorecard of ALL gated champions vs baseline better1/ckpt_23 (0.969),
+logged to `checkpoints/scaled_runs/ab_chain.log`, completion marker `PIPELINE_DONE`. Reading: an arm strictly above 31/32
+beats the ceiling; at/below ⇒ that lever alone does not (next: stack levers, or exploitability-descent per A5).
 
 **ACTION IN FLIGHT — net-arch SCREEN** (`checkpoints/scaled_runs/archscreen/`): 8 archs (20.6K→4.74M params, verified),
 recipe = **distillation + endgame exact-targets** so each net reaches ITS OWN representational ceiling — isolates the arch

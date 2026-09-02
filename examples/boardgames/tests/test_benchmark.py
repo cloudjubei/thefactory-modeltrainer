@@ -105,3 +105,31 @@ def test_verify_forced_win_conversion_is_an_exact_proof_without_the_opening_wall
     assert opt["rate"] == 1.0 and opt["converted"] == 3  # perfect play converts every proven forced win
     weak = verify_forced_win_conversion(game, lambda: RandomAgent(), n_roots=3, empties=12, seed=1)
     assert weak["rate"] < 1.0  # a random model throws proven wins away → exact suboptimality certificate
+
+
+def test_lbr_screen_profiles_exploitability_by_refuter_depth():
+    # §C.8 #14 LBR cheap-screen: the agent plays BOTH seats vs depth-k restricted best responders; the per-depth
+    # loss rate is the always-on exploitability gauge (a near-optimal policy stays hard to exploit as k rises).
+    from harness.agents import RandomAgent
+    from harness.benchmark import lbr_screen
+    from harness.solver import OracleAgent
+
+    game = Connect4()
+    r = lbr_screen(game, lambda: RandomAgent(), depths=[1, 2], n_openings=2, opening_plies=1, seed=3)
+    assert [row["depth"] for row in r["by_depth"]] == [1, 2]
+    for row in r["by_depth"]:
+        for seat in ("as_p1", "as_p2"):
+            s = row[seat]
+            assert abs(s["win"] + s["draw"] + s["loss"] - 1.0) < 1e-9
+        assert 0.0 <= row["exploit_rate"] <= 1.0
+    assert r["games_per_depth"] == 4  # 2 openings x both seats
+    # Determinism: the screen is a fixed-seed instrument, so two runs must agree exactly.
+    again = lbr_screen(game, lambda: RandomAgent(), depths=[1, 2], n_openings=2, opening_plies=1, seed=3)
+    assert again == r
+    # A STRONG agent is unexploitable by a depth-1 refuter from the canonical opening. NearPerfectOracle, not
+    # OracleAgent: the exact solver from the EMPTY BOARD is the minutes-long opening wall (it hung the suite).
+    from harness.solver import NearPerfectOracle
+
+    strong = lbr_screen(game, lambda: NearPerfectOracle(depth=8, solve_endgame=22),
+                        depths=[1], n_openings=1, opening_plies=0, seed=0)
+    assert strong["by_depth"][0]["as_p1"]["loss"] == 0.0

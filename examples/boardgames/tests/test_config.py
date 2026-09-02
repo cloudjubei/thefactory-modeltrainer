@@ -135,9 +135,21 @@ def test_validate_rejects_out_of_range_capacity_levers():
         TrainerConfig(model_name="alphazero", az_batchnorm=2),
         TrainerConfig(model_name="alphazero", az_head_hidden=-1),
         TrainerConfig(model_name="alphazero", az_head_hidden=99999),
+        TrainerConfig(model_name="alphazero", az_global_pool=2),
+        TrainerConfig(model_name="alphazero", az_value_bins=2),  # 1-2 bins are degenerate; 0 or >=3 only
+        TrainerConfig(model_name="alphazero", az_value_bins=999),
     ):
         with pytest.raises(ValueError):
             validate_config(bad)
+
+
+def test_az_ceiling_levers_default_off_and_coerce(tmp_path):
+    # §C.8 ceiling levers are OPT-IN: defaults must leave the net byte-identical to the pre-lever build.
+    c = TrainerConfig(model_name="alphazero")
+    assert c.az_global_pool == 0 and c.az_value_bins == 0
+    cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_global_pool": "1", "az_value_bins": "21"}))
+    assert cfg.az_global_pool == 1 and cfg.az_value_bins == 21
+    validate_config(cfg)
 
 
 def test_validate_rejects_out_of_range_endgame_knobs():
