@@ -43,7 +43,11 @@ export function portfolioGrossReturns(weights: number[][], assetReturns: number[
   return out
 }
 
-export function netReturnSeries(weights: number[][], assetReturns: number[][], fee: number): number[] {
+export function netReturnSeries(
+  weights: number[][],
+  assetReturns: number[][],
+  fee: number,
+): number[] {
   const gross = portfolioGrossReturns(weights, assetReturns)
   if (gross.length === 0) return gross
   const turn = turnoverSeries(weights)

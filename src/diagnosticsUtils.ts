@@ -17,7 +17,15 @@ import type {
   VerifyVerdict,
 } from './modelTrainerTypes'
 import { applyGateOp } from './modelTrainerUtils.js'
-import { medianOf, stdOf, iqm, aggregateRunValues, bootstrapDiff, pairedBootstrapDiff, normalCdf } from './xaiUtils.js'
+import {
+  medianOf,
+  stdOf,
+  iqm,
+  aggregateRunValues,
+  bootstrapDiff,
+  pairedBootstrapDiff,
+  normalCdf,
+} from './xaiUtils.js'
 import { deflatedSharpeFromStats } from './deflatedSharpe.js'
 
 export type SplitVerdict = 'unverifiable' | 'not-replicated' | 'single-split-luck' | 'robust'
@@ -43,7 +51,13 @@ export interface SplitHoldout {
 
   /** §C.7 per-split effect + CI vs the baseline — populated only when a CI-based held-test (`alpha`) is asked
    * for; [] under the mean test. Surfaces the interval the boolean `held` collapses. */
-  splitEffects: Array<{ split: string; delta: number; ci: [number, number]; pValue: number; held: boolean }>
+  splitEffects: Array<{
+    split: string
+    delta: number
+    ci: [number, number]
+    pValue: number
+    held: boolean
+  }>
 
   /** §C.3 the declared locked-TEST split values present in the run set — EXCLUDED from incumbent selection. */
   testSplits: string[]
@@ -54,8 +68,10 @@ export interface SplitHoldout {
 }
 
 function valueOf(run: AnalysisRun, criterion: AnalysisCriterion): number | undefined {
-  if (criterion.key === 'objective') return typeof run.objective === 'number' ? run.objective : undefined
-  if (criterion.key === 'durationMs') return typeof run.durationMs === 'number' ? run.durationMs : undefined
+  if (criterion.key === 'objective')
+    return typeof run.objective === 'number' ? run.objective : undefined
+  if (criterion.key === 'durationMs')
+    return typeof run.durationMs === 'number' ? run.durationMs : undefined
   const v = run.metrics?.[criterion.key]
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined
 }
@@ -111,7 +127,10 @@ function selectIncumbent(
   }
   // Rank setups by mean-of-criterion (stable, so ties keep insertion order — the first-wins incumbent the
   // strict-inequality scan used to give); the second is the runner-up the seed-significance gate tests against.
-  const setups = [...bySetup.values()].map((rs) => ({ rs, val: mean(rs.map((r) => valueOf(r, criterion)!)) }))
+  const setups = [...bySetup.values()].map((rs) => ({
+    rs,
+    val: mean(rs.map((r) => valueOf(r, criterion)!)),
+  }))
   setups.sort((a, b) => (criterion.direction === 'max' ? b.val - a.val : a.val - b.val))
   return {
     completed,
@@ -181,7 +200,8 @@ export function incumbentSplitHoldout(
       splitConfigByKey.set(k, Object.fromEntries(splitLevers.map((l) => [l, r.config[l]])))
     }
   }
-  const isTestSplit = (sv: string) => Object.values(splitConfigByKey.get(sv) ?? {}).some((v) => testSet.has(String(v)))
+  const isTestSplit = (sv: string) =>
+    Object.values(splitConfigByKey.get(sv) ?? {}).some((v) => testSet.has(String(v)))
 
   const splitValues = [...splitConfigByKey.keys()].sort()
   let evaluated = 0
@@ -257,7 +277,11 @@ export function convergenceGatedBySplits(holdout: SplitHoldout): boolean {
  * champion's runs there CARRIES the metric; when the metric is absent on every split the gate is NOT
  * applicable (skipped — e.g. the capture metrics' do-nothing sentinel), so it never rejects the champion.
  */
-function evalCohortMedianGate(gate: TrainerGate, incRuns: AnalysisRun[], splitLevers: string[]): ChampionGate {
+function evalCohortMedianGate(
+  gate: TrainerGate,
+  incRuns: AnalysisRun[],
+  splitLevers: string[],
+): ChampionGate {
   const rendered = typeof gate.value === 'number' ? String(gate.value) : gate.value.metric
   const label = gate.label ?? `${gate.metric} ${gate.op} ${rendered}`
   const bySplit = new Map<string, AnalysisRun[]>()
@@ -286,7 +310,14 @@ function evalCohortMedianGate(gate: TrainerGate, incRuns: AnalysisRun[], splitLe
     if (applyGateOp(actual, gate.op, bound)) held++
     else if (firstFail === undefined) firstFail = `${sv} (median ${actual.toFixed(3)})`
   }
-  if (!windows) return { label, kind: 'cohort-median', applicable: false, pass: false, detail: `${gate.metric} not emitted` }
+  if (!windows)
+    return {
+      label,
+      kind: 'cohort-median',
+      applicable: false,
+      pass: false,
+      detail: `${gate.metric} not emitted`,
+    }
   const pass = held === windows
   return {
     label,
@@ -319,7 +350,13 @@ function evalDsrGate(
   const finite = (v: number | undefined): v is number => v !== undefined
   const incSharpes = incRuns.map((r) => metricOf(r, sharpeKey)).filter(finite)
   if (!incSharpes.length) {
-    return { label, kind: 'dsr', applicable: false, pass: false, detail: `${sharpeKey} not emitted` }
+    return {
+      label,
+      kind: 'dsr',
+      applicable: false,
+      pass: false,
+      detail: `${sharpeKey} not emitted`,
+    }
   }
   // n_trials = distinct SETUPS; trial_sr_std = std of each setup's median Sharpe (the cross-trial spread).
   const exclude = new Set<string>(['seed', ...splitLevers])
@@ -347,7 +384,14 @@ function evalDsrGate(
   const incSkew = skewVals.length ? medianOf(skewVals) : 0
   const incKurt = kurtVals.length ? medianOf(kurtVals) : 3
   const incNObs = nObsVals.length ? medianOf(nObsVals) : 0
-  const dsrValue = deflatedSharpeFromStats(incSharpe, incSkew, incKurt, incNObs, nTrials, trialSrStd)
+  const dsrValue = deflatedSharpeFromStats(
+    incSharpe,
+    incSkew,
+    incKurt,
+    incNObs,
+    nTrials,
+    trialSrStd,
+  )
   const obsOk = dsr.minObs === undefined || incNObs >= dsr.minObs
   const pass = dsrValue >= threshold && obsOk
   const detail =
@@ -370,7 +414,13 @@ function evalStabilityGate(
   const label = `seed-stable (CI width ≤ ${stability.maxCiWidth})`
   const vals = incRuns.map((r) => metricOf(r, key)).filter((v): v is number => v !== undefined)
   if (vals.length < 2) {
-    return { label, kind: 'seed-stability', applicable: false, pass: false, detail: 'need ≥ 2 seeds' }
+    return {
+      label,
+      kind: 'seed-stability',
+      applicable: false,
+      pass: false,
+      detail: 'need ≥ 2 seeds',
+    }
   }
   const agg = aggregateRunValues(vals)
   const width = agg.ci[1] - agg.ci[0]
@@ -407,7 +457,13 @@ function evalBestOfNGate(
   const finite = (v: number | undefined): v is number => v !== undefined
   const incVals = incRuns.map((r) => metricOf(r, key)).filter(finite)
   if (!incVals.length || !incRuns.length) {
-    return { label, kind: 'best-of-n', applicable: false, pass: false, detail: `${key} not emitted` }
+    return {
+      label,
+      kind: 'best-of-n',
+      applicable: false,
+      pass: false,
+      detail: `${key} not emitted`,
+    }
   }
   const exclude = new Set<string>(['seed', ...splitLevers])
   const incKey = setupKey(incRuns[0].config, exclude)
@@ -422,7 +478,9 @@ function evalBestOfNGate(
   }
   // The null is the REST of the field — the champion's own setup is excluded so a lone real winner can't
   // inflate the noise scale it's judged against (the DSR path avoids this via each run's own sample length).
-  const otherVals = [...bySetup.entries()].filter(([k]) => k !== incKey).map(([, vs]) => medianOf(vs))
+  const otherVals = [...bySetup.entries()]
+    .filter(([k]) => k !== incKey)
+    .map(([, vs]) => medianOf(vs))
   const trialStd = stdOf(otherVals)
   if (otherVals.length < 2 || !(trialStd > 0)) {
     return {
@@ -433,10 +491,14 @@ function evalBestOfNGate(
       detail: `${key}: need ≥ 2 other setups with spread (have ${otherVals.length})`,
     }
   }
-  const nTrials = Math.max(bySetup.size, Number.isFinite(declaredTrials) ? Math.floor(declaredTrials) : 0)
+  const nTrials = Math.max(
+    bySetup.size,
+    Number.isFinite(declaredTrials) ? Math.floor(declaredTrials) : 0,
+  )
   const nullMean = mean(otherVals)
   const incVal = medianOf(incVals)
-  const z = criterion.direction === 'max' ? (incVal - nullMean) / trialStd : (nullMean - incVal) / trialStd
+  const z =
+    criterion.direction === 'max' ? (incVal - nullMean) / trialStd : (nullMean - incVal) / trialStd
   const familyP = 1 - Math.pow(normalCdf(z), nTrials)
   const pass = familyP < alpha
   return {
@@ -463,7 +525,9 @@ function evalDegeneracyGate(
   let anyApplicable = false
   let firstDegenerate: string | undefined
   for (const rule of degenerateWhen) {
-    const vals = incRuns.map((r) => metricOf(r, rule.metric)).filter((v): v is number => v !== undefined)
+    const vals = incRuns
+      .map((r) => metricOf(r, rule.metric))
+      .filter((v): v is number => v !== undefined)
     if (!vals.length) continue
     anyApplicable = true
     const med = medianOf(vals)
@@ -473,7 +537,13 @@ function evalDegeneracyGate(
     }
   }
   if (!anyApplicable) {
-    return { label, kind: 'not-degenerate', applicable: false, pass: false, detail: 'no degeneracy metric emitted' }
+    return {
+      label,
+      kind: 'not-degenerate',
+      applicable: false,
+      pass: false,
+      detail: 'no degeneracy metric emitted',
+    }
   }
   const pass = firstDegenerate === undefined
   return {
@@ -517,7 +587,11 @@ function evalSeedSignificanceGate(
   const common = [...incBySeed.keys()].filter((s) => runBySeed.has(s)).sort((a, b) => a - b)
   const { ci, pValue, delta } =
     common.length >= 2
-      ? pairedBootstrapDiff(common.map((s) => incBySeed.get(s)!), common.map((s) => runBySeed.get(s)!), criterion.direction)
+      ? pairedBootstrapDiff(
+          common.map((s) => incBySeed.get(s)!),
+          common.map((s) => runBySeed.get(s)!),
+          criterion.direction,
+        )
       : bootstrapDiff(incVals, runVals, criterion.direction)
   const pass = ci[0] > 0 && pValue < alpha
   return {
@@ -559,17 +633,32 @@ export function assembleChampionVerdict(
     !!diagnostics?.multiplicity ||
     !!diagnostics?.degenerateWhen?.length
   if (!hasConfig) return { championGates: [] }
-  const { completed, incRuns, runnerUpRuns } = selectIncumbent(ctx.runs, ctx.splitLevers, ctx.criterion)
-  const championGates: ChampionGate[] = gates.map((g) => evalCohortMedianGate(g, incRuns, ctx.splitLevers))
+  const { completed, incRuns, runnerUpRuns } = selectIncumbent(
+    ctx.runs,
+    ctx.splitLevers,
+    ctx.criterion,
+  )
+  const championGates: ChampionGate[] = gates.map((g) =>
+    evalCohortMedianGate(g, incRuns, ctx.splitLevers),
+  )
   if (diagnostics?.degenerateWhen?.length)
     championGates.push(evalDegeneracyGate(diagnostics.degenerateWhen, incRuns))
   if (diagnostics?.dsr)
     championGates.push(
-      evalDsrGate(diagnostics.dsr, completed, incRuns, ctx.splitLevers, diagnostics.searchSpace?.nTrials ?? 0),
+      evalDsrGate(
+        diagnostics.dsr,
+        completed,
+        incRuns,
+        ctx.splitLevers,
+        diagnostics.searchSpace?.nTrials ?? 0,
+      ),
     )
-  if (diagnostics?.stability) championGates.push(evalStabilityGate(diagnostics.stability, incRuns, ctx.criterion))
+  if (diagnostics?.stability)
+    championGates.push(evalStabilityGate(diagnostics.stability, incRuns, ctx.criterion))
   if (diagnostics?.significance)
-    championGates.push(evalSeedSignificanceGate(diagnostics.significance, incRuns, runnerUpRuns, ctx.criterion))
+    championGates.push(
+      evalSeedSignificanceGate(diagnostics.significance, incRuns, runnerUpRuns, ctx.criterion),
+    )
   if (diagnostics?.multiplicity)
     championGates.push(
       evalBestOfNGate(
@@ -627,7 +716,12 @@ export function verifyImprovement(
       detail: `Δ vs baseline [${d.ci[0].toFixed(3)}, ${d.ci[1].toFixed(3)}] p=${d.pValue.toFixed(3)}`,
     })
   } else {
-    checks.push({ name: 'seed-stability', applicable: false, pass: false, detail: `only ${incVals.length} seed` })
+    checks.push({
+      name: 'seed-stability',
+      applicable: false,
+      pass: false,
+      detail: `only ${incVals.length} seed`,
+    })
   }
 
   // 2) split-robust — the win holds across the declared split axis.
@@ -640,7 +734,12 @@ export function verifyImprovement(
       detail: `${h.held}/${h.evaluated} split(s) held`,
     })
   } else {
-    checks.push({ name: 'split-robust', applicable: false, pass: false, detail: 'no split axis declared' })
+    checks.push({
+      name: 'split-robust',
+      applicable: false,
+      pass: false,
+      detail: 'no split axis declared',
+    })
   }
 
   // 3) nuisance-robust — sibling setups differing ONLY on a declared nuisance lever still clear the baseline.
@@ -675,7 +774,9 @@ export function verifyImprovement(
       name: 'nuisance-robust',
       applicable: false,
       pass: false,
-      detail: nuisance.length ? 'incumbent carries no nuisance lever' : 'no nuisance levers declared',
+      detail: nuisance.length
+        ? 'incumbent carries no nuisance lever'
+        : 'no nuisance levers declared',
     })
   }
 
@@ -702,19 +803,32 @@ export function verifyImprovement(
       return best
     }
     const incKey = setupKey(incumbentConfig, exclude)
-    const agree = argmaxBy(mean) === incKey && argmaxBy(medianOf) === incKey && argmaxBy(iqm) === incKey
+    const agree =
+      argmaxBy(mean) === incKey && argmaxBy(medianOf) === incKey && argmaxBy(iqm) === incKey
     checks.push({
       name: 'aggregator-agreement',
       applicable: bySetup.size >= 2,
       pass: agree,
-      detail: agree ? 'mean/median/IQM agree on the incumbent' : 'aggregators disagree on the incumbent',
+      detail: agree
+        ? 'mean/median/IQM agree on the incumbent'
+        : 'aggregators disagree on the incumbent',
     })
   } else {
-    checks.push({ name: 'aggregator-agreement', applicable: false, pass: false, detail: 'incumbent has < 2 seeds' })
+    checks.push({
+      name: 'aggregator-agreement',
+      applicable: false,
+      pass: false,
+      detail: 'incumbent has < 2 seeds',
+    })
   }
 
   const applicable = checks.filter((c) => c.applicable)
-  return { verified: applicable.length > 0 && applicable.every((c) => c.pass), unverifiable: applicable.length === 0, incumbentConfig, checks }
+  return {
+    verified: applicable.length > 0 && applicable.every((c) => c.pass),
+    unverifiable: applicable.length === 0,
+    incumbentConfig,
+    checks,
+  }
 }
 
 /** The split levers a manifest declares for split-consistency (`diagnostics.splitAxis.levers`), or []. */
@@ -826,7 +940,9 @@ export function proxyAlignment(
   let regret = NaN
   if (setups.length) {
     const byObj = [...setups].sort((a, b) => b.obj - a.obj)[0]
-    const byMet = [...setups].sort((a, b) => (direction === 'max' ? b.met - a.met : a.met - b.met))[0]
+    const byMet = [...setups].sort((a, b) =>
+      direction === 'max' ? b.met - a.met : a.met - b.met,
+    )[0]
     regret = direction === 'max' ? byMet.met - byObj.met : byObj.met - byMet.met
   }
   return { metric, pearson: pear, spearman: spear, regret, n: setups.length }

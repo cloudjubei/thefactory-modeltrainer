@@ -236,12 +236,16 @@ describe('aggForModel + deriveModelStatus', () => {
   })
   it('respects a PINNED status (deferred) even from an auto source, not just manual', () => {
     // A manifest seed can declare a model deferred; auto-derivation must not flip it back to proposed.
-    expect(M.deriveModelStatus({ status: 'deferred', statusSource: 'auto', flavors: [] }, null, mani)).toBe(
-      'deferred',
-    )
+    expect(
+      M.deriveModelStatus({ status: 'deferred', statusSource: 'auto', flavors: [] }, null, mani),
+    ).toBe('deferred')
     // and even if (hypothetically) runs exist, the deliberate pin stands
     expect(
-      M.deriveModelStatus({ status: 'deferred', statusSource: 'auto', flavors: [] }, { runs: 3, failing: 0 }, mani),
+      M.deriveModelStatus(
+        { status: 'deferred', statusSource: 'auto', flavors: [] },
+        { runs: 3, failing: 0 },
+        mani,
+      ),
     ).toBe('deferred')
   })
   it('is implemented when lever-bound but unrun', () => {
@@ -340,7 +344,10 @@ describe('visibleMissingModels / inapplicableModelTitles', () => {
   })
 
   it('returns every missing model when nothing is inapplicable', () => {
-    const missing = [{ name: 'A', slug: 'a' }, { name: 'B', slug: 'b' }]
+    const missing = [
+      { name: 'A', slug: 'a' },
+      { name: 'B', slug: 'b' },
+    ]
     expect(M.visibleMissingModels(missing, paper([impModel('A')])).length).toBe(2)
     expect(M.visibleMissingModels(missing, undefined).length).toBe(2)
   })
@@ -483,9 +490,9 @@ describe('flavorComponents + modelsUsingComponent (block composition)', () => {
     expect(M.flavorComponents({ modelName: 'x' }, all)).toEqual([])
   })
   it('modelsUsingComponent finds the models whose flavors reference a component', () => {
-    expect(M.modelsUsingComponent('prioritized-replay-buffer', all).map((m: any) => m.slug)).toEqual(
-      ['rainbow-dqn'],
-    )
+    expect(
+      M.modelsUsingComponent('prioritized-replay-buffer', all).map((m: any) => m.slug),
+    ).toEqual(['rainbow-dqn'])
   })
   it('modelsUsingComponent excludes the component itself + returns [] when unused', () => {
     expect(M.modelsUsingComponent('custom-policies', comps).map((m: any) => m.slug)).toEqual([])
@@ -507,17 +514,31 @@ describe('modelsUsingComponentInRuns (custom_net_arch recipe wiring, A9)', () =>
     flavors: [],
     blockTokens: ['NoisyLinear', 'ResidualBlock'],
   }
-  const reppo = { slug: 'reppo-custom', name: 'Reppo Custom', category: 'rl', flavors: [{ modelName: 'reppo-custom' }] }
-  const gru = { slug: 'gru-custom', name: 'GRU Custom', category: 'rl', flavors: [{ modelName: 'gru-custom' }, { modelName: 'gru' }] }
+  const reppo = {
+    slug: 'reppo-custom',
+    name: 'Reppo Custom',
+    category: 'rl',
+    flavors: [{ modelName: 'reppo-custom' }],
+  }
+  const gru = {
+    slug: 'gru-custom',
+    name: 'GRU Custom',
+    category: 'rl',
+    flavors: [{ modelName: 'gru-custom' }, { modelName: 'gru' }],
+  }
   const models = [attention, nn, reppo, gru]
-  const run = (modelName: string, arch: unknown) => ({ config: { model_name: modelName, custom_net_arch: arch } })
+  const run = (modelName: string, arch: unknown) => ({
+    config: { model_name: modelName, custom_net_arch: arch },
+  })
 
   it('finds the models whose RUNS wire a block belonging to the component', () => {
     const runs = [
       run('reppo-custom', ['Linear', 'activation_fn', 'SelfAttention', 'Linear']),
       run('gru-custom', ['BatchNorm1d', 'Linear']), // no attention block
     ]
-    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['reppo-custom'])
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual([
+      'reppo-custom',
+    ])
   })
 
   it('reads the recipe from ANY array-valued config key (domain-oblivious) + dedups a model across runs', () => {
@@ -526,26 +547,55 @@ describe('modelsUsingComponentInRuns (custom_net_arch recipe wiring, A9)', () =>
       run('gru-custom', ['ResidualBlock']), // same model, another nn-block run
       run('reppo-custom', ['Linear']), // no nn block
     ]
-    expect(M.modelsUsingComponentInRuns(nn, models, runs).map((m: any) => m.slug)).toEqual(['gru-custom'])
+    expect(M.modelsUsingComponentInRuns(nn, models, runs).map((m: any) => m.slug)).toEqual([
+      'gru-custom',
+    ])
   })
 
   it('returns [] for a component without blockTokens, and ignores a non-array recipe', () => {
-    expect(M.modelsUsingComponentInRuns({ slug: 'x', category: 'component' }, models, [run('reppo-custom', ['SelfAttention'])])).toEqual([])
-    expect(M.modelsUsingComponentInRuns(attention, models, [run('reppo-custom', 'notarray')])).toEqual([])
+    expect(
+      M.modelsUsingComponentInRuns({ slug: 'x', category: 'component' }, models, [
+        run('reppo-custom', ['SelfAttention']),
+      ]),
+    ).toEqual([])
+    expect(
+      M.modelsUsingComponentInRuns(attention, models, [run('reppo-custom', 'notarray')]),
+    ).toEqual([])
   })
 
   it('reads a viewer run shape (summary.config) too', () => {
-    const runs = [{ summary: { config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] } } }]
-    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['reppo-custom'])
+    const runs = [
+      { summary: { config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] } } },
+    ]
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual([
+      'reppo-custom',
+    ])
   })
 
   it('skips invalid + failed runs (parity with the computeModelStats exclusion)', () => {
     const runs = [
-      { summary: { status: 'invalid', config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] } } },
-      { summary: { status: 'failed', config: { model_name: 'reppo-custom', custom_net_arch: ['MultiHeadAttention'] } } },
-      { summary: { status: 'completed', config: { model_name: 'gru-custom', custom_net_arch: ['SelfAttention'] } } },
+      {
+        summary: {
+          status: 'invalid',
+          config: { model_name: 'reppo-custom', custom_net_arch: ['SelfAttention'] },
+        },
+      },
+      {
+        summary: {
+          status: 'failed',
+          config: { model_name: 'reppo-custom', custom_net_arch: ['MultiHeadAttention'] },
+        },
+      },
+      {
+        summary: {
+          status: 'completed',
+          config: { model_name: 'gru-custom', custom_net_arch: ['SelfAttention'] },
+        },
+      },
     ]
-    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual(['gru-custom'])
+    expect(M.modelsUsingComponentInRuns(attention, models, runs).map((m: any) => m.slug)).toEqual([
+      'gru-custom',
+    ])
   })
 })
 
@@ -558,7 +608,10 @@ describe('seed re-sync (flavor components)', () => {
     category: 'rl',
     status: 'implemented',
     flavors: [
-      { modelName: 'rainbow-dqn-custom', components: ['custom-policies', 'prioritized-replay-buffer'] },
+      {
+        modelName: 'rainbow-dqn-custom',
+        components: ['custom-policies', 'prioritized-replay-buffer'],
+      },
     ],
     source: 'manual',
   }
@@ -617,7 +670,7 @@ describe('mergeModelsForConsolidation', () => {
   })
   const NOW = '2026-06-27T00:00:00.000Z'
 
-  it("unions flavors (canonical first) and de-dupes by flavorKey", () => {
+  it('unions flavors (canonical first) and de-dupes by flavorKey', () => {
     const merged = M.mergeModelsForConsolidation(
       canonical(),
       [dup(), dup({ id: 'x', slug: 'x', flavors: [{ modelName: 'itransformer-ppo' }] })],
@@ -679,7 +732,14 @@ describe('mergeModelsForConsolidation', () => {
   it('records the merged-away models (slug, name, their aliases) as aliases on the canonical', () => {
     const merged = M.mergeModelsForConsolidation(
       canonical(),
-      [dup({ id: 'inv-tf-ppo', slug: 'inv-tf-ppo', name: 'Inverted Transformer PPO', aliases: ['itpo'] })],
+      [
+        dup({
+          id: 'inv-tf-ppo',
+          slug: 'inv-tf-ppo',
+          name: 'Inverted Transformer PPO',
+          aliases: ['itpo'],
+        }),
+      ],
       NOW,
     )
     expect(merged.aliases).toContain('inv-tf-ppo') // the duplicate's slug/id
@@ -794,22 +854,45 @@ describe('alias-aware seed sync', () => {
 
   it('seedDiffersFromModel: a flavor only the RECORD has (consolidation-absorbed) is not a re-sync trigger', () => {
     const seed = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }] }
-    const rec = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }, { modelName: 'absorbed' }] }
+    const rec = {
+      id: 'm',
+      slug: 'm',
+      name: 'M',
+      flavors: [{ modelName: 'm' }, { modelName: 'absorbed' }],
+    }
     expect(M.seedDiffersFromModel(seed, rec)).toBe(false)
   })
   it('seedDiffersFromModel: a NEW manifest flavor triggers a re-sync', () => {
-    const seed = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }, { modelName: 'new' }] }
+    const seed = {
+      id: 'm',
+      slug: 'm',
+      name: 'M',
+      flavors: [{ modelName: 'm' }, { modelName: 'new' }],
+    }
     const rec = { id: 'm', slug: 'm', name: 'M', flavors: [{ modelName: 'm' }] }
     expect(M.seedDiffersFromModel(seed, rec)).toBe(true)
   })
   it('seedDiffersFromModel: a manifest-declared alias the record lacks triggers a re-sync', () => {
-    const seed = { id: 'a2c', slug: 'a2c', name: 'A2C', flavors: [{ modelName: 'a2c' }], aliases: ['policy-gradient'] }
+    const seed = {
+      id: 'a2c',
+      slug: 'a2c',
+      name: 'A2C',
+      flavors: [{ modelName: 'a2c' }],
+      aliases: ['policy-gradient'],
+    }
     const rec = { id: 'a2c', slug: 'a2c', name: 'A2C', flavors: [{ modelName: 'a2c' }] }
     expect(M.seedDiffersFromModel(seed, rec)).toBe(true)
   })
 
   it('mergeSeedIntoModel: unions record + seed aliases and preserves consolidation-absorbed flavors', () => {
-    const seed = { id: 'a2c', slug: 'a2c', name: 'A2C', category: 'rl', flavors: [{ modelName: 'a2c' }], aliases: ['vpg'] }
+    const seed = {
+      id: 'a2c',
+      slug: 'a2c',
+      name: 'A2C',
+      category: 'rl',
+      flavors: [{ modelName: 'a2c' }],
+      aliases: ['vpg'],
+    }
     const rec = {
       id: 'a2c',
       slug: 'a2c',
@@ -912,7 +995,12 @@ describe('device benchmark view helpers', () => {
       isBest: true,
       chipClass: 'device-chip-cpu',
     })
-    expect(v.perDevice[1]).toMatchObject({ device: 'mps', usPerStep: null, error: 'too slow / timed out', isBest: false })
+    expect(v.perDevice[1]).toMatchObject({
+      device: 'mps',
+      usPerStep: null,
+      error: 'too slow / timed out',
+      isBest: false,
+    })
     expect(v.perDevice[2]).toMatchObject({ device: 'cuda', usPerStep: null, error: null })
     expect(v.best).toBe('cpu')
     expect(v.bestClass).toBe('device-chip-cpu')
@@ -920,7 +1008,11 @@ describe('device benchmark view helpers', () => {
   })
 
   it('deviceBenchmarkView appends a non-standard device present in the data', () => {
-    const v = M.deviceBenchmarkView({ ...db(), bestDevice: 'cuda', usPerStep: { cuda: 47, tpu: 9 } })
+    const v = M.deviceBenchmarkView({
+      ...db(),
+      bestDevice: 'cuda',
+      usPerStep: { cuda: 47, tpu: 9 },
+    })
     expect(v.perDevice.map((d: any) => d.device)).toContain('tpu')
     expect(v.bestClass).toBe('device-chip-cuda')
   })

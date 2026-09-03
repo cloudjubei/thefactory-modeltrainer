@@ -79,7 +79,10 @@ describe('deflatedSharpeFromStats (TS twin of sharpe.py deflated_sharpe_ratio)',
   })
 
   it('equals PSR(benchmark 0) when there is a single trial (no deflation)', () => {
-    expect(deflatedSharpeFromStats(0.1, 0.0, 3.0, 101, 1, 0.5)).toBeCloseTo(psrFromStats(0.1, 0.0, 3.0, 101), 12)
+    expect(deflatedSharpeFromStats(0.1, 0.0, 3.0, 101, 1, 0.5)).toBeCloseTo(
+      psrFromStats(0.1, 0.0, 3.0, 101),
+      12,
+    )
   })
 })
 
@@ -407,7 +410,9 @@ describe('powered-null primitives (TS twins of trainer/sharpe.py)', () => {
   it('benjaminiYekutieli is no less conservative than BH', () => {
     const p = [0.001, 0.02, 0.5, 0.6]
     const by = benjaminiYekutieli(p, 0.05)
-    expect(by.filter(Boolean).length).toBeLessThanOrEqual(benjaminiHochberg(p, 0.05).filter(Boolean).length)
+    expect(by.filter(Boolean).length).toBeLessThanOrEqual(
+      benjaminiHochberg(p, 0.05).filter(Boolean).length,
+    )
     expect(by).toEqual([true, false, false, false]) // H_4=2.0833; k=1 thr = 0.05/2.0833/4 = 0.006 >= 0.001
   })
 })
@@ -426,17 +431,36 @@ describe('effectiveTrials (TS twin of effective_trials.py participation ratio)',
   })
 
   it('2x2 rho=0.5 -> 1.6 (golden vs Python)', () => {
-    expect(effectiveTrialsParticipation([[1, 0.5], [0.5, 1]])).toBeCloseTo(1.6, 10)
+    expect(
+      effectiveTrialsParticipation([
+        [1, 0.5],
+        [0.5, 1],
+      ]),
+    ).toBeCloseTo(1.6, 10)
   })
 
   it('3x3 equicorrelation rho=0.3 -> 2.542372881355932 (golden vs Python)', () => {
-    const c = [[1, 0.3, 0.3], [0.3, 1, 0.3], [0.3, 0.3, 1]]
+    const c = [
+      [1, 0.3, 0.3],
+      [0.3, 1, 0.3],
+      [0.3, 0.3, 1],
+    ]
     expect(effectiveTrialsParticipation(c)).toBeCloseTo(2.542372881355932, 10)
   })
 
   it('is bounded in [1, M]', () => {
-    expect(effectiveTrialsParticipation([[1, 0.9], [0.9, 1]])).toBeGreaterThanOrEqual(1)
-    expect(effectiveTrialsParticipation([[1, 0.9], [0.9, 1]])).toBeLessThanOrEqual(2)
+    expect(
+      effectiveTrialsParticipation([
+        [1, 0.9],
+        [0.9, 1],
+      ]),
+    ).toBeGreaterThanOrEqual(1)
+    expect(
+      effectiveTrialsParticipation([
+        [1, 0.9],
+        [0.9, 1],
+      ]),
+    ).toBeLessThanOrEqual(2)
   })
 
   it('empty / singleton degrade cleanly', () => {
@@ -475,7 +499,10 @@ describe('probabilisticSharpeRatioHac (TS twin of sharpe.py HAC-PSR, stats form)
 
   it('HAC-PSR golden vs Python (positive autocorrelation deflates PSR below iid)', () => {
     // case1: sr=0.1, iid moments, n=500, autocorr [0.3,0.1] q=2
-    expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0.3, 0.1], 2)).toBeCloseTo(0.9671108142040388, 6)
+    expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0.3, 0.1], 2)).toBeCloseTo(
+      0.9671108142040388,
+      6,
+    )
     expect(probabilisticSharpeRatioHacFromStats(0.1, 0.0, 3.0, 500, [0.3, 0.1], 2)).toBeLessThan(
       psrFromStats(0.1, 0.0, 3.0, 500),
     )

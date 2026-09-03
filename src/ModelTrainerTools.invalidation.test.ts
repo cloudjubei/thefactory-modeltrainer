@@ -49,7 +49,11 @@ function applyOmit(content: unknown, omit: string[] | undefined): unknown {
   for (const path of omit) {
     const dot = path.indexOf('.')
     if (dot === -1) delete out[path]
-    else nested.set(path.slice(0, dot), [...(nested.get(path.slice(0, dot)) ?? []), path.slice(dot + 1)])
+    else
+      nested.set(path.slice(0, dot), [
+        ...(nested.get(path.slice(0, dot)) ?? []),
+        path.slice(dot + 1),
+      ])
   }
   for (const [head, subs] of nested) {
     if (out[head] && typeof out[head] === 'object') out[head] = applyOmit(out[head], subs)
@@ -215,7 +219,12 @@ describe('invalidateRuns × fidelity look-ahead (real predicate)', () => {
     // Same coarse-only config, but produced under the fixed pipeline (major 6). The version gate must
     // exempt it — RED if beforePipelineMajor comparison regressed to invalidate re-runs of the fix.
     const storage = memoryStorage()
-    await seedRun(storage, 'r-v6', { timeframe: '1h', fidelity_set: '1d' }, { pipelineVersion: '6.0' })
+    await seedRun(
+      storage,
+      'r-v6',
+      { timeframe: '1h', fidelity_set: '1d' },
+      { pipelineVersion: '6.0' },
+    )
     const tools = makeTools(storage)
 
     const result = await tools.invalidateRuns({ ...baseParams, manifest: manifest() })
@@ -289,9 +298,11 @@ describe('invalidateRuns × fidelity look-ahead (real predicate)', () => {
 
     expect(result).toMatchObject({ examinedRuns: 5, invalidatedRuns: 2 })
     const statusOf = async (key: string) =>
-      ((await storage.readRecord({ scope: 'proj', type: 'trainer-run', key }))!.content as {
-        status: string
-      }).status
+      (
+        (await storage.readRecord({ scope: 'proj', type: 'trainer-run', key }))!.content as {
+          status: string
+        }
+      ).status
     expect(await statusOf('bad-1h-1d')).toBe('invalid')
     expect(await statusOf('bad-1h-1d1w')).toBe('invalid')
     expect(await statusOf('ok-1h-1d')).toBe('completed')

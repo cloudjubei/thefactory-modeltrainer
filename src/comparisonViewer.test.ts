@@ -96,7 +96,11 @@ const manifestConditional = {
   recordType: 'blackswan-run',
   objective: { name: 'return', direction: 'max' },
   levers: {
-    model_name: { type: 'choice', choices: ['supervised-logreg', 'momentum', 'ppo'], scope: 'model' },
+    model_name: {
+      type: 'choice',
+      choices: ['supervised-logreg', 'momentum', 'ppo'],
+      scope: 'model',
+    },
     learning_rate: { type: 'number', scope: 'model' },
     asset: { type: 'choice', choices: ['BTC'], scope: 'dataset' },
     stop_loss: { type: 'number', scope: 'environment' },
@@ -105,7 +109,11 @@ const manifestConditional = {
       scope: 'model',
       appliesWhen: { model_name: ['supervised-logreg'] },
     },
-    momentum_lookback: { type: 'number', scope: 'model', appliesWhen: { model_name: ['momentum'] } },
+    momentum_lookback: {
+      type: 'number',
+      scope: 'model',
+      appliesWhen: { model_name: ['momentum'] },
+    },
     seed: { type: 'number', scope: 'model' },
   },
 }
@@ -154,7 +162,12 @@ describe('locking / matching across the model-identity axis excludes gated lever
     expect(C.sameSetupExceptAxis(manifestConditional, 'model_name', focus, momentum)).toBe(true)
   })
   it('a run that differs on a SHARED locked lever still does not match', () => {
-    const focus = { model_name: 'supervised-logreg', learning_rate: 0.01, asset: 'BTC', stop_loss: 0.02 }
+    const focus = {
+      model_name: 'supervised-logreg',
+      learning_rate: 0.01,
+      asset: 'BTC',
+      stop_loss: 0.02,
+    }
     const other = { model_name: 'ppo', learning_rate: 0.5, asset: 'BTC', stop_loss: 0.02 }
     expect(C.sameSetupExceptAxis(manifestConditional, 'model_name', focus, other)).toBe(false)
   })
@@ -240,7 +253,13 @@ describe('sameSetupExceptAxis (strict across-axis grouping)', () => {
     ).toBe(false)
   })
   it('treats unset ≡ null ≡ n/a, so a lever the focus never set cannot leak in runs that DO set it', () => {
-    const f = { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', learning_rate: 0.0003 }
+    const f = {
+      model_name: 'ppo',
+      net_arch: '[128]',
+      asset: 'BTC',
+      timeframe: '1d',
+      learning_rate: 0.0003,
+    }
     expect(
       C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', f, { ...f, learning_rate: 0.001 }),
     ).toBe(true) // stop_loss unset on both
@@ -252,16 +271,37 @@ describe('sameSetupExceptAxis (strict across-axis grouping)', () => {
       }),
     ).toBe(false) // run sets a lever the focus left unset
     expect(
-      C.sameSetupExceptAxis(manifestSeedModel, 'learning_rate', { ...f, stop_loss: 'n/a' }, {
-        ...f,
-        learning_rate: 0.001,
-      }),
+      C.sameSetupExceptAxis(
+        manifestSeedModel,
+        'learning_rate',
+        { ...f, stop_loss: 'n/a' },
+        {
+          ...f,
+          learning_rate: 0.001,
+        },
+      ),
     ).toBe(true) // focus 'n/a' ≡ run unset
   })
   it('By dataset: same model/env config across datasets (the axis levers are free to differ)', () => {
-    const f = { model_name: 'ppo', net_arch: '[128]', asset: 'BTC', timeframe: '1d', stop_loss: 0.05, seed: 1 }
-    expect(C.sameSetupExceptAxis(manifest, 'dataset', f, { ...f, asset: 'ETH', timeframe: '1h', seed: 3 })).toBe(true)
-    expect(C.sameSetupExceptAxis(manifest, 'dataset', f, { ...f, asset: 'ETH', stop_loss: 0.02 })).toBe(false)
+    const f = {
+      model_name: 'ppo',
+      net_arch: '[128]',
+      asset: 'BTC',
+      timeframe: '1d',
+      stop_loss: 0.05,
+      seed: 1,
+    }
+    expect(
+      C.sameSetupExceptAxis(manifest, 'dataset', f, {
+        ...f,
+        asset: 'ETH',
+        timeframe: '1h',
+        seed: 3,
+      }),
+    ).toBe(true)
+    expect(
+      C.sameSetupExceptAxis(manifest, 'dataset', f, { ...f, asset: 'ETH', stop_loss: 0.02 }),
+    ).toBe(false)
   })
 })
 describe('groupComparison', () => {
@@ -372,16 +412,12 @@ describe('sortComparisonGroups', () => {
       { axisSig: 'b', axisLabel: 'B', count: 1, stats: {}, standing: 1.2 },
       { axisSig: 'c', axisLabel: 'C', count: 1, stats: {}, standing: NaN },
     ]
-    expect(C.sortComparisonGroups(withStanding, 'standing', 'desc').map((g: any) => g.axisSig)).toEqual([
-      'b',
-      'a',
-      'c',
-    ])
-    expect(C.sortComparisonGroups(withStanding, 'standing', 'asc').map((g: any) => g.axisSig)).toEqual([
-      'a',
-      'b',
-      'c',
-    ])
+    expect(
+      C.sortComparisonGroups(withStanding, 'standing', 'desc').map((g: any) => g.axisSig),
+    ).toEqual(['b', 'a', 'c'])
+    expect(
+      C.sortComparisonGroups(withStanding, 'standing', 'asc').map((g: any) => g.axisSig),
+    ).toEqual(['a', 'b', 'c'])
   })
   it('does not mutate the input array', () => {
     const copy = groups.slice()
@@ -432,7 +468,13 @@ const envManifest = {
       dependsOn: { lever: 'take_profit', active: true },
     },
     transaction_fee: { type: 'number', default: 0.001, scope: 'environment', active: false },
-    position_sizing: { type: 'choice', choices: ['fixed'], default: 'fixed', scope: 'environment', active: false },
+    position_sizing: {
+      type: 'choice',
+      choices: ['fixed'],
+      default: 'fixed',
+      scope: 'environment',
+      active: false,
+    },
     vol_target: { type: 'number', default: 0.02, scope: 'environment', active: false },
     seed: { type: 'number', scope: 'model' },
   },
@@ -468,7 +510,13 @@ describe('axisSweepBundleSpec (environment)', () => {
     })
     for (const b of spec.bundles) {
       expect(Object.keys(b).sort()).toEqual(
-        ['allow_shorting', 'no_sell_action', 'stop_loss', 'take_profit', 'trailing_take_profit'].sort(),
+        [
+          'allow_shorting',
+          'no_sell_action',
+          'stop_loss',
+          'take_profit',
+          'trailing_take_profit',
+        ].sort(),
       )
       expect('transaction_fee' in b).toBe(false)
     }
@@ -521,7 +569,9 @@ describe('axisSweepBundleSpec (environment)', () => {
   it('returns null when no active axis lever has values to sweep', () => {
     expect(C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {})).toBeNull()
     expect(
-      C.axisSweepBundleSpec(envManifest, 'environment', envFocus, { transaction_fee: [0.001, 0.002] }),
+      C.axisSweepBundleSpec(envManifest, 'environment', envFocus, {
+        transaction_fee: [0.001, 0.002],
+      }),
     ).toBeNull()
   })
 })

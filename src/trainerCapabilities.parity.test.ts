@@ -50,8 +50,10 @@ function normalizeType(expr: string): string {
   if ((t = /^`\$\{recordType\}([^`]*)`$/.exec(e))) return RT + t[1]
   if ((t = /^manifest\.recordType\s*\+\s*'([^']+)'$/.exec(e))) return RT + t[1]
   if ((t = /^recordType\s*\+\s*'([^']+)'$/.exec(e))) return RT + t[1]
-  if ((t = /^manifest\.recordType\s*\+\s*([A-Z0-9_]+)$/.exec(e))) return RT + (CONSTS.get(t[1]) ?? '?' + t[1])
-  if ((t = /^`\$\{manifest\.recordType\}\$\{([A-Z0-9_]+)\}`$/.exec(e))) return RT + (CONSTS.get(t[1]) ?? '?' + t[1])
+  if ((t = /^manifest\.recordType\s*\+\s*([A-Z0-9_]+)$/.exec(e)))
+    return RT + (CONSTS.get(t[1]) ?? '?' + t[1])
+  if ((t = /^`\$\{manifest\.recordType\}\$\{([A-Z0-9_]+)\}`$/.exec(e)))
+    return RT + (CONSTS.get(t[1]) ?? '?' + t[1])
   if (e === 'manifest.recordType' || e === 'recordType') return RT
   if ((t = /^([A-Z0-9_]+)$/.exec(e))) return CONSTS.get(t[1]) ?? '?' + t[1]
   return '??' + e
@@ -79,7 +81,10 @@ const usedActivities = new Set([
 ])
 const usedRecordTokens = writtenRecordTokens(appJs)
 
-const coveredActivities = new Set([...TRAINER_LAUNCHABLE_ACTIVITY_TYPES, ...TRAINER_EXEMPT_ACTIVITY_TYPES])
+const coveredActivities = new Set([
+  ...TRAINER_LAUNCHABLE_ACTIVITY_TYPES,
+  ...TRAINER_EXEMPT_ACTIVITY_TYPES,
+])
 const coveredRecordTokens = new Set([
   ...TRAINER_CAPABILITY_RECORD_TYPES.map((t) => t.fixedType ?? `${RT}${t.suffix ?? ''}`),
   ...TRAINER_EXEMPT_RECORDS.map((e) => e.fixedType ?? `${RT}${e.suffix ?? ''}`),

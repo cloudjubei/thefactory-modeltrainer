@@ -380,7 +380,11 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
       throw new Error('trainer manifest bookBuild must be an object of build knobs')
     }
     // Numbers, plus the winning-strategy mode's booleans (SOLVE-IT M1: `winningStrategy`).
-    if (Object.values(m.bookBuild as Record<string, unknown>).some((v) => typeof v !== 'number' && typeof v !== 'boolean')) {
+    if (
+      Object.values(m.bookBuild as Record<string, unknown>).some(
+        (v) => typeof v !== 'number' && typeof v !== 'boolean',
+      )
+    ) {
       throw new Error('trainer manifest bookBuild values must all be numbers or booleans')
     }
   }
@@ -390,10 +394,16 @@ export function validateTrainerManifest(raw: unknown): TrainerManifest {
     }
     const imp = m.improve as Record<string, unknown>
     if (imp.hyperparams !== undefined) {
-      if (typeof imp.hyperparams !== 'object' || imp.hyperparams === null || Array.isArray(imp.hyperparams)) {
+      if (
+        typeof imp.hyperparams !== 'object' ||
+        imp.hyperparams === null ||
+        Array.isArray(imp.hyperparams)
+      ) {
         throw new Error('trainer manifest improve.hyperparams must be an object of numeric levers')
       }
-      if (Object.values(imp.hyperparams as Record<string, unknown>).some((v) => typeof v !== 'number')) {
+      if (
+        Object.values(imp.hyperparams as Record<string, unknown>).some((v) => typeof v !== 'number')
+      ) {
         throw new Error('trainer manifest improve.hyperparams values must all be numbers')
       }
     }
@@ -546,12 +556,15 @@ function migrateSweepAxes(
       const keys = Object.keys(migrated)
       return keys.length === 1 ? { key: keys[0], value: migrated[keys[0]] } : null // clean iff one key
     })
-    const cleanRename =
-      mapped.every((m) => m) && new Set(mapped.map((m) => m!.key)).size === 1
+    const cleanRename = mapped.every((m) => m) && new Set(mapped.map((m) => m!.key)).size === 1
     if (cleanRename) {
       const key = mapped[0]!.key
-      pushDeduped(key, mapped.map((m) => m!.value))
-      if (key !== lever || mapped.some((m, i) => String(m!.value) !== String(values[i]))) changed = true
+      pushDeduped(
+        key,
+        mapped.map((m) => m!.value),
+      )
+      if (key !== lever || mapped.some((m, i) => String(m!.value) !== String(values[i])))
+        changed = true
     } else {
       pushDeduped(lever, values)
     }
@@ -633,8 +646,15 @@ export function validateSpecAgainstManifest(
       if (!Number.isFinite(n))
         errors.push(`${where} ${key}=${canonicalConfigString(value)} must be a number`)
       else if (lever.range && (n < lever.range[0] || n > lever.range[1]))
-        errors.push(`${where} ${key}=${n} is outside the range [${lever.range[0]}, ${lever.range[1]}]`)
-    } else if (lever.type === 'boolean' && typeof value !== 'boolean' && !eq(value, true) && !eq(value, false)) {
+        errors.push(
+          `${where} ${key}=${n} is outside the range [${lever.range[0]}, ${lever.range[1]}]`,
+        )
+    } else if (
+      lever.type === 'boolean' &&
+      typeof value !== 'boolean' &&
+      !eq(value, true) &&
+      !eq(value, false)
+    ) {
       errors.push(`${where} ${key}=${canonicalConfigString(value)} must be a boolean`)
     }
   }
@@ -1229,7 +1249,10 @@ export function plannedMatrixItemCount(spec: ExperimentSpec): number {
  * planning round throws. Only `fixed` and explicit `configs` (the run-config-derived surfaces) are pruned;
  * `sweep` / `compare` / bundles name levers the strategist chose deliberately and stay strictly validated.
  */
-export function sanitizeStrategistSpec(spec: ExperimentSpec, manifest: TrainerManifest): ExperimentSpec {
+export function sanitizeStrategistSpec(
+  spec: ExperimentSpec,
+  manifest: TrainerManifest,
+): ExperimentSpec {
   const leverKeys = new Set(Object.keys(manifest.levers))
   const keepLevers = (config: Record<string, unknown>): Record<string, unknown> => {
     const out: Record<string, unknown> = {}
@@ -1478,7 +1501,8 @@ export function computeScorecard(
   const gateSpecs = manifest.gates ?? []
   const gates = gateSpecs.map((gate) => {
     const actual = readScorecardMetric(run, gate.metric)
-    const bound = typeof gate.value === 'number' ? gate.value : readScorecardMetric(run, gate.value.metric)
+    const bound =
+      typeof gate.value === 'number' ? gate.value : readScorecardMetric(run, gate.value.metric)
     const rendered = typeof gate.value === 'number' ? String(gate.value) : gate.value.metric
     const applicable = hasScorecardMetric(run, gate.metric)
     return {
@@ -1508,7 +1532,8 @@ export function computeScorecard(
   const hs = run.health?.status
   const eligible = run.status !== 'failed' && run.status !== 'invalid' && (!hs || hs === 'ok')
   const accepted =
-    eligible && (gateSpecs.length === 0 || (applicable.length > 0 && applicable.every((g) => g.pass)))
+    eligible &&
+    (gateSpecs.length === 0 || (applicable.length > 0 && applicable.every((g) => g.pass)))
   return { gates, accepted, fitness }
 }
 
@@ -1520,7 +1545,11 @@ export function computeScorecard(
  */
 export function selectActiveScorecard(
   manifest: Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>,
-  cards: Array<{ id?: string; gates?: TrainerManifest['gates']; fitness?: TrainerManifest['fitness'] }>,
+  cards: Array<{
+    id?: string
+    gates?: TrainerManifest['gates']
+    fitness?: TrainerManifest['fitness']
+  }>,
   activeId?: string | null,
 ): Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'> {
   const valid = cards.filter((c) => c && c.id)
@@ -1568,9 +1597,10 @@ export function deriveBackfillMetric(
  * fitness is declared. This is what the exploration engine, diagnostics incumbent, and config-space
  * analysis rank by — so a project ranks on its declared success metric, not necessarily the reward.
  */
-export function primaryFitnessCriterion(
-  manifest: Pick<TrainerManifest, 'objective' | 'fitness'>,
-): { key: string; direction: 'max' | 'min' } {
+export function primaryFitnessCriterion(manifest: Pick<TrainerManifest, 'objective' | 'fitness'>): {
+  key: string
+  direction: 'max' | 'min'
+} {
   const primary = manifest.fitness?.[0]
   return primary
     ? { key: primary.metric, direction: primary.direction }
@@ -2727,8 +2757,9 @@ export function capRunSummaryForStorage(
     if (changed) out = { ...out, series: capped }
   }
 
-  const trace = (out.artifacts as { decisionTrace?: { steps?: unknown[]; totalSteps?: number } } | undefined)
-    ?.decisionTrace
+  const trace = (
+    out.artifacts as { decisionTrace?: { steps?: unknown[]; totalSteps?: number } } | undefined
+  )?.decisionTrace
   if (Array.isArray(trace?.steps) && trace.steps.length > maxSteps) {
     const cappedTrace = {
       ...trace,
@@ -2786,8 +2817,9 @@ export function describeRunFailures(records: Array<{ content?: unknown }>, max =
           | { status?: string; error?: string; ranAt?: string; logTail?: string[] }
           | undefined,
     )
-    .filter((c): c is { status?: string; error?: string; ranAt?: string; logTail?: string[] } =>
-      !!c && c.status === 'failed' && typeof c.error === 'string' && c.error.length > 0,
+    .filter(
+      (c): c is { status?: string; error?: string; ranAt?: string; logTail?: string[] } =>
+        !!c && c.status === 'failed' && typeof c.error === 'string' && c.error.length > 0,
     )
     .sort((a, b) => String(b.ranAt ?? '').localeCompare(String(a.ranAt ?? '')))
   if (!failed.length) return ''
@@ -2816,7 +2848,11 @@ export function extractSampleGame(
   const raw = (content as { sample_game?: unknown } | undefined)?.sample_game
   if (!isPlainObject(raw)) return undefined
   const frames = raw.frames
-  if (!Array.isArray(frames) || frames.length === 0 || !frames.every((f) => typeof f === 'string')) {
+  if (
+    !Array.isArray(frames) ||
+    frames.length === 0 ||
+    !frames.every((f) => typeof f === 'string')
+  ) {
     return undefined
   }
   const moves: SampleGameReplayMove[] = Array.isArray(raw.moves)
@@ -2847,14 +2883,20 @@ export function nextChampionStep(
   state: { plateauCount: number; bestVsStrongMcts: number },
   latest: { generation: number; promoted: boolean; winRateVsStrongMcts?: number },
   opts: { maxGenerations: number; patience: number; targetStrength?: number },
-): { done: boolean; stopReason?: ChampionStopReason; plateauCount: number; bestVsStrongMcts: number } {
+): {
+  done: boolean
+  stopReason?: ChampionStopReason
+  plateauCount: number
+  bestVsStrongMcts: number
+} {
   const plateauCount = latest.promoted ? 0 : state.plateauCount + 1
   const bestVsStrongMcts = Math.max(state.bestVsStrongMcts, latest.winRateVsStrongMcts ?? 0)
   let stopReason: ChampionStopReason | undefined
   // Plateau is checked BEFORE budget: a champion that stops promoting AT its generation budget has genuinely
   // plateaued, so it must report 'plateau' (a terminal the autopilot treats as done) rather than 'budget'
   // (which the autopilot reads as "still improving, give it another round" — an infinite improve loop).
-  if (opts.targetStrength !== undefined && bestVsStrongMcts >= opts.targetStrength) stopReason = 'reached-target'
+  if (opts.targetStrength !== undefined && bestVsStrongMcts >= opts.targetStrength)
+    stopReason = 'reached-target'
   else if (plateauCount >= opts.patience) stopReason = 'plateau'
   else if (latest.generation >= opts.maxGenerations) stopReason = 'budget'
   return { done: stopReason !== undefined, stopReason, plateauCount, bestVsStrongMcts }
@@ -2941,16 +2983,26 @@ export function nextAutopilotStep(s: AutopilotSignals): AutopilotDecision {
   // never have to run these by hand. Each runs at most once per Start; a project that doesn't declare the
   // capability skips straight past (so a non-solvable / non-tournament project still goes directly to done).
   if (s.canBuildBook && !s.bookBuiltThisRun) {
-    return { action: 'build-book', reason: 'extend the optimal-play opening book (makes optimal play computable)' }
+    return {
+      action: 'build-book',
+      reason: 'extend the optimal-play opening book (makes optimal play computable)',
+    }
   }
   if (s.canRate && !s.ratedThisRun) {
     return { action: 'rate', reason: 'rate every model on the comparable-strength gauntlet' }
   }
   if (s.canPlayOff && !s.playedOffThisRun) {
-    return { action: 'play-off', reason: 'run the head-to-head play-off + optimality check (the true winner)' }
+    return {
+      action: 'play-off',
+      reason: 'run the head-to-head play-off + optimality check (the true winner)',
+    }
   }
   if (s.canProcessEval && !s.scoredThisRun) {
-    return { action: 'score', reason: 'PROVE it — the near-optimality scorecard (ladder + exact forced-win conversion + distance-to-optimal)' }
+    return {
+      action: 'score',
+      reason:
+        'PROVE it — the near-optimality scorecard (ladder + exact forced-win conversion + distance-to-optimal)',
+    }
   }
   return {
     action: 'done',
@@ -3113,7 +3165,10 @@ function replayResultLine(winner: number | null, labels: Record<number, string>)
  */
 export function renderReplayText(game: SampleGameReplay): string {
   const other = game.opponent || 'opponent'
-  const labels: Record<number, string> = { [game.model_seat]: 'model', [1 - game.model_seat]: other }
+  const labels: Record<number, string> = {
+    [game.model_seat]: 'model',
+    [1 - game.model_seat]: other,
+  }
   const lines: string[] = [
     `Replay — model is seat ${game.model_seat}${game.opponent ? `, opponent '${game.opponent}'` : ''}`,
   ]
@@ -3190,13 +3245,16 @@ function coerceFeatureAttribution(raw: unknown): DecisionFeatureAttribution | un
 function coerceMatrixAttribution(raw: unknown): MatrixAttribution | undefined {
   if (!isPlainObject(raw)) return undefined
   const { rows, cols, grid } = raw
-  if (!Array.isArray(rows) || !rows.every((r): r is string => typeof r === 'string')) return undefined
-  if (!Array.isArray(cols) || !cols.every((c): c is string => typeof c === 'string')) return undefined
+  if (!Array.isArray(rows) || !rows.every((r): r is string => typeof r === 'string'))
+    return undefined
+  if (!Array.isArray(cols) || !cols.every((c): c is string => typeof c === 'string'))
+    return undefined
   if (!rows.length || !cols.length) return undefined
   if (!Array.isArray(grid) || grid.length !== rows.length) return undefined
   const cleanGrid: number[][] = []
   for (const row of grid) {
-    if (!Array.isArray(row) || row.length !== cols.length || !row.every(isFiniteNumber)) return undefined
+    if (!Array.isArray(row) || row.length !== cols.length || !row.every(isFiniteNumber))
+      return undefined
     cleanGrid.push(row.slice())
   }
   const out: MatrixAttribution = { rows: rows.slice(), cols: cols.slice(), grid: cleanGrid }
@@ -3246,7 +3304,8 @@ export function summarizeSnapshotTraces(raw: unknown): SnapshotTraceIndexEntry[]
   if (!Array.isArray(raw)) return []
   const out: SnapshotTraceIndexEntry[] = []
   for (const entry of raw) {
-    if (!isPlainObject(entry) || !isFiniteNumber(entry.step) || typeof entry.traceFile !== 'string') continue
+    if (!isPlainObject(entry) || !isFiniteNumber(entry.step) || typeof entry.traceFile !== 'string')
+      continue
     const km = isPlainObject(entry.keyMetrics) ? entry.keyMetrics : {}
     const keyMetrics: SnapshotTraceIndexEntry['keyMetrics'] = {}
     const actionCounts = coerceNumberMap(km.actionCounts)
@@ -3430,7 +3489,9 @@ export function isRunAffectedByFidelityLookahead(
  * queued campaign that SWEEPS `timeframe`/`fidelity_set` into a coarse-only combination is caught even when
  * its `fixed` base is safe. Defers to {@link isRunAffectedByFidelityLookahead} per candidate; conservative.
  */
-export function isSpecAffectedByFidelityLookahead(spec: Record<string, unknown> | undefined): boolean {
+export function isSpecAffectedByFidelityLookahead(
+  spec: Record<string, unknown> | undefined,
+): boolean {
   if (!spec || typeof spec !== 'object') return false
   const fixed = (spec.fixed && typeof spec.fixed === 'object' ? spec.fixed : {}) as Record<
     string,

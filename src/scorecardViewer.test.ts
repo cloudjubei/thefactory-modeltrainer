@@ -37,14 +37,20 @@ describe('viewer computeScorecard', () => {
   })
 
   it('SKIPS a gate on an absent metric (not applicable) but does NOT vacuously accept when it is the only gate', () => {
-    const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 1, metrics: { other: 1 } })
+    const card = S.computeScorecard(
+      { ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] },
+      { objective: 1, metrics: { other: 1 } },
+    )
     expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
     expect(card.accepted).toBe(false) // no applicable gate ⇒ can't verify ⇒ not accepted
   })
 
   it('accepts when a skipped gate sits alongside a PASSING applicable gate', () => {
-    const gates = [{ metric: 'gone', op: '>', value: 0 }, { metric: 'ret', op: '>', value: 0 }]
+    const gates = [
+      { metric: 'gone', op: '>', value: 0 },
+      { metric: 'ret', op: '>', value: 0 },
+    ]
     const card = S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { ret: 5 } })
     expect(card.accepted).toBe(true)
   })
@@ -53,32 +59,63 @@ describe('viewer computeScorecard', () => {
     const gates = [{ metric: 'ret', op: '>', value: 0 }]
     const metrics = { ret: 5 }
     expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics }).accepted).toBe(true)
-    expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' }).accepted).toBe(false)
-    expect(S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics, health: { status: 'degenerate' } }).accepted).toBe(false)
+    expect(
+      S.computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' })
+        .accepted,
+    ).toBe(false)
+    expect(
+      S.computeScorecard(
+        { ...objMax, gates },
+        { objective: 1, metrics, health: { status: 'degenerate' } },
+      ).accepted,
+    ).toBe(false)
   })
 
   it('FAILS a gate on a present but non-finite metric (measured garbage is not skipped)', () => {
-    const card = S.computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] }, { objective: 1, metrics: { m: NaN } })
+    const card = S.computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] },
+      { objective: 1, metrics: { m: NaN } },
+    )
     expect(card.gates[0]).toMatchObject({ applicable: true, pass: false })
     expect(card.accepted).toBe(false)
   })
 
   it('resolves a metric-vs-metric gate bound (beat hold)', () => {
     const gate = { metric: 'oos_return_pct', op: '>', value: { metric: 'hold_return_pct' } }
-    const card = S.computeScorecard({ ...objMax, gates: [gate] }, { objective: 1, metrics: { oos_return_pct: 10, hold_return_pct: 4 } })
-    expect(card.gates[0]).toMatchObject({ bound: 4, actual: 10, pass: true, label: 'oos_return_pct > hold_return_pct' })
+    const card = S.computeScorecard(
+      { ...objMax, gates: [gate] },
+      { objective: 1, metrics: { oos_return_pct: 10, hold_return_pct: 4 } },
+    )
+    expect(card.gates[0]).toMatchObject({
+      bound: 4,
+      actual: 10,
+      pass: true,
+      label: 'oos_return_pct > hold_return_pct',
+    })
   })
 
   it('renders a default label and preserves a custom one', () => {
-    const def = S.computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>=', value: 2 }] }, { objective: 1, metrics: { m: 3 } })
+    const def = S.computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '>=', value: 2 }] },
+      { objective: 1, metrics: { m: 3 } },
+    )
     expect(def.gates[0].label).toBe('m >= 2')
-    const custom = S.computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0, label: 'profitable' }] }, { objective: 1, metrics: { m: 1 } })
+    const custom = S.computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '>', value: 0, label: 'profitable' }] },
+      { objective: 1, metrics: { m: 1 } },
+    )
     expect(custom.gates[0].label).toBe('profitable')
   })
 
   it('builds a multi-objective fitness vector in declared order', () => {
     const card = S.computeScorecard(
-      { ...objMax, fitness: [{ metric: 'a', direction: 'max' }, { metric: 'b', direction: 'min' }] },
+      {
+        ...objMax,
+        fitness: [
+          { metric: 'a', direction: 'max' },
+          { metric: 'b', direction: 'min' },
+        ],
+      },
       { objective: 1, metrics: { a: 2, b: 3 } },
     )
     expect(card.fitness).toEqual([
@@ -93,7 +130,9 @@ describe('viewer primaryFitnessCriterion', () => {
     expect(S.primaryFitnessCriterion(objMax)).toEqual({ key: 'objective', direction: 'max' })
   })
   it('uses the first fitness objective', () => {
-    expect(S.primaryFitnessCriterion({ ...objMax, fitness: [{ metric: 'sharpe', direction: 'max' }] })).toEqual({
+    expect(
+      S.primaryFitnessCriterion({ ...objMax, fitness: [{ metric: 'sharpe', direction: 'max' }] }),
+    ).toEqual({
       key: 'sharpe',
       direction: 'max',
     })
@@ -101,11 +140,25 @@ describe('viewer primaryFitnessCriterion', () => {
 })
 
 describe('viewer scorecardRankValue + compareScorecards', () => {
-  const acc = (value: number) => ({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value }] })
-  const rej = (value: number) => ({ gates: [], accepted: false, fitness: [{ metric: 'x', direction: 'max', value }] })
+  const acc = (value: number) => ({
+    gates: [],
+    accepted: true,
+    fitness: [{ metric: 'x', direction: 'max', value }],
+  })
+  const rej = (value: number) => ({
+    gates: [],
+    accepted: false,
+    fitness: [{ metric: 'x', direction: 'max', value }],
+  })
 
   it('orients min objectives so higher-is-better', () => {
-    expect(S.scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'min', value: 7 }] })).toBe(-7)
+    expect(
+      S.scorecardRankValue({
+        gates: [],
+        accepted: true,
+        fitness: [{ metric: 'x', direction: 'min', value: 7 }],
+      }),
+    ).toBe(-7)
   })
   it('is -Infinity when unrankable', () => {
     expect(S.scorecardRankValue({ gates: [], accepted: true, fitness: [] })).toBe(-Infinity)
@@ -117,8 +170,16 @@ describe('viewer scorecardRankValue + compareScorecards', () => {
 })
 
 describe('viewer scorecardSortValue (numeric column sort)', () => {
-  const acc = (value: number) => ({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value }] })
-  const rej = (value: number) => ({ gates: [], accepted: false, fitness: [{ metric: 'x', direction: 'max', value }] })
+  const acc = (value: number) => ({
+    gates: [],
+    accepted: true,
+    fitness: [{ metric: 'x', direction: 'max', value }],
+  })
+  const rej = (value: number) => ({
+    gates: [],
+    accepted: false,
+    fitness: [{ metric: 'x', direction: 'max', value }],
+  })
 
   it('ranks EVERY accepted run above EVERY rejected run, however large the rejected fitness', () => {
     expect(S.scorecardSortValue(acc(-999))).toBeGreaterThan(S.scorecardSortValue(rej(1e9)))
@@ -131,7 +192,9 @@ describe('viewer scorecardSortValue (numeric column sort)', () => {
 
   it('is finite even for an unrankable (non-finite fitness) run', () => {
     expect(Number.isFinite(S.scorecardSortValue(acc(NaN)))).toBe(true)
-    expect(Number.isFinite(S.scorecardSortValue({ gates: [], accepted: true, fitness: [] }))).toBe(true)
+    expect(Number.isFinite(S.scorecardSortValue({ gates: [], accepted: true, fitness: [] }))).toBe(
+      true,
+    )
   })
 
   it('a descending numeric sort by this value groups accepted-first then best fitness', () => {
@@ -142,15 +205,35 @@ describe('viewer scorecardSortValue (numeric column sort)', () => {
 })
 
 describe('viewer selectActiveScorecard', () => {
-  const manifest = { objective: { name: 'ret', direction: 'max' }, gates: [{ metric: 'a', op: '>', value: 0 }], fitness: [{ metric: 'a', direction: 'max' }] }
-  const cardX = { id: 'x', gates: [{ metric: 'b', op: '>', value: 1 }], fitness: [{ metric: 'b', direction: 'min' }] }
-  const cardY = { id: 'y', gates: [{ metric: 'c', op: '<', value: 2 }], fitness: [{ metric: 'c', direction: 'max' }] }
+  const manifest = {
+    objective: { name: 'ret', direction: 'max' },
+    gates: [{ metric: 'a', op: '>', value: 0 }],
+    fitness: [{ metric: 'a', direction: 'max' }],
+  }
+  const cardX = {
+    id: 'x',
+    gates: [{ metric: 'b', op: '>', value: 1 }],
+    fitness: [{ metric: 'b', direction: 'min' }],
+  }
+  const cardY = {
+    id: 'y',
+    gates: [{ metric: 'c', op: '<', value: 2 }],
+    fitness: [{ metric: 'c', direction: 'max' }],
+  }
 
   it('falls back to the manifest when there are no cards', () => {
-    expect(S.selectActiveScorecard(manifest, [], null)).toEqual({ objective: manifest.objective, gates: manifest.gates, fitness: manifest.fitness })
+    expect(S.selectActiveScorecard(manifest, [], null)).toEqual({
+      objective: manifest.objective,
+      gates: manifest.gates,
+      fitness: manifest.fitness,
+    })
   })
   it('returns the active card by id, grafting the manifest objective', () => {
-    expect(S.selectActiveScorecard(manifest, [cardX, cardY], 'y')).toEqual({ objective: manifest.objective, gates: cardY.gates, fitness: cardY.fitness })
+    expect(S.selectActiveScorecard(manifest, [cardX, cardY], 'y')).toEqual({
+      objective: manifest.objective,
+      gates: cardY.gates,
+      fitness: cardY.fitness,
+    })
   })
   it('falls back to the first card when the active id is unknown', () => {
     expect(S.selectActiveScorecard(manifest, [cardX, cardY], 'gone').gates).toEqual(cardX.gates)

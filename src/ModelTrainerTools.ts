@@ -382,7 +382,11 @@ async function deleteRunAndDerivedRecords(
   }
   if (typeof setupKey === 'string' && setupKey) {
     const unrunnableType = `${recordType}${TRAINER_RUN_SETUP_KEYED_SUFFIX}`
-    const unrunnableRemoved = await storage.deleteRecord({ scope, type: unrunnableType, key: setupKey })
+    const unrunnableRemoved = await storage.deleteRecord({
+      scope,
+      type: unrunnableType,
+      key: setupKey,
+    })
     if (unrunnableRemoved) onRecordWritten?.(unrunnableType, setupKey)
   }
   return removed
@@ -844,7 +848,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             r.key && r.content?.status === 'completed' && typeof r.content.objective === 'number',
         )
         // Rank by the comparable rating for a game project (ratingAnchors), else the raw objective.
-        .map((r) => ({ key: r.key, objective: primaryFitness(r.content as Record<string, unknown>, manifest) })),
+        .map((r) => ({
+          key: r.key,
+          objective: primaryFitness(r.content as Record<string, unknown>, manifest),
+        })),
       manifest.objective.direction,
     )
 
@@ -926,7 +933,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     // but ONLY while it ran under the same pipeline MAJOR. A breaking bump makes those cells incomparable
     // (the same rule the train campaign applies to skip-if-fresh), so they re-run instead of being carried.
     const priorRecord = (
-      await deps.storage.readRecord({ scope: params.scope, type: experimentType, key: experimentId })
+      await deps.storage.readRecord({
+        scope: params.scope,
+        type: experimentType,
+        key: experimentId,
+      })
     )?.content as ExperimentRecord | undefined
     const cellByKey = new Map<string, ExperimentCell>()
     if (priorRecord && majorOf(priorRecord.provenance?.pipelineVersion) === pipelineMajor) {
@@ -996,7 +1007,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       },
     })
 
-    const cells = items.map((item) => cellByKey.get(item.key)).filter((c): c is ExperimentCell => !!c)
+    const cells = items
+      .map((item) => cellByKey.get(item.key))
+      .filter((c): c is ExperimentCell => !!c)
     const completedCells = cells.filter((c) => c.status === 'completed').length
     const completedOutcomes = summary.outcomes.filter((o) => o.status === 'completed').length
     const abortedOutcomes = summary.outcomes.filter((o) => o.status === 'aborted').length
@@ -1153,7 +1166,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // Ranking-basis self-heal: a project that declared `ratingAnchors` AFTER exploring under raw win-rate has
       // a persisted noiseFloor/regret/basins in objective units, meaningless against rating-scale peaks —
       // recalibrate from scratch rather than trust stale margins (one-time; stamped below so it doesn't repeat).
-      if (manifest.ratingAnchors && persisted?.content && persisted.content.rankBasis !== 'rating') {
+      if (
+        manifest.ratingAnchors &&
+        persisted?.content &&
+        persisted.content.rankBasis !== 'rating'
+      ) {
         base = initExplorationState(manifest, params.budget)
       }
       const working: ExplorationState = {
@@ -1181,7 +1198,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
 
       const runsRecords = await listCompletedRuns(params.scope, recordType, true)
-      const runs = recordsToAnalysisRuns(runsRecords, manifest, await resolveActiveScorecard(params.scope, manifest))
+      const runs = recordsToAnalysisRuns(
+        runsRecords,
+        manifest,
+        await resolveActiveScorecard(params.scope, manifest),
+      )
       const completedKeys = new Set(runsRecords.map((r) => r.key))
 
       // Fail-guard: a just-settled child that produced NO new completed runs was fruitless (failed / empty
@@ -1192,7 +1213,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         const fruitful = settledStatus === 'completed' && producedNew
         working.failStreak = fruitful ? 0 : (working.failStreak ?? 0) + 1
         if ((working.failStreak ?? 0) >= EXPLORATION_MAX_CHILD_FAILURES) {
-          const allRecords = await deps.storage.listRecords({ scope: params.scope, type: recordType })
+          const allRecords = await deps.storage.listRecords({
+            scope: params.scope,
+            type: recordType,
+          })
           const failureDetail = describeRunFailures(allRecords)
           const stopped = appendLog(
             working,
@@ -1369,10 +1393,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     if (!manifest.continueFromKey) {
-      throw new Error('trainer manifest declares no continueFromKey — this project has no continue-training path')
+      throw new Error(
+        'trainer manifest declares no continueFromKey — this project has no continue-training path',
+      )
     }
     const recordType = manifest.recordType
-    const record = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+    const record = await deps.storage.readRecord({
+      scope: params.scope,
+      type: recordType,
+      key: params.runKey,
+    })
     if (!record) throw new Error(`no run record for key ${params.runKey}`)
     const content = record.content as {
       config?: Record<string, unknown>
@@ -1426,7 +1456,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (!universe.length) {
       throw new Error(`cannot cross-test: manifest lever "${lever}" has no choices`)
     }
-    const record = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: params.runKey })
+    const record = await deps.storage.readRecord({
+      scope: params.scope,
+      type: recordType,
+      key: params.runKey,
+    })
     if (!record) throw new Error(`no run record for key ${params.runKey}`)
     const content = record.content as {
       config?: Record<string, unknown>
@@ -1442,7 +1476,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const trainedValue = String(config[lever] ?? '')
 
     const settestType = `${recordType}-settest`
-    const existing = await deps.storage.readRecord({ scope: params.scope, type: settestType, key: params.runKey })
+    const existing = await deps.storage.readRecord({
+      scope: params.scope,
+      type: settestType,
+      key: params.runKey,
+    })
     const prior = (existing?.content as CrossTestRunRecord | undefined) ?? {
       runKey: params.runKey,
       trainedValues: {},
@@ -1518,7 +1556,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       content: recordContent as unknown as Record<string, unknown>,
     })
     params.onRecordWritten?.(settestType, params.runKey)
-    logger?.info('cross-tested training run', { recordType, runKey: params.runKey, lever, tested: results.length })
+    logger?.info('cross-tested training run', {
+      recordType,
+      runKey: params.runKey,
+      lever,
+      tested: results.length,
+    })
     return {
       recordType,
       runKey: params.runKey,
@@ -1912,10 +1955,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   // Resolve which registered training project a CHAT tool call targets: by manifest name/recordType when
   // `project` is given, else the scope's single registered project; several + none named is an error that
   // LISTS the options so the model can retry with one.
-  async function resolveProjectManifest(
-    scope: string,
-    project?: string,
-  ): Promise<TrainerManifest> {
+  async function resolveProjectManifest(scope: string, project?: string): Promise<TrainerManifest> {
     const records = await deps.storage.listRecords({ scope, type: 'trainer-project-manifest' })
     const manifests = records
       .map((r) => (r.content as { manifest?: TrainerManifest } | undefined)?.manifest)
@@ -1957,7 +1997,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         continue
       }
       if (!raw.spec || typeof raw.spec !== 'object' || Array.isArray(raw.spec)) {
-        rejected.push({ title, reason: 'suggestion needs a spec object ({fixed?, sweep?, seeds?, …})' })
+        rejected.push({
+          title,
+          reason: 'suggestion needs a spec object ({fixed?, sweep?, seeds?, …})',
+        })
         continue
       }
       // Roll the spec through the manifest's migrations first (a chat can echo retired lever values),
@@ -2015,7 +2058,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       view: 'xai',
       params: { scope: 'all' },
     })
-    return { recordType, accepted: suggestions.length, skippedExisting, rejected, suggestions, viewLink }
+    return {
+      recordType,
+      accepted: suggestions.length,
+      skippedExisting,
+      rejected,
+      suggestions,
+      viewLink,
+    }
   }
 
   // Shared paper-synthesis core, used by BOTH analyzePaperFromUrl (single pasted link) and
@@ -2437,7 +2487,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       })
       params.onRecordWritten?.(`${recordType}-datasource`, key)
     }
-    return { recordType, candidates, discovered: candidates.length, sources, discoveredBy, discoveredAt }
+    return {
+      recordType,
+      candidates,
+      discovered: candidates.length,
+      sources,
+      discoveredBy,
+      discoveredAt,
+    }
   }
 
   async function suggestPaperHypotheses(
@@ -2735,7 +2792,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   ): Promise<Pick<TrainerManifest, 'objective' | 'gates' | 'fitness'>> {
     const cards = (
       await deps.storage.listRecords({ scope, type: `${manifest.recordType}-scorecard` })
-    ).map((r) => (r.content ?? {}) as { id?: string; gates?: TrainerManifest['gates']; fitness?: TrainerManifest['fitness'] })
+    ).map(
+      (r) =>
+        (r.content ?? {}) as {
+          id?: string
+          gates?: TrainerManifest['gates']
+          fitness?: TrainerManifest['fitness']
+        },
+    )
     const activeRec = await deps.storage.readRecord({
       scope,
       type: `${manifest.recordType}-scorecard-active`,
@@ -2768,7 +2832,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         status: 'completed',
         // Scorecard acceptance (gates) — only when the active scorecard is supplied so the verdict layer can
         // prefer accepted runs; omitted otherwise so pure analysis over all runs is unaffected.
-        accepted: card ? computeScorecard(card, { objective: rawObjective, metrics }).accepted : undefined,
+        accepted: card
+          ? computeScorecard(card, { objective: rawObjective, metrics }).accepted
+          : undefined,
         ranAt:
           ((r.content.provenance as { ranAt?: string } | undefined)?.ranAt ??
             (r.content.ranAt as string | undefined)) ||
@@ -2802,12 +2868,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       .filter(([, spec]) => spec.scope === 'ignore')
       .map(([name]) => name)
     const records = await listCompletedRuns(params.scope, recordType, true)
-    const analysis = computeConfigSpaceAnalysis(recordsToAnalysisRuns(records, manifest), criterion, {
-      contextLevers,
-      environment: params.environment,
-      appliesWhen,
-      ignoreLevers,
-    })
+    const analysis = computeConfigSpaceAnalysis(
+      recordsToAnalysisRuns(records, manifest),
+      criterion,
+      {
+        contextLevers,
+        environment: params.environment,
+        appliesWhen,
+        ignoreLevers,
+      },
+    )
     return { recordType, criterion, analysis }
   }
 
@@ -2952,7 +3022,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     scope: string,
     runKey: string,
   ): Promise<
-    | { recordType: string; manifest: TrainerManifest; dir?: string; content: Record<string, unknown> }
+    | {
+        recordType: string
+        manifest: TrainerManifest
+        dir?: string
+        content: Record<string, unknown>
+      }
     | undefined
   > {
     const manifests = await deps.storage.listRecords({ scope, type: 'trainer-project-manifest' })
@@ -3073,9 +3148,7 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     }
   }
 
-  async function mineProjectData(
-    params: MineProjectDataParams,
-  ): Promise<MineProjectDataResult> {
+  async function mineProjectData(params: MineProjectDataParams): Promise<MineProjectDataResult> {
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     if (!manifest.mineData) {
@@ -3114,10 +3187,23 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
     const type = `${recordType}-datasource`
-    const record = await deps.storage.readRecord({ scope: params.scope, type, key: params.sourceId })
+    const record = await deps.storage.readRecord({
+      scope: params.scope,
+      type,
+      key: params.sourceId,
+    })
     if (!record) throw new Error(`no datasource draft for ${params.sourceId}`)
-    const approved = { ...(record.content as Record<string, unknown>), status: 'approved', approvedAt: now() }
-    await deps.storage.upsertRecord({ scope: params.scope, type, key: params.sourceId, content: approved })
+    const approved = {
+      ...(record.content as Record<string, unknown>),
+      status: 'approved',
+      approvedAt: now(),
+    }
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type,
+      key: params.sourceId,
+      content: approved,
+    })
     params.onRecordWritten?.(type, params.sourceId)
 
     let mine: MineProjectDataResult | undefined
@@ -3131,7 +3217,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
       })
     }
-    return { recordType, sourceId: params.sourceId, status: 'approved', mined: !!mine, ...(mine ? { mine } : {}) }
+    return {
+      recordType,
+      sourceId: params.sourceId,
+      status: 'approved',
+      mined: !!mine,
+      ...(mine ? { mine } : {}),
+    }
   }
 
   async function scanProjectModels(
@@ -3675,7 +3767,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         best = { key: r.key, objective: o }
     }
     const hyps = hypRecs
-      .map((r) => r.content as { status?: string; verdictSource?: string; dismissed?: boolean; id?: string })
+      .map(
+        (r) =>
+          r.content as {
+            status?: string
+            verdictSource?: string
+            dismissed?: boolean
+            id?: string
+          },
+      )
       .filter((h) => h && h.id && !h.dismissed)
     const hypCensus = { total: hyps.length, proven: 0, disproved: 0, untested: 0, manual: 0 }
     for (const h of hyps) {
@@ -3723,7 +3823,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const card = await resolveActiveScorecard(params.scope, manifest)
     const criterion: AnalysisCriterion = primaryFitnessCriterion(card)
     const rankMetric = card.fitness?.[0]?.metric ?? manifest.objective.name
-    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest, card)
+    const runs = recordsToAnalysisRuns(
+      await listCompletedRuns(params.scope, recordType, true),
+      manifest,
+      card,
+    )
     const splitLevers = splitLeversOf(manifest)
     const splitAlpha = manifest.diagnostics?.splitAxis?.alpha
     const testValues = manifest.diagnostics?.splitAxis?.testValues
@@ -3745,10 +3849,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const proxy = alignMetrics.includes(rankMetric)
       ? proxyAlignment(runs, rankMetric, criterion.direction === 'min' ? 'min' : 'max', splitLevers)
       : undefined
-    const proxySkipped = !alignMetrics.length && runs.some((r) => r.metrics && Object.keys(r.metrics).length > 0)
+    const proxySkipped =
+      !alignMetrics.length && runs.some((r) => r.metrics && Object.keys(r.metrics).length > 0)
     // §C.5 confound advisory: how strongly the objective tracks each declared confound metric.
     const confoundMetrics = manifest.diagnostics?.confoundMetrics ?? []
-    const confounds = confoundMetrics.length ? rewardFitnessAlignment(runs, confoundMetrics) : undefined
+    const confounds = confoundMetrics.length
+      ? rewardFitnessAlignment(runs, confoundMetrics)
+      : undefined
     // A4.3 composite champion "declare steady" verdict over the same projected runs + split axis.
     const champion = assembleChampionVerdict(manifest.diagnostics, { runs, splitLevers, criterion })
     return {
@@ -3767,7 +3874,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       incumbent: holdout.incumbentConfig,
       convergenceGated: convergenceGatedBySplits(holdout),
       ...(holdout.testSplits.length
-        ? { test: { splits: holdout.testSplits, consumed: holdout.testConsumed, held: holdout.testHeld } }
+        ? {
+            test: {
+              splits: holdout.testSplits,
+              consumed: holdout.testConsumed,
+              held: holdout.testHeld,
+            },
+          }
         : {}),
       ...(alignment
         ? { alignment, alignmentNarrative: narrateAlignment(alignment, rankMetric) }
@@ -3788,7 +3901,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   // §C.6 adversarial-verify as a read tool: "try to REFUTE this winner". Mirrors diagnoseSearch's setup
   // (manifest → active scorecard → criterion → projected runs → split axis) then runs the four-lens battery and
   // narrates it. Baseline defaults to the manifest's declared null baseline; nuisance levers to the manifest's.
-  async function verifyImprovement(params: VerifyImprovementParams): Promise<VerifyImprovementResult> {
+  async function verifyImprovement(
+    params: VerifyImprovementParams,
+  ): Promise<VerifyImprovementResult> {
     let manifest: TrainerManifest
     try {
       manifest = await resolveProjectManifest(params.scope, params.project)
@@ -3798,13 +3913,22 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const recordType = manifest.recordType
     const card = await resolveActiveScorecard(params.scope, manifest)
     const criterion: AnalysisCriterion = primaryFitnessCriterion(card)
-    const runs = recordsToAnalysisRuns(await listCompletedRuns(params.scope, recordType, true), manifest, card)
+    const runs = recordsToAnalysisRuns(
+      await listCompletedRuns(params.scope, recordType, true),
+      manifest,
+      card,
+    )
     const splitLevers = splitLeversOf(manifest)
     const nullBaseline = manifest.diagnostics?.nullBaseline
     const baseline = params.baseline ?? (typeof nullBaseline === 'number' ? nullBaseline : 0)
     const alpha = params.alpha ?? manifest.diagnostics?.splitAxis?.alpha ?? 0.05
     const nuisanceLevers = params.nuisanceLevers ?? manifest.diagnostics?.nuisanceLevers ?? []
-    const verdict = verifyImprovementCore(runs, criterion, { baseline, alpha, splitLevers, nuisanceLevers })
+    const verdict = verifyImprovementCore(runs, criterion, {
+      baseline,
+      alpha,
+      splitLevers,
+      nuisanceLevers,
+    })
     const applied = verdict.checks.filter((c) => c.applicable)
     const passed = applied.filter((c) => c.pass).map((c) => c.name)
     const failed = applied.filter((c) => !c.pass).map((c) => c.name)
@@ -3829,7 +3953,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
   // recently done" for the AI companion. The generic activity-run record is the single authoritative status
   // source (trainer-queue is only a marker); its useful fields are nested (kind in `resumeToken.activityType`,
   // progress as a `steps[]` array) so this trims + folds them and flags stalled runs by staleness of updatedAt.
-  async function getActivityStatus(params: GetActivityStatusParams): Promise<GetActivityStatusResult> {
+  async function getActivityStatus(
+    params: GetActivityStatusParams,
+  ): Promise<GetActivityStatusResult> {
     let manifest: TrainerManifest
     try {
       manifest = await resolveProjectManifest(params.scope, params.project)
@@ -3854,12 +3980,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       else if (e.status === 'failed') counts.failed++
       else if (e.status === 'aborted') counts.aborted++
     }
-    const finishedAtMs = (e: ActivityStatusEntry) => Date.parse(e.finishedAt ?? e.updatedAt ?? '') || 0
+    const finishedAtMs = (e: ActivityStatusEntry) =>
+      Date.parse(e.finishedAt ?? e.updatedAt ?? '') || 0
     const recentlyFinished = entries
       .filter((e) => e.status === 'completed' || e.status === 'failed' || e.status === 'aborted')
       .sort((x, y) => finishedAtMs(y) - finishedAtMs(x))
     const recentLimit =
-      typeof params.recentLimit === 'number' && Number.isFinite(params.recentLimit) && params.recentLimit >= 0
+      typeof params.recentLimit === 'number' &&
+      Number.isFinite(params.recentLimit) &&
+      params.recentLimit >= 0
         ? Math.floor(params.recentLimit)
         : 10
     return {
@@ -3918,7 +4047,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const projectRoot = nodepath.resolve(base, resolved.dir ?? '.')
 
     const config = (resolved.content.config ?? {}) as Record<string, unknown>
-    const checkpoint = (resolved.content.artifacts as { checkpoint?: string } | undefined)?.checkpoint
+    const checkpoint = (resolved.content.artifacts as { checkpoint?: string } | undefined)
+      ?.checkpoint
     const request: Record<string, unknown> = {
       mode: params.mode,
       ...(config.game ? { game: config.game } : {}),
@@ -3957,7 +4087,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     return { ok: true, recordType: resolved.recordType, result: summary }
   }
 
-  async function runChampionTraining(params: ChampionTrainingParams): Promise<ChampionTrainingResult> {
+  async function runChampionTraining(
+    params: ChampionTrainingParams,
+  ): Promise<ChampionTrainingResult> {
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
@@ -3966,7 +4098,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const opponent = params.opponent ?? 'mcts'
     const evalGames = params.evalGames ?? 40
 
-    const existing = await deps.storage.readRecord({ scope: params.scope, type: stateType, key: 'current' })
+    const existing = await deps.storage.readRecord({
+      scope: params.scope,
+      type: stateType,
+      key: 'current',
+    })
     const prior = existing?.content as ChampionTrainingState | undefined
     // A fresh launch keeps the cumulative ladder (generation / best / history) but resets the plateau budget,
     // so each launch gets a full `patience` fresh attempts to improve (e.g. with new hyperparameters).
@@ -4027,10 +4163,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         }
         const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType })
         const match = runs.find((r) => {
-          const c = r.content as {
-            status?: string
-            config?: { seed?: number; model_name?: string }
-          } | undefined
+          const c = r.content as
+            | {
+                status?: string
+                config?: { seed?: number; model_name?: string }
+              }
+            | undefined
           return (
             c?.status === 'completed' &&
             c?.config?.model_name === 'alphazero' &&
@@ -4062,18 +4200,27 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         // The generation's run failed — the ladder can't continue from a missing champion, so stop cleanly.
         state.stopReason = 'aborted'
         state.updatedAt = now()
-        await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+        await deps.storage.upsertRecord({
+          scope: params.scope,
+          type: stateType,
+          key: 'current',
+          content: state,
+        })
         params.onRecordWritten?.(stateType, 'current')
         break
       }
 
       const promoted = !!content.alphazero?.promoted
       const winRateVsStrongMcts = content.metrics?.win_rate_vs_strong_mcts
-      const decision = nextChampionStep(state, { generation: genThisRun, promoted, winRateVsStrongMcts }, {
-        maxGenerations: params.maxGenerations,
-        patience,
-        ...(params.targetStrength !== undefined ? { targetStrength: params.targetStrength } : {}),
-      })
+      const decision = nextChampionStep(
+        state,
+        { generation: genThisRun, promoted, winRateVsStrongMcts },
+        {
+          maxGenerations: params.maxGenerations,
+          patience,
+          ...(params.targetStrength !== undefined ? { targetStrength: params.targetStrength } : {}),
+        },
+      )
       const genRecord: ChampionGeneration = {
         generation,
         runKey,
@@ -4091,7 +4238,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       state.stage = decision.done ? 'converged' : 'training'
       state.stopReason = decision.stopReason
       state.updatedAt = now()
-      await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: stateType,
+        key: 'current',
+        content: state,
+      })
       params.onRecordWritten?.(stateType, 'current')
       // Live scoreboard: rebuild the comparable leaderboard from stored numbers so the board climbs each
       // generation without re-playing the gauntlet (a no-op for projects that declare no `ratingAnchors`).
@@ -4128,10 +4280,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const stateType = `${recordType}-autopilot`
     const minScreenRuns = params.minScreenRuns ?? 2
     const screenSeeds = params.screenSeeds ?? 2
-    const modelChoices = ((manifest.levers?.model_name?.choices as string[] | undefined) ?? []).map(String)
+    const modelChoices = ((manifest.levers?.model_name?.choices as string[] | undefined) ?? []).map(
+      String,
+    )
     const learnedCores = manifest.learnedCores ?? []
 
-    const existing = await deps.storage.readRecord({ scope: params.scope, type: stateType, key: 'current' })
+    const existing = await deps.storage.readRecord({
+      scope: params.scope,
+      type: stateType,
+      key: 'current',
+    })
     const prior = existing?.content as AutopilotState | undefined
     const state: AutopilotState = {
       stage: 'running',
@@ -4142,7 +4300,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
 
     const persist = async (): Promise<void> => {
       state.updatedAt = now()
-      await deps.storage.upsertRecord({ scope: params.scope, type: stateType, key: 'current', content: state })
+      await deps.storage.upsertRecord({
+        scope: params.scope,
+        type: stateType,
+        key: 'current',
+        content: state,
+      })
       params.onRecordWritten?.(stateType, 'current')
     }
 
@@ -4162,23 +4325,46 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let playedOffThisRun = false
     let scoredThisRun = false
     const totalCompleted = async (): Promise<number> => {
-      const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
-      return runs.reduce((n, r) => n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0), 0)
+      const runs = await deps.storage.listRecords({
+        scope: params.scope,
+        type: recordType,
+        omit: HEAVY_RUN_FIELDS,
+      })
+      return runs.reduce(
+        (n, r) =>
+          n + ((r.content as { status?: string } | undefined)?.status === 'completed' ? 1 : 0),
+        0,
+      )
     }
     const deriveSignals = async (): Promise<AutopilotSignals> => {
-      const runs = await deps.storage.listRecords({ scope: params.scope, type: recordType, omit: HEAVY_RUN_FIELDS })
+      const runs = await deps.storage.listRecords({
+        scope: params.scope,
+        type: recordType,
+        omit: HEAVY_RUN_FIELDS,
+      })
       const completedRunCountByCore: Record<string, number> = {}
       for (const r of runs) {
         const c = r.content as { status?: string; config?: { model_name?: string } } | undefined
         if (c?.status !== 'completed') continue
         const core = c.config?.model_name
-        if (typeof core === 'string') completedRunCountByCore[core] = (completedRunCountByCore[core] ?? 0) + 1
+        if (typeof core === 'string')
+          completedRunCountByCore[core] = (completedRunCountByCore[core] ?? 0) + 1
       }
-      const expl = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-exploration`, key: 'current' })
+      const expl = await deps.storage.readRecord({
+        scope: params.scope,
+        type: `${recordType}-exploration`,
+        key: 'current',
+      })
       const explState = expl?.content as { stage?: string; done?: boolean } | undefined
-      const explorationConverged = searchExhausted || !!(explState && (explState.done || explState.stage === 'converged'))
-      const champ = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-champion`, key: 'current' })
-      const stopReason = (champ?.content as { stopReason?: ChampionStopReason } | undefined)?.stopReason
+      const explorationConverged =
+        searchExhausted || !!(explState && (explState.done || explState.stage === 'converged'))
+      const champ = await deps.storage.readRecord({
+        scope: params.scope,
+        type: `${recordType}-champion`,
+        key: 'current',
+      })
+      const stopReason = (champ?.content as { stopReason?: ChampionStopReason } | undefined)
+        ?.stopReason
       return deriveAutopilotSignals({
         modelChoices,
         learnedCores,
@@ -4201,7 +4387,14 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     let stopReason: AutopilotStopReason = 'done'
     let roundsThisRun = 0
     const tally: Record<AutopilotAction, number> = {
-      screen: 0, search: 0, improve: 0, 'build-book': 0, rate: 0, 'play-off': 0, score: 0, done: 0,
+      screen: 0,
+      search: 0,
+      improve: 0,
+      'build-book': 0,
+      rate: 0,
+      'play-off': 0,
+      score: 0,
+      done: 0,
     }
     while (true) {
       if (params.abortSignal?.aborted) {
@@ -4217,7 +4410,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         state.stopReason = 'done'
         stopReason = 'done'
         await persist()
-        await params.onProgress?.({ round: state.round, action: 'done', reason: decision.reason, done: true })
+        await params.onProgress?.({
+          round: state.round,
+          action: 'done',
+          reason: decision.reason,
+          done: true,
+        })
         break
       }
       if (roundsThisRun >= params.maxRounds) {
@@ -4229,7 +4427,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       state.round += 1
       // Persist "now doing X" BEFORE launching, so the viewer's step-adaptive display reflects the live step.
       await persist()
-      await params.onProgress?.({ round: state.round, action: decision.action, reason: decision.reason, done: false })
+      await params.onProgress?.({
+        round: state.round,
+        action: decision.action,
+        reason: decision.reason,
+        done: false,
+      })
 
       let childType: string
       let childParams: Record<string, unknown>
@@ -4241,7 +4444,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       } else if (decision.action === 'screen') {
         childType = 'train'
         childParams = {
-          spec: { fixed: { model_name: decision.target }, seeds: Array.from({ length: screenSeeds }, (_, i) => i + 1) },
+          spec: {
+            fixed: { model_name: decision.target },
+            seeds: Array.from({ length: screenSeeds }, (_, i) => i + 1),
+          },
         }
       } else if (decision.action === 'build-book') {
         childType = 'build-book'
@@ -4282,7 +4488,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
       // A search round that produced no new runs means the config space is covered — mark search exhausted so
       // the next decision falls through to `improve` instead of re-searching a fully-covered space forever.
-      if (decision.action === 'search' && (await totalCompleted()) <= searchBefore) searchExhausted = true
+      if (decision.action === 'search' && (await totalCompleted()) <= searchBefore)
+        searchExhausted = true
       // We've now genuinely re-attempted improve this run: a plateau from here on is a real "done" (not stale).
       if (decision.action === 'improve') improvedThisRun = true
       // Each finalize step runs once per Start — mark it done so the brain advances to the next result.
@@ -4333,7 +4540,12 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     onRecordWritten?: (type: string, key: string) => void,
   ): Promise<void> {
     const content: LeaderboardRecord = { entries, spine, gamesPerRung, basis, ranAt: now() }
-    await deps.storage.upsertRecord({ scope, type: `${recordType}-leaderboard`, key: 'current', content })
+    await deps.storage.upsertRecord({
+      scope,
+      type: `${recordType}-leaderboard`,
+      key: 'current',
+      content,
+    })
     onRecordWritten?.(`${recordType}-leaderboard`, 'current')
   }
 
@@ -4353,7 +4565,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       omit: HEAVY_RUN_FIELDS,
     })) as Array<{ key?: string | null; content?: Record<string, unknown> }>
     const entries = buildLeaderboardFromRuns(runs, manifest.ratingAnchors)
-    await writeLeaderboard(scope, recordType, entries, manifest.ratingSpine ?? [], 0, 'stored', onRecordWritten)
+    await writeLeaderboard(
+      scope,
+      recordType,
+      entries,
+      manifest.ratingSpine ?? [],
+      0,
+      'stored',
+      onRecordWritten,
+    )
   }
 
   async function rateModels(params: RateModelsParams): Promise<RateModelsResult> {
@@ -4370,7 +4590,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const allRuns = await deps.storage.listRecords({ scope: params.scope, type: recordType })
     const wanted = params.runKeys ? new Set(params.runKeys) : undefined
     const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-    let models: Array<{ id: string; checkpoint: string; ts: number; modelName?: string; game?: string }> = []
+    let models: Array<{
+      id: string
+      checkpoint: string
+      ts: number
+      modelName?: string
+      game?: string
+    }> = []
     let skipped = 0
     for (const r of allRuns) {
       const c = r.content as
@@ -4405,7 +4631,15 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       models = [...models].sort((a, b) => b.ts - a.ts).slice(0, maxModels)
     }
     if (!models.length) {
-      await writeLeaderboard(params.scope, recordType, [], spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
+      await writeLeaderboard(
+        params.scope,
+        recordType,
+        [],
+        spine,
+        gamesPerRung,
+        'gauntlet',
+        params.onRecordWritten,
+      )
       return { recordType, entries: [], skipped }
     }
 
@@ -4424,7 +4658,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       games_per_rung: gamesPerRung,
       base_seed: params.baseSeed ?? 0,
       opening_plies: params.openingPlies ?? 4,
-      ...(params.maxReferenceSims && params.maxReferenceSims > 0 ? { max_sims: params.maxReferenceSims } : {}),
+      ...(params.maxReferenceSims && params.maxReferenceSims > 0
+        ? { max_sims: params.maxReferenceSims }
+        : {}),
     }
     const runner = resolveRunner(params.computeTarget)
     const handle = runner.runJob({
@@ -4439,7 +4675,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const result = await handle.done
     if (result.status !== 'completed') {
       const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
-      throw new Error(`gauntlet ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+      throw new Error(
+        `gauntlet ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`,
+      )
     }
     const summary = (result.summary ?? {}) as {
       ratings?: Array<{ model_id: string; pairings?: RatingPairing[]; error?: string }>
@@ -4451,10 +4689,23 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const rating = fitRatingFromPairings(row.pairings)
       if (!rating) continue
       const modelName = nameByKey.get(row.model_id)
-      entries.push({ runKey: row.model_id, ...(modelName ? { modelName } : {}), ...rating, pairings: row.pairings })
+      entries.push({
+        runKey: row.model_id,
+        ...(modelName ? { modelName } : {}),
+        ...rating,
+        pairings: row.pairings,
+      })
     }
     entries.sort((a, b) => b.lowerBound - a.lowerBound)
-    await writeLeaderboard(params.scope, recordType, entries, spine, gamesPerRung, 'gauntlet', params.onRecordWritten)
+    await writeLeaderboard(
+      params.scope,
+      recordType,
+      entries,
+      spine,
+      gamesPerRung,
+      'gauntlet',
+      params.onRecordWritten,
+    )
     return { recordType, entries, skipped }
   }
 
@@ -4466,7 +4717,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
-    if (!manifest.tournament) throw new Error('this training project declares no "tournament" command')
+    if (!manifest.tournament)
+      throw new Error('this training project declares no "tournament" command')
     // 12 games/pair (was 4): the optimality check plays min(n,12) games as P1 vs the oracle, so a too-small n makes
     // BOTH the win% AND the "converts the first-player win" verdict noise — a model can go 4/4 by opening luck.
     const gamesPerPair = params.gamesPerPair ?? 12
@@ -4484,7 +4736,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const ckptByKey = new Map<string, { checkpoint: string; modelName?: string; game?: string }>()
     for (const r of allRuns) {
       const c = r.content as
-        | { status?: string; artifacts?: { checkpoint?: string }; config?: { model_name?: string; game?: string } }
+        | {
+            status?: string
+            artifacts?: { checkpoint?: string }
+            config?: { model_name?: string; game?: string }
+          }
         | undefined
       if (!c || c.status !== 'completed' || r.key == null) continue
       const checkpoint = c.artifacts?.checkpoint
@@ -4505,7 +4761,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
         key: 'current',
       })
       const entries = (lb?.content as LeaderboardRecord | undefined)?.entries ?? []
-      keys = entries.map((e) => e.runKey).filter((k) => ckptByKey.has(k)).slice(0, topN)
+      keys = entries
+        .map((e) => e.runKey)
+        .filter((k) => ckptByKey.has(k))
+        .slice(0, topN)
     }
     let skipped = 0
     const competitors: Array<Record<string, unknown>> = []
@@ -4528,9 +4787,16 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       for (const rung of spine) {
         if (rung.kind === 'mcts') {
           if ((rung.sims ?? 120) > maxReferenceSims) continue // skip pathologically-slow strong search rungs
-          competitors.push({ id: rung.id, label: `mcts@${rung.sims ?? 120}`, model_name: 'mcts', mcts_sims: rung.sims ?? 120 })
-        } else if (rung.kind === 'heuristic') competitors.push({ id: rung.id, label: 'heuristic', model_name: 'heuristic' })
-        else if (rung.kind === 'random') competitors.push({ id: rung.id, label: 'random', model_name: 'random' })
+          competitors.push({
+            id: rung.id,
+            label: `mcts@${rung.sims ?? 120}`,
+            model_name: 'mcts',
+            mcts_sims: rung.sims ?? 120,
+          })
+        } else if (rung.kind === 'heuristic')
+          competitors.push({ id: rung.id, label: 'heuristic', model_name: 'heuristic' })
+        else if (rung.kind === 'random')
+          competitors.push({ id: rung.id, label: 'random', model_name: 'random' })
         else if (rung.kind === 'book') {
           // The deployable book agent (opening book + exact endgame + near-perfect fallback). It is exact only
           // WHERE it has coverage (endgames always; the opening only as the book fills), so it is NOT labelled
@@ -4539,7 +4805,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
             id: rung.id,
             label: 'book (exact where solved)',
             model_name: 'book',
-            ...(rung.book_solve_endgame != null ? { book_solve_endgame: rung.book_solve_endgame } : {}),
+            ...(rung.book_solve_endgame != null
+              ? { book_solve_endgame: rung.book_solve_endgame }
+              : {}),
             ...(rung.depth != null ? { oracle_depth: rung.depth } : {}),
           })
         }
@@ -4570,7 +4838,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // optimality ladder. Both are slow from the opening, so they are off unless the caller asks.
       ...(params.oracleExact ? { oracle_exact: true } : {}),
       ...(params.ladder
-        ? { ladder: true, ladder_games: params.ladderGames ?? 2, ...(params.ladderExact ? { ladder_exact: true } : {}) }
+        ? {
+            ladder: true,
+            ladder_games: params.ladderGames ?? 2,
+            ...(params.ladderExact ? { ladder_exact: true } : {}),
+          }
         : {}),
     }
     const runner = resolveRunner(params.computeTarget)
@@ -4588,17 +4860,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // streamed first line can't slip past). The activity turns each marker into a partial progress record.
       handle.onLog((line) => {
         const marker = parseProgressMarker(line)
-        if (marker && typeof marker.phase === 'string') params.onProgress?.(marker as unknown as TournamentProgress)
+        if (marker && typeof marker.phase === 'string')
+          params.onProgress?.(marker as unknown as TournamentProgress)
       })
     }
     const result = await handle.done
     if (result.status !== 'completed') {
       const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
-      throw new Error(`tournament ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+      throw new Error(
+        `tournament ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`,
+      )
     }
     const summary = (result.summary ?? {}) as Omit<TournamentRecord, 'ranAt'>
     const record: TournamentRecord = { ...summary, ranAt: now() }
-    await deps.storage.upsertRecord({ scope: params.scope, type: `${recordType}-tournament`, key: 'current', content: record })
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: `${recordType}-tournament`,
+      key: 'current',
+      content: record,
+    })
     params.onRecordWritten?.(`${recordType}-tournament`, 'current')
     return { recordType, standings: record.standings ?? [], skipped }
   }
@@ -4607,27 +4887,41 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
-    if (!manifest.processEval) throw new Error('this training project declares no "processEval" command')
+    if (!manifest.processEval)
+      throw new Error('this training project declares no "processEval" command')
 
     // Resolve the model to score: an explicit spec, else a run's checkpoint. No runKey ⇒ the top-leaderboard run
     // (the champion) — so the autopilot's `score` finalize step proves the champion with no params.
     let model = params.model
     let runKey = params.runKey
     if (!model && !runKey) {
-      const lb = await deps.storage.readRecord({ scope: params.scope, type: `${recordType}-leaderboard`, key: 'current' })
+      const lb = await deps.storage.readRecord({
+        scope: params.scope,
+        type: `${recordType}-leaderboard`,
+        key: 'current',
+      })
       const entries = (lb?.content as LeaderboardRecord | undefined)?.entries ?? []
       runKey = entries[0]?.runKey
     }
     let recordKey = 'current'
     if (!model && runKey) {
-      const rec = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
-      const c = rec?.content as { artifacts?: { checkpoint?: string }; config?: { game?: string } } | undefined
+      const rec = await deps.storage.readRecord({
+        scope: params.scope,
+        type: recordType,
+        key: runKey,
+      })
+      const c = rec?.content as
+        | { artifacts?: { checkpoint?: string }; config?: { game?: string } }
+        | undefined
       const checkpoint = c?.artifacts?.checkpoint
       if (!checkpoint) throw new Error(`run ${runKey} has no checkpoint to score`)
       model = { checkpoint, label: runKey.slice(0, 8) }
       recordKey = runKey
     }
-    if (!model) throw new Error('runProcessEval needs a `model` spec, a `runKey`, or a leaderboard champion to score')
+    if (!model)
+      throw new Error(
+        'runProcessEval needs a `model` spec, a `runKey`, or a leaderboard champion to score',
+      )
 
     const game =
       params.game ??
@@ -4642,7 +4936,13 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       ...(params.simsCurve ? { sims_curve: params.simsCurve } : {}),
       ...(params.referenceDepth != null ? { reference_depth: params.referenceDepth } : {}),
       ...(params.corpus
-        ? { corpus: { n: params.corpus.n, min_moves: params.corpus.minMoves, seed: params.corpus.seed } }
+        ? {
+            corpus: {
+              n: params.corpus.n,
+              min_moves: params.corpus.minMoves,
+              seed: params.corpus.seed,
+            },
+          }
         : {}),
       ...(params.exact ? { exact: true } : {}),
     }
@@ -4659,17 +4959,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (params.onProgress) {
       handle.onLog((line) => {
         const marker = parseProgressMarker(line)
-        if (marker && typeof marker.phase === 'string') params.onProgress?.(marker as unknown as ProcessEvalProgress)
+        if (marker && typeof marker.phase === 'string')
+          params.onProgress?.(marker as unknown as ProcessEvalProgress)
       })
     }
     const result = await handle.done
     if (result.status !== 'completed') {
       const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
-      throw new Error(`process-eval ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+      throw new Error(
+        `process-eval ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`,
+      )
     }
     const card = (result.summary ?? {}) as Omit<ScorecardRecord, 'ranAt'>
     const record: ScorecardRecord = { ...card, ranAt: now() }
-    await deps.storage.upsertRecord({ scope: params.scope, type: `${recordType}-process-eval`, key: recordKey, content: record })
+    await deps.storage.upsertRecord({
+      scope: params.scope,
+      type: `${recordType}-process-eval`,
+      key: recordKey,
+      content: record,
+    })
     params.onRecordWritten?.(`${recordType}-process-eval`, recordKey)
     return { recordType, verdict: record.verdict, headline: record.headline, card: record }
   }
@@ -4678,7 +4986,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const manifest =
       params.manifest ?? (await readTrainerManifest(params.projectRoot, params.manifestRelPath))
     const recordType = manifest.recordType
-    if (!manifest.buildBook) throw new Error('this training project declares no "buildBook" command')
+    if (!manifest.buildBook)
+      throw new Error('this training project declares no "buildBook" command')
     const game = params.game ?? (manifest.levers?.game?.default as string | undefined) ?? 'connect4'
     // Default to the fast, productive SEED mode (cheap midgame subtrees grow real coverage); pass seedGames=0
     // for the long-running from-root OPENING accumulator instead.
@@ -4701,7 +5010,8 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     if (params.estimateGames != null && params.estimateGames > 0) {
       request.estimate_games = params.estimateGames
       if (params.estimateSims != null) request.estimate_sims = params.estimateSims
-      if (params.estimateSolveEndgame != null) request.estimate_solve_endgame = params.estimateSolveEndgame
+      if (params.estimateSolveEndgame != null)
+        request.estimate_solve_endgame = params.estimateSolveEndgame
     }
     if (params.maxExactEmpty != null) request.max_exact_empty = params.maxExactEmpty
     // WINNING-STRATEGY mode (SOLVE-IT M1): prove the directed winning-strategy tree from the opening instead of the
@@ -4725,7 +5035,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const result = await handle.done
     if (result.status !== 'completed') {
       const tail = result.logTail?.length ? ` — ${result.logTail[result.logTail.length - 1]}` : ''
-      throw new Error(`build-book ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`)
+      throw new Error(
+        `build-book ${result.status} (${result.error ?? `exit ${result.exitCode}`})${tail}`,
+      )
     }
     const summary = (result.summary ?? {}) as {
       game?: string
@@ -4849,7 +5161,9 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const objName = manifest.objective.name
       const metricObj = (content.metrics as Record<string, unknown> | undefined)?.[objName]
       const objectiveStale =
-        typeof metricObj === 'number' && Number.isFinite(metricObj) && metricObj !== content.objective
+        typeof metricObj === 'number' &&
+        Number.isFinite(metricObj) &&
+        metricObj !== content.objective
       // Metric backfill: DERIVE any declared metric that's ABSENT from this run (present values untouched,
       // so no float-churn on runs that already emitted it) — e.g. trades_per_day onto pre-existing runs.
       const runMetrics = (content.metrics as Record<string, number> | undefined) ?? {}
@@ -4868,7 +5182,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       // This run changes → rewrite. Read the FULL record by key (one at a time) so the omitted heavy fields are
       // preserved. setupKey stays RAW (from the pre-normalize config), exactly as the write path + isFresh
       // compute it, so canonicalising never desyncs the skipExplored/unrunnable dedup.
-      const full = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: record.key })
+      const full = await deps.storage.readRecord({
+        scope: params.scope,
+        type: recordType,
+        key: record.key,
+      })
       const fullContent = (full?.content ?? content) as Record<string, unknown>
       const rewritten: Record<string, unknown> = { ...fullContent }
       if (configChanged) {
@@ -4877,7 +5195,10 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       }
       if (objectiveStale) rewritten.objective = metricObj
       if (backfilled) {
-        rewritten.metrics = { ...((fullContent.metrics as Record<string, number>) ?? {}), ...metricAdds }
+        rewritten.metrics = {
+          ...((fullContent.metrics as Record<string, number>) ?? {}),
+          ...metricAdds,
+        }
       }
       await deps.storage.upsertRecord({
         scope: params.scope,
@@ -4937,16 +5258,25 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       const paperType = `${recordType}-paper`
       const modelType = `${recordType}-model`
       const experimentType = `${recordType}-experiment`
-      const hypRecords = await deps.storage.listRecords({ scope: params.scope, type: hypothesisType })
+      const hypRecords = await deps.storage.listRecords({
+        scope: params.scope,
+        type: hypothesisType,
+      })
       const hyps = hypRecords
         .map((r) => r.content as unknown as TrainingHypothesis)
         .filter((h) => h && h.id)
       if (hyps.length) {
-        const paperRecords = await deps.storage.listRecords({ scope: params.scope, type: paperType })
+        const paperRecords = await deps.storage.listRecords({
+          scope: params.scope,
+          type: paperType,
+        })
         const papers = paperRecords
           .map((r) => r.content as unknown as TrainingPaperRecord)
           .filter((p) => p && p.id)
-        const modelRecords = await deps.storage.listRecords({ scope: params.scope, type: modelType })
+        const modelRecords = await deps.storage.listRecords({
+          scope: params.scope,
+          type: modelType,
+        })
         const models = modelRecords
           .map((r) => r.content as unknown as TrainingModel)
           .filter((m) => m && m.id)
@@ -5056,7 +5386,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
       if (majorOf(content.pipelineVersion) >= params.beforePipelineMajor) continue
       if (!params.affectsRun(config)) continue
       // Read the FULL record by key (one at a time) so the omitted heavy fields survive the status stamp.
-      const full = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: record.key })
+      const full = await deps.storage.readRecord({
+        scope: params.scope,
+        type: recordType,
+        key: record.key,
+      })
       const fullContent = (full?.content ?? content) as Record<string, unknown>
       await deps.storage.upsertRecord({
         scope: params.scope,
@@ -5135,7 +5469,11 @@ export function createModelTrainerTools(deps: ModelTrainerToolsDeps): ModelTrain
     const missing: string[] = []
     let deleted = 0
     for (const runKey of params.runKeys) {
-      const existing = await deps.storage.readRecord({ scope: params.scope, type: recordType, key: runKey })
+      const existing = await deps.storage.readRecord({
+        scope: params.scope,
+        type: recordType,
+        key: runKey,
+      })
       if (!existing) {
         missing.push(runKey)
         continue

@@ -64,11 +64,19 @@ describe('sortRows', () => {
     expect(rows).toEqual(copy)
   })
   it('sorts by a lever value numerically', () => {
-    expect(B.sortRows(rows, 'window', 'asc').map((r: any) => r.values.window)).toEqual([20, 100, 2024])
-    expect(B.sortRows(rows, 'window', 'desc').map((r: any) => r.values.window)).toEqual([2024, 100, 20])
+    expect(B.sortRows(rows, 'window', 'asc').map((r: any) => r.values.window)).toEqual([
+      20, 100, 2024,
+    ])
+    expect(B.sortRows(rows, 'window', 'desc').map((r: any) => r.values.window)).toEqual([
+      2024, 100, 20,
+    ])
   })
   it('sorts by name case-insensitively', () => {
-    expect(B.sortRows(rows, 'name', 'asc').map((r: any) => r.name)).toEqual(['alpha', 'Beta', 'Gamma'])
+    expect(B.sortRows(rows, 'name', 'asc').map((r: any) => r.name)).toEqual([
+      'alpha',
+      'Beta',
+      'Gamma',
+    ])
   })
   it('sorts the default row first when sorting by "default" descending', () => {
     expect(B.sortRows(rows, 'default', 'desc')[0].name).toBe('alpha')

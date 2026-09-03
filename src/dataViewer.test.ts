@@ -36,18 +36,24 @@ describe('instrumentState', () => {
 
   it('is gaps when any interval has interior gaps', () => {
     expect(
-      D.instrumentState({ onDisk: { '1d': cov('2018-01', '2026-06', 100, ['2019-05', '2019-06']) } }),
+      D.instrumentState({
+        onDisk: { '1d': cov('2018-01', '2026-06', 100, ['2019-05', '2019-06']) },
+      }),
     ).toBe('gaps')
   })
 })
 
 describe('primaryInterval', () => {
   it('prefers 1d', () => {
-    expect(D.primaryInterval({ onDisk: { '1m': cov('a', 'b', 1), '1d': cov('a', 'b', 1) } })).toBe('1d')
+    expect(D.primaryInterval({ onDisk: { '1m': cov('a', 'b', 1), '1d': cov('a', 'b', 1) } })).toBe(
+      '1d',
+    )
   })
 
   it('falls back to the finest interval on disk', () => {
-    expect(D.primaryInterval({ onDisk: { '1h': cov('a', 'b', 1), '1m': cov('a', 'b', 1) } })).toBe('1h')
+    expect(D.primaryInterval({ onDisk: { '1h': cov('a', 'b', 1), '1m': cov('a', 'b', 1) } })).toBe(
+      '1h',
+    )
   })
 
   it('falls back to the first declared interval when nothing is on disk', () => {
@@ -116,7 +122,10 @@ describe('assetsWithData / isLeverValueDataless (A6 dim data-less asset lever va
           { symbol: 'DOGEUSDT', onDisk: {} }, // no data on disk
         ],
       },
-      { id: 'stocks', instruments: [{ symbol: 'AAPL', onDisk: { '1d': cov('2018-01', '2026-06', 100) } }] },
+      {
+        id: 'stocks',
+        instruments: [{ symbol: 'AAPL', onDisk: { '1d': cov('2018-01', '2026-06', 100) } }],
+      },
     ],
   }
 

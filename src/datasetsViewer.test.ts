@@ -86,19 +86,43 @@ describe('findDuplicateDataset', () => {
   const m = mkManifest('dataset')
   const dsA = { id: 'a', name: '1d · 2022', settings: { ...base, walk_forward_window: '2022' } }
   it('does NOT flag a dataset that differs only by walk_forward_window as a duplicate', () => {
-    const dup = D.findDuplicateDataset(m, [dsA], '1d · 2024', { ...base, walk_forward_window: '2024' }, 'new')
+    const dup = D.findDuplicateDataset(
+      m,
+      [dsA],
+      '1d · 2024',
+      { ...base, walk_forward_window: '2024' },
+      'new',
+    )
     expect(dup).toBeUndefined()
   })
   it('flags a same-settings dataset as a duplicate', () => {
-    const dup = D.findDuplicateDataset(m, [dsA], 'Another name', { ...base, walk_forward_window: '2022' }, 'new')
+    const dup = D.findDuplicateDataset(
+      m,
+      [dsA],
+      'Another name',
+      { ...base, walk_forward_window: '2022' },
+      'new',
+    )
     expect(dup && dup.id).toBe('a')
   })
   it('flags a same-NAME (case-insensitive) dataset as a duplicate', () => {
-    const dup = D.findDuplicateDataset(m, [dsA], '  1D · 2022 ', { ...base, walk_forward_window: '2024' }, 'new')
+    const dup = D.findDuplicateDataset(
+      m,
+      [dsA],
+      '  1D · 2022 ',
+      { ...base, walk_forward_window: '2024' },
+      'new',
+    )
     expect(dup && dup.id).toBe('a')
   })
   it('excludes the dataset being edited (exceptId)', () => {
-    const dup = D.findDuplicateDataset(m, [dsA], '1d · 2022', { ...base, walk_forward_window: '2022' }, 'a')
+    const dup = D.findDuplicateDataset(
+      m,
+      [dsA],
+      '1d · 2022',
+      { ...base, walk_forward_window: '2022' },
+      'a',
+    )
     expect(dup).toBeUndefined()
   })
 })
@@ -143,9 +167,12 @@ describe('cartesianBundles', () => {
   })
 
   it('skips levers with no chosen values (they fall back to defaults at plan time)', () => {
-    expect(D.cartesianBundles([['asset', ['ETHUSDT']], ['projection', []]])).toEqual([
-      { asset: 'ETHUSDT' },
-    ])
+    expect(
+      D.cartesianBundles([
+        ['asset', ['ETHUSDT']],
+        ['projection', []],
+      ]),
+    ).toEqual([{ asset: 'ETHUSDT' }])
   })
 
   it('empty input yields a single empty bundle', () => {

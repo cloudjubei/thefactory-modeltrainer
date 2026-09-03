@@ -18,17 +18,18 @@ const EULER_MASCHERONI = 0.5772156649015329
 // Acklam's rational approximation of the inverse standard-normal CDF (|relative error| < 1.15e-9 across (0,1)).
 // Only the DSR deflation level needs it (the engine's normalCdf has no inverse).
 const A = [
-  -3.969683028665376e1, 2.20946098424521e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1,
-  2.506628277459239e0,
+  -3.969683028665376e1, 2.20946098424521e2, -2.759285104469687e2, 1.38357751867269e2,
+  -3.066479806614716e1, 2.506628277459239,
 ]
 const B = [
-  -5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1,
+  -5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1,
+  -1.328068155288572e1,
 ]
 const C = [
-  -7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838e0, -2.549732539343734e0,
-  4.374664141464968e0, 2.938163982698783e0,
+  -7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734,
+  4.374664141464968, 2.938163982698783,
 ]
-const D = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996e0, 3.754408661907416e0]
+const D = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416]
 
 export function normalPpf(p: number): number {
   if (p <= 0) return -Infinity
@@ -457,7 +458,14 @@ export function poweredNullVerdict(
   const mde = minimumDetectableSharpe(nObs, alpha, power, skewness, kurtosis)
   const powerAtEcon = sharpePower(srEcon, nObs, alpha, skewness, kurtosis)
   if (!Number.isFinite(se)) {
-    return { verdict: 'inconclusive', se, lowerBound: -Infinity, upperBound: Infinity, mde, powerAtEcon }
+    return {
+      verdict: 'inconclusive',
+      se,
+      lowerBound: -Infinity,
+      upperBound: Infinity,
+      mde,
+      powerAtEcon,
+    }
   }
   const za = normalPpf(1 - alpha)
   const lowerBound = sharpe - za * se

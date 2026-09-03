@@ -5,11 +5,20 @@ import { buildBattery, renderBatteryHtml } from './batteryReportUtils.js'
 describe('buildBattery', () => {
   it('groups by family, counts swept cells, and tallies status', () => {
     const hyps = [
-      { id: 'p1', type: 't-a', status: 'disproved', gate: { kind: 'deflated-sharpe', metric: 'oos_sharpe' }, spec: { sweep: { x: [1, 2, 3], w: ['a', 'b'] } } }, // 6
+      {
+        id: 'p1',
+        type: 't-a',
+        status: 'disproved',
+        gate: { kind: 'deflated-sharpe', metric: 'oos_sharpe' },
+        spec: { sweep: { x: [1, 2, 3], w: ['a', 'b'] } },
+      }, // 6
       { id: 'p2', type: 't-a', status: 'inconclusive', spec: { sweep: { x: [1, 2] } } }, // 2
       { id: 'p3', type: 't-b', status: 'disproved', spec: {} }, // empty sweep -> 1
     ]
-    const b = buildBattery(hyps, { familyOf: (t) => (t === 't-a' ? 'Family A' : 'Family B'), familyOrder: ['Family A', 'Family B'] })
+    const b = buildBattery(hyps, {
+      familyOf: (t) => (t === 't-a' ? 'Family A' : 'Family B'),
+      familyOrder: ['Family A', 'Family B'],
+    })
     expect(b.stats.probes).toBe(3)
     expect(b.stats.families).toBe(2)
     expect(b.stats.cellsRun).toBe(9) // 6 + 2 + 1
@@ -21,7 +30,10 @@ describe('buildBattery', () => {
   })
 
   it('defaults the family label to the raw type and the title to the id', () => {
-    const b = buildBattery([{ id: 'probe-x', type: 'blackswan-cot-hypothesis', status: 'inconclusive' }], {})
+    const b = buildBattery(
+      [{ id: 'probe-x', type: 'blackswan-cot-hypothesis', status: 'inconclusive' }],
+      {},
+    )
     expect(b.families[0].family).toBe('blackswan-cot-hypothesis')
     expect(b.families[0].probes[0].title).toBe('probe-x')
     expect(b.families[0].probes[0].status).toBe('inconclusive')
@@ -30,7 +42,16 @@ describe('buildBattery', () => {
 
 describe('renderBatteryHtml', () => {
   const battery = buildBattery(
-    [{ id: 'p<x>', type: 't', title: 'A <b>bold</b> claim', status: 'disproved', gate: { kind: 'deflated-sharpe', metric: 'oos_sharpe' }, spec: { sweep: { x: [1, 2] } } }],
+    [
+      {
+        id: 'p<x>',
+        type: 't',
+        title: 'A <b>bold</b> claim',
+        status: 'disproved',
+        gate: { kind: 'deflated-sharpe', metric: 'oos_sharpe' },
+        spec: { sweep: { x: [1, 2] } },
+      },
+    ],
     {},
   )
   const html = renderBatteryHtml(battery, {

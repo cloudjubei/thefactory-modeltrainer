@@ -66,7 +66,11 @@ function applyOmit(content: unknown, omit: string[] | undefined): unknown {
   for (const path of omit) {
     const dot = path.indexOf('.')
     if (dot === -1) delete out[path]
-    else nested.set(path.slice(0, dot), [...(nested.get(path.slice(0, dot)) ?? []), path.slice(dot + 1)])
+    else
+      nested.set(path.slice(0, dot), [
+        ...(nested.get(path.slice(0, dot)) ?? []),
+        path.slice(dot + 1),
+      ])
   }
   for (const [head, subs] of nested) {
     if (out[head] && typeof out[head] === 'object') out[head] = applyOmit(out[head], subs)
@@ -292,8 +296,11 @@ describe('runTrainingCampaign', () => {
     const storage = memoryStorage()
     const { tools } = makeTools(stubRunner(), storage)
     await tools.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: manifest(),
-      spec: { sweep: { lr: [0.1] } }, activityId: 'act-train-7',
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1] } },
+      activityId: 'act-train-7',
     })
     const rec = (await storage.listRecords({ scope: 'proj', type: 'demo-run' }))[0]
     expect((rec.content as { activityId?: string }).activityId).toBe('act-train-7')
@@ -301,7 +308,10 @@ describe('runTrainingCampaign', () => {
     const storage2 = memoryStorage()
     const { tools: tools2 } = makeTools(stubRunner(), storage2)
     await tools2.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: manifest(), spec: { sweep: { lr: [0.1] } },
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      spec: { sweep: { lr: [0.1] } },
     })
     const rec2 = (await storage2.listRecords({ scope: 'proj', type: 'demo-run' }))[0]
     expect('activityId' in (rec2.content as Record<string, unknown>)).toBe(false)
@@ -922,9 +932,9 @@ describe('runTrainingCampaign', () => {
       spec: { fixed: { lr: 0.1 } },
     })
     const [record] = await storage.listRecords({ scope: 'proj', type: 'demo-run' })
-    expect((record.content as { series: { equity: number[] } }).series.equity.length).toBeLessThanOrEqual(
-      10000,
-    )
+    expect(
+      (record.content as { series: { equity: number[] } }).series.equity.length,
+    ).toBeLessThanOrEqual(10000)
   })
 
   it('MEMORY-SAFETY: the campaign dedup + pick-best scans omit heavy run fields (no full-content re-materialization)', async () => {
@@ -1778,7 +1788,11 @@ describe('evaluateTrainingRun', () => {
         runKeys: ['run1'],
         activityId: 'act-eval-1',
       })
-      const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-evaluation', key: 'run1' })
+      const rec = await storage.readRecord({
+        scope: 'proj',
+        type: 'demo-run-evaluation',
+        key: 'run1',
+      })
       expect(rec?.content).toMatchObject({ runKey: 'run1', activityId: 'act-eval-1' })
     })
 
@@ -1888,7 +1902,12 @@ describe('judgeTrainingRuns', () => {
     await seedRun(storage, 'a', 50)
     const executor = stubExecutor(JSON.stringify([{ key: 'a', score: 70, why: 'ok' }]))
     const { tools } = makeJudgeTools(executor, storage)
-    await tools.judgeTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), llmConfig: LLM })
+    await tools.judgeTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: manifest(),
+      llmConfig: LLM,
+    })
     const runScans = storage.queries.filter((q) => q.type === 'demo-run')
     expect(runScans.length).toBeGreaterThan(0)
     for (const q of runScans) {
@@ -2709,7 +2728,9 @@ describe('getRunData / getRunXAI (agent read tools)', () => {
     await seedRun(storage, 'lo', 10, { config: { lr: 0.1 } })
     await seedRun(storage, 'hi', 90, {
       config: { lr: 0.9 },
-      artifacts: { decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5, buy: 2 } } },
+      artifacts: {
+        decisionTrace: { steps: [{ step: 0, action: 'hold' }], actionCounts: { hold: 5, buy: 2 } },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.getRunXAI({ scope: 'proj', runKey: 'hi' })
@@ -2845,7 +2866,13 @@ describe('playBoardGame (interactive play RPC)', () => {
     await seedPlayableRun(storage)
     const runner = stubRunner({
       jobResult: () => ({
-        summary: { mode: 'move', frames: ['.', 'X'], to_move: 0, terminal: false, legal_actions: [0, 1] },
+        summary: {
+          mode: 'move',
+          frames: ['.', 'X'],
+          to_move: 0,
+          terminal: false,
+          legal_actions: [0, 1],
+        },
       }),
     })
     const tools = playTools(runner, storage, () => '/host/checkout')
@@ -2890,7 +2917,12 @@ describe('playBoardGame (interactive play RPC)', () => {
     })
     expect(res.ok).toBe(true)
     const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
-    expect(job.config).toMatchObject({ mode: 'autoplay', opponent: 'heuristic', model_seat: 1, seed: 2 })
+    expect(job.config).toMatchObject({
+      mode: 'autoplay',
+      opponent: 'heuristic',
+      model_seat: 1,
+      seed: 2,
+    })
   })
 
   it('errors when the project declares no play command', async () => {
@@ -2934,7 +2966,9 @@ describe('playBoardGame (interactive play RPC)', () => {
     const storage = memoryStorage()
     await seedPlayProject(storage)
     await seedPlayableRun(storage)
-    const runner = stubRunner({ jobResult: () => ({ summary: { error: 'illegal move: column 9' } }) })
+    const runner = stubRunner({
+      jobResult: () => ({ summary: { error: 'illegal move: column 9' } }),
+    })
     const res = await playTools(runner, storage, () => '/x').playBoardGame({
       scope: 'proj',
       runKey: 'g1',
@@ -2950,7 +2984,13 @@ describe('playBoardGame (interactive play RPC)', () => {
     await seedPlayProject(storage)
     await seedPlayableRun(storage)
     const runner = stubRunner({
-      jobResult: () => ({ status: 'failed', exitCode: 1, error: 'boom', summary: undefined, logTail: ['traceback'] }),
+      jobResult: () => ({
+        status: 'failed',
+        exitCode: 1,
+        error: 'boom',
+        summary: undefined,
+        logTail: ['traceback'],
+      }),
     })
     const res = await playTools(runner, storage, () => '/x').playBoardGame({
       scope: 'proj',
@@ -2983,7 +3023,10 @@ describe('runChampionTraining (champion autopilot loop)', () => {
           summary: {
             objective: p.strong,
             alphazero: { promoted: p.promoted },
-            metrics: { win_rate_vs_strong_mcts: p.strong, win_rate_vs_champion: p.promoted ? 0.6 : 0.3 },
+            metrics: {
+              win_rate_vs_strong_mcts: p.strong,
+              win_rate_vs_champion: p.promoted ? 0.6 : 0.3,
+            },
           },
         }
       },
@@ -3012,15 +3055,20 @@ describe('runChampionTraining (champion autopilot loop)', () => {
     expect(result.generations).toBe(4)
     expect(result.bestVsStrongMcts).toBe(0.7)
     expect(result.history.map((h) => h.promoted)).toEqual([true, true, false, false])
-    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current' }))
-      ?.content as ChampionTrainingState
+    const state = (
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current' })
+    )?.content as ChampionTrainingState
     expect(state.stage).toBe('converged')
     expect(state.history.length).toBe(4)
   })
 
   it('stops at the generation budget when it keeps improving', async () => {
     const storage = memoryStorage()
-    const runner = runnerFor({ 1: { promoted: true, strong: 0.5 }, 2: { promoted: true, strong: 0.6 }, 3: { promoted: true, strong: 0.7 } })
+    const runner = runnerFor({
+      1: { promoted: true, strong: 0.5 },
+      2: { promoted: true, strong: 0.6 },
+      3: { promoted: true, strong: 0.7 },
+    })
     const { tools } = makeTools(runner, storage)
     const result = await tools.runChampionTraining({
       scope: 'proj',
@@ -3108,7 +3156,11 @@ describe('runChampionTraining (champion autopilot loop)', () => {
       maxGenerations: 2,
       patience: 5,
     })
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-leaderboard',
+      key: 'current',
+    })
     const content = rec?.content as LeaderboardRecord
     expect(content).toBeTruthy()
     expect(content.basis).toBe('stored')
@@ -3128,7 +3180,11 @@ describe('runChampionTraining (champion autopilot loop)', () => {
       maxGenerations: 1,
       patience: 5,
     })
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-leaderboard',
+      key: 'current',
+    })
     expect(rec).toBeFalsy()
   })
 })
@@ -3150,7 +3206,7 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     const launchActivity = async (type: string, params: Record<string, unknown>) => {
       launched.push(type)
       if (type === 'train') {
-        const core = ((params.spec as { fixed: { model_name: string } }).fixed.model_name)
+        const core = (params.spec as { fixed: { model_name: string } }).fixed.model_name
         for (let s = 1; s <= 2; s++) {
           await storage.upsertRecord({
             scope: 'proj',
@@ -3160,9 +3216,19 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
           })
         }
       } else if (type === 'explore') {
-        await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run-exploration',
+          key: 'current',
+          content: { stage: 'converged', done: true },
+        })
       } else if (type === 'train-champion') {
-        await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+        await storage.upsertRecord({
+          scope: 'proj',
+          type: 'demo-run-champion',
+          key: 'current',
+          content: { stopReason: 'plateau' },
+        })
       }
       return { activityId: `child-${launched.length}` }
     }
@@ -3178,7 +3244,9 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     expect(launched).toEqual(['train', 'train', 'explore', 'train-champion'])
     expect(result.stopReason).toBe('done')
     expect(result.rounds).toBe(4)
-    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+    const state = (
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' })
+    )?.content as {
       stage: string
     }
     expect(state.stage).toBe('done')
@@ -3201,17 +3269,32 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
-          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const launched: string[] = []
     const result = await tools.runAutopilot({
-      scope: 'proj', projectRoot: '/x', manifest: finalizeManifest, maxRounds: 10,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: finalizeManifest,
+      maxRounds: 10,
       launchActivity: async (type: string) => {
         launched.push(type)
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: `c${launched.length}` }
       },
       awaitActivity: async () => 'completed',
@@ -3219,7 +3302,9 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     // improve (train-champion) settles → book → rate → play-off → done, each exactly once
     expect(launched).toEqual(['train-champion', 'build-book', 'rate-models', 'tournament'])
     expect(result.stopReason).toBe('done')
-    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+    const state = (
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' })
+    )?.content as {
       lastRun?: { bookBuilt: number; rated: number; playedOff: number }
     }
     expect(state.lastRun).toMatchObject({ bookBuilt: 1, rated: 1, playedOff: 1 })
@@ -3240,17 +3325,32 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
-          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const paramsByType: Record<string, unknown> = {}
     await tools.runAutopilot({
-      scope: 'proj', projectRoot: '/x', manifest: gradedManifest, maxRounds: 10,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: gradedManifest,
+      maxRounds: 10,
       launchActivity: async (type: string, p: unknown) => {
         paramsByType[type] = p
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: type }
       },
       awaitActivity: async () => 'completed',
@@ -3272,23 +3372,41 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
-          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const paramsByType: Record<string, unknown> = {}
     await tools.runAutopilot({
-      scope: 'proj', projectRoot: '/x', manifest: m, maxRounds: 4,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: m,
+      maxRounds: 4,
       launchActivity: async (type: string, p: unknown) => {
         paramsByType[type] = p
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: type }
       },
       awaitActivity: async () => 'completed',
     })
     // The autopilot's improve round runs with the manifest's bounded/light budget (not the full manual defaults).
-    expect(paramsByType['train-champion']).toEqual({ maxGenerations: 1, hyperparams: { az_iterations: 2, az_sims: 80 } })
+    expect(paramsByType['train-champion']).toEqual({
+      maxGenerations: 1,
+      hyperparams: { az_iterations: 2, az_sims: 80 },
+    })
   })
 
   it('passes the manifest rate config to the rate-models child (bounded gauntlet)', async () => {
@@ -3306,23 +3424,42 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
-          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const paramsByType: Record<string, unknown> = {}
     await tools.runAutopilot({
-      scope: 'proj', projectRoot: '/x', manifest: m, maxRounds: 6,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: m,
+      maxRounds: 6,
       launchActivity: async (type: string, p: unknown) => {
         paramsByType[type] = p
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: type }
       },
       awaitActivity: async () => 'completed',
     })
     // No buildBook declared → improve settles → straight to the BOUNDED rate step.
-    expect(paramsByType['rate-models']).toEqual({ maxModels: 16, gamesPerRung: 12, maxReferenceSims: 300 })
+    expect(paramsByType['rate-models']).toEqual({
+      maxModels: 16,
+      gamesPerRung: 12,
+      maxReferenceSims: 300,
+    })
   })
 
   it('reaches build-book even when the champion stops on BUDGET (never plateaus) — improve runs once, then finalizes', async () => {
@@ -3342,17 +3479,32 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     for (const core of ['mcts', 'alphazero'])
       for (let s = 1; s <= 2; s++)
         await storage.upsertRecord({
-          scope: 'proj', type: 'demo-run', key: `${core}-${s}`,
+          scope: 'proj',
+          type: 'demo-run',
+          key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const launched: string[] = []
     const result = await tools.runAutopilot({
-      scope: 'proj', projectRoot: '/x', manifest: m, maxRounds: 10,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: m,
+      maxRounds: 10,
       launchActivity: async (type: string) => {
         launched.push(type)
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'budget' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'budget' },
+          })
         return { activityId: `c${launched.length}` }
       },
       awaitActivity: async () => 'completed',
@@ -3384,7 +3536,12 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
         launched.push(type)
         // explore: no convergence stamp, no new runs (covered space); train-champion: plateaus.
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: `c${launched.length}` }
       },
       awaitActivity: async () => 'completed',
@@ -3406,8 +3563,18 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
           key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'reached-target' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-champion',
+      key: 'current',
+      content: { stopReason: 'reached-target' },
+    })
     const launched: string[] = []
     const result = await tools.runAutopilot({
       scope: 'proj',
@@ -3423,7 +3590,9 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
     // The stale plateau does NOT short-circuit to done: improve is re-attempted once this run, THEN it's done.
     expect(launched).toEqual(['train-champion'])
     expect(result.stopReason).toBe('done')
-    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+    const state = (
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' })
+    )?.content as {
       lastRun?: { rounds: number; improved: number; searched: number; stopReason: string }
     }
     expect(state.lastRun).toMatchObject({ rounds: 1, improved: 1, stopReason: 'done' })
@@ -3447,7 +3616,12 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
           key: `${core}-${s}`,
           content: { status: 'completed', config: { model_name: core, seed: s } },
         })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-exploration', key: 'current', content: { stage: 'converged', done: true } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-exploration',
+      key: 'current',
+      content: { stage: 'converged', done: true },
+    })
     const result = await tools.runAutopilot({
       scope: 'proj',
       projectRoot: '/x',
@@ -3455,14 +3629,21 @@ describe('runAutopilot (single-Start process orchestrates screen → search → 
       maxRounds: 10,
       launchActivity: async (type: string) => {
         if (type === 'train-champion')
-          await storage.upsertRecord({ scope: 'proj', type: 'demo-run-champion', key: 'current', content: { stopReason: 'plateau' } })
+          await storage.upsertRecord({
+            scope: 'proj',
+            type: 'demo-run-champion',
+            key: 'current',
+            content: { stopReason: 'plateau' },
+          })
         return { activityId: 't' }
       },
       awaitActivity: async () => 'completed',
     })
     // This press only ran improve once → rounds THIS run is 1, even though the lifetime counter is now 48.
     expect(result.rounds).toBe(1)
-    const state = (await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' }))?.content as {
+    const state = (
+      await storage.readRecord({ scope: 'proj', type: 'demo-run-autopilot', key: 'current' })
+    )?.content as {
       round: number
       lastRun?: { rounds: number }
     }
@@ -3501,8 +3682,14 @@ describe('rateModels (comparable-strength leaderboard)', () => {
 
   it('runs the gauntlet on checkpointed runs, fits ratings, and writes a sorted leaderboard', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'weak', 5, { config: { game: 'connect4', model_name: 'random' }, artifacts: { checkpoint: '/a.json' } })
-    await seedRun(storage, 'strong', 9, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/b.json' } })
+    await seedRun(storage, 'weak', 5, {
+      config: { game: 'connect4', model_name: 'random' },
+      artifacts: { checkpoint: '/a.json' },
+    })
+    await seedRun(storage, 'strong', 9, {
+      config: { game: 'connect4', model_name: 'mcts' },
+      artifacts: { checkpoint: '/b.json' },
+    })
     await seedRun(storage, 'nockpt', 3, { config: { model_name: 'mcts' } }) // no checkpoint → skipped
     const runner = stubRunner({
       jobResult: () => ({
@@ -3526,9 +3713,16 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     expect(res.entries.map((e) => e.runKey)).toEqual(['strong', 'weak']) // strong ranks above the weak-only one
     const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
     expect(job.commandTemplate).toContain('gauntlet')
-    expect(((job.config as { models: { id: string }[] }).models.map((m) => m.id)).sort()).toEqual(['strong', 'weak'])
+    expect((job.config as { models: { id: string }[] }).models.map((m) => m.id).sort()).toEqual([
+      'strong',
+      'weak',
+    ])
     expect((job.config as { rungs: unknown[] }).rungs.length).toBe(2)
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-leaderboard', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-leaderboard',
+      key: 'current',
+    })
     expect((rec?.content as { entries: unknown[] }).entries.length).toBe(2)
     expect((rec?.content as LeaderboardRecord).basis).toBe('gauntlet')
   })
@@ -3546,8 +3740,12 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     const runner = stubRunner({ jobResult: () => ({ summary: { ratings: [] } }) })
     const { tools } = makeTools(runner, storage)
     await tools.rateModels({
-      scope: 'proj', projectRoot: '/x', manifest: rateManifest,
-      maxModels: 2, gamesPerRung: 12, maxReferenceSims: 300,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: rateManifest,
+      maxModels: 2,
+      gamesPerRung: 12,
+      maxReferenceSims: 300,
     })
     const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as {
       models: { id: string }[]
@@ -3563,9 +3761,9 @@ describe('rateModels (comparable-strength leaderboard)', () => {
     const storage = memoryStorage()
     await seedRun(storage, 'a', 5, { artifacts: { checkpoint: '/a.json' } })
     const { tools } = makeTools(stubRunner(), storage)
-    await expect(tools.rateModels({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
-      /gauntlet/,
-    )
+    await expect(
+      tools.rateModels({ scope: 'proj', projectRoot: '/x', manifest: manifest() }),
+    ).rejects.toThrow(/gauntlet/)
   })
 })
 
@@ -3579,32 +3777,75 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
   })
   const tourSummary = {
     game: 'connect4',
-    competitors: [{ id: 'champ', label: 'alphazero · champ' }, { id: 'oracle', label: 'oracle' }],
-    matrix: [{ a: 'champ', b: 'oracle', a_win: 0.4, draw: 0.1, b_win: 0.5, first_player_win_rate: 0.9, games: 12 }],
+    competitors: [
+      { id: 'champ', label: 'alphazero · champ' },
+      { id: 'oracle', label: 'oracle' },
+    ],
+    matrix: [
+      {
+        a: 'champ',
+        b: 'oracle',
+        a_win: 0.4,
+        draw: 0.1,
+        b_win: 0.5,
+        first_player_win_rate: 0.9,
+        games: 12,
+      },
+    ],
     standings: [
       { id: 'oracle', label: 'oracle', score: 0.55, matches: 1, scorePerMatch: 0.55, rank: 1 },
-      { id: 'champ', label: 'alphazero · champ', score: 0.45, matches: 1, scorePerMatch: 0.45, rank: 2 },
+      {
+        id: 'champ',
+        label: 'alphazero · champ',
+        score: 0.45,
+        matches: 1,
+        scorePerMatch: 0.45,
+        rank: 2,
+      },
     ],
     firstPlayerWinRate: 0.9,
     gamesPerPair: 12,
-    selfPlay: { champ: { first_player_win_rate: 0.83, draw_rate: 0.0, first_player_loss_rate: 0.17, games: 12 } },
+    selfPlay: {
+      champ: {
+        first_player_win_rate: 0.83,
+        draw_rate: 0.0,
+        first_player_loss_rate: 0.17,
+        games: 12,
+      },
+    },
     optimality: { champ: { wins_as_p1_vs_oracle: 0.75, games: 12, verdict: 'near-optimal' } },
   }
 
   it('enters top-N leaderboard models + reference rungs + the oracle, runs the round-robin, and writes the record', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
-    await seedRun(storage, 'weak', 4, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/w.json' } })
+    await seedRun(storage, 'champ', 9, {
+      config: { game: 'connect4', model_name: 'alphazero' },
+      artifacts: { checkpoint: '/c.json' },
+    })
+    await seedRun(storage, 'weak', 4, {
+      config: { game: 'connect4', model_name: 'mcts' },
+      artifacts: { checkpoint: '/w.json' },
+    })
     // The stored leaderboard defines the top-N ranking (champ first).
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run-leaderboard',
       key: 'current',
-      content: { entries: [{ runKey: 'champ' }, { runKey: 'weak' }], spine: [], gamesPerRung: 0, ranAt: 't' },
+      content: {
+        entries: [{ runKey: 'champ' }, { runKey: 'weak' }],
+        spine: [],
+        gamesPerRung: 0,
+        ranAt: 't',
+      },
     })
     const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
     const { tools } = makeTools(runner, storage)
-    const res = await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, topN: 1 })
+    const res = await tools.runTournament({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: tourManifest,
+      topN: 1,
+    })
     const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
     expect(job.commandTemplate).toContain('tournament')
     const cfg = job.config as {
@@ -3619,7 +3860,11 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     expect(cfg.oracle_depth).toBe(6) // spine oracle depth 12 capped at 6 (+ exact endgame) to keep the play-off fast
     expect(cfg.max_sims).toBe(250) // EVERY competitor's search bounded so a high-sim leaderboard model can't time out the round-robin
     // the play-off record is persisted for the Results view, and standings come back
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-tournament', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-tournament',
+      key: 'current',
+    })
     expect((rec?.content as { standings: unknown[] }).standings.length).toBe(2)
     expect((rec?.content as { optimality: Record<string, unknown> }).optimality.champ).toBeDefined()
     expect(res.standings[0].id).toBe('oracle')
@@ -3627,27 +3872,65 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
 
   it('honours explicit competitor runKeys over the leaderboard', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'a', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/a.json' } })
-    await seedRun(storage, 'b', 8, { config: { game: 'connect4', model_name: 'mcts' }, artifacts: { checkpoint: '/b.json' } })
+    await seedRun(storage, 'a', 9, {
+      config: { game: 'connect4', model_name: 'alphazero' },
+      artifacts: { checkpoint: '/a.json' },
+    })
+    await seedRun(storage, 'b', 8, {
+      config: { game: 'connect4', model_name: 'mcts' },
+      artifacts: { checkpoint: '/b.json' },
+    })
     const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
     const { tools } = makeTools(runner, storage)
-    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['b'], includeReferences: false, includeOracle: false })
-    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as { competitors: Array<{ id: string }>; include_oracle: boolean }
+    await tools.runTournament({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: tourManifest,
+      runKeys: ['b'],
+      includeReferences: false,
+      includeOracle: false,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as {
+      competitors: Array<{ id: string }>
+      include_oracle: boolean
+    }
     expect(cfg.competitors.map((c) => c.id)).toEqual(['b'])
     expect(cfg.include_oracle).toBe(false)
   })
 
   it('forwards the SOLVE-IT M0 exact-oracle + ladder knobs to the play-off request (off by default)', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
+    await seedRun(storage, 'champ', 9, {
+      config: { game: 'connect4', model_name: 'alphazero' },
+      artifacts: { checkpoint: '/c.json' },
+    })
     const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
     const { tools } = makeTools(runner, storage)
-    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['champ'] })
-    const off = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    await tools.runTournament({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: tourManifest,
+      runKeys: ['champ'],
+    })
+    const off = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<
+      string,
+      unknown
+    >
     expect(off.oracle_exact).toBeUndefined()
     expect(off.ladder).toBeUndefined() // opt-in only, so the round-robin stays on the fast proxy
-    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['champ'], oracleExact: true, ladder: true, ladderGames: 3 })
-    const on = (runner as unknown as { jobs: ComputeJob[] }).jobs[1].config as Record<string, unknown>
+    await tools.runTournament({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: tourManifest,
+      runKeys: ['champ'],
+      oracleExact: true,
+      ladder: true,
+      ladderGames: 3,
+    })
+    const on = (runner as unknown as { jobs: ComputeJob[] }).jobs[1].config as Record<
+      string,
+      unknown
+    >
     expect(on.oracle_exact).toBe(true)
     expect(on.ladder).toBe(true)
     expect(on.ladder_games).toBe(3)
@@ -3655,14 +3938,17 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
 
   it('errors when the project declares no tournament command', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
-    await expect(tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
-      /tournament/,
-    )
+    await expect(
+      tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: manifest() }),
+    ).rejects.toThrow(/tournament/)
   })
 
   it('enters the book agent as an optimal-play competitor when the spine declares a book rung', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'champ', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/c.json' } })
+    await seedRun(storage, 'champ', 9, {
+      config: { game: 'connect4', model_name: 'alphazero' },
+      artifacts: { checkpoint: '/c.json' },
+    })
     const withBook = manifest({
       tournament: 'py -m harness.tournament --config-json {configPath} --summary-out {summaryOut}',
       ratingSpine: [
@@ -3673,7 +3959,12 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     })
     const runner = stubRunner({ jobResult: () => ({ summary: tourSummary }) })
     const { tools } = makeTools(runner, storage)
-    await tools.runTournament({ scope: 'proj', projectRoot: '/x', manifest: withBook, runKeys: ['champ'] })
+    await tools.runTournament({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: withBook,
+      runKeys: ['champ'],
+    })
     const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as {
       competitors: Array<{ id: string; model_name?: string; book_solve_endgame?: number }>
     }
@@ -3684,7 +3975,10 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
 
   it('streams the harness @@PROGRESS markers to onProgress (live per-pairing progress)', async () => {
     const storage = memoryStorage()
-    await seedRun(storage, 'a', 9, { config: { game: 'connect4', model_name: 'alphazero' }, artifacts: { checkpoint: '/a.json' } })
+    await seedRun(storage, 'a', 9, {
+      config: { game: 'connect4', model_name: 'alphazero' },
+      artifacts: { checkpoint: '/a.json' },
+    })
     const lines = [
       '@@PROGRESS {"phase":"start","game":"connect4","competitors":[{"id":"a","label":"a"}],"pairings":1,"selfPlayCount":1,"optimalityCount":0,"gamesPerPair":4}',
       'incidental engine log line (ignored)',
@@ -3703,7 +3997,14 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
           jobId: job.jobId,
           onLog: (cb: (line: string) => void) => {
             for (const l of lines) cb(l)
-            resolveDone({ jobId: job.jobId, status: 'completed', exitCode: 0, summary: tourSummary, logTail: [], durationMs: 1 })
+            resolveDone({
+              jobId: job.jobId,
+              status: 'completed',
+              exitCode: 0,
+              summary: tourSummary,
+              logTail: [],
+              durationMs: 1,
+            })
           },
           done,
           abort: () => {},
@@ -3713,8 +4014,13 @@ describe('runTournament (direct head-to-head play-off + optimality proof)', () =
     const { tools } = makeTools(streamingRunner, storage)
     const markers: Array<Record<string, unknown>> = []
     await tools.runTournament({
-      scope: 'proj', projectRoot: '/x', manifest: tourManifest, runKeys: ['a'],
-      includeReferences: false, includeOracle: false, onProgress: (m) => markers.push(m as unknown as Record<string, unknown>),
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: tourManifest,
+      runKeys: ['a'],
+      includeReferences: false,
+      includeOracle: false,
+      onProgress: (m) => markers.push(m as unknown as Record<string, unknown>),
     })
     expect(markers.map((m) => m.phase)).toEqual(['start', 'roundrobin']) // the noise line was ignored
     expect((markers[1].standings as Array<{ id: string }>)[0].id).toBe('a')
@@ -3738,7 +4044,11 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
     const { tools } = makeTools(runner, storage)
     const res = await tools.buildBook({
-      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 300, deadlineSeconds: 60,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: bookManifest,
+      seedGames: 300,
+      deadlineSeconds: 60,
     })
     const job = (runner as unknown as { jobs: ComputeJob[] }).jobs[0]
     expect(job.commandTemplate).toContain('harness.book')
@@ -3756,8 +4066,17 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const storage = memoryStorage()
     const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
     const { tools } = makeTools(runner, storage)
-    await tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 9 })
-    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    await tools.buildBook({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: bookManifest,
+      seedGames: 0,
+      maxPlies: 9,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<
+      string,
+      unknown
+    >
     expect(cfg.seed_games).toBeUndefined()
     expect(cfg.max_plies).toBe(9)
   })
@@ -3766,8 +4085,17 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const storage = memoryStorage()
     const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
     const { tools } = makeTools(runner, storage)
-    await tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 12 })
-    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    await tools.buildBook({
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: bookManifest,
+      seedGames: 0,
+      maxPlies: 12,
+    })
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<
+      string,
+      unknown
+    >
     expect(cfg.max_position_seconds).toBe(5) // every solve is bounded by default
     expect(cfg.workers).toBeUndefined() // parallelism stays opt-in
   })
@@ -3777,11 +4105,23 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const runner = stubRunner({ jobResult: () => ({ summary: bookSummary }) })
     const { tools } = makeTools(runner, storage)
     await tools.buildBook({
-      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 0, maxPlies: 12,
-      workers: 4, maxPositionSeconds: 3, estimateGames: 8, estimateSims: 48, estimateSolveEndgame: 16, maxExactEmpty: 20,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: bookManifest,
+      seedGames: 0,
+      maxPlies: 12,
+      workers: 4,
+      maxPositionSeconds: 3,
+      estimateGames: 8,
+      estimateSims: 48,
+      estimateSolveEndgame: 16,
+      maxExactEmpty: 20,
       maxEnumerate: 30000,
     })
-    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<
+      string,
+      unknown
+    >
     expect(cfg.workers).toBe(4)
     expect(cfg.max_position_seconds).toBe(3)
     expect(cfg.estimate_games).toBe(8)
@@ -3795,14 +4135,30 @@ describe('buildBook (extend the optimal-play opening book)', () => {
     const storage = memoryStorage()
     const wsSummary = {
       ...bookSummary,
-      winningStrategy: { nodes: 40, proven: 12, provenFraction: 0.3, root_proven: false, root_value: null, complete: false },
+      winningStrategy: {
+        nodes: 40,
+        proven: 12,
+        provenFraction: 0.3,
+        root_proven: false,
+        root_value: null,
+        complete: false,
+      },
     }
     const runner = stubRunner({ jobResult: () => ({ summary: wsSummary }) })
     const { tools } = makeTools(runner, storage)
     const res = await tools.buildBook({
-      scope: 'proj', projectRoot: '/x', manifest: bookManifest, seedGames: 300, winningStrategy: true, strategist: 0, maxPlies: 12,
+      scope: 'proj',
+      projectRoot: '/x',
+      manifest: bookManifest,
+      seedGames: 300,
+      winningStrategy: true,
+      strategist: 0,
+      maxPlies: 12,
     })
-    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<string, unknown>
+    const cfg = (runner as unknown as { jobs: ComputeJob[] }).jobs[0].config as Record<
+      string,
+      unknown
+    >
     expect(cfg.winning_strategy).toBe(true)
     expect(cfg.strategist).toBe(0)
     expect(cfg.seed_games).toBeUndefined() // seed mode is meaningless for a from-opening directed proof
@@ -3812,27 +4168,42 @@ describe('buildBook (extend the optimal-play opening book)', () => {
 
   it('errors when the project declares no buildBook command', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
-    await expect(tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: manifest() })).rejects.toThrow(
-      /buildBook/,
-    )
+    await expect(
+      tools.buildBook({ scope: 'proj', projectRoot: '/x', manifest: manifest() }),
+    ).rejects.toThrow(/buildBook/)
   })
 })
 
 describe('best-run repoint — ranks by rating for a ratingAnchors project, raw objective otherwise', () => {
   async function seedTwoRuns(storage: DataStorage, m: TrainerManifest) {
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'p', content: { manifest: m, dir: '.' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'p',
+      content: { manifest: m, dir: '.' },
+    })
     // A: a "perfect" 1.0 win-rate vs the WEAK random opponent. B: 0.7 vs a strong mcts.
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
       key: 'A',
-      content: { status: 'completed', objective: 1.0, config: { opponent: 'random' }, metrics: { win_rate: 1.0, games: 40 } },
+      content: {
+        status: 'completed',
+        objective: 1.0,
+        config: { opponent: 'random' },
+        metrics: { win_rate: 1.0, games: 40 },
+      },
     })
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
       key: 'B',
-      content: { status: 'completed', objective: 0.7, config: { opponent: 'mcts' }, metrics: { win_rate: 0.7, games: 40 } },
+      content: {
+        status: 'completed',
+        objective: 0.7,
+        config: { opponent: 'mcts' },
+        metrics: { win_rate: 0.7, games: 40 },
+      },
     })
   }
 
@@ -4178,14 +4549,54 @@ describe('getTrainerState (chat orientation read tool)', () => {
       key: 'demo',
       content: { manifest: manifest({ pipelineVersion: '3' }), dir: 'Demo' },
     })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r1', content: { status: 'completed', objective: 5, config: {} } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r2', content: { status: 'completed', objective: 9, config: {} } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run', key: 'r3', content: { status: 'failed' } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h1', content: { id: 'h1', status: 'proven', verdictSource: 'auto' } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h2', content: { id: 'h2', status: 'untested', verdictSource: 'manual' } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-hypothesis', key: 'h3', content: { id: 'h3', status: 'disproved', dismissed: true } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1', content: { id: 'p1' } })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-model', key: 'm1', content: { id: 'm1' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r1',
+      content: { status: 'completed', objective: 5, config: {} },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r2',
+      content: { status: 'completed', objective: 9, config: {} },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key: 'r3',
+      content: { status: 'failed' },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'h1',
+      content: { id: 'h1', status: 'proven', verdictSource: 'auto' },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'h2',
+      content: { id: 'h2', status: 'untested', verdictSource: 'manual' },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-hypothesis',
+      key: 'h3',
+      content: { id: 'h3', status: 'disproved', dismissed: true },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-paper',
+      key: 'p1',
+      content: { id: 'p1' },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-model',
+      key: 'm1',
+      content: { id: 'm1' },
+    })
     const { tools } = makeTools(stubRunner(), storage)
     const state = await tools.getTrainerState({ scope: 'proj' })
     expect(state.found).toBe(true)
@@ -4201,8 +4612,18 @@ describe('getTrainerState (chat orientation read tool)', () => {
 
   it('returns found:false with the options when the project is ambiguous', async () => {
     const storage = memoryStorage()
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'a',
+      content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'b',
+      content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) },
+    })
     const { tools } = makeTools(stubRunner(), storage)
     const state = await tools.getTrainerState({ scope: 'proj' })
     expect(state.found).toBe(false)
@@ -4216,45 +4637,75 @@ describe('getActivityStatus (A3.1 campaign/activity-status read tool)', () => {
   // companion. NOW is 2026-06-10T12:00:00Z; `updatedAt` older than the stale window flags an orphaned run.
   async function seedActivities(storage: DataStorage) {
     await storage.upsertRecord({
-      scope: 'proj', type: 'trainer-project-manifest', key: 'demo',
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
       content: { manifest: manifest(), dir: 'Demo' },
     })
     const put = (content: Record<string, unknown>) =>
-      storage.upsertRecord({ scope: 'proj', type: 'activity-run', key: content.activityId as string, content })
+      storage.upsertRecord({
+        scope: 'proj',
+        type: 'activity-run',
+        key: content.activityId as string,
+        content,
+      })
     await put({
-      activityId: 'a1', recordType: 'demo-run', status: 'running',
+      activityId: 'a1',
+      recordType: 'demo-run',
+      status: 'running',
       steps: [
         { key: 'calibrate', status: 'completed', done: 1, total: 1 },
         { key: 'train', status: 'running', done: 3, total: 10 },
       ],
       resumeToken: { activityType: 'train', params: { _label: 'lr sweep' } },
-      startedAt: '2026-06-10T11:55:00.000Z', updatedAt: NOW,
+      startedAt: '2026-06-10T11:55:00.000Z',
+      updatedAt: NOW,
     })
     await put({
-      activityId: 'a2', recordType: 'demo-run', status: 'queued',
+      activityId: 'a2',
+      recordType: 'demo-run',
+      status: 'queued',
       steps: [{ key: 'judge', status: 'queued', done: 0, total: 0 }],
-      resumeToken: { activityType: 'judge' }, startedAt: NOW, updatedAt: NOW,
+      resumeToken: { activityType: 'judge' },
+      startedAt: NOW,
+      updatedAt: NOW,
     })
     await put({
-      activityId: 'a3', recordType: 'demo-run', status: 'completed',
+      activityId: 'a3',
+      recordType: 'demo-run',
+      status: 'completed',
       steps: [{ key: 'explore', status: 'completed', done: 12, total: 12 }],
       resumeToken: { activityType: 'explore' },
-      startedAt: '2026-06-10T08:00:00.000Z', updatedAt: '2026-06-10T11:00:00.000Z',
-      finishedAt: '2026-06-10T11:00:00.000Z', costUSD: 0.42,
+      startedAt: '2026-06-10T08:00:00.000Z',
+      updatedAt: '2026-06-10T11:00:00.000Z',
+      finishedAt: '2026-06-10T11:00:00.000Z',
+      costUSD: 0.42,
     })
     await put({
-      activityId: 'a4', recordType: 'demo-run', status: 'failed', error: 'boom',
+      activityId: 'a4',
+      recordType: 'demo-run',
+      status: 'failed',
+      error: 'boom',
       resumeToken: { activityType: 'train' },
-      startedAt: '2026-06-10T09:00:00.000Z', updatedAt: '2026-06-10T10:00:00.000Z',
+      startedAt: '2026-06-10T09:00:00.000Z',
+      updatedAt: '2026-06-10T10:00:00.000Z',
       finishedAt: '2026-06-10T10:00:00.000Z',
     })
     await put({
-      activityId: 'a5', recordType: 'demo-run', status: 'running',
+      activityId: 'a5',
+      recordType: 'demo-run',
+      status: 'running',
       resumeToken: { activityType: 'train' },
-      startedAt: '2026-06-10T09:00:00.000Z', updatedAt: '2026-06-10T09:00:00.000Z', // 3h stale
+      startedAt: '2026-06-10T09:00:00.000Z',
+      updatedAt: '2026-06-10T09:00:00.000Z', // 3h stale
     })
     // A different trainer project's run in the same scope — must be excluded by the recordType filter.
-    await put({ activityId: 'x1', recordType: 'other-run', status: 'running', resumeToken: { activityType: 'train' } })
+    await put({
+      activityId: 'x1',
+      recordType: 'other-run',
+      status: 'running',
+      resumeToken: { activityType: 'train' },
+    })
   }
 
   it('folds activity-run records into running/queued/recently-finished with counts, progress, kind, cost', async () => {
@@ -4298,8 +4749,18 @@ describe('getActivityStatus (A3.1 campaign/activity-status read tool)', () => {
 
   it('returns found:false with the options when the project is ambiguous', async () => {
     const storage = memoryStorage()
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'a',
+      content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'b',
+      content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) },
+    })
     const { tools } = makeTools(stubRunner(), storage)
     const res = await tools.getActivityStatus({ scope: 'proj' })
     expect(res.found).toBe(false)
@@ -4364,10 +4825,18 @@ describe('migrateTrainingRuns', () => {
       },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
     expect(result.migratedRuns).toBe(1)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
-    const content = rec?.content as { objective: number; config: Record<string, unknown>; setupKey: string }
+    const content = rec?.content as {
+      objective: number
+      config: Record<string, unknown>
+      setupKey: string
+    }
     expect(content.objective).toBe(5) // backfilled from metrics.score
     expect(content.config).toMatchObject({ reward_model: 'combo_unified', lr: 0.1 }) // config untouched
     expect(content.setupKey).toBe('sk')
@@ -4379,10 +4848,18 @@ describe('migrateTrainingRuns', () => {
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 5, metrics: { score: 5 }, config: { reward_model: 'combo_unified', lr: 0.1 } },
+      content: {
+        objective: 5,
+        metrics: { score: 5 },
+        config: { reward_model: 'combo_unified', lr: 0.1 },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
     expect(result.migratedRuns).toBe(0)
   })
 
@@ -4390,37 +4867,71 @@ describe('migrateTrainingRuns', () => {
     const storage = memoryStorage()
     const m = manifest({
       backfillMetrics: [
-        { name: 'trades_per_day', ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } } },
+        {
+          name: 'trades_per_day',
+          ratePerDay: {
+            count: 'n_trades',
+            bars: 'oos_n_obs',
+            barDaysLever: 'timeframe',
+            barDays: { '1d': 1, '1h': 1 / 24 },
+          },
+        },
       ],
     })
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 5, metrics: { score: 5, n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '1d' } },
+      content: {
+        objective: 5,
+        metrics: { score: 5, n_trades: 10, oos_n_obs: 200 },
+        config: { timeframe: '1d' },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: m })
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+    })
     expect(result.migratedRuns).toBe(1)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
-    expect((rec?.content as { metrics: Record<string, number> }).metrics.trades_per_day).toBeCloseTo(0.05)
+    expect(
+      (rec?.content as { metrics: Record<string, number> }).metrics.trades_per_day,
+    ).toBeCloseTo(0.05)
   })
 
   it('leaves a derived metric that is already present untouched (no float churn)', async () => {
     const storage = memoryStorage()
     const m = manifest({
       backfillMetrics: [
-        { name: 'trades_per_day', ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1 } } },
+        {
+          name: 'trades_per_day',
+          ratePerDay: {
+            count: 'n_trades',
+            bars: 'oos_n_obs',
+            barDaysLever: 'timeframe',
+            barDays: { '1d': 1 },
+          },
+        },
       ],
     })
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 5, metrics: { score: 5, n_trades: 10, oos_n_obs: 200, trades_per_day: 0.99 }, config: { timeframe: '1d' } },
+      content: {
+        objective: 5,
+        metrics: { score: 5, n_trades: 10, oos_n_obs: 200, trades_per_day: 0.99 },
+        config: { timeframe: '1d' },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: m })
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
+    })
     expect(result.migratedRuns).toBe(0)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
     expect((rec?.content as { metrics: Record<string, number> }).metrics.trades_per_day).toBe(0.99)
@@ -4432,10 +4943,18 @@ describe('migrateTrainingRuns', () => {
       scope: 'proj',
       type: 'demo-run',
       key: 'r1',
-      content: { objective: 1, metrics: { other: 9 }, config: { reward_model: 'combo_unified', lr: 0.1 } },
+      content: {
+        objective: 1,
+        metrics: { other: 9 },
+        config: { reward_model: 'combo_unified', lr: 0.1 },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    const result = await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    const result = await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
     expect(result.migratedRuns).toBe(0)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run', key: 'r1' })
     expect((rec?.content as { objective: number }).objective).toBe(1)
@@ -4464,7 +4983,12 @@ describe('migrateTrainingRuns', () => {
       scope: 'proj',
       type: 'demo-run-paper',
       key: 'p1',
-      content: { id: 'p1', title: 'paper', hypothesisIds: [oldId], hypothesisWeights: { [oldId]: 4 } },
+      content: {
+        id: 'p1',
+        title: 'paper',
+        hypothesisIds: [oldId],
+        hypothesisWeights: { [oldId]: 4 },
+      },
     })
     const { tools } = makeTools(stubRunner(), storage)
     const result = await tools.migrateTrainingRuns({
@@ -4476,11 +5000,14 @@ describe('migrateTrainingRuns', () => {
     const hyps = await storage.listRecords({ scope: 'proj', type: 'demo-run-hypothesis' })
     expect(hyps).toHaveLength(1)
     expect(hyps[0].key).not.toBe(oldId)
-    expect((hyps[0].content as { spec: { fixed: Record<string, unknown> } }).spec.fixed).toMatchObject(
-      { reward_model: 'combo_unified', combo_sell: 1000, lr: 0.1 },
-    )
+    expect(
+      (hyps[0].content as { spec: { fixed: Record<string, unknown> } }).spec.fixed,
+    ).toMatchObject({ reward_model: 'combo_unified', combo_sell: 1000, lr: 0.1 })
     const paper = await storage.readRecord({ scope: 'proj', type: 'demo-run-paper', key: 'p1' })
-    const pc = paper?.content as { hypothesisIds: string[]; hypothesisWeights: Record<string, number> }
+    const pc = paper?.content as {
+      hypothesisIds: string[]
+      hypothesisWeights: Record<string, number>
+    }
     expect(pc.hypothesisIds).toEqual([hyps[0].key])
     expect(pc.hypothesisWeights[hyps[0].key]).toBe(4)
   })
@@ -4500,7 +5027,11 @@ describe('migrateTrainingRuns', () => {
       },
     })
     const { tools } = makeTools(stubRunner(), storage)
-    await tools.migrateTrainingRuns({ scope: 'proj', projectRoot: '/repo', manifest: withMigrations() })
+    await tools.migrateTrainingRuns({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: withMigrations(),
+    })
     const listScans = storage.queries.filter((q) => q.type === 'demo-run')
     expect(listScans.length).toBeGreaterThan(0)
     for (const q of listScans) expect(q.omit).toEqual(HEAVY_RUN_FIELDS)
@@ -6084,7 +6615,8 @@ describe('runExplorationCampaign (autopilot)', () => {
     const lr = Number(c.lr ?? 0.1)
     const seed = Number(c.seed ?? 0)
     const jitter = (((seed * 37) % 7) - 3) * 0.4
-    const base = algo === 'A' ? 500 - 1600 * (lr - 0.5) ** 2 : algo === 'B' ? 470 - 1600 * (lr - 0.3) ** 2 : 20
+    const base =
+      algo === 'A' ? 500 - 1600 * (lr - 0.5) ** 2 : algo === 'B' ? 470 - 1600 * (lr - 0.3) ** 2 : 20
     return base + jitter
   }
   function surfaceRunner() {
@@ -6092,7 +6624,14 @@ describe('runExplorationCampaign (autopilot)', () => {
       jobResult: (job) => {
         const c = job.config as Record<string, unknown>
         const score = surface(c)
-        return { summary: { objective: score, config: c, seed: Number(c.seed ?? 0), metrics: { score, baseline: 20 } } }
+        return {
+          summary: {
+            objective: score,
+            config: c,
+            seed: Number(c.seed ?? 0),
+            metrics: { score, baseline: 20 },
+          },
+        }
       },
     })
   }
@@ -6118,7 +6657,11 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect(declared?.peakObjective).toBeGreaterThan(485)
 
     // the exploration map is persisted under the stable per-project key for the viewer / pause round-trip
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
     expect((rec?.content as { stage?: string }).stage).toBe('converged')
     expect((rec?.content as { activityId?: string }).activityId).toBe('exp-1')
 
@@ -6213,7 +6756,11 @@ describe('runExplorationCampaign (autopilot)', () => {
     expect(h.labelOrder.every((l) => l.startsWith('explore · '))).toBe(true)
     expect(h.labelOrder.some((l) => l.includes('calibrate'))).toBe(true)
     // the map is fully settled: no in-flight child left pending after convergence
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
     expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBeUndefined()
   })
 
@@ -6232,7 +6779,11 @@ describe('runExplorationCampaign (autopilot)', () => {
     })
     expect(h.launchOrder.length).toBe(1)
     expect(h.awaitOrder.length).toBe(0) // the freshly-spawned child is not awaited within the same round
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
     expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBe('child-0')
   })
 
@@ -6281,8 +6832,14 @@ describe('runExplorationCampaign (autopilot)', () => {
     })
     expect(result.state.done).toBe(false)
     expect(h.launchOrder.length).toBeLessThanOrEqual(4) // bounded, not 200
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
-    const log = ((rec?.content as { log?: { rationale: string }[] }).log ?? []).map((e) => e.rationale)
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
+    const log = ((rec?.content as { log?: { rationale: string }[] }).log ?? []).map(
+      (e) => e.rationale,
+    )
     expect(log.some((r) => /fail|no new runs/i.test(r))).toBe(true)
   })
 
@@ -6303,8 +6860,14 @@ describe('runExplorationCampaign (autopilot)', () => {
     })
     expect(result.state.done).toBe(false)
     expect(h.launchOrder.length).toBeLessThanOrEqual(4) // bounded — did NOT re-spawn the fruitless batch 200×
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
-    expect((rec?.content as { failStreak?: number }).failStreak).toBeGreaterThanOrEqual(EXPLORATION_MAX_CHILD_FAILURES)
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
+    expect((rec?.content as { failStreak?: number }).failStreak).toBeGreaterThanOrEqual(
+      EXPLORATION_MAX_CHILD_FAILURES,
+    )
   })
 
   it('durable mode: a controller aborted mid-wait leaves the child pending for a Stop to clean up', async () => {
@@ -6320,7 +6883,11 @@ describe('runExplorationCampaign (autopilot)', () => {
       launchTrainCampaign: h.launchTrainCampaign,
       awaitActivity: h.awaitActivity,
     })
-    const rec = await storage.readRecord({ scope: 's', type: 'synthetic-run-exploration', key: 'current' })
+    const rec = await storage.readRecord({
+      scope: 's',
+      type: 'synthetic-run-exploration',
+      key: 'current',
+    })
     expect((rec?.content as { pendingChildId?: string }).pendingChildId).toBe('child-0')
   })
 })
@@ -6376,7 +6943,9 @@ describe('data catalog + mining', () => {
     const runner = stubRunner({
       jobResult: () => ({
         summary: {
-          mined: [{ symbol: 'GOLD', source: 'yfinance', written: 24, skipped: 0, errors: [], gaps: [] }],
+          mined: [
+            { symbol: 'GOLD', source: 'yfinance', written: 24, skipped: 0, errors: [], gaps: [] },
+          ],
           unknown: [],
           through: '2026-06',
         },
@@ -6405,15 +6974,21 @@ describe('data catalog + mining', () => {
     const runner = stubRunner({ jobResult: mineResult })
     const { tools } = makeTools(runner, memoryStorage())
     await tools.mineProjectData({
-      scope: 'proj', projectRoot: '/repo', manifest: dataManifest(),
-      request: { class: 'macro_core' }, env: { FRED_API_KEY: 'test-key' },
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      request: { class: 'macro_core' },
+      env: { FRED_API_KEY: 'test-key' },
     })
     expect(runner.jobs[0].env).toEqual({ FRED_API_KEY: 'test-key' })
 
     const runner2 = stubRunner({ jobResult: mineResult })
     const { tools: tools2 } = makeTools(runner2, memoryStorage())
     await tools2.mineProjectData({
-      scope: 'proj', projectRoot: '/repo', manifest: dataManifest(), request: { class: 'macro_core' },
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      request: { class: 'macro_core' },
     })
     expect('env' in (runner2.jobs[0] as Record<string, unknown>)).toBe(false)
   })
@@ -6458,7 +7033,12 @@ describe('data catalog + mining', () => {
   it('mineProjectData throws when the manifest declares no mineData command', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     await expect(
-      tools.mineProjectData({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), request: {} }),
+      tools.mineProjectData({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        request: {},
+      }),
     ).rejects.toThrow(/mineData/)
   })
 })
@@ -6477,7 +7057,13 @@ describe('discoverData', () => {
     const storage = memoryStorage()
     const dr = stubDeepResearch({
       extractItems: [
-        { name: 'FRED macro', source: 'FRED', coverage: '1950-', cost: 'free', licence: 'attribution' },
+        {
+          name: 'FRED macro',
+          source: 'FRED',
+          coverage: '1950-',
+          cost: 'free',
+          licence: 'attribution',
+        },
         { name: 'SEC EDGAR', source: 'EDGAR' },
       ],
       extractSources: [{ title: 'FRED', url: 'https://fred.example' }],
@@ -6489,7 +7075,11 @@ describe('discoverData', () => {
     expect(res.candidates[0].coverage).toBe('1950-')
     expect(res.sources[0].url).toBe('https://fred.example')
     // each candidate persisted as a reviewable {recordType}-datasource draft
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-datasource', key: 'fred-macro' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-datasource',
+      key: 'fred-macro',
+    })
     expect((rec!.content as { status: string }).status).toBe('proposed')
   })
 
@@ -6510,13 +7100,21 @@ describe('discoverData', () => {
 
 describe('approveDataSource (D4 approve-gate)', () => {
   const dataManifest = () =>
-    manifest({ mineData: 'bin/python -m trainer.data_cli mine --request {configPath} --out {summaryOut}' })
+    manifest({
+      mineData: 'bin/python -m trainer.data_cli mine --request {configPath} --out {summaryOut}',
+    })
   const seedDraft = (storage: ReturnType<typeof memoryStorage>) =>
     storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run-datasource',
       key: 'fred-macro',
-      content: { id: 'fred-macro', name: 'FRED macro', source: 'FRED', status: 'proposed', mineHint: 'add fred CPIAUCSL' },
+      content: {
+        id: 'fred-macro',
+        name: 'FRED macro',
+        source: 'FRED',
+        status: 'proposed',
+        mineHint: 'add fred CPIAUCSL',
+      },
     })
 
   it('promotes a proposed draft to the approved registry (no mine without a request)', async () => {
@@ -6524,10 +7122,19 @@ describe('approveDataSource (D4 approve-gate)', () => {
     await seedDraft(storage)
     const runner = stubRunner()
     const { tools } = makeTools(runner, storage)
-    const res = await tools.approveDataSource({ scope: 'proj', projectRoot: '/repo', manifest: dataManifest(), sourceId: 'fred-macro' })
+    const res = await tools.approveDataSource({
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: dataManifest(),
+      sourceId: 'fred-macro',
+    })
     expect(res.status).toBe('approved')
     expect(res.mined).toBe(false)
-    const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-datasource', key: 'fred-macro' })
+    const rec = await storage.readRecord({
+      scope: 'proj',
+      type: 'demo-run-datasource',
+      key: 'fred-macro',
+    })
     expect((rec!.content as { status: string }).status).toBe('approved')
     expect((rec!.content as { approvedAt?: string }).approvedAt).toBe(NOW)
     expect(runner.jobs).toHaveLength(0) // registry-only: no mine launched
@@ -6538,7 +7145,13 @@ describe('approveDataSource (D4 approve-gate)', () => {
     await seedDraft(storage)
     const runner = stubRunner({
       jobResult: () => ({
-        summary: { mined: [{ symbol: 'CPIAUCSL', source: 'fred', written: 12, skipped: 0, errors: [], gaps: [] }], unknown: [], through: '2026-06' },
+        summary: {
+          mined: [
+            { symbol: 'CPIAUCSL', source: 'fred', written: 12, skipped: 0, errors: [], gaps: [] },
+          ],
+          unknown: [],
+          through: '2026-06',
+        },
       }),
     })
     const { tools } = makeTools(runner, storage)
@@ -6558,7 +7171,12 @@ describe('approveDataSource (D4 approve-gate)', () => {
   it('throws when the datasource draft does not exist', async () => {
     const { tools } = makeTools(stubRunner(), memoryStorage())
     await expect(
-      tools.approveDataSource({ scope: 'proj', projectRoot: '/repo', manifest: manifest(), sourceId: 'ghost' }),
+      tools.approveDataSource({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: manifest(),
+        sourceId: 'ghost',
+      }),
     ).rejects.toThrow(/no datasource/)
   })
 })
@@ -6566,7 +7184,8 @@ describe('approveDataSource (D4 approve-gate)', () => {
 describe('crossTestRun', () => {
   const ctManifest = () =>
     manifest({
-      evaluate: 'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+      evaluate:
+        'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
       levers: {
         lr: { type: 'number', default: 0.01 },
         asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT'], scope: 'dataset' },
@@ -6593,7 +7212,9 @@ describe('crossTestRun', () => {
       jobResult: (job) => ({
         summary: {
           objective: 5,
-          metrics: { return_vs_hold_pct: (job.config as { asset: string }).asset === 'ETHUSDT' ? 3 : -2 },
+          metrics: {
+            return_vs_hold_pct: (job.config as { asset: string }).asset === 'ETHUSDT' ? 3 : -2,
+          },
         },
       }),
     })
@@ -6608,8 +7229,15 @@ describe('crossTestRun', () => {
     expect(res.tested).toBe(2)
     expect(res.results.map((r) => r.value).sort()).toEqual(['ETHUSDT', 'SOLUSDT'])
     // each eval job carried the OVERRIDDEN asset + the checkpoint
-    expect(runner.jobs.map((j) => (j.config as { asset: string }).asset).sort()).toEqual(['ETHUSDT', 'SOLUSDT'])
-    expect(runner.jobs.every((j) => (j.config as { checkpoint: string }).checkpoint === 'checkpoints/run1.zip')).toBe(true)
+    expect(runner.jobs.map((j) => (j.config as { asset: string }).asset).sort()).toEqual([
+      'ETHUSDT',
+      'SOLUSDT',
+    ])
+    expect(
+      runner.jobs.every(
+        (j) => (j.config as { checkpoint: string }).checkpoint === 'checkpoints/run1.zip',
+      ),
+    ).toBe(true)
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-settest', key: 'run1' })
     const content = rec!.content as {
       trainedValues: Record<string, string>
@@ -6680,7 +7308,13 @@ describe('crossTestRun', () => {
     })
     const { tools } = makeTools(stubRunner(), storage)
     await expect(
-      tools.crossTestRun({ scope: 'proj', projectRoot: '/repo', manifest: ctManifest(), runKey: 'run1', values: 'all' }),
+      tools.crossTestRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: ctManifest(),
+        runKey: 'run1',
+        values: 'all',
+      }),
     ).rejects.toThrow(/checkpoint/)
   })
 
@@ -6691,7 +7325,13 @@ describe('crossTestRun', () => {
     delete m.evaluate
     const { tools } = makeTools(stubRunner(), storage)
     await expect(
-      tools.crossTestRun({ scope: 'proj', projectRoot: '/repo', manifest: m, runKey: 'run1', values: 'all' }),
+      tools.crossTestRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: m,
+        runKey: 'run1',
+        values: 'all',
+      }),
     ).rejects.toThrow(/evaluate/)
   })
 })
@@ -6699,7 +7339,8 @@ describe('crossTestRun', () => {
 describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
   const wManifest = () =>
     manifest({
-      evaluate: 'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
+      evaluate:
+        'bin/python -m trainer.run --evaluate --config-json {configPath} --summary-out {summaryOut}',
       keepCheckpointKey: 'save_checkpoint',
       levers: {
         lr: { type: 'number', default: 0.01 },
@@ -6723,11 +7364,19 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     const runner = stubRunner({ jobResult: () => ({ summary: { objective: 2, metrics: {} } }) })
     const { tools } = makeTools(runner, storage)
     await tools.crossTestRun({
-      scope: 'proj', projectRoot: '/repo', manifest: wManifest(), runKey: 'run1', values: 'all',
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: wManifest(),
+      runKey: 'run1',
+      values: 'all',
     })
     await tools.crossTestRun({
-      scope: 'proj', projectRoot: '/repo', manifest: wManifest(), runKey: 'run1',
-      lever: 'walk_forward_window', values: 'all',
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: wManifest(),
+      runKey: 'run1',
+      lever: 'walk_forward_window',
+      values: 'all',
     })
     const rec = await storage.readRecord({ scope: 'proj', type: 'demo-run-settest', key: 'run1' })
     const content = rec!.content as {
@@ -6747,12 +7396,16 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     delete m.calibrate
     const plainKeys = tools.planTrainingMatrix(m, { sweep: { lr: [0.1, 0.2] } }).map((i) => i.key)
     await tools.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: m,
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
       spec: { sweep: { lr: [0.1, 0.2] } },
       keepCheckpoints: true,
     })
     expect(runner.jobs).toHaveLength(2)
-    expect(runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true)).toBe(true)
+    expect(
+      runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true),
+    ).toBe(true)
     // identity unchanged: the hashed item keys equal a plain (non-checkpointed) plan
     expect(runner.jobs.map((j) => j.jobId).sort()).toEqual([...plainKeys].sort())
   })
@@ -6764,7 +7417,9 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     const m = manifest()
     delete m.calibrate
     await tools.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: m,
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
       spec: { sweep: { lr: [0.1] } },
       keepCheckpoints: true,
     })
@@ -6780,14 +7435,22 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     delete m.calibrate
     const plainKeys = tools.planTrainingMatrix(m, { sweep: { lr: [0.1, 0.2] } }).map((i) => i.key)
     await tools.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: m,
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
       spec: { sweep: { lr: [0.1, 0.2] } },
       snapshotInterval: 5000,
     })
     expect(runner.jobs).toHaveLength(2)
     // the interval is injected AND a snapshot run keeps its checkpoint (so the snapshots persist)
-    expect(runner.jobs.every((j) => (j.config as { snapshot_interval: number }).snapshot_interval === 5000)).toBe(true)
-    expect(runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true)).toBe(true)
+    expect(
+      runner.jobs.every(
+        (j) => (j.config as { snapshot_interval: number }).snapshot_interval === 5000,
+      ),
+    ).toBe(true)
+    expect(
+      runner.jobs.every((j) => (j.config as { save_checkpoint: boolean }).save_checkpoint === true),
+    ).toBe(true)
     // identity unchanged: injection happens AFTER hashing
     expect(runner.jobs.map((j) => j.jobId).sort()).toEqual([...plainKeys].sort())
   })
@@ -6799,7 +7462,9 @@ describe('crossTestRun per-lever nesting + campaign keepCheckpoints', () => {
     const m = wManifest() // no snapshotIntervalKey
     delete m.calibrate
     await tools.runTrainingCampaign({
-      scope: 'proj', projectRoot: '/repo', manifest: m,
+      scope: 'proj',
+      projectRoot: '/repo',
+      manifest: m,
       spec: { sweep: { lr: [0.1] } },
       snapshotInterval: 5000,
     })
@@ -6825,7 +7490,10 @@ describe('diagnoseSearch (A5 read tool)', () => {
 
   it('narrates the split-consistency verdict over the project runs', async () => {
     const storage = memoryStorage()
-    await registerManifest(storage, manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }))
+    await registerManifest(
+      storage,
+      manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }),
+    )
     await seedRun(storage, 'a', { lr: 1, window: '2024' }, 20) // incumbent, only run on 2024
     await seedRun(storage, 'b', { lr: 2, window: '2022' }, 1)
     await seedRun(storage, 'c', { lr: 2, window: '2023' }, 1)
@@ -6861,7 +7529,12 @@ describe('diagnoseSearch (A5 read tool)', () => {
       }),
     )
     const seedM = (key: string, config: any, objective: number, metrics: any) =>
-      storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective, metrics, status: 'completed' } })
+      storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run',
+        key,
+        content: { config, objective, metrics, status: 'completed' },
+      })
     // lr:9 has the highest objective AND highest return_vs_hold, but oos_return_pct<0 ⇒ FAILS the gate.
     await seedM('a', { lr: 9, window: '2024' }, 100, { oos_return_pct: -5, return_vs_hold_pct: 50 })
     await seedM('b', { lr: 9, window: '2022' }, 90, { oos_return_pct: -5, return_vs_hold_pct: 48 })
@@ -6890,7 +7563,12 @@ describe('diagnoseSearch (A5 read tool)', () => {
         scope: 'proj',
         type: 'demo-run',
         key,
-        content: { config: { window: '2024' }, objective, metrics: { return_vs_hold_pct: rvh }, status: 'completed' },
+        content: {
+          config: { window: '2024' },
+          objective,
+          metrics: { return_vs_hold_pct: rvh },
+          status: 'completed',
+        },
       })
     // objective and return_vs_hold_pct are decorrelated (r≈0): a high reward does NOT imply a good model.
     await seedM('a', -1, 1)
@@ -6908,18 +7586,36 @@ describe('diagnoseSearch (A5 read tool)', () => {
     const storage = memoryStorage()
     await registerManifest(
       storage,
-      manifest({ fitness: [{ metric: 'manifest_metric', direction: 'max' }], diagnostics: { splitAxis: { levers: ['window'] } } }),
+      manifest({
+        fitness: [{ metric: 'manifest_metric', direction: 'max' }],
+        diagnostics: { splitAxis: { levers: ['window'] } },
+      }),
     )
     // A scorecard CARD (active) that ranks/gates by a DIFFERENT metric than the manifest.
     await storage.upsertRecord({
       scope: 'proj',
       type: 'demo-run-scorecard',
       key: 'c1',
-      content: { id: 'c1', name: 'Strict', gates: [], fitness: [{ metric: 'card_metric', direction: 'max' }] },
+      content: {
+        id: 'c1',
+        name: 'Strict',
+        gates: [],
+        fitness: [{ metric: 'card_metric', direction: 'max' }],
+      },
     })
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-scorecard-active', key: 'active', content: { activeId: 'c1' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-scorecard-active',
+      key: 'active',
+      content: { activeId: 'c1' },
+    })
     const seedM = (key: string, config: any, metrics: any) =>
-      storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective: 1, metrics, status: 'completed' } })
+      storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run',
+        key,
+        content: { config, objective: 1, metrics, status: 'completed' },
+      })
     await seedM('a', { window: '2024' }, { card_metric: 5, manifest_metric: -9 })
     await seedM('b', { window: '2022' }, { card_metric: 3, manifest_metric: -9 })
     const { tools } = makeTools(stubRunner(), storage)
@@ -6937,7 +7633,10 @@ describe('diagnoseSearch (A5 read tool)', () => {
 
   it('carries the composite champion verdict — not applicable when no champion config is declared', async () => {
     const storage = memoryStorage()
-    await registerManifest(storage, manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }))
+    await registerManifest(
+      storage,
+      manifest({ diagnostics: { splitAxis: { levers: ['window'] } } }),
+    )
     await seedRun(storage, 'a', { lr: 1, window: '2024' }, 5)
     const { tools } = makeTools(stubRunner(), storage)
     const res = await tools.diagnoseSearch({ scope: 'proj' })
@@ -6958,8 +7657,15 @@ describe('diagnoseSearch (A5 read tool)', () => {
     )
     const seedM = (key: string, window: string, rvh: number) =>
       storage.upsertRecord({
-        scope: 'proj', type: 'demo-run', key,
-        content: { config: { lr: 1, window }, objective: rvh, metrics: { return_vs_hold_pct: rvh }, status: 'completed' },
+        scope: 'proj',
+        type: 'demo-run',
+        key,
+        content: {
+          config: { lr: 1, window },
+          objective: rvh,
+          metrics: { return_vs_hold_pct: rvh },
+          status: 'completed',
+        },
       })
     // The incumbent {lr:1} beats hold (median across seeds) on BOTH windows ⇒ steady.
     await seedM('a', '2024', 6)
@@ -6976,9 +7682,19 @@ describe('diagnoseSearch (A5 read tool)', () => {
 
 describe('verifyImprovement (§C.6 adversarial-verify read tool)', () => {
   const registerManifest = (storage: any, m: any) =>
-    storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'demo', content: { manifest: m } })
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: m },
+    })
   const seedRun = (storage: any, key: string, config: any, objective: number) =>
-    storage.upsertRecord({ scope: 'proj', type: 'demo-run', key, content: { config, objective, status: 'completed' } })
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run',
+      key,
+      content: { config, objective, status: 'completed' },
+    })
 
   it('VERIFIES a winner that survives the applicable refutation lenses (seed-stability + aggregator)', async () => {
     const storage = memoryStorage()
@@ -7014,7 +7730,10 @@ describe('verifyImprovement (§C.6 adversarial-verify read tool)', () => {
 
   it('runs the nuisance-robust lens from the manifest declaration and honours a params baseline override', async () => {
     const storage = memoryStorage()
-    await registerManifest(storage, manifest({ diagnostics: { nullBaseline: 0, nuisanceLevers: ['batch'] } }))
+    await registerManifest(
+      storage,
+      manifest({ diagnostics: { nullBaseline: 0, nuisanceLevers: ['batch'] } }),
+    )
     // {lr:1} across two batch siblings (a declared nuisance), both seeds above baseline.
     await seedRun(storage, 'a1', { lr: 1, seed: 1, batch: 8 }, 20)
     await seedRun(storage, 'a2', { lr: 1, seed: 2, batch: 8 }, 21)
@@ -7048,7 +7767,12 @@ describe('continueTrainingRun (A3 extra-train)', () => {
       },
     })
   const registerManifest = (storage: any, mm: any) =>
-    storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'demo', content: { manifest: mm } })
+    storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'demo',
+      content: { manifest: mm },
+    })
 
   it('seeds a run from the parent checkpoint on a NEW dataset (continue_from + keep-checkpoint injected)', async () => {
     const storage = memoryStorage()
@@ -7097,7 +7821,12 @@ describe('continueTrainingRun (A3 extra-train)', () => {
     })
     const { tools } = makeTools(stubRunner(), storage)
     await expect(
-      tools.continueTrainingRun({ scope: 'proj', projectRoot: '/repo', manifest: contManifest(), runKey: 'p2' }),
+      tools.continueTrainingRun({
+        scope: 'proj',
+        projectRoot: '/repo',
+        manifest: contManifest(),
+        runKey: 'p2',
+      }),
     ).rejects.toThrow(/no checkpoint/)
   })
 
@@ -7150,10 +7879,26 @@ describe('deleteRuns (A2 destructive chat verb)', () => {
       key: 'r1',
       content: { config: { lr: 0.01 }, objective: 1, status: 'completed', setupKey: 's1' },
     })
-    for (const suffix of ['-evaluation', '-settest', '-verdict', '-xai-narrative', '-reliability']) {
-      await storage.upsertRecord({ scope: 'proj', type: 'demo-run' + suffix, key: 'r1', content: { runKey: 'r1' } })
+    for (const suffix of [
+      '-evaluation',
+      '-settest',
+      '-verdict',
+      '-xai-narrative',
+      '-reliability',
+    ]) {
+      await storage.upsertRecord({
+        scope: 'proj',
+        type: 'demo-run' + suffix,
+        key: 'r1',
+        content: { runKey: 'r1' },
+      })
     }
-    await storage.upsertRecord({ scope: 'proj', type: 'demo-run-unrunnable', key: 's1', content: { setupKey: 's1' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'demo-run-unrunnable',
+      key: 's1',
+      content: { setupKey: 's1' },
+    })
     const written: string[] = []
     const { tools } = makeTools(stubRunner(), storage)
     const res = await tools.deleteRuns({
@@ -7164,7 +7909,13 @@ describe('deleteRuns (A2 destructive chat verb)', () => {
     expect(res).toMatchObject({ recordType: 'demo-run', requested: 1, deleted: 1, missing: [] })
     // The run + EVERY derived child + the setup marker are gone.
     expect(storage.rows.has('proj|demo-run|r1')).toBe(false)
-    for (const suffix of ['-evaluation', '-settest', '-verdict', '-xai-narrative', '-reliability']) {
+    for (const suffix of [
+      '-evaluation',
+      '-settest',
+      '-verdict',
+      '-xai-narrative',
+      '-reliability',
+    ]) {
       expect(storage.rows.has(`proj|demo-run${suffix}|r1`)).toBe(false)
     }
     expect(storage.rows.has('proj|demo-run-unrunnable|s1')).toBe(false)
@@ -7191,11 +7942,28 @@ describe('deleteRuns (A2 destructive chat verb)', () => {
 
   it('resolves the target project when several are registered', async () => {
     const storage = memoryStorage()
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'a', content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) } })
-    await storage.upsertRecord({ scope: 'proj', type: 'trainer-project-manifest', key: 'b', content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) } })
-    await storage.upsertRecord({ scope: 'proj', type: 'b-run', key: 'r1', content: { config: {}, status: 'completed' } })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'a',
+      content: { manifest: manifest({ name: 'A', recordType: 'a-run' }) },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'trainer-project-manifest',
+      key: 'b',
+      content: { manifest: manifest({ name: 'B', recordType: 'b-run' }) },
+    })
+    await storage.upsertRecord({
+      scope: 'proj',
+      type: 'b-run',
+      key: 'r1',
+      content: { config: {}, status: 'completed' },
+    })
     const { tools } = makeTools(stubRunner(), storage)
-    await expect(tools.deleteRuns({ scope: 'proj', runKeys: ['r1'] })).rejects.toThrow(/several training projects/)
+    await expect(tools.deleteRuns({ scope: 'proj', runKeys: ['r1'] })).rejects.toThrow(
+      /several training projects/,
+    )
     const res = await tools.deleteRuns({ scope: 'proj', runKeys: ['r1'], project: 'B' })
     expect(res).toMatchObject({ recordType: 'b-run', deleted: 1 })
   })
@@ -7214,7 +7982,10 @@ describe('validateTrainingSpec (A2 up-front launch gate)', () => {
     const storage = memoryStorage()
     await registerManifest(storage)
     const { tools } = makeTools(stubRunner(), storage)
-    const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { lr: [0.01, 0.02, 0.03] } } })
+    const res = await tools.validateTrainingSpec({
+      scope: 'proj',
+      spec: { sweep: { lr: [0.01, 0.02, 0.03] } },
+    })
     expect(res.ok).toBe(true)
     expect(res.recordType).toBe('demo-run')
     expect(res.plannedCount).toBe(3)
@@ -7224,7 +7995,10 @@ describe('validateTrainingSpec (A2 up-front launch gate)', () => {
     const storage = memoryStorage()
     await registerManifest(storage)
     const { tools } = makeTools(stubRunner(), storage)
-    const res = await tools.validateTrainingSpec({ scope: 'proj', spec: { sweep: { nope: [1, 2] } } })
+    const res = await tools.validateTrainingSpec({
+      scope: 'proj',
+      spec: { sweep: { nope: [1, 2] } },
+    })
     expect(res.ok).toBe(false)
     expect(res.reason).toMatch(/nope/)
   })
@@ -7349,7 +8123,9 @@ describe('runSideExperimentCampaign (A4 — the SECOND evidence source)', () => 
     const again = await tools.runSideExperimentCampaign(base)
     expect(again.skipped).toBe(2)
     expect(again.completed).toBe(0)
-    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' })).toHaveLength(1)
+    expect(await storage.listRecords({ scope: 'proj', type: 'demo-run-experiment' })).toHaveLength(
+      1,
+    )
   })
 
   it('emits progress and reports the matrix cell count', async () => {
@@ -7420,7 +8196,10 @@ describe('runSideExperimentCampaign — branch coverage', () => {
 
   it('yields an unverifiable verdict when completed cells report no benchmark metric', async () => {
     const storage = memoryStorage()
-    const { tools } = makeTools(stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) }), storage)
+    const { tools } = makeTools(
+      stubRunner({ jobResult: () => ({ summary: { objective: 1 } }) }),
+      storage,
+    )
     const result = await tools.runSideExperimentCampaign({
       scope: 'proj',
       projectRoot: '/repo',
@@ -7438,7 +8217,12 @@ describe('runSideExperimentCampaign — branch coverage', () => {
   it('does not collect a cell whose job ended aborted (the abort branch), recording it failed', async () => {
     const storage = memoryStorage()
     const runner = stubRunner({
-      jobResult: () => ({ status: 'aborted', exitCode: null, error: 'aborted', summary: undefined }),
+      jobResult: () => ({
+        status: 'aborted',
+        exitCode: null,
+        error: 'aborted',
+        summary: undefined,
+      }),
     })
     const { tools } = makeTools(runner, storage)
     const result = await tools.runSideExperimentCampaign({
@@ -7536,7 +8320,10 @@ describe('runSideExperimentCampaign — comparability + provenance edges', () =>
     await tools.runSideExperimentCampaign({ ...base, manifest: manifest({ pipelineVersion: '1' }) })
     expect(runner.jobs).toHaveLength(1)
     // Same matrix under the SAME major: the completed cell is skipped (resume).
-    await tools.runSideExperimentCampaign({ ...base, manifest: manifest({ pipelineVersion: '1.3' }) })
+    await tools.runSideExperimentCampaign({
+      ...base,
+      manifest: manifest({ pipelineVersion: '1.3' }),
+    })
     expect(runner.jobs).toHaveLength(1)
     // A MAJOR bump makes prior cells incomparable — they must re-run, not be carried forward.
     const bumped = await tools.runSideExperimentCampaign({

@@ -769,9 +769,7 @@ const hygieneManifest = {
     timeframe: { type: 'choice', choices: ['1d', '1h'], scope: 'dataset' },
     seed: { type: 'number' },
   },
-  migrations: [
-    { match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified' } },
-  ],
+  migrations: [{ match: { reward_model: 'combo_all' }, set: { reward_model: 'combo_unified' } }],
 }
 
 describe('hypothesisHygiene — dead-pin causes', () => {
@@ -872,7 +870,12 @@ describe('hypothesisHygiene — statuses + structural issues', () => {
       run('b', { model_name: 'ppo', seed: 1 }, { vh: 4, objective: 4 }),
       run('c', { model_name: 'ppo', seed: 2 }, { vh: 3, objective: 3 }),
     ]
-    const d = H.hypothesisHygiene({ spec: { fixed: { model_name: 'ppo' } } }, runs3, hygieneManifest, 3)
+    const d = H.hypothesisHygiene(
+      { spec: { fixed: { model_name: 'ppo' } } },
+      runs3,
+      hygieneManifest,
+      3,
+    )
     expect(d.verdict).toBe('proven')
     expect(d.status).toBe('judged')
     expect(d.issues).toEqual([])
@@ -991,7 +994,12 @@ describe('hypothesisHygieneCensus', () => {
   })
   it('a manual verdict counts as judged regardless of runs', () => {
     const hyps = [
-      { id: 'h1', spec: { fixed: { model_name: 'ppo' } }, verdictSource: 'manual', status: 'proven' },
+      {
+        id: 'h1',
+        spec: { fixed: { model_name: 'ppo' } },
+        verdictSource: 'manual',
+        status: 'proven',
+      },
     ]
     const c = H.hypothesisHygieneCensus(hyps, [], hygieneManifest, 3)
     expect(c.judged).toBe(1)
@@ -1008,11 +1016,14 @@ describe('hypothesisHygieneCensus', () => {
       { id: 'h1', spec: { fixed: { model_name: 'ppo' } } },
       { id: 'h2', spec: { fixed: { model_name: 'ppo', reward_model: 'combo_all' } } },
       { id: 'h3', spec: { fixed: { model_name: 'dqn' }, seeds: [0, 1, 2] } },
-      { id: 'h4', spec: { fixed: { model_name: 'ppo' } }, verdictSource: 'manual', status: 'disproved' },
+      {
+        id: 'h4',
+        spec: { fixed: { model_name: 'ppo' } },
+        verdictSource: 'manual',
+        status: 'disproved',
+      },
     ]
-    const byId = new Map(
-      hyps.map((h) => [h.id, H.hypothesisHygiene(h, runs3, hygieneManifest, 3)]),
-    )
+    const byId = new Map(hyps.map((h) => [h.id, H.hypothesisHygiene(h, runs3, hygieneManifest, 3)]))
     const folded = H.foldHygieneCensus(hyps, byId)
     expect(folded.total).toBe(4)
     expect(folded.judged).toBe(2) // h1 proven + h4 manual
@@ -1087,15 +1098,31 @@ describe('measuredFromRuns with a manifest benchmark', () => {
   it('§C.1 a declared quorum requires that FRACTION of runs to clear the bar (not just the best)', () => {
     const q = { metric: 'eval_return_mean', threshold: 475, direction: 'max', quorum: 0.5 }
     // 1 of 5 clears ⇒ 0.2 < 0.5 ⇒ not proven; the lucky best no longer carries the verdict.
-    const lucky = [cartRun('a', 490), cartRun('b', 100), cartRun('c', 100), cartRun('d', 100), cartRun('e', 100)]
+    const lucky = [
+      cartRun('a', 490),
+      cartRun('b', 100),
+      cartRun('c', 100),
+      cartRun('d', 100),
+      cartRun('e', 100),
+    ]
     expect(H.measuredFromRuns(lucky, 'max', q).beatsHold).toBe(false)
     // 4 of 5 clears ⇒ 0.8 ≥ 0.5 ⇒ proven.
-    const strong = [cartRun('a', 490), cartRun('b', 480), cartRun('c', 495), cartRun('d', 500), cartRun('e', 100)]
+    const strong = [
+      cartRun('a', 490),
+      cartRun('b', 480),
+      cartRun('c', 495),
+      cartRun('d', 500),
+      cartRun('e', 100),
+    ]
     expect(H.measuredFromRuns(strong, 'max', q).beatsHold).toBe(true)
   })
 
   it('§C.1 fail-closed-with-reason: an undeclared benchmark whose default metric is absent explains itself', () => {
-    const m = H.measuredFromRuns([run('a', { model_name: 'ppo' }, { objective: 490 })], 'max', undefined)
+    const m = H.measuredFromRuns(
+      [run('a', { model_name: 'ppo' }, { objective: 490 })],
+      'max',
+      undefined,
+    )
     expect(m.beatsHold).toBe(null)
     expect(m.reason).toMatch(/no hypothesisBenchmark declared/i)
     // a DECLARED benchmark whose metric is simply absent gets a different, metric-named reason
@@ -1105,7 +1132,11 @@ describe('measuredFromRuns with a manifest benchmark', () => {
 
   it('threads through autoVerdictForHypothesis / effectiveVerdict / evaluateHypothesis', () => {
     const h = { spec: { fixed: { model_name: 'ppo' } } }
-    const runs3 = [cartRun('a', 490), cartRun('b', 480, { seed: 1 }), cartRun('c', 495, { seed: 2 })]
+    const runs3 = [
+      cartRun('a', 490),
+      cartRun('b', 480, { seed: 1 }),
+      cartRun('c', 495, { seed: 2 }),
+    ]
     expect(H.autoVerdictForHypothesis(h, runs3, 'max', 3, undefined, benchmark)).toBe('proven')
     expect(H.effectiveVerdict(h, runs3, 'max', 3, undefined, benchmark)).toBe('proven')
     const out = H.evaluateHypothesis(h, runs3, { direction: 'max', at: 't', minRuns: 3, benchmark })
@@ -1217,7 +1248,10 @@ describe('buildRunIndex + candidateRunsFor', () => {
   })
   it('context-spanning spec with compare + environments still matches identically', () => {
     sameMatch(
-      { compare: { lever: 'model_name', values: ['ppo', 'a2c'] }, environments: [{ asset: 'btc' }] },
+      {
+        compare: { lever: 'model_name', values: ['ppo', 'a2c'] },
+        environments: [{ asset: 'btc' }],
+      },
       corpus,
     )
   })
@@ -1240,9 +1274,9 @@ describe('buildRunIndex + candidateRunsFor', () => {
   })
   it('empty spec (no fixed/sweep/compare) yields [] — mirrors specMatchesConfig matching nothing', () => {
     expect(H.candidateRunsFor({}, H.buildRunIndex(corpus))).toEqual([])
-    expect(H.candidateRunsFor({ environments: [{ asset: 'btc' }] }, H.buildRunIndex(corpus))).toEqual(
-      [],
-    )
+    expect(
+      H.candidateRunsFor({ environments: [{ asset: 'btc' }] }, H.buildRunIndex(corpus)),
+    ).toEqual([])
     sameMatch({}, corpus)
     sameMatch({ environments: [{ asset: 'btc' }] }, corpus)
   })
@@ -1324,7 +1358,10 @@ describe('multi-source verdict aggregation', () => {
     const h = { id: 'h1', spec: { fixed: { allow_shorting: true } } }
     const e = experiment(
       'e1',
-      [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }), cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 })],
+      [
+        cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }),
+        cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 }),
+      ],
       { hypothesisId: 'h1' },
     )
     const exp = H.experimentEvidenceRows(h, [e])
@@ -1358,10 +1395,18 @@ describe('multi-source verdict aggregation', () => {
   })
 
   it('evaluateHypothesis records a transition attributed to the experiment source', () => {
-    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } }, verdictSource: 'auto', status: 'untested' }
+    const h = {
+      id: 'h1',
+      spec: { fixed: { allow_shorting: true } },
+      verdictSource: 'auto',
+      status: 'untested',
+    }
     const e = experiment(
       'e1',
-      [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }), cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 })],
+      [
+        cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 }),
+        cell('c2', { allow_shorting: true }, { objective: 6, vh: 3 }),
+      ],
       { hypothesisId: 'h1' },
     )
     const exp = H.experimentEvidenceRows(h, [e])
@@ -1379,7 +1424,12 @@ describe('multi-source verdict aggregation', () => {
   })
 
   it('preserves the manual-override precedence even with experiment evidence', () => {
-    const h = { id: 'h1', spec: { fixed: { allow_shorting: true } }, verdictSource: 'manual', status: 'disproved' }
+    const h = {
+      id: 'h1',
+      spec: { fixed: { allow_shorting: true } },
+      verdictSource: 'manual',
+      status: 'disproved',
+    }
     const e = experiment('e1', [cell('c1', { allow_shorting: true }, { objective: 5, vh: 2 })], {
       hypothesisId: 'h1',
     })
@@ -1391,7 +1441,10 @@ describe('multi-source verdict aggregation', () => {
   it('does NOT let an off-spec linked cell into a comparison arm (holds fixed levers constant)', () => {
     const h = {
       id: 'h1',
-      spec: { fixed: { asset: 'BTC' }, compare: { lever: 'allow_shorting', values: [true, false] } },
+      spec: {
+        fixed: { asset: 'BTC' },
+        compare: { lever: 'allow_shorting', values: [true, false] },
+      },
       comparison: { kind: 'beats-baseline', baselineIndex: 1 },
     }
     // On BTC the shorting arm (true, obj 3) loses to the baseline (false, obj 5) → disproved.
@@ -1407,7 +1460,9 @@ describe('multi-source verdict aggregation', () => {
       { hypothesisId: 'h1' },
     )
     const exp = H.experimentEvidenceRows(h, [e])
-    expect(H.autoVerdictForHypothesis(h, runs, 'max', 1, undefined, undefined, exp)).toBe('disproved')
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 1, undefined, undefined, exp)).toBe(
+      'disproved',
+    )
   })
 
   it('dedupes an experiment cell whose config equals a matched run (no double-count to minRuns)', () => {
@@ -1419,7 +1474,9 @@ describe('multi-source verdict aggregation', () => {
     })
     const exp = H.experimentEvidenceRows(h, [e])
     expect(H.measuredBySource(h, runs, exp, 'max', undefined).combined.runs).toBe(1)
-    expect(H.autoVerdictForHypothesis(h, runs, 'max', 2, undefined, undefined, exp)).toBe('untested')
+    expect(H.autoVerdictForHypothesis(h, runs, 'max', 2, undefined, undefined, exp)).toBe(
+      'untested',
+    )
   })
 
   it('feeds experiment cells into the cross-context comparison branch', () => {
@@ -1493,7 +1550,9 @@ describe('buildHypothesisIndex + candidateHypothesesFor', () => {
 
   it('handles an empty hypothesis set and a run with no config', () => {
     expect(H.candidateHypothesesFor(corpus[0], H.buildHypothesisIndex([]))).toEqual([])
-    expect(H.candidateHypothesesFor({ key: 'x', summary: {} }, H.buildHypothesisIndex(hyps))).toEqual([])
+    expect(
+      H.candidateHypothesesFor({ key: 'x', summary: {} }, H.buildHypothesisIndex(hyps)),
+    ).toEqual([])
   })
 })
 
@@ -1569,20 +1628,36 @@ describe('gateVerdict — majority-beats-hold (the campaign gate, faithfully der
 
   it('PROVEN when a strict majority of cells clear the benchmark in ≥ minWindows windows', () => {
     const rows = [
-      cell('a1', 'w1', 5), cell('a2', 'w1', 5), cell('a3', 'w1', -1), // w1: 2/3 clear
-      cell('b1', 'w2', 5), cell('b2', 'w2', 5), cell('b3', 'w2', -1), // w2: 2/3
-      cell('c1', 'w3', 5), cell('c2', 'w3', 5), cell('c3', 'w3', -1), // w3: 2/3
-      cell('d1', 'w4', -1), cell('d2', 'w4', -1), cell('d3', 'w4', 5), // w4: 1/3
+      cell('a1', 'w1', 5),
+      cell('a2', 'w1', 5),
+      cell('a3', 'w1', -1), // w1: 2/3 clear
+      cell('b1', 'w2', 5),
+      cell('b2', 'w2', 5),
+      cell('b3', 'w2', -1), // w2: 2/3
+      cell('c1', 'w3', 5),
+      cell('c2', 'w3', 5),
+      cell('c3', 'w3', -1), // w3: 2/3
+      cell('d1', 'w4', -1),
+      cell('d2', 'w4', -1),
+      cell('d3', 'w4', 5), // w4: 1/3
     ]
     expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('proven')
   })
 
   it('DISPROVED on the reversal signature — wins ONE window, loses the rest', () => {
     const rows = [
-      cell('a1', 'w1', 33), cell('a2', 'w1', 30), cell('a3', 'w1', 12), // w1: all clear
-      cell('b1', 'w2', -51), cell('b2', 'w2', -40), cell('b3', 'w2', -60),
-      cell('c1', 'w3', -67), cell('c2', 'w3', -50), cell('c3', 'w3', -70),
-      cell('d1', 'w4', -102), cell('d2', 'w4', -90), cell('d3', 'w4', -110),
+      cell('a1', 'w1', 33),
+      cell('a2', 'w1', 30),
+      cell('a3', 'w1', 12), // w1: all clear
+      cell('b1', 'w2', -51),
+      cell('b2', 'w2', -40),
+      cell('b3', 'w2', -60),
+      cell('c1', 'w3', -67),
+      cell('c2', 'w3', -50),
+      cell('c3', 'w3', -70),
+      cell('d1', 'w4', -102),
+      cell('d2', 'w4', -90),
+      cell('d3', 'w4', -110),
     ]
     expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('disproved') // 1 window of 4 clears < 3
   })
@@ -1604,9 +1679,13 @@ describe('gateVerdict — majority-beats-hold (the campaign gate, faithfully der
 
   it('failed / invalid cells never count toward a window', () => {
     const rows = [
-      cell('a1', 'w1', 5), cell('a2', 'w1', 5), cell('bad', 'w1', 5, 'failed'),
-      cell('b1', 'w2', 5), cell('b2', 'w2', 5),
-      cell('c1', 'w3', 5), cell('c2', 'w3', 5),
+      cell('a1', 'w1', 5),
+      cell('a2', 'w1', 5),
+      cell('bad', 'w1', 5, 'failed'),
+      cell('b1', 'w2', 5),
+      cell('b2', 'w2', 5),
+      cell('c1', 'w3', 5),
+      cell('c2', 'w3', 5),
     ]
     expect(H.gateVerdict(GATE, rows, BENCH, 3)).toBe('proven')
   })
@@ -1614,7 +1693,11 @@ describe('gateVerdict — majority-beats-hold (the campaign gate, faithfully der
   it('honours a min-direction benchmark (lower is better — clears below the threshold)', () => {
     const m = (key: string, w: string, v: number) => ({
       key,
-      summary: { config: { walk_forward_window: w }, status: 'completed', metrics: { cost_bps: v } },
+      summary: {
+        config: { walk_forward_window: w },
+        status: 'completed',
+        metrics: { cost_bps: v },
+      },
     })
     const bench = { metric: 'cost_bps', threshold: 20, direction: 'min' }
     const low = [m('a', 'w1', 5), m('b', 'w2', 5), m('c', 'w3', 5)] // all below 20 → clear
@@ -1625,8 +1708,12 @@ describe('gateVerdict — majority-beats-hold (the campaign gate, faithfully der
 
   it('pooled (no windowLever): majority of ALL cells clear → proven, minority → disproved', () => {
     const g = { kind: 'majority-beats-hold' }
-    expect(H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', 5), cell('c', 'w', -1)], BENCH, 3)).toBe('proven')
-    expect(H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', -1), cell('c', 'w', -1)], BENCH, 3)).toBe('disproved')
+    expect(
+      H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', 5), cell('c', 'w', -1)], BENCH, 3),
+    ).toBe('proven')
+    expect(
+      H.gateVerdict(g, [cell('a', 'w', 5), cell('b', 'w', -1), cell('c', 'w', -1)], BENCH, 3),
+    ).toBe('disproved')
   })
 })
 
@@ -1667,7 +1754,9 @@ describe('gateVerdict — deflated-sharpe (the multiple-testing correction, fait
     if (strict === 'proven') expect(lenient).toBe('proven')
   })
   it('UNTESTED without the deflation params, or with too few measured candidates', () => {
-    expect(H.gateVerdict({ kind: 'deflated-sharpe', threshold: 0.95 }, [cell('a', 2.5)], null, 1)).toBe('untested')
+    expect(
+      H.gateVerdict({ kind: 'deflated-sharpe', threshold: 0.95 }, [cell('a', 2.5)], null, 1),
+    ).toBe('untested')
     expect(H.gateVerdict(GATE, [cell('a', 2.5)], null, 3)).toBe('untested')
   })
 })
@@ -1675,7 +1764,11 @@ describe('gateVerdict — deflated-sharpe (the multiple-testing correction, fait
 describe('a hypothesis GATE overrides the default beats-hold(best) verdict', () => {
   const cell = (key: string, w: string, vh: number) => ({
     key,
-    summary: { config: { walk_forward_window: w, signal: 'reversal' }, status: 'completed', metrics: { return_vs_hold_pct: vh } },
+    summary: {
+      config: { walk_forward_window: w, signal: 'reversal' },
+      status: 'completed',
+      metrics: { return_vs_hold_pct: vh },
+    },
   })
   it('evaluateHypothesis uses the gate: a big winning cell in ONE window is DISPROVED, not proven-by-best', () => {
     const h = {
@@ -1684,9 +1777,12 @@ describe('a hypothesis GATE overrides the default beats-hold(best) verdict', () 
       gate: { kind: 'majority-beats-hold', windowLever: 'walk_forward_window', minWindows: 3 },
     }
     const runs = [
-      cell('a1', 'w1', 50), cell('a2', 'w1', 40), // w1 clears (and best cell is huge)
-      cell('b1', 'w2', -5), cell('b2', 'w2', -5),
-      cell('c1', 'w3', -5), cell('c2', 'w3', -5),
+      cell('a1', 'w1', 50),
+      cell('a2', 'w1', 40), // w1 clears (and best cell is huge)
+      cell('b1', 'w2', -5),
+      cell('b2', 'w2', -5),
+      cell('c1', 'w3', -5),
+      cell('c2', 'w3', -5),
     ]
     const out = H.evaluateHypothesis(h, runs, {
       direction: 'max',

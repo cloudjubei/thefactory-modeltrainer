@@ -13,10 +13,21 @@ import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
 import { describe, it, expect } from 'vitest'
 
-import { assembleChampionVerdict, incumbentSplitHoldout, proxyAlignment, verifyImprovement } from './diagnosticsUtils'
+import {
+  assembleChampionVerdict,
+  incumbentSplitHoldout,
+  proxyAlignment,
+  verifyImprovement,
+} from './diagnosticsUtils'
 import { bootstrapDiff } from './xaiUtils'
 import { validateTrainingRunSummary, validateRunProvenance } from './modelTrainerUtils'
-import type { AnalysisRun, AnalysisCriterion, TrainerDiagnostics, TrainerGate, GateOp } from './modelTrainerTypes'
+import type {
+  AnalysisRun,
+  AnalysisCriterion,
+  TrainerDiagnostics,
+  TrainerGate,
+  GateOp,
+} from './modelTrainerTypes'
 
 // viewer/hypothesis.js is the no-build browser module for the single-context verdict; load it as CommonJS
 // the same way src/hypothesisViewer.test.ts does, so the ACTUAL viewer logic is probed here.
@@ -57,7 +68,10 @@ const gate = (metric: string, op: GateOp, value: number): TrainerGate => ({ metr
 
 describe('§C.0 — a board-game cohort runs & collapses to the objective with ZERO engine config', () => {
   it('no diagnostics ⇒ champion verdict inapplicable (steady undefined) and split holdout unverifiable', () => {
-    const runs = [...cohort({ setup: 'A' }, [0.6, 0.58, 0.62]), ...cohort({ setup: 'B' }, [0.5, 0.52, 0.49])]
+    const runs = [
+      ...cohort({ setup: 'A' }, [0.6, 0.58, 0.62]),
+      ...cohort({ setup: 'B' }, [0.5, 0.52, 0.49]),
+    ]
     const v = assembleChampionVerdict(undefined, { runs, splitLevers: [], criterion: WIN })
     expect(v.steady).toBeUndefined()
     expect(v.championGates).toEqual([])
@@ -112,7 +126,11 @@ describe('§C.2/S2 — best-of-N gate: a pure-noise best-of-30 champion is defla
   }
 
   it('FIXED: DSR stays inapplicable to win_rate, but the generic best-of-N gate deflates the noise champion', () => {
-    const v = assembleChampionVerdict(diagnostics, { runs: noiseCohort(), splitLevers: [], criterion: WIN })
+    const v = assembleChampionVerdict(diagnostics, {
+      runs: noiseCohort(),
+      splitLevers: [],
+      criterion: WIN,
+    })
     expect(v.championGates.find((g) => g.kind === 'dsr')?.applicable).toBe(false)
     expect(v.championGates.find((g) => g.kind === 'best-of-n')?.pass).toBe(false)
     expect(v.steady).toBe(false)
@@ -135,9 +153,14 @@ describe('§C.9/S3 — a provenance detector + a generic search-space floor (was
     expect(bare.objective).toBe(0.62)
     const flag = validateRunProvenance(bare)
     expect(flag.complete).toBe(false)
-    expect(flag.missing).toEqual(expect.arrayContaining(['gitCommit', 'configHash', 'seed', 'dataVersion']))
+    expect(flag.missing).toEqual(
+      expect.arrayContaining(['gitCommit', 'configHash', 'seed', 'dataVersion']),
+    )
 
-    const full = validateRunProvenance({ seed: 1, provenance: { gitCommit: 'a', configHash: 'b', dataVersion: 'v1' } })
+    const full = validateRunProvenance({
+      seed: 1,
+      provenance: { gitCommit: 'a', configHash: 'b', dataVersion: 'v1' },
+    })
     expect(full).toEqual({ complete: true, missing: [] })
   })
 
@@ -158,7 +181,12 @@ describe('§C.9/S3 — a provenance detector + a generic search-space floor (was
 describe('§C.1/S4 — pre-registration: a declarable seed-quorum + a fail-closed-with-reason benchmark', () => {
   const bgRun = (winRate: number, seed: number, extra: Record<string, number> = {}) => ({
     key: `r${seed}`,
-    summary: { config: { setup: 'A', seed }, objective: winRate, status: 'completed', metrics: { win_rate: winRate, ...extra } },
+    summary: {
+      config: { setup: 'A', seed },
+      objective: winRate,
+      status: 'completed',
+      metrics: { win_rate: winRate, ...extra },
+    },
   })
   const bench = { metric: 'win_rate', threshold: 0.5, direction: 'max', quorum: 0.5 }
 
@@ -209,16 +237,25 @@ describe('§C.3/S6 — a locked held-out TEST role: selection excludes the test,
   const mk = (setup: string, opp: string, v: number, seed = 0) =>
     run({ setup, opponent: opp }, { win_rate: v }, { seed })
   const runs = [
-    mk('X', 'rungA', 0.5), mk('X', 'rungB', 0.5), mk('X', 'LOCKED', 0.9), // X wins ONLY on the locked test
-    mk('Y', 'rungA', 0.55), mk('Y', 'rungB', 0.55), mk('Y', 'LOCKED', 0.5),
+    mk('X', 'rungA', 0.5),
+    mk('X', 'rungB', 0.5),
+    mk('X', 'LOCKED', 0.9), // X wins ONLY on the locked test
+    mk('Y', 'rungA', 0.55),
+    mk('Y', 'rungB', 0.55),
+    mk('Y', 'LOCKED', 0.5),
   ]
 
   it('BITE (no test declared): the incumbent is still crowned USING the LOCKED split', () => {
-    expect(incumbentSplitHoldout(runs, ['opponent'], WIN, { baseline: 0.4 }).incumbentConfig?.setup).toBe('X')
+    expect(
+      incumbentSplitHoldout(runs, ['opponent'], WIN, { baseline: 0.4 }).incumbentConfig?.setup,
+    ).toBe('X')
   })
 
   it('FIXED: declaring LOCKED as the test excludes it from selection ⇒ Y is crowned, and the test is accounted', () => {
-    const h = incumbentSplitHoldout(runs, ['opponent'], WIN, { baseline: 0.4, testValues: ['LOCKED'] })
+    const h = incumbentSplitHoldout(runs, ['opponent'], WIN, {
+      baseline: 0.4,
+      testValues: ['LOCKED'],
+    })
     expect(h.incumbentConfig?.setup).toBe('Y') // selection no longer reads the locked test
     expect(h.testSplits).toEqual(['opponent=LOCKED'])
     expect(h.testConsumed).toBe(1) // the test is evaluated ONCE, post-selection
@@ -232,10 +269,14 @@ describe('§C.8/S7 — proxy selection-regret: a high correlation can still hide
 
   it('FIXED: proxyAlignment reports a POSITIVE selection regret even though the reward correlation is high', () => {
     const runs = [
-      mk('a', 1.0, 0.5, 0), mk('a', 1.0, 0.5, 1),
-      mk('b', 2.0, 0.6, 0), mk('b', 2.0, 0.6, 1),
-      mk('c', 3.0, 0.7, 0), mk('c', 3.0, 0.7, 1), // truth-best win_rate 0.70
-      mk('d', 5.0, 0.62, 0), mk('d', 5.0, 0.62, 1), // reward-best, but win_rate 0.62 < 0.70
+      mk('a', 1.0, 0.5, 0),
+      mk('a', 1.0, 0.5, 1),
+      mk('b', 2.0, 0.6, 0),
+      mk('b', 2.0, 0.6, 1),
+      mk('c', 3.0, 0.7, 0),
+      mk('c', 3.0, 0.7, 1), // truth-best win_rate 0.70
+      mk('d', 5.0, 0.62, 0),
+      mk('d', 5.0, 0.62, 1), // reward-best, but win_rate 0.62 < 0.70
     ]
     const pa = proxyAlignment(runs, 'win_rate')
     expect(pa.pearson).not.toBeNull()
@@ -247,7 +288,8 @@ describe('§C.8/S7 — proxy selection-regret: a high correlation can still hide
 describe('§C.6/S8 — first-class adversarial verify: a naive best-of-12 single-seed fluke is flagged UNVERIFIABLE', () => {
   it('FIXED: verifyImprovement flags the naive fluke unverifiable — no lens can run', () => {
     const sweep: AnalysisRun[] = []
-    for (let i = 0; i < 12; i++) sweep.push(...cohort({ setup: `c${i}` }, [0.5 + (i === 7 ? 0.2 : 0)])) // c7 flukes, 1 seed
+    for (let i = 0; i < 12; i++)
+      sweep.push(...cohort({ setup: `c${i}` }, [0.5 + (i === 7 ? 0.2 : 0)])) // c7 flukes, 1 seed
     const v = verifyImprovement(sweep, WIN, { baseline: 0.5 })
     expect(v.unverifiable).toBe(true)
     expect(v.verified).toBe(false)
@@ -257,14 +299,24 @@ describe('§C.6/S8 — first-class adversarial verify: a naive best-of-12 single
   it('FIXED: a well-seeded, split-robust champion verifies across the applicable lenses', () => {
     const good: AnalysisRun[] = []
     for (const board of ['A', 'B']) {
-      for (let s = 0; s < 5; s++) good.push(run({ setup: 'win', board }, { win_rate: 0.8 + (s % 2 ? 0.01 : -0.01) }, { seed: s }))
-      for (let s = 0; s < 5; s++) good.push(run({ setup: 'weak', board }, { win_rate: 0.55 }, { seed: s }))
+      for (let s = 0; s < 5; s++)
+        good.push(
+          run({ setup: 'win', board }, { win_rate: 0.8 + (s % 2 ? 0.01 : -0.01) }, { seed: s }),
+        )
+      for (let s = 0; s < 5; s++)
+        good.push(run({ setup: 'weak', board }, { win_rate: 0.55 }, { seed: s }))
     }
     const v = verifyImprovement(good, WIN, { baseline: 0.5, splitLevers: ['board'] })
     expect(v.verified).toBe(true)
     expect(v.unverifiable).toBe(false)
-    expect(v.checks.find((c) => c.name === 'seed-stability')).toMatchObject({ applicable: true, pass: true })
-    expect(v.checks.find((c) => c.name === 'split-robust')).toMatchObject({ applicable: true, pass: true })
+    expect(v.checks.find((c) => c.name === 'seed-stability')).toMatchObject({
+      applicable: true,
+      pass: true,
+    })
+    expect(v.checks.find((c) => c.name === 'split-robust')).toMatchObject({
+      applicable: true,
+      pass: true,
+    })
   })
 })
 

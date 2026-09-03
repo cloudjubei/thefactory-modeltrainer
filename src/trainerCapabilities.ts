@@ -48,7 +48,14 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     label: 'Train champion (autopilot)',
     description:
       'Start the champion-training autopilot for a LEARNED core (e.g. alphazero): keep training WARM-STARTED generations against the league and PROMOTING the stronger net until strength plateaus / a target win-rate vs the strong-mcts yardstick is hit / the generation budget is spent. Each generation runs as a standard `train` experiment (so the RL training shows under Experiments). This is the compounding "find the best model" loop — distinct from explore (config-space search). `hyperparams` carries the per-generation alphazero levers (e.g. {az_sims, az_iterations, az_selfplay_games, az_epochs}).',
-    optionalParams: ['maxGenerations', 'targetStrength', 'patience', 'opponent', 'evalGames', 'hyperparams'],
+    optionalParams: [
+      'maxGenerations',
+      'targetStrength',
+      'patience',
+      'opponent',
+      'evalGames',
+      'hyperparams',
+    ],
   },
   {
     activityType: 'autopilot',
@@ -80,7 +87,16 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
     label: 'Score a model (prove-it-good)',
     description:
       'Run the PROVE-IT-GOOD scorecard for ONE model: how close to optimal is it, and is it PROVEN so? Composes the measurement primitives into an honest verdict — the optimality LADDER (deepest oracle it converts the first-player win against), the SIM-SCALING curve (strength-per-compute), mid-game DISTANCE-TO-OPTIMAL vs the exact solver, and P1 conversion/not-lost (the draw-vs-loss diagnostic). Only the EXACT-oracle `verify_solved` gate (`exact: true`, slow) may certify "solved"; a depth-proxy win is "near-optimal" (unproven) at most. Writes a `{recordType}-process-eval` record. `runKey` scores a completed run (its checkpoint); `model` scores an explicit spec.',
-    optionalParams: ['runKey', 'model', 'games', 'ladderDepths', 'simsCurve', 'referenceDepth', 'corpus', 'exact'],
+    optionalParams: [
+      'runKey',
+      'model',
+      'games',
+      'ladderDepths',
+      'simsCurve',
+      'referenceDepth',
+      'corpus',
+      'exact',
+    ],
   },
   {
     activityType: 'side-experiment',
@@ -101,7 +117,8 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'evaluate',
     label: 'Evaluate checkpoints',
-    description: 'Re-test saved checkpoints (no training) for the given runs, writing fresh eval metrics.',
+    description:
+      'Re-test saved checkpoints (no training) for the given runs, writing fresh eval metrics.',
     requiredParams: ['runKeys'],
     optionalParams: ['concurrency'],
   },
@@ -137,7 +154,8 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'run-xai-analyze',
     label: 'Analyse a run (xAI)',
-    description: 'Compute + cache the deterministic xAI analysis of one run (attribution, latent probe, rank).',
+    description:
+      'Compute + cache the deterministic xAI analysis of one run (attribution, latent probe, rank).',
     requiredParams: ['runKey'],
     optionalParams: ['siblingKey', 'criterionKey', 'criterionDir'],
   },
@@ -175,7 +193,8 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'research-training-papers',
     label: 'Research papers',
-    description: 'Open-ended web research for relevant papers, drafting paper records for the ones that survive.',
+    description:
+      'Open-ended web research for relevant papers, drafting paper records for the ones that survive.',
     optionalParams: ['count', 'notes', 'researchBudget'],
   },
   {
@@ -195,7 +214,8 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'analyze-paper-models',
     label: 'Find paper models',
-    description: 'Identify the model architectures a paper relies on and link them into the model catalog.',
+    description:
+      'Identify the model architectures a paper relies on and link them into the model catalog.',
     requiredParams: ['paperId'],
     requiresApi: true,
   },
@@ -208,7 +228,8 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'consolidate-models',
     label: 'Consolidate models',
-    description: 'Propose merges of duplicate/near-duplicate model catalog entries (proposal only).',
+    description:
+      'Propose merges of duplicate/near-duplicate model catalog entries (proposal only).',
     requiresApi: true,
   },
   {
@@ -238,14 +259,16 @@ export const TRAINER_LAUNCHABLE_ACTIVITIES: TrainerLaunchableActivity[] = [
   {
     activityType: 'discover-data',
     label: 'Discover data sources',
-    description: 'Research candidate data sources for a problem statement, drafting datasource proposals.',
+    description:
+      'Research candidate data sources for a problem statement, drafting datasource proposals.',
     requiredParams: ['problemStatement'],
     optionalParams: ['goal', 'limit', 'researchBudget'],
   },
   {
     activityType: 'approve-data-source',
     label: 'Approve a data source',
-    description: 'Approve a proposed data source (optionally kicking off a mine of its symbols/class).',
+    description:
+      'Approve a proposed data source (optionally kicking off a mine of its symbols/class).',
     requiredParams: ['sourceId'],
     optionalParams: ['symbols', 'class'],
   },
@@ -276,7 +299,15 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
     description:
       'A tested claim about which lever settings help. To override a verdict, set BOTH status (proven/disproved/untested) and verdictSource="manual". Create a new one with a `spec` ({fixed?, sweep?, seeds?, environments?, datasets?, compare?}) using the manifest’s declared lever names.',
     editable: true,
-    editableFields: ['title', 'claim', 'rationale', 'verdictNote', 'dismissed', 'status', 'verdictSource'],
+    editableFields: [
+      'title',
+      'claim',
+      'rationale',
+      'verdictNote',
+      'dismissed',
+      'status',
+      'verdictSource',
+    ],
     creatable: true,
     creatableFields: ['title', 'claim', 'rationale', 'spec', 'comparison'],
     createDefaults: { status: 'untested', verdictSource: 'auto', source: 'llm' },
@@ -301,7 +332,17 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
     label: 'Paper',
     description: 'A research paper and its testable hypotheses.',
     editable: true,
-    editableFields: ['title', 'claim', 'approach', 'verdictNote', 'url', 'authors', 'dismissed', 'year', 'tags'],
+    editableFields: [
+      'title',
+      'claim',
+      'approach',
+      'verdictNote',
+      'url',
+      'authors',
+      'dismissed',
+      'year',
+      'tags',
+    ],
     creatable: true,
     creatableFields: ['title', 'claim', 'approach', 'url', 'authors', 'year', 'tags'],
     createDefaults: { status: 'untested', source: 'research' },
@@ -412,7 +453,8 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
   {
     suffix: '-favorites',
     label: 'Favorite runs',
-    description: 'Singleton {keys:[runId,…]} of favorited runs (quick-pick in xAI). Key "favorites".',
+    description:
+      'Singleton {keys:[runId,…]} of favorited runs (quick-pick in xAI). Key "favorites".',
     editable: true,
     editableFields: ['keys'],
   },
@@ -449,16 +491,37 @@ export const TRAINER_CAPABILITY_RECORD_TYPES: TrainerCapabilityRecordType[] = [
 export const TRAINER_EXEMPT_RECORDS: TrainerExemptRecord[] = [
   { suffix: '-dismissed-failure', reason: 'UI state — a run dismissed from the Activity list.' },
   { suffix: '-model-stats', reason: 'Backend-derived aggregate — recomputed from the runs.' },
-  { suffix: '-exploration', reason: 'Autopilot-managed search state — owned by the explore activity.' },
-  { suffix: '-evaluation', reason: 'Derived by the evaluate activity; cascade-deleted with the run.' },
-  { suffix: '-settest', reason: 'Derived by the cross-test activity; cascade-deleted with the run.' },
+  {
+    suffix: '-exploration',
+    reason: 'Autopilot-managed search state — owned by the explore activity.',
+  },
+  {
+    suffix: '-evaluation',
+    reason: 'Derived by the evaluate activity; cascade-deleted with the run.',
+  },
+  {
+    suffix: '-settest',
+    reason: 'Derived by the cross-test activity; cascade-deleted with the run.',
+  },
   { suffix: '-verdict', reason: 'Derived by the judge activity; cascade-deleted with the run.' },
-  { suffix: '-process-eval', reason: 'Derived by the process-eval activity (scorecard); cascade-deleted with the run.' },
-  { suffix: '-xai-narrative', reason: 'Derived by the xai-narrate activity; cascade-deleted with the run.' },
-  { fixedType: 'trainer-seen', reason: 'Per-user UI state — which runs have been seen (unseen badge).' },
+  {
+    suffix: '-process-eval',
+    reason: 'Derived by the process-eval activity (scorecard); cascade-deleted with the run.',
+  },
+  {
+    suffix: '-xai-narrative',
+    reason: 'Derived by the xai-narrate activity; cascade-deleted with the run.',
+  },
+  {
+    fixedType: 'trainer-seen',
+    reason: 'Per-user UI state — which runs have been seen (unseen badge).',
+  },
   { fixedType: 'trainer-queue', reason: 'Infra — host activity-queue markers.' },
   { fixedType: 'trainer-queue-order', reason: 'UI state — the queued-activity drain order.' },
-  { fixedType: 'trainer-project', reason: 'Hub registration — a home-shell action, not a within-project edit.' },
+  {
+    fixedType: 'trainer-project',
+    reason: 'Hub registration — a home-shell action, not a within-project edit.',
+  },
 ]
 
 /**
@@ -486,20 +549,25 @@ export const TRAINER_RUN_DELETE_CASCADE_SUFFIXES: readonly string[] = [
 ]
 
 /** The absolute launchable activity types, derived so the tool schema + audit never drift from the catalog. */
-export const TRAINER_LAUNCHABLE_ACTIVITY_TYPES: readonly string[] = TRAINER_LAUNCHABLE_ACTIVITIES.map(
-  (a) => a.activityType,
-)
+export const TRAINER_LAUNCHABLE_ACTIVITY_TYPES: readonly string[] =
+  TRAINER_LAUNCHABLE_ACTIVITIES.map((a) => a.activityType)
 
 /**
  * Build the data-capability manifest a trainer project reports for `recordType`, resolving every suffix to
  * an absolute type. `activities` is empty on purpose — trainer launches use the bespoke startTrainerActivity
  * tool, not the generic startProjectActivity path (see the module header).
  */
-export function buildTrainerDataCapabilityManifest(recordType: string): TrainerDataCapabilityManifest {
+export function buildTrainerDataCapabilityManifest(
+  recordType: string,
+): TrainerDataCapabilityManifest {
   return {
     types: TRAINER_CAPABILITY_RECORD_TYPES.map((t) => {
       const type = t.fixedType !== undefined ? t.fixedType : `${recordType}${t.suffix ?? ''}`
-      const out: TrainerDataCapabilityManifest['types'][number] = { type, label: t.label, description: t.description }
+      const out: TrainerDataCapabilityManifest['types'][number] = {
+        type,
+        label: t.label,
+        description: t.description,
+      }
       if (t.editable) out.editable = true
       if (t.editableFields) out.editableFields = t.editableFields
       if (t.creatable) out.creatable = true

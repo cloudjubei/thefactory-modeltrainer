@@ -20,14 +20,19 @@ const CT: any = mod.exports
 const cell = (value: string, returnVsHold: number | undefined, status = 'completed') => ({
   value,
   status,
-  ...(returnVsHold !== undefined ? { returnVsHold, metrics: { return_vs_hold_pct: returnVsHold } } : {}),
+  ...(returnVsHold !== undefined
+    ? { returnVsHold, metrics: { return_vs_hold_pct: returnVsHold } }
+    : {}),
   objective: 1,
   evaluatedAt: 'T',
 })
 
 const record = (assetCells: any[], windowCells: any[] = []) => ({
   runKey: 'r1',
-  trainedValues: { asset: 'BTCUSDT', ...(windowCells.length ? { walk_forward_window: '2024' } : {}) },
+  trainedValues: {
+    asset: 'BTCUSDT',
+    ...(windowCells.length ? { walk_forward_window: '2024' } : {}),
+  },
   levers: {
     asset: Object.fromEntries(assetCells.map((c) => [c.value, c])),
     ...(windowCells.length
@@ -44,8 +49,12 @@ describe('crossTestVerdict', () => {
   })
 
   it('weak when none beat hold, mixed otherwise', () => {
-    expect(CT.crossTestVerdict(record([cell('ETHUSDT', -3), cell('SOLUSDT', -1)])).state).toBe('weak')
-    expect(CT.crossTestVerdict(record([cell('ETHUSDT', 3), cell('SOLUSDT', -1)])).state).toBe('mixed')
+    expect(CT.crossTestVerdict(record([cell('ETHUSDT', -3), cell('SOLUSDT', -1)])).state).toBe(
+      'weak',
+    )
+    expect(CT.crossTestVerdict(record([cell('ETHUSDT', 3), cell('SOLUSDT', -1)])).state).toBe(
+      'mixed',
+    )
   })
 
   it('none when there are no completed cells (failed cells count separately)', () => {
@@ -65,7 +74,9 @@ describe('crossTestVerdict', () => {
 
 describe('crossTestRows', () => {
   it('flattens the per-lever maps into ordered display rows', () => {
-    const rows = CT.crossTestRows(record([cell('ETHUSDT', 3), cell('SOLUSDT', -1)], [cell('oos-2024', 1)]))
+    const rows = CT.crossTestRows(
+      record([cell('ETHUSDT', 3), cell('SOLUSDT', -1)], [cell('oos-2024', 1)]),
+    )
     expect(rows.map((r: any) => [r.lever, r.value])).toEqual([
       ['asset', 'ETHUSDT'],
       ['asset', 'SOLUSDT'],
@@ -82,7 +93,11 @@ describe('crossTestRows', () => {
 describe('missingAssets', () => {
   const manifest = {
     levers: {
-      asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'], scope: 'dataset' },
+      asset: {
+        type: 'choice',
+        choices: ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'XRPUSDT'],
+        scope: 'dataset',
+      },
     },
   }
 
@@ -124,7 +139,9 @@ describe('verdictChip', () => {
       label: '3/3 beat hold',
       cls: 'is-robust',
     })
-    expect(CT.verdictChip({ state: 'mixed', positive: 1, tested: 3, failed: 0 }).cls).toBe('is-mixed')
+    expect(CT.verdictChip({ state: 'mixed', positive: 1, tested: 3, failed: 0 }).cls).toBe(
+      'is-mixed',
+    )
     expect(CT.verdictChip({ state: 'weak', positive: 0, tested: 2, failed: 0 }).cls).toBe('is-weak')
     expect(CT.verdictChip({ state: 'none', positive: 0, tested: 0, failed: 2 })).toEqual({
       label: '2 failed',

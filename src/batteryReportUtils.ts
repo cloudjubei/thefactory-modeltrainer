@@ -12,8 +12,9 @@ import type {
 } from './modelTrainerTypes.js'
 
 const escapeHtml = (value: unknown): string =>
-  String(value ?? '').replace(/[&<>"']/g, (ch) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string,
+  String(value ?? '').replace(
+    /[&<>"']/g,
+    (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch] as string,
   )
 
 /** The number of backtested cells a spec's sweep declares (product of the swept-lever lengths; 1 for none). */
@@ -29,7 +30,10 @@ const gateLabel = (gate?: BatteryHypothesis['gate']): string =>
   !gate?.kind ? '' : gate.metric ? `${gate.kind}(${gate.metric})` : gate.kind
 
 /** Fold trail records into families (signal classes) with roll-up cell counts + a status tally. */
-export function buildBattery(hypotheses: BatteryHypothesis[], opts: BatteryBuildOptions = {}): ExperimentBattery {
+export function buildBattery(
+  hypotheses: BatteryHypothesis[],
+  opts: BatteryBuildOptions = {},
+): ExperimentBattery {
   const familyOf = opts.familyOf ?? ((t: string) => t)
   const byFamily = new Map<string, ExperimentBatteryFamily>()
   for (const h of hypotheses) {
@@ -52,10 +56,15 @@ export function buildBattery(hypotheses: BatteryHypothesis[], opts: BatteryBuild
   let families = [...byFamily.values()]
   if (opts.familyOrder) {
     const order = new Map(opts.familyOrder.map((f, i) => [f, i]))
-    families = families.sort((a, b) => (order.get(a.family) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.family) ?? Number.MAX_SAFE_INTEGER))
+    families = families.sort(
+      (a, b) =>
+        (order.get(a.family) ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(b.family) ?? Number.MAX_SAFE_INTEGER),
+    )
   }
   const byStatus: Record<string, number> = {}
-  for (const f of families) for (const p of f.probes) byStatus[p.status] = (byStatus[p.status] ?? 0) + 1
+  for (const f of families)
+    for (const p of f.probes) byStatus[p.status] = (byStatus[p.status] ?? 0) + 1
   return {
     families,
     stats: {
@@ -70,7 +79,13 @@ export function buildBattery(hypotheses: BatteryHypothesis[], opts: BatteryBuild
 // A completed null (disproved) is the desired result for a no-edge battery; inconclusive is an open thread; any
 // other status (a surviving/passing hypothesis) is the one to highlight.
 const statusClass = (status: string): string =>
-  status === 'disproved' ? 'null' : status === 'inconclusive' ? 'open' : status === 'untested' ? 'pending' : 'surviving'
+  status === 'disproved'
+    ? 'null'
+    : status === 'inconclusive'
+      ? 'open'
+      : status === 'untested'
+        ? 'pending'
+        : 'surviving'
 
 const STYLE = `
 :root{--bg:#ffffff;--fg:#1b1f24;--muted:#5b6672;--line:#e3e7ec;--card:#f6f8fa;--accent:#2b6cb0;

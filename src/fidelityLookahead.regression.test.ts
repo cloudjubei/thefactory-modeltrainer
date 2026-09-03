@@ -47,7 +47,12 @@ const FIDELITY_SET_IDS = [
   '1h+1d+1w',
   '1d+1w',
 ] as const
-const FIDELITY_SET_INPUTS: Array<string | undefined> = [...FIDELITY_SET_IDS, 'auto', undefined, 'bogus']
+const FIDELITY_SET_INPUTS: Array<string | undefined> = [
+  ...FIDELITY_SET_IDS,
+  'auto',
+  undefined,
+  'bogus',
+]
 const TIMEFRAMES = ['1h', '1d', '1m'] as const
 
 /**
@@ -56,7 +61,11 @@ const TIMEFRAMES = ['1h', '1d', '1m'] as const
  * through `_LAYER_SETS`; anything unknown observes nothing (empty).
  */
 function resolveObservedLayers(timeframe: string, fidelitySet: string | undefined): string[] {
-  const isAuto = fidelitySet === undefined || fidelitySet === null || fidelitySet === '' || fidelitySet === 'auto'
+  const isAuto =
+    fidelitySet === undefined ||
+    fidelitySet === null ||
+    fidelitySet === '' ||
+    fidelitySet === 'auto'
   if (isAuto) {
     if (timeframe === '1h') return ['1h', '1d']
     if (timeframe === '1m') return ['1m', '1h']
@@ -99,7 +108,8 @@ describe('fidelity look-ahead oracle is anchored to the ground-truth audit', () 
     const oracleAffectedKeys = new Set<string>()
     for (const timeframe of TIMEFRAMES) {
       for (const fidelitySet of FIDELITY_SET_IDS) {
-        if (oracleAffected(timeframe, fidelitySet)) oracleAffectedKeys.add(`${timeframe}@${fidelitySet}`)
+        if (oracleAffected(timeframe, fidelitySet))
+          oracleAffectedKeys.add(`${timeframe}@${fidelitySet}`)
       }
     }
     expect([...oracleAffectedKeys].sort()).toEqual([...EXPECTED_AFFECTED].sort())
@@ -150,7 +160,9 @@ describe('isRunAffectedByFidelityLookahead — cross-consistency with resolve_fi
       it(`timeframe=${timeframe} fidelity_set=${label} matches [${layers.join(',')}]`, () => {
         const config: Record<string, unknown> = { timeframe }
         if (fidelitySet !== undefined) config.fidelity_set = fidelitySet
-        expect(isRunAffectedByFidelityLookahead(config)).toBe(oracleAffected(timeframe, fidelitySet))
+        expect(isRunAffectedByFidelityLookahead(config)).toBe(
+          oracleAffected(timeframe, fidelitySet),
+        )
       })
     }
   }
@@ -229,7 +241,9 @@ describe('isRunAffectedByFidelityLookahead — the two ACTUALLY audited runs', (
 
 describe('isSpecAffectedByFidelityLookahead — pending-spec sweep coverage', () => {
   it('flags a fixed-only spec whose base is coarse-only (1h@1d)', () => {
-    expect(isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1d' } })).toBe(true)
+    expect(
+      isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1d' } }),
+    ).toBe(true)
   })
 
   it('does not flag a fixed-only spec whose base observes the run cadence (1h@1h+1d)', () => {
@@ -293,7 +307,9 @@ describe('fidelity look-ahead predicates — guards (never invalidate the unknow
 
   it('isSpecAffectedByFidelityLookahead is false for null/undefined/empty', () => {
     expect(isSpecAffectedByFidelityLookahead(undefined)).toBe(false)
-    expect(isSpecAffectedByFidelityLookahead(null as unknown as Record<string, unknown>)).toBe(false)
+    expect(isSpecAffectedByFidelityLookahead(null as unknown as Record<string, unknown>)).toBe(
+      false,
+    )
     expect(isSpecAffectedByFidelityLookahead({})).toBe(false)
   })
 })

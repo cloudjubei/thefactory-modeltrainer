@@ -183,7 +183,10 @@ export function aggregateExperimentCells(
     n === 0
       ? `no cell reports ${metric}`
       : `${k}/${n} cells clear ${metric}${benchDir === 'min' ? '<' : '>'}${threshold}`
-  return { aggregate, verdict: { kind, passed, source: 'auto', rationale, assessedAt: opts.assessedAt } }
+  return {
+    aggregate,
+    verdict: { kind, passed, source: 'auto', rationale, assessedAt: opts.assessedAt },
+  }
 }
 
 /** Read the criterion's numeric value off a run; `undefined` when absent/non-finite. */
@@ -1043,7 +1046,8 @@ export function interactionGrid(
         let whatIf: Record<string, unknown> = { ...c, [leverA]: av, [leverB]: bv }
         if (appliesWhen) {
           whatIf = normalizeConditionalLevers(whatIf, appliesWhen)
-          if (String(whatIf[leverA]) !== String(av) || String(whatIf[leverB]) !== String(bv)) continue
+          if (String(whatIf[leverA]) !== String(av) || String(whatIf[leverB]) !== String(bv))
+            continue
         }
         preds.push(predictConfig(surrogate, whatIf))
       }
@@ -1211,8 +1215,13 @@ function pickKeys(config: Record<string, unknown>, keys: string[]): Record<strin
 export const CONDITIONAL_NA = 'n/a'
 
 /** A conditional lever applies to a config only when every one of its `appliesWhen` conditions is met. */
-export function leverApplies(config: Record<string, unknown>, conds: Record<string, unknown[]>): boolean {
-  return Object.entries(conds).every(([k, raw]) => (Array.isArray(raw) ? raw : [raw]).map(String).includes(String(config[k])))
+export function leverApplies(
+  config: Record<string, unknown>,
+  conds: Record<string, unknown[]>,
+): boolean {
+  return Object.entries(conds).every(([k, raw]) =>
+    (Array.isArray(raw) ? raw : [raw]).map(String).includes(String(config[k])),
+  )
 }
 
 /**
@@ -1288,7 +1297,12 @@ function buildConvergence(runs: AnalysisRun[], criterion: AnalysisCriterion): Co
   const out: ConvergencePoint[] = []
   let best: number | null = null
   dated.forEach((x, i) => {
-    best = best === null ? x.v : criterion.direction === 'min' ? Math.min(best, x.v) : Math.max(best, x.v)
+    best =
+      best === null
+        ? x.v
+        : criterion.direction === 'min'
+          ? Math.min(best, x.v)
+          : Math.max(best, x.v)
     out.push({ index: i + 1, best, at: x.at })
   })
   return out
@@ -1380,7 +1394,8 @@ export function normalizeByEnvironment(
     const zBySetup = new Map<string, number>()
     for (const s of setups) {
       const v = criterionValueOf(s, criterion)
-      if (v !== undefined) zBySetup.set(setupSignatureOf(s), scale > 0 ? (orient * (v - center)) / scale : 0)
+      if (v !== undefined)
+        zBySetup.set(setupSignatureOf(s), scale > 0 ? (orient * (v - center)) / scale : 0)
     }
     for (const r of group) {
       const z = zBySetup.get(setupSignatureOf(r))
@@ -1410,7 +1425,10 @@ export function computeConfigSpaceAnalysis(
 ): ConfigSpaceAnalysis | null {
   const ignore = opts?.ignoreLevers ?? []
   const valid0base = ignore.length
-    ? validRunsFor(runs, criterion).map((r) => ({ ...r, config: configWithout(r.config, ...ignore) }))
+    ? validRunsFor(runs, criterion).map((r) => ({
+        ...r,
+        config: configWithout(r.config, ...ignore),
+      }))
     : validRunsFor(runs, criterion)
   if (!valid0base.length) return null
   // Pin each conditional lever to `n/a` wherever it doesn't apply, so it can't pollute the analysis (e.g.

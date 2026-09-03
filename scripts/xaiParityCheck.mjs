@@ -136,9 +136,13 @@ for (const crit of [MAX, MIN]) {
     let ck = 0
     for (const fh of [1, 5])
       for (const seed of [0, 1, 2])
-        condRuns.push(run('c' + ck++, { model_name: 'sup', forward_horizon: fh }, 10 + fh + seed, { seed }))
+        condRuns.push(
+          run('c' + ck++, { model_name: 'sup', forward_horizon: fh }, 10 + fh + seed, { seed }),
+        )
     for (const seed of [0, 1, 2])
-      condRuns.push(run('c' + ck++, { model_name: 'rl', forward_horizon: 'n/a' }, 50 + seed, { seed }))
+      condRuns.push(
+        run('c' + ck++, { model_name: 'rl', forward_horizon: 'n/a' }, 50 + seed, { seed }),
+      )
     const aw = { forward_horizon: { model_name: ['sup'] } }
     const cTs = ts.fitConfigSurrogate(condRuns, crit)
     const cJs = mirror.fitConfigSurrogate(condRuns, crit)

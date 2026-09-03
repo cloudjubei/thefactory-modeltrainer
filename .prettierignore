@@ -1,0 +1,18 @@
+node_modules
+dist
+build
+out
+coverage
+.husky
+.github
+.next
+.cache
+.turbo
+.vite
+docs
+**/generated
+# The viewer app's source is consumed as TEXT by the parity tests — `trainerCapabilities.
+# parity.test.ts` regex-extracts constants and launch types straight out of `viewer/app.js`,
+# and the *Viewer tests compile it as a module. Reformatting rewrites what those extractions
+# match, so the app source stays out of prettier's scope.
+viewer

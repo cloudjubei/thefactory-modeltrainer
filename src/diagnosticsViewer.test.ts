@@ -56,31 +56,82 @@ const WINE_MANIFEST = {
 }
 
 function rec(config: any, objective: number, metrics: any = {}, extra: any = {}) {
-  return { key: JSON.stringify(config) + ':' + (extra.status || 'c'), config, objective, metrics, seed: config.seed, status: 'completed', ...extra }
+  return {
+    key: JSON.stringify(config) + ':' + (extra.status || 'c'),
+    config,
+    objective,
+    metrics,
+    seed: config.seed,
+    status: 'completed',
+    ...extra,
+  }
 }
 
 // a converged CartPole cohort: a clear winner cluster at the 500 ceiling, seeded; plus weaker setups.
 function cartpoleConverged() {
   const runs: any[] = []
-  for (const s of [0, 1, 2, 3, 4]) runs.push(rec({ model_name: 'ppo', learning_rate: 0.003, seed: s }, 499 + (s % 2), { eval_return_mean: 499 + (s % 2) }))
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'a2c', learning_rate: 0.001, seed: s }, 120 + s, { eval_return_mean: 120 + s }))
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'ppo', learning_rate: 0.0001, seed: s }, 60 + s, { eval_return_mean: 60 + s }))
+  for (const s of [0, 1, 2, 3, 4])
+    runs.push(
+      rec({ model_name: 'ppo', learning_rate: 0.003, seed: s }, 499 + (s % 2), {
+        eval_return_mean: 499 + (s % 2),
+      }),
+    )
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'a2c', learning_rate: 0.001, seed: s }, 120 + s, {
+        eval_return_mean: 120 + s,
+      }),
+    )
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'ppo', learning_rate: 0.0001, seed: s }, 60 + s, {
+        eval_return_mean: 60 + s,
+      }),
+    )
   return runs
 }
 
 // a single-split-luck BlackSwan cohort: setup {x,lr:0.5} beats hold in window A, loses in window B.
 function blackswanOverfit() {
   const runs: any[] = []
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'x', window: 'A', lr: 0.5, seed: s }, 80 + s, { return_vs_hold_pct: 60 + s, traded_return: 80 + s }))
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'x', window: 'B', lr: 0.5, seed: s }, -40 + s, { return_vs_hold_pct: -50 + s, traded_return: -40 + s }))
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'y', window: 'A', lr: 0.2, seed: s }, 10 + s, { return_vs_hold_pct: -5 + s, traded_return: 10 + s }))
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'x', window: 'A', lr: 0.5, seed: s }, 80 + s, {
+        return_vs_hold_pct: 60 + s,
+        traded_return: 80 + s,
+      }),
+    )
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'x', window: 'B', lr: 0.5, seed: s }, -40 + s, {
+        return_vs_hold_pct: -50 + s,
+        traded_return: -40 + s,
+      }),
+    )
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'y', window: 'A', lr: 0.2, seed: s }, 10 + s, {
+        return_vs_hold_pct: -5 + s,
+        traded_return: 10 + s,
+      }),
+    )
   return runs
 }
 
 function wineConverged() {
   const runs: any[] = []
-  for (const s of [0, 1, 2, 3, 4]) runs.push(rec({ model_name: 'gbm', max_depth: 3, seed: s }, 0.56 + s * 0.001, { val_rmse: 0.56 + s * 0.001 }))
-  for (const s of [0, 1, 2]) runs.push(rec({ model_name: 'rf', max_depth: 6, seed: s }, 0.85 + s * 0.01, { val_rmse: 0.85 + s * 0.01 }))
+  for (const s of [0, 1, 2, 3, 4])
+    runs.push(
+      rec({ model_name: 'gbm', max_depth: 3, seed: s }, 0.56 + s * 0.001, {
+        val_rmse: 0.56 + s * 0.001,
+      }),
+    )
+  for (const s of [0, 1, 2])
+    runs.push(
+      rec({ model_name: 'rf', max_depth: 6, seed: s }, 0.85 + s * 0.01, {
+        val_rmse: 0.85 + s * 0.01,
+      }),
+    )
   return runs
 }
 
@@ -111,7 +162,12 @@ describe('partitionCohort', () => {
     const spec = Diagnostics.resolveSpec(CARTPOLE_MANIFEST)
     const runs = cartpoleConverged().concat([
       rec({ model_name: 'ppo', learning_rate: 0.5, seed: 0 }, 0, {}, { status: 'failed' }),
-      rec({ model_name: 'ppo', learning_rate: 0.9, seed: 0 }, 9, {}, { health: { status: 'degenerate', flags: ['x'] } }),
+      rec(
+        { model_name: 'ppo', learning_rate: 0.9, seed: 0 },
+        9,
+        {},
+        { health: { status: 'degenerate', flags: ['x'] } },
+      ),
     ])
     const c = Diagnostics.partitionCohort(runs, spec)
     expect(c.total).toBe(13)
@@ -157,7 +213,11 @@ describe('checks', () => {
 
   it('discriminability: flags under-seeding when most setups have a single seed', () => {
     const spec = Diagnostics.resolveSpec(WINE_MANIFEST)
-    const singleSeed = [0, 1, 2, 3, 4, 5].map((i) => rec({ model_name: 'gbm', max_depth: i, seed: 0 }, 0.6 + i * 0.05, { val_rmse: 0.6 + i * 0.05 }))
+    const singleSeed = [0, 1, 2, 3, 4, 5].map((i) =>
+      rec({ model_name: 'gbm', max_depth: i, seed: 0 }, 0.6 + i * 0.05, {
+        val_rmse: 0.6 + i * 0.05,
+      }),
+    )
     const f = Diagnostics.checkDiscriminability(singleSeed, spec)
     expect(f.category).toBe('objective-discriminability')
     expect(f.verdict).toBe('under-seeded')
@@ -190,7 +250,9 @@ describe('diagnose', () => {
 
   it('BlackSwan overfit => a split-consistency blocker drives the verdict', () => {
     const d = Diagnostics.diagnose({ runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST })
-    expect(d.findings.some((f: any) => f.category === 'split-consistency' && f.severity === 'blocker')).toBe(true)
+    expect(
+      d.findings.some((f: any) => f.category === 'split-consistency' && f.severity === 'blocker'),
+    ).toBe(true)
     expect(d.verdict).toBe('single-split-luck')
   })
 
@@ -207,12 +269,20 @@ describe('reseedSpecs', () => {
   it('adds the MISSING seeds for the top-N promising setups (never re-runs everything)', () => {
     const spec = Diagnostics.resolveSpec(CARTPOLE_MANIFEST)
     const runs = cartpoleConverged() // ppo/0.003 has seeds 0..4 already; a2c/0.001 has 0..2
-    const out = Diagnostics.reseedSpecs({ runs, manifest: CARTPOLE_MANIFEST, spec, topN: 3, targetSeeds: 5 })
+    const out = Diagnostics.reseedSpecs({
+      runs,
+      manifest: CARTPOLE_MANIFEST,
+      spec,
+      topN: 3,
+      targetSeeds: 5,
+    })
     expect(out.length).toBe(1)
     const configs = out[0].configs.map((c: any) => c.config)
     // a2c/0.001 (3 seeds) should get seeds 3 and 4 added; ppo/0.003 (5 seeds) needs none
     expect(configs.some((c: any) => c.model_name === 'a2c' && c.seed === 3)).toBe(true)
-    expect(configs.every((c: any) => !(c.model_name === 'ppo' && c.learning_rate === 0.003))).toBe(true)
+    expect(configs.every((c: any) => !(c.model_name === 'ppo' && c.learning_rate === 0.003))).toBe(
+      true,
+    )
   })
 })
 
@@ -220,7 +290,13 @@ describe('replicateSpecs', () => {
   it('produces ONE campaign per split value, each replicating the shortlist across seeds', () => {
     const spec = Diagnostics.resolveSpec(BLACKSWAN_MANIFEST)
     const runs = blackswanOverfit()
-    const out = Diagnostics.replicateSpecs({ runs, manifest: BLACKSWAN_MANIFEST, spec, topN: 2, seeds: [0, 1, 2, 3, 4] })
+    const out = Diagnostics.replicateSpecs({
+      runs,
+      manifest: BLACKSWAN_MANIFEST,
+      spec,
+      topN: 2,
+      seeds: [0, 1, 2, 3, 4],
+    })
     // one spec per distinct window value (A, B)
     const windows = new Set(out.flatMap((s: any) => s.configs.map((c: any) => c.config.window)))
     expect(windows).toEqual(new Set(['A', 'B']))
@@ -260,7 +336,10 @@ describe('analyze + paint (worker split)', () => {
 describe('planSteps', () => {
   it('maps an actionable finding to a launchable step carrying its NEW-run count', () => {
     const d = Diagnostics.diagnose({ runs: blackswanOverfit(), manifest: BLACKSWAN_MANIFEST })
-    const steps = Diagnostics.planSteps(d, { reseed: [], replicate: [{ configs: [{ config: { a: 1 } }, { config: { a: 2 } }] }] })
+    const steps = Diagnostics.planSteps(d, {
+      reseed: [],
+      replicate: [{ configs: [{ config: { a: 1 } }, { config: { a: 2 } }] }],
+    })
     const split = steps.find((s: any) => s.category === 'split-consistency')
     expect(split).toBeTruthy()
     expect(split.action.kind).toBe('replicate')
@@ -313,7 +392,9 @@ describe('checkCrossAssetRobustness', () => {
   })
 
   it('cautions when matrices exist but none cover the incumbent', () => {
-    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [settestFor('someone-else', { ETHUSDT: 2 })])
+    const f = Diagnostics.checkCrossAssetRobustness(runs(), spec(), [
+      settestFor('someone-else', { ETHUSDT: 2 }),
+    ])
     expect(f.severity).toBe('caution')
     expect(f.verdict).toBe('not-cross-tested')
   })

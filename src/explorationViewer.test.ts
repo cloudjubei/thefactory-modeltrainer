@@ -32,7 +32,10 @@ function runsFixture() {
   for (const algo of ['A', 'B']) {
     for (const x of [0, 0.25, 0.5, 0.75, 1]) {
       for (const y of [0.2, 0.5, 0.8]) {
-        runs.push({ config: { algo, x, y, noise: 0.5, seed: s % 3 }, objective: 100 + x * 300 + y * 40 })
+        runs.push({
+          config: { algo, x, y, noise: 0.5, seed: s % 3 },
+          objective: 100 + x * 300 + y * 40,
+        })
         s++
       }
     }
@@ -42,8 +45,17 @@ function runsFixture() {
 
 describe('Exploration.analyze', () => {
   it('chooses the two highest-ranked levers as the default X/Y axes (variance fallback, no Xai)', () => {
-    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: 30 } }
-    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'axes-a' }, state, runs: runsFixture() })
+    const state = {
+      activeLevers: ['algo', 'x', 'y'],
+      basins: [],
+      stage: 'global',
+      budget: { spentRuns: 30 },
+    }
+    const a = Exploration.analyze({
+      manifest: { ...MANIFEST, recordType: 'axes-a' },
+      state,
+      runs: runsFixture(),
+    })
     // x varies most, y next; noise is constant (filtered), seed excluded
     expect(a.vs.axisX).toBe('x')
     expect(a.vs.axisY).toBe('y')
@@ -53,14 +65,22 @@ describe('Exploration.analyze', () => {
   })
 
   it('falls back to model levers and sets two distinct axes when no state is present', () => {
-    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'axes-b' }, state: null, runs: runsFixture() })
+    const a = Exploration.analyze({
+      manifest: { ...MANIFEST, recordType: 'axes-b' },
+      state: null,
+      runs: runsFixture(),
+    })
     expect(a.vs.axisX).toBeTruthy()
     expect(a.vs.axisY).toBeTruthy()
     expect(a.vs.axisX).not.toBe(a.vs.axisY)
   })
 
   it('orients the color scale so a MIN objective maps its lowest value to the hot end', () => {
-    const minManifest = { ...MANIFEST, recordType: 'min-c', objective: { name: 'rmse', direction: 'min' as const } }
+    const minManifest = {
+      ...MANIFEST,
+      recordType: 'min-c',
+      objective: { name: 'rmse', direction: 'min' as const },
+    }
     const runs = [
       { config: { algo: 'A', x: 0.1, y: 0.1 }, objective: 0.2 }, // best (lowest)
       { config: { algo: 'A', x: 0.9, y: 0.9 }, objective: 0.8 }, // worst (highest)
@@ -71,8 +91,24 @@ describe('Exploration.analyze', () => {
   })
 
   it('passes basins through and preserves the objective range', () => {
-    const state = { basins: [{ id: 'b1', region: { algo: 'A' }, peakObjective: 420, centerConfig: { algo: 'A', x: 0.5, y: 0.5 } }], declaredBasinId: 'b1', stage: 'converged', budget: { spentRuns: 40 } }
-    const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: 'basins-d' }, state, runs: runsFixture() })
+    const state = {
+      basins: [
+        {
+          id: 'b1',
+          region: { algo: 'A' },
+          peakObjective: 420,
+          centerConfig: { algo: 'A', x: 0.5, y: 0.5 },
+        },
+      ],
+      declaredBasinId: 'b1',
+      stage: 'converged',
+      budget: { spentRuns: 40 },
+    }
+    const a = Exploration.analyze({
+      manifest: { ...MANIFEST, recordType: 'basins-d' },
+      state,
+      runs: runsFixture(),
+    })
     expect(a.basins).toHaveLength(1)
     expect(a.oMax).toBeGreaterThan(a.oMin)
   })
@@ -107,7 +143,15 @@ function condRuns() {
   const runs: any[] = []
   for (let i = 0; i < 20; i++) {
     const applies = i < 2 // cond applies to only 2 of 20 runs, with extreme values (5, 500)
-    runs.push({ config: { lr: (i % 5) * 0.25, gamma: 0.9 + (i % 3) * 0.03, cond: applies ? (i === 0 ? 5 : 500) : 'n/a', seed: i }, objective: 100 + (i % 5) * 10 })
+    runs.push({
+      config: {
+        lr: (i % 5) * 0.25,
+        gamma: 0.9 + (i % 3) * 0.03,
+        cond: applies ? (i === 0 ? 5 : 500) : 'n/a',
+        seed: i,
+      },
+      objective: 100 + (i % 5) * 10,
+    })
   }
   return runs
 }
@@ -131,7 +175,12 @@ describe('Exploration conditional-lever handling', () => {
 
 describe('Exploration.heatmapCells', () => {
   const cellsFor = (runs: any[], rt: string) => {
-    const state = { activeLevers: ['algo', 'x', 'y'], basins: [], stage: 'global', budget: { spentRuns: runs.length } }
+    const state = {
+      activeLevers: ['algo', 'x', 'y'],
+      basins: [],
+      stage: 'global',
+      budget: { spentRuns: runs.length },
+    }
     const a = Exploration.analyze({ manifest: { ...MANIFEST, recordType: rt }, state, runs })
     a.vs.axisX = 'x'
     a.vs.axisY = 'y'
@@ -183,7 +232,10 @@ describe('Exploration.heatmapCells', () => {
   it('zoom = grid density: zoom<1 GROUPS values; zoom=1 ≈ one cell per value; zoom>1 SUBDIVIDES past the values', () => {
     // 30 distinct x values in [0, 29/30]. Bin count = round(distinct × zoom): coarse groups them, fine keeps
     // one-per-value, and — the zoom-IN fix — zoom>1 keeps ADDING bins beyond the value count (untried gaps).
-    const runs = Array.from({ length: 30 }, (_, i) => ({ config: { algo: 'A', x: i / 30, y: 0.5 }, objective: 100 + i }))
+    const runs = Array.from({ length: 30 }, (_, i) => ({
+      config: { algo: 'A', x: i / 30, y: 0.5 },
+      objective: 100 + i,
+    }))
     const coarse = Exploration.makeAxis('x', runs, MANIFEST, 0.2)
     const finest = Exploration.makeAxis('x', runs, MANIFEST, 1)
     const finer = Exploration.makeAxis('x', runs, MANIFEST, 3)
@@ -226,7 +278,13 @@ describe('Exploration.manualCellConfigs', () => {
     const best = { algo: 'A', x: 0.5, y: 0.5, noise: 0.9, seed: 3 } // the top run's config
     const cx = xA.index(0.5)
     const cy = yA.index(0.5)
-    const cfgs = Exploration.manualCellConfigs([{ x: cx, y: cy }], { xA, yA, pegs: {}, best, manifest: M })
+    const cfgs = Exploration.manualCellConfigs([{ x: cx, y: cy }], {
+      xA,
+      yA,
+      pegs: {},
+      best,
+      manifest: M,
+    })
     expect(cfgs).toHaveLength(1)
     expect(cfgs[0].x).toBe(xA.cellValue(cx)) // the cell's concrete run value (bin midpoint)
     expect(cfgs[0].y).toBe(yA.cellValue(cy))
@@ -251,14 +309,23 @@ describe('Exploration.manualCellConfigs', () => {
 
   it('falls back to the manifest default when a lever is neither pegged nor in the best run', () => {
     const { xA, yA } = axes('x', 'y')
-    const cfgs = Exploration.manualCellConfigs([{ x: xA.index(0.25), y: yA.index(0.75) }], { xA, yA, pegs: {}, best: {}, manifest: M })
+    const cfgs = Exploration.manualCellConfigs([{ x: xA.index(0.25), y: yA.index(0.75) }], {
+      xA,
+      yA,
+      pegs: {},
+      best: {},
+      manifest: M,
+    })
     expect(cfgs[0].noise).toBe(0.5) // manifest default
   })
 
   it('cellValue reproduces the TRIED value in an OCCUPIED cell (not the bin geometric midpoint)', () => {
     // Tried lr values [0.001, 0.003, 0.01]; the extreme 0.01 lands at the top edge of its bin, so a naive
     // midpoint would run 0.0085 — a config never tried. cellValue must return the real value the cell shows.
-    const lrRuns = [0.001, 0.003, 0.01].map((lr) => ({ config: { algo: 'A', x: lr, y: 0.5 }, objective: 100 }))
+    const lrRuns = [0.001, 0.003, 0.01].map((lr) => ({
+      config: { algo: 'A', x: lr, y: 0.5 },
+      objective: 100,
+    }))
     const ax = Exploration.makeAxis('x', lrRuns, M, 1)
     const i = ax.index(0.01)
     expect(ax.cellValue(i)).toBe(0.01) // the concrete tried value, matching cellLabel
@@ -266,7 +333,10 @@ describe('Exploration.manualCellConfigs', () => {
   })
 
   it('cellValue on an EMPTY cell returns a fresh gap-fill value inside the cell', () => {
-    const lrRuns = [0.0, 1.0].map((lr) => ({ config: { algo: 'A', x: lr, y: 0.5 }, objective: 100 }))
+    const lrRuns = [0.0, 1.0].map((lr) => ({
+      config: { algo: 'A', x: lr, y: 0.5 },
+      objective: 100,
+    }))
     const ax = Exploration.makeAxis('x', lrRuns, M, 3) // 3 bins over [0,1]; the middle bin is empty
     const mid = ax.cellValue(1)
     expect(mid).toBeGreaterThan(0) // a value strictly inside the empty middle bin
@@ -276,7 +346,11 @@ describe('Exploration.manualCellConfigs', () => {
   it('SKIPS an out-of-range (stale) cell index instead of launching an invalid config', () => {
     const { xA, yA } = axes('x', 'y')
     const cfgs = Exploration.manualCellConfigs(
-      [{ x: xA.index(0.5), y: yA.index(0.5) }, { x: 999, y: 0 }, { x: 0, y: -1 }],
+      [
+        { x: xA.index(0.5), y: yA.index(0.5) },
+        { x: 999, y: 0 },
+        { x: 0, y: -1 },
+      ],
       { xA, yA, pegs: {}, best: {}, manifest: M },
     )
     expect(cfgs).toHaveLength(1) // only the in-range cell survives; the two stale ones are dropped
@@ -287,7 +361,11 @@ describe('Exploration.manualCellConfigs', () => {
 describe('Exploration.magma', () => {
   it('returns an rgb() string and ramps from dark to light across [0,1]', () => {
     expect(Exploration.magma(0)).toMatch(/^rgb\(/)
-    const lum = (s: string) => s.match(/\d+/g)!.map(Number).reduce((p: number, c: number) => p + c, 0)
+    const lum = (s: string) =>
+      s
+        .match(/\d+/g)!
+        .map(Number)
+        .reduce((p: number, c: number) => p + c, 0)
     expect(lum(Exploration.magma(1))).toBeGreaterThan(lum(Exploration.magma(0)))
   })
 

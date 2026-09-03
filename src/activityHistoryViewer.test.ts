@@ -32,9 +32,19 @@ describe('historyRows', () => {
     const acts = [
       act({ activityId: 'run', status: 'running', finishedAt: undefined }),
       act({ activityId: 'q', status: 'queued', finishedAt: undefined }),
-      act({ activityId: 'other', status: 'completed', recordType: 'wine-run', finishedAt: '2026-07-30T11:00:00Z' }),
+      act({
+        activityId: 'other',
+        status: 'completed',
+        recordType: 'wine-run',
+        finishedAt: '2026-07-30T11:00:00Z',
+      }),
       act({ activityId: 'old', status: 'completed', finishedAt: '2026-07-30T09:00:00.000Z' }),
-      act({ activityId: 'new', status: 'failed', finishedAt: '2026-07-30T12:00:00.000Z', error: 'boom' }),
+      act({
+        activityId: 'new',
+        status: 'failed',
+        finishedAt: '2026-07-30T12:00:00.000Z',
+        error: 'boom',
+      }),
       act({ activityId: 'mid', status: 'aborted', finishedAt: '2026-07-30T10:30:00.000Z' }),
     ]
     const rows = AH.historyRows(acts, 'demo-run')
@@ -45,7 +55,9 @@ describe('historyRows', () => {
   it('computes durationMs from started→finished (null when unparseable or negative)', () => {
     expect(AH.historyRows([act()], 'demo-run')[0].durationMs).toBe(192000) // 3m12s
     expect(AH.historyRows([act({ finishedAt: undefined })], 'demo-run')[0].durationMs).toBeNull()
-    expect(AH.historyRows([act({ finishedAt: '2026-07-30T09:00:00Z' })], 'demo-run')[0].durationMs).toBeNull() // finished < started
+    expect(
+      AH.historyRows([act({ finishedAt: '2026-07-30T09:00:00Z' })], 'demo-run')[0].durationMs,
+    ).toBeNull() // finished < started
   })
 
   it('carries the launch label (resumeToken.params._label), falling back to the type', () => {

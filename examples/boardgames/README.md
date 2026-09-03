@@ -74,7 +74,7 @@ same replay a run samples, so it needs no packages either):
   agent's moves in a game**. Strength scales with `mcts_sims`. It is SEARCH, not learning — no parameters, no
   memory across games.
 - **`alphazero`** — a **learned** policy+value net (`harness/neural.py`, needs torch) trained by self-play,
-  then used to *guide* the MCTS (PUCT priors + a value head instead of random rollouts). A training run
+  then used to _guide_ the MCTS (PUCT priors + a value head instead of random rollouts). A training run
   produces a `.pt` weights file beside the checkpoint; the knowledge is in the weights and **generalises**
   across positions (what a transposition table cannot). Levers: `az_iterations`, `az_selfplay_games`,
   `az_sims`, `az_epochs`, `az_warm_start`.

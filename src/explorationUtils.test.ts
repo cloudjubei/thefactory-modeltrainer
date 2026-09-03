@@ -1,9 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type {
-  AnalysisRun,
-  ExplorationState,
-  TrainerManifest,
-} from './modelTrainerTypes.js'
+import type { AnalysisRun, ExplorationState, TrainerManifest } from './modelTrainerTypes.js'
 import {
   initExplorationState,
   nextExplorationStep,
@@ -14,7 +10,13 @@ import {
   qualifyParetoBasins,
 } from './explorationUtils.js'
 import type { Basin } from './modelTrainerTypes.js'
-import { XAI_MIN_SEEDS, EXPLORATION_MAX_REFINE_DEPTH, EXPLORATION_BATCH_MAX, EXPLORATION_MAX_REGION_AXES, EXPLORATION_LADDER_MAX_REGION_AXES } from './modelTrainerConstants.js'
+import {
+  XAI_MIN_SEEDS,
+  EXPLORATION_MAX_REFINE_DEPTH,
+  EXPLORATION_BATCH_MAX,
+  EXPLORATION_MAX_REGION_AXES,
+  EXPLORATION_LADDER_MAX_REGION_AXES,
+} from './modelTrainerConstants.js'
 
 // A synthetic project: one discrete lever `algo` (the basin axis), one important continuous lever
 // `lr`, one INERT continuous lever `noise_knob` (screening must freeze it), and `seed` (the noise dim).
@@ -104,9 +106,12 @@ function drive(
   let rounds = 0
   const maxRounds = opts?.maxRounds ?? 200
   while (!state.done && rounds < maxRounds) {
-    const step = nextExplorationStep(state, runs, manifest, { targetObjective: opts?.targetObjective })
+    const step = nextExplorationStep(state, runs, manifest, {
+      targetObjective: opts?.targetObjective,
+    })
     state = step.stateNext
-    for (const rec of step.batch) for (const cfg of expandSpec(rec.spec, manifest)) runs.push(evaluate(cfg))
+    for (const rec of step.batch)
+      for (const cfg of expandSpec(rec.spec, manifest)) runs.push(evaluate(cfg))
     rounds++
   }
   return { state, runs, rounds }
@@ -155,7 +160,9 @@ describe('S0 calibrate', () => {
     // A large pre-existing archive that never ran the manifest-default config (lr=0.1) but IS seed-replicated
     // elsewhere — calibrate must estimate the noise floor from it and advance, not stall re-proposing a default
     // batch (the BlackSwan stuck-at-calibrate bug).
-    const archive = [0.3, 0.7].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })))
+    const archive = [0.3, 0.7].flatMap((lr) =>
+      [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })),
+    )
     const step = nextExplorationStep(initExplorationState(MANIFEST), archive, MANIFEST)
     expect(step.stage).toBe('screen')
     expect(step.stateNext.noiseFloor).toBeGreaterThanOrEqual(0)
@@ -165,9 +172,17 @@ describe('S0 calibrate', () => {
 describe('budget accounting on a populated archive', () => {
   it('counts runs THIS exploration produced, not the whole pre-existing archive (no instant converge)', () => {
     runSeq = 0
-    const archive = [0.2, 0.5, 0.8].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s }))) // 15 runs
+    const archive = [0.2, 0.5, 0.8].flatMap((lr) =>
+      [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })),
+    ) // 15 runs
     // maxRuns:10 over a 15-run archive would OLD-converge instantly ("budget exhausted"); now producedRuns=0.
-    const state: ExplorationState = { ...initExplorationState(MANIFEST, { maxRuns: 10 }), stage: 'global', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const state: ExplorationState = {
+      ...initExplorationState(MANIFEST, { maxRuns: 10 }),
+      stage: 'global',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
     const step = nextExplorationStep(state, archive, MANIFEST)
     expect(step.done).toBe(false)
     expect(step.stateNext.baselineRuns).toBe(15)
@@ -183,7 +198,8 @@ describe('S1 screen', () => {
     let seed = 0
     for (const algo of ['A', 'B', 'C']) {
       for (const lr of [0, 0.2, 0.4, 0.6, 0.8, 1.0]) {
-        for (const nk of [0, 0.5, 1.0]) runs.push(evaluate({ algo, lr, noise_knob: nk, seed: seed++ % 5 }))
+        for (const nk of [0, 0.5, 1.0])
+          runs.push(evaluate({ algo, lr, noise_knob: nk, seed: seed++ % 5 }))
       }
     }
     const state: ExplorationState = {
@@ -207,7 +223,9 @@ describe('S1 screen', () => {
     // EXPLORATION_MAX_REGION_AXES categoricals (model_name always in), freeze the rest at their CATEGORICAL value,
     // and still activate numeric climb dims.
     const BS: TrainerManifest = {
-      name: 'bs', recordType: 'bs-run', run: 'noop',
+      name: 'bs',
+      recordType: 'bs-run',
+      run: 'noop',
       objective: { name: 'ret', direction: 'max' },
       levers: {
         model_name: { type: 'choice', choices: ['m0', 'm1', 'm2'], default: 'm0' },
@@ -222,11 +240,29 @@ describe('S1 screen', () => {
     }
     const runs: AnalysisRun[] = []
     let s = 0
-    for (const model of ['m0', 'm1', 'm2']) for (const na of ['a', 'b']) for (const lr of [0.2, 0.5, 0.8]) {
-      const ret = (model === 'm1' ? 500 : 200) + (na === 'b' ? 30 : 0) - 200 * (lr - 0.5) ** 2 // model_name + lr matter most
-      runs.push({ key: `bs-${s}`, config: { model_name: model, net_arch: na, optimizer: 'adam', use_x: false, lr, gamma: 0.99, buf: 50, seed: s % 5 }, objective: ret, metrics: { ret, baseline: 20 }, seed: s % 5, status: 'completed' })
-      s++
-    }
+    for (const model of ['m0', 'm1', 'm2'])
+      for (const na of ['a', 'b'])
+        for (const lr of [0.2, 0.5, 0.8]) {
+          const ret = (model === 'm1' ? 500 : 200) + (na === 'b' ? 30 : 0) - 200 * (lr - 0.5) ** 2 // model_name + lr matter most
+          runs.push({
+            key: `bs-${s}`,
+            config: {
+              model_name: model,
+              net_arch: na,
+              optimizer: 'adam',
+              use_x: false,
+              lr,
+              gamma: 0.99,
+              buf: 50,
+              seed: s % 5,
+            },
+            objective: ret,
+            metrics: { ret, baseline: 20 },
+            seed: s % 5,
+            status: 'completed',
+          })
+          s++
+        }
     const state: ExplorationState = { ...initExplorationState(BS), stage: 'screen', noiseFloor: 1 }
     const step = nextExplorationStep(state, runs, BS)
     const active = step.stateNext.activeLevers
@@ -236,7 +272,8 @@ describe('S1 screen', () => {
     expect(active.filter((l) => BS.levers[l].type === 'number').length).toBeGreaterThanOrEqual(1) // numerics DO climb
     // a frozen categorical keeps its category value — never coerced to NaN
     for (const [l, v] of Object.entries(step.stateNext.frozenLevers)) {
-      if (BS.levers[l] && BS.levers[l].type !== 'number') expect(Number.isNaN(v as number)).toBe(false)
+      if (BS.levers[l] && BS.levers[l].type !== 'number')
+        expect(Number.isNaN(v as number)).toBe(false)
     }
   })
 })
@@ -267,7 +304,9 @@ describe('clusterBasins', () => {
     // n_layers is a discrete CHOICE whose values happen to be numbers — each is its own region/maximum, NOT a
     // continuous climb dimension. Without the manifest, value-based detection would wrongly treat it as numeric.
     const M: TrainerManifest = {
-      name: 'layers', recordType: 'layers-run', run: 'noop',
+      name: 'layers',
+      recordType: 'layers-run',
+      run: 'noop',
       objective: { name: 'score', direction: 'max' },
       levers: {
         n_layers: { type: 'choice', choices: [1, 2, 3], default: 1 },
@@ -276,28 +315,68 @@ describe('clusterBasins', () => {
       },
     }
     const runs: AnalysisRun[] = []
-    for (const n of [1, 2, 3]) for (const lr of [0.3, 0.5, 0.7]) for (const s of [0, 1, 2, 3, 4]) {
-      const score = (n === 2 ? 500 : n === 1 ? 470 : 20) - 400 * (lr - 0.5) ** 2 // n_layers=2 best, =3 at baseline
-      runs.push({ key: `l-${n}-${lr}-${s}`, config: { n_layers: n, lr, seed: s }, objective: score, metrics: { score, baseline: 20 }, seed: s, status: 'completed' })
-    }
-    const withManifest = clusterBasins(runs, { key: 'objective', direction: 'max' }, ['n_layers', 'lr'], 1, 20, M)
+    for (const n of [1, 2, 3])
+      for (const lr of [0.3, 0.5, 0.7])
+        for (const s of [0, 1, 2, 3, 4]) {
+          const score = (n === 2 ? 500 : n === 1 ? 470 : 20) - 400 * (lr - 0.5) ** 2 // n_layers=2 best, =3 at baseline
+          runs.push({
+            key: `l-${n}-${lr}-${s}`,
+            config: { n_layers: n, lr, seed: s },
+            objective: score,
+            metrics: { score, baseline: 20 },
+            seed: s,
+            status: 'completed',
+          })
+        }
+    const withManifest = clusterBasins(
+      runs,
+      { key: 'objective', direction: 'max' },
+      ['n_layers', 'lr'],
+      1,
+      20,
+      M,
+    )
     // one basin per good n_layers value — enumerated as distinct maxima, not blurred into one climb dimension
     expect(withManifest.map((b) => Number(b.region.n_layers)).sort()).toEqual([1, 2])
     // WITHOUT the manifest, numeric-valued choices are mis-detected as a climb dim → collapses to one basin
-    const withoutManifest = clusterBasins(runs, { key: 'objective', direction: 'max' }, ['n_layers', 'lr'], 1, 20)
+    const withoutManifest = clusterBasins(
+      runs,
+      { key: 'objective', direction: 'max' },
+      ['n_layers', 'lr'],
+      1,
+      20,
+    )
     expect(withoutManifest.length).toBe(1)
   })
 
   it('treats an ARRAY-valued lever (e.g. net_arch [64,64]) as a categorical basin axis', () => {
     // Object/array-valued levers are inherently categorical — each distinct architecture is its own region.
     const runs: AnalysisRun[] = []
-    const arches = [[64, 64], [256, 256]]
+    const arches = [
+      [64, 64],
+      [256, 256],
+    ]
     let seed = 0
-    for (const net of arches) for (const lr of [0.3, 0.5, 0.7]) for (const s of [0, 1, 2, 3, 4]) {
-      const score = (net[0] === 256 ? 500 : 470) - 400 * (lr - 0.5) ** 2
-      runs.push({ key: `n-${net[0]}-${lr}-${seed++}`, config: { net_arch: net, lr, seed: s }, objective: score, metrics: { score, baseline: 20 }, seed: s, status: 'completed' })
-    }
-    const basins = clusterBasins(runs, { key: 'objective', direction: 'max' }, ['net_arch', 'lr'], 1, 20)
+    for (const net of arches)
+      for (const lr of [0.3, 0.5, 0.7])
+        for (const s of [0, 1, 2, 3, 4]) {
+          const score = (net[0] === 256 ? 500 : 470) - 400 * (lr - 0.5) ** 2
+          runs.push({
+            key: `n-${net[0]}-${lr}-${seed++}`,
+            config: { net_arch: net, lr, seed: s },
+            objective: score,
+            metrics: { score, baseline: 20 },
+            seed: s,
+            status: 'completed',
+          })
+        }
+    const basins = clusterBasins(
+      runs,
+      { key: 'objective', direction: 'max' },
+      ['net_arch', 'lr'],
+      1,
+      20,
+    )
     // one basin per distinct architecture (both clear the baseline), keyed by the array value
     expect(basins.length).toBe(2)
     const declared = basins[0] // sorted best-first
@@ -385,7 +464,14 @@ describe('adaptive coordinate-ascent step', () => {
       for (const rec of step.batch)
         for (const cfg of expandSpec(rec.spec, NARROW)) {
           const score = trueNarrow(cfg)
-          runs.push({ key: `n-${seq++}`, config: { ...cfg }, objective: score, metrics: { score, baseline: BASELINE }, seed: Number(cfg.seed ?? 0), status: 'completed' })
+          runs.push({
+            key: `n-${seq++}`,
+            config: { ...cfg },
+            objective: score,
+            metrics: { score, baseline: BASELINE },
+            seed: Number(cfg.seed ?? 0),
+            status: 'completed',
+          })
         }
       rounds++
     }
@@ -400,9 +486,17 @@ describe('adaptive coordinate-ascent step', () => {
 describe('exhausted stage advance (no dead-end when the space is already covered)', () => {
   it('advances GLOBAL → local when told the proposed batch is fully redundant', () => {
     const runs = [
-      ...[0.2, 0.5, 0.8].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s }))),
+      ...[0.2, 0.5, 0.8].flatMap((lr) =>
+        [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s })),
+      ),
     ]
-    const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'global', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const state: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'global',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
     const normal = nextExplorationStep(state, runs, MANIFEST, {})
     expect(normal.stage).toBe('global') // absent the flag it keeps probing globally
     const advanced = nextExplorationStep(state, runs, MANIFEST, { exhausted: true })
@@ -412,8 +506,16 @@ describe('exhausted stage advance (no dead-end when the space is already covered
   it('does NOT converge from LOCAL on exhausted while fresh refinement remains — it escalates instead', () => {
     // Only lr=0.5 tried, no frozen levers: the coordinate sweep still has fresh points (0.375…0.625), so a
     // controller "exhausted" signal must NOT dead-end into converged — the space is nowhere near covered.
-    const runs = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s })))
-    const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
+    const runs = [0.5].flatMap((lr) =>
+      [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, seed: s })),
+    )
+    const state: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
+    }
     const advanced = nextExplorationStep(state, runs, MANIFEST, { exhausted: true })
     expect(advanced.done).toBe(false)
     expect(advanced.stage).toBe('local')
@@ -449,7 +551,7 @@ describe('escalation ladder — never converge until the space is covered', () =
   const proposedLrs = (step: ReturnType<typeof nextExplorationStep>): number[] =>
     step.batch.flatMap((b) => [
       ...(b.spec.configs ?? []).map((c) => Number(c.config.lr)),
-      ...(((b.spec.sweep?.lr as number[]) ?? []).map(Number)),
+      ...((b.spec.sweep?.lr as number[]) ?? []).map(Number),
     ])
 
   it('UNFREEZES a fixed numeric lever instead of converging when all basins plateaued (rung 1: widen)', () => {
@@ -457,7 +559,8 @@ describe('escalation ladder — never converge until the space is covered', () =
     // "all basins plateaued → converged", the search must unfreeze noise_knob and probe it.
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(MANIFEST, lr, s))
+    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52])
+      for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(MANIFEST, lr, s))
     const state: ExplorationState = {
       ...initExplorationState(MANIFEST),
       stage: 'local',
@@ -480,7 +583,8 @@ describe('escalation ladder — never converge until the space is covered', () =
     // (deepening is user-driven via "Explore more", not automatic).
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52])
+      for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
     const state: ExplorationState = {
       ...initExplorationState(M2),
       stage: 'local',
@@ -510,7 +614,12 @@ describe('escalation ladder — never converge until the space is covered', () =
     const runs: AnalysisRun[] = []
     for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) runs.push(run2('A', i / 20, s)) // A: densely covered
     for (const lr of [0.5, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(run2('B', lr, s)) // B: only 2 setups
-    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
     const recs = coverageGridRecs(state, runs, M2, { key: 'objective', direction: 'max' })
     const configs = recs.flatMap((r) => r.spec.configs ?? [])
     expect(configs.length).toBeGreaterThan(0)
@@ -521,8 +630,14 @@ describe('escalation ladder — never converge until the space is covered', () =
 
   it('round-robins coverage across multiple under-covered regions so EVERY value progresses each round', () => {
     const runs: AnalysisRun[] = []
-    for (const algo of ['A', 'B', 'C']) for (const lr of [0.5, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(run2(algo, lr, s))
-    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    for (const algo of ['A', 'B', 'C'])
+      for (const lr of [0.5, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(run2(algo, lr, s))
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
     const recs = coverageGridRecs(state, runs, M2, { key: 'objective', direction: 'max' })
     const configs = recs.flatMap((r) => r.spec.configs ?? [])
     expect(configs.length).toBeLessThanOrEqual(EXPLORATION_BATCH_MAX) // one round is bounded by the batch cap
@@ -535,18 +650,51 @@ describe('escalation ladder — never converge until the space is covered', () =
     // ROTATE across rounds (by the growing setup count) or the last regions would never get sampled.
     const algos = Array.from({ length: 26 }, (_, i) => 'a' + i)
     const M26: TrainerManifest = {
-      name: 'many', recordType: 'many-run', run: 'noop',
+      name: 'many',
+      recordType: 'many-run',
+      run: 'noop',
       objective: { name: 'score', direction: 'max' },
-      levers: { algo: { type: 'choice', choices: algos, default: 'a0' }, lr: { type: 'number', range: [0, 1], default: 0.5 }, seed: { type: 'number', default: 0 } },
+      levers: {
+        algo: { type: 'choice', choices: algos, default: 'a0' },
+        lr: { type: 'number', range: [0, 1], default: 0.5 },
+        seed: { type: 'number', default: 0 },
+      },
     }
     const mk = (extra: string[]): AnalysisRun[] => {
       const rs: AnalysisRun[] = []
-      for (const algo of algos) for (const lr of [0.4, 0.6]) rs.push({ key: `m-${algo}-${lr}`, config: { algo, lr, seed: 0 }, objective: 100, metrics: { score: 100, baseline: 20 }, seed: 0, status: 'completed' })
-      for (const k of extra) rs.push({ key: `x-${k}`, config: { algo: 'a0', lr: Number(k), seed: 0 }, objective: 100, metrics: { score: 100, baseline: 20 }, seed: 0, status: 'completed' })
+      for (const algo of algos)
+        for (const lr of [0.4, 0.6])
+          rs.push({
+            key: `m-${algo}-${lr}`,
+            config: { algo, lr, seed: 0 },
+            objective: 100,
+            metrics: { score: 100, baseline: 20 },
+            seed: 0,
+            status: 'completed',
+          })
+      for (const k of extra)
+        rs.push({
+          key: `x-${k}`,
+          config: { algo: 'a0', lr: Number(k), seed: 0 },
+          objective: 100,
+          metrics: { score: 100, baseline: 20 },
+          seed: 0,
+          status: 'completed',
+        })
       return rs
     }
-    const state: ExplorationState = { ...initExplorationState(M26), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
-    const served = (runs: AnalysisRun[]) => new Set(coverageGridRecs(state, runs, M26, { key: 'objective', direction: 'max' }).flatMap((r) => r.spec.configs ?? []).map((c) => String(c.config.algo)))
+    const state: ExplorationState = {
+      ...initExplorationState(M26),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
+    const served = (runs: AnalysisRun[]) =>
+      new Set(
+        coverageGridRecs(state, runs, M26, { key: 'objective', direction: 'max' })
+          .flatMap((r) => r.spec.configs ?? [])
+          .map((c) => String(c.config.algo)),
+      )
     const roundA = served(mk([])) // 52 setups → start 52%26 = 0
     const roundB = served(mk(['0.1'])) // 53 setups → start 53%26 = 1 → serves a different window
     expect(roundA.size).toBe(EXPLORATION_BATCH_MAX) // one round is capped
@@ -559,7 +707,8 @@ describe('escalation ladder — never converge until the space is covered', () =
     // untried, so the search must keep space-filling it.
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const lr of [0.4995, 0.5, 0.5005]) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
+    for (const lr of [0.4995, 0.5, 0.5005])
+      for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
     const state: ExplorationState = {
       ...initExplorationState(M2),
       stage: 'local',
@@ -576,7 +725,9 @@ describe('escalation ladder — never converge until the space is covered', () =
     // A dense-near-peak + spread-across-range history: >= the coverage target of distinct lr setups, with the
     // peak bracketed tighter than the resolution floor — nothing left to sample, so it may finally converge.
     runSeq = 0
-    const lrs = [0, 0.1, 0.2, 0.3, 0.4, 0.49, 0.495, 0.5, 0.505, 0.51, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0]
+    const lrs = [
+      0, 0.1, 0.2, 0.3, 0.4, 0.49, 0.495, 0.5, 0.505, 0.51, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0,
+    ]
     const runs: AnalysisRun[] = []
     for (const lr of lrs) for (const s of [0, 1, 2, 3, 4]) runs.push(aRun(M2, lr, s))
     const state: ExplorationState = {
@@ -599,7 +750,12 @@ describe('escalation ladder — never converge until the space is covered', () =
     const few: AnalysisRun[] = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => aRun(M2, lr, s)))
     const many: AnalysisRun[] = []
     for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) many.push(aRun(M2, i / 19, s))
-    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
     const sparse = coverageGridRecs(state, few, M2, { key: 'objective', direction: 'max' })
     const covered = coverageGridRecs(state, many, M2, { key: 'objective', direction: 'max' })
     expect(sparse.flatMap((r) => r.spec.configs ?? []).length).toBeGreaterThan(0)
@@ -610,12 +766,30 @@ describe('escalation ladder — never converge until the space is covered', () =
     // A `number` lever whose range is a single point [0.5,0.5] can never yield distinct setups — if it counted
     // toward coverage, the target could never be met and the search would never converge. It must be excluded.
     const M: TrainerManifest = {
-      name: 'degen', recordType: 'degen-run', run: 'noop',
+      name: 'degen',
+      recordType: 'degen-run',
+      run: 'noop',
       objective: { name: 'score', direction: 'max' },
-      levers: { algo: { type: 'choice', choices: ['A', 'B'], default: 'A' }, pinned: { type: 'number', range: [0.5, 0.5], default: 0.5 }, seed: { type: 'number', default: 0 } },
+      levers: {
+        algo: { type: 'choice', choices: ['A', 'B'], default: 'A' },
+        pinned: { type: 'number', range: [0.5, 0.5], default: 0.5 },
+        seed: { type: 'number', default: 0 },
+      },
     }
-    const runs: AnalysisRun[] = [0, 1, 2, 3, 4].map((s) => ({ key: `d-${s}`, config: { algo: 'A', pinned: 0.5, seed: s }, objective: 500, metrics: { score: 500, baseline: 20 }, seed: s, status: 'completed' }))
-    const state: ExplorationState = { ...initExplorationState(M), stage: 'local', activeLevers: ['algo', 'pinned'], noiseFloor: 1 }
+    const runs: AnalysisRun[] = [0, 1, 2, 3, 4].map((s) => ({
+      key: `d-${s}`,
+      config: { algo: 'A', pinned: 0.5, seed: s },
+      objective: 500,
+      metrics: { score: 500, baseline: 20 },
+      seed: s,
+      status: 'completed',
+    }))
+    const state: ExplorationState = {
+      ...initExplorationState(M),
+      stage: 'local',
+      activeLevers: ['algo', 'pinned'],
+      noiseFloor: 1,
+    }
     expect(coverageGridRecs(state, runs, M, { key: 'objective', direction: 'max' })).toEqual([]) // no coverable numeric axis
   })
 
@@ -623,12 +797,31 @@ describe('escalation ladder — never converge until the space is covered', () =
     // A tiny range [0.5, 0.5000006]: at 1e-6 quantization only ~2 distinct points exist, far fewer than the
     // coverage target — the gate must still close (return []) rather than re-propose the same configs forever.
     const M: TrainerManifest = {
-      name: 'tiny', recordType: 'tiny-run', run: 'noop',
+      name: 'tiny',
+      recordType: 'tiny-run',
+      run: 'noop',
       objective: { name: 'score', direction: 'max' },
-      levers: { lr: { type: 'number', range: [0.5, 0.5000006], default: 0.5 }, seed: { type: 'number', default: 0 } },
+      levers: {
+        lr: { type: 'number', range: [0.5, 0.5000006], default: 0.5 },
+        seed: { type: 'number', default: 0 },
+      },
     }
-    const runs: AnalysisRun[] = [0.5, 0.5000003, 0.5000006].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => ({ key: `t-${lr}-${s}`, config: { lr, seed: s }, objective: 500, metrics: { score: 500, baseline: 20 }, seed: s, status: 'completed' })))
-    const state: ExplorationState = { ...initExplorationState(M), stage: 'local', activeLevers: ['lr'], noiseFloor: 1 }
+    const runs: AnalysisRun[] = [0.5, 0.5000003, 0.5000006].flatMap((lr) =>
+      [0, 1, 2, 3, 4].map((s) => ({
+        key: `t-${lr}-${s}`,
+        config: { lr, seed: s },
+        objective: 500,
+        metrics: { score: 500, baseline: 20 },
+        seed: s,
+        status: 'completed',
+      })),
+    )
+    const state: ExplorationState = {
+      ...initExplorationState(M),
+      stage: 'local',
+      activeLevers: ['lr'],
+      noiseFloor: 1,
+    }
     const recs = coverageGridRecs(state, runs, M, { key: 'objective', direction: 'max' })
     const configs = recs.flatMap((r) => r.spec.configs ?? [])
     const sigs = configs.map((c) => Number(c.config.lr).toFixed(6))
@@ -639,7 +832,12 @@ describe('escalation ladder — never converge until the space is covered', () =
   it('coverage samples do NOT pin the champion run seed (coverage is for breadth; seeds are added when climbing)', () => {
     runSeq = 0
     const runs: AnalysisRun[] = [0.5].flatMap((lr) => [7].map((s) => aRun(M2, lr, s))) // champion ran at seed 7
-    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
     const recs = coverageGridRecs(state, runs, M2, { key: 'objective', direction: 'max' })
     const configs = recs.flatMap((r) => r.spec.configs ?? [])
     expect(configs.length).toBeGreaterThan(0)
@@ -652,8 +850,16 @@ describe('escalation ladder — never converge until the space is covered', () =
     runSeq = 0
     const runs: AnalysisRun[] = []
     const nk = [0.1, 0.3, 0.5, 0.7, 0.9]
-    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52]) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo: 'A', lr, noise_knob: nk[s], seed: s }))
-    const state: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: { noise_knob: 0.5 }, noiseFloor: 1 }
+    for (const lr of [0.48, 0.49, 0.5, 0.51, 0.52])
+      for (const s of [0, 1, 2, 3, 4])
+        runs.push(evaluate({ algo: 'A', lr, noise_knob: nk[s], seed: s }))
+    const state: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: { noise_knob: 0.5 },
+      noiseFloor: 1,
+    }
     const step = nextExplorationStep(state, runs, MANIFEST, {})
     expect(step.done).toBe(false)
     expect(step.stateNext.activeLevers).toContain('noise_knob') // widened despite nothing fresh to sweep
@@ -677,7 +883,8 @@ describe('escalation ladder — never converge until the space is covered', () =
     }
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const algo of ['A', 'B']) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, optimizer: 'adam', seed: s }))
+    for (const algo of ['A', 'B'])
+      for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, optimizer: 'adam', seed: s }))
     const state: ExplorationState = {
       ...initExplorationState(CAT),
       stage: 'local',
@@ -710,7 +917,8 @@ describe('escalation ladder — never converge until the space is covered', () =
     }
     runSeq = 0
     const runs: AnalysisRun[] = []
-    for (const algo of ['A', 'B']) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, use_x: false, seed: s }))
+    for (const algo of ['A', 'B'])
+      for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo, use_x: false, seed: s }))
     const state: ExplorationState = {
       ...initExplorationState(BOOL),
       stage: 'local',
@@ -772,7 +980,9 @@ describe('escalation ladder — never converge until the space is covered', () =
     // No numeric active lever (only the categorical basin axis) ⇒ coverage is trivially satisfied; at the max
     // refineDepth the convergence message reflects the finest resolution (the terminal of "Explore more").
     runSeq = 0
-    const runs: AnalysisRun[] = [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr: 0.5, seed: s }))
+    const runs: AnalysisRun[] = [0, 1, 2, 3, 4].map((s) =>
+      evaluate({ algo: 'A', lr: 0.5, seed: s }),
+    )
     const state: ExplorationState = {
       ...initExplorationState(MANIFEST),
       stage: 'local',
@@ -798,10 +1008,29 @@ describe('escalation ladder — never converge until the space is covered', () =
       memberRunKeys: [],
     }
     const runs: AnalysisRun[] = [
-      { key: 'a', config: { algo: 'A', lr: 0.48, seed: 0 }, objective: 490, metrics: { score: 490, baseline: BASELINE }, seed: 0, status: 'completed' },
-      { key: 'b', config: { algo: 'A', lr: 0.52, seed: 0 }, objective: 490, metrics: { score: 490, baseline: BASELINE }, seed: 0, status: 'completed' },
+      {
+        key: 'a',
+        config: { algo: 'A', lr: 0.48, seed: 0 },
+        objective: 490,
+        metrics: { score: 490, baseline: BASELINE },
+        seed: 0,
+        status: 'completed',
+      },
+      {
+        key: 'b',
+        config: { algo: 'A', lr: 0.52, seed: 0 },
+        objective: 490,
+        metrics: { score: 490, baseline: BASELINE },
+        seed: 0,
+        status: 'completed',
+      },
     ]
-    const base = { ...initExplorationState(M2), stage: 'local' as const, activeLevers: ['algo', 'lr'], noiseFloor: 1 }
+    const base = {
+      ...initExplorationState(M2),
+      stage: 'local' as const,
+      activeLevers: ['algo', 'lr'],
+      noiseFloor: 1,
+    }
     const shallow = localRefineRecs(basin, runs, M2, { ...base, refineDepth: 0 })
     const deep = localRefineRecs(basin, runs, M2, { ...base, refineDepth: 2 })
     // at the coarse floor (range/64 = 0.0156) the 0.48–0.52 bracket is resolved → no points; the finer floor
@@ -814,11 +1043,27 @@ describe('escalation ladder — never converge until the space is covered', () =
     // Objective barely above baseline (gain 2 < the min-span margin) ⇒ clusterBasins finds nothing; yet with the
     // space covered (>= target spread setups) the run history has a clear best — never report "no maximum found".
     const runs: AnalysisRun[] = []
-    for (let i = 0; i < 20; i++) for (const s of [0, 1, 2, 3, 4]) {
-      runs.push({ key: `w-${i}-${s}`, config: { algo: 'A', lr: i / 19, seed: s }, objective: 22, metrics: { score: 22, baseline: 20 }, seed: s, status: 'completed' })
+    for (let i = 0; i < 20; i++)
+      for (const s of [0, 1, 2, 3, 4]) {
+        runs.push({
+          key: `w-${i}-${s}`,
+          config: { algo: 'A', lr: i / 19, seed: s },
+          objective: 22,
+          metrics: { score: 22, baseline: 20 },
+          seed: s,
+          status: 'completed',
+        })
+      }
+    expect(
+      clusterBasins(runs, { key: 'objective', direction: 'max' }, ['algo', 'lr'], 1, 20),
+    ).toEqual([])
+    const state: ExplorationState = {
+      ...initExplorationState(M2),
+      stage: 'local',
+      activeLevers: ['algo', 'lr'],
+      frozenLevers: {},
+      noiseFloor: 1,
     }
-    expect(clusterBasins(runs, { key: 'objective', direction: 'max' }, ['algo', 'lr'], 1, 20)).toEqual([])
-    const state: ExplorationState = { ...initExplorationState(M2), stage: 'local', activeLevers: ['algo', 'lr'], frozenLevers: {}, noiseFloor: 1 }
     const step = nextExplorationStep(state, runs, M2, {})
     expect(step.done).toBe(true)
     expect(step.stateNext.basins.length).toBeGreaterThanOrEqual(1) // a fallback basin synthesised from the best run
@@ -834,7 +1079,17 @@ describe('stale state heals when the run archive is emptied', () => {
       done: true,
       activeLevers: ['algo', 'lr'],
       frozenLevers: { noise_knob: 0.5 },
-      basins: [{ id: 'algo=A', region: { algo: 'A' }, centerConfig: { algo: 'A', lr: 0.5 }, peakObjective: 500, peakSeeds: 5, plateaued: true, memberRunKeys: [] }],
+      basins: [
+        {
+          id: 'algo=A',
+          region: { algo: 'A' },
+          centerConfig: { algo: 'A', lr: 0.5 },
+          peakObjective: 500,
+          peakSeeds: 5,
+          plateaued: true,
+          memberRunKeys: [],
+        },
+      ],
       declaredBasinId: 'algo=A',
       refineDepth: 3,
     }
@@ -848,7 +1103,10 @@ describe('stale state heals when the run archive is emptied', () => {
   })
 
   it('a zero-run state with a spent budget still converges (budget takes precedence over the reset)', () => {
-    const spent: ExplorationState = { ...initExplorationState(MANIFEST, { maxRuns: 0 }), stage: 'global' }
+    const spent: ExplorationState = {
+      ...initExplorationState(MANIFEST, { maxRuns: 0 }),
+      stage: 'global',
+    }
     const step = nextExplorationStep(spent, [], MANIFEST)
     expect(step.done).toBe(true)
     expect(step.stage).toBe('converged')
@@ -856,13 +1114,25 @@ describe('stale state heals when the run archive is emptied', () => {
 
   it('a CONVERGED state with a populated archive stays converged (idempotent re-entry, declaration preserved)', () => {
     runSeq = 0
-    const runs = [0.5].flatMap((lr) => [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })))
+    const runs = [0.5].flatMap((lr) =>
+      [0, 1, 2, 3, 4].map((s) => evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s })),
+    )
     const converged: ExplorationState = {
       ...initExplorationState(MANIFEST),
       stage: 'converged',
       done: true,
       activeLevers: ['algo', 'lr'],
-      basins: [{ id: 'algo=A', region: { algo: 'A' }, centerConfig: { algo: 'A', lr: 0.5 }, peakObjective: 500, peakSeeds: 5, plateaued: true, memberRunKeys: [] }],
+      basins: [
+        {
+          id: 'algo=A',
+          region: { algo: 'A' },
+          centerConfig: { algo: 'A', lr: 0.5 },
+          peakObjective: 500,
+          peakSeeds: 5,
+          plateaued: true,
+          memberRunKeys: [],
+        },
+      ],
       declaredBasinId: 'algo=A',
     }
     const step = nextExplorationStep(converged, runs, MANIFEST, {})
@@ -879,7 +1149,9 @@ describe('escalation ladder end-to-end', () => {
     // Seed a resolved lr peak for algo A so `local` plateaus immediately and the escalation ladder engages; the
     // inert noise_knob starts FROZEN and must be unfrozen (rung 1) before the search can honestly converge.
     const runs: AnalysisRun[] = []
-    for (const lr of [0.4, 0.45, 0.5, 0.55, 0.6]) for (const s of [0, 1, 2, 3, 4]) runs.push(evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s }))
+    for (const lr of [0.4, 0.45, 0.5, 0.55, 0.6])
+      for (const s of [0, 1, 2, 3, 4])
+        runs.push(evaluate({ algo: 'A', lr, noise_knob: 0.5, seed: s }))
     let state: ExplorationState = {
       ...initExplorationState(MANIFEST, { maxRuns: 1200 }),
       stage: 'local',
@@ -895,8 +1167,14 @@ describe('escalation ladder end-to-end', () => {
       state = step.stateNext
       if (state.activeLevers.includes('noise_knob')) unfroze = true
       // the freed lever is actually PROBED (swept or space-filled), not merely marked active
-      if (step.batch.some((r) => (r.spec.sweep && 'noise_knob' in r.spec.sweep) || (r.spec.configs ?? []).length)) climbedNoiseKnob = true
-      for (const rec of step.batch) for (const cfg of expandSpec(rec.spec, MANIFEST)) runs.push(evaluate(cfg))
+      if (
+        step.batch.some(
+          (r) => (r.spec.sweep && 'noise_knob' in r.spec.sweep) || (r.spec.configs ?? []).length,
+        )
+      )
+        climbedNoiseKnob = true
+      for (const rec of step.batch)
+        for (const cfg of expandSpec(rec.spec, MANIFEST)) runs.push(evaluate(cfg))
       rounds++
     }
     expect(unfroze).toBe(true) // rung 1 widened into the previously-fixed lever
@@ -908,7 +1186,11 @@ describe('escalation ladder end-to-end', () => {
 
 describe('end-to-end synthetic drive', () => {
   it('finds ALL maxima, declares the global one, and converges with improving regret', () => {
-    const { state, rounds } = drive(MANIFEST, { maxRuns: 600, targetObjective: 500, maxRounds: 200 })
+    const { state, rounds } = drive(MANIFEST, {
+      maxRuns: 600,
+      targetObjective: 500,
+      maxRounds: 200,
+    })
 
     expect(state.done).toBe(true)
     expect(state.stage).toBe('converged')
@@ -926,7 +1208,9 @@ describe('end-to-end synthetic drive', () => {
 
     // regret improves from first measurement to last
     expect(state.regret.length).toBeGreaterThan(1)
-    expect(state.regret[state.regret.length - 1].bestObjective).toBeGreaterThan(state.regret[0].bestObjective)
+    expect(state.regret[state.regret.length - 1].bestObjective).toBeGreaterThan(
+      state.regret[0].bestObjective,
+    )
   })
 
   it('respects the run budget as a hard ceiling', () => {
@@ -936,7 +1220,11 @@ describe('end-to-end synthetic drive', () => {
   })
 
   it('holds the stage and emits nothing while paused', () => {
-    const paused: ExplorationState = { ...initExplorationState(MANIFEST), stage: 'global', paused: true }
+    const paused: ExplorationState = {
+      ...initExplorationState(MANIFEST),
+      stage: 'global',
+      paused: true,
+    }
     const step = nextExplorationStep(paused, [], MANIFEST)
     expect(step.batch).toEqual([])
     expect(step.stage).toBe('global')
@@ -944,7 +1232,10 @@ describe('end-to-end synthetic drive', () => {
   })
 
   it('converges immediately and emits nothing once the budget is already spent', () => {
-    const spent: ExplorationState = { ...initExplorationState(MANIFEST, { maxRuns: 0 }), stage: 'global' }
+    const spent: ExplorationState = {
+      ...initExplorationState(MANIFEST, { maxRuns: 0 }),
+      stage: 'global',
+    }
     const step = nextExplorationStep(spent, [], MANIFEST)
     expect(step.done).toBe(true)
     expect(step.stage).toBe('converged')
@@ -995,7 +1286,8 @@ describe('min-direction (Wine-like) drive', () => {
     while (!state.done && rounds < 200) {
       const step = nextExplorationStep(state, runs, WINE, { targetObjective: 0.2 })
       state = step.stateNext
-      for (const rec of step.batch) for (const cfg of expandSpec(rec.spec, WINE)) runs.push(wineEval(cfg))
+      for (const rec of step.batch)
+        for (const cfg of expandSpec(rec.spec, WINE)) runs.push(wineEval(cfg))
       rounds++
     }
     expect(state.done).toBe(true)
@@ -1004,7 +1296,9 @@ describe('min-direction (Wine-like) drive', () => {
     expect(declared).toBeTruthy()
     expect(declared!.peakObjective).toBeLessThan(0.3) // near the 0.2 minimum
     // regret DEcreases for a minimisation objective
-    expect(state.regret[state.regret.length - 1].bestObjective).toBeLessThan(state.regret[0].bestObjective)
+    expect(state.regret[state.regret.length - 1].bestObjective).toBeLessThan(
+      state.regret[0].bestObjective,
+    )
   })
 })
 
@@ -1019,7 +1313,11 @@ describe('reproducibility — repeated autopilot runs declare the same model bas
     run: 'noop',
     objective: { name: 'val_rmse', direction: 'min' },
     levers: {
-      model_name: { type: 'choice', choices: ['gradient_boosting', 'random_forest', 'hist_gradient_boosting'], default: 'gradient_boosting' },
+      model_name: {
+        type: 'choice',
+        choices: ['gradient_boosting', 'random_forest', 'hist_gradient_boosting'],
+        default: 'gradient_boosting',
+      },
       learning_rate: { type: 'number', range: [0.005, 0.5], default: 0.1 },
       seed: { type: 'number', default: 0 },
     },
@@ -1031,7 +1329,8 @@ describe('reproducibility — repeated autopilot runs declare the same model bas
     const model = String(config.model_name)
     const lr = Number(config.learning_rate ?? 0.1)
     const seed = Number(config.seed ?? 0)
-    const floor = model === 'hist_gradient_boosting' ? 0.30 : model === 'gradient_boosting' ? 0.40 : 0.50
+    const floor =
+      model === 'hist_gradient_boosting' ? 0.3 : model === 'gradient_boosting' ? 0.4 : 0.5
     const jitter = ((((seed + phase) * 37) % 11) - 5) * 0.004 // in [-0.02, 0.024]
     return floor + 1.2 * (lr - 0.05) ** 2 + jitter
   }
@@ -1046,7 +1345,14 @@ describe('reproducibility — repeated autopilot runs declare the same model bas
       for (const rec of step.batch)
         for (const cfg of expandSpec(rec.spec, TAB)) {
           const v = rmseFor(cfg, phase)
-          runs.push({ key: `t-${phase}-${n++}`, config: { ...cfg }, objective: v, metrics: { val_rmse: v, baseline: TAB_BASELINE }, seed: Number(cfg.seed ?? 0), status: 'completed' })
+          runs.push({
+            key: `t-${phase}-${n++}`,
+            config: { ...cfg },
+            objective: v,
+            metrics: { val_rmse: v, baseline: TAB_BASELINE },
+            seed: Number(cfg.seed ?? 0),
+            status: 'completed',
+          })
         }
       rounds++
     }
@@ -1071,7 +1377,8 @@ describe('steer overrides', () => {
     let seed = 0
     for (const algo of ['A', 'B', 'C']) {
       for (const lr of [0, 0.2, 0.4, 0.6, 0.8, 1.0]) {
-        for (const nk of [0, 0.5, 1.0]) runs.push(evaluate({ algo, lr, noise_knob: nk, seed: seed++ % 5 }))
+        for (const nk of [0, 0.5, 1.0])
+          runs.push(evaluate({ algo, lr, noise_knob: nk, seed: seed++ % 5 }))
       }
     }
     const state: ExplorationState = {
@@ -1179,7 +1486,8 @@ describe('global-stage discrete coverage', () => {
     const runs: AnalysisRun[] = []
     let seed = 0
     for (const algo of ['A', 'B']) {
-      for (const lr of [0.3, 0.5, 0.7]) runs.push(evaluate({ algo, lr, noise_knob: 0.5, seed: seed++ % 5 }))
+      for (const lr of [0.3, 0.5, 0.7])
+        runs.push(evaluate({ algo, lr, noise_knob: 0.5, seed: seed++ % 5 }))
     }
     const state: ExplorationState = {
       ...initExplorationState(MANIFEST),
@@ -1284,24 +1592,38 @@ describe('gateConvergenceOnSplits (A5 split-consistency convergence gate)', () =
 
   it('lets a fully-replicated incumbent converge (no unrun splits to fill)', () => {
     const runs = [run({ lr: 1, window: '2024' }, 8), run({ lr: 1, window: '2022' }, 3)]
-    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, true, mk)).toBe(converged)
+    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, true, mk)).toBe(
+      converged,
+    )
   })
 
   it('bypasses the gate when budget is exhausted', () => {
     const runs = [run({ lr: 1, window: '2024' }, 20), run({ lr: 2, window: '2022' }, 1)]
-    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, false, mk)).toBe(converged)
+    expect(gateConvergenceOnSplits(converged, state, runs, manifest, criterion, false, mk)).toBe(
+      converged,
+    )
   })
 
   it('is a no-op when the manifest declares no split axis', () => {
     const runs = [run({ lr: 1, window: '2024' }, 20), run({ lr: 2, window: '2022' }, 1)]
     const noSplit = { levers: {} } as any
-    expect(gateConvergenceOnSplits(converged, state, runs, noSplit, criterion, true, mk)).toBe(converged)
+    expect(gateConvergenceOnSplits(converged, state, runs, noSplit, criterion, true, mk)).toBe(
+      converged,
+    )
   })
 
   it('never touches a non-converged step', () => {
-    const inProgress = { stage: 'local', batch: [], rationale: 'x', stateNext: state, done: false } as any
+    const inProgress = {
+      stage: 'local',
+      batch: [],
+      rationale: 'x',
+      stateNext: state,
+      done: false,
+    } as any
     const runs = [run({ lr: 1, window: '2024' }, 20)]
-    expect(gateConvergenceOnSplits(inProgress, state, runs, manifest, criterion, true, mk)).toBe(inProgress)
+    expect(gateConvergenceOnSplits(inProgress, state, runs, manifest, criterion, true, mk)).toBe(
+      inProgress,
+    )
   })
 
   // --- A4.3 champion "declare steady" gate (augments the split gate; can only make convergence stricter) ---
@@ -1344,7 +1666,9 @@ describe('gateConvergenceOnSplits (A5 split-consistency convergence gate)', () =
       runs.push(runM({ lr: 1, window: '2022' }, 8, { return_vs_hold_pct: -3 }, s))
     }
     // Still not steady (fails on 2022), but every evaluated split has ≥ XAI_MIN_SEEDS seeds ⇒ nothing to fill.
-    expect(gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)).toBe(converged)
+    expect(
+      gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk),
+    ).toBe(converged)
   })
 
   it('lets a STEADY incumbent converge (the champion gate holds on every window)', () => {
@@ -1352,7 +1676,9 @@ describe('gateConvergenceOnSplits (A5 split-consistency convergence gate)', () =
       runM({ lr: 1, window: '2024' }, 10, { return_vs_hold_pct: 5 }),
       runM({ lr: 1, window: '2022' }, 8, { return_vs_hold_pct: 4 }),
     ]
-    expect(gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk)).toBe(converged)
+    expect(
+      gateConvergenceOnSplits(converged, state, runs, champManifest, criterion, true, mk),
+    ).toBe(converged)
   })
 
   it('the champion gate never overrides the split-fill (unrun splits are replicated first)', () => {
@@ -1391,8 +1717,16 @@ describe('qualifyParetoBasins (A6 — Pareto-front basins on multi-objective fit
   ]
 
   it('flags the non-dominated trade-off basins and drops the dominated one', () => {
-    const runs = [rr('a', { ret: 10, sharpe: 1 }), rr('b', { ret: 1, sharpe: 10 }), rr('c', { ret: 1, sharpe: 1 })]
-    const out = qualifyParetoBasins([basin('A', ['a']), basin('B', ['b']), basin('C', ['c'])], runs, fitness)
+    const runs = [
+      rr('a', { ret: 10, sharpe: 1 }),
+      rr('b', { ret: 1, sharpe: 10 }),
+      rr('c', { ret: 1, sharpe: 1 }),
+    ]
+    const out = qualifyParetoBasins(
+      [basin('A', ['a']), basin('B', ['b']), basin('C', ['c'])],
+      runs,
+      fitness,
+    )
     const by = new Map(out.map((b) => [b.id, b]))
     expect(by.get('A')!.onParetoFront).toBe(true) // best on ret
     expect(by.get('B')!.onParetoFront).toBe(true) // best on sharpe

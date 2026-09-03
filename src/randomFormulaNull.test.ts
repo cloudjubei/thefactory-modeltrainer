@@ -39,7 +39,12 @@ const RET = [
 
 describe('randomFormulaNull deterministic scorers (Python-pinned)', () => {
   it('signalToWeights is dollar-neutral, unit-gross, matches Python', () => {
-    expect(signalToWeights([[1, 2, 3], [-1, 0, 1]])).toEqual([
+    expect(
+      signalToWeights([
+        [1, 2, 3],
+        [-1, 0, 1],
+      ]),
+    ).toEqual([
       [-0.5, 0, 0.5],
       [-0.5, 0, 0.5],
     ])

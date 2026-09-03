@@ -22,7 +22,10 @@
     {
       "id": "wine-quality-red",
       "files": [
-        { "relPath": "data/winequality-red.csv", "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv" }
+        {
+          "relPath": "data/winequality-red.csv",
+          "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/wine-quality/winequality-red.csv"
+        }
       ]
     }
   ],

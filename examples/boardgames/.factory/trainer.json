@@ -44,9 +44,7 @@
     "name": "win_rate",
     "direction": "max"
   },
-  "learnedCores": [
-    "alphazero"
-  ],
+  "learnedCores": ["alphazero"],
   "ratingAnchors": {
     "random": 0,
     "heuristic": 400,
@@ -104,427 +102,263 @@
   "levers": {
     "game": {
       "type": "choice",
-      "choices": [
-        "connect4"
-      ],
+      "choices": ["connect4"],
       "default": "connect4"
     },
     "model_name": {
       "type": "choice",
-      "choices": [
-        "random",
-        "heuristic",
-        "mcts",
-        "alphazero"
-      ],
+      "choices": ["random", "heuristic", "mcts", "alphazero"],
       "default": "mcts"
     },
     "mcts_sims": {
       "type": "number",
       "default": 80,
-      "range": [
-        1,
-        5000
-      ],
+      "range": [1, 5000],
       "appliesWhen": {
-        "model_name": [
-          "mcts"
-        ]
+        "model_name": ["mcts"]
       }
     },
     "mcts_solve_endgame": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        30
-      ],
+      "range": [0, 30],
       "appliesWhen": {
-        "model_name": [
-          "mcts"
-        ]
+        "model_name": ["mcts"]
       }
     },
     "az_iterations": {
       "type": "number",
       "default": 6,
-      "range": [
-        1,
-        100
-      ],
+      "range": [1, 100],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_selfplay_games": {
       "type": "number",
       "default": 18,
-      "range": [
-        1,
-        500
-      ],
+      "range": [1, 500],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_sims": {
       "type": "number",
       "default": 140,
-      "range": [
-        1,
-        2000
-      ],
+      "range": [1, 2000],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_epochs": {
       "type": "number",
       "default": 6,
-      "range": [
-        1,
-        50
-      ],
+      "range": [1, 50],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_distill_positions": {
       "type": "number",
       "default": 200,
-      "range": [
-        0,
-        2000
-      ],
+      "range": [0, 2000],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_distill_games": {
       "type": "number",
       "default": 80,
-      "range": [
-        0,
-        2000
-      ],
+      "range": [0, 2000],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_solve_endgame": {
       "type": "number",
       "default": 22,
-      "range": [
-        0,
-        30
-      ],
+      "range": [0, 30],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_warm_start": {
       "type": "number",
       "default": 1,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_tablebase": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_max_empty": {
       "type": "number",
       "default": 14,
-      "range": [
-        0,
-        20
-      ],
+      "range": [0, 20],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_exact_targets": {
       "type": "number",
       "default": 1,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_extend_positions": {
       "type": "number",
       "default": 2000,
-      "range": [
-        0,
-        200000
-      ],
+      "range": [0, 200000],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_extend_seconds": {
       "type": "number",
       "default": 5,
-      "range": [
-        0,
-        120
-      ],
+      "range": [0, 120],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_cap": {
       "type": "number",
       "default": 200000,
-      "range": [
-        10000,
-        50000000
-      ],
+      "range": [10000, 50000000],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_warm_start": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_endgame_persist": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_channels": {
       "type": "number",
       "default": 32,
-      "range": [
-        8,
-        512
-      ],
+      "range": [8, 512],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_blocks": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        40
-      ],
+      "range": [0, 40],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_residual": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_batchnorm": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_head_hidden": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1024
-      ],
+      "range": [0, 1024],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_global_pool": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_value_bins": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        128
-      ],
+      "range": [0, 128],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_selfplay_workers": {
       "type": "number",
       "default": 1,
-      "range": [
-        1,
-        32
-      ],
+      "range": [1, 32],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_league": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_league_p1_frac": {
       "type": "number",
       "default": 0.7,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_league_snapshots": {
       "type": "number",
       "default": 4,
-      "range": [
-        0,
-        20
-      ],
+      "range": [0, 20],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "az_league_anchor_frac": {
       "type": "number",
       "default": 0.25,
-      "range": [
-        0,
-        0.9
-      ],
+      "range": [0, 0.9],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     },
     "opponent": {
       "type": "choice",
-      "choices": [
-        "random",
-        "heuristic",
-        "mcts"
-      ],
+      "choices": ["random", "heuristic", "mcts"],
       "default": "random"
     },
     "eval_games": {
       "type": "number",
       "default": 40,
-      "range": [
-        2,
-        5000
-      ]
+      "range": [2, 5000]
     },
     "seed": {
       "type": "number",
@@ -533,25 +367,16 @@
     "az_aux_heads": {
       "type": "number",
       "default": 0,
-      "range": [
-        0,
-        1
-      ],
+      "range": [0, 1],
       "appliesWhen": {
-        "model_name": [
-          "alphazero"
-        ]
+        "model_name": ["alphazero"]
       }
     }
   },
   "diagnostics": {
     "splitAxis": {
-      "levers": [
-        "opponent"
-      ],
-      "testValues": [
-        "mcts"
-      ]
+      "levers": ["opponent"],
+      "testValues": ["mcts"]
     },
     "significance": {
       "alpha": 0.05
@@ -578,9 +403,7 @@
         "value": 1
       }
     ],
-    "confoundMetrics": [
-      "first_player_seat_winrate"
-    ]
+    "confoundMetrics": ["first_player_seat_winrate"]
   },
   "eta": {
     "unitsLever": "eval_games"

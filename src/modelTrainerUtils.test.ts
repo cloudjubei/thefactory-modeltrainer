@@ -307,10 +307,21 @@ describe('migrateExperimentSpec', () => {
     // `projection` dataset flavour), so expandExperimentMatrix throws "sweep names no manifest lever". The
     // manifest maps each swept value to a single projection value, so the axis rolls forward cleanly.
     const rules = [
-      { match: { use_indicators: true }, set: { projection: 'with_indicators' }, unset: ['use_indicators'] },
-      { match: { use_indicators: false }, set: { projection: 'standard' }, unset: ['use_indicators'] },
+      {
+        match: { use_indicators: true },
+        set: { projection: 'with_indicators' },
+        unset: ['use_indicators'],
+      },
+      {
+        match: { use_indicators: false },
+        set: { projection: 'standard' },
+        unset: ['use_indicators'],
+      },
     ]
-    const out = migrateExperimentSpec({ sweep: { use_indicators: [true, false] }, seeds: [0] }, rules)
+    const out = migrateExperimentSpec(
+      { sweep: { use_indicators: [true, false] }, seeds: [0] },
+      rules,
+    )
     expect(out.sweep).toEqual({ projection: ['with_indicators', 'standard'] })
     expect(out.seeds).toEqual([0])
   })
@@ -324,7 +335,11 @@ describe('migrateExperimentSpec', () => {
 
   it('migrates only the retired sweep axis, leaving live axes (and their order) intact', () => {
     const rules = [
-      { match: { use_indicators: true }, set: { projection: 'with_indicators' }, unset: ['use_indicators'] },
+      {
+        match: { use_indicators: true },
+        set: { projection: 'with_indicators' },
+        unset: ['use_indicators'],
+      },
     ]
     const out = migrateExperimentSpec(
       { sweep: { learning_rate: [0.1, 0.01], use_indicators: [true] } },
@@ -551,11 +566,26 @@ describe('parseDataCatalog', () => {
 
 describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from disk)', () => {
   const inst = (symbol: string, onDisk: Record<string, unknown> = {}) => ({
-    symbol, label: symbol, assetClass: 'crypto', source: 'binance', sourceSymbol: symbol,
-    intervals: ['1h'], directory: 'binance', tier: 1, barCloseTz: 'UTC', onDisk,
+    symbol,
+    label: symbol,
+    assetClass: 'crypto',
+    source: 'binance',
+    sourceSymbol: symbol,
+    intervals: ['1h'],
+    directory: 'binance',
+    tier: 1,
+    barCloseTz: 'UTC',
+    onDisk,
   })
-  const cls = (id: string, instruments: unknown[]) => ({ id, label: id, directory: id, instruments })
-  const catalog = [cls('crypto', [inst('BTCUSDT', { '1h': {} }), inst('DOGEUSDT', { '1h': {} })])] as never
+  const cls = (id: string, instruments: unknown[]) => ({
+    id,
+    label: id,
+    directory: id,
+    instruments,
+  })
+  const catalog = [
+    cls('crypto', [inst('BTCUSDT', { '1h': {} }), inst('DOGEUSDT', { '1h': {} })]),
+  ] as never
 
   it('catalogAssetIds returns the on-disk symbols, de-duplicated', () => {
     const classes = [
@@ -570,9 +600,15 @@ describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from
   })
 
   const manifest = {
-    name: 'x', objective: { name: 'r', direction: 'max' },
+    name: 'x',
+    objective: { name: 'r', direction: 'max' },
     levers: {
-      asset: { type: 'choice', choices: ['BTCUSDT', 'ETHUSDT'], choicesFrom: 'datacatalog', scope: 'dataset' },
+      asset: {
+        type: 'choice',
+        choices: ['BTCUSDT', 'ETHUSDT'],
+        choicesFrom: 'datacatalog',
+        scope: 'dataset',
+      },
       lr: { type: 'number', default: 0.01 },
     },
   } as unknown as TrainerManifest
@@ -584,13 +620,17 @@ describe('catalogAssetIds / withCatalogChoices (A6 — derive asset choices from
   })
 
   it('leaves a lever WITHOUT the flag alone even if the catalog has assets', () => {
-    const m = { ...manifest, levers: { asset: { type: 'choice', choices: ['BTCUSDT'] } } } as unknown as TrainerManifest
+    const m = {
+      ...manifest,
+      levers: { asset: { type: 'choice', choices: ['BTCUSDT'] } },
+    } as unknown as TrainerManifest
     expect(withCatalogChoices(m, catalog).levers.asset.choices).toEqual(['BTCUSDT'])
   })
 
   it('seeds a datacatalog lever that declares NO choices straight from the on-disk symbols', () => {
     const m = {
-      name: 'x', objective: { name: 'r', direction: 'max' },
+      name: 'x',
+      objective: { name: 'r', direction: 'max' },
       levers: { asset: { type: 'choice', choicesFrom: 'datacatalog' } },
     } as unknown as TrainerManifest
     expect(withCatalogChoices(m, catalog).levers.asset.choices).toEqual(['BTCUSDT', 'DOGEUSDT'])
@@ -625,7 +665,14 @@ describe('buildDataDiscoveryGoal', () => {
 describe('coerceDataSourceCandidates', () => {
   it('coerces fields and dedupes by name (case-insensitive)', () => {
     const out = coerceDataSourceCandidates([
-      { name: 'FRED macro', source: 'FRED', coverage: '1950-', cost: 'free', licence: 'attribution', description: 'macro' },
+      {
+        name: 'FRED macro',
+        source: 'FRED',
+        coverage: '1950-',
+        cost: 'free',
+        licence: 'attribution',
+        description: 'macro',
+      },
       { name: 'fred macro', source: 'FRED' },
       { nope: 1 },
     ])
@@ -679,9 +726,9 @@ describe('missingCrossTestValues', () => {
   })
 
   it('excludes the trained value even if explicitly requested', () => {
-    expect(missingCrossTestValues('BTCUSDT', ['BTCUSDT', 'ETHUSDT'], [], universe).missing).toEqual([
-      'ETHUSDT',
-    ])
+    expect(missingCrossTestValues('BTCUSDT', ['BTCUSDT', 'ETHUSDT'], [], universe).missing).toEqual(
+      ['ETHUSDT'],
+    )
   })
 
   it('dedupes and returns empty when everything is already tested', () => {
@@ -830,13 +877,18 @@ describe('validateTrainerManifest', () => {
   })
 
   it('accepts a bookBuild config of numeric knobs (the autopilot build-book pass)', () => {
-    const m = validateTrainerManifest({ ...manifest(), bookBuild: { seedGames: 0, estimateGames: 3, maxPlies: 10 } })
+    const m = validateTrainerManifest({
+      ...manifest(),
+      bookBuild: { seedGames: 0, estimateGames: 3, maxPlies: 10 },
+    })
     expect(m.bookBuild).toEqual({ seedGames: 0, estimateGames: 3, maxPlies: 10 })
   })
 
   it('rejects a bookBuild that is not an object of numbers or booleans', () => {
     expect(() => validateTrainerManifest({ ...manifest(), bookBuild: [1, 2] })).toThrow(/bookBuild/)
-    expect(() => validateTrainerManifest({ ...manifest(), bookBuild: { maxPlies: 'deep' } })).toThrow(/bookBuild/)
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), bookBuild: { maxPlies: 'deep' } }),
+    ).toThrow(/bookBuild/)
   })
 
   it('accepts the SOLVE-IT M1 winning-strategy bookBuild (booleans allowed alongside numbers)', () => {
@@ -849,15 +901,21 @@ describe('validateTrainerManifest', () => {
     const good = { maxGenerations: 1, hyperparams: { az_iterations: 2, az_sims: 80 } }
     expect(validateTrainerManifest({ ...manifest(), improve: good }).improve).toEqual(good)
     expect(() => validateTrainerManifest({ ...manifest(), improve: [1] })).toThrow(/improve/)
-    expect(() => validateTrainerManifest({ ...manifest(), improve: { maxGenerations: 'lots' } })).toThrow(/improve/)
-    expect(() => validateTrainerManifest({ ...manifest(), improve: { hyperparams: { az_sims: 'many' } } })).toThrow(/improve/)
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), improve: { maxGenerations: 'lots' } }),
+    ).toThrow(/improve/)
+    expect(() =>
+      validateTrainerManifest({ ...manifest(), improve: { hyperparams: { az_sims: 'many' } } }),
+    ).toThrow(/improve/)
   })
 
   it('accepts a rate config (bounded gauntlet knobs) and rejects malformed ones', () => {
     const good = { maxModels: 16, gamesPerRung: 12, maxReferenceSims: 300 }
     expect(validateTrainerManifest({ ...manifest(), rate: good }).rate).toEqual(good)
     expect(() => validateTrainerManifest({ ...manifest(), rate: [1] })).toThrow(/rate/)
-    expect(() => validateTrainerManifest({ ...manifest(), rate: { maxModels: 'all' } })).toThrow(/rate/)
+    expect(() => validateTrainerManifest({ ...manifest(), rate: { maxModels: 'all' } })).toThrow(
+      /rate/,
+    )
   })
 
   it('rejects a missing name', () => {
@@ -910,13 +968,19 @@ describe('validateTrainerManifest', () => {
 
   it('rejects a play template without {configPath}', () => {
     expect(() =>
-      validateTrainerManifest({ ...manifest(), play: 'python -m harness.play --serve --summary-out {summaryOut}' }),
+      validateTrainerManifest({
+        ...manifest(),
+        play: 'python -m harness.play --serve --summary-out {summaryOut}',
+      }),
     ).toThrow(/configPath/)
   })
 
   it('rejects a play template without {summaryOut}', () => {
     expect(() =>
-      validateTrainerManifest({ ...manifest(), play: 'python -m harness.play --serve --config-json {configPath}' }),
+      validateTrainerManifest({
+        ...manifest(),
+        play: 'python -m harness.play --serve --config-json {configPath}',
+      }),
     ).toThrow(/summaryOut/)
   })
 
@@ -930,7 +994,10 @@ describe('validateTrainerManifest', () => {
 
   it('rejects a gauntlet template missing a placeholder and preserves a valid one', () => {
     expect(() =>
-      validateTrainerManifest({ ...manifest(), gauntlet: 'python -m harness.gauntlet --summary-out {summaryOut}' }),
+      validateTrainerManifest({
+        ...manifest(),
+        gauntlet: 'python -m harness.gauntlet --summary-out {summaryOut}',
+      }),
     ).toThrow(/configPath/)
     const m = validateTrainerManifest({
       ...manifest(),
@@ -955,13 +1022,19 @@ describe('validateTrainerManifest', () => {
 
   it('rejects a mineData template without {configPath}', () => {
     expect(() =>
-      validateTrainerManifest({ ...manifest(), mineData: 'python -m trainer.mine --summary-out {summaryOut}' }),
+      validateTrainerManifest({
+        ...manifest(),
+        mineData: 'python -m trainer.mine --summary-out {summaryOut}',
+      }),
     ).toThrow(/configPath/)
   })
 
   it('rejects a mineData template without {summaryOut}', () => {
     expect(() =>
-      validateTrainerManifest({ ...manifest(), mineData: 'python -m trainer.mine --config-json {configPath}' }),
+      validateTrainerManifest({
+        ...manifest(),
+        mineData: 'python -m trainer.mine --config-json {configPath}',
+      }),
     ).toThrow(/summaryOut/)
   })
 
@@ -1532,7 +1605,10 @@ describe('validateSpecAgainstManifest', () => {
 
   it('accepts a spec whose values are all in range / valid choices', () => {
     expect(
-      validateSpecAgainstManifest(vm, { fixed: { algo: 'a', lr: 0.05 }, sweep: { steps: [50, 100] } }),
+      validateSpecAgainstManifest(vm, {
+        fixed: { algo: 'a', lr: 0.05 },
+        sweep: { steps: [50, 100] },
+      }),
     ).toEqual([])
   })
   it('flags a number outside its declared range (fixed and sweep)', () => {
@@ -1544,9 +1620,7 @@ describe('validateSpecAgainstManifest', () => {
     expect(validateSpecAgainstManifest(vm, { fixed: { algo: 'a' } })).toEqual([])
   })
   it('compares array-valued choices by deep value (net_arch)', () => {
-    expect(
-      validateSpecAgainstManifest(vm, { fixed: { net_arch: [256, 256] } }),
-    ).toEqual([])
+    expect(validateSpecAgainstManifest(vm, { fixed: { net_arch: [256, 256] } })).toEqual([])
     expect(validateSpecAgainstManifest(vm, { fixed: { net_arch: [1, 2] } })).toHaveLength(1)
   })
   it('flags a non-boolean value for a boolean lever', () => {
@@ -1590,8 +1664,12 @@ describe('validateSpecAgainstManifest', () => {
         asset: { type: 'choice', choices: ['btc', 'eth'], scope: 'dataset', default: 'btc' },
       },
     })
-    expect(validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'doge' }] })).toHaveLength(1)
-    expect(validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'eth' }] })).toEqual([])
+    expect(
+      validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'doge' }] }),
+    ).toHaveLength(1)
+    expect(
+      validateSpecAgainstManifest(bm, { datasets: [{ asset: 'btc' }, { asset: 'eth' }] }),
+    ).toEqual([])
   })
   it('appliesWhen control satisfied via a DATASET/ENVIRONMENT bundle is not flagged (bundles set levers too)', () => {
     const bm = manifest({
@@ -2204,7 +2282,13 @@ describe('prompt builders', () => {
       runKey: 'feed',
       config: {},
       criterion: { key: 'objective', direction: 'max' },
-      attribution: { topGroups: [['layer:1d', 0.4]], driverCounts: [['layer:1d', 12], ['layer:1h', 3]] },
+      attribution: {
+        topGroups: [['layer:1d', 0.4]],
+        driverCounts: [
+          ['layer:1d', 12],
+          ['layer:1h', 3],
+        ],
+      },
       importances: [],
     })
     expect(withDrivers).toMatch(/Per-step drivers.*layer:1d=12, layer:1h=3\./)
@@ -2252,8 +2336,21 @@ describe('describeRunFailures (Explore stop-message diagnosis)', () => {
   it('surfaces the newest failed run error + last log line', () => {
     const records = [
       { content: { status: 'completed', objective: 0.9 } },
-      { content: { status: 'failed', error: 'unknown config keys: [device]', ranAt: '2026-08-10T09:00:00Z' } },
-      { content: { status: 'failed', error: 'python3: command not found', ranAt: '2026-08-10T10:00:00Z', logTail: ['/bin/sh: python3: command not found'] } },
+      {
+        content: {
+          status: 'failed',
+          error: 'unknown config keys: [device]',
+          ranAt: '2026-08-10T09:00:00Z',
+        },
+      },
+      {
+        content: {
+          status: 'failed',
+          error: 'python3: command not found',
+          ranAt: '2026-08-10T10:00:00Z',
+          logTail: ['/bin/sh: python3: command not found'],
+        },
+      },
     ]
     const out = describeRunFailures(records)
     expect(out).toContain('python3: command not found') // newest first
@@ -2263,7 +2360,16 @@ describe('describeRunFailures (Explore stop-message diagnosis)', () => {
 
   it('collapses a multi-line error to its first line and appends the log tail once', () => {
     const out = describeRunFailures(
-      [{ content: { status: 'failed', error: 'Traceback...\nValueError: bad', ranAt: 't', logTail: ['ValueError: bad'] } }],
+      [
+        {
+          content: {
+            status: 'failed',
+            error: 'Traceback...\nValueError: bad',
+            ranAt: 't',
+            logTail: ['ValueError: bad'],
+          },
+        },
+      ],
       1,
     )
     expect(out).toBe(' Last failure:\n• Traceback... — ValueError: bad')
@@ -2285,19 +2391,26 @@ describe('validateRunProvenance (§C.9 reproducibility soft-flag)', () => {
 
   it('is complete when the tuple is present (seed satisfied by the top-level seed)', () => {
     expect(
-      validateRunProvenance({ seed: 3, provenance: { gitCommit: 'a', configHash: 'b', dataVersion: 'v1' } }),
+      validateRunProvenance({
+        seed: 3,
+        provenance: { gitCommit: 'a', configHash: 'b', dataVersion: 'v1' },
+      }),
     ).toEqual({ complete: true, missing: [] })
   })
 
   it('accepts a provenance-nested seed too, and flags only the genuinely-absent keys', () => {
-    expect(
-      validateRunProvenance({ provenance: { gitCommit: 'a', seed: 3 } }),
-    ).toEqual({ complete: false, missing: ['configHash', 'dataVersion'] })
+    expect(validateRunProvenance({ provenance: { gitCommit: 'a', seed: 3 } })).toEqual({
+      complete: false,
+      missing: ['configHash', 'dataVersion'],
+    })
   })
 
   it('treats empty-string / null provenance values as missing', () => {
     expect(
-      validateRunProvenance({ seed: 1, provenance: { gitCommit: '', configHash: null, dataVersion: 'v1' } }),
+      validateRunProvenance({
+        seed: 1,
+        provenance: { gitCommit: '', configHash: null, dataVersion: 'v1' },
+      }),
     ).toEqual({ complete: false, missing: ['gitCommit', 'configHash'] })
   })
 })
@@ -2620,8 +2733,18 @@ describe('validateDecisionTrace', () => {
 describe('summarizeSnapshotTraces (A6 mid-training snapshot index)', () => {
   it('shapes a well-formed index, sorted by training step, coercing keyMetrics', () => {
     const rows = summarizeSnapshotTraces([
-      { step: 200, checkpointRef: 'm.step200', traceFile: 'checkpoints/m.snapshots.jsonl', keyMetrics: { actionCounts: { hold: 5, buy: 2, bad: 'x' }, totalSteps: 7 } },
-      { step: 100, checkpointRef: 'm.step100', traceFile: 'checkpoints/m.snapshots.jsonl', keyMetrics: { actionCounts: { hold: 3 }, totalSteps: 3 } },
+      {
+        step: 200,
+        checkpointRef: 'm.step200',
+        traceFile: 'checkpoints/m.snapshots.jsonl',
+        keyMetrics: { actionCounts: { hold: 5, buy: 2, bad: 'x' }, totalSteps: 7 },
+      },
+      {
+        step: 100,
+        checkpointRef: 'm.step100',
+        traceFile: 'checkpoints/m.snapshots.jsonl',
+        keyMetrics: { actionCounts: { hold: 3 }, totalSteps: 3 },
+      },
     ])
     expect(rows.map((r) => r.step)).toEqual([100, 200]) // ascending training order
     expect(rows[1]).toEqual({
@@ -2672,7 +2795,12 @@ describe('datasetAlignmentSignature', () => {
 describe('summarizeStepAttribution', () => {
   it('returns undefined when no step carries per-step group saliency', () => {
     expect(
-      summarizeStepAttribution({ steps: [{ step: 0, action: 'buy' }, { step: 1, action: 'hold' }] }),
+      summarizeStepAttribution({
+        steps: [
+          { step: 0, action: 'buy' },
+          { step: 1, action: 'hold' },
+        ],
+      }),
     ).toBeUndefined()
   })
 
@@ -2688,7 +2816,11 @@ describe('summarizeStepAttribution', () => {
       groups: ['engineered:drawdown', 'layer:1d', 'layer:1h'],
       perStep: [
         { step: 0, dominantGroup: 'layer:1d', byGroup: { 'layer:1d': 3, 'layer:1h': 1 } },
-        { step: 2, dominantGroup: 'engineered:drawdown', byGroup: { 'layer:1d': 1, 'engineered:drawdown': 4 } },
+        {
+          step: 2,
+          dominantGroup: 'engineered:drawdown',
+          byGroup: { 'layer:1d': 1, 'engineered:drawdown': 4 },
+        },
       ],
       dominanceCounts: { 'layer:1d': 1, 'engineered:drawdown': 1 },
       samples: 2,
@@ -3545,20 +3677,29 @@ describe('isRunAffectedByFidelityLookahead', () => {
   it('flags 1h@1d+1w (coarse-only at an hourly step) as affected', () => {
     expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: '1d+1w' })).toBe(true)
   })
-  it.each(['1d', '1h', '1h+1d', '1d+1w'])('flags a minute step observing only %s as affected', (fset) => {
-    expect(isRunAffectedByFidelityLookahead({ timeframe: '1m', fidelity_set: fset })).toBe(true)
-  })
+  it.each(['1d', '1h', '1h+1d', '1d+1w'])(
+    'flags a minute step observing only %s as affected',
+    (fset) => {
+      expect(isRunAffectedByFidelityLookahead({ timeframe: '1m', fidelity_set: fset })).toBe(true)
+    },
+  )
 
   // NOT affected — the base/run cadence IS observed (these v5 runs are correct; must NOT be invalidated).
-  it.each(['1h+1d', '1h+1d+1w', '1h'])('does NOT flag %s at an hourly step (base 1h observed)', (fset) => {
-    expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: fset })).toBe(false)
-  })
+  it.each(['1h+1d', '1h+1d+1w', '1h'])(
+    'does NOT flag %s at an hourly step (base 1h observed)',
+    (fset) => {
+      expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: fset })).toBe(false)
+    },
+  )
   it('does NOT flag 1h@1d run-through the daily step (1d@1h: base 1h observed, divider handles it)', () => {
     expect(isRunAffectedByFidelityLookahead({ timeframe: '1d', fidelity_set: '1h' })).toBe(false)
   })
-  it.each(['1d', '1d+1w', 'auto'])('does NOT flag a daily step observing %s (run cadence 1d observed)', (fset) => {
-    expect(isRunAffectedByFidelityLookahead({ timeframe: '1d', fidelity_set: fset })).toBe(false)
-  })
+  it.each(['1d', '1d+1w', 'auto'])(
+    'does NOT flag a daily step observing %s (run cadence 1d observed)',
+    (fset) => {
+      expect(isRunAffectedByFidelityLookahead({ timeframe: '1d', fidelity_set: fset })).toBe(false)
+    },
+  )
   it('does NOT flag single-timeline or auto (base always observed)', () => {
     expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: '1h' })).toBe(false)
     expect(isRunAffectedByFidelityLookahead({ timeframe: '1h', fidelity_set: 'auto' })).toBe(false)
@@ -3574,9 +3715,9 @@ describe('isRunAffectedByFidelityLookahead', () => {
 
 describe('isSpecAffectedByFidelityLookahead', () => {
   it('flags a fixed-only spec on the look-ahead path (1h@1d)', () => {
-    expect(isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1d' } })).toBe(
-      true,
-    )
+    expect(
+      isSpecAffectedByFidelityLookahead({ fixed: { timeframe: '1h', fidelity_set: '1d' } }),
+    ).toBe(true)
   })
   it('does NOT flag a fixed-only multi-layer spec that observes the base (1h+1d)', () => {
     expect(
@@ -3791,7 +3932,10 @@ describe('mergeHypothesisSpecs', () => {
   })
   it('unions sweep DIMENSIONS across members that each sweep a different lever', () => {
     // A member missing a swept lever contributes [] to that lever's union — the axis is not lost.
-    const merged = mergeHypothesisSpecs([{ sweep: { lr: [0.1] } }, { sweep: { batch: [32] } }] as any)
+    const merged = mergeHypothesisSpecs([
+      { sweep: { lr: [0.1] } },
+      { sweep: { batch: [32] } },
+    ] as any)
     expect(merged.sweep).toEqual({ batch: [32], lr: [0.1] })
   })
   it('unions compare values even when only one member declares the compare block', () => {
@@ -3846,8 +3990,20 @@ describe('pickCanonicalHypothesis', () => {
   })
   it('multiple manual with the SAME status ranks them (not a conflict)', () => {
     const r = pickCanonicalHypothesis([
-      h({ id: 'a', verdictSource: 'manual', status: 'proven', source: 'llm', createdAt: '2026-02-01' }),
-      h({ id: 'b', verdictSource: 'manual', status: 'proven', source: 'human', createdAt: '2026-03-01' }),
+      h({
+        id: 'a',
+        verdictSource: 'manual',
+        status: 'proven',
+        source: 'llm',
+        createdAt: '2026-02-01',
+      }),
+      h({
+        id: 'b',
+        verdictSource: 'manual',
+        status: 'proven',
+        source: 'human',
+        createdAt: '2026-03-01',
+      }),
     ] as any)
     expect(r.conflict).toBe(false)
     expect(r.canonical!.id).toBe('b') // human outranks llm within the manual set
@@ -4155,7 +4311,13 @@ describe('planHypothesisSpecMigration', () => {
         '2026-07-16T00:00:00Z',
         hashTrainingConfig,
       ),
-    ).toEqual({ writes: [], deletes: [], changedPapers: [], changedModels: [], changedExperiments: [] })
+    ).toEqual({
+      writes: [],
+      deletes: [],
+      changedPapers: [],
+      changedModels: [],
+      changedExperiments: [],
+    })
   })
 
   it('repoints an experiment linked to a re-keyed hypothesis onto the survivor id', () => {
@@ -4219,7 +4381,11 @@ describe('planHypothesisSpecMigration', () => {
   })
 
   it('defers a group with an in-flight campaign (would orphan its pending write)', () => {
-    const a = h('A', { fixed: { algo: 'old' } }, { campaign: { status: 'running', activityId: 'x' } })
+    const a = h(
+      'A',
+      { fixed: { algo: 'old' } },
+      { campaign: { status: 'running', activityId: 'x' } },
+    )
     expect(run([a]).writes).toEqual([])
   })
 
@@ -4233,11 +4399,15 @@ describe('planHypothesisSpecMigration', () => {
   })
 
   it('drops stale evidence/transitions/campaign on a re-keyed survivor', () => {
-    const a = h('A', { fixed: { algo: 'old' } }, {
-      evidence: { matchedKeys: ['k'], status: 'proven' },
-      transitions: [{ at: 't', from: 'untested', to: 'proven' }],
-      campaign: { status: 'completed', activityId: 'x' },
-    })
+    const a = h(
+      'A',
+      { fixed: { algo: 'old' } },
+      {
+        evidence: { matchedKeys: ['k'], status: 'proven' },
+        transitions: [{ at: 't', from: 'untested', to: 'proven' }],
+        campaign: { status: 'completed', activityId: 'x' },
+      },
+    )
     const p = run([a])
     expect('evidence' in p.writes[0]).toBe(false)
     expect('transitions' in p.writes[0]).toBe(false)
@@ -4257,7 +4427,11 @@ describe('planHypothesisSpecMigration', () => {
     const idC = idOf({ fixed: { algo: 'c' } })
     const paper = { id: 'p1', hypothesisIds: [idA], hypothesisWeights: { [idA]: 4 } }
     const p = run(
-      [h(idA, { fixed: { algo: 'a' } }), h(idB, { fixed: { algo: 'b' } }), h(idC, { fixed: { algo: 'c' } })],
+      [
+        h(idA, { fixed: { algo: 'a' } }),
+        h(idB, { fixed: { algo: 'b' } }),
+        h(idC, { fixed: { algo: 'c' } }),
+      ],
       [paper],
       [],
       chain,
@@ -4653,17 +4827,26 @@ describe('capRunSummaryForStorage', () => {
   })
 
   it('truncates a runaway decisionTrace.steps to a contiguous prefix and records the pre-cap totalSteps', () => {
-    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 100 }, (_, i) => ({ step: i, action: 'hold' }))
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 100 }, (_, i) => ({
+      step: i,
+      action: 'hold',
+    }))
     const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps } } }))
-    const trace = (out.artifacts as { decisionTrace: { steps: unknown[]; totalSteps: number } }).decisionTrace
+    const trace = (out.artifacts as { decisionTrace: { steps: unknown[]; totalSteps: number } })
+      .decisionTrace
     expect(trace.steps).toHaveLength(MAX_DECISION_TRACE_STEPS)
     expect((trace.steps[0] as { step: number }).step).toBe(0) // contiguous prefix (adjacency preserved)
     expect(trace.totalSteps).toBe(steps.length)
   })
 
   it('preserves a producer-supplied totalSteps rather than overwriting it with the kept count', () => {
-    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 1 }, (_, i) => ({ step: i, action: 'hold' }))
-    const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps, totalSteps: 999999 } } }))
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 1 }, (_, i) => ({
+      step: i,
+      action: 'hold',
+    }))
+    const out = capRunSummaryForStorage(
+      base({ artifacts: { decisionTrace: { steps, totalSteps: 999999 } } }),
+    )
     const trace = (out.artifacts as { decisionTrace: { totalSteps: number } }).decisionTrace
     expect(trace.totalSteps).toBe(999999)
   })
@@ -4676,7 +4859,10 @@ describe('capRunSummaryForStorage', () => {
   })
 
   it('preserves a trace-level attentionMatrix through the step-cap (grid is source-capped, never dropped here)', () => {
-    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 10 }, (_, i) => ({ step: i, action: 'hold' }))
+    const steps = Array.from({ length: MAX_DECISION_TRACE_STEPS + 10 }, (_, i) => ({
+      step: i,
+      action: 'hold',
+    }))
     const attentionMatrix = {
       rows: ['t0', 't1'],
       cols: ['c0', 'c1'],
@@ -4686,8 +4872,12 @@ describe('capRunSummaryForStorage', () => {
       ],
       method: 'attention-weights',
     }
-    const out = capRunSummaryForStorage(base({ artifacts: { decisionTrace: { steps, attentionMatrix } } }))
-    const trace = (out.artifacts as { decisionTrace: { steps: unknown[]; attentionMatrix: unknown } }).decisionTrace
+    const out = capRunSummaryForStorage(
+      base({ artifacts: { decisionTrace: { steps, attentionMatrix } } }),
+    )
+    const trace = (
+      out.artifacts as { decisionTrace: { steps: unknown[]; attentionMatrix: unknown } }
+    ).decisionTrace
     expect(trace.steps).toHaveLength(MAX_DECISION_TRACE_STEPS)
     expect(trace.attentionMatrix).toEqual(attentionMatrix)
   })
@@ -4773,7 +4963,10 @@ describe('computeScorecard', () => {
   })
 
   it('a missing fitness metric resolves to NaN', () => {
-    const card = computeScorecard({ ...objMax, fitness: [{ metric: 'gone', direction: 'max' }] }, { objective: 42 })
+    const card = computeScorecard(
+      { ...objMax, fitness: [{ metric: 'gone', direction: 'max' }] },
+      { objective: 42 },
+    )
     expect(Number.isNaN(card.fitness[0].value)).toBe(true)
   })
 
@@ -4783,7 +4976,13 @@ describe('computeScorecard', () => {
       { objective: 42, metrics: { oos_return_pct: 5 } },
     )
     expect(card.gates).toHaveLength(1)
-    expect(card.gates[0]).toMatchObject({ metric: 'oos_return_pct', op: '>', bound: 0, actual: 5, pass: true })
+    expect(card.gates[0]).toMatchObject({
+      metric: 'oos_return_pct',
+      op: '>',
+      bound: 0,
+      actual: 5,
+      pass: true,
+    })
     expect(card.accepted).toBe(true)
   })
 
@@ -4797,10 +4996,20 @@ describe('computeScorecard', () => {
   })
 
   it('resolves a metric-vs-metric gate bound (beat buy-and-hold)', () => {
-    const beatHold = { metric: 'oos_return_pct', op: '>' as const, value: { metric: 'hold_return_pct' } }
-    const pass = computeScorecard({ ...objMax, gates: [beatHold] }, { objective: 1, metrics: { oos_return_pct: 10, hold_return_pct: 4 } })
+    const beatHold = {
+      metric: 'oos_return_pct',
+      op: '>' as const,
+      value: { metric: 'hold_return_pct' },
+    }
+    const pass = computeScorecard(
+      { ...objMax, gates: [beatHold] },
+      { objective: 1, metrics: { oos_return_pct: 10, hold_return_pct: 4 } },
+    )
     expect(pass.gates[0]).toMatchObject({ bound: 4, actual: 10, pass: true })
-    const fail = computeScorecard({ ...objMax, gates: [beatHold] }, { objective: 1, metrics: { oos_return_pct: 2, hold_return_pct: 4 } })
+    const fail = computeScorecard(
+      { ...objMax, gates: [beatHold] },
+      { objective: 1, metrics: { oos_return_pct: 2, hold_return_pct: 4 } },
+    )
     expect(fail.gates[0]).toMatchObject({ bound: 4, actual: 2, pass: false })
   })
 
@@ -4808,7 +5017,10 @@ describe('computeScorecard', () => {
     // A run that predates a metric (the key isn't in `metrics` at all) can't be judged on that gate — skip it
     // rather than auto-fail. But when it's the ONLY gate, there is nothing we CAN evaluate, so the run is NOT
     // "accepted" (that would vacuously accept every failed/old run and make the accepted filter a no-op).
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] }, { objective: 42, metrics: { other: 1 } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'gone', op: '>', value: 0 }] },
+      { objective: 42, metrics: { other: 1 } },
+    )
     expect(card.gates[0].applicable).toBe(false)
     expect(card.gates[0].pass).toBe(false)
     expect(card.accepted).toBe(false) // no applicable gate ⇒ can't verify ⇒ NOT accepted (no vacuous accept)
@@ -4829,15 +5041,25 @@ describe('computeScorecard', () => {
     const gates = [{ metric: 'ret', op: '>' as const, value: 0 }]
     const metrics = { ret: 5 }
     expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics }).accepted).toBe(true)
-    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' }).accepted).toBe(false)
-    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'invalid' }).accepted).toBe(false)
     expect(
-      computeScorecard({ ...objMax, gates }, { objective: 1, metrics, health: { status: 'degenerate' } }).accepted,
+      computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'failed' }).accepted,
+    ).toBe(false)
+    expect(
+      computeScorecard({ ...objMax, gates }, { objective: 1, metrics, status: 'invalid' }).accepted,
+    ).toBe(false)
+    expect(
+      computeScorecard(
+        { ...objMax, gates },
+        { objective: 1, metrics, health: { status: 'degenerate' } },
+      ).accepted,
     ).toBe(false)
   })
 
   it('a PRESENT but non-finite gate metric FAILS (a measured-garbage value is not skipped)', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] }, { objective: 1, metrics: { m: NaN } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '>', value: 0 }] },
+      { objective: 1, metrics: { m: NaN } },
+    )
     expect(card.gates[0].applicable).toBe(true)
     expect(card.gates[0].pass).toBe(false)
     expect(card.accepted).toBe(false)
@@ -4868,12 +5090,19 @@ describe('computeScorecard', () => {
       { metric: 'a', op: '>' as const, value: 0 },
       { metric: 'b', op: '>' as const, value: 0 },
     ]
-    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: 1 } }).accepted).toBe(true)
-    expect(computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: -1 } }).accepted).toBe(false)
+    expect(
+      computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: 1 } }).accepted,
+    ).toBe(true)
+    expect(
+      computeScorecard({ ...objMax, gates }, { objective: 1, metrics: { a: 1, b: -1 } }).accepted,
+    ).toBe(false)
   })
 
   it('a gate can read the objective via the `objective` key', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'objective', op: '>=', value: 40 }] }, { objective: 42 })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'objective', op: '>=', value: 40 }] },
+      { objective: 42 },
+    )
     expect(card.gates[0]).toMatchObject({ actual: 42, bound: 40, pass: true })
   })
 
@@ -4891,30 +5120,45 @@ describe('computeScorecard', () => {
     ['!=', 5, 6, true],
     ['!=', 5, 5, false],
   ] as const)('evaluates %s (actual=%d bound=%d) as %s', (op, actual, bound, expected) => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op, value: bound }] }, { objective: 1, metrics: { m: actual } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op, value: bound }] },
+      { objective: 1, metrics: { m: actual } },
+    )
     expect(card.gates[0].pass).toBe(expected)
   })
 
   it('a PRESENT NaN actual fails even the != operator', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '!=', value: 5 }] }, { objective: 1, metrics: { m: NaN } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '!=', value: 5 }] },
+      { objective: 1, metrics: { m: NaN } },
+    )
     expect(card.gates[0]).toMatchObject({ applicable: true, pass: false })
   })
 
   it('renders a default label from metric/op/literal when none is given', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }] }, { objective: 1, metrics: { oos_return_pct: 1 } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: 0 }] },
+      { objective: 1, metrics: { oos_return_pct: 1 } },
+    )
     expect(card.gates[0].label).toBe('oos_return_pct > 0')
   })
 
   it('renders a default label naming the referenced metric', () => {
     const card = computeScorecard(
-      { ...objMax, gates: [{ metric: 'oos_return_pct', op: '>', value: { metric: 'hold_return_pct' } }] },
+      {
+        ...objMax,
+        gates: [{ metric: 'oos_return_pct', op: '>', value: { metric: 'hold_return_pct' } }],
+      },
       { objective: 1, metrics: { oos_return_pct: 5, hold_return_pct: 4 } },
     )
     expect(card.gates[0].label).toBe('oos_return_pct > hold_return_pct')
   })
 
   it('preserves a custom gate label', () => {
-    const card = computeScorecard({ ...objMax, gates: [{ metric: 'm', op: '>', value: 0, label: 'is profitable' }] }, { objective: 1, metrics: { m: 1 } })
+    const card = computeScorecard(
+      { ...objMax, gates: [{ metric: 'm', op: '>', value: 0, label: 'is profitable' }] },
+      { objective: 1, metrics: { m: 1 } },
+    )
     expect(card.gates[0].label).toBe('is profitable')
   })
 
@@ -4930,8 +5174,16 @@ describe('selectActiveScorecard', () => {
     gates: [{ metric: 'a', op: '>' as const, value: 0 }],
     fitness: [{ metric: 'a', direction: 'max' as const }],
   }
-  const cardX = { id: 'x', gates: [{ metric: 'b', op: '>' as const, value: 1 }], fitness: [{ metric: 'b', direction: 'min' as const }] }
-  const cardY = { id: 'y', gates: [{ metric: 'c', op: '<' as const, value: 2 }], fitness: [{ metric: 'c', direction: 'max' as const }] }
+  const cardX = {
+    id: 'x',
+    gates: [{ metric: 'b', op: '>' as const, value: 1 }],
+    fitness: [{ metric: 'b', direction: 'min' as const }],
+  }
+  const cardY = {
+    id: 'y',
+    gates: [{ metric: 'c', op: '<' as const, value: 2 }],
+    fitness: [{ metric: 'c', direction: 'max' as const }],
+  }
 
   it('falls back to the manifest gates/fitness when there are no cards', () => {
     expect(selectActiveScorecard(manifest, [], null)).toEqual({
@@ -4952,7 +5204,9 @@ describe('selectActiveScorecard', () => {
   })
 
   it('ignores card entries without an id', () => {
-    expect(selectActiveScorecard(manifest, [{ gates: [], fitness: [] } as any, cardY], 'y').gates).toEqual(cardY.gates)
+    expect(
+      selectActiveScorecard(manifest, [{ gates: [], fitness: [] } as any, cardY], 'y').gates,
+    ).toEqual(cardY.gates)
   })
 
   it('always keeps the manifest objective (cards carry no objective)', () => {
@@ -4969,25 +5223,54 @@ describe('selectActiveScorecard', () => {
 describe('deriveBackfillMetric', () => {
   const spec = {
     name: 'trades_per_day',
-    ratePerDay: { count: 'n_trades', bars: 'oos_n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } },
+    ratePerDay: {
+      count: 'n_trades',
+      bars: 'oos_n_obs',
+      barDaysLever: 'timeframe',
+      barDays: { '1d': 1, '1h': 1 / 24 },
+    },
   }
 
   it('derives a per-day rate as count / (bars × bar-days) at a daily step', () => {
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '1d' } })).toBeCloseTo(0.05)
+    expect(
+      deriveBackfillMetric(spec, {
+        metrics: { n_trades: 10, oos_n_obs: 200 },
+        config: { timeframe: '1d' },
+      }),
+    ).toBeCloseTo(0.05)
   })
 
   it('scales by the timeframe bar-days (hourly step spans 1/24 day per bar)', () => {
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 240 }, config: { timeframe: '1h' } })).toBeCloseTo(10 / (240 / 24))
+    expect(
+      deriveBackfillMetric(spec, {
+        metrics: { n_trades: 10, oos_n_obs: 240 },
+        config: { timeframe: '1h' },
+      }),
+    ).toBeCloseTo(10 / (240 / 24))
   })
 
   it('returns undefined when a required input is missing', () => {
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10 }, config: { timeframe: '1d' } })).toBeUndefined()
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: {} })).toBeUndefined()
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: { timeframe: '5m' } })).toBeUndefined()
+    expect(
+      deriveBackfillMetric(spec, { metrics: { n_trades: 10 }, config: { timeframe: '1d' } }),
+    ).toBeUndefined()
+    expect(
+      deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 200 }, config: {} }),
+    ).toBeUndefined()
+    expect(
+      deriveBackfillMetric(spec, {
+        metrics: { n_trades: 10, oos_n_obs: 200 },
+        config: { timeframe: '5m' },
+      }),
+    ).toBeUndefined()
   })
 
   it('returns 0 when there are no test bars (never divides by zero)', () => {
-    expect(deriveBackfillMetric(spec, { metrics: { n_trades: 10, oos_n_obs: 0 }, config: { timeframe: '1d' } })).toBe(0)
+    expect(
+      deriveBackfillMetric(spec, {
+        metrics: { n_trades: 10, oos_n_obs: 0 },
+        config: { timeframe: '1d' },
+      }),
+    ).toBe(0)
   })
 
   it('resolves the bars count from the run dataset block when absent from metrics', () => {
@@ -4995,20 +5278,38 @@ describe('deriveBackfillMetric', () => {
     // rate must derive from the dataset block so pre-existing runs backfill instead of staying "not recorded".
     const candleSpec = {
       name: 'trades_per_day',
-      ratePerDay: { count: 'n_trades', bars: 'candles', barDaysLever: 'timeframe', barDays: { '1d': 1, '1h': 1 / 24 } },
+      ratePerDay: {
+        count: 'n_trades',
+        bars: 'candles',
+        barDaysLever: 'timeframe',
+        barDays: { '1d': 1, '1h': 1 / 24 },
+      },
     }
     expect(
-      deriveBackfillMetric(candleSpec, { metrics: { n_trades: 10 }, dataset: { candles: 200 }, config: { timeframe: '1d' } }),
+      deriveBackfillMetric(candleSpec, {
+        metrics: { n_trades: 10 },
+        dataset: { candles: 200 },
+        config: { timeframe: '1d' },
+      }),
     ).toBeCloseTo(0.05)
   })
 
   it('prefers a metrics value over the dataset block when both carry the bars key', () => {
     const dualSpec = {
       name: 'trades_per_day',
-      ratePerDay: { count: 'n_trades', bars: 'n_obs', barDaysLever: 'timeframe', barDays: { '1d': 1 } },
+      ratePerDay: {
+        count: 'n_trades',
+        bars: 'n_obs',
+        barDaysLever: 'timeframe',
+        barDays: { '1d': 1 },
+      },
     }
     expect(
-      deriveBackfillMetric(dualSpec, { metrics: { n_trades: 10, n_obs: 100 }, dataset: { n_obs: 999 }, config: { timeframe: '1d' } }),
+      deriveBackfillMetric(dualSpec, {
+        metrics: { n_trades: 10, n_obs: 100 },
+        dataset: { n_obs: 999 },
+        config: { timeframe: '1d' },
+      }),
     ).toBeCloseTo(0.1)
   })
 
@@ -5056,20 +5357,45 @@ describe('primaryFitnessCriterion', () => {
 
 describe('scorecardRankValue', () => {
   it('returns the primary fitness value for a max objective', () => {
-    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value: 7 }] })).toBe(7)
+    expect(
+      scorecardRankValue({
+        gates: [],
+        accepted: true,
+        fitness: [{ metric: 'x', direction: 'max', value: 7 }],
+      }),
+    ).toBe(7)
   })
 
   it('negates the value for a min objective so higher-is-better holds', () => {
-    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'min', value: 7 }] })).toBe(-7)
+    expect(
+      scorecardRankValue({
+        gates: [],
+        accepted: true,
+        fitness: [{ metric: 'x', direction: 'min', value: 7 }],
+      }),
+    ).toBe(-7)
   })
 
   it('ranks only on the FIRST (primary) fitness objective', () => {
-    const card = { gates: [], accepted: true, fitness: [{ metric: 'a', direction: 'max' as const, value: 3 }, { metric: 'b', direction: 'max' as const, value: 99 }] }
+    const card = {
+      gates: [],
+      accepted: true,
+      fitness: [
+        { metric: 'a', direction: 'max' as const, value: 3 },
+        { metric: 'b', direction: 'max' as const, value: 99 },
+      ],
+    }
     expect(scorecardRankValue(card)).toBe(3)
   })
 
   it('returns -Infinity for a non-finite primary value', () => {
-    expect(scorecardRankValue({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max', value: NaN }] })).toBe(-Infinity)
+    expect(
+      scorecardRankValue({
+        gates: [],
+        accepted: true,
+        fitness: [{ metric: 'x', direction: 'max', value: NaN }],
+      }),
+    ).toBe(-Infinity)
   })
 
   it('returns -Infinity when there is no fitness objective', () => {
@@ -5078,8 +5404,16 @@ describe('scorecardRankValue', () => {
 })
 
 describe('compareScorecards', () => {
-  const acc = (value: number) => ({ gates: [], accepted: true, fitness: [{ metric: 'x', direction: 'max' as const, value }] })
-  const rej = (value: number) => ({ gates: [], accepted: false, fitness: [{ metric: 'x', direction: 'max' as const, value }] })
+  const acc = (value: number) => ({
+    gates: [],
+    accepted: true,
+    fitness: [{ metric: 'x', direction: 'max' as const, value }],
+  })
+  const rej = (value: number) => ({
+    gates: [],
+    accepted: false,
+    fitness: [{ metric: 'x', direction: 'max' as const, value }],
+  })
 
   it('orders an accepted run before a rejected one regardless of value', () => {
     expect(compareScorecards(rej(100), acc(1))).toBeGreaterThan(0)
@@ -5105,7 +5439,9 @@ describe('fitRatingFromPairings (pinned Bradley-Terry model rating)', () => {
   })
 
   it('a strong-opponent pairing gives a tighter, higher lower bound than a saturated weak-only one', () => {
-    const weakOnly = fitRatingFromPairings([{ opponentRating: 0, score: 1.0, games: 40, opponent: 'random' }])!
+    const weakOnly = fitRatingFromPairings([
+      { opponentRating: 0, score: 1.0, games: 40, opponent: 'random' },
+    ])!
     const withStrong = fitRatingFromPairings([
       { opponentRating: 0, score: 1.0, games: 40, opponent: 'random' },
       { opponentRating: 800, score: 0.4, games: 40, opponent: 'mcts' },
@@ -5115,18 +5451,24 @@ describe('fitRatingFromPairings (pinned Bradley-Terry model rating)', () => {
   })
 
   it('flags a model that only ever beat weak opponents and gives it a wide interval', () => {
-    const r = fitRatingFromPairings([{ opponentRating: 0, score: 1.0, games: 20, opponent: 'random' }])!
+    const r = fitRatingFromPairings([
+      { opponentRating: 0, score: 1.0, games: 20, opponent: 'random' },
+    ])!
     expect(r.flags).toContain('weak-opponent-only')
     expect(r.ciHigh - r.ciLow).toBeGreaterThan(300)
   })
 
   it('caps a weak-opponent-only rating so a big win vs a weak anchor cannot outrank a strong-measured model', () => {
     // The exact bug: mcts@3409 got 97.86% vs heuristic (400) over 3267 games — a confident WEAK-anchor extrapolation.
-    const weakBig = fitRatingFromPairings([{ opponentRating: 400, score: 0.9786, games: 3267, opponent: 'heuristic' }])!
+    const weakBig = fitRatingFromPairings([
+      { opponentRating: 400, score: 0.9786, games: 3267, opponent: 'heuristic' },
+    ])!
     expect(weakBig.flags).toContain('weak-opponent-only') // now fires even though 0.9786 < the 0.999 saturation bar
     expect(weakBig.lowerBound).toBeLessThanOrEqual(600) // capped near the strongest anchor it actually faced (400)+200
     // a model genuinely measured against the strong 1100 anchor out-ranks it
-    const strongMeasured = fitRatingFromPairings([{ opponentRating: 1100, score: 0.5, games: 50, opponent: 'mcts_strong' }])!
+    const strongMeasured = fitRatingFromPairings([
+      { opponentRating: 1100, score: 0.5, games: 50, opponent: 'mcts_strong' },
+    ])!
     expect(strongMeasured.lowerBound).toBeGreaterThan(weakBig.lowerBound)
   })
 
@@ -5143,7 +5485,12 @@ describe('fitRatingFromPairings (pinned Bradley-Terry model rating)', () => {
 
 describe('buildLeaderboardFromRuns (comparable ranking from stored pairings)', () => {
   const anchors = { random: 0, heuristic: 400, mcts: 800, mcts_strong: 1100 }
-  const run = (key: string, opponent: string, winRate: number, extra: Record<string, number> = {}) => ({
+  const run = (
+    key: string,
+    opponent: string,
+    winRate: number,
+    extra: Record<string, number> = {},
+  ) => ({
     key,
     content: {
       status: 'completed',
@@ -5162,14 +5509,26 @@ describe('buildLeaderboardFromRuns (comparable ranking from stored pairings)', (
   })
 
   it('folds win_rate_vs_strong_mcts in as a second pairing', () => {
-    const board = buildLeaderboardFromRuns([run('az', 'random', 1.0, { win_rate_vs_strong_mcts: 0.7 })], anchors)
+    const board = buildLeaderboardFromRuns(
+      [run('az', 'random', 1.0, { win_rate_vs_strong_mcts: 0.7 })],
+      anchors,
+    )
     expect(board[0].pairings.length).toBe(2)
     expect(board[0].flags).not.toContain('weak-opponent-only')
   })
 
   it('skips runs whose opponent is not a declared anchor', () => {
     const board = buildLeaderboardFromRuns(
-      [{ key: 'weird', content: { status: 'completed', config: { opponent: 'ghost' }, metrics: { win_rate: 0.5, games: 40 } } }],
+      [
+        {
+          key: 'weird',
+          content: {
+            status: 'completed',
+            config: { opponent: 'ghost' },
+            metrics: { win_rate: 0.5, games: 40 },
+          },
+        },
+      ],
       anchors,
     )
     expect(board).toEqual([])
@@ -5186,19 +5545,37 @@ describe('primaryFitness (rating-or-objective ranking value)', () => {
   })
 
   it('returns the rating lower bound when anchors + an anchor pairing exist', () => {
-    const content = { objective: 0.55, config: { opponent: 'mcts' }, metrics: { win_rate: 0.55, games: 40 } }
-    const expected = fitRatingFromPairings(extractRunPairings(content, anchored.ratingAnchors))!.lowerBound
+    const content = {
+      objective: 0.55,
+      config: { opponent: 'mcts' },
+      metrics: { win_rate: 0.55, games: 40 },
+    }
+    const expected = fitRatingFromPairings(
+      extractRunPairings(content, anchored.ratingAnchors),
+    )!.lowerBound
     expect(primaryFitness(content, anchored)).toBe(expected)
   })
 
   it('de-pollutes: a 1.0-vs-random run scores BELOW a 0.7-vs-mcts run', () => {
-    const a = { objective: 1.0, config: { opponent: 'random' }, metrics: { win_rate: 1.0, games: 40 } }
-    const b = { objective: 0.7, config: { opponent: 'mcts' }, metrics: { win_rate: 0.7, games: 40 } }
+    const a = {
+      objective: 1.0,
+      config: { opponent: 'random' },
+      metrics: { win_rate: 1.0, games: 40 },
+    }
+    const b = {
+      objective: 0.7,
+      config: { opponent: 'mcts' },
+      metrics: { win_rate: 0.7, games: 40 },
+    }
     expect(primaryFitness(a, anchored)).toBeLessThan(primaryFitness(b, anchored))
   })
 
   it('falls back to the raw objective when anchors are declared but no anchor pairing is extractable', () => {
-    const content = { objective: 0.42, config: { opponent: 'ghost' }, metrics: { win_rate: 0.42, games: 40 } }
+    const content = {
+      objective: 0.42,
+      config: { opponent: 'ghost' },
+      metrics: { win_rate: 0.42, games: 40 },
+    }
     expect(primaryFitness(content, anchored)).toBe(0.42)
   })
 })
@@ -5227,7 +5604,11 @@ describe('nextChampionStep (champion-training autopilot stop decision)', () => {
   })
 
   it('stops on plateau after `patience` consecutive non-promotions', () => {
-    const r = nextChampionStep({ plateauCount: 2, bestVsStrongMcts: 0.6 }, { generation: 5, promoted: false }, opts)
+    const r = nextChampionStep(
+      { plateauCount: 2, bestVsStrongMcts: 0.6 },
+      { generation: 5, promoted: false },
+      opts,
+    )
     expect(r.plateauCount).toBe(3)
     expect(r.done).toBe(true)
     expect(r.stopReason).toBe('plateau')
@@ -5274,7 +5655,12 @@ describe('nextAutopilotStep (the single-Start process decides the next thing to 
   }
 
   it('screens a newly-added architecture FIRST (before searching or improving)', () => {
-    const d = nextAutopilotStep({ ...base, unscreenedCores: ['ppo', 'resnet'], searchConverged: false, championPlateaued: false })
+    const d = nextAutopilotStep({
+      ...base,
+      unscreenedCores: ['ppo', 'resnet'],
+      searchConverged: false,
+      championPlateaued: false,
+    })
     expect(d.action).toBe('screen')
     expect(d.target).toBe('ppo') // the first unscreened one
   })
@@ -5310,7 +5696,13 @@ describe('nextAutopilotStep (the single-Start process decides the next thing to 
   })
 
   // Finalization: once training settles, a single Start produces the results without the user running them.
-  const settled = { ...base, championPlateaued: true, canBuildBook: true, canRate: true, canPlayOff: true }
+  const settled = {
+    ...base,
+    championPlateaued: true,
+    canBuildBook: true,
+    canRate: true,
+    canPlayOff: true,
+  }
 
   it('after training settles, extends the optimal-play book FIRST', () => {
     expect(nextAutopilotStep(settled).action).toBe('build-book')
@@ -5321,12 +5713,19 @@ describe('nextAutopilotStep (the single-Start process decides the next thing to 
   })
 
   it('runs the play-off once the book + rating are done this Start', () => {
-    expect(nextAutopilotStep({ ...settled, bookBuiltThisRun: true, ratedThisRun: true }).action).toBe('play-off')
+    expect(
+      nextAutopilotStep({ ...settled, bookBuiltThisRun: true, ratedThisRun: true }).action,
+    ).toBe('play-off')
   })
 
   it('is DONE once every declared finalize step ran this Start', () => {
     expect(
-      nextAutopilotStep({ ...settled, bookBuiltThisRun: true, ratedThisRun: true, playedOffThisRun: true }).action,
+      nextAutopilotStep({
+        ...settled,
+        bookBuiltThisRun: true,
+        ratedThisRun: true,
+        playedOffThisRun: true,
+      }).action,
     ).toBe('done')
   })
 
@@ -5335,7 +5734,9 @@ describe('nextAutopilotStep (the single-Start process decides the next thing to 
   })
 
   it('finalize NEVER preempts training — an unfinished improve still wins over build-book', () => {
-    expect(nextAutopilotStep({ ...base, championPlateaued: false, canBuildBook: true }).action).toBe('improve')
+    expect(
+      nextAutopilotStep({ ...base, championPlateaued: false, canBuildBook: true }).action,
+    ).toBe('improve')
   })
 })
 
@@ -5346,52 +5747,82 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
     completedRunCountByCore: { random: 5, heuristic: 5, mcts: 5, alphazero: 5 },
     minScreenRuns: 2,
     explorationConverged: true,
-    championStopReason: undefined as undefined | 'plateau' | 'budget' | 'reached-target' | 'aborted',
+    championStopReason: undefined as
+      | undefined
+      | 'plateau'
+      | 'budget'
+      | 'reached-target'
+      | 'aborted',
   }
 
   it('flags a core with too few runs as unscreened', () => {
-    const s = deriveAutopilotSignals({ ...input, completedRunCountByCore: { mcts: 5, alphazero: 1 } })
+    const s = deriveAutopilotSignals({
+      ...input,
+      completedRunCountByCore: { mcts: 5, alphazero: 1 },
+    })
     expect(s.unscreenedCores).toEqual(['random', 'heuristic', 'alphazero']) // <2 runs (alphazero:1, others:0)
   })
 
   it('has a starting point once any core has a completed run', () => {
-    expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: { mcts: 1 } }).hasStartingPoint).toBe(true)
-    expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: {} }).hasStartingPoint).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, completedRunCountByCore: { mcts: 1 } }).hasStartingPoint,
+    ).toBe(true)
+    expect(deriveAutopilotSignals({ ...input, completedRunCountByCore: {} }).hasStartingPoint).toBe(
+      false,
+    )
   })
 
   it('counts the champion as done only AFTER a fresh improve attempt this run — a stale terminal never blocks', () => {
     // A plateau/reached-target counts as done ONLY once we've actually re-attempted improve THIS run...
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: true }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: true })
+        .championPlateaued,
     ).toBe(true)
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: true }).championPlateaued,
+      deriveAutopilotSignals({
+        ...input,
+        championStopReason: 'reached-target',
+        improvedThisRun: true,
+      }).championPlateaued,
     ).toBe(true)
     // ...a terminal left by a PRIOR run must NOT block a fresh improve attempt — INCLUDING reached-target (e.g.
     // a past manual Improve that met a since-removed target), the exact stale flag that made Start do nothing.
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: false }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: 'plateau', improvedThisRun: false })
+        .championPlateaued,
     ).toBe(false)
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target', improvedThisRun: false }).championPlateaued,
+      deriveAutopilotSignals({
+        ...input,
+        championStopReason: 'reached-target',
+        improvedThisRun: false,
+      }).championPlateaued,
     ).toBe(false)
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued).toBe(false)
-    expect(deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'reached-target' }).championPlateaued,
+    ).toBe(false)
+    expect(
+      deriveAutopilotSignals({ ...input, championStopReason: 'plateau' }).championPlateaued,
+    ).toBe(false)
     // 'budget' (the per-launch generation allotment is spent) ALSO ends this Start's improve round — so a champion
     // that never plateaus can't monopolise the Start; the autopilot advances to finalize (build-book/rate/play-off)
     // and the next Start resumes the warm-start ladder. (Only counts after a fresh attempt THIS run.)
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: true }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: true })
+        .championPlateaued,
     ).toBe(true)
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: false }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: 'budget', improvedThisRun: false })
+        .championPlateaued,
     ).toBe(false)
     // 'aborted' is never a terminal that finalizes — the autopilot loop handles abort by breaking out.
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: 'aborted', improvedThisRun: true }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: 'aborted', improvedThisRun: true })
+        .championPlateaued,
     ).toBe(false)
     expect(
-      deriveAutopilotSignals({ ...input, championStopReason: undefined, improvedThisRun: true }).championPlateaued,
+      deriveAutopilotSignals({ ...input, championStopReason: undefined, improvedThisRun: true })
+        .championPlateaued,
     ).toBe(false)
   })
 
@@ -5402,7 +5833,13 @@ describe('deriveAutopilotSignals (live state → signals)', () => {
   })
 
   it('passes the finalize capabilities + per-run flags through (defaulting unset flags to false)', () => {
-    const s = deriveAutopilotSignals({ ...input, canBuildBook: true, canRate: true, canPlayOff: true, bookBuiltThisRun: true })
+    const s = deriveAutopilotSignals({
+      ...input,
+      canBuildBook: true,
+      canRate: true,
+      canPlayOff: true,
+      bookBuiltThisRun: true,
+    })
     expect([s.canBuildBook, s.canRate, s.canPlayOff]).toEqual([true, true, true])
     expect(s.bookBuiltThisRun).toBe(true)
     expect([s.ratedThisRun, s.playedOffThisRun]).toEqual([false, false])
@@ -5447,9 +5884,13 @@ describe('extractSampleGame (typed replay from a stored run record)', () => {
   })
 
   it('returns undefined when frames are missing or not a string array', () => {
-    expect(extractSampleGame({ sample_game: { model_seat: 0, winner: null, moves: [] } })).toBeUndefined()
     expect(
-      extractSampleGame({ sample_game: { model_seat: 0, winner: null, moves: [], frames: [1, 2, 3] } }),
+      extractSampleGame({ sample_game: { model_seat: 0, winner: null, moves: [] } }),
+    ).toBeUndefined()
+    expect(
+      extractSampleGame({
+        sample_game: { model_seat: 0, winner: null, moves: [], frames: [1, 2, 3] },
+      }),
     ).toBeUndefined()
   })
 

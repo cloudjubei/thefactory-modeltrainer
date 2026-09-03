@@ -164,8 +164,20 @@ describe('aggregateExperimentCells', () => {
   it('honours a min-direction benchmark (clears when the metric is BELOW the threshold)', () => {
     const benchmark = { metric: 'max_drawdown_pct', threshold: -5, direction: 'min' as const }
     const cells: ExperimentCell[] = [
-      { key: 'a', config: {}, status: 'completed', objective: 1, metrics: { max_drawdown_pct: -8 } },
-      { key: 'b', config: {}, status: 'completed', objective: 1, metrics: { max_drawdown_pct: -6 } },
+      {
+        key: 'a',
+        config: {},
+        status: 'completed',
+        objective: 1,
+        metrics: { max_drawdown_pct: -8 },
+      },
+      {
+        key: 'b',
+        config: {},
+        status: 'completed',
+        objective: 1,
+        metrics: { max_drawdown_pct: -6 },
+      },
     ]
     const { verdict } = aggregateExperimentCells(cells, { ...ctx, benchmark })
     expect(verdict.kind).toBe('robust')
@@ -180,9 +192,9 @@ describe('aggregateExperimentCells', () => {
     expect(v.kind).toBe('not-replicated')
     expect(v.passed).toBe(false)
     // A genuine single split still reads as single-split-luck.
-    expect(aggregateExperimentCells([cell('a', { vh: 1 })], { ...ctx, minSplits: 3 }).verdict.kind).toBe(
-      'single-split-luck',
-    )
+    expect(
+      aggregateExperimentCells([cell('a', { vh: 1 })], { ...ctx, minSplits: 3 }).verdict.kind,
+    ).toBe('single-split-luck')
   })
 
   it('aggregates objectives per the objective DIRECTION independent of the benchmark metric', () => {
@@ -381,7 +393,7 @@ describe('conditional levers — the "doesn\'t-apply" sentinel is excluded from 
     expect(imp[0].lever).toBe('model_name') // the real driver wins
   })
 
-  it('ofatContrasts never forms a contrast level from the doesn\'t-apply sentinel', () => {
+  it("ofatContrasts never forms a contrast level from the doesn't-apply sentinel", () => {
     const runs = [
       run('s1', { model_name: 'sup', forward_horizon: 1 }, 10),
       run('s2', { model_name: 'sup', forward_horizon: 5 }, 20),
@@ -780,7 +792,9 @@ describe('config surrogate (Phase 3)', () => {
     const condRuns: AnalysisRun[] = []
     for (const fh of [1, 5]) {
       for (let s = 0; s < 3; s++)
-        condRuns.push(run(`sup-${fh}-${s}`, { model_name: 'sup', forward_horizon: fh }, 10 + fh, { seed: s }))
+        condRuns.push(
+          run(`sup-${fh}-${s}`, { model_name: 'sup', forward_horizon: fh }, 10 + fh, { seed: s }),
+        )
     }
     for (let s = 0; s < 3; s++)
       condRuns.push(run(`rl-${s}`, { model_name: 'rl', forward_horizon: 'n/a' }, 50, { seed: s }))
@@ -1110,7 +1124,10 @@ describe('normalizeConditionalLevers', () => {
   it('tolerates a SINGLE (non-array) appliesWhen value instead of crashing (vals.map bug)', () => {
     // A manifest may declare `appliesWhen: { model_name: 'mcts' }` (a bare value). leverApplies must coerce
     // it to an array; the old `vals.map` threw "vals.map is not a function" and dropped every run silently.
-    const aw = { mcts_sims: { model_name: 'mcts' } } as unknown as Record<string, Record<string, unknown[]>>
+    const aw = { mcts_sims: { model_name: 'mcts' } } as unknown as Record<
+      string,
+      Record<string, unknown[]>
+    >
     expect(normalizeConditionalLevers({ model_name: 'mcts', mcts_sims: 80 }, aw)).toEqual({
       model_name: 'mcts',
       mcts_sims: 80,
@@ -1235,17 +1252,29 @@ describe('exported robust-stats helpers (champion-verdict families)', () => {
 
   it('pairedBootstrapDiff — constant paired samples are exactly determined', () => {
     // Constant samples ⇒ every paired resample diff = 1, ci=[1,1], no diff <=0 ⇒ pValue 0.
-    expect(pairedBootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({ ci: [1, 1], pValue: 0, delta: 1 })
+    expect(pairedBootstrapDiff([2, 2, 2], [1, 1, 1], 'max')).toEqual({
+      ci: [1, 1],
+      pValue: 0,
+      delta: 1,
+    })
   })
 
   it('pairedBootstrapDiff — a tight, clear separation excludes 0 and is significant', () => {
-    const d = pairedBootstrapDiff([0.86, 0.84, 0.85, 0.85, 0.84], [0.55, 0.56, 0.54, 0.55, 0.56], 'max')
+    const d = pairedBootstrapDiff(
+      [0.86, 0.84, 0.85, 0.85, 0.84],
+      [0.55, 0.56, 0.54, 0.55, 0.56],
+      'max',
+    )
     expect(d.ci[0]).toBeGreaterThan(0)
     expect(d.pValue).toBeLessThan(0.05)
   })
 
   it('pairedBootstrapDiff — genuinely-overlapping seeds (A wins some, B wins others) straddle 0 and are not significant', () => {
-    const d = pairedBootstrapDiff([0.7, 0.52, 0.68, 0.54, 0.61], [0.55, 0.66, 0.57, 0.64, 0.6], 'max')
+    const d = pairedBootstrapDiff(
+      [0.7, 0.52, 0.68, 0.54, 0.61],
+      [0.55, 0.66, 0.57, 0.64, 0.6],
+      'max',
+    )
     expect(d.ci[0]).toBeLessThan(0)
     expect(d.ci[1]).toBeGreaterThan(0)
     expect(d.pValue).toBeGreaterThan(0.05)
@@ -1355,7 +1384,13 @@ describe('edge branches', () => {
     })
 
     it('returns null with ≥3 distinct setups but no encodable levers', () => {
-      const ds = (candles: number) => ({ asset: 'BTC', timeframe: '1h', candles, from: 'a', to: 'b' })
+      const ds = (candles: number) => ({
+        asset: 'BTC',
+        timeframe: '1h',
+        candles,
+        from: 'a',
+        to: 'b',
+      })
       const runs = [
         run('a', {}, 10, { dataset: ds(100) }),
         run('b', {}, 20, { dataset: ds(200) }),

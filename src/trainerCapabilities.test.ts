@@ -91,7 +91,6 @@ describe('trainer launchable activities', () => {
     for (const t of TRAINER_EXEMPT_ACTIVITY_TYPES) expect(byType.has(t)).toBe(false)
     expect(TRAINER_EXEMPT_ACTIVITY_TYPES).toContain('inspect-trainer')
   })
-
 })
 
 describe('trainer capability record types', () => {
@@ -157,7 +156,14 @@ describe('trainer capability record types', () => {
     // The delete cascade the bespoke deleteRuns tool replicates — pinned EXACTLY (not a subset) so dropping
     // any suffix (e.g. -settest) fails the guard, and derived from the run-keyed source + setup-keyed marker.
     expect([...TRAINER_RUN_DELETE_CASCADE_SUFFIXES].sort()).toEqual(
-      ['-evaluation', '-reliability', '-settest', '-unrunnable', '-verdict', '-xai-narrative'].sort(),
+      [
+        '-evaluation',
+        '-reliability',
+        '-settest',
+        '-unrunnable',
+        '-verdict',
+        '-xai-narrative',
+      ].sort(),
     )
     expect(TRAINER_RUN_DELETE_CASCADE_SUFFIXES).toEqual([
       ...TRAINER_RUN_KEYED_CHILD_SUFFIXES,
@@ -167,10 +173,12 @@ describe('trainer capability record types', () => {
 
   it('exempts UI/derived/hub records with a stated reason', () => {
     const exemptKeys = new Set(TRAINER_EXEMPT_RECORDS.map((e) => e.suffix ?? e.fixedType))
-    for (const k of ['-dismissed-failure', '-model-stats', '-exploration']) expect(exemptKeys.has(k)).toBe(true)
+    for (const k of ['-dismissed-failure', '-model-stats', '-exploration'])
+      expect(exemptKeys.has(k)).toBe(true)
     for (const k of ['trainer-seen', 'trainer-queue', 'trainer-project', 'trainer-queue-order'])
       expect(exemptKeys.has(k)).toBe(true)
-    for (const k of ['-evaluation', '-verdict', '-xai-narrative']) expect(exemptKeys.has(k)).toBe(true)
+    for (const k of ['-evaluation', '-verdict', '-xai-narrative'])
+      expect(exemptKeys.has(k)).toBe(true)
     for (const e of TRAINER_EXEMPT_RECORDS) expect(e.reason.length).toBeGreaterThan(0)
   })
 })
@@ -192,7 +200,9 @@ describe('buildTrainerDataCapabilityManifest', () => {
 
   it('never emits a type that is on the exempt list', () => {
     const exemptAbsolute = new Set(
-      TRAINER_EXEMPT_RECORDS.map((e) => (e.suffix !== undefined ? `demo-run${e.suffix}` : e.fixedType)),
+      TRAINER_EXEMPT_RECORDS.map((e) =>
+        e.suffix !== undefined ? `demo-run${e.suffix}` : e.fixedType,
+      ),
     )
     for (const t of m.types) expect(exemptAbsolute.has(t.type)).toBe(false)
   })

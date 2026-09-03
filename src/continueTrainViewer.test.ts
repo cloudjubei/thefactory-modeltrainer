@@ -20,7 +20,13 @@ const CtT: any = mod.exports
 
 const run = (
   key: string,
-  opts: { checkpoint?: string; continuedFrom?: string; config?: Record<string, unknown>; objective?: number; status?: string } = {},
+  opts: {
+    checkpoint?: string
+    continuedFrom?: string
+    config?: Record<string, unknown>
+    objective?: number
+    status?: string
+  } = {},
 ) => ({
   key,
   summary: {
@@ -74,10 +80,27 @@ describe('lineageIndex', () => {
 
 describe('continuedMatrixRows', () => {
   it('emits one row per continued child, labelled by its dataset lever values', () => {
-    const parent = run('p', { checkpoint: 'ckpt/p.zip', config: { asset: 'BTCUSDT', walk_forward_window: '2024' } })
-    const c1 = run('c1', { continuedFrom: 'ckpt/p.zip', config: { asset: 'ETHUSDT', walk_forward_window: '2025' }, objective: 3.5, status: 'completed' })
-    const c2 = run('c2', { continuedFrom: 'ckpt/p.zip', config: { asset: 'SOLUSDT', walk_forward_window: '2025' }, objective: 1.2, status: 'completed' })
-    const runsByKey = new Map([['p', parent], ['c1', c1], ['c2', c2]])
+    const parent = run('p', {
+      checkpoint: 'ckpt/p.zip',
+      config: { asset: 'BTCUSDT', walk_forward_window: '2024' },
+    })
+    const c1 = run('c1', {
+      continuedFrom: 'ckpt/p.zip',
+      config: { asset: 'ETHUSDT', walk_forward_window: '2025' },
+      objective: 3.5,
+      status: 'completed',
+    })
+    const c2 = run('c2', {
+      continuedFrom: 'ckpt/p.zip',
+      config: { asset: 'SOLUSDT', walk_forward_window: '2025' },
+      objective: 1.2,
+      status: 'completed',
+    })
+    const runsByKey = new Map([
+      ['p', parent],
+      ['c1', c1],
+      ['c2', c2],
+    ])
     const idx = CtT.lineageIndex([parent, c1, c2])
     const rows = CtT.continuedMatrixRows(parent, idx, runsByKey, ['asset', 'walk_forward_window'])
     expect(rows).toEqual([

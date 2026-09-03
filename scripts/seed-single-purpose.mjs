@@ -73,7 +73,9 @@ if (existsSync(manifestPath)) {
 writeFileSync(join(dest, 'boot.config.js'), renderBootConfig(cfg))
 
 console.log(`seeded single-purpose viewer → ${dest}`)
-console.log(`boot: ${bundled ? 'bundled manifest (instant, self-refreshing)' : 'inspect-on-boot'} — ${JSON.stringify({ ...cfg, manifest: bundled ? '<' + (cfg.manifest.recordType || 'manifest') + '>' : undefined })}`)
+console.log(
+  `boot: ${bundled ? 'bundled manifest (instant, self-refreshing)' : 'inspect-on-boot'} — ${JSON.stringify({ ...cfg, manifest: bundled ? '<' + (cfg.manifest.recordType || 'manifest') + '>' : undefined })}`,
+)
 console.log('')
 console.log('Final wiring (overseer project metadata, NOT a repo file):')
 console.log(`  metadata.hasApp = true`)

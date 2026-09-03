@@ -1913,7 +1913,15 @@ export type ChampionStopReason = 'reached-target' | 'plateau' | 'budget' | 'abor
  * the user never runs these by hand): `build-book` = extend the optimal-play opening book; `rate` = rate every
  * model on the comparable gauntlet; `play-off` = the head-to-head tournament + optimality check. `done` = nothing
  * left without new input, and the results are ready. */
-export type AutopilotAction = 'screen' | 'search' | 'improve' | 'build-book' | 'rate' | 'play-off' | 'score' | 'done'
+export type AutopilotAction =
+  | 'screen'
+  | 'search'
+  | 'improve'
+  | 'build-book'
+  | 'rate'
+  | 'play-off'
+  | 'score'
+  | 'done'
 
 /** The derived state the autopilot decides from — kept a plain data bag so the decision is a PURE function. */
 export interface AutopilotSignals {
@@ -2025,7 +2033,10 @@ export interface AutopilotParams {
   onRecordWritten?: (type: string, key: string) => void
   /** Launch a child sub-process (`explore` / `train` / `train-champion`) and return its id; the backend host
    * injects the base params (recordType/dir/manifestRelPath). Omit to no-op (the pure-decision unit tests). */
-  launchActivity?: (type: string, params: Record<string, unknown>) => Promise<{ activityId?: string }>
+  launchActivity?: (
+    type: string,
+    params: Record<string, unknown>,
+  ) => Promise<{ activityId?: string }>
   /** Await a launched child to terminal; `undefined` ⇒ the autopilot itself was aborted mid-wait. */
   awaitActivity?: (id: string) => Promise<string | undefined>
 }
@@ -2260,7 +2271,14 @@ export interface TournamentOptimality {
 }
 /** One competitor's SOLVE-IT optimality ladder — the deepest oracle rung it converts the first-player win against. */
 export interface TournamentLadder {
-  rungs: Array<{ label: string; kind: string; depth: number | null; rate: number; games: number; cleared: boolean }>
+  rungs: Array<{
+    label: string
+    kind: string
+    depth: number | null
+    rate: number
+    games: number
+    cleared: boolean
+  }>
   /** Deepest cleared rung's label ('none' | 'depth-N' | 'exact'). */
   frontier: string
   /** Cleared the EXACT rung — the only truthful "solved" signal. */
@@ -2364,7 +2382,14 @@ export interface ScorecardRecord {
   ladder?: { frontier: string; rungs: unknown[] }
   sim_scaling?: { points: unknown[]; auc: number; flatness: number }
   oracle_match?: number
-  p1?: { rate: number; not_lost_rate: number; wins: number; draws: number; losses: number; games: number }
+  p1?: {
+    rate: number
+    not_lost_rate: number
+    wins: number
+    draws: number
+    losses: number
+    games: number
+  }
   verify_solved?: { solved: boolean } & Record<string, unknown>
   verdict: string
   headline: string

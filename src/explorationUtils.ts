@@ -48,17 +48,20 @@ import {
 // ---------------------------------------------------------------------------------------------------
 // small pure helpers
 
-const isBetter = (a: number, b: number, dir: 'max' | 'min'): boolean => (dir === 'max' ? a > b : a < b)
+const isBetter = (a: number, b: number, dir: 'max' | 'min'): boolean =>
+  dir === 'max' ? a > b : a < b
 /** Oriented gain of `v` over `ref` (always ≥0 means "better by that much"). */
-const gainOver = (v: number, ref: number, dir: 'max' | 'min'): number => (dir === 'max' ? v - ref : ref - v)
+const gainOver = (v: number, ref: number, dir: 'max' | 'min'): number =>
+  dir === 'max' ? v - ref : ref - v
 
 function std(nums: number[]): number {
   if (nums.length < 2) return 0
   const m = nums.reduce((a, b) => a + b, 0) / nums.length
   return Math.sqrt(nums.reduce((a, b) => a + (b - m) ** 2, 0) / (nums.length - 1))
 }
-const mean = (nums: number[]): number => (nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0)
-const uniq = <T,>(xs: T[]): T[] => [...new Set(xs)]
+const mean = (nums: number[]): number =>
+  nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0
+const uniq = <T>(xs: T[]): T[] => [...new Set(xs)]
 const seedRange = (n: number): number[] => Array.from({ length: n }, (_, i) => i)
 
 /**
@@ -95,7 +98,11 @@ function without(obj: Record<string, unknown>, ...keys: string[]): Record<string
 }
 
 /** True when every key in `keys` matches (by stringified value) between `config` and `target`. */
-function matchesConfig(config: Record<string, unknown>, target: Record<string, unknown>, keys: string[]): boolean {
+function matchesConfig(
+  config: Record<string, unknown>,
+  target: Record<string, unknown>,
+  keys: string[],
+): boolean {
   return keys.every((k) => String(config[k]) === String(target[k]))
 }
 
@@ -111,7 +118,8 @@ const isNumericManifestLever = (manifest: TrainerManifest, lever: string): boole
 
 function defaultsOf(manifest: TrainerManifest): Record<string, unknown> {
   const d: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(manifest.levers)) if (v.default !== undefined) d[k] = v.default
+  for (const [k, v] of Object.entries(manifest.levers))
+    if (v.default !== undefined) d[k] = v.default
   return d
 }
 
@@ -164,7 +172,11 @@ function isCategoricalValue(v: unknown): boolean {
  * values look numeric, e.g. n_layers ∈ {1,2,3}), a `number` lever never is. Only when the type is unknown do we
  * fall back to inspecting the observed values.
  */
-function regionLeversOf(setups: AnalysisRun[], activeLevers: string[], manifest?: TrainerManifest): string[] {
+function regionLeversOf(
+  setups: AnalysisRun[],
+  activeLevers: string[],
+  manifest?: TrainerManifest,
+): string[] {
   return activeLevers.filter((lever) => {
     const type = manifest?.levers[lever]?.type
     if (type === 'choice' || type === 'boolean') return true
@@ -206,14 +218,19 @@ export function clusterBasins(
 
   const peaks = [...byRegion.entries()].map(([, group]) => {
     let peak = group[0]
-    for (const s of group) if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(peak, criterion)!, dir)) peak = s
+    for (const s of group)
+      if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(peak, criterion)!, dir))
+        peak = s
     return peak
   })
   const peakVals = peaks.map((p) => criterionValueOf(p, criterion)!)
   const best = peakVals.reduce((a, b) => (isBetter(a, b, dir) ? a : b))
   const worst = peakVals.reduce((a, b) => (isBetter(a, b, dir) ? b : a))
   const ref = baseline ?? baselineOf(runs) ?? worst
-  const margin = Math.max(EXPLORATION_BASIN_NOISE_MARGIN * noiseFloor, EXPLORATION_BASIN_MIN_SPAN_FRACTION * Math.abs(best - ref))
+  const margin = Math.max(
+    EXPLORATION_BASIN_NOISE_MARGIN * noiseFloor,
+    EXPLORATION_BASIN_MIN_SPAN_FRACTION * Math.abs(best - ref),
+  )
 
   const basins: Basin[] = []
   for (const peak of peaks) {
@@ -263,13 +280,19 @@ export function qualifyParetoBasins(
       return vals.length ? iqm(vals) : f.direction === 'min' ? Infinity : -Infinity
     }),
   )
-  const front = new Set(paretoFrontier(points, fitness.map((f) => f.direction)))
+  const front = new Set(
+    paretoFrontier(
+      points,
+      fitness.map((f) => f.direction),
+    ),
+  )
   return basins.map((b, i) => ({ ...b, onParetoFront: front.has(i) }))
 }
 
 const bestBasin = (basins: Basin[], criterion: AnalysisCriterion): Basin | undefined =>
   basins.reduce<Basin | undefined>(
-    (best, b) => (!best || isBetter(b.peakObjective, best.peakObjective, criterion.direction) ? b : best),
+    (best, b) =>
+      !best || isBetter(b.peakObjective, best.peakObjective, criterion.direction) ? b : best,
     undefined,
   )
 
@@ -277,7 +300,11 @@ const bestBasin = (basins: Basin[], criterion: AnalysisCriterion): Basin | undef
 // batch builders
 
 /** A deterministic space-filling sample across the full space — the screen stage's probe. */
-function screenSampleRec(manifest: TrainerManifest, levers: string[], n: number): ExperimentRecommendation {
+function screenSampleRec(
+  manifest: TrainerManifest,
+  levers: string[],
+  n: number,
+): ExperimentRecommendation {
   const configs: Array<{ config: Record<string, unknown> }> = []
   for (let i = 0; i < n; i++) {
     const config: Record<string, unknown> = {}
@@ -343,7 +370,9 @@ export function localRefineRecs(
   const region = basin.region
   const regionKeys = Object.keys(region)
   const center = basin.centerConfig
-  const numericActive = state.activeLevers.filter((l) => isNumericManifestLever(manifest, l) && !(l in region))
+  const numericActive = state.activeLevers.filter(
+    (l) => isNumericManifestLever(manifest, l) && !(l in region),
+  )
   const regionRuns = runs.filter((r) => matchesConfig(r.config, region, regionKeys))
 
   // 1. stabilize the peak with more seeds
@@ -377,7 +406,8 @@ export function localRefineRecs(
     const maxStep = span * EXPLORATION_REFINE_MAX_STEP_FRACTION
     // DEEPENING: each refine level halves the resolution floor, so a basin that plateaued at the coarse floor
     // can be climbed further once the ladder deepens (the "never stop while the space is uncovered" contract).
-    const minStep = (span * EXPLORATION_REFINE_MIN_STEP_FRACTION) / Math.pow(2, state.refineDepth ?? 0)
+    const minStep =
+      (span * EXPLORATION_REFINE_MIN_STEP_FRACTION) / Math.pow(2, state.refineDepth ?? 0)
     const triedVals = regionRuns.map((r) => Number(r.config[lever])).filter((v) => isFinite(v))
     const eps = minStep / 4
     // nearest tried point strictly below / above the center, else the range edge
@@ -399,7 +429,11 @@ export function localRefineRecs(
         kind: 'acquisition',
         reason: `climb ${lever} around ${c.toFixed(3)} in basin ${basin.id}`,
         runCount: fresh.length * XAI_MIN_SEEDS,
-        spec: { fixed: without(center, lever, 'seed'), sweep: { [lever]: fresh }, seeds: seedRange(XAI_MIN_SEEDS) },
+        spec: {
+          fixed: without(center, lever, 'seed'),
+          sweep: { [lever]: fresh },
+          seeds: seedRange(XAI_MIN_SEEDS),
+        },
         priority: 50,
       })
     }
@@ -433,7 +467,10 @@ export function initExplorationState(
  * autopilot can never launch past its ceiling. If nothing fits, keep the single smallest rec to make progress
  * (the next round then hits the ceiling and converges); overshoot is bounded by one rec.
  */
-function clampBatch(batch: ExperimentRecommendation[], remaining: number): ExperimentRecommendation[] {
+function clampBatch(
+  batch: ExperimentRecommendation[],
+  remaining: number,
+): ExperimentRecommendation[] {
   if (!Number.isFinite(remaining)) return batch
   if (remaining <= 0) return []
   const out: ExperimentRecommendation[] = []
@@ -444,7 +481,8 @@ function clampBatch(batch: ExperimentRecommendation[], remaining: number): Exper
       used += rec.runCount
     }
   }
-  if (!out.length && batch.length) return [batch.reduce((m, r) => (r.runCount < m.runCount ? r : m))]
+  if (!out.length && batch.length)
+    return [batch.reduce((m, r) => (r.runCount < m.runCount ? r : m))]
   return out
 }
 
@@ -472,7 +510,7 @@ export function nextExplorationStep(
   // Budget + progress count runs THIS exploration produced, not the whole pre-existing archive: capture the
   // archive size at map start (first step), then spentRuns = archiveNow - baseline. On a project with 20k runs
   // this keeps a run budget from tripping "budget exhausted" on round 0. Reset to 0 when the archive is emptied.
-  const baselineRuns = archiveRuns === 0 ? 0 : state.baselineRuns ?? archiveRuns
+  const baselineRuns = archiveRuns === 0 ? 0 : (state.baselineRuns ?? archiveRuns)
   const spentRuns = Math.max(0, archiveRuns - baselineRuns)
   const best = bestObjectiveOf(runs, criterion)
 
@@ -483,7 +521,8 @@ export function nextExplorationStep(
     regret: best === undefined ? s.regret : appendRegret(s.regret, spentRuns, best),
     updatedAt: state.updatedAt,
   })
-  const remaining = state.budget.maxRuns != null ? Math.max(0, state.budget.maxRuns - spentRuns) : Infinity
+  const remaining =
+    state.budget.maxRuns != null ? Math.max(0, state.budget.maxRuns - spentRuns) : Infinity
   const mk = (
     stage: ExplorationState['stage'],
     batch: ExperimentRecommendation[],
@@ -570,8 +609,16 @@ function stepCalibrate(
   const seedsPresent = new Set(calibRuns.map((r) => r.seed ?? 0)).size
 
   if (seedsPresent >= XAI_MIN_SEEDS) {
-    const vals = calibRuns.map((r) => criterionValueOf(r, criterion)).filter((v): v is number => v != null)
-    return stepScreen({ ...state, stage: 'screen', noiseFloor: std(vals) }, runs, manifest, criterion, mk)
+    const vals = calibRuns
+      .map((r) => criterionValueOf(r, criterion))
+      .filter((v): v is number => v != null)
+    return stepScreen(
+      { ...state, stage: 'screen', noiseFloor: std(vals) },
+      runs,
+      manifest,
+      criterion,
+      mk,
+    )
   }
 
   // Populated project whose archive doesn't hold the manifest-default config × N seeds (the default combo was
@@ -580,7 +627,13 @@ function stepCalibrate(
   // re-proposing a default-config batch it can't recognize (the BlackSwan stuck-at-calibrate bug).
   const archiveNoise = archiveNoiseFloor(runs, criterion)
   if (archiveNoise !== undefined) {
-    return stepScreen({ ...state, stage: 'screen', noiseFloor: archiveNoise }, runs, manifest, criterion, mk)
+    return stepScreen(
+      { ...state, stage: 'screen', noiseFloor: archiveNoise },
+      runs,
+      manifest,
+      criterion,
+      mk,
+    )
   }
 
   const rec: ExperimentRecommendation = {
@@ -618,7 +671,12 @@ function stepScreen(
   // TOP-level basin axis rather than one of many co-equal ones.
   const regionAxes = discrete
     .slice()
-    .sort((a, b) => (b === 'model_name' ? 1 : 0) - (a === 'model_name' ? 1 : 0) || impOf(b) - impOf(a) || (a < b ? -1 : 1))
+    .sort(
+      (a, b) =>
+        (b === 'model_name' ? 1 : 0) - (a === 'model_name' ? 1 : 0) ||
+        impOf(b) - impOf(a) ||
+        (a < b ? -1 : 1),
+    )
     .slice(0, EXPLORATION_MAX_REGION_AXES)
 
   // Numeric climb dims: important numerics filling the remaining active budget (always at least one when numeric
@@ -627,7 +685,10 @@ function stepScreen(
   if (!activeNumeric.length && numeric.length) {
     activeNumeric = [numeric.slice().sort((a, b) => impOf(b) - impOf(a))[0]] // keep at least one climb dimension
   }
-  const numericSlots = Math.max(numeric.length ? 1 : 0, EXPLORATION_MAX_ACTIVE_LEVERS - regionAxes.length)
+  const numericSlots = Math.max(
+    numeric.length ? 1 : 0,
+    EXPLORATION_MAX_ACTIVE_LEVERS - regionAxes.length,
+  )
   activeNumeric = activeNumeric.sort((a, b) => impOf(b) - impOf(a)).slice(0, numericSlots)
 
   const steerActive = (state.steer?.pinActive ?? []).filter((l) => searchable.includes(l))
@@ -662,7 +723,14 @@ function stepGlobal(
   mk: Mk,
   opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
-  const basins = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
+  const basins = clusterBasins(
+    runs,
+    criterion,
+    state.activeLevers,
+    state.noiseFloor ?? 0,
+    baselineOf(runs),
+    manifest,
+  )
   const known = new Set(state.basins.map((b) => b.id))
   const foundNew = basins.some((b) => !known.has(b.id))
   const dryRounds = foundNew ? 0 : state.dryRounds + 1
@@ -714,7 +782,14 @@ function stepLocal(
   mk: Mk,
   opts?: { targetObjective?: number; exhausted?: boolean },
 ): ExplorationStep {
-  const clustered = clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
+  const clustered = clusterBasins(
+    runs,
+    criterion,
+    state.activeLevers,
+    state.noiseFloor ?? 0,
+    baselineOf(runs),
+    manifest,
+  )
   const target = opts?.targetObjective
   const withPlateau = clustered.map((b) => ({
     ...b,
@@ -727,7 +802,9 @@ function stepLocal(
   // controller reports the batch fully redundant — DON'T converge. A plateau in this subspace is not the whole
   // space: ESCALATE (unfreeze a fixed lever, then deepen the numeric resolution). Convergence is reserved for
   // when that ladder is fully dry — the only honest "the search space is covered".
-  const batch = pending.flatMap((b) => localRefineRecs(b, runs, manifest, state)).slice(0, EXPLORATION_BATCH_MAX)
+  const batch = pending
+    .flatMap((b) => localRefineRecs(b, runs, manifest, state))
+    .slice(0, EXPLORATION_BATCH_MAX)
   if (opts?.exhausted || !pending.length || !batch.length) {
     return expand(state2, withPlateau, runs, manifest, criterion, mk, target)
   }
@@ -762,10 +839,23 @@ function expand(
     const lever = frozenNumeric.slice().sort((a, b) => impOf(b) - impOf(a) || (a < b ? -1 : 1))[0]
     const frozenLevers = without(state.frozenLevers, lever)
     const activeLevers = uniq([...state.activeLevers, lever])
-    const widened = { ...state, stage: 'global' as const, activeLevers, frozenLevers, dryRounds: 0, basins }
+    const widened = {
+      ...state,
+      stage: 'global' as const,
+      activeLevers,
+      frozenLevers,
+      dryRounds: 0,
+      basins,
+    }
     const sweep = unfreezeSweepRec(lever, frozenLevers, runs, manifest, criterion)
     if (sweep) {
-      return mk('global', [sweep], `unfreeze ${lever} — widen the search into a previously-fixed lever`, widened, false)
+      return mk(
+        'global',
+        [sweep],
+        `unfreeze ${lever} — widen the search into a previously-fixed lever`,
+        widened,
+        false,
+      )
     }
     // The lever was already swept across its range — just re-enter global search on the widened space.
     return stepGlobal(widened, runs, manifest, criterion, mk, undefined)
@@ -774,7 +864,13 @@ function expand(
   // Rung 2 — space-fill the active numeric space until it reaches the coverage density target.
   const coverage = coverageGridRecs(state, runs, manifest, criterion)
   if (coverage.length) {
-    return mk('local', coverage, `cover the space — ${coverage[0].runCount} space-filling sample(s)`, { ...state, stage: 'local', basins }, false)
+    return mk(
+      'local',
+      coverage,
+      `cover the space — ${coverage[0].runCount} space-filling sample(s)`,
+      { ...state, stage: 'local', basins },
+      false,
+    )
   }
 
   // Rung 3 — the numeric space is unfrozen AND covered: grow into a still-FROZEN CATEGORICAL dimension (open a
@@ -785,18 +881,34 @@ function expand(
   const setups = aggregateToSetupRuns(runs, criterion)
   const regionAxes = regionLeversOf(setups, state.activeLevers, manifest)
   const frozenCategorical = Object.keys(state.frozenLevers).filter(
-    (l) => !isNumericManifestLever(manifest, l) && (categoricalChoices(manifest, l)?.length ?? 0) > 1,
+    (l) =>
+      !isNumericManifestLever(manifest, l) && (categoricalChoices(manifest, l)?.length ?? 0) > 1,
   )
   if (frozenCategorical.length && regionAxes.length < EXPLORATION_LADDER_MAX_REGION_AXES) {
     const imps = leverImportances(runs, criterion)
     const impOf = (l: string): number => imps.find((i) => i.lever === l)?.importance ?? 0
-    const lever = frozenCategorical.slice().sort((a, b) => impOf(b) - impOf(a) || (a < b ? -1 : 1))[0]
+    const lever = frozenCategorical
+      .slice()
+      .sort((a, b) => impOf(b) - impOf(a) || (a < b ? -1 : 1))[0]
     const frozenLevers = without(state.frozenLevers, lever)
     const activeLevers = uniq([...state.activeLevers, lever])
-    const widened = { ...state, stage: 'global' as const, activeLevers, frozenLevers, dryRounds: 0, basins }
+    const widened = {
+      ...state,
+      stage: 'global' as const,
+      activeLevers,
+      frozenLevers,
+      dryRounds: 0,
+      basins,
+    }
     const sweep = unfreezeCategoricalRec(lever, frozenLevers, runs, manifest, criterion)
     if (sweep) {
-      return mk('global', [sweep], `unfreeze ${lever} — open a new basin axis into a fixed categorical`, widened, false)
+      return mk(
+        'global',
+        [sweep],
+        `unfreeze ${lever} — open a new basin axis into a fixed categorical`,
+        widened,
+        false,
+      )
     }
     // Every value already tried — just widen (re-cluster with the new axis so its tried values become basins).
     return stepGlobal(widened, runs, manifest, criterion, mk, undefined)
@@ -853,7 +965,8 @@ export function coverageGridRecs(
   if (!numericActive.length) return []
   const setups = aggregateToSetupRuns(runs, criterion)
   const regionLevers = regionLeversOf(setups, state.activeLevers, manifest)
-  const perRegionTarget = EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
+  const perRegionTarget =
+    EXPLORATION_COVERAGE_PER_LEVER * numericActive.length * (1 + (state.refineDepth ?? 0))
   const ranges = numericActive.map((l) => manifest.levers[l].range as [number, number])
   // Coverage samples probe BREADTH at a single seed — seeds are added later when a region is climbed — so the
   // champion's seed is NOT carried onto them (it would pin every sample to one noise draw).
@@ -878,7 +991,13 @@ export function coverageGridRecs(
   for (const { region, setups: rSetups } of regions.values()) {
     if (rSetups.length >= perRegionTarget) continue
     const need = Math.min(perRegionTarget - rSetups.length, EXPLORATION_BATCH_MAX)
-    const fresh = maximinCoverageConfigs(numericActive, ranges, rSetups, { ...best, ...region }, need)
+    const fresh = maximinCoverageConfigs(
+      numericActive,
+      ranges,
+      rSetups,
+      { ...best, ...region },
+      need,
+    )
     if (fresh.length) queues.push(fresh)
   }
   const regionCount = queues.length
@@ -918,9 +1037,12 @@ function maximinCoverageConfigs(
   base: Record<string, unknown>,
   need: number,
 ): Array<{ config: Record<string, unknown> }> {
-  const sigOf = (config: Record<string, unknown>): string => numericActive.map((l) => Number(config[l]).toFixed(6)).join('|')
+  const sigOf = (config: Record<string, unknown>): string =>
+    numericActive.map((l) => Number(config[l]).toFixed(6)).join('|')
   const normOf = (config: Record<string, unknown>): number[] =>
-    numericActive.map((l, j) => (Number(config[l]) - ranges[j][0]) / (ranges[j][1] - ranges[j][0] || 1))
+    numericActive.map(
+      (l, j) => (Number(config[l]) - ranges[j][0]) / (ranges[j][1] - ranges[j][0] || 1),
+    )
   const tried = rSetups.map((s) => normOf(s.config))
   const triedSigs = new Set(rSetups.map((s) => sigOf(s.config)))
   const minDistToTried = (pt: number[]): number => {
@@ -988,7 +1110,12 @@ function unfreezeSweepRec(
   if (!range) return undefined
   const [lo, hi] = range
   const n = 5
-  const tried = new Set(runs.map((r) => Number(r.config[lever])).filter(isFinite).map((v) => v.toFixed(6)))
+  const tried = new Set(
+    runs
+      .map((r) => Number(r.config[lever]))
+      .filter(isFinite)
+      .map((v) => v.toFixed(6)),
+  )
   const fresh: number[] = []
   for (let i = 0; i < n; i++) {
     const v = Number((lo + ((i + 0.5) / n) * (hi - lo)).toFixed(6))
@@ -1074,11 +1201,14 @@ function syntheticBestBasin(
   if (!setups.length) return undefined
   const dir = criterion.direction
   let best = setups[0]
-  for (const s of setups) if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(best, criterion)!, dir)) best = s
+  for (const s of setups)
+    if (isBetter(criterionValueOf(s, criterion)!, criterionValueOf(best, criterion)!, dir)) best = s
   const regionLevers = regionLeversOf(setups, activeLevers, manifest)
   const region: Record<string, unknown> = {}
   for (const l of regionLevers) region[l] = best.config[l]
-  const memberRunKeys = runs.filter((r) => matchesConfig(r.config, best.config, regionLevers)).map((r) => r.key)
+  const memberRunKeys = runs
+    .filter((r) => matchesConfig(r.config, best.config, regionLevers))
+    .map((r) => r.key)
   return {
     id: regionKey(best.config, regionLevers),
     region,
@@ -1118,7 +1248,14 @@ function converge(
 ): ExplorationStep {
   let basins = state.basins.length
     ? state.basins
-    : clusterBasins(runs, criterion, state.activeLevers, state.noiseFloor ?? 0, baselineOf(runs), manifest)
+    : clusterBasins(
+        runs,
+        criterion,
+        state.activeLevers,
+        state.noiseFloor ?? 0,
+        baselineOf(runs),
+        manifest,
+      )
   if (!basins.length) {
     // No region cleared the basin margin — still declare the best run so the maxima view is never empty.
     const synth = syntheticBestBasin(runs, criterion, state.activeLevers, manifest)
@@ -1163,7 +1300,11 @@ export function gateConvergenceOnSplits(
   })
   // 1) Split-consistency gate (existing): the incumbent isn't robust across the split axis AND there are unrun
   //    splits + budget to try them → replicate it across them before crowning (fixes single-window luck).
-  if (convergenceGatedBySplits(holdout) && holdout.missingSplitConfigs.length && holdout.incumbentConfig) {
+  if (
+    convergenceGatedBySplits(holdout) &&
+    holdout.missingSplitConfigs.length &&
+    holdout.incumbentConfig
+  ) {
     const base = without(holdout.incumbentConfig, 'seed')
     const batch: ExperimentRecommendation[] = holdout.missingSplitConfigs.map((sc) => ({
       kind: 'missing-cell',
@@ -1225,7 +1366,9 @@ function championSeedFill(
     if (es.seeds >= XAI_MIN_SEEDS) continue
     batch.push({
       kind: 'missing-cell',
-      reason: `champion gate — seed the incumbent to ${XAI_MIN_SEEDS} on ${Object.entries(es.splitConfig)
+      reason: `champion gate — seed the incumbent to ${XAI_MIN_SEEDS} on ${Object.entries(
+        es.splitConfig,
+      )
         .map(([k, v]) => `${k}=${v}`)
         .join(', ')} for a sound steady verdict`,
       runCount: XAI_MIN_SEEDS - es.seeds,
