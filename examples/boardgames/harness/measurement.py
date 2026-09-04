@@ -217,3 +217,30 @@ def _chi2_sf(x: float, df: int) -> float:
         if abs(delta - 1) < 1e-14:
             break
     return max(0.0, min(1.0, h * math.exp(-z + a * math.log(z) - math.lgamma(a))))
+
+
+def seed_sd_from_pair(rate_a: float, rate_b: float) -> float:
+    """Crude per-run SD estimated from ONE pair of identical-config runs: |a-b|/sqrt(2).
+
+    Measured 2026-09-04 (302K arch, identical recipe/budget, seeds 0 and 101): 0.836 vs 0.867 => sd ~= 0.022.
+    ONE PAIR IS A WEAK ESTIMATE (a chi-square CI on a variance from 2 samples is enormous) — treat it as an order
+    of magnitude, not a constant, and widen it as more replicates land."""
+    return abs(float(rate_a) - float(rate_b)) / math.sqrt(2.0)
+
+
+def required_seeds(delta: float, seed_sd: float, n_roots: int, base_rate: float,
+                   z_alpha: float = 1.96, z_beta: float = 0.84) -> int:
+    """How many TRAINING SEEDS per arm are needed to resolve an architecture difference of `delta`.
+
+    The unit of analysis for an architecture claim is a RUN, not a checkpoint (§C.9 rule 6). Each run carries two
+    independent noise sources: training-seed variance (`seed_sd`) and the conversion metric's own sampling error
+    at `n_roots`. This sizes the experiment against BOTH — and it shows that adding ROOTS is usually far cheaper
+    than adding training runs, since roots cost minutes and a run costs hours."""
+    if delta <= 0:
+        raise ValueError("delta must be > 0")
+    if n_roots <= 0:
+        raise ValueError("n_roots must be positive")
+    p = min(max(base_rate, 1e-6), 1 - 1e-6)
+    var_run = float(seed_sd) ** 2 + p * (1 - p) / n_roots
+    k = 2.0 * var_run * ((z_alpha + z_beta) / delta) ** 2
+    return max(1, math.ceil(k))

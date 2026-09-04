@@ -130,3 +130,25 @@ def test_homogeneity_refuses_to_rank_an_underpowered_sweep():
     assert rank_or_refuse(sig_but_meaningless)["ranked"] is True    # significant on its own
     r3 = rank_or_refuse(sig_but_meaningless, null_arm_spread=0.08)  # but inside the sweep's own noise floor
     assert r3["ranked"] is False and "null-arm" in r3["verdict"].lower()
+
+
+def test_required_seeds_sizes_a_training_seed_experiment():
+    # §C.12: with a MEASURED seed floor we can finally size an architecture experiment instead of guessing.
+    # Measured 2026-09-04: two identical 302K configs (seed 0 vs 101) scored 0.836 vs 0.867 -> pair gap 0.031.
+    from harness.measurement import required_seeds, seed_sd_from_pair
+
+    sd = seed_sd_from_pair(0.836, 0.867)
+    assert 0.015 < sd < 0.030                       # ~0.022: |delta|/sqrt(2)
+
+    # Detecting the 0.062 arch gap at n=128 roots needs SEVERAL seeds per arm...
+    k128 = required_seeds(delta=0.062, seed_sd=sd, n_roots=128, base_rate=0.85)
+    assert k128 >= 4
+    # ...and MORE ROOTS is the cheaper lever than more training runs: quadrupling roots cuts the seeds needed.
+    k512 = required_seeds(delta=0.062, seed_sd=sd, n_roots=512, base_rate=0.85)
+    assert k512 < k128
+    # A larger effect needs fewer runs; a smaller one needs many more.
+    assert required_seeds(0.15, sd, 128, 0.85) < k128 < required_seeds(0.02, sd, 128, 0.85)
+    # Zero seed variance still leaves measurement noise -> never zero runs.
+    assert required_seeds(0.062, 0.0, 128, 0.85) >= 1
+    with pytest.raises(ValueError):
+        required_seeds(0.0, sd, 128, 0.85)

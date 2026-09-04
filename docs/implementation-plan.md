@@ -1635,3 +1635,44 @@ lever: they make single-budget ranking structurally impossible rather than merel
 **Standing practice (user, 2026-09-04):** the PROCESS is the deliverable. Every step must harden the system —
 each mistake becomes a code guard with a regression test naming the incident; prefer the experiment that makes
 FUTURE experiments interpretable over the one that answers today's question.
+
+### §C.12 — THE SEED-NOISE FLOOR, MEASURED (2026-09-04) — and the design it prescribes
+
+**The number every architecture claim in this document was implicitly assuming, finally measured.** Two runs of the
+IDENTICAL config (302K arch, same recipe, same 9,600-game budget), differing ONLY by training seed, scored:
+
+| run | conversion (paired, n=128, held-out seed 99, final ckpt) |
+|---|---|
+| 302K seed 0   | 107/128 = **0.836** |
+| 302K seed 101 | 111/128 = **0.867** |
+
+**Seed-pair gap = 0.031** (McNemar p=0.424, budget-matched, both `provenance=final`, drawn through the ledger).
+Estimated per-run seed SD ≈ **0.022** (`seed_sd_from_pair`; ONE pair is a weak variance estimate — treat as an
+order of magnitude).
+
+**What this settles about the capacity question:** the 1.79M-vs-302K gap at 16k games was **0.062** — roughly 2×
+the seed gap, so NOT obviously an artifact — but at n=128 the metric's own SE is ~0.032, so the effect is the same
+size as the combined noise. **The capacity signal is neither confirmed nor refuted.** That is precisely why it
+flip-flopped across three consecutive reports: we were reading noise each time, in whichever direction the latest
+comparison happened to fall.
+
+**The prescribed design** (`required_seeds()`, new in `harness/measurement.py`, tested):
+
+| n_roots | training seeds per arch to resolve Δ=0.062 |
+|---|---|
+| 128 | 7 |
+| 256 | 4 |
+| **512** | **3** |
+| 1024 | 3 |
+
+**⭐ THE PROCESS LESSON: ROOTS ARE CHEAP, RUNS ARE EXPENSIVE.** A root costs seconds; a training run costs ~10
+hours. Quadrupling roots (128→512) drops the requirement from 7 seeds to 3 — **trading ~1 hour of measurement for
+~40 hours of saved training.** Any future architecture experiment should max out the measurement budget FIRST and
+only then buy training seeds. This inverts how we have been spending: every sweep so far bought more runs and
+skimped on roots, which is the most expensive possible way to be uncertain.
+
+**Consequence for the backlog:** §C.10 BUILD #1 (n=256+ paired as the harness default) and #7 (graded conversion,
+more bits per root) are now clearly ahead of ANY further architecture work — they are what make architecture work
+affordable. The arch A/Bs still paused at `ab_gpool` ckpt_4 are targeting a predicted +0.02–0.05 effect, which at
+n=128 would need **>20 training seeds per arm**; at n=512 with a graded metric it becomes plausible. Do not resume
+them until the measurement side is built.
