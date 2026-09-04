@@ -150,3 +150,61 @@ def test_refutation_without_league_is_refused(tmp_path):
 
     with pytest.raises(ValueError):
         run_scaled_experiment(_req(tmp_path / "dead", batches=1) | {"refutation_frac": 0.2})
+
+
+def test_gate_requires_the_gain_to_clear_measurement_noise(tmp_path):
+    # §C.9 E2 guard, live-fire: our real gate promoted b5 (0.773 true) over b23 (0.836 true) by chasing the max
+    # of 24 twelve-root probes. A promotion must now beat the incumbent by more than the probe's own noise.
+    from harness.neural import Connect4Net
+    from harness.scaled_run import update_gate
+
+    d = Path(tmp_path)
+    net = Connect4Net(channels=8)
+    assert update_gate(d, batch=0, rate=0.833, net=net, roots=12) is True   # first crowning always takes
+    # +0.084 on 12 roots is well inside noise (Wilson half-width ~0.2) -> REFUSED, where the old rule promoted
+    assert update_gate(d, batch=5, rate=0.917, net=net, roots=12) is False
+    assert json.loads((d / "champion.json").read_text())["batch"] == 0
+    # a decisive gain still promotes
+    assert update_gate(d, batch=9, rate=1.0, net=net, roots=12) is True
+    # and on a big probe the same +0.084 IS resolvable -> promotes
+    d2 = Path(tmp_path) / "big"; d2.mkdir()
+    assert update_gate(d2, batch=0, rate=0.833, net=net, roots=512) is True
+    assert update_gate(d2, batch=1, rate=0.917, net=net, roots=512) is True
+
+
+def test_gate_rejects_a_measurement_seed(tmp_path):
+    # §C.9 E1 guard: the gate may never probe on a seed reserved for reported scorecards.
+    import pytest
+
+    from harness.scaled_run import GATE_PROBE_SEED, gate_probe
+    from harness.measurement import MEASUREMENT_SEEDS, SELECTION_SEEDS
+
+    assert GATE_PROBE_SEED in SELECTION_SEEDS and GATE_PROBE_SEED not in MEASUREMENT_SEEDS
+    with pytest.raises(ValueError):
+        gate_probe(None, None, roots=4, sims=8, seed=7)   # 7 = the reported-scorecard seed
+
+
+def test_batch_record_carries_cost_accounting(tmp_path):
+    # §C.10 BUILD #4: Q_eff (best skill per unit budget) was UNANSWERABLE because the batch record contained no
+    # timing at all. Every batch must now carry wall/cpu seconds, games played and a cumulative wall total.
+    r = run_scaled_experiment(_req(tmp_path / "cost", batches=2))
+    for m in r["metrics"]:
+        for k in ("wall_s", "cpu_s", "games", "cum_wall_s"):
+            assert k in m, f"missing cost field {k}"
+        assert m["wall_s"] > 0 and m["games"] > 0
+    assert r["metrics"][1]["cum_wall_s"] >= r["metrics"][0]["cum_wall_s"]  # cumulative, monotone
+    # and it survives a RESUME (cum_wall_s restarts from the resumed batch, wall_s stays per-batch truth)
+    r2 = run_scaled_experiment(_req(tmp_path / "cost", batches=3))
+    assert r2["metrics"][-1]["wall_s"] > 0
+
+
+def test_cost_accounting_separates_training_from_eval():
+    # The old cost model bundled per-batch EVAL into the timing, making cost look non-monotone in params and
+    # producing contradictory speed ratios (53x vs 15.8x for the same span). Training and eval are now distinct.
+    import inspect
+
+    import harness.scaled_run as sr
+
+    src = inspect.getsource(sr.run_scaled_experiment)
+    assert "_train_wall = time.perf_counter() - _t0" in src
+    assert src.index("_train_wall = time.perf_counter()") < src.index("m = batch_metrics(")  # measured BEFORE eval

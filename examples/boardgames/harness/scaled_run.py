@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -47,26 +48,40 @@ def _read_json_tolerant(path: Path) -> dict | None:
         return None
 
 
-def gate_probe(game, net, roots: int, sims: int) -> float:
+def gate_probe(game, net, roots: int, sims: int, seed: int = None) -> float:
     """The gate's per-batch probe (§C.8 #6): net-only forced-win conversion over `roots` PROVEN-won positions —
     the clean near-optimality metric, on a fixed HELD-OUT seed so batches compare like-for-like without ever
     touching the final-measurement roots."""
     from harness.benchmark import verify_forced_win_conversion
+    from harness.measurement import MEASUREMENT_SEEDS
 
+    seed = GATE_PROBE_SEED if seed is None else int(seed)
+    if seed in MEASUREMENT_SEEDS:  # §C.9 E1: never select on a seed we report on
+        raise ValueError(f"gate seed {seed} is reserved for MEASUREMENT — selecting on it is selection-on-test")
     r = verify_forced_win_conversion(
         game, lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=True, c_scale=0.1),
-        n_roots=roots, empties=24, games_per_root=1, seed=GATE_PROBE_SEED, max_empty=22)
+        n_roots=roots, empties=24, games_per_root=1, seed=seed, max_empty=22)
     return float(r["rate"])
 
 
-def update_gate(run_dir: Path, batch: int, rate: float, net) -> bool:
-    """Crown `net` as champion.pt ONLY on a STRICTLY better probe rate (ties keep the incumbent — §C.8 #6: the
-    push run's b23→b39 regression is exactly what this prevents). Returns whether promotion happened."""
+def update_gate(run_dir: Path, batch: int, rate: float, net, roots: int = 0) -> bool:
+    """Crown `net` as champion.pt only when the probe beats the incumbent by MORE THAN THE PROBE'S OWN NOISE.
+
+    §C.9 E2 (measured 2026-09-03): the naive 'strictly better' rule chased the max of 24 twelve-root probes and
+    promoted a checkpoint 0.063 WORSE than the run's own final one — the winner's curse, in the very mechanism
+    built to prevent bad crowning. A promotion must now clear the incumbent's Wilson half-width, so a small probe
+    can no longer promote on noise; with `roots=0` (unknown probe size) the rule stays strictly-better."""
     champ_path = Path(run_dir) / "champion.json"
     blob = _read_json_tolerant(champ_path) if champ_path.exists() else None
     best = blob["rate"] if blob else None
-    if best is not None and rate <= best:
-        return False
+    if best is not None:
+        margin = 0.0
+        if roots > 0:
+            from harness.measurement import promotion_margin
+
+            margin = promotion_margin(best, roots)  # one SE of the incumbent probe: beat the noise, not the point
+        if rate <= best + margin:
+            return False
     save_net(net, str(Path(run_dir) / "champion.pt"))
     _write_json_atomic(champ_path, {"batch": batch, "rate": rate})
     return True
@@ -209,6 +224,7 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         emit({"phase": "distill_corpus", "examples": len(distill_corpus)})
 
     all_metrics: list[dict] = []
+    _cum_wall = 0.0
     if metrics_path.exists():
         all_metrics = [json.loads(l) for l in metrics_path.read_text().splitlines() if l.strip()]
 
@@ -220,10 +236,12 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             from harness.league import build_solver_free_pool
 
             opp_pool = build_solver_free_pool(game, run_dir, list(range(b)), net_arch, league_cfg)
+        _t0, _c0 = time.perf_counter(), time.process_time()
         net, hist, buf = train_alphazero(
             game, iterations=iters_per_batch, selfplay_games=games, sims=sims, epochs=epochs,
             seed=seed * 1000 + b, init_net=init_net, net_arch=net_arch, buffer_cap=buffer_cap,
             gumbel=gumbel, c_scale=c_scale, value_n_step=value_n_step, selfplay_opening_plies=opening_plies,
+            lr=float(request.get("lr", 1e-3)), batch_size=int(request.get("batch_size", 64)),
             opening_plies_zero_frac=float(request.get("opening_plies_zero_frac", 0.0)),
             reanalyze_frac=float(request.get("reanalyze_frac", 0.0)),
             endgame_net_priority=bool(request.get("endgame_net_priority", 0)),
@@ -242,6 +260,8 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             league_p1_frac=league_p1_frac, opening_anchor_cap=(league_anchor_cap if league else 0),
             league_anchor_frac=league_anchor_frac, league_frozen_self=league_frozen_self,
         )
+        _train_wall = time.perf_counter() - _t0          # TRAINING only — measured before save/eval
+        _train_cpu = time.process_time() - _c0
         save_net(net, str(run_dir / f"ckpt_{b}.pt"))
         torch.save(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts
         if refutation_store is not None:
@@ -250,12 +270,21 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         if run_tb is not None:
             run_tb.save(str(tb_path))
         m = batch_metrics(game, net, seed, sims, benchmark_positions, offline_openings, opening_plies, gumbel, c_scale)
+        # §C.10 BUILD #4 cost accounting — Q_eff is a question about skill per unit BUDGET, and the batch record
+        # previously carried no timing whatsoever, making it unanswerable from logs. wall_s excludes the metric
+        # pass so it is a training cost, not a training+eval cost (the conflation that broke the old cost model).
+        _wall = _train_wall
+        _cpu = _train_cpu
+        _eval_wall = (time.perf_counter() - _t0) - _train_wall   # save + metrics, kept SEPARATE
+        _cum_wall += _wall
         rec = {"batch": b, "iterations_done": (b + 1) * iters_per_batch, "final_loss": round(hist[-1]["loss"], 4),
+               "wall_s": round(_wall, 2), "cpu_s": round(_cpu, 2), "games": iters_per_batch * games,
+               "cum_wall_s": round(_cum_wall, 2), "eval_wall_s": round(_eval_wall, 2),
                "endgame_total": (len(run_tb) if run_tb is not None else 0),
                "league_vs_pool": sum(h["vs_pool_games"] for h in hist), **m}
         if gate_roots > 0:  # §C.8 #6: probe + promote-only-on-strictly-better, so a late slide never uncrowns the best
             rec["gate_rate"] = gate_probe(game, net, gate_roots, sims)
-            update_gate(run_dir, b, rec["gate_rate"], net)
+            update_gate(run_dir, b, rec["gate_rate"], net, roots=gate_roots)
         with metrics_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
         all_metrics.append(rec)

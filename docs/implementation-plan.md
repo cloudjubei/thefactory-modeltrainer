@@ -865,16 +865,24 @@ with a floor. Measurement: scratch/measure_champs.py.
 more batches) with the STRONGEST solver-free teachers yet: league mcts 100/300 sims, 8 snapshots @200 sims, league_frac
 0.45, opening_plies 6, endgame table ON. FINAL b40: opening_value +0.755 (last-4 avg), off-line P1-loss 0.317 (best recent
 0.267) — NO gain over the pre-push b23 (+0.90/0.30). DECISIVE clean-metric head-to-head (verify_forced_win_conversion,
-net-only, n_roots=**32**, empties=24, seed=7): **pre-push b23 = 31/32 = 0.969 > final b39 = 29/32 = 0.906.** b23 leads at
+net-only, n_roots=**32**, empties=24, seed=7): **pre-push b23 = 31/32 = 0.969 > final b39 = 29/32 = 0.906.** ⚠️ **SUPERSEDED (§C.9, 2026-09-03): both numbers are selection+easy-subset artifacts. Paired re-measurement on held-out seed 99 (n=128) puts ckpt_23 at 0.852; the 'regression' does not survive — at larger n the push run scored HIGHER. Do not cite 0.969 or the push regression.** b23 leads at
 BOTH n=16 (15/16 vs 14/16) and n=32 — a consistent ~2-root edge that never once favors the extra training (within noise,
-but the push clearly did not help). VERDICT: **ckpt_23 is the near-optimal champion — 0.969 forced-win conversion,
-net-only, no solver.** The residual off-line-loss gap to the oracle (0.30 vs 0.21) is NOT teacher-strength-limited — it is
+but the push clearly did not help). VERDICT: **ckpt_23 measures 0.852 (n=128, held-out seed 99) — NOT the 0.969 originally reported (§C.9).** The residual off-line-loss gap to the oracle (0.30 vs 0.21) is NOT teacher-strength-limited — it is
 the METHOD/ARCHITECTURE CEILING for this 1.79M net; more of the same solver-free teacher does not break it. Closing it
 further needs a DIFFERENT lever (bigger net, a different value target, or a genuinely stronger-than-depth-8 teacher), not
 more league games. This closes the #1/#2/#3 arc: generic solver-free self-play reaches ~0.97 near-optimality on C4, and we
 now know precisely where its ceiling is and why.
 
 ### §C.8 — NEXT-LEVERS ROADMAP (2026-08-31): what actually moves a MEASURED ceiling
+
+> ⚠️ **READ §C.9 + §C.10 BEFORE ACTING ON THIS SECTION (added 2026-09-04).** §C.8 is framed throughout around
+> "beating 0.969" — **that number was never real** (selection + easy-root artifact; the same checkpoint measures
+> **0.852** paired at n=128 on a held-out seed). The "ceiling" this roadmap sets out to break is therefore not
+> established, and neither is the plateau that motivated it. The LEVERS below remain reasonable engineering
+> hypotheses, but their PRIORITISATION is invalid: §C.10 BUILD #15 moves the architectural A/Bs to LAST, behind
+> measurement (n=256 paired), cost accounting, the loss statistic, and the carry-to-40-batches run — because a
+> +0.02–0.05 effect cannot be detected by the instrument this section assumes. Treat §C.8 as a lever CATALOGUE,
+> not as a plan of record.
 
 Source: an 11-agent literature+adversarial-critique workflow over 5 questions (efficiency / net-arch / generic solver /
 constraint-programming / leftover items). **Honest filter kept throughout: separate levers that can raise the 0.969 forced-win
@@ -1393,3 +1401,237 @@ of edge, and the write-up must never pretend it does. What IS defensible — and
   certified to compare against, and a comparison UI would invite the §C.2.2 multiplicity error the gates exist
   to catch. Trigger: Connect-4-solved lands steady. Scope then: a READ surface over the existing
   `{recordType}-leaderboard` records (the Models view), not a new activity.
+
+### §C.9 — MEASUREMENT INTEGRITY PROTOCOL (2026-09-03) — MANDATORY for every reported strength number
+
+**WHY THIS EXISTS.** A phantom result — "0.969 forced-win conversion, best ever" — survived for days, was written
+into this plan and into memory as settled, and drove real decisions (it justified the whole "push the ceiling"
+arc and the arch screen). It was never real. Independent paired re-measurement on a fresh seed put the same
+checkpoint at **0.852** (n=128, seed 99). FOUR compounding errors, all ours, all now guarded IN CODE:
+
+| # | Error | What it did | Guard (code + test) |
+|---|---|---|---|
+| **E1** | **Selection on the test set** | the promotion gate probed the SAME roots the scorecard reported (its 12 roots were literally the first 12 of the final 32) | `harness/measurement.py` `SELECTION_SEEDS` / `MEASUREMENT_SEEDS` are disjoint frozensets; `assert_seed_roles_disjoint`; `gate_probe` REFUSES a measurement seed. `test_measurement.py::test_selection_and_measurement_seeds_are_disjoint`, `test_scaled_run.py::test_gate_rejects_a_measurement_seed` |
+| **E2** | **Winner's curse** | the headline was max-over-40-checkpoints on 32 roots. At true rate 0.85, E[max] = **0.962** — the "breakthrough" was the EXPECTED value of the selection procedure | `expected_selected_max()`; `report_rate()` refuses to emit a selected number without the inflation estimate + caveat; the promotion gate now needs the gain to clear `promotion_margin()` (one SE of the incumbent probe). `test_expected_selected_max_quantifies_the_winners_curse`, `test_report_rate_refuses_a_naked_selected_number`, `test_promotion_margin_blocks_noise_but_admits_decisive_gains`, `test_gate_requires_the_gain_to_clear_measurement_noise` |
+| **E3** | **Mixed-provenance comparison** | one net's SELECTED-best vs another's FINAL — manufactured a "significant" arch difference (p=0.041) that VANISHED (p=0.754) once both were compared final-vs-final on identical roots | `mcnemar_exact()` requires equal-length PAIRED vectors and raises otherwise. `test_mcnemar_exact_matches_hand_computed_cases` |
+| **E4** | **Underpowered ranking** | 8 architectures ranked on 16 roots where ±1 root = 0.06 and the true spread was ~0.08; re-seeding the roots REVERSES the headline | `min_roots_for(delta, base)` — detecting the ~0.02 differences we ranked on needs >1000 roots. `test_min_roots_for_powers_the_claim` |
+
+**THE RULES (non-negotiable, enforced by the tests above):**
+1. **Seeds have ROLES.** A seed used to CHOOSE (gate, sweep, early stop, arch pick) may NEVER be used to REPORT.
+2. **Every reported rate carries n, seed and a Wilson CI.** `report_rate()` is the only sanctioned emitter. A bare
+   point estimate is not a result. `0.969` and `0.85` are the same measurement at n=32.
+3. **A selected maximum is not an estimate.** Best-of-k must be labelled and must carry `expected_selected_max`.
+   Re-measure the chosen candidate on a held-out measurement seed before quoting it.
+4. **Comparisons are PAIRED on identical roots, final-vs-final** (or selected-vs-selected — never mixed), reported
+   with exact McNemar.
+5. **Power the claim before making it.** `min_roots_for()` before ranking anything.
+6. **One training run is one sample.** Architecture-level claims need replication across TRAINING seeds; a paired
+   root test only establishes that two WEIGHT VECTORS differ.
+
+**TWO REAL BUGS THIS EXPOSED, BOTH FIXED:** (a) `train_net` constructed a fresh `torch.optim.Adam` on EVERY call,
+so Adam's moments reset every training iteration (~200× in a long run) — an `opt_state` dict now carries one
+optimizer for the life of the run (default path unchanged, `test_train_net_can_persist_optimizer_state_across_calls`).
+(b) `lr=1e-3` / `batch=64` were HARD-CODED across a 20K→4.7M parameter span, so every "big nets are worse" reading
+was confounded by an lr tuned for neither — now `az_lr` / `az_batch_size` levers (config + manifest + scaled_run).
+
+**CORRECTED RESULTS TABLE (paired, n=128, held-out seed 99, final-vs-final):**
+better1 ckpt_23 (1.79M) **0.852** · carry final ckpt_23 (302K) **0.836** · McNemar **p=0.754 — INDISTINGUISHABLE**.
+carry's GATE-PROMOTED champion 0.773 — i.e. the gate promoted a net **0.063 WORSE** than the run's own final
+checkpoint (p=0.077). **The 302K net matches the 1.79M net at equal games with 1/6 the parameters and ~2.5×
+the training speed. There is no measured capacity crossover, and there never was a 0.969.**
+
+### §C.10 — WHAT WE LEARNED ABOUT NETS, GAMES AND SEARCH PROCESS (2026-09-04)
+
+Compiled from a 6-agent analysis + adversarial critique + **my own independent re-measurements**. Provenance is
+marked: `[measured-here]` = re-run this session; `[agent]` = analysis-agent measurement not independently re-run;
+`[verified]` / `[unverified]` = citation confirmed (or NOT confirmed — treat as directional); `[reasoning]`.
+**Read §C.9 first — it is why most of the older numbers in this plan are wrong.**
+
+#### Q1 — Why the models perform as they do (and why "small beat big" was mostly an artifact)
+
+**The headline collapsed under re-measurement.** Paired, FINAL-vs-FINAL, identical roots, held-out seed 99:
+1.79M = **0.852**, 302K = **0.836**, McNemar **p=0.754 — indistinguishable** `[measured-here, n=128]`. The
+"crossover" (small wins cheap, loses at scale) is **not supported by any measurement we own**. Beyond §C.9's
+E1–E4, one more error was mine: I compared the big net's *selected* checkpoint against the small net's
+*gate-damaged* one, manufacturing p=0.041; like-for-like gives p=0.754.
+
+**What survives:**
+1. **A representational FLOOR, not a peak.** The only significant architectural result we own: the 20K legacy net
+   (`blocks=0, head_hidden=0` — two convs then a **bare Linear**) is worse than everything ≥302K (p=0.0025
+   `[agent]`). Forks are AND-of-threats, odd/even parity is XOR-like; an affine readout represents neither.
+   **Above ~3×10⁵ params every pairwise comparison is null** — extra capacity is neither help nor harm at these
+   budgets, only cost.
+2. **Cost is the real axis.** 302K trains ~2.5× faster per batch, ~2.1× cheaper per forward `[agent]`. Equal skill
+   at 1/6 the params is an EFFICIENCY win, not a strength win. ⚠️ The critic found the agent's wall-clock model
+   self-contradictory (53× vs 15.8× for the same span; cost non-monotone in params because per-batch EVAL is
+   bundled into the timing) — **re-measure cost cleanly before budgeting on it** (BUILD #4).
+3. **TARGET QUALITY was the binding constraint, not capacity.** Pure self-play at 1.79M for 16k games left
+   `opening_value ≈ 0`: equal-strength self-play from a won-but-unconverted position scores ~50/50, so the
+   MSE-optimal value target is literally 0. Distillation fixed it in 1–2 batches. **The data was wrong, not
+   scarce.** (The stronger "recipe×capacity INTERACTION" claim is a difference-of-significance fallacy, p≈0.08,
+   **n.s.** — do not cite it as established.)
+4. **Two confounds invalidated every capacity reading anyway**, both fixed in §C.9: Adam's moments reset every
+   iteration; one hard-coded lr spanned a 230× parameter range.
+5. **`final_loss` explained nothing** — it was never a train loss, just one mini-batch (verified in code).
+   Loss-vs-conversion r ≈ −0.09; ~80% of its variance tracks policy-target ENTROPY `[agent]`. Any KataGo-style
+   "switch when the loss catches up" rule is unusable until BUILD #3.
+
+**⚠️ THE LIMIT ON ALL OF IT: one training run per architecture.** A paired root test shows two WEIGHT VECTORS
+differ — never that two ARCHITECTURES do. Training-seed variance has never been measured here. Every architectural
+statement above, **including the corrected null result**, is provisional until replicated.
+
+#### Q2 — Predicting a good net for a NEW game
+
+**Tier 1 — what our data licenses (only these three):**
+- **R1 FLOOR.** Trunk receptive field must cover one win-line; the head must be NONLINEAR. Below that nothing
+  helps; above it this rule says nothing.
+- **R2 KNEE, not peak.** Sweep params at a fixed cheap budget, then take the **smallest arch whose CI overlaps the
+  top** — never the point-estimate winner.
+- **R3 RECIPE BEFORE ARCHITECTURE.** The recipe moves skill more than any architectural contrast we measured.
+
+**Tier 2 — property → knob (literature checklist; a HYPOTHESIS generator, not our measurement):** whole-board
+aggregate (parity/komi/score/connection) → **global-pool branch** `[unverified 1.60×]`; long-range relations
+(ladders/connections) → **attention blocks** `[verified: ResTNet, Hex 19×19 50.4→58.0%]`; score-margin value or
+common draws → **categorical value + draw bin** `[verified: Stop Regressing 2403.03950]`; per-cell final label →
+**aux heads** `[unverified 1.65×]`; non-lattice topology → **drop the conv trunk** (MLP/set encoder) `[verified:
+TD-Gammon]`; large action space → plane-stacked policy + raise `gumbel_m`; hidden info → **change the ALGORITHM,
+not the net** (PBS/CFR/ReBeL; subgame decomposition is theorem-forbidden) `[verified: 2007.13544]`; large symmetry
+group + scarce data → equivariant layers, else augmentation.
+
+**⚠️ TRANSFER WARNING:** "48–96 sims suffices" rests on `gumbel_m=16 ≥ A=7`. For Go (A=362), Hex 11×11 (121),
+chess (4,672), m ≪ A. **Do not carry this sims budget to any larger-action game.**
+
+**Worked starting points (hypotheses, not decisions):** tic-tac-toe → *tabulate, no net*; **Connect-4 → c64×b4
+hh32 (302K)** as the deployed net — reversing the old 1.79M recommendation on COST grounds, not strength; Go 9×9 →
+c96×b8 + global-pool + ownership aux; Go 19×19 → c256×b20 `[verified: AlphaGo Zero 20×256]`; Hex 11×11 → c128×b12
++ transformer blocks (**no oracle exists — needs Elo-vs-MoHex, not a conversion score**); backgammon → **not a
+ResNet**: MLP + expectimax `[verified: TD-Gammon]`; poker/hidden-info → algorithm change first.
+
+**DELETED — do not carry forward:** the `P* ≈ 115·G` params-per-game formula (both fit points noise-selected; its
+"confirmation" was a 12-root gate artifact; α≈115 for us vs ≈0.5 for AlphaZero chess — 230× apart, so not a
+constant of anything). The quantitative depth floor `b_RF = ceil((2D−1)/2)` — our measured depth ordering is flat
+and non-monotone (b2 .691, b4 .738, b6 .723/.730, b8 .707, b10 .715 `[agent]`); keep only as a prior for unrun
+games. "Big nets forget openings" — non-monotone in size, and Connect-4 is explicitly exempted from inverse
+scaling `[verified: Neumann & Gros]`.
+
+#### Q3 — The streamlined process: **Bracket-and-Fit**
+
+An 8-arch full-budget grid is ≈3 CPU-months at measured throughput, so the procedure must EXTRAPOLATE, not rank.
+
+- **Step 0 — fix the MEASUREMENT before spending a training hour.** n=256 paired roots, common random numbers,
+  McNemar + Wilson. Ship a **NULL ARM** in every sweep (a ≤1%-param duplicate of the centre arch — 05/06 differ by
+  8,704 params, the natural pair): its spread IS the sweep's noise floor. **Refuse to emit a ranking** when
+  homogeneity p > 0.20 or the top-2 gap < the null-arm spread. Our screen would have auto-flagged: **χ²=4.96,
+  df=7, p=0.665** `[agent]`.
+- **Step 1 — 4 arms**, three bracketing the knee at ±½ decade plus the null arm. Not 8.
+- **Step 2 — rungs budgeted in WALL-CLOCK, not games.** Equal-games gave a large wall-clock spread; the small nets
+  were NEVER run at the budget they can afford — the 20K net's true ceiling is simply unmeasured.
+- **Step 3 — THE STRUCTURAL FIX: never eliminate on RANK at a rung.** Kill an arm only when its fitted curve's
+  upper 90% bound AT THE TARGET BUDGET is below the incumbent's lower 90% bound. That makes "we did not discard the
+  eventual winner" a property, not a hope.
+
+#### Q4 — The most EFFICIENT vs the BEST net: three objectives, not one
+
+| | Definition | Answer shape | Our current answer |
+|---|---|---|---|
+| **Q_eff(B)** | best skill at training budget B | a FRONTIER, one winner per budget | 302K at ~9.6h `[agent, sub-noise]` |
+| **Q_best** | best fitted asymptote (budget → patience) | one net + tolerance + stated recipe | **UNDETERMINED — neither net has been run to plateau** |
+| **Q_deploy** | skill per unit INFERENCE cost | a second frontier | 302K by ~2.1× (ms/forward at batch=1 — MCTS forwards are NOT batched, so batch-1 latency is the currency) |
+
+**The single-budget trap, dissected** (all three bit us): the point is noise (n=16 ⇒ CI half-width ±0.22); the
+budget is not equal in the currency you pay; and rank at B does not determine rank at B′ `[verified: Hoffmann]`.
+A fourth trap sat on top: best-of-N reporting (§C.9 E2).
+
+**Protocol:** curves not points (one experiment answers Q_eff AND Q_best); eliminate only on CI-at-target; null arm
+in every sweep; DEV/SEL/TEST seed partition so the reported number was never optimised against; report the frontier
+WITH undetermined regions marked; report Q_deploy separately.
+
+**Honest limit:** no procedure guarantees a global optimum over an unbounded architecture space. This one
+guarantees: (a) no arm discarded except on evidence of inferiority AT THE TARGET BUDGET; (b) no reported difference
+smaller than the sweep's own measured noise floor; (c) efficiency and asymptote separated, each with a CI; (d) the
+reported number was never optimised against.
+
+#### BUILD BACKLOG (information per engineering-hour; **1–4 BLOCKING** — nothing above them is interpretable)
+
+1. **n=256 paired conversion as the harness default** + widen the root sampler beyond the easy first-32 (roots
+   0–31 measured ~+0.077 optimistic for EVERY net `[agent]`). *Partly done ad hoc — promote into `benchmark.py`.*
+2. **Null arm + refuse-to-rank guard** (homogeneity χ², null-arm spread). Turns "the screen found nothing" from a
+   post-mortem into an automatic gate. *(`harness/measurement.py` has the primitives; the guard is NOT wired.)*
+3. **Fix the loss statistic**: return an EPOCH MEAN from `train_net`; log anchor loss separately; add a held-out
+   solver-labelled probe set never trained on.
+4. **Cost accounting**: `wall_s, cpu_s, games, forwards, cum_wall_s` per batch (`scaled_run` records **no timing
+   at all**) + an `ArchCostProbe`. Q_eff is currently unanswerable from existing logs.
+5. ✅ **DONE (§C.9)**: `az_lr`/`az_batch_size` levers + persistent optimizer state. The lr sweep on the widest arch
+   is now possible — it decides "mistuned vs capacity", i.e. whether the screen must be redone per-arch.
+6. **Run `carry_302K` to 40 batches (16k games)** — **the single most informative experiment available**, ~6.4h
+   compute, zero engineering. ≥0.879 ⇒ no capacity ceiling below 16k games; flat ~0.85 ⇒ our first defensible
+   ceiling claim.
+7. **Graded conversion + `games_per_root>1`** with randomised defender tie-breaks — more bits per root at no extra
+   sampling cost (the binary metric needs ~870 roots to resolve 0.848 vs 0.879).
+8. ✅ **PARTLY DONE (§C.9)**: gate now needs the gain to clear one SE. Still to add: promote-then-CONFIRM on a
+   larger root set, and explicit DEV/SEL/TEST seed families.
+9. **LBR at ≥200 openings/cell, paired, floor-subtracted** — n=20/cell is non-monotone, therefore uninterpretable;
+   our champion's "shallow-tactical weakness" reading rests on it and is **not yet safe**.
+10. **Playout Cap Randomization + Forced Playouts** `[unverified 1.37×/1.25×]` — a ~1.7× throughput gain would be
+    worth more than any architecture difference this program has measured.
+11. **`harness/curvefit.py`** — fit/predict/crossover/pareto + on-disk pre-registration of the next rung's prediction.
+12. **`harness/bracket.py`** — the Bracket-and-Fit driver, resumable, emits `frontier.json`.
+13. **Per-depth (empties-bucketed) loss breakdown.**
+14. **Reset / shrink-and-perturb at plateau** — ranked LOW: sampling noise now explains the plateau without it.
+15. **`az_global_pool` / `az_aux_heads` / categorical-value A/Bs — DELIBERATELY LAST.** A +0.02–0.05 effect needs
+    ~870–1,500 paired roots or the graded metric FIRST. ⚠️ The arms in flight (ab_gpool, ab_bins) were launched
+    before this was understood — single-run, n=32-scorecard experiments on a +0.02 question. **They will most
+    likely produce a null dressed as a finding; score them under §C.9 and expect "indistinguishable".**
+
+**DO FIRST:** #1 → #3 → #4 → **#6** → the lr sweep. Under a day of compute; either restores or finishes off the
+capacity thesis.
+
+#### PROGRESS 2026-09-04 — blocking items shipped, compute REPRIORITISED
+
+**Built (TDD, all green):**
+- ✅ **#2 refuse-to-rank guard** — `rank_or_refuse()` (chi-square homogeneity + null-arm noise floor + required-n).
+  Live-fire regression test replays OUR OWN 8-arch/16-root screen and **REFUSES to rank it** (χ²=4.96, df=7,
+  p=0.665, "~1,400 roots per arm needed"). The guard also refuses a *statistically significant* gap that is
+  smaller than the sweep's null-arm spread — significant ≠ real.
+- ✅ **#3 honest loss** — `train_net` returns an **epoch mean**, not the last mini-batch. Test pins stability
+  (spread < 0.15 across identical runs) where the old single-batch statistic had SD ≈ 0.23.
+- ✅ **#4 cost accounting** — every batch record now carries `wall_s, cpu_s, games, cum_wall_s, eval_wall_s`.
+  **Training is timed SEPARATELY from eval** — bundling them is what made the old cost model non-monotone in
+  params and produced the contradictory 53×-vs-15.8× ratios. Q_eff is answerable from logs for the first time.
+- ✅ (§C.9) `az_lr`/`az_batch_size`, persistent optimizer, gate margin, measurement primitives.
+
+**Compute reprioritised** (the arch A/Bs were ~40h for a *predicted* null; both paused, fully resumable at
+`ab_gpool` ckpt_4):
+1. **`carry_302K` 24 → 40 batches** — the capacity question at a budget MATCHED to better1's 16k games (~6.4h).
+2. **`seedrep_302K_s101`** — same arch, same recipe, same budget, **different training seed**. This measures the
+   TRAINING-SEED NOISE FLOOR, which is the gap underneath every architectural claim in this document. Until it
+   exists, "arch A ≈ arch B" is a statement about two weight vectors.
+
+**Still open from the backlog:** #1 (n=256 paired as harness default), #7 (graded conversion), #9 (LBR at
+n≥200), #11/#12 (curvefit + bracket drivers), #10 (playout-cap randomisation — likely worth more throughput than
+any architecture difference measured so far).
+
+### §C.11 — ANALYSIS LEDGER (2026-09-04): guards belong ON the path, not beside it
+
+**The lesson that produced this section.** §C.9 shipped correct measurement primitives. Within HOURS I made three
+NEW errors anyway — not statistics failures, BOOKKEEPING failures — because the primitives were available but
+nothing forced measurements through them:
+
+| | The error I actually made | Ledger guard |
+|---|---|---|
+| **L1** | put a GATE-SELECTED checkpoint in a grid beside FINAL ones and compared them | `compare()` raises on mixed provenance (`provenance` is a mandatory field on every record) |
+| **L2** | labelled a comparison "matched budget" when the arms had 9.6k vs 16k games | every record carries `games`; `compare()` returns `budget_matched` + an explicit note |
+| **L3** | ran ~6 paired tests on overlapping roots, then read p=0.039 as significant | the ledger counts comparisons per ROOT FAMILY and returns `alpha_corrected` + `significant` |
+
+`harness/ledger.py` + `tests/test_ledger.py` (6 tests, one per error class). **Replayed against the real
+2026-09-04 grid it blocks L1 outright, flags L2, and downgrades my own headline: the 1.79M-vs-302K@16k result
+(raw p=0.0386) is NOT significant once multiplicity is counted.**
+
+**THE GENERALISABLE RULE: a guard that is optional will eventually be bypassed by whoever is in a hurry —
+including the author.** Put the guard on the path (a ledger you must record through) rather than beside it (a
+helper you may call). This is why §C.10 BUILD #11/#12 (curvefit + bracket drivers) matter more than any individual
+lever: they make single-budget ranking structurally impossible rather than merely discouraged.
+
+**Standing practice (user, 2026-09-04):** the PROCESS is the deliverable. Every step must harden the system —
+each mistake becomes a code guard with a regression test naming the incident; prefer the experiment that makes
+FUTURE experiments interpretable over the one that answers today's question.

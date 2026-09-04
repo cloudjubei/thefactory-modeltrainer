@@ -896,6 +896,7 @@ def train_net(
     batch_size: int,
     lr: float,
     device: str,
+    opt_state: dict | None = None,
 ) -> float:
     """One training pass over the buffer (policy cross-entropy + value MSE — or value cross-entropy against a
     two-hot target when the net carries a categorical value head). Returns the final mean loss."""
@@ -914,9 +915,19 @@ def train_net(
         target_own = torch.stack([e[3] if len(e) >= 5 else zeros for e in examples]).to(device)
         target_reply = torch.tensor([e[4] if len(e) >= 5 else -1 for e in examples], dtype=torch.long).to(device)
         aux_mask = torch.tensor([1.0 if len(e) >= 5 else 0.0 for e in examples]).to(device)
-    opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
+    # §C.9 BUG FIX: a fresh Adam per call reset the moment estimates on EVERY training iteration (~200x in a
+    # long run), so the optimizer never accumulated any state. Callers that pass `opt_state` keep ONE Adam for
+    # the life of the run; passing nothing preserves the old behaviour byte-for-byte.
+    if opt_state is None:
+        opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
+    else:
+        opt = opt_state.get("opt")
+        if opt is None:
+            opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
+            opt_state["opt"] = opt
     net.train()
     last = 0.0
+    epoch_sum = epoch_seen = 0.0
     n = len(examples)
     for _ in range(epochs):
         perm = torch.randperm(n)
@@ -944,7 +955,13 @@ def train_net(
             opt.zero_grad()
             loss.backward()
             opt.step()
-            last = float(loss.detach())
+            # §C.10 BUILD #3: accumulate an EPOCH MEAN. The old `last = float(loss.detach())` reported one
+            # mini-batch — a single-sample statistic (within-run SD ~0.23) that we mistook for a fit-quality
+            # signal across architectures. Loss-vs-skill correlation was ~-0.09; the column meant nothing.
+            epoch_sum += float(loss.detach()) * len(b)
+            epoch_seen += len(b)
+        last = epoch_sum / max(1, epoch_seen)
+        epoch_sum = epoch_seen = 0.0
     return last
 
 
@@ -1346,6 +1363,7 @@ def train_alphazero(
             _frozen = copy.deepcopy(net)
             _league_pool.append(lambda fn=_frozen: AlphaZeroAgent(fn, sims=sims, device=device, gumbel=gumbel,
                                                                   gumbel_m=gumbel_m, c_scale=c_scale))
+    _opt_state: dict = {}  # §C.9: ONE Adam for the whole run (moments no longer reset each iteration)
     for it in range(iterations):
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
@@ -1436,7 +1454,8 @@ def train_alphazero(
         # mix the oracle distillation uses — so a few-hundred empty-board examples aren't diluted in a 400k buffer.
         _anchor = distilled + opening_anchor
         _afrac = league_anchor_frac if opening_anchor else distill_fraction
-        loss = train_net(net, _mix_training_set(buffer, _anchor, _afrac), epochs, batch_size, lr, device)
+        loss = train_net(net, _mix_training_set(buffer, _anchor, _afrac), epochs, batch_size, lr, device,
+                         opt_state=_opt_state)
         # CHEAP per-iteration quality probe (one forward pass): the net's value on the standard opening. Connect 4
         # is a first-player WIN, so this should climb toward +1 — the live curve the #2-vs-#1 A/B compares.
         opening_value = round(net_value(net, game, game.initial_state(random.Random(seed)), device), 4)

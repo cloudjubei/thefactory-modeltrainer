@@ -999,3 +999,53 @@ def test_nogood_prefix_never_stores_the_full_game():
     assert _nogood_prefix([0, 3, 1, 3, 0, 3, 1, 3], plies=8) == (0, 3, 1, 3, 0, 3, 1)  # final move excluded
     assert _nogood_prefix([0, 3, 1, 3, 0, 3, 1, 3], plies=4) == (0, 3, 1, 3)  # cap still applies
     assert _nogood_prefix([5], plies=6) == ()  # a 1-move game stores nothing (add() drops empty prefixes)
+
+
+def test_train_net_can_persist_optimizer_state_across_calls():
+    # §C.9 BUG: train_net constructed a fresh Adam every call, so moment estimates reset on EVERY iteration
+    # (~200x in a long run) — the optimizer never accumulated. An opt_state dict now carries Adam across calls.
+    game = _game()
+    torch.manual_seed(0)
+    data = self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(0))
+    net = Connect4Net(channels=8)
+    state = {}
+    train_net(net, data, epochs=1, batch_size=32, lr=1e-3, device="cpu", opt_state=state)
+    assert "opt" in state
+    opt = state["opt"]
+    assert opt.state, "Adam moments must exist after a step"
+    train_net(net, data, epochs=1, batch_size=32, lr=1e-3, device="cpu", opt_state=state)
+    assert state["opt"] is opt  # SAME optimizer reused, moments carried forward (not reset)
+    steps = [s["step"] for s in opt.state.values()]
+    assert steps and all(float(s) >= 2 for s in steps)  # step counter advanced across calls
+
+
+def test_train_net_without_opt_state_is_unchanged():
+    # Default path stays byte-identical for every existing caller/run.
+    game = _game()
+    torch.manual_seed(0)
+    data = self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(1))
+    a, b = Connect4Net(channels=8), Connect4Net(channels=8)
+    b.load_state_dict(a.state_dict())
+    torch.manual_seed(7); la = train_net(a, data, epochs=2, batch_size=16, lr=1e-3, device="cpu")
+    torch.manual_seed(7); lb = train_net(b, data, epochs=2, batch_size=16, lr=1e-3, device="cpu", opt_state=None)
+    assert la == lb
+    for pa, pb in zip(a.parameters(), b.parameters()):
+        assert torch.equal(pa, pb)
+
+
+def test_train_net_returns_an_epoch_mean_not_one_minibatch():
+    # §C.10 BUILD #3: `final_loss` was `float(loss.detach())` of the LAST (possibly ragged) mini-batch — a
+    # single-sample statistic with SD ~0.23 that we then read architectural meaning into. It must be the mean
+    # over the final epoch's batches, which is stable enough to compare.
+    game = _game()
+    torch.manual_seed(0)
+    data = []
+    for i in range(4):
+        data += self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=8), random.Random(i))
+    losses = []
+    for _ in range(6):
+        net = Connect4Net(channels=8)
+        torch.manual_seed(0)
+        losses.append(train_net(net, data, epochs=1, batch_size=8, lr=1e-3, device="cpu"))
+    spread = max(losses) - min(losses)
+    assert spread < 0.15, f"epoch-mean loss should be stable across identical runs, spread={spread}"

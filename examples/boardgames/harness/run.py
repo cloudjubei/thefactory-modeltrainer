@@ -294,6 +294,7 @@ def _run_alphazero_training(game: Game, config: TrainerConfig):
         gumbel=bool(config.az_gumbel),
         c_scale=config.az_c_scale,
         value_n_step=config.az_value_n_step,
+        lr=float(config.az_lr), batch_size=int(config.az_batch_size),
         target_refresh=config.az_target_refresh,
         selfplay_opening_plies=config.az_selfplay_opening_plies,
         buffer_cap=config.az_buffer_cap,

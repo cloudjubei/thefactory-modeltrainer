@@ -108,6 +108,10 @@ class TrainerConfig:
     # §C.8 ceiling levers (both OPT-IN; default net byte-identical): whole-board conditioning + categorical value.
     az_global_pool: int = 0  # 1 = KataGo-style global-pool branch in every res block (whole-board mean+max→FC→bias)
     az_value_bins: int = 0  # K>=3 = categorical value head over K bins (cross-entropy, not tanh+MSE); 0 = legacy scalar
+    # §C.9 width-fairness: lr/batch were HARD-CODED (1e-3/64) across a 20K->4.7M param span, so every
+    # "big nets are worse" reading was confounded by an lr tuned for neither. Now sweepable per arch.
+    az_lr: float = 1e-3
+    az_batch_size: int = 64
     az_aux_heads: int = 0  # 1 = auxiliary ownership+opponent-reply heads (requires az_residual; self-play auto-records)
     az_selfplay_workers: int = 1  # §C.7 parallel self-play worker processes (1 = sequential); fills idle cores
     # §C.7 #3 SOLVER-FREE LEAGUE — break opening value-collapse WITHOUT an oracle (weak→strong non-oracle opponents +
@@ -176,6 +180,10 @@ def validate_config(config: TrainerConfig) -> None:
             raise ValueError(f"{name} must be 0 or 1, got {getattr(config, name)}")
     if config.az_value_bins != 0 and not 3 <= config.az_value_bins <= 128:
         raise ValueError(f"az_value_bins must be 0 (scalar) or in (3, 128), got {config.az_value_bins}")
+    if not 1e-6 <= config.az_lr <= 1.0:
+        raise ValueError(f"az_lr must be in [1e-6, 1.0], got {config.az_lr}")
+    if not 1 <= config.az_batch_size <= 4096:
+        raise ValueError(f"az_batch_size must be in [1, 4096], got {config.az_batch_size}")
     if config.az_aux_heads and not config.az_residual:
         raise ValueError("az_aux_heads=1 requires az_residual=1 (aux heads read the spatial trunk)")
     if not AZ_CHANNELS_RANGE[0] <= config.az_channels <= AZ_CHANNELS_RANGE[1]:
@@ -225,10 +233,10 @@ def _config_from_raw(raw: dict[str, Any]) -> TrainerConfig:
     # (e.g. `device`, checkpoint/continue refs) that a consumer must not hard-fail on.
     known = {f.name for f in fields(TrainerConfig)}
     filtered = {k: v for k, v in raw.items() if k in known}
-    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_value_bins", "az_selfplay_workers", "az_league_snapshots"):
+    for int_key in ("mcts_sims", "mcts_solve_endgame", "oracle_depth", "benchmark_positions", "eval_games", "seed", "az_iterations", "az_selfplay_games", "az_sims", "az_epochs", "az_distill_positions", "az_distill_games", "az_solve_endgame", "az_value_n_step", "az_target_refresh", "az_selfplay_opening_plies", "az_buffer_cap", "az_endgame_max_empty", "az_endgame_extend_positions", "az_endgame_cap", "az_channels", "az_blocks", "az_head_hidden", "az_value_bins", "az_batch_size", "az_selfplay_workers", "az_league_snapshots"):
         if int_key in filtered:
             filtered[int_key] = int(filtered[int_key])
-    for float_key in ("az_c_scale", "az_pool_frac", "az_endgame_extend_seconds", "az_league_p1_frac", "az_league_anchor_frac"):
+    for float_key in ("az_lr", "az_c_scale", "az_pool_frac", "az_endgame_extend_seconds", "az_league_p1_frac", "az_league_anchor_frac"):
         if float_key in filtered:
             filtered[float_key] = float(filtered[float_key])
     for bool_key in ("az_warm_start", "az_gumbel", "az_endgame_tablebase", "az_endgame_exact_targets", "az_endgame_warm_start", "az_endgame_persist", "az_residual", "az_batchnorm", "az_global_pool", "az_aux_heads", "az_league"):

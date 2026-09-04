@@ -371,6 +371,22 @@
       "appliesWhen": {
         "model_name": ["alphazero"]
       }
+    },
+    "az_lr": {
+      "type": "number",
+      "default": 0.001,
+      "range": [1e-6, 1.0],
+      "appliesWhen": {
+        "model_name": ["alphazero"]
+      }
+    },
+    "az_batch_size": {
+      "type": "number",
+      "default": 64,
+      "range": [1, 4096],
+      "appliesWhen": {
+        "model_name": ["alphazero"]
+      }
     }
   },
   "diagnostics": {
