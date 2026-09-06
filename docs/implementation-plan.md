@@ -1676,3 +1676,50 @@ more bits per root) are now clearly ahead of ANY further architecture work — t
 affordable. The arch A/Bs still paused at `ab_gpool` ckpt_4 are targeting a predicted +0.02–0.05 effect, which at
 n=128 would need **>20 training seeds per arm**; at n=512 with a graded metric it becomes plausible. Do not resume
 them until the measurement side is built.
+
+### §C.13 — GRADED CONVERSION: BUILT, MEASURED, AND PARTLY REFUTED (2026-09-05)
+
+**Built:** `RandomizedOracleAgent` (perfect defence that samples UNIFORMLY among equally-optimal replies),
+`graded_conversion` (per-root FRACTION of perfect defences beaten), `paired_conversion` (all arms on identical
+roots — pairing is now structural), shuffled root sampling (prefixes representative), and a runtime
+opening-wall guard in the solver (`MAX_SOLVE_EMPTIES`, set by `tests/conftest.py`).
+
+**⛔ THE HEADLINE IS A REFUTATION OF MY OWN BUILD #7.** Graded scoring reduces per-root variance by a real but
+MODEST amount — effective-n gain **×1.18–1.41 (mean ×1.32)** — while costing **4× the games** (`games_per_root=4`).
+Normalised for compute it is a **LOSS**:
+
+| at an equal 384-game budget | SE of the mean |
+|---|---|
+| graded, 96 roots × 4 games | 0.029–0.038 |
+| **binary, 384 roots × 1 game** | **0.018–0.021** |
+
+**Binary-with-4×-roots is 1.75× more precise than graded-with-4-games at identical cost.** The mechanism:
+BETWEEN-root difficulty variance dominates (positions genuinely differ in hardness); extra games per root only
+shrink the small WITHIN-root component. **RULE: buy ROOTS, not games per root.** Keep the randomized defence
+(it is a validity fix — the metric now means "beats perfect play" rather than "beats one canonical line") but run
+it at `games_per_root=1`, where each root samples a different optimal defence for free.
+
+**Measured on existing checkpoints (n=96 roots, graded, randomized defence, paired, held-out seed 99):**
+
+| comparison | delta | p (paired permutation) |
+|---|---|---|
+| ARCH gap, 1.79M vs 302K @16k | **+0.060** | 0.021 |
+| SEED gap, identical config s0 vs s101 | −0.036 | 0.329 |
+| BUDGET gap, 9.6k → 16k games (same seed) | +0.018 | 0.656 |
+
+Three comparisons on this root family ⇒ corrected α = 0.0167, so **the arch gap at p=0.021 STILL does not clear
+correction**. It is now consistent across two independent instruments (binary/deterministic: +0.062; graded/
+randomized: +0.060) — suggestive, reproducible, and still not established. The randomized defence did NOT reorder
+the nets, so the validity concern, while real in principle, did not change any conclusion here.
+
+**⭐ THE STRATEGIC FINDING: YOU CANNOT MEASURE YOUR WAY OUT OF TRAINING-SEED VARIANCE.** The seed floor (0.036)
+is ~60% of the arch gap (0.060). Measurement improvements have hit diminishing returns — better instruments make
+the seed floor *more precisely visible*, not smaller. The remaining paths are only:
+1. **Buy seeds** — 4–5 training runs per arm at n≥256 roots (~40–50h) settles it definitively.
+2. **Reduce training variance itself** — the untried lever, and the interesting one: EMA/SWA, longer runs, a more
+   stable recipe. If training variance halved, the SAME arch question becomes answerable with ~2 seeds instead of 5.
+3. **Accept "indistinguishable at ~0.06 resolution"** and spend the compute on the recipe, which has produced every
+   large measured effect in this project.
+
+**Backlog correction:** BUILD #7 (graded conversion) is DONE but should NOT be used at `games_per_root>1`.
+BUILD #1 (more paired roots) is upgraded — it is now the ONLY measurement lever with a favourable exchange rate.

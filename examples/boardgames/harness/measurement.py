@@ -228,19 +228,24 @@ def seed_sd_from_pair(rate_a: float, rate_b: float) -> float:
     return abs(float(rate_a) - float(rate_b)) / math.sqrt(2.0)
 
 
-def required_seeds(delta: float, seed_sd: float, n_roots: int, base_rate: float,
+def required_seeds(delta: float, run_sd: float, measurement_var: float = 0.0,
                    z_alpha: float = 1.96, z_beta: float = 0.84) -> int:
-    """How many TRAINING SEEDS per arm are needed to resolve an architecture difference of `delta`.
+    """How many TRAINING RUNS per arm are needed to resolve an architecture difference of `delta`.
 
-    The unit of analysis for an architecture claim is a RUN, not a checkpoint (§C.9 rule 6). Each run carries two
-    independent noise sources: training-seed variance (`seed_sd`) and the conversion metric's own sampling error
-    at `n_roots`. This sizes the experiment against BOTH — and it shows that adding ROOTS is usually far cheaper
-    than adding training runs, since roots cost minutes and a run costs hours."""
+    `run_sd` is the TOTAL per-run SD of the REPORTED statistic — exactly what `seed_sd_from_pair` returns, since
+    that is computed from two measured rates and therefore already contains the metric's own noise.
+
+    §C.14 BUG FIX (2026-09-05): the previous version added `p(1-p)/n_roots` on top of `run_sd`, double-counting
+    measurement noise, and used the UNPAIRED binomial variance where a paired design leaves only the (much
+    smaller) net x root interaction. It reported ~8 seeds where ~3 was correct — which is part of why I told the
+    user the architecture question needed 4-5 training runs per arm.
+
+    Pass `measurement_var` ONLY in the component form, where `run_sd` is the trajectory-only SD and the
+    measurement term is supplied separately (e.g. the paired interaction variance divided by n_roots)."""
     if delta <= 0:
         raise ValueError("delta must be > 0")
-    if n_roots <= 0:
-        raise ValueError("n_roots must be positive")
-    p = min(max(base_rate, 1e-6), 1 - 1e-6)
-    var_run = float(seed_sd) ** 2 + p * (1 - p) / n_roots
+    if run_sd < 0 or measurement_var < 0:
+        raise ValueError("run_sd and measurement_var must be non-negative")
+    var_run = float(run_sd) ** 2 + float(measurement_var)
     k = 2.0 * var_run * ((z_alpha + z_beta) / delta) ** 2
     return max(1, math.ceil(k))

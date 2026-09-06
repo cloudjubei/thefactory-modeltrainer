@@ -183,7 +183,8 @@ def verify_solved(
     return {**res, "solved": res["rate"] >= 0.999}
 
 
-def sample_forced_win_roots(game: Game, n: int, empties: int = 14, seed: int = 0) -> list[State]:
+def sample_forced_win_roots(game: Game, n: int, empties: int = 14, seed: int = 0,
+                            shuffle: bool = True) -> list[State]:
     """`n` non-terminal positions with exactly `empties` empty cells where the SIDE TO MOVE has a PROVEN forced win
     (`position_value > 0`). These are small, FAST-to-solve roots: verifying the model converts them against the EXACT
     solver is an exact proof that SIDESTEPS the opening wall (solving a 14-empty position is milliseconds, not the
@@ -209,6 +210,11 @@ def sample_forced_win_roots(game: Game, n: int, empties: int = 14, seed: int = 0
         if sum(1 for v in s.board if v == 0) != empties or position_value(game, s) <= 0:
             continue
         out.append(s)
+    if shuffle:
+        # §C.13: return roots in a SHUFFLED order so any PREFIX is representative. The old generation order was
+        # measured to be systematically easier at the front (mean conversion .804 on roots 0-31 vs .727 on
+        # 32-255), and every gate / quick check reads a prefix — so the cheap checks were the biased ones.
+        random.Random(seed ^ 0x5EED).shuffle(out)
     return out
 
 
@@ -346,3 +352,44 @@ def evaluate_optimality(
         "oracle_positions": total,
         "oracle_min_moves": min_moves,
     }
+
+
+def graded_conversion(game: Game, model_factory: Callable[[], object], roots: list[State],
+                      games_per_root: int = 4, seed: int = 0, max_empty: int = 10**9,
+                      randomized_defence: bool = True) -> dict:
+    """GRADED forced-win conversion (§C.13): per root, the FRACTION of games converted against perfect defence
+    that varies among equally-optimal replies. The binary metric asks "did it beat THE canonical defence" (1 bit,
+    high variance); this asks "what share of perfect defences does it beat" — more bits per root at identical
+    root-sampling cost, which is the cheap way to buy statistical power (roots cost seconds, training runs hours).
+
+    Returns `scores` (per-root fractions), `rate` (their mean) and `binary_rate` (the old all-or-nothing metric,
+    kept so historical numbers remain comparable)."""
+    from harness.solver import OracleAgent, RandomizedOracleAgent
+
+    if getattr(game, "name", "") == "connect4":
+        opp = (lambda: RandomizedOracleAgent()) if randomized_defence else (lambda: OracleAgent())
+    else:
+        opp = exact_opponent_factory(game, max_empty)
+    scores: list[float] = []
+    for i, root in enumerate(roots):
+        res = p1_conversion(game, model_factory, opp, games=max(1, games_per_root),
+                            seed=seed + i * 7919, start=root, strategist=root.to_move)
+        scores.append(res["rate"])
+    n = max(1, len(scores))
+    return {"scores": scores, "rate": sum(scores) / n, "n_roots": len(scores),
+            "games_per_root": games_per_root,
+            "binary_rate": sum(1 for x in scores if x >= 0.999) / n}
+
+
+def paired_conversion(game: Game, factories: dict, n_roots: int = 256, empties: int = 24, seed: int = 0,
+                      games_per_root: int = 4, max_empty: int = 22,
+                      randomized_defence: bool = True) -> dict:
+    """Score EVERY arm on the SAME roots in one call (§C.13 G2) — pairing becomes structural rather than a thing
+    the caller has to remember, which is how a mixed-root comparison got made by hand once already. Returns each
+    arm's graded scores plus a `roots_id` identifying the exact root family for the analysis ledger."""
+    roots = sample_forced_win_roots(game, n_roots, empties=empties, seed=seed)
+    arms = {name: graded_conversion(game, f, roots, games_per_root=games_per_root, seed=seed,
+                                    max_empty=max_empty, randomized_defence=randomized_defence)
+            for name, f in factories.items()}
+    return {"arms": arms, "roots_id": f"e{empties}_s{seed}_n{len(roots)}_g{games_per_root}",
+            "n_roots": len(roots), "games_per_root": games_per_root}

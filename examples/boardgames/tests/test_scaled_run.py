@@ -208,3 +208,22 @@ def test_cost_accounting_separates_training_from_eval():
     src = inspect.getsource(sr.run_scaled_experiment)
     assert "_train_wall = time.perf_counter() - _t0" in src
     assert src.index("_train_wall = time.perf_counter()") < src.index("m = batch_metrics(")  # measured BEFORE eval
+
+
+def test_optimizer_state_persists_across_batches_not_just_iterations(tmp_path, monkeypatch):
+    # §C.14 BUG: the §C.9 "one Adam per run" fix put `_opt_state` INSIDE train_alphazero, which scaled_run calls
+    # once per BATCH — so Adam still reset 24-40x per run, not once. The run-level owner must be scaled_run.
+    import harness.scaled_run as sr
+    from harness.neural import Connect4Net
+
+    seen = []
+
+    def fake_train(game, **kw):
+        seen.append(kw.get("opt_state"))
+        return Connect4Net(**kw["net_arch"]), [{"loss": 1.0, "vs_pool_games": 0}], []
+
+    monkeypatch.setattr(sr, "train_alphazero", fake_train)
+    run_scaled_experiment(_req(tmp_path / "optruns", batches=3))
+    assert len(seen) == 3
+    assert all(s is not None for s in seen), "scaled_run must own an opt_state across batches"
+    assert seen[0] is seen[1] is seen[2], "the SAME optimizer state object must span every batch of a run"

@@ -1,3 +1,4 @@
+import pytest
 import random
 
 import torch
@@ -268,15 +269,17 @@ def test_alphazero_solve_endgame_plays_perfectly_on_late_positions():
 
 def test_alphazero_solve_endgame_off_by_default_and_skipped_while_exploring():
     game = _game()
-    # Off by default (self-play must keep exploring, not collapse onto solver moves).
+    # OFF BY DEFAULT is the real protection: self-play never pays for solves and never collapses onto solver moves.
     assert AlphaZeroAgent(Connect4Net(), sims=5).solve_endgame == 0
-    # Even with the cutoff on, a non-zero temperature (self-play exploration) skips it — the solver is a
-    # GREEDY-play optimisation, never a training-time shortcut that would starve exploration.
+    # With the cutoff explicitly ON the agent DOES consult the solver at proof leaves (`_proven_value` gates on
+    # solve_endgame alone — NOT on temperature; an earlier comment here claimed otherwise and nothing checked it).
+    # Use a LATE position so the assertion is about behaviour rather than a hidden 37-empty solve on every run.
+    from harness.benchmark import sample_solvable_positions
+
+    late = sample_solvable_positions(game, n=1, min_moves=30, seed=4)[0]
     agent = AlphaZeroAgent(Connect4Net(), sims=5, solve_endgame=40, temperature=1.0)
-    s = game.initial_state(random.Random(0))
-    for c in [3, 3, 3, 4]:  # a few stones down, still far from a cheap solve anyway
-        s = game.step(s, c)
-    assert agent.act(game, s, random.Random(0)) in game.legal_actions(s)  # plays via search, not a crash
+    assert agent.act(game, late, random.Random(0)) in game.legal_actions(late)
+    assert agent.endgame_solves >= 1  # it really did solve — the behaviour is now pinned, not assumed
 
 
 def test_build_alphazero_agent_reads_solve_endgame(tmp_path):
@@ -594,6 +597,7 @@ def test_gumbel_search_returns_a_valid_improved_policy_within_budget():
     assert agent._gumbel_selected in wins  # guaranteed improvement + terminal backup ⇒ it selects the win
 
 
+@pytest.mark.allow_deep_solve  # §C.5 gate: win-in-1 roots can occur early; the solve cost is inherent
 def test_completed_q_policy_beats_visit_counts_at_low_sims_on_tactical_positions():
     # THE #1 GATE (plan §C.5): at n=8 sims the completed-Q policy concentrates MORE mass on the exact-optimal move
     # than the raw visit-count policy across a set of tactical Connect-4 positions — measured against the solver,

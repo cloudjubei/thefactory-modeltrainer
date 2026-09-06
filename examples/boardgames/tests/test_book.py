@@ -1,3 +1,4 @@
+import pytest
 import random
 
 from games.connect4 import COLS, ROWS, C4State, Connect4
@@ -37,6 +38,7 @@ def test_run_bounded_caps_a_slow_call_and_passes_a_fast_one():
     assert _run_bounded(lambda: 42, 0.05) == 42  # a fast call returns normally, the timer is cleared
 
 
+@pytest.mark.allow_deep_solve  # deliberately probes the opening wall
 def test_solve_exact_bounded_defers_the_opening_wall():
     from harness.book import _solve_exact_bounded
 
@@ -85,6 +87,7 @@ def test_build_book_sequential_in_band_cap_matches_the_plain_build():
         assert plain.proven_value(k) == capped.proven_value(k)
 
 
+@pytest.mark.allow_deep_solve  # deliberately probes the opening wall
 def test_build_book_respects_the_deadline_within_a_band():
     # gap (b): a time-capped accumulator must STOP near its deadline, not grind a whole band first. The ply-14 band
     # below a ply-12 root is ~40 cold solves (~120ms each ≈ 5s). A 0.4s deadline must book only a small prefix and

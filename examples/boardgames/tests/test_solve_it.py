@@ -1,3 +1,4 @@
+import pytest
 """SOLVE-IT (docs/implementation-plan.md §C.5) — the honest measurement + winning-strategy grind + book/net
 verification that turns a SOLVED GAME into a MODEL that plays perfectly. The truth spine: nothing here claims
 "optimal" unless it is measured against the EXACT oracle. The full pipeline closes end-to-end on tic-tac-toe
@@ -153,6 +154,7 @@ def test_prove_winning_strategy_is_bounded_and_resumable():
     assert winning_strategy_coverage(game, book, max_plies=9, max_exact_empty=0)["complete"] is True
 
 
+@pytest.mark.allow_deep_solve  # deliberately probes the opening wall
 def test_prove_winning_strategy_defers_a_hard_solve_instead_of_hanging():
     # A from-opening strategist node with a tiny per-solve cap must DEFER (not hang) — the endgame-back grind.
     game = Connect4()

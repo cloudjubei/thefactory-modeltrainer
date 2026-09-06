@@ -1240,6 +1240,7 @@ def train_alphazero(
     selfplay_opening_plies: int = 0,
     opening_plies_zero_frac: float = 0.0,
     endgame_net_priority: bool = False,
+    opt_state: dict | None = None,
     refutation_frac: float = 0.0,
     refutation_prefix_plies: int = 6,
     refutation_store=None,
@@ -1363,7 +1364,9 @@ def train_alphazero(
             _frozen = copy.deepcopy(net)
             _league_pool.append(lambda fn=_frozen: AlphaZeroAgent(fn, sims=sims, device=device, gumbel=gumbel,
                                                                   gumbel_m=gumbel_m, c_scale=c_scale))
-    _opt_state: dict = {}  # §C.9: ONE Adam for the whole run (moments no longer reset each iteration)
+    # §C.14: the RUN owns this (scaled_run passes it across batches). A local default keeps other
+    # callers working, but then Adam resets per call — which is the bug this parameter fixes.
+    _opt_state: dict = opt_state if opt_state is not None else {}
     for it in range(iterations):
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
@@ -1479,6 +1482,42 @@ def train_alphazero(
     if return_buffer:
         return net, history, buffer
     return net, history
+
+
+def average_checkpoints(paths: list[str], device: str = "cpu") -> Connect4Net:
+    """Average the PARAMETERS of several checkpoints of the SAME architecture (SWA-style, §C.14).
+
+    Why: run-to-run (training-seed) variance is the constraint that measurement cannot reduce — better instruments
+    make the seed floor more precisely visible, not smaller. Averaging the tail of a run's checkpoints is the
+    classic cheap variance reducer, and because we save a checkpoint every batch it can be applied POST-HOC to
+    finished runs at zero training cost.
+
+    Averages every floating-point entry in the state dict, INCLUDING BatchNorm running statistics (dropping them
+    silently changes eval-time behaviour). Integer buffers such as `num_batches_tracked` are taken from the first
+    checkpoint. NOTE: averaging BN running stats is the cheap approximation — the textbook SWA recipe recomputes
+    them with a forward pass over data; if the averaged net underperforms its members, that is the first thing to
+    try (the run's persisted replay buffer is the natural data source)."""
+    if not paths:
+        raise ValueError("no checkpoints to average")
+    nets = [load_net(p, device) for p in paths]
+    arch = nets[0].arch
+    for p, n in zip(paths[1:], nets[1:]):
+        if n.arch != arch:
+            raise ValueError(f"cannot average mismatched arch: {p} has {n.arch}, expected {arch}")
+    out = Connect4Net(**arch).to(device)
+    sds = [n.state_dict() for n in nets]
+    merged = {}
+    for key, first in sds[0].items():
+        if first.is_floating_point():
+            acc = torch.zeros_like(first, dtype=torch.float64)
+            for sd in sds:
+                acc += sd[key].to(torch.float64)
+            merged[key] = (acc / len(sds)).to(first.dtype)
+        else:
+            merged[key] = first.clone()
+    out.load_state_dict(merged)
+    out.eval()
+    return out
 
 
 def save_net(net: Connect4Net, path: str) -> None:

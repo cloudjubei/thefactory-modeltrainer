@@ -225,6 +225,7 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
 
     all_metrics: list[dict] = []
     _cum_wall = 0.0
+    _run_opt_state: dict = {}  # §C.14: ONE Adam for the whole RUN (train_alphazero is called per BATCH)
     if metrics_path.exists():
         all_metrics = [json.loads(l) for l in metrics_path.read_text().splitlines() if l.strip()]
 
@@ -252,6 +253,7 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
             endgame_exact_targets=int(request.get("endgame_exact_targets", 1)),
             endgame_extend_positions=int(request.get("endgame_extend_positions", 2000)),
             endgame_extend_seconds=float(request.get("endgame_extend_seconds", 5.0)),
+            opt_state=_run_opt_state,
             init_buffer=init_buffer, return_buffer=True,
             selfplay_workers=int(request.get("selfplay_workers", 1)),
             distill_corpus=distill_corpus,

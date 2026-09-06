@@ -277,6 +277,23 @@ def to_bitboard(state: C4State) -> tuple[int, int, int]:
     return position, mask, moves
 
 
+# §C.13 GUARD: exact solves near the OPENING are the minutes-to-hours wall. Production may do them deliberately
+# (book building, with budgets), but a TEST that triggers one hangs the suite silently — a hung suite is
+# indistinguishable from a slow one. Tests set this limit (see tests/conftest.py) so the wall FAILS FAST instead.
+# 0 = unlimited (the production default). I have hit this trap three times; a comment was not enough.
+MAX_SOLVE_EMPTIES = 0
+
+
+def _guard_solve_depth(state) -> None:
+    if MAX_SOLVE_EMPTIES and not getattr(state, "done", False):
+        empties = sum(1 for v in state.board if v == 0)
+        if empties > MAX_SOLVE_EMPTIES:
+            raise RuntimeError(
+                f"exact solve attempted on a position with {empties} empty cells (test limit "
+                f"{MAX_SOLVE_EMPTIES}) — this is the opening wall and will hang. Use a LATE position: "
+                f"sample_solvable_positions(min_moves=28+) or sample_forced_win_roots(empties<=14).")
+
+
 def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = None, book=None) -> dict[int, int]:
     """Game-theoretic value of every legal column from the mover's perspective (higher = better). The optimal
     SET is the argmax; `weak` scores by outcome (win/draw/loss), `weak=False` by outcome-then-speed.
@@ -285,6 +302,7 @@ def move_values(state: C4State, weak: bool = True, tt: dict[int, int] | None = N
     child that is already solved: instead of re-searching it we read its stored value. This is the bottom-up
     wall-break — once the deeper frontier is booked, a shallower position's children are all instant lookups,
     so its own solve collapses to a handful of table hits. Only consulted when `weak` (the store is weak-valued)."""
+    _guard_solve_depth(state)
     tt = _TT if tt is None else tt
     if state.done:
         return {}
@@ -382,6 +400,30 @@ class OracleAgent:
         best_cols = [c for c, v in values.items() if v == best]
         best_cols.sort(key=_CENTER_ORDER.index)
         return best_cols[0]
+
+
+class RandomizedOracleAgent:
+    """Perfect Connect 4 defence that samples UNIFORMLY among equally-optimal moves (§C.13 G1).
+
+    `OracleAgent` tie-breaks centre-first *for determinism*, which meant `games_per_root > 1` replayed the
+    identical game — zero extra information — and conversion was only ever tested against ONE optimal defence out
+    of the many that exist. This agent is exactly as strong (it never plays a sub-optimal move) but explores the
+    optimal-defence space, so a graded score measures "what fraction of perfect defences does the model beat",
+    which is both more informative per root and a strictly harder test."""
+
+    kind = "oracle_randomized"
+
+    def act(self, game, state, rng: random.Random) -> int:
+        position, mask, moves = to_bitboard(state)
+        legal = [c for c in range(WIDTH) if _can_play(mask, c)]
+        if not legal:
+            raise ValueError("oracle asked to move in a terminal position")
+        wins = [c for c in legal if _is_winning_move(position, mask, c)]
+        if wins:
+            return rng.choice(wins)  # any immediate win is equally optimal
+        values = move_values(state, weak=False)
+        best = max(values.values())
+        return rng.choice([c for c, v in values.items() if v == best])
 
 
 class NearPerfectOracle:

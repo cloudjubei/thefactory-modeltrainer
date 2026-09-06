@@ -133,22 +133,39 @@ def test_homogeneity_refuses_to_rank_an_underpowered_sweep():
 
 
 def test_required_seeds_sizes_a_training_seed_experiment():
-    # §C.12: with a MEASURED seed floor we can finally size an architecture experiment instead of guessing.
-    # Measured 2026-09-04: two identical 302K configs (seed 0 vs 101) scored 0.836 vs 0.867 -> pair gap 0.031.
+    # §C.14: with a MEASURED per-run SD we can size an architecture experiment instead of guessing.
+    # Measured 2026-09-05: two identical 302K configs (seeds 0 vs 101) scored 0.818 vs 0.854 (graded, n=96).
     from harness.measurement import required_seeds, seed_sd_from_pair
 
-    sd = seed_sd_from_pair(0.836, 0.867)
-    assert 0.015 < sd < 0.030                       # ~0.022: |delta|/sqrt(2)
+    run_sd = seed_sd_from_pair(0.818, 0.854)
+    assert 0.020 < run_sd < 0.030                    # ~0.0255 = |delta|/sqrt(2), the TOTAL per-run SD
 
-    # Detecting the 0.062 arch gap at n=128 roots needs SEVERAL seeds per arm...
-    k128 = required_seeds(delta=0.062, seed_sd=sd, n_roots=128, base_rate=0.85)
-    assert k128 >= 4
-    # ...and MORE ROOTS is the cheaper lever than more training runs: quadrupling roots cuts the seeds needed.
-    k512 = required_seeds(delta=0.062, seed_sd=sd, n_roots=512, base_rate=0.85)
-    assert k512 < k128
-    # A larger effect needs fewer runs; a smaller one needs many more.
-    assert required_seeds(0.15, sd, 128, 0.85) < k128 < required_seeds(0.02, sd, 128, 0.85)
-    # Zero seed variance still leaves measurement noise -> never zero runs.
-    assert required_seeds(0.062, 0.0, 128, 0.85) >= 1
+    # Component form: buying ROOTS shrinks the measurement term, so it reduces the seeds needed. (Under a PAIRED
+    # design the residual is the net x root INTERACTION variance ~0.0548, not the unpaired binomial 0.1275.)
+    traj_sd = 0.010                                   # trajectory-only SD, excluding measurement
+    k96 = required_seeds(0.062, run_sd=traj_sd, measurement_var=0.0548 / 96)
+    k512 = required_seeds(0.062, run_sd=traj_sd, measurement_var=0.0548 / 512)
+    assert k512 <= k96                                # more roots => no more seeds needed
+    assert required_seeds(0.15, run_sd) < required_seeds(0.02, run_sd)   # bigger effect => fewer runs
+    assert required_seeds(0.062, 0.0) >= 1                               # never zero runs
     with pytest.raises(ValueError):
-        required_seeds(0.0, sd, 128, 0.85)
+        required_seeds(0.062, -0.1)
+
+
+def test_required_seeds_does_not_double_count_measurement_noise():
+    # §C.14 BUG (found 2026-09-05): `seed_sd_from_pair` is computed from MEASURED rates, so it already contains
+    # the metric's own noise. The old formula then ADDED p(1-p)/n_roots again, inflating the seed budget — it
+    # said ~8 seeds where ~3 was right, which is part of why I reported needing 4-5 training runs per arm.
+    from harness.measurement import required_seeds, seed_sd_from_pair
+
+    run_sd = seed_sd_from_pair(0.818, 0.854)          # 0.0255: the TOTAL per-run SD of the reported statistic
+    k = required_seeds(delta=0.062, run_sd=run_sd)
+    assert k <= 4, f"budget should be small when run_sd is already total, got {k}"
+    # It must NOT change with n_roots: measurement noise is already inside run_sd (that was the double-count).
+    assert required_seeds(0.062, run_sd) == k
+    # Component form: when the caller knows trajectory-only SD, they may add measurement variance explicitly.
+    k_comp = required_seeds(0.062, run_sd=0.010, measurement_var=0.0548 / 256)
+    assert 1 <= k_comp <= 3
+    assert required_seeds(0.062, 0.010) < required_seeds(0.062, 0.030)   # more run noise => more seeds
+    with pytest.raises(ValueError):
+        required_seeds(0.0, run_sd)
