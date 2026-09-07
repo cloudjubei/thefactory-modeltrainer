@@ -1723,3 +1723,55 @@ the seed floor *more precisely visible*, not smaller. The remaining paths are on
 
 **Backlog correction:** BUILD #7 (graded conversion) is DONE but should NOT be used at `games_per_root>1`.
 BUILD #1 (more paired roots) is upgraded — it is now the ONLY measurement lever with a favourable exchange rate.
+
+### §C.15 — THE CAPACITY QUESTION CLOSED, AND GLOBAL-POOL IS A NULL (2026-09-07)
+
+**Two questions settled with properly-designed experiments — the first in this project designed correctly from
+the start (pre-registered read, 2 seeds, pre-existing controls, paired at n=384, ledger-enforced provenance).**
+
+#### 1. Architecture (capacity): NO DIFFERENCE — closed
+
+| root family | n | 1.79M vs 302K gap |
+|---|---|---|
+| s99 | 96-128 | +0.060 / +0.062 (what I reported, repeatedly) |
+| s99 | **384** | **+0.023, p=0.23** |
+| s257 | **384** | **-0.005, p=0.87** |
+
+The effect DECAYED toward zero as roots increased ON THE SAME FAMILY, and flips sign across families; the two
+n=384 estimates average **+0.009**. **There is no measurable architecture difference. The 302K net matches the
+1.79M net at 1/6 the parameters and ~2.5x the training speed — use the small one.** (Note the two families differ
+in absolute difficulty by ~4 points, 0.87 vs 0.90 — cross-family ABSOLUTE rates are meaningless; only paired
+within-family comparisons are valid.)
+
+#### 2. Global-pool branch: NO DETECTABLE EFFECT
+
+302K arch, identical recipe/budget/seed, one flag changed; controls already existed at zero cost.
+
+| seed | control | +global_pool | effect |
+|---|---|---|---|
+| 0 | 0.8880 | 0.8854 | -0.003 (p=1.00) |
+| 101 | 0.8828 | 0.8750 | -0.008 (p=0.76) |
+| **mean** | | | **-0.005** |
+
+**Why this is informative rather than merely disappointing:** global-pool was the BEST-motivated architectural
+lever we had — C4's win condition is odd/even threat parity, a whole-board COUNT that stacked 3x3 convs represent
+poorly, and KataGo measures real gains from exactly this branch on Go. The honest reading of a null here is a
+BOUNDARY CONDITION: **6x7 is small enough that the plain conv tower's receptive field already spans the board, so
+there is no non-local information left for pooling to add.** Expect the lever to pay on 19x19, not on 6x7. That is
+a transferable prediction, not a dead end.
+
+#### The consistent picture across everything measured
+
+**Architecture is NOT the binding constraint on this game** — not width, not depth, not parameter count, and now
+not whole-board aggregation. Every large measured effect came from TARGET QUALITY (distillation breaking
+value-collapse; exact endgame targets) or from MEASUREMENT DISCIPLINE. Both nets sit at ~0.88-0.90 conversion,
+i.e. ~1 in 9 proven-won positions is still thrown away, and no architectural change we have tried moves it.
+
+**Remaining candidates for that last ~10%:** the value-target FORM (categorical head — built, still untested), the
+exploitability thread (LBR measured a depth-2 refuter beating the champion from 15% of diverse openings as P1),
+and the TRANSFER TEST — porting the process unchanged to a game with no solver, which is the actual north star and
+the one question Connect-4 cannot answer.
+
+**Process note:** this experiment cost ~20h and its controls were FREE, because the 302K net had already been run
+at matched budget on two seeds. Designing the A/B on the CHEAP arch (justified by finding #1) made it 2.5x cheaper
+with no loss of validity. The abandoned 1.79M `ab_gpool` run would have cost ~36h and still needed its own control.
