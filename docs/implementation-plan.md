@@ -1726,6 +1726,12 @@ BUILD #1 (more paired roots) is upgraded — it is now the ONLY measurement leve
 
 ### §C.15 — THE CAPACITY QUESTION CLOSED, AND GLOBAL-POOL IS A NULL (2026-09-07)
 
+> **⛔ CORRECTED 2026-09-08 — READ §C.17 FIRST. Both experiments below reused controls trained by DIFFERENT
+> TRAINING CODE than their arms, so each varied more than the one flag under test. The paragraph immediately
+> below, claiming this was "the first experiment designed correctly from the start", is exactly wrong: the design
+> was careful about everything the ledger checked and blind to the thing it did not. §C.17 has the audit, what
+> survives, and what is being re-run.**
+
 **Two questions settled with properly-designed experiments — the first in this project designed correctly from
 the start (pre-registered read, 2 seeds, pre-existing controls, paired at n=384, ledger-enforced provenance).**
 
@@ -1775,3 +1781,123 @@ the one question Connect-4 cannot answer.
 **Process note:** this experiment cost ~20h and its controls were FREE, because the 302K net had already been run
 at matched budget on two seeds. Designing the A/B on the CHEAP arch (justified by finding #1) made it 2.5x cheaper
 with no loss of validity. The abandoned 1.79M `ab_gpool` run would have cost ~36h and still needed its own control.
+
+### §C.16 — THE MEASUREMENT STEP IS NOW A SCRIPT (2026-09-08)
+
+**The gap:** §C.9 gave us correct primitives and §C.11 gave us a ledger, but the step that USES them — score the
+arms, record them, draw the comparison — was still a hand-written heredoc, rewritten from scratch for the capacity
+A/B and again for the global-pool A/B. Nothing carried root count, `games_per_root`, seed role, simulation budget
+or provenance from one to the next. A protocol re-decided by hand each time is the same failure mode as a guard
+that is available but optional: it holds until someone is in a hurry.
+
+`scripts/measure_ab.py` is that step. It refuses a non-MEASUREMENT seed, folds `sims` into `roots_id` so arms
+measured under different search cannot be paired, records every arm through the ledger, and prints the
+pre-registered read (`NULL` / `EFFECT` / `INCONCLUSIVE`) beside the numbers so a null cannot quietly become
+"promising" while it is being written up.
+
+**`harness.ledger.run_budget` — provenance is DERIVED, not asserted.** Batch index comes from the filename, games
+from the run's own `metrics.jsonl` (or, for runs predating per-batch cost accounting, `iterations_done` x the
+config's games-per-iteration), and any checkpoint that is not the run's last batch is `budget_matched`. The point
+is not convenience: pick an earlier checkpoint because it looked good and its budget shrinks with it, so `compare`
+refuses the pairing. A cherry-picked checkpoint cannot wear an honest label.
+
+**The L1 guard was checking the wrong thing.** It compared provenance LABELS for equality. The bins A/B ran 24
+batches against a control configured for 40, so the like-for-like arm is the control's ckpt_23 — selection-free,
+but not `final`. Label-equality refused that legitimate comparison, and the only way through was
+`allow_mixed_provenance=True`, which also switches off the guard against the actual L1 error. What a comparison
+must agree on is **selection status**, not the label: `SCORE_SELECTED = {gate_selected, best_of_n, arbitrary}`
+(`arbitrary` gets the pessimistic reading — an unexplained checkpoint cannot be shown not to have been picked by
+looking). `compare` now raises only when the arms straddle that line, and separately refuses a `budget_matched`
+arm whose budgets do not in fact match — a label that would otherwise let the L2 error through wearing a
+reassuring name.
+
+**Generalised lesson, third instance:** a guard that fires on the wrong cases teaches people to disable it. The
+over-broad solve-depth guard (§C.9) and this one failed the same way — both checked a PROXY (source text; a label)
+instead of the thing itself (actual solve depth; whether a score was consulted). When a guard produces a false
+positive, the fix is to make it check the real property, never to add an opt-out beside it.
+
+### §C.17 — THE CONTROLS WERE NEVER MATCHED: A TRAINING-CODE AUDIT (2026-09-08)
+
+**Every A/B this project has run compared arms trained by DIFFERENT CODE.** Not different flags — different
+harness source. Controls are files on disk, files do not record what wrote them, and reusing an old control was
+celebrated in §C.15 as making the experiment cheap. Provenance, budget, root family, seed roles and multiplicity
+all passed. None of them could see it.
+
+#### The audit
+
+Fingerprints are `training_fingerprint(game, revision=<last commit before the run started>)`.
+
+| run | role | training code | |
+|---|---|---|---|
+| `better1` (1.79M) | capacity arm | `35e07af6e079` | |
+| `carry_03` (302K) | capacity arm, **and control for gpool + bins** | `bceb94d254eb` | |
+| `seedrep_302K_s101` | control for gpool + bins (seed 101) | `bceb94d254eb` | |
+| `ab302_gpool_s0` / `_s101` | gpool arms | `488601381041` | |
+| `ab302_bins_s0` / `_s101` | categorical-head arms | `5a55087160db` | |
+| `ctrl302_postfix_s0` / `_s101` | **NEW, launched 10:04** | `5a55087160db` | ✅ matches the bins arms |
+
+Four distinct states; every comparison drawn so far crossed at least one boundary. The largest single difference
+is the optimizer: Adam was rebuilt every ITERATION (~200x/run) before `619e252`, every BATCH between `619e252`
+and `eacf154`, and once per run after. So each A/B varied its flag *and* the optimizer regime.
+
+#### What survives, and what does not
+
+**Global-pool (null) and categorical head (null): the readings survive, conditionally.** The confound is
+directional — in both, the TREATMENT held the newer optimizer and still lost (−0.005, −0.010). If persistent Adam
+is neutral-or-better, "not a win" holds. But §C.14 shipped persistent Adam as a *fix* and never measured it, and
+deliberately resetting optimizer state across a shifting self-play distribution is a real RL technique. The sign
+is unknown, so this is a conditional reading, not a result.
+
+**Capacity ("no architecture difference"): NOT ESTABLISHED.** Worse than a code-era gap. The span between the two
+arms includes `c47d562`, a 298-line neural.py change that introduced `_frontier_order` — called unconditionally
+in the endgame loop that BOTH runs used, so their endgame training data was selected differently. And `better1`
+has no config and no summary: **its recipe was never recorded at all**, so recipe parity cannot be checked even
+in principle. The practical decision is unaffected — the 302K net is 2.5x faster and measured no worse, so it
+remains the right net to build on — but the scientific claim is withdrawn.
+
+#### One run bounds all three
+
+`ctrl302_postfix_s0` is the era-`5a55087160db` scalar baseline. Against `carry_03` (era `bceb94d254eb`, same
+arch, same seed, same budget) it MEASURES the optimizer-era effect directly. If that effect is small, the bound
+propagates to every confounded comparison above and retro-validates them; if it is large, the nulls were reading
+the optimizer. Either way it also de-confounds the categorical-head A/B, which is what it was launched for.
+
+#### The guard
+
+`harness/fingerprint.py` hashes the normalized syntax trees (docstrings and comments stripped) of the nine
+modules that can change weights. Runs write `provenance.json` at start — fingerprint plus the full request, since
+`better1` proved a run that does not record its own recipe is unauditable forever. `Ledger.compare` refuses
+mismatched fingerprints and warns when either is unknown, so every legacy entry now says so out loud.
+
+**Why not the commit hash.** It changes when the docs change. A guard that fires on valid comparisons gets
+switched off, and this is the THIRD time that failure mode has bitten: the over-broad solve-depth guard scanned
+source text instead of measuring solve depth (§C.9), the L1 provenance check compared labels instead of asking
+whether a score was consulted (§C.16), and a commit hash would name a revision instead of the code that computes
+weights. **A guard must check the property itself. Checking a proxy produces false positives, false positives
+produce opt-outs, and an opt-out is how the guard was going to fail anyway.**
+
+Measurement, benchmark and ledger code is deliberately excluded from the fingerprint — it reads checkpoints and
+never feeds back into training, so including it would make the guard fire on measurement work. Verified: today's
+ledger and measurement changes leave the fingerprint at `5a55087160db`, unchanged from `eacf154`.
+
+#### §C.17a — the guard's first act was to catch the same mistake being made again (2026-09-08, same morning)
+
+Adding the `provenance.json` write to `scaled_run.py` moved the fingerprint `5a55087160db` -> `4bb7ae0dc3ce` —
+because `scaled_run.py` is itself one of the nine fingerprinted modules. `ctrl302_postfix_s0` had already started
+under `5a55087160db`; `ctrl302_postfix_s101` starts hours later and would have loaded the edited code. **The two
+controls built to fix a cross-era comparison would have been in different eras from each other and from the arms**
+— the identical failure, two hours after building the guard against it, committed by the person who built it.
+
+The instrumentation is therefore REVERTED until both controls finish. Two rules follow, and they are the real
+output of this episode:
+
+1. **Never edit a training-path module while runs whose comparison is not yet drawn are outstanding.** A control
+   is not "done" when its checkpoints exist; it is done when its comparison has been recorded.
+2. **Instrumentation must live OUTSIDE the fingerprinted set.** Writing run metadata cannot change weights, but
+   putting the call in `scaled_run.py` makes it change the fingerprint. When the controls land, the recording
+   moves to a non-fingerprinted `harness/runlog.py` so that future changes to WHAT is recorded cost nothing. The
+   one-time call-site edit is unavoidable; the recurring churn is not.
+
+**Pending when the controls finish:** (a) re-apply run-start provenance recording via `harness/runlog.py`;
+(b) a resume guard — `scaled_run` resumes from checkpoints, so resuming a run after a training-path edit splices
+two code eras inside a SINGLE run, which no comparison-time check can detect.
