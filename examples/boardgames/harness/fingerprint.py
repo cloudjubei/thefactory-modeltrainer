@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -91,3 +92,17 @@ def training_fingerprint(game: str | None = None, revision: str | None = None, r
         h.update(path.encode())
         h.update(normalize(_source_at(path, revision, root)).encode())
     return h.hexdigest()[:12]
+
+
+# Naming and length are not the experiment: `run_dir` identifies the run, and a different `batches` is exactly
+# what a budget-matched checkpoint index exists to reconcile (the ledger's budget check enforces equal games).
+CONFIG_IGNORED = ("run_dir", "batches")
+
+
+def config_fingerprint(cfg: dict) -> str:
+    """A short hash of a run's REQUEST, so the ledger can tell a config A/B from a training-code A/B.
+
+    Whichever dimension is declared as the treatment, the other has to be held fixed; without this the "held
+    fixed" half is an assertion rather than a check."""
+    trimmed = {k: v for k, v in cfg.items() if k not in CONFIG_IGNORED}
+    return hashlib.sha256(json.dumps(trimmed, sort_keys=True).encode()).hexdigest()[:12]

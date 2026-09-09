@@ -98,7 +98,7 @@ class Ledger:
         return dict(self._entries)
 
     def record(self, name: str, outcomes: list[int], params: int, games: int, provenance: str,
-               seed: int, roots_id: str, code: str | None = None) -> dict:
+               seed: int, roots_id: str, code: str | None = None, config: str | None = None) -> dict:
         """Record a measurement. `provenance` is MANDATORY — 'final' vs 'gate_selected' vs 'best_of_n' is the
         difference between a comparison that means something and one that does not (L1)."""
         if provenance not in PROVENANCE:
@@ -109,13 +109,23 @@ class Ledger:
         k = sum(1 for o in outcomes if o)
         e = {"name": name, "outcomes": [int(o) for o in outcomes], "n": n, "converted": k, "rate": k / n,
              "ci": list(wilson_interval(k, n)), "params": int(params), "games": int(games),
-             "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code}
+             "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code, "config": config}
         self._entries[name] = e
         self._save()
         return e
 
-    def compare(self, a: str, b: str, allow_mixed_provenance: bool = False) -> dict:
-        """Paired comparison drawn from the ledger, with all three bookkeeping checks enforced."""
+    def compare(self, a: str, b: str, allow_mixed_provenance: bool = False,
+                treatment: str = "config") -> dict:
+        """Paired comparison drawn from the ledger, with all the bookkeeping checks enforced.
+
+        `treatment` names WHICH dimension is under test, because the answer inverts the code check. Normally the
+        config is the treatment and the training code must be held fixed (§C.17). But measuring a harness change
+        itself — the §C.14 optimizer regime, say — is a real experiment in which the code IS the variable and the
+        CONFIG is what must be held fixed. Declaring it is not an opt-out: each setting still demands that the
+        other dimension match, and that the declared one actually differ, so a mislabelled experiment is refused
+        rather than waved through."""
+        if treatment not in ("config", "code"):
+            raise ValueError(f"treatment must be 'config' or 'code', got {treatment!r}")
         ea, eb = self._entries.get(a), self._entries.get(b)
         if ea is None or eb is None:
             raise ValueError(f"unknown entry: {a if ea is None else b}")
@@ -127,9 +137,21 @@ class Ledger:
                 raise ValueError(f"{name} is recorded as budget_matched but the budgets differ "
                                  f"({ea['games']} vs {eb['games']}) — the label is false")
         ca, cb = ea.get("code"), eb.get("code")
-        if ca and cb and ca != cb:
-            raise ValueError(f"DIFFERENT TRAINING CODE: {a} was trained by {ca}, {b} by {cb} — the arms differ "
-                             f"by more than the flag under test, so the comparison attributes to the wrong cause")
+        ga, gb = ea.get("config"), eb.get("config")
+        if treatment == "config":
+            if ca and cb and ca != cb:
+                raise ValueError(f"DIFFERENT TRAINING CODE: {a} was trained by {ca}, {b} by {cb} — the arms differ "
+                                 f"by more than the flag under test, so the comparison attributes to the wrong cause")
+            if ga and gb and ga == gb:
+                raise ValueError(f"{a} and {b} have the SAME CONFIG ({ga}) — with the config declared as the "
+                                 f"treatment there is nothing under test here")
+        else:
+            if ga and gb and ga != gb:
+                raise ValueError(f"DIFFERENT CONFIG: {a} is {ga}, {b} is {gb} — with the training code declared "
+                                 f"as the treatment the config is what must be held fixed")
+            if ca and cb and ca == cb:
+                raise ValueError(f"{a} and {b} were trained by the SAME TRAINING CODE ({ca}) — declaring code as "
+                                 f"the treatment describes an experiment that is not being run")
         code_warning = ("" if ca and cb else
                         f"TRAINING CODE UNKNOWN for {a if not ca else b} — it cannot be shown that both arms were "
                         f"trained by the same harness, so a second, unrecorded difference may be in play")

@@ -211,6 +211,61 @@ def test_unknown_code_warns_rather_than_passing_silently(tmp_path):
     assert "legacy" in r["code_warning"] and "unknown" in r["code_warning"].lower()
 
 
+def _pair(led, code_a, code_b, cfg_a="C", cfg_b="C"):
+    led.record("a", outcomes=[1] * 100 + [0] * 28, params=1, games=9600, provenance="final",
+               seed=257, roots_id="R", code=code_a, config=cfg_a)
+    led.record("b", outcomes=[1] * 99 + [0] * 29, params=1, games=9600, provenance="final",
+               seed=257, roots_id="R", code=code_b, config=cfg_b)
+    return led
+
+
+def test_code_can_be_the_treatment_when_the_config_is_held_fixed(tmp_path):
+    # Measuring the §C.14 optimizer change IS a code experiment: ctrl302_postfix_s0 vs carry_03 differ in the
+    # harness and in nothing else. Refusing it would push the measurement outside the ledger, which is the
+    # bypass every guard here exists to prevent — so the caller declares WHICH dimension is under test.
+    led = _pair(_mk(tmp_path), "5a55087160db", "bceb94d254eb")
+    r = led.compare("a", "b", treatment="code")
+    assert "p" in r and r["code_warning"] == ""
+
+
+def test_code_as_treatment_still_requires_the_config_to_match(tmp_path):
+    # Otherwise "treatment=code" is just an opt-out from the code check wearing an experimental name.
+    led = _pair(_mk(tmp_path), "5a55087160db", "bceb94d254eb", cfg_a="C1", cfg_b="C2")
+    with pytest.raises(ValueError, match="(?i)config"):
+        led.compare("a", "b", treatment="code")
+
+
+def test_code_as_treatment_refuses_when_the_code_is_actually_the_same(tmp_path):
+    # Nothing is being measured: the label would misdescribe the experiment.
+    led = _pair(_mk(tmp_path), "5a55087160db", "5a55087160db")
+    with pytest.raises(ValueError, match="(?i)same training code"):
+        led.compare("a", "b", treatment="code")
+
+
+def test_config_treatment_is_the_default_and_still_refuses_mixed_code(tmp_path):
+    led = _pair(_mk(tmp_path), "5a55087160db", "bceb94d254eb", cfg_a="C1", cfg_b="C2")
+    with pytest.raises(ValueError, match="(?i)training code"):
+        led.compare("a", "b")
+
+
+def test_config_treatment_requires_the_configs_to_actually_differ(tmp_path):
+    # Two arms with identical configs and identical code are the same experiment run twice, not an A/B.
+    led = _pair(_mk(tmp_path), "5a55087160db", "5a55087160db")
+    with pytest.raises(ValueError, match="(?i)same config"):
+        led.compare("a", "b")
+
+
+def test_unknown_config_does_not_block_the_default_comparison(tmp_path):
+    # Legacy entries carry no config fingerprint; that must warn, not refuse, or every historical entry becomes
+    # uncomparable and the ledger stops being used.
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 100 + [0] * 28, params=1, games=9600, provenance="final",
+               seed=257, roots_id="R", code="5a55087160db")
+    led.record("b", outcomes=[1] * 99 + [0] * 29, params=1, games=9600, provenance="final",
+               seed=257, roots_id="R", code="5a55087160db")
+    assert "p" in led.compare("a", "b")
+
+
 def test_ledger_persists_across_instances(tmp_path):
     led = _mk(tmp_path)
     led.record("p", outcomes=[1, 0, 1], params=1, games=1, provenance="final", seed=99, roots_id="R")

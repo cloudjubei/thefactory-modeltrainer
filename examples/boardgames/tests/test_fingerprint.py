@@ -76,3 +76,27 @@ def test_every_declared_training_module_exists(path):
     from harness.fingerprint import HARNESS_ROOT
 
     assert (HARNESS_ROOT / path).exists(), f"{path} is fingerprinted but missing — the guard would crash, not warn"
+
+
+def test_config_fingerprint_ignores_naming_and_run_length():
+    # ctrl302_postfix_s0 (24 batches) vs carry_03 (40): at the budget-matched index these are the SAME recipe,
+    # and the ledger's budget check is what enforces equal games.
+    from harness.fingerprint import config_fingerprint
+
+    a = {"run_dir": "x", "batches": 24, "seed": 0, "sims": 96}
+    b = {"run_dir": "y", "batches": 40, "seed": 0, "sims": 96}
+    assert config_fingerprint(a) == config_fingerprint(b)
+
+
+def test_config_fingerprint_separates_the_flag_under_test():
+    from harness.fingerprint import config_fingerprint
+
+    base = {"run_dir": "x", "batches": 24, "net_arch": {"channels": 64, "value_bins": 0}}
+    bins = {"run_dir": "x", "batches": 24, "net_arch": {"channels": 64, "value_bins": 21}}
+    assert config_fingerprint(base) != config_fingerprint(bins)
+
+
+def test_config_fingerprint_is_order_insensitive():
+    from harness.fingerprint import config_fingerprint
+
+    assert config_fingerprint({"a": 1, "b": 2}) == config_fingerprint({"b": 2, "a": 1})

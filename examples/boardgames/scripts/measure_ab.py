@@ -15,11 +15,13 @@ budget and provenance were re-decided by hand every time — and a re-decided pr
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from harness.benchmark import paired_conversion
 from harness.ledger import Ledger, run_budget
+from harness.fingerprint import config_fingerprint
 from harness.measurement import MEASUREMENT_SEEDS, wilson_interval
 from harness.registry import resolve_game
 
@@ -40,6 +42,8 @@ def load_arm(spec: str, sims: int, device: str) -> dict:
     if code and budget["code"] and code != budget["code"]:
         raise ValueError(f"{name}: fingerprint {code} was asserted but the run recorded {budget['code']}")
     budget["code"] = budget["code"] or code or None
+    cfg_path = ckpt.parent.parent / f"{ckpt.parent.name}.json"
+    budget["config"] = config_fingerprint(json.loads(cfg_path.read_text())) if cfg_path.exists() else None
     return {"name": name, "ckpt": ckpt, "params": sum(p.numel() for p in net.parameters()),
             "factory": lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=True, c_scale=0.1),
             **budget}
@@ -52,8 +56,10 @@ def main() -> None:
                     help="an arm to score; repeat once per arm (all arms share the roots). Append "
                          "@<fingerprint> for runs predating provenance.json, whose training code you have "
                          "established from git rather than from the run itself")
-    ap.add_argument("--pair", action="append", default=[], metavar="A:B",
-                    help="a comparison to draw from the ledger; repeat as needed")
+    ap.add_argument("--pair", action="append", default=[], metavar="A:B[:code]",
+                    help="a comparison to draw from the ledger; repeat as needed. Append ':code' when the "
+                         "TRAINING CODE is the thing under test and the config is held fixed (e.g. measuring an "
+                         "optimizer change), which inverts which dimension must match")
     ap.add_argument("--game", default="connect4")
     ap.add_argument("--tag", default="", help="suffix for roots_id, naming this measurement's root family")
     ap.add_argument("--seed", type=int, default=257, help=f"must be a MEASUREMENT seed {sorted(MEASUREMENT_SEEDS)}")
@@ -76,7 +82,7 @@ def main() -> None:
     arms = [load_arm(spec, args.sims, args.device) for spec in args.arm]
     for a in arms:
         print(f"arm {a['name']:24s} {a['ckpt']}  batch={a['batch']} games={a['games']} "
-              f"params={a['params']} provenance={a['provenance']} code={a['code']}")
+              f"params={a['params']} provenance={a['provenance']} code={a['code']} config={a['config']}")
 
     res = paired_conversion(resolve_game(args.game), {a["name"]: a["factory"] for a in arms},
                             n_roots=args.n_roots, empties=args.empties, seed=args.seed,
@@ -87,15 +93,17 @@ def main() -> None:
     for a in arms:
         outcomes = [1 if s >= 0.999 else 0 for s in res["arms"][a["name"]]["scores"]]
         e = led.record(a["name"], outcomes=outcomes, params=a["params"], games=a["games"],
-                       provenance=a["provenance"], seed=args.seed, roots_id=roots_id, code=a["code"])
+                       provenance=a["provenance"], seed=args.seed, roots_id=roots_id, code=a["code"],
+                       config=a["config"])
         lo, hi = wilson_interval(e["converted"], e["n"])
         print(f"\n{a['name']}: {e['converted']}/{e['n']} = {e['rate']:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
 
     refused = 0
     for pair in args.pair:
-        a, _, b = pair.partition(":")
+        a, _, rest = pair.partition(":")
+        b, _, treat = rest.partition(":")
         try:
-            r = led.compare(a, b)
+            r = led.compare(a, b, treatment=treat or "config")
         except ValueError as exc:
             # A refusal is a RESULT — the arms were measured and recorded, and the ledger is saying the
             # comparison would attribute the difference to the wrong cause. Printing it as a verdict rather
