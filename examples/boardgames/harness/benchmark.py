@@ -240,6 +240,58 @@ def verify_forced_win_conversion(
     return {"converted": converted, "total": total, "rate": (converted / total) if total else 0.0, "roots": details}
 
 
+def paired_exploitability(
+    game: Game, factories: dict, depths: list[int], n_openings: int = 64, opening_plies: int = 4,
+    seed: int = 0, refuter_factory: Callable[[int], object] | None = None, oracle_solve_endgame: int = 22,
+) -> dict:
+    """§C.19: every arm plays the SAME openings (both seats) against the SAME depth-k refuter, and we keep the
+    per-cell loss outcome for each arm. Pairing on the opening is what cancels the opening-value confound that
+    makes the raw single-arm exploit_rate meaningless: a position that is theoretically lost is lost for every
+    arm, so it lands in neither arm's discordant set. The paired difference between two arms' outcome vectors
+    (via `mcnemar_exact`) is therefore a clean RELATIVE exploitability — and because the refuter is a bounded
+    searcher rather than a solver, it needs no exact oracle, which is what lets this metric transfer to games
+    where forced-win conversion cannot go.
+
+    `refuter_factory(depth) -> agent` is injectable so a transfer game can supply its own bounded searcher;
+    the default is `NearPerfectOracle(depth=depth)`, the calibration game's refuter."""
+    from harness.solver import NearPerfectOracle
+
+    if refuter_factory is None:
+        def refuter_factory(depth):
+            return NearPerfectOracle(depth=depth, solve_endgame=oracle_solve_endgame)
+
+    def opening(i):
+        rng = random.Random(seed * 100003 + i)
+        st = game.initial_state(rng)
+        for _ in range(opening_plies):
+            if game.is_terminal(st):
+                break
+            st = game.step(st, rng.choice(game.legal_actions(st)))
+        return st
+
+    by_depth: list[dict] = []
+    for depth in depths:
+        arms_out: dict = {name: {"outcomes": []} for name in factories}
+        for model_seat in (0, 1):
+            for i in range(n_openings):
+                start = opening(i)
+                for name, fac in factories.items():
+                    seats = {model_seat: fac(), 1 - model_seat: refuter_factory(depth)}
+                    st = start
+                    rng = random.Random(90001 + i)  # greedy agents; fixed so the refuter is reproducible
+                    while not game.is_terminal(st):
+                        st = game.step(st, seats[game.current_player(st)].act(game, st, rng))
+                    arms_out[name]["outcomes"].append(1 if game.returns(st)[model_seat] < 0 else 0)
+        for name, a in arms_out.items():
+            n = len(a["outcomes"])
+            a["losses"] = sum(a["outcomes"])
+            a["n"] = n
+            a["loss_rate"] = a["losses"] / n if n else 0.0
+        by_depth.append({"depth": depth, "arms": arms_out, "n": 2 * n_openings})
+    return {"by_depth": by_depth, "opening_plies": opening_plies, "seed": seed,
+            "roots_id": f"exploit_e{opening_plies}_s{seed}_n{n_openings}"}
+
+
 def lbr_screen(
     game: Game, model_factory: Callable[[], object], depths: list[int], n_openings: int = 20,
     opening_plies: int = 4, seed: int = 0, oracle_solve_endgame: int = 22,

@@ -1726,7 +1726,7 @@ BUILD #1 (more paired roots) is upgraded — it is now the ONLY measurement leve
 
 ### §C.15 — THE CAPACITY QUESTION CLOSED, AND GLOBAL-POOL IS A NULL (2026-09-07)
 
-> **⛔ CORRECTED 2026-09-08 — READ §C.17 FIRST. Both experiments below reused controls trained by DIFFERENT
+> **⛔ CORRECTED 2026-09-08 — READ §C.17 AND §C.18 FIRST. Both experiments below reused controls trained by DIFFERENT
 > TRAINING CODE than their arms, so each varied more than the one flag under test. The paragraph immediately
 > below, claiming this was "the first experiment designed correctly from the start", is exactly wrong: the design
 > was careful about everything the ledger checked and blind to the thing it did not. §C.17 has the audit, what
@@ -1901,3 +1901,198 @@ output of this episode:
 **Pending when the controls finish:** (a) re-apply run-start provenance recording via `harness/runlog.py`;
 (b) a resume guard — `scaled_run` resumes from checkpoints, so resuming a run after a training-path edit splices
 two code eras inside a SINGLE run, which no comparison-time check can detect.
+
+### §C.18 — CANDIDATE #1 VERDICT + THE ADAM "FIX" WAS A NULL (2026-09-09)
+
+**The first within-era A/Bs this project has produced.** All arms fingerprinted `5a55087160db`; the ledger drew
+the comparisons instead of refusing them. Two seeds each, paired at n=384 on measurement seed 257, pre-registered
+read (|mean| < 0.03 with neither seed significant ⇒ null).
+
+#### Categorical value head (value_bins=21) — NULL, refuted as a lever
+
+| | seed 0 | seed 101 | pooled (n=768) |
+|---|---|---|---|
+| bins vs scalar (same code) | −0.0078 | −0.0078 | **−0.0078**, 95% CI [−0.031, +0.015], p=0.58 |
+
+Identical across seeds — a small, consistent, non-significant NEGATIVE, not noise-around-zero. The categorical
+head is if anything marginally worse than a scalar value head at 6x7/302K. Rules out any benefit beyond ~1.5
+points. **The last value-FORM lever is closed.** Target-QUALITY levers (distillation, exact endgame targets)
+remain the only thing that has ever moved this metric; the target's parameterisation does not.
+
+#### §C.14 optimizer change — NULL, and it was mis-shipped as a fix
+
+| | seed 0 | seed 101 | pooled (n=768) |
+|---|---|---|---|
+| Adam per-run (new) vs per-iteration (old), same config | −0.0026 | −0.0208 | **−0.0117**, 95% CI [−0.035, +0.012], p=0.39 |
+
+`ctrl302_postfix` (era `5a55087160db`) vs `carry_03`/`seedrep` (era `bceb94d254eb`), config held fixed, code the
+treatment. §C.14 shipped "one Adam per run" as a CORRECTNESS fix on the theory that ~200 per-iteration resets
+were destroying optimizer state. **They were not: the change is not measurably better, and leans mildly negative.**
+Per-batch training is long enough that Adam's moment warm-up is negligible, so resetting it costs nothing. §C.14's
+"BUG FIX" framing is withdrawn — it is a behaviour-neutral refactor.
+
+#### Correction to §C.17's "the nulls survive"
+
+§C.17 (and what I told the user on 2026-09-08) leaned on the seed-0 optimizer number (−0.003) to argue the
+cross-era confound was "an order of magnitude below" the gpool/capacity effects. **The second seed pulls the
+pooled optimizer effect to −0.012 — the SAME order as the gpool −0.005, not below it.** So the optimizer axis
+BOUNDS the confound (at ~0.01–0.02) but does not eliminate it; the gpool and capacity comparisons remain
+confounded at a magnitude comparable to their own effect sizes, and their precise point estimates are not
+trustworthy. This is the 2-seed rule working exactly as intended: a one-seed number that happened to be small got
+generalised, and the second seed caught it.
+
+**What is robust across all of it:** no architectural or value-form lever tried — width, depth, parameter count,
+global-pool, categorical value head — moves conversion beyond ~0.03 at n=384. Every large measured effect in this
+project came from target quality or measurement discipline. That conclusion does not depend on any of the
+confounded point estimates; it is the consistent sign of every well-powered null.
+
+#### Candidate #1 CLOSED. Next: #2 exploitability (needs no training), then #3 transfer test.
+
+### §C.19 — EXPLOITABILITY IS CONFOUNDED BY OPENING VALUE; THE PAIRED FORM IS THE TRANSFER METRIC (2026-09-09)
+
+**Candidate #2. The raw LBR exploit_rate is not a model-quality number** — it is dominated by the game-theoretic
+value of the opening, and reporting it as exploitability is the same class of error as value-collapse.
+
+#### The screen, taken naively, looks alarming
+
+302K final net (`ctrl302_postfix_s0`), `lbr_screen`, 64 diverse 4-ply openings x2 seats, measurement seed 131:
+
+| refuter depth | 1 | 2 | 3 | 4 |
+|---|---|---|---|---|
+| exploit_rate | 0.148 | 0.234 | 0.250 | 0.242 |
+
+A depth-2 refuter "beats" the 0.88-conversion model 23% of the time — apparently contradicting conversion. The
+tell that it is not real: the rate rises 1→2 then PLATEAUS. Genuine exploitation deepens with the refuter; a fixed
+pool of already-lost openings does not.
+
+#### Paired against a strong reference, the signal vanishes
+
+Connect-4 is a P1 win with perfect play, so a random 4-ply opening is often theoretically LOST for the model's
+seat (especially as P2). When an oracle beats the model from such an opening it is realising its own win, not
+exploiting the model. Subtract what a strong reference (depth-10 + endgame solve) also loses on the SAME openings
+against the SAME depth-2 refuter:
+
+| | loss rate |
+|---|---|
+| model | 0.2344 (30/128) |
+| strong reference | 0.2500 (32/128) — openings simply lost |
+| **CLEAN = model − reference** | **−0.0156** (17 vs 19 discordant, McNemar NS) |
+
+**The model is statistically indistinguishable from a depth-10 reference at avoiding losses from these openings.**
+The exploitability lens AGREES with the 0.88 conversion once the opening-value confound is removed; the two never
+conflicted. The earlier "depth-2 refuter beats the champion 15% as P1" (§C.8 #14) was this confound reported as a
+model finding — **withdrawn.**
+
+#### What this means for the metric
+
+- **Raw single-agent exploit_rate must never be reported as model quality.** It measures the opening corpus, not
+  the policy. `lbr_screen` is a diagnostic profile, not a scorecard.
+- **Exploitability must be PAIRED** — model minus a reference on identical openings — so the opening-value
+  confound cancels, exactly as root-difficulty cancels in paired conversion (§C.13).
+- **Absolute vs relative is a real fork.** An ABSOLUTE number (vs a truly-perfect reference) at diverse shallow
+  openings needs the solver, which hits the opening wall from 4-ply; at deep openings the solver is cheap but the
+  measurement overlaps conversion. So exploitability adds nothing as a second ABSOLUTE Connect-4 number.
+- **Its unique value is the RELATIVE, solver-free form: model A vs model B on shared openings.** The confound
+  cancels between arms with no solver at all — which makes it the near-optimality yardstick that TRANSFERS to
+  chess/Go (candidate #3), where conversion cannot go because it needs the solver to label won roots.
+
+**Deliverable:** `paired_exploitability` in benchmark.py — the transfer-ready metric, built and tested here on the
+calibration game so #3 inherits a measured instrument rather than a fresh heredoc.
+
+### §C.20 — CROSS-GAME REGRESSION MATRIX (user direction, 2026-09-09) — the payoff of the fingerprint
+
+**User:** "once we have enough types of games in ... introduce a new model or variation or some change — see how all
+the games' training scores behave."
+
+The deliverable: a **change x game matrix**. Rows = a change (a new net, a lever, any variation), columns = the
+games, cells = the paired score delta with CI. It turns a single-game A/B — the thing we spent §C.15-§C.19
+fighting confounds on — into a GENERALISATION test: does a lever move EVERY game (a real transferable lever) or
+just one (game-specific, or noise)? Candidate #1 is the motivating case: value-form levers are null ON CONNECT-4;
+only the matrix says whether that null generalises.
+
+**Most of the machinery already exists — this is why the fingerprint was worth building:**
+- A change IS a training-code **fingerprint delta** (§C.17). A matrix row is "the same code change applied to
+  every game", verified by construction, not asserted.
+- `Ledger.compare` already refuses cross-fingerprint comparisons unless `treatment="code"` (§C.18) — so a row is
+  structurally a clean code-A/B per game, with `config` held fixed.
+- Each column contributes a PAIRED number: `paired_conversion` where a solver exists (checkers, NMM, pentago all
+  have known values), `paired_exploitability` where it does not (othello, and the north-star games) — so every
+  cell is confound-controlled, never a raw rate.
+- The pre-registered read (`measure_ab`) and multiplicity correction extend to the matrix: N games = N
+  comparisons on the family; a lever "wins" only if it clears the corrected bar, and "generalises" only if the
+  sign is consistent across columns.
+
+**The one genuinely new piece:** a multi-game runner + matrix view — run the same config across all encoded
+games at a fixed fingerprint, collect the per-game paired deltas into one ledger-backed table, and render it
+(chat-reachable capability, per the north star). This is also the first labelled data for the §C.6 META-SELECTOR
+(features -> which process suits which game class).
+
+**Gated on:** (a) the unified rule-encoding (§C.19-followup, in flight) so games are cheap to add and measured
+identically; (b) >=3-4 games actually encoded (the current thread: checkers -> NMM -> pentago -> othello). Not
+built now; recorded so the encoding and the games are built with this matrix as their downstream consumer.
+
+### §C.21 — UNIFIED RULE ENCODING: ATFP-v2, ADOPTED WITH THE TRANSFER CLAIM DEMOTED (2026-09-10)
+
+Designed by a 14-agent workflow (survey GDL/GGP/RBG/OpenSpiel/MuZero → decompose the 4 games → synthesize →
+3 adversarial critics → revise). Full artifact: the workflow output (tasks/wczn6dtrc.output). The critics forced
+the headline claim down from "seamless transfer by construction" to an honest, measured position. What we adopt:
+
+**THE BANKABLE WIN IS THE RULE-MODULE LIBRARY, NOT A SHARED TRUNK.** A game is ~8 pure composable hooks over the
+already-generic Game Protocol + already-generic search: board() (cells, coord, delta, valid_mask, normalized
+adjacency A, symmetries as (cell_perm, channel_perm, bank_perm) triples), piece_types(), plane_spec(),
+atoms(state) (from can_place/can_step/can_lift/can_drop/can_remove + a mandatory() filter), effect() (via reusable
+primitives ray_walk/flip_flank/jump-over/place/remove/rotate_quadrant/promote), is_switch() (the SINGLE compound
+mechanism), terminal() (eliminated/immobilized/line_of_n/count_majority/board_full/repetition), returns(). This
+delivers genuine "one file per game" and is independent of any weight-sharing.
+
+**ONE ACTION MECHANISM.** num_actions = C_a·H·W + G: a spatial (channel,cell) atom tensor PLUS a small global/
+region bank (PASS, claim-draw, Pentago's 8 rotate-quadrant-direction slots). Every multi-decision move is a
+SEQUENCE of atoms with current_player unchanged until is_switch fires (checkers multi-jump, NMM lift→drop and
+mill→remove, Pentago place→rotate). The first draft's two flaws are fixed: Pentago's rotate is a bank action (not
+a faked cell-anchor entangling place+rotate in one channel), and there is exactly one compound mechanism (no
+per-game joint-vs-sequence fork). Global-bank slots are permutation-EXEMPT under board symmetry.
+
+**TRANSFER IS A HYPOTHESIS WITH A MANDATORY CONTROL, NOT A CONSTRUCTION.** The critics invoked our own memory
+(phantom 0.969; every A/B crossed a code era) to refuse an unfalsifiable "by construction" claim. Before ANY
+trunk sharing ships: a compute-matched cold-start vs warm-start control, per channel-group and per component
+(trunk vs head), and no sharing ships without a positive matched delta. Named risks: (a) trunk transfer can be
+NEGATIVE — "more of my pieces = good" is value-relevant with OPPOSITE sign in Othello vs checkers/NMM, so the
+value readout stays per-game; (b) PLACE-channel semantics diverge (gravity/flank/graph-drop), so cross-game
+policy warm-start is partial-to-negative; (c) Connect-4 is NOT a transfer donor — it keeps its 7-wide head and
+306 checkpoints as a LEGACY EVAL BASELINE only. The one genuine size-invariance mechanism kept: MASKED global-
+pool lets a trunk evaluate a different board size.
+
+**NMM IS AN HONEST TOPOLOGY MISFIT.** The 24-node graph does NOT embed on grid-8 adjacency (ring edges span 3
+grid cells, invisible to a 3×3 conv; grid-diagonals are false neighbours; mill-lines span up to 7 cells). It needs
+a gated adjacency-propagation layer (h' = A_norm·h, a GCN layer that recovers the conv exactly when handed the
+grid graph) + its 16 mill-lines as fixed membership planes. This relaxes "CNN unchanged" for graph games — stated
+plainly, gated so grid games and the 306 C4 checkpoints are untouched.
+
+#### THREE LIVE HARNESS DEFECTS — verified in current code, blocking prerequisites for game #2
+
+The critics claimed three; all three CONFIRMED against source (they do not bite Connect-4, so the suite is green,
+but each silently corrupts the moment a second game is added — the project's recurring latent-defect class):
+1. `neural.py:384` `masked = torch.full((COLS,), -1e9)` — inference policy mask hardcoded to 7 wide; truncates/
+   misaligns any game with num_actions != 7. FIX: `torch.full((game.num_actions,), ...)` + a test that FAILS for
+   num_actions != COLS.
+2. `neural.py:60` global-pool `h.mean(dim=(2,3))`/`h.amax` over ALL 64 cells, no valid-mask — dilutes/pollutes
+   value aggregates for padded boards (NMM 24/64, checkers 32/64). FIX: valid-mask-weighted mean + masked_fill max.
+3. `neural.py:27` `ROWS,COLS=6,7` module constants + `Linear(...,COLS)` heads — board dims + action count
+   hardwired. FIX: read game.board_shape()/num_actions; conv-policy head behind an opt-in arch flag so the 306
+   checkpoints load unchanged.
+Two DESIGN-level bugs the first draft would have shipped, also caught: checkers "column mirror" maps dark→light
+squares (parity flip, corrupts augmented data) — real symmetry is the valid_mask-preserving perms (180° + main
+diagonals) with side-swap + STEP-DIR relabel; and Othello PASS is not D4-invariant (global slots must be
+permutation-exempt). augment_examples() (neural.py:845, last-axis-only `x[...,perm]`) cannot express either and
+must accept full (cell_perm, channel_perm, bank_perm) triples, each validated by asserting legal→legal on samples.
+
+#### RECOMMENDED FIRST STEP (from the design; note the tension with the stated game order)
+
+Build the rule-module library + game-agnostic plumbing + per-game right-sized heads, fix the three live defects,
+and land ONE game as the second game and transfer probe — the design recommends **Othello** (cleanest fit: pure
+PLACE + flip + PASS, no sub-turns, closest to Connect-4 for a cold-start transfer measurement). This is in TENSION
+with the user's stated order (checkers → NMM → pentago → othello): checkers is actually the HARDEST first port
+(multi-jump sub-turns + the dark-square symmetry bug + diagonal-only waste). Decision to surface to the user:
+honor the stated order (checkers first) vs. do the engineering-rational order (othello first as the cleanest
+library validation + transfer probe, then checkers). Do NOT build the shared trunk on faith either way — it ships
+only behind the cold-start control (§C.20's matrix is the natural home for that measurement).
