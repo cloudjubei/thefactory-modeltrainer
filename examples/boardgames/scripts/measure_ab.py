@@ -56,7 +56,7 @@ def main() -> None:
                     help="an arm to score; repeat once per arm (all arms share the roots). Append "
                          "@<fingerprint> for runs predating provenance.json, whose training code you have "
                          "established from git rather than from the run itself")
-    ap.add_argument("--pair", action="append", default=[], metavar="A:B[:code]",
+    ap.add_argument("--pair", action="append", default=[], metavar="A:B[:code|:budget]",
                     help="a comparison to draw from the ledger; repeat as needed. Append ':code' when the "
                          "TRAINING CODE is the thing under test and the config is held fixed (e.g. measuring an "
                          "optimizer change), which inverts which dimension must match")
@@ -94,7 +94,7 @@ def main() -> None:
         outcomes = [1 if s >= 0.999 else 0 for s in res["arms"][a["name"]]["scores"]]
         e = led.record(a["name"], outcomes=outcomes, params=a["params"], games=a["games"],
                        provenance=a["provenance"], seed=args.seed, roots_id=roots_id, code=a["code"],
-                       config=a["config"])
+                       config=a["config"], run_complete=a["run_complete"])
         lo, hi = wilson_interval(e["converted"], e["n"])
         print(f"\n{a['name']}: {e['converted']}/{e['n']} = {e['rate']:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
 
@@ -122,6 +122,8 @@ def main() -> None:
             print(f"  {r['provenance_warning']}")
         if r["code_warning"]:
             print(f"  {r['code_warning']}")
+        if r["completeness_warning"]:
+            print(f"  {r['completeness_warning']}")
         verdict = ("NULL — below the pre-registered threshold and not significant"
                    if abs(d) < args.null_below and not r["significant"]
                    else "EFFECT — significant" if r["significant"]

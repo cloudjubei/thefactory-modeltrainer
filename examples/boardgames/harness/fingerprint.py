@@ -33,7 +33,15 @@ TRAINING_MODULES = (
     "harness/book.py",
     "harness/tablebase.py",
     "harness/config.py",
+    "harness/agents.py",  # league OPPONENTS (UCT/heuristic/random) shape the self-play data — 2026-09-10
+    "harness/rules.py",   # the rule-module LIBRARY: a game's mechanics (flank, rays, ...) ARE its data — 2026-09-10
 )
+
+# Earlier lists, so an era recorded under one stays re-derivable (pass as `modules=`): V1 = the nine modules the
+# ledger's pre-2026-09-10 codes (5a55087160db, bceb94d254eb, ...) used; V2 = +agents.py, the list the Othello
+# transfer run was launched under (ac11124cf17a) before rules.py was recognised as training-path code.
+TRAINING_MODULES_V1 = TRAINING_MODULES[:-2]
+TRAINING_MODULES_V2 = TRAINING_MODULES[:-1]
 
 HARNESS_ROOT = Path(__file__).resolve().parent.parent
 
@@ -79,12 +87,14 @@ def _git_root(root: Path) -> Path:
     return Path(out)
 
 
-def training_fingerprint(game: str | None = None, revision: str | None = None, root: Path | None = None) -> str:
+def training_fingerprint(game: str | None = None, revision: str | None = None, root: Path | None = None,
+                         modules: tuple[str, ...] = TRAINING_MODULES) -> str:
     """A short hash of the training path's normalized source, optionally as of a git `revision`.
 
-    `game` folds in that game's own module, so a Connect-4 run is not invalidated by an edit to Tic-tac-toe."""
+    `game` folds in that game's own module, so a Connect-4 run is not invalidated by an edit to Tic-tac-toe.
+    `modules` defaults to the current list; pass TRAINING_MODULES_V1 to re-derive an era recorded before it grew."""
     root = HARNESS_ROOT if root is None else Path(root)
-    paths = list(TRAINING_MODULES)
+    paths = list(modules)
     if game:
         paths.append(f"games/{game}.py")
     h = hashlib.sha256()

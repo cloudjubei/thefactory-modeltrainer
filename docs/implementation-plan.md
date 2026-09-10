@@ -2096,3 +2096,215 @@ with the user's stated order (checkers → NMM → pentago → othello): checker
 honor the stated order (checkers first) vs. do the engineering-rational order (othello first as the cleanest
 library validation + transfer probe, then checkers). Do NOT build the shared trunk on faith either way — it ships
 only behind the cold-start control (§C.20's matrix is the natural home for that measurement).
+
+#### §C.21 Increment 1 — LANDED (2026-09-10): the net is board-shape/action-count aware; Connect-4 byte-identical
+
+All three live defects fixed at the ARCH level (persisted with the weights, defaults = Connect-4, so the 306
+checkpoints build and load strictly unchanged): `board_shape`, `num_actions`, `valid_mask` on `Connect4Net`;
+heads sized from them; `_policy_value` mask is `num_actions` wide and REFUSES a net built for another game
+(`game.num_actions != net.num_actions` raises BEFORE the forward pass); global-pool aggregates go through a pure
+`_masked_pool(h, mask)` that ignores pad cells; `encode`/self-play/augment/train read the shape from the game or
+net, never from module constants. Protocol gains optional `board_shape` (Connect-4 and TicTacToe declare it).
+Tests: `tests/test_net_shape.py` (11) — goldens computed with the pre-refactor code pin the legacy and tower
+forward outputs to 1e-6, and a real checkpoint's initial-state value (0.50067037).
+
+**A test caught being vacuous, by its own mutation guard.** The first D2 test asserted "net value output is
+identical with pad noise under a mask" — and passed. Its guard ("...and DIFFERENT without the mask") failed:
+the probe showed `v_raw` = 0.1431 in all four cases. The randomly-initialised value head was dead-ReLU on that
+input, so nothing reached it either way. Replaced by tests of the property itself (`_masked_pool` ignores pad
+cells; unmasked leaks; masked == plain pool over only the valid cells) plus wiring tests (block and net route the
+mask). Third instance this week of "check the property, not a proxy" — this time the proxy was a downstream
+output that happened to be constant.
+
+**Training-code era moved, legitimately: `5a55087160db` → `d31c86a58185`.** The net class is training-path code. Every
+comparison on the 5a55 era was drawn before this edit (candidates #1/#2 closed, controls measured), so §C.17a
+rule 1 is satisfied. Any FUTURE arm compared against a 5a55 checkpoint is a code-A/B and must be declared as such.
+
+**Not in this increment (next):** the rule-module library (hooks + effect primitives), the factored
+`C_a·H·W + G` action head behind an opt-in flag, full 2-D symmetry triples in `augment_examples`, the sub-turn
+macro-transition value target, the NMM adjacency layer. Othello needs only the first two.
+
+#### §C.21 Increment 2 — LANDED (2026-09-10): rule-module library + Othello; THE PROCESS RUNS WITH NO SOLVER
+
+**First north-star data point.** `scaled_run` — the real, chat-reachable path, UNCHANGED — trained an Othello net
+end to end (`othello_smoke`: 2 batches, 27 s, loss 5.35→5.16, checkpoints + buffer + metrics + summary). Every
+solver-backed probe reported `null` instead of crashing (the "chess/Go degrade cleanly" path, exercised for the
+first time). The checkpoint carries the derived arch (`board_shape [8,8], num_actions 65`), loads strictly, and a
+net-guided Gumbel-MCTS plays legal Othello from the opening. Nothing in the trainer, search, league, replay or
+gating knows the game changed.
+
+**What landed.** `harness/rules.py` — the library's first primitives (`DIRS8`, `grid_rays`, `flank`, `majority`),
+pure and tested (8). `games/othello.py` — composed ON TOP of them: move generation is `flank` over rays, terminal
+is `majority`, PASS = action 64 at the end of the space (the design's global-bank slot), `done` DERIVED from the
+position so the state stays Markov without a pass counter (12 tests, incl. a hand-built pass→move→terminal→
+majority scenario). `arch_for_game` — a config never hand-types 65: `board_shape`/`num_actions` are FILLED from
+the game and REFUSED when stated differently, so the D1 defect is caught at construction. Registry entry.
+Suite: 388 passed / 2 skipped after Increment 1; +Increment 2's 33 targeted tests green; definitive run pending.
+
+**Deliberate omissions, with reasons.** No `symmetries()` on Othello: `augment_examples` permutes the LAST tensor
+axis (Connect-4 columns), so exposing 64-cell dihedral perms would corrupt data, not multiply it (TicTacToe's
+cell-perm `symmetries()` has the same latent hazard — no caller trains it augmented). The augmenter rewrite to
+(cell_perm, channel_perm, bank_perm) triples with permutation-exempt global slots is its own increment. `summary.json`
+echoes the REQUEST's net_arch rather than the built net's (the checkpoint is authoritative; cosmetic, deferred so
+the training era is not moved right before a long run). Value target stays ±1/0 (disc margin via value_bins is a
+later experiment, not a port requirement).
+
+**Training-code era:** connect4 `21a7debbf2d7`, othello `880d339bd65e` (the game module is part of its fingerprint).
+All Connect-4 comparisons on `5a55087160db` were drawn before any of this; a future arm vs a 5a55 checkpoint is a
+declared code-A/B.
+
+**Next (the transfer test proper):** a real Othello run at the Connect-4 recipe's scale (solver-free league on,
+endgame/distill off, probes zeroed), then a SOLVER-FREE learning measurement — `paired_exploitability` between
+checkpoints with the game-agnostic `MctsAgent` (pure UCT) as the refuter — the yardstick §C.19 built for exactly
+this. The cold-start transfer control (§C.21) follows once a trained Othello net exists to warm-start from.
+
+#### §C.21 Increment 2a — the transfer test's first CATCH: a Protocol leak in the "domain-oblivious" search (2026-09-10)
+
+Smoke-testing the solver-free measurement tool (`scripts/measure_exploit.py`: paired exploitability with the
+game-agnostic pure-UCT `MctsAgent` as refuter, through the ledger) crashed on Othello: `MctsAgent.act` read
+`game.step(state, a).winner` — the STATE DATACLASS's field, not the Protocol's `game.winner(state)`. Connect-4 and
+TicTacToe states happen to carry `winner`, so it had always worked. Two sites (`agents.py:105`, `:220`), plus
+`benchmark.sample_solvable_positions` reading `s.done` (harmless today, same class). All three now speak the
+Protocol; a regression test plays every generic agent — and a full UCT-vs-UCT game — on Othello, the first
+state without a `winner` field. Grep confirms no state-field reads remain in generic harness code.
+
+Why it matters beyond the fix: the smoke run passed because it ran `league=False`; the real run turns the league
+on, and the league's opponents ARE `MctsAgent` — a multi-day run would have died mid-batch. This is what
+"run the process unchanged on a new game" is FOR: every hidden Connect-4 assumption surfaces as a crash on the
+second game rather than as a silent bias.
+
+**Fingerprint list grown.** `harness/agents.py` was not in TRAINING_MODULES, yet league opponents shape the
+self-play data — training-path code. Added. The ledger's recorded eras (`5a55087160db`, `bceb94d254eb`, ...) were
+computed under the nine-module list; `TRAINING_MODULES_V1` keeps it re-derivable (tested: `eacf154` under V1 still
+hashes to `5a55087160db`). **Launch era for the Othello run: othello `ac11124cf17a`, connect4 `07db4fa43df0`.**
+
+#### §C.21 THE TRANSFER RUN LAUNCHED — `othello_302K_s0` (2026-09-10 00:41)
+
+Gate: 414 passed / 2 skipped on the exact tree that trains. Config = the Connect-4 302K control recipe
+(`ctrl302_postfix_s0.json`) with ONLY the solver-backed parts removed: `endgame` off, `benchmark_positions`/
+`offline_openings`/`gate_roots` 0; solver-free league ON; net shape derived (`[8,8]`, 65 actions). 24 batches x
+(5 iters x 80 games), seed 0. Provenance written by the launcher from outside the fingerprinted modules:
+training era **`4a9e255a90c6`** (V3 list; launched as `ac11124cf17a` under V2 before `harness/rules.py` was
+recognised as training-path code — re-stamped after verifying no fingerprinted file had changed; the V2 value is
+kept in provenance.json), config **`147a3de64336`** — the first run that records its own code.
+
+What it answers: does the UNCHANGED process learn on a game with no solver, read by a SOLVER-FREE yardstick —
+`scripts/measure_exploit.py` (paired exploitability vs the game-agnostic UCT refuter) between late and early
+checkpoints. It is also the COLD-START arm of the §C.21 transfer control; the warm-start arm (Connect-4 trunk
+into Othello) needs this trained net first. Per-batch pace and ETA recorded once batch 0 lands (Othello games run
+~3x Connect-4's length; expect slow).
+
+#### PRE-REGISTERED READ for the Othello transfer run (written 2026-09-10 00:45, before any checkpoint exists)
+
+The question: does the unchanged process LEARN on a game with no solver? The measurement, fixed now so the numbers
+cannot steer it (the candidate-#1 lesson): `scripts/measure_exploit.py --game othello --refuter uct --depths 200
+--n-openings 128 --sims 96 --seed 131`, arms = `ckpt_23` (late), `ckpt_11` (mid), `ckpt_3` (early), pairs drawn
+with `treatment="budget"` (same run, same code, budget the variable). Outcome = HELD rate (1 − loss) over 256
+paired cells (128 openings × 2 seats).
+- **Learning:** late − early > 0 AND significant at the family-corrected alpha (2 comparisons on the family ⇒
+  0.025). Sanity: mid between early and late in sign (not required to be significant).
+- **Null / not learning:** |late − early| < 0.03 and not significant ⇒ the process does NOT measurably learn Othello
+  at this budget — reported as such, not as "needs more batches".
+- **Inconclusive:** |diff| ≥ 0.03 but not significant ⇒ a second seed (`othello_302K_s101`) before any claim.
+Detection limit at n=256 paired cells is roughly ±0.04 on the held-rate difference; a real learning effect from a
+random-init net over 9,600 games should be far larger than that, so a null here is informative, not underpowered.
+The Ledger's `treatment="budget"` (learning curve: code + config held fixed, games must differ) was added for
+exactly this comparison so it never has to be drawn outside the ledger.
+
+**Measured cost of the unchanged recipe on Othello (2026-09-10 01:10, niced probe beside the run):** 17.1 s/game
+vs Connect-4's 4.8 s at identical settings (sims 96, 302K net) — **3.6×**, from 60 plies/game at 283 ms/ply vs
+26 at 187 ms/ply. A 400-game batch ≈ 1.9 h; 24 batches ≈ 2 days uncontended, 2–3 on the shared machine. Kept the
+recipe unchanged (that is the experiment); the lever if the cost is unacceptable is self-play sims 96→32 (Gumbel
+makes low sims nearly free on low-branching games — MiniZero's Othello result), which would be a declared recipe
+change for BOTH transfer-control arms, not a quiet edit. **Early read scheduled:** mid (`ckpt_11`) vs early
+(`ckpt_3`) fires automatically when batch 11 lands (~1 day) as comparison #1 on the pre-registered family; late vs
+early and late vs mid follow at batch 23 (the ledger corrects alpha for all three).
+
+#### §C.22 — RESUME is a measurement surface, not a convenience (2026-09-10)
+
+The decision to let the 2–3 day run stand promoted **resume** to the load-bearing path: on this machine the run
+will be interrupted more often than it is launched. `scaled_run` was written resumable (checkpoint + replay
+buffer + nogood store per batch, `start = last ckpt + 1`) and the mechanics hold — verified end-to-end on
+Othello, including the shape-aware net's 8×8/65-action arch surviving `save_net`/`load_net` and the buffer
+surviving `torch.load` under torch 2.13's `weights_only=True` default. But reading the resume path found three
+ways a resume corrupts the RECORD while looking like it worked. All three were **confirmed empirically**, not
+merely argued:
+
+- **R1 CODE DRIFT (the likely one).** `provenance.json` is stamped ONCE at launch; resume trains against
+  whatever source is on disk. Edit a training module during the run, let it be interrupted, and later batches
+  carry a different era than the run's own label claims — §C.17's control-reuse confound reintroduced
+  *invisibly, through the mechanism built to detect it*. Days of a live run is exactly when code gets edited,
+  so this is a near-certainty rather than a tail risk. Worse, the old launcher re-stamped `provenance.json`
+  unconditionally, so resuming through it would have **overwritten the launch era with today's** and destroyed
+  the evidence.
+- **R2 ORPHAN CHECKPOINT.** `ckpt_N.pt` is written before batch N's metrics row (the window spans the ~50 MB
+  buffer write and the metric pass). Killed in between, that row is lost for good — resume restarts at N+1 and
+  never revisits N — and `run_budget`, which establishes a budget by COUNTING rows, then refuses `ckpt_N` *and
+  every checkpoint above it*. Confirmed: `run_budget(ckpt_1)` → `ValueError: claims batch 1 but its run records
+  1 batches up to it`. Training continues perfectly while the run silently becomes unreadable by the ledger —
+  i.e. the pre-registered comparison the run exists to draw could never be drawn.
+- **R3 TRUNCATED BUFFER.** `torch.save(buf, buffer_path)` is not atomic — unlike the `_write_json_atomic`
+  written for this exact failure class a few lines above it. Confirmed: a half-written `buffer.pt` raises
+  `OSError` on **every** subsequent resume; the run is wedged until a human deletes the file.
+
+**Guard (`harness/resume.py`, 20 tests, all six mutations caught).** `preflight(run_dir, repair=True)` refuses
+R1 and repairs R2/R3. Repair is deliberately conservative: it deletes only artefacts the ledger has been shown
+unable to read (that batch is retrained, costing what the interruption cost anyway), it truncates the stale
+metrics rows above the gap (otherwise retraining appends a SECOND row for that batch and breaks `run_budget`
+all over again), and it touches nothing while the era check is failing — code drift is a judgement for a human,
+not something to tidy away. The property test is the real one: *after repair, `run_budget` succeeds on every
+surviving checkpoint*. The module sits outside `TRAINING_MODULES` and is imported by nothing in the training
+path, so consulting it cannot move the era it checks (§C.17a rule 2).
+
+**On the path, not beside it** (the §C.11 ledger lesson). `scripts/run_scaled.sh` is now the single command for
+both launch and resume: it stamps provenance only when absent, runs the preflight, and **refuses to repair while
+a trainer for that run is alive** — a live trainer looks exactly like an orphan checkpoint for the seconds
+between `save_net` and the metrics append, so an unguarded repair tool would have become the data-loss cause it
+exists to prevent. Both refusals demonstrated against the live run.
+
+**Declared, not fixed: resume is not trajectory-equivalent.** §C.14 keeps ONE Adam per *process* and no optimizer
+state is persisted, so every resume restarts the moment estimates — a real difference (per-run vs per-batch Adam
+measured pooled −0.012 in §C.18, small but not zero). Preventing it means editing `scaled_run.py`, which is
+FROZEN while this run's comparison is undrawn (§C.17a rule 1). So the preflight instead **counts resumes into
+`provenance.json`**, putting the number of such discontinuities on the record where the ledger can see it. Fixing
+R2/R3 at the root (metrics row and checkpoint written atomically together; `buffer.pt` via temp+rename) is
+queued for when the freeze lifts.
+
+#### §C.23 — the unchanged process LEARNS a game with no solver (2026-09-10, batch 11 read)
+
+The pre-registered comparison #1 fired automatically when batch 11 landed. Paired exploitability, 128 openings ×
+both seats, both arms refuted by the same game-agnostic UCT-200 searcher, budget declared as the treatment:
+
+| arm | checkpoint | games | held (1 − loss) | 95% CI |
+|---|---|---|---|---|
+| mid | `ckpt_11` | 4800 | **0.5820** | [0.5208, 0.6408] |
+| early | `ckpt_3` | 1600 | 0.1250 | [0.0900, 0.1711] |
+
+**+0.4570, McNemar p = 5.7e-27**, discordant pairs 127/10, one comparison on the family. Same code
+(`4a9e255a90c6`), same config (`147a3de64336`), same run — a clean learning curve. This is the north-star
+question's first real evidence: the Connect-4 recipe, transplanted unchanged to a game with **no solver, no
+endgame tablebase, no opening book and no oracle-labelled targets**, learns — and the yardstick that measured it
+needed none of those either (§C.19).
+
+**What it does NOT say.** `ckpt_3` (1600 games) is barely trained, so this is a low bar cleared decisively, not
+near-optimality: `mid` still loses 41.8% of paired openings to a plain 200-sim UCT searcher. The informative
+read is late-vs-mid at batch 23 — does it keep climbing or saturate? `opening_value` continuing to drift
+positive (+0.55 by batch 13) on a game believed near-drawn is the number to watch, and precisely why the
+adjudicating metric is paired exploitability rather than the net's own value.
+
+**The defect the read exposed — L1 through a DERIVED label.** The result printed `provenance=final` for
+`ckpt_11`. It is not final; it was merely the newest row when the measurement looked. `run_budget` derived
+"final" from *is this the last row in metrics.jsonl*, which on a live run is a fact about **when you looked**,
+not a property of the checkpoint. The dangerous form is not the stale label but what it would launder: stop a
+run early at a nice-looking batch — and we are watching `opening_value` and `final_loss` on a live run right now
+— and its last checkpoint reads "final", the most trusted label in the system, when it was in fact chosen by
+looking at a score. That is exactly L1, re-entering through a label nobody asserts by hand.
+
+**Guard.** "final" now requires the run to have reached the end it DECLARED (`request.batches` in
+provenance.json); any other index is `budget_matched`, which is what it already meant — an index pinned in
+advance and never scored. `run_budget` also returns `run_complete`, recorded on the ledger entry and surfaced by
+both measurement tools as a `completeness_warning`, so a mid-run reading announces itself as a progress report.
+Re-derived on the live run, `ckpt_11` and `ckpt_3` both now read `budget_matched, run_complete=False` —
+correct. 4 mutations, all caught; suite 445 green. The stale `final` in the ledger entry is harmless (neither
+label is score-selected, so the comparison stands unchanged) and is overwritten when the batch-23 read
+re-records that arm.

@@ -370,9 +370,9 @@ def sample_solvable_positions(game: Game, n: int, min_moves: int, seed: int) -> 
             if not legal:
                 break
             s = game.step(s, rng.choice(legal))
-            if s.done:
+            if game.is_terminal(s):
                 break
-        if not s.done and len(game.legal_actions(s)) >= 2:
+        if not game.is_terminal(s) and len(game.legal_actions(s)) >= 2:
             out.append(s)
     return out
 

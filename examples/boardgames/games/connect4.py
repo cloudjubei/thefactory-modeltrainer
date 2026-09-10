@@ -25,6 +25,7 @@ class Connect4:
     name = "connect4"
     num_players = 2
     num_actions = COLS
+    board_shape = (ROWS, COLS)
 
     def initial_state(self, rng: random.Random | None = None) -> C4State:
         return C4State(board=(0,) * (ROWS * COLS), to_move=0, winner=None, done=False)

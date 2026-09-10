@@ -73,6 +73,7 @@ class TicTacToe:
     name = "tictactoe"
     num_players = 2
     num_actions = CELLS
+    board_shape = (N, N)
 
     def initial_state(self, rng: random.Random | None = None) -> TTTState:
         return TTTState(board=(0,) * CELLS, to_move=0, winner=None, done=False)

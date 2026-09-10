@@ -21,6 +21,9 @@ class Game(Protocol):
     num_players: int
     # Size of the (fixed) action space, so a policy can build a legal-action mask over range(num_actions).
     num_actions: int
+    # Optional: (rows, cols) of the board a net's planes are laid out on. Games that omit it are Connect-4-
+    # shaped (6x7); a net persists the shape it was built for in its arch (§C.21).
+    board_shape: tuple[int, int]
 
     def initial_state(self, rng: random.Random) -> State: ...
 

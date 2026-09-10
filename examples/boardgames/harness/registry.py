@@ -4,12 +4,14 @@ from __future__ import annotations
 from typing import Callable
 
 from games.connect4 import Connect4
+from games.othello import Othello
 from games.tictactoe import TicTacToe
 from harness.agents import Agent
 from harness.game import Game
 
 GAMES: dict[str, Callable[[], Game]] = {
     "connect4": Connect4,
+    "othello": Othello,
     "tictactoe": TicTacToe,
 }
 
@@ -17,6 +19,7 @@ GAMES: dict[str, Callable[[], Game]] = {
 # Flip 7, Skull King) need. Perfect-information games use random/heuristic/mcts/book only.
 PERSONAS: dict[str, dict[str, Callable[[dict], Agent]]] = {
     "connect4": {},
+    "othello": {},
     "tictactoe": {},
 }
 

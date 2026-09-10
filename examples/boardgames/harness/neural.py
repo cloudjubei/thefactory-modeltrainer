@@ -24,7 +24,30 @@ import torch.nn.functional as F
 from harness.agents import Agent, _sign, child_move_value, prove_node, state_key
 from harness.game import Game, State
 
-ROWS, COLS = 6, 7  # connect4 board dims (this first neural core is connect4-shaped; moves stay generic)
+ROWS, COLS = 6, 7  # the DEFAULT board (Connect-4); a net carries its own board_shape/num_actions in its arch
+
+
+def _board_shape(game: Game) -> tuple[int, int]:
+    """A game's (rows, cols); games that predate `board_shape` are Connect-4-shaped."""
+    h, w = getattr(game, "board_shape", (ROWS, COLS))
+    return int(h), int(w)
+
+
+def arch_for_game(net_arch: dict | None, game: Game) -> dict:
+    """A net arch with `board_shape`/`num_actions` taken FROM THE GAME when the config omits them — a config never
+    hand-types 65 for Othello — and REFUSED when it states them differently: a net built for the wrong game is the
+    §C.21 D1 defect, and it is caught here at construction, before a single game is played."""
+    arch = dict(net_arch or {})
+    h, w = _board_shape(game)
+    n = getattr(game, "num_actions", None)
+    if "board_shape" in arch and [int(v) for v in arch["board_shape"]] != [h, w]:
+        raise ValueError(f"net_arch board_shape {list(arch['board_shape'])} but {game.name} is {[h, w]}")
+    if "num_actions" in arch and n is not None and int(arch["num_actions"]) != int(n):
+        raise ValueError(f"net_arch num_actions {arch['num_actions']} but {game.name} has {n}")
+    arch.setdefault("board_shape", [h, w])
+    if n is not None:
+        arch.setdefault("num_actions", int(n))
+    return arch
 
 
 # --- the network -----------------------------------------------------------------------------------------
@@ -36,6 +59,17 @@ def _mlp(in_dim: int, hidden: int, out_dim: int) -> nn.Module:
     if hidden <= 0:
         return nn.Linear(in_dim, out_dim)
     return nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU(), nn.Linear(hidden, out_dim))
+
+
+def _masked_pool(h: torch.Tensor, mask: torch.Tensor | None) -> torch.Tensor:
+    """Per-channel (mean, max) over the board — over ONLY the valid cells when a mask is given. §C.21 D2: a padded
+    board's pad cells must not reach the aggregate; an unmasked mean is diluted 2.7x for a 24-of-64 board and the
+    max picks up whatever the pad emits. `mask` is None for a full board, which is the legacy path unchanged."""
+    if mask is None:
+        return torch.cat([h.mean(dim=(2, 3)), h.amax(dim=(2, 3))], dim=1)
+    n = mask.sum().clamp_min(1.0)
+    return torch.cat([(h * mask).sum(dim=(2, 3)) / n,
+                      h.masked_fill(mask == 0, float("-inf")).amax(dim=(2, 3))], dim=1)
 
 
 class _ResBlock(nn.Module):
@@ -53,11 +87,11 @@ class _ResBlock(nn.Module):
         self.bn2 = nn.BatchNorm2d(filters) if batchnorm else None
         self.gpool_fc = nn.Linear(2 * filters, filters) if global_pool else None
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         h = self.conv1(x)
         h = self.bn1(h) if self.bn1 is not None else h
         h = F.relu(h)
-        pooled = torch.cat([h.mean(dim=(2, 3)), h.amax(dim=(2, 3))], dim=1) if self.gpool_fc is not None else None
+        pooled = _masked_pool(h, mask) if self.gpool_fc is not None else None
         h = self.conv2(h)
         h = self.bn2(h) if self.bn2 is not None else h
         if pooled is not None:
@@ -74,10 +108,18 @@ class Connect4Net(nn.Module):
 
     def __init__(self, channels: int = 32, blocks: int = 0, residual: bool = False,
                  batchnorm: bool = False, head_hidden: int = 0, input_planes: int = 2,
-                 global_pool: bool = False, value_bins: int = 0, aux_heads: bool = False):
+                 global_pool: bool = False, value_bins: int = 0, aux_heads: bool = False,
+                 board_shape=(ROWS, COLS), num_actions: int = COLS, valid_mask=None):
         super().__init__()
         if aux_heads and not residual:
             raise ValueError("aux_heads requires the residual tower (spatial trunk features)")
+        # §C.21 Increment 1: the board and the action count are part of the ARCH, not module constants, so one
+        # net class serves every game; the defaults are Connect-4, so every existing checkpoint builds identically.
+        self.board_h, self.board_w = int(board_shape[0]), int(board_shape[1])
+        self.num_actions = int(num_actions)
+        cells = self.board_h * self.board_w
+        if valid_mask is not None and len(valid_mask) != cells:
+            raise ValueError(f"valid_mask has {len(valid_mask)} cells for a {self.board_h}x{self.board_w} board")
         # The architecture is a CONFIG, persisted with the weights so any net round-trips. The DEFAULT reproduces
         # the legacy 2-conv/bare-linear-head net EXACTLY (same module names) so the 306 old checkpoints still load;
         # `residual=True` builds the deep tower (§C.7: the capacity the 20K-param toy lacked). See save_net/load_net.
@@ -86,7 +128,12 @@ class Connect4Net(nn.Module):
         # value head (consumers still see a scalar — forward returns the expectation over the support).
         self.arch = {"channels": int(channels), "blocks": int(blocks), "residual": bool(residual),
                      "batchnorm": bool(batchnorm), "head_hidden": int(head_hidden), "input_planes": int(input_planes),
-                     "global_pool": bool(global_pool), "value_bins": int(value_bins), "aux_heads": bool(aux_heads)}
+                     "global_pool": bool(global_pool), "value_bins": int(value_bins), "aux_heads": bool(aux_heads),
+                     "board_shape": [self.board_h, self.board_w], "num_actions": self.num_actions,
+                     "valid_mask": None if valid_mask is None else [int(m) for m in valid_mask]}
+        if valid_mask is not None:  # only when a game pads its board — legacy checkpoints carry no such buffer
+            self.register_buffer("valid_mask", torch.tensor([float(m) for m in valid_mask])
+                                 .reshape(1, 1, self.board_h, self.board_w))
         self.residual = bool(residual)
         self.value_bins = int(value_bins)
         if self.value_bins > 0:
@@ -95,8 +142,8 @@ class Connect4Net(nn.Module):
         if not self.residual:
             self.conv1 = nn.Conv2d(input_planes, channels, 3, padding=1)
             self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
-            self.policy_head = nn.Linear(channels * ROWS * COLS, COLS)
-            self.value_head = nn.Linear(channels * ROWS * COLS, v_out)
+            self.policy_head = nn.Linear(channels * cells, self.num_actions)
+            self.value_head = nn.Linear(channels * cells, v_out)
             return
         # SCALED: stem → residual tower → policy/value HEAD TOWERS (a hidden layer, not a bare linear — the
         # dominant nonlinearity gap that let forks / odd-even parity be represented).
@@ -105,21 +152,22 @@ class Connect4Net(nn.Module):
         self.blocks = nn.ModuleList([_ResBlock(channels, batchnorm, global_pool) for _ in range(max(1, blocks))])
         self.p_conv = nn.Conv2d(channels, 2, 1)
         self.p_bn = nn.BatchNorm2d(2) if batchnorm else None
-        self.policy_head = _mlp(2 * ROWS * COLS, head_hidden, COLS)
+        self.policy_head = _mlp(2 * cells, head_hidden, self.num_actions)
         self.v_conv = nn.Conv2d(channels, 1, 1)
         self.v_bn = nn.BatchNorm2d(1) if batchnorm else None
-        self.value_head = _mlp(1 * ROWS * COLS, max(1, head_hidden), v_out)  # value ALWAYS gets a hidden layer
+        self.value_head = _mlp(1 * cells, max(1, head_hidden), v_out)  # value ALWAYS gets a hidden layer
         if aux_heads:  # §C.8 #4: ownership map (per-cell, from the spatial trunk) + opponent-reply logits
             self.own_head = nn.Conv2d(channels, 1, 1)
-            self.reply_head = _mlp(2 * ROWS * COLS, head_hidden, COLS)
+            self.reply_head = _mlp(2 * cells, head_hidden, self.num_actions)
 
     def _body(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Residual tower → (policy features, value features, SPATIAL trunk) — the aux heads read the trunk."""
         h = self.stem(x)
         h = self.stem_bn(h) if self.stem_bn is not None else h
         h = F.relu(h)
+        mask = getattr(self, "valid_mask", None)
         for b in self.blocks:
-            h = b(h)
+            h = b(h, mask)
         p = self.p_conv(h)
         p = self.p_bn(p) if self.p_bn is not None else p
         p = F.relu(p).flatten(1)
@@ -162,14 +210,15 @@ class Connect4Net(nn.Module):
 
 
 def encode(game: Game, state: State) -> torch.Tensor:
-    """Encode a position as a (2, ROWS, COLS) tensor from the SIDE-TO-MOVE's perspective (plane 0 = own
+    """Encode a position as a (2, rows, cols) tensor from the SIDE-TO-MOVE's perspective (plane 0 = own
     pieces, plane 1 = opponent), read from the game's own observation so the net is position-canonical."""
     player = game.current_player(state)
-    cells = game.observation(state, player)[: ROWS * COLS]
+    h, w = _board_shape(game)
+    cells = game.observation(state, player)[: h * w]
     own = [1.0 if v == 1.0 else 0.0 for v in cells]
     opp = [1.0 if v == -1.0 else 0.0 for v in cells]
-    plane_own = torch.tensor(own, dtype=torch.float32).reshape(ROWS, COLS)
-    plane_opp = torch.tensor(opp, dtype=torch.float32).reshape(ROWS, COLS)
+    plane_own = torch.tensor(own, dtype=torch.float32).reshape(h, w)
+    plane_opp = torch.tensor(opp, dtype=torch.float32).reshape(h, w)
     return torch.stack([plane_own, plane_opp])
 
 
@@ -377,11 +426,14 @@ class AlphaZeroAgent:
         return None
 
     def _policy_value(self, game: Game, state: State) -> tuple[dict[int, float], float]:
+        n = self.net.num_actions
+        if getattr(game, "num_actions", n) != n:  # §C.21 D1: a net built for another game must fail loudly
+            raise ValueError(f"net has num_actions={n} but {game.name} has {game.num_actions}")
         self.net.eval()
         with torch.no_grad():
             logits, value = self.net(encode(game, state).unsqueeze(0).to(self.device))
         legal = game.legal_actions(state)
-        masked = torch.full((COLS,), -1e9)
+        masked = torch.full((n,), -1e9)
         for a in legal:
             masked[a] = logits[0, a]
         probs = F.softmax(masked, dim=0)
@@ -674,7 +726,8 @@ def self_play_game(
         # §C.8 #4 aux targets, mover-relative like everything else: `own` = the FINAL board read through THIS
         # position's mover perspective (game.observation — generic, no C4 knowledge); `reply` = the opponent's
         # actual next move (-1 for the last position). Consecutive examples are exact negations of each other.
-        owns = [torch.tensor(game.observation(state, p)[: ROWS * COLS], dtype=torch.float32)
+        _h, _w = _board_shape(game)
+        owns = [torch.tensor(game.observation(state, p)[: _h * _w], dtype=torch.float32)
                 for (_s, _x, _pi, p) in pending]
         replies = [actions[i + 1] if i + 1 < len(actions) else -1 for i in range(len(pending))]
         if return_states:
@@ -865,7 +918,7 @@ def augment_examples(
                 if perm == identity:
                     out.append(base + (own, reply))
                 else:
-                    own_m = own.reshape(ROWS, COLS)[:, perm].reshape(-1)
+                    own_m = own.reshape(-1, len(perm))[:, perm].reshape(-1)
                     out.append(base + (own_m, perm.index(reply) if reply >= 0 else -1))
             else:
                 out.append(base)
@@ -911,7 +964,7 @@ def train_net(
     if aux_on:
         # §C.8 #4: aux targets apply ONLY to examples that carry them — league/distill 3-tuples train alongside
         # aux-recorded self-play with their ownership/reply terms masked out (weight 0), never faked.
-        zeros = torch.zeros(ROWS * COLS)
+        zeros = torch.zeros(net.board_h * net.board_w)
         target_own = torch.stack([e[3] if len(e) >= 5 else zeros for e in examples]).to(device)
         target_reply = torch.tensor([e[4] if len(e) >= 5 else -1 for e in examples], dtype=torch.long).to(device)
         aux_mask = torch.tensor([1.0 if len(e) >= 5 else 0.0 for e in examples]).to(device)
@@ -982,7 +1035,7 @@ def distill_examples(
             continue
         best = max(values.values())
         optimal = [c for c, v in values.items() if v == best]
-        pi = [0.0] * COLS
+        pi = [0.0] * game.num_actions
         for c in optimal:
             pi[c] = 1.0 / len(optimal)
         value = 1.0 if best > 0 else (-1.0 if best < 0 else 0.0)
@@ -1009,10 +1062,10 @@ def book_distill_examples(
         entry = book.entry(_key(game, state))
         if entry is None or not entry.best_actions:
             continue
-        acts = [c for c in range(COLS) if (entry.best_actions >> c) & 1]
+        acts = [c for c in range(game.num_actions) if (entry.best_actions >> c) & 1]
         if not acts:
             continue
-        pi = [0.0] * COLS
+        pi = [0.0] * game.num_actions
         for c in acts:
             pi[c] = 1.0 / len(acts)
         copies = proof_copies if entry.status == PROVEN else estimate_copies
@@ -1056,13 +1109,13 @@ def oracle_distill_games(
         # not the noisy game outcome — the fix for the opening value-label contamination that forfeits the win.
         bv = book_value(book, game, state) if book is not None else None
         if optimal:
-            pi = [0.0] * COLS
+            pi = [0.0] * game.num_actions
             for c in optimal:
                 pi[c] = 1.0 / len(optimal)
-            action = optimal[0] if len(optimal) == 1 else min(optimal, key=lambda c: abs(c - COLS // 2))
+            action = optimal[0] if len(optimal) == 1 else min(optimal, key=lambda c: abs(c - game.num_actions // 2))
             return pi, action, bv
         action = oracle.act(game, state, rng)
-        return [1.0 if c == action else 0.0 for c in range(COLS)], action, bv
+        return [1.0 if c == action else 0.0 for c in range(game.num_actions)], action, bv
 
     examples: list[tuple[torch.Tensor, list[float], float]] = []
     for g in range(n_games):
@@ -1269,7 +1322,8 @@ def train_alphazero(
     torch.manual_seed(seed)
     # net_arch (§C.7 capacity levers) overrides the legacy `channels`-only shape; init_net (warm start / batch resume)
     # wins over both so a resumed run keeps its architecture.
-    net = init_net if init_net is not None else Connect4Net(**(net_arch or {"channels": channels})).to(device)
+    net = init_net if init_net is not None else Connect4Net(
+        **arch_for_game(net_arch or {"channels": channels}, game)).to(device)
     # §C.8 #4: an aux-headed net auto-records its own targets in self-play (no extra knob to forget); the
     # reanalyze state-buffer path drops aux fields, so the combination is refused rather than silently degraded.
     aux_on = bool(net.arch.get("aux_heads", False))

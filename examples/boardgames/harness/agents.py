@@ -102,7 +102,7 @@ def _hands_opponent_win(game: Game, state: State, action: int) -> bool:
     if game.is_terminal(s2):
         return False
     opp = game.current_player(s2)
-    return any(game.step(s2, b).winner == opp for b in game.legal_actions(s2))
+    return any(game.winner(game.step(s2, b)) == opp for b in game.legal_actions(s2))  # Protocol, not the field
 
 
 def _tactical_move(game: Game, state: State, rng: random.Random) -> int:
@@ -217,7 +217,7 @@ class MctsAgent:
         # Tactical guards, BEFORE trusting visit counts — the two sources of the residual ~1.5% loss:
         # (1) take an immediate win outright; (2) never play a move that hands the opponent a mate-in-1
         # (unless every move does). Combined with the tactical rollout below, this drives loss toward 0.
-        wins = [a for a in legal if game.step(state, a).winner == me]
+        wins = [a for a in legal if game.winner(game.step(state, a)) == me]  # Protocol, not the state's field
         if wins:
             self.sims_used += 1
             return wins[0]

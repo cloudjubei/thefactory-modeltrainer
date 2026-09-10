@@ -9,7 +9,8 @@ import subprocess
 
 import pytest
 
-from harness.fingerprint import TRAINING_MODULES, normalize, training_fingerprint
+from harness.fingerprint import (TRAINING_MODULES, TRAINING_MODULES_V1, TRAINING_MODULES_V2, normalize,
+                                 training_fingerprint)
 
 
 def test_fingerprint_is_stable_across_calls():
@@ -100,3 +101,22 @@ def test_config_fingerprint_is_order_insensitive():
     from harness.fingerprint import config_fingerprint
 
     assert config_fingerprint({"a": 1, "b": 2}) == config_fingerprint({"b": 2, "a": 1})
+
+
+def test_league_opponents_are_part_of_the_training_path():
+    # 2026-09-10: MctsAgent (a league opponent) had a Protocol leak that would have crashed the Othello run — code
+    # that plays the self-play opponent shapes the data, so it is training-path code and must be fingerprinted.
+    assert "harness/agents.py" in TRAINING_MODULES
+
+
+def test_a_recorded_era_is_still_derivable_with_the_list_it_was_recorded_under():
+    # The ledger's 5a55087160db was computed under V1 (nine modules); growing the list must not orphan it.
+    assert training_fingerprint("connect4", revision="eacf154", modules=TRAINING_MODULES_V1) == "5a55087160db"
+    assert training_fingerprint("connect4", revision="eacf154") != "5a55087160db"
+
+
+def test_the_rule_library_is_part_of_the_training_path():
+    # A game's mechanics are its training data: Othello's move generation IS harness/rules.py. Leaving it out would
+    # let a change to `flank` alter every Othello run's data without moving its era — the §C.17 hole, relocated.
+    assert "harness/rules.py" in TRAINING_MODULES
+    assert "harness/rules.py" not in TRAINING_MODULES_V2 and "harness/agents.py" in TRAINING_MODULES_V2

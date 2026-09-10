@@ -63,8 +63,17 @@ def run_budget(ckpt) -> dict:
 
     prov = _read_json(ckpt.parent / "provenance.json") or _read_json(ckpt.parent / "summary.json") or {}
     last = max(int(r["batch"]) for r in rows)
-    return {"batch": idx, "games": games, "provenance": "final" if idx == last else "budget_matched",
-            "code": prov.get("training_fingerprint")}
+
+    # "final" is the most trusted label in the system, so it has to mean the run reached the end it DECLARED,
+    # not merely the last row present when someone happened to look. On a live run the old rule made every
+    # freshly-written checkpoint "final" for as long as it was the newest; on a run stopped early at a
+    # nice-looking batch it would have laundered that choice — L1 (selection) re-entering through a derived
+    # label. An index that is not the declared end is exactly what "budget_matched" already describes.
+    declared = (prov.get("request") or {}).get("batches", prov.get("batches"))
+    run_complete = None if declared is None else (last == int(declared) - 1)
+    is_final = idx == last and run_complete is not False
+    return {"batch": idx, "games": games, "provenance": "final" if is_final else "budget_matched",
+            "code": prov.get("training_fingerprint"), "run_complete": run_complete}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -98,7 +107,8 @@ class Ledger:
         return dict(self._entries)
 
     def record(self, name: str, outcomes: list[int], params: int, games: int, provenance: str,
-               seed: int, roots_id: str, code: str | None = None, config: str | None = None) -> dict:
+               seed: int, roots_id: str, code: str | None = None, config: str | None = None,
+               run_complete: bool | None = None) -> dict:
         """Record a measurement. `provenance` is MANDATORY — 'final' vs 'gate_selected' vs 'best_of_n' is the
         difference between a comparison that means something and one that does not (L1)."""
         if provenance not in PROVENANCE:
@@ -109,7 +119,8 @@ class Ledger:
         k = sum(1 for o in outcomes if o)
         e = {"name": name, "outcomes": [int(o) for o in outcomes], "n": n, "converted": k, "rate": k / n,
              "ci": list(wilson_interval(k, n)), "params": int(params), "games": int(games),
-             "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code, "config": config}
+             "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code, "config": config,
+             "run_complete": run_complete}
         self._entries[name] = e
         self._save()
         return e
@@ -124,18 +135,25 @@ class Ledger:
         CONFIG is what must be held fixed. Declaring it is not an opt-out: each setting still demands that the
         other dimension match, and that the declared one actually differ, so a mislabelled experiment is refused
         rather than waved through."""
-        if treatment not in ("config", "code"):
-            raise ValueError(f"treatment must be 'config' or 'code', got {treatment!r}")
+        if treatment not in ("config", "code", "budget"):
+            raise ValueError(f"treatment must be 'config', 'code' or 'budget', got {treatment!r}")
         ea, eb = self._entries.get(a), self._entries.get(b)
         if ea is None or eb is None:
             raise ValueError(f"unknown entry: {a if ea is None else b}")
         if ea["roots_id"] != eb["roots_id"]:
             raise ValueError(f"different root families ({ea['roots_id']} vs {eb['roots_id']}) are NOT paired data")
         budget_matched = ea["games"] == eb["games"]
-        for e, name in ((ea, a), (eb, b)):
-            if e["provenance"] == "budget_matched" and not budget_matched:
-                raise ValueError(f"{name} is recorded as budget_matched but the budgets differ "
-                                 f"({ea['games']} vs {eb['games']}) — the label is false")
+        if treatment == "budget":
+            # A LEARNING CURVE: two checkpoints of one recipe under one code, and the training budget IS the
+            # variable. Everything else must be held fixed, and the budgets must actually differ.
+            if ea["games"] == eb["games"]:
+                raise ValueError(f"{a} and {b} have the SAME budget ({ea['games']} games) — with budget declared "
+                                 f"as the treatment there is nothing under test")
+        else:
+            for e, name in ((ea, a), (eb, b)):
+                if e["provenance"] == "budget_matched" and not budget_matched:
+                    raise ValueError(f"{name} is recorded as budget_matched but the budgets differ "
+                                     f"({ea['games']} vs {eb['games']}) — the label is false")
         ca, cb = ea.get("code"), eb.get("code")
         ga, gb = ea.get("config"), eb.get("config")
         if treatment == "config":
@@ -145,13 +163,18 @@ class Ledger:
             if ga and gb and ga == gb:
                 raise ValueError(f"{a} and {b} have the SAME CONFIG ({ga}) — with the config declared as the "
                                  f"treatment there is nothing under test here")
-        else:
+        elif treatment == "code":
             if ga and gb and ga != gb:
                 raise ValueError(f"DIFFERENT CONFIG: {a} is {ga}, {b} is {gb} — with the training code declared "
                                  f"as the treatment the config is what must be held fixed")
             if ca and cb and ca == cb:
                 raise ValueError(f"{a} and {b} were trained by the SAME TRAINING CODE ({ca}) — declaring code as "
                                  f"the treatment describes an experiment that is not being run")
+        else:  # budget: code AND config held fixed
+            if ca and cb and ca != cb:
+                raise ValueError(f"DIFFERENT TRAINING CODE: {a} {ca} vs {b} {cb} — a learning curve must be one code")
+            if ga and gb and ga != gb:
+                raise ValueError(f"DIFFERENT CONFIG: {a} {ga} vs {b} {gb} — a learning curve must be one recipe")
         code_warning = ("" if ca and cb else
                         f"TRAINING CODE UNKNOWN for {a if not ca else b} — it cannot be shown that both arms were "
                         f"trained by the same harness, so a second, unrecorded difference may be in play")
@@ -162,6 +185,11 @@ class Ledger:
                 warning += " — a selected checkpoint against an unselected one measures the SELECTOR, not the models"
                 if not allow_mixed_provenance:
                     raise ValueError(warning)
+        incomplete = [n for e, n in ((ea, a), (eb, b)) if e.get("run_complete") is False]
+        completeness_warning = ("" if not incomplete else
+                                f"RUN NOT FINISHED: {', '.join(incomplete)} did not reach its declared end — the "
+                                f"reading is a progress report, and if the run is later stopped at a batch chosen "
+                                f"by looking at scores, that checkpoint is selected rather than final")
         res = mcnemar_exact(ea["outcomes"], eb["outcomes"])
         family = ea["roots_id"]
         self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"]})
@@ -174,6 +202,7 @@ class Ledger:
                                 f"BUDGETS DIFFER: {a} trained on {ea['games']} games, {b} on {eb['games']} — "
                                 f"this is not a like-for-like comparison"),
                 "provenance_warning": warning, "code_warning": code_warning,
+                "completeness_warning": completeness_warning,
                 "comparisons_on_family": n_fam,
                 "alpha_corrected": 0.05 / n_fam,
                 "significant": res["p"] <= 0.05 / n_fam}

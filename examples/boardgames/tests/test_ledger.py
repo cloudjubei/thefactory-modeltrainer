@@ -132,7 +132,8 @@ def test_refuses_comparison_across_different_root_families(tmp_path):
 
 def test_run_budget_reads_the_final_checkpoint_off_the_run(tmp_path):
     d = _mk_run(tmp_path, "r", [{"batch": i, "games": 400} for i in range(3)])
-    assert run_budget(d / "ckpt_2.pt") == {"batch": 2, "games": 1200, "provenance": "final", "code": None}
+    assert run_budget(d / "ckpt_2.pt") == {"batch": 2, "games": 1200, "provenance": "final", "code": None,
+                                           "run_complete": None}
 
 
 def test_run_budget_labels_an_earlier_index_budget_matched(tmp_path):
@@ -156,7 +157,7 @@ def test_run_budget_derives_games_for_runs_that_predate_cost_accounting(tmp_path
     d = _mk_run(tmp_path, "old", [{"batch": i, "iterations_done": 5 * (i + 1)} for i in range(40)],
                 cfg={"games": 80, "iters_per_batch": 5})
     assert run_budget(d / "ckpt_23.pt") == {"batch": 23, "games": 9600, "provenance": "budget_matched",
-                                            "code": None}
+                                            "code": None, "run_complete": None}
 
 
 def test_run_budget_refuses_when_the_budget_cannot_be_established(tmp_path):
@@ -169,6 +170,58 @@ def test_run_budget_refuses_a_checkpoint_the_run_does_not_account_for(tmp_path):
     d = _mk_run(tmp_path, "gappy", [{"batch": i, "games": 400} for i in (0, 1, 3)])
     with pytest.raises(ValueError, match="(?i)batch"):
         run_budget(d / "ckpt_3.pt")
+
+
+def _declare(run_dir, batches: int) -> None:
+    (run_dir / "provenance.json").write_text(json.dumps({"request": {"batches": batches}}))
+
+
+def test_run_budget_will_not_call_a_checkpoint_final_before_the_run_reaches_its_declared_end(tmp_path):
+    """L1 through a DERIVED label: 'final' was 'is the last row in metrics.jsonl', which on a LIVE run is a
+    snapshot of when you looked, not a property of the checkpoint. Worse, a run stopped early at a
+    nice-looking batch would launder that choice into the most trusted label in the system."""
+    d = _mk_run(tmp_path, "live", [{"batch": i, "games": 400} for i in range(12)])
+    _declare(d, 24)
+    b = run_budget(d / "ckpt_11.pt")
+    assert b["provenance"] == "budget_matched" and b["run_complete"] is False
+
+
+def test_run_budget_calls_the_last_checkpoint_final_once_the_run_reached_its_declared_end(tmp_path):
+    d = _mk_run(tmp_path, "done", [{"batch": i, "games": 400} for i in range(24)])
+    _declare(d, 24)
+    b = run_budget(d / "ckpt_23.pt")
+    assert b["provenance"] == "final" and b["run_complete"] is True
+
+
+def test_run_budget_still_labels_earlier_indices_budget_matched_in_a_completed_run(tmp_path):
+    d = _mk_run(tmp_path, "done", [{"batch": i, "games": 400} for i in range(24)])
+    _declare(d, 24)
+    assert run_budget(d / "ckpt_11.pt")["provenance"] == "budget_matched"
+
+
+def test_run_budget_cannot_certify_completeness_without_a_declared_end(tmp_path):
+    d = _mk_run(tmp_path, "undeclared", [{"batch": i, "games": 400} for i in range(3)])
+    (d / "provenance.json").write_text(json.dumps({"training_fingerprint": "5a55087160db"}))
+    b = run_budget(d / "ckpt_2.pt")
+    assert b["run_complete"] is None and b["provenance"] == "final"
+
+
+def test_compare_warns_when_an_arm_came_from_a_run_that_never_reached_its_declared_end(tmp_path):
+    led = _mk(tmp_path)
+    for name, games in (("mid", 4800), ("early", 1600)):
+        led.record(name, outcomes=[1] * 5 + [0] * 5, params=1, games=games, provenance="budget_matched",
+                   seed=131, roots_id="R", code="C", config="G", run_complete=False)
+    r = led.compare("mid", "early", treatment="budget")
+    assert "did not reach its declared end" in r["completeness_warning"]
+    assert "mid" in r["completeness_warning"] and "early" in r["completeness_warning"]
+
+
+def test_compare_is_quiet_about_completeness_when_both_runs_finished(tmp_path):
+    led = _mk(tmp_path)
+    for name, games in (("late", 9600), ("early", 1600)):
+        led.record(name, outcomes=[1] * 5 + [0] * 5, params=1, games=games, provenance="budget_matched",
+                   seed=131, roots_id="R", code="C", config="G", run_complete=True)
+    assert led.compare("late", "early", treatment="budget")["completeness_warning"] == ""
 
 
 def test_run_budget_refuses_a_checkpoint_not_named_by_batch(tmp_path):
@@ -273,3 +326,42 @@ def test_ledger_persists_across_instances(tmp_path):
     again = Ledger(tmp_path / "ledger.json")
     assert "p" in again.entries()
     assert again.compare("p", "p")["comparisons_on_family"] == 2  # multiplicity survives a restart
+
+
+def _curve(led, games_a, games_b, code_a="ac11124cf17a", code_b="ac11124cf17a", cfg_a="R", cfg_b="R"):
+    led.record("late", outcomes=[1] * 200 + [0] * 56, params=1, games=games_a, provenance="final",
+               seed=131, roots_id="X", code=code_a, config=cfg_a)
+    led.record("early", outcomes=[1] * 150 + [0] * 106, params=1, games=games_b, provenance="budget_matched",
+               seed=131, roots_id="X", code=code_b, config=cfg_b)
+    return led
+
+
+def test_budget_can_be_the_treatment_for_a_learning_curve(tmp_path):
+    # "Is the process learning?" compares ckpt_23 with ckpt_3 of ONE run: same code, same recipe, and the training
+    # budget IS the variable. Under the default treatment the L2 guard refuses this (budgets differ, and the
+    # earlier index carries the budget_matched label) — which would push the question outside the ledger.
+    led = _curve(_mk(tmp_path), 9600, 1600)
+    r = led.compare("late", "early", treatment="budget")
+    assert "p" in r and r["budget_matched"] is False
+
+
+def test_budget_treatment_requires_the_budgets_to_differ(tmp_path):
+    led = _curve(_mk(tmp_path), 9600, 9600)
+    with pytest.raises(ValueError, match="(?i)same budget"):
+        led.compare("late", "early", treatment="budget")
+
+
+def test_budget_treatment_holds_code_and_config_fixed(tmp_path):
+    led = _curve(_mk(tmp_path), 9600, 1600, code_b="bceb94d254eb")
+    with pytest.raises(ValueError, match="(?i)training code"):
+        led.compare("late", "early", treatment="budget")
+    led2 = _curve(_mk(tmp_path / "b"), 9600, 1600, cfg_b="S")
+    with pytest.raises(ValueError, match="(?i)config"):
+        led2.compare("late", "early", treatment="budget")
+
+
+def test_default_treatment_still_refuses_a_learning_curve_pair(tmp_path):
+    # The guard that motivated the new treatment must keep firing when nobody declared budget as the variable.
+    led = _curve(_mk(tmp_path), 9600, 1600)
+    with pytest.raises(ValueError, match="(?i)budget"):
+        led.compare("late", "early")
