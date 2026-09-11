@@ -243,6 +243,7 @@ def verify_forced_win_conversion(
 def paired_exploitability(
     game: Game, factories: dict, depths: list[int], n_openings: int = 64, opening_plies: int = 4,
     seed: int = 0, refuter_factory: Callable[[int], object] | None = None, oracle_solve_endgame: int = 22,
+    on_progress: Callable[[dict], None] | None = None,
 ) -> dict:
     """§C.19: every arm plays the SAME openings (both seats) against the SAME depth-k refuter, and we keep the
     per-cell loss outcome for each arm. Pairing on the opening is what cancels the opening-value confound that
@@ -270,8 +271,12 @@ def paired_exploitability(
         return st
 
     by_depth: list[dict] = []
+    # A read of this shape runs for hours with nothing to show; without a progress signal, a starved process and
+    # a wedged one look identical from outside (§C.24).
+    total = 2 * n_openings * len(factories)
     for depth in depths:
         arms_out: dict = {name: {"outcomes": []} for name in factories}
+        done = 0
         for model_seat in (0, 1):
             for i in range(n_openings):
                 start = opening(i)
@@ -282,6 +287,10 @@ def paired_exploitability(
                     while not game.is_terminal(st):
                         st = game.step(st, seats[game.current_player(st)].act(game, st, rng))
                     arms_out[name]["outcomes"].append(1 if game.returns(st)[model_seat] < 0 else 0)
+                    done += 1
+                    if on_progress:
+                        on_progress({"depth": depth, "arm": name, "seat": model_seat, "opening": i,
+                                     "done": done, "total": total})
         for name, a in arms_out.items():
             n = len(a["outcomes"])
             a["losses"] = sum(a["outcomes"])

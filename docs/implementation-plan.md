@@ -2308,3 +2308,42 @@ Re-derived on the live run, `ckpt_11` and `ckpt_3` both now read `budget_matched
 correct. 4 mutations, all caught; suite 445 green. The stale `final` in the ledger entry is harmless (neither
 label is score-selected, so the comparison stands unchanged) and is overwritten when the batch-23 read
 re-records that arm.
+
+#### §C.24 — the run never saturated, and the proxies said it had (2026-09-11, batch 23 read)
+
+Both pre-registered comparisons, same family, alpha corrected for all three:
+
+| arm | checkpoint | games | held (1 − loss) | 95% CI |
+|---|---|---|---|---|
+| **late** | `ckpt_23` | 9600 | **0.8398** | [0.7899, 0.8797] |
+| mid | `ckpt_11` | 4800 | 0.5820 | [0.5208, 0.6408] |
+| early | `ckpt_3` | 1600 | 0.1250 | [0.0900, 0.1711] |
+
+- **late vs early +0.7148**, p = 2.1e-44, discordant 194/11, alpha 0.025 — EFFECT.
+- **late vs mid +0.2578**, p = 1.1e-09, discordant 93/27, alpha 0.0167 — EFFECT.
+
+**The correction.** From the loss curve flattening (1.38 → 1.28 over batches 15–23) and `opening_value`
+plateauing (~+0.55 from batch 12), I read the run as having "saturated in its second half". That was wrong, and
+the measurement refutes it decisively: the second half bought **+0.2578 held** — loss to a 200-sim UCT refuter
+fell from 41.8% to 16.0%, a 62% relative reduction, in exactly the stretch the proxies called flat.
+
+**The lesson, which is the transferable part.** Training loss and the net's own `opening_value` are NOT proxies
+for strength, and here they were actively misleading — both flattened while real strength climbed steeply. Loss
+is computed against the net's own moving self-play targets, so it measures how well the net fits its current
+data, not how good that data has become; `opening_value` is the net's opinion of one position, which is the very
+quantity training is free to drift. Had we early-stopped on either — the obvious compute-efficiency move — we
+would have thrown away the most productive half of the run. This is the §C.19 argument arriving as data: the
+only number that tracked reality is the one measured by PLAY against an external opponent.
+
+**What it means for the north star.** The run was stopped at 24 batches because 24 was pre-registered, not
+because it stopped improving — it was still gaining fast at the end. So Othello's compute-efficiency frontier is
+NOT yet located; 9600 games is a lower bound on what the recipe can use, not a plateau. A longer run (or the
+sims 96→32 lever, now measurable against this curve as the control) is the next question, and `late` at 16.0%
+loss is still far from near-optimal.
+
+**Tooling defect fixed.** This read ran ~9 h emitting nothing until it finished, and for the third time in two
+days a starved process and a wedged one were indistinguishable from outside — the actual state (CPU starvation:
+12 minutes of CPU in 4h49m, load 42 from two vitest watchers, a pegged VS Code plugin host, Docker and a VM) was
+only diagnosable by sampling `ps` counters. `paired_exploitability` now takes `on_progress`, and
+`measure_exploit.py` prints games-done/total, s/game, elapsed and ETA every 16 games. 2 tests, suite 447 green.
+The exit code 1 on that run was the broken `tee` path in the launch pipeline, not the measurement.
