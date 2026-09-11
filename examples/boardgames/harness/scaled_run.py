@@ -137,6 +137,48 @@ def _completed_batches(run_dir: Path) -> list[int]:
     return sorted(int(p.stem.split("_")[1]) for p in run_dir.glob("ckpt_*.pt"))
 
 
+def _save_atomic(obj, path: Path) -> None:
+    """temp+rename `torch.save` (§C.22 R3). A kill during a ~50 MB buffer write used to leave a truncated
+    buffer.pt that raised on EVERY later resume — the same failure class `_write_json_atomic` already guards
+    for JSON, and the replay buffer had none of it."""
+    import os
+
+    import torch
+
+    path = Path(path)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        with open(tmp, "wb") as f:
+            torch.save(obj, f)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    os.replace(tmp, path)
+
+
+def _append_metrics(metrics_path: Path, rec: dict) -> None:
+    """Append batch `rec`, REPLACING any row already recorded for that batch (§C.22 R2). A retrained batch must
+    not leave two rows behind: `run_budget` establishes a budget by counting rows up to an index, so a duplicate
+    makes every later checkpoint unreadable exactly as a missing one does."""
+    import os
+
+    rows = []
+    if metrics_path.exists():
+        for line in metrics_path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                break  # a kill mid-append leaves a partial last line; everything before it is sound
+            if int(row.get("batch", -1)) != int(rec["batch"]):
+                rows.append(row)
+    rows.append(rec)
+    tmp = metrics_path.with_suffix(".jsonl.tmp")
+    tmp.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    os.replace(tmp, metrics_path)
+
+
 def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | None = None) -> dict:
     """Train in BATCHES with a checkpoint after each; RESUMES from the latest checkpoint in run_dir. Returns the
     accumulated per-batch metrics. Pure self-play (endgame loop optional via `endgame`)."""
@@ -193,9 +235,14 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         if on_progress:
             on_progress(p)
 
-    done = _completed_batches(run_dir)
-    start = (done[-1] + 1) if done else 0
-    init_net = load_net(str(run_dir / f"ckpt_{done[-1]}.pt")) if done else None
+    # §C.22 R2: resume from the prefix the LEDGER can read — a checkpoint whose metrics row never landed is an
+    # orphan, and starting past it would strand that batch forever (run_budget counts rows, so it would refuse
+    # that checkpoint and every later one). Retraining it costs what the interruption already cost.
+    from harness.resume import ledger_readable_prefix
+
+    start = ledger_readable_prefix(run_dir)
+    done = list(range(start))
+    init_net = load_net(str(run_dir / f"ckpt_{start - 1}.pt")) if start else None
     buffer_path = run_dir / "buffer.pt"
     init_buffer = None
     if done and buffer_path.exists():
@@ -226,10 +273,17 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
     all_metrics: list[dict] = []
     _cum_wall = 0.0
     _run_opt_state: dict = {}  # §C.14: ONE Adam for the whole RUN (train_alphazero is called per BATCH)
+    opt_path = run_dir / "opt.pt"
     if metrics_path.exists():
         all_metrics = [json.loads(l) for l in metrics_path.read_text().splitlines() if l.strip()]
+        all_metrics = [r for r in all_metrics if int(r.get("batch", -1)) < start]
 
     import torch
+
+    # §C.22: the run's ONE Adam is state, and until now it lived only in the process — so every resume silently
+    # restarted the moment estimates and a resumed run was not the same experiment as an uninterrupted one.
+    if done and opt_path.exists():
+        _run_opt_state["load_state"] = torch.load(opt_path)
 
     for b in range(start, batches):
         opp_pool = None
@@ -265,7 +319,9 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         _train_wall = time.perf_counter() - _t0          # TRAINING only — measured before save/eval
         _train_cpu = time.process_time() - _c0
         save_net(net, str(run_dir / f"ckpt_{b}.pt"))
-        torch.save(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts
+        _save_atomic(buf, buffer_path)  # persist the replay buffer so the NEXT batch continues, not restarts
+        if _run_opt_state.get("opt") is not None:
+            _save_atomic(_run_opt_state["opt"].state_dict(), opt_path)
         if refutation_store is not None:
             _write_json_atomic(refut_path, refutation_store.to_json())
         init_buffer = buf
@@ -287,8 +343,7 @@ def run_scaled_experiment(request: dict, on_progress: Callable[[dict], None] | N
         if gate_roots > 0:  # §C.8 #6: probe + promote-only-on-strictly-better, so a late slide never uncrowns the best
             rec["gate_rate"] = gate_probe(game, net, gate_roots, sims)
             update_gate(run_dir, b, rec["gate_rate"], net, roots=gate_roots)
-        with metrics_path.open("a") as f:
-            f.write(json.dumps(rec) + "\n")
+        _append_metrics(metrics_path, rec)
         all_metrics.append(rec)
         init_net = net
         emit({"phase": "batch", **rec})

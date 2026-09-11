@@ -2347,3 +2347,127 @@ days a starved process and a wedged one were indistinguishable from outside — 
 only diagnosable by sampling `ps` counters. `paired_exploitability` now takes `on_progress`, and
 `measure_exploit.py` prints games-done/total, s/game, elapsed and ETA every 16 games. 2 tests, suite 447 green.
 The exit code 1 on that run was the broken `tee` path in the launch pipeline, not the measurement.
+
+#### §C.22a — the three resume defects fixed at the root (2026-09-11, freeze lifted)
+
+With the pre-registered comparisons drawn, §C.17a rule 1 released the training path and the §C.22 defects were
+fixed where they live rather than only detected from outside. New era **0fb1adf0bce9** (12 modules).
+
+- **R3 buffer atomicity** — `_save_atomic` (temp + `os.replace`, scratch removed on failure) replaces the bare
+  `torch.save` onto `buffer.pt`. The same guard `_write_json_atomic` already gave JSON, which the ~50 MB replay
+  buffer never had.
+- **R2 orphan checkpoint** — the resume point is now `ledger_readable_prefix` (the batches for which a
+  checkpoint AND its metrics row both exist) instead of "newest ckpt + 1", so an orphan is retrained rather
+  than stranding the run; and `_append_metrics` REPLACES any existing row for a batch, because a duplicate row
+  breaks `run_budget`'s counting exactly as a missing one does.
+- **Optimizer persistence** — the run's single Adam (§C.14) is saved to `opt.pt` each batch and reloaded into
+  the fresh optimizer on resume. The property test is equivalence, not existence: *a run split by an
+  interruption reaches the same Adam step count as one that was never interrupted*. Resume is now the same
+  experiment; the `resumes` counter stays as the record of how often it happened.
+
+**A mutation survived, and it was the same lesson for the fourth time.** Reverting the call site to
+`torch.save(buf, buffer_path)` left all six tests green: they proved `_save_atomic` *works*, never that the
+batch loop *uses* it. Helper-correctness is not wiring. Fixed with a monkeypatch spy asserting `buffer.pt` and
+`opt.pt` both go through the atomic path; the mutation now fails. Five mutations, all caught.
+
+**Fingerprint coverage gap closed in the same breath.** `scaled_run` now imports `harness.resume` to choose
+which batch training restarts from — that is training-path code by the identical argument that pulled in
+agents.py and rules.py, and it was not in `TRAINING_MODULES`. An edit silently changing a run's resume point
+would not have moved the era. Added, with `TRAINING_MODULES_V3` preserving the list the completed Othello run
+was stamped under. The guard immediately proved itself: the finished run's preflight now REFUSES it
+("launched as 4a9e255a90c6, on disk now 0fb1adf0bce9"), which is correct — that run cannot be extended under
+different code.
+
+Suite 458 passed, 2 skipped.
+
+#### §C.25 — checkers: the game that actually tests the encoding design (2026-09-11)
+
+Othello proved the rule-module library *composes*; checkers is what stresses it, because it breaks three
+assumptions every earlier game satisfied. All three were absorbed by declaration rather than by special-casing
+the harness — which is the ATFP-v2 claim, now under load:
+
+1. **A turn is not a move.** A multi-jump is one turn made of several decisions, so `to_move` does not alternate
+   on every `step`. The state carries `jumping` (the cell the sequence must continue from) and
+   `current_player` simply keeps returning the same player. The design's sub-turn `is_switch` hook cost one
+   field and NO harness change — self-play, MCTS and the league never learned that sub-turns exist.
+2. **Pieces have types.** Men and kings cannot be expressed in the own/opponent 2-plane encoding, which was
+   hardcoded in `encode`. A game may now declare `input_planes` and emit its own planes; checkers declares 4
+   (own men, own kings, opponent men, opponent kings). The 2-plane path is untouched and Connect-4/Othello
+   encode byte-identically, verified by test.
+3. **Half the board is dead.** Play is on dark squares only, so 32 of 64 cells are permanently empty. Checkers
+   declares `valid_mask` and `arch_for_game` routes it into the net, where the masked pooling built in §C.21
+   Increment 1 — written months before any game needed it — excludes those cells from the global statistics
+   instead of averaging 32 structural zeros into every feature. First real consumer of that work.
+
+Actions are FACTORED as `direction * 64 + from_cell` (4 diagonals x 64 = 256), the design's C_a·H·W action-plane
+stack, so a conv policy head can later predict them positionally with no change here. New rule primitives are
+`diag_steps` and `diag_jumps` — pure geometry, present only when the target is on the board, so a lookup miss IS
+the edge test and no caller repeats the arithmetic where wrap-around bugs live.
+
+Rules are standard English draughts: capture mandatory, men forward-only, kings one square in four diagonals,
+promotion ends the turn mid-sequence, no legal move loses, 40-move idle draw. `state_key` includes the idle
+clock, since two identical positions with different clocks have different values near the draw limit.
+
+**Verified:** 22 direct tests, 6/6 mutations caught (capture-not-mandatory, multi-jump-ends-turn,
+promotion-keeps-jumping, men-move-backwards, idle-never-counts, winner-flipped). Generic harness agents play it
+through the Protocol (the §C.21 leak regression). A 2-batch smoke trained end-to-end through the UNCHANGED
+`scaled_run` with the league on in 11 s, and the checkpoint round-trips with `input_planes=4`, `num_actions=256`,
+`board_shape=[8,8]` and a 32-cell mask buffer. One real bug found and fixed: an out-of-range action raised
+`IndexError` from the label formatter instead of a clean `ValueError`. Suite 483 passed.
+
+**Not yet done:** no training run (the frontier question from §C.24 is still open and a real run is a multi-day
+machine commitment), and no `symmetries()` — checkers has a left-right mirror, but the augmenter is
+last-axis-only and feeding it a 256-action factored permutation would corrupt data rather than multiply it.
+
+#### §C.26 — PRE-REGISTRATION: the frontier and the sims-efficiency arm (2026-09-11, written BEFORE launch)
+
+§C.24 left two questions open: how far does the recipe keep improving (it was still climbing when its budget
+ran out), and does a smaller search budget buy more strength per unit compute. One pair of runs answers both,
+because the frontier arm IS the efficiency control.
+
+| arm | sims | batches | games | total simulations |
+|---|---|---|---|---|
+| `othello_frontier_s96` (A) | 96 | 48 | 19,200 | 1.84M |
+| `othello_frontier_s32` (B) | 32 | 144 | 57,600 | 1.84M |
+
+**Compute-matching is on SIMULATIONS, not games or wall-clock.** 96·N ≡ 32·3N, so B gets 3x the games. A
+measured probe puts 32-sim play at **3.61x** cheaper per game than 96-sim (9.39 vs 2.60 s/game — the saving is
+super-linear in sims, since a smaller tree also means fewer net evaluations per move). Matching on simulations
+therefore CREDITS B WITH LESS COMPUTE THAN IT ACTUALLY SAVES: if B wins on this design it wins by more in
+wall-clock. Simulations are also reproducible where contended wall-clock is not (yesterday's measurement lost
+~3x to machine load), so they are the honest experimental unit.
+
+**B keeps A's batch, not a bigger one.** The first sketch gave B 3x-larger batches; that would have tripled its
+replay-buffer turnover and made the buffer horizon a second variable. B instead runs 3x as MANY identical
+batches (400 games, `buffer_cap` 50000), so per-batch dynamics match and **only `sims` differs**. Everything
+else is held fixed deliberately, including the league opponents (`league_mcts_sims` [60,200],
+`league_snapshot_sims` 128): the league is the curriculum, not the treatment, so it must not move with the arm.
+
+**Pre-registered reads** (paired exploitability, UCT-200 refuter, MEASUREMENT seed 131, 128 openings):
+- FRONTIER, `treatment="budget"` within an arm: A@11 vs A@23, A@23 vs A@47; B@35 vs B@71, B@71 vs B@143.
+- EFFICIENCY, `treatment="config"` at compute-matched points: A@11 vs B@35, A@23 vs B@71, A@47 vs B@143.
+
+Seven comparisons on one root family, so the ledger corrects alpha to 0.05/7 = 0.0071. Reads are FIXED here in
+advance; per §C.24 neither training loss nor `opening_value` may be used to judge progress or to stop either
+run early, and per §C.23 "final" is earned only by reaching the declared batch count.
+
+**Pre-registered caveat.** The ledger matches budgets on `games`, so a compute-matched comparison will trip its
+"BUDGETS DIFFER" note. That note is correct about games and misleading about compute; the ledger needs a
+compute budget alongside the games budget, which is the tooling task to build while these train.
+
+**Schedule:** sequential (user's call), A first — the machine is shared with Docker, a VM and vitest watchers at
+load ~31/10 cores, and parallel arms would thrash. A ~53 h, B ~44 h at the measured rates.
+
+**Deployment budget at measurement — both arms at sims 96.** The arms differ in TRAINING search budget; they
+are measured at the SAME deployment budget (96, as in every earlier read) so the comparison isolates *which
+recipe produced the better model*. Measuring B at 32 would conflate the training question with a separate
+deployment question, and the north star is a compute-efficient process producing a near-optimal MODEL, not a
+cheap-to-deploy one. All seven reads share `--tag frontier`, so they form ONE root family and the ledger's
+alpha correction applies across all of them.
+
+**Consequence of launching: the training path is FROZEN again** (§C.17a rule 1) until BOTH arms are measured —
+arm B must be trained by the same era as arm A (`3f2bacd402c7`) or the efficiency comparison is a code
+comparison and the ledger will refuse it. That blocks `harness/rules.py` and `harness/neural.py`, and therefore
+blocks nine men's morris (new geometry primitives) and the augmenter rewrite for ~4 days. Non-fingerprinted
+work is unaffected: the ledger's compute-budget gap, measurement tooling, and the §C.20 cross-game matrix
+runner all live outside `TRAINING_MODULES`.

@@ -80,3 +80,38 @@ def test_majority_names_the_winner_or_a_draw():
     assert majority((2, 2, 1, 0)) == 1
     assert majority((1, 2, 0, 0)) is None
     assert majority((0, 0, 0)) is None
+
+
+def test_diag_steps_are_the_four_diagonal_neighbours_inside_the_board():
+    from harness.rules import DIRS4, diag_steps
+
+    s = diag_steps(8, 8)
+    assert s[27, (-1, -1)] == 18 and s[27, (1, 1)] == 36
+    assert (0, (-1, -1)) not in s, "a corner has no off-board neighbour"
+    assert (0, (1, 1)) in s
+    assert len(DIRS4) == 4 and all(abs(dr) == 1 and abs(dc) == 1 for dr, dc in DIRS4)
+
+
+def test_diag_steps_never_wrap_around_a_row_edge():
+    from harness.rules import diag_steps
+
+    s = diag_steps(8, 8)
+    assert (8, (-1, -1)) not in s and (8, (1, -1)) not in s, "col 0 has no left diagonal"
+    assert (15, (-1, 1)) not in s and (15, (1, 1)) not in s, "col 7 has no right diagonal"
+
+
+def test_diag_jumps_give_the_jumped_cell_and_the_landing_cell():
+    from harness.rules import diag_jumps
+
+    j = diag_jumps(8, 8)
+    assert j[27, (-1, -1)] == (18, 9) and j[27, (1, 1)] == (36, 45)
+    assert (9, (-1, -1)) not in j, "landing would be off the board"
+
+
+def test_diag_jumps_land_two_diagonal_steps_away_on_the_same_colour():
+    from harness.rules import diag_jumps
+
+    j = diag_jumps(8, 8)
+    for (cell, _d), (over, land) in j.items():
+        assert (cell // 8 + land // 8) % 2 == 0 and (cell % 8 + land % 8) % 2 == 0
+        assert over != cell and land != over

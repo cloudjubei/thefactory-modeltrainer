@@ -35,13 +35,18 @@ TRAINING_MODULES = (
     "harness/config.py",
     "harness/agents.py",  # league OPPONENTS (UCT/heuristic/random) shape the self-play data — 2026-09-10
     "harness/rules.py",   # the rule-module LIBRARY: a game's mechanics (flank, rays, ...) ARE its data — 2026-09-10
+    "harness/resume.py",  # §C.22 made scaled_run ask it WHICH BATCH to restart from — training-path — 2026-09-11
 )
 
 # Earlier lists, so an era recorded under one stays re-derivable (pass as `modules=`): V1 = the nine modules the
 # ledger's pre-2026-09-10 codes (5a55087160db, bceb94d254eb, ...) used; V2 = +agents.py, the list the Othello
-# transfer run was launched under (ac11124cf17a) before rules.py was recognised as training-path code.
-TRAINING_MODULES_V1 = TRAINING_MODULES[:-2]
-TRAINING_MODULES_V2 = TRAINING_MODULES[:-1]
+# transfer run was launched under (ac11124cf17a) before rules.py was recognised as training-path code; V3 =
+# +rules.py, the list the completed Othello run was stamped under (4a9e255a90c6 at that revision) before
+# resume.py joined the training path. A list alone re-derives an old code only WITH that code's `revision`:
+# the list says which files counted, the revision says what was in them.
+TRAINING_MODULES_V1 = TRAINING_MODULES[:-3]
+TRAINING_MODULES_V2 = TRAINING_MODULES[:-2]
+TRAINING_MODULES_V3 = TRAINING_MODULES[:-1]
 
 HARNESS_ROOT = Path(__file__).resolve().parent.parent
 

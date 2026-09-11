@@ -187,3 +187,59 @@ def test_arch_for_game_refuses_a_config_for_the_wrong_game():
         arch_for_game({"num_actions": 7}, oth)
     with pytest.raises(ValueError, match="board_shape"):
         arch_for_game({"board_shape": [6, 7]}, oth)
+
+
+def test_encode_reads_a_games_own_planes_when_it_declares_more_than_two():
+    """Checkers has a THIRD piece type, so the own/opponent 2-plane derivation cannot represent it. A game
+    declaring `input_planes` emits its planes directly and `encode` reshapes them."""
+    from harness.neural import encode
+    from harness.registry import resolve_game
+
+    g = resolve_game("checkers")
+    s = g.initial_state(random.Random(0))
+    x = encode(g, s)
+    assert tuple(x.shape) == (4, 8, 8)
+    assert x[0].sum() == 12 and x[2].sum() == 12, "12 own men, 12 opponent men"
+    assert x[1].sum() == 0 and x[3].sum() == 0, "no kings in the opening"
+
+
+def test_encode_stays_byte_identical_on_the_two_plane_games():
+    from harness.neural import encode
+    from harness.registry import resolve_game
+
+    for name in ("connect4", "othello"):
+        g = resolve_game(name)
+        x = encode(g, g.initial_state(random.Random(0)))
+        assert tuple(x.shape) == (2, *g.board_shape)
+        assert set(x.flatten().tolist()) <= {0.0, 1.0}
+
+
+def test_arch_for_game_carries_planes_and_valid_mask_off_the_game():
+    from harness.neural import arch_for_game
+    from harness.registry import resolve_game
+
+    g = resolve_game("checkers")
+    arch = arch_for_game({"channels": 8}, g)
+    assert arch["input_planes"] == 4 and arch["num_actions"] == 256 and arch["board_shape"] == [8, 8]
+    assert sum(arch["valid_mask"]) == 32, "only the dark squares are real cells"
+    plain = arch_for_game({"channels": 8}, resolve_game("connect4"))
+    assert "valid_mask" not in plain and plain.get("input_planes", 2) == 2
+
+
+def test_arch_for_game_refuses_a_plane_count_the_game_contradicts():
+    from harness.neural import arch_for_game
+    from harness.registry import resolve_game
+
+    with pytest.raises(ValueError, match="(?i)input_planes"):
+        arch_for_game({"channels": 8, "input_planes": 2}, resolve_game("checkers"))
+
+
+def test_a_net_built_for_checkers_plays_a_legal_move():
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game
+    from harness.registry import resolve_game
+
+    g = resolve_game("checkers")
+    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1}, g))
+    s = g.initial_state(random.Random(0))
+    a = AlphaZeroAgent(net, sims=4, solve_endgame=0, gumbel=True, c_scale=0.1).act(g, s, random.Random(0))
+    assert a in g.legal_actions(s)

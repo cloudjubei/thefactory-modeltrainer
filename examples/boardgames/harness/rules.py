@@ -12,8 +12,36 @@ promotion arrive with the games that need them; unused primitives are untested p
 from __future__ import annotations
 
 DIRS8: tuple[tuple[int, int], ...] = tuple((dr, dc) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if (dr, dc) != (0, 0))
+DIRS4: tuple[tuple[int, int], ...] = ((-1, -1), (-1, 1), (1, -1), (1, 1))
 
 Rays = dict[tuple[int, tuple[int, int]], tuple[int, ...]]
+
+
+def diag_steps(h: int, w: int) -> dict[tuple[int, tuple[int, int]], int]:
+    """For every cell and diagonal direction, the adjacent cell — present ONLY when it is on the board, so a
+    lookup miss IS the edge test and no caller repeats the bounds arithmetic (which is where wrap-around bugs
+    live: cell + dr*w + dc happily walks off the end of a row)."""
+    out: dict[tuple[int, tuple[int, int]], int] = {}
+    for r in range(h):
+        for c in range(w):
+            for dr, dc in DIRS4:
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < h and 0 <= cc < w:
+                    out[r * w + c, (dr, dc)] = rr * w + cc
+    return out
+
+
+def diag_jumps(h: int, w: int) -> dict[tuple[int, tuple[int, int]], tuple[int, int]]:
+    """For every cell and diagonal direction, `(jumped cell, landing cell)` two steps out — present only when
+    the LANDING is on the board. The geometry of a capture-by-jump, with no notion of who owns what."""
+    out: dict[tuple[int, tuple[int, int]], tuple[int, int]] = {}
+    for r in range(h):
+        for c in range(w):
+            for dr, dc in DIRS4:
+                rr, cc = r + 2 * dr, c + 2 * dc
+                if 0 <= rr < h and 0 <= cc < w:
+                    out[r * w + c, (dr, dc)] = ((r + dr) * w + (c + dc), rr * w + cc)
+    return out
 
 
 def grid_rays(h: int, w: int) -> Rays:

@@ -44,9 +44,19 @@ def arch_for_game(net_arch: dict | None, game: Game) -> dict:
         raise ValueError(f"net_arch board_shape {list(arch['board_shape'])} but {game.name} is {[h, w]}")
     if "num_actions" in arch and n is not None and int(arch["num_actions"]) != int(n):
         raise ValueError(f"net_arch num_actions {arch['num_actions']} but {game.name} has {n}")
+    planes = getattr(game, "input_planes", None)
+    if planes is not None and "input_planes" in arch and int(arch["input_planes"]) != int(planes):
+        raise ValueError(f"net_arch input_planes {arch['input_planes']} but {game.name} emits {planes}")
     arch.setdefault("board_shape", [h, w])
     if n is not None:
         arch.setdefault("num_actions", int(n))
+    if planes is not None:
+        arch.setdefault("input_planes", int(planes))
+    # A game whose board has structurally dead cells (checkers' light squares) hands the net its mask, so the
+    # masked pooling built in Increment 1 excludes them instead of averaging structural zeros into every feature.
+    mask = getattr(game, "valid_mask", None)
+    if mask is not None:
+        arch.setdefault("valid_mask", list(mask))
     return arch
 
 
@@ -214,7 +224,13 @@ def encode(game: Game, state: State) -> torch.Tensor:
     pieces, plane 1 = opponent), read from the game's own observation so the net is position-canonical."""
     player = game.current_player(state)
     h, w = _board_shape(game)
-    cells = game.observation(state, player)[: h * w]
+    obs = game.observation(state, player)
+    planes = int(getattr(game, "input_planes", 2))
+    if planes != 2:
+        # A game with more than two piece kinds (checkers' men and kings) cannot be expressed as own/opponent,
+        # so it declares `input_planes` and emits its own planes as the first `planes * h * w` observations.
+        return torch.tensor(obs[: planes * h * w], dtype=torch.float32).reshape(planes, h, w)
+    cells = obs[: h * w]
     own = [1.0 if v == 1.0 else 0.0 for v in cells]
     opp = [1.0 if v == -1.0 else 0.0 for v in cells]
     plane_own = torch.tensor(own, dtype=torch.float32).reshape(h, w)
@@ -977,6 +993,11 @@ def train_net(
         opt = opt_state.get("opt")
         if opt is None:
             opt = torch.optim.Adam(net.parameters(), lr=lr, weight_decay=1e-4)
+            # §C.22: a RESUMED run hands back the Adam state its earlier process saved, so the moment estimates
+            # continue instead of restarting — otherwise an interrupted run is a different experiment.
+            carried = opt_state.pop("load_state", None)
+            if carried is not None:
+                opt.load_state_dict(carried)
             opt_state["opt"] = opt
     net.train()
     last = 0.0

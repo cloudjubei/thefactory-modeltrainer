@@ -6,6 +6,7 @@ behaviour change in the training path and stay silent on everything else — a g
 measurement work gets bypassed, which is how we got here.
 """
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -120,3 +121,21 @@ def test_the_rule_library_is_part_of_the_training_path():
     # let a change to `flank` alter every Othello run's data without moving its era — the §C.17 hole, relocated.
     assert "harness/rules.py" in TRAINING_MODULES
     assert "harness/rules.py" not in TRAINING_MODULES_V2 and "harness/agents.py" in TRAINING_MODULES_V2
+
+
+def test_resume_is_training_path_code_and_is_fingerprinted():
+    """§C.22 made `scaled_run` import `harness.resume` to pick the resume point, so it now DECIDES which batch
+    training restarts from — training-path code by the same argument that pulled in agents.py and rules.py. An
+    edit to it that silently changed a run's resume point must move the era."""
+    import harness.scaled_run as sr
+
+    assert "harness/resume.py" in TRAINING_MODULES
+    assert "from harness.resume import" in Path(sr.__file__).read_text()
+
+
+def test_the_pre_resume_module_list_stays_derivable():
+    from harness.fingerprint import TRAINING_MODULES_V3
+
+    assert "harness/resume.py" not in TRAINING_MODULES_V3
+    assert "harness/rules.py" in TRAINING_MODULES_V3
+    assert training_fingerprint("othello", modules=TRAINING_MODULES_V3) != training_fingerprint("othello")
