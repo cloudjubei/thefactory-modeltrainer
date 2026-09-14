@@ -72,8 +72,17 @@ def run_budget(ckpt) -> dict:
     declared = (prov.get("request") or {}).get("batches", prov.get("batches"))
     run_complete = None if declared is None else (last == int(declared) - 1)
     is_final = idx == last and run_complete is not False
+
+    # §C.26: `games` is only a PROXY for what a search-based learner spends. Two arms at different search
+    # budgets are comparable on SIMULATIONS, not on games — 96 sims x N games is the same compute as 32 x 3N.
+    sims = (prov.get("request") or {}).get("sims")
+    if sims is None:
+        cfg_path = ckpt.parent.parent / f"{ckpt.parent.name}.json"
+        sims = (_read_json(cfg_path) or {}).get("sims") if cfg_path.exists() else None
     return {"batch": idx, "games": games, "provenance": "final" if is_final else "budget_matched",
-            "code": prov.get("training_fingerprint"), "run_complete": run_complete}
+            "code": prov.get("training_fingerprint"), "run_complete": run_complete,
+            "sims": int(sims) if sims is not None else None,
+            "simulations": games * int(sims) if sims is not None else None}
 
 
 def _read_json(path: Path) -> dict | None:
@@ -108,7 +117,7 @@ class Ledger:
 
     def record(self, name: str, outcomes: list[int], params: int, games: int, provenance: str,
                seed: int, roots_id: str, code: str | None = None, config: str | None = None,
-               run_complete: bool | None = None) -> dict:
+               run_complete: bool | None = None, compute: int | None = None) -> dict:
         """Record a measurement. `provenance` is MANDATORY — 'final' vs 'gate_selected' vs 'best_of_n' is the
         difference between a comparison that means something and one that does not (L1)."""
         if provenance not in PROVENANCE:
@@ -120,7 +129,7 @@ class Ledger:
         e = {"name": name, "outcomes": [int(o) for o in outcomes], "n": n, "converted": k, "rate": k / n,
              "ci": list(wilson_interval(k, n)), "params": int(params), "games": int(games),
              "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code, "config": config,
-             "run_complete": run_complete}
+             "run_complete": run_complete, "compute": compute}
         self._entries[name] = e
         self._save()
         return e
@@ -143,6 +152,13 @@ class Ledger:
         if ea["roots_id"] != eb["roots_id"]:
             raise ValueError(f"different root families ({ea['roots_id']} vs {eb['roots_id']}) are NOT paired data")
         budget_matched = ea["games"] == eb["games"]
+        # §C.26 COMPUTE MATCHING: the efficiency arms differ in `games` BY DESIGN, because equal compute at
+        # different search budgets means unequal game counts. Equal simulations is therefore just as good a
+        # claim to "like for like" as equal games — but only when both arms actually recorded their compute;
+        # an unknown compute must never be read as a match.
+        ca_, cb_ = ea.get("compute"), eb.get("compute")
+        compute_matched = bool(ca_ and cb_ and ca_ == cb_)
+        matched = budget_matched or compute_matched
         if treatment == "budget":
             # A LEARNING CURVE: two checkpoints of one recipe under one code, and the training budget IS the
             # variable. Everything else must be held fixed, and the budgets must actually differ.
@@ -151,9 +167,10 @@ class Ledger:
                                  f"as the treatment there is nothing under test")
         else:
             for e, name in ((ea, a), (eb, b)):
-                if e["provenance"] == "budget_matched" and not budget_matched:
+                if e["provenance"] == "budget_matched" and not matched:
                     raise ValueError(f"{name} is recorded as budget_matched but the budgets differ "
-                                     f"({ea['games']} vs {eb['games']}) — the label is false")
+                                     f"({ea['games']} vs {eb['games']} games, compute {ca_} vs {cb_}) — "
+                                     f"the label is false")
         ca, cb = ea.get("code"), eb.get("code")
         ga, gb = ea.get("config"), eb.get("config")
         if treatment == "config":
@@ -198,7 +215,10 @@ class Ledger:
         return {**res,
                 "a": a, "b": b, "rate_a": ea["rate"], "rate_b": eb["rate"],
                 "budget_matched": budget_matched,
+                "compute_matched": compute_matched,
                 "budget_note": ("" if budget_matched else
+                                f"COMPUTE-MATCHED: {a} played {ea['games']} games and {b} {eb['games']}, which "
+                                f"differ BY DESIGN — both spent {ca_} simulations" if compute_matched else
                                 f"BUDGETS DIFFER: {a} trained on {ea['games']} games, {b} on {eb['games']} — "
                                 f"this is not a like-for-like comparison"),
                 "provenance_warning": warning, "code_warning": code_warning,

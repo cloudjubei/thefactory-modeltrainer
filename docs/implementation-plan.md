@@ -2471,3 +2471,71 @@ comparison and the ledger will refuse it. That blocks `harness/rules.py` and `ha
 blocks nine men's morris (new geometry primitives) and the augmenter rewrite for ~4 days. Non-fingerprinted
 work is unaffected: the ledger's compute-budget gap, measurement tooling, and the §C.20 cross-game matrix
 runner all live outside `TRAINING_MODULES`.
+
+#### §C.27 — the frontier arm reproduced the old run BIT-FOR-BIT, and that is two findings (2026-09-12)
+
+Pre-registered frontier read #1 (A@11 vs A@23) fired on schedule: held **0.8398 vs 0.5820, +0.2578**, discordant
+93/27, p<0.0001 — significant. It is also, to the digit, the completed run's late-vs-mid result. Checked rather
+than assumed: `ckpt_11` and `ckpt_23` are **byte-identical** across the two runs (sha256 `97fd3042348e3ed4`,
+`e99b4ebf28ca9eb7`), and all 24 batches match exactly on `final_loss`, `opening_value` and `league_vs_pool`.
+
+**Finding 1 — the pipeline is bit-reproducible.** Same seed, ~26 h of stochastic self-play, 9600 games, a league
+rebuilt per batch, and the run re-derived itself exactly under a DIFFERENT code era (`4a9e255a90c6` →
+`3f2bacd402c7`). The checkers work touched `neural.py` and `rules.py` but was behaviour-preserving for Othello
+(the multi-plane `encode` branch is taken only when a game declares `input_planes != 2`; `diag_steps`/
+`diag_jumps` are new functions Othello never calls). This is a strong property most RL codebases do not have,
+and it is now demonstrated rather than hoped for.
+
+**Finding 2 — the era guard is conservative, and conservatism has a price: ~26 h here.** The guard refuses to
+resume a run whose training source changed *textually*, which is the right default — behaviour-preservation is
+undecidable in general and a wrong guess reintroduces the §C.17 confound silently. But in this case the old
+run's checkpoints were provably reusable, and re-deriving them bought nothing. Frontier read #1 is therefore a
+REPLICATION, not new information; the genuinely new territory is batches 24-47, and the frontier answer arrives
+at A@47.
+
+**Queued tool (outside TRAINING_MODULES, so the freeze does not block it): equivalence-based run seeding.** Given
+a config and an existing run whose `config_fingerprint` matches, re-derive ONE batch and compare the checkpoint
+hash to the existing one. Bit-identical ⇒ the eras are behaviourally equivalent *for this game* and the existing
+checkpoints may be adopted, skipping the recompute; different ⇒ the code genuinely moved and the full run is
+required. This CHECKS the property (a re-derived checkpoint matches) instead of trusting a judgement about
+which edits "should" be behaviour-preserving — the §C.9 lesson applied to compute rather than to statistics.
+It would have saved 26 h here and saves more as runs accumulate. Arm B gains nothing from it (144 batches at 32
+sims are all new), so it is queued, not urgent.
+
+#### §C.28 — the frontier is FOUND, and it is much closer than §C.24 implied (2026-09-14)
+
+Arm A completed 48/48 batches in 53.7 h. Both pre-registered frontier reads are drawn:
+
+| budget | games | held (1 − loss) | marginal gain |
+|---|---|---|---|
+| A@11 | 4,800 | 0.5820 | — |
+| A@23 | 9,600 | 0.8398 | **+0.2578**, p<0.0001 — EFFECT |
+| A@47 | 19,200 | 0.8945 | **+0.0547**, p=0.098 — INCONCLUSIVE |
+
+**Returns collapse by ~5x across one doubling.** The first doubling of budget bought +0.258 held; the second
+bought +0.055 and does not reach the corrected threshold (alpha 0.025). For this recipe on Othello, the useful
+frontier sits around **9,600 games** — roughly where the original 24-batch run stopped.
+
+**This corrects the extrapolation §C.24 invited, though not its literal claim.** §C.24 said the run "was still
+gaining fast at the end" and that 9,600 games was "a lower bound, not a plateau". Both were true of the 11→23
+interval. But the natural reading — double again and gain comparably — is refuted: 23→47 gained less than a
+fifth as much. The honest summary is that §C.24 correctly refused to call a plateau from the loss curve, and
+this read locates the plateau properly, by play.
+
+**INCONCLUSIVE is not NULL, and the difference matters here.** The minimum effect n=256 can resolve at this
+discordant count (~62 pairs) is **|b−c| ≥ 20, i.e. ~0.078 held**. The observed +0.0547 is BELOW that limit, so
+this measurement could not have detected it even if it is entirely real. We may say "the second doubling's
+return is small enough to be invisible at n=256"; we may NOT say it is zero. (The same detection-limit trap as
+the knowledge project's "<0.044 invisible at N=5".)
+
+**Consequence for the efficiency reads, handled WITHOUT moving the goalposts.** If arm B's compute-matched
+differences are also in the 0.05 range, they will land inconclusive for the same reason. The fix is NOT to
+raise `--n-openings` now: `n` is part of `roots_id`, so changing it mid-experiment creates a different root
+family, breaks the pre-registered multiplicity accounting, and is post-hoc flexibility of exactly the kind that
+invalidates inference. Instead, PRE-REGISTERED HERE IN ADVANCE: if any efficiency read returns INCONCLUSIVE
+with |diff| < 0.078, a single higher-powered confirmation is run on a NEW family at `--n-openings 512`
+(detection limit ~0.039), comparing only the arms that were inconclusive, and reported as its own family with
+its own alpha.
+
+`a47` reaches 0.8945 held — 10.6% loss to a 200-sim UCT refuter, down from 16.0% at A@23. Better, still not
+near-optimal.

@@ -133,7 +133,7 @@ def test_refuses_comparison_across_different_root_families(tmp_path):
 def test_run_budget_reads_the_final_checkpoint_off_the_run(tmp_path):
     d = _mk_run(tmp_path, "r", [{"batch": i, "games": 400} for i in range(3)])
     assert run_budget(d / "ckpt_2.pt") == {"batch": 2, "games": 1200, "provenance": "final", "code": None,
-                                           "run_complete": None}
+                                           "run_complete": None, "sims": None, "simulations": None}
 
 
 def test_run_budget_labels_an_earlier_index_budget_matched(tmp_path):
@@ -157,7 +157,8 @@ def test_run_budget_derives_games_for_runs_that_predate_cost_accounting(tmp_path
     d = _mk_run(tmp_path, "old", [{"batch": i, "iterations_done": 5 * (i + 1)} for i in range(40)],
                 cfg={"games": 80, "iters_per_batch": 5})
     assert run_budget(d / "ckpt_23.pt") == {"batch": 23, "games": 9600, "provenance": "budget_matched",
-                                            "code": None, "run_complete": None}
+                                            "code": None, "run_complete": None, "sims": None,
+                                            "simulations": None}
 
 
 def test_run_budget_refuses_when_the_budget_cannot_be_established(tmp_path):
@@ -365,3 +366,65 @@ def test_default_treatment_still_refuses_a_learning_curve_pair(tmp_path):
     led = _curve(_mk(tmp_path), 9600, 1600)
     with pytest.raises(ValueError, match="(?i)budget"):
         led.compare("late", "early")
+
+
+def _declare_sims(run_dir, batches: int, sims: int, name: str, tmp_path) -> None:
+    (run_dir / "provenance.json").write_text(json.dumps({"request": {"batches": batches, "sims": sims}}))
+    (tmp_path / f"{name}.json").write_text(json.dumps({"sims": sims}))
+
+
+def test_run_budget_reports_the_search_budget_and_total_simulations(tmp_path):
+    """§C.26: `games` is a proxy for cost. The real budget of a search-based learner is SIMULATIONS, and two
+    arms at different sims are comparable only on that."""
+    d = _mk_run(tmp_path, "r", [{"batch": i, "games": 400} for i in range(12)])
+    _declare_sims(d, 48, 96, "r", tmp_path)
+    b = run_budget(d / "ckpt_11.pt")
+    assert b["sims"] == 96 and b["simulations"] == 4800 * 96
+
+
+def test_run_budget_leaves_simulations_unknown_when_the_run_never_declared_sims(tmp_path):
+    d = _mk_run(tmp_path, "r", [{"batch": i, "games": 400} for i in range(3)])
+    b = run_budget(d / "ckpt_2.pt")
+    assert b["sims"] is None and b["simulations"] is None
+
+
+def test_compare_accepts_a_compute_matched_pair_whose_game_counts_differ_by_design(tmp_path):
+    """The pre-registered efficiency read: 96 sims x N games vs 32 sims x 3N games is the SAME compute, and the
+    ledger must not reject it as a mislabelled budget just because `games` differs."""
+    led = _mk(tmp_path)
+    led.record("a11", outcomes=[1] * 6 + [0] * 4, params=1, games=4800, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G96", compute=4800 * 96)
+    led.record("b35", outcomes=[1] * 8 + [0] * 2, params=1, games=14400, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G32", compute=14400 * 32)
+    r = led.compare("a11", "b35", treatment="config")
+    assert r["compute_matched"] and not r["budget_matched"]
+    assert "COMPUTE-MATCHED" in r["budget_note"] and "460800" in r["budget_note"]
+
+
+def test_compare_still_refuses_a_pair_that_matches_on_neither_games_nor_compute(tmp_path):
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 6 + [0] * 4, params=1, games=4800, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G96", compute=4800 * 96)
+    led.record("b", outcomes=[1] * 8 + [0] * 2, params=1, games=9600, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G32", compute=9600 * 32)
+    with pytest.raises(ValueError, match="(?i)label is false"):
+        led.compare("a", "b", treatment="config")
+
+
+def test_compute_matching_does_not_paper_over_unknown_compute(tmp_path):
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 6 + [0] * 4, params=1, games=4800, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G96")
+    led.record("b", outcomes=[1] * 8 + [0] * 2, params=1, games=14400, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G32")
+    with pytest.raises(ValueError, match="(?i)label is false"):
+        led.compare("a", "b", treatment="config")
+
+
+def test_a_budget_treatment_learning_curve_is_unaffected_by_compute_matching(tmp_path):
+    led = _mk(tmp_path)
+    for name, games in (("late", 19200), ("early", 4800)):
+        led.record(name, outcomes=[1] * 5 + [0] * 5, params=1, games=games, provenance="budget_matched",
+                   seed=131, roots_id="R", code="C", config="G", compute=games * 96)
+    r = led.compare("late", "early", treatment="budget")
+    assert not r["compute_matched"] and "BUDGETS DIFFER" in r["budget_note"]

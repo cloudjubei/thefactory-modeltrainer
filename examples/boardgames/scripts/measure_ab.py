@@ -94,7 +94,7 @@ def main() -> None:
         outcomes = [1 if s >= 0.999 else 0 for s in res["arms"][a["name"]]["scores"]]
         e = led.record(a["name"], outcomes=outcomes, params=a["params"], games=a["games"],
                        provenance=a["provenance"], seed=args.seed, roots_id=roots_id, code=a["code"],
-                       config=a["config"], run_complete=a["run_complete"])
+                       config=a["config"], run_complete=a["run_complete"], compute=a["simulations"])
         lo, hi = wilson_interval(e["converted"], e["n"])
         print(f"\n{a['name']}: {e['converted']}/{e['n']} = {e['rate']:.4f}  95% CI [{lo:.4f}, {hi:.4f}]")
 
