@@ -2539,3 +2539,117 @@ its own alpha.
 
 `a47` reaches 0.8945 held — 10.6% loss to a 200-sim UCT refuter, down from 16.0% at A@23. Better, still not
 near-optimal.
+
+**CORRECTION to §C.26's cost claim (2026-09-14, measured on arm B's first batches).** §C.26 asserted that
+matching on simulations "CREDITS B WITH LESS COMPUTE THAN IT ACTUALLY SAVES: if B wins on this design it wins
+by more in wall-clock." **That is refuted.** Arm B runs at 40.6 min/batch against arm A's 67.1 — a ratio of
+0.61, not the 0.28 the 3.61x per-game probe implied — so arm B's full 144 batches cost **97 h against arm A's
+53.7 h: 1.82x MORE wall-clock for the identical 1.84M simulations.**
+
+The cause is the league, and it is arithmetic, not noise. `league_frac` 0.4 sends a large share of self-play
+against opponents whose search is pinned by `league_mcts_sims` [60,200] and `league_snapshot_sims` 128 — held
+FIXED across arms deliberately, because the league is the curriculum and not the treatment. Those opponent
+moves cost the same whatever the arm's own sims are, so only roughly half the work gets cheaper: predicted
+blend 0.5/3.61 + 0.5 = 0.64 against 0.61 observed.
+
+**The error was measuring a proxy instead of the property** — again. The 3.61x ratio came from a net-vs-net
+probe at matched sims, which is not the workload a training batch actually runs. The property was "what does a
+BATCH cost", and one batch of each arm would have answered it in 45 minutes before launch.
+
+**What does NOT change:** the pre-registered comparison stays simulation-matched at 1.84M each. Cost information
+is not outcome information, but redesigning mid-flight is how pre-registration dies, and no efficiency read has
+been drawn. **What DOES change is the interpretation:** a B win on this design can no longer be read as a
+wall-clock win — B would have to beat A while having spent 1.82x the wall-clock. The wall-clock accounting is
+reported alongside the result as a cost fact, NOT smuggled in as a second ledger comparison. A genuinely
+wall-clock-matched efficiency test would have to scale the league with the arm's sims, which is a different
+experiment with a different curriculum.
+
+#### §C.29 — the efficiency verdict INVERTS with the accounting unit (2026-09-17, efficiency read #1)
+
+Pre-registered efficiency read #1 is drawn, and the ledger's compute-matching (built 2026-09-14, hours before it
+was needed) carried it: "COMPUTE-MATCHED: b35 played 14400 games and a11 4800, which differ BY DESIGN — both
+spent 460800 simulations". Without it the pair would have been refused as a mislabelled budget.
+
+| arm | sims | games | simulations | wall | held |
+|---|---|---|---|---|---|
+| a11 | 96 | 4,800 | 460,800 | 14.3 h | 0.5820 |
+| **b35** | **32** | **14,400** | **460,800** | **24.3 h** | **0.7344** |
+| a23 | 96 | 9,600 | 921,600 | 26.9 h | 0.8398 |
+
+**AT EQUAL SIMULATIONS THE LOW-SEARCH ARM WINS, decisively: +0.1523, p=0.0006**, significant at the corrected
+alpha 0.0167. Three times the games at a third of the search beats the deep-search arm on the same simulation
+budget. That is the pre-registered result and it stands.
+
+**But the same rows show the verdict inverting under wall-clock.** b35 needed **24.3 h** to reach 0.7344; a23
+reached **0.8398 in 26.9 h** — comparable time, clearly stronger. Arm A converts simulations to wall-clock at
+32.2k sims/h, arm B at only 19.0k: **B's simulations are 1.70x more expensive in real time.**
+
+The mechanism is exact and is the §C.26 correction compounding. At fixed simulations, arm B buys its advantage
+by playing 3x as many GAMES, and a large part of a game's cost does not scale with the arm's own search — the
+league opponents are pinned at 60/128/200 sims. So arm B pays roughly 3x the league bill for the same nominal
+compute. Playing more games is not free, and "simulations" is blind to the part of the bill that games incur.
+
+**Status of each claim, kept separate on purpose.** The sims-matched comparison is pre-registered, paired,
+ledger-drawn and causal: at equal simulations, lower search trains better. The wall-clock observation is
+DESCRIPTIVE only — a23 vs b35 differ in sims AND games AND simulations at once, so the ledger rightly refuses
+to draw it and no cause may be attributed. It is reported as a cost fact from the runs' own metrics, not
+promoted to a finding, and it is emphatically not a result I went looking for after seeing the outcome: §C.26's
+correction predicted this shape three days before this read landed.
+
+**What it means for the north star.** "Compute-efficient" needs its unit named. Under simulations — the unit
+that is reproducible and machine-independent — fewer sims and more games is the better recipe. Under wall-clock
+on this machine it is not, and the gap is caused by a recipe detail (fixed-cost league opponents), not by
+anything intrinsic to search depth. The experiment that would make both units agree is **32 sims with the
+league scaled proportionally** (60/128/200 → 20/43/67), which is pre-registered here as the natural successor
+and NOT run now: the training path is frozen until arm B's reads complete, and changing the curriculum
+mid-experiment would forfeit the comparison in flight.
+
+#### §C.30 — HYPOTHESIS REGISTER: claims become falsifiable objects the runs judge (2026-09-17)
+
+Every finding in this track so far lived as PROSE — a plan section, a memory file. Prose cannot be wrong in a
+way the system notices: nothing linked a claim to the run that would test it, nothing stopped a claim being
+written up after the result was in, and nothing forced a claim to say in advance which outcome would kill it.
+`harness/hypotheses.py` closes that, enforcing three rules rather than relying on me to remember them:
+
+- **H1 STATUS IS DERIVED, NEVER ASSERTED.** A hypothesis does not get to declare itself true. `status` is
+  computed from linked ledger comparisons (supported / refuted / inconclusive / contested / untested) and
+  `register()` has no `status` parameter at all — passing one is a TypeError.
+- **H2 PRE-REGISTRATION IS CHECKED, NOT CLAIMED.** `pre_registered` is true only when EVERY piece of evidence
+  was drawn after the claim was registered, verified against the ledger's own `drawn_at`. The difference
+  between a prediction and a rationalisation is a timestamp. Status is unaffected — late evidence still counts;
+  only the claim to foresight is withdrawn.
+- **H3 COMPARISON AND UNIT DECLARED UP FRONT.** A hypothesis names both arms, the DIRECTION that would support
+  it, and the UNIT. Without direction, any significant result can be spun as confirmation; without a unit the
+  claim is not well-formed, because §C.29 measured the same recipe winning in simulations and losing in
+  wall-clock. Linking a comparison between arms other than the declared pair is refused, so a claim cannot
+  harvest whichever result happened to be significant.
+
+Evidence accumulates rather than overwrites: the declared comparison drawn twice attaches twice, so a
+replication is visible and a contradiction becomes `contested` instead of averaging away.
+
+**Two real defects fell out of building it.** (1) The dedupe key was `(roots_id, drawn_at)`, which collapsed two
+genuinely different comparisons drawn in the same second — fixed with microsecond stamps and a full-record key.
+(2) Comparisons drawn before the direction fields existed crashed `link`. They are now handled by DERIVING
+`diff`/`significant` on read from the entries' stored rates (nothing invented, and no re-drawing, which would
+add a row to the family and silently tighten alpha for every other comparison on it), while `drawn_at` stays
+None because it is genuinely unrecoverable — and a record of unknown age forfeits the pre-registration claim.
+A comparison whose direction cannot be recovered is refused as evidence outright.
+
+**The board, backfilled with this session's claims** (`scripts/hypotheses.py list`):
+
+| status | id | claim | |
+|---|---|---|---|
+| SUPPORTED | h1 | the unchanged process learns a game with no solver | POST-HOC |
+| SUPPORTED | h3 | at equal simulations, 32 sims beats 96 | POST-HOC |
+| INCONCL. | h2 | budget past ~9600 games keeps buying strength | POST-HOC |
+| untested | h4 | h3 at the next compute-matched point | **pre-registered, run in flight** |
+| untested | h5 | h3 at full compute match (1.84M sims) | **pre-registered, run in flight** |
+| untested | h6 | arm B keeps improving on its own curve | **pre-registered, run in flight** |
+
+The three findings already in hand are marked POST-HOC by the system, correctly: they were discovered and
+written up before any register existed. h4/h5/h6 are the first claims this project has made BEFORE seeing their
+evidence, and arm B is now running to judge them. That distinction is the whole point, and from here it is
+recorded automatically rather than by my remembering to be honest about it.
+
+14 tests, 6/6 mutations caught (pre-registration always true, direction ignored, contested collapsed to
+supported, links any comparison, unit not required, non-significant counts as support). Suite 507 passed.

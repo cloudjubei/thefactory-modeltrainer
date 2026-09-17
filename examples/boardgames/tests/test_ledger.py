@@ -428,3 +428,25 @@ def test_a_budget_treatment_learning_curve_is_unaffected_by_compute_matching(tmp
                    seed=131, roots_id="R", code="C", config="G", compute=games * 96)
     r = led.compare("late", "early", treatment="budget")
     assert not r["compute_matched"] and "BUDGETS DIFFER" in r["budget_note"]
+
+
+def test_comparisons_derive_direction_for_records_drawn_before_it_was_stored(tmp_path):
+    """Comparisons predating the direction fields still have their rates in `entries`, so `diff` and
+    `significant` are DERIVABLE on read — no rewriting of stored results, and no re-drawing (which would
+    inflate the family's multiplicity count and quietly tighten alpha for everyone else)."""
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 8 + [0] * 2, params=1, games=100, provenance="final", seed=99, roots_id="R")
+    led.record("b", outcomes=[1] * 3 + [0] * 7, params=1, games=100, provenance="final", seed=99, roots_id="R")
+    led._comparisons.append({"a": "a", "b": "b", "roots_id": "R", "p": 0.01})  # a legacy record
+    led._save()
+    c = Ledger(tmp_path / "ledger.json").comparisons()[0]
+    assert c["diff"] == pytest.approx(0.5) and c["significant"] is True
+    assert c["drawn_at"] is None, "when it was drawn is genuinely unknown and must not be invented"
+
+
+def test_comparisons_leave_direction_unknown_when_the_entries_are_gone(tmp_path):
+    led = _mk(tmp_path)
+    led._comparisons.append({"a": "ghost_a", "b": "ghost_b", "roots_id": "R", "p": 0.01})
+    led._save()
+    c = Ledger(tmp_path / "ledger.json").comparisons()[0]
+    assert c["diff"] is None and c["significant"] is None

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 from harness.measurement import mcnemar_exact, wilson_interval
@@ -115,6 +116,25 @@ class Ledger:
     def entries(self) -> dict:
         return dict(self._entries)
 
+    def comparisons(self) -> list[dict]:
+        """Stored comparisons, with `diff`/`significant` DERIVED for records drawn before those fields existed.
+
+        The rates were always in `entries`, so nothing is invented — and deriving on read beats re-drawing the
+        comparison, which would add a row to the family and silently tighten alpha for every other comparison
+        on it. `drawn_at` is genuinely unrecoverable and stays None, which is what forfeits a pre-registration
+        claim downstream (harness/hypotheses.py H2)."""
+        out = []
+        for c in self._comparisons:
+            c = dict(c)
+            if "diff" not in c or "significant" not in c:
+                ea, eb = self._entries.get(c["a"]), self._entries.get(c["b"])
+                n_fam = sum(1 for x in self._comparisons if x["roots_id"] == c["roots_id"])
+                c["diff"] = (ea["rate"] - eb["rate"]) if ea and eb else None
+                c["significant"] = (c["p"] <= 0.05 / max(1, n_fam)) if ea and eb else None
+            c.setdefault("drawn_at", None)
+            out.append(c)
+        return out
+
     def record(self, name: str, outcomes: list[int], params: int, games: int, provenance: str,
                seed: int, roots_id: str, code: str | None = None, config: str | None = None,
                run_complete: bool | None = None, compute: int | None = None) -> dict:
@@ -209,9 +229,14 @@ class Ledger:
                                 f"by looking at scores, that checkpoint is selected rather than final")
         res = mcnemar_exact(ea["outcomes"], eb["outcomes"])
         family = ea["roots_id"]
-        self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"]})
+        n_fam = sum(1 for c in self._comparisons if c["roots_id"] == family) + 1
+        # The stored record carries WHEN it was drawn and WHICH WAY it went, because a hypothesis register can
+        # only tell a prediction from a rationalisation by comparing those timestamps (harness/hypotheses.py).
+        self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"],
+                                  "diff": ea["rate"] - eb["rate"],
+                                  "significant": res["p"] <= 0.05 / n_fam,
+                                  "drawn_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")})
         self._save()
-        n_fam = sum(1 for c in self._comparisons if c["roots_id"] == family)
         return {**res,
                 "a": a, "b": b, "rate_a": ea["rate"], "rate_b": eb["rate"],
                 "budget_matched": budget_matched,
