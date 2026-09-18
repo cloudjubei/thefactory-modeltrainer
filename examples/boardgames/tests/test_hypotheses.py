@@ -27,6 +27,22 @@ def _ledger(tmp_path, diff=+0.15, p=0.0006):
     return led
 
 
+def _discordant(tmp_path, only_a, only_b, both=100, name="disc"):
+    """A ledger whose two arms differ by a CONTROLLED number of discordant pairs, so a test can ask for a
+    given effect size AND a given p — the nested helper above always yields one-sided discordance, which is
+    always significant and cannot express 'a real-looking difference that misses significance'."""
+    led = Ledger(tmp_path / f"{name}.json")
+    n = both + only_a + only_b
+    a = [1] * both + [1] * only_a + [0] * only_b
+    b = [1] * both + [0] * only_a + [1] * only_b
+    led.record("b35", outcomes=a, params=1, games=14400, provenance="budget_matched", seed=131,
+               roots_id="R", code="C", config="G32", compute=460800)
+    led.record("a11", outcomes=b, params=1, games=4800, provenance="budget_matched", seed=131,
+               roots_id="R", code="C", config="G96", compute=460800)
+    assert len(a) == len(b) == n
+    return led
+
+
 def _reg(tmp_path, now="2026-09-01T00:00:00"):
     return Register(tmp_path / "hypotheses.json", now=lambda: now)
 
@@ -65,7 +81,7 @@ def test_a_significant_comparison_the_WRONG_way_refutes_it(tmp_path):
 
 
 def test_a_non_significant_comparison_leaves_it_inconclusive(tmp_path):
-    led = _ledger(tmp_path, diff=0.01)
+    led = _discordant(tmp_path, only_a=25, only_b=15)   # +0.077, p high -> a real-looking miss
     led.compare("b35", "a11", treatment="config")
     r = _reg(tmp_path)
     r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
@@ -173,3 +189,128 @@ def test_evidence_of_unknown_age_forfeits_the_pre_registration_claim(tmp_path):
     r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
     h = r.link("h1", led)
     assert h["status"] == "supported" and h["pre_registered"] is False
+
+
+# --- test-backed claims: most findings are not A/B comparisons -------------------------------------------
+
+def _pass(nodeid):
+    return {"ok": True, "collected": 1, "detail": "1 passed"}
+
+
+def _fail(nodeid):
+    return {"ok": False, "collected": 1, "detail": "1 failed"}
+
+
+def _nothing(nodeid):
+    return {"ok": True, "collected": 0, "detail": "no tests ran"}
+
+
+def test_a_claim_can_be_backed_by_a_test_instead_of_a_comparison(tmp_path):
+    """Most of what this project learns is not an A/B: 'resume loses the Adam state', 'encode was hardcoded to
+    two planes'. Those are proved by a regression test, and the register has to hold them too."""
+    r = _reg(tmp_path)
+    h = r.register("t1", claim="a resumed run keeps its optimizer state",
+                   proof="tests/test_resume_integrity.py::test_the_optimizer_survives_a_resume")
+    assert h["status"] == "untested" and h["mode"] == "test"
+    h = r.verify("t1", run_test=_pass)
+    assert h["status"] == "supported" and h["evidence"][0]["ok"]
+
+
+def test_a_failing_test_refutes_the_claim(tmp_path):
+    r = _reg(tmp_path)
+    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    assert r.verify("t1", run_test=_fail)["status"] == "refuted"
+
+
+def test_a_proof_that_COLLECTS_NOTHING_is_refused_not_counted_as_passing(tmp_path):
+    """The vacuity trap in its purest form: a typo'd node id makes pytest exit 0 having run nothing, and a
+    green-by-vacuum proof is worse than no proof because it looks like evidence."""
+    r = _reg(tmp_path)
+    r.register("t1", claim="c", proof="tests/typo.py::test_does_not_exist")
+    with pytest.raises(ValueError, match="(?i)collected no tests"):
+        r.verify("t1", run_test=_nothing)
+    assert r.get("t1")["status"] == "untested", "a vacuous proof must leave the claim unproven"
+
+
+def test_a_claim_needs_either_a_comparison_or_a_proof(tmp_path):
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="(?i)either"):
+        r.register("t1", claim="c")
+
+
+def test_a_claim_cannot_be_both(tmp_path):
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="(?i)exactly one"):
+        r.register("t1", claim="c", a="x", b="y", direction="a>b", unit="simulations",
+                   proof="tests/x.py::test_y")
+
+
+def test_a_comparison_claim_still_demands_its_unit(tmp_path):
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="(?i)unit"):
+        r.register("t1", claim="c", a="x", b="y", direction="a>b")
+
+
+def test_verify_refuses_a_comparison_backed_claim(tmp_path):
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="x", b="y", direction="a>b", unit="simulations")
+    with pytest.raises(ValueError, match="(?i)test-backed"):
+        r.verify("h1", run_test=_pass)
+
+
+def test_link_refuses_a_test_backed_claim(tmp_path):
+    led = _ledger(tmp_path)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    with pytest.raises(ValueError, match="(?i)comparison-backed"):
+        r.link("t1", led)
+
+
+def test_reverifying_accumulates_so_a_regression_becomes_contested(tmp_path):
+    r = _reg(tmp_path)
+    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    r.verify("t1", run_test=_pass)
+    h = r.verify("t1", run_test=_fail)
+    assert h["status"] == "contested" and len(h["evidence"]) == 2
+
+
+def test_a_record_written_before_mode_existed_is_still_read_correctly(tmp_path):
+    """Records registered before the test-backed mode was added carry no `mode` field. Defaulting them the
+    wrong way silently sent every one of them down the test-backed path."""
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
+    blob = json.loads((tmp_path / "hypotheses.json").read_text())
+    del blob["hypotheses"]["h1"]["mode"]
+    (tmp_path / "hypotheses.json").write_text(json.dumps(blob))
+
+    reloaded = Register(tmp_path / "hypotheses.json")
+    assert reloaded.get("h1")["mode"] == "comparison"
+    led = _ledger(tmp_path)
+    led.compare("b35", "a11", treatment="config")
+    assert reloaded.link("h1", led)["status"] == "supported"
+
+
+def test_a_difference_below_the_declared_null_threshold_is_NULL_not_merely_inconclusive(tmp_path):
+    """NULL and INCONCLUSIVE are different claims: NULL says the effect is absent, INCONCLUSIVE says the
+    measurement could not see it. §C.28 (+0.0547, underpowered) and §C.29's follow-up (+0.0156, genuinely flat)
+    must not collapse into the same word."""
+    led = _ledger(tmp_path, diff=0.01)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    assert r.link("h1", led)["status"] == "null"
+
+
+def test_a_difference_above_the_threshold_that_misses_significance_stays_inconclusive(tmp_path):
+    led = _discordant(tmp_path, only_a=25, only_b=15)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    assert r.link("h1", led)["status"] == "inconclusive"
+
+
+def test_the_null_threshold_is_recorded_with_the_claim_not_chosen_at_reading_time(tmp_path):
+    r = _reg(tmp_path)
+    h = r.register("h1", claim="c", a="x", b="y", direction="a>b", unit="simulations", null_below=0.05)
+    assert h["null_below"] == 0.05

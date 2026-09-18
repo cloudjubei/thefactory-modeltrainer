@@ -20,13 +20,18 @@ REGISTER_PATH = "checkpoints/scaled_runs/hypotheses.json"
 LEDGER_PATH = "checkpoints/scaled_runs/analysis_ledger.json"
 
 MARK = {"supported": "SUPPORTED", "refuted": "REFUTED ", "contested": "CONTESTED",
-        "inconclusive": "INCONCL.", "untested": "untested"}
+        "null": "NULL    ", "inconclusive": "INCONCL.", "untested": "untested"}
 
 
 def show(h: dict) -> None:
     flag = ("no evidence yet" if not h["evidence"]
             else "pre-registered" if h["pre_registered"] else "POST-HOC")
     print(f"{MARK[h['status']]:>10}  {h['id']:<6} {h['claim']}")
+    if h.get("mode") == "test":
+        print(f"{'':>10}  proved by {h['proof']}  [{flag}]")
+        for e in h["evidence"]:
+            print(f"{'':>10}    {'PASS' if e['ok'] else 'FAIL'}  {e['drawn_at']}")
+        return
     print(f"{'':>10}  predicts {h['a']} {'>' if h['direction'] == 'a>b' else '<'} {h['b']} "
           f"in {h['unit']}  [{flag}]")
     for e in h["evidence"]:

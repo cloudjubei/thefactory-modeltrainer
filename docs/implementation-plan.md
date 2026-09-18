@@ -2653,3 +2653,30 @@ recorded automatically rather than by my remembering to be honest about it.
 
 14 tests, 6/6 mutations caught (pre-registration always true, direction ignored, contested collapsed to
 supported, links any comparison, unit not required, non-significant counts as support). Suite 507 passed.
+
+#### §C.30a — the flow is now FORCED, and test-backed claims have a home (2026-09-17)
+
+Standing instruction: *whenever something is found it MUST be recorded with tests/proof backing it; if a
+capability is missing to support that, add it.* Auditing §C.30 against that found two gaps, both now closed.
+
+**Gap 1 — the register sat BESIDE the path.** `measure_exploit.py` drew comparisons without asking whether any
+hypothesis had predicted them, so a result could still land as prose. It now links every drawn comparison to
+the hypotheses that DECLARED it and prints the verdict inline (`HYPOTHESIS h4 -> SUPPORTED (pre-registered)`);
+a comparison no hypothesis predicted prints **UNREGISTERED COMPARISON** and says to register the claim it
+answers. Same lesson as the §C.11 ledger: a guard that is optional gets bypassed by whoever is in a hurry.
+
+**Gap 2 — most findings are not A/B comparisons.** "A resumed run keeps its optimizer state", "encode was
+hardcoded to two planes", "an orphan checkpoint strands the ledger" are proved by REGRESSION TESTS, and the
+register had nowhere to put them. A claim may now be TEST-BACKED: `proof` is a pytest node id, `verify()` runs
+it, status derives from the result. The load-bearing guard is vacuity: **a proof that collects no tests is
+REFUSED, not recorded** — a typo'd node id makes pytest exit 0 having run nothing, and green-by-vacuum is worse
+than no proof because it reads as evidence. Re-verifying accumulates, so a later regression turns a supported
+claim `contested` rather than silently flipping it.
+
+**The board now holds 14 claims** (`scripts/hypotheses.py list`): 10 supported, 1 inconclusive, 3 untested. The
+eight test-backed ones (t1-t8) were this session's prose findings, each now pinned to a named regression test
+that was actually executed and passed. h1/h2/h3 remain marked POST-HOC — they were discovered before any
+register existed, and the system says so rather than letting me imply otherwise. h4/h5/h6 are pre-registered
+with arm B running to judge them.
+
+25 tests on the register, 11/11 mutations caught across both rounds. Suite 516 passed.
