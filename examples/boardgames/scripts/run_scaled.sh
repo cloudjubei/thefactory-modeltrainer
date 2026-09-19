@@ -45,6 +45,14 @@ fi
 
 .venv/bin/python -m harness.resume "$D/$NAME" --repair || exit 1
 
+# §C.31: a multi-day run on a sleeping laptop is not running. `caffeinate -s` is inert on battery, so check
+# the PROPERTY (is sleep actually prevented) rather than whether a guard process happens to exist.
+.venv/bin/python -c "
+from harness.machine import sleep_guard_effective
+ok, why = sleep_guard_effective()
+print('sleep guard:', 'effective' if ok else 'NOT EFFECTIVE — ' + why)
+" 
+
 echo "=== START $NAME $(date) ===" >> "$L"
 nice -n 10 /usr/bin/time -p .venv/bin/python -m harness.scaled_run \
   --config-json "$CFG" --summary-out "$D/$NAME/summary.json" >> "$L" 2>&1

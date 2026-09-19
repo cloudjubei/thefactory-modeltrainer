@@ -2680,3 +2680,29 @@ register existed, and the system says so rather than letting me imply otherwise.
 with arm B running to judge them.
 
 25 tests on the register, 11/11 mutations caught across both rounds. Suite 516 passed.
+
+#### §C.31 — the sleep guard was checking the process, not the property (2026-09-19)
+
+Arm B lost roughly **20 hours of wall-clock to 169 sleep episodes (23.7 h asleep)** between batch 112 and 113,
+while `caffeinate -is` was alive for the whole five days. `caffeinate -s` is documented as valid ONLY on AC
+power; the machine was on battery, so the assertion was held and the system slept through it anyway.
+
+The failure is not the flag, it is what I verified. I checked that the guard process was RUNNING — a proxy —
+instead of checking that sleep was PREVENTED, which is the property. That is the fourth instance of this exact
+shape (solve-depth guard, L1 label check, vacuous net-level pool test, `_save_atomic` wiring), and the first
+where the cost was wall-clock rather than a wrong conclusion.
+
+Diagnosis was evidence, not inference: the trainer's CPU time advanced 42 s in a 25 s sample (so it was working,
+not wedged), while `pmset -g log` showed 169 "Entering Sleep state ... Using Batt" episodes since the last
+checkpoint was written. A stalled run and a slept-through run look identical from the batch timestamps alone.
+
+**`harness/machine.py`** (outside `TRAINING_MODULES`, so it cannot move an era): `power_source()`,
+`sleep_guard_effective()` — which requires an assertion **and** AC power, and names the battery case explicitly
+— and `slept_seconds_since()`, which reads the system's own sleep log so a paused run can be told from a stuck
+one by evidence. 6 tests, 3/3 mutations caught, including the one that IS the bug ("battery ignored").
+`scripts/run_scaled.sh` now prints the verdict before launching, so the next long run says up front whether it
+is actually protected. Registered as **t9** in the hypothesis register, backed by the battery test.
+
+**Nothing was lost** — the process survived every sleep, checkpoints are intact, and no resume was even needed.
+Arm B sits at 113/144 with 76.2 h of real compute done. The machine is now on AC and the guard reports
+effective.
