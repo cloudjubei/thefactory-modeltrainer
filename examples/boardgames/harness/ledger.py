@@ -93,6 +93,36 @@ def _read_json(path: Path) -> dict | None:
         return None
 
 
+
+def _deployment_warning(ea: dict, eb: dict, a: str, b: str) -> str:
+    """L5: is the budget the arms were MEASURED at one arm's own TRAINING budget, and not the other's?
+
+    A net deployed at the search budget it trained under is on home ground; its opponent is not. That is a
+    confound in the measurement, not in the training, so every other check here — matched games, matched
+    compute, same code, same roots — passes while it is present. It is stated as a warning rather than a
+    refusal because the asymmetry is sometimes unavoidable and often the standard: the fix is to say so, and
+    to add one reading at a budget neutral to both."""
+    ta, tb = ea.get("train_sims"), eb.get("train_sims")
+    da, db = ea.get("deploy_sims"), eb.get("deploy_sims")
+    if None in (ta, tb, da, db):
+        return (f"DEPLOYMENT BUDGET not recorded for {a if None in (ta, da) else b} — whether the measurement "
+                f"budget was one arm's own training budget is UNKNOWN, not checked")
+    if da != db:
+        raise ValueError(f"{a} was measured at {da} sims and {b} at {db} — arms that faced the refuter with "
+                         f"DIFFERENT search budgets are not paired data, the same fault as different root "
+                         f"families. Re-draw both at one budget.")
+    if ta == tb:
+        return ""
+    home = a if da == ta else b if db == tb else None
+    if home is None:
+        return ""
+    away = b if home == a else a
+    away_train = tb if home == a else ta
+    return (f"HOME BUDGET: both arms were measured at {da} sims, which is {home}'s own training budget and "
+            f"{away}'s is {away_train} — {home} is on home ground and {away} is not. Read the result as "
+            f"scoped to {da}-sim deployment until a budget neutral to both is also measured.")
+
+
 class Ledger:
     """A persistent record of measurements + the comparisons drawn from them."""
 
@@ -137,7 +167,8 @@ class Ledger:
 
     def record(self, name: str, outcomes: list[int], params: int, games: int, provenance: str,
                seed: int, roots_id: str, code: str | None = None, config: str | None = None,
-               run_complete: bool | None = None, compute: int | None = None) -> dict:
+               run_complete: bool | None = None, compute: int | None = None,
+               train_sims: int | None = None, deploy_sims: int | None = None) -> dict:
         """Record a measurement. `provenance` is MANDATORY — 'final' vs 'gate_selected' vs 'best_of_n' is the
         difference between a comparison that means something and one that does not (L1)."""
         if provenance not in PROVENANCE:
@@ -158,7 +189,9 @@ class Ledger:
         e = {"name": name, "outcomes": [int(o) for o in outcomes], "n": n, "converted": k, "rate": k / n,
              "ci": list(wilson_interval(k, n)), "params": int(params), "games": int(games),
              "provenance": provenance, "seed": int(seed), "roots_id": roots_id, "code": code, "config": config,
-             "run_complete": run_complete, "compute": compute}
+             "run_complete": run_complete, "compute": compute,
+             "train_sims": None if train_sims is None else int(train_sims),
+             "deploy_sims": None if deploy_sims is None else int(deploy_sims)}
         self._entries[name] = e
         self._save()
         return e
@@ -257,6 +290,7 @@ class Ledger:
                                 f"this is not a like-for-like comparison"),
                 "provenance_warning": warning, "code_warning": code_warning,
                 "completeness_warning": completeness_warning,
+                "deployment_warning": _deployment_warning(ea, eb, a, b),
                 "comparisons_on_family": n_fam,
                 "alpha_corrected": 0.05 / n_fam,
                 "significant": res["p"] <= 0.05 / n_fam}

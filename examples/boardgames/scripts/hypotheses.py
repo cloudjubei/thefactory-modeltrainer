@@ -23,8 +23,8 @@ from harness.ledger import Ledger
 REGISTER_PATH = "checkpoints/scaled_runs/hypotheses.json"
 LEDGER_PATH = "checkpoints/scaled_runs/analysis_ledger.json"
 
-MARK = {"supported": "SUPPORTED", "refuted": "REFUTED ", "contested": "CONTESTED",
-        "null": "NULL    ", "inconclusive": "INCONCL.", "untested": "untested"}
+MARK = {"supported": "SUPPORTED", "refuted": "REFUTED ", "contested": "CONTESTED", "null": "NULL    ",
+        "inconclusive": "INCONCL.", "untested": "untested", "negligible": "NEGLIGIBLE"}
 
 
 def show(h: dict) -> None:

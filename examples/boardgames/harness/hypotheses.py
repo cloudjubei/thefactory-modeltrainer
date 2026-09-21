@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DIRECTIONS = ("a>b", "a<b")
-STATUSES = ("untested", "supported", "refuted", "null", "inconclusive", "contested")
+STATUSES = ("untested", "supported", "negligible", "refuted", "null", "inconclusive", "contested")
 
 
 def _run_pytest(nodeid: str) -> dict:
@@ -224,15 +224,23 @@ class Register:
         wants_positive = h["direction"] == "a>b"
         for_it = [e for e in sig if (e["diff"] > 0) == wants_positive]
         against = [e for e in sig if (e["diff"] > 0) != wants_positive]
+        threshold = float(h.get("null_below", 0.03))
         if for_it and against:
             return "contested"
         if for_it:
+            # A claim must clear the bar ITS OWN registrant set. Significance says the effect is not zero;
+            # `null_below` says how big it must be to matter, and a claim that asserts an effect cannot be
+            # supported by one it would itself have called absent. Testing significance first let power, not
+            # effect size, decide the verdict.
+            if all(abs(e["diff"]) < threshold for e in for_it):
+                return "negligible"
             return "supported"
         if against:
+            # Deliberately asymmetric: magnitude gates a claim being ASSERTED, never one being contradicted.
+            # "a > b" is wrong if b wins significantly, however narrowly.
             return "refuted"
         # NULL says the effect is ABSENT; INCONCLUSIVE says the measurement could not see it. Collapsing them
         # loses the distinction between "we looked and it is not there" and "we lacked the power to look".
-        threshold = float(h.get("null_below", 0.03))
         if all(abs(e["diff"]) < threshold for e in h["evidence"]):
             return "null"
         return "inconclusive"

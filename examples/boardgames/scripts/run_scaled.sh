@@ -57,4 +57,13 @@ echo "=== START $NAME $(date) ===" >> "$L"
 nice -n 10 /usr/bin/time -p .venv/bin/python -m harness.scaled_run \
   --config-json "$CFG" --summary-out "$D/$NAME/summary.json" >> "$L" 2>&1
 echo "=== END $NAME $(date) ===" >> "$L"
+
+# §C.31b: wall-clock is not a cost when the machine slept through part of the run. The launch-time sleep check
+# above cannot see that; only CPU-vs-wall afterwards can, so report it where the number gets read.
+.venv/bin/python -c "
+from harness.machine import run_cost
+c = run_cost('$L', threads=4)
+print(f\"cost: {c['cost_h']:.2f} h CPU over {c['segments']} segment(s)  (wall {c['wall_h']:.2f} h, ratio {c['cpu_wall_ratio']:.2f})\")
+print('  ' + c['warning']) if c['warning'] else None
+" | tee -a "$L"
 touch "$D/${NAME}_DONE"

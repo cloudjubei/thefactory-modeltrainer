@@ -395,3 +395,65 @@ def test_superseding_an_unknown_claim_is_refused(tmp_path):
         r.supersede("nope", by="h8", reason="r")
     with pytest.raises(KeyError):
         r.supersede("h8", by="nope", reason="r")
+
+
+# NEGLIGIBLE — found 2026-09-21 by an adversarial audit. `_status` filtered on significance FIRST and returned
+# `supported` before `null_below` was ever read, so a claim could clear alpha on an effect smaller than the
+# threshold its own registrant declared as "absent" and still read as supported. Power, not effect size, was
+# deciding the verdict — which is exactly backwards for a claim that ASSERTS an effect exists.
+
+def test_a_significant_effect_INSIDE_the_claim_s_own_null_band_is_not_supported(tmp_path):
+    led = _discordant(tmp_path, only_a=60, only_b=25, both=2000, name="tiny")
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    h = r.link("h1", led)
+    assert h["evidence"][0]["significant"] and 0 < h["evidence"][0]["diff"] < 0.03
+    assert h["status"] == "negligible"
+
+
+def test_a_significant_effect_ABOVE_the_null_band_is_still_supported(tmp_path):
+    """The guard must not simply demote everything — h8 at +0.0342 against a 0.03 band stays supported."""
+    led = _discordant(tmp_path, only_a=116, only_b=81, both=827, name="h8like")
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    h = r.link("h1", led)
+    assert h["evidence"][0]["diff"] > 0.03 and h["status"] == "supported"
+
+
+def test_the_band_that_applies_is_the_one_the_CLAIM_declared(tmp_path):
+    """Same evidence, stricter declared band — the verdict must follow the registrant's own bar, not a default."""
+    led = _discordant(tmp_path, only_a=116, only_b=81, both=827, name="h8like2")
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("strict", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.10)
+    assert r.link("strict", led)["status"] == "negligible"
+
+
+def test_a_significant_effect_in_the_WRONG_direction_still_refutes_however_small(tmp_path):
+    """Asymmetric on purpose: magnitude gates a claim being ASSERTED, never a claim being contradicted."""
+    led = _discordant(tmp_path, only_a=25, only_b=60, both=2000, name="wrongdir")
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    h = r.link("h1", led)
+    assert h["evidence"][0]["diff"] < 0 and h["status"] == "refuted"
+
+
+def test_one_replication_above_the_band_is_enough_to_support_it(tmp_path):
+    """Accumulation is the point: a claim with a meaningful effect in one draw and a tiny one in another is
+    SUPPORTED, not demoted. Only a claim whose every supporting draw is under its own bar is negligible."""
+    led = _discordant(tmp_path, only_a=116, only_b=81, both=827, name="mixed")
+    led.compare("b35", "a11", treatment="config")
+    led.record("b35", outcomes=[1] * 1030 + [0] * 994, params=1, games=14400, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G32", compute=460800)
+    led.record("a11", outcomes=[1] * 1010 + [0] * 1014, params=1, games=4800, provenance="budget_matched",
+               seed=131, roots_id="R", code="C", config="G96", compute=460800)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", null_below=0.03)
+    h = r.link("h1", led)
+    sigs = [e for e in h["evidence"] if e["significant"] and e["diff"] > 0]
+    assert len(h["evidence"]) == 2 and any(e["diff"] > 0.03 for e in sigs)
+    assert h["status"] == "supported"

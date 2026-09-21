@@ -494,3 +494,69 @@ def test_re_recording_an_arm_on_the_SAME_root_family_is_still_allowed(tmp_path):
     _fam(led, "a47@uct200", "exploit_s131_n128", seed=131, n=128, held=104)
     e = led.entries()["a47@uct200"]
     assert e["converted"] == 104 and e["roots_id"] == "exploit_s131_n128"
+
+
+# L5 DEPLOYMENT BUDGET — found 2026-09-21 by an adversarial audit of h8. The ledger refuses mixed provenance,
+# unmatched budgets, drifted code and mislabelled treatments, but it never recorded the budget the arms were
+# MEASURED at, so `compare` could not notice that it equalled exactly one arm's TRAINING budget. Every one of
+# the 29 entries on disk was drawn at 96 sims — arm A's home value and 3x arm B's — and nothing said so. A
+# counter-experiment at 32-sim deployment put the two arms dead level.
+
+def _arm(led, name, train_sims, deploy_sims, held, n=128, family="F", games=1000, config=None):
+    return led.record(name, outcomes=[1] * held + [0] * (n - held), params=1, games=games, provenance="final",
+                      seed=131, roots_id=family, code="C", config=config or f"G{train_sims}", compute=96000,
+                      train_sims=train_sims, deploy_sims=deploy_sims)
+
+
+def test_an_entry_records_the_budget_it_was_TRAINED_at_and_the_one_it_was_MEASURED_at(tmp_path):
+    led = _mk(tmp_path)
+    e = _arm(led, "a", train_sims=96, deploy_sims=96, held=100)
+    assert e["train_sims"] == 96 and e["deploy_sims"] == 96
+
+
+def test_compare_warns_when_the_deployment_budget_is_one_arm_s_HOME_budget(tmp_path):
+    """The h8 shape exactly: measured at 96, which is A's training budget and 3x B's."""
+    led = _mk(tmp_path)
+    _arm(led, "a47", train_sims=96, deploy_sims=96, held=110)
+    _arm(led, "b143", train_sims=32, deploy_sims=96, held=100)
+    r = led.compare("a47", "b143", treatment="config")
+    assert r["deployment_warning"]
+    assert "96" in r["deployment_warning"] and "32" in r["deployment_warning"]
+
+
+def test_a_deployment_budget_NEUTRAL_to_both_arms_draws_no_warning(tmp_path):
+    """64 sims is neither arm's home value — the comparison no longer favours either by construction."""
+    led = _mk(tmp_path)
+    _arm(led, "a47", train_sims=96, deploy_sims=64, held=110)
+    _arm(led, "b143", train_sims=32, deploy_sims=64, held=100)
+    assert led.compare("a47", "b143", treatment="config")["deployment_warning"] == ""
+
+
+def test_a_shared_home_budget_draws_no_warning(tmp_path):
+    """Two arms trained at the SAME sims measured there favours neither — only an ASYMMETRIC match is a confound."""
+    led = _mk(tmp_path)
+    _arm(led, "x", train_sims=96, deploy_sims=96, held=110, family="S", config="wide")
+    _arm(led, "y", train_sims=96, deploy_sims=96, held=100, family="S", config="deep")
+    assert led.compare("x", "y", treatment="config")["deployment_warning"] == ""
+
+
+def test_legacy_entries_without_the_budgets_recorded_do_not_fabricate_a_verdict(tmp_path):
+    """Every pre-2026-09-21 entry lacks both fields. Silence must read as UNKNOWN, never as 'checked, fine'."""
+    led = _mk(tmp_path)
+    led.record("old_a", outcomes=[1] * 100 + [0] * 28, params=1, games=1000, provenance="final", seed=131,
+               roots_id="F", code="C", config="G1", compute=96000)
+    led.record("old_b", outcomes=[1] * 90 + [0] * 38, params=1, games=1000, provenance="final", seed=131,
+               roots_id="F", code="C", config="G2", compute=96000)
+    r = led.compare("old_a", "old_b", treatment="config")
+    assert "not recorded" in r["deployment_warning"].lower()
+
+
+def test_arms_measured_at_DIFFERENT_deployment_budgets_are_refused_as_unpaired(tmp_path):
+    """Not a warning: an arm searching 96 while its opponent searches 32 is a different experiment, exactly as
+    unpaired as two different root families — which compare() already refuses outright."""
+    led = _mk(tmp_path)
+    _arm(led, "a", train_sims=96, deploy_sims=96, held=110)
+    _arm(led, "b", train_sims=32, deploy_sims=32, held=100)
+    with pytest.raises(ValueError) as exc:
+        led.compare("a", "b", treatment="config")
+    assert "not paired data" in str(exc.value)
