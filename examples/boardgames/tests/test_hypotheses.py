@@ -314,3 +314,84 @@ def test_the_null_threshold_is_recorded_with_the_claim_not_chosen_at_reading_tim
     r = _reg(tmp_path)
     h = r.register("h1", claim="c", a="x", b="y", direction="a>b", unit="simulations", null_below=0.05)
     assert h["null_below"] == 0.05
+
+
+# SUPERSESSION — found 2026-09-21 when h8 landed. h3 ("at equal simulations LOWER search wins") and h8 (the
+# exact opposite) both read SUPPORTED on the board, each an honest report of its own evidence: h3 was true at
+# 460,800 simulations and false at 1,843,200. Nothing in the register could say "do not build on h3", which is
+# precisely how a stale finding gets re-used. Supersession is a POINTER, never a status rewrite — rewriting h3
+# to refuted would be a lie about what its own comparison found.
+
+def _supported(tmp_path, reg, hid, name="ev"):
+    led = _discordant(tmp_path, only_a=40, only_b=5, name=name)
+    led.compare("b35", "a11", treatment="config")
+    reg.register(hid, claim=f"claim {hid}", a="b35", b="a11", direction="a>b", unit="simulations")
+    return reg.link(hid, led)
+
+
+def test_a_claim_can_be_superseded_by_a_later_one(tmp_path):
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    _supported(tmp_path, r, "h8", name="e2")
+    h = r.supersede("h3", by="h8", reason="true at 460,800 sims, false at 1,843,200 — budget-scoped")
+    assert h["superseded_by"] == "h8"
+    assert "budget-scoped" in h["supersession"]["reason"]
+
+
+def test_supersession_does_NOT_rewrite_the_superseded_claim_s_status(tmp_path):
+    """h3's own comparison really was significant in its predicted direction. The register must keep saying so."""
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    _supported(tmp_path, r, "h8", name="e2")
+    assert r.get("h3")["status"] == "supported"
+    r.supersede("h3", by="h8", reason="later evidence at higher budget reverses it")
+    again = r.get("h3")
+    assert again["status"] == "supported" and again["superseded_by"] == "h8"
+
+
+def test_a_claim_with_NO_evidence_cannot_retire_another(tmp_path):
+    """The whole point is that a finding is retired by EVIDENCE, not by someone changing their mind."""
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    r.register("h9", claim="speculation", a="x", b="y", direction="a>b", unit="simulations")
+    with pytest.raises(ValueError) as exc:
+        r.supersede("h3", by="h9", reason="I think this is better")
+    assert "no evidence" in str(exc.value)
+
+
+def test_a_reason_is_required(tmp_path):
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    _supported(tmp_path, r, "h8", name="e2")
+    with pytest.raises(ValueError):
+        r.supersede("h3", by="h8", reason="   ")
+
+
+def test_self_supersession_is_refused_as_the_degenerate_CYCLE(tmp_path):
+    """There is deliberately no separate self-check: the cycle walk is seeded with `id`, so it already covers
+    this. A second guard for the same property would be dead code that reads as protection."""
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    with pytest.raises(ValueError) as exc:
+        r.supersede("h3", by="h3", reason="circular")
+    assert "cycle" in str(exc.value).lower()
+
+
+def test_a_supersession_CYCLE_is_refused(tmp_path):
+    """A mutual supersession makes both claims unreadable — neither can be built on, and nothing says why."""
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h3", name="e1")
+    _supported(tmp_path, r, "h8", name="e2")
+    r.supersede("h3", by="h8", reason="higher budget reverses it")
+    with pytest.raises(ValueError) as exc:
+        r.supersede("h8", by="h3", reason="going back")
+    assert "cycle" in str(exc.value).lower()
+
+
+def test_superseding_an_unknown_claim_is_refused(tmp_path):
+    r = _reg(tmp_path)
+    _supported(tmp_path, r, "h8", name="e2")
+    with pytest.raises(KeyError):
+        r.supersede("nope", by="h8", reason="r")
+    with pytest.raises(KeyError):
+        r.supersede("h8", by="nope", reason="r")

@@ -145,6 +145,15 @@ class Ledger:
         n = len(outcomes)
         if n == 0:
             raise ValueError("no outcomes")
+        # L4: entries are keyed by NAME, so reusing a name against a fresh set of roots would overwrite the
+        # original outcomes in place — leaving every comparison that cited them holding a verdict with no data
+        # behind it. The family is what changed, so the arm needs its own name.
+        prior = self._entries.get(name)
+        if prior is not None and prior["roots_id"] != roots_id:
+            raise ValueError(
+                f"arm {name!r} already holds a measurement on root family {prior['roots_id']!r}; recording it "
+                f"against {roots_id!r} would destroy those outcomes in place. Give the new measurement its own "
+                f"arm name — a name identifies one measurement on one set of roots.")
         k = sum(1 for o in outcomes if o)
         e = {"name": name, "outcomes": [int(o) for o in outcomes], "n": n, "converted": k, "rate": k / n,
              "ci": list(wilson_interval(k, n)), "params": int(params), "games": int(games),

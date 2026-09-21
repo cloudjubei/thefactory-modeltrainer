@@ -450,3 +450,47 @@ def test_comparisons_leave_direction_unknown_when_the_entries_are_gone(tmp_path)
     led._save()
     c = Ledger(tmp_path / "ledger.json").comparisons()[0]
     assert c["diff"] is None and c["significant"] is None
+
+
+# L4 NAME COLLISION ACROSS ROOT FAMILIES — found 2026-09-20 while setting up the h8 confirmation read.
+# `record` keys entries by NAME alone, so re-measuring an arm against a fresh set of roots overwrites the
+# original outcomes IN PLACE. The comparison that cited them survives with its verdict; the data behind the
+# verdict is gone, and it can never be re-drawn or re-checked. Seven months of ledger survived only because
+# every read happened to suffix the family into the name by hand (`@n384`, `_s101`) — convention, not a rule.
+
+def _fam(led, name, family, seed, n, held):
+    led.record(name, outcomes=[1] * held + [0] * (n - held), params=1, games=100, provenance="final",
+               seed=seed, roots_id=family, code="C", config="G", compute=1000)
+
+
+def test_record_refuses_to_reuse_an_arm_name_on_a_DIFFERENT_root_family(tmp_path):
+    """An arm name is the identity of ONE measurement on ONE set of roots."""
+    led = _mk(tmp_path)
+    _fam(led, "a47@uct200", "exploit_s131_n128", seed=131, n=128, held=100)
+    with pytest.raises(ValueError) as exc:
+        _fam(led, "a47@uct200", "exploit_s257_n512", seed=257, n=512, held=430)
+    assert "exploit_s131_n128" in str(exc.value) and "exploit_s257_n512" in str(exc.value)
+
+
+def test_a_refused_name_collision_leaves_the_ORIGINAL_measurement_untouched(tmp_path):
+    """The refusal is worth nothing if it half-writes first — the point is that the old outcomes survive."""
+    led = _mk(tmp_path)
+    _fam(led, "a47@uct200", "exploit_s131_n128", seed=131, n=128, held=100)
+    with pytest.raises(ValueError):
+        _fam(led, "a47@uct200", "exploit_s257_n512", seed=257, n=512, held=430)
+    # BOTH views, because they fail independently: a refusal placed after the dict write but before the save
+    # leaves disk pristine while the LIVE object serves the clobbered row — and measure_exploit.py records
+    # every arm and then calls compare() on that same in-memory Ledger.
+    for where, e in (("in memory", led.entries()["a47@uct200"]),
+                     ("on disk", Ledger(tmp_path / "ledger.json").entries()["a47@uct200"])):
+        assert e["roots_id"] == "exploit_s131_n128", where
+        assert e["n"] == 128 and e["converted"] == 100, where
+
+
+def test_re_recording_an_arm_on_the_SAME_root_family_is_still_allowed(tmp_path):
+    """A repeat measurement on the same roots is a legitimate overwrite; only a family change is a collision."""
+    led = _mk(tmp_path)
+    _fam(led, "a47@uct200", "exploit_s131_n128", seed=131, n=128, held=100)
+    _fam(led, "a47@uct200", "exploit_s131_n128", seed=131, n=128, held=104)
+    e = led.entries()["a47@uct200"]
+    assert e["converted"] == 104 and e["roots_id"] == "exploit_s131_n128"

@@ -170,11 +170,44 @@ class Register:
         self._save()
         return self._view(h)
 
+    def supersede(self, id: str, by: str, reason: str) -> dict:
+        """Mark `id` as superseded by `by` — "do not build on this claim any more".
+
+        This is a POINTER, not a status rewrite. h3 ("at equal simulations LOWER search wins") was genuinely
+        supported by its own comparison at 460,800 simulations and genuinely reversed at 1,843,200; rewriting
+        it to `refuted` would misreport what its evidence found, and deleting it would erase the fact that a
+        budget-scoped claim looked general for three days. Both stay readable, with the later one named.
+
+        A claim is retired by EVIDENCE, so a superseder with none is refused — otherwise supersession becomes
+        a way to overrule a measurement by assertion, which is the whole failure this register exists to end."""
+        h, sup = self._h.get(id), self._h.get(by)
+        if h is None:
+            raise KeyError(f"unknown hypothesis {id!r}")
+        if sup is None:
+            raise KeyError(f"unknown superseding hypothesis {by!r}")
+        if not reason.strip():
+            raise ValueError("a reason is required: supersession without one leaves the next reader unable to "
+                             "tell a retired finding from a contradicted one")
+        if not sup["evidence"]:
+            raise ValueError(f"{by} has no evidence, so it cannot retire {id} — a finding is superseded by a "
+                             f"measurement, never by assertion")
+        seen, cursor = {id}, by   # seeded with `id`, so self-supersession is the degenerate cycle
+        while cursor is not None:
+            if cursor in seen:
+                raise ValueError(f"supersession cycle: {by} already leads back to {id}, and a mutual "
+                                 f"supersession leaves both claims unreadable")
+            seen.add(cursor)
+            cursor = (self._h.get(cursor) or {}).get("supersession", {}).get("by")
+        h["supersession"] = {"by": by, "reason": reason.strip(), "at": self._now()}
+        self._save()
+        return self._view(h)
+
     def report(self) -> list[dict]:
         return [self._view(h) for h in self._h.values()]
 
     def _view(self, h: dict) -> dict:
-        return {**h, "mode": _mode(h), "status": self._status(h), "pre_registered": self._pre_registered(h)}
+        return {**h, "mode": _mode(h), "status": self._status(h), "pre_registered": self._pre_registered(h),
+                "superseded_by": h.get("supersession", {}).get("by")}
 
     def _status(self, h: dict) -> str:
         """H1: derived from the evidence, never stored."""
