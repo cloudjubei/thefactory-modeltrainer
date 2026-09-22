@@ -170,7 +170,7 @@ class NineMensMorris:
         board[t] = to + 1
         if _forms_mill(tuple(board), t, to + 1):
             return _settle(tuple(board), to, state.hands, True, state.idle)   # carry idle; removal resets it
-        return _settle(tuple(board), 1 - to, state.hands, False, state.idle)
+        return _settle(tuple(board), 1 - to, state.hands, False, state.idle + 1)
 
     def is_terminal(self, state: MorrisState) -> bool:
         return state.done

@@ -394,3 +394,17 @@ def test_heuristic_takes_an_available_mill_and_the_forced_removal():
     assert G.heuristic_action(s, random.Random(0)) == PLACE(2)   # completes (0,1,2)
     s2 = G.step(s, PLACE(2))
     assert G.heuristic_action(s2, random.Random(0)) == REMOVE(10)
+
+
+def test_a_mill_forming_MOVE_carries_idle_and_the_removal_RESETS_it():
+    # the removal's own idle reset (distinct from PLACE's): a mill formed by a MOVE carries a high idle into the
+    # pending state, and only the REMOVE clears the draw clock.
+    b = _empty()
+    b[0], b[1], b[3], b[10] = 1, 1, 1, 1   # 4 p0 men (moving phase); the man at 3 can slide to empty 2
+    b[20], b[21], b[22] = 2, 2, 2
+    s = _mk(b, to_move=0, hands=(0, 0), idle=50)
+    assert MOVE(3, 2) in G.legal_actions(s)
+    s2 = G.step(s, MOVE(3, 2))             # completes ring mill (0,1,2)
+    assert s2.pending_removal and s2.idle == 50    # a mill-forming MOVE CARRIES idle (does not reset)
+    s3 = G.step(s2, REMOVE(20))
+    assert s3.idle == 0                    # the REMOVAL resets the draw clock
