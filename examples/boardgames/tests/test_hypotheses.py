@@ -457,3 +457,36 @@ def test_one_replication_above_the_band_is_enough_to_support_it(tmp_path):
     sigs = [e for e in h["evidence"] if e["significant"] and e["diff"] > 0]
     assert len(h["evidence"]) == 2 and any(e["diff"] > 0.03 for e in sigs)
     assert h["status"] == "supported"
+
+
+def test_evidence_carries_the_CAVEATS_the_comparison_was_drawn_with(tmp_path):
+    """The register exists so findings are not prose. A verdict stored without its caveats is prose with a
+    p-value: h8's row said +0.0342/significant and nothing about being drawn at one arm's home budget."""
+    led = _discordant(tmp_path, only_a=40, only_b=5, name="cav")
+    led._entries["b35"].update(train_sims=32, deploy_sims=32)
+    led._entries["a11"].update(train_sims=96, deploy_sims=32)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
+    h = r.link("h1", led)
+    assert "HOME BUDGET" in h["evidence"][0]["caveats"]["deployment"]
+
+
+def test_a_claim_whose_every_draw_is_caveated_says_so_on_the_board(tmp_path):
+    led = _discordant(tmp_path, only_a=40, only_b=5, name="cav2")
+    led._entries["b35"].update(train_sims=32, deploy_sims=32)
+    led._entries["a11"].update(train_sims=96, deploy_sims=32)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
+    assert r.link("h1", led)["caveats"] == ["deployment"]
+
+
+def test_an_uncaveated_claim_reports_no_caveats(tmp_path):
+    led = _discordant(tmp_path, only_a=40, only_b=5, name="cav3")
+    led._entries["b35"].update(train_sims=32, deploy_sims=64)
+    led._entries["a11"].update(train_sims=96, deploy_sims=64)
+    led.compare("b35", "a11", treatment="config")
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
+    assert r.link("h1", led)["caveats"] == []

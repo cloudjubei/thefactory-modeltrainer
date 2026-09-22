@@ -145,7 +145,7 @@ class Register:
                 continue
             h["evidence"].append({"a": c["a"], "b": c["b"], "roots_id": c["roots_id"], "p": c["p"],
                                   "diff": c["diff"], "significant": c["significant"],
-                                  "drawn_at": c.get("drawn_at")})
+                                  "caveats": c.get("caveats"), "drawn_at": c.get("drawn_at")})
         self._save()
         return self._view(h)
 
@@ -207,7 +207,8 @@ class Register:
 
     def _view(self, h: dict) -> dict:
         return {**h, "mode": _mode(h), "status": self._status(h), "pre_registered": self._pre_registered(h),
-                "superseded_by": h.get("supersession", {}).get("by")}
+                "superseded_by": h.get("supersession", {}).get("by"),
+                "caveats": sorted({k for e in h["evidence"] for k in (e.get("caveats") or {})})}
 
     def _status(self, h: dict) -> str:
         """H1: derived from the evidence, never stored."""

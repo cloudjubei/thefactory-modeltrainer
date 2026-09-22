@@ -560,3 +560,51 @@ def test_arms_measured_at_DIFFERENT_deployment_budgets_are_refused_as_unpaired(t
     with pytest.raises(ValueError) as exc:
         led.compare("a", "b", treatment="config")
     assert "not paired data" in str(exc.value)
+
+
+# L6 CAVEATS ARE NOT PERSISTED — found 2026-09-21. `compare` returns provenance/code/completeness/deployment
+# warnings and stores NONE of them: the stored record keeps a, b, roots_id, p, diff, significant, drawn_at. So
+# the ledger's durable memory is the verdict stripped of the reasons to doubt it, and since the hypothesis
+# register builds its evidence rows from `comparisons()`, the caveats never reach the register either. h8's
+# evidence row recorded +0.0342/significant with no trace that it was drawn at one arm's home budget.
+
+def test_a_stored_comparison_KEEPS_the_caveats_it_was_drawn_with(tmp_path):
+    led = _mk(tmp_path)
+    _arm(led, "a47", train_sims=96, deploy_sims=96, held=110)
+    _arm(led, "b143", train_sims=32, deploy_sims=96, held=100)
+    live = led.compare("a47", "b143", treatment="config")
+    stored = Ledger(tmp_path / "ledger.json").comparisons()[-1]
+    assert stored["caveats"]["deployment"] == live["deployment_warning"]
+    assert "HOME BUDGET" in stored["caveats"]["deployment"]
+
+
+def test_a_clean_comparison_stores_no_empty_caveats(tmp_path):
+    """Only real caveats are kept, so their presence means something rather than being a field of blanks."""
+    led = _mk(tmp_path)
+    _arm(led, "a", train_sims=96, deploy_sims=64, held=110)
+    _arm(led, "b", train_sims=32, deploy_sims=64, held=100)
+    led.compare("a", "b", treatment="config")
+    assert Ledger(tmp_path / "ledger.json").comparisons()[-1]["caveats"] == {}
+
+
+def test_an_unfinished_run_s_caveat_survives_to_the_stored_record(tmp_path):
+    """Varies the SHAPE: a different caveat, reached by a different code path than the deployment one."""
+    led = _mk(tmp_path)
+    led.record("prog", outcomes=[1] * 110 + [0] * 18, params=1, games=1000, provenance="final", seed=131,
+               roots_id="F", code="C", config="G1", compute=9, run_complete=False,
+               train_sims=96, deploy_sims=64)
+    led.record("done", outcomes=[1] * 100 + [0] * 28, params=1, games=1000, provenance="final", seed=131,
+               roots_id="F", code="C", config="G2", compute=9, run_complete=True,
+               train_sims=32, deploy_sims=64)
+    led.compare("prog", "done", treatment="config")
+    c = Ledger(tmp_path / "ledger.json").comparisons()[-1]
+    assert "RUN NOT FINISHED" in c["caveats"]["completeness"] and "deployment" not in c["caveats"]
+
+
+def test_comparisons_drawn_before_caveats_existed_read_as_absent_not_clean(tmp_path):
+    """The 30 records already on disk carry none. Silence must not read as 'drawn with nothing to note'."""
+    led = _mk(tmp_path)
+    led._comparisons.append({"a": "old_a", "b": "old_b", "roots_id": "R", "p": 0.01,
+                             "diff": 0.1, "significant": True, "drawn_at": None})
+    led._save()
+    assert Ledger(tmp_path / "ledger.json").comparisons()[-1]["caveats"] is None

@@ -44,6 +44,8 @@ def show(h: dict) -> None:
     for e in h["evidence"]:
         print(f"{'':>10}    {e['diff']:+.4f}  p={e['p']:.4g}  "
               f"{'significant' if e['significant'] else 'not significant'}  {e['drawn_at']}")
+        for kind, text in sorted((e.get("caveats") or {}).items()):
+            print(f"{'':>10}      ^ {kind.upper()}: {text}")
 
 
 def main() -> None:

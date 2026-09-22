@@ -156,6 +156,9 @@ class Ledger:
         out = []
         for c in self._comparisons:
             c = dict(c)
+            # None, not {}: these records were drawn before caveats were stored, so what they were drawn
+            # with is UNKNOWN. An empty dict would read as "checked, nothing to note".
+            c.setdefault("caveats", None)
             if "diff" not in c or "significant" not in c:
                 ea, eb = self._entries.get(c["a"]), self._entries.get(c["b"])
                 n_fam = sum(1 for x in self._comparisons if x["roots_id"] == c["roots_id"])
@@ -269,14 +272,22 @@ class Ledger:
                                 f"RUN NOT FINISHED: {', '.join(incomplete)} did not reach its declared end — the "
                                 f"reading is a progress report, and if the run is later stopped at a batch chosen "
                                 f"by looking at scores, that checkpoint is selected rather than final")
+        deployment_warning = _deployment_warning(ea, eb, a, b)
         res = mcnemar_exact(ea["outcomes"], eb["outcomes"])
         family = ea["roots_id"]
         n_fam = sum(1 for c in self._comparisons if c["roots_id"] == family) + 1
         # The stored record carries WHEN it was drawn and WHICH WAY it went, because a hypothesis register can
         # only tell a prediction from a rationalisation by comparing those timestamps (harness/hypotheses.py).
+        # L6: the caveats travel WITH the verdict. A stored comparison that keeps `significant=True` and drops
+        # "this was drawn at one arm's home budget" is the L4 failure in another costume — the conclusion
+        # outlives the reason to doubt it, and the register builds its evidence rows from these records.
+        caveats = {k: v for k, v in (("provenance", warning), ("code", code_warning),
+                                     ("completeness", completeness_warning),
+                                     ("deployment", deployment_warning)) if v}
         self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"],
                                   "diff": ea["rate"] - eb["rate"],
                                   "significant": res["p"] <= 0.05 / n_fam,
+                                  "caveats": caveats,
                                   "drawn_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")})
         self._save()
         return {**res,
@@ -290,7 +301,7 @@ class Ledger:
                                 f"this is not a like-for-like comparison"),
                 "provenance_warning": warning, "code_warning": code_warning,
                 "completeness_warning": completeness_warning,
-                "deployment_warning": _deployment_warning(ea, eb, a, b),
+                "deployment_warning": deployment_warning,
                 "comparisons_on_family": n_fam,
                 "alpha_corrected": 0.05 / n_fam,
                 "significant": res["p"] <= 0.05 / n_fam}
