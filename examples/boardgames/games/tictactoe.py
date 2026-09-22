@@ -9,7 +9,7 @@ group than Connect 4's single mirror, via the same `canonical_key` / `symmetries
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 N = 3
 CELLS = N * N
@@ -151,8 +151,24 @@ class TicTacToe:
     def ply(self, state: TTTState) -> int:
         return sum(1 for v in state.board if v != 0)
 
-    def symmetries(self) -> list[list[int]]:
-        return _D4
+
+    _symmetries_cache = None
+
+    def symmetries(self):
+        """VERIFIED symmetries as (cell_perm, action_perm) pairs — found once by proving each candidate isometry
+        commutes with this game's own dynamics (harness.symmetry.find_symmetries), never hand-asserted."""
+        cls = type(self)
+        if cls._symmetries_cache is None:
+            from harness.symmetry import find_symmetries
+            cls._symmetries_cache = find_symmetries(self)
+        return cls._symmetries_cache
+
+    def transform_state(self, state, iso):
+        nb = tuple(state.board[iso.cell_perm[d]] for d in range(CELLS))
+        return replace(state, board=nb)
+
+    def transform_action(self, action, iso):
+        return iso.cell_image(action)  # an action IS a cell
 
     def canonical_key(self, state: TTTState) -> int:
         """The DIHEDRAL-canonical key: the smallest base-3 board encoding over all 8 symmetries, plus side to

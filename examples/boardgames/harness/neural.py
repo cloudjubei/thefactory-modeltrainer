@@ -912,30 +912,42 @@ def head_to_head(
 
 
 def augment_examples(
-    examples: list[tuple[torch.Tensor, list[float], float]], perms: list[list[int]] | None
+    examples: list[tuple[torch.Tensor, list[float], float]],
+    perms: list[tuple[list[int], list[int]]] | None,
 ) -> list[tuple[torch.Tensor, list[float], float]]:
-    """Multiply training examples by a game's symmetries (Lever 2 for the net). Each `perm` is a column
-    source-permutation `dest <- src`: it reorders the board planes' column axis and the policy vector identically;
-    the value is invariant. Bakes symmetry-invariance into the net and multiplies data — worth more the harder the
-    game is to encode. Identity-only (or no perms) is a plain copy."""
+    """Multiply training examples by a game's symmetries (Lever 2 for the net). Each symmetry is a PAIR
+    `(cell_perm, action_perm)`, both source-permutations `dest <- src`:
+
+      - `cell_perm` (length rows*cols) reorders the board planes' FLATTENED cell axis, so a 2D isometry (a
+        rotation, a diagonal flip) is expressible — not only a reordering of the last tensor axis. Before this,
+        `augment` reindexed the width axis with the action perm, which is correct ONLY when the action space IS
+        the board width (Connect-4's columns). tictactoe's 9-cell dihedral perms indexed a size-3 axis and threw
+        IndexError; othello and checkers could not expose symmetries at all.
+      - `action_perm` (length num_actions) reorders the policy vector.
+
+    The value is invariant. Identity-only (or no perms) is a plain copy. Connect-4 is byte-identical to the old
+    single-perm path (its cell_perm is the column mirror lifted to rows*cols, its action_perm the column mirror)."""
     if not perms or len(perms) <= 1:
         return list(examples)
-    identity = list(range(len(perms[0])))
     out: list[tuple] = []
     for e in examples:
         x, pi, v = e[0], e[1], e[2]
-        for perm in perms:
-            if perm == identity:
+        flat = x.reshape(x.shape[0], -1)
+        ident_cells = list(range(flat.shape[1]))
+        ident_acts = list(range(len(pi)))
+        for cell_perm, action_perm in perms:
+            if cell_perm == ident_cells and action_perm == ident_acts:
                 base = (x, list(pi), v)
             else:
-                base = (x[..., perm], [pi[s] for s in perm], v)
-            if len(e) >= 5:  # aux targets (§C.8 #4) transform with the board: ownership by column, reply by index
+                bx = flat[:, cell_perm].reshape(x.shape)
+                base = (bx, [pi[a] for a in action_perm], v)
+            if len(e) >= 5:  # aux targets (§C.8 #4): ownership is per-CELL, the reply is an ACTION index
                 own, reply = e[3], e[4]
-                if perm == identity:
+                if cell_perm == ident_cells and action_perm == ident_acts:
                     out.append(base + (own, reply))
                 else:
-                    own_m = own.reshape(-1, len(perm))[:, perm].reshape(-1)
-                    out.append(base + (own_m, perm.index(reply) if reply >= 0 else -1))
+                    own_m = own[cell_perm]
+                    out.append(base + (own_m, action_perm.index(reply) if reply >= 0 else -1))
             else:
                 out.append(base)
     return out

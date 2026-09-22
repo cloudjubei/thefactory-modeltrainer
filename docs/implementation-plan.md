@@ -2566,6 +2566,8 @@ experiment with a different curriculum.
 
 #### §C.29 — the efficiency verdict INVERTS with the accounting unit (2026-09-17, efficiency read #1)
 
+> **⛔ HEADLINE REFUTED BY ITS OWN SUCCESSOR READS (see §C.33). Read this section as a snapshot, not the conclusion.** The +0.1523 low-search win below was real at 460,800 simulations and DECAYED to +0.0156 (921,600) then reversed to -0.0625 (1,843,200) as both arms converged: a11's 4,800-game control was simply undertrained. At full convergence the DEEP-search arm wins, and a three-budget deployment sweep (§C.33) puts the pooled effect at **+0.0312, p=0.0007**. The wall-clock figures here are also wrong — arm B cost 127 h CPU / 142 h wall, not the ‘24.3 h’-era extrapolation; ratio 1.88x not 1.70x (§C.33). h3/h5 are marked SUPERSEDED in the register.
+
 Pre-registered efficiency read #1 is drawn, and the ledger's compute-matching (built 2026-09-14, hours before it
 was needed) carried it: "COMPUTE-MATCHED: b35 played 14400 games and a11 4800, which differ BY DESIGN — both
 spent 460800 simulations". Without it the pair would have been refused as a mislabelled budget.
@@ -2706,3 +2708,148 @@ is actually protected. Registered as **t9** in the hypothesis register, backed b
 **Nothing was lost** — the process survived every sleep, checkpoints are intact, and no resume was even needed.
 Arm B sits at 113/144 with 76.2 h of real compute done. The machine is now on AC and the guard reports
 effective.
+
+
+#### §C.32 — MUTATION TESTING BECOMES A TOOL, because run by hand it lied four ways (2026-09-20)
+
+The standing rule "mutation-test the guards" was carried out by hand — rewrite the module with sed, run pytest,
+read the count. In ten minutes it lied twice on a real guard. **M-A STALE BYTECODE:** a `.pyc` validates on
+`(mtime, size)`, so restoring `harness/ledger.py` to bytes that had just scored **46 passed** re-scored **2
+failed**; same bytes, cache cleared, 46 passed. Either direction is fatal. **M-D KILLED IS A PROXY:** the
+mutation meant to move a guard *after* the write instead went inert (it re-read the row it had just written), so
+both tests died on "DID NOT RAISE" and the property under test was never exercised. Two more lie in wait: an
+UNAPPLIED mutation (typo'd `old` text) reads as SURVIVED, and a RED baseline makes every mutation look killed.
+
+`harness/mutation.py` (+ `scripts/mutate.py`, chat-reachable) refuses all four: it clears bytecode, requires each
+edit's `old` to occur exactly once, refuses a red or empty baseline, and reports `killed_by` so kills are
+checkable one-to-one. **Multi-edit mutations** express the highest-value class — relocating a guard so it still
+runs but too late — which a single substitution cannot. Validated by running the runner against itself: 9
+mutations, all killed, each by exactly the one test asserting its property. Registered t10–t13, t15, t17; L4
+(name-collision that would silently overwrite a family's outcomes) fixed the same day. This is the recurring
+"guard must check the PROPERTY, not a proxy" lesson turned on mutation testing itself.
+
+#### §C.33 — THE EFFICIENCY VERDICT REVERSED, AND AN ADVERSARIAL AUDIT SCOPED IT (2026-09-20 → 09-22)
+
+The pre-registered headline read h5 (b143 vs a47, compute-matched at 1,843,200 sims) came back **-0.0625,
+INCONCLUSIVE** — the opposite sign to §C.29. h6 (arm B's own budget curve) was NULL. The whole §C.29 story was
+an undertrained control: a11 sat below the ~9,600-game frontier, so h3 measured "more games beats an unconverged
+net", not search depth. h8 replicated the reversal on a fresh root family: **+0.0342, p=0.0152**.
+
+Rather than bank it, the h8 conclusion was handed to a 4-lens adversarial audit (measurement asymmetry, budget
+confound, statistics, implementation), each objection then verified against the actual files. **8 of 22 confirmed.**
+The sharpest was found by an agent that RAN a counter-experiment: every one of the 29 ledger entries was drawn at
+**96 sims — exactly arm A's training budget and 3x arm B's**. The ledger refused mixed provenance, unmatched
+budgets and drifted code, but never recorded the budget the arms were MEASURED at, so it was blind to this. Fixed
+(L5/L6): entries carry `train_sims`/`deploy_sims`; `compare` warns "HOME BUDGET", refuses arms measured at
+different budgets, and PERSISTS every caveat onto the stored record so a verdict never outlives its reasons to
+doubt (t14, t17). A `_status` precedence bug — significance tested before the null band, so a significant effect
+smaller than its own declared band read `supported` — was fixed with a NEGLIGIBLE status (t15). The "95.8 h" I
+quoted for arm B three times was also wrong: it was **142.69 h wall / 127.16 h CPU** across two segments, the gap
+being 5.79 h of sleep; `harness.machine.run_cost` now sums segments, quotes CPU, and flags any run whose CPU/wall
+ratio falls under its thread count (t16). Corrected cost ratio: **1.88x**, matching the audit's independent number.
+
+#### §C.34 — THE DEPLOYMENT SWEEP, POOLED: real, small, and no home-ground effect (2026-09-22)
+
+The pair was read at all three deployment budgets on the SAME 1024 roots:
+
+| deployment | a47 (96-trained) | b143 (32-trained) | diff | p |
+|---|---|---|---|---|
+| 32 sims (B home) | 0.8311 | 0.8154 | +0.0156 | 0.38 — NULL |
+| 64 sims (neutral) | 0.8779 | 0.8340 | +0.0439 | 0.0042 |
+| 96 sims (A home) | 0.9111 | 0.8770 | +0.0342 | 0.0152 |
+
+The home-ground objection is **refuted**: if it were home advantage, 96 would be the maximum — the NEUTRAL 64 is.
+And "significant at 64/96, NULL at 32" must NOT be read as budget-dependence — that is the significant/non-
+significant fallacy (I was one sentence from it). All three pairwise diff-in-diffs on shared roots are null,
+**max |z| = 1.30**, so the honest summary is ONE pooled effect: **+0.0312, SE 0.0093, z=3.37, p=0.0007, 95% CI
+[+0.0131, +0.0494]** (`harness.measurement.pooled_paired_effect`, t18). Two caveats travel with it: the CI's lower
+bound is *below* the 0.03 band the claims themselves declared as absent, and the SE prices ROOT noise only — with
+n=1 training run per arm the dominant term is unpriced. **VERDICT: deeper training search wins by ~0.031 across
+every deployment budget, small and within confounds.** Two confounds remain, both needing fresh training runs the
+user has judged not worth the compute: the league pinned in absolute sims, and n=1 seed against a requirement of 7.
+The measurement question is closed; the training-path freeze can lift.
+
+
+#### §C.35 — FREEZE LIFTED, and the augmenter generalized to 2D symmetries (2026-09-22)
+
+With the measurement question closed (§C.34), the training-path freeze — held only to protect the comparison in
+flight — is lifted, and the code-forward queue resumes. First item: the symmetry augmenter, which turned out to
+hide a **latent bug**, not just a missing feature.
+
+`augment_examples` did `x[..., perm]`, reindexing the board's WIDTH axis with the action permutation. That is
+correct only when `num_actions == board width` — the Connect-4 coincidence (actions ARE columns). tictactoe's
+`symmetries()` returned 8 valid 9-cell dihedral perms; the augmenter indexed a size-3 axis with cell indices up
+to 8 and threw **IndexError**. othello and checkers omitted `symmetries()` entirely for exactly this reason
+(a comment in `test_othello` recorded the limitation). So "checkers `symmetries()`" and "augmenter rewrite" were
+one task with a failing anchor case already in the tree.
+
+The contract is now a **`(cell_perm, action_perm)` pair** per symmetry: `cell_perm` (rows*cols) permutes the
+FLATTENED board, `action_perm` (num_actions) the policy; aux ownership transforms by `cell_perm`, the aux reply
+by `action_perm`. A 2D isometry is now expressible. **Connect-4 is byte-identical** (guarded by a reproducibility
+test), so its runs' training data does not move. Registered t19; 6/6 mutations killed, including the one that IS
+the original bug (board indexed by the action perm). This UNBLOCKS othello's 8-fold dihedral and checkers'
+symmetries as deferred units — it does not add them yet, because a checkers symmetry needs its own geometry work
+(directional men + the dark-square parity make the valid group non-obvious, so it will be MEASURED by a verified
+finder, not asserted). `neural.py` is a training module, so this **moves the era 3f2bacd402c7 → 1bab977cec75**;
+acceptable because no comparison is outstanding and Connect-4/Othello behaviour is unchanged.
+
+**Queue after this:** checkers `symmetries()` (verified finder) → nine men's morris (adjacency primitives) →
+cross-game matrix runner. All no-compute capability work; a third-game TRAINING run is deferred by user decision.
+
+
+#### §C.36 — VERIFIED SYMMETRY FINDER, and it corrected my own hand-analysis (2026-09-22)
+
+The augmenter (§C.35) unblocked 2D symmetries; this fills them in — by PROOF, not assertion. A false symmetry
+teaches the net that two positions are equivalent when they are not, so `harness/symmetry.py` enumerates the
+board's shape-preserving isometries and keeps only those that COMMUTE with the game's own dynamics:
+`transform(step(s, a)) == step(transform(s), action_perm[a])` for every legal `a` over 200 random positions,
+with the side to move preserved (commutation + fixed side-to-move IS value-invariance). Games supply two small
+encoding-aware hooks (`transform_state`, `transform_action`); the enumeration and verification are generic.
+
+Results: connect4 `{id, flip_h}` (byte-identical to the old hand-written mirror), tictactoe the full dihedral
+`D4 = 8`, and **checkers `{id, flip_h}`**. That last one CORRECTS a hand-analysis I had written into this very
+session: I argued checkers was probably identity-only because a left-right mirror sends dark squares to light.
+The finder disagreed and it is right — `flip_h` flips only the COLUMN component, so the men's forward direction
+survives, and because the encoding uses all 64 cells the mirror is an isomorphic copy on the light sublattice;
+`rot180`/`flip_v` reverse the forward direction and the diagonal maps rotate it sideways, all refused by the
+verifier. This is the single cleanest instance of "measure, don't assert" on the whole track: the tool caught a
+wrong assertion the moment it was made. Registered t20; 6/6 mutations killed, each verifier check isolated by a
+fake game that lies one way (bad bijection, flipped side-to-move, wrong-successor bijection). `games/` and
+`symmetry.py` are NOT training modules, so the era stays 1bab977cec75.
+
+**Queue after this:** nine men's morris (adjacency primitives — its own encoding test) → cross-game matrix
+runner. Othello's D4 is now a two-line addition (its transform hooks) whenever wanted. No-compute throughout.
+
+
+#### §C.37 — NINE MEN'S MORRIS: the process transfers to a NON-GRID, three-phase game (2026-09-22)
+
+The north-star claim is that the UNCHANGED process learns a new game. Every game so far was a grid with one move
+type. Nine Men's Morris is the real stress test: a 24-point GRAPH board (three concentric squares joined by
+spokes, no diagonals), THREE phases (placing / moving / flying-when-down-to-3), a mill->remove SUB-TURN, and a
+symmetry group (D4 x inner/outer ring-swap = 16) that is not a grid dihedral. It was designed by a 4-agent panel
++ synthesis before a line was written.
+
+It went in as ONE new file (`games/ninemensmorris.py`) plus a 2-line registry wiring and a small GENERIC
+extension to the symmetry finder — **zero edits to any fingerprinted training module** (verified: othello's era
+stays 1bab977cec75). Every harness assumption it breaks is absorbed by DECLARATION:
+- **Non-grid board** -> embed the 24 points on a 7x7 grid at their natural coordinates and declare the 25
+  non-points dead via `valid_mask` (checkers' masked-pooling path). PROVEN in-system: the 7x7 grid's D4 permutes
+  the 24-point set onto itself, so the verified symmetry finder recovers the board's 8 dihedral symmetries with
+  no change; the game supplies the 8 ring-swap candidates too, and `find_symmetries` verifies all **16** against
+  the game's own dynamics (a construction bug would yield fewer, never a false symmetry).
+- **>2 non-derivable features** (phase, men-in-hand, pending-removal, flying) -> `input_planes=8`, folded into
+  observation PLANES because `encode` discards anything past `planes*h*w` (the one silent-corruption trap).
+- **Sub-turn** -> a `pending_removal` bool with `to_move` frozen through the removal (checkers' `jumping`).
+- **Three terminal kinds + draw** -> `_settle` + a bounded `idle` counter (IDLE_LIMIT=100) in `state_key`.
+- **No solver** -> implements Game (not SolvableGame), like othello; the paired-exploitability metric runs with
+  the game-agnostic MctsAgent refuter (integration-tested to completion).
+
+Geometry is GENERATED from `point = ring*8 + pos`, guarded by a transcription test (32 edges, degree histogram
+{2:12,3:8,4:4}, 16 mills, every point in exactly two, mill points collinear on the grid). 38 direct tests cover
+all three phases, the sub-turn, capture priority (both branches), attrition/blockade/draw, encoding, the action
+round-trip, the 16 symmetries, and the wrong-candidate rejection. Rules guards mutation-tested. The generic win:
+`harness/symmetry.py` gained `iso_from_cell_map` + an `isometries=` override so a game can offer board
+automorphisms the grid enumerator cannot — still proven, never trusted.
+
+**Queue after this:** cross-game matrix runner (run the same process across all five games and tabulate);
+othello's D4 (a two-line hook addition). No-compute throughout; a third-game TRAINING run remains the user's call.

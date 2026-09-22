@@ -143,7 +143,8 @@ def test_augment_examples_mirrors_board_and_policy():
 
 def test_augment_examples_identity_only_is_copy():
     x = torch.zeros(2, 6, 7)
-    assert len(augment_examples([(x, [0.0] * 7, 0.0)], [[0, 1, 2, 3, 4, 5, 6]])) == 1
+    ident = (list(range(42)), list(range(7)))
+    assert len(augment_examples([(x, [0.0] * 7, 0.0)], [ident])) == 1
 
 
 def _game():
@@ -1053,3 +1054,41 @@ def test_train_net_returns_an_epoch_mean_not_one_minibatch():
         losses.append(train_net(net, data, epochs=1, batch_size=8, lr=1e-3, device="cpu"))
     spread = max(losses) - min(losses)
     assert spread < 0.15, f"epoch-mean loss should be stable across identical runs, spread={spread}"
+
+
+def test_augment_works_for_a_game_whose_ACTIONS_ARE_CELLS_not_the_board_width():
+    """The anchor for the augmenter generalization (2026-09-22): tictactoe's 9-cell dihedral perms used to throw
+    IndexError because augment reindexed the size-3 width axis with cell indices up to 8. A 2D board symmetry
+    must be expressible, so the board is flattened and permuted by the cell_perm, the policy by the action_perm."""
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    x = torch.zeros(2, 3, 3)
+    x[0, 0, 0] = 1.0                       # own mark in the top-left corner
+    pi = [1.0] + [0.0] * 8                 # all policy mass on cell 0
+    aug = augment_examples([(x, pi, 1.0)], g.symmetries())
+    assert len(aug) == 8                   # the full dihedral orbit, no crash
+    # every image is a legal (board, policy) pair: exactly one own-mark, exactly one unit of policy mass, on
+    # the SAME cell (action == cell for tictactoe), and the value is invariant
+    for bx, bpi, bv in aug:
+        assert bv == 1.0
+        assert float(bx[0].sum()) == 1.0 and abs(sum(bpi) - 1.0) < 1e-6
+        mark = int(torch.argmax(bx[0].reshape(-1)))
+        assert bpi[mark] == 1.0
+    # the four corners are exactly the images the corner mark can land on under D4
+    corners = {int(torch.argmax(bx[0].reshape(-1))) for bx, _, _ in aug}
+    assert corners == {0, 2, 6, 8}
+
+
+def test_connect4_augmentation_is_byte_identical_to_the_old_single_perm_path():
+    """Reproducibility guard: the contract changed shape but Connect-4's augmented tensors must not move a bit,
+    or every existing Connect-4 run's training data would silently differ."""
+    g = Connect4()
+    x = torch.arange(2 * 6 * 7, dtype=torch.float32).reshape(2, 6, 7)
+    pi = [0.4, 0.3, 0.1, 0.1, 0.05, 0.03, 0.02]
+    aug = augment_examples([(x, pi, 0.7)], g.symmetries())
+    assert len(aug) == 2
+    # identity leg unchanged; mirror leg is exactly the width-axis reversal the old code produced
+    assert torch.equal(aug[0][0], x) and aug[0][1] == pi
+    assert torch.equal(aug[1][0], x[..., list(range(6, -1, -1))])
+    assert aug[1][1] == pi[::-1]

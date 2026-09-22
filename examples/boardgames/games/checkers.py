@@ -26,7 +26,7 @@ player with no legal move LOSES. Draw by the 40-move idle rule (no capture and n
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from harness.rules import DIRS4, diag_jumps, diag_steps
 
@@ -132,6 +132,29 @@ class Checkers:
 
     def current_player(self, state: CheckersState) -> int:
         return state.to_move
+
+    _symmetries_cache = None
+
+    def symmetries(self):
+        """VERIFIED symmetries as (cell_perm, action_perm) pairs — found once by proving each candidate isometry
+        commutes with this game's own dynamics (harness.symmetry.find_symmetries), never hand-asserted."""
+        cls = type(self)
+        if cls._symmetries_cache is None:
+            from harness.symmetry import find_symmetries
+            cls._symmetries_cache = find_symmetries(self)
+        return cls._symmetries_cache
+
+    def transform_state(self, state, iso):
+        nb = tuple(state.board[iso.cell_perm[d]] for d in range(CELLS))
+        jumping = None if state.jumping is None else iso.cell_image(state.jumping)
+        return replace(state, board=nb, jumping=jumping)
+
+    def transform_action(self, action, iso):
+        d_idx, cell = divmod(action, CELLS)
+        ndir = iso.dir_image(*DIRS4[d_idx])
+        if ndir not in DIRS4:
+            raise ValueError("isometry sends a diagonal move off the diagonal set")
+        return DIRS4.index(ndir) * CELLS + iso.cell_image(cell)
 
     def legal_actions(self, state: CheckersState) -> list[int]:
         if state.done:

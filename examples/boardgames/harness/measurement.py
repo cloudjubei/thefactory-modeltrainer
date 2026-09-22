@@ -249,3 +249,50 @@ def required_seeds(delta: float, run_sd: float, measurement_var: float = 0.0,
     var_run = float(run_sd) ** 2 + float(measurement_var)
     k = 2.0 * var_run * ((z_alpha + z_beta) / delta) ** 2
     return max(1, math.ceil(k))
+
+
+def pooled_paired_effect(settings, null_below: float = 0.03) -> dict:
+    """Pool ONE comparison read at several settings that share the same roots.
+
+    §C.34, 2026-09-22. The 96-vs-32 pair was read at three deployment budgets on the same 1024 roots and came
+    back "significant, significant, NULL". Read one at a time that invites the significant/non-significant
+    fallacy — concluding the effect depends on the setting when the INTERACTION was never tested. Here it is
+    tested and handed back (`max_interaction_z`, `poolable`) so pooling cannot quietly bury a real one.
+
+    Pooling is legitimate ONLY because the roots are shared, which makes the per-root differences comparable
+    term by term and cancels the opening-value confound across settings; unequal root counts mean they are not
+    the same roots, so that is refused rather than aligned by truncation.
+
+    `settings` is a sequence of (a_outcomes, b_outcomes) pairs, one per setting."""
+    import math
+
+    settings = [(list(a), list(b)) for a, b in settings]
+    if len(settings) < 2:
+        raise ValueError("pooling needs at least two settings — one setting is just that comparison")
+    n = len(settings[0][0])
+    for a, b in settings:
+        if not (len(a) == len(b) == n):
+            raise ValueError(f"every setting must cover the SAME ROOTS in the same order; got lengths "
+                             f"{[len(x) for pair in settings for x in pair]} — pooling across different roots "
+                             f"compares different questions")
+    per = [[x - y for x, y in zip(a, b)] for a, b in settings]
+    pooled = [sum(col) / len(per) for col in zip(*per)]
+
+    def _stats(v):
+        m = sum(v) / len(v)
+        sd = math.sqrt(sum((x - m) ** 2 for x in v) / (len(v) - 1)) if len(v) > 1 else 0.0
+        se = sd / math.sqrt(len(v)) if sd else 0.0
+        return m, se, (m / se if se else 0.0)
+
+    effect, se, z = _stats(pooled)
+    max_z = 0.0
+    for i in range(len(per)):
+        for j in range(i + 1, len(per)):
+            _, _, zz = _stats([p - q for p, q in zip(per[i], per[j])])
+            max_z = max(max_z, abs(zz))
+    lo, hi = effect - 1.96 * se, effect + 1.96 * se
+    return {"settings": len(settings), "n_roots": n, "effect": effect, "se": se, "z": z,
+            "p": math.erfc(abs(z) / math.sqrt(2)) if se else 1.0, "ci": (lo, hi),
+            "per_setting": [sum(v) / n for v in per],
+            "max_interaction_z": max_z, "poolable": max_z < 1.96,
+            "ci_reaches_null_band": lo < float(null_below)}

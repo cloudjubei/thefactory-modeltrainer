@@ -159,16 +159,18 @@ def test_encode_follows_the_games_board_shape():
     assert tuple(encode(c4, c4.initial_state(random.Random(0))).shape) == (2, 6, 7)
 
 
-def test_augment_reshapes_aux_by_perm_width_not_module_constant():
-    # D3 in the augmenter: ownership planes were reshaped to (6,7) whatever the board — a 3x4 board crashed.
+def test_augment_transforms_aux_ownership_by_the_CELL_perm_and_reply_by_the_ACTION_perm():
+    # A 3x4 board with a column-mirror symmetry: ownership is per-cell (len 12), the reply is an action (len 4).
     own = torch.arange(12, dtype=torch.float32)  # 3 rows x 4 cols
     x = torch.zeros(2, 3, 4)
-    mirror = [3, 2, 1, 0]
-    out = augment_examples([(x, [0.25] * 4, 0.0, own, 1)], [list(range(4)), mirror])
+    cell_mirror = [r * 4 + (3 - c) for r in range(3) for c in range(4)]  # dest <- src over 12 cells
+    col_mirror = [3, 2, 1, 0]
+    ident = (list(range(12)), list(range(4)))
+    out = augment_examples([(x, [0.25] * 4, 0.0, own, 1)], [ident, (cell_mirror, col_mirror)])
     assert len(out) == 2
     own_m = out[1][3]
-    assert own_m.tolist() == own.reshape(3, 4)[:, mirror].reshape(-1).tolist()
-    assert out[1][4] == mirror.index(1)
+    assert own_m.tolist() == own.reshape(3, 4)[:, col_mirror].reshape(-1).tolist()  # same cells, expressed as a mirror
+    assert out[1][4] == col_mirror.index(1)
 
 
 def test_arch_for_game_fills_shape_and_actions_from_the_game():

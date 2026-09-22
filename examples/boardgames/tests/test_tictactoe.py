@@ -32,7 +32,9 @@ def test_canonical_key_is_dihedral_invariant():
 def test_symmetries_are_the_eight_dihedral_maps():
     perms = game.symmetries()
     assert len(perms) == 8
-    assert all(sorted(p) == list(range(9)) for p in perms)  # each is a permutation of the 9 cells
+    # each symmetry is a (cell_perm, action_perm) pair; here an action IS a cell, so the two coincide
+    for cell_perm, action_perm in perms:
+        assert sorted(cell_perm) == list(range(9)) and cell_perm == action_perm
 
 
 def test_full_book_completes_and_plays_optimally():

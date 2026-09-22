@@ -67,8 +67,10 @@ class SolvableGame(Game, Protocol):
       - `canonical_key(state)`— a symmetry-reduced integer key (a position and its symmetric images collapse);
       - `position_value(state, book)` — exact value to the player to move (win +1 / draw 0 / loss -1), the
         solver, which may read `book` for already-solved children (the bottom-up wall-break);
-      - `symmetries()`        — the exploitable symmetries as action (source→dest) permutations, for net
-        augmentation; identity-only when a game has none (the rest still works, just no space saving)."""
+      - `symmetries()`        — the exploitable symmetries as `(cell_perm, action_perm)` source-permutation
+        PAIRS (`dest <- src`), for net augmentation: `cell_perm` (length rows*cols) transforms the flattened
+        board, `action_perm` (length num_actions) the policy. They differ whenever the action space is not the
+        board width. Identity-only when a game has none (the rest still works, just no space saving)."""
 
     def ply(self, state: State) -> int: ...
 
@@ -76,5 +78,5 @@ class SolvableGame(Game, Protocol):
 
     def position_value(self, state: State, book: Any = None) -> int: ...
 
-    def symmetries(self) -> list[list[int]]: ...
+    def symmetries(self) -> list[tuple[list[int], list[int]]]: ...
 

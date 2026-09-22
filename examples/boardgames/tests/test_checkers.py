@@ -194,3 +194,37 @@ def test_generic_harness_agents_play_checkers():
         if G.is_terminal(s):
             break
         s = G.step(s, agents[G.current_player(s)].act(G, s, rng), rng)
+
+
+def test_checkers_has_exactly_the_verified_left_right_mirror():
+    """VERIFIED, not asserted (§C.36): the finder proves the column mirror commutes with checkers dynamics and
+    that the other seven isometries do not. This CORRECTS the earlier hand-guess of 'identity-only' — flip_h
+    flips only the column component, so the men's forward direction survives and the mirror is a real symmetry."""
+    from games.checkers import Checkers
+
+    g = Checkers()
+    syms = g.symmetries()
+    assert len(syms) == 2                                   # identity + flip_h
+    cell_perm, action_perm = syms[1]
+    assert sorted(cell_perm) == list(range(64))
+    assert sorted(action_perm) == list(range(g.num_actions))
+    for r in range(8):
+        for c in range(8):
+            assert cell_perm[r * 8 + c] == r * 8 + (7 - c)  # the left-right column mirror
+
+
+def test_the_mirror_maps_a_real_position_to_a_legal_mirror_with_the_same_move_count():
+    import random as _random
+
+    from harness.symmetry import dihedral_isometries
+    from games.checkers import Checkers
+
+    g = Checkers()
+    s = g.initial_state(_random.Random(0))
+    for _ in range(7):
+        s = g.step(s, _random.choice(g.legal_actions(s)))
+    flip_h = next(i for i in dihedral_isometries(8, 8) if i.name == "flip_h")
+    gs = g.transform_state(s, flip_h)
+    assert g.current_player(gs) == g.current_player(s)
+    assert len(g.legal_actions(gs)) == len(g.legal_actions(s))
+    assert g.transform_state(gs, flip_h) == s               # the mirror is its own inverse

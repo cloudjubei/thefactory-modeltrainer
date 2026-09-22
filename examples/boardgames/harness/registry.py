@@ -6,6 +6,7 @@ from typing import Callable
 from games.connect4 import Connect4
 from games.checkers import Checkers
 from games.othello import Othello
+from games.ninemensmorris import NineMensMorris
 from games.tictactoe import TicTacToe
 from harness.agents import Agent
 from harness.game import Game
@@ -15,6 +16,7 @@ GAMES: dict[str, Callable[[], Game]] = {
     "othello": Othello,
     "checkers": Checkers,
     "tictactoe": TicTacToe,
+    "ninemensmorris": NineMensMorris,
 }
 
 # Per-game protocol PERSONAS (fixed-strategy archetypes) — the opponent rungs the luck-based games (Skull,
@@ -24,6 +26,7 @@ PERSONAS: dict[str, dict[str, Callable[[dict], Agent]]] = {
     "othello": {},
     "checkers": {},
     "tictactoe": {},
+    "ninemensmorris": {},
 }
 
 

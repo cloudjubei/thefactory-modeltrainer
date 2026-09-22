@@ -6,7 +6,7 @@ Board is 6 rows x 7 columns, indexed `row * COLS + col` with row 0 the BOTTOM. A
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 ROWS = 6
 COLS = 7
@@ -115,12 +115,25 @@ class Connect4:
         determines whether the game is over)."""
         return (state.board, state.to_move)
 
-    def symmetries(self) -> list[list[int]]:
-        """The board's exploitable symmetries as ACTION (column) source-permutations `dest <- src`: identity and
-        the left↔right mirror about the centre column. A game-theoretic value is invariant under these, so they
-        both halve the search (canonical keys) and AUGMENT net training (a position + its mirror teach the same
-        thing). A game with no symmetry returns just the identity."""
-        return [list(range(COLS)), list(range(COLS - 1, -1, -1))]
+
+    _symmetries_cache = None
+
+    def symmetries(self):
+        """VERIFIED symmetries as (cell_perm, action_perm) pairs — found once by proving each candidate isometry
+        commutes with this game's own dynamics (harness.symmetry.find_symmetries), never hand-asserted."""
+        cls = type(self)
+        if cls._symmetries_cache is None:
+            from harness.symmetry import find_symmetries
+            cls._symmetries_cache = find_symmetries(self)
+        return cls._symmetries_cache
+
+    def transform_state(self, state, iso):
+        nb = tuple(state.board[iso.cell_perm[d]] for d in range(ROWS * COLS))
+        return replace(state, board=nb)
+
+    def transform_action(self, action, iso):
+        # an action is a COLUMN; its image is the column any row maps to under the isometry
+        return iso.map(0, action)[1]
 
     # --- SolvableGame hooks (the per-game parts the book engine needs; see docs/implementation-plan.md (§C.5)) ---
     def ply(self, state: C4State) -> int:

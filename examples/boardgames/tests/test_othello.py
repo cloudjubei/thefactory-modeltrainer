@@ -124,8 +124,9 @@ def test_render_and_labels():
     assert g.state_key(s) == (s.board, 0)
 
 
-def test_no_symmetries_exposed_until_the_augmenter_can_use_them():
-    # augment_examples permutes the LAST tensor axis (Connect-4 columns); 64-cell dihedral perms would corrupt.
+def test_othello_does_not_expose_symmetries_yet():
+    # The augmenter now takes (cell_perm, action_perm) pairs, so othello's 8-fold dihedral symmetry is now
+    # EXPRESSIBLE — it is simply not implemented yet (a deferred unit), so none are exposed.
     assert not hasattr(Othello(), "symmetries")
 
 
