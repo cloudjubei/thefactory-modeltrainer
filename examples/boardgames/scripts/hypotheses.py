@@ -36,8 +36,14 @@ def show(h: dict) -> None:
               f"{h['supersession']['reason']}")
     if h.get("mode") == "test":
         print(f"{'':>10}  proved by {h['proof']}  [{flag}]")
+        if h.get("data"):
+            print(f"{'':>10}  on data {h['data']['path']} "
+                  f"({'started ' + h['data']['started'] if h['data']['started'] else 'not produced yet'})")
+        if h.get("inconclusive_proof"):
+            print(f"{'':>10}  inconclusive when {h['inconclusive_proof']}")
         for e in h["evidence"]:
-            print(f"{'':>10}    {'PASS' if e['ok'] else 'FAIL'}  {e['drawn_at']}")
+            mark = "PASS" if e["ok"] else "INCONCL." if e.get("inconclusive") else "FAIL"
+            print(f"{'':>10}    {mark}  {e['drawn_at']}")
         return
     print(f"{'':>10}  predicts {h['a']} {'>' if h['direction'] == 'a>b' else '<'} {h['b']} "
           f"in {h['unit']}  [{flag}]")
@@ -65,16 +71,28 @@ def main() -> None:
                         "A/B comparisons at all, and a claim with no regression test behind it is prose.")
     r.add_argument("--null-below", type=float, default=0.03,
                    help="COMPARISON mode: |diff| under this reads as NULL rather than INCONCLUSIVE")
+    r.add_argument("--data", default="",
+                   help="TEST mode: the stored-evidence file the proof reads (must carry `started`); the claim is "
+                        "pre-registered only if written before that data was produced")
+    r.add_argument("--reads-no-data", action="store_true",
+                   help="TEST mode: the proof reads code only, no stored evidence (one of --data / --reads-no-data "
+                        "is required, so a data-backed claim cannot be timed by its verify call)")
+    r.add_argument("--inconclusive-proof", default="",
+                   help="TEST mode: a pytest node id that PASSES when the claim cannot be judged (a gate failed, the "
+                        "data only bound the effect); a failed proof then reads INCONCLUSIVE, not REFUTED")
     r.add_argument("--note", default="")
     li = sub.add_parser("link")
     li.add_argument("--id", help="omit to link every hypothesis whose evidence exists")
+    ad = sub.add_parser("attach-data")
+    ad.add_argument("--id", required=True)
+    ad.add_argument("--data", required=True, help="can only withdraw foresight, never grant it; declared once")
     v = sub.add_parser("verify")
     v.add_argument("--id", required=True, help="run a TEST-backed claim's proof and attach the outcome")
     sp = sub.add_parser("supersede")
     sp.add_argument("--id", required=True, help="the claim to retire — its status is KEPT, not rewritten")
     sp.add_argument("--by", required=True, help="the later claim that retires it; it must have evidence")
     sp.add_argument("--reason", required=True)
-    for p in (ap, r, li, v, sp):
+    for p in (ap, r, li, ad, v, sp):
         p.add_argument("--register", default=REGISTER_PATH) if p is not ap else None
     ap.add_argument("--ledger", default=LEDGER_PATH)
     args = ap.parse_args()
@@ -82,7 +100,12 @@ def main() -> None:
     reg = Register(getattr(args, "register", REGISTER_PATH))
     if args.cmd == "register":
         show(reg.register(args.id, claim=args.claim, a=args.a, b=args.b, direction=args.direction,
-                          unit=args.unit, proof=args.proof, note=args.note, null_below=args.null_below))
+                          unit=args.unit, proof=args.proof, note=args.note, null_below=args.null_below,
+                          data=args.data, inconclusive_proof=args.inconclusive_proof,
+                          reads_no_data=args.reads_no_data))
+        return
+    if args.cmd == "attach-data":
+        show(reg.attach_data(args.id, args.data))
         return
     if args.cmd == "verify":
         show(reg.verify(args.id))

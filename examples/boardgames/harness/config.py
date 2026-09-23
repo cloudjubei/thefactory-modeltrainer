@@ -186,6 +186,12 @@ def validate_config(config: TrainerConfig) -> None:
         raise ValueError(f"az_batch_size must be in [1, 4096], got {config.az_batch_size}")
     if config.az_aux_heads and not config.az_residual:
         raise ValueError("az_aux_heads=1 requires az_residual=1 (aux heads read the spatial trunk)")
+    if not config.az_residual:
+        # §C.46: without the residual tower these are IGNORED by the legacy net — a config asking for 3 blocks got a
+        # 12,746-parameter 2-conv net for three sections of the plan. Asking for them without a tower is refused.
+        stray = [n for n in ("az_blocks", "az_head_hidden", "az_batchnorm", "az_global_pool") if getattr(config, n)]
+        if stray:
+            raise ValueError(f"{', '.join(stray)} set without az_residual=1 — the legacy net would ignore them")
     if not AZ_CHANNELS_RANGE[0] <= config.az_channels <= AZ_CHANNELS_RANGE[1]:
         raise ValueError(f"az_channels must be in {AZ_CHANNELS_RANGE}, got {config.az_channels}")
     if not AZ_BLOCKS_RANGE[0] <= config.az_blocks <= AZ_BLOCKS_RANGE[1]:

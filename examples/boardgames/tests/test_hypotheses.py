@@ -210,7 +210,7 @@ def test_a_claim_can_be_backed_by_a_test_instead_of_a_comparison(tmp_path):
     two planes'. Those are proved by a regression test, and the register has to hold them too."""
     r = _reg(tmp_path)
     h = r.register("t1", claim="a resumed run keeps its optimizer state",
-                   proof="tests/test_resume_integrity.py::test_the_optimizer_survives_a_resume")
+                   proof="tests/test_resume_integrity.py::test_the_optimizer_survives_a_resume", reads_no_data=True)
     assert h["status"] == "untested" and h["mode"] == "test"
     h = r.verify("t1", run_test=_pass)
     assert h["status"] == "supported" and h["evidence"][0]["ok"]
@@ -218,7 +218,7 @@ def test_a_claim_can_be_backed_by_a_test_instead_of_a_comparison(tmp_path):
 
 def test_a_failing_test_refutes_the_claim(tmp_path):
     r = _reg(tmp_path)
-    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    r.register("t1", claim="c", proof="tests/x.py::test_y", reads_no_data=True)
     assert r.verify("t1", run_test=_fail)["status"] == "refuted"
 
 
@@ -226,7 +226,7 @@ def test_a_proof_that_COLLECTS_NOTHING_is_refused_not_counted_as_passing(tmp_pat
     """The vacuity trap in its purest form: a typo'd node id makes pytest exit 0 having run nothing, and a
     green-by-vacuum proof is worse than no proof because it looks like evidence."""
     r = _reg(tmp_path)
-    r.register("t1", claim="c", proof="tests/typo.py::test_does_not_exist")
+    r.register("t1", claim="c", proof="tests/typo.py::test_does_not_exist", reads_no_data=True)
     with pytest.raises(ValueError, match="(?i)collected no tests"):
         r.verify("t1", run_test=_nothing)
     assert r.get("t1")["status"] == "untested", "a vacuous proof must leave the claim unproven"
@@ -262,14 +262,14 @@ def test_link_refuses_a_test_backed_claim(tmp_path):
     led = _ledger(tmp_path)
     led.compare("b35", "a11", treatment="config")
     r = _reg(tmp_path)
-    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    r.register("t1", claim="c", proof="tests/x.py::test_y", reads_no_data=True)
     with pytest.raises(ValueError, match="(?i)comparison-backed"):
         r.link("t1", led)
 
 
 def test_reverifying_accumulates_so_a_regression_becomes_contested(tmp_path):
     r = _reg(tmp_path)
-    r.register("t1", claim="c", proof="tests/x.py::test_y")
+    r.register("t1", claim="c", proof="tests/x.py::test_y", reads_no_data=True)
     r.verify("t1", run_test=_pass)
     h = r.verify("t1", run_test=_fail)
     assert h["status"] == "contested" and len(h["evidence"]) == 2
@@ -490,3 +490,147 @@ def test_an_uncaveated_claim_reports_no_caveats(tmp_path):
     r = _reg(tmp_path)
     r.register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
     assert r.link("h1", led)["caveats"] == []
+
+
+def _data(tmp_path, started, name="ev.json"):
+    p = tmp_path / name
+    p.write_text(json.dumps({"started": started, "rows": []}))
+    return str(p)
+
+
+def test_a_claim_about_STORED_evidence_is_timed_against_the_DATA_not_the_verify_call(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    _reg(tmp_path, now="2026-09-20T00:00:00").register("h1", claim="c", proof="tests/x.py::t", data=data)
+    h = _reg(tmp_path, now="2026-09-21T00:00:00").verify("h1", run_test=_pass)
+    assert h["pre_registered"] is False, "written after the data existed, however soon it was then verified"
+    assert h["status"] == "supported"
+
+
+def test_a_claim_registered_before_its_data_was_produced_is_pre_registered(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    _reg(tmp_path, now="2026-09-01T00:00:00").register("h1", claim="c", proof="tests/x.py::t", data=data)
+    assert _reg(tmp_path, now="2026-09-15T00:00:00").verify("h1", run_test=_pass)["pre_registered"] is True
+
+
+def test_data_of_unknown_age_is_refused_at_declaration(tmp_path):
+    p = tmp_path / "ev.json"
+    p.write_text(json.dumps({"rows": []}))
+    with pytest.raises(ValueError, match="started"):
+        _reg(tmp_path).register("h1", claim="c", proof="tests/x.py::t", data=str(p))
+
+
+def test_declared_data_cannot_be_swapped_or_regenerated_under_the_claim(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    r = _reg(tmp_path, now="2026-09-01T00:00:00")
+    r.register("h1", claim="c", proof="tests/x.py::t", reads_no_data=True)
+    r.attach_data("h1", data)
+    with pytest.raises(ValueError, match="already"):
+        r.attach_data("h1", _data(tmp_path, "2026-09-11T00:00:00", name="other.json"))
+    _data(tmp_path, "2026-09-12T00:00:00")
+    with pytest.raises(ValueError, match="changed"):
+        r.verify("h1", run_test=_pass)
+
+
+def test_attaching_data_late_can_only_WITHDRAW_foresight_it_is_judged_by_the_registration_time(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    Register(tmp_path / "h.json", now=lambda: "2026-09-20T00:00:00").register("h1", claim="c", proof="tests/x.py::t", reads_no_data=True)
+    r = Register(tmp_path / "h.json", now=lambda: "2026-09-21T00:00:00")
+    r.verify("h1", run_test=_pass)
+    assert r.get("h1")["pre_registered"] is True
+    assert r.attach_data("h1", data)["pre_registered"] is False
+
+
+def test_only_a_test_backed_claim_takes_a_data_file(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    with pytest.raises(ValueError, match="test-backed"):
+        _reg(tmp_path).register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", data=data)
+
+
+def _runner(outcomes):
+    """A proof runner whose result depends on WHICH node id it is asked to run."""
+    def run(nodeid):
+        return {"ok": outcomes[nodeid], "collected": 1, "detail": ""}
+    return run
+
+
+def test_a_failed_proof_whose_INCONCLUSIVE_proof_passes_reads_inconclusive_not_refuted(tmp_path):
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", proof="t::claim", inconclusive_proof="t::undecidable", reads_no_data=True)
+    h = r.verify("h1", run_test=_runner({"t::claim": False, "t::undecidable": True}))
+    assert h["status"] == "inconclusive"
+
+
+def test_a_failed_proof_whose_inconclusive_proof_ALSO_fails_is_refuted(tmp_path):
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", proof="t::claim", inconclusive_proof="t::undecidable", reads_no_data=True)
+    h = r.verify("h1", run_test=_runner({"t::claim": False, "t::undecidable": False}))
+    assert h["status"] == "refuted"
+
+
+def test_a_passing_proof_is_supported_without_consulting_the_inconclusive_proof(tmp_path):
+    asked = []
+
+    def run(nodeid):
+        asked.append(nodeid)
+        return {"ok": True, "collected": 1, "detail": ""}
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", proof="t::claim", inconclusive_proof="t::undecidable", reads_no_data=True)
+    assert r.verify("h1", run_test=run)["status"] == "supported"
+    assert asked == ["t::claim"]
+
+
+def test_inconclusive_evidence_never_contradicts_a_pass_but_a_fail_does(tmp_path):
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", proof="t::claim", inconclusive_proof="t::undecidable", reads_no_data=True)
+    r.verify("h1", run_test=_runner({"t::claim": False, "t::undecidable": True}))
+    assert r.verify("h1", run_test=_runner({"t::claim": True, "t::undecidable": True}))["status"] == "supported"
+    assert r.verify("h1", run_test=_runner({"t::claim": False, "t::undecidable": False}))["status"] == "contested"
+
+
+def test_the_inconclusive_proof_must_differ_from_the_proof_and_must_collect(tmp_path):
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="differ"):
+        r.register("h1", claim="c", proof="t::claim", inconclusive_proof="t::claim", reads_no_data=True)
+    with pytest.raises(ValueError, match="test-backed"):
+        r.register("h2", claim="c", a="b35", b="a11", direction="a>b", unit="simulations",
+                   inconclusive_proof="t::undecidable")
+    r.register("h3", claim="c", proof="t::claim", inconclusive_proof="t::gone", reads_no_data=True)
+
+    def run(nodeid):
+        return {"ok": False, "collected": 0 if nodeid == "t::gone" else 1, "detail": ""}
+    with pytest.raises(ValueError, match="collected no tests"):
+        r.verify("h3", run_test=run)
+
+
+def test_a_test_backed_claim_must_DECLARE_whether_its_proof_reads_stored_data(tmp_path):
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="declare"):
+        r.register("h1", claim="c", proof="t::p")
+    with pytest.raises(ValueError, match="both"):
+        r.register("h2", claim="c", proof="t::p", data=_data(tmp_path, "2026-09-10T00:00:00"), reads_no_data=True)
+    assert r.register("h3", claim="c", proof="t::p", reads_no_data=True)["reads_no_data"] is True
+
+
+def test_a_PRE_registered_claim_names_data_that_does_not_exist_yet_and_is_timed_when_it_does(tmp_path):
+    future = tmp_path / "later.json"
+    _reg(tmp_path, now="2026-09-01T00:00:00").register("h1", claim="c", proof="t::p", data=str(future))
+    later = _reg(tmp_path, now="2026-09-20T00:00:00")
+    with pytest.raises(ValueError, match="not been produced"):
+        later.verify("h1", run_test=_pass)
+    future.write_text(json.dumps({"started": "2026-09-10T00:00:00"}))
+    h = later.verify("h1", run_test=_pass)
+    assert h["pre_registered"] is True and h["data"]["started"] == "2026-09-10T00:00:00"
+
+
+def test_data_named_at_registration_that_ALREADY_exists_is_timed_at_registration(tmp_path):
+    data = _data(tmp_path, "2026-09-10T00:00:00")
+    _reg(tmp_path, now="2026-09-20T00:00:00").register("h1", claim="c", proof="t::p", data=data)
+    assert _reg(tmp_path, now="2026-09-21T00:00:00").verify("h1", run_test=_pass)["pre_registered"] is False
+
+
+def test_a_stored_claim_from_before_the_declaration_rule_still_verifies(tmp_path):
+    path = tmp_path / "hypotheses.json"
+    path.write_text(json.dumps({"hypotheses": {"t1": {"id": "t1", "claim": "c", "mode": "test", "proof": "t::p",
+                                                      "note": "", "registered_at": "2026-09-01T00:00:00",
+                                                      "evidence": []}}}))
+    assert Register(path, now=lambda: "2026-09-02T00:00:00").verify("t1", run_test=_pass)["status"] == "supported"

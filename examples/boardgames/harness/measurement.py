@@ -13,6 +13,7 @@ call from every reporting path. See tests/test_measurement.py — one test per e
 from __future__ import annotations
 
 import math
+import random
 
 # Seed ROLES are disjoint by construction. A seed used to CHOOSE (gates, sweeps, early stopping, arch picks) may
 # never be used to REPORT, and vice versa — E1 is otherwise a one-line mistake away, and it is invisible in review.
@@ -177,6 +178,45 @@ def rank_or_refuse(arms: dict[str, tuple[int, int]], null_arm_spread: float | No
     out["ranked"] = True
     out["verdict"] = f"RANKED: {order[0]} leads by {gap:.3f} (chi2 p={p:.3f})."
     return out
+
+
+def hypergeom_sf(x: int, population: int, successes: int, draws: int) -> float:
+    """P(X >= x) for X ~ Hypergeometric(population, successes, draws): the chance that `draws` items picked
+    without replacement contain at least `x` of the `successes` — the exact one-sided enrichment test."""
+    comb = math.comb
+    lo, hi = max(0, draws - (population - successes)), min(draws, successes)
+    if x <= lo:
+        return 1.0
+    if x > hi:
+        return 0.0
+    total = comb(population, draws)
+    return sum(comb(successes, k) * comb(population - successes, draws - k) for k in range(x, hi + 1)) / total
+
+
+def stratified_permutation_p(values: list, labels: list, strata: list, trials: int = 20000, seed: int = 0,
+                             alternative: str = "less") -> float:
+    """One-sided permutation p that the LABELLED items' mean value is lower (`alternative="less"`) or higher than
+    chance, shuffling labels only WITHIN each stratum. Stratifying holds a confounder fixed: a difference that
+    exists only BETWEEN strata (late plies simply have fewer visits each) cannot read as an effect."""
+    if not (len(values) == len(labels) == len(strata)):
+        raise ValueError("values, labels and strata must be the same length")
+    k = sum(1 for x in labels if x)
+    if k == 0:
+        raise ValueError("no labelled items — there is nothing to compare")
+    if alternative not in ("less", "greater"):
+        raise ValueError(f"alternative must be 'less' or 'greater', got {alternative!r}")
+    groups: dict = {}
+    for v, lab, st in zip(values, labels, strata):
+        g = groups.setdefault(st, [[], 0])
+        g[0].append(v)
+        g[1] += 1 if lab else 0
+    observed = sum(v for v, lab in zip(values, labels) if lab)
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(trials):
+        total = sum(sum(rng.sample(vals, n)) for vals, n in groups.values() if n)
+        hits += 1 if (total <= observed if alternative == "less" else total >= observed) else 0
+    return (1 + hits) / (1 + trials)
 
 
 def _chi2_sf(x: float, df: int) -> float:

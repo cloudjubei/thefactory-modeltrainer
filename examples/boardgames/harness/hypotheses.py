@@ -48,6 +48,23 @@ def _mode(h: dict) -> str:
     return h.get("mode") or ("test" if h.get("proof") else "comparison")
 
 
+def _ts(text: str) -> datetime:
+    t = datetime.fromisoformat(text)
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _data_started(path: str) -> str:
+    """The `started` stamp a stored-evidence file carries — when its data began to be produced."""
+    try:
+        started = json.loads(Path(path).read_text()).get("started")
+    except (OSError, json.JSONDecodeError, AttributeError) as e:
+        raise ValueError(f"cannot read a `started` timestamp from {path!r}: {e}") from e
+    if not started:
+        raise ValueError(f"{path!r} carries no `started` timestamp — data of unknown age cannot time a claim")
+    _ts(started)
+    return started
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
@@ -74,7 +91,8 @@ class Register:
 
     def register(self, id: str, claim: str, a: str | None = None, b: str | None = None,
                  direction: str | None = None, unit: str = "", proof: str = "", note: str = "",
-                 null_below: float = 0.03) -> dict:
+                 null_below: float = 0.03, data: str = "", inconclusive_proof: str = "",
+                 reads_no_data: bool = False) -> dict:
         """Register a claim, in exactly ONE of two modes.
 
         COMPARISON-backed: `a`/`b`/`direction` name the ledger comparison that would settle it and `unit` says
@@ -82,20 +100,52 @@ class Register:
         A/B comparisons at all — "a resumed run keeps its optimizer state", "encode was hardcoded to two
         planes". Those are proved by a regression test, and a claim without one is just prose.
 
+        A test-backed claim MUST declare what its proof reads: `data` — the stored-evidence file, carrying its own
+        `started` timestamp, so the claim is pre-registered only if it was written before the data was produced —
+        or `reads_no_data` for a proof over code alone. Without the declaration the only clock is the verify call,
+        which always comes after registration, so a claim written after reading the results would still read as a
+        prediction (§C.43 t27) — and remembering to attach the data before verifying nearly failed (§C.45). A
+        PRE-registered claim names data that does not exist yet; it is timed when verify first finds it.
+
+        A test-backed claim may also declare an `inconclusive_proof`: a test that PASSES when the claim cannot be
+        judged (a pre-registered gate failed, or the data only bound the effect). A failed proof then reads
+        INCONCLUSIVE instead of REFUTED — without it the only outcomes are pass and refuted, and an underpowered
+        null reads as a refutation (§C.44 h19-h22 did).
+
         There is deliberately no `status` parameter in either mode (H1)."""
         if id in self._h:
             raise ValueError(f"hypothesis {id!r} already exists — registering it again would overwrite the "
                              f"record of what was originally predicted")
         has_cmp = bool(a or b or direction)
+        if data and not proof:
+            raise ValueError(f"{id}: only a test-backed claim takes a `data` file — a comparison is timed by the "
+                             f"ledger's own drawn_at")
+        if inconclusive_proof and not proof:
+            raise ValueError(f"{id}: only a test-backed claim takes an `inconclusive_proof` — a comparison reads "
+                             f"inconclusive from its own significance and null band")
+        if inconclusive_proof and inconclusive_proof == proof:
+            raise ValueError(f"{id}: the inconclusive proof must differ from the proof — one test cannot both "
+                             f"settle a claim and say it cannot be settled")
         if has_cmp and proof:
             raise ValueError(f"{id}: a claim is settled by a comparison OR by a test, exactly one — a claim "
                              f"with two kinds of proof has no single thing that would refute it")
         if not has_cmp and not proof:
             raise ValueError(f"{id}: a claim needs either a comparison (a/b/direction) or a test `proof` — "
                              f"without one it is prose, which is what this register exists to replace")
+        if proof and data and reads_no_data:
+            raise ValueError(f"{id}: a claim cannot both name a data file and declare it reads no data")
+        if proof and not data and not reads_no_data:
+            raise ValueError(f"{id}: declare what the proof reads — `data` (the evidence file, even one not produced "
+                             f"yet) or `reads_no_data` — or the claim can only be timed by its verify call")
         if proof:
             h = {"id": id, "claim": claim, "mode": "test", "proof": proof, "note": note,
                  "registered_at": self._now(), "evidence": []}
+            if data:
+                h["data"] = {"path": data, "started": _data_started(data) if Path(data).exists() else None}
+            if reads_no_data:
+                h["reads_no_data"] = True
+            if inconclusive_proof:
+                h["inconclusive_proof"] = inconclusive_proof
             self._h[id] = h
             self._save()
             return self._view(h)
@@ -149,6 +199,22 @@ class Register:
         self._save()
         return self._view(h)
 
+    def attach_data(self, id: str, path: str) -> dict:
+        """Declare the stored evidence a test-backed claim's proof reads, after registration. The pre-registration
+        check compares the claim's ORIGINAL registration time with the data's `started`, so a late declaration
+        can only withdraw a claim to foresight, never grant one. Declared once: swapping in another file would
+        let a claim be re-timed against whichever data suits it."""
+        h = self._h.get(id)
+        if h is None:
+            raise KeyError(f"unknown hypothesis {id!r}")
+        if _mode(h) != "test":
+            raise ValueError(f"{id} is comparison-backed; only a test-backed claim takes a `data` file")
+        if h.get("data"):
+            raise ValueError(f"{id} already declares {h['data']['path']!r} — its data cannot be swapped")
+        h["data"] = {"path": path, "started": _data_started(path)}
+        self._save()
+        return self._view(h)
+
     def verify(self, id: str, run_test=None) -> dict:
         """Run a test-backed claim's proof and attach the outcome.
 
@@ -161,12 +227,26 @@ class Register:
         if _mode(h) != "test":
             raise ValueError(f"verify() is for test-backed claims; {id} is comparison-backed and is settled "
                              f"by ledger evidence (use link())")
-        res = (run_test or _run_pytest)(h["proof"])
+        if h.get("data") and h["data"]["started"] is None:
+            if not Path(h["data"]["path"]).exists():
+                raise ValueError(f"{id}: its data {h['data']['path']!r} has not been produced yet — nothing to verify")
+            h["data"]["started"] = _data_started(h["data"]["path"])
+        if h.get("data") and _data_started(h["data"]["path"]) != h["data"]["started"]:
+            raise ValueError(f"{id}: {h['data']['path']!r} changed its `started` since it was declared — the data "
+                             f"was regenerated under the claim, so register a new claim against the new data")
+        runner = run_test or _run_pytest
+        res = runner(h["proof"])
         if not res.get("collected"):
             raise ValueError(f"{id}: proof {h['proof']!r} collected no tests — a proof that runs nothing "
                              f"proves nothing, and would otherwise read as a pass")
-        h["evidence"].append({"proof": h["proof"], "ok": bool(res["ok"]), "detail": res.get("detail", ""),
-                              "drawn_at": self._now()})
+        entry = {"proof": h["proof"], "ok": bool(res["ok"]), "detail": res.get("detail", ""), "drawn_at": self._now()}
+        if not res["ok"] and h.get("inconclusive_proof"):
+            inc = runner(h["inconclusive_proof"])
+            if not inc.get("collected"):
+                raise ValueError(f"{id}: inconclusive proof {h['inconclusive_proof']!r} collected no tests — it "
+                                 f"would otherwise read as 'decidable', turning an undecidable claim into a refutation")
+            entry["inconclusive"] = bool(inc["ok"])
+        h["evidence"].append(entry)
         self._save()
         return self._view(h)
 
@@ -215,12 +295,15 @@ class Register:
         if not h["evidence"]:
             return "untested"
         if _mode(h) == "test":
-            oks = [e["ok"] for e in h["evidence"]]
-            if all(oks):
+            passed = any(e["ok"] for e in h["evidence"])
+            failed = any(not e["ok"] and not e.get("inconclusive") for e in h["evidence"])
+            if passed and failed:
+                return "contested"
+            if passed:
                 return "supported"
-            if not any(oks):
+            if failed:
                 return "refuted"
-            return "contested"
+            return "inconclusive"
         sig = [e for e in h["evidence"] if e["significant"]]
         wants_positive = h["direction"] == "a>b"
         for_it = [e for e in sig if (e["diff"] > 0) == wants_positive]
@@ -251,4 +334,6 @@ class Register:
         stamps = [e.get("drawn_at") for e in h["evidence"]]
         if not stamps or any(s is None for s in stamps):
             return not h["evidence"]
+        if h.get("data") and not _ts(h["registered_at"]) < _ts(h["data"]["started"]):
+            return False
         return all(s > h["registered_at"] for s in stamps)

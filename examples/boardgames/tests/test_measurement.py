@@ -169,3 +169,32 @@ def test_required_seeds_does_not_double_count_measurement_noise():
     assert required_seeds(0.062, 0.010) < required_seeds(0.062, 0.030)   # more run noise => more seeds
     with pytest.raises(ValueError):
         required_seeds(0.0, run_sd)
+
+
+def test_hypergeom_sf_matches_hand_computed_tails():
+    from math import comb
+    from harness.measurement import hypergeom_sf
+    assert abs(hypergeom_sf(1, 10, 3, 2) - (1 - comb(7, 2) / comb(10, 2))) < 1e-12
+    assert hypergeom_sf(0, 10, 3, 2) == 1.0
+    assert abs(hypergeom_sf(3, 10, 3, 3) - 1 / comb(10, 3)) < 1e-12
+    assert hypergeom_sf(4, 10, 3, 5) == 0.0
+    assert abs(hypergeom_sf(2, 20, 8, 6) - (1 - sum(comb(8, k) * comb(12, 6 - k) for k in (0, 1)) / comb(20, 6))) < 1e-12
+
+
+def test_stratified_permutation_p_finds_a_shift_only_WITHIN_strata():
+    from harness.measurement import stratified_permutation_p
+    values = [0, 1, 2, 10, 11, 12] * 4
+    strata = ["a", "a", "a", "b", "b", "b"] * 4
+    low_in_each = [True, False, False, True, False, False] * 4
+    assert stratified_permutation_p(values, low_in_each, strata, trials=4000, seed=1) < 0.01
+    all_of_a = [True, True, True, False, False, False] * 4
+    assert stratified_permutation_p(values, all_of_a, strata, trials=4000, seed=1) > 0.3
+
+
+def test_stratified_permutation_p_refuses_mismatched_lengths_and_empty_labels():
+    import pytest
+    from harness.measurement import stratified_permutation_p
+    with pytest.raises(ValueError):
+        stratified_permutation_p([1, 2], [True], ["a", "a"])
+    with pytest.raises(ValueError):
+        stratified_permutation_p([1, 2], [False, False], ["a", "a"])

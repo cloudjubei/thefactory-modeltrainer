@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import math
 import random
+import time
 from typing import Callable
 
 import torch
@@ -644,13 +645,70 @@ def reanalyze_examples(
     out: list[tuple[torch.Tensor, list[float], float]] = []
     for state in states:
         if game.is_terminal(state):
-            continue
+            raise ValueError("reanalyze_examples was handed a terminal state — skipping it would shift every later "
+                             "label onto the wrong buffer entry")
         agent._nodes = {}
         pi = agent.run_search(game, state, rng)
         pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
         value = max(-1.0, min(1.0, _root_search_value(agent, game, state)))
         out.append((encode(game, state), pi_vec, value))
     return out
+
+
+def _checked_policy_target(game: Game, state: State, fn: Callable) -> list[float]:
+    """A `policy_target_fn` label, refused unless it is a distribution over exactly the legal moves — a malformed
+    oracle would otherwise train silently."""
+    pi = [float(p) for p in fn(game, state)]
+    legal = set(game.legal_actions(state))
+    if len(pi) != game.num_actions or abs(sum(pi) - 1.0) > 1e-6 or any(p < 0 for p in pi) \
+            or any(p > 0 for a, p in enumerate(pi) if a not in legal):
+        raise ValueError("policy_target_fn must return a probability vector over num_actions with mass only on "
+                         "legal moves")
+    return pi
+
+
+def one_ply_siblings(game: Game, states: list, key_fn, holdout: dict | None = None) -> tuple[list, dict]:
+    """§C.46 SIBLINGS: the positions one move away from the recorded ones along a move self-play did NOT take —
+    exactly the off-line positions self-play stops generating (§C.45 h30: after the random plies, 200-sim play never
+    reaches a position where the second player wins). Pure and rng-free: parents in the order given, actions in
+    `legal_actions` order; a child is kept when it is non-terminal, its key is not a recorded parent's, it is not
+    held out, and it was not already kept (the first raw image found stands for its key). `holdout`
+    {"mod", "salt"} withholds keys k with sha256(f"{salt}:{k!r}") % mod == 0, so what the net learns there can be
+    measured as GENERALISATION rather than recall. Returns (children, counts)."""
+    import hashlib
+
+    if holdout is not None and int(holdout.get("mod", 0)) < 2:
+        raise ValueError(f"sibling holdout mod must be >= 2, got {holdout.get('mod')}")
+
+    def held(k) -> bool:
+        if holdout is None:
+            return False
+        digest = hashlib.sha256(f"{holdout['salt']}:{k!r}".encode()).hexdigest()
+        return int(digest, 16) % int(holdout["mod"]) == 0
+
+    parents = {key_fn(s) for s in states}
+    seen: set = set()
+    out: list = []
+    stats = {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}
+    for s in states:
+        for a in game.legal_actions(s):
+            child = game.step(s, a)
+            if game.is_terminal(child):
+                stats["terminal_skipped"] += 1
+                continue
+            k = key_fn(child)
+            if k in parents:
+                stats["recorded_skipped"] += 1
+                continue
+            if held(k):
+                stats["holdout_skipped"] += 1
+                continue
+            if k in seen:
+                continue
+            seen.add(k)
+            out.append(child)
+    stats["added"] = len(out)
+    return out, stats
 
 
 def n_step_value_targets(vt: list[float], outcome_for: list[float], n: int) -> list[float]:
@@ -970,6 +1028,18 @@ def _two_hot(values: torch.Tensor, support: torch.Tensor) -> torch.Tensor:
     return dist
 
 
+def _value_loss(value: torch.Tensor, target_v: torch.Tensor) -> torch.Tensor:
+    """Value MSE over the examples that CARRY a value target. A NaN target marks a policy-only example (§C.46
+    siblings: a position self-play never reached, labelled by search but with no game outcome to learn from) and
+    is left out; with no NaN present this is exactly `F.mse_loss`, so every existing run trains byte-identically."""
+    mask = ~torch.isnan(target_v)
+    if bool(mask.all()):
+        return F.mse_loss(value, target_v)
+    if not bool(mask.any()):
+        return (value * 0.0).sum()
+    return ((value - torch.nan_to_num(target_v)) ** 2)[mask].mean()
+
+
 def train_net(
     net: Connect4Net,
     examples: list[tuple[torch.Tensor, list[float], float]],
@@ -978,16 +1048,26 @@ def train_net(
     lr: float,
     device: str,
     opt_state: dict | None = None,
+    epoch_examples: int | None = None,
 ) -> float:
     """One training pass over the buffer (policy cross-entropy + value MSE — or value cross-entropy against a
-    two-hot target when the net carries a categorical value head). Returns the final mean loss."""
+    two-hot target when the net carries a categorical value head). Returns the final mean loss.
+
+    `epoch_examples` caps each epoch at that many examples of a fresh random permutation (§C.46 steps-matched
+    mode: an arm that ADDS examples keeps the optimisation steps of the arm without them, so exposure is not
+    confounded with extra gradient steps). None — or the full size — trains exactly as before."""
     if not examples:
         return 0.0
+    if epoch_examples is not None and not 1 <= epoch_examples <= len(examples):
+        raise ValueError(f"epoch_examples {epoch_examples} outside 1..{len(examples)}")
     bins = int(net.arch.get("value_bins", 0))
     aux_on = bool(net.arch.get("aux_heads", False))
     x = torch.stack([e[0] for e in examples]).to(device)
     target_p = torch.tensor([e[1] for e in examples], dtype=torch.float32).to(device)
     target_v = torch.tensor([[e[2]] for e in examples], dtype=torch.float32).to(device)
+    if bins > 0 and bool(torch.isnan(target_v).any()):
+        raise ValueError("policy-only examples (NaN value target) are not supported with a categorical value head — "
+                         "a two-hot of NaN would poison the value loss")
     target_dist = _two_hot(target_v, net.value_support) if bins > 0 else None
     if aux_on:
         # §C.8 #4: aux targets apply ONLY to examples that carry them — league/distill 3-tuples train alongside
@@ -1015,9 +1095,12 @@ def train_net(
     last = 0.0
     epoch_sum = epoch_seen = 0.0
     n = len(examples)
+    per_epoch = n if epoch_examples is None else int(epoch_examples)
     for _ in range(epochs):
         perm = torch.randperm(n)
-        for i in range(0, n, batch_size):
+        if per_epoch < n:
+            perm = perm[:per_epoch]
+        for i in range(0, per_epoch, batch_size):
             b = perm[i : i + batch_size]
             if aux_on:
                 logits, value, own_pred, reply_logits = net.forward_aux(x[b])
@@ -1027,7 +1110,7 @@ def train_net(
             if bins > 0:
                 value_loss = -(target_dist[b] * F.log_softmax(value, dim=1)).sum(1).mean()
             else:
-                value_loss = F.mse_loss(value, target_v[b])
+                value_loss = _value_loss(value, target_v[b])
             loss = policy_loss + value_loss
             if aux_on:
                 m = aux_mask[b]
@@ -1323,6 +1406,11 @@ def train_alphazero(
     value_n_step: int = 0,
     target_refresh: int = 4,
     reanalyze_frac: float = 0.0,
+    reanalyze_sims: int | None = None,
+    reanalyze_siblings: bool = False,
+    steps_matched: bool = False,
+    sibling_holdout: dict | None = None,
+    policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
     opening_plies_zero_frac: float = 0.0,
     endgame_net_priority: bool = False,
@@ -1362,6 +1450,26 @@ def train_alphazero(
     aux_on = bool(net.arch.get("aux_heads", False))
     if aux_on and reanalyze_frac > 0.0:
         raise ValueError("aux_heads + reanalyze_frac are not combinable (the state buffer drops aux targets)")
+    # §C.45: `reanalyze_sims` relabels the buffer with its OWN search budget while self-play keeps `sims` — the one
+    # treatment that changes the policy LABEL alone (play, outcomes and visited states stay at the self-play budget).
+    if reanalyze_sims is not None and reanalyze_frac <= 0.0:
+        raise ValueError("reanalyze_sims is set but reanalyze_frac is 0 — nothing is relabelled, so the knob would "
+                         "silently do nothing")
+    # §C.46: siblings, steps matching and the policy-target hook all act at RELABEL time on the reanalyze path, so
+    # each is refused wherever it would silently do nothing or mix with a path that cannot carry it.
+    if reanalyze_siblings and reanalyze_frac != 1.0:
+        raise ValueError("reanalyze_siblings needs reanalyze_frac == 1.0 — siblings are relabelled with the whole buffer")
+    if (steps_matched or sibling_holdout is not None) and not reanalyze_siblings:
+        raise ValueError("steps_matched / sibling_holdout act only on siblings — set reanalyze_siblings")
+    if sibling_holdout is not None and int(sibling_holdout.get("mod", 0)) < 2:
+        raise ValueError(f"sibling_holdout mod must be >= 2, got {sibling_holdout.get('mod')}")
+    if reanalyze_siblings and (aux_on or int(net.arch.get("value_bins", 0)) > 0):
+        raise ValueError("siblings carry no value target, which aux heads and a categorical value head cannot mask")
+    if policy_target_fn is not None and (reanalyze_frac != 1.0 or reanalyze_sims is not None):
+        raise ValueError("policy_target_fn replaces the relabel search, so it needs reanalyze_frac == 1.0 and no "
+                         "reanalyze_sims")
+    if refutation_frac > 0.0 and reanalyze_frac > 0.0:
+        raise ValueError("refutation_frac is inert on the reanalyze path (its store is never replayed there)")
     # init_buffer/return_buffer (§C.7 batched training): carry the replay buffer ACROSS batches so a resumed run is
     # equivalent to a continuous one — a big net starved of history relearns from scratch each batch. (Non-reanalyze path.)
     buffer: list[tuple[torch.Tensor, list[float], float]] = list(init_buffer) if init_buffer else []
@@ -1383,6 +1491,9 @@ def train_alphazero(
             game, book, book_states, proof_copies=book_proof_copies, estimate_copies=book_estimate_copies, device=device
         )
     distilled = augment_examples(distilled, perms)  # a position + its mirror are the same exact lesson
+    if reanalyze_siblings and distilled:
+        raise ValueError("siblings are refused with a distilled anchor — its fixed-fraction mix would change what the "
+                         "steps-matched pass samples")
     if distilled:
         train_net(net, distilled, epochs, batch_size, lr, device)  # imprint optimal play before self-play
     history: list[dict] = []
@@ -1455,6 +1566,9 @@ def train_alphazero(
     # callers working, but then Adam resets per call — which is the bug this parameter fixes.
     _opt_state: dict = opt_state if opt_state is not None else {}
     for it in range(iterations):
+        reanalyze_note: dict = {}
+        epoch_cap: int | None = None
+        sibling_relabel_s = 0.0
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
         # When armed, the learner carries the run tablebase as its proof book + a cheap-endgame cutoff, so search
@@ -1474,19 +1588,57 @@ def train_alphazero(
                                               exact_value_targets=eg_targets))
             if endgame_on:
                 eg_visited.extend(s for (s, *_rest) in fresh_s)
+            evicted = max(0, len(state_buffer) + len(fresh_s) - buffer_cap)
             state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
+            t_relabel = time.time()
+            sib_rows: list = []
+            sib_stats = {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}
             # Re-label a random sample of the buffer with the CURRENT net (fresh policy + search-improved value).
             k = int(reanalyze_frac * len(state_buffer))
             if it > 0 and k > 0:
                 idxs = rng.sample(range(len(state_buffer)), k)
-                relabelled = reanalyze_examples(game, learner, [state_buffer[i][0] for i in idxs], rng)
+                relabeler = learner if reanalyze_sims is None else AlphaZeroAgent(
+                    net, sims=reanalyze_sims, device=device, gumbel=gumbel, gumbel_m=gumbel_m, c_scale=c_scale,
+                    book=(endgame_tb if endgame_on else None), solve_endgame=(endgame_max_empty if endgame_on else 0))
+                if relabeler is not learner:
+                    relabeler.add_noise = learner.add_noise  # self-play left the learner's root-noise state set
+                if policy_target_fn is not None:
+                    relabelled = [(encode(game, s), _checked_policy_target(game, s, policy_target_fn), None)
+                                  for s in (state_buffer[i][0] for i in idxs)]
+                else:
+                    relabelled = reanalyze_examples(game, relabeler, [state_buffer[i][0] for i in idxs], rng)
+                if relabeler is not learner:
+                    learner.endgame_solves += relabeler.endgame_solves
+                    learner.endgame_hits += relabeler.endgame_hits
                 # POLICY-ONLY refresh: replace the POLICY target with the current net's, but KEEP the stored n-step
                 # VALUE target — measured: overwriting the value with a search-root estimate DEGRADES the n-step
                 # value (the #3 lever), so reanalyze must not touch it.
-                for i, (x, pi, _v_search) in zip(idxs, relabelled):
+                for i, (x, pi, _v_search) in zip(idxs, relabelled, strict=True):
                     state_buffer[i] = (state_buffer[i][0], x, pi, state_buffer[i][3])
                 reanalyzed = len(relabelled)
-            buffer = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
+                if reanalyze_siblings:
+                    key_fn = getattr(game, "canonical_key", None) or (lambda st: game.state_key(st))
+                    sibs, sib_stats = one_ply_siblings(game, [st for (st, *_rest) in state_buffer], key_fn,
+                                                       sibling_holdout)
+                    t_sib = time.time()
+                    if policy_target_fn is not None:
+                        sib_rows = [(encode(game, st), _checked_policy_target(game, st, policy_target_fn), float("nan"))
+                                    for st in sibs]
+                    else:
+                        sib_rows = [(x, pi, float("nan")) for (x, pi, _v) in reanalyze_examples(game, relabeler, sibs,
+                                                                                              rng)]
+                    sibling_relabel_s = time.time() - t_sib
+            sp_aug = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
+            sib_aug = augment_examples(sib_rows, perms) if sib_rows else []
+            buffer = sp_aug + sib_aug
+            reanalyze_note = {"selfplay_states": len(fresh_s), "state_buffer": len(state_buffer), "evicted": evicted,
+                              "siblings": sib_stats["added"],
+                              "sibling_terminal_skipped": sib_stats["terminal_skipped"],
+                              "sibling_recorded_skipped": sib_stats["recorded_skipped"],
+                              "sibling_holdout_skipped": sib_stats["holdout_skipped"],
+                              "nan_value_examples": len(sib_aug), "relabel_s": round(time.time() - t_relabel, 3),
+                              "sibling_relabel_s": round(sibling_relabel_s, 3)}
+            epoch_cap = len(sp_aug) if (steps_matched and sib_aug) else None
         elif parallel_ok:  # PURE-#1 fanned out across worker processes (fills the idle cores; ~2-2.5x faster)
             fresh = _run_parallel_selfplay(_pool, _tmpdir, net, target_net, it, selfplay_games, sims, gumbel,
                                            gumbel_m, c_scale, value_n_step, selfplay_opening_plies, rng)
@@ -1544,13 +1696,21 @@ def train_alphazero(
         # mix the oracle distillation uses — so a few-hundred empty-board examples aren't diluted in a 400k buffer.
         _anchor = distilled + opening_anchor
         _afrac = league_anchor_frac if opening_anchor else distill_fraction
-        loss = train_net(net, _mix_training_set(buffer, _anchor, _afrac), epochs, batch_size, lr, device,
-                         opt_state=_opt_state)
+        train_set = _mix_training_set(buffer, _anchor, _afrac)
+        t_train = time.time()
+        loss = train_net(net, train_set, epochs, batch_size, lr, device, opt_state=_opt_state,
+                         epoch_examples=epoch_cap)
+        if reanalyze_note:
+            per_epoch = epoch_cap if epoch_cap is not None else len(train_set)
+            reanalyze_note.update({"train_examples": len(train_set), "epoch_examples": per_epoch,
+                                   "steps": epochs * math.ceil(per_epoch / batch_size),
+                                   "train_s": round(time.time() - t_train, 3)})
         # CHEAP per-iteration quality probe (one forward pass): the net's value on the standard opening. Connect 4
         # is a first-player WIN, so this should climb toward +1 — the live curve the #2-vs-#1 A/B compares.
         opening_value = round(net_value(net, game, game.initial_state(random.Random(seed)), device), 4)
         entry = {"iteration": it + 1, "examples": len(buffer), "vs_pool_games": vs_pool, "reanalyzed": reanalyzed,
                  "buffer": len(buffer), "distilled": len(distilled), "loss": loss, "opening_value": opening_value}
+        entry.update(reanalyze_note)
         if endgame_on:
             entry.update({"endgame_booked": eg_booked, "endgame_solves": learner.endgame_solves,
                           "endgame_hits": learner.endgame_hits, "endgame_total": len(endgame_tb)})

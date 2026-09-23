@@ -3028,23 +3028,41 @@ so this is an experiment now, not a guess.
 
 **Prioritized forward work** (measurement is cheap and unblocks the rest; every A/B is coverage-scored, seed-
 replicated, and read through the cross-game matrix + the register):
-1. **Localize the ceiling.** Dump the specific midgame positions where coverage fails (tictactoe ply-2 first,
-   trivially enumerable), across ≥7 seeds — is the blind spot the SAME positions every seed (a systematic recipe
-   flaw) or seed-noise? This single cheap read decides whether (a) or (b) above is even plausible.
+1. ~~**Localize the ceiling.**~~ **DONE 2026-09-23 → §C.43.** Systematic (h11), data-starved (h13), NOT
+   off-manifold (h16); the net-vs-budget read is confounded on tic-tac-toe (h15). Outcome re-points item 3.
 2. **Matched multi-seed coverage A/Bs** to firm up the two n=1 results: pure solver-free vs endgame-taught
    (Connect-4), and tictactoe drift, at ≥7 seeds under identical conditions — resolves the ~1–8% against the
    seed floor (~0.036).
-3. **Ablate the suspected causes**, each a coverage-scored A/B on the failing states: train-time sims (deeper
-   search targets), value-target source (n-step vs outcome vs reanalyze) on midgame states, and mixed-opening
-   coverage focused on the ply where it breaks. The cross-game matrix (§C.38) says whether a fix GENERALISES.
-4. **Build the calibrated solver-free reference** (§C.41 addendum) so the ceiling can be tracked on Othello and
+3. ~~**Ablate the suspected causes — self-play diversity first.**~~ **DONE 2026-09-23 → §C.44. The first fix
+   FAILED — and informatively.** The pre-registered A/B (mixed-openings self-play vs baseline, fresh seeds 11-20)
+   REPLICATED the blind spot (h18) and did not fix it at its bar. **CORRECTED by §C.45:** at n=10 a §C.44-sized
+   effect had ~8% power, so "not the cause" (h22) was an overstatement; the bounded reading (h23, supersedes h22) is
+   that exposure raised visits 4.5× yet repairs at most ~35% of the blind spot (95% upper bound) and does not
+   measurably repair the prior. Next cause: **label quality** → §C.45.
+4. ~~**§C.45 — does LABEL QUALITY cause the blind spot?**~~ **DONE 2026-09-23 → §C.45.** Partially: near-exact
+   labels at matched exposure repair ~half the target shortfall through the prior (h26, h28); deeper self-play as
+   the delivery route FAILS (h27, h29, h30). No seed reaches NET-level coverage 1.0 yet.
+4b. **§C.46 (next) — correct labels × exposure at the NET level, plus a value-sufficiency probe.** Fresh seeds
+   41-60, all arms mixed openings + 32-sim self-play + reanalyze_frac 1.0: R32 (control); R200 (pre-registered
+   REPLICATION of A1/A2 — required before building on them); R200-target-only (replicate the exploratory split_in
+   finding as a claim); R200+siblings (every legal one-move deviation from recorded self-play states added to the
+   relabel buffer, policy-only — generic, cost ∝ branching factor, restores the O-to-move winning positions self-play
+   never makes); diagnostic ceilings on tic-tac-toe only: exact-solver labels + siblings (can this net reach
+   raw-policy 1.0 at all?) and R32 with exact value targets (does a correct value head make CHEAP 32-sim labels
+   correct — the transfer question). Primary metric: raw-policy coverage over all 627 states; target set re-derived
+   at the PRIOR level from seeds 21-40; per-state delivery gate; migration gate on raw-policy failures too. Needs new
+   training code (sibling injection) → new era, mutation-tested, design review before compute.
+5. **Build the calibrated solver-free reference** (§C.41 addendum) so the ceiling can be tracked on Othello and
    the chess-scale target — the only way "how close to perfect play" becomes a number where no solver exists.
-5. **Promote the coverage scorecard to a first-class per-checkpoint metric** (as a post-hoc tool over checkpoints,
+6. **Promote the coverage scorecard to a first-class per-checkpoint metric** (as a post-hoc tool over checkpoints,
    OUTSIDE the fingerprinted training path per §C.17a rule 2), retiring `opening_value`/late-corpus proxies the
    §C.24 audit and §C.41 both showed mislead.
 
 **Measurable success criteria (the bar, restated in coverage terms):** (i) certified coverage → 1.0 on tic-tac-toe
-— the floor test: a process that cannot solve the smallest game cannot be called near-optimal-generic; (ii)
+— the floor test: a process that cannot solve the smallest game cannot be called near-optimal-generic — **stated
+at the NET's level** (raw-policy coverage, and coverage at a fixed small budget, each read against the search-alone
+control): §C.43 showed an UNTRAINED net at 800 sims already covers the failing states, so a search-budget 1.0 on
+tic-tac-toe is brute force, not learning; (ii)
 Connect-4 solver-free midgame proven-win conversion → ≥0.99; (iii) a calibrated reference whose false-optimal rate
 on solvable games is published, so Othello-and-beyond optimality is a bounded coverage number. **Explicitly OFF
 the table:** more parameters, more raw compute without a localized cause, and any proxy (loss, opening_value,
@@ -3055,3 +3073,213 @@ late-corpus move-match) standing in for coverage.
 coverage → 1.0 where a solver exists (tic-tac-toe, then Connect-4), and elsewhere drive a CALIBRATED coverage
 bound as high as it will go, on the unchanged process.* Perfect play on the solvable games is the falsifiable
 milestone the whole program now aims at, because the coverage instrument finally makes "how close" a fact.
+
+
+#### §C.43 — THE CEILING LOCALIZED: a systematic, data-starved blind spot (2026-09-23)
+
+§C.42 item 1, run as a pre-registered experiment. 10 independently trained tic-tac-toe seeds (6 iters × 48
+games, train sims 32, the §C.41 demo recipe), every misplayed state dumped (`coverage.coverage_failures`), four
+claims registered BEFORE the run and judged by `harness/ceiling.py` from `examples/boardgames/evidence/
+tictactoe_ceiling.json` (stored in the repo tree but NOT yet committed — corrected 2026-09-23; the register times each
+claim against the file's own `started`). Family α=0.05,
+split /4. Training fingerprint c4b351282e91 (unchanged: no training module was touched).
+
+**A measurement defect found first (t26).** The §C.41 scorecard reused one search tree across all 627 states, so
+later states were searched with the budget of every state before them — coverage depended on ORDER (same net:
+0.9904 forward, 0.9968 reversed). Fixed at the root: `state_coverage` now REFUSES an act_fn that answers a state
+differently when re-asked, and `per_state_act` builds a fresh agent + rng per state. The honest number for the
+§C.41 demo net is 0.9872, not 0.9904.
+
+| claim (pre-registered unless noted) | verdict | numbers |
+|---|---|---|
+| h11 the blind spot is SYSTEMATIC across seeds | **SUPPORTED** | 179 shared-failure pairs vs 4.9 expected (36×), p<1e-4; 69 failures over only 17 distinct states; one state missed by 10/10 seeds |
+| h12 more deploy search fixes < half (net, not budget) | **REFUTED** → superseded by h15 | 400 sims fixes 67/69 |
+| h13 failing states were STARVED of training data | **SUPPORTED** | 1.9 vs 10.4 mean final-buffer visits, same seed and ply, stratified permutation p<1e-4 |
+| h14 failing states are enriched OFF the optimal-play manifold | **REFUTED** → superseded by h16 | 13/17 off vs an 80% base rate, p=0.76 |
+| h15 (post-hoc) the deep-search check is CONFOUNDED | SUPPORTED | an UNTRAINED net at 400 sims fixes 72% of the same failures; at 800 sims, all 17 |
+| h16 (post-hoc) no off-manifold enrichment | SUPPORTED | as h14 |
+| h17 (post-hoc) tic-tac-toe coverage is mostly SEARCH | SUPPORTED | untrained net + 48 sims = 0.935; trained 0.982–0.994; raw policy 0.54 → 0.94–0.96 |
+
+**What the blind spot is.** 67/69 failures: the net's PRIOR ranks the played move above every optimal one (the
+value head does in 53/69). The recurring states are odd openings (a corner and an edge) where the win needs a
+quiet forking move and the net plays the centre, its default. At 16 sims the trained prior does WORSE than an
+untrained one on these states (6/17 vs 10/17 correct, one seed): the learned prior is not merely thin there, it is
+confidently wrong. The states are not positions reached only after a blunder (h16). They are positions self-play
+stopped visiting (h13): the state missed 10/10 had zero final-buffer visits in every seed. **Verdict on §C.42's
+central question: the ceiling is a property of the RECIPE, not seed noise (a), and specifically of its data
+distribution:** self-play concentrates on its own lines, the prior generalises "centre" to states it never sees,
+and a small search cannot overturn a confident prior.
+
+**Caveats.** Visits are counted in the FINAL replay buffer (cap 8000), not over all of training. The deep-search
+check is uninformative on tic-tac-toe because the tree is small; it becomes informative only where search is far
+from exhaustive (Connect-4), with the same control. n=1 recipe and 1 game: that this generalises is untested.
+
+**Guards added** (all mutation-tested, every mutant killed): stateful act_fn refused (t26);
+`blind_spot_concentration` judged over the FAILABLE universe (states where a wrong move exists), refuses a
+single seed; `ceiling.localize_report` marks the net-vs-budget reading `attributable` only when a search-alone
+control fails the same states; Wilson bounds, not point estimates, for every rate verdict; stratified (seed×ply)
+visit comparison; data-timed pre-registration in the register (t27: h15–h17 had read "pre-registered" because a
+test-backed claim was timed against its verify call). Suite 727 passed.
+
+**Forward** (§C.42 item 3 re-pointed): the next experiment tests one localized cause. Self-play state diversity
+vs baseline at ≥10 seeds, scored at the NET's level against the search-alone control, with these 17 states as
+the pre-declared target set.
+
+
+
+#### §C.44 — THE FIRST FIX FAILED, INFORMATIVELY: starvation is a correlate, not the cause (2026-09-23)
+
+§C.42 item 3, run as a pre-registered A/B. §C.43 found the tic-tac-toe blind spot correlated with data-starvation
+(h13: failing states had ~5× fewer self-play visits). The obvious fix is to make self-play visit them, via the
+existing mixed-openings knob (`selfplay_opening_plies=2` + `opening_plies_zero_frac=0.5`). Baseline vs treatment,
+FRESH seeds 11-20 (the target was localized from seeds 1-10, so evaluating on 1-10 would be regression to the
+mean — `ab_report` refuses it), 17 recurring states as the pre-declared target, four claims at α/4, paired by
+seed with an exact sign-flip test. h18-h21 registered before either arm trained; fingerprint c4b351282e91.
+
+| claim | verdict | numbers |
+|---|---|---|
+| h18 the blind spot REPLICATES on fresh seeds | **SUPPORTED** | 58/60 baseline failures land in the 17-state target (its universe share is 3.9%), hypergeometric p≈0 |
+| h19 mixed openings raise TARGET correctness | **REFUTED** | +0.053, sign-flip p=0.14 |
+| h20 mixed openings raise RAW-POLICY coverage | **REFUTED** | +0.009, p=0.044 (> α/4=0.0125) |
+| h21 mixed openings raise eval-budget coverage | **REFUTED** | +0.001, p=0.19 |
+| h22 (post-hoc) starvation is NOT the cause | **SUPPORTED** | see below |
+
+**The manipulation check is the finding (h22).** A refuted fix is only informative if the treatment did what it
+claimed. It did: mixed openings raised mean target-state self-play visits from 36.8 to **166.4 per seed** (4.5×,
+paired sign-flip p=0.002), cutting zero-visit (seed,state) pairs from 148/170 to 113/170. Correctness stayed flat
+anyway. Pooled across both arms, a target state that WAS visited in self-play is misplayed at 0.30, one that was
+NOT at 0.32 — indistinguishable. ~~So the net SEES these states and still plays the wrong move; §C.43's
+data-starvation was a correlate, not the operative cause.~~ **CORRECTED (§C.45, h23 supersedes h22):** a
+non-significant +0.053 at n=10 had ~8% power, so it cannot say "not the cause". Inverting the sign-flip test gives
+what the data DO bound: target gain < +0.118 (95% one-sided), i.e. exposure repairs at most ~35% of the blind spot,
+and raw-prior gain at the target < +0.044 (under 1 of 17 states). Exposure is not ruled out as a partial cause.
+
+**Where this points.** The cause is upstream of exposure. The recurring misses are odd openings where a quiet
+forking move wins and the net plays the centre; the failure is in the PRIOR (§C.43: 67/69). Raising exposure at a
+32-sim self-play budget did not help — which implicates the TARGET the net imitates: a 32-sim search from these
+fork openings may itself not find the fork, so self-play labels the state with the wrong move and more visits just
+teach the wrong label harder. That is the next pre-registered A/B: **train-time self-play sims** (a deeper label
+search), same 17-state target, same search-alone control. Value-target source / reanalyze only if that fails.
+
+**Method note — a pre-registered fix failed and the system caught it honestly.** The register shows h19-h21 REFUTED
+with timestamps proving the claims preceded the run; the manipulation check (baked into `ab_report`, mutation-
+tested) is what turned "the fix didn't work" into "starvation isn't the cause" rather than "maybe the knob didn't
+reach the states". `ab_report` refuses unpaired seeds, moved training code, a target chosen from the evaluated
+seeds, and arms differing in more than the declared treatment; every rate verdict is an exact paired test at α/4.
+Every new guard was mutation-tested (each mutant killed); the full suite passes green. No training module touched.
+
+
+#### §C.45 — Does LABEL QUALITY cause the blind spot? (pre-registered; design rebuilt by adversarial review, 2026-09-23)
+
+**Why this experiment.** §C.44 ruled out exposure as the whole cause. The net's PRIOR is what is wrong at the 17
+target states (§C.43), and a prior is learned from self-play policy LABELS (the Gumbel completed-Q target
+`softmax(log prior + (c_visit+maxN)·c_scale·q̂)`, c_scale 0.1). If the 32-sim label search misplays these fork
+openings, the net imitates a wrong target however often it visits them.
+
+**Pre-work and what it did NOT show.** `harness/targets.py` splits one search into prior / completed-Q / label
+(`label_ok`, `prior_anchor` = search found it but the target kept the prior, `search_miss` = search never found
+it). On the final nets of seeds 11-20: labels right 0.998 on other states but 0.597 on the target states; deeper
+label search (200 sims) 0.949; a more Q-trusting target (c_scale 1.0) only 0.629. **The design review showed this
+contrast is circular** — the target set IS where those same final nets fail, so re-searching them measures the
+failure, not its cause — and it is recorded only as the hypothesis's motivation. A ladder of relabel budgets
+(`evidence/tictactoe_labels_ladder.json`) found NO "transferable" budget S* (trained labels ≥ 0.85 while an
+untrained net's search stays ≤ 0.65): at 96 sims trained 0.847 / search-alone 0.702; at 128, 0.898 / 0.765. **On
+tic-tac-toe, good labels and brute-force search cannot be told apart by budget** — so the planned S* arm (A3) was
+dropped by its own pre-stated rule, and any positive result here says "labels matter", not "a small budget fixes
+them".
+
+**Two adversarial reviews before any compute.** (1) Design review (4 critics + synthesis): the original 2×2 would
+have (a) passed its manipulation check on the INSTRUMENT alone (an untrained net at 200 sims labels 0.81 right),
+making "causal" a copy of the outcome; (b) tested deep-vs-base, which delivers almost no target labels (base
+buffers hold 0-14 target positions per seed); (c) had ~8-48% power for plausible effects at n=10 and alpha/6;
+(d) changed play, outcomes, game length and label sharpness together (train_sims is not a label-only treatment).
+Rebuilt: a label-ONLY treatment (new `reanalyze_sims`: relabel the buffer at 200 sims while self-play stays at
+32), exposure held high (mixed openings in every treatment arm), n=20, a DELIVERED-dose manipulation (the labels
+the net actually trained on, recorded by wrapping `train_net`), gates instead of alpha-spending certain claims,
+fixed-sequence alpha. (2) Implementation review (4 reviewers, every finding independently re-derived): 14
+confirmed defects fixed before launch — most importantly the confidence bound landed a hair past exact ties
+(0.5 = 3/6 …) so a clean fix would have read "moved" in ~4-11% of runs; plus relabeler noise parity without
+Gumbel, target-set mismatch between arms and report, measurement-fingerprint stamping, a silent no-op flag, and
+a dropped claim still emitted.
+
+**Also corrected in passing (h23 supersedes h22):** §C.44's "starvation is not the cause" was an underpowered
+null read as a refutation; the bounded claim is "exposure repairs at most ~35% of the blind spot".
+
+**The pre-registered design** (h24-h27, registered before any registered arm trained; disclosures in the notes):
+seeds 21-40; arms base / mixed / mixed_deep (train_sims 200) / mixed_R32 / mixed_R200 (reanalyze_frac 1.0 at 32 /
+200 sims); `harness.ceiling.c45_report` emits only: **G1** gate replication (h24); **G2** delivery gate per
+contrast (correct target labels trained on must rise; every seed trained on ≥1 target example; R200 delivered
+share ≥ 0.85); **G3** migration gate (upper bound on outside-target failure rise ≤ 0.5); **chain A** fixed
+sequence at α 0.04 — **A1** (h25) R200 vs R32 target correctness, **A2** (h26) R200 vs R32 raw prior at the
+target; **B1** (h27) mixed_deep vs mixed target correctness at α 0.01. A null reads REFUTED only when the 95%
+upper bound excludes half the control's shortfall; otherwise INCONCLUSIVE. Known, matched caveat: the reanalyze
+path caps its buffer in raw states (×8 augmented) where the plain path caps augmented examples, so the R arms keep
+more history than `mixed` — only R32 vs R200 is a claim, and they are matched.
+
+**Infrastructure this added** (all mutation-tested, every mutant killed): register — `inconclusive_proof` (a
+failed test-backed claim reads INCONCLUSIVE when its undecidability test passes; before, every failed proof read
+REFUTED) and data-timed pre-registration from §C.43; `harness/ceiling.py` — exact meet-in-the-middle sign-flip
+(n ≤ 30) inverted into one-sided confidence bounds, tie-robust bound comparisons, `ab_report` with explicit
+`alpha_each`, `dose`/`labels` manipulations that refuse missing fields, migration guard, target-set and
+measurement-fingerprint refusals, `c45_report`; `harness/targets.py` — `search_decomposition`, `target_error`,
+`record_training_labels`; `harness/coverage.py` — `raw_encoding_lookup`, `label_dose`; `harness/neural.py` —
+`reanalyze_sims` (byte-identical when unset or equal to sims, with or without Gumbel; refused without
+reanalyze). **Training-fingerprint era change:** tic-tac-toe c4b351282e91 → e92d405fae26, shared canary
+5b2e23684c22 → 845458df8455 (every §C.45 arm trains under the new era; no run was in flight). Suite 805 passed.
+
+**RESULTS (2026-09-23; verified before recording).** All five arms × 20 seeds completed under one training era
+(e92d405fae26) and one measurement stamp (71586a13e928); every run started after registration. A verification
+pass (4 independent verifiers + a completeness critic) re-derived every number with its own code (no harness
+import; exact 2^20 enumeration), retrained seeds of four arms bit-for-bit, and ran two exploratory control arms.
+
+| pre-registered claim | verdict | numbers |
+|---|---|---|
+| h24 G1 replication (3rd time) | **SUPPORTED** | 119/125 base failures in the 17-state target (3.9% of states), p=4e-168 |
+| h25 A1 200-sim relabelling raises target correctness | **SUPPORTED** → reframed by h28 | 0.706 → 0.859, +0.153, 19/20 seeds up, 0 down, p=1.9e-6, 95% lower bound +0.125; G2 delivered (correct share 0.387 → 0.958 on relabelled passes); G3 held (outside failures 0.25 → 0.30) |
+| h26 A2 … through the PRIOR | **SUPPORTED** | raw prior correct at the target 0.438 → 0.712, +0.274, p=9.5e-7, lower bound +0.235 |
+| h27 B1 deeper SELF-PLAY raises target correctness | **REFUTED** | 0.721 → 0.647, −0.074, 95% upper bound −0.024 (excludes any gain); migration gate FAILED (outside failures 0.20 → 1.35/seed) |
+
+| arm | 48-sim coverage | raw-policy coverage | target correct | target prior | seeds at coverage 1.0 |
+|---|---|---|---|---|---|
+| base | 0.9900 | 0.9486 | 0.650 | 0.309 | 0 |
+| mixed | 0.9921 | 0.9691 | 0.721 | 0.391 | 0 |
+| mixed_R32 | 0.9916 | 0.9730 | 0.706 | 0.438 | 0 |
+| **mixed_R200** | **0.9957** | **0.9827** | **0.859** | **0.712** | **2 / 20** |
+| mixed_deep | 0.9883 | 0.9486 | 0.647 | 0.435 | 0 |
+
+**What is established (and the bounded wording the register now carries).**
+- **Label quality is a PARTIAL cause (h28, supersedes h25's headline).** With exposure matched, near-exact policy
+  labels repair ~52% of the target shortfall (lower bound 42.5% — below the pre-registered SESOI of half) and ~49%
+  of the prior shortfall, through the PRIOR (A2; the value head is unchanged, R200 vs R32 +0.009). The blind spot is
+  halved, not removed: 48 of R200's 54 failures are still in the target (key 601 fails 13/20 seeds, 1608 15/20; at
+  601 even the 200-sim relabeller is only 0.65 correct). The attribution is clean: pass-1 training is byte-identical
+  across mixed/R32/R200 in 20/20 seeds, R32 reproduces plain Reanalyze byte-for-byte, exposure slightly FAVOURS R32.
+- **Deeper self-play is the wrong way to buy better labels (h27, h29, h30).** B1 refutes the RECIPE, not labels: its
+  delivery gate passed only through key 90 (without it the correct-label dose does not rise), it trained on 32%
+  fewer target examples, and 200-sim self-play after two random plies NEVER produces off-manifold positions where O
+  (to move) wins — zero in 20/20 seeds — and its decline sits on exactly those O-to-move states (p=3e-4). Hypothesis
+  (not shown): its value head learns "O to move in an odd position is lost".
+- **Milestone, stated at the level it holds:** 2 of 20 R200 seeds reach 48-sim coverage 1.0 — the first perfect
+  coverage on this track — but ZERO seeds in any arm reach raw-policy (net-level) coverage 1.0 (R200 best 0.9952),
+  so the §C.42 floor test is NOT met. At R200 the net-level gap now lies mostly OUTSIDE the 17-state target (5.95
+  vs 4.90 raw-policy failures per seed), because the target was chosen from 48-sim eval failures.
+
+**What is NOT established.** Transfer: 200 sims nearly exhausts 16 of the 17 target subtrees, an untrained net at
+200 sims already labels 0.795 of them right, and no "transferable" budget S* existed — so this says "near-exact
+labels work", not "a search budget Connect-4 can afford works"; there a relabel search leans on the value head,
+which no arm fixed. "Label quality is THE cause" — correct labels × enough exposure is the surviving post-hoc
+reading (neither alone sufficed: §C.44 exposure with wrong labels, B1 good labels at low exposure).
+
+**Exploratory, pending replication (not register-grade: patched one-off runs, no fingerprints).** A verifier ran
+two control arms on seeds 21-40: 200-sim relabels ONLY at the 17 target states (32 elsewhere) reproduced the entire
+A1 effect (0.862 vs R200 0.859); 200-sim relabels everywhere EXCEPT the target recovered only +0.038. Correct labels
+at the blind-spot states are sufficient for the repair — the obvious first claim to pre-register next.
+
+**Process lessons turned into guards this section.** (1) A design review BEFORE compute caught a manipulation check
+that passes on its instrument alone (t-level: `dose` reads the labels actually trained on). (2) An implementation
+review caught a confidence bound landing past exact ties (t29). (3) The register could not say "inconclusive" for a
+test-backed claim (t28). (4) The critic caught verification about to run without data timing — the §C.43 guard only
+works if `attach-data` precedes `verify` — now GUARDED (t30): every new test-backed claim must declare its data
+file (even one not produced yet, timed when verify first finds it) or `--reads-no-data`, so it cannot be forgotten.
+Suite 816 passed. (5) G2's pooled-count
+delivery gate could not see per-state delivery (h29) — the next design's gate must be per state.

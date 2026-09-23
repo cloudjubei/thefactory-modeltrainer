@@ -15,8 +15,7 @@ from __future__ import annotations
 import argparse
 import random
 
-from harness.coverage import (calibrate_reference, decided_frontier, optimal_actions, reachable_states,
-                              state_coverage)
+from harness.coverage import decided_frontier, optimal_actions, per_state_act, reachable_states, state_coverage
 from harness.registry import resolve_game
 
 
@@ -25,13 +24,10 @@ def _agent_act(game, spec, sims):
     if spec == "optimal":
         return lambda s: sorted(optimal_actions(game, s))[0]
     if spec == "random":
-        rng = random.Random(0)
-        return lambda s: rng.choice(game.legal_actions(s))
+        return lambda s: random.Random(repr(game.state_key(s))).choice(game.legal_actions(s))
     from harness.neural import AlphaZeroAgent, load_net
     net = load_net(spec, "cpu")
-    ag = AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=True, c_scale=0.1)
-    rng = random.Random(0)
-    return lambda s: ag.act(game, s, rng), net
+    return per_state_act(game, lambda: AlphaZeroAgent(net, sims=sims, solve_endgame=0, gumbel=True, c_scale=0.1)), net
 
 
 def main() -> None:

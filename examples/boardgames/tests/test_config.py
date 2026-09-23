@@ -147,7 +147,8 @@ def test_az_ceiling_levers_default_off_and_coerce(tmp_path):
     # §C.8 ceiling levers are OPT-IN: defaults must leave the net byte-identical to the pre-lever build.
     c = TrainerConfig(model_name="alphazero")
     assert c.az_global_pool == 0 and c.az_value_bins == 0
-    cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_global_pool": "1", "az_value_bins": "21"}))
+    cfg = load_config(_write(tmp_path, {"model_name": "alphazero", "az_global_pool": "1", "az_value_bins": "21",
+                                        "az_residual": "1"}))
     assert cfg.az_global_pool == 1 and cfg.az_value_bins == 21
     validate_config(cfg)
 
@@ -188,3 +189,12 @@ def test_az_league_levers_and_solver_free_assertion(tmp_path):
             validate_config(bad)
     validate_config(TrainerConfig(model_name="alphazero", az_league=1, az_endgame_tablebase=1,
                                   az_distill_positions=0))  # league + grow-as-you-go endgame table = OK
+
+
+def test_residual_only_net_settings_WITHOUT_az_residual_are_refused_not_silently_built_legacy():
+    import pytest
+    from harness.config import TrainerConfig, validate_config
+    for field, value in (("az_blocks", 3), ("az_head_hidden", 32), ("az_batchnorm", 1), ("az_global_pool", 1)):
+        with pytest.raises(ValueError, match="az_residual"):
+            validate_config(TrainerConfig(**{field: value}))
+        validate_config(TrainerConfig(**{field: value, "az_residual": 1}))

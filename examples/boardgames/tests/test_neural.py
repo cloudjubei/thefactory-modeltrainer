@@ -1092,3 +1092,336 @@ def test_connect4_augmentation_is_byte_identical_to_the_old_single_perm_path():
     assert torch.equal(aug[0][0], x) and aug[0][1] == pi
     assert torch.equal(aug[1][0], x[..., list(range(6, -1, -1))])
     assert aug[1][1] == pi[::-1]
+
+
+def _tiny_reanalyze_run(gumbel=True, **kw):
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    return train_alphazero(TicTacToe(), iterations=2, selfplay_games=3, sims=8, epochs=1, channels=8,
+                           net_arch={"channels": 8, "blocks": 1, "head_hidden": 8}, gumbel=gumbel, seed=5,
+                           reanalyze_frac=0.5, **kw)[0]
+
+
+def _same_weights(a, b):
+    import torch
+    return all(torch.equal(x, y) for x, y in zip(a.state_dict().values(), b.state_dict().values()))
+
+
+def test_reanalyze_sims_EQUAL_to_the_self_play_budget_trains_byte_identically_to_leaving_it_unset():
+    assert _same_weights(_tiny_reanalyze_run(), _tiny_reanalyze_run(reanalyze_sims=8))
+
+
+def test_reanalyze_sims_relabels_with_its_OWN_budget_while_self_play_keeps_the_learner_s(monkeypatch):
+    import harness.neural as neural
+    seen = []
+    real = neural.reanalyze_examples
+
+    def spy(game, agent, states, rng):
+        seen.append(agent.sims)
+        return real(game, agent, states, rng)
+    monkeypatch.setattr(neural, "reanalyze_examples", spy)
+    real_sp = neural.self_play_game
+    played = []
+
+    def spy_sp(game, agent, rng, **kw):
+        played.append(agent.sims)
+        return real_sp(game, agent, rng, **kw)
+    monkeypatch.setattr(neural, "self_play_game", spy_sp)
+    _tiny_reanalyze_run(reanalyze_sims=24)
+    assert seen and set(seen) == {24}
+    assert played and set(played) == {8}
+
+
+def test_a_different_relabel_budget_changes_what_is_learned():
+    assert not _same_weights(_tiny_reanalyze_run(), _tiny_reanalyze_run(reanalyze_sims=24))
+
+
+def test_reanalyze_sims_WITHOUT_reanalyze_is_refused_as_a_knob_that_would_do_nothing():
+    import pytest
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    with pytest.raises(ValueError, match="reanalyze_frac"):
+        train_alphazero(TicTacToe(), iterations=1, selfplay_games=1, sims=8, reanalyze_sims=24)
+
+
+def test_reanalyze_sims_equal_to_sims_is_byte_identical_WITHOUT_gumbel_too_the_relabeler_keeps_the_learner_s_noise():
+    assert _same_weights(_tiny_reanalyze_run(gumbel=False), _tiny_reanalyze_run(gumbel=False, reanalyze_sims=8))
+
+
+def test_a_separate_relabeler_s_endgame_solves_are_counted_in_the_iteration_s_history():
+    from games.connect4 import Connect4
+    from harness.neural import train_alphazero
+    from harness.tablebase import Tablebase
+
+    def run(**kw):
+        _net, hist = train_alphazero(Connect4(), iterations=2, selfplay_games=2, sims=8, epochs=1, channels=8,
+                                     net_arch={"channels": 8, "blocks": 1, "head_hidden": 8}, gumbel=True, seed=3,
+                                     reanalyze_frac=0.5, endgame_tb=Tablebase(), endgame_max_empty=6, **kw)
+        return [(h.get("endgame_solves"), h.get("endgame_hits")) for h in hist]
+    assert run() == run(reanalyze_sims=8)
+
+
+def test_value_loss_is_EXACTLY_the_old_mse_when_no_value_target_is_masked():
+    from harness.neural import _value_loss
+    value = torch.tensor([[0.3], [-0.2], [0.9]], requires_grad=True)
+    target = torch.tensor([[1.0], [0.0], [-1.0]])
+    assert torch.equal(_value_loss(value, target), F.mse_loss(value, target))
+
+
+def test_a_NaN_value_target_is_masked_out_of_the_value_loss():
+    from harness.neural import _value_loss
+    value = torch.tensor([[0.3], [-0.2], [0.9]], requires_grad=True)
+    target = torch.tensor([[1.0], [float("nan")], [-1.0]])
+    expected = ((0.3 - 1.0) ** 2 + (0.9 + 1.0) ** 2) / 2
+    loss = _value_loss(value, target)
+    assert abs(float(loss) - expected) < 1e-6
+    loss.backward()
+    assert float(value.grad[1, 0]) == 0.0 and not torch.isnan(value.grad).any()
+
+
+def test_a_batch_of_ONLY_masked_values_contributes_zero_value_loss_and_no_NaN_gradient():
+    from harness.neural import _value_loss
+    value = torch.tensor([[0.3], [-0.2]], requires_grad=True)
+    loss = _value_loss(value, torch.tensor([[float("nan")], [float("nan")]]))
+    loss.backward()
+    assert float(loss) == 0.0 and not torch.isnan(value.grad).any()
+
+
+def test_a_policy_only_example_still_trains_the_policy():
+    from games.tictactoe import TicTacToe
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    g = TicTacToe()
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1, "head_hidden": 8}, g))
+    s = g.initial_state()
+    pi = [0.0] * 9
+    pi[4] = 1.0
+    train_net(net, [(encode(g, s), pi, float("nan"))] * 32, epochs=20, batch_size=8, lr=1e-2, device="cpu")
+    net.eval()
+    with torch.no_grad():
+        logits, value = net(encode(g, s).unsqueeze(0))
+    assert int(logits[0].argmax()) == 4 and not torch.isnan(value).any()
+
+
+def test_masked_value_targets_are_refused_with_a_CATEGORICAL_value_head():
+    from games.tictactoe import TicTacToe
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    g = TicTacToe()
+    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1, "head_hidden": 8, "value_bins": 11}, g))
+    with pytest.raises(ValueError, match="categorical"):
+        train_net(net, [(encode(g, g.initial_state()), [1 / 9] * 9, float("nan"))], epochs=1, batch_size=8,
+                  lr=1e-3, device="cpu")
+
+
+# --- §C.46: steps-matched training, one-ply siblings, oracle-label hook -------------------------------------------
+
+
+def _ttt_examples(n, seed=0):
+    import random as _random
+    from games.tictactoe import TicTacToe
+    from harness.coverage import reachable_states
+    from harness.neural import encode
+    g = TicTacToe()
+    states, _ = reachable_states(g, exact=True)
+    rng = _random.Random(seed)
+    out = []
+    for s in rng.sample(states, n):
+        pi = [0.0] * 9
+        pi[rng.choice(g.legal_actions(s))] = 1.0
+        out.append((encode(g, s), pi, rng.choice([-1.0, 0.0, 1.0])))
+    return g, out
+
+
+def _fresh_net(g, seed=0):
+    from harness.neural import Connect4Net, arch_for_game
+    torch.manual_seed(seed)
+    return Connect4Net(**arch_for_game({"channels": 8}, g))
+
+
+def test_epoch_examples_unset_or_equal_to_n_trains_bit_identically():
+    from harness.neural import train_net
+    g, ex = _ttt_examples(40)
+    nets = [_fresh_net(g) for _ in range(3)]
+    for net, kw in zip(nets, ({}, {"epoch_examples": None}, {"epoch_examples": 40})):
+        torch.manual_seed(7)
+        train_net(net, ex, epochs=3, batch_size=8, lr=1e-3, device="cpu", **kw)
+    assert _same_weights(nets[0], nets[1]) and _same_weights(nets[0], nets[2])
+
+
+def test_epoch_examples_caps_the_batches_each_epoch_takes():
+    from harness.neural import train_net
+    g, ex = _ttt_examples(40)
+    net = _fresh_net(g)
+    calls = []
+    real = net.forward_train
+    net.forward_train = lambda x: (calls.append(x.shape[0]), real(x))[1]
+    train_net(net, ex, epochs=3, batch_size=8, lr=1e-3, device="cpu", epoch_examples=20)
+    assert len(calls) == 3 * 3 and sum(calls) == 3 * 20
+
+
+def test_epoch_examples_out_of_range_is_refused():
+    from harness.neural import train_net
+    g, ex = _ttt_examples(10)
+    for bad in (0, 11):
+        with pytest.raises(ValueError, match="epoch_examples"):
+            train_net(_fresh_net(g), ex, epochs=1, batch_size=8, lr=1e-3, device="cpu", epoch_examples=bad)
+
+
+def test_reanalyze_examples_REFUSES_a_terminal_state_instead_of_silently_misaligning_labels():
+    from games.tictactoe import TicTacToe, TTTState
+    from harness.neural import AlphaZeroAgent, reanalyze_examples
+    g = TicTacToe()
+    done = TTTState(board=(1, 1, 1, 2, 2, 0, 0, 0, 0), to_move=1, winner=0, done=True)
+    agent = AlphaZeroAgent(_fresh_net(g), sims=4, gumbel=True)
+    with pytest.raises(ValueError, match="terminal"):
+        reanalyze_examples(g, agent, [g.initial_state(), done, g.initial_state()], random.Random(0))
+
+
+def _brute_siblings(g, states, key_fn, held=lambda k: False):
+    parents = {key_fn(s) for s in states}
+    seen, out = set(), []
+    for s in states:
+        for a in g.legal_actions(s):
+            c = g.step(s, a)
+            k = key_fn(c)
+            if g.is_terminal(c) or k in parents or held(k) or k in seen:
+                continue
+            seen.add(k)
+            out.append(c)
+    return out
+
+
+def test_one_ply_siblings_are_the_new_non_terminal_one_move_deviations_in_a_fixed_order():
+    from games.tictactoe import TicTacToe, TTTState
+    from harness.neural import one_ply_siblings
+    g = TicTacToe()
+    a = g.initial_state()
+    b = g.step(a, 4)
+    c = TTTState(board=(1, 1, 0, 0, 2, 2, 0, 0, 0), to_move=0, winner=None, done=False)
+    for states in ([a], [a, b], [c, b, a], [b, b]):
+        got, stats = one_ply_siblings(g, states, g.canonical_key)
+        want = _brute_siblings(g, states, g.canonical_key)
+        assert got == want
+        assert stats["added"] == len(want)
+    _, stats = one_ply_siblings(g, [c], g.canonical_key)
+    assert stats["terminal_skipped"] == 1
+    _, stats = one_ply_siblings(g, [a, b], g.canonical_key)
+    assert stats["recorded_skipped"] >= 1
+
+
+def test_held_out_sibling_keys_are_never_added_and_are_counted():
+    import hashlib
+    from harness.neural import one_ply_siblings
+    from games.tictactoe import TicTacToe
+    g = TicTacToe()
+    states = [g.initial_state(), g.step(g.initial_state(), 0), g.step(g.initial_state(), 4)]
+    hold = {"mod": 2, "salt": "c46"}
+
+    def held(k):
+        return int(hashlib.sha256(f"c46:{k!r}".encode()).hexdigest(), 16) % 2 == 0
+    got, stats = one_ply_siblings(g, states, g.canonical_key, holdout=hold)
+    assert got == _brute_siblings(g, states, g.canonical_key, held)
+    assert stats["holdout_skipped"] > 0 and not any(held(g.canonical_key(s)) for s in got)
+    with pytest.raises(ValueError, match="mod"):
+        one_ply_siblings(g, states, g.canonical_key, holdout={"mod": 1, "salt": "x"})
+
+
+def _tiny_c46(**kw):
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    return train_alphazero(TicTacToe(), iterations=kw.pop("iterations", 2), selfplay_games=3, sims=8, epochs=1,
+                           channels=8, net_arch={"channels": 8}, gumbel=True, seed=5, reanalyze_frac=1.0, **kw)
+
+
+def test_siblings_change_NOTHING_in_iteration_zero_so_pass_one_stays_paired(monkeypatch):
+    import harness.neural as neural
+    assert _same_weights(_tiny_c46(iterations=1)[0], _tiny_c46(iterations=1, reanalyze_siblings=True)[0])
+    shas = {}
+    real = neural.train_net
+    for arm, kw in (("off", {}), ("on", {"reanalyze_siblings": True})):
+        seen = []
+
+        def spy(net, examples, *a, **k):
+            out = real(net, examples, *a, **k)
+            seen.append(tuple(float(p.sum()) for p in net.state_dict().values()))
+            return out
+        monkeypatch.setattr(neural, "train_net", spy)
+        _tiny_c46(**kw)
+        shas[arm] = seen
+    assert shas["off"][0] == shas["on"][0] and shas["off"][1] != shas["on"][1]
+
+
+def test_siblings_enter_training_policy_only_and_are_recorded_in_the_history():
+    net, hist, buf = _tiny_c46(reanalyze_siblings=True, return_buffer=True)
+    it2 = hist[1]
+    assert it2["siblings"] > 0 and it2["nan_value_examples"] == it2["siblings"] * 8
+    assert sum(1 for e in buf if e[2] != e[2]) == it2["nan_value_examples"]
+    assert hist[0]["siblings"] == 0
+    for key in ("selfplay_states", "state_buffer", "evicted", "train_examples", "epoch_examples", "steps",
+                "sibling_terminal_skipped", "sibling_recorded_skipped", "sibling_holdout_skipped"):
+        assert key in it2
+
+
+def test_steps_matched_keeps_the_optimisation_steps_of_the_self_play_rows_alone():
+    _net, hist = _tiny_c46(reanalyze_siblings=True, steps_matched=True)
+    it2 = hist[1]
+    assert it2["epoch_examples"] == it2["train_examples"] - it2["nan_value_examples"]
+    _net, plain = _tiny_c46(reanalyze_siblings=True)
+    assert plain[1]["epoch_examples"] == plain[1]["train_examples"]
+
+
+def _exact(game, state):
+    from harness.coverage import optimal_actions
+    opt = optimal_actions(game, state)
+    return [1.0 / len(opt) if a in opt else 0.0 for a in range(game.num_actions)]
+
+
+def test_a_policy_target_fn_replaces_the_search_label_and_is_validated():
+    from games.tictactoe import TicTacToe
+    assert _same_weights(_tiny_c46(iterations=1)[0], _tiny_c46(iterations=1, policy_target_fn=_exact)[0])
+    _net, _h, buf = _tiny_c46(policy_target_fn=_exact, return_buffer=True)
+    assert all(abs(sum(e[1]) - 1) < 1e-6 for e in buf)
+    for bad in (lambda g, s: [1.0] * 9, lambda g, s: [1.0] + [0.0] * 7, lambda g, s: [0.0] * 8 + [1.0]):
+        with pytest.raises(ValueError, match="policy_target_fn"):
+            _tiny_c46(policy_target_fn=bad)
+
+
+def test_c46_knobs_that_would_silently_do_nothing_or_corrupt_are_refused():
+    cases = [({"reanalyze_siblings": True, "reanalyze_frac": 0.5}, "reanalyze_frac"),
+             ({"steps_matched": True}, "siblings"),
+             ({"sibling_holdout": {"mod": 2, "salt": "x"}}, "siblings"),
+             ({"reanalyze_siblings": True, "sibling_holdout": {"mod": 1, "salt": "x"}}, "mod"),
+             ({"policy_target_fn": _exact, "reanalyze_sims": 16}, "reanalyze_sims"),
+             ({"policy_target_fn": _exact, "reanalyze_frac": 0.5}, "reanalyze_frac"),
+             ({"refutation_frac": 0.5}, "refutation")]
+    for kw, msg in cases:
+        frac = kw.pop("reanalyze_frac", 1.0)
+        from games.tictactoe import TicTacToe
+        from harness.neural import train_alphazero
+        with pytest.raises(ValueError, match=msg):
+            train_alphazero(TicTacToe(), iterations=1, selfplay_games=1, sims=4, epochs=1, net_arch={"channels": 8},
+                            gumbel=True, seed=1, reanalyze_frac=frac, **kw)
+
+
+def test_the_training_path_never_imports_measurement_or_oracle_code():
+    import ast
+    from pathlib import Path
+    tree = ast.parse(Path("harness/neural.py").read_text())
+    names = {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    assert not ({"harness.targets", "harness.coverage", "harness.ceiling"} & names)
+    assert not any(k in Path("harness/scaled_run.py").read_text()
+                   for k in ("reanalyze_siblings", "policy_target_fn", "steps_matched", "sibling_holdout"))
+
+
+def test_siblings_are_refused_with_a_categorical_value_head_or_a_distilled_anchor():
+    from games.tictactoe import TicTacToe
+    from harness.neural import encode, train_alphazero
+    g = TicTacToe()
+    base = dict(iterations=1, selfplay_games=1, sims=4, epochs=1, gumbel=True, seed=1, reanalyze_frac=1.0,
+                reanalyze_siblings=True)
+    with pytest.raises(ValueError, match="value target"):
+        train_alphazero(g, net_arch={"channels": 8, "value_bins": 11}, **base)
+    corpus = [(encode(g, g.initial_state()), [1 / 9] * 9, 0.0)]
+    with pytest.raises(ValueError, match="distilled"):
+        train_alphazero(g, net_arch={"channels": 8}, distill_corpus=corpus, **base)
