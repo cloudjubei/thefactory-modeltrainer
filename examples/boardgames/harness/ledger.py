@@ -200,7 +200,7 @@ class Ledger:
         return e
 
     def compare(self, a: str, b: str, allow_mixed_provenance: bool = False,
-                treatment: str = "config") -> dict:
+                treatment: str = "config", record: bool = True) -> dict:
         """Paired comparison drawn from the ledger, with all the bookkeeping checks enforced.
 
         `treatment` names WHICH dimension is under test, because the answer inverts the code check. Normally the
@@ -284,12 +284,15 @@ class Ledger:
         caveats = {k: v for k, v in (("provenance", warning), ("code", code_warning),
                                      ("completeness", completeness_warning),
                                      ("deployment", deployment_warning)) if v}
-        self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"],
-                                  "diff": ea["rate"] - eb["rate"],
-                                  "significant": res["p"] <= 0.05 / n_fam,
-                                  "caveats": caveats,
-                                  "drawn_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")})
-        self._save()
+        # record=False is a PURE READ (the cross-game matrix's assemble path): it must not append a row or tighten
+        # the family's multiplicity, or merely VIEWING the matrix would inflate every cell's corrected alpha.
+        if record:
+            self._comparisons.append({"a": a, "b": b, "roots_id": family, "p": res["p"],
+                                      "diff": ea["rate"] - eb["rate"],
+                                      "significant": res["p"] <= 0.05 / n_fam,
+                                      "caveats": caveats,
+                                      "drawn_at": datetime.now(timezone.utc).isoformat(timespec="microseconds")})
+            self._save()
         return {**res,
                 "a": a, "b": b, "rate_a": ea["rate"], "rate_b": eb["rate"],
                 "budget_matched": budget_matched,

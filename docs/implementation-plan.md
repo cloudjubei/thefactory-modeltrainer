@@ -688,7 +688,7 @@ way to build such models. Literature-grounded (8-agent survey, folded here from 
    rigorously PROVE a produced model/process is good (the evaluation spine below), publish that evidence, and loop:
    survey → hypothesise → test → prove → improve every area → add a game → repeat.
 
-**GOAL MET — Exploration produces a PROVEN near-optimal Connect-4 model (2026-08-25).** Trigger `Exploration → Start`;
+**GOAL MET (BOOKAGENT ONLY — see §C.41 correction) — Exploration produces a PROVEN near-optimal Connect-4 model (2026-08-25).** Trigger `Exploration → Start`;
 the autopilot now runs `improve` (the validated recipe) → `play-off` → **`score`** (new finalize step → the
 `process-eval` scorecard on the champion). The scorecard's HONEST verdict on the champion: **"near-optimal
 (exact-proven)" — converts 8/8 (and 16/16 at larger K) PROVEN forced wins vs the EXACT solver** (exact, not a proxy,
@@ -2853,3 +2853,205 @@ automorphisms the grid enumerator cannot — still proven, never trusted.
 
 **Queue after this:** cross-game matrix runner (run the same process across all five games and tabulate);
 othello's D4 (a two-line hook addition). No-compute throughout; a third-game TRAINING run remains the user's call.
+
+
+#### §C.38 — CROSS-GAME REGRESSION MATRIX: the payoff §C.20 was recorded for (2026-09-22)
+
+With five games encoded and the unified encoding done, the matrix §C.20 was gated on is built: rows = a change,
+columns = games, cells = a paired delta, and a DERIVED verdict — generalises / local / contested / null /
+inconclusive / single_game — that says whether a lever transfers. `harness/matrix.py` (the tested capability) +
+`scripts/cross_game_matrix.py` (a chat-reachable runner: `sweep` trains and measures, `assemble` reads a ledger).
+
+It was built, then handed to a 4-dimension adversarial review that CONFIRMED 16 findings; the material ones were
+real and are fixed:
+- **The generalisation bar was over-corrected.** "Every game moved" is a CONJUNCTION — an intersection-union
+  test at alpha (Berger's min-test; the reason TOST uses alpha not alpha/2), NOT Bonferroni alpha/N. The original
+  applied alpha/N to both, so a genuinely transferable lever read "inconclusive" — the opposite of the truth.
+  Now the union question (did ANY game move -> local/contested) keeps alpha/N; the conjunction uses alpha (t22).
+- **"null" was read from the point estimate**, the absence-of-evidence fallacy the module rails against. Now a
+  row is `null` only when every cell's CI lies inside its null band (a TOST equivalence); a small diff with a
+  wide CI is `inconclusive` (t22).
+- **The FATAL one: a single training run per arm** measured opening variance for one net vs one net — the exact
+  single-net confound §C.20 exists to kill (§C.19). Now the unit of replication is the TRAINING RUN:
+  `cell_from_seed_deltas` tests the per-seed paired deltas between seeds with a t-test (new, table-validated
+  `student_t_two_sided_p`/`t_critical` in measurement.py — the codebase had chi-square but no t). One seed can
+  never be significant and carries a standing caveat (t23).
+- Plus: N==1 reads `single_game` not `generalises`; `assemble` is a pure read (`Ledger.compare(record=False)`, so
+  viewing the matrix never tightens the family alpha); exploitability `roots_id` now carries the game name (so
+  the cross-family guard and L4's name-collision guard work across games); per-arm eval operator; a saturation
+  caveat; fail-fast game resolution and per-game error isolation. Caveats propagate into every cell (L6).
+
+A smoke sweep (augment lever, 2 seeds, connect4+tictactoe, tiny nets) runs end-to-end and returns INCONCLUSIVE
+with every cell caveated SMOKE SCALE — the honest read at that power. Nothing here touches a training module, so
+the era stays 1bab977cec75. This is also the first labelled data shape for the §C.6 meta-selector. The matrix is
+ready for a real sweep whenever the compute is spent.
+
+
+#### §C.39 — OTHELLO's DIHEDRAL GROUP, and all five games now carry verified symmetries (2026-09-22)
+
+The last deferred symmetry hook: othello's D4. `transform_state` relabels the 64-cell board, `transform_action`
+maps a cell to its image and PASS->PASS; `find_symmetries` verifies all 8 dihedral against othello's own
+dynamics (the flank-capture rule is direction-agnostic, so every rotation/reflection of a position preserves
+value). Registered t24. The full table now:
+
+| game | verified symmetries |
+|---|---|
+| connect4 | {id, flip_h} (2) |
+| tictactoe | full D4 (8) |
+| checkers | {id, flip_h} (2) |
+| othello | full D4 (8) |
+| nine men's morris | D4 x ring-swap (16) |
+
+This MOVES othello's own era (1bab977cec75 -> f180acfa235f) because games/othello.py folds into its fingerprint
+AND othello training now augments 8x where it was identity-only — a real, intended improvement. The shared-module
+canary `training_fingerprint(None) = 5b2e23684c22` is unchanged, so no training-path drift; only othello's own era
+moved, exactly as the per-game fingerprint is designed to isolate. The queue §C.20 recorded is now fully cleared:
+augmenter (§C.35), verified finder (§C.36), the fifth game (§C.37), the matrix (§C.38), and every game's symmetries.
+
+
+#### §C.40 — THE FIRST REAL CROSS-GAME SWEEP: augment is consistent but underpowered (2026-09-22)
+
+The matrix's first real run (the lever = symmetry AUGMENTATION on/off, 5 training seeds, all five games, paired
+exploitability vs a UCT-48 refuter):
+
+| game | verified symmetry | augment Δ | p | 95% CI |
+|---|---|---|---|---|
+| othello | 8x | +0.069 | 0.18 | [-0.049, +0.186] |
+| tictactoe | 8x | +0.050 | **0.016** | [+0.015, +0.085] |
+| connect4 | 2x | +0.044 | 0.094 | [-0.012, +0.099] |
+| checkers | 2x | +0.013 | 0.51 | [-0.036, +0.061] |
+| ninemensmorris | 16x | +0.009 | 0.30 | [-0.013, +0.031] |
+
+**Verdict: INCONCLUSIVE** (0/5 clear the union bar alpha/5=0.01; only tictactoe clears the per-cell IUT bar
+alpha=0.05, so not `generalises`). The DIRECTION is unanimous — augment helped all five games — and among the
+games the metric can measure (excluding morris), the effect tracks symmetry richness: the 8x games move most,
+the 2x games least. But at 5 seeds the +0.01-0.07 effects are underpowered (the review's `required_seeds ~= 7`
+was right), so the matrix correctly refuses to call it generalisation.
+
+This is the instrument working as the review forced it to: the naive "5/5 positive -> generalises!" overclaim is
+exactly what the IUT-at-alpha + between-seed-t-test rigor prevents. The honest read is a consistent positive
+direction, not yet statistically resolved.
+
+**Dogfooding find:** morris was NOT flagged saturated though it is clearly ceiling-bound (all rates 0.97-1.0 —
+both arms almost never lose to the bounded refuter in a draw-heavy game). The saturation threshold (`lo>0.98`)
+missed it by 0.011; `is_saturated` moved into the tested capability with a 0.95 threshold and a mutation-tested
+guard. Morris's number was honest anyway (tiny near-null effect), just unlabelled.
+
+**Pre-registered follow-up** (when compute is spent): rerun at >=7-10 training seeds to resolve the ~0.05 effect
+on the 8x games; for morris, use a STRONGER refuter (or a win-rate metric, not not-losing) so the cell can
+discriminate. No training-module was touched; othello's era is f180acfa235f, the shared canary 5b2e23684c22.
+
+
+#### §C.41 — OPTIMALITY MEASURED: the SOLVED gate, and coverage as the north-star yardstick (2026-09-23)
+
+Prompted by a scrutinous audit (the track had drifted to RELATIVE transfer/efficiency on Othello and never
+certified ABSOLUTE optimality on the calibration game), two things were done.
+
+**(1) The SOLVED gate was actually run on the best trained net** (ab302_gpool_s0 ckpt_16, opening_value 0.979).
+The pure from-empty-board gate (net P1 vs the EXACT solver defending from move 1) is IMPRACTICAL — the solver
+hits the opening wall (minutes per defensive move), which is exactly why the plan marked it opt-in/SLOW and it
+had never been run. The feasible, more diagnostic read (forced-win conversion vs EXACT defence by distance from
+the opening, sims=64):
+
+| position | proven-win conversion |
+|---|---|
+| 34 stones in (deep endgame) | 0.917 |
+| 30 stones in | 0.958 |
+| 26 stones in | 0.958 |
+| 22 stones in (midgame) | 0.917 |
+
+plus state-space coverage 1.000 on sampled >=30-stone states. **Honest verdict: the net is near-optimal in the
+ENDGAME (coverage 1.0 deep), but demonstrably NOT optimal at full-game play — it throws away ~4-8% of PROVEN
+wins whenever a longer correct sequence is required — and the OPENING (the real gap) stays unmeasured because
+solving there is the wall.** This is LESS damning than the "loses ~30% as P1" proxy read (that was confounded by
+random lost openings and a depth-8 proxy), but the plan's own SOLVED bar (100% from the opening vs the exact
+solver) is still not met, and line 691's "GOAL MET — PROVEN near-optimal Connect-4 model" refers to the BOOKAGENT
+(the solver crutch the north star excludes), NOT a trained net.
+
+**(2) OPTIMALITY-AS-COVERAGE (harness/coverage.py, t25) — a measurable definition of "how close to perfect
+play", per user direction.** Distance-to-optimal = the SYMMETRY-REDUCED fraction of reachable states where the
+model's move is in the solver's optimal set (`state_coverage`), with a per-ply breakdown that localizes the
+failure, plus the `decided_frontier` (the share of states from which a non-loss is PROVEN — the subtree beyond a
+proven win needs no search, the pruning the user asked to measure). EXACT for enumerable games (tictactoe,
+collapsed by the verified §C.36 symmetry group: optimal agent 1.0, random <1.0), SAMPLED for large ones.
+
+**NORTH-STAR ADDENDUM (research path).** For solver-free games (othello, and the chess-scale target) there is no
+optimal set to grade against. The path to make "how close to perfect play" MEASURABLE there: replace the solver
+with a STRONG REFERENCE (a much deeper search, or a learned approx-exploitability adversary), and CALIBRATE that
+proxy against the exact solver on connect4/tictactoe so its false-optimal rate is known and published, before
+trusting it off-solver. Optimality then becomes a coverage number on any game — exact where a solver exists,
+bounded where it does not. This is added to the north star as an explicit path to build, not a solved problem.
+harness/coverage.py + measurement.py are not training modules; era unchanged.
+
+**(3) END-TO-END DEMONSTRATION + THE CEILING, MEASURED (2026-09-23).** The scorecard was run through the whole
+loop — generic process → trained model → certified distance-to-optimal — on the one game small enough to
+enumerate EXACTLY (tictactoe, 627 canonical states, `complete=True`):
+
+| agent | coverage | decided-kept | weakest ply |
+|---|---|---|---|
+| optimal (solver) | 1.0000 | 1.000 | — |
+| random | 0.6029 | 0.487 | ply 1 (0.33) |
+| trained ×2 | 0.9904 | 0.998 | ply 2 (0.917) |
+| trained ×6 | 0.9904 | 1.000 | ply 2 (0.917) |
+| trained ×14 | 0.9841 | 0.993 | ply 2 (0.917) |
+
+**Even on tic-tac-toe the process plateaus at ~0.99 and never reaches certified-perfect — and MORE training does
+not close it, it slightly REGRESSES (the model drifts; opening_value +0.49→+0.01). The miss is LOCALIZED and
+PERSISTENT: ply 2 stuck at 0.917 regardless of budget** — a specific ~8% of midgame positions misplayed no matter
+how long it trains. This is exactly why the proxy metrics misled: `opening_value` looked fine, coverage says
+"99%, not 100%, stuck at ply 2".
+
+The matching Connect-4 test (§C.41 step 3): a PURE solver-free run (14 iters, opening-diverse, NO endgame-solver
+crutch) converts proven midgame wins at 0.71–0.88 — at/BELOW the endgame-TAUGHT ab302 baseline (~0.92). So (a) the
+exact-endgame teaching the strong runs used was doing real work — the pure solver-free process is materially
+further from optimal; (b) more training + opening diversity did NOT close the gap. Both games show the SAME thing:
+this AlphaZero recipe gets close to optimal and stops, with a localized midgame blind spot. That is now a MEASURED
+claim, not a proxy. (Caveats: n=1 seed each, tictactoe drift and connect4 solver-free-vs-taught want matched
+≥7-seed runs to firm up — but "more training closes it" is refuted, and the ceiling is real.)
+
+
+#### §C.42 — FORWARD: the north star meets a measured ceiling — the plan from here (2026-09-23)
+
+The instrument work is done; the honest picture it produced reframes the whole effort. **The generic solver-free
+process does not reach certified-optimal play on ANY game — not even tic-tac-toe — and the failure is a specific,
+persistent MIDGAME blind spot that more training does not fix (§C.41).** Capacity is not the lever (302K ≈ 1.79M,
+refuted §C.15), compute-to-convergence is not the lever (both games plateau then drift), and the strong Connect-4
+numbers leaned on a solver crutch the north star excludes. So the forward question is no longer "train more" — it
+is **why does this recipe stop ~1–8% short in the midgame, and is that fixable or intrinsic?** — and for the first
+time it is directly measurable via per-ply coverage.
+
+**The central open question (now measurable):** is the midgame ceiling (a) a fixable property of the recipe — the
+usual suspects are train-time search depth (the net is asked to imitate a shallow search), value/policy target
+quality on midgame states, or a value↔policy conflict there — or (b) an intrinsic ceiling of solver-free
+AlphaZero at this scale? The per-ply coverage breakdown + `decided_frontier` localize the failing states exactly,
+so this is an experiment now, not a guess.
+
+**Prioritized forward work** (measurement is cheap and unblocks the rest; every A/B is coverage-scored, seed-
+replicated, and read through the cross-game matrix + the register):
+1. **Localize the ceiling.** Dump the specific midgame positions where coverage fails (tictactoe ply-2 first,
+   trivially enumerable), across ≥7 seeds — is the blind spot the SAME positions every seed (a systematic recipe
+   flaw) or seed-noise? This single cheap read decides whether (a) or (b) above is even plausible.
+2. **Matched multi-seed coverage A/Bs** to firm up the two n=1 results: pure solver-free vs endgame-taught
+   (Connect-4), and tictactoe drift, at ≥7 seeds under identical conditions — resolves the ~1–8% against the
+   seed floor (~0.036).
+3. **Ablate the suspected causes**, each a coverage-scored A/B on the failing states: train-time sims (deeper
+   search targets), value-target source (n-step vs outcome vs reanalyze) on midgame states, and mixed-opening
+   coverage focused on the ply where it breaks. The cross-game matrix (§C.38) says whether a fix GENERALISES.
+4. **Build the calibrated solver-free reference** (§C.41 addendum) so the ceiling can be tracked on Othello and
+   the chess-scale target — the only way "how close to perfect play" becomes a number where no solver exists.
+5. **Promote the coverage scorecard to a first-class per-checkpoint metric** (as a post-hoc tool over checkpoints,
+   OUTSIDE the fingerprinted training path per §C.17a rule 2), retiring `opening_value`/late-corpus proxies the
+   §C.24 audit and §C.41 both showed mislead.
+
+**Measurable success criteria (the bar, restated in coverage terms):** (i) certified coverage → 1.0 on tic-tac-toe
+— the floor test: a process that cannot solve the smallest game cannot be called near-optimal-generic; (ii)
+Connect-4 solver-free midgame proven-win conversion → ≥0.99; (iii) a calibrated reference whose false-optimal rate
+on solvable games is published, so Othello-and-beyond optimality is a bounded coverage number. **Explicitly OFF
+the table:** more parameters, more raw compute without a localized cause, and any proxy (loss, opening_value,
+late-corpus move-match) standing in for coverage.
+
+**North-star restatement.** The literal "certified near-optimal, generic, solver-free" is partly self-contradictory
+— certification needs a solver, which only 2 of 5 games have — so the working north star is: *drive certified
+coverage → 1.0 where a solver exists (tic-tac-toe, then Connect-4), and elsewhere drive a CALIBRATED coverage
+bound as high as it will go, on the unchanged process.* Perfect play on the solvable games is the falsifiable
+milestone the whole program now aims at, because the coverage instrument finally makes "how close" a fact.

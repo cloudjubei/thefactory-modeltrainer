@@ -13,7 +13,7 @@ a pass counter. No `symmetries()` yet: the augmenter is column-permutation-only 
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from harness.rules import flank, grid_rays, majority
 
@@ -64,6 +64,25 @@ class Othello:
 
     def current_player(self, state: OthelloState) -> int:
         return state.to_move
+
+    _symmetries_cache = None
+
+    def symmetries(self):
+        """VERIFIED symmetries (the board's dihedral group), proven against othello's own dynamics — the
+        flanking-capture rule is direction-agnostic, so every rotation/reflection of a POSITION has the same
+        value. find_symmetries refuses any candidate that does not actually commute."""
+        cls = type(self)
+        if cls._symmetries_cache is None:
+            from harness.symmetry import find_symmetries
+            cls._symmetries_cache = find_symmetries(self)
+        return cls._symmetries_cache
+
+    def transform_state(self, state, iso):
+        nb = tuple(state.board[iso.cell_perm[d]] for d in range(CELLS))
+        return replace(state, board=nb)
+
+    def transform_action(self, action, iso):
+        return PASS if action == PASS else iso.cell_image(action)   # a pass is a pass under any symmetry
 
     def legal_actions(self, state: OthelloState) -> list[int]:
         if state.done:

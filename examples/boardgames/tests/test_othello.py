@@ -124,10 +124,21 @@ def test_render_and_labels():
     assert g.state_key(s) == (s.board, 0)
 
 
-def test_othello_does_not_expose_symmetries_yet():
-    # The augmenter now takes (cell_perm, action_perm) pairs, so othello's 8-fold dihedral symmetry is now
-    # EXPRESSIBLE — it is simply not implemented yet (a deferred unit), so none are exposed.
-    assert not hasattr(Othello(), "symmetries")
+def test_othello_symmetry_transform_commutes_on_a_played_position():
+    import random as _random
+
+    from harness.symmetry import dihedral_isometries
+    from games.othello import Othello
+
+    g = Othello()
+    s0 = g.initial_state(_random.Random(0))
+    for _ in range(10):
+        if g.is_terminal(s0):
+            break
+        s0 = g.step(s0, _random.choice(g.legal_actions(s0)))
+    rot = next(i for i in dihedral_isometries(8, 8) if i.name == "rot90")
+    for a in g.legal_actions(s0):
+        assert g.transform_state(g.step(s0, a), rot) == g.step(g.transform_state(s0, rot), g.transform_action(a, rot))
 
 
 def test_generic_harness_agents_play_othello():
@@ -150,3 +161,17 @@ def test_generic_harness_agents_play_othello():
         plies += 1
         assert plies < 200
     assert g.returns(s) in ([1.0, -1.0], [-1.0, 1.0], [0.0, 0.0])
+
+
+def test_othello_has_the_full_verified_dihedral_group():
+    # replaces the old "no symmetries yet": the D4 hooks are in, and the finder proves all 8 against the rules.
+    from games.othello import Othello, PASS, CELLS
+
+    g = Othello()
+    syms = g.symmetries()
+    assert len(syms) == 8
+    for cell_perm, action_perm in syms:
+        assert sorted(cell_perm) == list(range(CELLS))
+        assert sorted(action_perm) == list(range(g.num_actions))
+        assert action_perm[PASS] == PASS               # a pass maps to a pass under every symmetry
+

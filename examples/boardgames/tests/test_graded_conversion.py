@@ -80,7 +80,7 @@ def test_paired_conversion_scores_every_arm_on_identical_roots():
                           n_roots=3, empties=12, seed=5, games_per_root=2, max_empty=22)
     assert set(r["arms"]) == {"oracle", "random"}
     assert len(r["arms"]["oracle"]["scores"]) == len(r["arms"]["random"]["scores"]) == 3
-    assert r["roots_id"] == "e12_s5_n3_g2"        # identifies the exact root family + games/root
+    assert r["roots_id"] == "connect4_e12_s5_n3_g2"  # game name + exact root family + games/root (cross-game guard)
     assert r["arms"]["oracle"]["rate"] > r["arms"]["random"]["rate"]
 
 

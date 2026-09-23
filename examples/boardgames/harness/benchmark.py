@@ -298,7 +298,7 @@ def paired_exploitability(
             a["loss_rate"] = a["losses"] / n if n else 0.0
         by_depth.append({"depth": depth, "arms": arms_out, "n": 2 * n_openings})
     return {"by_depth": by_depth, "opening_plies": opening_plies, "seed": seed,
-            "roots_id": f"exploit_e{opening_plies}_s{seed}_n{n_openings}"}
+            "roots_id": f"exploit_{game.name}_e{opening_plies}_s{seed}_n{n_openings}"}
 
 
 def lbr_screen(
@@ -452,5 +452,5 @@ def paired_conversion(game: Game, factories: dict, n_roots: int = 256, empties: 
     arms = {name: graded_conversion(game, f, roots, games_per_root=games_per_root, seed=seed,
                                     max_empty=max_empty, randomized_defence=randomized_defence)
             for name, f in factories.items()}
-    return {"arms": arms, "roots_id": f"e{empties}_s{seed}_n{len(roots)}_g{games_per_root}",
+    return {"arms": arms, "roots_id": f"{game.name}_e{empties}_s{seed}_n{len(roots)}_g{games_per_root}",
             "n_roots": len(roots), "games_per_root": games_per_root}

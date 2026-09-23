@@ -219,6 +219,82 @@ def _chi2_sf(x: float, df: int) -> float:
     return max(0.0, min(1.0, h * math.exp(-z + a * math.log(z) - math.lgamma(a))))
 
 
+def _betacf(a: float, b: float, x: float) -> float:
+    """Continued fraction for the regularised incomplete beta (Lentz's method), the same numerical style as
+    _chi2_sf. Converges for x < (a+1)/(a+b+2); the caller swaps arguments otherwise."""
+    tiny = 1e-300
+    qab, qap, qam = a + b, a + 1.0, a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < tiny:
+        d = tiny
+    d = 1.0 / d
+    h = d
+    for m in range(1, 300):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        h *= d * c
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d = 1.0 + aa * d
+        if abs(d) < tiny:
+            d = tiny
+        c = 1.0 + aa / c
+        if abs(c) < tiny:
+            c = tiny
+        d = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < 1e-14:
+            break
+    return h
+
+
+def _betai(a: float, b: float, x: float) -> float:
+    """Regularised incomplete beta I_x(a, b)."""
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    bt = math.exp(math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b) + a * math.log(x) + b * math.log(1.0 - x))
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def student_t_two_sided_p(t: float, df: int) -> float:
+    """P(|T| > |t|) for Student's t with `df` degrees of freedom — the two-sided p-value of a t-statistic.
+    The codebase had chi-square (`_chi2_sf`) but no t; a between-run test over a handful of training seeds needs
+    the t tail, not the normal, or it overstates significance at small df."""
+    if df <= 0:
+        return 1.0
+    t = abs(float(t))
+    if t == 0.0:
+        return 1.0
+    return _betai(df / 2.0, 0.5, df / (df + t * t))
+
+
+def t_critical(df: int, two_sided_p: float = 0.05) -> float:
+    """The t value whose two-sided tail equals `two_sided_p` (e.g. the 95%-CI multiplier). Found by bisection on
+    the monotone tail, so no inverse-beta table is needed."""
+    if df <= 0:
+        return float("inf")
+    lo, hi = 0.0, 1000.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if student_t_two_sided_p(mid, df) > two_sided_p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2.0
+
+
 def seed_sd_from_pair(rate_a: float, rate_b: float) -> float:
     """Crude per-run SD estimated from ONE pair of identical-config runs: |a-b|/sqrt(2).
 

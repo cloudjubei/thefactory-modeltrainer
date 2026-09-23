@@ -608,3 +608,29 @@ def test_comparisons_drawn_before_caveats_existed_read_as_absent_not_clean(tmp_p
                              "diff": 0.1, "significant": True, "drawn_at": None})
     led._save()
     assert Ledger(tmp_path / "ledger.json").comparisons()[-1]["caveats"] is None
+
+
+def test_compare_with_record_false_is_a_pure_read(tmp_path):
+    """The cross-game matrix's assemble path re-draws each comparison to render it; that must not append a row or
+    tighten the family's corrected alpha, or merely VIEWING the matrix would inflate every cell's bar."""
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 40 + [0] * 10, params=1, games=100, provenance="final", seed=131,
+               roots_id="F", code="C", config="Ga", compute=1000)
+    led.record("b", outcomes=[1] * 30 + [0] * 20, params=1, games=100, provenance="final", seed=131,
+               roots_id="F", code="C", config="Gb", compute=1000)
+    before = len(Ledger(tmp_path / "ledger.json").comparisons())
+    res = led.compare("a", "b", treatment="config", record=False)
+    assert res["rate_a"] > res["rate_b"] and "p" in res            # still returns the full result
+    reread = Ledger(tmp_path / "ledger.json").comparisons()
+    assert len(reread) == before                                    # nothing appended, nothing saved
+    assert len(led.comparisons()) == before
+
+
+def test_compare_defaults_to_recording(tmp_path):
+    led = _mk(tmp_path)
+    led.record("a", outcomes=[1] * 40 + [0] * 10, params=1, games=100, provenance="final", seed=131,
+               roots_id="F", code="C", config="Ga", compute=1000)
+    led.record("b", outcomes=[1] * 30 + [0] * 20, params=1, games=100, provenance="final", seed=131,
+               roots_id="F", code="C", config="Gb", compute=1000)
+    led.compare("a", "b", treatment="config")
+    assert len(Ledger(tmp_path / "ledger.json").comparisons()) == 1   # persisted by default

@@ -72,12 +72,14 @@ def test_the_verifier_REJECTS_a_plausible_but_false_candidate():
 
 def test_a_game_without_transform_hooks_gets_only_the_identity():
     from harness.symmetry import find_symmetries
-    from harness.registry import resolve_game
 
-    oth = resolve_game("othello")  # has no transform_state/transform_action (deferred)
-    syms = find_symmetries(oth)
-    assert len(syms) == 1
-    assert syms[0] == (list(range(64)), list(range(oth.num_actions)))
+    class _NoHooks:                       # every real game now has the hooks, so use a bare stub
+        board_shape = (8, 8)
+        num_actions = 65
+
+    syms = find_symmetries(_NoHooks())
+    assert len(syms) == 1                 # identity only — safe, just no augmentation space saving
+    assert syms[0] == (list(range(64)), list(range(65)))
 
 
 def test_a_returned_pair_augments_board_and_policy_CONSISTENTLY():
