@@ -36,9 +36,10 @@ def show(h: dict) -> None:
               f"{h['supersession']['reason']}")
     if h.get("mode") == "test":
         print(f"{'':>10}  proved by {h['proof']}  [{flag}]")
-        if h.get("data"):
-            print(f"{'':>10}  on data {h['data']['path']} "
-                  f"({'started ' + h['data']['started'] if h['data']['started'] else 'not produced yet'})")
+        data = h.get("data")
+        for f in ([data] if isinstance(data, dict) else data or []):
+            print(f"{'':>10}  on data {f['path']} "
+                  f"({'started ' + f['started'] if f['started'] else 'not produced yet'})")
         if h.get("inconclusive_proof"):
             print(f"{'':>10}  inconclusive when {h['inconclusive_proof']}")
         for e in h["evidence"]:
@@ -72,8 +73,8 @@ def main() -> None:
     r.add_argument("--null-below", type=float, default=0.03,
                    help="COMPARISON mode: |diff| under this reads as NULL rather than INCONCLUSIVE")
     r.add_argument("--data", default="",
-                   help="TEST mode: the stored-evidence file the proof reads (must carry `started`); the claim is "
-                        "pre-registered only if written before that data was produced")
+                   help="TEST mode: the stored-evidence file(s) the proof reads, comma-separated (each must carry "
+                        "`started`); the claim is pre-registered only if written before the EARLIEST was produced")
     r.add_argument("--reads-no-data", action="store_true",
                    help="TEST mode: the proof reads code only, no stored evidence (one of --data / --reads-no-data "
                         "is required, so a data-backed claim cannot be timed by its verify call)")
@@ -101,7 +102,8 @@ def main() -> None:
     if args.cmd == "register":
         show(reg.register(args.id, claim=args.claim, a=args.a, b=args.b, direction=args.direction,
                           unit=args.unit, proof=args.proof, note=args.note, null_below=args.null_below,
-                          data=args.data, inconclusive_proof=args.inconclusive_proof,
+                          data=args.data.split(",") if "," in args.data else args.data,
+                          inconclusive_proof=args.inconclusive_proof,
                           reads_no_data=args.reads_no_data))
         return
     if args.cmd == "attach-data":

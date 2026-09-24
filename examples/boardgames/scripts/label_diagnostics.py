@@ -23,11 +23,11 @@ def diagnose_seed(job: dict) -> dict:
 
     torch.set_num_threads(job["threads"])
     from harness.coverage import coverage_failures, failable_keys, optimal_actions, per_state_act, reachable_states
-    from harness.neural import AlphaZeroAgent, train_alphazero
+    from harness.neural import AlphaZeroAgent, legacy_arch_as_built, train_alphazero
     from harness.registry import resolve_game
     from harness.targets import search_decomposition, target_error
 
-    cfg = job["config"]
+    cfg = {**job["config"], "arch": legacy_arch_as_built(job["config"]["arch"])}
     game = resolve_game(cfg["game"])
     net, _history, _buffer = train_alphazero(
         game, iterations=cfg["iterations"], selfplay_games=cfg["selfplay"], sims=cfg["train_sims"],
@@ -67,11 +67,12 @@ def untrained_ladder(cfg: dict, target: list, budgets: list, n_nets: int, noise_
     import torch
 
     from harness.coverage import optimal_actions, reachable_states
-    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, legacy_arch_as_built
     from harness.registry import resolve_game
     from harness.targets import search_decomposition, target_error
 
     game = resolve_game(cfg["game"])
+    cfg = {**cfg, "arch": legacy_arch_as_built(cfg["arch"])}
     states, _ = reachable_states(game, exact=True, symmetry=True)
     by_key = {game.canonical_key(s): s for s in states}
     out = {}

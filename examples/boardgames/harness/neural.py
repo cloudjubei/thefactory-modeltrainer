@@ -34,11 +34,26 @@ def _board_shape(game: Game) -> tuple[int, int]:
     return int(h), int(w)
 
 
+def legacy_arch_as_built(arch: dict) -> dict:
+    """The net an arch recorded BEFORE §C.46 actually built. Without `residual` the legacy branch ignored blocks,
+    head_hidden, batchnorm and global_pool, so {"channels": 32, "blocks": 3, "head_hidden": 32} trained a
+    12,746-parameter 2-conv net. Re-analysing old evidence must rebuild that net, which `arch_for_game` now refuses
+    to build from the misleading dict; a residual arch is returned unchanged."""
+    if arch.get("residual"):
+        return dict(arch)
+    return {k: v for k, v in arch.items() if k not in ("blocks", "head_hidden", "batchnorm", "global_pool")}
+
+
 def arch_for_game(net_arch: dict | None, game: Game) -> dict:
     """A net arch with `board_shape`/`num_actions` taken FROM THE GAME when the config omits them — a config never
     hand-types 65 for Othello — and REFUSED when it states them differently: a net built for the wrong game is the
     §C.21 D1 defect, and it is caught here at construction, before a single game is played."""
     arch = dict(net_arch or {})
+    if not arch.get("residual"):
+        stray = [k for k in ("blocks", "head_hidden", "batchnorm", "global_pool") if arch.get(k)]
+        if stray:
+            raise ValueError(f"net_arch sets {stray} without residual=True — the legacy net would silently ignore them "
+                             f"(§C.43-§C.45 trained a 12,746-parameter net believed to be 32/3/32)")
     h, w = _board_shape(game)
     n = getattr(game, "num_actions", None)
     if "board_shape" in arch and [int(v) for v in arch["board_shape"]] != [h, w]:
@@ -660,7 +675,8 @@ def _checked_policy_target(game: Game, state: State, fn: Callable) -> list[float
     oracle would otherwise train silently."""
     pi = [float(p) for p in fn(game, state)]
     legal = set(game.legal_actions(state))
-    if len(pi) != game.num_actions or abs(sum(pi) - 1.0) > 1e-6 or any(p < 0 for p in pi) \
+    if not all(math.isfinite(p) for p in pi) \
+            or len(pi) != game.num_actions or abs(sum(pi) - 1.0) > 1e-6 or any(p < 0 for p in pi) \
             or any(p > 0 for a, p in enumerate(pi) if a not in legal):
         raise ValueError("policy_target_fn must return a probability vector over num_actions with mass only on "
                          "legal moves")
@@ -674,7 +690,8 @@ def one_ply_siblings(game: Game, states: list, key_fn, holdout: dict | None = No
     `legal_actions` order; a child is kept when it is non-terminal, its key is not a recorded parent's, it is not
     held out, and it was not already kept (the first raw image found stands for its key). `holdout`
     {"mod", "salt"} withholds keys k with sha256(f"{salt}:{k!r}") % mod == 0, so what the net learns there can be
-    measured as GENERALISATION rather than recall. Returns (children, counts)."""
+    measured as GENERALISATION rather than recall. Returns (children, counts): the skip counts are per (parent,
+    move) EDGE, so a child reached from several parents counts once per edge; `added` counts distinct keys."""
     import hashlib
 
     if holdout is not None and int(holdout.get("mod", 0)) < 2:
@@ -1065,6 +1082,9 @@ def train_net(
     x = torch.stack([e[0] for e in examples]).to(device)
     target_p = torch.tensor([e[1] for e in examples], dtype=torch.float32).to(device)
     target_v = torch.tensor([[e[2]] for e in examples], dtype=torch.float32).to(device)
+    if aux_on and bool(torch.isnan(target_v).any()):
+        raise ValueError("policy-only examples (NaN value target) are not supported with aux heads — their ownership "
+                         "and reply terms would train on positions with no outcome")
     if bins > 0 and bool(torch.isnan(target_v).any()):
         raise ValueError("policy-only examples (NaN value target) are not supported with a categorical value head — "
                          "a two-hot of NaN would poison the value loss")
@@ -1463,6 +1483,9 @@ def train_alphazero(
         raise ValueError("steps_matched / sibling_holdout act only on siblings — set reanalyze_siblings")
     if sibling_holdout is not None and int(sibling_holdout.get("mod", 0)) < 2:
         raise ValueError(f"sibling_holdout mod must be >= 2, got {sibling_holdout.get('mod')}")
+    if sibling_holdout is not None and not isinstance(sibling_holdout.get("salt"), str):
+        raise ValueError("sibling_holdout needs a string 'salt' — without one the held-out set is undefined, and the "
+                         "run would fail only after the first pass had been paid for")
     if reanalyze_siblings and (aux_on or int(net.arch.get("value_bins", 0)) > 0):
         raise ValueError("siblings carry no value target, which aux heads and a categorical value head cannot mask")
     if policy_target_fn is not None and (reanalyze_frac != 1.0 or reanalyze_sims is not None):
@@ -1568,7 +1591,7 @@ def train_alphazero(
     for it in range(iterations):
         reanalyze_note: dict = {}
         epoch_cap: int | None = None
-        sibling_relabel_s = 0.0
+        sibling_relabel_s = relabel_s = 0.0
         if value_n_step > 0 and it > 0 and it % max(1, target_refresh) == 0:
             target_net = copy.deepcopy(net)  # refresh the lag every k iters
         # When armed, the learner carries the run tablebase as its proof book + a cheap-endgame cutoff, so search
@@ -1581,6 +1604,7 @@ def train_alphazero(
         eg_visited: list[State] = []
         if reanalyze_frac > 0.0:
             fresh_s: list[tuple[State, torch.Tensor, list[float], float]] = []
+            t_selfplay = time.time()
             for _ in range(selfplay_games):
                 fresh_s.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
                                               device=device, return_states=True, opening_plies=_game_plies(rng),
@@ -1588,6 +1612,7 @@ def train_alphazero(
                                               exact_value_targets=eg_targets))
             if endgame_on:
                 eg_visited.extend(s for (s, *_rest) in fresh_s)
+            selfplay_s = time.time() - t_selfplay
             evicted = max(0, len(state_buffer) + len(fresh_s) - buffer_cap)
             state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
             t_relabel = time.time()
@@ -1616,6 +1641,7 @@ def train_alphazero(
                 for i, (x, pi, _v_search) in zip(idxs, relabelled, strict=True):
                     state_buffer[i] = (state_buffer[i][0], x, pi, state_buffer[i][3])
                 reanalyzed = len(relabelled)
+                relabel_s = time.time() - t_relabel
                 if reanalyze_siblings:
                     key_fn = getattr(game, "canonical_key", None) or (lambda st: game.state_key(st))
                     sibs, sib_stats = one_ply_siblings(game, [st for (st, *_rest) in state_buffer], key_fn,
@@ -1636,8 +1662,8 @@ def train_alphazero(
                               "sibling_terminal_skipped": sib_stats["terminal_skipped"],
                               "sibling_recorded_skipped": sib_stats["recorded_skipped"],
                               "sibling_holdout_skipped": sib_stats["holdout_skipped"],
-                              "nan_value_examples": len(sib_aug), "relabel_s": round(time.time() - t_relabel, 3),
-                              "sibling_relabel_s": round(sibling_relabel_s, 3)}
+                              "nan_value_examples": len(sib_aug), "selfplay_s": round(selfplay_s, 3),
+                              "relabel_s": round(relabel_s, 3), "sibling_relabel_s": round(sibling_relabel_s, 3)}
             epoch_cap = len(sp_aug) if (steps_matched and sib_aug) else None
         elif parallel_ok:  # PURE-#1 fanned out across worker processes (fills the idle cores; ~2-2.5x faster)
             fresh = _run_parallel_selfplay(_pool, _tmpdir, net, target_net, it, selfplay_games, sims, gumbel,

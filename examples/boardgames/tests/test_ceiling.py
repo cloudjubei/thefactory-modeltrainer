@@ -3,6 +3,9 @@ verdicts. Fixtures are synthetic evidence whose answer is known by construction,
 how failures fall across plies and the manifold) so a verdict cannot pass by accident of one layout."""
 from __future__ import annotations
 
+import hashlib
+from functools import lru_cache
+
 import pytest
 
 from harness.ceiling import localize_report
@@ -642,3 +645,836 @@ def test_c45_reports_the_delivered_label_SHARE_alongside_the_count():
     d = c45_report(_c45_arms(), _target())["claims"]["A1"]["delivery"]
     assert d["share"]["treat_mean"] == pytest.approx(0.9) and d["share"]["base_mean"] == pytest.approx(0.25)
     assert d["share"]["mean_delta"] == pytest.approx(0.65) and d["share"]["p"] == pytest.approx(1 / 1024)
+
+
+def test_ab_report_and_c46_share_ONE_pairing_refusal_that_returns_the_paired_rows():
+    from harness.ceiling import _pair_arms
+    seeds = range(11, 14)
+    kw = dict(coverage=[0.98] * 3, policy=[0.95] * 3, fails=[[5]] * 3)
+    keys = ("opening_plies", "opening_zero_frac")
+    pair = _pair_arms(_arm(seeds, **kw), _arm(seeds, cfg=TREAT, **kw), _target(), keys)
+    assert pair["diff"] == ["opening_plies", "opening_zero_frac"] and pair["order"] == [11, 12, 13]
+    assert pair["target_keys"] == {5, 6, 7, 8} and sorted(pair["base"]) == sorted(pair["treat"]) == [11, 12, 13]
+    with pytest.raises(ValueError, match="beyond the declared"):
+        _pair_arms(_arm(seeds, **kw), _arm(seeds, cfg=TREAT, **kw), _target(), ("opening_plies",))
+
+
+def test_c45_and_c46_judge_a_claim_on_one_ladder():
+    from harness.ceiling import _judge
+    hit, null, wide = {"p": 0.001, "upper": 2.0}, {"p": 0.5, "upper": 0.2}, {"p": 0.5, "upper": 3.0}
+    assert _judge(hit, 0.01, 1.0, False, True) == "not_delivered"
+    assert _judge(hit, 0.01, 1.0, True, True) == "supported"
+    assert _judge(hit, 0.01, 1.0, True, False) == "moved"
+    assert _judge(null, 0.01, 1.0, True, True) == "refuted"
+    assert _judge(wide, 0.01, 1.0, True, True) == "inconclusive"
+    assert _judge({"p": 0.01, "upper": 0.2}, 0.01, 1.0, True, True) == "refuted"
+
+
+# §C.46 — synthetic arms in the full evidence schema, on the REAL tic-tac-toe position graph so the sibling closure
+# is checked against the game's rules. Shapes vary by seed and pass: self-play key sets differ per (seed, pass), even
+# seeds record the dose over every canonical key (zero rows included) while odd seeds record only the keys trained
+# on, failure counts vary per seed with an arm-specific stride, and the hold-out arm withholds keys by the hash rule.
+C46_SEEDS = tuple(range(41, 51))
+LEGACY = {"channels": 32}
+RESIDUAL = {"channels": 32, "blocks": 3, "head_hidden": 32, "residual": True}
+HOLDOUT = {"mod": 2, "salt": "c46"}
+C46_ARM_SPECS = {  # name: (arch, reanalyze_sims, siblings, oracle labels, hold-out)
+    "leg_R32": (LEGACY, None, False, False, None),
+    "leg_R200": (LEGACY, 200, False, False, None),
+    "R32": (RESIDUAL, None, False, False, None),
+    "R200": (RESIDUAL, 200, False, False, None),
+    "R32S": (RESIDUAL, None, True, False, None),
+    "R200S": (RESIDUAL, 200, True, False, None),
+    "Rx": (RESIDUAL, None, False, True, None),
+    "RxS": (RESIDUAL, None, True, True, None),
+    "RxS_H": (RESIDUAL, None, True, True, HOLDOUT),
+}
+C46_PROFILE = {  # name: (target raw-policy failures, outside raw-policy failures, target eval failures, outside eval)
+    "leg_R32": (3, 10, 3, 1), "leg_R200": (1, 8, 1, 1), "R32": (3, 6, 3, 1), "R200": (1, 5, 1, 1),
+    "R32S": (1, 3, 1, 0), "R200S": (0, 2, 0, 0), "Rx": (0, 3, 0, 0), "RxS": (0, 1, 0, 0), "RxS_H": (0, 2, 0, 0),
+}
+
+
+@lru_cache(maxsize=1)
+def _ttt():
+    """The tic-tac-toe position graph built the brute-force way — the children of EVERY raw image of a canonical
+    key, not of one representative — so the report's closure is checked against a different computation."""
+    from games.tictactoe import TicTacToe
+    from harness.coverage import failable_keys, reachable_states
+    game = TicTacToe()
+    raw, _ = reachable_states(game, exact=True, symmetry=False)
+    kids: dict = {}
+    for s in raw:
+        out = kids.setdefault(game.canonical_key(s), set())
+        for a in game.legal_actions(s):
+            child = game.step(s, a)
+            if not game.is_terminal(child):
+                out.add(game.canonical_key(child))
+    canon, _ = reachable_states(game, exact=True, symmetry=True)
+    by_ply: dict = {}
+    for s in canon:
+        by_ply.setdefault(game.ply(s), []).append(game.canonical_key(s))
+    return game, kids, sorted(failable_keys(game, canon)), by_ply
+
+
+def _held(k, holdout=HOLDOUT):
+    return int(hashlib.sha256(f"{holdout['salt']}:{k!r}".encode()).hexdigest(), 16) % holdout["mod"] == 0
+
+
+def _ring(sp, holdout=None):
+    kids = _ttt()[1]
+    out = set().union(*(kids[k] for k in sp)) - set(sp)
+    return {k for k in out if holdout is None or not _held(k, holdout)}
+
+
+def _sp(i, p):
+    by = _ttt()[3]
+    return sorted({0, *by[1][: 1 + (i + p) % 3], *by[2][(3 * i + p) % 12:: 7], *by[3][(i + 2 * p) % 19:: 11]})
+
+
+def _t17():
+    universe = set(_ttt()[2])
+    return [k for k in _ttt()[3][6] if k in universe][5:9]
+
+
+def _outside():
+    t = set(_t17())
+    return [k for k in _ttt()[2] if k not in t]
+
+
+def _c46_arm(name, seeds=C46_SEEDS):
+    _game, kids, universe, _by = _ttt()
+    arch, sims, sib, oracle, holdout = C46_ARM_SPECS[name]
+    t_raw, o_raw, t_eval, o_eval = C46_PROFILE[name]
+    tk, out = _t17(), _outside()
+    stride = list(C46_ARM_SPECS).index(name) + 1
+    residual = arch is RESIDUAL
+    cfg = {"game": "tictactoe", "iterations": 6, "selfplay": 48, "train_sims": 32, "eval_sims": 48, "arch": arch,
+           "params_expected": 57453 if residual else 12746, "reanalyze_frac": 1.0, "reanalyze_sims": sims,
+           "reanalyze_siblings": sib, "sibling_key": "canonical" if sib else None, "sibling_holdout": holdout,
+           "steps_matched": sib, "policy_target": "exact_uniform_optimal" if oracle else None, "epochs": 6,
+           "batch_size": 64, "lr": 1e-3, "buffer_cap": 8000, "target_keys": list(tk), "seeds": list(seeds)}
+    if oracle:
+        cfg["oracle_fingerprint"] = "ofp"
+    rows = []
+    for i, seed in enumerate(seeds):
+        pfk = tk[:t_raw] + out[(7 * i) % 50:(7 * i) % 50 + o_raw + (i * stride) % 3]
+        fails = tk[:t_eval] + out[(3 * i) % 40:(3 * i) % 40 + o_eval]
+        passes, history, ring, sp = [], [], [], []
+        for p in range(1, 7):
+            sp = _sp(i, p)
+            ring = sorted(_ring(sp, holdout)) if sib and p >= 2 else []
+            dose = [[k, 8, 8, 0, 0] for k in sp] + [[k, 0, 0, 8, 8] for k in ring]
+            if i % 2 == 0:
+                dose += [[k, 0, 0, 0, 0] for k in sorted(set(kids) - set(sp) - set(ring))]
+            passes.append({"pass": p, "weights_sha": f"{'res' if residual else 'leg'}-{seed}" if p == 1
+                           else f"{name}-{seed}-{p}",
+                           "policy_fail_keys": pfk + out[len(out) - (6 - p):] if p < 6 else list(pfk), "dose": dose})
+            history.append({"iteration": p, "siblings": len(ring), "train_examples": 8 * (len(sp) + len(ring)),
+                            "epoch_examples": 8 * len(sp), "steps": 540 + 6 * i + (12 * (i % 4) if sib else 0)})
+        low = name in ("leg_R32", "R32")
+        written = [{"pass": p, "examples": 8000, "n_target": 20 + p % 2,
+                    "argmax_ok": 5 + i % 2 if low else 18 + p % 2, "opt_mass": 0.0, "per_key": []} for p in range(1, 7)]
+        rows.append({"seed": seed, "coverage": 1 - len(fails) / 627, "policy_coverage": 1 - len(pfk) / 627,
+                     "failures": [{"key": k} for k in fails], "policy_fail_keys": pfk, "written_labels": written,
+                     "visits": [[k, 8 * (1 + j % 3)] for j, k in enumerate(sp)],
+                     "sibling_visits": [[k, 8] for k in ring], "history": history, "passes": passes,
+                     "params": 57453 if residual else 12746})
+    return {"training_fingerprint": "tfp", "measurement_fingerprint": "mfp", "started": "2026-09-24T00:00:00+00:00",
+            "config": cfg, "universe": list(universe), "optimal_play_keys": [], "plies": [], "seeds": rows}
+
+
+def _c46_arms(names=tuple(C46_ARM_SPECS), seeds=C46_SEEDS):
+    return {n: _c46_arm(n, seeds) for n in names}
+
+
+def _g0(verdict="passed", fp="tfp"):
+    return {"training_fingerprint": fp, "verdict": {"verdict": verdict},
+            "summary": [{"arch": "legacy", "epochs": 62, "failures": [5, 8, 1, 6, 3]}]}
+
+
+def _c46(arms, g0=None, **kw):
+    from harness.ceiling import c46_report
+    return c46_report(arms, _target(keys=tuple(_t17())), _ttt()[0], _g0() if g0 is None else g0, **kw)
+
+
+def _verdicts(r):
+    return {k: c["verdict"] for k, c in r["claims"].items()}
+
+
+E_ARMS = ("R200", "R200S", "R32", "R32S")
+
+
+def test_c46_every_claim_is_SUPPORTED_when_each_treatment_works_and_every_gate_holds():
+    r = _c46(_c46_arms())
+    assert _verdicts(r) == dict.fromkeys(("E1", "E2", "A1", "L1", "L2", "R1", "R2"), "supported")
+    assert set(r) == {"claims", "descriptive"}
+    assert {k: (c["chain"], c["alpha"]) for k, c in r["claims"].items()} == {
+        "E1": ("E", 0.03), "E2": ("E", 0.03), "A1": ("A", 0.01), "L1": ("R", 0.01), "L2": ("R", 0.01),
+        "R1": ("R", 0.01), "R2": ("R", 0.01)}
+    ge = r["claims"]["E1"]["gates"]["GE"]
+    assert ge["passed"] is True and ge["siblings_every_pass"] is True and ge["control_has_none"] is True
+    assert ge["exposure"]["rises"] is True and ge["closure"]["holds"] is True and ge["closure"]["mismatches"] == []
+    assert ge["step_ratio"]["within"] is True and ge["sibling_label_share"]["share"] == 1.0
+    assert r["claims"]["E2"]["gates"]["GE"]["sibling_label_share"]["min"] is None
+    assert r["claims"]["A1"]["gates"]["G0"]["passed"] is True
+    assert r["claims"]["R1"]["gates"]["G1-leg"]["passed"] is True and r["claims"]["R1"]["gates"]["G1-res"]["passed"]
+    assert r["claims"]["L1"]["gates"]["G2"]["passed"] is True and r["claims"]["L1"]["gates"]["G3"]["holds"] is True
+    assert "G3" not in r["claims"]["L2"]["gates"]
+    assert "L1: leg_R200 vs leg_R32" in r["descriptive"] and "R2: R200 vs R32" in r["descriptive"]
+
+
+def test_c46_policy_failure_claims_read_the_gain_as_CONTROL_minus_TREATMENT_failures_per_seed():
+    arms = _c46_arms(E_ARMS)
+    e1 = _c46(arms)["claims"]["E1"]
+    base = [len(s["policy_fail_keys"]) for s in arms["R200"]["seeds"]]
+    treat = [len(s["policy_fail_keys"]) for s in arms["R200S"]["seeds"]]
+    assert e1["control_failures"] == base and e1["treat_failures"] == treat
+    assert e1["control"] == "R200" and e1["treat"] == "R200S"
+    assert e1["mean_delta"] == pytest.approx(sum(base) / 10 - sum(treat) / 10)
+    assert e1["sesoi"] == pytest.approx(0.25 * sum(base) / 10)
+    assert e1["gain_failable_coverage"] == pytest.approx(e1["mean_delta"] / len(_ttt()[2]))
+    assert e1["p"] == pytest.approx(1 / 1024)
+
+
+def _set_failures(arm, counts):
+    out = _outside()
+    for row, c in zip(arm["seeds"], counts):
+        row["policy_fail_keys"] = out[:c]
+
+
+def test_c46_a_null_whose_upper_bound_EXCLUDES_the_smallest_effect_is_refuted_worded_as_a_bound_and_halts_E():
+    arms = _c46_arms(E_ARMS)
+    base = [len(s["policy_fail_keys"]) for s in arms["R200"]["seeds"]]
+    _set_failures(arms["R200S"], [b - d for b, d in zip(base, [1, -1, 0, 1, -1, 0, 0, 1, -1, 0])])
+    r = _c46(arms)
+    e1 = r["claims"]["E1"]
+    assert e1["verdict"] == "refuted" and e1["upper"] < e1["sesoi"]
+    assert e1["statement"] == f"effect bounded below {round(e1['upper'], 3) + 0.0:.3f} failures per seed"
+    assert r["claims"]["E2"]["verdict"] == "not_reached"
+
+
+def test_c46_a_noisy_null_is_INCONCLUSIVE_and_carries_no_bound_statement():
+    arms = _c46_arms(E_ARMS)
+    base = [len(s["policy_fail_keys"]) for s in arms["R200"]["seeds"]]
+    _set_failures(arms["R200S"], [b - d for b, d in zip(base, [6, -5, 4, -6, 5, -4, 0, 3, -3, 1])])
+    e1 = _c46(arms)["claims"]["E1"]
+    assert e1["verdict"] == "inconclusive" and e1["p"] >= 0.03 and e1["upper"] >= e1["sesoi"]
+    assert "statement" not in e1
+
+
+def _dose(arm, i, p):
+    return next(x for x in arm["seeds"][i]["passes"] if x["pass"] == p)["dose"]
+
+
+def _ge(r, claim="E1"):
+    return r["claims"][claim]["gates"]["GE"]
+
+
+def test_c46_GE_i_a_treatment_pass_WITHOUT_sibling_rows_is_not_delivered():
+    arms = _c46_arms(E_ARMS)
+    by = _ttt()[3]
+    late = sorted(set(by[7]) | set(by[8]))
+    assert _ring(late) == set()
+    row = arms["R200S"]["seeds"][2]
+    next(x for x in row["passes"] if x["pass"] == 4)["dose"] = [[k, 8, 8, 0, 0] for k in late]
+    r = _c46(arms)
+    ge = _ge(r)
+    assert ge["siblings_every_pass"] is False and ge["closure"]["holds"] is True and ge["exposure"]["rises"] is True
+    assert ge["passed"] is False and r["claims"]["E1"]["verdict"] == "not_delivered"
+    assert r["claims"]["E2"]["verdict"] == "not_reached"
+
+
+def test_c46_GE_i_a_treatment_seed_with_NO_relabelled_pass_is_not_delivered():
+    arms = _c46_arms(E_ARMS)
+    for row in (arms["R200S"]["seeds"][5], arms["R200"]["seeds"][5]):
+        row["passes"] = [p for p in row["passes"] if p["pass"] == 1]
+    ge = _ge(_c46(arms))
+    assert ge["siblings_every_pass"] is False and ge["passed"] is False
+
+
+def test_c46_GE_i_a_CONTROL_with_sibling_rows_is_not_delivered():
+    arms = _c46_arms(E_ARMS)
+    _dose(arms["R200"], 3, 3).append([_ttt()[3][4][0], 0, 0, 8, 8])
+    ge = _ge(_c46(arms))
+    assert ge["control_has_none"] is False and ge["siblings_every_pass"] is True and ge["passed"] is False
+
+
+def test_c46_GE_ii_exposure_that_does_NOT_rise_in_the_final_pass_is_not_delivered():
+    arms = _c46_arms(E_ARMS)
+    for i in range(len(C46_SEEDS)):
+        _dose(arms["R200"], i, 6).extend([k, 8, 8, 0, 0] for k in _ttt()[2])
+    ge = _ge(_c46(arms))
+    assert ge["exposure"]["rises"] is False and ge["exposure"]["p"] >= 0.05
+    assert ge["closure"]["holds"] is True and ge["control_has_none"] is True and ge["passed"] is False
+
+
+def test_c46_GE_ii_exposure_counts_only_FAILABLE_keys_of_the_FINAL_pass():
+    arms = _c46_arms(E_ARMS)
+    universe = set(_ttt()[2])
+    by = _ttt()[3]
+    unfailable = [k for p in (5, 6, 7) for k in by[p] if k not in universe]
+    for i in range(len(C46_SEEDS)):
+        _dose(arms["R200"], i, 6).extend([k, 8, 8, 0, 0] for k in unfailable)
+        _dose(arms["R200"], i, 5).extend([k, 8, 8, 0, 0] for k in _ttt()[2])
+    ge = _ge(_c46(arms))
+    assert ge["exposure"]["rises"] is True and ge["passed"] is True
+
+
+def test_c46_GE_iii_a_ring_key_with_NO_sibling_row_breaks_the_closure():
+    arms = _c46_arms(E_ARMS)
+    dose = _dose(arms["R200S"], 3, 5)
+    sib = [row for row in dose if row[3] > 0]
+    dose.remove(sib[1])
+    ge = _ge(_c46(arms))
+    assert ge["closure"]["holds"] is False and ge["passed"] is False
+    assert ge["closure"]["mismatches"] == [{"seed": C46_SEEDS[3], "pass": 5, "missing": [sib[1][0]], "extra": []}]
+    assert ge["siblings_every_pass"] is True and ge["exposure"]["rises"] is True
+
+
+def test_c46_GE_iii_a_sibling_row_OUTSIDE_the_ring_breaks_the_closure():
+    arms = _c46_arms(E_ARMS)
+    sp = _sp(4, 2)
+    stray = next(k for k in _ttt()[3][6] if k not in _ring(sp))
+    _dose(arms["R200S"], 4, 2).append([stray, 0, 0, 8, 8])
+    ge = _ge(_c46(arms))
+    assert ge["closure"]["mismatches"] == [{"seed": C46_SEEDS[4], "pass": 2, "missing": [], "extra": [stray]}]
+    assert ge["passed"] is False
+
+
+def test_c46_GE_iii_the_closure_is_checked_on_relabelled_passes_only():
+    arms = _c46_arms(E_ARMS)
+    for i in range(len(C46_SEEDS)):
+        _dose(arms["R200S"], i, 1).extend([k, 0, 0, 8, 0] for k in _ttt()[3][4][:40])
+    r = _c46(arms)
+    assert _ge(r)["closure"]["holds"] is True and r["claims"]["E1"]["verdict"] == "supported"
+
+
+def _set_steps(arm, per_seed):
+    for row, steps in zip(arm["seeds"], per_seed):
+        for h in row["history"]:
+            h["steps"] = steps
+
+
+def test_c46_GE_iv_the_realised_step_ratio_must_sit_in_its_band_INCLUSIVE_of_both_ends():
+    arms = _c46_arms(("R200", "R200S"))
+    _set_steps(arms["R200"], [100] * 10)
+    _set_steps(arms["R200S"], [75, 133] + [100] * 8)
+    ge = _ge(_c46(arms))
+    assert ge["step_ratio"]["per_seed"][:2] == pytest.approx([0.75, 1.33])
+    assert ge["step_ratio"]["within"] is True and ge["passed"] is True
+    for bad in (74, 134):
+        _set_steps(arms["R200S"], [bad] + [100] * 9)
+        ge = _ge(_c46(arms))
+        assert ge["step_ratio"]["within"] is False and ge["passed"] is False
+
+
+def test_c46_GE_iv_a_control_that_recorded_ZERO_steps_cannot_pass_the_ratio():
+    arms = _c46_arms(("R200", "R200S"))
+    _set_steps(arms["R200"], [0] + [100] * 9)
+    ge = _ge(_c46(arms))
+    assert ge["step_ratio"]["per_seed"][0] == float("inf") and ge["step_ratio"]["within"] is False
+
+
+def _sibling_ok(arm, ok, failable):
+    universe = set(_ttt()[2])
+    for row in arm["seeds"]:
+        for p in row["passes"]:
+            for d in p["dose"]:
+                if d[3] > 0 and (d[0] in universe) == failable:
+                    d[4] = ok
+
+
+def test_c46_GE_v_E1_needs_its_sibling_labels_on_FAILABLE_rows_to_be_mostly_right():
+    arms = _c46_arms(E_ARMS)
+    _sibling_ok(arms["R200S"], 7, True)
+    r = _c46(arms)
+    assert _ge(r)["sibling_label_share"]["share"] == pytest.approx(7 / 8) and _ge(r)["passed"] is False
+    assert r["claims"]["E1"]["verdict"] == "not_delivered"
+
+
+def test_c46_GE_v_a_sibling_label_share_of_EXACTLY_the_minimum_passes():
+    arms = _c46_arms(("R200", "R200S"))
+    universe = set(_ttt()[2])
+    for row in arms["R200S"]["seeds"]:
+        for p in row["passes"]:
+            for d in p["dose"]:
+                if d[3] > 0 and d[0] in universe:
+                    d[3], d[4] = 10, 9
+    ge = _ge(_c46(arms))
+    assert ge["sibling_label_share"]["share"] == 0.9 and ge["sibling_label_share"]["holds"] is True
+
+
+def test_c46_GE_v_reads_failable_rows_on_relabelled_passes_and_binds_E1_ONLY():
+    arms = _c46_arms(E_ARMS)
+    _sibling_ok(arms["R200S"], 0, False)
+    for i in range(len(C46_SEEDS)):
+        _dose(arms["R200S"], i, 1).extend([k, 0, 0, 8, 0] for k in _ttt()[2][:40])
+    _sibling_ok(arms["R32S"], 0, True)
+    r = _c46(arms)
+    assert _ge(r)["sibling_label_share"]["share"] == 1.0 and _verdicts(r)["E1"] == "supported"
+    assert _ge(r, "E2")["sibling_label_share"]["share"] == 0.0 and _verdicts(r)["E2"] == "supported"
+
+
+def test_c46_GE_v_is_not_passed_by_an_arm_with_NO_failable_sibling_rows():
+    arms = _c46_arms(("R200", "R200S"))
+    universe = set(_ttt()[2])
+    for row in arms["R200S"]["seeds"]:
+        for p in row["passes"]:
+            for d in p["dose"]:
+                if d[3] > 0 and d[0] in universe:
+                    d[3] = d[4] = 0
+    ge = _ge(_c46(arms))
+    assert ge["sibling_label_share"]["share"] is None and ge["sibling_label_share"]["holds"] is False
+
+
+def test_c46_a_blind_spot_that_does_not_replicate_on_LEGACY_stops_the_whole_R_chain():
+    arms = _c46_arms()
+    out = _outside()
+    for i, row in enumerate(arms["leg_R32"]["seeds"]):
+        row["failures"] = [{"key": k} for k in out[i * 3:i * 3 + 3]]
+    r = _c46(arms)
+    assert r["claims"]["L1"]["gates"]["G1-leg"]["passed"] is False
+    assert [r["claims"][c]["verdict"] for c in ("L1", "L2", "R1", "R2")] == ["stopped"] * 4
+    assert _verdicts(r)["E1"] == "supported" and _verdicts(r)["A1"] == "supported"
+
+
+def test_c46_a_blind_spot_that_does_not_replicate_on_RESIDUAL_stops_R1_and_R2_only():
+    arms = _c46_arms()
+    out = _outside()
+    for i, row in enumerate(arms["R32"]["seeds"]):
+        row["failures"] = [{"key": k} for k in out[i * 3:i * 3 + 3]]
+    r = _c46(arms)
+    assert [r["claims"][c]["verdict"] for c in ("L1", "L2", "R1", "R2")] == ["supported", "supported", "stopped",
+                                                                            "stopped"]
+
+
+def test_c46_A1_is_STOPPED_when_the_offline_capacity_gate_failed_and_no_other_chain_is():
+    r = _c46(_c46_arms(), g0=_g0("failed"))
+    assert _verdicts(r) == {**dict.fromkeys(("E1", "E2", "L1", "L2", "R1", "R2"), "supported"), "A1": "stopped"}
+    assert r["descriptive"]["D7"]["g0"]["passed"] is False
+
+
+def test_c46_A1_is_NOT_RUN_when_the_offline_capacity_gate_was_not_run():
+    r = _c46(_c46_arms(), g0=_g0("not_run"))
+    assert r["claims"]["A1"]["verdict"] == "not_run"
+
+
+def test_c46_a_G0_trained_by_DIFFERENT_code_than_the_arms_is_refused():
+    with pytest.raises(ValueError, match="fingerprint"):
+        _c46(_c46_arms(("R200",)), g0=_g0(fp="other"))
+
+
+def test_c46_a_missing_arm_reads_not_run_and_halts_its_chain():
+    arms = _c46_arms()
+    del arms["leg_R200"]
+    r = _c46(arms)
+    assert _verdicts(r) == {"E1": "supported", "E2": "supported", "A1": "not_run", "L1": "not_run",
+                            "L2": "not_reached", "R1": "not_reached", "R2": "not_reached"}
+
+
+def test_c46_a_G1_gate_whose_arm_was_not_run_is_unknown_not_failed():
+    arms = _c46_arms(("R32", "R200"))
+    r = _c46(arms)
+    assert r["claims"]["R1"]["verdict"] == "not_reached" and r["claims"]["L1"]["verdict"] == "not_run"
+    assert r["claims"]["L1"]["gates"]["G1-leg"] == {"arm": "leg_R32", "passed": None}
+
+
+def test_c46_R_claims_without_DELIVERED_labels_are_not_delivered():
+    arms = _c46_arms()
+    for row in arms["leg_R200"]["seeds"]:
+        for w in row["written_labels"]:
+            w["argmax_ok"] = 5
+    r = _c46(arms)
+    assert r["claims"]["L1"]["verdict"] == "not_delivered" and r["claims"]["L1"]["gates"]["G2"]["passed"] is False
+    assert [r["claims"][c]["verdict"] for c in ("L2", "R1", "R2")] == ["not_reached"] * 3
+
+
+def test_c46_a_target_fix_that_MOVES_failures_outside_the_target_reads_moved_and_halts_R():
+    arms = _c46_arms()
+    out = _outside()
+    for row in arms["leg_R200"]["seeds"]:
+        row["failures"] += [{"key": k} for k in out[-3:]]
+    r = _c46(arms)
+    assert r["claims"]["L1"]["verdict"] == "moved" and r["claims"]["L1"]["gates"]["G3"]["holds"] is False
+    assert [r["claims"][c]["verdict"] for c in ("L2", "R1", "R2")] == ["not_reached"] * 3
+
+
+def test_c46_a_null_on_a_target_claim_is_refuted_as_a_bound_on_target_correctness():
+    arms = _c46_arms()
+    for c, t in zip(arms["R32"]["seeds"], arms["R200"]["seeds"]):
+        t["failures"] = [dict(f) for f in c["failures"]]
+    r = _c46(arms)
+    r1 = r["claims"]["R1"]
+    assert r1["verdict"] == "refuted" and r1["sesoi"] == pytest.approx(0.5 * 0.75)
+    assert r1["statement"] == f"effect bounded below {round(r1['upper'], 3) + 0.0:.3f} target correctness per seed"
+    assert r["claims"]["R2"]["verdict"] == "not_reached"
+
+
+@pytest.mark.parametrize("where, field", [
+    *[("arm", f) for f in ("training_fingerprint", "measurement_fingerprint", "started", "config", "universe",
+                           "optimal_play_keys", "plies", "seeds")],
+    *[("config", f) for f in ("arch", "params_expected", "train_sims", "reanalyze_frac", "reanalyze_sims",
+                              "reanalyze_siblings", "sibling_key", "sibling_holdout", "steps_matched",
+                              "policy_target", "target_keys", "seeds")],
+    *[("seed", f) for f in ("seed", "coverage", "policy_coverage", "failures", "policy_fail_keys", "written_labels",
+                            "visits", "sibling_visits", "history", "passes", "params")],
+    *[("history", f) for f in ("siblings", "train_examples", "epoch_examples", "steps")],
+    *[("pass", f) for f in ("pass", "weights_sha", "policy_fail_keys", "dose")],
+])
+def test_c46_a_MISSING_field_is_refused_never_read_as_zero(where, field):
+    arms = _c46_arms(("R200", "R200S"))
+    arm = arms["R200S"]
+    record = {"arm": arm, "config": arm["config"], "seed": arm["seeds"][3], "history": arm["seeds"][3]["history"][2],
+              "pass": arm["seeds"][3]["passes"][4]}[where]
+    del record[field]
+    with pytest.raises(ValueError, match=f"no `{field}`"):
+        _c46(arms)
+
+
+def test_c46_a_net_whose_parameter_count_is_not_the_declared_arch_is_refused():
+    arms = _c46_arms(("R200", "R200S"))
+    arms["R200S"]["seeds"][6]["params"] = 12746
+    with pytest.raises(ValueError, match="12746 parameters"):
+        _c46(arms)
+
+
+def test_c46_arms_declared_to_share_pass_1_must_share_its_weights_byte_for_byte():
+    arms = _c46_arms(("R32", "R200"))
+    arms["R200"]["seeds"][2]["passes"][0]["weights_sha"] = "drifted"
+    with pytest.raises(ValueError, match="pass-1 weights"):
+        _c46(arms)
+
+
+def test_c46_the_legacy_to_residual_pair_is_NOT_held_to_a_shared_pass_1():
+    arms = _c46_arms(("leg_R200", "R200"))
+    first = [arms[a]["seeds"][0]["passes"][0]["weights_sha"] for a in ("leg_R200", "R200")]
+    assert first[0] != first[1]
+    assert _c46(arms)["claims"]["A1"]["verdict"] == "supported"
+
+
+def test_c46_a_seed_with_no_pass_1_or_TWO_of_them_is_refused():
+    arms = _c46_arms(("R200", "R200S"))
+    arms["R200S"]["seeds"][0]["passes"] = arms["R200S"]["seeds"][0]["passes"][1:]
+    with pytest.raises(ValueError, match="pass 1"):
+        _c46(arms)
+    arms = _c46_arms(("R200", "R200S"))
+    passes = arms["R200S"]["seeds"][7]["passes"]
+    passes.append(dict(passes[0], weights_sha="res-48-rerun"))
+    with pytest.raises(ValueError, match="pass 1"):
+        _c46(arms)
+
+
+def test_c46_arms_that_differ_BEYOND_their_declared_treatment_are_refused():
+    arms = _c46_arms(("R200", "R200S"))
+    arms["R200S"]["config"]["epochs"] = 12
+    with pytest.raises(ValueError, match="beyond the declared"):
+        _c46(arms)
+
+
+def test_c46_arms_trained_by_different_code_are_refused():
+    arms = _c46_arms(("RxS", "RxS_H"))
+    arms["RxS_H"]["training_fingerprint"] = "tfp2"
+    with pytest.raises(ValueError, match="training fingerprint"):
+        _c46(arms)
+
+
+def test_c46_an_UNKNOWN_arm_is_refused_rather_than_silently_ignored():
+    arms = _c46_arms(("R200",))
+    arms["R200s"] = arms["R200"]
+    with pytest.raises(ValueError, match="unknown arm"):
+        _c46(arms)
+
+
+@pytest.mark.parametrize("g0", [{}, {"passed": True}, {"training_fingerprint": "tfp", "verdict": "passed"},
+                                {"verdict": {"verdict": "passed"}}])
+def test_c46_the_capacity_gate_must_be_passed_as_its_EVIDENCE(g0):
+    with pytest.raises(ValueError, match="G0"):
+        _c46(_c46_arms(("R200",)), g0=g0)
+
+
+def test_c46_a_dose_key_that_is_not_a_position_of_the_game_is_refused():
+    arms = _c46_arms(("R200", "R200S"))
+    _dose(arms["R200S"], 1, 3).append([10 ** 9, 8, 8, 0, 0])
+    with pytest.raises(ValueError, match="not a reachable"):
+        _c46(arms)
+
+
+def test_the_sibling_ring_of_the_EMPTY_board_is_its_three_first_moves_minus_the_held_out_ones():
+    from harness.ceiling import one_ply_children, sibling_ring
+    children = one_ply_children(_ttt()[0])
+    assert len(children) == 627
+    assert sibling_ring(children, [0]) == {3, 7, 163}
+    assert _held(7) and not _held(3) and not _held(163)
+    assert sibling_ring(children, [0], HOLDOUT) == {3, 163}
+    assert sibling_ring(children, [0, 3]) == {7, 163} | (_ttt()[1][3] - {0, 3})
+
+
+def test_the_sibling_ring_from_ONE_representative_equals_the_ring_over_EVERY_symmetric_image():
+    from harness.ceiling import one_ply_children, sibling_ring
+    children = one_ply_children(_ttt()[0])
+    assert children == _ttt()[1]
+    by = _ttt()[3]
+    for i in range(6):
+        for p in range(1, 7):
+            sp = _sp(i, p) + by[5][i:: 17]
+            assert sibling_ring(children, sp) == _ring(sp)
+            assert sibling_ring(children, sp, HOLDOUT) == _ring(sp, HOLDOUT)
+            assert all(not _held(k) for k in sibling_ring(children, sp, HOLDOUT))
+    other = {"mod": 3, "salt": "x"}
+    for i in range(4):
+        sp = _sp(i, 2) + by[4][i:: 13]
+        assert sibling_ring(children, sp, other) == _ring(sp, other) != _ring(sp, HOLDOUT)
+    late = set(by[7]) | set(by[8])
+    assert sibling_ring(children, late) == set()
+
+
+def test_the_sibling_ring_refuses_a_key_the_game_cannot_reach():
+    from harness.ceiling import one_ply_children, sibling_ring
+    with pytest.raises(ValueError, match="not a reachable"):
+        sibling_ring(one_ply_children(_ttt()[0]), [0, -5])
+
+
+def test_a_sibling_on_a_HELD_OUT_key_breaks_the_closure_of_a_holdout_arm():
+    from harness.ceiling import _closure_mismatches, one_ply_children
+    children = one_ply_children(_ttt()[0])
+    row = _c46_arm("RxS_H")["seeds"][2]
+    assert _closure_mismatches(row, children, HOLDOUT) == []
+    held = next(k for k in sorted(_ring(_sp(2, 3))) if _held(k))
+    next(p for p in row["passes"] if p["pass"] == 3)["dose"].append([held, 0, 0, 8, 8])
+    assert _closure_mismatches(row, children, HOLDOUT) == [{"pass": 3, "missing": [], "extra": [held]}]
+    assert _closure_mismatches(_c46_arm("RxS")["seeds"][2], children, HOLDOUT) != []
+
+
+def test_clopper_pearson_matches_the_exact_binomial_interval():
+    from harness.ceiling import clopper_pearson
+    for (k, n), (lo, hi) in {(0, 20): (0.0, 0.1684335), (20, 20): (0.8315665, 1.0), (5, 10): (0.1870860, 0.8129140),
+                             (15, 20): (0.5089541, 0.9134285), (1, 20): (0.0012651, 0.2487328),
+                             (7, 13): (0.2513455, 0.8077676)}.items():
+        got = clopper_pearson(k, n)
+        assert got[0] == pytest.approx(lo, abs=1e-7) and got[1] == pytest.approx(hi, abs=1e-7)
+    assert clopper_pearson(0, 20)[1] == pytest.approx(1 - 0.025 ** (1 / 20), abs=1e-12)
+    assert clopper_pearson(5, 10, conf=0.90)[0] > clopper_pearson(5, 10)[0]
+
+
+@pytest.mark.parametrize("k, n", [(-1, 20), (21, 20), (0, 0)])
+def test_clopper_pearson_refuses_an_impossible_count(k, n):
+    from harness.ceiling import clopper_pearson
+    with pytest.raises(ValueError, match="not a binomial count"):
+        clopper_pearson(k, n)
+
+
+def _perfect(arm, k):
+    for i, row in enumerate(arm["seeds"]):
+        row["policy_fail_keys"] = [] if i < k else _outside()[:1 + i % 2]
+
+
+@pytest.mark.parametrize("perfect, reading", [(20, "reaches"), (15, "reaches"), (14, "partial"), (6, "partial"),
+                                              (5, "does not"), (0, "does not")])
+def test_c46_D1_reads_the_exact_label_ring_ceiling_at_15_and_5_of_20_seeds(perfect, reading):
+    arms = _c46_arms(("RxS",), seeds=tuple(range(41, 61)))
+    _perfect(arms["RxS"], perfect)
+    d1 = _c46(arms)["descriptive"]["D1"]
+    assert d1 == {"arm": "RxS", "perfect": perfect, "n": 20, "reading": reading}
+
+
+def test_c46_D1_without_its_arm_reports_it_missing():
+    assert _c46(_c46_arms(("R200",)))["descriptive"]["D1"] == {"missing": ["RxS"]}
+
+
+@pytest.mark.parametrize("arm, perfect, met", [("R200S", 15, True), ("R200S", 14, False), ("R32", 16, True),
+                                               ("RxS", 20, False), ("leg_R200", 20, False)])
+def test_c46_the_floor_test_is_met_only_by_a_GENERIC_RESIDUAL_arm_at_15_of_20(arm, perfect, met):
+    arms = _c46_arms((arm,), seeds=tuple(range(41, 61)))
+    _perfect(arms[arm], perfect)
+    m = _c46(arms)["descriptive"]["M"]
+    assert m["floor_test_met"] is met
+    assert m["arms"][arm]["raw_policy_perfect"] == perfect and m["arms"][arm]["n"] == 20
+
+
+def test_c46_the_milestone_carries_clopper_pearson_intervals_and_the_search_alone_control():
+    from harness.ceiling import clopper_pearson
+    arms = _c46_arms(("R200S",), seeds=tuple(range(41, 61)))
+    _perfect(arms["R200S"], 15)
+    for i, row in enumerate(arms["R200S"]["seeds"]):
+        row["failures"] = [] if i < 4 else [{"key": _outside()[0]}]
+    arms["R200S"]["search_alone"] = {"coverage_eval": 0.93, "policy_coverage": 0.54}
+    row = _c46(arms)["descriptive"]["M"]["arms"]["R200S"]
+    assert row["raw_policy_ci"] == pytest.approx(list(clopper_pearson(15, 20)))
+    assert row["eval_perfect"] == 4 and row["eval_ci"] == pytest.approx(list(clopper_pearson(4, 20)))
+    assert row["search_alone"] == {"coverage_eval": 0.93, "policy_coverage": 0.54}
+    assert row["generic_residual"] is True
+    assert _c46(_c46_arms(("R32",)))["descriptive"]["M"]["arms"]["R32"]["search_alone"] is None
+
+
+def _fails_of(arm):
+    return [len(s["policy_fail_keys"]) for s in arm["seeds"]]
+
+
+def test_c46_D2_D4_and_D5_are_paired_differences_with_bounds_but_no_verdict():
+    arms = _c46_arms()
+    d = _c46(arms)["descriptive"]
+    f = {n: _fails_of(a) for n, a in arms.items()}
+    assert d["D2"]["deltas"] == [x - y for x, y in zip(f["Rx"], f["RxS"])]
+    assert d["D4"]["deltas"] == [x - y for x, y in zip(f["R200S"], f["RxS"])]
+    assert d["D5"]["deltas"] == [(a - b) - (c - e) for a, b, c, e in zip(f["R200"], f["R200S"], f["R32"], f["R32S"])]
+    for item in ("D2", "D4", "D5"):
+        assert d[item]["lower"] <= d[item]["mean_delta"] <= d[item]["upper"]
+        assert "verdict" not in d[item] and "p" not in d[item]
+    partial = _c46(_c46_arms(("R200", "R200S", "R32")))["descriptive"]
+    assert partial["D5"] == {"missing": ["R32S"]} and partial["D2"] == {"missing": ["Rx", "RxS"]}
+
+
+def test_c46_D3_reads_failures_INSIDE_the_hold_out_and_the_generalisation_ratio():
+    arms = _c46_arms(("Rx", "RxS", "RxS_H"))
+    universe = set(_ttt()[2])
+    late = [k for k in _ttt()[3][7] if k in universe]
+    h = [k for k in late if _held(k)]
+    u = next(k for k in late if not _held(k))
+    for row in arms["Rx"]["seeds"]:
+        row["policy_fail_keys"] = [h[0], h[1], h[2], h[3], u]
+        next(p for p in row["passes"] if p["pass"] == 4)["dose"].append([h[3], 8, 8, 0, 0])
+    for row in arms["RxS_H"]["seeds"]:
+        row["policy_fail_keys"] = [h[0], h[1], u]
+        next(p for p in row["passes"] if p["pass"] == 2)["dose"].append([h[1], 8, 8, 0, 0])
+    for row in arms["RxS"]["seeds"]:
+        row["policy_fail_keys"] = [h[0], h[4]]
+        next(p for p in row["passes"] if p["pass"] == 3)["dose"].append([h[4], 0, 0, 8, 8])
+    d3 = _c46(arms)["descriptive"]["D3"]
+    assert d3["holdout"] == HOLDOUT
+    assert d3["H"]["mean_failures"] == {"Rx": 4, "RxS_H": 2, "RxS": 2}
+    assert d3["H"]["generalisation_ratio"] == pytest.approx(1.0)
+    ntr = d3["H_never_trained"]
+    assert ntr["mean_failures"] == {"Rx": 3, "RxS_H": 1, "RxS": 2}
+    assert ntr["generalisation_ratio"] == pytest.approx(2.0)
+    assert ntr["key_set"] == "H keys the RxS_H seed never trained on, the same set for every arm"
+    assert ntr["mean_keys"] > 0
+    for row in arms["RxS"]["seeds"]:
+        row["policy_fail_keys"] = [h[0], h[1], h[2], h[3]]
+    assert _c46(arms)["descriptive"]["D3"]["H"]["generalisation_ratio"] is None
+
+
+def test_c46_D6_sums_each_label_probe_and_reports_an_unrecorded_one_as_None_not_zero():
+    arms = _c46_arms(("R200", "R32"))
+    for i, row in enumerate(arms["R200"]["seeds"]):
+        row["target_labels"] = {"label_ok": 10 + i, "prior_anchor": 2, "search_miss": 1}
+        row["target_labels_exact_leaf"] = {"0.1": {"label_ok": 12, "search_miss": 1},
+                                           "1.0": {"label_ok": 13, "prior_anchor": i % 2}}
+    d6 = _c46(arms)["descriptive"]["D6"]
+    assert d6["R200"]["target_labels"] == {"label_ok": 145, "prior_anchor": 20, "search_miss": 10}
+    assert d6["R200"]["target_labels_exact_leaf"] == {"0.1": {"label_ok": 120, "search_miss": 10},
+                                                      "1.0": {"label_ok": 130, "prior_anchor": 5}}
+    assert d6["R32"] == {"target_labels": None, "target_labels_exact_leaf": None}
+    del arms["R200"]["seeds"][4]["target_labels_exact_leaf"]
+    assert _c46(arms)["descriptive"]["D6"]["R200"]["target_labels_exact_leaf"] is None
+
+
+def test_c46_D7_traces_raw_policy_failures_per_pass():
+    arms = _c46_arms(("R200", "leg_R32"))
+    d7 = _c46(arms)["descriptive"]["D7"]
+    assert d7["g0"]["passed"] is True and d7["g0"]["summary"] == _g0()["summary"]
+    final = sum(_fails_of(arms["R200"])) / 10
+    assert d7["raw_policy_by_pass"]["R200"] == [[p, pytest.approx(final + 6 - p)] for p in range(1, 7)]
+    assert set(d7["raw_policy_by_pass"]) == {"leg_R32", "R200"}
+
+
+def test_c46_D8_splits_target_cells_into_never_delivered_and_delivered_correct_but_failed():
+    arms = _c46_arms(("R200",))
+    tk = _t17()
+    for i, row in enumerate(arms["R200"]["seeds"]):
+        row["policy_fail_keys"] = [tk[0], tk[1], tk[2]]
+        dose3 = next(p for p in row["passes"] if p["pass"] == 3)["dose"]
+        dose3 += [[tk[0], 12, 9, 8, 8], [tk[1], 12, 8, 8, 8]] + ([[tk[3], 0, 0, 8, 8]] if i % 2 else [])
+        next(p for p in row["passes"] if p["pass"] == 1)["dose"].append([tk[2], 8, 8, 0, 0])
+    d8 = _c46(arms, notes={tk[2]: "depth-2 gap"})["descriptive"]["D8"]
+    assert d8["share"] == 0.85 and d8["notes"] == [[tk[2], "depth-2 gap"]]
+    assert d8["arms"]["R200"]["T"] == {"cells": 40, "failed": 30, "never_delivered": 15, "never_delivered_failed": 10,
+                                       "delivered_correct": 15, "delivered_correct_failed": 10}
+    per_key = dict((k, v) for k, v in d8["arms"]["R200"]["per_key"])
+    assert per_key[tk[2]]["never_delivered_failed"] == 10 and per_key[tk[0]]["delivered_correct_failed"] == 10
+    assert d8["arms"]["R200"]["P"] is None
+
+
+def test_c46_P_is_the_set_of_keys_the_reference_arm_fails_in_at_least_THREE_seeds():
+    from harness.ceiling import recurrent_keys
+    out = _outside()
+    ref = {"seeds": [{"policy_fail_keys": [out[0], out[1]]}, {"policy_fail_keys": [out[0], out[1], out[1]]},
+                     {"policy_fail_keys": [out[0], out[2]]}, {"policy_fail_keys": [out[3]]}]}
+    assert recurrent_keys(ref) == {out[0]}
+    assert recurrent_keys(ref, min_seeds=2) == {out[0], out[1]}
+    arms = _c46_arms(("R200",))
+    d = _c46(arms, reference=ref)["descriptive"]
+    assert d["P"] == [out[0]] and d["T"] == sorted(_t17())
+    assert d["D8"]["arms"]["R200"]["P"]["cells"] == 10
+    assert d["D8"]["arms"]["R200"]["P"]["failed"] == sum(out[0] in s["policy_fail_keys"] for s in arms["R200"]["seeds"])
+
+
+def test_c46_D9_places_each_failure_as_VISITED_RING_or_two_plies_away_with_intervals():
+    from harness.measurement import t_critical
+    arms = _c46_arms(("R200",))
+    tk = _t17()
+    far = [k for k in _ttt()[3][7] if k in set(_ttt()[2])]
+    for i, row in enumerate(arms["R200"]["seeds"]):
+        row["visits"] = [[3, 16], [163, 0]]
+        for p in row["passes"]:
+            p["dose"] = [[0, 8, 8, 0, 0], [3, 8, 8, 0, 0], [163, 0, 0, 0, 0]]
+        row["policy_fail_keys"] = [3, 7, 163, tk[0]] + far[:i % 3]
+    d9 = _c46(arms)["descriptive"]["D9"]["R200"]
+    assert d9["all"]["visited"] == {"mean": 1.0, "ci": [1.0, 1.0]}
+    assert d9["all"]["ring"]["mean"] == 2.0
+    assert d9["in_T"] == {"visited": {"mean": 0.0, "ci": [0.0, 0.0]}, "ring": {"mean": 0.0, "ci": [0.0, 0.0]},
+                          "far": {"mean": 1.0, "ci": [1.0, 1.0]}}
+    extra = [i % 3 for i in range(10)]
+    m = sum(extra) / 10
+    sd = (sum((x - m) ** 2 for x in extra) / 9) ** 0.5
+    half = t_critical(9) * sd / 10 ** 0.5
+    assert d9["out_T"]["far"]["mean"] == pytest.approx(m)
+    assert d9["out_T"]["far"]["ci"] == pytest.approx([m - half, m + half])
+    assert d9["all"]["far"]["mean"] == pytest.approx(1 + m)
+    assert "in_P" not in d9
+
+
+def test_c46_D9_splits_by_P_when_a_reference_is_given():
+    arms = _c46_arms(("R200",))
+    ref = {"seeds": [{"policy_fail_keys": [3]}] * 3}
+    for row in arms["R200"]["seeds"]:
+        for p in row["passes"]:
+            p["dose"] = [[0, 8, 8, 0, 0], [3, 8, 8, 0, 0]]
+        row["policy_fail_keys"] = [3, 7]
+    d9 = _c46(arms, reference=ref)["descriptive"]["D9"]["R200"]
+    assert d9["in_P"]["visited"]["mean"] == 1.0 and d9["in_P"]["ring"]["mean"] == 0.0
+    assert d9["out_P"]["visited"]["mean"] == 0.0 and d9["out_P"]["ring"]["mean"] == 1.0
+
+
+def test_c46_D9_gives_no_interval_for_a_single_seed():
+    d9 = _c46(_c46_arms(("R200",), seeds=(41,)))["descriptive"]["D9"]["R200"]
+    assert d9["all"]["far"]["ci"] is None and d9["all"]["far"]["mean"] >= 0
+
+
+def test_a_seed_MISSING_its_raw_policy_failures_is_refused_not_read_as_a_perfect_prior():
+    from harness.ceiling import ab_report
+    seeds = range(11, 14)
+    kw = dict(coverage=[0.98] * 3, policy=[0.95] * 3, fails=[[5]] * 3)
+    base, treat = _arm(seeds, **kw), _arm(seeds, cfg=TREAT, **kw)
+    del treat["seeds"][2]["policy_fail_keys"]
+    with pytest.raises(ValueError, match="policy_fail_keys"):
+        ab_report(base, treat, _target())
+
+
+def test_c46_GE_fails_when_the_siblings_never_CHANGED_training():
+    arms = _c46_arms()
+    control = {r["seed"]: r for r in arms["R200"]["seeds"]}
+    for row in arms["R200S"]["seeds"]:
+        for p in row["passes"]:
+            if p["pass"] == 2:
+                p["weights_sha"] = next(q for q in control[row["seed"]]["passes"] if q["pass"] == 2)["weights_sha"]
+    e1 = _c46(arms)["claims"]["E1"]
+    assert e1["verdict"] == "not_delivered"
+    assert e1["gates"]["GE"]["siblings_changed_training"] is False
+
+
+def test_localize_report_reads_an_arm_with_NO_failures_as_nothing_starved_instead_of_crashing():
+    seeds = [_seed([], visits={k: 1 for k in range(10)}) for _ in range(3)]
+    r = localize_report(_evidence(seeds))
+    assert r["starved"]["verdict"] is None and r["starved"]["p"] is None
+    assert r["systematic"]["verdict"] is None

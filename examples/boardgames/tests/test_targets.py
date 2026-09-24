@@ -103,8 +103,6 @@ def _same(a, b):
 
 
 def test_recording_the_trained_on_labels_does_NOT_change_what_is_trained():
-    from harness.neural import encode
-    from harness.targets import record_training_labels
     plain = _tiny()
     with record_training_labels(G, {G.canonical_key(G.initial_state())}, encode) as log:
         watched = _tiny()
@@ -113,11 +111,7 @@ def test_recording_the_trained_on_labels_does_NOT_change_what_is_trained():
 
 
 def test_the_recorder_reports_each_training_pass_s_dose_at_the_target_states():
-    from harness.neural import encode
-    from harness.targets import record_training_labels
-    from harness.coverage import reachable_states
-    states, _ = reachable_states(G, exact=True)
-    target = {G.canonical_key(s) for s in states if G.ply(s) == 1}
+    target = {G.canonical_key(s) for s in STATES if G.ply(s) == 1}
     with record_training_labels(G, target, encode) as log:
         _tiny()
     assert [row["pass"] for row in log] == [1, 2]
@@ -131,9 +125,6 @@ def test_the_recorder_reports_each_training_pass_s_dose_at_the_target_states():
 
 
 def test_the_recorder_restores_training_even_when_the_run_raises():
-    import harness.neural as neural
-    from harness.neural import encode
-    from harness.targets import record_training_labels
     original = neural.train_net
     try:
         with record_training_labels(G, set(), encode):
@@ -297,6 +288,38 @@ def test_the_dose_covers_exactly_the_keys_of_the_states_it_was_given(monkeypatch
     assert passes[0]["dose"] == [[7, 0, 0, 0, 0], [163, 0, 0, 0, 0], [BLOCK_KEY, 1, 0, 1, 1], [WIN_KEY, 1, 1, 3, 2]]
     assert passes[1]["dose"] == [[7, 0, 0, 0, 0], [163, 0, 0, 0, 0], [BLOCK_KEY, 0, 0, 0, 0], [WIN_KEY, 1, 1, 1, 1]]
     assert [p["pass"] for p in passes] == [1, 2]
+
+
+def test_the_dose_is_what_the_pass_was_FED_even_if_the_pass_consumes_its_examples(monkeypatch):
+    def consuming_train(net, examples, *args, **kwargs):
+        examples.clear()
+        return 0.0
+
+    monkeypatch.setattr(neural, "train_net", consuming_train)
+    fed = list(DOSE_EXAMPLES)
+    with record_training_passes(G, STATES, encode) as passes:
+        neural.train_net(_legacy_net(), fed, 1, 64, 1e-3, "cpu")
+    assert fed == []
+    assert {k: row for k, *row in passes[0]["dose"] if any(row)} == {
+        WIN_KEY: [1, 1, 3, 2], INITIAL_KEY: [1, 1, 0, 0], BLOCK_KEY: [1, 0, 1, 1]}
+
+
+def test_the_solver_is_asked_ONCE_per_raw_position_however_many_passes_see_it(monkeypatch):
+    import harness.targets as targets
+    asked = []
+    solve = targets.optimal_actions
+
+    def counting(game, s):
+        asked.append(game.state_key(s))
+        return solve(game, s)
+
+    monkeypatch.setattr(targets, "optimal_actions", counting)
+    monkeypatch.setattr(neural, "train_net", _no_op_train)
+    with record_training_passes(G, STATES, encode):
+        for _ in range(3):
+            neural.train_net(_legacy_net(), DOSE_EXAMPLES, 1, 64, 1e-3, "cpu")
+    assert len(asked) == len(set(asked))
+    assert set(asked) == {G.state_key(s) for s in STATES + [MIRROR, BLOCK_MIRROR]}
 
 
 class _RampNet(torch.nn.Module):

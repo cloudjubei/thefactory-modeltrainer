@@ -342,7 +342,7 @@ def test_a_deliberately_wrong_candidate_is_REJECTED_by_the_verifier():
 def test_a_net_builds_for_morris_and_encodes_a_position():
     import torch
     from harness.neural import Connect4Net, arch_for_game, encode
-    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1}, G))
+    net = Connect4Net(**arch_for_game({"channels": 8}, G))
     x = encode(G, G.initial_state()).unsqueeze(0)
     pol, val = net(x)
     assert pol.shape[1] == NUM_ACTIONS and val.shape[0] == 1
@@ -350,7 +350,7 @@ def test_a_net_builds_for_morris_and_encodes_a_position():
 
 def test_self_play_produces_examples_that_augment_sixteenfold():
     from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, augment_examples, self_play_game
-    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1}, G))
+    net = Connect4Net(**arch_for_game({"channels": 8}, G))
     agent = AlphaZeroAgent(net, sims=6, solve_endgame=0, gumbel=True, c_scale=0.1)
     ex = self_play_game(G, agent, random.Random(0))
     assert len(ex) > 0
@@ -364,7 +364,7 @@ def test_paired_exploitability_runs_with_the_game_agnostic_refuter():
     from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game
 
     def arm():
-        net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1}, G))
+        net = Connect4Net(**arch_for_game({"channels": 8}, G))
         return AlphaZeroAgent(net, sims=4, solve_endgame=0, gumbel=True, c_scale=0.1)
 
     res = paired_exploitability(

@@ -300,3 +300,67 @@ def test_label_dose_REFUSES_an_encoding_shared_by_two_different_positions():
     from harness.coverage import label_dose
     with _pytest.raises(ValueError, match="collid"):
         label_dose(G, [], lambda game, s: b"same", set())
+
+
+def _isos():
+    from harness.symmetry import dihedral_isometries
+    return dihedral_isometries(3, 3)
+
+
+def _onehot_logits(a):
+    return [10.0 if i == a else 0.0 for i in range(9)]
+
+
+def test_orientation_failures_catches_a_policy_that_is_right_ONLY_on_canonical_images():
+    from harness.coverage import orientation_failures
+    canon, _ = reachable_states(G, exact=True)
+    reps = {G.state_key(s) for s in canon}
+
+    def policy(s):
+        opt = sorted(optimal_actions(G, s))
+        if G.state_key(s) in reps:
+            return _onehot_logits(opt[0])
+        bad = [a for a in G.legal_actions(s) if a not in opt]
+        return _onehot_logits(bad[0] if bad else opt[0])
+    r = orientation_failures(G, policy, _isos())
+    assert r["canonical_fail_keys"] == []
+    assert r["failing_images"] > 0 and len(r["image_fail_keys"]) > 0
+    assert set(r["image_fail_keys"]) <= failable_keys(G, canon)
+    assert r["positions"] == len([s for s in reachable_states(G, exact=True, symmetry=False)[0] if not G.is_terminal(s)])
+
+
+def test_an_exactly_optimal_policy_passes_all_three_orientation_readings():
+    from harness.coverage import orientation_failures
+
+    def optimal_with_a_louder_illegal_move(s):
+        lg = _onehot_logits(sorted(optimal_actions(G, s))[0])
+        occupied = [i for i, v in enumerate(s.board) if v]
+        if occupied:
+            lg[occupied[0]] = 20.0
+        return lg
+    r = orientation_failures(G, optimal_with_a_louder_illegal_move, _isos())
+    assert r["canonical_fail_keys"] == [] and r["image_fail_keys"] == [] and r["symmetrized_fail_keys"] == []
+    assert r["failing_images"] == 0
+
+
+def test_the_symmetrized_reading_averages_the_policy_over_the_images_and_maps_moves_back():
+    from harness.coverage import orientation_failures
+    iso_count = len(_isos())
+
+    def mostly_right(s):
+        opt = sorted(optimal_actions(G, s))
+        bad = [a for a in G.legal_actions(s) if a not in opt]
+        wrong_here = bad and hash(s.board) % iso_count == 0
+        return _onehot_logits(bad[0]) if wrong_here else _onehot_logits(opt[0])
+    r = orientation_failures(G, mostly_right, _isos())
+    assert r["failing_images"] > 0
+    assert len(r["symmetrized_fail_keys"]) < len(r["canonical_fail_keys"]) < len(r["image_fail_keys"])
+
+
+def test_orientation_failures_refuses_an_isometry_the_game_does_not_obey():
+    import pytest as _pytest
+    from harness.coverage import orientation_failures
+    from harness.symmetry import iso_from_cell_map
+    shift = iso_from_cell_map("shift", 3, 3, lambda i: (i // 3) * 3 + (i % 3 + 1) % 3)
+    with _pytest.raises(ValueError, match="isometr"):
+        orientation_failures(G, lambda s: _onehot_logits(sorted(optimal_actions(G, s))[0]), _isos() + [shift])

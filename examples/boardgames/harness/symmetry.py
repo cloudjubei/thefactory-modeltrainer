@@ -131,6 +131,29 @@ def verify_isometry(game, iso: Iso, probes: list) -> list[int] | None:
     return action_perm
 
 
+def verified_isometries(game, n_probes: int = 200, seed: int = 20260922, max_plies: int = 30,
+                        isometries: list | None = None) -> list[tuple[Iso, list[int]]]:
+    """The game's VERIFIED isometries as `(iso, forward_action_image)` pairs, identity first — the objects a caller
+    needs to TRANSFORM positions (e.g. scoring a policy in every orientation), where `find_symmetries` gives only the
+    permutations augmentation needs. Every candidate is proven against dynamics; one that is not a real symmetry is
+    left out, never trusted. A game without the transform hooks has only the identity."""
+    rows, cols = game.board_shape
+    candidates = isometries if isometries is not None else dihedral_isometries(rows, cols)
+    identity = next((i for i in candidates if i.name == "identity"), None) \
+        or next(i for i in dihedral_isometries(rows, cols) if i.name == "identity")
+    out = [(identity, list(range(game.num_actions)))]
+    if not (hasattr(game, "transform_state") and hasattr(game, "transform_action")):
+        return out
+    probes = _probe_states(game, n_probes, seed, max_plies)
+    for iso in candidates:
+        if iso.name == "identity":
+            continue
+        forward = verify_isometry(game, iso, probes)
+        if forward is not None:
+            out.append((iso, forward))
+    return out
+
+
 def find_symmetries(game, n_probes: int = 200, seed: int = 20260922, max_plies: int = 30,
                     isometries: list | None = None) -> list[tuple[list[int], list[int]]]:
     """The game's VERIFIED symmetries as `(cell_perm, action_perm)` pairs (identity always included). A game that
@@ -140,20 +163,15 @@ def find_symmetries(game, n_probes: int = 200, seed: int = 20260922, max_plies: 
     automorphisms the grid enumerator cannot propose — each is still PROVEN against dynamics, so an extra
     candidate that is not a real symmetry is refused, never trusted."""
     rows, cols = game.board_shape
-    ident = (list(range(rows * cols)), list(range(game.num_actions)))
-    if not (hasattr(game, "transform_state") and hasattr(game, "transform_action")):
-        return [ident]
-    probes = _probe_states(game, n_probes, seed, max_plies)
-    out = [ident]
-    for iso in (isometries if isometries is not None else dihedral_isometries(rows, cols)):
+    out = []
+    for iso, forward in verified_isometries(game, n_probes, seed, max_plies, isometries):
         if iso.name == "identity":
+            out.append((list(range(rows * cols)), list(range(game.num_actions))))
             continue
-        forward = verify_isometry(game, iso, probes)
-        if forward is not None:
-            # the verifier works with FORWARD action images (action_perm[a] = image of a); augment_examples
-            # consumes SOURCE-permutations (new[dest] = old[perm[dest]]) to match cell_perm, so invert.
-            source = [0] * len(forward)
-            for a, img in enumerate(forward):
-                source[img] = a
-            out.append((iso.cell_perm, source))
+        # the verifier works with FORWARD action images (action_perm[a] = image of a); augment_examples
+        # consumes SOURCE-permutations (new[dest] = old[perm[dest]]) to match cell_perm, so invert.
+        source = [0] * len(forward)
+        for a, img in enumerate(forward):
+            source[img] = a
+        out.append((iso.cell_perm, source))
     return out

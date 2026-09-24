@@ -287,6 +287,62 @@ def _as_bytes(x) -> bytes:
     return x.detach().cpu().numpy().tobytes() if hasattr(x, "detach") else bytes(repr(x), "utf8")
 
 
+def orientation_failures(game, logits_fn, isometries, max_states: int = 300000) -> dict:
+    """Raw-policy failures scored three ways, because a net trained with augmentation is not exactly symmetric:
+    `canonical_fail_keys` — one representative image per canonical state (what §C.41-§C.46 measured);
+    `image_fail_keys` / `failing_images` — EVERY reachable raw position, the strict reading of "plays optimally in
+    any position it is handed" (§C.46 verification: the same nets scored 9/20 perfect seeds canonically, 0/20 here);
+    `symmetrized_fail_keys` — per canonical state, the policy averaged over the verified images (softmax over legal
+    moves, each image's moves mapped back) — an evaluation-time ensemble, a DIFFERENT policy from the raw net.
+    `logits_fn(state)` returns logits over num_actions. Every isometry must be one the game verifiably obeys, or the
+    averaged reading would mix in positions that are not the same game."""
+    import math
+
+    from harness.symmetry import verify_isometry
+
+    raw, _ = reachable_states(game, exact=True, max_states=max_states, symmetry=False)
+    raw = [s for s in raw if not game.is_terminal(s)]
+    probes = raw[:: max(1, len(raw) // 200)]
+    action_perms = []
+    for iso in isometries:
+        perm = verify_isometry(game, iso, probes)
+        if perm is None:
+            raise ValueError(f"isometry {iso.name!r} is not one the game obeys — averaging over it would mix positions "
+                             f"that are not equivalent")
+        action_perms.append(perm)
+
+    def choose(s):
+        lg = logits_fn(s)
+        return max(game.legal_actions(s), key=lambda a: float(lg[a]))
+
+    image_fails: dict = {}
+    for s in raw:
+        if choose(s) not in optimal_actions(game, s):
+            k = _key(game, s)
+            image_fails[k] = image_fails.get(k, 0) + 1
+    canon, _ = reachable_states(game, exact=True, max_states=max_states, symmetry=True)
+    canon = [s for s in canon if not game.is_terminal(s)]
+    canonical = sorted(_key(game, s) for s in canon if choose(s) not in optimal_actions(game, s))
+
+    def averaged(s):
+        legal = game.legal_actions(s)
+        acc = dict.fromkeys(legal, 0.0)
+        for iso, perm in zip(isometries, action_perms):
+            t = game.transform_state(s, iso)
+            lg = logits_fn(t)
+            lt = game.legal_actions(t)
+            top = max(float(lg[b]) for b in lt)
+            ex = {b: math.exp(float(lg[b]) - top) for b in lt}
+            z = sum(ex.values())
+            for a in legal:
+                acc[a] += ex[perm[a]] / z
+        return max(legal, key=lambda a: acc[a])
+    symmetrized = sorted(_key(game, s) for s in canon if averaged(s) not in optimal_actions(game, s))
+    return {"canonical_fail_keys": canonical, "image_fail_keys": sorted(image_fails),
+            "failing_images": sum(image_fails.values()), "positions": len(raw),
+            "symmetrized_fail_keys": symmetrized}
+
+
 def blind_spot_concentration(failure_sets: list, universe: set, trials: int = 20000, seed: int = 0) -> dict:
     """Are independently trained models wrong at the SAME states, or at different ones? The statistic is the
     number of (seed-pair, shared-failure) coincidences, sum over states of C(misses, 2). The null is that each

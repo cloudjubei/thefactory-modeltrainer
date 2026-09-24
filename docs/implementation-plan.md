@@ -3042,7 +3042,20 @@ replicated, and read through the cross-game matrix + the register):
 4. ~~**§C.45 — does LABEL QUALITY cause the blind spot?**~~ **DONE 2026-09-23 → §C.45.** Partially: near-exact
    labels at matched exposure repair ~half the target shortfall through the prior (h26, h28); deeper self-play as
    the delivery route FAILS (h27, h29, h30). No seed reaches NET-level coverage 1.0 yet.
-4b. **§C.46 (next) — correct labels × exposure at the NET level, plus a value-sufficiency probe.** Fresh seeds
+4b. ~~**§C.46**~~ **DONE 2026-09-24 → §C.46.** One-ply siblings cut raw-policy failures ~10× (E1/E2) but mostly
+   in-sample on a 627-state game (h38); architecture inconclusive (A1); exact labels are not a ceiling (h40); the
+   coverage metric was canonical-image only — strict all-orientation perfection 0/20 (h39). Floor test not met.
+4c. **§C.47 (next) — two legs.** (i) FLOOR (tic-tac-toe, fresh seeds 61-80): pre-register the floor operator BEFORE
+   data — recommended: the raw policy averaged over the verified symmetry group (search-free, generic, exactly
+   equivariant), with the strict all-orientation raw-net score as the secondary — and the arm R200S unchanged;
+   claim ≥ 15/20 perfect. Wording fixed in advance: "met by near-enumeration of 627 states; necessary, not evidence
+   of transfer". (ii) TRANSFER (Connect-4): Stage 0 go/no-go without training — on the existing solver-free Connect-4
+   net, classify each first raw-policy error in proven-win conversion as visited / one move off / further from its
+   self-play; pre-registered: < 25% within one move → siblings are not the Connect-4 lever, stop; ≥ 50% → Stage 1
+   (C_R vs C_RS vs C_RS_H at 64-sim labels, n = 10, primary claim paired proven-win conversion, C3 = error rate on
+   the withheld half = generalisation at Connect-4 density). Prerequisites: a trained-key recorder that does not
+   enumerate the state space; scalar value head; a single train_alphazero call per run. Original §C.46 sketch,
+   superseded: Fresh seeds
    41-60, all arms mixed openings + 32-sim self-play + reanalyze_frac 1.0: R32 (control); R200 (pre-registered
    REPLICATION of A1/A2 — required before building on them); R200-target-only (replicate the exploratory split_in
    finding as a claim); R200+siblings (every legal one-move deviation from recorded self-play states added to the
@@ -3283,3 +3296,123 @@ works if `attach-data` precedes `verify` — now GUARDED (t30): every new test-b
 file (even one not produced yet, timed when verify first finds it) or `--reads-no-data`, so it cannot be forgotten.
 Suite 816 passed. (5) G2's pooled-count
 delivery gate could not see per-state delivery (h29) — the next design's gate must be per state.
+
+**CORRECTION — the network every §C.41-§C.45 tic-tac-toe run actually trained (found by the §C.46 design review,
+2026-09-23).** The scripts passed `net_arch={"channels": 32, "blocks": 3, "head_hidden": 32}` with no `residual`;
+the legacy branch of `Connect4Net` ignores `blocks`/`head_hidden`, so every seed trained the 12,746-parameter
+2-conv legacy net, not the 57,453-parameter residual net the config described. All results stand as measured, but
+they are results about the LEGACY net. The §C.46 G0 capacity gate then showed why it matters: trained directly on
+the EXACT policy for all 627 states at the recipe's step budget, the residual net reaches 0 raw-policy failures on
+4/5 seeds while the legacy net reaches 0 on 0/5 (1/5 even at 3× the steps; key 601 fails in 8/15 legacy runs) — part
+of the "ceiling" may be capacity/optimisation of the legacy net, not the recipe. Now GUARDED at the root:
+`arch_for_game` and `validate_config` refuse residual-only settings without the residual tower; `localize_ceiling`
+takes an explicit `--arch legacy|residual` and records `params_expected`, and the §C.46 report refuses a seed whose
+built parameter count differs from it.
+
+
+#### §C.46 — Labels × exposure × architecture at the NET level (pre-registered 2026-09-24)
+
+**Why.** §C.45 left two routes to the §C.42 floor test (raw-policy coverage → 1.0): the residual gap sits half in
+cells that never received a training label, and positions self-play never generates (h30). Siblings — every
+one-move deviation from recorded self-play states — are the generic exposure mechanism. Then the design review
+found something bigger: **every §C.41-§C.45 tic-tac-toe run trained the 12,746-parameter LEGACY net** (the recorded
+`{32, 3, 32}` had no `residual`), and the offline capacity gate G0 showed that net cannot fit the exact policy at
+the recipe's step budget (0/5 seeds at zero failures; the residual net 4/5). So §C.46 asks three questions at once:
+does the right ARCHITECTURE move the ceiling (A1), does sibling EXPOSURE (E1/E2), and do the §C.45 LABEL results
+replicate on fresh seeds and on the right net (chain R).
+
+**Design history.** Sketch (6 arms incl. target-only relabel and exact-value arms) → design review (4 critics +
+synthesis; `scratchpad/c46/spec.md`) → rebuilt. The review killed: a 17/17 per-state delivery gate that would fail
+~98% of the time (key 4983 is reachable by siblings only at depth 2); a migration gate on raw-policy failures that
+fails by noise alone; a SESOI that read real gains as refutations; sibling injection at iteration 0 (it destroyed
+the pass-1 pairing that gives the test its power); the target-only and exact-value arms (solver-derived, no generic
+decision follows). Implementation review (4 reviewers, each finding re-derived; 15 real, all fixed before launch):
+D3's generalisation ratio compared arms over different key sets; D9 dropped children of non-failable visited
+states; G0 reached the report as a bare boolean; the delivery gate could pass with siblings that never changed
+training (now GE(vi), t32); a parameter check that compared a number with itself; a holdout without a salt; NaN
+oracle labels; aux-head NaN values; old-evidence re-analysis broken by the new arch guard.
+
+**Arms** (seeds 41-60; all: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters × 48 games, eval
+48-sim fresh tree): leg_R32, leg_R200 (legacy net); R32, R200 (residual); R32S, R200S (residual + siblings,
+policy-only, value masked, steps-matched); Rx, RxS, RxS_H (DIAGNOSTIC: exact-solver labels; RxS_H withholds half
+the sibling keys to measure generalisation).
+
+**Claims** (`harness.ceiling.c46_report`; h31-h37 registered against data not yet produced): **E1** (primary,
+α 0.03) R200 → R200S raw-policy failures over 627 states, gate GE (siblings on every relabelled pass, exposure
+rises, exact one-ply closure re-derived from the rules, step ratio 0.75-1.33, sibling-label share ≥ 0.90, siblings
+changed training); **E2** R32 → R32S (only if E1 supported); **A1** (α 0.01, gated by G0) leg_R200 → R200;
+**chain R** (α 0.01, fixed sequence) L1/L2 legacy replication of §C.45 A1/A2, R1/R2 on the residual net.
+Descriptives: D1 (does RxS reach raw-policy 1.0), D3 (generalisation to withheld keys), D6 (does an exact value
+make a 32-sim label right — the transfer probe), D9 (where the remaining failures sit), M (milestone vs
+search-alone, with exact intervals). Floor test registered: met iff a generic residual arm reaches raw-policy 1.0
+in ≥ 15/20 seeds.
+
+**Training-code changes** (era c4b351282e91 → … → **2600dc4f574a**; every step reproduced §C.45 seed 21
+bit-for-bit with the new knobs off): masked value loss (`_value_loss`, bit-identical when nothing is masked —
+equivalent mutant documented), `train_net(epoch_examples)` steps matching, `reanalyze_examples` refuses terminals,
+`one_ply_siblings`, `train_alphazero(reanalyze_siblings, steps_matched, sibling_holdout, policy_target_fn)` with
+refusals and per-iteration history, `arch_for_game`/`validate_config` refuse residual-only settings without the
+tower (t31), `legacy_arch_as_built` for re-analysing old evidence. Measurement: `record_training_passes` (per-pass
+dose over all 627 keys, weights hash, raw-policy failures), `exact_policy_target`, `scripts/capacity_gate.py` (G0).
+Suite 982 passed; every new guard mutation-tested.
+
+**RESULTS (2026-09-24; verified before recording).** Nine arms × 20 seeds under one era (2600dc4f574a), every run
+started 5.5 min after h31-h37 were registered. Verification (4 verifiers + critic) re-derived every number with its
+own code (exact 2^20 sign-flip), retrained 6 seeds bit-for-bit (the critic later all 20 R200S seeds).
+
+| pre-registered claim | verdict | numbers (raw-policy failures per seed, 627 states, ONE canonical image each) |
+|---|---|---|
+| h31 E1 siblings, 200-sim labels (R200 → R200S) | **SUPPORTED** | 10.0 → 0.9, gain +9.1, 20/20 seeds, p=9.5e-7, 95% lower bound 6.9; GE held (labels 99.87% right, steps 0.975-1.027, siblings changed training in 20/20) |
+| h32 E2 siblings, 32-sim labels (R32 → R32S) | **SUPPORTED** | 12.35 → 4.75, gain +7.6, p=1.9e-6, lower bound 6.17 |
+| h33 A1 residual vs legacy net (leg_R200 → R200) | **INCONCLUSIVE** | 12.8 → 10.0, gain +2.8, p=0.031 (> α 0.01), bounds [0.42, 5.2] straddle SESOI 3.2 — the register's new inconclusive outcome, not a refutation |
+| h34/h35 L1/L2 legacy relabelling (replication of §C.45) | **SUPPORTED** | target 0.726 → 0.835, prior 0.462 → 0.674 — direction and significance replicate; magnitudes smaller than §C.45 |
+| h36/h37 R1/R2 residual relabelling | **SUPPORTED** | target 0.856 → 0.959, prior 0.697 → 0.868 |
+
+**What E1 does and does NOT show (h38, post-hoc).** On a 627-state game, self-play plus one-ply siblings trains on
+~89% of the failable positions. ~89% of the E1 gain is the net learning labels on positions R200S trained and R200
+never did; the spillover to positions NEITHER arm trained is ~1.0 failure/seed — real (p≈0.001) but small. Only the
+spillover part could transfer to Connect-4, where one-ply siblings of visited positions are a vanishing fraction of
+the space. So E1 is a strong EXPOSURE result on tic-tac-toe, not yet a transferable mechanism; D3's withheld-sibling
+arm puts generalisation to never-trained withheld positions at 0.34 of the direct effect (bootstrap CI [0.21, 0.45]).
+
+**Exact labels are not a ceiling (h40, post-hoc).** Rx (solver labels uniform over the optimal set, no siblings) is
+the WORST residual arm — 18.3 failures/seed vs R200's 10.0 and R32's 12.35 — while training MORE positions than R200:
+it generalises to untrained neighbours ~2× worse (8.3% vs 4.1%). Label argmax accuracy is not what makes a label teach;
+the soft search target carries a ranking among moves that the uniform oracle label does not (hypothesis). Once
+siblings cover the ring, 200-sim labels do as well as solver labels (D4 R200S − RxS = +0.15 [−0.6, +0.9]).
+
+**Where the residual sits (R200S).** 14 of its 18 remaining failures are late tactical positions exactly two plies
+from self-play that received no training row on any pass; the other 4 are trained positions (mostly multi-optimal,
+small logit margins). R200S is flat from pass 5 to 6 (0.9/seed) — more iterations will not close it. A scratch pilot
+(verifier, not register-grade, on the evaluation seeds) with TWO-ply siblings reached 15/20 canonical-perfect seeds.
+
+**THE METRIC WAS WRONG IN A WAY THAT MATTERS (h39, post-hoc).** Every coverage number since §C.41 scored the raw
+policy on ONE canonical image per state. A net trained with augmentation is not exactly symmetric. Rebuilt
+bit-for-bit (`scripts/orientation_evidence.py` refuses any net whose weights hash differs from the evidence), the
+same nets score:
+
+| perfect seeds (raw policy) | one canonical image | every raw position (4,520) | averaged over the 8 verified images |
+|---|---|---|---|
+| R200S | 9/20 | **0/20** | 16/20 |
+| RxS (exact labels) | 12/20 | **0/20** | 17/20 |
+| R32S | 2/20 | 1/20 | 2/20 |
+
+E1/E2 stay valid (both arms of each comparison were scored the same way), but every "perfect" count and every
+"distance to optimal" since §C.41 is canonical-image. The raw net misplays some rotation of a position it plays
+right canonically (R200S: 3.85 failing positions per seed over all images vs 0.9 canonically). Averaging the policy
+over the verified symmetry group removes almost all of it — and an averaged policy is EXACTLY equivariant, so for it
+the canonical and all-orientation readings coincide. **Guarded now:** `coverage.orientation_failures` scores any
+policy all three ways and refuses an isometry the game does not obey; `localize_ceiling` records it for every future
+arm; `symmetry.verified_isometries` supplies the proven isometries.
+
+**Floor test after §C.46.** NOT met under any reading as registered (the bar is ≥ 15/20 seeds under an operator
+fixed in advance; §C.42 never fixed one). The symmetry-averaged reading reaching 16/20 was found AFTER the data — it
+can motivate a pre-registration on fresh seeds, not satisfy one.
+
+**Also corrected / guarded this section.** The report overwrote each E/A claim's arm name with a per-seed list
+(fixed; the saved scratch report predates the fix); the §C.43 printout crashed on a perfect arm (fixed); the
+register can now time a claim against SEVERAL data files, the earliest start binding (t33); `harness/symmetry.py`
+(augmentation) and `harness/game.py` are training-path code missing from the training fingerprint — to be added at
+the next era change (adding them now would move the era under §C.46's evidence).
+
+

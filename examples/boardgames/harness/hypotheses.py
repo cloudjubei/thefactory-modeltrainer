@@ -53,6 +53,16 @@ def _ts(text: str) -> datetime:
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
+def _data_files(h: dict) -> list:
+    """The stored-evidence files a claim declared, as a list whatever the record's shape: one file is stored as a
+    dict (every record before multi-file claims), several as a list. A claim is pre-registered only if it predates
+    the EARLIEST of them — the first moment any of its data existed."""
+    data = h.get("data")
+    if not data:
+        return []
+    return [data] if isinstance(data, dict) else list(data)
+
+
 def _data_started(path: str) -> str:
     """The `started` stamp a stored-evidence file carries — when its data began to be produced."""
     try:
@@ -91,7 +101,7 @@ class Register:
 
     def register(self, id: str, claim: str, a: str | None = None, b: str | None = None,
                  direction: str | None = None, unit: str = "", proof: str = "", note: str = "",
-                 null_below: float = 0.03, data: str = "", inconclusive_proof: str = "",
+                 null_below: float = 0.03, data: str | list = "", inconclusive_proof: str = "",
                  reads_no_data: bool = False) -> dict:
         """Register a claim, in exactly ONE of two modes.
 
@@ -141,7 +151,9 @@ class Register:
             h = {"id": id, "claim": claim, "mode": "test", "proof": proof, "note": note,
                  "registered_at": self._now(), "evidence": []}
             if data:
-                h["data"] = {"path": data, "started": _data_started(data) if Path(data).exists() else None}
+                paths = [data] if isinstance(data, str) else list(data)
+                files = [{"path": d, "started": _data_started(d) if Path(d).exists() else None} for d in paths]
+                h["data"] = files[0] if len(files) == 1 else files
             if reads_no_data:
                 h["reads_no_data"] = True
             if inconclusive_proof:
@@ -227,13 +239,14 @@ class Register:
         if _mode(h) != "test":
             raise ValueError(f"verify() is for test-backed claims; {id} is comparison-backed and is settled "
                              f"by ledger evidence (use link())")
-        if h.get("data") and h["data"]["started"] is None:
-            if not Path(h["data"]["path"]).exists():
-                raise ValueError(f"{id}: its data {h['data']['path']!r} has not been produced yet — nothing to verify")
-            h["data"]["started"] = _data_started(h["data"]["path"])
-        if h.get("data") and _data_started(h["data"]["path"]) != h["data"]["started"]:
-            raise ValueError(f"{id}: {h['data']['path']!r} changed its `started` since it was declared — the data "
-                             f"was regenerated under the claim, so register a new claim against the new data")
+        for f in _data_files(h):
+            if f["started"] is None:
+                if not Path(f["path"]).exists():
+                    raise ValueError(f"{id}: its data {f['path']!r} has not been produced yet — nothing to verify")
+                f["started"] = _data_started(f["path"])
+            elif _data_started(f["path"]) != f["started"]:
+                raise ValueError(f"{id}: {f['path']!r} changed its `started` since it was declared — the data was "
+                                 f"regenerated under the claim, so register a new claim against the new data")
         runner = run_test or _run_pytest
         res = runner(h["proof"])
         if not res.get("collected"):
@@ -334,6 +347,8 @@ class Register:
         stamps = [e.get("drawn_at") for e in h["evidence"]]
         if not stamps or any(s is None for s in stamps):
             return not h["evidence"]
-        if h.get("data") and not _ts(h["registered_at"]) < _ts(h["data"]["started"]):
+        files = _data_files(h)
+        if files and (any(f["started"] is None for f in files)
+                      or not _ts(h["registered_at"]) < min(_ts(f["started"]) for f in files)):
             return False
         return all(s > h["registered_at"] for s in stamps)

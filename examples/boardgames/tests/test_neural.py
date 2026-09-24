@@ -1098,7 +1098,7 @@ def _tiny_reanalyze_run(gumbel=True, **kw):
     from games.tictactoe import TicTacToe
     from harness.neural import train_alphazero
     return train_alphazero(TicTacToe(), iterations=2, selfplay_games=3, sims=8, epochs=1, channels=8,
-                           net_arch={"channels": 8, "blocks": 1, "head_hidden": 8}, gumbel=gumbel, seed=5,
+                           net_arch={"channels": 8}, gumbel=gumbel, seed=5,
                            reanalyze_frac=0.5, **kw)[0]
 
 
@@ -1155,7 +1155,7 @@ def test_a_separate_relabeler_s_endgame_solves_are_counted_in_the_iteration_s_hi
 
     def run(**kw):
         _net, hist = train_alphazero(Connect4(), iterations=2, selfplay_games=2, sims=8, epochs=1, channels=8,
-                                     net_arch={"channels": 8, "blocks": 1, "head_hidden": 8}, gumbel=True, seed=3,
+                                     net_arch={"channels": 8}, gumbel=True, seed=3,
                                      reanalyze_frac=0.5, endgame_tb=Tablebase(), endgame_max_empty=6, **kw)
         return [(h.get("endgame_solves"), h.get("endgame_hits")) for h in hist]
     assert run() == run(reanalyze_sims=8)
@@ -1192,7 +1192,7 @@ def test_a_policy_only_example_still_trains_the_policy():
     from harness.neural import Connect4Net, arch_for_game, encode, train_net
     g = TicTacToe()
     torch.manual_seed(0)
-    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1, "head_hidden": 8}, g))
+    net = Connect4Net(**arch_for_game({"channels": 8}, g))
     s = g.initial_state()
     pi = [0.0] * 9
     pi[4] = 1.0
@@ -1207,7 +1207,7 @@ def test_masked_value_targets_are_refused_with_a_CATEGORICAL_value_head():
     from games.tictactoe import TicTacToe
     from harness.neural import Connect4Net, arch_for_game, encode, train_net
     g = TicTacToe()
-    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1, "head_hidden": 8, "value_bins": 11}, g))
+    net = Connect4Net(**arch_for_game({"channels": 8, "value_bins": 11}, g))
     with pytest.raises(ValueError, match="categorical"):
         train_net(net, [(encode(g, g.initial_state()), [1 / 9] * 9, float("nan"))], epochs=1, batch_size=8,
                   lr=1e-3, device="cpu")
@@ -1425,3 +1425,63 @@ def test_siblings_are_refused_with_a_categorical_value_head_or_a_distilled_ancho
     corpus = [(encode(g, g.initial_state()), [1 / 9] * 9, 0.0)]
     with pytest.raises(ValueError, match="distilled"):
         train_alphazero(g, net_arch={"channels": 8}, distill_corpus=corpus, **base)
+
+
+def test_residual_only_arch_settings_WITHOUT_the_residual_tower_are_refused_not_silently_ignored():
+    from games.tictactoe import TicTacToe
+    from harness.neural import arch_for_game
+    g = TicTacToe()
+    for extra in ({"blocks": 3}, {"head_hidden": 32}, {"batchnorm": True}, {"global_pool": True}):
+        with pytest.raises(ValueError, match="residual"):
+            arch_for_game({"channels": 32, **extra}, g)
+        arch_for_game({"channels": 32, "residual": True, **extra}, g)
+    arch_for_game({"channels": 32}, g)
+    arch_for_game({"channels": 32, "blocks": 0, "head_hidden": 0}, g)
+
+
+def test_a_sibling_holdout_without_a_string_salt_is_refused_BEFORE_any_compute():
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    for bad in ({"mod": 2}, {"mod": 2, "salt": 5}):
+        with pytest.raises(ValueError, match="salt"):
+            train_alphazero(TicTacToe(), iterations=2, selfplay_games=1, sims=4, epochs=1, net_arch={"channels": 8},
+                            gumbel=True, seed=1, reanalyze_frac=1.0, reanalyze_siblings=True, sibling_holdout=bad)
+
+
+def test_a_non_finite_oracle_label_is_refused():
+    from games.tictactoe import TicTacToe
+    from harness.neural import _checked_policy_target
+    g = TicTacToe()
+    for bad in ([float("nan")] * 9, [float("nan")] + [0.0] * 8, [float("inf")] + [0.0] * 8):
+        with pytest.raises(ValueError, match="policy_target_fn"):
+            _checked_policy_target(g, g.initial_state(), lambda _g, _s, b=bad: b)
+
+
+def test_masked_value_targets_are_refused_with_AUX_heads():
+    from games.tictactoe import TicTacToe
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    g = TicTacToe()
+    net = Connect4Net(**arch_for_game({"channels": 8, "residual": True, "aux_heads": True}, g))
+    ex = [(encode(g, g.initial_state()), [1 / 9] * 9, float("nan"))] * 2
+    with pytest.raises(ValueError, match="aux"):
+        train_net(net, ex, epochs=1, batch_size=2, lr=1e-3, device="cpu")
+
+
+def test_the_reanalyze_history_times_self_play_relabel_and_siblings_SEPARATELY():
+    _net, hist = _tiny_c46(reanalyze_siblings=True)
+    it2 = hist[1]
+    for k in ("selfplay_s", "relabel_s", "sibling_relabel_s", "train_s"):
+        assert k in it2 and it2[k] >= 0
+    assert hist[0]["sibling_relabel_s"] == 0
+
+
+def test_an_old_evidence_arch_maps_to_the_net_it_ACTUALLY_built():
+    from games.tictactoe import TicTacToe
+    from harness.neural import Connect4Net, arch_for_game, legacy_arch_as_built
+    g = TicTacToe()
+    recorded = {"channels": 32, "blocks": 3, "head_hidden": 32}
+    built = legacy_arch_as_built(recorded)
+    assert built == {"channels": 32}
+    assert sum(p.numel() for p in Connect4Net(**arch_for_game(built, g)).parameters()) == 12746
+    residual = {"channels": 32, "blocks": 3, "head_hidden": 32, "residual": True}
+    assert legacy_arch_as_built(residual) == residual

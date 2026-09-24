@@ -9,7 +9,9 @@ optimal-play manifold). Writes the full per-seed evidence so harness.ceiling can
         evidence/tictactoe_mixed.json evidence/tictactoe_ceiling.json
 
 Every state is evaluated with a FRESH search tree (coverage.per_state_act): an agent that keeps its tree across
-states scores differently depending on the order states are asked in (§C.42)."""
+states scores differently depending on the order states are asked in (§C.42). The raw policy is ALSO scored on
+every reachable orientation (`orientation`): `policy_fail_keys` reads one canonical image per state, which called
+nets perfect that misplay a rotated board (§C.46 verification)."""
 from __future__ import annotations
 
 import argparse
@@ -27,6 +29,8 @@ ORACLE_MODULES = ("harness/targets.py", "harness/coverage.py")
 ARCHS = {"legacy": {"channels": 32},
          "residual": {"channels": 32, "blocks": 3, "head_hidden": 32, "residual": True}}
 TRAIN_DEFAULTS = {"epochs": 6, "batch_size": 64, "lr": 1e-3, "buffer_cap": 8000}
+# Registered parameter counts per preset, so a drifting preset is refused at launch rather than compared with itself.
+PARAMS_EXPECTED = {"legacy": 12746, "residual": 57453}
 
 
 def _parse_seeds(text: str) -> list[int]:
@@ -63,8 +67,8 @@ def run_seed(cfg: dict) -> dict:
     knobs: dict = {}
     if cfg.get("reanalyze_frac"):
         knobs.update(reanalyze_frac=cfg["reanalyze_frac"], reanalyze_sims=cfg["reanalyze_sims"])
-    if cfg.get("reanalyze_siblings"):
-        knobs.update(reanalyze_siblings=True, steps_matched=bool(cfg.get("steps_matched")),
+    if cfg.get("reanalyze_siblings") or cfg.get("steps_matched") or cfg.get("sibling_holdout"):
+        knobs.update(reanalyze_siblings=bool(cfg.get("reanalyze_siblings")), steps_matched=bool(cfg.get("steps_matched")),
                      sibling_holdout=cfg.get("sibling_holdout"))
     if cfg.get("policy_target"):
         knobs["policy_target_fn"] = POLICY_TARGETS[cfg["policy_target"]]
@@ -106,6 +110,14 @@ def run_seed(cfg: dict) -> dict:
         a = max(legal, key=lambda x: float(logits[0, x]))
         if a not in optimal_actions(game, s):
             policy_fail_keys.append(game.canonical_key(s))
+    from harness.coverage import orientation_failures
+    from harness.symmetry import verified_isometries
+
+    def logits_fn(state):
+        with torch.no_grad():
+            lg, _v = net(encode(game, state).unsqueeze(0))
+        return [float(x) for x in lg[0]]
+    orientation = orientation_failures(game, logits_fn, [iso for iso, _f in verified_isometries(game)])
     universe = failable_keys(game, states)
     tv = training_visits(game, [e for e in buffer if e[2] == e[2]], encode)
     sv = training_visits(game, [e for e in buffer if e[2] != e[2]], encode)
@@ -153,7 +165,7 @@ def run_seed(cfg: dict) -> dict:
             "sibling_visits": [[k, sv["visits"].get(k, 0)] for k in sorted(universe)],
             "buffer_size": len(buffer), "buffer_unmatched": tv["unmatched"] + sv["unmatched"],
             "train_seconds": round(train_s, 1), "params": sum(p.numel() for p in net.parameters()),
-            "history": history, "passes": passes, **extra}
+            "history": history, "passes": passes, "orientation": orientation, **extra}
 
 
 def search_alone_control(game, arch: dict, eval_sims: int, deep_sims: int, keys, seed: int = 0) -> dict:
@@ -164,10 +176,10 @@ def search_alone_control(game, arch: dict, eval_sims: int, deep_sims: int, keys,
     import torch
 
     from harness.coverage import optimal_actions, per_state_act, reachable_states, state_coverage
-    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, encode
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, encode, legacy_arch_as_built
 
     torch.manual_seed(seed)
-    blank = Connect4Net(**arch_for_game(arch, game))
+    blank = Connect4Net(**arch_for_game(legacy_arch_as_built(arch), game))
     blank.eval()
     states, _ = reachable_states(game, exact=True, symmetry=True)
     by_key = {game.canonical_key(s): s for s in states}
@@ -277,14 +289,20 @@ def main() -> None:
     from harness.neural import Connect4Net, arch_for_game
 
     arch = ARCHS[args.arch]
+    built = sum(p.numel() for p in Connect4Net(**arch_for_game(arch, game)).parameters())
+    if built != PARAMS_EXPECTED[args.arch]:
+        raise SystemExit(f"the {args.arch} preset builds {built} parameters, not the registered "
+                         f"{PARAMS_EXPECTED[args.arch]} — the preset drifted")
+    if (args.steps_matched or args.sibling_holdout) and not args.reanalyze_siblings:
+        raise SystemExit("--steps-matched / --sibling-holdout act only on siblings — add --reanalyze-siblings")
     holdout = None
     if args.sibling_holdout:
         mod, salt = args.sibling_holdout.split(":", 1)
         holdout = {"mod": int(mod), "salt": salt}
     base = {"game": args.game, "iterations": args.iterations, "selfplay": args.selfplay,
             "train_sims": args.train_sims, "eval_sims": args.eval_sims, "deep_sims": args.deep_sims,
-            "arch": arch, "arch_name": args.arch,
-            "params_expected": sum(p.numel() for p in Connect4Net(**arch_for_game(arch, game)).parameters()),
+            "arch": arch,
+            "params_expected": PARAMS_EXPECTED[args.arch],
             "threads": args.threads, "opening_plies": args.opening_plies,
             "opening_zero_frac": args.opening_zero_frac, "reanalyze_frac": args.reanalyze_frac,
             "reanalyze_sims": args.reanalyze_sims or None, "reanalyze_siblings": args.reanalyze_siblings,

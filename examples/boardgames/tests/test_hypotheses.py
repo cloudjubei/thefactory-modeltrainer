@@ -634,3 +634,27 @@ def test_a_stored_claim_from_before_the_declaration_rule_still_verifies(tmp_path
                                                       "note": "", "registered_at": "2026-09-01T00:00:00",
                                                       "evidence": []}}}))
     assert Register(path, now=lambda: "2026-09-02T00:00:00").verify("t1", run_test=_pass)["status"] == "supported"
+
+
+def test_a_claim_reading_SEVERAL_data_files_is_timed_against_the_EARLIEST_of_them(tmp_path):
+    early = _data(tmp_path, "2026-09-10T00:00:00", name="a.json")
+    late = _data(tmp_path, "2026-09-12T00:00:00", name="b.json")
+    _reg(tmp_path, now="2026-09-11T00:00:00").register("h1", claim="c", proof="t::p", data=[early, late])
+    h = _reg(tmp_path, now="2026-09-13T00:00:00").verify("h1", run_test=_pass)
+    assert h["pre_registered"] is False
+    _reg(tmp_path, now="2026-09-01T00:00:00").register("h2", claim="c", proof="t::p", data=[early, late])
+    assert _reg(tmp_path, now="2026-09-13T00:00:00").verify("h2", run_test=_pass)["pre_registered"] is True
+
+
+def test_several_data_files_are_ALL_required_before_verify_and_none_may_be_regenerated(tmp_path):
+    first = _data(tmp_path, "2026-09-10T00:00:00", name="a.json")
+    pending = tmp_path / "b.json"
+    _reg(tmp_path, now="2026-09-01T00:00:00").register("h1", claim="c", proof="t::p", data=[first, str(pending)])
+    later = _reg(tmp_path, now="2026-09-20T00:00:00")
+    with pytest.raises(ValueError, match="not been produced"):
+        later.verify("h1", run_test=_pass)
+    pending.write_text(json.dumps({"started": "2026-09-11T00:00:00"}))
+    assert later.verify("h1", run_test=_pass)["pre_registered"] is True
+    _data(tmp_path, "2026-09-15T00:00:00", name="a.json")
+    with pytest.raises(ValueError, match="changed"):
+        later.verify("h1", run_test=_pass)

@@ -241,7 +241,7 @@ def test_a_net_built_for_checkers_plays_a_legal_move():
     from harness.registry import resolve_game
 
     g = resolve_game("checkers")
-    net = Connect4Net(**arch_for_game({"channels": 8, "blocks": 1}, g))
+    net = Connect4Net(**arch_for_game({"channels": 8}, g))
     s = g.initial_state(random.Random(0))
     a = AlphaZeroAgent(net, sims=4, solve_endgame=0, gumbel=True, c_scale=0.1).act(g, s, random.Random(0))
     assert a in g.legal_actions(s)

@@ -193,3 +193,28 @@ def test_verifier_rejects_a_bijection_that_sends_moves_to_the_WRONG_successor():
     g = _Place()
     g.transform_action = lambda a, iso: {0: 2, 1: 3, 2: 0, 3: 1}[a]   # a bijection, but not flip_h's
     assert verify_isometry(g, _flip_h(), [g.initial_state()]) is None
+
+
+def test_verified_isometries_returns_the_PROVEN_isometry_objects_identity_first():
+    from games.tictactoe import TicTacToe
+    from harness.symmetry import find_symmetries, verified_isometries
+    g = TicTacToe()
+    pairs = verified_isometries(g)
+    assert pairs[0][0].name == "identity" and pairs[0][1] == list(range(g.num_actions))
+    assert len(pairs) == 8
+    source_perms = []
+    for iso, forward in pairs:
+        src = [0] * len(forward)
+        for a, img in enumerate(forward):
+            src[img] = a
+        source_perms.append((iso.cell_perm, src))
+    assert source_perms == find_symmetries(g)
+
+
+def test_a_candidate_the_game_does_not_obey_is_not_among_the_verified_isometries():
+    from games.tictactoe import TicTacToe
+    from harness.symmetry import dihedral_isometries, iso_from_cell_map, verified_isometries
+    g = TicTacToe()
+    shift = iso_from_cell_map("shift", 3, 3, lambda i: (i // 3) * 3 + (i % 3 + 1) % 3)
+    names = [iso.name for iso, _f in verified_isometries(g, isometries=dihedral_isometries(3, 3) + [shift])]
+    assert "shift" not in names and len(names) == 8

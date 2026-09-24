@@ -70,7 +70,7 @@ def exact_policy_target(game, state) -> list[float]:
 
 
 # A run's config names its policy target as a string, so the config stays JSON and still says which oracle trained it.
-POLICY_TARGETS = {"exact_uniform": exact_policy_target}
+POLICY_TARGETS = {"exact_uniform_optimal": exact_policy_target}
 
 
 @contextmanager
