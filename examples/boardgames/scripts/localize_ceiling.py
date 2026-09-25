@@ -2,11 +2,11 @@
 whether the blind spot is systematic, where it lives (net vs search budget), and why (training visits, the
 optimal-play manifold). Writes the full per-seed evidence so harness.ceiling can recompute every verdict.
 
-    PYTHONPATH=. .venv/bin/python scripts/localize_ceiling.py --seeds 1-10 --out evidence/tictactoe_ceiling.json
+    PYTHONPATH=. .venv/bin/python scripts/localize_ceiling.py --seeds 1-10 --out evidence/tictactoe_ceiling.json.gz
     PYTHONPATH=. .venv/bin/python scripts/localize_ceiling.py --seeds 11-20 --opening-plies 2 \
-        --opening-zero-frac 0.5 --out evidence/tictactoe_mixed.json
-    PYTHONPATH=. .venv/bin/python scripts/localize_ceiling.py --ab evidence/tictactoe_base.json \
-        evidence/tictactoe_mixed.json evidence/tictactoe_ceiling.json
+        --opening-zero-frac 0.5 --out evidence/tictactoe_mixed.json.gz
+    PYTHONPATH=. .venv/bin/python scripts/localize_ceiling.py --ab evidence/tictactoe_base.json.gz \
+        evidence/tictactoe_mixed.json.gz evidence/tictactoe_ceiling.json.gz
 
 Every state is evaluated with a FRESH search tree (coverage.per_state_act): an agent that keeps its tree across
 states scores differently depending on the order states are asked in (§C.42). The raw policy is ALSO scored on
@@ -117,7 +117,17 @@ def run_seed(cfg: dict) -> dict:
         with torch.no_grad():
             lg, _v = net(encode(game, state).unsqueeze(0))
         return [float(x) for x in lg[0]]
-    orientation = orientation_failures(game, logits_fn, [iso for iso, _f in verified_isometries(game)])
+    isos = {iso.name: iso for iso, _f in verified_isometries(game)}
+    orientation = orientation_failures(game, logits_fn, list(isos.values()))
+    from harness.coverage import subgroup_failures
+    from harness.floor import C47_SUBGROUPS
+
+    subgroups = ({order: subgroup_failures(game, logits_fn, [isos[n] for n in names])
+                  for order, names in C47_SUBGROUPS.items()} if set(isos) == set(C47_SUBGROUPS["8"]) else None)
+    if cfg.get("save_nets"):
+        out = Path(cfg["save_nets"])
+        out.mkdir(parents=True, exist_ok=True)
+        torch.save({"state_dict": net.state_dict(), "arch": cfg["arch"]}, out / f"seed{cfg['seed']}.pt")
     universe = failable_keys(game, states)
     tv = training_visits(game, [e for e in buffer if e[2] == e[2]], encode)
     sv = training_visits(game, [e for e in buffer if e[2] != e[2]], encode)
@@ -165,7 +175,8 @@ def run_seed(cfg: dict) -> dict:
             "sibling_visits": [[k, sv["visits"].get(k, 0)] for k in sorted(universe)],
             "buffer_size": len(buffer), "buffer_unmatched": tv["unmatched"] + sv["unmatched"],
             "train_seconds": round(train_s, 1), "params": sum(p.numel() for p in net.parameters()),
-            "history": history, "passes": passes, "orientation": orientation, **extra}
+            "history": history, "passes": passes, "orientation": orientation,
+            **({"subgroups": subgroups} if subgroups is not None else {}), **extra}
 
 
 def search_alone_control(game, arch: dict, eval_sims: int, deep_sims: int, keys, seed: int = 0) -> dict:
@@ -199,6 +210,40 @@ def search_alone_control(game, arch: dict, eval_sims: int, deep_sims: int, keys,
             "deep_ok": {k: deep(by_key[k]) in optimal_actions(game, by_key[k]) for k in sorted(set(keys))}}
 
 
+def operator_sanity(game, arch: dict, label_sims: int, net_seeds=range(5)) -> dict:
+    """What the floor operator and the labeller give with NO learning: the symmetry-averaged policy of untrained
+    nets (failures over the canonical states), and how often the relabelling search, run from an untrained net at
+    the recipe's label budget, picks an optimal move at the failable states. The second is the sense in which the
+    labels are near-exhaustive at this game size."""
+    import torch
+
+    from harness.coverage import failable_keys, optimal_actions, orientation_failures, per_state_act, reachable_states
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, encode
+    from harness.symmetry import verified_isometries
+
+    isos = [iso for iso, _f in verified_isometries(game)]
+    states, _ = reachable_states(game, exact=True, symmetry=True)
+    failable = failable_keys(game, states)
+    targets = [s for s in states if game.canonical_key(s) in failable]
+    counts, label_ok = [], None
+    for seed in net_seeds:
+        torch.manual_seed(seed)
+        blank = Connect4Net(**arch_for_game(arch, game))
+        blank.eval()
+
+        def logits_fn(state, net=blank):
+            with torch.no_grad():
+                lg, _v = net(encode(game, state).unsqueeze(0))
+            return [float(x) for x in lg[0]]
+        counts.append(len(orientation_failures(game, logits_fn, isos)["symmetrized_fail_keys"]))
+        if label_ok is None:
+            act = per_state_act(game, lambda: AlphaZeroAgent(blank, sims=label_sims, solve_endgame=0, gumbel=True,
+                                                            c_scale=0.1))
+            label_ok = sum(1 for s in targets if act(s) in optimal_actions(game, s)) / len(targets)
+    return {"untrained_symmetrized_failures": counts, "untrained_label_ok_share": label_ok,
+            "label_sims": label_sims, "failable_states": len(targets)}
+
+
 def _attach_control(game, evidence: dict) -> None:
     cfg = evidence["config"]
     keys = {f["key"] for sd in evidence["seeds"] for f in sd["failures"]}
@@ -207,8 +252,12 @@ def _attach_control(game, evidence: dict) -> None:
         for f in sd["failures"]:
             f["control_deep_ok"] = ctrl["deep_ok"][f["key"]]
     evidence["search_alone"] = {k: v for k, v in ctrl.items() if k != "deep_ok"}
+    sanity = operator_sanity(game, cfg["arch"], cfg.get("reanalyze_sims") or cfg["train_sims"])
+    evidence["operator_sanity"] = sanity
     print(f"search-alone control (untrained net): coverage@{cfg['eval_sims']} {ctrl['coverage_eval']:.4f}  "
           f"policy-only {ctrl['policy_coverage']:.4f}", flush=True)
+    print(f"operator sanity (untrained nets): symmetrized failures {sanity['untrained_symmetrized_failures']}  "
+          f"label ok at {sanity['label_sims']} sims {sanity['untrained_label_ok_share']:.3f}", flush=True)
 
 
 def _report(evidence: dict) -> None:
@@ -257,18 +306,20 @@ def main() -> None:
     ap.add_argument("--reanalyze-sims", type=int, default=0,
                     help="relabel search budget (0 = the self-play budget); needs --reanalyze-frac > 0")
     ap.add_argument("--out", default="")
+    ap.add_argument("--save-nets", default="", help="directory to save each seed's final net (state_dict + arch)")
     ap.add_argument("--control-only", action="store_true",
                     help="attach the search-alone control to existing evidence at --out instead of training")
     args = ap.parse_args()
 
     from harness.coverage import failable_keys, optimal_play_keys, reachable_states
+    from harness.evidence import load_evidence, manifest_entry, save_evidence
     from harness.fingerprint import training_fingerprint
     from harness.registry import resolve_game
 
     if args.ab:
         from harness.ceiling import ab_report
 
-        base, treat, target = (json.loads(Path(x).read_text()) for x in args.ab)
+        base, treat, target = (load_evidence(x) for x in args.ab)
         print(json.dumps(ab_report(base, treat, target, alpha=args.alpha,
                                    treatment_keys=tuple(args.treatment_keys.split(",")),
                                    manipulation=args.manipulation), indent=1, default=str))
@@ -281,9 +332,10 @@ def main() -> None:
     game = resolve_game(args.game)
     out = Path(args.out)
     if args.control_only:
-        evidence = json.loads(out.read_text())
+        evidence = load_evidence(out)
+        replaces = (manifest_entry(out) or {}).get("sha256")
         _attach_control(game, evidence)
-        out.write_text(json.dumps(evidence, indent=1))
+        save_evidence(out, evidence, replaces=replaces)
         _report(evidence)
         return
     from harness.neural import Connect4Net, arch_for_game
@@ -307,9 +359,10 @@ def main() -> None:
             "opening_zero_frac": args.opening_zero_frac, "reanalyze_frac": args.reanalyze_frac,
             "reanalyze_sims": args.reanalyze_sims or None, "reanalyze_siblings": args.reanalyze_siblings,
             "sibling_key": "canonical" if args.reanalyze_siblings else None, "sibling_holdout": holdout,
-            "steps_matched": args.steps_matched, "policy_target": args.policy_target or None, **TRAIN_DEFAULTS}
+            "steps_matched": args.steps_matched, "policy_target": args.policy_target or None, **TRAIN_DEFAULTS,
+            **({"save_nets": args.save_nets} if args.save_nets else {})}
     if args.target:
-        tgt = json.loads(Path(args.target).read_text())
+        tgt = load_evidence(args.target)
         base.update(target_evidence=args.target, label_draws=args.label_draws, label_sims=args.label_sims,
                     target_keys=sorted({f["key"] for s in tgt["seeds"] for f in s["failures"]}))
     seeds = _parse_seeds(args.seeds)
@@ -327,7 +380,14 @@ def main() -> None:
     states, _ = reachable_states(game, exact=True, symmetry=True)
     universe = sorted(failable_keys(game, states))
     keep = set(universe)
+    import platform
+
+    import numpy
+    import torch
+
     evidence = {"game": args.game, "started": started,
+                "versions": {"python": platform.python_version(), "torch": torch.__version__,
+                             "numpy": numpy.__version__, "platform": platform.platform()},
                 "finished": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "training_fingerprint": stamps[0], "measurement_fingerprint": stamps[1],
                 **({"oracle_fingerprint": training_fingerprint(modules=ORACLE_MODULES)} if args.policy_target else {}),
@@ -336,8 +396,7 @@ def main() -> None:
                 "plies": [[game.canonical_key(s), game.ply(s)] for s in states if game.canonical_key(s) in keep],
                 "seeds": results}
     _attach_control(game, evidence)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(evidence, indent=1))
+    save_evidence(out, evidence)
     _report(evidence)
 
 

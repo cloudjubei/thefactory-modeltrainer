@@ -4,8 +4,8 @@ split the self-play target at every failable state into label_ok / prior_anchor 
 under the arm's own training search, and at the target states under two counterfactual searches: deeper
 (more sims) and more Q-trusting (higher c_scale). Non-target failable states are the control.
 
-    PYTHONPATH=. .venv/bin/python scripts/label_diagnostics.py --evidence evidence/tictactoe_base.json \\
-        --target evidence/tictactoe_ceiling.json --out evidence/tictactoe_labels.json
+    PYTHONPATH=. .venv/bin/python scripts/label_diagnostics.py --evidence evidence/tictactoe_base.json.gz \\
+        --target evidence/tictactoe_ceiling.json.gz --out evidence/tictactoe_labels.json.gz
 """
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import argparse
 import json
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 CLASSES = ("label_ok", "prior_anchor", "search_miss")
 
@@ -117,8 +116,10 @@ def main() -> None:
     ap.add_argument("--threads", type=int, default=2)
     args = ap.parse_args()
 
-    ev = json.loads(Path(args.evidence).read_text())
-    tgt = json.loads(Path(args.target).read_text())
+    from harness.evidence import load_evidence, save_evidence
+
+    ev = load_evidence(args.evidence)
+    tgt = load_evidence(args.target)
     target = sorted({f["key"] for s in tgt["seeds"] for f in s["failures"]})
     cfg = ev["config"]
     budgets = [int(x) for x in args.deep_sims.split(",")]
@@ -141,7 +142,7 @@ def main() -> None:
            "searches": [{"name": n, "sims": s, "c_scale": c, "target_only": o} for n, s, c, o in searches],
            "noise_draws": args.noise_draws, "target": target, "rows": rows, "summary": summarise(rows),
            "untrained": untrained}
-    Path(args.out).write_text(json.dumps(out, indent=1))
+    save_evidence(args.out, out)
     print(json.dumps(out["summary"], indent=1))
     print("untrained (search-alone) label_ok by budget:", json.dumps(untrained))
 

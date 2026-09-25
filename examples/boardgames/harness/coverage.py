@@ -287,6 +287,61 @@ def _as_bytes(x) -> bytes:
     return x.detach().cpu().numpy().tobytes() if hasattr(x, "detach") else bytes(repr(x), "utf8")
 
 
+def _verified_perms(game, isometries, max_states: int) -> list:
+    """The action image of each isometry, proven on probe positions; an isometry the game does not obey is
+    refused, because averaging over it would mix positions that are not the same game."""
+    from harness.symmetry import verify_isometry
+
+    raw, _ = reachable_states(game, exact=True, max_states=max_states, symmetry=False)
+    raw = [s for s in raw if not game.is_terminal(s)]
+    probes = raw[:: max(1, len(raw) // 200)]
+    perms = []
+    for iso in isometries:
+        perm = verify_isometry(game, iso, probes)
+        if perm is None:
+            raise ValueError(f"isometry {iso.name!r} is not one the game obeys — averaging over it would mix positions "
+                             f"that are not equivalent")
+        perms.append(perm)
+    return perms
+
+
+def _averaged_move(game, s, logits_fn, isometries, perms):
+    """The argmax over legal moves of the softmax policy averaged across the images of `s`, each image's moves
+    mapped back; the first legal move wins an exact tie."""
+    import math
+
+    legal = game.legal_actions(s)
+    acc = dict.fromkeys(legal, 0.0)
+    for iso, perm in zip(isometries, perms):
+        t = game.transform_state(s, iso)
+        lg = logits_fn(t)
+        lt = game.legal_actions(t)
+        top = max(float(lg[b]) for b in lt)
+        ex = {b: math.exp(float(lg[b]) - top) for b in lt}
+        z = sum(ex.values())
+        for a in legal:
+            acc[a] += ex[perm[a]] / z
+    return max(legal, key=lambda a: acc[a])
+
+
+def subgroup_failures(game, logits_fn, isometries, max_states: int = 300000) -> dict:
+    """The policy averaged over `isometries` — any verified set, identity included or not — scored at EVERY
+    non-terminal raw position. Averaging over a SUBGROUP is not equivariant under the whole group, so unlike the
+    full-group reading it cannot be scored on one image per class. The identity alone is the strict raw reading;
+    a game with a two-element group (Connect-4's mirror) gets only what order 2 gives, which is why the rescue an
+    order-8 average performs on tic-tac-toe does not carry to it."""
+    perms = _verified_perms(game, isometries, max_states)
+    raw, _ = reachable_states(game, exact=True, max_states=max_states, symmetry=False)
+    raw = [s for s in raw if not game.is_terminal(s)]
+    fails: dict = {}
+    for s in raw:
+        if _averaged_move(game, s, logits_fn, isometries, perms) not in optimal_actions(game, s):
+            k = _key(game, s)
+            fails[k] = fails.get(k, 0) + 1
+    return {"isometries": [iso.name for iso in isometries], "positions": len(raw),
+            "failing_positions": sum(fails.values()), "fail_keys": sorted(fails)}
+
+
 def orientation_failures(game, logits_fn, isometries, max_states: int = 300000) -> dict:
     """Raw-policy failures scored three ways, because a net trained with augmentation is not exactly symmetric:
     `canonical_fail_keys` — one representative image per canonical state (what §C.41-§C.46 measured);
@@ -296,20 +351,9 @@ def orientation_failures(game, logits_fn, isometries, max_states: int = 300000) 
     moves, each image's moves mapped back) — an evaluation-time ensemble, a DIFFERENT policy from the raw net.
     `logits_fn(state)` returns logits over num_actions. Every isometry must be one the game verifiably obeys, or the
     averaged reading would mix in positions that are not the same game."""
-    import math
-
-    from harness.symmetry import verify_isometry
-
+    action_perms = _verified_perms(game, isometries, max_states)
     raw, _ = reachable_states(game, exact=True, max_states=max_states, symmetry=False)
     raw = [s for s in raw if not game.is_terminal(s)]
-    probes = raw[:: max(1, len(raw) // 200)]
-    action_perms = []
-    for iso in isometries:
-        perm = verify_isometry(game, iso, probes)
-        if perm is None:
-            raise ValueError(f"isometry {iso.name!r} is not one the game obeys — averaging over it would mix positions "
-                             f"that are not equivalent")
-        action_perms.append(perm)
 
     def choose(s):
         lg = logits_fn(s)
@@ -324,23 +368,11 @@ def orientation_failures(game, logits_fn, isometries, max_states: int = 300000) 
     canon = [s for s in canon if not game.is_terminal(s)]
     canonical = sorted(_key(game, s) for s in canon if choose(s) not in optimal_actions(game, s))
 
-    def averaged(s):
-        legal = game.legal_actions(s)
-        acc = dict.fromkeys(legal, 0.0)
-        for iso, perm in zip(isometries, action_perms):
-            t = game.transform_state(s, iso)
-            lg = logits_fn(t)
-            lt = game.legal_actions(t)
-            top = max(float(lg[b]) for b in lt)
-            ex = {b: math.exp(float(lg[b]) - top) for b in lt}
-            z = sum(ex.values())
-            for a in legal:
-                acc[a] += ex[perm[a]] / z
-        return max(legal, key=lambda a: acc[a])
-    symmetrized = sorted(_key(game, s) for s in canon if averaged(s) not in optimal_actions(game, s))
+    symmetrized = sorted(_key(game, s) for s in canon
+                         if _averaged_move(game, s, logits_fn, isometries, action_perms) not in optimal_actions(game, s))
     return {"canonical_fail_keys": canonical, "image_fail_keys": sorted(image_fails),
             "failing_images": sum(image_fails.values()), "positions": len(raw),
-            "symmetrized_fail_keys": symmetrized}
+            "symmetrized_fail_keys": symmetrized, "isometries": [iso.name for iso in isometries]}
 
 
 def blind_spot_concentration(failure_sets: list, universe: set, trials: int = 20000, seed: int = 0) -> dict:

@@ -6,22 +6,28 @@ pins the refutation, and the inconclusive-proof nodes (consulted only when a pro
 keeps the frozen verdicts, and these tests keep the suite green and pin each verdict against later code changes."""
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 from pathlib import Path
 
+import pytest
+
 from harness.ceiling import c45_report
+from harness.evidence import load_evidence
 
 EVIDENCE = Path(__file__).resolve().parent.parent / "evidence"
 ARMS = ("base", "mixed", "mixed_deep", "mixed_R32", "mixed_R200")
 UNDECIDABLE = {"inconclusive", "not_delivered", "not_reached", "not_run", "moved", "stopped"}
+FILES = [f"c45_{a}.json.gz" for a in ARMS] + ["tictactoe_ceiling.json.gz"]
+pytestmark = pytest.mark.skipif(
+    not all((EVIDENCE / f).exists() for f in FILES),
+    reason="evidence/ is gitignored and these files are not on this machine — restore them to run the proofs")
 
 
 @lru_cache(maxsize=1)
 def _report():
-    arms = {a: json.loads((EVIDENCE / f"c45_{a}.json").read_text()) for a in ARMS}
+    arms = {a: load_evidence(EVIDENCE / f"c45_{a}.json.gz") for a in ARMS}
     assert all(len(e["seeds"]) == 20 for e in arms.values())
-    return c45_report(arms, json.loads((EVIDENCE / "tictactoe_ceiling.json").read_text()))
+    return c45_report(arms, load_evidence(EVIDENCE / "tictactoe_ceiling.json.gz"))
 
 
 def _verdict(claim):
@@ -46,11 +52,11 @@ def test_c45_B1_REFUTED_deeper_self_play_does_not_raise_target_correctness():
 
 
 def _arm(name):
-    return json.loads((EVIDENCE / f"c45_{name}.json").read_text())
+    return load_evidence(EVIDENCE / f"c45_{name}.json.gz")
 
 
 def _target():
-    return {f["key"] for s in json.loads((EVIDENCE / "tictactoe_ceiling.json").read_text())["seeds"]
+    return {f["key"] for s in load_evidence(EVIDENCE / "tictactoe_ceiling.json.gz")["seeds"]
             for f in s["failures"]}
 
 

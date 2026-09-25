@@ -1,0 +1,1660 @@
+{
+  "hypotheses": {
+    "h1": {
+      "id": "h1",
+      "claim": "The unchanged process learns a game with no solver (Othello)",
+      "a": "late@uct200",
+      "b": "early@uct200",
+      "direction": "a>b",
+      "unit": "games",
+      "note": "C.23 \u2014 evidence predates this register",
+      "registered_at": "2026-09-17T07:28:05.889466+00:00",
+      "evidence": [
+        {
+          "a": "late@uct200",
+          "b": "early@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_transfer",
+          "p": 2.1111941794479074e-44,
+          "diff": 0.71484375,
+          "significant": true,
+          "drawn_at": null
+        }
+      ]
+    },
+    "h2": {
+      "id": "h2",
+      "claim": "Training budget past ~9600 games keeps buying strength on Othello",
+      "a": "a47@uct200",
+      "b": "a23@uct200",
+      "direction": "a>b",
+      "unit": "games",
+      "note": "C.28 frontier \u2014 evidence predates this register",
+      "registered_at": "2026-09-17T07:28:05.922566+00:00",
+      "evidence": [
+        {
+          "a": "a47@uct200",
+          "b": "a23@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.09795444051950737,
+          "diff": 0.0546875,
+          "significant": false,
+          "drawn_at": null
+        }
+      ]
+    },
+    "h3": {
+      "id": "h3",
+      "claim": "At equal SIMULATIONS, lower search (32) beats deeper search (96)",
+      "a": "b35@uct200",
+      "b": "a11@uct200",
+      "direction": "a>b",
+      "unit": "simulations",
+      "note": "C.29 read 1 \u2014 evidence predates this register",
+      "registered_at": "2026-09-17T07:28:05.957326+00:00",
+      "evidence": [
+        {
+          "a": "b35@uct200",
+          "b": "a11@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.0006180577056348101,
+          "diff": 0.15234375,
+          "significant": true,
+          "drawn_at": null
+        }
+      ],
+      "supersession": {
+        "by": "h8",
+        "reason": "TRUE at 460,800 simulations and FALSE at 1,843,200: h3's control (a11, 4,800 games) sat below the ~9,600-game frontier, so it measured 'more games beats an unconverged net'. h8 replicated the reversal on a fresh root family (+0.0342, p=0.0152). The claim is budget-scoped, not general.",
+        "at": "2026-09-21T06:28:11.300073+00:00"
+      }
+    },
+    "h4": {
+      "id": "h4",
+      "claim": "The same claim at the next compute-matched point (921,600 sims)",
+      "a": "b71@uct200",
+      "b": "a23@uct200",
+      "direction": "a>b",
+      "unit": "simulations",
+      "note": "C.26 read 2 \u2014 run in flight",
+      "registered_at": "2026-09-17T07:28:05.991259+00:00",
+      "evidence": [
+        {
+          "a": "b71@uct200",
+          "b": "a23@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.707980754134764,
+          "diff": 0.015625,
+          "significant": false,
+          "drawn_at": null
+        }
+      ],
+      "null_below": 0.03
+    },
+    "h5": {
+      "id": "h5",
+      "claim": "The same claim at full compute match (1.84M sims)",
+      "a": "b143@uct200",
+      "b": "a47@uct200",
+      "direction": "a>b",
+      "unit": "simulations",
+      "note": "C.26 read 3 \u2014 HEADLINE, run in flight",
+      "registered_at": "2026-09-17T07:28:06.024029+00:00",
+      "evidence": [
+        {
+          "a": "b143@uct200",
+          "b": "a47@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.0402235640957167,
+          "diff": -0.0625,
+          "significant": false,
+          "drawn_at": "2026-09-20T08:37:07.689968+00:00"
+        }
+      ],
+      "supersession": {
+        "by": "h8",
+        "reason": "Same question, settled with power h5 lacked: h5 read -0.0625 on 256 pairs (p=0.0402 vs a multiplicity-corrected alpha of 0.0083) and could only return INCONCLUSIVE. h8 re-drew it on a fresh root family at 1024 pairs and found the same direction at full significance. h5's number stands as the underpowered first look; h8 is the read to cite.",
+        "at": "2026-09-21T06:28:27.427233+00:00"
+      }
+    },
+    "h6": {
+      "id": "h6",
+      "claim": "Arm B keeps improving on its own budget curve",
+      "a": "b143@uct200",
+      "b": "b71@uct200",
+      "direction": "a>b",
+      "unit": "games",
+      "note": "C.26 arm-B frontier \u2014 run in flight",
+      "registered_at": "2026-09-17T07:28:06.058553+00:00",
+      "evidence": [
+        {
+          "a": "b143@uct200",
+          "b": "b71@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.5446122234192591,
+          "diff": -0.0234375,
+          "significant": false,
+          "drawn_at": "2026-09-20T10:26:54.900472+00:00"
+        }
+      ]
+    },
+    "t1": {
+      "id": "t1",
+      "claim": "A resumed run keeps its optimizer state, so an interruption does not change the experiment",
+      "mode": "test",
+      "proof": "tests/test_resume_integrity.py::test_the_optimizer_survives_a_resume",
+      "note": "C.22a",
+      "registered_at": "2026-09-17T08:09:30.787090+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_resume_integrity.py::test_the_optimizer_survives_a_resume",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 4.22s",
+          "drawn_at": "2026-09-17T08:09:35.768927+00:00"
+        }
+      ]
+    },
+    "t2": {
+      "id": "t2",
+      "claim": "An orphan checkpoint is retrained rather than stranding the run's ledger-readability",
+      "mode": "test",
+      "proof": "tests/test_resume_integrity.py::test_an_orphan_checkpoint_is_retrained_rather_than_stranding_the_run",
+      "note": "C.22a R2",
+      "registered_at": "2026-09-17T08:09:30.811305+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_resume_integrity.py::test_an_orphan_checkpoint_is_retrained_rather_than_stranding_the_run",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.72s",
+          "drawn_at": "2026-09-17T08:09:39.106158+00:00"
+        }
+      ]
+    },
+    "t3": {
+      "id": "t3",
+      "claim": "A killed buffer write leaves the previous buffer intact",
+      "mode": "test",
+      "proof": "tests/test_resume_integrity.py::test_save_atomic_leaves_the_previous_file_intact_when_the_write_dies",
+      "note": "C.22a R3",
+      "registered_at": "2026-09-17T08:09:30.835280+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_resume_integrity.py::test_save_atomic_leaves_the_previous_file_intact_when_the_write_dies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.80s",
+          "drawn_at": "2026-09-17T08:09:40.340556+00:00"
+        }
+      ]
+    },
+    "t4": {
+      "id": "t4",
+      "claim": "A run whose training code moved underneath it is refused resumption",
+      "mode": "test",
+      "proof": "tests/test_resume.py::test_era_status_refuses_a_run_whose_training_code_moved_underneath_it",
+      "note": "C.22 R1",
+      "registered_at": "2026-09-17T08:09:30.861922+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_resume.py::test_era_status_refuses_a_run_whose_training_code_moved_underneath_it",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.96s",
+          "drawn_at": "2026-09-17T08:09:41.710980+00:00"
+        }
+      ]
+    },
+    "t5": {
+      "id": "t5",
+      "claim": "'final' is earned only by reaching the declared batch count, never by being newest",
+      "mode": "test",
+      "proof": "tests/test_ledger.py::test_run_budget_will_not_call_a_checkpoint_final_before_the_run_reaches_its_declared_end",
+      "note": "C.23",
+      "registered_at": "2026-09-17T08:09:30.888331+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ledger.py::test_run_budget_will_not_call_a_checkpoint_final_before_the_run_reaches_its_declared_end",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-09-17T08:09:41.916162+00:00"
+        }
+      ]
+    },
+    "t6": {
+      "id": "t6",
+      "claim": "A compute-matched pair whose game counts differ by design is accepted, not refused",
+      "mode": "test",
+      "proof": "tests/test_ledger.py::test_compare_accepts_a_compute_matched_pair_whose_game_counts_differ_by_design",
+      "note": "C.26",
+      "registered_at": "2026-09-17T08:09:30.914445+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ledger.py::test_compare_accepts_a_compute_matched_pair_whose_game_counts_differ_by_design",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-17T08:09:42.106433+00:00"
+        }
+      ]
+    },
+    "t7": {
+      "id": "t7",
+      "claim": "Checkers' three new mechanics need zero harness changes (multi-jump is one turn)",
+      "mode": "test",
+      "proof": "tests/test_checkers.py::test_a_multi_jump_is_ONE_turn_so_the_mover_does_not_change",
+      "note": "C.25",
+      "registered_at": "2026-09-17T08:09:30.940490+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_checkers.py::test_a_multi_jump_is_ONE_turn_so_the_mover_does_not_change",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-17T08:09:42.302289+00:00"
+        }
+      ]
+    },
+    "t8": {
+      "id": "t8",
+      "claim": "A game with more than two piece types gets its own planes; 2-plane games are byte-identical",
+      "mode": "test",
+      "proof": "tests/test_net_shape.py::test_encode_stays_byte_identical_on_the_two_plane_games",
+      "note": "C.25",
+      "registered_at": "2026-09-17T08:09:30.968116+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_net_shape.py::test_encode_stays_byte_identical_on_the_two_plane_games",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.74s",
+          "drawn_at": "2026-09-17T08:09:43.494129+00:00"
+        }
+      ]
+    },
+    "h7": {
+      "id": "h7",
+      "claim": "Arm B is still improving on its own budget curve at 28,800 games",
+      "mode": "comparison",
+      "a": "b71@uct200",
+      "b": "b35@uct200",
+      "direction": "a>b",
+      "unit": "games",
+      "note": "C.26 \u2014 caught by the UNREGISTERED COMPARISON guard, registered after the fact",
+      "null_below": 0.03,
+      "registered_at": "2026-09-17T20:18:34.717070+00:00",
+      "evidence": [
+        {
+          "a": "b71@uct200",
+          "b": "b35@uct200",
+          "roots_id": "exploit_e4_s131_n128_uct200_sims96_frontier",
+          "p": 0.0005387801699960487,
+          "diff": 0.12109375,
+          "significant": true,
+          "drawn_at": "2026-09-17T11:56:47.316355+00:00"
+        }
+      ]
+    },
+    "t9": {
+      "id": "t9",
+      "claim": "A sleep assertion alone does not protect a long run: on battery caffeinate -s is inert, so the guard must check power source too",
+      "mode": "test",
+      "proof": "tests/test_machine.py::test_the_guard_is_NOT_effective_on_battery_even_with_the_assertion_held",
+      "note": "C.31 \u2014 cost arm B ~20h of wall-clock",
+      "registered_at": "2026-09-19T12:17:52.115337+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_machine.py::test_the_guard_is_NOT_effective_on_battery_even_with_the_assertion_held",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-19T12:17:52.346518+00:00"
+        }
+      ]
+    },
+    "h8": {
+      "id": "h8",
+      "claim": "At equal SIMULATIONS and full convergence, DEEPER search (96) beats lower search (32) \u2014 the reversal of h3",
+      "mode": "comparison",
+      "a": "a47c@uct200",
+      "b": "b143c@uct200",
+      "direction": "a>b",
+      "unit": "simulations",
+      "note": "Pre-registered CONFIRMATION required by the rule set before h5 was read: an INCONCLUSIVE efficiency read with |diff|<0.078 gets ONE confirmation at 512 openings on a NEW root family (seed 257, n=512), 4x the pairs of the 128-opening frontier family. DIRECTION was chosen from h5's observed sign (-0.0625, a47 ahead), so this is a sign-replication test on fresh roots, NOT a discovery. Arms are renamed a47c/b143c because harness.ledger.record keys entries by name alone and would otherwise overwrite the family-1 outcomes. h3 (+0.1523 at 460,800 sims) and h4 (NULL at 921,600) and h5 (-0.0625 at 1,843,200) are the trajectory this settles.",
+      "null_below": 0.03,
+      "registered_at": "2026-09-20T17:49:28.265839+00:00",
+      "evidence": [
+        {
+          "a": "a47c@uct200",
+          "b": "b143c@uct200",
+          "roots_id": "exploit_e4_s257_n512_uct200_sims96_confirm",
+          "p": 0.015205873559445663,
+          "diff": 0.0341796875,
+          "significant": true,
+          "drawn_at": "2026-09-21T00:48:28.261153+00:00"
+        }
+      ]
+    },
+    "t10": {
+      "id": "t10",
+      "claim": "An arm name means ONE measurement on ONE root family \u2014 reusing it across families is refused, and refused WITHOUT destroying the original outcomes",
+      "mode": "test",
+      "proof": "tests/test_ledger.py::test_a_refused_name_collision_leaves_the_ORIGINAL_measurement_untouched",
+      "note": "L4, found 2026-09-20 while setting up the h8 confirmation read: Ledger.record keys entries by name alone, so re-measuring a47@uct200 on a new root family would have overwritten the family-1 outcomes in place, leaving the h5 comparison holding a verdict with no data behind it. Seven months of ledger survived on naming CONVENTION (@n384, _s101) alone. Mutation-tested: the precise mutation that keeps the refusal but moves it AFTER the write is killed by this test and by no other.",
+      "registered_at": "2026-09-20T17:53:43.922700+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ledger.py::test_a_refused_name_collision_leaves_the_ORIGINAL_measurement_untouched",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-09-20T17:53:48.708529+00:00"
+        },
+        {
+          "proof": "tests/test_ledger.py::test_a_refused_name_collision_leaves_the_ORIGINAL_measurement_untouched",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-09-20T18:05:28.944560+00:00"
+        }
+      ]
+    },
+    "t11": {
+      "id": "t11",
+      "claim": "A stale bytecode cache can invert a mutation verdict, so a mutation run must clear it \u2014 the guard checks the poisoned IMPORT, not that caches were deleted",
+      "mode": "test",
+      "proof": "tests/test_mutation.py::test_a_stale_bytecode_cache_cannot_hide_a_mutation",
+      "note": "\u00a7C.32, 2026-09-20. A .pyc validates on (mtime, size). Restoring harness/ledger.py to bytes that had just scored 46-passed re-scored 2-failed; same bytes, cache cleared, 46 passed. Either direction is fatal: a KILLED mutation may have been killed by the previous mutation's code, a SURVIVOR may have survived on stale bytes. The test reproduces the poisoned import with a same-size edit restamped to the old mtime, and carries a CONTROL assertion proving the fixture is genuinely poisoned \u2014 that control immediately caught the test un-poisoning itself when it inherited PYTHONDONTWRITEBYTECODE from the runner.",
+      "registered_at": "2026-09-20T18:05:27.455870+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_mutation.py::test_a_stale_bytecode_cache_cannot_hide_a_mutation",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.53s",
+          "drawn_at": "2026-09-20T18:05:28.471749+00:00"
+        }
+      ]
+    },
+    "t12": {
+      "id": "t12",
+      "claim": "A guard that still runs but AFTER the damage is a distinct, detectable mutation \u2014 relocation needs multi-edit support, which single-substitution mutation testing cannot express",
+      "mode": "test",
+      "proof": "tests/test_mutation.py::test_a_mutation_can_carry_SEVERAL_edits_so_a_guard_can_be_RELOCATED",
+      "note": "\u00a7C.32 M-D. Hand-running this mutation on the L4 guard moved the lookup too, so the guard re-read the row it had just written, went inert, and BOTH tests died on 'DID NOT RAISE' \u2014 the data-preservation property was never exercised. Once expressible, the CLI immediately found a SURVIVOR my hand-run had passed: a relocation placed before _save() clobbers the in-memory entry while leaving disk pristine, and the test only checked disk. measure_exploit.py records every arm then calls compare() on that same live Ledger, so the in-memory view is load-bearing. Test now asserts both views.",
+      "registered_at": "2026-09-20T18:05:27.499517+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_mutation.py::test_a_mutation_can_carry_SEVERAL_edits_so_a_guard_can_be_RELOCATED",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-20T18:05:28.706123+00:00"
+        }
+      ]
+    },
+    "t13": {
+      "id": "t13",
+      "claim": "A superseded claim keeps its own derived status and gains a pointer \u2014 retiring a finding must not misreport what its evidence actually found",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_supersession_does_NOT_rewrite_the_superseded_claim_s_status",
+      "note": "2026-09-21, found when h8 landed: h3 ('lower search wins at equal simulations') and h8 (the exact opposite) both read SUPPORTED, each an honest report of its own comparison \u2014 h3 was true at 460,800 sims and false at 1,843,200. Nothing could say 'do not build on h3', which is exactly how a stale finding gets reused. Supersession is a POINTER, never a status rewrite: marking h3 refuted would misreport its own evidence, deleting it would erase that a budget-scoped claim looked general for three days. A superseder with NO evidence is refused, so a measurement can never be overruled by assertion. Mutation-testing found the separate self-supersession check was DEAD CODE (the cycle walk, seeded with id, already covered it) \u2014 removed rather than left as protection that is not load-bearing.",
+      "registered_at": "2026-09-21T06:28:27.460319+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_supersession_does_NOT_rewrite_the_superseded_claim_s_status",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-09-21T06:28:27.999259+00:00"
+        }
+      ]
+    },
+    "h9": {
+      "id": "h9",
+      "claim": "At a deployment budget NEUTRAL to both arms (64 sims), the 96-trained arm still holds more than the 32-trained arm \u2014 h8's direction is not home-ground advantage",
+      "mode": "comparison",
+      "a": "a47n@uct200",
+      "b": "b143n@uct200",
+      "direction": "a>b",
+      "unit": "held, training-matched at 1,843,200 simulations, deployed at 64 sims (neutral)",
+      "note": "Pre-registered 2026-09-21 after an adversarial audit confirmed that every one of the 29 ledger entries was drawn at 96 sims \u2014 exactly arm A's training budget and 3x arm B's. A counter-experiment at 32-sim deployment on identical roots put the arms dead level (417/512 vs 417/512), though underpowered: its CI contains h8's +0.0342 and the diff-in-diff is null (z=0.99). 64 sims is neither arm's home value, so neither is favoured by construction. SAME roots as h8 (seed 257, 512 openings) deliberately, so the only thing that changes is the deployment budget. REFUTES h9 if the arms tie or reverse at 64; SUPPORTS if A's lead survives. Either way h8 must be restated as scoped to its deployment budget.",
+      "null_below": 0.03,
+      "registered_at": "2026-09-21T08:11:34.228888+00:00",
+      "evidence": [
+        {
+          "a": "a47n@uct200",
+          "b": "b143n@uct200",
+          "roots_id": "exploit_e4_s257_n512_uct200_sims64_neutral",
+          "p": 0.004164825184005592,
+          "diff": 0.0439453125,
+          "significant": true,
+          "drawn_at": "2026-09-21T20:43:37.365907+00:00"
+        }
+      ]
+    },
+    "t14": {
+      "id": "t14",
+      "claim": "A comparison drawn at one arm's own TRAINING search budget is flagged as home ground; arms measured at different deployment budgets are refused as unpaired",
+      "mode": "test",
+      "proof": "tests/test_ledger.py::test_compare_warns_when_the_deployment_budget_is_one_arm_s_HOME_budget",
+      "note": "L5, found 2026-09-21 by an adversarial audit of h8. The ledger refused mixed provenance, unmatched budgets, drifted code and mislabelled treatments \u2014 and never recorded the budget the arms were MEASURED at, so compare() could not notice it equalled exactly one arm's training budget. All 29 entries on disk were drawn at 96 sims: arm A's home value, 3x arm B's. A counter-experiment at 32-sim deployment on identical roots tied 417/512 vs 417/512 (underpowered: its CI contains h8's +0.0342, diff-in-diff z=0.99). Legacy entries report the budgets as NOT RECORDED rather than passing as checked. Mutation-testing found the differing-budget branch had no test behind it, which is how that case was upgraded from a warning to a refusal \u2014 arms searching different amounts are as unpaired as different root families.",
+      "registered_at": "2026-09-21T08:16:51.086675+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ledger.py::test_compare_warns_when_the_deployment_budget_is_one_arm_s_HOME_budget",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.10s",
+          "drawn_at": "2026-09-21T08:16:51.558677+00:00"
+        }
+      ]
+    },
+    "t15": {
+      "id": "t15",
+      "claim": "A claim must clear the null band ITS OWN registrant declared \u2014 a significant effect smaller than that band reads NEGLIGIBLE, not supported",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_significant_effect_INSIDE_the_claim_s_own_null_band_is_not_supported",
+      "note": "Found 2026-09-21 by an adversarial audit of h8. _status filtered on significance FIRST and returned 'supported' before null_below was read, so POWER rather than effect size decided the verdict: a significant +0.029 inside a declared 0.03 band read exactly like a +0.70. Deliberately asymmetric \u2014 magnitude gates a claim being ASSERTED, never one being contradicted, since 'a>b' is wrong if b wins significantly however narrowly. Mutation-testing found ALL-vs-ANY untested: a claim with one meaningful replication and one tiny one is SUPPORTED, and only a claim whose every supporting draw is under its own bar is negligible. h8 (+0.0342 vs a 0.03 band) is unaffected and stays supported \u2014 by 14%.",
+      "registered_at": "2026-09-21T08:19:10.940074+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_significant_effect_INSIDE_the_claim_s_own_null_band_is_not_supported",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-09-21T08:19:11.383455+00:00"
+        }
+      ]
+    },
+    "t16": {
+      "id": "t16",
+      "claim": "A run's cost is summed over EVERY segment and quoted as CPU time; a run whose CPU/wall ratio falls below its thread count is reported as sleep-contaminated, never returned as a clean number",
+      "mode": "test",
+      "proof": "tests/test_run_cost.py::test_a_run_that_slept_is_flagged_rather_than_returned_as_a_clean_number",
+      "note": "Found 2026-09-21: I quoted arm B's cost as 95.8 h three times. It was 142.69 h wall / 127.16 h CPU across TWO segments, and the gap was sleep. sleep_guard_effective() only ever checked the MOMENT OF LAUNCH, and slept_seconds_since existed but was never called again, so a run that began protected and slept six hours later looked identical to one that never slept. 8th instance of 'the guard must check the property, not a proxy' \u2014 a point-in-time check standing in for a duration property. cost_h returns CPU deliberately: wall-clock is not a cost when the machine was asleep for part of it. Correct ratio is 1.88x, not the 1.78x I reported; an adversarial audit computed 1.88x independently.",
+      "registered_at": "2026-09-21T17:59:05.614435+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_run_cost.py::test_a_run_that_slept_is_flagged_rather_than_returned_as_a_clean_number",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-21T17:59:06.004985+00:00"
+        }
+      ]
+    },
+    "h10": {
+      "id": "h10",
+      "claim": "At 32-sim deployment \u2014 arm B's OWN home budget \u2014 the 96-trained arm still holds more, so the advantage is general across deployment budgets rather than an interaction",
+      "mode": "comparison",
+      "a": "a47h@uct200",
+      "b": "b143h@uct200",
+      "direction": "a>b",
+      "unit": "held, training-matched at 1,843,200 simulations, deployed at 32 sims (arm B home)",
+      "note": "Completes the deployment-budget sweep. 96 (A home): +0.0342 p=0.0152. 64 (neutral): +0.0439 p=0.0042. 32 (B home): an audit counter-experiment at HALF power (256 openings, 512 cells) tied EXACTLY 417/512 vs 417/512, discordant 73/73 \u2014 but its CI [-0.0463,+0.0463] contains both other readings, so it cannot distinguish a real interaction from noise. This read is the same 512 openings/1024 pairs as h8 and h9, making all three directly comparable. REFUTED if the arms tie or reverse at full power, which would mean B's home budget really is where it competes and the claim must be stated per-budget. Direction a>b is declared because 64 and 96 both favour A; the 32 probe is the reason this is worth measuring rather than assuming.",
+      "null_below": 0.03,
+      "registered_at": "2026-09-21T21:47:07.795174+00:00",
+      "evidence": [
+        {
+          "a": "a47h@uct200",
+          "b": "b143h@uct200",
+          "roots_id": "exploit_e4_s257_n512_uct200_sims32_bhome",
+          "p": 0.3800794436831471,
+          "diff": 0.015625,
+          "significant": false,
+          "drawn_at": "2026-09-22T03:27:08.425377+00:00"
+        }
+      ]
+    },
+    "t17": {
+      "id": "t17",
+      "claim": "A stored comparison keeps the CAVEATS it was drawn with, and they travel into the register's evidence \u2014 a verdict that outlives the reasons to doubt it is prose with a p-value",
+      "mode": "test",
+      "proof": "tests/test_ledger.py::test_a_stored_comparison_KEEPS_the_caveats_it_was_drawn_with",
+      "note": "L6, found 2026-09-21 immediately after the L5 guard shipped: compare() returned provenance/code/completeness/deployment warnings and stored NONE of them \u2014 the durable record kept a,b,roots_id,p,diff,significant,drawn_at. Since the register builds evidence rows from comparisons(), h8's row recorded +0.0342/significant with no trace that it was drawn at one arm's home budget. Same shape as L4 in another costume: the conclusion outlives the reason to doubt it. Records drawn before this read as None (UNKNOWN), never {} (checked, nothing to note).",
+      "registered_at": "2026-09-21T21:48:48.443581+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ledger.py::test_a_stored_comparison_KEEPS_the_caveats_it_was_drawn_with",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.39s",
+          "drawn_at": "2026-09-21T21:48:49.340750+00:00"
+        }
+      ]
+    },
+    "t18": {
+      "id": "t18",
+      "claim": "One comparison read at several settings is summarised by a POOLED effect with the interaction tested and handed back \u2014 reading each setting alone invites the significant/non-significant fallacy",
+      "mode": "test",
+      "proof": "tests/test_pooled.py::test_the_interaction_across_settings_is_reported_not_assumed",
+      "note": "\u00a7C.34, 2026-09-22. The 96-vs-32 pair was read at three deployment budgets on the SAME 1024 roots: 32 -> +0.0156 (p=0.38, NULL), 64 -> +0.0439 (p=0.0042), 96 -> +0.0342 (p=0.0152). Read one at a time that reads as 'the effect depends on the deployment budget' \u2014 which is the significant/non-significant fallacy, and I was one sentence from committing it. The INTERACTION is null (max |z| = 1.30 across all three pairwise diff-in-diffs), so the three are statistically indistinguishable and the honest summary is ONE pooled effect: +0.0312, SE 0.0093, z=3.37, p=0.00074, 95% CI [+0.0131, +0.0494]. Pooling is legitimate only because the roots are shared, so unequal root counts are refused rather than truncated into alignment; and the function hands back the evidence against pooling (max_interaction_z, poolable) so it cannot quietly bury a real interaction. NOTE the CI lower bound +0.0131 is BELOW the 0.03 null band these very claims declared as absent, and this SE prices ROOT noise only \u2014 with n=1 training run per arm the dominant term is still unpriced.",
+      "registered_at": "2026-09-22T07:47:21.630062+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_pooled.py::test_the_interaction_across_settings_is_reported_not_assumed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-22T07:47:22.619855+00:00"
+        }
+      ]
+    },
+    "t19": {
+      "id": "t19",
+      "claim": "The augmenter expresses a 2D board symmetry as a (cell_perm, action_perm) pair, so a game whose action space is not its board width can be symmetry-augmented \u2014 tictactoe augmentation no longer throws",
+      "mode": "test",
+      "proof": "tests/test_neural.py::test_augment_works_for_a_game_whose_ACTIONS_ARE_CELLS_not_the_board_width",
+      "note": "2026-09-22, code-forward after the efficiency question closed. augment_examples did x[..., perm] \u2014 reindexing the board's WIDTH axis with the action perm \u2014 which is correct ONLY when num_actions == board width (Connect-4's columns). tictactoe.symmetries() returned 8 valid 9-cell dihedral perms and augment threw IndexError on the size-3 axis; othello/checkers omitted symmetries() entirely for this reason (documented in test_othello). Now each symmetry is (cell_perm len rows*cols, action_perm len num_actions): the board is flattened and permuted by cell_perm, the policy by action_perm, aux ownership by cell_perm, aux reply by action_perm. Connect-4 is byte-identical (guarded). This UNBLOCKS othello + checkers symmetries (deferred units) but does not add them. neural.py is a TRAINING_MODULE so this MOVES THE ERA off 3f2bacd402c7 \u2014 acceptable: no comparison is outstanding, and connect4/othello behaviour is unchanged.",
+      "registered_at": "2026-09-22T08:30:27.640061+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_neural.py::test_augment_works_for_a_game_whose_ACTIONS_ARE_CELLS_not_the_board_width",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.86s",
+          "drawn_at": "2026-09-22T08:30:42.235410+00:00"
+        }
+      ]
+    },
+    "t20": {
+      "id": "t20",
+      "claim": "A game's exploitable symmetries are FOUND by proving each candidate isometry commutes with its own dynamics (side-to-move preserved), not hand-asserted \u2014 and checkers has the left-right mirror, correcting the hand-guess of identity-only",
+      "mode": "test",
+      "proof": "tests/test_checkers.py::test_checkers_has_exactly_the_verified_left_right_mirror",
+      "note": "\u00a7C.36, 2026-09-22. harness/symmetry.py: dihedral_isometries enumerates the board's shape-preserving isometries; verify_isometry keeps one only if transform(step(s,a))==step(transform(s),action_perm[a]) for every legal a over 200 random positions with current_player preserved (== value-invariance). Games supply two small encoding-aware hooks (transform_state, transform_action); enumeration + verification are generic. Results: connect4 {id,flip_h} (byte-identical to the old hand-written pair), tictactoe full D4=8, checkers {id,flip_h}. The checkers result CORRECTS my own earlier hand-analysis ('likely identity-only'): flip_h flips only the column component so the men's forward direction survives; rot180/flip_v reverse it and the diagonal maps rotate it sideways, all refused BY THE VERIFIER. 6/6 mutations killed incl. each individual check isolated by a fake game that lies one way. games/ + symmetry.py are NOT fingerprinted, so the era stays 1bab977cec75. This is 'measure, don't assert' catching a wrong assertion in real time.",
+      "registered_at": "2026-09-22T09:05:00.627746+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_checkers.py::test_checkers_has_exactly_the_verified_left_right_mirror",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.31s",
+          "drawn_at": "2026-09-22T09:05:05.799633+00:00"
+        }
+      ]
+    },
+    "t21": {
+      "id": "t21",
+      "claim": "A change's effect across games is read as ONE verdict with multiplicity counted across the row (N games = N comparisons at alpha/N): generalises only if every game moves the same way, contested if signs disagree, local if only some move, null vs inconclusive split by the null band",
+      "mode": "test",
+      "proof": "tests/test_matrix.py::test_a_change_significant_in_OPPOSITE_directions_is_CONTESTED",
+      "note": "\u00a7C.20/\u00a7C.38, 2026-09-22. harness/matrix.py \u2014 the cross-game regression matrix the fingerprint was built for (\u00a7C.17). Rows=a change, columns=games, cells=a paired delta (from paired_exploitability/paired_conversion via cell_from_compare). The row verdict is DERIVED, in the register's vocabulary: significance at the CORRECTED bar alpha/N, direction from SIGNIFICANT cells only (a non-sig cell abstains, sign '0'), generalises requires ALL games, contested if significant signs disagree, local if some, null if all |diff|<null_below else inconclusive. Caveats travel through per cell (L6). 6/6 mutations killed incl. sign-from-significant-only and the <= boundary; scripts/cross_game_matrix.py drives a real sweep (smoke-run on connect4+tictactoe with the augment lever -> INCONCLUSIVE, correct at 6 openings) or assembles from a ledger. matrix.py + scripts not fingerprinted -> era stays 1bab977cec75.",
+      "registered_at": "2026-09-22T14:50:44.898326+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_matrix.py::test_a_change_significant_in_OPPOSITE_directions_is_CONTESTED",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-22T14:50:49.698948+00:00"
+        }
+      ]
+    },
+    "t22": {
+      "id": "t22",
+      "claim": "generalises (a conjunction: every game moved) is an intersection-union test at alpha, NOT Bonferroni alpha/N \u2014 the corrected bar is for the union question (did any game move); and null requires the whole CI inside the null band, not a small point estimate",
+      "mode": "test",
+      "proof": "tests/test_matrix.py::test_generalises_uses_the_per_cell_IUT_bar_not_alpha_over_N",
+      "note": "\u00a7C.20, 2026-09-22, from an adversarial review of the matrix. Original code applied alpha/N to BOTH the union and the conjunction, over-correcting generalises so a real transferable lever (all games p<=0.05 but >alpha/N) read inconclusive \u2014 the opposite of the truth on the headline verdict. Fix (Berger min-test / IUT theorem, same reason TOST uses alpha not alpha/2): generalises tests each game at alpha; local/contested keep alpha/N (the union family). Also fixed: null now gated on the CI lying inside the null band (TOST equivalence) not the point estimate (the absence-of-evidence fallacy the module rails against); N==1 reads 'single_game' not 'generalises'. 6/6 mutations killed.",
+      "registered_at": "2026-09-22T15:17:34.228684+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_matrix.py::test_generalises_uses_the_per_cell_IUT_bar_not_alpha_over_N",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-22T15:17:34.450244+00:00"
+        }
+      ]
+    },
+    "t23": {
+      "id": "t23",
+      "claim": "A cross-game matrix cell's unit of replication is the TRAINING RUN, not the opening: a single training draw is never significant and carries a standing caveat; significance comes from a between-seed t-test over per-seed deltas",
+      "mode": "test",
+      "proof": "tests/test_matrix.py::test_a_single_seed_cell_is_never_significant_and_carries_a_standing_caveat",
+      "note": "\u00a7C.20/\u00a7C.19, 2026-09-22, the FATAL review finding: the original sweep measured opening variance for ONE net vs ONE net, re-admitting the single-net confound the matrix exists to kill. Fix: cell_from_seed_deltas takes the per-training-seed paired deltas (measured on a FIXED opening set) and tests their mean with a between-seed t-test (new Student's-t primitives student_t_two_sided_p/t_critical in measurement.py, validated against the t-table). One seed -> p=1.0 + provenance caveat, so it can never claim a net-level effect. Exact sample-t formula (sd ddof=1, SE=sd/sqrt(r), df=r-1) mutation-pinned.",
+      "registered_at": "2026-09-22T15:17:34.255954+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_matrix.py::test_a_single_seed_cell_is_never_significant_and_carries_a_standing_caveat",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-22T15:17:34.647216+00:00"
+        }
+      ]
+    },
+    "t24": {
+      "id": "t24",
+      "claim": "Othello exposes the full verified dihedral group (D4=8): the flank-capture rule is direction-agnostic so every rotation/reflection of a position preserves value, and the PASS action is fixed under every symmetry",
+      "mode": "test",
+      "proof": "tests/test_othello.py::test_othello_has_the_full_verified_dihedral_group",
+      "note": "\u00a7C.39, 2026-09-22. The deferred othello hook: transform_state relabels the 64-cell board, transform_action maps a cell to its image and PASS->PASS. find_symmetries verifies all 8 D4 against othello's dynamics (measure, don't assert). This MOVES othello's own era 1bab977cec75->f180acfa235f because games/othello.py folds into its fingerprint AND othello training now augments 8x (was identity-only) \u2014 a real, intended behavioural improvement; the shared-module canary training_fingerprint(None)=5b2e23684c22 is unchanged, so no training-path drift. All 5 encoded games now have verified symmetries: connect4 {id,flip_h}, tictactoe D4=8, checkers {id,flip_h}, ninemensmorris D4xring-swap=16, othello D4=8.",
+      "registered_at": "2026-09-22T15:29:33.430269+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_othello.py::test_othello_has_the_full_verified_dihedral_group",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.26s",
+          "drawn_at": "2026-09-22T15:29:35.864682+00:00"
+        }
+      ]
+    },
+    "t25": {
+      "id": "t25",
+      "claim": "Optimality is measurable as STATE-SPACE COVERAGE: the symmetry-reduced fraction of reachable states where an agent's move is in the solver's optimal set \u2014 an optimal agent scores 1.0, a weaker one strictly less, and a per-ply breakdown localizes where it fails",
+      "mode": "test",
+      "proof": "tests/test_coverage.py::test_an_optimal_agent_covers_the_whole_state_space",
+      "note": "\u00a7C.41, 2026-09-22 (user direction). harness/coverage.py: optimal_actions (generic over SolvableGame via -position_value), reachable_states (EXACT BFS for small games / SAMPLED playouts for large, both symmetry-collapsed via canonical_key), state_coverage (coverage rate + by-ply breakdown), decided_frontier (the 'provable-outcome' share \u2014 states from which a non-loss is proven, the subtree-pruning the user asked to measure). Validated on tictactoe (fully enumerable): optimal agent 1.0, random <1.0, D4 symmetry shrinks the space. This is the FIRST absolute-optimality instrument that does not depend on the opening-wall from-empty solve. For solver-free games the same shape needs a strong reference in place of the solver (the north-star research path). 6/6 mutations killed.",
+      "registered_at": "2026-09-22T20:21:21.116748+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_coverage.py::test_an_optimal_agent_covers_the_whole_state_space",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.82s",
+          "drawn_at": "2026-09-22T20:21:22.269406+00:00"
+        }
+      ]
+    },
+    "h11": {
+      "id": "h11",
+      "claim": "The tic-tac-toe coverage blind spot is SYSTEMATIC: independently trained seeds fail at the SAME states beyond a uniform random-subset null over the failable universe (p < 0.0125). False => the ceiling is seed noise.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h11_the_tictactoe_blind_spot_is_SYSTEMATIC_across_seeds",
+      "note": "Pre-registered 2026-09-23 before the 10-seed run (seeds 1-10, 6 iters x 48 games, train sims 32, eval 48 fresh-tree, deep 400). Family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration smoke of the pipeline was seen before registering.",
+      "registered_at": "2026-09-23T08:45:31.073227+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h11_the_tictactoe_blind_spot_is_SYSTEMATIC_across_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.77s",
+          "drawn_at": "2026-09-23T08:48:47.859804+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "h12": {
+      "id": "h12",
+      "claim": "The blind spot lives in the NET, not the deployment budget: 8x more eval search (48->400 sims, fresh tree) fixes fewer than half the failures (one-sided Wilson upper bound < 0.5 at alpha 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h12_more_deployment_search_fixes_FEWER_than_half_the_failures",
+      "note": "Pre-registered 2026-09-23 before the 10-seed run (seeds 1-10, 6 iters x 48 games, train sims 32, eval 48 fresh-tree, deep 400). Family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration smoke of the pipeline was seen before registering.",
+      "registered_at": "2026-09-23T08:45:31.107526+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h12_more_deployment_search_fixes_FEWER_than_half_the_failures",
+          "ok": false,
+          "detail": "rdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:25: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h12_more_deployment_search_fixes_FEWER_than_half_the_failures\n1 failed in 1.95s",
+          "drawn_at": "2026-09-23T08:48:50.319288+00:00"
+        }
+      ],
+      "supersession": {
+        "by": "h15",
+        "reason": "the deep-search check it relied on is confounded by search alone on tic-tac-toe",
+        "at": "2026-09-23T08:52:51.376102+00:00"
+      },
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "h13": {
+      "id": "h13",
+      "claim": "Failing states were STARVED of training data: fewer final-replay-buffer visits than non-failing failable states of the same seed and ply (stratified permutation, p < 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h13_failing_states_were_STARVED_of_training_visits",
+      "note": "Pre-registered 2026-09-23 before the 10-seed run (seeds 1-10, 6 iters x 48 games, train sims 32, eval 48 fresh-tree, deep 400). Family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration smoke of the pipeline was seen before registering.",
+      "registered_at": "2026-09-23T08:45:31.142669+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h13_failing_states_were_STARVED_of_training_visits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.00s",
+          "drawn_at": "2026-09-23T08:48:53.132735+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "h14": {
+      "id": "h14",
+      "claim": "Failing states are ENRICHED off the optimal-play manifold (reachable only after a blunder) beyond the base rate (exact hypergeometric over distinct failable states, p < 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h14_failing_states_are_ENRICHED_off_the_optimal_play_manifold",
+      "note": "Pre-registered 2026-09-23 before the 10-seed run (seeds 1-10, 6 iters x 48 games, train sims 32, eval 48 fresh-tree, deep 400). Family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration smoke of the pipeline was seen before registering.",
+      "registered_at": "2026-09-23T08:45:31.178179+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h14_failing_states_are_ENRICHED_off_the_optimal_play_manifold",
+          "ok": false,
+          "detail": "rdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:33: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h14_failing_states_are_ENRICHED_off_the_optimal_play_manifold\n1 failed in 2.04s",
+          "drawn_at": "2026-09-23T08:48:55.625804+00:00"
+        }
+      ],
+      "supersession": {
+        "by": "h16",
+        "reason": "refuted; the successor states the measured non-enrichment",
+        "at": "2026-09-23T08:52:51.407800+00:00"
+      },
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "t26": {
+      "id": "t26",
+      "claim": "Coverage is a property of a POLICY: an act_fn that keeps state between calls (a search agent reusing its tree across states) is REFUSED, because its score depends on evaluation order \u2014 measured 0.9904 forward vs 0.9968 reversed on one tictactoe net; per_state_act (fresh agent + rng per state) is order-invariant (0.9872 both ways).",
+      "mode": "test",
+      "proof": "tests/test_coverage.py::test_a_stateful_act_fn_is_REFUSED_because_coverage_would_depend_on_evaluation_order",
+      "note": "",
+      "registered_at": "2026-09-23T08:45:48.764734+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_coverage.py::test_a_stateful_act_fn_is_REFUSED_because_coverage_would_depend_on_evaluation_order",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-09-23T08:45:49.419684+00:00"
+        }
+      ]
+    },
+    "h15": {
+      "id": "h15",
+      "claim": "On tic-tac-toe the deep-search check CANNOT attribute the blind spot to net vs budget: an untrained net at 400 sims fixes 72% of the failing states (Wilson lower bound > 0.5) \u2014 search alone nearly exhausts the tree. h12's refutation is real but uninformative.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h12_REFUTED_and_h15_the_deep_search_check_is_CONFOUNDED_by_search_alone",
+      "note": "",
+      "registered_at": "2026-09-23T08:52:47.425620+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h12_REFUTED_and_h15_the_deep_search_check_is_CONFOUNDED_by_search_alone",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.43s",
+          "drawn_at": "2026-09-23T08:52:49.224227+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "h16": {
+      "id": "h16",
+      "claim": "Failing states are NOT enriched off the optimal-play manifold: 13/17 off vs an 80% base rate (hypergeometric p=0.76) \u2014 the blind spot is not 'positions only reached after a blunder'.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h14_REFUTED_and_h16_failing_states_are_NOT_enriched_off_the_optimal_play_manifold",
+      "note": "",
+      "registered_at": "2026-09-23T08:52:47.456701+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h14_REFUTED_and_h16_failing_states_are_NOT_enriched_off_the_optimal_play_manifold",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.43s",
+          "drawn_at": "2026-09-23T08:52:50.979456+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "h17": {
+      "id": "h17",
+      "claim": "Tic-tac-toe coverage is mostly SEARCH: an untrained net with 48-sim search already covers 0.935; training lifts it to 0.982-0.994 and lifts the raw policy from 0.54 to 0.94-0.96. A tic-tac-toe coverage number must be read against this search-alone control.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h17_search_alone_does_most_of_the_work_and_learning_adds_the_rest",
+      "note": "",
+      "registered_at": "2026-09-23T08:52:47.486813+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h17_search_alone_does_most_of_the_work_and_learning_adds_the_rest",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-23T08:52:51.304536+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_ceiling.json.gz",
+        "started": "2026-09-23T08:45:36+00:00",
+        "moved_from": "evidence/tictactoe_ceiling.json"
+      }
+    },
+    "t27": {
+      "id": "t27",
+      "claim": "A test-backed claim about STORED evidence is timed against the data's own 'started', not the verify call \u2014 else a claim written after reading the results reads as a prediction (h15-h17 did, until fixed). Declared data cannot be swapped or regenerated under a claim.",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_claim_about_STORED_evidence_is_timed_against_the_DATA_not_the_verify_call",
+      "note": "",
+      "registered_at": "2026-09-23T08:54:50.373194+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_claim_about_STORED_evidence_is_timed_against_the_DATA_not_the_verify_call",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-09-23T08:54:50.783459+00:00"
+        }
+      ]
+    },
+    "h18": {
+      "id": "h18",
+      "claim": "REPLICATION: fresh baseline seeds (11-20) misplay the 17 localized target states far beyond the target's share of the failable universe (hypergeometric p < 0.0125) \u2014 the \u00a7C.43 blind spot is real out of sample.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h18_fresh_baseline_seeds_miss_the_localized_target_REPLICATION",
+      "note": "Pre-registered 2026-09-23 before training either arm. Seeds 11-20 (fresh: the target was localized from seeds 1-10), both arms 6 iters x 48 games, train sims 32, eval 48 fresh-tree; treatment = selfplay_opening_plies 2 + opening_plies_zero_frac 0.5 (the \u00a7C.8 #13 mixed-openings knob). Exact sign-flip paired test, family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration pipeline smoke was seen (target +0.29, policy +0.09, coverage +0.02; not evidence).",
+      "registered_at": "2026-09-23T10:13:39.091217+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h18_fresh_baseline_seeds_miss_the_localized_target_REPLICATION",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-23T10:15:46.388647+00:00"
+        },
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h18_fresh_baseline_seeds_miss_the_localized_target_REPLICATION",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-23T10:23:44.809715+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      }
+    },
+    "h19": {
+      "id": "h19",
+      "claim": "Mixed-openings self-play RAISES the share of the 17 target states played correctly at the 48-sim eval budget (paired by seed, exact sign-flip p < 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h19_mixed_openings_raise_TARGET_state_correctness",
+      "note": "Pre-registered 2026-09-23 before training either arm. Seeds 11-20 (fresh: the target was localized from seeds 1-10), both arms 6 iters x 48 games, train sims 32, eval 48 fresh-tree; treatment = selfplay_opening_plies 2 + opening_plies_zero_frac 0.5 (the \u00a7C.8 #13 mixed-openings knob). Exact sign-flip paired test, family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration pipeline smoke was seen (target +0.29, policy +0.09, coverage +0.02; not evidence).",
+      "registered_at": "2026-09-23T10:13:39.124607+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h19_mixed_openings_raise_TARGET_state_correctness",
+          "ok": false,
+          "detail": "target\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:68: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h19_mixed_openings_raise_TARGET_state_correctness\n1 failed in 0.04s",
+          "drawn_at": "2026-09-23T10:15:46.786371+00:00"
+        },
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h19_mixed_openings_raise_TARGET_state_correctness",
+          "ok": false,
+          "detail": "target\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:68: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h19_mixed_openings_raise_TARGET_state_correctness\n1 failed in 0.07s",
+          "drawn_at": "2026-09-23T10:23:45.278430+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      },
+      "supersession": {
+        "by": "h22",
+        "reason": "refuted; subsumed by h22 \u2014 the treatment reached the states (visits 4.5x) but did not fix them, so the starvation this fix targeted was not the cause",
+        "at": "2026-09-23T10:27:15.382904+00:00"
+      }
+    },
+    "h20": {
+      "id": "h20",
+      "claim": "Mixed-openings self-play RAISES raw-policy coverage over all 627 states \u2014 a NET-level gain, not search (paired by seed, p < 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h20_mixed_openings_raise_RAW_POLICY_coverage",
+      "note": "Pre-registered 2026-09-23 before training either arm. Seeds 11-20 (fresh: the target was localized from seeds 1-10), both arms 6 iters x 48 games, train sims 32, eval 48 fresh-tree; treatment = selfplay_opening_plies 2 + opening_plies_zero_frac 0.5 (the \u00a7C.8 #13 mixed-openings knob). Exact sign-flip paired test, family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration pipeline smoke was seen (target +0.29, policy +0.09, coverage +0.02; not evidence).",
+      "registered_at": "2026-09-23T10:13:39.157963+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h20_mixed_openings_raise_RAW_POLICY_coverage",
+          "ok": false,
+          "detail": "b()[\"policy\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:72: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h20_mixed_openings_raise_RAW_POLICY_coverage\n1 failed in 0.04s",
+          "drawn_at": "2026-09-23T10:15:47.181226+00:00"
+        },
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h20_mixed_openings_raise_RAW_POLICY_coverage",
+          "ok": false,
+          "detail": "b()[\"policy\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:72: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h20_mixed_openings_raise_RAW_POLICY_coverage\n1 failed in 0.04s",
+          "drawn_at": "2026-09-23T10:23:45.723553+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      },
+      "supersession": {
+        "by": "h22",
+        "reason": "refuted; subsumed by h22 \u2014 the treatment reached the states (visits 4.5x) but did not fix them, so the starvation this fix targeted was not the cause",
+        "at": "2026-09-23T10:27:15.416988+00:00"
+      }
+    },
+    "h21": {
+      "id": "h21",
+      "claim": "Mixed-openings self-play RAISES coverage at the 48-sim eval budget over all 627 states (paired by seed, p < 0.0125).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h21_mixed_openings_raise_eval_budget_COVERAGE",
+      "note": "Pre-registered 2026-09-23 before training either arm. Seeds 11-20 (fresh: the target was localized from seeds 1-10), both arms 6 iters x 48 games, train sims 32, eval 48 fresh-tree; treatment = selfplay_opening_plies 2 + opening_plies_zero_frac 0.5 (the \u00a7C.8 #13 mixed-openings knob). Exact sign-flip paired test, family alpha 0.05 split /4. Disclosure: a 2-seed x 1-iteration pipeline smoke was seen (target +0.29, policy +0.09, coverage +0.02; not evidence).",
+      "registered_at": "2026-09-23T10:13:39.192598+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h21_mixed_openings_raise_eval_budget_COVERAGE",
+          "ok": false,
+          "detail": "[\"coverage\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:76: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h21_mixed_openings_raise_eval_budget_COVERAGE\n1 failed in 0.05s",
+          "drawn_at": "2026-09-23T10:15:47.614027+00:00"
+        },
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h21_mixed_openings_raise_eval_budget_COVERAGE",
+          "ok": false,
+          "detail": "[\"coverage\"][\"verdict\"] is True\nE       assert False is True\n\ntests/test_ceiling_evidence.py:76: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_ceiling_evidence.py::test_h21_mixed_openings_raise_eval_budget_COVERAGE\n1 failed in 0.05s",
+          "drawn_at": "2026-09-23T10:23:46.132355+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      },
+      "supersession": {
+        "by": "h22",
+        "reason": "refuted; subsumed by h22 \u2014 the treatment reached the states (visits 4.5x) but did not fix them, so the starvation this fix targeted was not the cause",
+        "at": "2026-09-23T10:27:15.452259+00:00"
+      }
+    },
+    "h22": {
+      "id": "h22",
+      "claim": "Data-starvation is NOT the operative cause of the tic-tac-toe blind spot: mixed-openings self-play RAISED target-state visits ~4.5x (manipulation succeeded, p=0.002) but did NOT raise target-state correctness (h19 refuted) \u2014 visiting the blind-spot states in self-play does not fix them. h13's correlation was confounded.",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h22_raising_self_play_visits_did_NOT_fix_the_target_so_starvation_is_not_the_cause",
+      "note": "Post-hoc read of the pre-registered h18-h21 run (evidence/tictactoe_base.json vs _mixed.json, seeds 11-20). Manipulation check: mixed openings raised mean target-state self-play visits 36.8->166.4 per seed (paired sign-flip p=0.002) while target correctness stayed flat (+0.053, p=0.14). So the \u00a7C.43 h13 starvation was a correlation, not the operative cause.",
+      "registered_at": "2026-09-23T10:23:44.372940+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h22_raising_self_play_visits_did_NOT_fix_the_target_so_starvation_is_not_the_cause",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-23T10:23:46.512875+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      },
+      "supersession": {
+        "by": "h23",
+        "reason": "h22 read a non-significant +0.053 as 'not the cause'; at n=10 that effect size had ~8% power. h23 states what the data bound: at most ~35% of the blind spot, prior not measurably repaired.",
+        "at": "2026-09-23T10:57:07.075957+00:00"
+      }
+    },
+    "h23": {
+      "id": "h23",
+      "claim": "BOUNDED (supersedes h22's overstatement): mixed-openings self-play raised target-state visits 4.5x (p=0.002), yet the target-correctness gain is below +0.118 (95% one-sided upper bound, inverted sign-flip) \u2014 at most ~35% of the baseline blind spot \u2014 and the raw-prior gain at the target states is below +0.044 (under 1 of 17 states). Exposure alone repairs at most a third of the blind spot and does not measurably repair the prior; it is not ruled out as a PARTIAL cause (a \u00a7C.44-sized effect had ~8% power at n=10).",
+      "mode": "test",
+      "proof": "tests/test_ceiling_evidence.py::test_h23_exposure_raised_visits_but_repairs_at_most_a_third_of_the_blind_spot_and_not_the_prior",
+      "note": "Post-hoc correction prompted by the \u00a7C.45 adversarial design review (power finding). Bounds from harness.ceiling._paired_gain (meet-in-the-middle exact sign-flip, inverted by bisection).",
+      "registered_at": "2026-09-23T10:57:06.710530+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling_evidence.py::test_h23_exposure_raised_visits_but_repairs_at_most_a_third_of_the_blind_spot_and_not_the_prior",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-09-23T10:57:07.040528+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/tictactoe_base.json.gz",
+        "started": "2026-09-23T10:13:45+00:00",
+        "moved_from": "evidence/tictactoe_base.json"
+      }
+    },
+    "h24": {
+      "id": "h24",
+      "claim": "\u00a7C.45 G1: the tic-tac-toe blind spot REPLICATES a third time \u2014 base seeds 21-40 misplay the 17 target states beyond their universe share (hypergeometric p<0.05).",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_c45_G1_the_blind_spot_replicates_on_seeds_21_to_40",
+      "note": "\u00a7C.45 PRE-REGISTERED 2026-09-23 before any registered arm trained. Arms (seeds 21-40, 6 iters x 48 games, arch 32/3/32, gumbel, eval 48-sim fresh-tree, threads 1, --target evidence/tictactoe_ceiling.json, label_sims 32, label_draws 8): base; mixed (opening plies 2, zero-frac 0.5); mixed_deep (mixed + train_sims 200); mixed_R32 / mixed_R200 (mixed + reanalyze_frac 1.0, reanalyze_sims 32 / 200). Report = harness.ceiling.c45_report: G1 gate replication; G2 delivery gate (count of correct target labels trained on rises p<0.05, every seed >=1 target example, R200 pass>=2 share >= 0.85); G3 migration gate (upper bound on outside-target failure rise <= 0.5); chain A fixed-sequence alpha 0.04 (A1 target, A2 target_policy, R200 vs R32); B1 alpha 0.01 (target, mixed_deep vs mixed); refuted only if the 95% upper bound excludes half the control's shortfall. A3/S* dropped by its pre-stated rule (evidence/tictactoe_labels_ladder.json). Training era e92d405fae26, measurement 71586a13e928. DISCLOSURES: (1) a 2-seed x 2-iteration x 6-game smoke of all arms on seeds 21-22 (not the registered config) was seen; (2) the implementation reviewers computed TRAINING-TIME label doses (no evaluation, no claim metric) for mixed vs mixed_deep on seeds 21-40 (B1 dose rises 15/20) and R32 vs R200 on seeds 21-28 (dose and share rise 8/8) \u2014 G2 for B1/A was thus partly known, the claims were not.",
+      "registered_at": "2026-09-23T11:56:58.289499+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_c45_G1_the_blind_spot_replicates_on_seeds_21_to_40",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.91s",
+          "drawn_at": "2026-09-23T12:47:31.723045+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "h25": {
+      "id": "h25",
+      "claim": "\u00a7C.45 A1: LABEL QUALITY is causal \u2014 relabelling the buffer with a 200-sim search (self-play unchanged at 32) raises target-state correctness at the 48-sim eval vs 32-sim relabelling, with better labels delivered and failures not migrating (chain A, alpha 0.04).",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_c45_A1_deeper_RELABELLING_fixes_the_target_states",
+      "note": "\u00a7C.45 PRE-REGISTERED 2026-09-23 before any registered arm trained. Arms (seeds 21-40, 6 iters x 48 games, arch 32/3/32, gumbel, eval 48-sim fresh-tree, threads 1, --target evidence/tictactoe_ceiling.json, label_sims 32, label_draws 8): base; mixed (opening plies 2, zero-frac 0.5); mixed_deep (mixed + train_sims 200); mixed_R32 / mixed_R200 (mixed + reanalyze_frac 1.0, reanalyze_sims 32 / 200). Report = harness.ceiling.c45_report: G1 gate replication; G2 delivery gate (count of correct target labels trained on rises p<0.05, every seed >=1 target example, R200 pass>=2 share >= 0.85); G3 migration gate (upper bound on outside-target failure rise <= 0.5); chain A fixed-sequence alpha 0.04 (A1 target, A2 target_policy, R200 vs R32); B1 alpha 0.01 (target, mixed_deep vs mixed); refuted only if the 95% upper bound excludes half the control's shortfall. A3/S* dropped by its pre-stated rule (evidence/tictactoe_labels_ladder.json). Training era e92d405fae26, measurement 71586a13e928. DISCLOSURES: (1) a 2-seed x 2-iteration x 6-game smoke of all arms on seeds 21-22 (not the registered config) was seen; (2) the implementation reviewers computed TRAINING-TIME label doses (no evaluation, no claim metric) for mixed vs mixed_deep on seeds 21-40 (B1 dose rises 15/20) and R32 vs R200 on seeds 21-28 (dose and share rise 8/8) \u2014 G2 for B1/A was thus partly known, the claims were not.",
+      "registered_at": "2026-09-23T11:57:07.674448+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_c45_A1_deeper_RELABELLING_fixes_the_target_states",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.91s",
+          "drawn_at": "2026-09-23T12:47:32.990444+00:00"
+        }
+      ],
+      "inconclusive_proof": "tests/test_c45_evidence.py::test_c45_A1_is_undecidable",
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      },
+      "supersession": {
+        "by": "h28",
+        "reason": "h25's headline 'label quality IS causal' overstates a result that repairs ~half the blind spot (lower bound below the SESOI); its operational claim (relabelling raises target correctness) stands as supported",
+        "at": "2026-09-23T12:48:26.614132+00:00"
+      }
+    },
+    "h26": {
+      "id": "h26",
+      "claim": "\u00a7C.45 A2: the label fix comes through the PRIOR \u2014 200-sim relabelling raises raw-prior correctness at the 17 target states vs 32-sim relabelling (chain A, tested only if A1 is supported).",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_c45_A2_deeper_relabelling_fixes_the_target_PRIOR",
+      "note": "\u00a7C.45 PRE-REGISTERED 2026-09-23 before any registered arm trained. Arms (seeds 21-40, 6 iters x 48 games, arch 32/3/32, gumbel, eval 48-sim fresh-tree, threads 1, --target evidence/tictactoe_ceiling.json, label_sims 32, label_draws 8): base; mixed (opening plies 2, zero-frac 0.5); mixed_deep (mixed + train_sims 200); mixed_R32 / mixed_R200 (mixed + reanalyze_frac 1.0, reanalyze_sims 32 / 200). Report = harness.ceiling.c45_report: G1 gate replication; G2 delivery gate (count of correct target labels trained on rises p<0.05, every seed >=1 target example, R200 pass>=2 share >= 0.85); G3 migration gate (upper bound on outside-target failure rise <= 0.5); chain A fixed-sequence alpha 0.04 (A1 target, A2 target_policy, R200 vs R32); B1 alpha 0.01 (target, mixed_deep vs mixed); refuted only if the 95% upper bound excludes half the control's shortfall. A3/S* dropped by its pre-stated rule (evidence/tictactoe_labels_ladder.json). Training era e92d405fae26, measurement 71586a13e928. DISCLOSURES: (1) a 2-seed x 2-iteration x 6-game smoke of all arms on seeds 21-22 (not the registered config) was seen; (2) the implementation reviewers computed TRAINING-TIME label doses (no evaluation, no claim metric) for mixed vs mixed_deep on seeds 21-40 (B1 dose rises 15/20) and R32 vs R200 on seeds 21-28 (dose and share rise 8/8) \u2014 G2 for B1/A was thus partly known, the claims were not.",
+      "registered_at": "2026-09-23T11:57:07.702806+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_c45_A2_deeper_relabelling_fixes_the_target_PRIOR",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.94s",
+          "drawn_at": "2026-09-23T12:47:34.263908+00:00"
+        }
+      ],
+      "inconclusive_proof": "tests/test_c45_evidence.py::test_c45_A2_is_undecidable",
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "h27": {
+      "id": "h27",
+      "claim": "\u00a7C.45 B1 (practical): deeper SELF-PLAY (train_sims 200) with mixed openings raises target-state correctness vs mixed openings at 32 sims, with better labels delivered and failures not migrating (alpha 0.01).",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_c45_B1_deeper_SELF_PLAY_fixes_the_target_states",
+      "note": "\u00a7C.45 PRE-REGISTERED 2026-09-23 before any registered arm trained. Arms (seeds 21-40, 6 iters x 48 games, arch 32/3/32, gumbel, eval 48-sim fresh-tree, threads 1, --target evidence/tictactoe_ceiling.json, label_sims 32, label_draws 8): base; mixed (opening plies 2, zero-frac 0.5); mixed_deep (mixed + train_sims 200); mixed_R32 / mixed_R200 (mixed + reanalyze_frac 1.0, reanalyze_sims 32 / 200). Report = harness.ceiling.c45_report: G1 gate replication; G2 delivery gate (count of correct target labels trained on rises p<0.05, every seed >=1 target example, R200 pass>=2 share >= 0.85); G3 migration gate (upper bound on outside-target failure rise <= 0.5); chain A fixed-sequence alpha 0.04 (A1 target, A2 target_policy, R200 vs R32); B1 alpha 0.01 (target, mixed_deep vs mixed); refuted only if the 95% upper bound excludes half the control's shortfall. A3/S* dropped by its pre-stated rule (evidence/tictactoe_labels_ladder.json). Training era e92d405fae26, measurement 71586a13e928. DISCLOSURES: (1) a 2-seed x 2-iteration x 6-game smoke of all arms on seeds 21-22 (not the registered config) was seen; (2) the implementation reviewers computed TRAINING-TIME label doses (no evaluation, no claim metric) for mixed vs mixed_deep on seeds 21-40 (B1 dose rises 15/20) and R32 vs R200 on seeds 21-28 (dose and share rise 8/8) \u2014 G2 for B1/A was thus partly known, the claims were not.",
+      "registered_at": "2026-09-23T11:57:07.730914+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_c45_B1_deeper_SELF_PLAY_fixes_the_target_states",
+          "ok": false,
+          "detail": "= 'supported'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c45_evidence.py:50: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c45_evidence.py::test_c45_B1_deeper_SELF_PLAY_fixes_the_target_states\n1 failed in 0.90s",
+          "drawn_at": "2026-09-23T12:47:35.489213+00:00",
+          "inconclusive": false
+        }
+      ],
+      "inconclusive_proof": "tests/test_c45_evidence.py::test_c45_B1_is_undecidable",
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "t28": {
+      "id": "t28",
+      "claim": "A failed test-backed claim is not automatically REFUTED: when its declared inconclusive_proof passes (a gate failed, or the data only bound the effect) it reads INCONCLUSIVE. Without this the register turned \u00a7C.44's underpowered nulls into refutations.",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_failed_proof_whose_INCONCLUSIVE_proof_passes_reads_inconclusive_not_refuted",
+      "note": "",
+      "registered_at": "2026-09-23T12:01:52.572638+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_failed_proof_whose_INCONCLUSIVE_proof_passes_reads_inconclusive_not_refuted",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-09-23T12:01:53.255889+00:00"
+        }
+      ]
+    },
+    "t29": {
+      "id": "t29",
+      "claim": "A sign-flip confidence bound sits ON a subset mean of the deltas, often exactly a pre-registered threshold (0.5 = 3/6); threshold comparisons read an exact tie as inside the closed confidence set. Found by the \u00a7C.45 implementation review: bisection overshot the tie by ~5e-14 and would have turned a clean fix into 'moved' in ~4-11% of runs.",
+      "mode": "test",
+      "proof": "tests/test_ceiling.py::test_a_bound_that_lands_EXACTLY_on_the_migration_margin_holds",
+      "note": "",
+      "registered_at": "2026-09-23T12:01:52.608404+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling.py::test_a_bound_that_lands_EXACTLY_on_the_migration_margin_holds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.53s",
+          "drawn_at": "2026-09-23T12:01:54.292116+00:00"
+        }
+      ]
+    },
+    "h28": {
+      "id": "h28",
+      "claim": "\u00a7C.45 BOUNDED (supersedes h25's 'label quality IS causal'): label quality is a PARTIAL cause. With exposure matched, 200-sim relabelling repairs ~52% of the R32 target shortfall (95% lower bound 42.5%, below the pre-registered SESOI of half) and ~49% of the prior shortfall; 48 of R200's 54 eval failures remain in the 17-state target (key 601 13/20 seeds, 1608 15/20).",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_h28_label_quality_is_a_PARTIAL_cause_about_half_the_target_shortfall_is_repaired",
+      "note": "Post-hoc, from the \u00a7C.45 adversarial verification pass (4 verifiers + critic; arithmetic reproduced independently, seeds retrained bit-for-bit).",
+      "registered_at": "2026-09-23T12:48:24.234127+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_h28_label_quality_is_a_PARTIAL_cause_about_half_the_target_shortfall_is_repaired",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.93s",
+          "drawn_at": "2026-09-23T12:48:25.554648+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "h29": {
+      "id": "h29",
+      "claim": "\u00a7C.45: B1's refutation is of the RECIPE (deeper self-play), not of labels \u2014 its delivery gate passed only through key 90 (without it the correct-label dose does not rise, p>0.5) and deep self-play trained on >25% fewer target examples; G2 as designed (pooled count, >=1 example/seed) could not see this.",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_h29_B1_refutes_the_RECIPE_not_labels_its_delivery_rested_on_one_state",
+      "note": "Post-hoc, from the \u00a7C.45 adversarial verification pass (4 verifiers + critic; arithmetic reproduced independently, seeds retrained bit-for-bit).",
+      "registered_at": "2026-09-23T12:48:24.268089+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_h29_B1_refutes_the_RECIPE_not_labels_its_delivery_rested_on_one_state",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-09-23T12:48:25.927935+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "h30": {
+      "id": "h30",
+      "claim": "\u00a7C.45: 200-sim self-play (after 2 random plies) never trains on off-manifold positions where O (to move) wins \u2014 zero such visits in 20/20 mixed_deep seeds vs visited in >=15/20 mixed seeds \u2014 and its decline sits on O-to-move target states (paired sign-flip p<1e-3). Mechanism (value head learns 'O to move in an odd position loses') is a hypothesis, not shown.",
+      "mode": "test",
+      "proof": "tests/test_c45_evidence.py::test_h30_deep_self_play_never_trains_on_O_to_move_winning_positions_and_fails_there",
+      "note": "Post-hoc, from the \u00a7C.45 adversarial verification pass (4 verifiers + critic; arithmetic reproduced independently, seeds retrained bit-for-bit).",
+      "registered_at": "2026-09-23T12:48:24.301337+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c45_evidence.py::test_h30_deep_self_play_never_trains_on_O_to_move_winning_positions_and_fails_there",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.36s",
+          "drawn_at": "2026-09-23T12:48:26.585298+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c45_mixed_R32.json.gz",
+        "started": "2026-09-23T12:00:55+00:00",
+        "moved_from": "evidence/c45_mixed_R32.json"
+      }
+    },
+    "t30": {
+      "id": "t30",
+      "claim": "A test-backed claim must DECLARE what its proof reads \u2014 a data file (even one not yet produced, timed when verify first finds it) or reads-no-data \u2014 so a data-backed claim can never be timed by its own verify call. \u00a7C.45 nearly verified h24-h27 without their data attached; the rule made remembering unnecessary.",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_test_backed_claim_must_DECLARE_whether_its_proof_reads_stored_data",
+      "note": "",
+      "registered_at": "2026-09-23T12:50:26.111990+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_test_backed_claim_must_DECLARE_whether_its_proof_reads_stored_data",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-09-23T12:50:26.473305+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h31": {
+      "id": "h31",
+      "claim": "\u00a7C.46 E1 (PRIMARY): one-ply SIBLINGS (every one-move deviation from recorded self-play states, 200-sim labels, policy-only, steps-matched) reduce RAW-POLICY failures over all 627 states vs R200 on the residual net.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_E1_siblings_raise_net_level_coverage_with_200_sim_labels",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.481029+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_E1_siblings_raise_net_level_coverage_with_200_sim_labels",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.41s",
+          "drawn_at": "2026-09-24T08:41:55.134401+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_E1_is_undecidable"
+    },
+    "h32": {
+      "id": "h32",
+      "claim": "\u00a7C.46 E2: siblings with CHEAP 32-sim labels also reduce raw-policy failures vs R32 (tested only if E1 is supported).",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_E2_siblings_raise_net_level_coverage_with_32_sim_labels",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.534558+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_E2_siblings_raise_net_level_coverage_with_32_sim_labels",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.34s",
+          "drawn_at": "2026-09-24T08:41:57.882074+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_E2_is_undecidable"
+    },
+    "h33": {
+      "id": "h33",
+      "claim": "\u00a7C.46 A1: the RESIDUAL net (57,453 params) reduces raw-policy failures vs the legacy net (12,746) under the same 200-sim relabelling recipe \u2014 part of the tic-tac-toe ceiling was capacity/optimisation (gated by G0).",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_A1_the_residual_net_raises_net_level_coverage_over_legacy",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.590488+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_A1_the_residual_net_raises_net_level_coverage_over_legacy",
+          "ok": false,
+          "detail": "     \nE         - supported\nE         + inconclusive\n\ntests/test_c46_evidence.py:50: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c46_evidence.py::test_c46_A1_the_residual_net_raises_net_level_coverage_over_legacy\n1 failed in 2.35s",
+          "drawn_at": "2026-09-24T08:42:00.629619+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_A1_is_undecidable"
+    },
+    "h34": {
+      "id": "h34",
+      "claim": "\u00a7C.46 L1: on the legacy net, 200-sim relabelling again raises target-state correctness vs 32-sim (replication of \u00a7C.45 A1 on fresh seeds 41-60).",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_L1_legacy_200_sim_relabelling_replicates_the_target_gain",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.650089+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_L1_legacy_200_sim_relabelling_replicates_the_target_gain",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.43s",
+          "drawn_at": "2026-09-24T08:42:06.081584+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_L1_is_undecidable"
+    },
+    "h35": {
+      "id": "h35",
+      "claim": "\u00a7C.46 L2: on the legacy net, 200-sim relabelling again raises the target PRIOR (replication of \u00a7C.45 A2).",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_L2_legacy_200_sim_relabelling_replicates_the_prior_gain",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.701370+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_L2_legacy_200_sim_relabelling_replicates_the_prior_gain",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.42s",
+          "drawn_at": "2026-09-24T08:42:08.919071+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_L2_is_undecidable"
+    },
+    "h36": {
+      "id": "h36",
+      "claim": "\u00a7C.46 R1: on the residual net, 200-sim relabelling raises target-state correctness vs 32-sim.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_R1_residual_200_sim_relabelling_raises_target_correctness",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.753126+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_R1_residual_200_sim_relabelling_raises_target_correctness",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.34s",
+          "drawn_at": "2026-09-24T08:42:11.664805+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_R1_is_undecidable"
+    },
+    "h37": {
+      "id": "h37",
+      "claim": "\u00a7C.46 R2: on the residual net, 200-sim relabelling raises the target PRIOR vs 32-sim.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_c46_R2_residual_200_sim_relabelling_raises_the_target_prior",
+      "note": "\u00a7C.46 PRE-REGISTERED 2026-09-24 before any registered arm trained. Seeds 41-60; nine arms (spec: scratchpad c46/spec.md, recorded in plan \u00a7C.46): leg_R32, leg_R200 (legacy 12,746-param net), R32, R200, R32S, R200S (residual 57,453; S = one-ply siblings, policy-only, steps-matched), Rx, RxS, RxS_H (DIAGNOSTIC exact-solver labels; RxS_H holds out siblings by sha256 mod 2 salt c46). All: mixed openings 2/0.5, 32-sim self-play, reanalyze_frac 1.0, 6 iters x 48 games, eval 48-sim fresh tree, threads 1. Judged by harness.ceiling.c46_report: G0 capacity gate (evidence/c46_G0_capacity.json, PASSED 4/5, era 2600dc4f574a) gates A1; G1-leg / G1-res replication gates; chain E alpha 0.03 (E1 R200->R200S then E2 R32->R32S, raw-policy failures over 627 states, gate GE i-vi, SESOI 0.25 x control mean); A1 alpha 0.01 (leg_R200->R200, raw-policy failures); chain R alpha 0.01 fixed sequence L1,L2 (legacy) R1,R2 (residual) target/target_policy with G2/G3, SESOI 0.5 x shortfall. Refuted only when the 95% upper bound excludes the SESOI. Registered expectations: E1 effect band 0.3-0.5 x control failures; floor test met iff a generic residual arm reaches raw-policy 1.0 in >=15/20 seeds. Training era 2600dc4f574a. DISCLOSURES: G0 capacity probed before registration (design lead 5/5 residual, 0/8 legacy; formal G0 run three times across code freezes with identical results); smoke runs of all arms on seeds 41-42 (2-3 iterations x 6 games, not the registered config) were seen; the design lead's n=2 preview showed ~5-6 fewer raw-policy failures/seed for residual; c45 seed 21 was reproduced bit-for-bit under the new era.",
+      "registered_at": "2026-09-24T06:11:20.803168+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_c46_R2_residual_200_sim_relabelling_raises_the_target_prior",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.35s",
+          "drawn_at": "2026-09-24T08:42:14.402574+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c46_R200S.json.gz",
+        "started": "2026-09-24T06:16:53+00:00",
+        "moved_from": "evidence/c46_R200S.json"
+      },
+      "inconclusive_proof": "tests/test_c46_evidence.py::test_c46_R2_is_undecidable"
+    },
+    "t31": {
+      "id": "t31",
+      "claim": "A net arch that sets residual-only settings (blocks, head_hidden, batchnorm, global_pool) without residual=True is REFUSED, in arch_for_game and in validate_config. \u00a7C.43-\u00a7C.45 recorded {32,3,32} and silently trained a 12,746-parameter legacy net; the G0 gate then showed that net cannot fit the exact policy at the recipe's budget.",
+      "mode": "test",
+      "proof": "tests/test_neural.py::test_residual_only_arch_settings_WITHOUT_the_residual_tower_are_refused_not_silently_ignored",
+      "note": "",
+      "registered_at": "2026-09-24T06:17:00.841514+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_neural.py::test_residual_only_arch_settings_WITHOUT_the_residual_tower_are_refused_not_silently_ignored",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.22s",
+          "drawn_at": "2026-09-24T06:17:05.058725+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "t32": {
+      "id": "t32",
+      "claim": "A sibling treatment counts as delivered only if it CHANGED training: the treatment's first relabelled pass must end with different weights from the control's, since everything before it is byte-identical by construction. Found by the \u00a7C.46 implementation review (the delivery gate read what train_net was handed, not what it trained on).",
+      "mode": "test",
+      "proof": "tests/test_ceiling.py::test_c46_GE_fails_when_the_siblings_never_CHANGED_training",
+      "note": "",
+      "registered_at": "2026-09-24T06:17:00.890393+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_ceiling.py::test_c46_GE_fails_when_the_siblings_never_CHANGED_training",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.92s",
+          "drawn_at": "2026-09-24T06:17:07.415466+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "t33": {
+      "id": "t33",
+      "claim": "A claim reading several evidence files is timed against the EARLIEST of them, all must exist before verify, and none may be regenerated \u2014 the \u00a7C.46 critic found h33-h37 timed against one arm (R200S) while they judge others.",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_claim_reading_SEVERAL_data_files_is_timed_against_the_EARLIEST_of_them",
+      "note": "",
+      "registered_at": "2026-09-24T08:58:55.474715+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_claim_reading_SEVERAL_data_files_is_timed_against_the_EARLIEST_of_them",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.73s",
+          "drawn_at": "2026-09-24T08:58:57.945497+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h38": {
+      "id": "h38",
+      "claim": "\u00a7C.46 BOUNDED READING OF E1: on tic-tac-toe the sibling gain is MOSTLY IN-SAMPLE \u2014 R200S trains on >80% of the failable positions (self-play + one-ply siblings nearly enumerate the 627-state space), >80% of the 9.1/seed gain sits on positions R200S trained and R200 never did, and the spillover to positions NEITHER arm trained is real but small (<20% of the gain; paired sign-flip p<0.01). Only the spillover part speaks to transfer.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_h38_E1_is_MOSTLY_IN_SAMPLE_with_a_small_real_spillover",
+      "note": "Post-hoc, from the \u00a7C.46 adversarial verification pass (4 verifiers + critic; every number re-derived without harness code; 6 seeds retrained bit-for-bit).",
+      "registered_at": "2026-09-24T08:58:55.529160+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_h38_E1_is_MOSTLY_IN_SAMPLE_with_a_small_real_spillover",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.28s",
+          "drawn_at": "2026-09-24T08:59:01.109611+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c46_R200.json.gz",
+          "started": "2026-09-24T06:16:53+00:00",
+          "moved_from": "evidence/c46_R200.json"
+        },
+        {
+          "path": "evidence/c46_R200S.json.gz",
+          "started": "2026-09-24T06:16:53+00:00",
+          "moved_from": "evidence/c46_R200S.json"
+        }
+      ]
+    },
+    "h40": {
+      "id": "h40",
+      "claim": "\u00a7C.46: EXACT solver labels (uniform over the optimal set) WITHOUT siblings are the WORST residual arm \u2014 more raw-policy failures than R200 and than R32 (paired p<0.01) despite training on more positions than R200; they generalise to untrained positions >1.5x worse. So Rx/RxS are not 'ceilings', and label argmax accuracy is not what makes labels teach. Mechanism (uniform labels carry no ranking among moves) is a hypothesis.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_h40_exact_solver_labels_WITHOUT_siblings_are_the_worst_residual_arm",
+      "note": "Post-hoc, from the \u00a7C.46 adversarial verification pass (4 verifiers + critic; every number re-derived without harness code; 6 seeds retrained bit-for-bit).",
+      "registered_at": "2026-09-24T08:58:55.905192+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_h40_exact_solver_labels_WITHOUT_siblings_are_the_worst_residual_arm",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.46s",
+          "drawn_at": "2026-09-24T08:59:04.278790+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c46_Rx.json.gz",
+          "started": "2026-09-24T07:05:48+00:00",
+          "moved_from": "evidence/c46_Rx.json"
+        },
+        {
+          "path": "evidence/c46_R200.json.gz",
+          "started": "2026-09-24T06:16:53+00:00",
+          "moved_from": "evidence/c46_R200.json"
+        },
+        {
+          "path": "evidence/c46_R32.json.gz",
+          "started": "2026-09-24T06:40:51+00:00",
+          "moved_from": "evidence/c46_R32.json"
+        }
+      ]
+    },
+    "h39": {
+      "id": "h39",
+      "claim": "\u00a7C.46 CORRECTION OF THE METRIC: every coverage number since \u00a7C.41 scored the raw policy on ONE canonical image per state. The net is not exactly symmetric: rebuilt bit-for-bit, the 20 R200S nets are perfect on 9/20 seeds canonically but on 0/20 over every reachable raw position (4,520), and on 16/20 when the policy is averaged over the 8 verified images (an evaluation-time ensemble, a different policy). RxS: 12/20, 0/20, 17/20. The floor test's operator was never pre-registered and decides its verdict.",
+      "mode": "test",
+      "proof": "tests/test_c46_evidence.py::test_h39_the_canonical_image_metric_OVERSTATED_perfection_no_R200S_net_is_perfect_in_every_orientation",
+      "note": "Post-hoc, found by the \u00a7C.46 verification pass; nets rebuilt by scripts/orientation_evidence.py, each refused unless its weights hash equals the evidence's final-pass weights_sha.",
+      "registered_at": "2026-09-24T09:26:24.563231+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c46_evidence.py::test_h39_the_canonical_image_metric_OVERSTATED_perfection_no_R200S_net_is_perfect_in_every_orientation",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-09-24T09:26:25.022433+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c46_R200S.json.gz",
+          "started": "2026-09-24T06:16:53+00:00",
+          "moved_from": "evidence/c46_R200S.json"
+        },
+        {
+          "path": "evidence/c46_R200S_orientation.json.gz",
+          "started": "2026-09-24T08:56:52+00:00",
+          "moved_from": "evidence/c46_R200S_orientation.json"
+        }
+      ]
+    },
+    "h41": {
+      "id": "h41",
+      "claim": "\u00a7C.47 F1: the generic process (R200S recipe unchanged, seeds 81-100) meets the tic-tac-toe floor under the symmetry-averaged policy \u2014 at least 15 of 20 seeds perfect at every position (refuted at <= 11, inconclusive 12-14, not_run on any integrity failure)",
+      "mode": "test",
+      "proof": "tests/test_c47_floor_evidence.py::test_c47_F1_the_floor_is_met_under_the_symmetry_averaged_policy",
+      "note": "Operator adopted after \u00a7C.46 (h39); amendment to \u00a7C.42(i) recorded before data. Prior 16/20 was post hoc; predictive pass rate ~0.7.",
+      "registered_at": "2026-09-24T11:49:08.499447+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c47_floor_evidence.py::test_c47_F1_the_floor_is_met_under_the_symmetry_averaged_policy",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.44s",
+          "drawn_at": "2026-09-24T12:12:08.972823+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c47_F.json.gz",
+          "started": "2026-09-24T11:55:33+00:00"
+        },
+        {
+          "path": "evidence/c47_F_repro.json.gz",
+          "started": "2026-09-24T11:49:40+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor.py": "774ed2e460cc7a2bda565275ec9f773564bf6a5918e7a47ce661332f9bf551ca",
+        "tests/test_c47_floor_evidence.py": "0afdbd9bcf401ce785c89f75a9c2d47db5a71149acf2a7c0fe890b0833dafdc8"
+      },
+      "inconclusive_proof": "tests/test_c47_floor_evidence.py::test_c47_F1_is_undecidable"
+    },
+    "h42": {
+      "id": "h42",
+      "claim": "\u00a7C.47 F2: on the same seeds the symmetry-averaged policy is perfect on more seeds than the strict raw reading (exact one-sided sign test on discordant seeds, p < 0.01; refuted if the reverse reaches it)",
+      "mode": "test",
+      "proof": "tests/test_c47_floor_evidence.py::test_c47_F2_the_averaged_operator_is_perfect_on_more_seeds_than_the_strict_raw_reading",
+      "note": "Replaces the draft's 'strict <= 5/20', which could hardly fail.",
+      "registered_at": "2026-09-24T11:49:08.554416+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c47_floor_evidence.py::test_c47_F2_the_averaged_operator_is_perfect_on_more_seeds_than_the_strict_raw_reading",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.44s",
+          "drawn_at": "2026-09-24T12:12:09.638899+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c47_F.json.gz",
+          "started": "2026-09-24T11:55:33+00:00"
+        },
+        {
+          "path": "evidence/c47_F_repro.json.gz",
+          "started": "2026-09-24T11:49:40+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor.py": "774ed2e460cc7a2bda565275ec9f773564bf6a5918e7a47ce661332f9bf551ca",
+        "tests/test_c47_floor_evidence.py": "0afdbd9bcf401ce785c89f75a9c2d47db5a71149acf2a7c0fe890b0833dafdc8"
+      },
+      "inconclusive_proof": "tests/test_c47_floor_evidence.py::test_c47_F2_is_undecidable"
+    },
+    "h43": {
+      "id": "h43",
+      "claim": "\u00a7C.47 C0: on Connect-4 the direct sibling channel has headroom \u2014 at the positions one_ply_siblings would add to the final relabel buffer, the C_R nets err more often than on the buffer (E) and the recipe's 64-sim label is right more often than the raw net (L); GO iff both means >= 0.02 with one-sided 95% lower bounds > 0 (net as unit, 5 nets), STOP (refuted) iff either upper bound < 0.02, else undecided",
+      "mode": "test",
+      "proof": "tests/test_c47_stage0_evidence.py::test_c47_C0_the_direct_sibling_channel_has_headroom_on_connect4",
+      "note": "Calibrated on \u00a7C.46 R200: tic-tac-toe exposure gap 0.042 (sd 0.019) reads GO 0.93 at the registered sizes; a true zero reads GO 0.02. STOP never means 'siblings are not the lever' \u2014 the generalisation route is untested.",
+      "registered_at": "2026-09-24T12:26:09.097811+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c47_stage0_evidence.py::test_c47_C0_the_direct_sibling_channel_has_headroom_on_connect4",
+          "ok": false,
+          "detail": "      \nE         - go\nE         + not_run\n\ntests/test_c47_stage0_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c47_stage0_evidence.py::test_c47_C0_the_direct_sibling_channel_has_headroom_on_connect4\n1 failed in 0.08s",
+          "drawn_at": "2026-09-24T20:51:09.734344+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c47_C0.json.gz",
+        "started": "2026-09-24T12:26:10+00:00"
+      },
+      "pins": {
+        "harness/stage0.py": "6d4935eedd6ddd2e05c822e0c03a8bebe378321178cd703759e621461f95d0d4",
+        "tests/test_c47_stage0_evidence.py": "c372fd4a5a37e8b106f951feacd3fb55f2aab26f6cdd5a4e13c44213c011be35"
+      },
+      "inconclusive_proof": "tests/test_c47_stage0_evidence.py::test_c47_C0_is_undecidable"
+    },
+    "h44": {
+      "id": "h44",
+      "claim": "\u00a7C.47 C0 v2 (re-run of h43, which read NOT_RUN on thin cells): on Connect-4 the direct sibling channel has headroom \u2014 at the positions one_ply_siblings would add to the final relabel buffer, fresh C_R nets (seeds 206-210) err more often than at positions they trained on (E), and the recipe's 64-sim label is right more often than the raw net there (L); GO iff both means >= 0.02 with one-sided 95% lower bounds > 0 (net as unit), STOP (refuted) iff either upper bound < 0.02, else undecided",
+      "mode": "test",
+      "proof": "tests/test_c47_stage0v2_evidence.py::test_c47_C0v2_the_direct_sibling_channel_has_headroom_on_connect4",
+      "note": "Designed after h43's NOT_RUN from its cell COUNTS only (no E or L computed on seeds 201-205). Operating characteristic at v1's realised sizes: tic-tac-toe signature GO 0.81, true zero GO 0.03-0.04.",
+      "registered_at": "2026-09-24T21:02:49.429163+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c47_stage0v2_evidence.py::test_c47_C0v2_the_direct_sibling_channel_has_headroom_on_connect4",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-09-25T09:28:36.261461+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c47_C0v2.json.gz",
+        "started": "2026-09-24T21:02:50+00:00"
+      },
+      "pins": {
+        "harness/stage0_v2.py": "dbb2be67655431bed7639e87fb2dccb59299b8ad2ed51dfdcea99585f3df1946",
+        "harness/stage0.py": "6d4935eedd6ddd2e05c822e0c03a8bebe378321178cd703759e621461f95d0d4",
+        "tests/test_c47_stage0v2_evidence.py": "557e184835bac14d458a6b478d62035deb4ed383c35c922bcf5b1e0fccf2ccfa"
+      },
+      "inconclusive_proof": "tests/test_c47_stage0v2_evidence.py::test_c47_C0v2_is_undecidable"
+    },
+    "h45": {
+      "id": "h45",
+      "claim": "\u00a7C.48 T2 (augment): the generic tic-tac-toe process (R200S recipe) run to convergence \u2014 30 iterations, seeds 301-310 \u2014 ends with a RAW net optimal at every one of the 4,520 raw positions (no averaging) in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_with_augmentation",
+      "note": "The user's challenge: tic-tac-toe at 100% should be trivial; \u00a7C.47 only met the floor under symmetry averaging on a 288-game budget.",
+      "registered_at": "2026-09-25T12:21:01.973547+00:00",
+      "evidence": [],
+      "data": [
+        {
+          "path": "evidence/c48_T2_augment.json.gz",
+          "started": null
+        },
+        {
+          "path": "evidence/c48_T2_no_augment.json.gz",
+          "started": null
+        }
+      ],
+      "pins": {
+        "harness/floor_converge.py": "986552aa8a208202283b640afe7e0bd826b028b28628eb8cd3f926d5285f1014",
+        "tests/test_c48_converge_evidence.py": "8dcd5891eda19d38e06e6e2c4091310e43267fb5723b1483253ee13d39498818"
+      },
+      "inconclusive_proof": "tests/test_c48_converge_evidence.py::test_c48_T2_augment_is_undecidable"
+    },
+    "h46": {
+      "id": "h46",
+      "claim": "\u00a7C.48 T2 (no_augment): the same run with NO symmetry anywhere (no augmentation) ends with a raw net optimal at every raw position in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
+      "note": "Symmetry is an optimisation, not a requirement: the process should learn every orientation from its own data.",
+      "registered_at": "2026-09-25T12:21:02.027099+00:00",
+      "evidence": [],
+      "data": [
+        {
+          "path": "evidence/c48_T2_augment.json.gz",
+          "started": null
+        },
+        {
+          "path": "evidence/c48_T2_no_augment.json.gz",
+          "started": null
+        }
+      ],
+      "pins": {
+        "harness/floor_converge.py": "986552aa8a208202283b640afe7e0bd826b028b28628eb8cd3f926d5285f1014",
+        "tests/test_c48_converge_evidence.py": "8dcd5891eda19d38e06e6e2c4091310e43267fb5723b1483253ee13d39498818"
+      },
+      "inconclusive_proof": "tests/test_c48_converge_evidence.py::test_c48_T2_no_augment_is_undecidable"
+    }
+  }
+}

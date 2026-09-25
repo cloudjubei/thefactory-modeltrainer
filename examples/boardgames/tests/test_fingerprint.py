@@ -139,3 +139,55 @@ def test_the_pre_resume_module_list_stays_derivable():
     assert "harness/resume.py" not in TRAINING_MODULES_V3
     assert "harness/rules.py" in TRAINING_MODULES_V3
     assert training_fingerprint("othello", modules=TRAINING_MODULES_V3) != training_fingerprint("othello")
+
+
+def test_the_generic_path_s_base_classes_symmetry_and_game_lookup_are_fingerprinted():
+    """§C.46 found harness/symmetry.py (the augmentation's isometries) and harness/game.py (the base every game
+    extends) on the path of EVERY run yet outside the list: an edit to either could change a run's data without
+    moving its era. registry.py resolves the game inside each self-play worker."""
+    for module in ("harness/game.py", "harness/symmetry.py", "harness/registry.py"):
+        assert module in TRAINING_MODULES
+
+
+def test_the_c46_era_stays_derivable_with_the_list_it_was_recorded_under():
+    from harness.fingerprint import TRAINING_MODULES_V4
+
+    for module in ("harness/game.py", "harness/symmetry.py", "harness/registry.py"):
+        assert module not in TRAINING_MODULES_V4
+    assert "harness/resume.py" in TRAINING_MODULES_V4
+    assert training_fingerprint("tictactoe", revision="4cfcfbe", modules=TRAINING_MODULES_V4) == "2600dc4f574a"
+    assert training_fingerprint("tictactoe", modules=TRAINING_MODULES_V4) != training_fingerprint("tictactoe")
+
+
+def _harness_imports(path: str) -> set:
+    import ast
+
+    tree = ast.parse((Path(__file__).resolve().parent.parent / path).read_text())
+    out = set()
+    for node in ast.walk(tree):
+        names = ([node.module] if isinstance(node, ast.ImportFrom) and node.module
+                 else [a.name for a in node.names] if isinstance(node, ast.Import) else [])
+        out |= {n.replace(".", "/") + ".py" for n in names if n.split(".")[0] in ("harness", "games")}
+    return out
+
+
+def test_every_harness_module_the_training_path_imports_is_fingerprinted_or_excluded_for_a_stated_reason():
+    """The list is maintained by hand, and it has missed training-path code three times (agents.py, rules.py, then
+    symmetry.py and game.py). So the import graph is walked from every fingerprinted module: whatever it reaches
+    must be fingerprinted too, or be one of the modules excluded on purpose, each with the reason it cannot change
+    the weights of a generic run. A game's own module is folded in per game, so the walk passes through games/
+    to what they import (the augmentation's symmetry.py is reached only that way)."""
+    from harness.fingerprint import NOT_TRAINING_PATH
+
+    root = Path(__file__).resolve().parent.parent
+    seen, todo = set(), list(TRAINING_MODULES) + [str(p.relative_to(root)) for p in (root / "games").glob("*.py")]
+    while todo:
+        module = todo.pop()
+        if module in seen or not (root / module).exists():
+            continue
+        seen.add(module)
+        todo.extend(_harness_imports(module))
+    unlisted = {m for m in seen if m.startswith("harness/")} - set(TRAINING_MODULES) - set(NOT_TRAINING_PATH)
+    assert not unlisted, f"training-path imports neither fingerprinted nor excluded: {sorted(unlisted)}"
+    assert all(reason.strip() for reason in NOT_TRAINING_PATH.values())
+    assert not set(NOT_TRAINING_PATH) & set(TRAINING_MODULES)

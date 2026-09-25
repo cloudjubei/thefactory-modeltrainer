@@ -20,7 +20,7 @@ import sys
 from harness.hypotheses import Register
 from harness.ledger import Ledger
 
-REGISTER_PATH = "checkpoints/scaled_runs/hypotheses.json"
+REGISTER_PATH = "hypotheses.json"
 LEDGER_PATH = "checkpoints/scaled_runs/analysis_ledger.json"
 
 MARK = {"supported": "SUPPORTED", "refuted": "REFUTED ", "contested": "CONTESTED", "null": "NULL    ",
@@ -81,6 +81,9 @@ def main() -> None:
     r.add_argument("--inconclusive-proof", default="",
                    help="TEST mode: a pytest node id that PASSES when the claim cannot be judged (a gate failed, the "
                         "data only bound the effect); a failed proof then reads INCONCLUSIVE, not REFUTED")
+    r.add_argument("--pins", default="",
+                   help="TEST mode: comma-separated files that judge the claim (its report, its proof test); verify "
+                        "refuses once their behaviour changed")
     r.add_argument("--note", default="")
     li = sub.add_parser("link")
     li.add_argument("--id", help="omit to link every hypothesis whose evidence exists")
@@ -104,7 +107,8 @@ def main() -> None:
                           unit=args.unit, proof=args.proof, note=args.note, null_below=args.null_below,
                           data=args.data.split(",") if "," in args.data else args.data,
                           inconclusive_proof=args.inconclusive_proof,
-                          reads_no_data=args.reads_no_data))
+                          reads_no_data=args.reads_no_data,
+                          pins=[p for p in args.pins.split(",") if p]))
         return
     if args.cmd == "attach-data":
         show(reg.attach_data(args.id, args.data))

@@ -343,6 +343,15 @@ def test_an_exactly_optimal_policy_passes_all_three_orientation_readings():
     assert r["failing_images"] == 0
 
 
+def test_the_orientation_record_names_the_isometries_the_policy_was_averaged_over():
+    from harness.coverage import orientation_failures
+
+    def optimal(s):
+        return _onehot_logits(sorted(optimal_actions(G, s))[0])
+    for isos in (_isos(), _isos()[:1], _isos()[::-1]):
+        assert orientation_failures(G, optimal, isos)["isometries"] == [iso.name for iso in isos]
+
+
 def test_the_symmetrized_reading_averages_the_policy_over_the_images_and_maps_moves_back():
     from harness.coverage import orientation_failures
     iso_count = len(_isos())
@@ -364,3 +373,55 @@ def test_orientation_failures_refuses_an_isometry_the_game_does_not_obey():
     shift = iso_from_cell_map("shift", 3, 3, lambda i: (i // 3) * 3 + (i % 3 + 1) % 3)
     with _pytest.raises(ValueError, match="isometr"):
         orientation_failures(G, lambda s: _onehot_logits(sorted(optimal_actions(G, s))[0]), _isos() + [shift])
+
+
+def _hashed_policy(salt):
+    """A deterministic policy that is wrong at a hash-chosen subset of raw positions — not symmetric, so each
+    reading has something different to find. A small per-(position, move) jitter keeps averaged probabilities
+    free of EXACT ties, as a trained net's float logits are: an exact tie is broken by move order, which no
+    isometry preserves."""
+    def policy(s):
+        opt = sorted(optimal_actions(G, s))
+        bad = [a for a in G.legal_actions(s) if a not in opt]
+        lg = _onehot_logits(bad[0] if bad and hash((s.board, salt)) % 3 == 0 else opt[0])
+        return [v + 1e-3 * (hash((s.board, a, salt)) % 997) / 997 for a, v in enumerate(lg)]
+    return policy
+
+
+@pytest.mark.parametrize("salt", [0, 1])
+def test_subgroup_failures_over_the_identity_alone_is_the_strict_raw_reading(salt):
+    from harness.coverage import orientation_failures, subgroup_failures
+    iso = _isos()
+    full = orientation_failures(G, _hashed_policy(salt), iso)
+    alone = subgroup_failures(G, _hashed_policy(salt), iso[:1])
+    assert alone["failing_positions"] == full["failing_images"] and alone["fail_keys"] == full["image_fail_keys"]
+    assert alone["positions"] == full["positions"] and alone["isometries"] == [iso[0].name]
+
+
+@pytest.mark.parametrize("salt", [0, 1])
+def test_subgroup_failures_over_the_whole_group_agree_with_the_canonical_symmetrized_reading(salt):
+    from harness.coverage import orientation_failures, subgroup_failures
+    iso = _isos()
+    full = orientation_failures(G, _hashed_policy(salt), iso)
+    whole = subgroup_failures(G, _hashed_policy(salt), iso)
+    assert whole["fail_keys"] == full["symmetrized_fail_keys"]
+
+
+def test_the_whole_group_average_rescues_a_policy_wrong_in_scattered_images_but_a_subgroup_need_not():
+    """Averaging over the full group turns scattered single-image errors into a majority vote; a two-image average
+    has no majority to take, so it can score WORSE than the raw policy (measured here: 1080 vs 1047). Rescue is not
+    monotone in the number of images averaged — only the whole group is guaranteed to vote."""
+    from harness.coverage import subgroup_failures
+    iso = {i.name: i for i in _isos()}
+    names = [["identity"], ["identity", "flip_h"], ["identity", "rot180", "flip_h", "flip_v"], list(iso)]
+    counts = [subgroup_failures(G, _hashed_policy(0), [iso[n] for n in group])["failing_positions"]
+              for group in names]
+    assert counts[-1] < counts[2] < counts[0] < counts[1]
+
+
+def test_subgroup_failures_refuses_an_isometry_the_game_does_not_obey():
+    from harness.coverage import subgroup_failures
+    from harness.symmetry import iso_from_cell_map
+    shift = iso_from_cell_map("shift", 3, 3, lambda i: (i // 3) * 3 + (i % 3 + 1) % 3)
+    with pytest.raises(ValueError, match="isometr"):
+        subgroup_failures(G, _hashed_policy(0), _isos()[:1] + [shift])

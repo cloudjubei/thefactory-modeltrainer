@@ -4,16 +4,14 @@ call a net perfect that misplays a rotated board. This retrains each seed of an 
 REFUSES any net whose weights hash differs from the final-pass `weights_sha` the evidence recorded (so the net
 scored is provably the net that was measured), and scores it three ways with `coverage.orientation_failures`.
 
-    PYTHONPATH=. .venv/bin/python scripts/orientation_evidence.py --evidence evidence/c46_R200S.json \\
-        --out evidence/c46_R200S_orientation.json
+    PYTHONPATH=. .venv/bin/python scripts/orientation_evidence.py --evidence evidence/c46_R200S.json.gz \\
+        --out evidence/c46_R200S_orientation.json.gz
 """
 from __future__ import annotations
 
 import argparse
-import json
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
-from pathlib import Path
 
 MODULES = ("scripts/orientation_evidence.py", "harness/coverage.py", "harness/symmetry.py", "harness/targets.py")
 
@@ -57,6 +55,7 @@ def score_seed(job: dict) -> dict:
 
 
 def main() -> None:
+    from harness.evidence import load_evidence, save_evidence
     from harness.fingerprint import training_fingerprint
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -64,7 +63,7 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--workers", type=int, default=10)
     args = ap.parse_args()
-    ev = json.loads(Path(args.evidence).read_text())
+    ev = load_evidence(args.evidence)
     if training_fingerprint(ev["config"]["game"]) != ev["training_fingerprint"]:
         raise SystemExit("the training code moved since this evidence was produced — its nets cannot be rebuilt")
     jobs = [{"config": ev["config"], "seed": s["seed"],
@@ -83,7 +82,7 @@ def main() -> None:
     out = {"started": started, "finished": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "evidence": args.evidence, "arm_started": ev["started"], "training_fingerprint": ev["training_fingerprint"],
            "orientation_fingerprint": training_fingerprint(modules=MODULES), "seeds": rows}
-    Path(args.out).write_text(json.dumps(out, indent=1))
+    save_evidence(args.out, out)
     for r in rows:
         print(f"seed {r['seed']}: canonical {len(r['canonical_fail_keys'])}  images {r['failing_images']} over "
               f"{len(r['image_fail_keys'])} keys  symmetrized {len(r['symmetrized_fail_keys'])}")

@@ -1,5 +1,5 @@
 """§C.46 — the PRE-REGISTERED labels x exposure x architecture claims, judged by harness.ceiling.c46_report from the
-nine arm evidence files (seeds 41-60), the G0 capacity gate (evidence/c46_G0_capacity.json) and the §C.45 R200 arm
+nine arm evidence files (seeds 41-60), the G0 capacity gate (evidence/c46_G0_capacity.json.gz) and the §C.45 R200 arm
 as the reference for the recurrent-failure set P. Every claim has a proof (passes only on `supported`) and an
 undecidable proof (passes when the report says the claim could not be judged); a claim is refuted only when both
 fail — its one-sided 95% upper bound excluded the smallest effect of interest.
@@ -9,24 +9,31 @@ A1 INCONCLUSIVE. The undecidable nodes of the decided claims are gone (they are 
 and A1's proof node now pins its recorded inconclusive reading — the register keeps the frozen verdicts."""
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 from pathlib import Path
 
+import pytest
+
 from harness.ceiling import C46_ARMS, c46_report
+from harness.evidence import load_evidence
 
 EVIDENCE = Path(__file__).resolve().parent.parent / "evidence"
 UNDECIDABLE = {"inconclusive", "not_delivered", "not_reached", "not_run", "moved", "stopped"}
+FILES = ([f"c46_{a}.json.gz" for a in C46_ARMS] + ["c46_R200S_orientation.json.gz", "tictactoe_ceiling.json.gz",
+                                                   "c46_G0_capacity.json.gz", "c45_mixed_R200.json.gz"])
+pytestmark = pytest.mark.skipif(
+    not all((EVIDENCE / f).exists() for f in FILES),
+    reason="evidence/ is gitignored and these files are not on this machine — restore them to run the proofs")
 
 
 @lru_cache(maxsize=1)
 def _report():
     from games.tictactoe import TicTacToe
-    arms = {a: json.loads((EVIDENCE / f"c46_{a}.json").read_text()) for a in C46_ARMS}
+    arms = {a: load_evidence(EVIDENCE / f"c46_{a}.json.gz") for a in C46_ARMS}
     assert all(len(e["seeds"]) == 20 for e in arms.values())
-    return c46_report(arms, json.loads((EVIDENCE / "tictactoe_ceiling.json").read_text()), TicTacToe(),
-                      json.loads((EVIDENCE / "c46_G0_capacity.json").read_text()),
-                      reference=json.loads((EVIDENCE / "c45_mixed_R200.json").read_text()),
+    return c46_report(arms, load_evidence(EVIDENCE / "tictactoe_ceiling.json.gz"), TicTacToe(),
+                      load_evidence(EVIDENCE / "c46_G0_capacity.json.gz"),
+                      reference=load_evidence(EVIDENCE / "c45_mixed_R200.json.gz"),
                       notes={"depth2_gap": [4983], "label_limited": [601]})
 
 
@@ -75,7 +82,7 @@ def test_c46_R2_residual_200_sim_relabelling_raises_the_target_prior():
 
 
 def _arm(name):
-    return json.loads((EVIDENCE / f"c46_{name}.json").read_text())
+    return load_evidence(EVIDENCE / f"c46_{name}.json.gz")
 
 
 def _trained(row):
@@ -123,7 +130,7 @@ def test_h40_exact_solver_labels_WITHOUT_siblings_are_the_worst_residual_arm():
 
 
 def _orientation(name):
-    return json.loads((EVIDENCE / f"c46_{name}_orientation.json").read_text())["seeds"]
+    return load_evidence(EVIDENCE / f"c46_{name}_orientation.json.gz")["seeds"]
 
 
 def test_h39_the_canonical_image_metric_OVERSTATED_perfection_no_R200S_net_is_perfect_in_every_orientation():

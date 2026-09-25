@@ -1,21 +1,27 @@
 """§C.42 item 1 — the PRE-REGISTERED localization claims (h11-h14), each judged by harness.ceiling from the stored
 multi-seed evidence. The decision rule lives in harness.ceiling and was fixed, with these tests, before the run
-that produced evidence/tictactoe_ceiling.json; a test here fails exactly when its registered claim is false.
+that produced evidence/tictactoe_ceiling.json.gz; a test here fails exactly when its registered claim is false.
 
 h12 and h14 were REFUTED by that run. Their tests now pin the refutation (h15, h16) — the register keeps the
 original FAIL verdicts, drawn after pre-registration, and points from each refuted claim to its successor."""
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from harness.ceiling import localize_report
+import pytest
 
-EVIDENCE = Path(__file__).resolve().parent.parent / "evidence" / "tictactoe_ceiling.json"
+from harness.ceiling import localize_report
+from harness.evidence import load_evidence
+
+EVIDENCE = Path(__file__).resolve().parent.parent / "evidence" / "tictactoe_ceiling.json.gz"
+FILES = ("tictactoe_ceiling.json.gz", "tictactoe_base.json.gz", "tictactoe_mixed.json.gz")
+pytestmark = pytest.mark.skipif(
+    not all((EVIDENCE.parent / f).exists() for f in FILES),
+    reason="evidence/ is gitignored and these files are not on this machine — restore them to run the proofs")
 
 
 def _report():
-    return localize_report(json.loads(EVIDENCE.read_text()))
+    return localize_report(load_evidence(EVIDENCE))
 
 
 def test_h11_the_tictactoe_blind_spot_is_SYSTEMATIC_across_seeds():
@@ -41,7 +47,7 @@ def test_h14_REFUTED_and_h16_failing_states_are_NOT_enriched_off_the_optimal_pla
 
 
 def test_h17_search_alone_does_most_of_the_work_and_learning_adds_the_rest():
-    ev = json.loads(EVIDENCE.read_text())
+    ev = load_evidence(EVIDENCE)
     ctrl = ev["search_alone"]
     trained = [s["coverage"] for s in ev["seeds"]]
     policy = [s["policy_coverage"] for s in ev["seeds"]]
@@ -49,13 +55,13 @@ def test_h17_search_alone_does_most_of_the_work_and_learning_adds_the_rest():
     assert ctrl["policy_coverage"] < 0.6 < 0.9 < min(policy)
 
 
-BASE = EVIDENCE.parent / "tictactoe_base.json"
-MIXED = EVIDENCE.parent / "tictactoe_mixed.json"
+BASE = EVIDENCE.parent / "tictactoe_base.json.gz"
+MIXED = EVIDENCE.parent / "tictactoe_mixed.json.gz"
 
 
 def _ab():
     from harness.ceiling import ab_report
-    return ab_report(json.loads(BASE.read_text()), json.loads(MIXED.read_text()), json.loads(EVIDENCE.read_text()))
+    return ab_report(load_evidence(BASE), load_evidence(MIXED), load_evidence(EVIDENCE))
 
 
 def test_h18_fresh_baseline_seeds_miss_the_localized_target_REPLICATION():

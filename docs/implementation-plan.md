@@ -3045,26 +3045,16 @@ replicated, and read through the cross-game matrix + the register):
 4b. ~~**§C.46**~~ **DONE 2026-09-24 → §C.46.** One-ply siblings cut raw-policy failures ~10× (E1/E2) but mostly
    in-sample on a 627-state game (h38); architecture inconclusive (A1); exact labels are not a ceiling (h40); the
    coverage metric was canonical-image only — strict all-orientation perfection 0/20 (h39). Floor test not met.
-4c. **§C.47 (next) — two legs.** (i) FLOOR (tic-tac-toe, fresh seeds 61-80): pre-register the floor operator BEFORE
-   data — recommended: the raw policy averaged over the verified symmetry group (search-free, generic, exactly
-   equivariant), with the strict all-orientation raw-net score as the secondary — and the arm R200S unchanged;
-   claim ≥ 15/20 perfect. Wording fixed in advance: "met by near-enumeration of 627 states; necessary, not evidence
-   of transfer". (ii) TRANSFER (Connect-4): Stage 0 go/no-go without training — on the existing solver-free Connect-4
-   net, classify each first raw-policy error in proven-win conversion as visited / one move off / further from its
-   self-play; pre-registered: < 25% within one move → siblings are not the Connect-4 lever, stop; ≥ 50% → Stage 1
-   (C_R vs C_RS vs C_RS_H at 64-sim labels, n = 10, primary claim paired proven-win conversion, C3 = error rate on
-   the withheld half = generalisation at Connect-4 density). Prerequisites: a trained-key recorder that does not
-   enumerate the state space; scalar value head; a single train_alphazero call per run. Original §C.46 sketch,
-   superseded: Fresh seeds
-   41-60, all arms mixed openings + 32-sim self-play + reanalyze_frac 1.0: R32 (control); R200 (pre-registered
-   REPLICATION of A1/A2 — required before building on them); R200-target-only (replicate the exploratory split_in
-   finding as a claim); R200+siblings (every legal one-move deviation from recorded self-play states added to the
-   relabel buffer, policy-only — generic, cost ∝ branching factor, restores the O-to-move winning positions self-play
-   never makes); diagnostic ceilings on tic-tac-toe only: exact-solver labels + siblings (can this net reach
-   raw-policy 1.0 at all?) and R32 with exact value targets (does a correct value head make CHEAP 32-sim labels
-   correct — the transfer question). Primary metric: raw-policy coverage over all 627 states; target set re-derived
-   at the PRIOR level from seeds 21-40; per-state delivery gate; migration gate on raw-policy failures too. Needs new
-   training code (sibling injection) → new era, mutation-tested, design review before compute.
+4c. ~~**§C.47**~~ **DONE 2026-09-25 → §C.47.**
+   - Floor MET under the pre-registered symmetry-averaged policy (h41: 17/20, rate ≥ 0.66). It holds only at
+     averaging order ≥ 4 (order 2 gives 10/20) and with a near-oracle labeller.
+   - Connect-4 Stage 0: h43 NOT_RUN (thin cells), then h44 GO on fresh nets. There is an exposure gap E = 0.043 on a
+     0.39 base and a label headroom L = 0.084, but the labeller is weak (0.65) and siblings reach under 10% of the
+     first errors that decide conversion.
+   - Evidence left git; the register pins its judges.
+4d. **Stage 1 (Connect-4 siblings), next.** Redesign per the §C.47 requirements (randomised-holdout primary
+   endpoint, compute-matched control, label-quality competitor, pre-solved evaluation bank), with design review
+   before any compute. Estimated 60-70 h of measurement unless the evaluation bank lands first.
 5. **Build the calibrated solver-free reference** (§C.41 addendum) so the ceiling can be tracked on Othello and
    the chess-scale target — the only way "how close to perfect play" becomes a number where no solver exists.
 6. **Promote the coverage scorecard to a first-class per-checkpoint metric** (as a post-hoc tool over checkpoints,
@@ -3415,4 +3405,265 @@ register can now time a claim against SEVERAL data files, the earliest start bin
 (augmentation) and `harness/game.py` are training-path code missing from the training fingerprint — to be added at
 the next era change (adding them now would move the era under §C.46's evidence).
 
+
+#### §C.47 — The floor on fresh seeds, and the Connect-4 transfer go/no-go (2026-09-24)
+
+**Leg 0 — housekeeping, done before any §C.47 data.**
+- **Evidence leaves git.** 36 MB of pretty-printed JSON in `evidence/` (the §C.46 arms were 3.3 MB each, 76% of
+  it the per-pass training record) is now gzip-compressed minified JSON (`*.json.gz`, 2.1 MB in total). The
+  directory is gitignored except `evidence/manifest.json`. That manifest restores what leaving git lost, a record of
+  what each file contains: `harness/evidence.py` refuses to read a file whose content hash differs from the one
+  pinned there, and writes each file once, with any replacement naming the version it replaces.
+  - A restored backup is therefore proved to be the data the verdicts were drawn from.
+  - The register moved from the gitignored `checkpoints/scaled_runs/` to the tracked `hypotheses.json`.
+    `Register.relocate_data` re-pointed h11-h40 at the compressed files, and refused unless each held exactly the
+    old content.
+  - A SKIPPED proof now refuses to verify. Pytest exits 0 on a skip, and the evidence proofs skip on a checkout
+    without the data, so a missing file would otherwise have verified as a pass.
+  - Every guard is mutation-tested.
+- **Fingerprint.** `harness/game.py`, `harness/symmetry.py` and `harness/registry.py` joined `TRAINING_MODULES`,
+  moving the tic-tac-toe era from 2600dc4f574a to 27933b3a3bba. No training code changed; §C.46's era re-derives
+  under `TRAINING_MODULES_V4` at 4cfcfbe.
+  - The list has now missed training-path code three times, so a test walks the import graph from every
+    fingerprinted module, through `games/`. Everything it reaches must be fingerprinted or appear in
+    `NOT_TRAINING_PATH`, each entry with its reason: benchmark, bookagent, measurement, fingerprint — all reached
+    only under solver or league knobs, or used only to stamp.
+
+**Design review (3 critics: statistics, scientific validity, implementation; findings re-derived by each).** Rebuilt
+the draft on 20+ findings. The ones that changed the design:
+- Seeds 61-65 had already been used by the G0 capacity gate, with identical starting weights. Leg F therefore runs on
+  seeds 81-100.
+- "Refuted at ≤ 14" was not a refutation: 14/20 has a one-sided 95% upper bound of 0.86. F1 now has three outcomes.
+- F2 as drafted (strict raw ≤ 5/20) could hardly fail. It is now an exact sign test over the seeds the two readings
+  disagree on.
+- The report took the era, the isometries and the reference from its caller, so it could pass vacuously. They are now
+  constants in `harness/floor.py`, and the register PINS that file and the proof test (new: `Register(pins=…)`,
+  guard t34). Verify refuses once their behaviour changes, because the register stores a proof's node id, not its
+  content.
+- The driver's knobs sit outside the training era. So R200S seed 41 must first rebuild bit-for-bit, under the same
+  stamps, before the arm counts (`c47_F_repro.json.gz`).
+- A crash or schema gap must read NOT_RUN, never a refutation.
+- The Connect-4 half of the draft was rejected outright; see leg C below.
+
+**Amendment to §C.42(i), dated 2026-09-24, before any §C.47 data.** "Net level" means the policy averaged over the
+game's verified symmetry group:
+- π̄(a|s) = mean over g of softmax_legal(net(g·s))[g·a], move = argmax, the first legal move on an exact tie.
+- It is an evaluation-time ensemble of |G| forward passes: no search, no solver, derived from the rules.
+- The strict raw reading (every raw orientation) and the canonical reading §C.46 registered are reported alongside it,
+  with equal weight.
+- Why the change: h39 showed the raw net is not equivariant, and the operator was chosen AFTER §C.46's data. Its rescue
+  power scales with the group: 8 on tic-tac-toe, 2 on Connect-4, about 1 beyond. Leg F records π̄ over subgroups of
+  order 1, 2 and 4 so that dependence is measured, not assumed.
+
+**Leg F — the floor, pre-registered.**
+- **Arm:** R200S's recipe unchanged, run on seeds 81-100 with `--threads 1`. Era 27933b3a3bba; measurement code
+  e5a9cb7b706d.
+  - The integrity gate checks every recipe field against `C47_REFERENCE_CONFIG`, which is tested against the pinned
+    R200S evidence.
+  - It also checks the 8 isometries by name; 6 passes with siblings on iterations 2-6; the parameter count; 4,520
+    positions; and the subgroup readings.
+- **F1:** π̄-perfect seeds.
+  - SUPPORTED at ≥ 15/20: an exact one-sided test that the per-seed rate exceeds 0.5 (size 0.021). The lower bound is
+    0.544 at 15/20.
+  - REFUTED at ≤ 11: the rate is then below 0.75 at 95%.
+  - INCONCLUSIVE between.
+  - P(pass) by true rate: 0.6 → 0.13, 0.7 → 0.42, 0.75 → 0.62, 0.8 → 0.80, 0.85 → 0.93. §C.46's 16/20 was the best
+    of three readings chosen post hoc, so its predictive pass rate is nearer 0.7 than 0.8.
+- **F2:** an exact one-sided sign test on the discordant seeds (π̄-perfect but not strictly perfect, against the
+  reverse).
+  - SUPPORTED at p < 0.01.
+  - REFUTED if the reverse direction reaches p < 0.01.
+  - INCONCLUSIVE otherwise.
+- **NOT_RUN:** any failure of the automated integrity list, which is the only route to it. One rerun of the same
+  seeds is allowed, under a new claim id.
+- **Wording:** fixed in `floor.py`. The SUPPORTED text names the operator and the fact that it was adopted after
+  §C.46. It also gives the one-sided lower bound, the canonical and strict counts, "labels from a search
+  near-exhaustive at this game size", and the never-trained share re-measured on seeds 81-100 (not §C.46's 89%).
+- **Descriptives:**
+  - failures by reading and by subgroup, with seeded bootstrap intervals (the counts are mostly zero, so no
+    t-intervals);
+  - failures at trained vs never-trained positions;
+  - any seed whose π̄ reading over all images differs from its canonical one;
+  - the operator sanity check: π̄ of 5 untrained nets, and the labelling search from an untrained net at 200 sims on
+    the 431 failable states.
+
+**Leg C — the Connect-4 transfer, Stage 0: redesigned before any data.**
+- **The draft was rejected.** It classified first raw-policy errors on uniformly random proven-win roots.
+  - The validity and implementation critics measured the pre-fixed roots: 46-56 of 64 per depth were win-in-one.
+  - None of 192 roots lay within one move of a proxy self-play set, so STOP was decided by the root sampler, not
+    by the net.
+  - That design also could not see the generalisation route, which h38 says is the only part that could transfer.
+  - The same win-in-one caveat applies to §C.41's 0.71-0.88 conversion numbers.
+- **Why a fresh run.** The §C.41 solver-free Connect-4 net was a scratchpad file wiped with /private/tmp. Its data
+  was never saved, and no weights hash exists to prove a rebuild. Stage 0 therefore trains 5 nets (seeds 201-205) on
+  the Stage-1 control recipe C_R: `harness.stage0.C0_RECIPE`.
+  - The net: residual {32,3,32}, 60,555 params, scalar value head.
+  - Training: 14 iterations × 48 games, 64-sim Gumbel self-play; openings of 4 random plies with a zero-ply share of
+    0.3; reanalyze 1.0 at 64 sims.
+  - One `train_alphazero` call per net.
+  - Guards: the new self-play recorder is on (bit-identity tested); the exact solver is FORBIDDEN during training (it
+    raises if called); raw-policy accuracy on a fixed probe is recorded per pass, as a plateau check.
+- **Implementation review (before launch).** The rule changed before h43 was registered; the plan text here had
+  predated it.
+  - All three drafted plies were even, so only the FIRST player was ever to move. Siblings exist above all for the
+    second player's positions after a deviation (h30).
+  - Taking min(E, L) per net was biased low by about one full SESOI.
+  - Plies pooled with unequal counts could manufacture a gap.
+  - At 60 positions per cell, the tic-tac-toe signature read GO only about 45% of the time.
+  - Separately, I found that mirrored positions shared a value cache in the column frame of whichever was solved
+    first. The cache is now keyed by the exact position.
+- **h43, as registered** (`harness/stage0.py`, pinned):
+  - Plies 16/17/19/20/22/23, three for each mover.
+  - Decision cells: a census of the final relabel buffer, and exactly `neural.one_ply_siblings` of that buffer.
+  - E = the raw error rate at the siblings minus the rate at the buffer. L = the 64-sim label accuracy minus the
+    raw accuracy at the siblings. Both are computed per ply and averaged with equal weight.
+  - The rule is an intersection-union test with the net as the unit: GO iff both means ≥ 0.02 and both one-sided
+    95% lower bounds > 0; STOP iff either upper bound < 0.02; UNDECIDED otherwise.
+  - Each decision cell needs ≥ 80 positions, else NOT_RUN. STOP is never worded as "siblings are not the lever".
+- **Calibration**, from §C.46 R200 before any Connect-4 data. The tic-tac-toe exposure gap was 0.042 (0.0006 on
+  trained keys, 0.042 one move off; per-seed sd ≈ 0.019): the signature of the channel that cut failures ~10×.
+  - A 0.05 bar would have called it STOP.
+  - Simulated at the registered sizes, the rule reads that signature GO 0.93 of the time. A true zero gap reads GO
+    0.02 and STOP 0.47-0.69.
+
+**h43 → NOT_RUN (INCONCLUSIVE in the register, pre-registered). The integrity gate refused the run.**
+- After the non-trivial filter, the final buffer held 44-78 positions in 16 of 30 cells, under the registered 80.
+  I had assumed about 150.
+- The report stops before E or L is computed, so no outcome on seeds 201-205 has been seen. The nets and their
+  recorded self-play are kept under `checkpoints/c47_C0/`.
+- The measurement took about 7.5 h against 45-52 min of training, almost all of it exact solves.
+
+**h44 — Stage 0 v2** (`harness/stage0_v2.py`, pinned with `stage0.py`), registered BEFORE its data on fresh seeds
+206-210. It was designed from v1's cell COUNTS only.
+- The trained reference cell is every position the net trained on at any iteration, as the tic-tac-toe calibration
+  used, with final-buffer membership recorded on each position.
+- Each decision cell needs ≥ 60 positions. v1's counts, re-read this way, give 70-234.
+- Sampling is smaller where it is only descriptive: siblings 250 per ply, rings and random positions 30, conversion
+  roots 6.
+- The rule and SESOI are unchanged.
+- Simulated at v1's realised cell sizes (raw error ~0.45): the tic-tac-toe signature reads GO 0.81; a true zero
+  reads GO 0.03-0.04 and STOP 0.35-0.46.
+- **Descriptives** (cannot change the verdict):
+  - raw, mirror-averaged and label accuracy per class × ply, and by mover;
+  - how often random-play positions fall within two moves of the visited set;
+  - proven-win conversion from non-trivial random roots and from the net's own buffer, each first error classed by
+    distance;
+  - the per-pass plateau probe.
+- **What follows.** Stage 1, if GO, uses fresh seeds: neither the 201-205 nor the 206-210 nets are ever its controls.
+
+**LEG F RESULTS (2026-09-24, verified).** The reproduction came first: R200S seed 41 rebuilt bit-for-bit under
+today's code (weights 78052b2a…, all six passes). The arm, seeds 81-100, followed at era 27933b3a3bba.
+- **Verification.** An independent verifier re-derived every number with its own code and reloaded all 20 saved
+  nets. Every net's weights hash equals its final pass, and its readings match the evidence field-for-field
+  (180/180).
+- **Timing.** h41/h42 were registered at 11:49:08Z. The data started at 11:49:40Z (reproduction) and 11:55:33Z (arm).
+  The pins recompute.
+
+| reading, 20 fresh seeds | perfect seeds |
+|---|---|
+| **π̄, the policy averaged over the 8 verified isometries — h41 F1 SUPPORTED** | **17/20**; per-seed rate ≥ 0.66 (one-sided 95%), upper bound 0.96 |
+| canonical image (the reading §C.46 registered) | 10/20 |
+| strict: every one of the 4,520 raw positions | 3/20 |
+| π̄ over subgroups of order 1 / 2 / 4 / 8 | 3 / 10 / 17 / 17 |
+| 48-sim search (canonical) | 19/20 |
+
+- **h42 F2 SUPPORTED.** 14 seeds are π̄-perfect but not strictly perfect, against 0 the reverse (p = 6×10⁻⁵).
+  - This largely restates h39 (raw nets are not equivariant).
+  - The fairer comparison, π̄ against the canonical reading, is 7 vs 0 discordant seeds (p = 0.008).
+- **Replication.** §C.46 R200S gave 16 / 9 / 0 (π̄ / canonical / strict); here it is 17 / 10 / 3.
+
+**What the result does and does NOT show.** The wording fixed in `floor.py` stands, with these qualifications made
+explicit:
+1. **The floor depends on the operator's group order.**
+   - Averaging over order 2, the size of Connect-4's group, gives 10/20. That is at the refutation bar, as are the
+     canonical (10/20) and strict (3/20) readings.
+   - SUPPORTED needs averaging of order ≥ 4; the gain saturates at 4.
+   - The rescue that meets the floor on tic-tac-toe is not available at that strength on Connect-4, so "not evidence
+     the mechanism transfers" is, if anything, an understatement.
+2. **The labeller is near-oracle at this size.**
+   - An UNTRAINED net plus the 200-sim relabel search picks an optimal move at 98.4% of the 431 failable states.
+   - The trained runs' final-pass labels are right on 187,080/187,080 self-play rows and 31,088/31,096 sibling rows.
+   - The floor shows that a net can distil near-exact labels over a nearly enumerated space: 89.6% of failable
+     positions received a training row (range 84-95% per seed). It does not show the loop discovering play.
+3. **"Met" is a rate, not a guarantee.** The bound allows about one run in three to miss π̄-perfection.
+4. **The residual failures are not a coverage failure.**
+   - 3 of the 5 π̄ failures are key 601 (ply 3, on the optimal line, a §C.43 target key), trained in every seed:
+     - Seed 86 saw it only as a sibling, with 8 of 8 rows mislabelled. It is the only wrong final-pass label in the
+       whole failable universe across 20 seeds.
+     - Seeds 84 and 99 had right labels at the minimum dose and never fitted them.
+     - The value head's one-ply choice is wrong at 601 in 19/20 seeds.
+   - The other 2 are never-trained keys (4983, 5306), one seed each. Generalisation to unseen positions mostly works
+     (4983 went unseen in 9 seeds and failed in 1), but not always.
+   - §C.46's residual keys do not recur, so there is no fixed residual state across studies.
+
+**LEG C STAGE 0 RESULTS (2026-09-25, verified).**
+- **h44 SUPPORTED, pre-registered.** Registered 21:02:49Z; the data started 21:02:50Z; every training part started
+  after registration; the pins recompute.
+- **Verification.** Two verifiers and a critic re-derived every number with their own code. They rebuilt 4 of 5 nets
+  (weights hashes match) and re-graded 440 positions exactly: exact optimal set, raw, mirror-averaged and the 64-sim
+  label.
+- **Irregularity.** One position (seed 210) sits in both decision cells; it moves that net's E by 0.0003.
+
+| per net, plies 16-23 averaged | 206 | 207 | 208 | 209 | 210 | mean [one-sided 95%] |
+|---|---|---|---|---|---|---|
+| E: raw error, siblings minus trained positions | .036 | .096 | .056 | .019 | .007 | **.043 [.009, .076]** |
+| L: label minus raw accuracy at siblings | .084 | .094 | .066 | .079 | .096 | **.084 [.072, .095]** |
+
+**What GO licenses, and what it does not.**
+1. **Same number as tic-tac-toe, different meaning.**
+   - Tic-tac-toe's 0.042 sat on a base error of 0.0006, a gap of about 70×. Connect-4's 0.043 sits on 0.393 raw
+     error at trained positions against 0.436 at siblings, about 1.1×.
+   - Closing E entirely would cut sibling errors by ~10%, not ~10×.
+   - An absolute SESOI calibrated on a near-zero base does not scale; E must always be quoted with its base rate.
+2. **The GO is fragile; its direction replicates.**
+   - The lower bound is 0.009. Dropping net 206 or 208 crosses zero, and nets 209 and 210 are individually below
+     the SESOI.
+   - The first player's E alone has a lower bound of −0.002; the gap rests on the second player (0.046).
+   - The between-net sd of E is 0.035, 1.8× the tic-tac-toe sd assumed in the power simulation, so the quoted
+     0.81 power was optimistic.
+   - The v2 minimum of 60 per cell was binding: cells of 63, 66 and 79 would have failed v1's bar of 80.
+   - Post hoc and descriptive: the h43 nets 201-205 give E ≈ 0.064-0.070 and L ≈ 0.090, so E > 0 holds across all
+     10 nets.
+   - There is no v3 path.
+3. **Where E sits.**
+   - Difficulty does not explain it away. Siblings are, if anything, easier by chance (more optimal moves), and
+     standardising them to the visited mix raises E to about 0.05.
+   - But E sits almost entirely in FORCED-DEFENCE positions, where exactly one move avoids an immediate loss. There
+     the raw net is right 0.72 at visited positions and 0.44 at siblings; elsewhere siblings do as well or better.
+   - So the gap is mostly failing to parry threats that arise off the net's own lines, not a general drop in move
+     quality.
+4. **Exposure evidence.**
+   - For: raw accuracy falls from visited 0.607 to siblings 0.564, two moves off 0.546 and random 0.504, while
+     label accuracy is flat at 0.64-0.66; evicted positions score 0.584 against 0.618 still in the buffer.
+   - Against: one move off vs two moves off differ by only 0.012, so there is little neighbourhood
+     generalisation.
+   - The selection confound (visited = the net's own moves) is removable only by a randomised holdout.
+   - The plateau probe was still rising at pass 14.
+5. **L is nearly guaranteed, and the ceiling is the informative part.**
+   - L > 0 in every class, including visited (+0.049).
+   - The 64-sim label is right only 0.65 of the time at siblings, and 4.8% of sibling positions are raw-right but
+     label-wrong. Direct distillation is capped near 0.65.
+   - The Leg F near-oracle-labeller caveat does NOT apply to Connect-4: the labeller is weak.
+6. **The dominant failure is on trained positions.**
+   - Raw accuracy at visited positions (0.607) is below their own labels (0.656).
+   - First errors in proven-win conversion from the net's own buffer are mostly at buffer positions: 77 of 150, 67
+     of them at the root. Only 8% are one move off. From random roots, 100% are "further".
+   - Raw conversion is 14-17%.
+   - GO says there is headroom where siblings train; siblings reach under 10% of the errors that decide conversion.
+
+**Stage 1 design requirements that follow (not yet designed or run).**
+- Primary endpoint: per-position accuracy on a hash-withheld half of C_RS_H's own siblings, with a randomised holdout.
+  Proven-win conversion is secondary; at n = 10 its minimum detectable difference is ~0.08 against a plausible gain
+  of +1-2 points.
+- Strata registered in advance: forced-defence vs other, the (value, number of optimal moves) mix, and ply parity.
+  Accuracy above chance is reported.
+- A compute- and dose-matched control: siblings number 3.5-4.3× the buffer. There is also a harm endpoint on trained
+  positions.
+- A label-quality competitor: more label sims, or a threat-aware search, is a live alternative lever at a 0.65
+  labeller.
+- Training to a pre-registered plateau, or stating the under-training.
+- Power sized from the realised between-net sd (0.035) with a SESOI relative to the base rate.
+- A shared pre-solved evaluation bank. Stage 0 v2 spent ~10 h per 5 nets on exact solves; 3 arms × 10 nets would be
+  60-70 h.
+- Fresh seeds.
 

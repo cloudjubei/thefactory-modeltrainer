@@ -8,10 +8,12 @@ the difference between a prediction and a rationalisation is a timestamp, not a 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from harness.hypotheses import Register
+from harness.evidence import save_evidence
+from harness.hypotheses import Register, _pytest_outcome
 from harness.ledger import Ledger
 
 
@@ -492,9 +494,9 @@ def test_an_uncaveated_claim_reports_no_caveats(tmp_path):
     assert r.link("h1", led)["caveats"] == []
 
 
-def _data(tmp_path, started, name="ev.json"):
+def _data(tmp_path, started, name="ev.json.gz"):
     p = tmp_path / name
-    p.write_text(json.dumps({"started": started, "rows": []}))
+    save_evidence(p, {"started": started, "rows": []})
     return str(p)
 
 
@@ -513,8 +515,8 @@ def test_a_claim_registered_before_its_data_was_produced_is_pre_registered(tmp_p
 
 
 def test_data_of_unknown_age_is_refused_at_declaration(tmp_path):
-    p = tmp_path / "ev.json"
-    p.write_text(json.dumps({"rows": []}))
+    p = tmp_path / "ev.json.gz"
+    save_evidence(p, {"rows": []})
     with pytest.raises(ValueError, match="started"):
         _reg(tmp_path).register("h1", claim="c", proof="tests/x.py::t", data=str(p))
 
@@ -525,7 +527,7 @@ def test_declared_data_cannot_be_swapped_or_regenerated_under_the_claim(tmp_path
     r.register("h1", claim="c", proof="tests/x.py::t", reads_no_data=True)
     r.attach_data("h1", data)
     with pytest.raises(ValueError, match="already"):
-        r.attach_data("h1", _data(tmp_path, "2026-09-11T00:00:00", name="other.json"))
+        r.attach_data("h1", _data(tmp_path, "2026-09-11T00:00:00", name="other.json.gz"))
     _data(tmp_path, "2026-09-12T00:00:00")
     with pytest.raises(ValueError, match="changed"):
         r.verify("h1", run_test=_pass)
@@ -612,12 +614,12 @@ def test_a_test_backed_claim_must_DECLARE_whether_its_proof_reads_stored_data(tm
 
 
 def test_a_PRE_registered_claim_names_data_that_does_not_exist_yet_and_is_timed_when_it_does(tmp_path):
-    future = tmp_path / "later.json"
+    future = tmp_path / "later.json.gz"
     _reg(tmp_path, now="2026-09-01T00:00:00").register("h1", claim="c", proof="t::p", data=str(future))
     later = _reg(tmp_path, now="2026-09-20T00:00:00")
     with pytest.raises(ValueError, match="not been produced"):
         later.verify("h1", run_test=_pass)
-    future.write_text(json.dumps({"started": "2026-09-10T00:00:00"}))
+    save_evidence(future, {"started": "2026-09-10T00:00:00"})
     h = later.verify("h1", run_test=_pass)
     assert h["pre_registered"] is True and h["data"]["started"] == "2026-09-10T00:00:00"
 
@@ -637,8 +639,8 @@ def test_a_stored_claim_from_before_the_declaration_rule_still_verifies(tmp_path
 
 
 def test_a_claim_reading_SEVERAL_data_files_is_timed_against_the_EARLIEST_of_them(tmp_path):
-    early = _data(tmp_path, "2026-09-10T00:00:00", name="a.json")
-    late = _data(tmp_path, "2026-09-12T00:00:00", name="b.json")
+    early = _data(tmp_path, "2026-09-10T00:00:00", name="a.json.gz")
+    late = _data(tmp_path, "2026-09-12T00:00:00", name="b.json.gz")
     _reg(tmp_path, now="2026-09-11T00:00:00").register("h1", claim="c", proof="t::p", data=[early, late])
     h = _reg(tmp_path, now="2026-09-13T00:00:00").verify("h1", run_test=_pass)
     assert h["pre_registered"] is False
@@ -647,14 +649,261 @@ def test_a_claim_reading_SEVERAL_data_files_is_timed_against_the_EARLIEST_of_the
 
 
 def test_several_data_files_are_ALL_required_before_verify_and_none_may_be_regenerated(tmp_path):
-    first = _data(tmp_path, "2026-09-10T00:00:00", name="a.json")
-    pending = tmp_path / "b.json"
+    first = _data(tmp_path, "2026-09-10T00:00:00", name="a.json.gz")
+    pending = tmp_path / "b.json.gz"
     _reg(tmp_path, now="2026-09-01T00:00:00").register("h1", claim="c", proof="t::p", data=[first, str(pending)])
     later = _reg(tmp_path, now="2026-09-20T00:00:00")
     with pytest.raises(ValueError, match="not been produced"):
         later.verify("h1", run_test=_pass)
-    pending.write_text(json.dumps({"started": "2026-09-11T00:00:00"}))
+    save_evidence(pending, {"started": "2026-09-11T00:00:00"})
     assert later.verify("h1", run_test=_pass)["pre_registered"] is True
-    _data(tmp_path, "2026-09-15T00:00:00", name="a.json")
+    _data(tmp_path, "2026-09-15T00:00:00", name="a.json.gz")
     with pytest.raises(ValueError, match="changed"):
         later.verify("h1", run_test=_pass)
+
+
+def test_declared_data_must_be_stored_evidence_even_before_it_exists(tmp_path):
+    r = _reg(tmp_path)
+    for bad in ("evidence/arm.json", "evidence/arm.gz"):
+        with pytest.raises(ValueError, match="gzip JSON"):
+            r.register("h1", claim="c", proof="t::p", data=bad)
+        with pytest.raises(ValueError, match="gzip JSON"):
+            r.register("h2", claim="c", proof="t::p", data=["evidence/ok.json.gz", bad])
+    assert r.report() == []
+
+
+def _legacy(tmp_path, obj, name):
+    p = tmp_path / name
+    p.write_text(json.dumps(obj, indent=1))
+    return str(p)
+
+
+def _stored_claim(tmp_path, data, id="h1"):
+    path = tmp_path / "hypotheses.json"
+    blob = json.loads(path.read_text()) if path.exists() else {"hypotheses": {}}
+    files = [{"path": d, "started": "2026-09-10T00:00:00"} for d in data]
+    blob["hypotheses"][id] = {"id": id, "claim": "c", "mode": "test", "proof": "t::p", "note": "",
+                              "registered_at": "2026-09-01T00:00:00", "evidence": [],
+                              "data": files[0] if len(files) == 1 else files}
+    path.write_text(json.dumps(blob))
+
+
+def test_relocating_data_moves_every_claim_that_declares_it_and_keeps_its_timing(tmp_path):
+    obj = {"started": "2026-09-10T00:00:00", "seeds": [{"seed": 41, "fails": [3, 1]}]}
+    old = _legacy(tmp_path, obj, "arm.json")
+    other = _legacy(tmp_path, {"started": "2026-09-10T00:00:00"}, "ref.json")
+    _stored_claim(tmp_path, [old])
+    _stored_claim(tmp_path, [other, old], id="h2")
+    _stored_claim(tmp_path, [other], id="h3")
+    new = str(tmp_path / "arm.json.gz")
+    save_evidence(new, obj)
+    r = _reg(tmp_path, now="2026-09-20T00:00:00")
+    assert r.relocate_data(old, new) == ["h1", "h2"]
+    reread = _reg(tmp_path, now="2026-09-20T00:00:00")
+    assert reread.get("h1")["data"] == {"path": new, "started": "2026-09-10T00:00:00", "moved_from": old}
+    assert reread.get("h2")["data"] == [{"path": other, "started": "2026-09-10T00:00:00"},
+                                        {"path": new, "started": "2026-09-10T00:00:00", "moved_from": old}]
+    assert reread.get("h3")["data"] == {"path": other, "started": "2026-09-10T00:00:00"}
+    h = reread.verify("h1", run_test=_pass)
+    assert h["status"] == "supported" and h["pre_registered"] is True
+
+
+def test_relocation_is_refused_unless_the_new_file_holds_EXACTLY_the_old_content(tmp_path):
+    old = _legacy(tmp_path, {"started": "2026-09-10T00:00:00", "rows": [1, 2]}, "arm.json")
+    _stored_claim(tmp_path, [old])
+    r = _reg(tmp_path)
+    for i, changed in enumerate(({"started": "2026-09-10T00:00:00", "rows": [1, 3]},
+                                 {"started": "2026-09-10T00:00:00", "rows": [1, 2], "extra": None},
+                                 {"started": "2026-09-11T00:00:00", "rows": [1, 2]})):
+        new = str(tmp_path / f"arm{i}.json.gz")
+        save_evidence(new, changed)
+        with pytest.raises(ValueError, match="differs"):
+            r.relocate_data(old, new)
+    assert _reg(tmp_path).get("h1")["data"]["path"] == old
+
+
+def test_relocation_needs_both_files_and_a_claim_that_declares_the_old_one(tmp_path):
+    obj = {"started": "2026-09-10T00:00:00"}
+    old = _legacy(tmp_path, obj, "arm.json")
+    new = str(tmp_path / "arm.json.gz")
+    _stored_claim(tmp_path, [old])
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="not exist"):
+        r.relocate_data(old, new)
+    save_evidence(new, obj)
+    with pytest.raises(ValueError, match="no claim"):
+        r.relocate_data(str(tmp_path / "unknown.json"), new)
+    with pytest.raises(ValueError, match="gzip JSON"):
+        r.relocate_data(old, str(tmp_path / "moved.json"))
+    Path(old).unlink()
+    with pytest.raises(ValueError, match="not exist"):
+        r.relocate_data(old, new)
+
+
+@pytest.mark.parametrize("code,out,ok,collected,skipped", [
+    (0, "....\n1 passed in 0.05s", True, 1, 0),
+    (0, "1 passed, 2 warnings in 0.05s", True, 1, 0),
+    (1, "F\n1 failed in 0.05s", False, 1, 0),
+    (1, "1 failed, 3 passed in 0.05s", False, 1, 0),
+    (1, "1 error in 0.05s", False, 1, 0),
+    (5, "no tests ran in 0.01s", False, 0, 0),
+    (0, "s\n1 skipped in 0.01s", False, 1, 1),
+    (0, "3 passed, 1 skipped in 0.01s", False, 1, 1),
+    (0, "captured: the fixture reported 2 skipped\n1 passed in 0.05s", True, 1, 0),
+])
+def test_the_proof_runner_reads_pytest_s_outcome_and_a_skip_is_never_a_pass(code, out, ok, collected, skipped):
+    res = _pytest_outcome(code, out)
+    assert (res["ok"], res["collected"], res["skipped"]) == (ok, collected, skipped)
+
+
+def test_a_SKIPPED_proof_is_refused_not_recorded_because_it_ran_nothing(tmp_path):
+    """The evidence directory is not in git: on a checkout without it the evidence proofs skip, and pytest exits 0
+    on a skip — without this refusal a missing data file would verify as a pass."""
+    def skipped(nodeid):
+        return {"ok": False, "collected": 1, "skipped": 1, "detail": "1 skipped"}
+
+    def by_node(nodeid):
+        return {"t::p": {"ok": False, "collected": 1, "detail": "1 failed"},
+                "t::u": {"ok": False, "collected": 1, "skipped": 1, "detail": "1 skipped"}}[nodeid]
+    r = _reg(tmp_path)
+    r.register("t1", claim="c", proof="t::p", reads_no_data=True)
+    with pytest.raises(ValueError, match="skipped"):
+        r.verify("t1", run_test=skipped)
+    r.register("t2", claim="c", proof="t::p", inconclusive_proof="t::u", reads_no_data=True)
+    with pytest.raises(ValueError, match="skipped"):
+        r.verify("t2", run_test=by_node)
+    assert r.get("t1")["status"] == "untested" and r.get("t2")["status"] == "untested"
+
+
+def _judge_file(tmp_path, body="def judge(r):\n    return r >= 15\n", name="judge.py"):
+    p = tmp_path / name
+    p.write_text(body)
+    return str(p)
+
+
+def test_a_claim_PINS_the_code_that_judges_it_and_verify_refuses_once_that_code_changed(tmp_path):
+    """The register stores a proof's node id, not its content: without a pin, the bar or the test could be edited
+    after the data is in and the claim would still verify as pre-registered (§C.47 review)."""
+    judge = _judge_file(tmp_path)
+    test = _judge_file(tmp_path, "def test_it():\n    assert True\n", name="test_judge.py")
+    r = _reg(tmp_path)
+    h = r.register("h1", claim="c", proof="t::p", reads_no_data=True, pins=[judge, test])
+    assert sorted(h["pins"]) == sorted([judge, test])
+    assert r.verify("h1", run_test=_pass)["status"] == "supported"
+    Path(judge).write_text("def judge(r):\n    return r >= 14\n")
+    with pytest.raises(ValueError, match="changed since"):
+        r.verify("h1", run_test=_pass)
+    assert len(r.get("h1")["evidence"]) == 1
+
+
+def test_a_pinned_file_may_change_its_prose_but_not_its_behaviour(tmp_path):
+    judge = _judge_file(tmp_path, 'def judge(r):\n    """old words"""\n    return r >= 15  # a note\n')
+    r = _reg(tmp_path)
+    r.register("h1", claim="c", proof="t::p", reads_no_data=True, pins=[judge])
+    Path(judge).write_text('def judge(r):\n    """new words"""\n    return r >= 15\n')
+    assert r.verify("h1", run_test=_pass)["status"] == "supported"
+
+
+def test_a_pinned_file_that_is_gone_or_never_existed_is_refused(tmp_path):
+    judge = _judge_file(tmp_path)
+    r = _reg(tmp_path)
+    with pytest.raises(ValueError, match="does not exist"):
+        r.register("h0", claim="c", proof="t::p", reads_no_data=True, pins=[str(tmp_path / "nope.py")])
+    r.register("h1", claim="c", proof="t::p", reads_no_data=True, pins=[judge])
+    Path(judge).unlink()
+    with pytest.raises(ValueError, match="changed since"):
+        r.verify("h1", run_test=_pass)
+
+
+def test_only_a_test_backed_claim_takes_pins(tmp_path):
+    judge = _judge_file(tmp_path)
+    with pytest.raises(ValueError, match="test-backed"):
+        _reg(tmp_path).register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", pins=[judge])
+
+
+def _suite_on(tmp_path, claims, bodies, register_proof=False):
+    """Run pytest (with the suite's conftest) over a probe test file, against a register holding `claims` — each
+    (proof, inconclusive_proof, recorded ok, recorded inconclusive) over the probe's test names."""
+    import os
+    import subprocess
+    import sys
+
+    test = tmp_path / "test_probe_claims.py"
+    test.write_text("\n\n".join(f"def {name}():\n    assert {'True' if ok else 'False'}" for name, ok in bodies.items()))
+    hyps = {}
+    for i, (proof, inc, ok, inconclusive, *earlier) in enumerate(claims):
+        entries = []
+        for run_ok, run_inc in [*earlier, (ok, inconclusive)]:
+            entry = {"proof": f"{test}::{proof}", "ok": run_ok, "detail": "", "drawn_at": "2026-09-24T00:00:00"}
+            if run_inc is not None:
+                entry["inconclusive"] = run_inc
+            entries.append(entry)
+        hyps[f"p{i}"] = {"id": f"p{i}", "claim": "c", "mode": "test", "proof": f"{test}::{proof}", "note": "",
+                         "registered_at": "2026-09-01T00:00:00", "evidence": entries,
+                         **({"inconclusive_proof": f"{test}::{inc}"} if inc else {})}
+    register = tmp_path / "register.json"
+    register.write_text(json.dumps({"hypotheses": hyps}))
+    env = {k: v for k, v in os.environ.items() if k != "REGISTER_PROOF"}
+    env["HYPOTHESES_REGISTER"] = str(register)
+    if register_proof:
+        env["REGISTER_PROOF"] = "1"
+    r = subprocess.run([sys.executable, "-m", "pytest", "-q", "-p", "tests.conftest", "-p", "no:randomly", "-rsxX",
+                        str(test)], capture_output=True, text=True, env=env, cwd=Path(__file__).resolve().parent.parent)
+    return r.returncode, r.stdout.strip().splitlines()[-1]
+
+
+def test_the_suite_follows_the_REGISTER_a_supported_claim_s_undecidable_proof_is_not_run(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", True, None)],
+                              {"test_holds": True, "test_undecidable": False})
+    assert code == 0 and summary.startswith("1 passed, 1 skipped")
+
+
+def test_an_INCONCLUSIVE_claim_s_failing_proof_is_expected_to_fail_and_its_undecidable_proof_runs(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", False, True)],
+                              {"test_holds": False, "test_undecidable": True})
+    assert code == 0 and summary.startswith("1 passed, 1 xfailed")
+
+
+def test_a_REFUTED_claim_s_proofs_are_both_expected_to_fail(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", False, False)],
+                              {"test_holds": False, "test_undecidable": False})
+    assert code == 0 and summary.startswith("2 xfailed")
+
+
+def test_a_proof_recorded_as_failing_that_now_PASSES_fails_the_suite(tmp_path):
+    """Strict: a registered failure that turns into a pass means the evidence or the judge changed under the
+    claim — it must be seen, not absorbed."""
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", False, True)],
+                              {"test_holds": True, "test_undecidable": True})
+    assert code != 0 and ("xpass" in summary.lower() or "failed" in summary)
+
+
+def test_under_REGISTER_PROOF_every_proof_runs_as_written(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", True, None)],
+                              {"test_holds": True, "test_undecidable": False}, register_proof=True)
+    assert code != 0 and summary.startswith("1 failed, 1 passed")
+
+
+def test_the_LAST_recorded_verification_decides_what_the_suite_expects(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", True, None, (False, True))],
+                              {"test_holds": True, "test_undecidable": False})
+    assert code == 0 and summary.startswith("1 passed, 1 skipped")
+
+
+def test_tests_the_register_does_not_name_are_untouched(tmp_path):
+    code, summary = _suite_on(tmp_path, [], {"test_plain": True, "test_plain_is_undecidable": True})
+    assert code == 0 and summary.startswith("2 passed")
+
+
+def test_the_register_runs_its_proofs_with_REGISTER_PROOF_set(tmp_path, monkeypatch):
+    import subprocess
+
+    from harness.hypotheses import _run_pytest
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="1 passed in 0.01s", stderr="")
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert _run_pytest("tests/x.py::test_y")["ok"]
+    assert seen["env"]["REGISTER_PROOF"] == "1"

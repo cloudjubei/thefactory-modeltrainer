@@ -24,22 +24,41 @@ contradiction becomes `contested` rather than quietly averaging away."""
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
+
+from harness.evidence import evidence_path, load_evidence
 
 DIRECTIONS = ("a>b", "a<b")
 STATUSES = ("untested", "supported", "negligible", "refuted", "null", "inconclusive", "contested")
 
 
+def _pytest_outcome(returncode: int, out: str) -> dict:
+    """Read a proof run from pytest's exit code and its final summary line. Exit 5 is "no tests collected", and a
+    SKIP exits 0 too — the evidence proofs skip on a checkout without the (gitignored) evidence directory — so
+    neither may read as a pass: a proof passes only if tests ran, none failed and none was skipped."""
+    lines = [ln for ln in out.strip().splitlines() if ln.strip()]
+    counts: dict = {}
+    for n, kind in re.findall(r"(\d+) (passed|failed|skipped|errors?|xfailed|xpassed)\b", lines[-1] if lines else ""):
+        counts[kind] = counts.get(kind, 0) + int(n)
+    ran = sum(v for k, v in counts.items() if k != "skipped")
+    skipped = counts.get("skipped", 0)
+    collected = 0 if returncode == 5 or not (ran or skipped) else 1
+    ok = returncode == 0 and ran > 0 and not skipped and not counts.get("failed")
+    return {"ok": ok, "collected": collected, "skipped": skipped, "detail": out.strip()[-300:]}
+
+
 def _run_pytest(nodeid: str) -> dict:
-    """Default proof runner. Exit 5 is pytest's "no tests collected", which must never read as a pass."""
+    """Default proof runner. It sets REGISTER_PROOF, under which the suite's conftest runs the undecidable proofs it
+    otherwise skips."""
     import subprocess
 
+    import os
+
     r = subprocess.run([".venv/bin/python", "-m", "pytest", nodeid, "-q", "-p", "no:randomly"],
-                       capture_output=True, text=True)
-    out = (r.stdout or "") + (r.stderr or "")
-    collected = 0 if (r.returncode == 5 or "no tests ran" in out) else 1
-    return {"ok": r.returncode == 0 and collected == 1, "collected": collected, "detail": out.strip()[-300:]}
+                       capture_output=True, text=True, env={**os.environ, "REGISTER_PROOF": "1"})
+    return _pytest_outcome(r.returncode, (r.stdout or "") + (r.stderr or ""))
 
 
 def _mode(h: dict) -> str:
@@ -66,13 +85,32 @@ def _data_files(h: dict) -> list:
 def _data_started(path: str) -> str:
     """The `started` stamp a stored-evidence file carries — when its data began to be produced."""
     try:
-        started = json.loads(Path(path).read_text()).get("started")
-    except (OSError, json.JSONDecodeError, AttributeError) as e:
+        started = load_evidence(path).get("started")
+    except AttributeError as e:
         raise ValueError(f"cannot read a `started` timestamp from {path!r}: {e}") from e
     if not started:
         raise ValueError(f"{path!r} carries no `started` timestamp — data of unknown age cannot time a claim")
     _ts(started)
     return started
+
+
+def _pin_hash(path: str) -> str | None:
+    """What a pinned file DOES: its normalized syntax tree, so prose and comment edits pass and behaviour edits do
+    not. None when the file is gone."""
+    import hashlib
+
+    from harness.fingerprint import normalize
+
+    p = Path(path)
+    if not p.exists():
+        return None
+    return hashlib.sha256(normalize(p.read_text()).encode()).hexdigest()
+
+
+def _refuse_skipped(id: str, nodeid: str, res: dict) -> None:
+    if res.get("skipped"):
+        raise ValueError(f"{id}: proof {nodeid!r} skipped {res['skipped']} test(s) — a skipped proof ran nothing; "
+                         f"restore the evidence it reads and verify again")
 
 
 def _now() -> str:
@@ -102,7 +140,7 @@ class Register:
     def register(self, id: str, claim: str, a: str | None = None, b: str | None = None,
                  direction: str | None = None, unit: str = "", proof: str = "", note: str = "",
                  null_below: float = 0.03, data: str | list = "", inconclusive_proof: str = "",
-                 reads_no_data: bool = False) -> dict:
+                 reads_no_data: bool = False, pins: list | tuple = ()) -> dict:
         """Register a claim, in exactly ONE of two modes.
 
         COMPARISON-backed: `a`/`b`/`direction` name the ledger comparison that would settle it and `unit` says
@@ -122,6 +160,10 @@ class Register:
         INCONCLUSIVE instead of REFUTED — without it the only outcomes are pass and refuted, and an underpowered
         null reads as a refutation (§C.44 h19-h22 did).
 
+        `pins` names the files that JUDGE a test-backed claim — the report that computes its verdict, the proof
+        test itself. The register stores a proof's node id, not its content, so without a pin the bar could be
+        edited after the data is in; verify refuses once a pinned file's behaviour has changed (§C.47).
+
         There is deliberately no `status` parameter in either mode (H1)."""
         if id in self._h:
             raise ValueError(f"hypothesis {id!r} already exists — registering it again would overwrite the "
@@ -130,6 +172,12 @@ class Register:
         if data and not proof:
             raise ValueError(f"{id}: only a test-backed claim takes a `data` file — a comparison is timed by the "
                              f"ledger's own drawn_at")
+        if pins and not proof:
+            raise ValueError(f"{id}: only a test-backed claim takes `pins` — a comparison is judged by the ledger")
+        pinned = {path: _pin_hash(path) for path in pins}
+        missing = [path for path, sha in pinned.items() if sha is None]
+        if missing:
+            raise ValueError(f"{id}: pinned file {missing} does not exist — a pin records code that judges the claim")
         if inconclusive_proof and not proof:
             raise ValueError(f"{id}: only a test-backed claim takes an `inconclusive_proof` — a comparison reads "
                              f"inconclusive from its own significance and null band")
@@ -147,15 +195,19 @@ class Register:
         if proof and not data and not reads_no_data:
             raise ValueError(f"{id}: declare what the proof reads — `data` (the evidence file, even one not produced "
                              f"yet) or `reads_no_data` — or the claim can only be timed by its verify call")
+        paths = [] if not data else [data] if isinstance(data, str) else list(data)
+        for d in paths:
+            evidence_path(d)
         if proof:
             h = {"id": id, "claim": claim, "mode": "test", "proof": proof, "note": note,
                  "registered_at": self._now(), "evidence": []}
             if data:
-                paths = [data] if isinstance(data, str) else list(data)
                 files = [{"path": d, "started": _data_started(d) if Path(d).exists() else None} for d in paths]
                 h["data"] = files[0] if len(files) == 1 else files
             if reads_no_data:
                 h["reads_no_data"] = True
+            if pinned:
+                h["pins"] = pinned
             if inconclusive_proof:
                 h["inconclusive_proof"] = inconclusive_proof
             self._h[id] = h
@@ -247,21 +299,47 @@ class Register:
             elif _data_started(f["path"]) != f["started"]:
                 raise ValueError(f"{id}: {f['path']!r} changed its `started` since it was declared — the data was "
                                  f"regenerated under the claim, so register a new claim against the new data")
+        moved = sorted(path for path, sha in (h.get("pins") or {}).items() if _pin_hash(path) != sha)
+        if moved:
+            raise ValueError(f"{id}: {moved} changed since the claim was registered — the code that judges it is no "
+                             f"longer the code it was registered with")
         runner = run_test or _run_pytest
         res = runner(h["proof"])
         if not res.get("collected"):
             raise ValueError(f"{id}: proof {h['proof']!r} collected no tests — a proof that runs nothing "
                              f"proves nothing, and would otherwise read as a pass")
+        _refuse_skipped(id, h["proof"], res)
         entry = {"proof": h["proof"], "ok": bool(res["ok"]), "detail": res.get("detail", ""), "drawn_at": self._now()}
         if not res["ok"] and h.get("inconclusive_proof"):
             inc = runner(h["inconclusive_proof"])
             if not inc.get("collected"):
                 raise ValueError(f"{id}: inconclusive proof {h['inconclusive_proof']!r} collected no tests — it "
                                  f"would otherwise read as 'decidable', turning an undecidable claim into a refutation")
+            _refuse_skipped(id, h["inconclusive_proof"], inc)
             entry["inconclusive"] = bool(inc["ok"])
         h["evidence"].append(entry)
         self._save()
         return self._view(h)
+
+    def relocate_data(self, old: str, new: str) -> list[str]:
+        """Re-point every claim that declares `old` at `new` — the same evidence moved or re-encoded, never
+        regenerated. Refused unless `new` holds exactly the content of `old`, so a claim cannot be re-pointed at
+        different data; each moved entry keeps its `started` and records where it came from. Returns the ids moved."""
+        evidence_path(new)
+        entries = [(h["id"], f) for h in self._h.values() for f in _data_files(h) if f["path"] == old]
+        if not entries:
+            raise ValueError(f"no claim declares {old!r}")
+        for path in (old, new):
+            if not Path(path).exists():
+                raise ValueError(f"{path!r} does not exist — relocation compares the two files' content")
+        before = load_evidence(old) if old.endswith(".json.gz") else json.loads(Path(old).read_text())
+        if json.dumps(before, sort_keys=True) != json.dumps(load_evidence(new), sort_keys=True):
+            raise ValueError(f"{new!r} differs from {old!r} — relocation moves the same data, it cannot swap it")
+        for _id, f in entries:
+            f["path"] = new
+            f["moved_from"] = old
+        self._save()
+        return sorted({i for i, _f in entries})
 
     def supersede(self, id: str, by: str, reason: str) -> dict:
         """Mark `id` as superseded by `by` — "do not build on this claim any more".

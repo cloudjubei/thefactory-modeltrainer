@@ -894,8 +894,8 @@ def _dose_keys(row: dict) -> set:
 
 
 def _g0_gate(g0: dict, arms: dict) -> dict:
-    """The offline capacity gate, read from its OWN evidence (evidence/c46_G0_capacity.json): `passed` is derived from
-    its recorded verdict (not_run -> None), and it is refused unless it was trained by the same code as the arms — a
+    """The offline capacity gate, read from its OWN evidence (evidence/c46_G0_capacity.json.gz): `passed` is derived
+    from its recorded verdict (not_run -> None), and it is refused unless it was trained by the same code as the arms — a
     gate run on other training code says nothing about the net these arms trained."""
     verdict = (g0.get("verdict") or {}).get("verdict") if isinstance(g0.get("verdict"), dict) else None
     if verdict is None or "training_fingerprint" not in g0:

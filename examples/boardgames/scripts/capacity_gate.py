@@ -11,9 +11,9 @@ Registered (spec §4 G0): residual PASSES iff at least 4 of torch seeds 61-65 re
 epochs (62 x 79 batches = 4,898 steps, R200's budget). Legacy runs at 62, 124 and 186 epochs, descriptive only.
 
     PYTHONPATH=. .venv/bin/python scripts/capacity_gate.py --arch residual --epochs 62 --seeds 61-65 \\
-        --out evidence/c46_G0_capacity.json
+        --out evidence/c46_G0_capacity.json.gz
     PYTHONPATH=. .venv/bin/python scripts/capacity_gate.py --arch legacy --epochs 62,124,186 --seeds 61-65 \\
-        --out evidence/c46_G0_capacity.json
+        --out evidence/c46_G0_capacity.json.gz
 
 A later invocation MERGES into an existing --out (a run with the same arch, epochs and seed is replaced) and is
 refused when the file was written under other training or measurement code, or from another supervised set.
@@ -26,7 +26,6 @@ own exact label, so a wrong action permutation cannot teach the mirror's move.""
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -279,6 +278,7 @@ def main() -> None:
     args = ap.parse_args()
 
     from harness.coverage import optimal_actions
+    from harness.evidence import load_evidence, manifest_entry, save_evidence
     from harness.fingerprint import training_fingerprint
     from harness.registry import resolve_game
 
@@ -288,7 +288,8 @@ def main() -> None:
     before = (training_fingerprint(GAME), training_fingerprint(modules=MEASUREMENT_MODULES))
     game = resolve_game(GAME)
     states, examples, dataset = supervised_set(game)
-    existing = json.loads(out.read_text()) if out.exists() else None
+    existing = load_evidence(out) if out.exists() else None
+    replaces = (manifest_entry(out) or {}).get("sha256") if existing is not None else None
     probe = {"game": GAME, "training_fingerprint": before[0], "measurement_fingerprint": before[1],
              "dataset": dataset, "started": started, "invocations": [], "runs": []}
     merge_evidence(existing, probe)
@@ -313,8 +314,7 @@ def main() -> None:
                             "threads": args.threads}],
            "runs": runs}
     evidence = merge_evidence(existing, new)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(evidence, indent=1))
+    save_evidence(out, evidence, replaces=replaces)
     for g in evidence["summary"]:
         print(f"{g['arch']:>8} @ {g['epochs']:>4} epochs: failures {g['failures']} (seeds {g['seeds']}), "
               f"{g['zero_failure_seeds']}/{len(g['seeds'])} at zero", flush=True)
