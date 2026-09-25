@@ -1615,15 +1615,23 @@
       "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_with_augmentation",
       "note": "The user's challenge: tic-tac-toe at 100% should be trivial; \u00a7C.47 only met the floor under symmetry averaging on a 288-game budget.",
       "registered_at": "2026-09-25T12:21:01.973547+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_with_augmentation",
+          "ok": false,
+          "detail": "  + refuted\n\ntests/test_c48_converge_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_with_augmentation\n1 failed in 0.03s",
+          "drawn_at": "2026-09-25T17:56:50.700718+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": [
         {
           "path": "evidence/c48_T2_augment.json.gz",
-          "started": null
+          "started": "2026-09-25T12:21:10+00:00"
         },
         {
           "path": "evidence/c48_T2_no_augment.json.gz",
-          "started": null
+          "started": "2026-09-25T12:21:10+00:00"
         }
       ],
       "pins": {
@@ -1639,15 +1647,23 @@
       "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
       "note": "Symmetry is an optimisation, not a requirement: the process should learn every orientation from its own data.",
       "registered_at": "2026-09-25T12:21:02.027099+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
+          "ok": false,
+          "detail": " refuted\n\ntests/test_c48_converge_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_converge_evidence.py::test_c48_T2_run_to_convergence_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry\n1 failed in 0.03s",
+          "drawn_at": "2026-09-25T17:56:51.131461+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": [
         {
           "path": "evidence/c48_T2_augment.json.gz",
-          "started": null
+          "started": "2026-09-25T12:21:10+00:00"
         },
         {
           "path": "evidence/c48_T2_no_augment.json.gz",
-          "started": null
+          "started": "2026-09-25T12:21:10+00:00"
         }
       ],
       "pins": {

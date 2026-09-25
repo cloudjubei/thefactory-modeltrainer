@@ -3667,3 +3667,43 @@ explicit:
   60-70 h.
 - Fresh seeds.
 
+
+#### §C.48 — The smallest setup, and why the process misses 100% on tic-tac-toe (2026-09-25)
+
+**Prompt (user).** Tic-tac-toe at 100% should be trivial: find the smallest net that holds perfect play without any
+symmetry. Then find the smallest SETUP (architecture, encoding, training process) and the process that reaches it.
+
+**T1: the smallest perfect net** (`scripts/smallest_net.py`, `evidence/c48_T1_smallest.json.gz`). Supervised on
+exact labels over all 4,520 raw positions, with no symmetry and training until perfect or stuck (5 seeds each):
+
+| net | params | perfect at every raw position |
+|---|---|---|
+| residual, width 16 | 5,629 | 5/5 |
+| legacy conv, width 16 | 4,074 | 3/5 |
+| legacy conv, width 32 | 12,746 | 5/5 |
+| all nets ≤ 1,866 params | — | 0/5 |
+
+- The smallest perfect net in the harness's family is about 4-6K parameters.
+- §C.46's G0 finding that the 12,746-param net cannot fit tic-tac-toe was an artefact of the step budget.
+- MLPs larger than 1.9K params were not swept.
+
+**T2: the generic process run to convergence** (`harness/floor_converge.py`, pinned; h45/h46, pre-registered).
+- Setup: the R200S recipe for 30 iterations instead of 6, seeds 301-310. The RAW net is scored at all 4,520 raw
+  positions after every pass.
+- **h45 (with augmentation): REFUTED, 0/10 perfect at the final pass.**
+  - Failures fall to about 4 by pass 8, then hover at 1-9 without settling. 4 seeds touched 0 and relapsed.
+  - From iteration 24 failures rise to about 20. That is exactly when the 8,000-state buffer fills and first-in-first-out
+    eviction starts, in every seed.
+- **h46 (no symmetry anywhere): REFUTED, 0/10.** Failures plateau at about 190. Self-play visits only about
+  1,100-1,300 of the 4,520 raw positions in 30 iterations.
+
+**Reading (post hoc; the eviction timing is observed, not yet tested).**
+1. The obstacle is the PROCESS, not capacity.
+2. Coverage: the buffer holds 8,000 states that are mostly repeats of about 1,150 distinct positions. Eviction discards
+   rare positions first and the net forgets them.
+3. There is no convergence mechanism. The learning rate is constant, each pass re-fits the whole relabelled buffer,
+   and boundary positions flip back and forth.
+4. Without augmentation, self-play alone never reaches three-quarters of the positions.
+
+These feed the smallest-setup design (see the user-requested analysis after T3).
+
