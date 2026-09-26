@@ -3707,3 +3707,121 @@ exact labels over all 4,520 raw positions, with no symmetry and training until p
 
 These feed the smallest-setup design (see the user-requested analysis after T3).
 
+**Bank and T3: the Connect-4 ceiling by net size** (`scripts/build_bank.py`, `scripts/c4_ceiling.py`;
+`evidence/c48_bank.json.gz`, `evidence/c48_T3_ceiling.json.gz`; h48, descriptive, registered after the data).
+- **Bank.** 48,000 exactly solved positions at plies 14-38: half from the ten §C.47 nets' own self-play, half one
+  move off it. Split train/test by a hash of the canonical key, so no test position has a mirror in training. It is
+  reusable for any later probe (exact solves cost ~10 h per 5 nets).
+- **T3.** Supervised on exact labels, 2 seeds per cell, early-stopped on held-out training positions:
+
+| net | params | 4k labels | 12k | 35k | training-set fit at 35k |
+|---|---|---|---|---|---|
+| legacy32 | 20,616 | 0.54 | 0.61 | 0.66 | 0.89 |
+| residual32 (the §C.47 net) | 60,555 | 0.53 | 0.60 | 0.71 | 0.92 |
+| residual64 | 302,353 | 0.55 | 0.66 | 0.77 | 0.98 |
+| residual128 | 1,785,873 | 0.59 | 0.73 | **0.82** | 0.98 |
+
+  (Accuracy on unseen NON-TRIVIAL positions.)
+- **Reading.**
+  - Connect-4 is DATA-limited first: every net gains ~0.1 per tripling of exact labels, and none has flattened.
+  - It is capacity-limited second: the 20K and 60K nets cannot even fit 35k positions.
+  - Self-play positions and siblings, and early and late plies, all score within ~0.02 of each other.
+  - For comparison, the §C.47 solver-free nets (60K, trained on 64-sim labels of about 65% quality) score ~0.56-0.61
+    raw on comparable positions. The 60K net trained on EXACT labels reaches 0.71. That is the label-quality gap, at
+    the same size.
+
+**The smallest-setup programme (decided 2026-09-26 with the user).**
+- **Objective (primary).** The fewest PARAMETERS that play perfectly, at ONE FORWARD PASS at play time (the raw net,
+  no search). A setup is architecture + input encoding + symmetry handling + training process. More elaborate setups
+  count if they need fewer parameters. Parameter-free preprocessing is disclosed with its cost: canonicalising the
+  input costs rule calls.
+- **Secondary, reported alongside.** The same frontier at small play-time search budgets, so the parameters-vs-search
+  trade-off is visible.
+- **Deferred alternative (recorded, not yet pursued).** Minimise TOTAL play-time compute, parameters and search
+  together. Revisit once the primary frontier has good results across the games.
+- **The process, per game.**
+  1. ORACLE FRONTIER. Train each candidate setup on exact answers, to convergence, sweeping size: the smallest
+     representable setup. On games that cannot be enumerated, data volume is a second axis (T3).
+  2. PROCESS GAP. Run the generic solver-free process with the frontier setup and measure its distance from the
+     frontier: coverage, label accuracy, the per-pass probe.
+  3. CLOSE THE GAP, one pre-registered A/B per fix.
+  4. The smallest setup is the smallest frontier point the process actually reaches.
+- **First steps (tic-tac-toe).**
+  - Step 1: T1 extended to setup variants — canonicalised input, larger and deeper MLPs, and rule-derived input
+    features.
+  - Step 3, in parallel: the T2 process fixes.
+    - A de-duplicated buffer: one entry per position with its latest label, replacing FIFO eviction.
+    - A settling phase.
+    - A solver-free stopping rule: stop when the net agrees with its own search labels across the buffer.
+
+
+**Step 1 result: T1b, the oracle frontier over setups** (`scripts/smallest_net.py`, `evidence/c48_T1b_setups.json.gz`;
+h51, descriptive, registered after the data, VERIFIED).
+- Same supervised fit as T1, 5 seeds each, on 29 new setups. Every setup is scored on all 4,520 raw positions; a
+  canonicalising setup trains on the 627 canonical images and is scored through its own map back.
+
+| setup | params | perfect on every seed |
+|---|---|---|
+| raw, residual16 (T1) | 5,629 | 5/5 |
+| raw, MLP 64×64 | 6,026 | 5/5 |
+| raw, MLP 128 | 3,722 | 2/5 |
+| **canonicalised input, MLP 32** | **938** | **5/5** |
+| canonicalised input, MLP 16×16 | 746 | 2/5 |
+| canonicalised input, legacy conv 4 | 594 | 0/5 (12-29 failures) |
+| rule features (raw or canonical), any size up to 1,514 | — | never 5/5 |
+
+- **Canonicalising the input cuts the frontier about 6-fold, 5,629 → 938.** This is the more elaborate setup with
+  fewer parameters. Its cost is 8 board transforms per decision, to be counted under the deferred total-compute
+  objective.
+- Rule features (wins now / hands a win) do not lower the frontier. On raw input they are worse than the canonical
+  map alone at equal width.
+- Next on the frontier: the canonical frontier sits between 594 and 938. Step 2 (process gap) should use the
+  canonical setup once the fixed process (T4) is known.
+
+**Step 3: the process fixes, and T4** (`harness/neural.py`, `harness/floor_settle.py` pinned, `scripts/settle_floor.py`;
+h49/h50, PRE-REGISTERED 2026-09-26, VERIFIED the same day).
+- `train_alphazero` gains three knobs, all off by default (the default path trains bit-for-bit as before, pinned by
+  weight hashes recorded before the change). All three are refused off the reanalyze path.
+  - `buffer_unique`: one row per position (`state_key`), refreshed to the newest end when seen again. Eviction drops
+    the least recently seen position, never a repeat. Records `merged`.
+  - `settle_epochs` / `settle_lr_final`: after the last iteration, extra epochs on the last training set with the
+    learning rate decaying linearly to the floor (`train_net(..., lr_end=)`). Recorded as a history entry
+    `iteration: "settle"`.
+  - `record_self_agreement`: after each pass, the share of buffer positions where the raw argmax is one of its own
+    label's best moves. Observation only; it is the candidate solver-free stopping signal.
+- **T4** = T2's R200S recipe plus the three knobs (30 settle epochs, floor 1e-5), seeds 311-320, scored raw at all
+  4,520 positions after all 31 passes. Bars as T2: supported at ≥8/10 perfect after the settle, refuted at ≤5.
+  - h49 (augment): expected supported.
+  - h50 (no_augment): expected refuted. Neither fix adds coverage.
+  - Descriptives: seeds perfect BEFORE settling (the buffer fix alone), relapses, and FALSE STOPS (passes where
+    self-agreement is 1.0 but the net fails somewhere). These calibrate the stopping rule.
+
+**T4 result (verified 2026-09-26).**
+- **h49 (augment): INCONCLUSIVE, 6/10 perfect after the settle** (bar 8; T2 was 0/10 on the same recipe without the
+  fixes). Final failures by seed: 6, 0, 0, 0, 0, 0, 1, 4, 0, 2.
+  - The unique buffer removed the eviction relapse. The buffer holds the 1,000-1,180 positions self-play visits, and
+    nothing is ever evicted.
+  - Before settling, 4/10 were perfect. The settle took 2 seeds to zero, improved 2 and worsened 2 (5→6 and 2→4). It
+    helps but does not stop the flicker.
+  - 7 seeds touched zero and relapsed. The flicker at 0-5 failures persists without eviction, so it comes from
+    re-fitting relabelled targets each pass, not from forgetting.
+  - The residual failures are scattered: 6 distinct canonical positions, only one shared by two seeds. Not one hard
+    position.
+- **h50 (no_augment): REFUTED, 0/10**, as predicted. 157-224 failures; self-play reaches 1,090-1,280 of the 4,520 raw
+  positions.
+- **Self-agreement is NOT a usable stopping rule as defined. It fails in both directions.**
+  - no_augment: 6 FALSE STOPS. Full agreement at the final pass with ~200 failures, because it cannot see positions
+    self-play never reached.
+  - augment: it never reaches 1.0 (final 0.93-0.96) even on perfect nets. The likely cause, not yet checked, is that
+    it counts the net's move as a disagreement when it picks a different optimal move from the label's argmax.
+  - A stopping rule needs both a coverage term and a tie-tolerant agreement.
+- **Where the gap stands.** Representation is solved: 938 params with canonical input, about 5.6K raw. The generic
+  process now gets 6/10 raw-perfect with augmentation. What remains is (a) the last few flickering positions and
+  (b) coverage without symmetry.
+- **Post-hoc diagnostic: the residual failures are not label errors.** At all 13 positions the final augment nets
+  still get wrong, a 200-sim search with that net returns an optimal move as its top choice. 9 of the 13 are forced
+  single-answer positions with a one-hot label. The search knows the answer, and the raw net does not hold it.
+  Most are late-game positions self-play rarely reaches. Likely cause: COVERAGE, the same obstacle as no_augment at a
+  smaller scale. Not yet tested: the per-seed visited sets were not stored, so "never in the buffer" is not proven.
+- **Next A/B candidate: coverage.** Solver-free ways to put unvisited positions in the buffer: deeper siblings,
+  more random opening plies, or relabelling a rule-enumerated frontier.

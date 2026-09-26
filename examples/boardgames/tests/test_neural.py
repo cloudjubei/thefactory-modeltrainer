@@ -1485,3 +1485,275 @@ def test_an_old_evidence_arch_maps_to_the_net_it_ACTUALLY_built():
     assert sum(p.numel() for p in Connect4Net(**arch_for_game(built, g)).parameters()) == 12746
     residual = {"channels": 32, "blocks": 3, "head_hidden": 32, "residual": True}
     assert legacy_arch_as_built(residual) == residual
+
+
+# §C.48 step 3 — the process fixes T2 pointed at: a buffer of UNIQUE positions (not FIFO over repeats), a settling
+# pass with a decaying learning rate, and a solver-free self-agreement record. All off by default, and a run with
+# them off must train bit-for-bit as before (the hashes below were recorded before the change).
+
+_C48_ARCH = {"channels": 16, "blocks": 1, "head_hidden": 8, "residual": True}
+_C48_BEFORE = {
+    (): "f0d40997d6de214e916e2a01050073e7bfe453d47b124d4a27a6907f7a99b463",
+    ("reanalyze_frac", "reanalyze_sims"): "ea7e3193022b829f17b76cc58fd463f17d3858e767e1fcfb1f223e91d39da0e0",
+    ("reanalyze_frac", "reanalyze_siblings", "reanalyze_sims", "steps_matched"):
+        "158cef4625569121b9d3ca91d2aad875607abc3831fc2c58d8bc0fe590effb34",
+}
+_C48_KNOBS = {(): {}, ("reanalyze_frac", "reanalyze_sims"): {"reanalyze_frac": 1.0, "reanalyze_sims": 4},
+              ("reanalyze_frac", "reanalyze_siblings", "reanalyze_sims", "steps_matched"):
+                  {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "reanalyze_siblings": True, "steps_matched": True}}
+
+
+def _c48_train(iterations=3, **knobs):
+    import torch
+
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    from harness.targets import _weights_sha
+
+    torch.set_num_threads(1)
+    net, history = train_alphazero(TicTacToe(), iterations=iterations, selfplay_games=3, sims=8, epochs=1, channels=16,
+                                   net_arch=_C48_ARCH, augment=True, gumbel=True, seed=5, selfplay_opening_plies=1,
+                                   opening_plies_zero_frac=0.5, buffer_cap=40, **knobs)
+    return _weights_sha(net), history, net
+
+
+@pytest.mark.parametrize("key", sorted(_C48_BEFORE))
+def test_c48_every_existing_path_trains_bit_for_bit_as_before_with_the_new_knobs_off(key):
+    assert _c48_train(**_C48_KNOBS[key])[0] == _C48_BEFORE[key]
+
+
+def test_c48_a_unique_buffer_holds_each_position_once_and_evicts_only_when_distinct_positions_overflow():
+    from games.tictactoe import TicTacToe
+    from harness.transfer import record_selfplay_states
+
+    g = TicTacToe()
+    with record_selfplay_states(g) as log:
+        _sha, history, _net = _c48_train(iterations=4, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True)
+    seen = []
+    for game_row in log["games"]:
+        for s in game_row["states"]:
+            k = g.state_key(s)
+            if k in seen:
+                seen.remove(k)
+            seen.append(k)
+    assert history[-1]["state_buffer"] == min(40, len(seen))
+    fifo = _c48_train(iterations=4, reanalyze_frac=1.0, reanalyze_sims=4)[1]
+    assert fifo[-1]["state_buffer"] == 40 and sum(h["evicted"] for h in fifo) > sum(h["evicted"] for h in history)
+
+
+def test_c48_the_unique_buffer_keeps_the_LATEST_label_of_a_repeated_position(monkeypatch):
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    root = g.initial_state(__import__("random").Random(0))
+    calls = {"n": 0}
+
+    def scripted(game, agent, rng, **kwargs):
+        calls["n"] += 1
+        x = neural.encode(game, root)
+        return [(root, x, [1.0 if a == calls["n"] % 9 else 0.0 for a in range(9)], float(calls["n"]))]
+    monkeypatch.setattr(neural, "self_play_game", scripted)
+    captured = {}
+    real_train = neural.train_net
+
+    def spy(net, examples, *args, **kwargs):
+        captured["examples"] = examples
+        return real_train(net, examples, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy)
+    _c48_train(iterations=1, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True)
+    values = {float(e[2]) for e in captured["examples"]}
+    assert values == {3.0}, "one position, three games: only the last game's row may remain (8 augmented images)"
+
+
+def test_c48_the_settling_pass_decays_the_learning_rate_to_its_floor_and_is_recorded():
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True, settle_epochs=3,
+                                     settle_lr_final=1e-5)
+    settle = history[-1]
+    assert settle["iteration"] == "settle" and settle["epochs"] == 3 and settle["lr_final"] == pytest.approx(1e-5)
+    assert settle["train_examples"] > 0 and settle["loss"] >= 0
+    assert _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True)[0] != _sha
+
+
+def test_c48_train_net_decays_the_learning_rate_linearly_to_lr_end():
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    s = g.initial_state(__import__("random").Random(0))
+    rows = [(encode(g, s), [1 / 9] * 9, 0.0)] * 10
+    state: dict = {}
+    train_net(net, rows, 2, 4, 1e-3, "cpu", opt_state=state, lr_end=1e-6)
+    assert state["opt"].param_groups[0]["lr"] == pytest.approx(1e-6)
+    torch.manual_seed(0)
+    a = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    torch.manual_seed(0)
+    b = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    torch.manual_seed(1)
+    train_net(a, rows, 2, 4, 1e-3, "cpu")
+    torch.manual_seed(1)
+    train_net(b, rows, 2, 4, 1e-3, "cpu", lr_end=None)
+    assert all(torch.equal(p, q) for p, q in zip(a.parameters(), b.parameters()))
+
+
+def test_c48_self_agreement_is_recorded_per_iteration_and_observes_only():
+    plain = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True)[0]
+    sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
+                                    record_self_agreement=True)
+    assert sha == plain
+    for h in history:
+        assert 0.0 <= h["self_agreement"] <= 1.0 and h["self_agreement_positions"] == h["state_buffer"]
+
+
+@pytest.mark.parametrize("knob", [{"buffer_unique": True}, {"settle_epochs": 2}, {"record_self_agreement": True}])
+def test_c48_the_new_knobs_are_refused_off_the_reanalyze_path(knob):
+    with pytest.raises(ValueError, match="reanalyze"):
+        _c48_train(**knob)
+
+
+def _c48_scripted_positions(monkeypatch, script):
+    """Self-play replaced by a script: game n returns one row per ply listed in script[n-1] — the position after
+    playing that many moves 0,1,2,... — with value n, so a row's age and origin are readable from its value."""
+    import random
+
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    positions = [g.initial_state(random.Random(0))]
+    for a in range(6):
+        positions.append(g.step(positions[-1], a, random.Random(0)))
+    calls = {"n": 0}
+
+    def scripted(game, agent, rng, **kwargs):
+        calls["n"] += 1
+        rows = []
+        for ply in script[calls["n"] - 1]:
+            s = positions[ply]
+            pi = [0.0] * 9
+            pi[game.legal_actions(s)[0]] = 1.0
+            rows.append((s, neural.encode(game, s), pi, float(calls["n"])))
+        return rows
+    monkeypatch.setattr(neural, "self_play_game", scripted)
+    return g, positions
+
+
+def test_c48_a_repeated_position_is_refreshed_to_the_newest_end_so_eviction_drops_the_least_recently_seen(monkeypatch):
+    import harness.neural as neural
+    from harness.neural import train_alphazero
+
+    g, positions = _c48_scripted_positions(monkeypatch, [[0, 1, 2], [0, 3]])
+    captured = {}
+    real = neural.train_net
+
+    def spy(net, examples, *args, **kwargs):
+        captured["examples"] = examples
+        return real(net, examples, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy)
+    _net, history = train_alphazero(g, iterations=1, selfplay_games=2, sims=4, epochs=1, net_arch=_C48_ARCH,
+                                    augment=False, seed=5, buffer_cap=3, reanalyze_frac=1.0, reanalyze_sims=4,
+                                    buffer_unique=True)
+    kept = sorted(float(e[2]) for e in captured["examples"])
+    assert kept == [1.0, 2.0, 2.0], "position 1 (seen once, first) is evicted; the empty board lives on as game 2's"
+    assert history[0]["merged"] == 1 and history[0]["evicted"] == 1 and history[0]["state_buffer"] == 3
+
+
+@pytest.mark.parametrize("settle", [1, 4])
+def test_c48_the_settling_pass_trains_the_last_training_set_for_its_own_epochs_with_the_decay(monkeypatch, settle):
+    import harness.neural as neural
+
+    calls = []
+    real = neural.train_net
+
+    def spy(net, examples, epochs, *args, **kwargs):
+        calls.append({"examples": examples, "epochs": epochs, "lr_end": kwargs.get("lr_end")})
+        return real(net, examples, epochs, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy)
+    _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True, settle_epochs=settle, settle_lr_final=2e-5)
+    assert len(calls) == 4 and [c["lr_end"] for c in calls] == [None, None, None, 2e-5]
+    assert calls[-1]["epochs"] == settle and calls[-1]["examples"] is calls[-2]["examples"]
+
+
+@pytest.mark.parametrize("lr_end", [0.0, -1e-5, 2e-3])
+def test_c48_train_net_refuses_a_schedule_that_does_not_decay(lr_end):
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    net = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    rows = [(encode(g, g.initial_state(__import__("random").Random(0))), [1 / 9] * 9, 0.0)]
+    with pytest.raises(ValueError, match="only decays"):
+        train_net(net, rows, 1, 4, 1e-3, "cpu", lr_end=lr_end)
+
+
+def test_c48_train_net_steps_the_rate_down_evenly_every_batch(monkeypatch):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    net = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    rows = [(encode(g, g.initial_state(__import__("random").Random(0))), [1 / 9] * 9, 0.0)] * 10
+    seen = []
+    real_step = torch.optim.Adam.step
+
+    def step(self, *a, **k):
+        seen.append(self.param_groups[0]["lr"])
+        return real_step(self, *a, **k)
+    monkeypatch.setattr(torch.optim.Adam, "step", step)
+    train_net(net, rows, 2, 4, 1e-3, "cpu", lr_end=4e-4)
+    assert seen == pytest.approx([1e-3 - 1e-4 * k for k in range(1, 7)])
+
+
+class _FixedPolicyNet:
+    def __init__(self, logits):
+        import torch
+
+        self.logits = torch.tensor(logits, dtype=torch.float32)
+        self.training = True
+        self.modes = []
+
+    def eval(self):
+        self.modes.append("eval")
+        self.training = False
+
+    def train(self, mode=True):
+        self.modes.append(mode)
+        self.training = mode
+
+    def __call__(self, x):
+        return self.logits[: len(x)], None
+
+
+def test_c48_self_agreement_counts_a_tie_in_the_label_and_never_an_illegal_argmax():
+    import random
+
+    import torch
+
+    from harness.neural import _self_agreement
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    root = g.initial_state(random.Random(0))
+    after = g.step(root, 0, random.Random(0))
+    x = torch.zeros(2, 9)
+    tie = [0.0, 0.5, 0.5] + [0.0] * 6
+    minor = [0.0, 0.7, 0.3] + [0.0] * 6
+    rows = [(root, x[0], tie, 0.0), (after, x[1], [0.0, 1.0] + [0.0] * 7, 0.0),
+            (root, x[0], tie, 0.0), (after, x[1], [0.0, 1.0] + [0.0] * 7, 0.0), (root, x[0], minor, 0.0)]
+    logits = [[0.0, 0.0, 9.0] + [0.0] * 6, [9.0, 5.0] + [0.0] * 7,
+              [0.0, 0.0, 0.0, 9.0] + [0.0] * 5, [9.0, 1.0, 5.0] + [0.0] * 6, [0.0, 1.0, 9.0] + [0.0] * 6]
+    net = _FixedPolicyNet(logits)
+    got = _self_agreement(net, g, rows, "cpu")
+    assert got == {"self_agreement": 0.4, "self_agreement_positions": 5}
+    assert net.modes == ["eval", True] and net.training
+    net.eval()
+    net.modes = []
+    _self_agreement(net, g, rows, "cpu")
+    assert net.modes == ["eval", False] and not net.training
+    assert _self_agreement(net, g, [], "cpu") == {"self_agreement": 0.0, "self_agreement_positions": 0}

@@ -1066,17 +1066,23 @@ def train_net(
     device: str,
     opt_state: dict | None = None,
     epoch_examples: int | None = None,
+    lr_end: float | None = None,
 ) -> float:
     """One training pass over the buffer (policy cross-entropy + value MSE — or value cross-entropy against a
     two-hot target when the net carries a categorical value head). Returns the final mean loss.
 
     `epoch_examples` caps each epoch at that many examples of a fresh random permutation (§C.46 steps-matched
     mode: an arm that ADDS examples keeps the optimisation steps of the arm without them, so exposure is not
-    confounded with extra gradient steps). None — or the full size — trains exactly as before."""
+    confounded with extra gradient steps). None — or the full size — trains exactly as before.
+
+    `lr_end` decays the learning rate linearly, step by step, from `lr` to `lr_end` at the last step (§C.48 settling:
+    a constant rate leaves the net on a noise floor around the fit). None keeps the optimizer's rate untouched."""
     if not examples:
         return 0.0
     if epoch_examples is not None and not 1 <= epoch_examples <= len(examples):
         raise ValueError(f"epoch_examples {epoch_examples} outside 1..{len(examples)}")
+    if lr_end is not None and not 0.0 < lr_end <= lr:
+        raise ValueError(f"lr_end {lr_end} outside (0, lr={lr}] — the schedule only decays")
     bins = int(net.arch.get("value_bins", 0))
     aux_on = bool(net.arch.get("aux_heads", False))
     x = torch.stack([e[0] for e in examples]).to(device)
@@ -1116,6 +1122,8 @@ def train_net(
     epoch_sum = epoch_seen = 0.0
     n = len(examples)
     per_epoch = n if epoch_examples is None else int(epoch_examples)
+    total_steps = epochs * math.ceil(per_epoch / batch_size)
+    step = 0
     for _ in range(epochs):
         perm = torch.randperm(n)
         if per_epoch < n:
@@ -1143,6 +1151,10 @@ def train_net(
                         loss = loss + 0.15 * F.cross_entropy(reply_logits[valid], rb[valid])
             opt.zero_grad()
             loss.backward()
+            step += 1
+            if lr_end is not None:
+                for group in opt.param_groups:
+                    group["lr"] = lr + (lr_end - lr) * step / total_steps
             opt.step()
             # §C.10 BUILD #3: accumulate an EPOCH MEAN. The old `last = float(loss.detach())` reported one
             # mini-batch — a single-sample statistic (within-run SD ~0.23) that we mistook for a fit-quality
@@ -1395,6 +1407,25 @@ def _endgame_enabled(game: Game, endgame_tb) -> bool:
     )
 
 
+def _self_agreement(net: Connect4Net, game: Game, rows: list, device: str) -> dict:
+    """§C.48: the share of buffer positions where the raw policy's argmax over legal moves is one of its own label's
+    best moves — a solver-free reading of whether the net has fit what it is being taught. Observes only: eval mode,
+    no gradient, no RNG, and the net is put back in the mode it was in."""
+    if not rows:
+        return {"self_agreement": 0.0, "self_agreement_positions": 0}
+    was_training = net.training
+    net.eval()
+    with torch.no_grad():
+        logits, _v = net(torch.stack([x for (_s, x, _pi, _v) in rows]).to(device))
+    net.train(was_training)
+    hits = 0
+    for (s, _x, pi, _v), row in zip(rows, logits.cpu(), strict=True):
+        legal = game.legal_actions(s)
+        move = max(legal, key=lambda a: float(row[a]))
+        hits += pi[move] >= max(pi)
+    return {"self_agreement": hits / len(rows), "self_agreement_positions": len(rows)}
+
+
 def train_alphazero(
     game: Game,
     iterations: int = 8,
@@ -1429,6 +1460,10 @@ def train_alphazero(
     reanalyze_sims: int | None = None,
     reanalyze_siblings: bool = False,
     steps_matched: bool = False,
+    buffer_unique: bool = False,
+    settle_epochs: int = 0,
+    settle_lr_final: float = 1e-5,
+    record_self_agreement: bool = False,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1479,6 +1514,9 @@ def train_alphazero(
     # each is refused wherever it would silently do nothing or mix with a path that cannot carry it.
     if reanalyze_siblings and reanalyze_frac != 1.0:
         raise ValueError("reanalyze_siblings needs reanalyze_frac == 1.0 — siblings are relabelled with the whole buffer")
+    if (buffer_unique or settle_epochs > 0 or record_self_agreement) and reanalyze_frac <= 0.0:
+        raise ValueError("buffer_unique / settle_epochs / record_self_agreement act on the reanalyze state buffer — "
+                         "set reanalyze_frac")
     if (steps_matched or sibling_holdout is not None) and not reanalyze_siblings:
         raise ValueError("steps_matched / sibling_holdout act only on siblings — set reanalyze_siblings")
     if sibling_holdout is not None and int(sibling_holdout.get("mod", 0)) < 2:
@@ -1613,8 +1651,18 @@ def train_alphazero(
             if endgame_on:
                 eg_visited.extend(s for (s, *_rest) in fresh_s)
             selfplay_s = time.time() - t_selfplay
-            evicted = max(0, len(state_buffer) + len(fresh_s) - buffer_cap)
-            state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
+            if buffer_unique:
+                held = {game.state_key(row[0]): row for row in state_buffer}
+                for row in fresh_s:
+                    held.pop(game.state_key(row[0]), None)
+                    held[game.state_key(row[0])] = row
+                merged = len(state_buffer) + len(fresh_s) - len(held)
+                evicted = max(0, len(held) - buffer_cap)
+                state_buffer = list(held.values())[-buffer_cap:]
+            else:
+                merged = 0
+                evicted = max(0, len(state_buffer) + len(fresh_s) - buffer_cap)
+                state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
             t_relabel = time.time()
             sib_rows: list = []
             sib_stats = {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}
@@ -1658,7 +1706,7 @@ def train_alphazero(
             sib_aug = augment_examples(sib_rows, perms) if sib_rows else []
             buffer = sp_aug + sib_aug
             reanalyze_note = {"selfplay_states": len(fresh_s), "state_buffer": len(state_buffer), "evicted": evicted,
-                              "siblings": sib_stats["added"],
+                              **({"merged": merged} if buffer_unique else {}), "siblings": sib_stats["added"],
                               "sibling_terminal_skipped": sib_stats["terminal_skipped"],
                               "sibling_recorded_skipped": sib_stats["recorded_skipped"],
                               "sibling_holdout_skipped": sib_stats["holdout_skipped"],
@@ -1737,6 +1785,8 @@ def train_alphazero(
         entry = {"iteration": it + 1, "examples": len(buffer), "vs_pool_games": vs_pool, "reanalyzed": reanalyzed,
                  "buffer": len(buffer), "distilled": len(distilled), "loss": loss, "opening_value": opening_value}
         entry.update(reanalyze_note)
+        if record_self_agreement:
+            entry.update(_self_agreement(net, game, state_buffer, device))
         if endgame_on:
             entry.update({"endgame_booked": eg_booked, "endgame_solves": learner.endgame_solves,
                           "endgame_hits": learner.endgame_hits, "endgame_total": len(endgame_tb)})
@@ -1746,6 +1796,14 @@ def train_alphazero(
                        if endgame_on else "")
             log(f"iter {it + 1}/{iterations}: buffer {len(buffer)} ({vs_pool} vs-pool, {reanalyzed} reanalyzed), "
                 f"distilled {len(distilled)}, loss {loss:.3f}{eg_note}")
+    if settle_epochs > 0 and iterations > 0:
+        loss = train_net(net, train_set, settle_epochs, batch_size, lr, device, opt_state=_opt_state,
+                         epoch_examples=epoch_cap, lr_end=settle_lr_final)
+        entry = {"iteration": "settle", "epochs": settle_epochs, "lr_final": settle_lr_final,
+                 "train_examples": len(train_set), "state_buffer": len(state_buffer), "loss": loss}
+        if record_self_agreement:
+            entry.update(_self_agreement(net, game, state_buffer, device))
+        history.append(entry)
     if _pool is not None:
         _pool.close()
         _pool.join()

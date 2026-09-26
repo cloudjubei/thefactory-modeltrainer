@@ -100,6 +100,10 @@
       "sha256": "cf17d2c4a196e5864a0aba73a424017852dd0d5de9340c3e21d7f4568a79c710",
       "started": "2026-09-25T12:17:27+00:00"
     },
+    "c48_T1b_setups.json.gz": {
+      "sha256": "4990f211166beea96e3d3b1ea4cf261fbc1b03c9d772f2f5e1aa772f2fe4dab4",
+      "started": "2026-09-26T06:30:00+00:00"
+    },
     "c48_T2_augment.json.gz": {
       "sha256": "90b3d707c6e0de1778480235545b47eebb8cc53d00c7465c9067ca209235f9f0",
       "started": "2026-09-25T12:21:10+00:00"
@@ -107,6 +111,22 @@
     "c48_T2_no_augment.json.gz": {
       "sha256": "d8adcc6f207a294514615c3e639f5a07872f835be5d105706094d3936359b074",
       "started": "2026-09-25T12:21:10+00:00"
+    },
+    "c48_T3_ceiling.json.gz": {
+      "sha256": "7b1b89c189e44d7f5bf613624ec28edb68eccf3ee989660f84475415a6afc8c7",
+      "started": "2026-09-26T03:10:52+00:00"
+    },
+    "c48_T4_augment.json.gz": {
+      "sha256": "0e64bcf161d1b6168c4b3fedf8a70f3cdde228d74da0a522bff950429afb178b",
+      "started": "2026-09-26T06:46:47+00:00"
+    },
+    "c48_T4_no_augment.json.gz": {
+      "sha256": "95ea0c1ccb65352c5456c2e1aee6891b07870184455d82192e7e7a4a275b4292",
+      "started": "2026-09-26T06:46:47+00:00"
+    },
+    "c48_bank.json.gz": {
+      "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
+      "started": "2026-09-25T17:49:30+00:00"
     },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",

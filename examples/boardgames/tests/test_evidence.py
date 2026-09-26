@@ -192,7 +192,9 @@ def test_git_tracks_no_evidence_data_and_never_ignores_the_manifest():
 
 @pytest.mark.parametrize("module", ["tests.test_ceiling_evidence", "tests.test_c45_evidence",
                                     "tests.test_c46_evidence", "tests.test_c47_floor_evidence",
-                                    "tests.test_c47_stage0_evidence", "tests.test_c47_stage0v2_evidence"])
+                                    "tests.test_c47_stage0_evidence", "tests.test_c47_stage0v2_evidence",
+                                    "tests.test_c48_evidence", "tests.test_c48_converge_evidence",
+                                    "tests.test_c48_setups_evidence", "tests.test_c48_settle_evidence"])
 def test_the_evidence_proofs_skip_only_when_their_recorded_files_are_absent(module):
     """The pinned proofs skip on a checkout without the evidence. A skip condition that names the wrong path skips
     them EVERYWHERE, silently — so each module's files must be ones the manifest records, and on a machine holding

@@ -1671,6 +1671,151 @@
         "tests/test_c48_converge_evidence.py": "8dcd5891eda19d38e06e6e2c4091310e43267fb5723b1483253ee13d39498818"
       },
       "inconclusive_proof": "tests/test_c48_converge_evidence.py::test_c48_T2_no_augment_is_undecidable"
+    },
+    "h47": {
+      "id": "h47",
+      "claim": "\u00a7C.48 T1 (descriptive): in the harness's net family about 5K parameters (residual16, 5,629) hold perfect tic-tac-toe at every raw position from exact labels without symmetry (5/5 seeds); no net <= 1,866 params does",
+      "mode": "test",
+      "proof": "tests/test_c48_evidence.py::test_c48_T1_about_5K_parameters_hold_perfect_tic_tac_toe_and_under_2K_never_do",
+      "note": "",
+      "registered_at": "2026-09-26T04:50:53.482160+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_evidence.py::test_c48_T1_about_5K_parameters_hold_perfect_tic_tac_toe_and_under_2K_never_do",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-26T04:50:53.894651+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c48_T1_smallest.json.gz",
+        "started": "2026-09-25T12:17:27+00:00"
+      },
+      "pins": {
+        "tests/test_c48_evidence.py": "62bad7eb5f3486eeb6ab2017323bdf5644c7c957324ae38cf8dae39542d7f345"
+      }
+    },
+    "h48": {
+      "id": "h48",
+      "claim": "\u00a7C.48 T3 (descriptive): Connect-4 accuracy on unseen non-trivial positions (plies 14-38) is DATA-limited \u2014 every net improves with every tripling of exact labels (4k -> 12k -> 35k); the 1.8M net reaches ~0.82 and fits its training set, the 20K/60K nets cannot fit theirs",
+      "mode": "test",
+      "proof": "tests/test_c48_evidence.py::test_c48_T3_connect4_accuracy_is_DATA_limited_every_net_improves_with_every_tripling_of_exact_labels",
+      "note": "",
+      "registered_at": "2026-09-26T04:50:53.525318+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_evidence.py::test_c48_T3_connect4_accuracy_is_DATA_limited_every_net_improves_with_every_tripling_of_exact_labels",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-26T04:50:54.251681+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T3_ceiling.json.gz",
+          "started": "2026-09-26T03:10:52+00:00"
+        },
+        {
+          "path": "evidence/c48_bank.json.gz",
+          "started": "2026-09-25T17:49:30+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c48_evidence.py": "62bad7eb5f3486eeb6ab2017323bdf5644c7c957324ae38cf8dae39542d7f345"
+      }
+    },
+    "h49": {
+      "id": "h49",
+      "claim": "\u00a7C.48 T4 (augment): the T2 recipe (R200S) with the process fixes on \u2014 a buffer of unique positions, a 30-epoch settling pass decaying the learning rate to 1e-5 \u2014 seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions (no averaging) in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation",
+      "note": "Step 3 of the smallest-setup programme: T2 (h45) was refuted with ~4 failures until FIFO eviction of a duplicate-heavy buffer; these are the two fixes T2 pointed at. Expected: supported.",
+      "registered_at": "2026-09-26T06:46:35.037022+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation",
+          "ok": false,
+          "detail": "\n\ntests/test_c48_settle_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation\n1 failed in 0.03s",
+          "drawn_at": "2026-09-26T07:17:53.496828+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T4_augment.json.gz",
+          "started": "2026-09-26T06:46:47+00:00"
+        },
+        {
+          "path": "evidence/c48_T4_no_augment.json.gz",
+          "started": "2026-09-26T06:46:47+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_settle.py": "16fa7ce02812d4e19548290dd70ea175de03104b3c6cc3d90eed33d7462ac311",
+        "tests/test_c48_settle_evidence.py": "d755d8111f8f22e2b12923caa961a7603dd5b187933499fdca756721d5e28304"
+      },
+      "inconclusive_proof": "tests/test_c48_settle_evidence.py::test_c48_T4_augment_is_undecidable"
+    },
+    "h50": {
+      "id": "h50",
+      "claim": "\u00a7C.48 T4 (no_augment): the same fixed process with NO symmetry anywhere, seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
+      "note": "Neither fix adds coverage (T2 self-play reached ~1,150 of 4,520 raw positions), so this is EXPECTED to stay refuted; run to measure what the fixes do without symmetry.",
+      "registered_at": "2026-09-26T06:46:35.088753+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
+          "ok": false,
+          "detail": "ests/test_c48_settle_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry\n1 failed in 0.03s",
+          "drawn_at": "2026-09-26T07:17:53.861842+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T4_augment.json.gz",
+          "started": "2026-09-26T06:46:47+00:00"
+        },
+        {
+          "path": "evidence/c48_T4_no_augment.json.gz",
+          "started": "2026-09-26T06:46:47+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_settle.py": "16fa7ce02812d4e19548290dd70ea175de03104b3c6cc3d90eed33d7462ac311",
+        "tests/test_c48_settle_evidence.py": "d755d8111f8f22e2b12923caa961a7603dd5b187933499fdca756721d5e28304"
+      },
+      "inconclusive_proof": "tests/test_c48_settle_evidence.py::test_c48_T4_no_augment_is_undecidable"
+    },
+    "h51": {
+      "id": "h51",
+      "claim": "\u00a7C.48 T1b (descriptive): canonicalising the input (position mapped to its smallest-key image under the verified isometries, move mapped back) cuts the smallest setup that holds perfect tic-tac-toe at every raw position from exact labels, 5/5 seeds, from 5,629 params (raw residual16) to 938 (canon_mlp32) \u2014 about 6x fewer; no smaller canon net is 5/5, and rule features (wins now / hands a win) make no setup 5/5",
+      "mode": "test",
+      "proof": "tests/test_c48_setups_evidence.py::test_c48_T1b_canonicalising_the_input_cuts_the_smallest_perfect_net_about_six_fold_from_5_6K_to_938",
+      "note": "Registered AFTER the data \u2014 descriptive, not a prediction. The user's thesis: a more complex setup can need fewer parameters. The canonicaliser costs 8 board transforms per decision \u2014 counted by the deferred total-compute objective, not here.",
+      "registered_at": "2026-09-26T06:47:54.125445+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_setups_evidence.py::test_c48_T1b_canonicalising_the_input_cuts_the_smallest_perfect_net_about_six_fold_from_5_6K_to_938",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-09-26T06:47:54.410247+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T1b_setups.json.gz",
+          "started": "2026-09-26T06:30:00+00:00"
+        },
+        {
+          "path": "evidence/c48_T1_smallest.json.gz",
+          "started": "2026-09-25T12:17:27+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c48_setups_evidence.py": "30aac4f3bac0bf0436b9d1efafd4bb5bc3d59022d4f27a3d3118f3460a19a1be"
+      }
     }
   }
 }
