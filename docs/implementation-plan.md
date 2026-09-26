@@ -3825,3 +3825,61 @@ h49/h50, PRE-REGISTERED 2026-09-26, VERIFIED the same day).
   smaller scale. Not yet tested: the per-seed visited sets were not stored, so "never in the buffer" is not proven.
 - **Next A/B candidate: coverage.** Solver-free ways to put unvisited positions in the buffer: deeper siblings,
   more random opening plies, or relabelling a rule-enumerated frontier.
+
+**T5: coverage levers** (`harness/neural.py`, `harness/transfer.py`, `harness/floor_coverage.py` pinned,
+`scripts/coverage_floor.py`; h52-h57, PRE-REGISTERED 2026-09-26, VERIFIED the same day).
+- **Bug found and fixed at the root.** Without augmentation, siblings were de-duplicated by the CANONICAL key. A
+  sibling whose mirror image was recorded never entered training, although a no-augment net must learn every
+  orientation separately. The sibling key now follows augmentation: canonical with it, the raw state key without.
+  The augment path is unchanged (pinned weight hashes). This affected T2/T4's no-augment arms (h46, h50).
+- **New knob `sibling_depth`** (default 1, which is exactly the old siblings). Ring k is the new non-terminal children
+  of ring k-1, not recorded and not in an earlier ring; the holdout is respected. It is checked against an independent
+  breadth-first reference to depth 4, and history records `sibling_rings`.
+- **The recorder** now logs every sibling set (observation only). The driver therefore knows each net's TRAINED set:
+  all self-play positions (the unique buffer never evicts here; the driver refuses if it does) plus the last sibling
+  set, all images of each with augmentation.
+- **Arms** (T4 recipe + one lever; seeds 311-320, paired with T4):
+
+| arm | lever | control | claim |
+|---|---|---|---|
+| augment_sib2 | siblings 2 moves deep | T4 augment (6/10) | h52 |
+| augment_open6 | up to 6 random opening moves | T4 augment | h53 |
+| no_augment_rawkey | the key fix alone | T4 no_augment (0/10) | h54 |
+| no_augment_sib2 | key fix + 2-deep siblings | no_augment_rawkey | h55 |
+| no_augment_open6 | key fix + 6 opening moves | no_augment_rawkey | h56 |
+
+  - Bars as T4: ≥8/10 raw-perfect after the settle supports; ≤5 refutes.
+  - **Reproduction gate:** T4's augment seed 311 must rebuild bit-for-bit under the T5 code, or every verdict is
+    NOT_RUN.
+- **h57, the mechanism** (tests T4's post-hoc reading). Pooled over all 50 final nets, with the net as the unit:
+  untrained positions fail at a higher rate than trained ones. Supported if a one-sided sign test gives p < 0.01 over
+  ≥10 failing nets AND the pooled rate ratio is ≥5. Refuted if the ratio is ≤2.
+
+**T5 result (verified 2026-09-26; reproduction gate passed: T4 augment seed 311 rebuilt bit-for-bit).**
+
+| arm | raw-perfect after the settle | final failures by seed | positions trained (of 4,520) | claim |
+|---|---|---|---|---|
+| augment_sib2 | **10/10** | all 0 (also 10/10 BEFORE the settle) | ~4,500 | **h52 SUPPORTED** |
+| augment_open6 | 3/10 | 3, 0, 5, 0, 1, 0, 1, 12, 4, 6 | ~4,190 | h53 refuted |
+| no_augment_rawkey | 0/10 | 20-48 (T4: 157-224) | ~3,060 | h54 refuted |
+| no_augment_sib2 | 5/10 | 0, 0, 1, 0, 1, 2, 1, 0, 0, 1 | ~4,360 | h55 refuted, exactly at the bar |
+| no_augment_open6 | 0/10 | 26-84 | ~2,960 | h56 refuted |
+
+- **h57 (mechanism): SUPPORTED, decisively.** In all 32 of 32 failing nets, untrained positions fail at the higher
+  rate (sign test p = 2e-10). The pooled rate ratio is ~249: 2.7% of untrained positions fail against 0.01% of
+  trained ones. 98.6-100% of every arm's failures are on positions the net never trained on.
+- **The generic process now reaches perfect tic-tac-toe.** With augmentation and 2-deep siblings, 10/10 seeds are
+  raw-perfect at all 4,520 positions: no averaging, no canonical images, solver-free labels (200-sim search), and the
+  same cost as T4 (~14 min per seed). Paired with T4, the 4 seeds T4 left failing (6, 1, 4, 2) are all 0. The settle
+  is not needed here: all 10 were already perfect before it.
+- **The sibling-key bug mattered.** Fixing it alone cut no-augment failures ~7-fold (≈200 → 20-48).
+- **More random openings do not help.** They move coverage to later positions but lose early ones: augment_open6 is
+  worse than T4 (3/10 against 6/10).
+- **Without symmetry** 2-deep siblings get 5/10, with 0-2 failures, all on the ~160 positions still untrained.
+  Coverage is still the whole story.
+- **Caveat for transfer.** At this size the rings nearly enumerate the game (2-deep siblings plus augmentation train
+  ~4,500 of 4,520). Connect-4 cannot be enumerated, so the lesson that transfers is "the failures are the untrained
+  positions". The lever, blind rings, does not transfer. Connect-4 needs coverage aimed where the net is likely wrong.
+- **Suite fix found while verifying.** tests/conftest.py matched register proofs by function name without the
+  parameter id, so parametrized proofs (one per arm) never followed their own claim. It now matches the full node
+  name, with a test.

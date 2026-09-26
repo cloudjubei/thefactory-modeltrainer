@@ -1757,3 +1757,152 @@ def test_c48_self_agreement_counts_a_tie_in_the_label_and_never_an_illegal_argma
     _self_agreement(net, g, rows, "cpu")
     assert net.modes == ["eval", False] and not net.training
     assert _self_agreement(net, g, [], "cpu") == {"self_agreement": 0.0, "self_agreement_positions": 0}
+
+
+# §C.48 coverage: siblings deeper than one move, and a sibling key that follows augmentation — without augmentation
+# every orientation is its own position, so a sibling whose MIRROR was recorded is still unseen.
+
+def _c48_buffer_states():
+    import random
+
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    r = random.Random(0)
+    root = g.initial_state(r)
+    a = g.step(root, 0, r)
+    return g, [root, a, g.step(a, 4, r)]
+
+
+@pytest.mark.parametrize("key", ["canonical_key", "state_key"])
+def test_c48_siblings_at_depth_one_are_exactly_the_one_ply_siblings(key):
+    from harness.neural import one_ply_siblings, sibling_positions
+
+    g, states = _c48_buffer_states()
+    fn = getattr(g, key)
+    for hold in (None, {"mod": 3, "salt": "s"}):
+        got, stats = sibling_positions(g, states, fn, hold, 1)
+        want, want_stats = one_ply_siblings(g, states, fn, hold)
+        assert got == want and stats == {**want_stats, "rings": [len(want)]}
+
+
+@pytest.mark.parametrize("key", ["canonical_key", "state_key"])
+def test_c48_siblings_at_depth_two_add_the_new_children_of_the_first_ring_in_order(key):
+    from harness.neural import one_ply_siblings, sibling_positions
+
+    g, states = _c48_buffer_states()
+    fn = getattr(g, key)
+    ring1, _ = one_ply_siblings(g, states, fn)
+    known = {fn(s) for s in states} | {fn(s) for s in ring1}
+    expected = list(ring1)
+    for s in ring1:
+        for a in g.legal_actions(s):
+            c = g.step(s, a)
+            if not g.is_terminal(c) and fn(c) not in known:
+                known.add(fn(c))
+                expected.append(c)
+    got, stats = sibling_positions(g, states, fn, None, 2)
+    assert [fn(s) for s in got] == [fn(s) for s in expected] and len(got) > len(ring1)
+    assert stats["added"] == len(got) and stats["rings"] == [len(ring1), len(got) - len(ring1)]
+
+
+def test_c48_deeper_rings_respect_the_holdout():
+    import hashlib
+
+    from harness.neural import sibling_positions
+
+    g, states = _c48_buffer_states()
+    hold = {"mod": 3, "salt": "s"}
+    got, stats = sibling_positions(g, states, g.state_key, hold, 3)
+    assert got and stats["holdout_skipped"] > 0
+    assert not any(int(hashlib.sha256(f"s:{g.state_key(c)!r}".encode()).hexdigest(), 16) % 3 == 0 for c in got)
+
+
+@pytest.mark.parametrize("depth", [0, -1])
+def test_c48_a_sibling_depth_below_one_is_refused(depth):
+    from harness.neural import sibling_positions
+
+    g, states = _c48_buffer_states()
+    with pytest.raises(ValueError, match="depth"):
+        sibling_positions(g, states, g.state_key, None, depth)
+
+
+def test_c48_sibling_depth_needs_siblings_on():
+    with pytest.raises(ValueError, match="sibling_depth"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, sibling_depth=2)
+
+
+@pytest.mark.parametrize("augment,key", [(True, "canonical_key"), (False, "state_key")])
+def test_c48_the_sibling_key_follows_augmentation(monkeypatch, augment, key):
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+
+    seen = []
+    real = neural.sibling_positions
+
+    def spy(game, states, key_fn, holdout, depth):
+        seen.append((key_fn, depth))
+        return real(game, states, key_fn, holdout, depth)
+    monkeypatch.setattr(neural, "sibling_positions", spy)
+    g = TicTacToe()
+    train_alphazero(g, iterations=2, selfplay_games=2, sims=4, epochs=1, net_arch=_C48_ARCH, augment=augment,
+                    seed=5, reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True, sibling_depth=2)
+    _g, states = _c48_buffer_states()
+    mirrored = g.step(states[0], 2, __import__("random").Random(0))
+    assert seen and all(d == 2 for _k, d in seen)
+    assert all(k(mirrored) == getattr(g, key)(mirrored) for k, _d in seen)
+    assert (g.canonical_key(mirrored) == g.canonical_key(states[1])) and (g.state_key(mirrored) != g.state_key(states[1]))
+
+
+def _c48_reference_rings(g, states, fn, hold_fn, depth):
+    recorded = {fn(s) for s in states}
+    known, out, frontier, held_edges = set(recorded), [], list(states), 0
+    for _ in range(depth):
+        ring = []
+        parents = {fn(s) for s in frontier}
+        for s in frontier:
+            for a in g.legal_actions(s):
+                c = g.step(s, a)
+                if g.is_terminal(c) or fn(c) in parents:
+                    continue
+                if hold_fn(fn(c)):
+                    held_edges += 1
+                    continue
+                if fn(c) not in known:
+                    known.add(fn(c))
+                    ring.append(c)
+        out += ring
+        frontier = ring
+    return out, held_edges
+
+
+@pytest.mark.parametrize("depth", [1, 2, 3, 4])
+@pytest.mark.parametrize("key", ["canonical_key", "state_key"])
+def test_c48_every_ring_matches_an_independent_breadth_first_reference(depth, key):
+    import hashlib
+    import random
+
+    from harness.neural import sibling_positions
+
+    g, states = _c48_buffer_states()
+    states = states + [g.step(states[-1], 8, random.Random(0))]
+    fn = getattr(g, key)
+    got, stats = sibling_positions(g, states, fn, None, depth)
+    want, _ = _c48_reference_rings(g, states, fn, lambda k: False, depth)
+    assert [fn(s) for s in got] == [fn(s) for s in want] and sum(stats["rings"]) == len(got)
+    hold = {"mod": 3, "salt": "s"}
+    in_hold = lambda k: int(hashlib.sha256(f"s:{k!r}".encode()).hexdigest(), 16) % 3 == 0
+    got, stats = sibling_positions(g, states, fn, hold, depth)
+    want, held_edges = _c48_reference_rings(g, states, fn, in_hold, depth)
+    assert [fn(s) for s in got] == [fn(s) for s in want]
+    assert stats["holdout_skipped"] == held_edges > 0
+
+
+@pytest.mark.parametrize("depth", [1, 2])
+def test_c48_history_records_each_sibling_ring_only_when_siblings_are_on(depth):
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True,
+                                     sibling_depth=depth)
+    assert history[0]["sibling_rings"] == []
+    assert all(len(h["sibling_rings"]) == depth and sum(h["sibling_rings"]) == h["siblings"] for h in history[1:])
+    assert "sibling_rings" not in _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)[1][-1]

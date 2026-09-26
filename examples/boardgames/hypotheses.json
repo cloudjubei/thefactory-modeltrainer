@@ -1816,6 +1816,304 @@
       "pins": {
         "tests/test_c48_setups_evidence.py": "30aac4f3bac0bf0436b9d1efafd4bb5bc3d59022d4f27a3d3118f3460a19a1be"
       }
+    },
+    "h52": {
+      "id": "h52",
+      "claim": "\u00a7C.48 T5 (augment_sib2): with siblings two moves deep, T4's fixed process (unique buffer + settle), seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_sib2]",
+      "note": "Control: T4 augment (6/10), reproduced bit-for-bit under the T5 code. Expected: supported.",
+      "registered_at": "2026-09-26T12:50:36.145592+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_sib2]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-26T14:42:07.795890+00:00"
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_sib2]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-26T14:42:20.973756+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_arm_is_undecidable[augment_sib2]"
+    },
+    "h53": {
+      "id": "h53",
+      "claim": "\u00a7C.48 T5 (augment_open6): with up to 6 random opening moves instead of 2, T4's fixed process (unique buffer + settle), seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]",
+      "note": "Control: T4 augment (6/10). Openings reach the late positions where the residual failures sit.",
+      "registered_at": "2026-09-26T12:50:36.194014+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]",
+          "ok": false,
+          "detail": "     + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-26T14:42:08.027287+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_arm_is_undecidable[augment_open6]"
+    },
+    "h54": {
+      "id": "h54",
+      "claim": "\u00a7C.48 T5 (no_augment_rawkey): without augmentation, with the sibling key fixed to the raw state key (siblings one move deep), T4's fixed process (unique buffer + settle), seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]",
+      "note": "The key fix alone \u2014 T4 deduplicated siblings by canonical key without augmentation. Expected: refuted (fewer failures than T4's ~200, still far from 0).",
+      "registered_at": "2026-09-26T12:50:36.240499+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]",
+          "ok": false,
+          "detail": " + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-26T14:42:08.426250+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_arm_is_undecidable[no_augment_rawkey]"
+    },
+    "h55": {
+      "id": "h55",
+      "claim": "\u00a7C.48 T5 (no_augment_sib2): without augmentation, raw sibling key, siblings two moves deep, T4's fixed process (unique buffer + settle), seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]",
+      "note": "Control: no_augment_rawkey.",
+      "registered_at": "2026-09-26T12:50:36.287984+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]",
+          "ok": false,
+          "detail": "   + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-26T14:42:08.849821+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_arm_is_undecidable[no_augment_sib2]"
+    },
+    "h56": {
+      "id": "h56",
+      "claim": "\u00a7C.48 T5 (no_augment_open6): without augmentation, raw sibling key, up to 6 random opening moves, T4's fixed process (unique buffer + settle), seeds 311-320, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]",
+      "note": "Control: no_augment_rawkey.",
+      "registered_at": "2026-09-26T12:50:36.335553+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]",
+          "ok": false,
+          "detail": "  + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-26T14:42:09.260406+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_arm_is_undecidable[no_augment_open6]"
+    },
+    "h57": {
+      "id": "h57",
+      "claim": "\u00a7C.48 T5 mechanism: over all 50 T5 final nets (net as the unit, nets with >= 1 failure), untrained positions fail at a higher rate than trained ones \u2014 one-sided sign test p < 0.01 over >= 10 failing nets AND pooled rate ratio >= 5; refuted at pooled ratio <= 2; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_failures_left_concentrate_on_positions_the_net_was_never_trained_on",
+      "note": "Tests the post-hoc reading of T4: the residual failures are COVERAGE, not labels or flicker.",
+      "registered_at": "2026-09-26T12:50:36.384238+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_failures_left_concentrate_on_positions_the_net_was_never_trained_on",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-26T14:42:09.650488+00:00"
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_failures_left_concentrate_on_positions_the_net_was_never_trained_on",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-26T14:42:21.198713+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c48_T5_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_rawkey.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_sib2.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_no_augment_open6.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        },
+        {
+          "path": "evidence/c48_T5_repro.json.gz",
+          "started": "2026-09-26T12:50:50+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_coverage.py": "2de74c697024a85e4397c529afe6a9788310b409d6cbc08edcb347cb32aa5b9f",
+        "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
+      },
+      "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_mechanism_is_undecidable"
     }
   }
 }

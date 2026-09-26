@@ -728,6 +728,30 @@ def one_ply_siblings(game: Game, states: list, key_fn, holdout: dict | None = No
     return out, stats
 
 
+def sibling_positions(game: Game, states: list, key_fn, holdout: dict | None, depth: int) -> tuple[list, dict]:
+    """§C.48 coverage: siblings out to `depth` moves off the recorded positions. Ring 1 is exactly
+    `one_ply_siblings`; each further ring is the new non-terminal children of the ring before it, in the same fixed
+    order, keeping only keys not recorded, not in an earlier ring and not held out. Pure and rng-free. The counts
+    add up over rings, `added` counts distinct keys and `rings` the size of each ring."""
+    if depth < 1:
+        raise ValueError(f"sibling depth must be >= 1, got {depth}")
+    out, stats = one_ply_siblings(game, states, key_fn, holdout)
+    rings = [len(out)]
+    known = {key_fn(st) for st in states} | {key_fn(st) for st in out}
+    frontier = out
+    for _ in range(depth - 1):
+        children, ring_stats = one_ply_siblings(game, frontier, key_fn, holdout)
+        fresh = [c for c in children if key_fn(c) not in known]
+        stats["recorded_skipped"] += ring_stats["recorded_skipped"] + len(children) - len(fresh)
+        stats["terminal_skipped"] += ring_stats["terminal_skipped"]
+        stats["holdout_skipped"] += ring_stats["holdout_skipped"]
+        known |= {key_fn(c) for c in fresh}
+        out = out + fresh
+        rings.append(len(fresh))
+        frontier = fresh
+    return out, {**stats, "added": len(out), "rings": rings}
+
+
 def n_step_value_targets(vt: list[float], outcome_for: list[float], n: int) -> list[float]:
     """The n-step / TD value target (MuZero) — the fix for opening value-label CONTAMINATION. The raw-MC target
     labels every position with the FINAL game outcome, so an opening gets blamed for a blunder 20 plies later. The
@@ -1464,6 +1488,7 @@ def train_alphazero(
     settle_epochs: int = 0,
     settle_lr_final: float = 1e-5,
     record_self_agreement: bool = False,
+    sibling_depth: int = 1,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1517,6 +1542,8 @@ def train_alphazero(
     if (buffer_unique or settle_epochs > 0 or record_self_agreement) and reanalyze_frac <= 0.0:
         raise ValueError("buffer_unique / settle_epochs / record_self_agreement act on the reanalyze state buffer — "
                          "set reanalyze_frac")
+    if sibling_depth != 1 and not reanalyze_siblings:
+        raise ValueError("sibling_depth acts only on siblings — set reanalyze_siblings")
     if (steps_matched or sibling_holdout is not None) and not reanalyze_siblings:
         raise ValueError("steps_matched / sibling_holdout act only on siblings — set reanalyze_siblings")
     if sibling_holdout is not None and int(sibling_holdout.get("mod", 0)) < 2:
@@ -1691,9 +1718,9 @@ def train_alphazero(
                 reanalyzed = len(relabelled)
                 relabel_s = time.time() - t_relabel
                 if reanalyze_siblings:
-                    key_fn = getattr(game, "canonical_key", None) or (lambda st: game.state_key(st))
-                    sibs, sib_stats = one_ply_siblings(game, [st for (st, *_rest) in state_buffer], key_fn,
-                                                       sibling_holdout)
+                    key_fn = (game.canonical_key if augment and hasattr(game, "canonical_key") else game.state_key)
+                    sibs, sib_stats = sibling_positions(game, [st for (st, *_rest) in state_buffer], key_fn,
+                                                        sibling_holdout, sibling_depth)
                     t_sib = time.time()
                     if policy_target_fn is not None:
                         sib_rows = [(encode(game, st), _checked_policy_target(game, st, policy_target_fn), float("nan"))
@@ -1707,6 +1734,7 @@ def train_alphazero(
             buffer = sp_aug + sib_aug
             reanalyze_note = {"selfplay_states": len(fresh_s), "state_buffer": len(state_buffer), "evicted": evicted,
                               **({"merged": merged} if buffer_unique else {}), "siblings": sib_stats["added"],
+                              **({"sibling_rings": sib_stats.get("rings", [])} if reanalyze_siblings else {}),
                               "sibling_terminal_skipped": sib_stats["terminal_skipped"],
                               "sibling_recorded_skipped": sib_stats["recorded_skipped"],
                               "sibling_holdout_skipped": sib_stats["holdout_skipped"],

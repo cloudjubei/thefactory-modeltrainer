@@ -26,7 +26,8 @@ VISITED, ONE_MOVE, TWO_MOVES, FURTHER = "visited", "one_move_off", "two_moves_of
 def record_selfplay_states(game, probe: dict | None = None):
     """While active, every self-play game `harness.neural.self_play_game` plays appends one row to the yielded
     log's `games`: {"pass": the number of `train_net` calls made before the game, "states": the positions the
-    game returned as training examples}. Random opening plies are not training examples and are not recorded.
+    game returned as training examples}. Random opening plies are not training examples and are not recorded. Every
+sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
 
     With a `probe` ({"x": encoded positions, "legal": bool mask, "optimal": one set of moves per position}, built
     before training so nothing here needs a solver), every pass appends the raw policy's accuracy on it to
@@ -39,8 +40,10 @@ def record_selfplay_states(game, probe: dict | None = None):
     wrapped functions are restored however the block exits."""
     import harness.neural as neural
 
-    log: dict = {"game": getattr(game, "name", type(game).__name__), "games": [], "passes": 0, "probe": []}
-    original_play, original_train = neural.self_play_game, neural.train_net
+    log: dict = {"game": getattr(game, "name", type(game).__name__), "games": [], "siblings": [], "passes": 0,
+                 "probe": []}
+    original_play, original_train, original_siblings = (neural.self_play_game, neural.train_net,
+                                                         neural.sibling_positions)
 
     def play(*args, **kwargs):
         asked = kwargs.get("return_states", False)
@@ -55,11 +58,17 @@ def record_selfplay_states(game, probe: dict | None = None):
             log["probe"].append(policy_accuracy(args[0] if args else kwargs["net"], probe))
         return result
 
-    neural.self_play_game, neural.train_net = play, train
+    def siblings(*args, **kwargs):
+        result = original_siblings(*args, **kwargs)
+        log["siblings"].append({"pass": log["passes"], "states": list(result[0])})
+        return result
+
+    neural.self_play_game, neural.train_net, neural.sibling_positions = play, train, siblings
     try:
         yield log
     finally:
-        neural.self_play_game, neural.train_net = original_play, original_train
+        neural.self_play_game, neural.train_net, neural.sibling_positions = (original_play, original_train,
+                                                                             original_siblings)
 
 
 def policy_accuracy(net, probe: dict) -> float:

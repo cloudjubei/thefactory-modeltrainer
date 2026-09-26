@@ -124,6 +124,30 @@
       "sha256": "95ea0c1ccb65352c5456c2e1aee6891b07870184455d82192e7e7a4a275b4292",
       "started": "2026-09-26T06:46:47+00:00"
     },
+    "c48_T5_augment_open6.json.gz": {
+      "sha256": "d077e387e638ebcbef3a250ef39d7276a7484cd28cf23a536683354c5fc51150",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
+    "c48_T5_augment_sib2.json.gz": {
+      "sha256": "379291bef3e06a9c0563eb25dfa1362280bae2a4b776f6d7632962108a5a4336",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
+    "c48_T5_no_augment_open6.json.gz": {
+      "sha256": "12c22d4fe372c50a692d8c0f988ad39c4fe0579efc7f4fcf5f79444794859884",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
+    "c48_T5_no_augment_rawkey.json.gz": {
+      "sha256": "2ff403faf7d58ffe3f6ed0c12a22b4a3e08069561509ddf58bf71f82dbc7ecc1",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
+    "c48_T5_no_augment_sib2.json.gz": {
+      "sha256": "db3bfd038f4ac47b3ffe2b02d08628866f86eaffc57e3774e8e1055a15280c28",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
+    "c48_T5_repro.json.gz": {
+      "sha256": "b90a432b2e24c05ef2bfc6a8fe3136d5bf7e416153b01c1742ca31af686f4118",
+      "started": "2026-09-26T12:50:50+00:00"
+    },
     "c48_bank.json.gz": {
       "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
       "started": "2026-09-25T17:49:30+00:00"

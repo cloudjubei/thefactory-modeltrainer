@@ -821,7 +821,7 @@ def test_only_a_test_backed_claim_takes_pins(tmp_path):
         _reg(tmp_path).register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", pins=[judge])
 
 
-def _suite_on(tmp_path, claims, bodies, register_proof=False):
+def _suite_on(tmp_path, claims, bodies, register_proof=False, source=None):
     """Run pytest (with the suite's conftest) over a probe test file, against a register holding `claims` — each
     (proof, inconclusive_proof, recorded ok, recorded inconclusive) over the probe's test names."""
     import os
@@ -829,7 +829,8 @@ def _suite_on(tmp_path, claims, bodies, register_proof=False):
     import sys
 
     test = tmp_path / "test_probe_claims.py"
-    test.write_text("\n\n".join(f"def {name}():\n    assert {'True' if ok else 'False'}" for name, ok in bodies.items()))
+    test.write_text(source or "\n\n".join(f"def {name}():\n    assert {'True' if ok else 'False'}"
+                                           for name, ok in bodies.items()))
     hyps = {}
     for i, (proof, inc, ok, inconclusive, *earlier) in enumerate(claims):
         entries = []
@@ -888,6 +889,16 @@ def test_the_LAST_recorded_verification_decides_what_the_suite_expects(tmp_path)
     code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", True, None, (False, True))],
                               {"test_holds": True, "test_undecidable": False})
     assert code == 0 and summary.startswith("1 passed, 1 skipped")
+
+
+def test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm(tmp_path):
+    """One parametrized function can back several claims, one per arm; each arm's node must follow its own claim."""
+    source = ("import pytest\n\n\n@pytest.mark.parametrize('arm', ['a', 'b'])\ndef test_arm(arm):\n"
+              "    assert arm == 'a'\n\n\n@pytest.mark.parametrize('arm', ['a', 'b'])\ndef test_und(arm):\n"
+              "    assert False\n")
+    code, summary = _suite_on(tmp_path, [("test_arm[a]", "test_und[a]", True, None),
+                                         ("test_arm[b]", "test_und[b]", False, False)], {}, source=source)
+    assert code == 0 and summary.startswith("1 passed, 1 skipped, 2 xfailed")
 
 
 def test_tests_the_register_does_not_name_are_untouched(tmp_path):

@@ -312,3 +312,21 @@ def test_rings_at_a_ply_are_the_full_neighbourhood_restricted_to_that_ply(line):
         assert set(r["one_move_off"]) == {k for k in hood["one_move_off"] if G.ply(keyed[k]) == ply}
         assert set(r["two_moves_off"]) == {k for k in hood["two_moves_off"] if G.ply(keyed[k]) == ply}
         assert all(G.ply(st) == ply for ring in r.values() for st in ring.values())
+
+
+def test_the_recorder_logs_every_sibling_set_the_trainer_relabels_with_its_pass():
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+    from harness.transfer import record_selfplay_states
+
+    g = TicTacToe()
+    kw = dict(iterations=3, selfplay_games=2, sims=4, epochs=1, net_arch={"channels": 4}, augment=False, seed=3,
+              reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True)
+    with record_selfplay_states(g) as log:
+        net, history = train_alphazero(g, **kw)
+    assert [row["pass"] for row in log["siblings"]] == [1, 2]
+    assert [len(row["states"]) for row in log["siblings"]] == [h["siblings"] for h in history[1:]]
+    plain, _ = train_alphazero(g, **kw)
+    import torch
+
+    assert all(torch.equal(a, b) for a, b in zip(net.state_dict().values(), plain.state_dict().values()))

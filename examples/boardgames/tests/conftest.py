@@ -67,7 +67,7 @@ def pytest_collection_modifyitems(config, items):
     if not recorded:
         return
     for item in items:
-        outcome = recorded.get((Path(str(item.path)).resolve(), getattr(item, "originalname", item.name)))
+        outcome = recorded.get((Path(str(item.path)).resolve(), item.name))
         if outcome is None:
             continue
         kind, why = outcome
