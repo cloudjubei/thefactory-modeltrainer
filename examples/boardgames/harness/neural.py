@@ -73,6 +73,8 @@ def arch_for_game(net_arch: dict | None, game: Game) -> dict:
     mask = getattr(game, "valid_mask", None)
     if mask is not None:
         arch.setdefault("valid_mask", list(mask))
+    if arch.get("canonical_input") and "symmetries" not in arch and hasattr(game, "symmetries"):
+        arch["symmetries"] = [[list(c), list(a)] for c, a in game.symmetries()]
     return arch
 
 
@@ -135,10 +137,17 @@ class Connect4Net(nn.Module):
     def __init__(self, channels: int = 32, blocks: int = 0, residual: bool = False,
                  batchnorm: bool = False, head_hidden: int = 0, input_planes: int = 2,
                  global_pool: bool = False, value_bins: int = 0, aux_heads: bool = False,
-                 board_shape=(ROWS, COLS), num_actions: int = COLS, valid_mask=None):
+                 board_shape=(ROWS, COLS), num_actions: int = COLS, valid_mask=None,
+                 mlp_hidden: list[int] | None = None, canonical_input: bool = False, symmetries=None):
         super().__init__()
         if aux_heads and not residual:
             raise ValueError("aux_heads requires the residual tower (spatial trunk features)")
+        if mlp_hidden is not None and (not mlp_hidden or any(int(h) < 1 for h in mlp_hidden) or residual or blocks
+                                       or value_bins or aux_heads or global_pool or batchnorm or head_hidden):
+            raise ValueError(f"mlp_hidden {mlp_hidden} needs positive widths and no conv-tower options — the MLP "
+                             "body is a plain tower with linear policy and tanh value heads")
+        if canonical_input and aux_heads:
+            raise ValueError("canonical_input cannot serve aux heads — their per-cell targets are not mapped back")
         # §C.21 Increment 1: the board and the action count are part of the ARCH, not module constants, so one
         # net class serves every game; the defaults are Connect-4, so every existing checkpoint builds identically.
         self.board_h, self.board_w = int(board_shape[0]), int(board_shape[1])
@@ -157,6 +166,10 @@ class Connect4Net(nn.Module):
                      "global_pool": bool(global_pool), "value_bins": int(value_bins), "aux_heads": bool(aux_heads),
                      "board_shape": [self.board_h, self.board_w], "num_actions": self.num_actions,
                      "valid_mask": None if valid_mask is None else [int(m) for m in valid_mask]}
+        if mlp_hidden is not None:
+            self.arch["mlp_hidden"] = [int(h) for h in mlp_hidden]
+        if canonical_input:
+            self._init_canonical(symmetries, input_planes, cells)
         if valid_mask is not None:  # only when a game pads its board — legacy checkpoints carry no such buffer
             self.register_buffer("valid_mask", torch.tensor([float(m) for m in valid_mask])
                                  .reshape(1, 1, self.board_h, self.board_w))
@@ -165,6 +178,16 @@ class Connect4Net(nn.Module):
         if self.value_bins > 0:
             self.register_buffer("value_support", torch.linspace(-1.0, 1.0, self.value_bins))
         v_out = self.value_bins if self.value_bins > 0 else 1
+        self.mlp_body = None
+        if mlp_hidden is not None:
+            layers, width = [], int(input_planes) * cells
+            for h in mlp_hidden:
+                layers += [nn.Linear(width, int(h)), nn.ReLU()]
+                width = int(h)
+            self.mlp_body = nn.Sequential(*layers)
+            self.policy_head = nn.Linear(width, self.num_actions)
+            self.value_head = nn.Linear(width, v_out)
+            return
         if not self.residual:
             self.conv1 = nn.Conv2d(input_planes, channels, 3, padding=1)
             self.conv2 = nn.Conv2d(channels, channels, 3, padding=1)
@@ -186,6 +209,44 @@ class Connect4Net(nn.Module):
             self.own_head = nn.Conv2d(channels, 1, 1)
             self.reply_head = _mlp(2 * cells, head_hidden, self.num_actions)
 
+    def _init_canonical(self, symmetries, planes: int, cells: int) -> None:
+        """§C.49: the net takes every input in ONE standardised orientation — the image, under the game's verified
+        symmetries, with the smallest fixed-weight key — and maps its policy back, so it is equivariant by
+        construction and never has to learn an orientation twice."""
+        perms = [(list(c), list(a)) for c, a in (symmetries or [])]
+        if len(perms) < 2 or any(len(c) != cells or sorted(c) != list(range(cells)) or len(a) != self.num_actions
+                                 or sorted(a) != list(range(self.num_actions)) for c, a in perms):
+            raise ValueError("canonical_input needs the game's verified symmetries: at least two (cell_perm, "
+                             f"action_perm) pairs over {cells} cells and {self.num_actions} actions")
+        self.arch["canonical_input"] = True
+        self.arch["symmetries"] = [[c, a] for c, a in perms]
+        self.register_buffer("canon_cells", torch.tensor([c for c, _a in perms]), persistent=False)
+        self.register_buffer("canon_actions", torch.tensor([a for _c, a in perms]), persistent=False)
+        weights = torch.rand(planes * cells, generator=torch.Generator().manual_seed(20260927), dtype=torch.float64)
+        self.register_buffer("canon_weights", weights, persistent=False)
+
+    def canonical_images(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """(the standardised image of each input, a [batch, symmetries] mask of the symmetries that produce it).
+        Several symmetries produce it exactly when the position is symmetric."""
+        b, planes = x.shape[0], x.shape[1]
+        images = x.reshape(b, planes, -1)[:, :, self.canon_cells].permute(0, 2, 1, 3)
+        keys = (images.reshape(b, images.shape[1], -1).double() * self.canon_weights).sum(-1)
+        tied = keys == keys.min(dim=1, keepdim=True).values
+        chosen = images[torch.arange(b), tied.int().argmax(dim=1)].reshape(x.shape)
+        return chosen, tied
+
+    def _map_back(self, logits: torch.Tensor, tied: torch.Tensor) -> torch.Tensor:
+        """The raw-frame policy: the standardised-frame logits mapped back through each symmetry that produced the
+        standardised image, averaged. Summed in sorted order, so a symmetric position gets bit-identical output
+        whichever of its orientations came in."""
+        b, g, n = logits.shape[0], self.canon_actions.shape[0], logits.shape[1]
+        every = torch.zeros(b, g, n, dtype=logits.dtype, device=logits.device).scatter(
+            2, self.canon_actions.unsqueeze(0).expand(b, g, n), logits.unsqueeze(1).expand(b, g, n))
+        every = every.masked_fill(~tied.unsqueeze(2), float("inf")).sort(dim=1).values
+        count = tied.sum(dim=1)
+        total = every.masked_fill(torch.isinf(every), 0.0).cumsum(dim=1)[torch.arange(b), count - 1]
+        return total / count.unsqueeze(1).to(logits.dtype)
+
     def _body(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Residual tower → (policy features, value features, SPATIAL trunk) — the aux heads read the trunk."""
         h = self.stem(x)
@@ -204,6 +265,16 @@ class Connect4Net(nn.Module):
 
     def _trunk(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Shared body → (policy logits, RAW value-head output: scalar pre-tanh, or K bin logits)."""
+        if self.arch.get("canonical_input"):
+            chosen, tied = self.canonical_images(x)
+            logits, value = self._raw_trunk(chosen)
+            return self._map_back(logits, tied), value
+        return self._raw_trunk(x)
+
+    def _raw_trunk(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.mlp_body is not None:
+            h = self.mlp_body(x.flatten(1))
+            return self.policy_head(h), self.value_head(h)
         if not self.residual:
             h = F.relu(self.conv1(x))
             h = F.relu(self.conv2(h))
@@ -1528,6 +1599,10 @@ def train_alphazero(
     # §C.8 #4: an aux-headed net auto-records its own targets in self-play (no extra knob to forget); the
     # reanalyze state-buffer path drops aux fields, so the combination is refused rather than silently degraded.
     aux_on = bool(net.arch.get("aux_heads", False))
+    canonical = bool(net.arch.get("canonical_input", False))
+    if canonical and augment:
+        raise ValueError("a canonical_input net sees every orientation as one input — augment would only duplicate "
+                         "its training rows")
     if aux_on and reanalyze_frac > 0.0:
         raise ValueError("aux_heads + reanalyze_frac are not combinable (the state buffer drops aux targets)")
     # §C.45: `reanalyze_sims` relabels the buffer with its OWN search budget while self-play keeps `sims` — the one
@@ -1679,10 +1754,11 @@ def train_alphazero(
                 eg_visited.extend(s for (s, *_rest) in fresh_s)
             selfplay_s = time.time() - t_selfplay
             if buffer_unique:
-                held = {game.state_key(row[0]): row for row in state_buffer}
+                row_key = game.canonical_key if canonical else game.state_key
+                held = {row_key(row[0]): row for row in state_buffer}
                 for row in fresh_s:
-                    held.pop(game.state_key(row[0]), None)
-                    held[game.state_key(row[0])] = row
+                    held.pop(row_key(row[0]), None)
+                    held[row_key(row[0])] = row
                 merged = len(state_buffer) + len(fresh_s) - len(held)
                 evicted = max(0, len(held) - buffer_cap)
                 state_buffer = list(held.values())[-buffer_cap:]
@@ -1718,7 +1794,8 @@ def train_alphazero(
                 reanalyzed = len(relabelled)
                 relabel_s = time.time() - t_relabel
                 if reanalyze_siblings:
-                    key_fn = (game.canonical_key if augment and hasattr(game, "canonical_key") else game.state_key)
+                    key_fn = (game.canonical_key if (augment or canonical) and hasattr(game, "canonical_key")
+                              else game.state_key)
                     sibs, sib_stats = sibling_positions(game, [st for (st, *_rest) in state_buffer], key_fn,
                                                         sibling_holdout, sibling_depth)
                     t_sib = time.time()

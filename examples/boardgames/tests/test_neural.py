@@ -1906,3 +1906,246 @@ def test_c48_history_records_each_sibling_ring_only_when_siblings_are_on(depth):
     assert history[0]["sibling_rings"] == []
     assert all(len(h["sibling_rings"]) == depth and sum(h["sibling_rings"]) == h["siblings"] for h in history[1:])
     assert "sibling_rings" not in _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)[1][-1]
+
+
+# §C.49 task 1 — the net itself can take a STANDARDISED orientation (`canonical_input`: every input is mapped to one
+# fixed image under the game's verified symmetries and the policy mapped back), and can have an MLP body
+# (`mlp_hidden`), so the §C.48 frontier setups are ordinary nets every consumer can train, search and score.
+
+def _c49_positions(game, n=40, seed=0):
+    import random
+
+    r = random.Random(seed)
+    out = []
+    while len(out) < n:
+        s = game.initial_state(r)
+        for _ in range(r.randrange(0, 7)):
+            if game.is_terminal(s):
+                break
+            s = game.step(s, r.choice(game.legal_actions(s)), r)
+        if not game.is_terminal(s):
+            out.append(s)
+    return out
+
+
+def _c49_games():
+    from games.connect4 import Connect4
+    from games.tictactoe import TicTacToe
+
+    return [TicTacToe(), Connect4()]
+
+
+@pytest.mark.parametrize("gi", [0, 1])
+@pytest.mark.parametrize("body", [{"mlp_hidden": [16, 8]}, {"channels": 4},
+                                  {"channels": 4, "blocks": 1, "head_hidden": 4, "residual": True}])
+def test_c49_a_canonical_input_net_is_exactly_equivariant_under_every_verified_symmetry(gi, body):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode
+
+    game = _c49_games()[gi]
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game({**body, "canonical_input": True}, game)).eval()
+    perms = game.symmetries()
+    assert len(perms) > 1
+    xs = torch.stack([encode(game, s) for s in _c49_positions(game)])
+    with torch.no_grad():
+        logits, value = net(xs)
+        for cell_perm, action_perm in perms:
+            img = xs.reshape(len(xs), xs.shape[1], -1)[:, :, cell_perm].reshape(xs.shape)
+            li, vi = net(img)
+            assert torch.equal(vi, value)
+            assert torch.equal(li, logits[:, action_perm])
+
+
+@pytest.mark.parametrize("gi", [0, 1])
+def test_c49_without_the_flag_the_same_net_is_NOT_equivariant_so_the_test_can_fail(gi):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode
+
+    game = _c49_games()[gi]
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game({"mlp_hidden": [16]}, game)).eval()
+    xs = torch.stack([encode(game, s) for s in _c49_positions(game)])
+    cell_perm, action_perm = next(p for p in game.symmetries() if p[1] != list(range(game.num_actions)))
+    with torch.no_grad():
+        li, _ = net(xs.reshape(len(xs), xs.shape[1], -1)[:, :, cell_perm].reshape(xs.shape))
+        assert not torch.equal(li, net(xs)[0][:, action_perm])
+
+
+def test_c49_the_standardised_image_is_one_of_the_input_s_own_images_and_the_same_for_all_of_them():
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode
+
+    game = _c49_games()[0]
+    net = Connect4Net(**arch_for_game({"mlp_hidden": [8], "canonical_input": True}, game))
+    xs = torch.stack([encode(game, s) for s in _c49_positions(game)])
+    flat = xs.reshape(len(xs), xs.shape[1], -1)
+    chosen, _index = net.canonical_images(xs)
+    for cell_perm, _a in game.symmetries():
+        again, _ = net.canonical_images(flat[:, :, cell_perm].reshape(xs.shape))
+        assert torch.equal(again, chosen)
+    images = [flat[:, :, c].reshape(xs.shape) for c, _a in game.symmetries()]
+    assert all(any(torch.equal(chosen[i], im[i]) for im in images) for i in range(len(xs)))
+
+
+@pytest.mark.parametrize("hidden,params", [([32], 938), ([16, 16], 746), ([64], 1866), ([128], 3722)])
+def test_c49_an_mlp_body_has_exactly_the_c48_frontier_parameter_counts(hidden, params):
+    from harness.neural import Connect4Net, arch_for_game
+
+    game = _c49_games()[0]
+    for canonical in (False, True):
+        net = Connect4Net(**arch_for_game({"mlp_hidden": hidden, "canonical_input": canonical}, game))
+        assert sum(p.numel() for p in net.parameters()) == params
+        assert [type(m).__name__ for m in net.mlp_body] == ["Linear", "ReLU"] * len(hidden)
+
+
+def test_c49_the_canonical_net_trains_through_the_mapped_back_policy(monkeypatch):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode, train_net
+
+    game = _c49_games()[0]
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game({"mlp_hidden": [16], "canonical_input": True}, game))
+    states = _c49_positions(game, 8)
+    rows = []
+    for s in states:
+        pi = [0.0] * 9
+        pi[game.legal_actions(s)[-1]] = 1.0
+        rows.append((encode(game, s), pi, 0.5))
+    before = [p.detach().clone() for p in net.parameters()]
+    train_net(net, rows, 30, 8, 1e-2, "cpu")
+    assert any(not torch.equal(a, b) for a, b in zip(before, net.parameters()))
+
+
+def test_c49_existing_arches_are_untouched_by_the_new_options():
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game
+
+    game = _c49_games()[1]
+    for arch in ({"channels": 32}, {"channels": 16, "blocks": 2, "head_hidden": 8, "residual": True}):
+        net = Connect4Net(**arch_for_game(arch, game))
+        assert not {"mlp_hidden", "canonical_input", "symmetries"} & set(net.arch)
+        torch.manual_seed(3)
+        a = Connect4Net(**arch_for_game(arch, game))
+        torch.manual_seed(3)
+        b = Connect4Net(**net.arch)
+        assert all(torch.equal(p, q) for p, q in zip(a.state_dict().values(), b.state_dict().values()))
+
+
+def test_c49_a_canonical_mlp_net_round_trips_through_save_and_load(tmp_path):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode, load_net, save_net
+
+    game = _c49_games()[1]
+    net = Connect4Net(**arch_for_game({"mlp_hidden": [12], "canonical_input": True}, game)).eval()
+    save_net(net, str(tmp_path / "n.pt"))
+    back = load_net(str(tmp_path / "n.pt"))
+    xs = torch.stack([encode(game, s) for s in _c49_positions(game, 10)])
+    with torch.no_grad():
+        assert torch.equal(back(xs)[0], net(xs)[0]) and back.arch == net.arch
+
+
+@pytest.mark.parametrize("arch,match", [
+    ({"mlp_hidden": [8], "residual": True, "blocks": 1}, "mlp_hidden"),
+    ({"mlp_hidden": []}, "mlp_hidden"),
+    ({"mlp_hidden": [8], "value_bins": 5}, "mlp_hidden"),
+    ({"channels": 4, "blocks": 1, "residual": True, "aux_heads": True, "canonical_input": True}, "canonical"),
+])
+def test_c49_combinations_the_net_cannot_honour_are_refused(arch, match):
+    from harness.neural import Connect4Net, arch_for_game
+
+    with pytest.raises(ValueError, match=match):
+        Connect4Net(**arch_for_game(arch, _c49_games()[1]))
+
+
+def test_c49_a_canonical_net_needs_the_game_s_symmetries():
+    from harness.neural import Connect4Net
+
+    with pytest.raises(ValueError, match="symmetries"):
+        Connect4Net(mlp_hidden=[8], canonical_input=True)
+    with pytest.raises(ValueError, match="symmetries"):
+        Connect4Net(mlp_hidden=[8], canonical_input=True, symmetries=[[list(range(5)), list(range(7))]])
+    good = [list(range(42)), list(range(7))]
+    for bad in ([list(range(41)), list(range(7))], [[0] * 42, list(range(7))], [list(range(42)), [0] * 7]):
+        with pytest.raises(ValueError, match="symmetries"):
+            Connect4Net(mlp_hidden=[8], canonical_input=True, symmetries=[good, bad])
+
+
+@pytest.mark.parametrize("gi", [0, 1])
+def test_c49_the_output_is_the_standardised_policy_mapped_back_averaged_over_exactly_the_symmetries_that_give_it(gi):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game, encode
+
+    game = _c49_games()[gi]
+    torch.manual_seed(1)
+    net = Connect4Net(**arch_for_game({"mlp_hidden": [16], "canonical_input": True}, game)).eval()
+    states = _c49_positions(game, 30) + [game.initial_state(__import__("random").Random(0))]
+    xs = torch.stack([encode(game, s) for s in states])
+    flat = xs.reshape(len(xs), xs.shape[1], -1)
+    with torch.no_grad():
+        got, _v = net(xs)
+        chosen, _tied = net.canonical_images(xs)
+        inner, _ = net._raw_trunk(chosen)
+    sizes = set()
+    for i in range(len(xs)):
+        producers = [a for c, a in game.symmetries() if torch.equal(flat[i][:, c].reshape(xs.shape[1:]), chosen[i])]
+        sizes.add(len(producers))
+        expected = torch.zeros(game.num_actions)
+        for a in producers:
+            mapped = torch.zeros(game.num_actions)
+            mapped[a] = inner[i]
+            expected += mapped
+        assert torch.allclose(got[i], expected / len(producers), atol=1e-6)
+    assert max(sizes) > 1 and min(sizes) == 1
+
+
+_C49_CANON = {"mlp_hidden": [16], "canonical_input": True}
+
+
+def test_c49_a_canonical_net_refuses_augmentation_it_would_only_duplicate():
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+
+    with pytest.raises(ValueError, match="canonical_input"):
+        train_alphazero(TicTacToe(), iterations=1, selfplay_games=1, sims=4, epochs=1, net_arch=_C49_CANON,
+                        augment=True, seed=5)
+
+
+def test_c49_a_canonical_net_keys_siblings_and_the_unique_buffer_by_symmetry_class(monkeypatch):
+    import random
+
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+
+    g = TicTacToe()
+    root = g.initial_state(random.Random(0))
+    corners = [g.step(root, a, random.Random(0)) for a in (0, 2, 6, 8)]
+    keys = []
+    real = neural.sibling_positions
+
+    def spy(game, states, key_fn, holdout, depth):
+        keys.append(key_fn)
+        return real(game, states, key_fn, holdout, depth)
+    monkeypatch.setattr(neural, "sibling_positions", spy)
+    calls = {"n": 0}
+
+    def scripted(game, agent, rng, **kwargs):
+        s = corners[calls["n"] % 4]
+        calls["n"] += 1
+        pi = [0.0] * 9
+        pi[game.legal_actions(s)[0]] = 1.0
+        return [(s, neural.encode(game, s), pi, 0.0)]
+    monkeypatch.setattr(neural, "self_play_game", scripted)
+    _net, history = train_alphazero(g, iterations=2, selfplay_games=4, sims=4, epochs=1, net_arch=_C49_CANON,
+                                    augment=False, seed=5, reanalyze_frac=1.0, reanalyze_sims=4,
+                                    reanalyze_siblings=True, buffer_unique=True)
+    assert keys and all(k(corners[0]) == k(corners[3]) for k in keys)
+    assert history[0]["state_buffer"] == 1 and history[0]["merged"] == 3

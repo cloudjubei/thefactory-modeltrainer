@@ -3883,3 +3883,47 @@ h49/h50, PRE-REGISTERED 2026-09-26, VERIFIED the same day).
 - **Suite fix found while verifying.** tests/conftest.py matched register proofs by function name without the
   parameter id, so parametrized proofs (one per arm) never followed their own claim. It now matches the full node
   name, with a test.
+
+#### §C.49 — A repeatable smallest-net process, then Connect-4 perfect play (2026-09-27)
+
+**Prompt (user).** Make the smallest-net method a real, repeatable process, then apply all of it to Connect-4 to get
+perfect play.
+
+**What "perfect play" means for Connect-4 (fixed before any work).** "Optimal at every position" (~4.5 trillion)
+cannot be measured. Two measurable levels:
+- **P-START (the goal).** The RAW net (one forward pass per move, no search) as first player wins against EVERY
+  defence from the empty board. It is certified by walking the tree of the net's single move at each of its turns
+  and every legal reply at the opponent's, checking with the exact solver that each net move keeps a proven win. A
+  strategy that keeps a proven win at every one of its moves must win, because a finished draw is not a win.
+  Success: zero non-winning net moves over the whole tree.
+- **P-SAMPLED (reported alongside).** On a broad held-out sample of positions from every stage of the game, the raw
+  move never gives away value (win → draw/loss, draw → loss). Reported as an error rate with an upper confidence
+  bound.
+
+The PROCESS stays solver-free, as in §C.47-48: training labels come from search, never the solver. The solver is
+used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle frontier.
+
+**Tasks.**
+1. **The net can take a standardised orientation.** `Connect4Net` gets `canonical_input`: the input is mapped to one
+   fixed image under the game's verified symmetries, and the policy is mapped back. Every consumer (search, training,
+   scoring, play) works unchanged. The net also gets an MLP body (`mlp_hidden`), so the §C.48 frontier setups are
+   ordinary nets.
+   **Success:** the output is exactly equivariant under every verified symmetry (tests); existing arches build
+   bit-identically; `canonical_input` + `mlp_hidden=[32]` on tic-tac-toe has exactly 938 params.
+2. **A reusable smallest-net tool** (`harness/frontier.py`, `scripts/frontier.py`). It takes any game, a family of
+   setups with a width parameter, and a pluggable target: every enumerable position, or a pre-solved bank. It finds
+   the smallest width that succeeds on every seed, by doubling then bisection, under several training recipes. It
+   records every probed point and flags non-monotone widths.
+   **Success:** unit tests, plus it re-derives §C.48 T1b on tic-tac-toe: a canonical-MLP frontier ≤ 938 params with
+   every seed perfect and the width below failing.
+3. **Step 4 on tic-tac-toe** (pre-registered): the T5 process (unique buffer, 2-deep siblings, settle) trained at
+   the frontier setups instead of the 57K net.
+   **Success:** the smallest setup the process makes raw-perfect on ≥ 8/10 seeds is named.
+4. **Connect-4 instruments first.** The P-START certifier (policy-restricted tree walk plus exact solver, with its
+   size and cost measured) and the P-SAMPLED grader. Baseline: the best existing Connect-4 nets.
+   **Success:** the certifier verifies the solver's own move choices as P-START-perfect and catches a deliberately
+   planted losing move.
+5. **Connect-4 oracle frontier and process.** First, what can a net represent near the net's own proof tree. Then the
+   solver-free process with coverage aimed at that tree: all opponent replies to the net's own line, the §C.48
+   lesson that failures are untrained positions. Each lever is a pre-registered A/B.
+   **Success:** P-START certified for a raw net.

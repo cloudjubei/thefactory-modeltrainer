@@ -152,6 +152,10 @@
       "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
       "started": "2026-09-25T17:49:30+00:00"
     },
+    "c49_frontier_tictactoe.json.gz": {
+      "sha256": "14ec579ab10bd6d82cc83a3c116cb5865cbfe40b4f525d9f334b92d72e56d8e3",
+      "started": "2026-09-26T22:57:40+00:00"
+    },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",
       "started": "2026-09-23T10:13:45+00:00"
