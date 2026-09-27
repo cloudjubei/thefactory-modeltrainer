@@ -2149,3 +2149,25 @@ def test_c49_a_canonical_net_keys_siblings_and_the_unique_buffer_by_symmetry_cla
                                     reanalyze_siblings=True, buffer_unique=True)
     assert keys and all(k(corners[0]) == k(corners[3]) for k in keys)
     assert history[0]["state_buffer"] == 1 and history[0]["merged"] == 3
+
+
+def test_c49_the_settle_starts_from_settle_lr_when_given_and_from_lr_otherwise(monkeypatch):
+    import harness.neural as neural
+
+    calls = []
+    real = neural.train_net
+
+    def spy(net, examples, epochs, batch_size, lr, *args, **kwargs):
+        calls.append((lr, kwargs.get("lr_end")))
+        return real(net, examples, epochs, batch_size, lr, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy)
+    _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True, settle_epochs=2, settle_lr=5e-3)
+    assert calls[-1] == (5e-3, 1e-5) and all(c[0] == 1e-3 for c in calls[:-1])
+    calls.clear()
+    _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True, settle_epochs=2)
+    assert calls[-1] == (1e-3, 1e-5)
+
+
+def test_c49_settle_lr_needs_a_settle():
+    with pytest.raises(ValueError, match="settle_lr"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, settle_lr=5e-3)

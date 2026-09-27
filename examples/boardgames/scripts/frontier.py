@@ -32,7 +32,7 @@ def search(job: dict) -> dict:
     import torch
 
     torch.set_num_threads(1)
-    from harness.frontier import enumerated_target, probe_width, smallest_width
+    from harness.frontier import enumerated_target, frontier_summary, probe_width, smallest_width
     from harness.registry import resolve_game
 
     game = resolve_game(job["game"])
@@ -53,7 +53,8 @@ def search(job: dict) -> dict:
     frontier = result["frontier"]
     params = next((r["params"] for r in records if r["width"] == frontier), None)
     return {"family": job["family"], "recipe": job["recipe"], "frontier": frontier, "frontier_params": params,
-            "non_monotone": result["non_monotone"], "probes": records, "seconds": round(time.time() - t0, 1)}
+            "non_monotone": result["non_monotone"], "summary": frontier_summary(records, frontier), "probes": records,
+            "seconds": round(time.time() - t0, 1)}
 
 
 def _seeds(text: str) -> list:
@@ -100,6 +101,8 @@ def main() -> None:
         raise SystemExit("training or measurement code changed while the searches ran — evidence not written")
     found = [r for r in rows if r["frontier"] is not None]
     best = min(found, key=lambda r: r["frontier_params"]) if found else None
+    robust = [r for r in rows if r["summary"]["robust"] is not None]
+    best_robust = min(robust, key=lambda r: r["summary"]["robust"]["params"]) if robust else None
     save_evidence(args.out, {"game": args.game, "started": started,
                              "finished": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                              "training_fingerprint": stamps[0], "measurement_fingerprint": stamps[1],
@@ -108,7 +111,10 @@ def main() -> None:
                                         "seeds": seeds, "start": args.start, "caps": CAPS},
                              "searches": rows,
                              "smallest": None if best is None else {k: best[k] for k in
-                                                                    ("family", "recipe", "frontier", "frontier_params")}})
+                                                                    ("family", "recipe", "frontier", "frontier_params")},
+                             "smallest_robust": None if best_robust is None else {
+                                 "family": best_robust["family"], "recipe": best_robust["recipe"],
+                                 **best_robust["summary"]["robust"]}})
     if best:
         print(f"smallest: {best['family']} / {best['recipe']} at width {best['frontier']} = "
               f"{best['frontier_params']} params", flush=True)

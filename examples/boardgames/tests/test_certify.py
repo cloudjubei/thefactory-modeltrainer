@@ -177,3 +177,113 @@ def test_a_move_onto_an_occupied_cell_is_a_failure_not_a_crash(ttt):
     root = ttt.step(ttt.initial_state(random.Random(0)), 4, random.Random(0))
     r = certify(ttt, root, 1, lambda states: [4 for _ in states], _value(ttt))
     assert not r["certified"] and r["failures"] == 1 and r["failure_examples"][0]["action"] == 4
+
+
+def _depth_of(game, root, key, player, choose):
+    level, depth = {game.state_key(root): root}, 0
+    while level:
+        if key in level:
+            return depth
+        nxt = {}
+        for s in level.values():
+            if game.is_terminal(s):
+                continue
+            moves = choose([s]) if game.current_player(s) == player else game.legal_actions(s)
+            for a in moves:
+                c = game.step(s, a, random.Random(0))
+                nxt[game.state_key(c)] = c
+        level, depth = nxt, depth + 1
+    raise KeyError(key)
+
+
+def test_a_horizon_certifies_only_the_first_plies_and_says_so(ttt):
+    root = ttt.initial_state(random.Random(0))
+    key, _action, chooser = _planted(ttt, 0, root)
+    depth = _depth_of(ttt, root, key, 0, _optimal(ttt))
+    below = certify(ttt, root, 0, chooser, _value(ttt), max_depth=depth)
+    assert below["certified"] and below["horizon"] == depth and not below["complete_game"]
+    assert max(below["by_ply"]) == depth - 1
+    at = certify(ttt, root, 0, chooser, _value(ttt), max_depth=depth + 1)
+    assert not at["certified"] and at["failures"] == 1
+    full = certify(ttt, root, 0, _optimal(ttt), _value(ttt))
+    assert full["horizon"] is None and full["complete_game"] and full["certified"]
+
+
+def test_a_horizon_past_the_end_of_the_game_is_the_whole_game(ttt):
+    root = ttt.initial_state(random.Random(0))
+    r = certify(ttt, root, 1, _optimal(ttt), _value(ttt), max_depth=50)
+    assert r["certified"] and r["complete_game"]
+
+
+def _won_ttt_root(ttt):
+    r = random.Random(0)
+    root = ttt.initial_state(r)
+    for a in (4, 1, 0):
+        root = ttt.step(root, a, r)
+    s = ttt.step(root, 8, r)
+    assert ttt.position_value(s) == 1 and ttt.current_player(s) == 0
+    return s
+
+
+def test_from_a_won_root_the_player_s_positions_are_never_solved_and_the_verdict_is_unchanged(ttt):
+    root = _won_ttt_root(ttt)
+    solved = []
+
+    def value(s):
+        solved.append(ttt.current_player(s))
+        return ttt.position_value(s)
+    r = certify(ttt, root, 0, _optimal(ttt), value)
+    assert r["certified"] and r["root_value"] == 1
+    assert solved.count(0) == 1, "only the root itself — every other player position is won by the rules"
+    key, action, chooser = _planted(ttt, 0, root)
+    solved.clear()
+    bad = certify(ttt, root, 0, chooser, value)
+    assert not bad["certified"] and bad["failures"] == 1 and bad["failure_examples"][0]["value"] == 1
+
+
+def test_from_a_drawn_root_every_player_position_is_solved_because_a_reply_can_hand_over_a_win(ttt):
+    root = ttt.initial_state(random.Random(0))
+    solved = []
+
+    def value(s):
+        solved.append(ttt.current_player(s))
+        return ttt.position_value(s)
+    r = certify(ttt, root, 0, _optimal(ttt), value)
+    assert r["certified"] and solved.count(0) == r["nodes"]["player"] + 1
+
+
+@pytest.mark.parametrize("root_kind", ["empty", "won"])
+def test_a_batch_value_function_is_asked_once_per_ply_and_changes_no_verdict(ttt, root_kind):
+    root = ttt.initial_state(random.Random(0)) if root_kind == "empty" else _won_ttt_root(ttt)
+    batches = []
+
+    def many(states):
+        batches.append(len(states))
+        return [ttt.position_value(s) for s in states]
+    plain = certify(ttt, root, 0, _optimal(ttt), _value(ttt))
+    batched = certify(ttt, root, 0, _optimal(ttt), _value(ttt), value_many=many)
+    assert batched == plain and batches and len(batches) <= len(plain["by_ply"])
+    key, _a, chooser = _planted(ttt, 0, root)
+    assert certify(ttt, root, 0, chooser, _value(ttt), value_many=many) == certify(ttt, root, 0, chooser, _value(ttt))
+
+
+def test_failures_are_counted_at_the_depth_where_they_happen(ttt):
+    root = ttt.initial_state(random.Random(0))
+    key, _action, chooser = _planted(ttt, 0, root)
+    depth = _depth_of(ttt, root, key, 0, _optimal(ttt))
+    r = certify(ttt, root, 0, chooser, _value(ttt))
+    assert r["failures_by_ply"] == {depth: 1}
+    assert certify(ttt, root, 0, _optimal(ttt), _value(ttt))["failures_by_ply"] == {}
+
+
+def test_a_given_root_value_is_used_instead_of_solving_the_root(ttt):
+    root = _won_ttt_root(ttt)
+    solved = []
+
+    def value(s):
+        solved.append(ttt.state_key(s))
+        return ttt.position_value(s)
+    r = certify(ttt, root, 0, _optimal(ttt), value, root_value=1)
+    assert r["certified"] and r["root_value"] == 1 and ttt.state_key(root) not in solved
+    wrong = certify(ttt, ttt.initial_state(random.Random(0)), 0, _optimal(ttt), _value(ttt), root_value=1)
+    assert not wrong["certified"], "claiming a win the root does not have must not certify a drawing strategy"

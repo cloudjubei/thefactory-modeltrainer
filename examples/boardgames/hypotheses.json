@@ -2114,6 +2114,342 @@
         "tests/test_c48_coverage_evidence.py": "d4bf0086264148d1eae7e9884f3306fa25b4848aacd99bcca54d632ba604e8c8"
       },
       "inconclusive_proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_mechanism_is_undecidable"
+    },
+    "h58": {
+      "id": "h58",
+      "claim": "\u00a7C.49 T6 (canon_mlp32): at the standardised-input MLP-32 setup (938 params, 30-epoch settle), T5's working process (unique buffer, 2-deep siblings, settle; solver-free), seeds 321-330, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]",
+      "note": "Oracle frontier 851-1,054 params by recipe. Expected: refuted \u2014 the process trains ~210 epochs, the oracle fit needed ~1,000+.",
+      "registered_at": "2026-09-27T08:18:31.533670+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]",
+          "ok": false,
+          "detail": "refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:03:16.294893+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T6_canon_mlp32.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_mlp32_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_conv6_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_small.py": "c375eecda92fad681b62a549ed01efec5eaa97090cb26437cabd03d47faaab36",
+        "tests/test_c49_small_evidence.py": "bfcbaadf87d38005a4d3455c34d43f8404eb88c147251a282e3543f7ffbc2b6d"
+      },
+      "inconclusive_proof": "tests/test_c49_small_evidence.py::test_c49_T6_arm_is_undecidable[canon_mlp32]"
+    },
+    "h59": {
+      "id": "h59",
+      "claim": "\u00a7C.49 T6 (canon_mlp32_long): at the standardised-input MLP-32 setup (938 params) with a 1,500-epoch settle, T5's working process (unique buffer, 2-deep siblings, settle; solver-free), seeds 321-330, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]",
+      "note": "Tests whether the plain arm's shortfall is the training budget.",
+      "registered_at": "2026-09-27T08:18:31.582804+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]",
+          "ok": false,
+          "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:03:16.717039+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T6_canon_mlp32.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_mlp32_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_conv6_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_small.py": "c375eecda92fad681b62a549ed01efec5eaa97090cb26437cabd03d47faaab36",
+        "tests/test_c49_small_evidence.py": "bfcbaadf87d38005a4d3455c34d43f8404eb88c147251a282e3543f7ffbc2b6d"
+      },
+      "inconclusive_proof": "tests/test_c49_small_evidence.py::test_c49_T6_arm_is_undecidable[canon_mlp32_long]"
+    },
+    "h60": {
+      "id": "h60",
+      "claim": "\u00a7C.49 T6 (canon_conv6_long): at the standardised-input conv-6 setup (994 params) with a 1,500-epoch settle, T5's working process (unique buffer, 2-deep siblings, settle; solver-free), seeds 321-330, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]",
+      "note": "The frontier point that held under every recipe.",
+      "registered_at": "2026-09-27T08:18:31.630795+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]",
+          "ok": false,
+          "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:03:17.126498+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T6_canon_mlp32.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_mlp32_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_conv6_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_small.py": "c375eecda92fad681b62a549ed01efec5eaa97090cb26437cabd03d47faaab36",
+        "tests/test_c49_small_evidence.py": "bfcbaadf87d38005a4d3455c34d43f8404eb88c147251a282e3543f7ffbc2b6d"
+      },
+      "inconclusive_proof": "tests/test_c49_small_evidence.py::test_c49_T6_arm_is_undecidable[canon_conv6_long]"
+    },
+    "h61": {
+      "id": "h61",
+      "claim": "\u00a7C.49 T6 (residual15): at the raw frontier residual-15 setup (5,008 params) with augmentation, T5's working process (unique buffer, 2-deep siblings, settle; solver-free), seeds 321-330, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]",
+      "note": "Control for size: T5 used the 57,453-param net.",
+      "registered_at": "2026-09-27T08:18:31.679305+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]",
+          "ok": false,
+          "detail": " refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:03:17.545252+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T6_canon_mlp32.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_mlp32_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_conv6_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_small.py": "c375eecda92fad681b62a549ed01efec5eaa97090cb26437cabd03d47faaab36",
+        "tests/test_c49_small_evidence.py": "bfcbaadf87d38005a4d3455c34d43f8404eb88c147251a282e3543f7ffbc2b6d"
+      },
+      "inconclusive_proof": "tests/test_c49_small_evidence.py::test_c49_T6_arm_is_undecidable[residual15]"
+    },
+    "h62": {
+      "id": "h62",
+      "claim": "\u00a7C.49 T6 (residual15_long): at the raw frontier residual-15 setup (5,008 params) with augmentation and a 1,500-epoch settle, T5's working process (unique buffer, 2-deep siblings, settle; solver-free), seeds 321-330, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15_long]",
+      "note": "",
+      "registered_at": "2026-09-27T08:18:31.729100+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15_long]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-27T10:03:17.940091+00:00"
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15_long]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-09-27T10:03:23.781396+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T6_canon_mlp32.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_mlp32_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_canon_conv6_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        },
+        {
+          "path": "evidence/c49_T6_residual15_long.json.gz",
+          "started": "2026-09-27T08:18:39+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_small.py": "c375eecda92fad681b62a549ed01efec5eaa97090cb26437cabd03d47faaab36",
+        "tests/test_c49_small_evidence.py": "bfcbaadf87d38005a4d3455c34d43f8404eb88c147251a282e3543f7ffbc2b6d"
+      },
+      "inconclusive_proof": "tests/test_c49_small_evidence.py::test_c49_T6_arm_is_undecidable[residual15_long]"
+    },
+    "h63": {
+      "id": "h63",
+      "claim": "\u00a7C.49 T7 (canon_mlp32_budget): at the standardised-input MLP-32 setup (938 params), T6's process (unique buffer, 2-deep siblings; solver-free) with the settle matched to the oracle fit's budget (3,000 epochs from lr 5e-3 decaying to 1e-5), seeds 331-340, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]",
+      "note": "Direct comparison with h59 (0/10, 22-114 failures, all on trained positions). Tests the optimisation-budget reading.",
+      "registered_at": "2026-09-27T10:06:20.916994+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:29:28.447427+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T7_canon_mlp32_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_mlp48_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_conv6_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_budget.py": "0c3034e2a7e191015bb477b7892c0818c5eacf97db42a879abd70a1180c44ff2",
+        "harness/arm_judge.py": "c730794bc27abb182c3b04ccbb98338ee7e8facdf381311f43683d7502c30d0c",
+        "tests/test_c49_budget_evidence.py": "b3d6bb52a7dbdb699985585ac893baac01fd256fa772be0dbd906b6fc5352d7c"
+      },
+      "inconclusive_proof": "tests/test_c49_budget_evidence.py::test_c49_T7_arm_is_undecidable[canon_mlp32_budget]"
+    },
+    "h64": {
+      "id": "h64",
+      "claim": "\u00a7C.49 T7 (canon_mlp48_budget): at the standardised-input MLP-48 setup (1,402 params), T6's process (unique buffer, 2-deep siblings; solver-free) with the settle matched to the oracle fit's budget (3,000 epochs from lr 5e-3 decaying to 1e-5), seeds 331-340, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]",
+      "note": "A width inside the oracle frontier's robust range.",
+      "registered_at": "2026-09-27T10:06:20.962231+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-27T10:29:28.845888+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T7_canon_mlp32_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_mlp48_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_conv6_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_budget.py": "0c3034e2a7e191015bb477b7892c0818c5eacf97db42a879abd70a1180c44ff2",
+        "harness/arm_judge.py": "c730794bc27abb182c3b04ccbb98338ee7e8facdf381311f43683d7502c30d0c",
+        "tests/test_c49_budget_evidence.py": "b3d6bb52a7dbdb699985585ac893baac01fd256fa772be0dbd906b6fc5352d7c"
+      },
+      "inconclusive_proof": "tests/test_c49_budget_evidence.py::test_c49_T7_arm_is_undecidable[canon_mlp48_budget]"
+    },
+    "h65": {
+      "id": "h65",
+      "claim": "\u00a7C.49 T7 (canon_conv6_budget): at the standardised-input conv-6 setup (994 params), T6's process (unique buffer, 2-deep siblings; solver-free) with the settle matched to the oracle fit's budget (3,000 epochs from lr 5e-3 decaying to 1e-5), seeds 331-340, ends with a RAW net optimal at every one of the 4,520 raw positions in >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]",
+      "note": "Compare h60 (0/10, 21-96 failures).",
+      "registered_at": "2026-09-27T10:06:21.008273+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]\n1 failed in 0.03s",
+          "drawn_at": "2026-09-27T10:29:29.244813+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T7_canon_mlp32_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_mlp48_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        },
+        {
+          "path": "evidence/c49_T7_canon_conv6_budget.json.gz",
+          "started": "2026-09-27T10:06:21+00:00"
+        }
+      ],
+      "pins": {
+        "harness/floor_budget.py": "0c3034e2a7e191015bb477b7892c0818c5eacf97db42a879abd70a1180c44ff2",
+        "harness/arm_judge.py": "c730794bc27abb182c3b04ccbb98338ee7e8facdf381311f43683d7502c30d0c",
+        "tests/test_c49_budget_evidence.py": "b3d6bb52a7dbdb699985585ac893baac01fd256fa772be0dbd906b6fc5352d7c"
+      },
+      "inconclusive_proof": "tests/test_c49_budget_evidence.py::test_c49_T7_arm_is_undecidable[canon_conv6_budget]"
     }
   }
 }

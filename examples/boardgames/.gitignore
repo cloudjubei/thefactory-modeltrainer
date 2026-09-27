@@ -6,3 +6,4 @@ __pycache__/
 books/
 evidence/*
 !evidence/manifest.json
+build/

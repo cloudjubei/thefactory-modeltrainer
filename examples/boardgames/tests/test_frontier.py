@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from harness.frontier import (DEFAULT_RECIPE, arch_at, enumerated_target, failures, family_name, fit, probe_width,
-                              smallest_width)
+from harness.frontier import (DEFAULT_RECIPE, arch_at, enumerated_target, failures, family_name, fit,
+                              frontier_summary, probe_width, smallest_width)
 
 
 @pytest.mark.parametrize("body,arch", [("mlp", {"mlp_hidden": [7]}), ("mlp2", {"mlp_hidden": [7, 7]}),
@@ -151,11 +151,15 @@ def test_a_width_succeeds_only_if_every_seed_does_and_the_first_failure_ends_the
         calls.append(seed)
         return {"seed": seed, "params": 10, "solved": outcomes[seed]}
     monkeypatch.setattr(frontier, "fit", fake_fit)
-    r = probe_width(ttt, {"body": "mlp"}, 4, targets[False], [1, 2, 3], DEFAULT_RECIPE)
+    r = probe_width(ttt, {"body": "mlp"}, 4, targets[False], [1, 2, 3], DEFAULT_RECIPE, stop_on_failure=True)
     assert not r["ok"] and calls == [1, 2] and r["params"] == 10
     calls.clear()
+    r = probe_width(ttt, {"body": "mlp"}, 4, targets[False], [1, 2, 3], DEFAULT_RECIPE)
+    assert not r["ok"] and calls == [1, 2, 3] and r["rate"] == pytest.approx(2 / 3)
+    calls.clear()
     outcomes[2] = True
-    assert probe_width(ttt, {"body": "mlp"}, 4, targets[False], [1, 2, 3], DEFAULT_RECIPE)["ok"] and calls == [1, 2, 3]
+    r = probe_width(ttt, {"body": "mlp"}, 4, targets[False], [1, 2, 3], DEFAULT_RECIPE)
+    assert r["ok"] and calls == [1, 2, 3] and r["rate"] == 1.0
 
 
 def test_patience_counts_from_the_first_epoch_that_reached_the_best_not_from_later_ties(ttt, targets, monkeypatch):
@@ -166,3 +170,36 @@ def test_patience_counts_from_the_first_epoch_that_reached_the_best_not_from_lat
     recipe = {**DEFAULT_RECIPE, "max_epochs": 1000, "check_every": 10, "patience": 50}
     r = fit(ttt, arch_at({"body": "mlp"}, 2), targets[False], 1, recipe)
     assert r["best_failures"] == 4 and r["epochs_run"] == 20 + 50 and not r["solved"]
+
+
+def _probe(width, rate):
+    return {"width": width, "params": width * 10, "ok": rate == 1.0, "rate": rate}
+
+
+def test_the_summary_separates_the_strict_the_robust_and_the_first_success_frontier():
+    probes = [_probe(8, 0.0), _probe(24, 0.4), _probe(28, 0.6), _probe(29, 1.0), _probe(30, 1.0), _probe(31, 0.8),
+              _probe(32, 1.0), _probe(64, 1.0), _probe(16, 0.0)]
+    s = frontier_summary(probes, strict=29)
+    assert s["strict"] == {"width": 29, "params": 290}
+    assert s["robust"] == {"width": 32, "params": 320}
+    assert s["first_success"] == {"width": 24, "params": 240}
+    assert s["rates"] == [[8, 80, 0.0], [16, 160, 0.0], [24, 240, 0.4], [28, 280, 0.6], [29, 290, 1.0],
+                          [30, 300, 1.0], [31, 310, 0.8], [32, 320, 1.0], [64, 640, 1.0]]
+
+
+def test_a_search_with_no_success_has_no_frontier_of_any_kind():
+    s = frontier_summary([_probe(2, 0.0), _probe(4, 0.0)], strict=None)
+    assert s["strict"] is None and s["robust"] is None and s["first_success"] is None
+
+
+def test_a_widest_probe_that_fails_leaves_no_robust_frontier():
+    s = frontier_summary([_probe(8, 1.0), _probe(16, 0.8)], strict=8)
+    assert s["robust"] is None and s["strict"] == {"width": 8, "params": 80}
+
+
+def test_a_fit_hands_back_its_net_only_when_asked(ttt, targets):
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 20, "check_every": 10}
+    plain = fit(ttt, arch_at({"body": "mlp"}, 4), targets[False], 3, recipe)
+    with_net = fit(ttt, arch_at({"body": "mlp"}, 4), targets[False], 3, recipe, return_net=True)
+    assert "net" not in plain and failures(with_net.pop("net"), targets[False]["eval"]) == with_net["curve"][-1][1]
+    assert with_net == plain

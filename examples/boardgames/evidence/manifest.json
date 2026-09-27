@@ -152,6 +152,38 @@
       "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
       "started": "2026-09-25T17:49:30+00:00"
     },
+    "c49_T6_canon_conv6_long.json.gz": {
+      "sha256": "79026c7bf1812d4e8132ebacab75ecaf6333e07fe38260609a8318caf4bb6437",
+      "started": "2026-09-27T08:18:39+00:00"
+    },
+    "c49_T6_canon_mlp32.json.gz": {
+      "sha256": "75515cbb50ee4950be03c8157b997bb96ce9d4a30b6b26e180d27dfc83329d2a",
+      "started": "2026-09-27T08:18:39+00:00"
+    },
+    "c49_T6_canon_mlp32_long.json.gz": {
+      "sha256": "0f2f517da7c25db929af0509d9712e7314667467be8ff0232d6b1d03216585dd",
+      "started": "2026-09-27T08:18:39+00:00"
+    },
+    "c49_T6_residual15.json.gz": {
+      "sha256": "bfb2d59e85b6ded74fd1fd8ba392f5598e7f86d68ac963d2d3122862e7a810fe",
+      "started": "2026-09-27T08:18:39+00:00"
+    },
+    "c49_T6_residual15_long.json.gz": {
+      "sha256": "79bac1c3eae37de35ff4920d6e921333e7c0bfb93ab729a841d80eb1c9502d3c",
+      "started": "2026-09-27T08:18:39+00:00"
+    },
+    "c49_T7_canon_conv6_budget.json.gz": {
+      "sha256": "e7ab795d3a1d89f1b03b993959b45a02b8c2a7ca05374bea25aa70b1749ba694",
+      "started": "2026-09-27T10:06:21+00:00"
+    },
+    "c49_T7_canon_mlp32_budget.json.gz": {
+      "sha256": "8b5b70f58152f4144af50bc1f4636e1fb006421f8fe4fb1968131804327e5fe3",
+      "started": "2026-09-27T10:06:21+00:00"
+    },
+    "c49_T7_canon_mlp48_budget.json.gz": {
+      "sha256": "715139898d3e620dec0ee3a3434b8f4a49be6ea397c2d0ffc8f743d927bba4fb",
+      "started": "2026-09-27T10:06:21+00:00"
+    },
     "c49_frontier_tictactoe.json.gz": {
       "sha256": "14ec579ab10bd6d82cc83a3c116cb5865cbfe40b4f525d9f334b92d72e56d8e3",
       "started": "2026-09-26T22:57:40+00:00"

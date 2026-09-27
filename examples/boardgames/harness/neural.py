@@ -1558,6 +1558,7 @@ def train_alphazero(
     buffer_unique: bool = False,
     settle_epochs: int = 0,
     settle_lr_final: float = 1e-5,
+    settle_lr: float | None = None,
     record_self_agreement: bool = False,
     sibling_depth: int = 1,
     sibling_holdout: dict | None = None,
@@ -1617,6 +1618,8 @@ def train_alphazero(
     if (buffer_unique or settle_epochs > 0 or record_self_agreement) and reanalyze_frac <= 0.0:
         raise ValueError("buffer_unique / settle_epochs / record_self_agreement act on the reanalyze state buffer — "
                          "set reanalyze_frac")
+    if settle_lr is not None and settle_epochs <= 0:
+        raise ValueError("settle_lr sets the settle's starting rate — it needs settle_epochs")
     if sibling_depth != 1 and not reanalyze_siblings:
         raise ValueError("sibling_depth acts only on siblings — set reanalyze_siblings")
     if (steps_matched or sibling_holdout is not None) and not reanalyze_siblings:
@@ -1902,8 +1905,8 @@ def train_alphazero(
             log(f"iter {it + 1}/{iterations}: buffer {len(buffer)} ({vs_pool} vs-pool, {reanalyzed} reanalyzed), "
                 f"distilled {len(distilled)}, loss {loss:.3f}{eg_note}")
     if settle_epochs > 0 and iterations > 0:
-        loss = train_net(net, train_set, settle_epochs, batch_size, lr, device, opt_state=_opt_state,
-                         epoch_examples=epoch_cap, lr_end=settle_lr_final)
+        loss = train_net(net, train_set, settle_epochs, batch_size, lr if settle_lr is None else settle_lr, device,
+                         opt_state=_opt_state, epoch_examples=epoch_cap, lr_end=settle_lr_final)
         entry = {"iteration": "settle", "epochs": settle_epochs, "lr_final": settle_lr_final,
                  "train_examples": len(train_set), "state_buffer": len(state_buffer), "loss": loss}
         if record_self_agreement:

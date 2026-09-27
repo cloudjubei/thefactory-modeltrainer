@@ -110,10 +110,10 @@ def failures(net, ev: dict) -> int:
     return int((~ev["optimal"][torch.arange(len(moves)), moves]).sum())
 
 
-def fit(game, arch: dict, target: dict, seed: int, recipe: dict) -> dict:
+def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: bool = False) -> dict:
     """Train a fresh net of `arch` on the target's exact answers until it holds the target (no more failures than
     allowed) or has not improved for `patience` epochs. Policy: cross-entropy to uniform over the optimal moves;
-    value: squared error to the exact value."""
+    value: squared error to the exact value. `return_net` adds the trained net itself under "net"."""
     import torch
 
     from harness.neural import Connect4Net, arch_for_game
@@ -147,16 +147,41 @@ def fit(game, arch: dict, target: dict, seed: int, recipe: dict) -> dict:
             break
         if epoch - best_epoch >= recipe["patience"]:
             break
-    return {"seed": seed, "params": sum(p.numel() for p in net.parameters()), "solved": solved_at is not None,
-            "solved_at_epoch": solved_at, "best_failures": best, "epochs_run": epoch, "curve": curve}
+    out = {"seed": seed, "params": sum(p.numel() for p in net.parameters()), "solved": solved_at is not None,
+           "solved_at_epoch": solved_at, "best_failures": best, "epochs_run": epoch, "curve": curve}
+    return {**out, "net": net} if return_net else out
 
 
-def probe_width(game, family: dict, width: int, target: dict, seeds: list, recipe: dict) -> dict:
-    """Fit every seed at `width`; the width succeeds only if every seed does, so the first failing seed ends it."""
+def probe_width(game, family: dict, width: int, target: dict, seeds: list, recipe: dict,
+                stop_on_failure: bool = False) -> dict:
+    """Fit every seed at `width`. The width succeeds only if every seed does; `rate` is the share that did. Near the
+    frontier success is a matter of seed luck, so by default every seed runs and the rate is measured;
+    `stop_on_failure` ends the probe at the first failing seed when only the verdict is wanted."""
     runs = []
     for seed in seeds:
         runs.append(fit(game, arch_at(family, width), target, seed, recipe))
-        if not runs[-1]["solved"]:
+        if stop_on_failure and not runs[-1]["solved"]:
             break
-    return {"width": width, "params": runs[0]["params"], "ok": all(r["solved"] for r in runs) and len(runs) == len(seeds),
+    solved = sum(1 for r in runs if r["solved"])
+    return {"width": width, "params": runs[0]["params"], "ok": solved == len(seeds), "rate": solved / len(runs),
             "runs": runs}
+
+
+def frontier_summary(probes: list, strict) -> dict:
+    """Three readings of one search. STRICT: the searched width (every seed succeeded there). ROBUST: the smallest
+    probed width from which every wider probe also succeeded on every seed — immune to a lucky width. FIRST
+    SUCCESS: the smallest probed width where any seed succeeded — the optimistic bound on what is representable.
+    `rates` lists every probe as [width, params, share of seeds that succeeded]."""
+    ordered = sorted(probes, key=lambda p: p["width"])
+
+    def point(p):
+        return None if p is None else {"width": p["width"], "params": p["params"]}
+
+    robust = None
+    for p in reversed(ordered):
+        if not p["ok"]:
+            break
+        robust = p
+    return {"strict": point(next((p for p in ordered if p["width"] == strict), None)), "robust": point(robust),
+            "first_success": point(next((p for p in ordered if p["rate"] > 0), None)),
+            "rates": [[p["width"], p["params"], p["rate"]] for p in ordered]}

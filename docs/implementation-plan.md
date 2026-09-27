@@ -3927,3 +3927,94 @@ used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle front
    solver-free process with coverage aimed at that tree: all opponent replies to the net's own line, the §C.48
    lesson that failures are untrained positions. Each lever is a pre-registered A/B.
    **Success:** P-START certified for a raw net.
+
+**§C.49 progress (2026-09-27).**
+- **Task 1 DONE.** `Connect4Net` gets `canonical_input` (the input is mapped to one image under the verified
+  symmetries, and the policy is mapped back, averaged in sorted order over the symmetries that produce the image) and
+  `mlp_hidden`.
+  - Exactly equivariant on tic-tac-toe and Connect-4, for all three body types including fully symmetric positions,
+    and checked against a hand computation. An MLP body reproduces 938/746/1,866/3,722 params. Old arches build
+    bit-identically.
+  - In the loop: a canonical net refuses augmentation, and its siblings and unique buffer key by symmetry class.
+- **Task 2 DONE (tool), criterion met under 2 of 3 recipes.** `harness/frontier.py` + `scripts/frontier.py`,
+  evidence `c49_frontier_tictactoe.json.gz` (8 families × 3 recipes × 5 seeds):
+
+| family | default | slow | fast |
+|---|---|---|---|
+| raw mlp | 4,534 | 4,650 | 4,389 |
+| raw mlp2 | 4,826 | 4,409 | 4,969 |
+| raw conv | 4,906 | 5,349 | 4,906 |
+| raw residual | 5,008 | 5,629 | 5,008 |
+| **canon mlp** | 1,054 | 938 | **851** |
+| canon mlp2 | 1,154 | 1,010 | 1,010 |
+| **canon conv** | **994** | **994** | **994** |
+| canon residual | 1,669 | 2,038 | 2,443 |
+
+  - Standardised orientation cuts the frontier about 5× in EVERY body type. Canon conv-6 (994) is the only point
+    that held under all three recipes.
+  - **Finding: the frontier is a BAND, not a line.** Near it, success depends on the seed: canon MLP widths 24-37
+    (706-1,083 params) succeed on some seeds, while failing seeds stall almost always at exactly 8 failures, likely
+    one hard position in all 8 orientations. An "every seed" single-width frontier moves with that luck (1,054 /
+    938 / 851 by recipe).
+  - The tool now runs every seed at every probe and reports the success rate per width, plus three frontiers:
+    STRICT (the searched width), ROBUST (every wider probe also succeeded) and FIRST SUCCESS (the optimistic
+    representability bound).
+- **Task 3 (T6) PRE-REGISTERED (h58-h62), running.** T5's process at 938 (canon MLP-32, plain and 1,500-epoch
+  settle), 994 (canon conv-6, long settle) and 5,008 (raw residual-15, plain and long settle). The long settle tests
+  whether a shortfall is the training budget: the process trains ~210 epochs, and the oracle fits took ~1,000+.
+- **Task 4 instruments.**
+  - `harness/certify.py` (tested, mutation-checked): certifies that a player keeps the exact value at every
+    reachable position against every reply. It catches and names a single planted losing move and certifies the
+    solver's own play.
+  - **Scale measured:** the tree under the best existing net's first-player strategy (ab302, 335K params) has 162K
+    distinct positions at ply 16 and grows ~3.5× per 2 plies, on the order of 10^9 by game end.
+  - **The Python solver cannot certify the opening:** 8 s to ~2 h per ply-8 position.
+  - **Native solver** (`harness/c4solver.c` + `harness/native_solver.py`). The user chose "write our own" over the
+    AGPL-3.0 BitBully. It is a line-for-line C port of `harness/solver.py`, compiled on first use into `build/`
+    (gitignored), and agrees with the Python solver on every tested position, weak and strong, even with a 4-entry
+    table. Ply-8 positions: 0.1 s and 37 s, against 8 s and 6,894 s in Python.
+  - NOTE for the user: `harness/solver.py` describes itself as a port of Pascal Pons' solver. Its provenance (his
+    tutorial blog or his AGPL repository) is unverified.
+- **T6 result (verified 2026-09-27).**
+
+| arm | params | raw-perfect | final failures | claim |
+|---|---|---|---|---|
+| **residual15_long** | **5,008** | **9/10** | 0×9, 1 | **h62 SUPPORTED** |
+| residual15 | 5,008 | 1/10 | 0-9 | h61 refuted |
+| canon_mlp32 | 938 | 0/10 | 314-450 | h58 refuted |
+| canon_mlp32_long | 938 | 0/10 | 22-114 | h59 refuted |
+| canon_conv6_long | 994 | 0/10 | 21-96 | h60 refuted |
+
+  - **The smallest setup the process reaches is 5,008 params** (raw residual-15, augmentation, 2-deep siblings, a
+    1,500-epoch settle), 11× smaller than T5's net and at the raw oracle frontier.
+  - **The ~1K standardised setups are representable but the process does not fit them, and it is not coverage.**
+    Every failure is on a TRAINED position (~4,515 of 4,520 covered).
+  - Likeliest cause, not yet tested: the optimisation budget. A standardised net trains on ~625 rows (one per
+    symmetry class) against ~11,500 for the augmented raw net, so under the same epochs it gets ~20× fewer gradient
+    steps. Its settle also starts at lr 1e-3, where the oracle fits used 2e-3-5e-3.
+  - Self-agreement is ~0.94 even for perfect nets. This confirms it counts a different optimal move as a
+    disagreement, so it cannot be a stopping signal as defined.
+  - **Next A/B (proposed):** the standardised setups with the settle matched to the oracle fit's budget (steps and
+    learning rate).
+- **Task 4 native solver, faster (still exact).** A two-sided transposition table (lower bounds from cutoffs, plus
+  the upper bounds the reference keeps) and a direct one-solve `solve_position` (weak only, because strong distance
+  scores differ by one between the two routes in the Python reference).
+  - Ply-8 position: 37 s → 3 s. Ply 1 after the centre opening (the hardest node of the certificate): 49 min, once.
+  - Our own solver confirms the empty board is a first-player win.
+  - Certification of ab302 through depth 12 is running.
+- **T7 result (verified 2026-09-27; h63-h65 all REFUTED, but the budget reading holds).** The same standardised
+  setups with the settle matched to the oracle fit's budget (3,000 epochs from lr 5e-3):
+  - canon MLP-32 (938): final failures 8-16 (T6 long settle: 22-114; before the settle: 350-498).
+  - canon MLP-48 (1,402): 8-16.
+  - canon conv-6 (994): 0-36, one seed perfect.
+  - Every failure is on a TRAINED position, and every count is a multiple of 8: each net is wrong on ONE or TWO
+    symmetry classes (8 raw orientations each).
+  - **The residual is one position.** Class 608 fails in 28 of 30 nets:
+    `X O . / O . X / . . .`, X to move, whose only winning move is the corner fork (bottom-right).
+    - The 200-sim search labels it RIGHT 19/20 times even from an untrained net, so this is representation, not
+      labels. It is the same position the oracle fits stall on ("stuck at 8"), so it is what makes the ~1K
+      frontier a band.
+    - Class 601 (10 nets) is different: labels there are right only 3/20 times from an untrained net (the §C.47
+      mislabel position).
+  - **Tic-tac-toe answer for now.** The smallest setup the process reaches is 5,008 params (h62). At ~1K it gets
+    within one or two positions, stopped by one fork that sits at the edge of what a ~1K net can represent.
