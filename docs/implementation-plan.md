@@ -4018,3 +4018,24 @@ used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle front
       mislabel position).
   - **Tic-tac-toe answer for now.** The smallest setup the process reaches is 5,008 params (h62). At ~1K it gets
     within one or two positions, stopped by one fork that sits at the edge of what a ~1K net can represent.
+- **P-START baseline (h66, descriptive, VERIFIED).** The strongest existing net (ab302, 335K params), raw, as first
+  player through 12 plies: NOT certified. 50 value-losing moves: depth 2: 2 of 7 positions, depth 6: 4, depth 8: 9,
+  depth 10: 35. These are lower bounds, since subtrees below a failure are not walked.
+  - The first failures come at its SECOND move. After the centre opening and a neighbouring-column reply, it
+    answers in that same column, which only keeps a draw.
+  - The walk took 2.0 h, 1.6 h of it on the first two plies of solves (ply 1: 52 min; ply 3: 45 min).
+  - The distance to P-START is large and starts in the opening.
+- **Task 5 tooling.** `harness/strategy_fit.py` grows a net on its own strategy tree: walk, solver-label, retrain,
+  repeat until certified through a horizon. It is tested on tic-tac-toe (it grows a certified strategy; a width-1 net
+  does not) and mutation-checked. `scripts/strategy_frontier.py` is the Connect-4 driver, with a persistent
+  exact-label cache (`books/c4_labels.json.gz`).
+  - The first run (depth 6, canon conv-8 and residual-16) is under way.
+- **Strategy frontier, depth 6** (`evidence/c49_strategy_d6.json.gz`). Canon conv-8 (3,432 params) and residual-16
+  (7,179) are both CERTIFIED through 6 plies after 6 rounds (failures per round: 1,4,6,4,4,0 and 1,4,8,1,5,0), on 92
+  labelled positions.
+  - Labelling cost 5.6 h, all in the opening: a full label is 7 child solves. The second setup took 9 s from the
+    cache.
+- **Check-first labelling** (`expand_round(check_many=...)`, tested, mutation-checked). The net's move is checked
+  with ONE solve. If it keeps a win, that move alone is a valid label, since nothing beats a win. Only a
+  non-winning move costs the full label.
+- **Depths 8, 10 and 12 running**: canon conv 4/8, residual 8/16, 12 rounds each, shared label cache.

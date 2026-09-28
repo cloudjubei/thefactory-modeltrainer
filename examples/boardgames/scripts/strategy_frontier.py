@@ -1,7 +1,8 @@
 """§C.49 — the Connect-4 ORACLE FRONTIER through a horizon: for each net setup, grow it round by round on its own
 first-player strategy tree (harness.strategy_fit) and report whether it becomes certified through --depth plies.
 Exact move values come from the native solver in worker processes and are cached in --labels across widths, rounds
-and runs, so the opening's hard solves are paid for once.
+and runs, so the opening's hard solves are paid for once. Labelling is CHECK-FIRST: the net's move is checked with one
+solve, and only a move that does not keep the win costs the full label.
 
     PYTHONPATH=. .venv/bin/python scripts/strategy_frontier.py --depth 8 --setups canon_conv:8,16 residual:16 \\
         --rounds 12 --workers 8 --out evidence/c49_strategy_d8.json.gz
@@ -31,6 +32,25 @@ def _values(job: tuple) -> dict:
         _BOOK = load_book("connect4")
     board, to_move = job
     return native_solver.move_values(C4State(tuple(board), to_move, None, False), book=_BOOK)
+
+
+def _kept(job: tuple) -> int:
+    """The value the mover keeps by playing `action` — one exact solve of the position it leads to."""
+    global _BOOK
+    import random
+
+    from games.connect4 import C4State, Connect4
+    from harness import native_solver
+    from harness.book import load_book
+
+    if _BOOK is None:
+        _BOOK = load_book("connect4")
+    board, to_move, action = job
+    game = Connect4()
+    child = game.step(C4State(tuple(board), to_move, None, False), action, random.Random(0))
+    if game.is_terminal(child):
+        return int(round(game.returns(child)[to_move]))
+    return -native_solver.solve_position(child, book=_BOOK)
 
 
 def _load_labels(path: Path, game) -> dict:
@@ -95,6 +115,14 @@ def main() -> None:
             print(f"    labelled {len(batch):>7} positions in {time.time() - t:7.1f}s", flush=True)
             return out
 
+        def check(pairs: list) -> list:
+            t = time.time()
+            out = list(pool.map(_kept, [(s.board, s.to_move, a) for s, a in pairs], chunksize=8))
+            for s, _a in pairs:
+                states[game.state_key(s)] = s
+            print(f"    checked  {len(pairs):>7} moves     in {time.time() - t:7.1f}s", flush=True)
+            return out
+
         for spec in args.setups:
             family_name, widths = spec.split(":")
             canonical = family_name.startswith("canon_")
@@ -103,7 +131,7 @@ def main() -> None:
                 t0 = time.time()
                 arch = arch_at(family, width)
                 r = fit_strategy(game, arch, root, 0, args.depth, args.seed, RECIPE, args.rounds, _values_local,
-                                 known, many)
+                                 known, many, check)
                 r.update({"family": family_name, "width": width, "arch": arch, "seconds": round(time.time() - t0, 1)})
                 print(f"{family_name} width {width} ({r['params']} params): certified through depth {args.depth} = "
                       f"{r['certified']} after {len(r['rounds'])} rounds; failures by round "

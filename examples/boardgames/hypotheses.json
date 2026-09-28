@@ -2450,6 +2450,29 @@
         "tests/test_c49_budget_evidence.py": "b3d6bb52a7dbdb699985585ac893baac01fd256fa772be0dbd906b6fc5352d7c"
       },
       "inconclusive_proof": "tests/test_c49_budget_evidence.py::test_c49_T7_arm_is_undecidable[canon_conv6_budget]"
+    },
+    "h66": {
+      "id": "h66",
+      "claim": "\u00a7C.49 P-START baseline (descriptive): the strongest existing Connect-4 net (ab302, 335K params), playing RAW as first player from the empty board, is not certified even through 12 plies \u2014 50 value-losing moves (depth 2: 2 of 7 positions, depth 6: 4, 8: 9, 10: 35), the first at its second move (a draw-only reply to a neighbouring-column defence)",
+      "mode": "test",
+      "proof": "tests/test_c49_certify_evidence.py::test_c49_the_best_existing_net_gives_away_the_proven_win_at_its_second_move_and_50_times_within_12_plies",
+      "note": "Registered AFTER the data. Counts are lower bounds: subtrees below a failing move are not walked.",
+      "registered_at": "2026-09-27T11:35:04.909037+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_certify_evidence.py::test_c49_the_best_existing_net_gives_away_the_proven_win_at_its_second_move_and_50_times_within_12_plies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.01s",
+          "drawn_at": "2026-09-27T11:35:05.108186+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_certify_ab302_d12.json.gz",
+        "started": "2026-09-27T09:32:53+00:00"
+      },
+      "pins": {
+        "tests/test_c49_certify_evidence.py": "eb461d53e5663d1deb367fdd8e8fd5c37141e20110ddc8cbba1f43ec4fe3815a"
+      }
     }
   }
 }

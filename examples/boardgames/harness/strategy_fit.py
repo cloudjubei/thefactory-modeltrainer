@@ -19,10 +19,16 @@ from typing import Callable
 
 
 def expand_round(game, root, player: int, choose: Callable[[list], list], move_values_fn: Callable, depth, known: dict,
-                 move_values_many: Callable[[list], list] | None = None) -> dict:
+                 move_values_many: Callable[[list], list] | None = None,
+                 check_many: Callable[[list], list] | None = None) -> dict:
     """One walk of `player`'s strategy tree from `root` to `depth` plies (None: the whole game). `known` caches exact
     move values by state key across rounds; `move_values_many`, when given, receives each ply's unknown positions in
-    one batch. Returns {"labelled": {key: (state, best moves, value)} for every `player` position walked,
+    one batch.
+
+    `check_many` ((position, move) pairs → the value each move keeps) makes labelling CHECK-FIRST: the chosen move is
+    checked with one solve, and when it keeps a WIN — nothing is better — that move alone is the label; only a move
+    that does not win costs the full label (every move's value). `known` then holds partial entries ({move: 1}) that
+    grow as later rounds check other moves. Returns {"labelled": {key: (state, best moves, value)} for every `player` position walked,
     "failures": keys where the chosen move was not best, "failures_by_depth", "complete" (nothing left beyond the
     horizon), "nodes": {"player", "opponent"}}."""
     rng = random.Random(0)
@@ -40,14 +46,23 @@ def expand_round(game, root, player: int, choose: Callable[[list], list], move_v
         theirs = [s for s in live.values() if game.current_player(s) != player]
         nodes["player"] += len(mine)
         nodes["opponent"] += len(theirs)
-        unknown = [k for k in mine if k not in known]
+        keys = list(mine)
+        chosen = choose([mine[k] for k in keys]) if keys else []
+        if check_many is not None:
+            ask = [(k, a) for k, a in zip(keys, chosen, strict=True) if a not in known.get(k, {})
+                   and a in game.legal_actions(mine[k])]
+            kept = check_many([(mine[k], a) for k, a in ask]) if ask else []
+            for (k, a), v in zip(ask, kept, strict=True):
+                if v == 1:
+                    known.setdefault(k, {})[a] = 1
+        unknown = [k for k, a in zip(keys, chosen, strict=True) if a not in known.get(k, {})
+                   or (check_many is None and k not in known)]
         if unknown:
             solved = (move_values_many([mine[k] for k in unknown]) if move_values_many
                       else [move_values_fn(mine[k]) for k in unknown])
             known.update(zip(unknown, solved, strict=True))
         nxt: dict = {}
-        keys = list(mine)
-        for key, a in zip(keys, choose([mine[k] for k in keys]) if keys else [], strict=True):
+        for key, a in zip(keys, chosen, strict=True):
             vals = known[key]
             value = max(vals.values())
             best = sorted(m for m, v in vals.items() if v == value)
@@ -112,9 +127,12 @@ def net_chooser(game, net) -> Callable[[list], list]:
 
 
 def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: dict, rounds: int,
-                 move_values_fn: Callable, known: dict, move_values_many: Callable[[list], list] | None = None) -> dict:
+                 move_values_fn: Callable, known: dict, move_values_many: Callable[[list], list] | None = None,
+                 check_many: Callable[[list], list] | None = None) -> dict:
     """Grow a net of `arch` to a perfect strategy through `depth`: alternate walks of its own tree and refits on
-    everything labelled so far. Returns {"certified", "params", "positions" labelled in all, "rounds": [{"round",
+    everything labelled so far. A round that labels nothing new after a refit that could NOT hold its data would only
+    repeat that refit exactly, so growth stops there as STALLED — the setup could not represent what it was taught.
+    Returns {"certified", "stalled", "params", "positions" labelled in all, "rounds": [{"round",
     "failures", "failures_by_depth", "labelled" this walk, "positions" so far, "complete", "fit": the refit's
     readings or None}]}."""
     import torch
@@ -126,9 +144,12 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
     net = Connect4Net(**arch_for_game(arch, game))
     data: dict = {}
     log = []
-    certified = False
+    certified = stalled = False
+    last_fit_held = True
     for r in range(rounds):
-        walk = expand_round(game, root, player, net_chooser(game, net), move_values_fn, depth, known, move_values_many)
+        before = len(data)
+        walk = expand_round(game, root, player, net_chooser(game, net), move_values_fn, depth, known, move_values_many,
+                            check_many)
         data.update(walk["labelled"])
         entry = {"round": r, "failures": len(walk["failures"]), "failures_by_depth": walk["failures_by_depth"],
                  "labelled": len(walk["labelled"]), "positions": len(data), "complete": walk["complete"], "fit": None}
@@ -136,10 +157,14 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
         if not walk["failures"]:
             certified = True
             break
+        if r > 0 and len(data) == before and not last_fit_held:
+            stalled = True
+            break
         if r == rounds - 1:
             break
         result = fit(game, arch, strategy_target(game, data), seed, recipe, return_net=True)
         net = result.pop("net")
         entry["fit"] = {k: result[k] for k in ("solved", "solved_at_epoch", "best_failures", "epochs_run")}
-    return {"certified": certified, "params": sum(p.numel() for p in net.parameters()), "positions": len(data),
+        last_fit_held = result["solved"]
+    return {"certified": certified, "stalled": stalled, "params": sum(p.numel() for p in net.parameters()), "positions": len(data),
             "rounds": log}
