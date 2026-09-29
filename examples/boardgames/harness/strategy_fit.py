@@ -128,10 +128,12 @@ def net_chooser(game, net) -> Callable[[list], list]:
 
 def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: dict, rounds: int,
                  move_values_fn: Callable, known: dict, move_values_many: Callable[[list], list] | None = None,
-                 check_many: Callable[[list], list] | None = None) -> dict:
+                 check_many: Callable[[list], list] | None = None, warm_start: bool = False) -> dict:
     """Grow a net of `arch` to a perfect strategy through `depth`: alternate walks of its own tree and refits on
     everything labelled so far. A round that labels nothing new after a refit that could NOT hold its data would only
     repeat that refit exactly, so growth stops there as STALLED — the setup could not represent what it was taught.
+    `warm_start` continues each refit from the previous round's net instead of a fresh one — most of the data is
+    unchanged from round to round, so the net already holds it.
     Returns {"certified", "stalled", "params", "positions" labelled in all, "rounds": [{"round",
     "failures", "failures_by_depth", "labelled" this walk, "positions" so far, "complete", "fit": the refit's
     readings or None}]}."""
@@ -162,7 +164,8 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
             break
         if r == rounds - 1:
             break
-        result = fit(game, arch, strategy_target(game, data), seed, recipe, return_net=True)
+        result = fit(game, arch, strategy_target(game, data), seed, recipe, return_net=True,
+                     init_net=net if warm_start else None)
         net = result.pop("net")
         entry["fit"] = {k: result[k] for k in ("solved", "solved_at_epoch", "best_failures", "epochs_run")}
         last_fit_held = result["solved"]

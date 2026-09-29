@@ -110,16 +110,19 @@ def failures(net, ev: dict) -> int:
     return int((~ev["optimal"][torch.arange(len(moves)), moves]).sum())
 
 
-def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: bool = False) -> dict:
+def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: bool = False, init_net=None) -> dict:
     """Train a fresh net of `arch` on the target's exact answers until it holds the target (no more failures than
     allowed) or has not improved for `patience` epochs. Policy: cross-entropy to uniform over the optimal moves;
-    value: squared error to the exact value. `return_net` adds the trained net itself under "net"."""
+    value: squared error to the exact value. `return_net` adds the trained net itself under "net". `init_net`
+    continues training that net (it must be of `arch`) instead of a fresh one — a warm start."""
     import torch
 
     from harness.neural import Connect4Net, arch_for_game
 
     torch.manual_seed(seed)
-    net = Connect4Net(**arch_for_game(arch, game))
+    net = Connect4Net(**arch_for_game(arch, game)) if init_net is None else init_net
+    if init_net is not None and init_net.arch != Connect4Net(**arch_for_game(arch, game)).arch:
+        raise ValueError(f"init_net has arch {init_net.arch}, not the requested {arch}")
     opt = torch.optim.Adam(net.parameters(), lr=recipe["lr"])
     tr = target["train"]
     n = len(tr["x"])

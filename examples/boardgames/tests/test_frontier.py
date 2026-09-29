@@ -203,3 +203,30 @@ def test_a_fit_hands_back_its_net_only_when_asked(ttt, targets):
     with_net = fit(ttt, arch_at({"body": "mlp"}, 4), targets[False], 3, recipe, return_net=True)
     assert "net" not in plain and failures(with_net.pop("net"), targets[False]["eval"]) == with_net["curve"][-1][1]
     assert with_net == plain
+
+
+def test_a_fit_can_continue_from_a_given_net_instead_of_a_fresh_one(ttt, targets):
+    import copy
+
+    import torch
+
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 3000}
+    held = fit(ttt, arch_at({"body": "mlp", "canonical": True}, 32), targets[True], 1, recipe, return_net=True)
+    assert held["solved"]
+    start = copy.deepcopy(held["net"])
+    again = fit(ttt, arch_at({"body": "mlp", "canonical": True}, 32), targets[True], 2, recipe, return_net=True,
+                init_net=held["net"])
+    assert again["solved"] and again["solved_at_epoch"] == recipe["check_every"]
+    assert again["net"] is held["net"]
+    fresh = fit(ttt, arch_at({"body": "mlp", "canonical": True}, 32), targets[True], 2,
+                {**recipe, "max_epochs": 25, "check_every": 25})
+    assert fresh["curve"][0][1] > 0
+    assert not all(torch.equal(a, b) for a, b in zip(start.parameters(), again["net"].parameters()))
+
+
+def test_a_given_net_of_another_shape_is_refused(ttt, targets):
+    from harness.neural import Connect4Net, arch_for_game
+
+    other = Connect4Net(**arch_for_game({"mlp_hidden": [8]}, ttt))
+    with pytest.raises(ValueError, match="arch"):
+        fit(ttt, arch_at({"body": "mlp"}, 16), targets[False], 1, DEFAULT_RECIPE, init_net=other)

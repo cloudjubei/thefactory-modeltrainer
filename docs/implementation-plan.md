@@ -4039,3 +4039,25 @@ used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle front
   with ONE solve. If it keeps a win, that move alone is a valid label, since nothing beats a win. Only a
   non-winning move costs the full label.
 - **Depths 8, 10 and 12 running**: canon conv 4/8, residual 8/16, 12 rounds each, shared label cache.
+- **Strategy frontier, depths 8 and 10** (`c49_strategy_d8/_d10.json.gz`). Depth 12 was cancelled with the user's
+  agreement: no setup certified at depth 10.
+
+| setup | params | depth 8 | depth 10 |
+|---|---|---|---|
+| canon conv-4 | 1,576 | **certified** (12 rounds, 1,086 positions) | root collapse |
+| canon conv-8 | 3,432 | **certified** (6 rounds, 710 positions) | root collapse |
+| residual-8 | 2,443 | root collapse (capacity) | root collapse |
+| residual-16 | 7,179 | not certified: out of ROUNDS (fits all held; failures 3-8 at the end) | root collapse |
+
+  - **Two failure modes.** (1) CAPACITY: a refit cannot hold all its data, the opening move is lost, and the walk
+    stops at the root. (2) ROUND BUDGET: every fit holds, and failures are still falling when the rounds run out.
+  - **Tool fix:** growth stops as STALLED when a round labels nothing new after a refit that could not hold its
+    data. Such rounds only repeated the same fit (residual-8 ran 10 of them).
+  - **Running:** depth 10 with canon conv-16/32 and residual-32, 20 rounds.
+- **Restart (2026-09-29, user's choice: stop and restart with fixes).** The first wide run was stopped after 13.8 h
+  on its first setup: refitting a fresh net each round on growing data dominated. Two fixes:
+  - (1) **Warm-start refits** (`fit(init_net=)`, `fit_strategy(warm_start=True)`; tested, mutation-checked): each
+    round continues from the previous net.
+  - (2) **The label cache is saved after every labelling and check batch**, atomically (temp file + rename). The
+    stopped run's new labels were lost because the cache was saved only per setup; 13,130 earlier labels were kept.
+  - Relaunched: depth 10, canon conv-16/32 and residual-32, 20 rounds, warm start.

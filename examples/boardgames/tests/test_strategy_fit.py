@@ -164,7 +164,8 @@ def test_a_single_failure_is_never_certified(ttt, monkeypatch):
     import harness.strategy_fit as sf
     from harness.frontier import DEFAULT_RECIPE
 
-    monkeypatch.setattr(sf, "expand_round", lambda *a, **k: {"labelled": {}, "failures": ["x"],
+    fresh = iter(range(100))
+    monkeypatch.setattr(sf, "expand_round", lambda *a, **k: {"labelled": {next(fresh): 1}, "failures": ["x"],
                                                              "failures_by_depth": {0: 1}, "complete": True,
                                                              "nodes": {}})
     monkeypatch.setattr(sf, "strategy_target", lambda game, data: None)
@@ -329,3 +330,24 @@ def test_a_round_that_labels_nothing_new_after_a_SOLVED_fit_is_not_a_stall(ttt, 
     r = fit_strategy(ttt, {"mlp_hidden": [4]}, ttt.initial_state(random.Random(0)), 0, None, 1, DEFAULT_RECIPE, 4,
                      _move_values(ttt), known={})
     assert not r["certified"] and not r["stalled"] and len(r["rounds"]) == 4
+
+
+def test_warm_start_hands_each_round_s_net_to_the_next_refit_and_cold_start_never_does(ttt, monkeypatch):
+    import harness.frontier as frontier
+    from harness.frontier import DEFAULT_RECIPE
+
+    real = frontier.fit
+    given = []
+
+    def spy(*args, **kwargs):
+        given.append(kwargs.get("init_net"))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(frontier, "fit", spy)
+    root = ttt.initial_state(random.Random(0))
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 300}
+    fit_strategy(ttt, {"mlp_hidden": [16]}, root, 0, None, 1, recipe, 4, _move_values(ttt), known={}, warm_start=True)
+    assert len(given) >= 2 and given[0] is not None and all(g is not None for g in given)
+    assert len({id(g) for g in given}) == 1, "one net trained on and on"
+    given.clear()
+    fit_strategy(ttt, {"mlp_hidden": [16]}, root, 0, None, 1, recipe, 4, _move_values(ttt), known={})
+    assert given and all(g is None for g in given)

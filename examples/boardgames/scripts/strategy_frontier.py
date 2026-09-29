@@ -67,12 +67,16 @@ def _load_labels(path: Path, game) -> dict:
 
 
 def _save_labels(path: Path, labels: dict) -> None:
+    """Write the whole cache to a temporary file and rename it over the old one, so a run stopped mid-save never
+    leaves a corrupt cache behind."""
     from harness.evidence import save_evidence
 
     path.parent.mkdir(exist_ok=True)
-    save_evidence(path, {"positions": [{"board": list(s.board), "to_move": s.to_move,
-                                        "values": {str(a): v for a, v in vals.items()}}
-                                       for s, vals in labels.values()]})
+    tmp = path.with_name(path.name.replace(".json.gz", ".tmp.json.gz"))
+    save_evidence(tmp, {"positions": [{"board": list(s.board), "to_move": s.to_move,
+                                       "values": {str(a): v for a, v in vals.items()}}
+                                      for s, vals in labels.values()]})
+    tmp.replace(path)
 
 
 def main() -> None:
@@ -110,16 +114,21 @@ def main() -> None:
         def many(batch: list) -> list:
             t = time.time()
             out = list(pool.map(_values, [(s.board, s.to_move) for s in batch], chunksize=4))
-            for s in batch:
+            for s, vals in zip(batch, out, strict=True):
                 states[game.state_key(s)] = s
+                known[game.state_key(s)] = vals
+            _save_labels(labels_path, {k: (states[k], v) for k, v in known.items() if k in states})
             print(f"    labelled {len(batch):>7} positions in {time.time() - t:7.1f}s", flush=True)
             return out
 
         def check(pairs: list) -> list:
             t = time.time()
             out = list(pool.map(_kept, [(s.board, s.to_move, a) for s, a in pairs], chunksize=8))
-            for s, _a in pairs:
+            for (s, a), v in zip(pairs, out, strict=True):
                 states[game.state_key(s)] = s
+                if v == 1:
+                    known.setdefault(game.state_key(s), {})[a] = 1
+            _save_labels(labels_path, {k: (states[k], v) for k, v in known.items() if k in states})
             print(f"    checked  {len(pairs):>7} moves     in {time.time() - t:7.1f}s", flush=True)
             return out
 
@@ -131,10 +140,10 @@ def main() -> None:
                 t0 = time.time()
                 arch = arch_at(family, width)
                 r = fit_strategy(game, arch, root, 0, args.depth, args.seed, RECIPE, args.rounds, _values_local,
-                                 known, many, check)
+                                 known, many, check, warm_start=True)
                 r.update({"family": family_name, "width": width, "arch": arch, "seconds": round(time.time() - t0, 1)})
                 print(f"{family_name} width {width} ({r['params']} params): certified through depth {args.depth} = "
-                      f"{r['certified']} after {len(r['rounds'])} rounds; failures by round "
+                      f"{r['certified']}{' (STALLED: could not hold its data)' if r['stalled'] else ''} after {len(r['rounds'])} rounds; failures by round "
                       f"{[e['failures'] for e in r['rounds']]}; {r['positions']} positions [{r['seconds']:.0f}s]",
                       flush=True)
                 runs.append(r)
@@ -146,7 +155,7 @@ def main() -> None:
                              "training_fingerprint": stamps[0], "measurement_fingerprint": stamps[1],
                              "versions": {"python": platform.python_version(), "torch": torch.__version__},
                              "config": {"depth": args.depth, "setups": args.setups, "rounds": args.rounds,
-                                        "seed": args.seed, "recipe": RECIPE, "player": 0},
+                                        "seed": args.seed, "recipe": RECIPE, "player": 0, "warm_start": True},
                              "labelled_positions": len(known), "runs": runs})
 
 
