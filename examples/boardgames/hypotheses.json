@@ -2473,6 +2473,72 @@
       "pins": {
         "tests/test_c49_certify_evidence.py": "eb461d53e5663d1deb367fdd8e8fd5c37141e20110ddc8cbba1f43ec4fe3815a"
       }
+    },
+    "h67": {
+      "id": "h67",
+      "claim": "\u00a7C.49 C4 strategy frontier (descriptive): a 1,576-param standardised-input conv net holds a CERTIFIED first-player strategy through 8 plies (grown with exact labels)",
+      "mode": "test",
+      "proof": "tests/test_c49_strategy_evidence.py::test_c49_a_1_6K_standardised_net_holds_a_certified_first_player_strategy_through_8_plies",
+      "note": "Registered AFTER the data.",
+      "registered_at": "2026-09-29T22:59:42.837379+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_strategy_evidence.py::test_c49_a_1_6K_standardised_net_holds_a_certified_first_player_strategy_through_8_plies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-29T22:59:43.090491+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_strategy_d8.json.gz",
+          "started": "2026-09-27T16:17:43+00:00"
+        },
+        {
+          "path": "evidence/c49_strategy_d10.json.gz",
+          "started": "2026-09-27T21:00:32+00:00"
+        },
+        {
+          "path": "evidence/c49_strategy_d10_wide.json.gz",
+          "started": "2026-09-29T00:12:14+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_strategy_evidence.py": "44a36aad0be6797fbb88f6a970743f25ca651b599255bb5be753bef535a51956"
+      }
+    },
+    "h68": {
+      "id": "h68",
+      "claim": "\u00a7C.49 C4 strategy frontier (descriptive): no setup up to 23.5K params is certified through 10 plies in 20 rounds, and it is the REFITS that fall short \u2014 in every late round the refit does not hold its own labelled data (the 20K canon conv misses 1-5 of ~11K positions); not a stall, not representability shown",
+      "mode": "test",
+      "proof": "tests/test_c49_strategy_evidence.py::test_c49_no_setup_up_to_23_5K_is_certified_through_10_plies_because_the_refits_do_not_hold_their_data",
+      "note": "Registered AFTER the data. Corrects my in-progress reading that the loop was unstable while fits held.",
+      "registered_at": "2026-09-29T22:59:42.884327+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_strategy_evidence.py::test_c49_no_setup_up_to_23_5K_is_certified_through_10_plies_because_the_refits_do_not_hold_their_data",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-29T22:59:43.311492+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_strategy_d8.json.gz",
+          "started": "2026-09-27T16:17:43+00:00"
+        },
+        {
+          "path": "evidence/c49_strategy_d10.json.gz",
+          "started": "2026-09-27T21:00:32+00:00"
+        },
+        {
+          "path": "evidence/c49_strategy_d10_wide.json.gz",
+          "started": "2026-09-29T00:12:14+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_strategy_evidence.py": "44a36aad0be6797fbb88f6a970743f25ca651b599255bb5be753bef535a51956"
+      }
     }
   }
 }

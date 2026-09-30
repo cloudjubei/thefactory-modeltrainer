@@ -197,7 +197,7 @@ def test_git_tracks_no_evidence_data_and_never_ignores_the_manifest():
                                     "tests.test_c48_setups_evidence", "tests.test_c48_settle_evidence",
                                     "tests.test_c48_coverage_evidence",
                                     "tests.test_c49_small_evidence", "tests.test_c49_budget_evidence",
-                                    "tests.test_c49_certify_evidence"])
+                                    "tests.test_c49_certify_evidence", "tests.test_c49_strategy_evidence"])
 def test_the_evidence_proofs_skip_only_when_their_recorded_files_are_absent(module):
     """The pinned proofs skip on a checkout without the evidence. A skip condition that names the wrong path skips
     them EVERYWHERE, silently — so each module's files must be ones the manifest records, and on a machine holding

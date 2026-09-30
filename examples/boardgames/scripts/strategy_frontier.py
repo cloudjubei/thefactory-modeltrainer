@@ -18,7 +18,8 @@ from pathlib import Path
 MEASUREMENT_MODULES = ("scripts/strategy_frontier.py", "harness/strategy_fit.py", "harness/frontier.py",
                        "harness/native_solver.py", "harness/solver.py")
 LABELS = Path(__file__).resolve().parent.parent / "books" / "c4_labels.json.gz"
-RECIPE = {"lr": 2e-3, "batch": 256, "max_epochs": 3000, "check_every": 25, "patience": 600}
+RECIPES = {"default": {"lr": 2e-3, "batch": 256, "max_epochs": 3000, "check_every": 25, "patience": 600},
+           "hold": {"lr": 3e-3, "lr_end": 1e-5, "batch": 512, "max_epochs": 4000, "check_every": 25, "patience": None}}
 _BOOK = None
 
 
@@ -95,6 +96,8 @@ def main() -> None:
     ap.add_argument("--depth", type=int, required=True)
     ap.add_argument("--setups", nargs="+", required=True, help="family:width,width (family as in harness.frontier)")
     ap.add_argument("--rounds", type=int, default=12)
+    ap.add_argument("--recipe", choices=sorted(RECIPES), default="default",
+                    help="hold: refits train until they hold their data (decaying rate, no patience stop)")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--labels", default=str(LABELS))
@@ -139,7 +142,8 @@ def main() -> None:
             for width in [int(w) for w in widths.split(",")]:
                 t0 = time.time()
                 arch = arch_at(family, width)
-                r = fit_strategy(game, arch, root, 0, args.depth, args.seed, RECIPE, args.rounds, _values_local,
+                r = fit_strategy(game, arch, root, 0, args.depth, args.seed, RECIPES[args.recipe], args.rounds,
+                                 _values_local,
                                  known, many, check, warm_start=True)
                 r.update({"family": family_name, "width": width, "arch": arch, "seconds": round(time.time() - t0, 1)})
                 print(f"{family_name} width {width} ({r['params']} params): certified through depth {args.depth} = "
@@ -155,7 +159,8 @@ def main() -> None:
                              "training_fingerprint": stamps[0], "measurement_fingerprint": stamps[1],
                              "versions": {"python": platform.python_version(), "torch": torch.__version__},
                              "config": {"depth": args.depth, "setups": args.setups, "rounds": args.rounds,
-                                        "seed": args.seed, "recipe": RECIPE, "player": 0, "warm_start": True},
+                                        "seed": args.seed, "recipe": RECIPES[args.recipe], "recipe_name": args.recipe,
+                                        "player": 0, "warm_start": True},
                              "labelled_positions": len(known), "runs": runs})
 
 

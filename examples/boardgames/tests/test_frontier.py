@@ -230,3 +230,34 @@ def test_a_given_net_of_another_shape_is_refused(ttt, targets):
     other = Connect4Net(**arch_for_game({"mlp_hidden": [8]}, ttt))
     with pytest.raises(ValueError, match="arch"):
         fit(ttt, arch_at({"body": "mlp"}, 16), targets[False], 1, DEFAULT_RECIPE, init_net=other)
+
+
+def test_a_recipe_can_decay_the_learning_rate_linearly_to_its_floor_over_the_epoch_budget(ttt, targets, monkeypatch):
+    import torch
+
+    seen = []
+    real = torch.optim.Adam.step
+
+    def step(self, *a, **k):
+        seen.append(self.param_groups[0]["lr"])
+        return real(self, *a, **k)
+    monkeypatch.setattr(torch.optim.Adam, "step", step)
+    recipe = {**DEFAULT_RECIPE, "lr": 1e-3, "lr_end": 1e-4, "max_epochs": 10, "check_every": 5, "patience": None}
+    fit(ttt, arch_at({"body": "mlp"}, 2), targets[True], 1, recipe)
+    per_epoch = len(seen) // 10
+    firsts = [seen[e * per_epoch] for e in range(10)]
+    assert firsts == pytest.approx([1e-3 - 1e-4 * e for e in range(10)])
+    assert seen[-1] == pytest.approx(1e-4)
+
+
+def test_without_patience_an_unsolved_fit_uses_its_whole_budget(ttt, targets):
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 60, "check_every": 10, "patience": None}
+    r = fit(ttt, arch_at({"body": "mlp"}, 1), targets[False], 1, recipe)
+    assert not r["solved"] and r["epochs_run"] == 60
+
+
+def test_a_recipe_without_the_new_keys_trains_exactly_as_before(ttt, targets):
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 40, "check_every": 10}
+    a = fit(ttt, arch_at({"body": "mlp"}, 4), targets[False], 5, recipe)
+    b = fit(ttt, arch_at({"body": "mlp"}, 4), targets[False], 5, {**recipe, "lr_end": None})
+    assert a == b

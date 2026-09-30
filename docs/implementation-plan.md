@@ -4061,3 +4061,24 @@ used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle front
   - (2) **The label cache is saved after every labelling and check batch**, atomically (temp file + rename). The
     stopped run's new labels were lost because the cache was saved only per setup; 13,130 earlier labels were kept.
   - Relaunched: depth 10, canon conv-16/32 and residual-32, 20 rounds, warm start.
+- **Wide depth-10 result (h67, h68, descriptive, VERIFIED).**
+
+| setup | params | depth 10 | refit misses per late round |
+|---|---|---|---|
+| canon conv-16 | 8,008 | not certified (last-5-round failures 13,17,21,13,11) | 50-72 of ~9K |
+| canon conv-32 | 20,616 | not certified (10,18,16,6,38) | **1-5** of ~11K |
+| residual-32 | 23,563 | not certified (45,50,34,57,54,26) | 222-250 of ~6.8K |
+
+  - **Correction.** My in-progress reading ("the fits hold; each refit shifts the net's moves and opens new failing
+    branches") was WRONG. No late refit held its own data: every one stopped at its patience still missing
+    positions. The limit measured is the REFIT budget, the same lesson as tic-tac-toe T6/T7, not net size and not
+    tree instability.
+  - The 20K standardised conv is within 1-5 positions of holding all ~11K, so a certified depth-10 strategy may
+    well be representable at that size. The residual nets fit badly under this recipe.
+  - **Next (proposed):** refits that run until they hold (a larger epoch budget, a decaying learning rate) for canon
+    conv-16/32 at depth 10. The labels are cached, so the cost is almost all fitting.
+- **Depth-10 rerun, refits run to holding** (user: "do it", 2026-09-30). `fit` recipes may now set `lr_end` (a linear
+  per-epoch decay reaching it on the last epoch) and `patience: None` (no early stop); the old recipes are unchanged
+  (tested). The driver's `--recipe hold` = lr 3e-3 → 1e-5, batch 512, up to 4,000 epochs, no patience, with warm
+  start. Running: canon conv-16 and conv-32 at depth 10, 20 rounds, cached labels.
+  - **Success:** a certified depth-10 strategy for either net. **Diagnostic:** do the refits now hold their data?

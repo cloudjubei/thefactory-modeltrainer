@@ -113,7 +113,9 @@ def failures(net, ev: dict) -> int:
 def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: bool = False, init_net=None) -> dict:
     """Train a fresh net of `arch` on the target's exact answers until it holds the target (no more failures than
     allowed) or has not improved for `patience` epochs. Policy: cross-entropy to uniform over the optimal moves;
-    value: squared error to the exact value. `return_net` adds the trained net itself under "net". `init_net`
+    value: squared error to the exact value. A recipe's optional `lr_end` decays the rate linearly, epoch by epoch,
+    from `lr` at the first epoch to `lr_end` at the last of `max_epochs`; a `patience` of None never stops early, so an unsolved fit uses its
+    whole budget. `return_net` adds the trained net itself under "net". `init_net`
     continues training that net (it must be of `arch`) instead of a fresh one — a warm start."""
     import torch
 
@@ -129,7 +131,11 @@ def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: boo
     gen = torch.Generator().manual_seed(seed)
     best, best_epoch, solved_at, curve = None, 0, None, []
     epoch = 0
+    lr_end = recipe.get("lr_end")
     for epoch in range(1, recipe["max_epochs"] + 1):
+        if lr_end is not None:
+            for group in opt.param_groups:
+                group["lr"] = recipe["lr"] + (lr_end - recipe["lr"]) * (epoch - 1) / max(1, recipe["max_epochs"] - 1)
         order = torch.randperm(n, generator=gen)
         for i in range(0, n, recipe["batch"]):
             j = order[i:i + recipe["batch"]]
@@ -148,7 +154,7 @@ def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: boo
         if f <= target["allowed_failures"]:
             solved_at = epoch
             break
-        if epoch - best_epoch >= recipe["patience"]:
+        if recipe["patience"] is not None and epoch - best_epoch >= recipe["patience"]:
             break
     out = {"seed": seed, "params": sum(p.numel() for p in net.parameters()), "solved": solved_at is not None,
            "solved_at_epoch": solved_at, "best_failures": best, "epochs_run": epoch, "curve": curve}

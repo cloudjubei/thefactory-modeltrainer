@@ -196,6 +196,10 @@
       "sha256": "c61f1f1a7d9d7a3eae13197e8dc5b4c0bad9522dda86da17d41c2dae2074f577",
       "started": "2026-09-27T21:00:32+00:00"
     },
+    "c49_strategy_d10_wide.json.gz": {
+      "sha256": "b19d62b715979a621128a50a2c45ff1a5dea62814b7c01ace3a06a9cd4bd7105",
+      "started": "2026-09-29T00:12:14+00:00"
+    },
     "c49_strategy_d6.json.gz": {
       "sha256": "6dda576b271a74151fce0e6650037f328ecac1f5c540250e803347eab69c1b07",
       "started": "2026-09-27T10:35:54+00:00"
