@@ -2672,6 +2672,52 @@
       "pins": {
         "tests/test_c49_strategy_evidence.py": "44a36aad0be6797fbb88f6a970743f25ca651b599255bb5be753bef535a51956"
       }
+    },
+    "h70": {
+      "id": "h70",
+      "claim": "\u00a7C.50 E1: the generic tactics playbook (win now, else block their win, else fork: two winning moves and none for them) recommends ONLY value-optimal moves at every position where it fires, on all five E1 sets: every raw tic-tac-toe position (4,520), Newell\u2013Simon's own-play positions for each side, the fully labelled Connect-4 label-cache positions, and a random-play Connect-4 sample (4 stone-count bands from 10 stones) labelled by the native solver",
+      "mode": "test",
+      "proof": "tests/test_c50_rules_evidence.py::test_c50_E1_the_tactics_playbook_is_optimal_wherever_it_fires_on_every_set",
+      "note": "Sound by construction (a win is maximal; a lone block is the only non-losing move or all moves lose; a fork with no reply win wins in 3 plies). A miss would mean a bug or a wrong argument.",
+      "registered_at": "2026-09-30T19:07:25.918915+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_rules_evidence.py::test_c50_E1_the_tactics_playbook_is_optimal_wherever_it_fires_on_every_set",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.16s",
+          "drawn_at": "2026-09-30T19:08:59.901341+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_E1_rules.json.gz",
+        "started": "2026-09-30T19:07:36+00:00"
+      },
+      "pins": {
+        "tests/test_c50_rules_evidence.py": "0b93c88696d7d7fb7963fc95663b58d14566c4b3b256fb53964549eb612593f7"
+      }
+    },
+    "h71": {
+      "id": "h71",
+      "claim": "\u00a7C.50 E1: Newell\u2013Simon's tic-tac-toe rules as written in our rule language (win, block, fork, block fork = their fork square that gives no fork, force without a fork, centre, opposite corner, empty corner, empty side) are STRATEGY-SOUND for both sides: at every position the list reaches in its own play (following every move it recommends) against every reply, some rule fires and every recommended move is value-optimal",
+      "mode": "test",
+      "proof": "tests/test_c50_rules_evidence.py::test_c50_E1_newell_simon_plays_perfectly_from_the_start_as_either_player",
+      "note": "Literature claims the list is perfect (Crowley & Siegler 1993, via Wikipedia) but the survey found no formal proof; the block-fork clause is where renderings break. Our rendering of rule 4 is a guess at its intent, so this can fail on the rendering rather than the list.",
+      "registered_at": "2026-09-30T19:07:25.981643+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_rules_evidence.py::test_c50_E1_newell_simon_plays_perfectly_from_the_start_as_either_player",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-09-30T19:09:00.299675+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_E1_rules.json.gz",
+        "started": "2026-09-30T19:07:36+00:00"
+      },
+      "pins": {
+        "tests/test_c50_rules_evidence.py": "0b93c88696d7d7fb7963fc95663b58d14566c4b3b256fb53964549eb612593f7"
+      }
     }
   }
 }

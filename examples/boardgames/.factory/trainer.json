@@ -429,5 +429,102 @@
     "gpu": false,
     "memory": "1g",
     "cpus": 2
-  }
+  },
+  "papers": [
+    {
+      "id": "allis-knowledge-based-connect4-1988",
+      "title": "A Knowledge-based Approach of Connect-Four. The Game is Solved: White Wins",
+      "url": "http://tromp.github.io/c4/connect4_thesis.pdf",
+      "authors": "Victor Allis",
+      "year": 1988,
+      "claim": "VICTOR, built on nine strategic rules each proven correct, shows Black at least draws on every 7x(2n) board unless White starts in the middle column, and on any 6x(2n) board; with conspiracy-number search, search tables and depth-first search it shows White wins on 7x6, playing in real time from a database of about half a million positions.",
+      "approach": "Rules (claimeven, baseinverse, vertical, aftereven, lowinverse, highinverse, baseclaim, before, specialbefore) each solve sets of four-in-a-row groups for the side that controls zugzwang; a conflict-free combination of rule instances that solves every group certifies the position's value.",
+      "assumptions": {
+        "notes": "The rules certify VALUES (at least a draw / a win); they do not choose moves. Rule instances conflict and must pass a compatibility check. The rules alone did not settle the middle-column opening: search and a position database were needed."
+      },
+      "verdictNote": "§C.50 reference for Connect-4 written rules: port the rules as a value CERTIFICATE (with the compatibility check), not as move rules; expect a long tail the rules do not cover.",
+      "tags": ["connect4", "written-rules", "certificate", "zugzwang", "c50"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "weakc4-steady-state-2swap",
+      "title": "WeakC4: a search-free weak solution of Connect 4",
+      "url": "https://2swap.github.io/WeakC4/explanation/",
+      "authors": "2swap (with Waffle3z, dave-zyx, CTL560, Meghanto)",
+      "claim": "A weak solution for the first player that needs no runtime search fits in about 25 KB: an opening tree of under 2,600 nodes, about two-thirds of them leaves holding 'steady states' played by a tiny rule language.",
+      "approach": "Rule language at a steady state: win if you can, block if you must, else follow priority levels 0-d on the empty squares (play the one playable square of the lowest level with exactly one). Candidates found by a genetic algorithm and a SAT reduction, verified by brute force against every reply.",
+      "assumptions": {
+        "notes": "Strategy-sound, not position-sound: correct from its own roots against every reply, not at arbitrary positions. Language design by trial and error."
+      },
+      "verdictNote": "§C.50 closest precedent to our P-START target: a compact written first-player strategy; the size benchmark our rules+net setups should be compared with.",
+      "tags": ["connect4", "written-rules", "weak-solution", "p-start", "c50"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "hocquette-muggleton-migo-2019",
+      "title": "Can Meta-Interpretive Learning outperform Deep Reinforcement Learning of Evaluable Game strategies?",
+      "url": "https://arxiv.org/abs/1902.09835",
+      "authors": "Celine Hocquette, Stephen H. Muggleton",
+      "year": 2019,
+      "claim": "MIGO, a meta-interpretive learner of comprehensible game strategies, has lower cumulative minimax regret than all tested normal and deep reinforcement-learning variants on Noughts-and-Crosses and Hexapawn, and transfers between the two games.",
+      "approach": "Learns layered logic programs (win_1, win_2, ... then draw rules), each defined from the previous layer.",
+      "assumptions": {
+        "notes": "Tiny games; the authors note the need for an optimal opponent and cost growing with state size."
+      },
+      "verdictNote": "§C.50: layered win-in-k predicates are a good backbone for the rule language; evidence that written rules can beat learned nets on sample efficiency in small games.",
+      "tags": ["tictactoe", "ilp", "written-rules", "rule-discovery", "c50"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "wu-katago-2019",
+      "title": "Accelerating Self-Play Learning in Go",
+      "url": "https://arxiv.org/abs/1902.10565",
+      "authors": "David J. Wu",
+      "year": 2019,
+      "claim": "KataGo reaches ELF OpenGo's strength after 19 days on fewer than 30 GPUs, about a 50x reduction in computation over comparable methods; domain-specific techniques are separated from general ones.",
+      "approach": "General self-play improvements plus Go-specific input features (ladders, liberties, pass-alive areas) whose ablation measures what domain knowledge adds.",
+      "assumptions": {
+        "notes": "The size of the Go-specific feature ablation effect is as reported in the paper body (our research note: about 1.55x training compute), not re-checked in the abstract."
+      },
+      "verdictNote": "§C.50 F3 evidence: rule predicates as input planes speed learning; supports testing our predicates as features for a smaller net.",
+      "tags": ["go", "features", "self-play", "c50"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bastani-viper-2018",
+      "title": "Verifiable Reinforcement Learning via Policy Extraction",
+      "url": "https://proceedings.neurips.cc/paper/2018/hash/e6d8545daa42d5ced125a4bf747b3688-Abstract.html",
+      "authors": "Osbert Bastani, Yewen Pu, Armando Solar-Lezama",
+      "year": 2018,
+      "claim": "VIPER extracts decision-tree policies from neural policies that perform comparably and can be formally verified; shown on a robust Pong variant, an unbeatable toy game and a provably stable cart-pole controller.",
+      "approach": "Imitation (Q-DAgger) of the neural oracle into a decision tree, weighting states by how costly a mistake there is.",
+      "assumptions": {
+        "notes": "Extraction measures agreement with the net; correctness still needs a separate check."
+      },
+      "verdictNote": "§C.50 S3 method: extract rules from our small perfect nets, weight by mistake cost, then verify with the solver.",
+      "tags": ["rule-extraction", "verification", "c50"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "romera-paredes-funsearch-2024",
+      "title": "Mathematical discoveries from program search with large language models",
+      "url": "https://doi.org/10.1038/s41586-023-06924-6",
+      "authors": "Romera-Paredes, Barekatain, Novikov, Balog, Kumar, et al.",
+      "year": 2024,
+      "claim": "FunSearch pairs a large language model that proposes programs with an automatic evaluator, finding new results in mathematics (Nature 625:468-475).",
+      "approach": "Evolutionary loop: the LLM mutates candidate programs, an exact evaluator scores them and guards against wrong ones.",
+      "assumptions": {
+        "notes": "The evaluator is what makes it trustworthy; the LLM alone is not."
+      },
+      "verdictNote": "§C.50 S2 variant: propose candidate rules (as code or in the rule language) and accept only those the solver finds 100% precise.",
+      "tags": ["llm", "program-search", "rule-discovery", "c50"],
+      "status": "untested",
+      "source": "manual"
+    }
+  ]
 }

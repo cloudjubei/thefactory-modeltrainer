@@ -4166,3 +4166,229 @@ reaching 0.
   - Zero means P-START, not all-position perfection: 155 of 258 zero readings were on nets perfect at every position.
 - Copy-back list gains `tests/test_evidence.py` (T8 proofs added to the evidence guard) and
   `evidence/c49_T8_augment_sib2_tree.json.gz` (+ its manifest entry, merged).
+
+#### §C.50 — WRITTEN RULES: play knowledge as logical statements, verified by the solver (2026-09-30)
+
+**Why.** A net holds a rule implicitly in its weights. A rule written as a logical statement can be checked
+exactly against the solver, read by a person, and reused by every other agent: as exact training labels, as a move
+override in front of a smaller net, as input features, and as search pruning. So the deliverable of this track is
+**written rules with proven or measured precision**. A net is one place to find them.
+
+**The rule language.** A rule is `IF ∃ m: L1(m) ∧ … ∧ Lk(m) THEN play such an m`. Each literal is a predicate of a
+position and a legal move, or its negation. A **playbook** is an ordered decision list: the first rule that fires
+decides. Every rule prints as a readable statement. The predicate library has two layers:
+- **Generic tactics** (any alternating game; uses only `step`, terminal checks and a "their move" view of the same
+  board): `wins`, `blocks` (the opponent would win there), `gives_win` (after m the opponent can win at once),
+  `forks` (after m we have two or more winning moves and they have none), `blocks_fork`.
+- **Game geometry**: tic-tac-toe cell classes (centre, corner, side, corner opposite the opponent). Connect-4 column
+  distance from centre, landing-row parity, and threats created on odd or even rows. Parity is the Allis/zugzwang
+  knowledge the earlier nets could not represent (§C.8 notes).
+
+**Verdicts on a rule.** Measured against exact move values. **Coverage** is where it fires; **precision** is where
+every move it recommends is value-optimal. **Sound** means precision 1.0 over the complete position set: exhaustive
+on tic-tac-toe; on Connect-4, by construction for the tactics and measured on solver-labelled positions for the rest.
+
+**Where rules come from (three sources, one verifier):**
+- **S1 Known rules (baselines):** Newell–Simon for tic-tac-toe; Allis threat parity for Connect-4.
+- **S2 Discovered:** search the rule language for rules with precision 1.0 and maximum coverage against exact
+  labels, building the playbook greedily. The rules are found by the process, not written by hand.
+- **S3 Extracted from a net:** fit the rule language to a trained net's own moves, e.g. the 938-param net perfect at
+  every tic-tac-toe position (h51), and verify with the solver. This writes out what the net learned.
+
+**How rules feed the other agents:**
+- **F1 Labels:** sound rules label positions exactly with no solver → the solver-free process.
+- **F2 Override:** playbook first, net for the rest. The net only has to be right where no rule fires → a smaller
+  certified net.
+- **F3 Features:** predicates as input planes.
+- **F4 Search:** rules as a prior or pruning.
+
+**Experiments and success criteria:**
+- **E1 (descriptive, now):** the rule harness plus the generic tactics and Newell–Simon.
+  - Tic-tac-toe, all 4,520 raw positions: coverage and precision per rule and for each playbook.
+  - Connect-4: fully labelled positions from the label cache and a solver-labelled random-play sample.
+  - **Pass:** every rule claimed sound by construction scores precision 1.0 on every set. Any miss is a bug or a
+    wrong argument, and is reported.
+- **E2 (pre-registered before running):** S2 on tic-tac-toe, from the predicate library and exact labels only.
+  **Success:** a playbook of ≤ 12 rules that recommends only optimal moves at every one of the 4,520 positions and
+  fires at all of them.
+- **E3 (pre-registered before running):** F2 on Connect-4. The smallest certified net through depth 8 with the
+  playbook in front of it, against 1,576 params without (h67). **Success:** at most half the params. Rules count as
+  zero params only if their compute is declared and bounded (one or two plies of lookahead), and that cost is
+  reported beside the params.
+- **E4:** S3 extraction from the h51 net. It succeeds if the extracted playbook, checked by the solver, is as
+  precise as S2's.
+
+No file the Connect-4 hold run fingerprints is touched: new modules only (`harness/playbook.py`,
+`scripts/playbook_measure.py`), not imported by the training path.
+
+**§C.50 — what prior work says, and how the design changes (literature survey 2026-09-30; six sources verified
+and added to the board-games Papers Library).**
+- **Allis 1988 (VICTOR):** Connect-4's nine written rules (claimeven, baseinverse, vertical, aftereven,
+  low/highinverse, baseclaim, before, specialbefore) are each proven correct.
+  - They are **value certificates**, not move choices: a conflict-free set of rule instances that covers every
+    group the opponent could complete proves "at least a draw". Instances conflict, and the compatibility check is
+    part of the method.
+  - The rules alone did not settle the middle-column opening. Search and about half a million stored positions
+    were needed.
+  - → A separate track **C (certificates)** beside **M (move rules)**. Port the compatibility check with the
+    rules. Expect a long tail.
+- **WeakC4 (2swap):** a search-free first-player weak solution in about 25 KB — under 2,600 opening nodes, about
+  two-thirds of them "steady states" played by win / block / square priorities.
+  - Correct only from its own roots against every reply.
+  - → The closest precedent to our P-START target and **the size benchmark** for rules + net. Plan a small lookup
+    table for what no rule covers.
+- **MIGO (Hocquette & Muggleton 2019):** layered logic rules (win in 1, then 2, 3, …) learned by meta-interpretive
+  learning, with lower minimax regret than deep RL on tic-tac-toe and Hexapawn.
+  - → Add layered `win_k` predicates to the language.
+- **KataGo (Wu 2019):** Go-specific input features measurably sped training.
+  - → Supports F3 (predicates as input planes) as a first-class experiment.
+- **VIPER (Bastani et al. 2018):** decision trees extracted from neural policies, then verified; states weighted
+  by the cost of a mistake.
+  - → S3 method. Extraction measures agreement with the net, so every extracted rule must still pass the solver.
+- **FunSearch (Romera-Paredes et al. 2024):** a proposer (an LLM) plus an exact evaluator.
+  - → An S2 variant: candidate rules from an LLM or enumeration, accepted only at 100% solver precision.
+  - The survey found no prior work where proposed game rules are verified exactly against a solver; this looks
+    open.
+
+**Design changes adopted:**
+1. **Two soundness grades per rule, reported separately.**
+   - *Position-sound:* optimal at any legal position, in its decision-list position.
+   - *Strategy-sound:* optimal only on positions its own play reaches (Newell–Simon, WeakC4).
+   - Only position-sound rules may be used as training labels or as overrides at arbitrary positions.
+2. **Metrics per rule:** precision and coverage both standalone and in decision-list order, broken out by ply.
+3. **Three Connect-4 test sets:** a ply-matched random sample; positions our agents visit; the playbook's own play
+   against every reply.
+4. **Connect-4 move-rule order:** win, block, never play under their threat (`gives_win`), then double threats.
+   Parity rules (claimeven, vertical, baseinverse) go in track C.
+
+**Built (E1 harness):** `harness/playbook.py` with `tests/test_playbook.py` (32 tests; 21 mutations killed via
+`scripts/mutate.py`). It has:
+- the predicates, `Rule` (prints as a logical statement), `decide` and `evaluate`;
+- `own_play_positions`, for strategy-soundness;
+- `tactics()` and `newell_simon()`.
+
+The tactics playbook (win, block, fork) is already exhaustively position-sound on tic-tac-toe, and sound on 60
+solved Connect-4 positions (a test).
+
+#### §C.51 — NORTH STAR: one fool-proof HYBRID process for any finite game (agreed with the user, 2026-09-30)
+
+**The goal.** For any finite game-like scenario, one process that produces two things:
+- an agent that plays perfectly;
+- **the most compact written description of a perfect strategy**: an ordered list of logical rules, then a small
+  net for what the rules do not cover, then a small table of exceptions.
+
+Both come with a certificate, and with evidence that this process beats the alternatives tried. The written rules are
+the most valuable output: they can be checked, read and moved to other agents and games. The net is kept only for
+what cannot (yet) be written down.
+
+**Two tracks in parallel, one verifier.** Neither track replaces the other. Self-play continues as it is; rule
+discovery runs beside it, and in the final process both are launched together.
+- **Track L — learner (existing).** Self-play with the strategy-tree walk (h52 process + §C.49 wiring), the
+  calibrated stop signal (h69), and the smallest-net search (§C.48–49).
+- **Track R — rules (§C.50).** Known rules (S1), discovered rules (S2, a proposer plus the solver), and rules
+  extracted from track L's nets (S3, VIPER-style).
+- **V — verifier.** The exact solver where one exists. Where none exists, value certificates (Allis-style) and
+  calibrated self-consistency (h69). V shares no code with what it verifies.
+- **Exchange loop.**
+  - R → L: sound rules become exact labels (no solver), move overrides, input features (the KataGo evidence) and
+    search pruning.
+  - L → R: the net's moves are extraction candidates; the positions agents visit become test sets. The net's
+    remaining errors show where rules are missing.
+
+**"Best", made measurable.**
+1. **Correctness (hard gate).** A certificate for every claim: position-sound (exhaustive or solver-checked) or
+   strategy-sound (the solver certifies the strategy's own tree against every reply, P-START).
+2. **Size — total description length in bits:**
+   - rules: literals × bits per literal id;
+   - net: params × declared bits per param;
+   - table: entries × bits per entry.
+   Each part is reported separately. **The objective is the smallest certified total.** One ruler for the pure net,
+   the pure rules and every hybrid; WeakC4's ~25 KB first-player Connect-4 strategy is the outside benchmark.
+3. **Compute per move** — forward passes plus predicate evaluations — declared and bounded, so a rule cannot hide
+   a search.
+4. **Minimality proofs.**
+   - Rules: within the declared language, exhaustive or SAT search proves no smaller rule list reaches the same
+     certificate (an UNSAT certificate at size k − 1).
+   - Nets: the frontier search gives the smallest searched width, stated as an upper bound within the searched
+     families.
+   Minimality is always stated RELATIVE TO the declared language or family, never absolutely.
+5. **Process "best".** Among process variants, the one that reaches the smallest certified artifact on every
+   ladder game with **zero game-specific process edits**, within a declared compute budget. Ties are broken by
+   compute. Pre-registered per game.
+
+**Fool-proof, as testable requirements on the process:**
+- Every claim pre-registered in the register, with a proof test and pinned judge files. Integrity failures read
+  NOT_RUN, never pass.
+- The process touches a game only through the generic `Game` interface plus declared optional hooks (symmetries,
+  solver). No game names in process code; checked by a test that walks the process's imports.
+- **Every game must be proven to terminate:** a progress measure that strictly decreases every move, stated in its
+  module and checked by a test on random play. Games that can extend without bound (chess, checkers, Nine Men's
+  Morris with cycles) are out until a hard move cap makes them finite.
+- The verifier is independent of what it checks, and bit-reproducible runs carry fingerprints/eras.
+- **The transfer test:** each new game is added with zero process edits. A failure is fixed in the process, then
+  every earlier game is re-run.
+
+**The game ladder** (finite, with an exact oracle available or buildable, small enough for the rule verifier):
+1. **Tic-tac-toe** — done for track L (raw-perfect nets, h52/h62, down to 938 params with standardised input,
+   h51). Track R harness built.
+2. **Connect-4** — in progress (§C.49: certified through depth 8 at 1,576 params; depth-10 run running).
+3. **Kalah (Mancala), small variants first** (e.g. 4 pits × 3 seeds, then 6 × 4). Solved variants give an
+   oracle.
+   - Termination proof: every move either moves seeds into a store (seeds in pits fall) or, when no seed reaches a
+     store, sows only on the mover's own side towards its store (the total distance of seeds to their owner's
+     store falls).
+   - It brings extra turns and captures, and a new shape: no board geometry.
+   - Needs a game module, a solver (retrograde or alpha-beta), and its (trivial) symmetry.
+4. **Othello 6×6** — solved; always ends within 32 moves. The module exists but is fixed at 8×8 (`N = 8`) and
+   needs a size parameter.
+5. **One game with known written strategy theory:**
+   - small **Hex** — edge templates and bridges are written rules; no draws;
+   - or **Dots and Boxes** — chain and parity rules.
+   Chosen by the ladder literature (being verified now).
+
+**Order of work.**
+- **a.** Track L on Connect-4: the hold-run outcome, then the solver-free Connect-4 run with the h69 stop.
+- **b.** Track R on tic-tac-toe:
+  - E1 measure;
+  - E2 discovery, with a minimality proof (SAT/exhaustive) — **success: a proven-minimal rule list, within the
+    language, that is optimal at all 4,520 positions**, plus the smallest strategy-sound (P-START) list for each
+    side;
+  - E4 extraction from the h51 net.
+- **c.** Track R on Connect-4: move rules (win, block, `gives_win`, double threats), parity certificates (track C),
+  and the E3 hybrid (rules in front of a smaller certified net).
+- **d.** Hybrid on both games: the total description length of the smallest certified artifact, against pure net
+  and pure rules.
+- **e.** Kalah, then Othello 6×6, then Hex or Dots and Boxes — each added with zero process edits; the whole
+  process re-run on all earlier games after any process fix.
+- **f.** Freeze the process and write the "any finite game" runbook: inputs required, the certificates it issues,
+  and its stated limits.
+
+**Copy-back correction (2026-09-30).** h70/h71 (§C.50 E1) were registered in the REAL tree's `hypotheses.json`
+while h69 lives in the scratch copy's. At copy-back, MERGE the h69 entry into the real register — never overwrite
+the file.
+
+**§C.50 E1 result (2026-09-30) — h70 and h71 SUPPORTED, both pre-registered.** Evidence:
+`evidence/c50_E1_rules.json.gz` (measurement fingerprint 1f08a0b61ab5).
+- **h70 — tactics (win, block, fork) are position-sound on every set.** They are optimal wherever they fire:
+
+  | set | fires at | notes |
+  |---|---|---|
+  | every raw tic-tac-toe position | 4,034 / 4,520 (89%) | |
+  | Connect-4 positions our nets visit (label cache) | 1,378 / 4,827 (29%) | win 870, block 183, fork 325 |
+  | random-play Connect-4 sample | 468 / 600 | win 323, block 133, fork 12 |
+
+  Random play leaves threats lying around, so the sample overstates coverage in good play. The cache figure is the
+  honest one for the opening.
+- **h71 — Newell–Simon is strategy-sound for both sides.**
+  - It fires and is right at all 417 (first player) and 573 (second player) positions of its own play.
+  - At arbitrary positions it is wrong at 80 of 4,520: "block fork" at 24 of 240 and "force without a fork" at 56
+    of 148. Every other rule is right wherever it decides.
+  - So it is a perfect strategy but NOT a position-sound playbook. It may not label arbitrary positions — the
+    research's two-grade distinction, measured.
+- **What it means for E2.** The first three rules already settle 89% of tic-tac-toe exactly, so discovery only
+  has to cover the remaining 11%, where the classic list goes wrong. E2 asks two separate questions:
+  - the smallest position-sound list (all 4,520);
+  - the smallest strategy-sound list for each side (Newell–Simon's 9 rules are the upper bound to beat, or to
+    prove minimal).
+- **At copy-back:** add `tests.test_c50_rules_evidence` to the `tests/test_evidence.py` guard list. The copy's
+  version of that file already adds `tests.test_c49_stop_evidence`, so apply both.

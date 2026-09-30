@@ -208,6 +208,10 @@
       "sha256": "1fe7d373a19333062bba90f3f3ad5929f81f0f9cc7292e6405efc74a479aa830",
       "started": "2026-09-27T16:17:43+00:00"
     },
+    "c50_E1_rules.json.gz": {
+      "sha256": "8648bb6662a048791a1bae7cd0692914c7ff9c51c7f6d37d810083f812b72693",
+      "started": "2026-09-30T19:07:36+00:00"
+    },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",
       "started": "2026-09-23T10:13:45+00:00"
