@@ -2171,3 +2171,62 @@ def test_c49_the_settle_starts_from_settle_lr_when_given_and_from_lr_otherwise(m
 def test_c49_settle_lr_needs_a_settle():
     with pytest.raises(ValueError, match="settle_lr"):
         _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, settle_lr=5e-3)
+
+
+# §C.49 task 6 — strategy-tree coverage: each relabelled iteration also walks the net's own RAW strategy tree for one
+# player (every reply for the other), relabels those positions with the process's own search, and trains on them
+# policy-only — no solver. The history records the walk and the solver-free disagreement reading.
+
+def test_c49_strategy_tree_needs_the_whole_buffer_relabelled():
+    with pytest.raises(ValueError, match="strategy_tree"):
+        _c48_train(strategy_tree={"player": 0, "depth": 3})
+    with pytest.raises(ValueError, match="strategy_tree"):
+        _c48_train(reanalyze_frac=0.5, reanalyze_sims=4, strategy_tree={"player": 0, "depth": 3})
+
+
+def test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only(monkeypatch):
+    import math
+
+    import harness.neural as neural
+
+    walks = []
+    real_walk = neural.strategy_tree_positions
+
+    def spy_walk(game, root, player, choose, depth):
+        out = real_walk(game, root, player, choose, depth)
+        walks.append((player, depth, out))
+        return out
+    monkeypatch.setattr(neural, "strategy_tree_positions", spy_walk)
+    trained = []
+    real_train = neural.train_net
+
+    def spy_train(net, examples, *args, **kwargs):
+        trained.append(sum(1 for e in examples if isinstance(e[2], float) and math.isnan(e[2])))
+        return real_train(net, examples, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy_train)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
+                                     strategy_tree={"player": 0, "depth": 4})
+    assert len(walks) == 2 and all(p == 0 and d == 4 for p, d, _w in walks)
+    assert history[0]["tree_walked"] == 0 and history[0]["tree_positions"] == 0
+    for h, (_p, _d, walked) in zip(history[1:], walks, strict=True):
+        assert h["tree_walked"] == len(walked) > 0
+        assert 0 <= h["tree_positions"] <= len(walked) and 0 <= h["tree_disagreements"] <= len(walked)
+    assert trained[1:] == [8 * h["tree_positions"] for h in history[1:]]
+
+
+def test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice(monkeypatch):
+    import harness.neural as neural
+    from harness.neural import train_alphazero
+
+    g, positions = _c48_scripted_positions(monkeypatch, [[0, 1]] * 20)
+    monkeypatch.setattr(neural, "strategy_tree_positions", lambda game, root, player, choose, depth: positions[:3])
+    _net, history = train_alphazero(g, iterations=3, selfplay_games=1, sims=4, epochs=1, net_arch=_C48_ARCH,
+                                    augment=True, seed=5, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
+                                    strategy_tree={"player": 0, "depth": 3})
+    assert [h["tree_walked"] for h in history] == [0, 3, 3]
+    assert [h["tree_positions"] for h in history] == [0, 1, 1], "positions 0 and 1 are self-play rows already"
+
+
+def test_c49_without_the_knob_the_history_has_no_tree_readings():
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)
+    assert not any(k.startswith("tree_") for h in history for k in h)

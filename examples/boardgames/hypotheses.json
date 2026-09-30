@@ -1738,6 +1738,13 @@
           "detail": "\n\ntests/test_c48_settle_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation\n1 failed in 0.03s",
           "drawn_at": "2026-09-26T07:17:53.496828+00:00",
           "inconclusive": true
+        },
+        {
+          "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation",
+          "ok": false,
+          "detail": "\n\ntests/test_c48_settle_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_with_augmentation\n1 failed in 0.09s",
+          "drawn_at": "2026-09-30T09:08:04.110423+00:00",
+          "inconclusive": true
         }
       ],
       "data": [
@@ -1770,6 +1777,13 @@
           "detail": "ests/test_c48_settle_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry\n1 failed in 0.03s",
           "drawn_at": "2026-09-26T07:17:53.861842+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry",
+          "ok": false,
+          "detail": "ests/test_c48_settle_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_settle_evidence.py::test_c48_T4_with_a_unique_buffer_and_settling_the_raw_net_is_perfect_at_every_position_WITHOUT_any_symmetry\n1 failed in 0.15s",
+          "drawn_at": "2026-09-30T09:08:05.633759+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -1801,6 +1815,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.04s",
           "drawn_at": "2026-09-26T06:47:54.410247+00:00"
+        },
+        {
+          "proof": "tests/test_c48_setups_evidence.py::test_c48_T1b_canonicalising_the_input_cuts_the_smallest_perfect_net_about_six_fold_from_5_6K_to_938",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-09-30T09:08:06.649744+00:00"
         }
       ],
       "data": [
@@ -1836,6 +1856,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.03s",
           "drawn_at": "2026-09-26T14:42:20.973756+00:00"
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_sib2]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-09-30T09:08:07.314839+00:00"
         }
       ],
       "data": [
@@ -1883,6 +1909,13 @@
           "ok": false,
           "detail": "     + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]\n1 failed in 0.04s",
           "drawn_at": "2026-09-26T14:42:08.027287+00:00",
+          "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]",
+          "ok": false,
+          "detail": "     + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[augment_open6]\n1 failed in 0.10s",
+          "drawn_at": "2026-09-30T09:08:08.273048+00:00",
           "inconclusive": false
         }
       ],
@@ -1932,6 +1965,13 @@
           "detail": " + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]\n1 failed in 0.04s",
           "drawn_at": "2026-09-26T14:42:08.426250+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]",
+          "ok": false,
+          "detail": " + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_rawkey]\n1 failed in 0.44s",
+          "drawn_at": "2026-09-30T09:08:10.076108+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -1980,6 +2020,13 @@
           "detail": "   + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]\n1 failed in 0.04s",
           "drawn_at": "2026-09-26T14:42:08.849821+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]",
+          "ok": false,
+          "detail": "   + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_sib2]\n1 failed in 0.36s",
+          "drawn_at": "2026-09-30T09:08:11.949875+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -2027,6 +2074,13 @@
           "ok": false,
           "detail": "  + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]\n1 failed in 0.04s",
           "drawn_at": "2026-09-26T14:42:09.260406+00:00",
+          "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]",
+          "ok": false,
+          "detail": "  + refuted\n\ntests/test_c48_coverage_evidence.py:34: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c48_coverage_evidence.py::test_c48_T5_the_coverage_lever_gives_a_raw_perfect_net_on_8_of_10_seeds[no_augment_open6]\n1 failed in 0.34s",
+          "drawn_at": "2026-09-30T09:08:13.830410+00:00",
           "inconclusive": false
         }
       ],
@@ -2081,6 +2135,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.03s",
           "drawn_at": "2026-09-26T14:42:21.198713+00:00"
+        },
+        {
+          "proof": "tests/test_c48_coverage_evidence.py::test_c48_T5_the_failures_left_concentrate_on_positions_the_net_was_never_trained_on",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-09-30T09:08:14.535540+00:00"
         }
       ],
       "data": [
@@ -2129,6 +2189,13 @@
           "detail": "refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:03:16.294893+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]",
+          "ok": false,
+          "detail": "refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32]\n1 failed in 0.08s",
+          "drawn_at": "2026-09-30T09:08:14.906325+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -2172,6 +2239,13 @@
           "ok": false,
           "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:03:16.717039+00:00",
+          "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]",
+          "ok": false,
+          "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_mlp32_long]\n1 failed in 0.05s",
+          "drawn_at": "2026-09-30T09:08:15.548377+00:00",
           "inconclusive": false
         }
       ],
@@ -2217,6 +2291,13 @@
           "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:03:17.126498+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]",
+          "ok": false,
+          "detail": "ed\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[canon_conv6_long]\n1 failed in 0.06s",
+          "drawn_at": "2026-09-30T09:08:16.146913+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -2260,6 +2341,13 @@
           "ok": false,
           "detail": " refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:03:17.545252+00:00",
+          "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]",
+          "ok": false,
+          "detail": " refuted\n\ntests/test_c49_small_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15]\n1 failed in 0.05s",
+          "drawn_at": "2026-09-30T09:08:16.678614+00:00",
           "inconclusive": false
         }
       ],
@@ -2310,6 +2398,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.03s",
           "drawn_at": "2026-09-27T10:03:23.781396+00:00"
+        },
+        {
+          "proof": "tests/test_c49_small_evidence.py::test_c49_T6_the_process_gives_a_raw_perfect_net_at_the_frontier_setup_on_8_of_10_seeds[residual15_long]",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-09-30T09:08:17.237631+00:00"
         }
       ],
       "data": [
@@ -2354,6 +2448,13 @@
           "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:29:28.447427+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp32_budget]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-30T09:08:17.532373+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -2390,6 +2491,13 @@
           "ok": false,
           "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]\n1 failed in 0.04s",
           "drawn_at": "2026-09-27T10:29:28.845888+00:00",
+          "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_mlp48_budget]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-30T09:08:18.013002+00:00",
           "inconclusive": false
         }
       ],
@@ -2428,6 +2536,13 @@
           "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]\n1 failed in 0.03s",
           "drawn_at": "2026-09-27T10:29:29.244813+00:00",
           "inconclusive": false
+        },
+        {
+          "proof": "tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]",
+          "ok": false,
+          "detail": "ests/test_c49_budget_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_budget_evidence.py::test_c49_T7_with_the_oracle_budget_the_process_gives_a_raw_perfect_net_on_8_of_10_seeds[canon_conv6_budget]\n1 failed in 0.04s",
+          "drawn_at": "2026-09-30T09:08:18.484822+00:00",
+          "inconclusive": false
         }
       ],
       "data": [
@@ -2464,6 +2579,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.01s",
           "drawn_at": "2026-09-27T11:35:05.108186+00:00"
+        },
+        {
+          "proof": "tests/test_c49_certify_evidence.py::test_c49_the_best_existing_net_gives_away_the_proven_win_at_its_second_move_and_50_times_within_12_plies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-30T09:08:18.937783+00:00"
         }
       ],
       "data": {
@@ -2487,6 +2608,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.02s",
           "drawn_at": "2026-09-29T22:59:43.090491+00:00"
+        },
+        {
+          "proof": "tests/test_c49_strategy_evidence.py::test_c49_a_1_6K_standardised_net_holds_a_certified_first_player_strategy_through_8_plies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-30T09:08:19.226372+00:00"
         }
       ],
       "data": [
@@ -2520,6 +2647,12 @@
           "ok": true,
           "detail": ".                                                                        [100%]\n1 passed in 0.02s",
           "drawn_at": "2026-09-29T22:59:43.311492+00:00"
+        },
+        {
+          "proof": "tests/test_c49_strategy_evidence.py::test_c49_no_setup_up_to_23_5K_is_certified_through_10_plies_because_the_refits_do_not_hold_their_data",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-09-30T09:08:19.523371+00:00"
         }
       ],
       "data": [

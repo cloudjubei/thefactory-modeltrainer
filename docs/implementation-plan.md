@@ -4082,3 +4082,87 @@ used only to MEASURE: certify P-START, grade P-SAMPLED, and map the oracle front
   (tested). The driver's `--recipe hold` = lr 3e-3 → 1e-5, batch 512, up to 4,000 epochs, no patience, with warm
   start. Running: canon conv-16 and conv-32 at depth 10, 20 rounds, cached labels.
   - **Success:** a certified depth-10 strategy for either net. **Diagnostic:** do the refits now hold their data?
+
+**Task 6 (user: "go", 2026-09-30): the SOLVER-FREE Connect-4 process — strategy-tree coverage.**
+- **Design.** A tree-walk-only process would have no ground-truth signal: its values would bootstrap from nothing,
+  because the walk rarely reaches finished games. So this is the proven T5 process (self-play outcomes, unique
+  buffer, search relabelling, siblings, settle) plus ONE coverage lever, `strategy_tree` ({player, depth}).
+  - Each iteration: walk the current net's RAW strategy tree for `player` to `depth` plies, against every reply.
+  - Relabel those positions with the process's own search, and train on them policy-only (like siblings).
+  - The solver is used only to MEASURE: certify P-START, and read the frontier.
+- **Solver-free stop signal**, recorded each iteration, observation only: `tree_disagreements`, the tree positions
+  where the raw move is not one of the search label's top moves (within half the top probability, so a different
+  but equally searched move is not counted). It is calibrated against the solver's certificate before it is
+  trusted.
+- **Success:**
+  - (unit) the walk equals an independent reference walk; knob off = bit-identical; refused off the reanalyze path.
+  - (tic-tac-toe) with `strategy_tree` for both players to full depth, the process stays raw-perfect (T5's h52
+    level) and `tree_disagreements` reaches 0 when the net is perfect.
+  - (Connect-4, pre-registered later) the certified depth reached by a solver-free net.
+
+**Plan after the depth-10 "hold" run (agreed with the user, 2026-09-30).**
+- **Whatever the outcome:**
+  - (1) Apply the prepared `strategy_tree` wiring (tests already written); mutation pass with `scripts/mutate.py` (NOT
+    hand-run); full suite.
+  - (2) **Stop-signal calibration on tic-tac-toe** (pre-registered): does `tree_disagreements == 0` coincide with
+    solver-certified perfection? **Success:** no false stops (0 disagreements while not certified) and the signal
+    reaching 0 within a few iterations of true perfection.
+- **Outcome A (a net certifies through depth 10):** depth 12 for that setup, then the solver-free Connect-4 run at
+  it.
+- **Outcome B (refits hold, not certified):** the tree shifting between rounds is the limit. More rounds, or label
+  each winning move's whole subtree; re-test at depth 10.
+- **Outcome C (refits still do not hold):** capacity/optimiser. Larger nets (conv-64, residual with batch-norm) or a
+  better optimiser.
+- **The solver-free Connect-4 run** (pre-registered): the T5 process + `strategy_tree` to depth D at the frontier
+  setup with headroom; stop by the calibrated signal. **Success:** the solver certifies P-START through depth D on
+  ≥ 8/10 seeds. A cost estimate comes before launch.
+- **Feasibility of the whole game:** from how net size and cost grow over depths 8 → 10 → 12, extrapolate whether a
+  full-game P-START certificate (~10^9 positions) is realistic on this machine, and report it plainly.
+- **Open for the user:** the provenance of `harness/solver.py` (possible AGPL derivation); the C solver is ported
+  from it.
+
+**Progress on the outcome-independent steps (2026-09-30, while the hold run runs).** The hold run fingerprints
+`neural.py` (training) and `strategy_fit.py`/`frontier.py` (measurement) and refuses to write evidence if they change,
+so all of this was done in a scratch copy of `examples/boardgames` and is copied back only after it exits.
+- (1) **Wiring done.** `strategy_tree` applied to `train_alphazero`. Mutation pass (`scripts/mutate.py`): 15 wiring
+  mutations — the first pass left 5 alive (NaN-row count, disagreement reading, player, mirror-image dedupe key,
+  steps-matched cap); tests added, all 15 killed. `strategy_tree.py`: 10 mutations, the repeat check survived
+  (tic-tac-toe positions never recur) — test on a cyclic toy game added, all killed.
+  - `strategy_fit.net_chooser` removed; the loop uses `strategy_tree.raw_chooser` (restores the net's mode).
+  - **Bug fixed:** `frontier.fit` never put the net in training mode, so every warm-started refit trained a net
+    the chooser had left in eval mode. No effect on any recorded result (no searched arch has batch-norm or dropout),
+    but it would have silently broken the batch-norm option in Outcome C. `fit` now calls `net.train()`; test +
+    mutation.
+  - `harness/strategy_tree.py` joins `TRAINING_MODULES` (the import-graph test demanded it); the previous list is
+    kept as `TRAINING_MODULES_V5` so every earlier era, including the hold run's, stays derivable.
+- (2) **Calibration pre-registered as h69 (T8) and running.** `harness/floor_stop.py` (judge, 16 mutations
+  killed), `tests/test_c49_stop_evidence.py`, recorder hook `on_pass` (`harness/transfer.py`), driver
+  `scripts/small_floor.py --spec floor_stop`. Arm `augment_sib2_tree` = T5's `augment_sib2` + strategy tree (first
+  player, whole game), seeds 341–350, era 41605b4ce5d9, measurement 2348ed70041f. Iteration i's signal is paired
+  with the solver certificate of the net after pass i − 1 (the net that walked).
+  - **Success (SUPPORTED):** zero false stops on every seed AND ≥ 8/10 seeds reach zero 0–3 iterations after
+    their first certified net. **REFUTED:** any false stop, or ≤ 5 timely. **INCONCLUSIVE** otherwise, or < 8 seeds
+    ever certify.
+  - Cost: ~15–20 min/seed single-thread; 3 low-priority workers beside the hold run → ~2–3 h.
+- **Copy-back, the moment the hold run exits (before registering its findings):** copy `harness/{neural,
+  strategy_fit,frontier,transfer,fingerprint,floor_stop}.py`, `scripts/small_floor.py`, `tests/{test_neural,
+  test_strategy_tree,test_frontier,test_transfer,test_fingerprint,test_floor_stop,test_c49_stop_evidence}.py` and
+  `hypotheses.json` (h69; unchanged in the real tree since the copy was made) → rerun the full suite in the real tree
+  (the git-revision fingerprint tests cannot run in the copy). When T8 finishes: copy its evidence file and MERGE
+  its `evidence/` manifest entry (the hold run adds its own) — never overwrite the manifest.
+
+**T8 result — h69 SUPPORTED (pre-registered; verified 2026-09-30).** Stop signal = the tree walk's disagreement count
+reaching 0.
+- **Safety:** 0 false stops. **Liveness:** 10/10 seeds certified (first certified net after pass 2–4) and 10/10 stopped
+  in time — latency 0 on 7 seeds, 1 on 3.
+- Descriptive: the tree walk costs little (~100 positions per iteration; 640–900 s/seed uncontended, as T5) and all
+  10 seeds still end raw-perfect at every position after the settle (h52's result, new seeds 341–350).
+- **Limits of the calibration (carry into the Connect-4 run):**
+  - The safety test rests on 29 uncertified iterations (all read > 0). No seed ever LOST certification, so the signal
+    was never tested on a relapse.
+  - Tic-tac-toe's 200-sim search on ~100-position trees is close to exact; a Connect-4 search at affordable sims is
+    not. A zero there is a reason to stop and certify, not a certificate — the Connect-4 claim stays judged by the
+    solver.
+  - Zero means P-START, not all-position perfection: 155 of 258 zero readings were on nets perfect at every position.
+- Copy-back list gains `tests/test_evidence.py` (T8 proofs added to the evidence guard) and
+  `evidence/c49_T8_augment_sib2_tree.json.gz` (+ its manifest entry, merged).
