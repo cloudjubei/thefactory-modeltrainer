@@ -1,0 +1,49 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked",
+    "tests/test_neural.py::test_c49_without_full_agreement_the_run_trains_every_iteration_and_settles",
+    "tests/test_neural.py::test_c49_stopping_on_agreement_needs_the_strategy_tree",
+    "tests/test_neural.py::test_c49_full_agreement_does_not_stop_a_run_that_did_not_ask_to_stop"
+  ],
+  "mutations": [
+    {
+      "name": "stops before any walk",
+      "old": "stopped = stop_on_agreement and tree_walked > 0 and tree_disagree == 0",
+      "new": "stopped = stop_on_agreement and tree_disagree == 0"
+    },
+    {
+      "name": "stops whatever the reading",
+      "old": "stopped = stop_on_agreement and tree_walked > 0 and tree_disagree == 0",
+      "new": "stopped = stop_on_agreement and tree_walked > 0"
+    },
+    {
+      "name": "stops without the knob",
+      "old": "stopped = stop_on_agreement and tree_walked > 0 and tree_disagree == 0",
+      "new": "stopped = tree_walked > 0 and tree_disagree == 0"
+    },
+    {
+      "name": "trains once more before stopping",
+      "edits": [
+        {
+          "old": "        if stopped:\n            history.append({\"iteration\": it + 1, \"stopped\": True, **reanalyze_note})\n            break\n",
+          "new": ""
+        },
+        {
+          "old": "        history.append(entry)\n        if log:",
+          "new": "        history.append(entry)\n        if stopped:\n            entry[\"stopped\"] = True\n            break\n        if log:"
+        }
+      ]
+    },
+    {
+      "name": "settles after a stop",
+      "old": "    if settle_epochs > 0 and iterations > 0 and not stopped:",
+      "new": "    if settle_epochs > 0 and iterations > 0:"
+    },
+    {
+      "name": "knob accepted without tree",
+      "old": "    if stop_on_agreement and strategy_tree is None:\n",
+      "new": "    if False:\n"
+    }
+  ]
+}

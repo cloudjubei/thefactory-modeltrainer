@@ -1,0 +1,86 @@
+{
+  "file": "harness/knowledge.py",
+  "tests": ["tests/test_knowledge.py"],
+  "mutations": [
+    {
+      "name": "duplicate ingredient allowed",
+      "old": "        if key in keys:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "empty conclusion allowed",
+      "old": "if not str(ing.get(\"conclusion\", \"\")).strip() or not str(ing.get(\"what\", \"\")).strip():",
+      "new": "if not str(ing.get(\"what\", \"\")).strip():"
+    },
+    {
+      "name": "unregistered claim allowed",
+      "old": "            if cid not in registered:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "unfiled citation allowed",
+      "old": "            if cid not in ing.get(\"claims\", []):\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "unfiled claim allowed",
+      "old": "    problems += [f\"{cid} is not filed under any ingredient\" for cid in sorted(registered - filed)]\n",
+      "new": ""
+    },
+    {
+      "name": "trial fields unchecked",
+      "old": "        if not all(str(trial.get(k, \"\")).strip() for k in (\"what\", \"lesson\", \"plan\")):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "pending not flagged",
+      "old": "    return status if status in DECIDED else f\"{status} — PENDING\"",
+      "new": "    return status"
+    },
+    {
+      "name": "verdict not shown",
+      "old": "f\"- **{c}** {by_id[c]['status'].upper()} — {by_id[c]['claim']}\"",
+      "new": "f\"- **{c}** — {by_id[c]['claim']}\""
+    },
+    {
+      "name": "trials not shown",
+      "old": "    lines += [f\"- {t['what']} **Lesson:** {t['lesson']} ({t['plan']})\" for t in kmap.get(\"unproven_trials\", [])]\n",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T13:04:36+00:00",
+    "killed": 9,
+    "survived": [],
+    "killed_by": {
+      "duplicate ingredient allowed": [
+        "test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-twice]"
+      ],
+      "empty conclusion allowed": [
+        "test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-no"
+      ],
+      "unregistered claim allowed": [
+        "test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-h9"
+      ],
+      "unfiled citation allowed": [
+        "test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-cites"
+      ],
+      "unfiled claim allowed": ["test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-h2"],
+      "trial fields unchecked": [
+        "test_an_incomplete_or_inconsistent_map_is_reported[<lambda>-trial]"
+      ],
+      "pending not flagged": [
+        "test_a_conclusion_resting_on_an_undecided_claim_says_so",
+        "test_the_repository_map_files_every_registered_claim_and_the_page_is_current"
+      ],
+      "verdict not shown": [
+        "test_the_page_lists_each_ingredient_with_its_conclusion_and_every_claim_with_its_current_verdict",
+        "test_the_repository_map_files_every_registered_claim_and_the_page_is_current"
+      ],
+      "trials not shown": [
+        "test_the_page_lists_each_ingredient_with_its_conclusion_and_every_claim_with_its_current_verdict",
+        "test_the_repository_map_files_every_registered_claim_and_the_page_is_current"
+      ]
+    }
+  }
+}

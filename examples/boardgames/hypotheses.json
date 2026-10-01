@@ -2673,6 +2673,32 @@
         "tests/test_c49_strategy_evidence.py": "44a36aad0be6797fbb88f6a970743f25ca651b599255bb5be753bef535a51956"
       }
     },
+    "h69": {
+      "id": "h69",
+      "claim": "\u00a7C.49 T8 (augment_sib2_tree): with the strategy-tree walk on (first player, whole game) in T5's working process (57,453 params, seeds 341-350, solver-free training), the walk's disagreement count reaching ZERO is a safe and live stop signal: no iteration on any seed reads zero while the solver does not certify the net that walked (its own first-player tree keeps the game's value against every reply), and on >= 8/10 seeds the first zero comes 0-3 iterations after the first certified net; refuted on any false stop or at <= 5 timely seeds; inconclusive between, or when fewer than 8 seeds ever certify",
+      "mode": "test",
+      "proof": "tests/test_c49_stop_evidence.py::test_c49_T8_the_stop_signal_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+      "note": "Calibrates the stop rule for the solver-free Connect-4 run. Signal at iteration i paired with the certificate of the net after pass i-1 (the net that walked). Search share bar AGREE_SHARE=0.5 at 200 reanalyze sims. Cost estimate: ~15-20 min/seed single-thread (T5 took 700-1000 s; the walk adds a relabel of a few hundred positions per iteration), 3 niced workers alongside the C4 hold run: ~2-3 h wall.",
+      "registered_at": "2026-09-30T11:12:20.817956+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_stop_evidence.py::test_c49_T8_the_stop_signal_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-09-30T12:45:57.428414+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T8_augment_sib2_tree.json.gz",
+        "started": "2026-09-30T11:12:42+00:00"
+      },
+      "pins": {
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024",
+        "harness/arm_judge.py": "c730794bc27abb182c3b04ccbb98338ee7e8facdf381311f43683d7502c30d0c",
+        "tests/test_c49_stop_evidence.py": "0b407d4ab7d0ac56dd1a7c6b8f593b47bcbf99f0016716794429b2c536044225"
+      },
+      "inconclusive_proof": "tests/test_c49_stop_evidence.py::test_c49_T8_the_stop_signal_is_undecidable"
+    },
     "h70": {
       "id": "h70",
       "claim": "\u00a7C.50 E1: the generic tactics playbook (win now, else block their win, else fork: two winning moves and none for them) recommends ONLY value-optimal moves at every position where it fires, on all five E1 sets: every raw tic-tac-toe position (4,520), Newell\u2013Simon's own-play positions for each side, the fully labelled Connect-4 label-cache positions, and a random-play Connect-4 sample (4 stone-count bands from 10 stones) labelled by the native solver",
@@ -2718,6 +2744,315 @@
       "pins": {
         "tests/test_c50_rules_evidence.py": "0b93c88696d7d7fb7963fc95663b58d14566c4b3b256fb53964549eb612593f7"
       }
+    },
+    "h72": {
+      "id": "h72",
+      "claim": "\u00a7C.49 C4 strategy frontier (descriptive): with refits trained until they hold their data (hold recipe), canon conv-32 (20,616 params) is certified through 10 plies in 18 rounds, with every refit missing at most 4 labelled positions; canon conv-16 (8,008 params) is not certified in 20 rounds, its refits holding for 3 rounds and never again (misses reaching >= 40) \u2014 a capacity limit. The depth-10 smallest certified net of this family lies in (8,008, 20,616]",
+      "mode": "test",
+      "proof": "tests/test_c49_hold_evidence.py::test_c49_with_refits_that_hold_a_20_6K_net_is_certified_through_10_plies_and_an_8K_net_is_not",
+      "note": "Registered AFTER the data. Settles h68's open question: the refits WERE the limit. Certificate = the strategy walk with exact solver labels; the net was not saved, so harness/certify has not re-checked it independently (fix before depth 12).",
+      "registered_at": "2026-10-01T05:36:39.042281+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_hold_evidence.py::test_c49_with_refits_that_hold_a_20_6K_net_is_certified_through_10_plies_and_an_8K_net_is_not",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-01T05:36:39.287570+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_strategy_d10_hold.json.gz",
+        "started": "2026-09-30T06:14:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_hold_evidence.py": "fa4ca4703186930063ff111a910280e9bce85aaf0b9afef6845fea808362dfd7"
+      }
+    },
+    "h73": {
+      "id": "h73",
+      "claim": "\u00a7C.49 T9 (tree_no_siblings): with the 2-deep siblings switched OFF and the strategy-tree walk ON (first player, whole game), T8's tic-tac-toe process (57,453 params, unique buffer, whole-buffer 200-sim relabel, settle; solver-free training), seeds 351-360, ends with a settled net that plays perfectly from the start as the first player (the solver certifies its own tree against every reply) on >= 8/10 seeds; refuted at <= 5, inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_tree_evidence.py::test_c49_T9_without_siblings_the_settled_net_plays_perfectly_from_the_start_on_8_of_10_seeds",
+      "note": "Why: on Connect-4 the siblings cost 94% of an iteration (~200 h/seed); the tree walk ~2 min. The process must stay ONE process across games, so the cheaper lever is re-validated on tic-tac-toe first. Control: T8 (siblings on) settled certified 10/10.",
+      "registered_at": "2026-10-01T09:49:10.484768+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_tree_evidence.py::test_c49_T9_without_siblings_the_settled_net_plays_perfectly_from_the_start_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-01T10:08:19.473195+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T9_tree_no_siblings.json.gz",
+        "started": "2026-10-01T09:49:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_tree_evidence.py": "069f9fa25da3b73973364f2f6fbd637f312d4e63396f20e35a0b114bccb0ce84",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_tree_evidence.py::test_c49_T9_the_start_reading_is_undecidable"
+    },
+    "h74": {
+      "id": "h74",
+      "claim": "\u00a7C.49 T9 (tree_no_siblings): in the same run, the h69 stop signal (the tree walk's disagreement count reaching zero) stays safe and live without siblings: no false stop on any seed and, on >= 8/10 seeds, the first zero comes 0-3 iterations after the first certified net; refuted on any false stop or at <= 5 timely seeds; inconclusive between, or when fewer than 8 seeds ever certify",
+      "mode": "test",
+      "proof": "tests/test_c49_tree_evidence.py::test_c49_T9_without_siblings_the_stop_signal_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+      "note": "h69 calibrated the signal with siblings on; this re-checks it on the process Connect-4 will actually run.",
+      "registered_at": "2026-10-01T09:49:10.543922+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_tree_evidence.py::test_c49_T9_without_siblings_the_stop_signal_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-01T10:08:19.710199+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T9_tree_no_siblings.json.gz",
+        "started": "2026-10-01T09:49:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_tree_evidence.py": "069f9fa25da3b73973364f2f6fbd637f312d4e63396f20e35a0b114bccb0ce84",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_tree_evidence.py::test_c49_T9_the_stop_reading_is_undecidable"
+    },
+    "h75": {
+      "id": "h75",
+      "claim": "\u00a7C.49 T10: the SOLVER-FREE process reaches perfect play from the start on Connect-4 through 10 plies. T9's process (unique buffer, whole-buffer 200-sim relabel, strategy-tree walk instead of siblings) at the depth-10 oracle setup (canon conv-32, 20,616 params), trained with the solver forbidden (Python and native), stops at its first walk of its own first-player tree (10 plies) reading zero disagreements, cap 60 iterations; on >= 8/10 seeds (361-370) it stops AND the solver certifies the stopped net's own first-player tree through 10 plies against every reply (P-START). Refuted at <= 5, inconclusive between; a seed that never stops fails",
+      "mode": "test",
+      "proof": "tests/test_c49_solver_free_evidence.py::test_c49_T10_the_solver_free_process_stops_on_a_net_certified_through_10_plies_on_8_of_10_seeds",
+      "note": "Agreed plan (\u00a7C.49 outcome A + user's pilot choice). Cost estimate: training 10-30 min/seed if it stops in 10-20 iterations (pilot: 30-35 s/iteration at 8 workers), worst case ~2.5 h/seed at the 60 cap; certification 0.5-5 h/net depending on how much of its tree the label cache already holds (ply 1-3 solves can take up to ~50 min each). Total ~5 h to ~2.5 days. Caveat from h69/h74: on TTT the search was near-exact; on C4 a 200-sim search may agree with a wrong move, so false stops are the main risk.",
+      "registered_at": "2026-10-01T10:32:16.350523+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_T10_solver_free.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_solver_free_evidence.py": "ceb8863946c5d58cf851d3d9c7e04ab1d681898b47ba3aac1b5e68988ea01132",
+        "harness/floor_c4.py": "d922fe16e0b41e94c326dc5f714c446449551d1fcc968c6a53cc7d587dee8265"
+      },
+      "inconclusive_proof": "tests/test_c49_solver_free_evidence.py::test_c49_T10_is_undecidable"
+    },
+    "h76": {
+      "id": "h76",
+      "claim": "\u00a7C.49 T10 pilot (descriptive): with T5's 2-deep siblings, a Connect-4 iteration of the h52 process (canon conv-32, 200-sim relabel) takes over an hour, over 90% of it relabelling >50,000 siblings \u2014 so siblings cannot scale to Connect-4",
+      "mode": "test",
+      "proof": "tests/test_c49_pilot_evidence.py::test_c49_with_2_deep_siblings_a_connect4_iteration_is_over_90_percent_sibling_relabelling",
+      "note": "Registered AFTER the data. Iteration 2: 4,008 s, 3,778 s of it relabelling 55,764 siblings. This decided T9 (tree instead of siblings).",
+      "registered_at": "2026-10-01T10:56:15.126529+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_pilot_evidence.py::test_c49_with_2_deep_siblings_a_connect4_iteration_is_over_90_percent_sibling_relabelling",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-10-01T10:56:16.171650+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T10_pilot_siblings.json.gz",
+        "started": "2026-10-01T07:13:49+00:00"
+      },
+      "pins": {
+        "tests/test_c49_pilot_evidence.py": "27d50a49f1657062c1c1f9df893924d75266eeebc841274b3f01b2c190f5dbc6"
+      }
+    },
+    "h77": {
+      "id": "h77",
+      "claim": "\u00a7C.49 T10 pilot (descriptive): with the strategy tree instead of siblings and relabelling spread over 8 worker processes, the same Connect-4 iteration takes under a minute \u2014 over 100x faster than with siblings",
+      "mode": "test",
+      "proof": "tests/test_c49_pilot_evidence.py::test_c49_with_the_tree_instead_of_siblings_and_8_relabel_workers_an_iteration_takes_under_a_minute",
+      "note": "Registered AFTER the data. Iteration 2: 31.6 s vs 4,008 s.",
+      "registered_at": "2026-10-01T10:56:15.241937+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_pilot_evidence.py::test_c49_with_the_tree_instead_of_siblings_and_8_relabel_workers_an_iteration_takes_under_a_minute",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-01T10:56:16.755041+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T10_pilot_tree_parallel.json.gz",
+        "started": "2026-10-01T10:23:15+00:00"
+      },
+      "pins": {
+        "tests/test_c49_pilot_evidence.py": "27d50a49f1657062c1c1f9df893924d75266eeebc841274b3f01b2c190f5dbc6"
+      }
+    },
+    "h78": {
+      "id": "h78",
+      "claim": "\u00a7C.49 DEAD END (guarded): certifying from the empty board first SOLVED the root \u2014 hours of the most expensive solve of all, for a value that is an established theorem (Connect-4 is a first-player win). Fixed: a given root value is used instead of solving the root.",
+      "mode": "test",
+      "proof": "tests/test_certify.py::test_a_given_root_value_is_used_instead_of_solving_the_root",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:53:59.491767+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_certify.py::test_a_given_root_value_is_used_instead_of_solving_the_root",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.17s",
+          "drawn_at": "2026-10-01T12:54:00.324359+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h79": {
+      "id": "h79",
+      "claim": "\u00a7C.49 DEAD END (guarded): the native C solver's transposition table used 0 to mean 'no bound stored', but 0 is a real value (a draw), so stored draws read as missing. Fixed with an explicit lower/upper flag; exact values hold whatever the table size, even when every probe collides.",
+      "mode": "test",
+      "proof": "tests/test_native_solver.py::test_values_are_exact_whatever_the_table_size_even_when_every_probe_collides",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:54:00.397848+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_native_solver.py::test_values_are_exact_whatever_the_table_size_even_when_every_probe_collides",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 60.92s (0:01:00)",
+          "drawn_at": "2026-10-01T12:55:01.714029+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h80": {
+      "id": "h80",
+      "claim": "\u00a7C.49 DEAD END (guarded): the smallest-width search bisected, and bisection can never observe a failing width ABOVE its answer, so a non-monotone frontier read as clean. Fixed: the widths just above the answer are probed too, and a failure there is flagged.",
+      "mode": "test",
+      "proof": "tests/test_frontier.py::test_a_failure_just_above_the_frontier_is_flagged_not_hidden",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:55:01.817602+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_frontier.py::test_a_failure_just_above_the_frontier_is_flagged_not_hidden",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.31s",
+          "drawn_at": "2026-10-01T12:55:02.925714+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h81": {
+      "id": "h81",
+      "claim": "\u00a7C.49 DEAD END (guarded): the strategy-fit loop kept repeating identical rounds after a refit that could not hold its data (no new labels, same failing fit). Fixed: such a round stops the growth as STALLED.",
+      "mode": "test",
+      "proof": "tests/test_strategy_fit.py::test_a_round_that_labels_nothing_new_after_a_failed_fit_stops_the_growth_as_stalled",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:55:02.986098+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_strategy_fit.py::test_a_round_that_labels_nothing_new_after_a_failed_fit_stops_the_growth_as_stalled",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 6.65s",
+          "drawn_at": "2026-10-01T12:55:12.690487+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h82": {
+      "id": "h82",
+      "claim": "\u00a7C.48 DEAD END (guarded): the register's test hook matched PARAMETRIZED proofs by function name, so one arm's recorded outcome was applied to every arm. Fixed: proofs are matched by the full parametrized test name.",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:55:12.768109+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.78s",
+          "drawn_at": "2026-10-01T12:55:14.139731+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h83": {
+      "id": "h83",
+      "claim": "\u00a7C.32/\u00a7C.49 DEAD END (guarded): a hand-run mutation of the same byte length, restored within the same second, left the mutant's bytecode valid, so tests ran the mutant after 'restoring' (relapsed 2026-09-30). Fixed rule: mutations run only through scripts/mutate.py, which never writes bytecode.",
+      "mode": "test",
+      "proof": "tests/test_mutation.py::test_a_stale_bytecode_cache_cannot_hide_a_mutation",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:55:14.232689+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_mutation.py::test_a_stale_bytecode_cache_cannot_hide_a_mutation",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.41s",
+          "drawn_at": "2026-10-01T12:55:17.301116+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h84": {
+      "id": "h84",
+      "claim": "\u00a7C.48 DEAD END (guarded): siblings were keyed by the canonical (symmetry-class) key even without augmentation, so a net that sees orientations as different inputs skipped siblings it had never trained on. Fixed: the sibling key follows augmentation / canonical input.",
+      "mode": "test",
+      "proof": "tests/test_neural.py::test_c48_the_sibling_key_follows_augmentation",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:55:17.371266+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_neural.py::test_c48_the_sibling_key_follows_augmentation",
+          "ok": true,
+          "detail": "..                                                                       [100%]\n2 passed in 40.17s",
+          "drawn_at": "2026-10-01T12:56:00.948107+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h85": {
+      "id": "h85",
+      "claim": "\u00a7C.49 DEAD END (guarded): frontier.fit never put the net in training mode, so every warm-started refit trained a net the move chooser had left in eval mode (no effect on recorded results \u2014 no searched arch has batch-norm or dropout \u2014 but it would have broken batch-norm). Fixed: fit trains in training mode whatever it is handed.",
+      "mode": "test",
+      "proof": "tests/test_frontier.py::test_a_given_net_left_in_eval_mode_is_trained_in_training_mode",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:56:01.028792+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_frontier.py::test_a_given_net_left_in_eval_mode_is_trained_in_training_mode",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 33.20s",
+          "drawn_at": "2026-10-01T12:56:35.063095+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h86": {
+      "id": "h86",
+      "claim": "\u00a7C.49 DEAD END (guarded): the solver-free guard blocked only the Python solver, so a 'solver-free' Connect-4 run could have called the native C solver unnoticed. Fixed: the guard also refuses the native solver's library loader, through which every native solve goes.",
+      "mode": "test",
+      "proof": "tests/test_transfer.py::test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:56:35.110939+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_transfer.py::test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it",
+          "ok": true,
+          "detail": "...                                                                      [100%]\n3 passed in 0.08s",
+          "drawn_at": "2026-10-01T12:56:35.404820+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h87": {
+      "id": "h87",
+      "claim": "\u00a7C.49 DEAD END (guarded): the depth-10 strategy-fit run certified a 20,616-param net but did not keep it, so the independent certifier could not re-check it and deeper runs could not start from it. Fixed: the run hands back and saves the net that made the last walk, and the independent certifier agrees with the walk's verdict.",
+      "mode": "test",
+      "proof": "tests/test_strategy_fit.py::test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees",
+      "note": "Dead end recorded at the user's request (2026-10-01): what went wrong, and the regression test that now fails if it comes back.",
+      "registered_at": "2026-10-01T12:56:35.462629+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_strategy_fit.py::test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 5.58s",
+          "drawn_at": "2026-10-01T12:56:41.906445+00:00"
+        }
+      ],
+      "reads_no_data": true
     }
   }
 }

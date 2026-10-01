@@ -1,0 +1,124 @@
+{
+  "file": "harness/floor_tree.py",
+  "tests": ["tests/test_floor_tree.py"],
+  "mutations": [
+    {
+      "name": "start read from the last iteration",
+      "old": "r[\"tree_certification_per_pass\"][-1][\"certified\"]",
+      "new": "r[\"tree_certification_per_pass\"][-2][\"certified\"]"
+    },
+    {
+      "name": "support bar strict",
+      "old": "\"supported\" if count >= spec[\"support_at\"]",
+      "new": "\"supported\" if count > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "else \"refuted\" if count <= spec[\"refute_at\"]",
+      "new": "else \"refuted\" if count < spec[\"refute_at\"]"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if arm.get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "measurement unchecked",
+      "old": "    if arm.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if arm[\"config\"] != {**cfg, \"seeds\": list(spec[\"seeds\"])}:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if sorted(r.get(\"seed\") for r in arm[\"seeds\"] if isinstance(r, dict)) != list(spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "net unchecked",
+      "old": "        if row.get(\"params\") != spec[\"params\"][name] or row.get(\"positions\") != spec[\"positions\"]:\n",
+      "new": "        if row.get(\"params\") != spec[\"params\"][name]:\n"
+    },
+    {
+      "name": "games unchecked",
+      "old": "        if row.get(\"games_per_pass\") != [cfg[\"selfplay\"]] * n + [0]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "settle unchecked",
+      "old": "settle.get(\"iteration\") != \"settle\" or settle.get(\"epochs\") != cfg[\"settle_epochs\"]",
+      "new": "settle.get(\"iteration\") != \"settle\""
+    },
+    {
+      "name": "siblings allowed",
+      "old": "        if any((h.get(\"siblings\") or 0) != 0 for h in history[:-1]):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "unique buffer unchecked",
+      "old": "        if not all(\"merged\" in h for h in history[:-1]):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "tree checks skipped",
+      "old": "        problems.extend(_tree_problems(row, n))\n",
+      "new": ""
+    },
+    {
+      "name": "passes unchecked",
+      "old": "        if not isinstance(curve, list) or len(curve) != n + 1:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "raw perfect miscounted",
+      "old": "r[\"strict_failures_per_pass\"][-1] == 0)",
+      "new": "r[\"strict_failures_per_pass\"][-2] == 0)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:50:08+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "start read from the last iteration": [
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[10-refuted]",
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[2-supported]",
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[3-inconclusive]",
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[4-inconclusive]",
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[5-refuted]"
+      ],
+      "support bar strict": [
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[2-supported]"
+      ],
+      "refute bar strict": [
+        "test_the_start_reading_counts_seeds_whose_settled_net_is_certified[5-refuted]"
+      ],
+      "era unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[era]"],
+      "measurement unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[measurement]"
+      ],
+      "config unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[config]",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[seeds]"
+      ],
+      "seeds unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[seed"],
+      "net unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[positions]"],
+      "games unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[games]"],
+      "settle unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[settle"],
+      "siblings allowed": ["test_evidence_that_is_not_the_registered_run_is_not_run[siblings"],
+      "unique buffer unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[no"],
+      "tree checks skipped": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificates]",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[no"
+      ],
+      "passes unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[passes]"],
+      "raw perfect miscounted": [
+        "test_a_run_certified_after_the_settle_with_a_timely_safe_stop_on_every_seed_supports_both_readings",
+        "test_all_position_perfection_is_reported_not_judged"
+      ]
+    }
+  }
+}

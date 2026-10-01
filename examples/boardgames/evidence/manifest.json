@@ -152,6 +152,14 @@
       "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
       "started": "2026-09-25T17:49:30+00:00"
     },
+    "c49_T10_pilot_siblings.json.gz": {
+      "sha256": "01f746497a01a38c16d96284450d7111b4189ed052554bd7ec3f3241f96870f5",
+      "started": "2026-10-01T07:13:49+00:00"
+    },
+    "c49_T10_pilot_tree_parallel.json.gz": {
+      "sha256": "15f49599f75a9cba01bd7ba80f25aacf49368bce54748e3742173d51fc9d7418",
+      "started": "2026-10-01T10:23:15+00:00"
+    },
     "c49_T6_canon_conv6_long.json.gz": {
       "sha256": "79026c7bf1812d4e8132ebacab75ecaf6333e07fe38260609a8318caf4bb6437",
       "started": "2026-09-27T08:18:39+00:00"
@@ -184,6 +192,14 @@
       "sha256": "715139898d3e620dec0ee3a3434b8f4a49be6ea397c2d0ffc8f743d927bba4fb",
       "started": "2026-09-27T10:06:21+00:00"
     },
+    "c49_T8_augment_sib2_tree.json.gz": {
+      "sha256": "9e0b482b7b4ea2825de121fa340b5e2bfd62f195d9daccfedd33e6f3a1f22c96",
+      "started": "2026-09-30T11:12:42+00:00"
+    },
+    "c49_T9_tree_no_siblings.json.gz": {
+      "sha256": "7fc9a21498227cbcfb6217d7784ead1a04a3926974d19849fa928d92b01bc2c0",
+      "started": "2026-10-01T09:49:17+00:00"
+    },
     "c49_certify_ab302_d12.json.gz": {
       "sha256": "c5b648600664e7f62d0eeea39cebe20273114b47d838c8fdb74cadb17e0d3552",
       "started": "2026-09-27T09:32:53+00:00"
@@ -195,6 +211,10 @@
     "c49_strategy_d10.json.gz": {
       "sha256": "c61f1f1a7d9d7a3eae13197e8dc5b4c0bad9522dda86da17d41c2dae2074f577",
       "started": "2026-09-27T21:00:32+00:00"
+    },
+    "c49_strategy_d10_hold.json.gz": {
+      "sha256": "5ec0dd48e8dcd7c3dee08085ce86e615b6ec3b4628a721c7e1003325bfc95b15",
+      "started": "2026-09-30T06:14:39+00:00"
     },
     "c49_strategy_d10_wide.json.gz": {
       "sha256": "b19d62b715979a621128a50a2c45ff1a5dea62814b7c01ace3a06a9cd4bd7105",

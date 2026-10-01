@@ -1,0 +1,39 @@
+{
+  "file": "harness/strategy_fit.py",
+  "tests": [
+    "tests/test_strategy_fit.py::test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees"
+  ],
+  "mutations": [
+    {
+      "name": "a fresh net handed back",
+      "old": "return {**out, \"net\": net} if return_net else out",
+      "new": "return {**out, \"net\": Connect4Net(**arch_for_game(arch, game))} if return_net else out"
+    },
+    {
+      "name": "net never handed back",
+      "old": "return {**out, \"net\": net} if return_net else out",
+      "new": "return out"
+    },
+    {
+      "name": "net always handed back",
+      "old": "return {**out, \"net\": net} if return_net else out",
+      "new": "return {**out, \"net\": net}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:52:43+00:00",
+    "killed": 3,
+    "survived": [],
+    "killed_by": {
+      "a fresh net handed back": [
+        "test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees"
+      ],
+      "net never handed back": [
+        "test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees"
+      ],
+      "net always handed back": [
+        "test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees"
+      ]
+    }
+  }
+}

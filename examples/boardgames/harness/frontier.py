@@ -55,7 +55,8 @@ def smallest_width(probe: Callable[[int], bool], start: int = 2, cap: int = 1024
     for w in range(hi + 1, hi + 1 + confirm_above):
         if w not in probes:
             probes[w] = bool(probe(w))
-    return {"frontier": hi, "probes": probes, "non_monotone": sorted(w for w, ok in probes.items() if w > hi and not ok)}
+    return {"frontier": hi, "probes": probes,
+            "non_monotone": sorted(w for w, ok in probes.items() if w > hi and not ok)}
 
 
 def enumerated_target(game, canonical: bool) -> dict:
@@ -114,9 +115,10 @@ def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: boo
     """Train a fresh net of `arch` on the target's exact answers until it holds the target (no more failures than
     allowed) or has not improved for `patience` epochs. Policy: cross-entropy to uniform over the optimal moves;
     value: squared error to the exact value. A recipe's optional `lr_end` decays the rate linearly, epoch by epoch,
-    from `lr` at the first epoch to `lr_end` at the last of `max_epochs`; a `patience` of None never stops early, so an unsolved fit uses its
-    whole budget. `return_net` adds the trained net itself under "net". `init_net`
-    continues training that net (it must be of `arch`) instead of a fresh one — a warm start."""
+    from `lr` at the first epoch to `lr_end` at the last of `max_epochs`; a `patience` of None never stops early,
+    so an unsolved fit uses its whole budget. `return_net` adds the trained net itself under "net". `init_net`
+    continues training that net (it must be of `arch`) instead of a fresh one — a warm start. The net trains in
+    training mode whatever mode it was handed in."""
     import torch
 
     from harness.neural import Connect4Net, arch_for_game
@@ -125,6 +127,7 @@ def fit(game, arch: dict, target: dict, seed: int, recipe: dict, return_net: boo
     net = Connect4Net(**arch_for_game(arch, game)) if init_net is None else init_net
     if init_net is not None and init_net.arch != Connect4Net(**arch_for_game(arch, game)).arch:
         raise ValueError(f"init_net has arch {init_net.arch}, not the requested {arch}")
+    net.train()
     opt = torch.optim.Adam(net.parameters(), lr=recipe["lr"])
     tr = target["train"]
     n = len(tr["x"])

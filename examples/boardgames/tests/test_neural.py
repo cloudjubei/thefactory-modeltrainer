@@ -1852,7 +1852,8 @@ def test_c48_the_sibling_key_follows_augmentation(monkeypatch, augment, key):
     mirrored = g.step(states[0], 2, __import__("random").Random(0))
     assert seen and all(d == 2 for _k, d in seen)
     assert all(k(mirrored) == getattr(g, key)(mirrored) for k, _d in seen)
-    assert (g.canonical_key(mirrored) == g.canonical_key(states[1])) and (g.state_key(mirrored) != g.state_key(states[1]))
+    assert g.canonical_key(mirrored) == g.canonical_key(states[1])
+    assert g.state_key(mirrored) != g.state_key(states[1])
 
 
 def _c48_reference_rings(g, states, fn, hold_fn, depth):
@@ -2184,7 +2185,8 @@ def test_c49_strategy_tree_needs_the_whole_buffer_relabelled():
         _c48_train(reanalyze_frac=0.5, reanalyze_sims=4, strategy_tree={"player": 0, "depth": 3})
 
 
-def test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only(monkeypatch):
+@pytest.mark.parametrize("player", [0, 1])
+def test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only(monkeypatch, player):
     import math
 
     import harness.neural as neural
@@ -2205,13 +2207,14 @@ def test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_posi
         return real_train(net, examples, *args, **kwargs)
     monkeypatch.setattr(neural, "train_net", spy_train)
     _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
-                                     strategy_tree={"player": 0, "depth": 4})
-    assert len(walks) == 2 and all(p == 0 and d == 4 for p, d, _w in walks)
+                                     strategy_tree={"player": player, "depth": 4})
+    assert len(walks) == 2 and all(p == player and d == 4 for p, d, _w in walks)
     assert history[0]["tree_walked"] == 0 and history[0]["tree_positions"] == 0
     for h, (_p, _d, walked) in zip(history[1:], walks, strict=True):
         assert h["tree_walked"] == len(walked) > 0
         assert 0 <= h["tree_positions"] <= len(walked) and 0 <= h["tree_disagreements"] <= len(walked)
     assert trained[1:] == [8 * h["tree_positions"] for h in history[1:]]
+    assert [h["nan_value_examples"] for h in history] == [8 * h["tree_positions"] for h in history]
 
 
 def test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice(monkeypatch):
@@ -2227,6 +2230,157 @@ def test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice(monkeypa
     assert [h["tree_positions"] for h in history] == [0, 1, 1], "positions 0 and 1 are self-play rows already"
 
 
+def _c49_scripted_tree(monkeypatch, first_moves, augment):
+    import random
+
+    import harness.neural as neural
+    from harness.neural import train_alphazero
+
+    g, positions = _c48_scripted_positions(monkeypatch, [[0, 1]] * 20)
+    walked = [g.step(positions[0], a, random.Random(0)) for a in first_moves]
+    monkeypatch.setattr(neural, "strategy_tree_positions", lambda game, root, player, choose, depth: walked)
+    _net, history = train_alphazero(g, iterations=3, selfplay_games=1, sims=4, epochs=1, net_arch=_C48_ARCH,
+                                    augment=augment, seed=5, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
+                                    strategy_tree={"player": 0, "depth": 3})
+    return history
+
+
+@pytest.mark.parametrize("augment,trained", [(True, 1), (False, 2)])
+def test_c49_a_mirror_image_of_a_buffered_position_is_held_exactly_when_images_are_trained(monkeypatch, augment,
+                                                                                           trained):
+    history = _c49_scripted_tree(monkeypatch, [2, 4], augment)
+    assert [h["tree_positions"] for h in history] == [0, trained, trained], \
+        "the corner opening 2 mirrors the buffered opening 0; the centre 4 is new"
+
+
+def test_c49_the_history_records_the_disagreements_graded_on_the_walked_moves_and_their_labels(monkeypatch):
+    import harness.neural as neural
+
+    monkeypatch.setattr(neural, "disagreements", lambda moves, labels: 10 * len(moves) + len(labels))
+    history = _c49_scripted_tree(monkeypatch, [2, 4, 6], True)
+    assert [h["tree_disagreements"] for h in history] == [0, 33, 33]
+
+
+def test_c49_steps_matched_keeps_tree_rows_out_of_the_epoch_even_when_no_sibling_was_added(monkeypatch):
+    import harness.neural as neural
+
+    monkeypatch.setattr(neural, "sibling_positions", lambda game, states, key_fn, holdout, depth: (
+        [], {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}))
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True,
+                                     steps_matched=True, strategy_tree={"player": 0, "depth": 4})
+    for h in history[1:]:
+        assert h["siblings"] == 0 and h["tree_positions"] > 0
+        assert h["epoch_examples"] == h["train_examples"] - h["nan_value_examples"]
+
+
 def test_c49_without_the_knob_the_history_has_no_tree_readings():
     _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)
     assert not any(k.startswith("tree_") for h in history for k in h)
+
+
+def _timing_free(history):
+    return [{k: v for k, v in h.items() if not k.endswith("_s")} for h in history]
+
+
+@pytest.mark.parametrize("knobs", [
+    {"reanalyze_frac": 1.0, "reanalyze_sims": 4},
+    {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "reanalyze_siblings": True, "sibling_depth": 2,
+     "strategy_tree": {"player": 0, "depth": 4}},
+], ids=["buffer", "siblings_and_tree"])
+def test_c49_relabelling_across_worker_processes_trains_bit_identically(knobs):
+    serial_sha, serial_history, _net = _c48_train(**knobs)
+    parallel_sha, parallel_history, _net = _c48_train(relabel_workers=2, **knobs)
+    assert parallel_sha == serial_sha and _timing_free(parallel_history) == _timing_free(serial_history)
+
+
+@pytest.mark.parametrize("knobs", [{"relabel_workers": 2}, {"relabel_workers": 2, "reanalyze_frac": 1.0},
+                                   {"relabel_workers": 0, "reanalyze_frac": 1.0, "reanalyze_sims": 4}],
+                         ids=["no relabel", "no separate relabel search", "no workers"])
+def test_c49_parallel_relabelling_needs_a_separate_relabel_search(knobs):
+    with pytest.raises(ValueError, match="relabel_workers"):
+        _c48_train(**knobs)
+
+
+def test_c49_a_relabel_worker_refuses_any_random_draw(tmp_path):
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    path = tmp_path / "net.pt"
+    neural.save_net(neural.Connect4Net(**neural.arch_for_game(_C48_ARCH, g)), str(path))
+    neural._relabel_worker_init("tictactoe")
+    states = [g.initial_state(random.Random(0))]
+    assert len(neural._relabel_worker((str(path), 1, {"sims": 4, "gumbel": True}, states))) == 1
+    with pytest.raises(RuntimeError, match="rng"):
+        neural._relabel_worker((str(path), 2, {"sims": 4, "gumbel": False, "add_noise": True}, states))
+
+
+def test_c49_with_workers_every_relabel_goes_through_the_worker_pool(monkeypatch):
+    import harness.neural as neural
+
+    calls = []
+    real = neural._parallel_relabel
+
+    def spy(*args, **kwargs):
+        calls.append(len(args[-1]))
+        return real(*args, **kwargs)
+    monkeypatch.setattr(neural, "_parallel_relabel", spy)
+    _sha, history, _net = _c48_train(relabel_workers=2, reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True,
+                                     strategy_tree={"player": 0, "depth": 4})
+    relabelled = [h for h in history[1:] if h.get("iteration") != "settle"]
+    assert len(calls) == 3 * len(relabelled) and all(n > 0 for n in calls)
+
+
+def test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers():
+    from games.tictactoe import TicTacToe
+    from harness.neural import train_alphazero
+
+    with pytest.raises(RuntimeError, match="rng"):
+        train_alphazero(TicTacToe(), iterations=2, selfplay_games=2, sims=4, epochs=1, net_arch=_C48_ARCH,
+                        gumbel=False, seed=5, reanalyze_frac=1.0, reanalyze_sims=4, relabel_workers=2)
+
+
+def test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked(monkeypatch):
+    import harness.neural as neural
+    from harness.targets import _weights_sha
+
+    readings = iter([3, 0, 5])
+    monkeypatch.setattr(neural, "disagreements", lambda moves, labels: next(readings))
+    trained = []
+    real = neural.train_net
+
+    def spy(net, *args, **kwargs):
+        out = real(net, *args, **kwargs)
+        trained.append(_weights_sha(net))
+        return out
+    monkeypatch.setattr(neural, "train_net", spy)
+    sha, history, _net = _c48_train(iterations=5, reanalyze_frac=1.0, reanalyze_sims=4, settle_epochs=2,
+                                    strategy_tree={"player": 0, "depth": 4}, stop_on_agreement=True)
+    assert [h["iteration"] for h in history] == [1, 2, 3]
+    assert history[-1]["stopped"] and history[-1]["tree_disagreements"] == 0 and history[-1]["tree_walked"] > 0
+    assert not any(h.get("stopped") for h in history[:-1])
+    assert len(trained) == 2 and sha == trained[-1]
+
+
+def test_c49_without_full_agreement_the_run_trains_every_iteration_and_settles(monkeypatch):
+    import harness.neural as neural
+
+    monkeypatch.setattr(neural, "disagreements", lambda moves, labels: 1)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, settle_epochs=2,
+                                     strategy_tree={"player": 0, "depth": 4}, stop_on_agreement=True)
+    assert [h["iteration"] for h in history] == [1, 2, 3, "settle"]
+    assert not any(h.get("stopped") for h in history)
+
+
+def test_c49_stopping_on_agreement_needs_the_strategy_tree():
+    with pytest.raises(ValueError, match="stop_on_agreement"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, stop_on_agreement=True)
+
+
+def test_c49_full_agreement_does_not_stop_a_run_that_did_not_ask_to_stop(monkeypatch):
+    import harness.neural as neural
+
+    monkeypatch.setattr(neural, "disagreements", lambda moves, labels: 0)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, settle_epochs=2,
+                                     strategy_tree={"player": 0, "depth": 4})
+    assert [h["iteration"] for h in history] == [1, 2, 3, "settle"]

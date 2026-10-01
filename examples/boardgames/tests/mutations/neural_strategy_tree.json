@@ -1,0 +1,89 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_strategy_tree_needs_the_whole_buffer_relabelled",
+    "tests/test_neural.py::test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only",
+    "tests/test_neural.py::test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice",
+    "tests/test_neural.py::test_c49_without_the_knob_the_history_has_no_tree_readings",
+    "tests/test_neural.py::test_c49_a_mirror_image_of_a_buffered_position_is_held_exactly_when_images_are_trained",
+    "tests/test_neural.py::test_c49_the_history_records_the_disagreements_graded_on_the_walked_moves_and_their_labels",
+    "tests/test_neural.py::test_c49_steps_matched_keeps_tree_rows_out_of_the_epoch_even_when_no_sibling_was_added"
+  ],
+  "mutations": [
+    {
+      "name": "refusal removed",
+      "old": "if strategy_tree is not None and reanalyze_frac != 1.0:",
+      "new": "if False:"
+    },
+    {
+      "name": "refusal accepts partial relabel",
+      "old": "if strategy_tree is not None and reanalyze_frac != 1.0:",
+      "new": "if strategy_tree is not None and reanalyze_frac <= 0.0:"
+    },
+    {
+      "name": "buffered positions retrained",
+      "old": "                                     if tree_key(st) not in held]",
+      "new": "                                     ]"
+    },
+    {
+      "name": "tree rows carry a value",
+      "old": "tree_rows = [(x, pi, float(\"nan\")) for st",
+      "new": "tree_rows = [(x, pi, _v) for st"
+    },
+    {
+      "name": "tree rows not trained",
+      "old": "buffer = sp_aug + sib_aug + tree_aug",
+      "new": "buffer = sp_aug + sib_aug"
+    },
+    {
+      "name": "tree rows not augmented",
+      "old": "tree_aug = augment_examples(tree_rows, perms) if tree_rows else []",
+      "new": "tree_aug = list(tree_rows)"
+    },
+    {
+      "name": "nan count ignores tree",
+      "old": "len(sib_aug) + len(tree_aug)",
+      "new": "len(sib_aug)"
+    },
+    {
+      "name": "disagreements not recorded",
+      "old": "\"tree_disagreements\": tree_disagree}",
+      "new": "\"tree_disagreements\": 0}"
+    },
+    {
+      "name": "walked reports kept",
+      "old": "\"tree_walked\": tree_walked,",
+      "new": "\"tree_walked\": len(tree_rows),"
+    },
+    {
+      "name": "positions reports walked",
+      "old": "\"tree_positions\": len(tree_rows),",
+      "new": "\"tree_positions\": tree_walked,"
+    },
+    {
+      "name": "depth ignored",
+      "old": "strategy_tree[\"player\"], choose, strategy_tree.get(\"depth\"))",
+      "new": "strategy_tree[\"player\"], choose, None)"
+    },
+    {
+      "name": "player ignored",
+      "old": "strategy_tree[\"player\"], choose, strategy_tree.get(\"depth\"))",
+      "new": "0, choose, strategy_tree.get(\"depth\"))"
+    },
+    {
+      "name": "raw-key dedupe under augment",
+      "old": "tree_key = (game.canonical_key if (augment or canonical)",
+      "new": "tree_key = (game.state_key if (augment or canonical)"
+    },
+    {
+      "name": "epoch cap ignores tree",
+      "old": "if (steps_matched and (sib_aug or tree_aug))",
+      "new": "if (steps_matched and sib_aug)"
+    },
+    {
+      "name": "readings without knob",
+      "old": "            if strategy_tree is not None:\n                reanalyze_note.update",
+      "new": "            if True:\n                reanalyze_note.update"
+    }
+  ]
+}

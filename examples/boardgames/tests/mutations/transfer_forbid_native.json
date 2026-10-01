@@ -1,0 +1,16 @@
+{
+  "file": "harness/transfer.py",
+  "tests": ["tests/test_transfer.py"],
+  "mutations": [
+    {
+      "name": "native loader not refused",
+      "old": "solver._solve, solver.move_values, native_solver._library = refuse, refuse, refuse",
+      "new": "solver._solve, solver.move_values = refuse, refuse"
+    },
+    {
+      "name": "native loader not restored",
+      "old": "    finally:\n        solver._solve, solver.move_values, native_solver._library = saved",
+      "new": "    finally:\n        solver._solve, solver.move_values = saved[:2]"
+    }
+  ]
+}

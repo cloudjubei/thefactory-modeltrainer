@@ -13,6 +13,12 @@ harness.mutation makes the correct procedure the default; this is its front door
     PYTHONPATH=. .venv/bin/python scripts/mutate.py --file harness/ledger.py \
         --tests tests/test_ledger.py --mutations /tmp/muts.json
 
+A tracked spec under tests/mutations/ ({"file", "tests", "mutations"}) runs with --spec alone, and the outcome is
+written back into it under "last_run", so every guard proof stays re-runnable and its last verdict is on record
+(tests/test_mutation_specs.py fails when a spec's code has moved on without it):
+
+    PYTHONPATH=. .venv/bin/python scripts/mutate.py --spec tests/mutations/playbook.json
+
 Exits non-zero if ANY mutation survives, so it can gate a change rather than merely inform one. Read the
 `by:` column, not just the verdict — a mutation killed by a test unrelated to the property it breaks means the
 guard is still unproven (M-D)."""
@@ -21,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from harness.mutation import mutate
@@ -28,13 +35,20 @@ from harness.mutation import mutate
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--file", required=True, help="the module whose guard is under test")
-    ap.add_argument("--tests", required=True, nargs="+", help="pytest targets that should catch the mutations")
-    ap.add_argument("--mutations", required=True, help="JSON list of {name, old, new}")
+    ap.add_argument("--spec", help="a tracked spec: {file, tests, mutations}; the outcome is recorded into it")
+    ap.add_argument("--file", help="the module whose guard is under test")
+    ap.add_argument("--tests", nargs="+", help="pytest targets that should catch the mutations")
+    ap.add_argument("--mutations", help="JSON list of {name, old, new}")
     ap.add_argument("--cwd", default=".")
     args = ap.parse_args()
 
-    muts = json.loads(Path(args.mutations).read_text())
+    if args.spec:
+        spec = json.loads(Path(args.spec).read_text())
+        args.file, args.tests, muts = spec["file"], spec["tests"], spec["mutations"]
+    elif not (args.file and args.tests and args.mutations):
+        raise SystemExit("give --spec, or all of --file, --tests and --mutations")
+    else:
+        muts = json.loads(Path(args.mutations).read_text())
     if not isinstance(muts, list) or not muts:
         raise SystemExit("--mutations must be a non-empty JSON list of {name, old, new}")
     for m in muts:
@@ -50,6 +64,12 @@ def main() -> int:
     for r in res["results"]:
         by = ", ".join(t.split("::")[-1] for t in r["killed_by"]) or "-"
         print(f"{'KILLED  ' if r['killed'] else 'SURVIVED'} {r['name']:{width}s}  by: {by}")
+    if args.spec:
+        spec["last_run"] = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                            "killed": sum(1 for r in res["results"] if r["killed"]), "survived": res["survived"],
+                            "killed_by": {r["name"]: sorted(t.split("::")[-1] for t in r["killed_by"])
+                                          for r in res["results"]}}
+        Path(args.spec).write_text(json.dumps(spec, indent=1, ensure_ascii=False) + "\n")
     if res["survived"]:
         print(f"\n{len(res['survived'])} mutation(s) SURVIVED: {res['survived']} — the guard is not proven; "
               f"the suite passes with it broken.")

@@ -1,0 +1,121 @@
+{
+  "file": "harness/floor_c4.py",
+  "tests": ["tests/test_floor_c4.py"],
+  "mutations": [
+    {
+      "name": "success without stopping",
+      "old": "ok = [r[\"stopped\"] and r[\"certificate\"][\"certified\"] for r in rows]",
+      "new": "ok = [r[\"certificate\"][\"certified\"] for r in rows]"
+    },
+    {
+      "name": "success without certificate",
+      "old": "ok = [r[\"stopped\"] and r[\"certificate\"][\"certified\"] for r in rows]",
+      "new": "ok = [r[\"stopped\"] for r in rows]"
+    },
+    {
+      "name": "support bar strict",
+      "old": "\"supported\" if successes >= spec[\"support_at\"]",
+      "new": "\"supported\" if successes > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "\"refuted\" if successes <= spec[\"refute_at\"]",
+      "new": "\"refuted\" if successes < spec[\"refute_at\"]"
+    },
+    {
+      "name": "any net certified",
+      "old": "    if cert.get(\"net_file_sha256\") != row[\"net\"][\"file_sha256\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "any depth",
+      "old": "    if cert.get(\"horizon\") != spec[\"certify_depth\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "stop flag unchecked",
+      "old": "    if row.get(\"stopped\") != bool(last.get(\"stopped\")):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "stop reading unchecked",
+      "old": "        if last.get(\"tree_disagreements\") != 0 or not last.get(\"tree_walked\"):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "stopped games unchecked",
+      "old": "        if row.get(\"games_per_pass\") != [cfg[\"selfplay\"]] * (len(history) - 1):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "full run unchecked",
+      "old": "    elif len(history) != cfg[\"iterations\"] + 1 or last.get(\"iteration\") != \"settle\" \\\n",
+      "new": "    elif last.get(\"iteration\") != \"settle\" \\\n"
+    },
+    {
+      "name": "siblings allowed",
+      "old": "    if any((h.get(\"siblings\") or 0) != 0 for h in history if h.get(\"iteration\") != \"settle\"):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "walk unchecked",
+      "old": "    if not all(isinstance(h.get(\"tree_walked\"), int) and h[\"tree_walked\"] > 0 for h in walks):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if evidence[\"config\"] != {**spec[\"config\"], \"seeds\": list(spec[\"seeds\"]), \"certify_depth\": spec[\"certify_depth\"]}:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "params unchecked",
+      "old": "    if row.get(\"params\") != spec[\"params\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "verdict type unchecked",
+      "old": "not isinstance(cert.get(\"certified\"), bool)",
+      "new": "cert.get(\"certified\") is None"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:50:18+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "success without stopping": [
+        "test_a_seed_that_never_stopped_fails_even_if_its_final_net_is_certified"
+      ],
+      "success without certificate": [
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[10-refuted]",
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[2-supported]",
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[3-inconclusive]",
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[4-inconclusive]",
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[5-refuted]"
+      ],
+      "support bar strict": [
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[2-supported]"
+      ],
+      "refute bar strict": [
+        "test_seeds_whose_stopped_net_the_solver_rejects_count_against_the_bars[5-refuted]"
+      ],
+      "any net certified": ["test_evidence_that_is_not_the_registered_run_is_not_run[another"],
+      "any depth": ["test_evidence_that_is_not_the_registered_run_is_not_run[shallower"],
+      "stop flag unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[stop"],
+      "stop reading unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[stopped"],
+      "stopped games unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[games]"],
+      "full run unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[unstopped"],
+      "siblings allowed": ["test_evidence_that_is_not_the_registered_run_is_not_run[siblings"],
+      "walk unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[no"],
+      "config unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certify",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[config]",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[seeds]"
+      ],
+      "params unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[params]"],
+      "verdict type unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificate"
+      ]
+    }
+  }
+}

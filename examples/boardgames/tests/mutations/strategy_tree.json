@@ -1,0 +1,56 @@
+{
+  "file": "harness/strategy_tree.py",
+  "tests": ["tests/test_strategy_tree.py"],
+  "mutations": [
+    {
+      "name": "depth zero accepted",
+      "old": "if depth is not None and depth < 1:",
+      "new": "if False:"
+    },
+    {
+      "name": "repeats walked again",
+      "old": "if k not in seen and not game.is_terminal(s)}",
+      "new": "if not game.is_terminal(s)}"
+    },
+    {
+      "name": "terminals kept",
+      "old": "if k not in seen and not game.is_terminal(s)}",
+      "new": "if k not in seen}"
+    },
+    {
+      "name": "opponent positions returned",
+      "old": "mine = [s for s in fresh.values() if game.current_player(s) == player]\n        out.extend(mine)",
+      "new": "mine = [s for s in fresh.values() if game.current_player(s) == player]\n        out.extend(fresh.values())"
+    },
+    {
+      "name": "one ply too deep",
+      "old": "while level and (depth is None or ply < depth):",
+      "new": "while level and (depth is None or ply <= depth):"
+    },
+    {
+      "name": "equal share disagrees",
+      "old": "pi[a] < AGREE_SHARE * max(pi)",
+      "new": "pi[a] <= AGREE_SHARE * max(pi)"
+    },
+    {
+      "name": "any lower share disagrees",
+      "old": "pi[a] < AGREE_SHARE * max(pi)",
+      "new": "pi[a] < max(pi)"
+    },
+    {
+      "name": "length check removed",
+      "old": "    if len(moves) != len(labels):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "mode not restored",
+      "old": "        net.train(was)\n",
+      "new": ""
+    },
+    {
+      "name": "illegal moves chosen",
+      "old": "logits.masked_fill(~legal, float(\"-inf\"))",
+      "new": "logits"
+    }
+  ]
+}

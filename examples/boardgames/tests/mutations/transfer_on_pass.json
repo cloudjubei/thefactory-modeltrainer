@@ -1,0 +1,24 @@
+{
+  "file": "harness/transfer.py",
+  "tests": ["tests/test_transfer.py"],
+  "mutations": [
+    {
+      "name": "observer never called",
+      "old": "        if on_pass is not None:\n            log[\"on_pass\"].append(on_pass(args[0] if args else kwargs[\"net\"]))\n",
+      "new": ""
+    },
+    {
+      "name": "observer before training",
+      "edits": [
+        {
+          "old": "        if on_pass is not None:\n            log[\"on_pass\"].append(on_pass(args[0] if args else kwargs[\"net\"]))\n",
+          "new": ""
+        },
+        {
+          "old": "        result = original_train(*args, **kwargs)\n",
+          "new": "        if on_pass is not None:\n            log[\"on_pass\"].append(on_pass(args[0] if args else kwargs[\"net\"]))\n        result = original_train(*args, **kwargs)\n"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,211 @@
+{
+  "file": "harness/playbook.py",
+  "tests": ["tests/test_playbook.py"],
+  "mutations": [
+    {
+      "name": "win credited to the other side",
+      "old": "game.winner(child) == game.current_player(state)",
+      "new": "game.winner(child) != game.current_player(state)"
+    },
+    {
+      "name": "block reads our own win",
+      "old": "    return _wins(game, their_view(state), move)",
+      "new": "    return _wins(game, state, move)"
+    },
+    {
+      "name": "fork ignores their win",
+      "old": "not _winning_moves(game, child) \\\n        and ",
+      "new": ""
+    },
+    {
+      "name": "one threat is a fork",
+      "old": "len(_winning_moves(game, their_view(child))) >= 2",
+      "new": "len(_winning_moves(game, their_view(child))) >= 1"
+    },
+    {
+      "name": "threat read for them",
+      "old": "    return child is not None and bool(_winning_moves(game, their_view(child)))",
+      "new": "    return child is not None and bool(_winning_moves(game, child))"
+    },
+    {
+      "name": "their fork read as ours",
+      "old": "    return forks(game, their_view(state), move)",
+      "new": "    return forks(game, state, move)"
+    },
+    {
+      "name": "gives fork needs every reply",
+      "old": "any(forks(game, child, b) for b",
+      "new": "all(forks(game, child, b) for b"
+    },
+    {
+      "name": "opposite corner is the same corner",
+      "old": "state.board[8 - move]",
+      "new": "state.board[move]"
+    },
+    {
+      "name": "opposite corner holds our piece",
+      "old": "== (1 - state.to_move) + 1",
+      "new": "== state.to_move + 1"
+    },
+    {
+      "name": "unknown predicate accepted",
+      "old": "        if unknown or not self.literals:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "negation ignored",
+      "old": "if all(PREDICATES[p](game, state, m) == positive for",
+      "new": "if all(PREDICATES[p](game, state, m) for"
+    },
+    {
+      "name": "one optimal move is enough",
+      "old": "ok = set(moves) <= optimal",
+      "new": "ok = bool(set(moves) & optimal)"
+    },
+    {
+      "name": "every firing decides",
+      "old": "            if not decided:\n",
+      "new": "            if True:\n"
+    },
+    {
+      "name": "json keys not read as moves",
+      "old": "optimal = {int(a) for a, v in vals.items() if v == best}",
+      "new": "optimal = {a for a, v in vals.items() if v == best}"
+    },
+    {
+      "name": "length check removed",
+      "old": "    if len(positions) != len(values):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "geometry on any game",
+      "old": "    if game.name != \"tictactoe\":\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "last rule decides",
+      "edits": [
+        {
+          "old": "        if moves:\n            return i, moves\n    return None, []",
+          "new": "        if moves:\n            found = (i, moves)\n    return found if 'found' in dir() else (None, [])"
+        }
+      ]
+    },
+    {
+      "name": "only the first recommended move followed",
+      "old": "moves = decide(book, game, s)[1] or game.legal_actions(s)",
+      "new": "moves = decide(book, game, s)[1][:1] or game.legal_actions(s)"
+    },
+    {
+      "name": "uncovered positions end the walk",
+      "old": "moves = decide(book, game, s)[1] or game.legal_actions(s)",
+      "new": "moves = decide(book, game, s)[1]"
+    },
+    {
+      "name": "repeats kept",
+      "old": "            if k in seen or game.is_terminal(s):",
+      "new": "            if game.is_terminal(s):"
+    },
+    {
+      "name": "opponent positions returned",
+      "old": "                out.append(s)\n",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:49:44+00:00",
+    "killed": 21,
+    "survived": [],
+    "killed_by": {
+      "win credited to the other side": [
+        "test_a_rule_recommends_the_moves_meeting_every_literal_and_prints_as_a_statement",
+        "test_move_values_read_from_json_with_text_keys_are_scored_as_moves",
+        "test_the_evaluation_counts_firings_and_optimal_recommendations_per_rule_and_for_the_book",
+        "test_the_first_rule_that_fires_decides",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o....-0-makes_threat-moves0]",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-gives_fork-moves2]",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-opp_fork_at-moves1]",
+        "test_the_tactical_predicates_on_connect_4_read_the_landing_square",
+        "test_the_tactical_predicates_on_tic_tac_toe[x...o...x-0-forks-moves6]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xo..o..x.-0-forks-moves7]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx..o....-1-gives_win-moves5]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.o.....-1-blocks-moves2]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-0-blocks-moves3]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-0-wins-moves0]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-1-forks-moves8]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-1-wins-moves1]",
+        "test_the_tactics_playbook_is_sound_on_solved_connect_4_positions"
+      ],
+      "block reads our own win": [
+        "test_the_first_rule_that_fires_decides",
+        "test_the_tactical_predicates_on_connect_4_read_the_landing_square",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.o.....-1-blocks-moves2]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-0-blocks-moves3]"
+      ],
+      "fork ignores their win": [
+        "test_a_fork_needs_the_opponent_to_have_no_immediate_win",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-gives_fork-moves2]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xx.oo....-1-forks-moves8]"
+      ],
+      "one threat is a fork": [
+        "test_a_fork_needs_the_opponent_to_have_no_immediate_win",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-gives_fork-moves2]",
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-opp_fork_at-moves1]",
+        "test_the_tactical_predicates_on_tic_tac_toe[x...o...x-0-forks-moves6]",
+        "test_the_tactical_predicates_on_tic_tac_toe[xo..o..x.-0-forks-moves7]",
+        "test_the_tactics_playbook_is_sound_at_every_tic_tac_toe_position",
+        "test_the_tactics_playbook_is_sound_on_solved_connect_4_positions"
+      ],
+      "threat read for them": [
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o....-0-makes_threat-moves0]"
+      ],
+      "their fork read as ours": [
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-opp_fork_at-moves1]"
+      ],
+      "gives fork needs every reply": [
+        "test_the_lookahead_predicates_on_tic_tac_toe[x...o...x-1-gives_fork-moves2]"
+      ],
+      "opposite corner is the same corner": ["test_the_geometry_predicates_of_tic_tac_toe"],
+      "opposite corner holds our piece": ["test_the_geometry_predicates_of_tic_tac_toe"],
+      "unknown predicate accepted": ["test_an_unknown_predicate_is_refused_when_the_rule_is_made"],
+      "negation ignored": [
+        "test_a_rule_recommends_the_moves_meeting_every_literal_and_prints_as_a_statement"
+      ],
+      "one optimal move is enough": [
+        "test_a_recommendation_counts_only_when_every_recommended_move_is_optimal"
+      ],
+      "every firing decides": [
+        "test_the_tactics_playbook_is_sound_at_every_tic_tac_toe_position",
+        "test_the_tactics_playbook_is_sound_on_solved_connect_4_positions"
+      ],
+      "json keys not read as moves": [
+        "test_move_values_read_from_json_with_text_keys_are_scored_as_moves"
+      ],
+      "length check removed": ["test_positions_and_values_must_pair_up"],
+      "geometry on any game": ["test_the_tic_tac_toe_geometry_is_refused_on_another_game"],
+      "last rule decides": [
+        "test_newell_simon_is_the_eight_classic_rules_in_order",
+        "test_the_first_rule_that_fires_decides"
+      ],
+      "only the first recommended move followed": [
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-0]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-1]"
+      ],
+      "uncovered positions end the walk": [
+        "test_own_play_does_not_walk_a_position_reached_again",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-0]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-1]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-0]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-1]"
+      ],
+      "repeats kept": ["test_own_play_does_not_walk_a_position_reached_again"],
+      "opponent positions returned": [
+        "test_own_play_does_not_walk_a_position_reached_again",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-0]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-1]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-0]",
+        "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-1]"
+      ]
+    }
+  }
+}

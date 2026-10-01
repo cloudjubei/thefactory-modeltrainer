@@ -1,0 +1,246 @@
+{
+  "ingredients": [
+    {
+      "key": "strategy_tree",
+      "name": "Strategy-tree walk (first-player coverage)",
+      "what": "Each relabelled iteration walks the net's own first-player tree (its raw move at its positions, every reply at the opponent's) and relabels those positions with the net's own search. The targeted coverage for perfect play from the start (P-START).",
+      "claims": ["h69", "h73", "h77"],
+      "conclusion": "Works, and replaces the siblings for the P-START goal: perfect first-player play on 10/10 tic-tac-toe seeds with siblings off (h73), and on Connect-4 an iteration dropped from 4,008 s to 32 s together with parallel relabelling (h77).",
+      "based_on": ["h73", "h77"]
+    },
+    {
+      "key": "stop_signal",
+      "name": "Solver-free stop signal",
+      "what": "Stop training when, on the net's own first-player tree, every raw move agrees with the net's own search (zero disagreements).",
+      "claims": ["h69", "h74", "h75"],
+      "conclusion": "Safe and timely on tic-tac-toe with siblings (h69) and without (h74): 0 false stops, latency 0-1 iterations. On Connect-4, where a 200-sim search is far from exact, it is under test (h75).",
+      "based_on": ["h69", "h74", "h75"]
+    },
+    {
+      "key": "siblings",
+      "name": "Siblings (one- and two-move deviations)",
+      "what": "Relabel every position one (or two) moves away from the recorded self-play positions along moves self-play did not take.",
+      "claims": ["h31", "h32", "h38", "h43", "h44", "h52", "h54", "h55", "h57", "h76", "h84"],
+      "conclusion": "Work on tic-tac-toe: one-ply siblings cut raw failures, mostly in-sample (h31, h38); two-deep siblings with augmentation gave raw-perfect nets on 10/10 seeds (h52), the remaining failures sitting on untrained positions (h57). Without augmentation they fail (h54, h55). They do not scale to Connect-4 (over 90% of an iteration, h76) and are replaced there by the strategy tree.",
+      "based_on": ["h31", "h38", "h52", "h54", "h55", "h57", "h76"]
+    },
+    {
+      "key": "augmentation",
+      "name": "Symmetry augmentation",
+      "what": "Train on every symmetric image of each example, with each game's symmetries found and verified rather than assumed.",
+      "claims": ["h45", "h46", "h50", "h52", "h54", "h55", "h56", "t19", "t20", "t24"],
+      "conclusion": "Necessary in the tic-tac-toe process: every arm without it failed (h46, h50, h54, h55, h56), and augmentation with two-deep siblings gave 10/10 (h52). Convergence alone was not enough (h45). Symmetries are found by proof per game (t20).",
+      "based_on": ["h45", "h46", "h50", "h52", "h54", "h55", "h56", "t20"]
+    },
+    {
+      "key": "canonical_input",
+      "name": "Standardised (canonical) input",
+      "what": "Map each position to its smallest-key symmetric image before the net sees it, so the net never has to learn the symmetry.",
+      "claims": ["h51", "h58", "h59", "h60", "h63", "h64", "h65"],
+      "conclusion": "Shrinks what a net must represent (a 938-param net holds perfect tic-tac-toe when fitted to the answers, h51), but the solver-free process could not reach it at about 1K params, even with the final training pass matched to the oracle fit's budget (h58, h59, h60, h63, h64, h65).",
+      "based_on": ["h51", "h58", "h63", "h64", "h65"]
+    },
+    {
+      "key": "relabel",
+      "name": "Relabelling with a deeper search (reanalyse)",
+      "what": "Relabel the whole buffer each iteration with a 200-sim search of the current net.",
+      "claims": ["h25", "h26", "h28", "h34", "h35", "h36", "h37"],
+      "conclusion": "Works and replicates, through the policy prior (h25, h26, h34, h35, h36, h37), but is a partial cause of the tic-tac-toe fix, not the whole of it (h28).",
+      "based_on": ["h26", "h28", "h34", "h36"]
+    },
+    {
+      "key": "settle",
+      "name": "Unique buffer and final settle",
+      "what": "Keep each position once in the buffer and finish with a long, low-rate training pass (the settle).",
+      "claims": ["h49", "h50", "h59", "h60", "h61", "h62"],
+      "conclusion": "Helps, not sufficient alone: with augmentation it was inconclusive (h49); a 1,500-epoch settle made the 5,008-param residual net raw-perfect where 30 epochs did not (h62 vs h61); it did not rescue the 1K standardised-input nets (h59, h60).",
+      "based_on": ["h49", "h59", "h61", "h62"]
+    },
+    {
+      "key": "openings",
+      "name": "Random openings",
+      "what": "Start self-play games after random opening moves to widen what self-play visits.",
+      "claims": ["h19", "h20", "h21", "h22", "h23", "h53", "h56"],
+      "conclusion": "Does not work: mixed openings raised visits to the starved positions 4.5x without fixing them (h19, h20, h21, h23), so starvation is a correlate, not the cause (h22); six random opening moves failed in T5 with and without augmentation (h53, h56).",
+      "based_on": ["h19", "h22", "h23", "h53", "h56"]
+    },
+    {
+      "key": "search_budget",
+      "name": "Self-play search depth",
+      "what": "How many simulations the self-play search spends per move.",
+      "claims": ["h3", "h4", "h5", "h6", "h7", "h8", "h9", "h10", "h27", "h29"],
+      "conclusion": "At matched compute shallow search first looked better (h3), but the effect decayed and reversed at full convergence: deeper search plateaus higher (h8). Part of the early gap was a deployment-budget confound (h9 holds at a neutral budget, h10 is null at the shallow arm's own). Deeper self-play alone did not fix the tic-tac-toe blind spot (h27), a failure of that recipe rather than of labels (h29).",
+      "based_on": ["h3", "h8", "h9", "h10", "h27", "h29"]
+    },
+    {
+      "key": "exact_labels",
+      "name": "Exact solver labels",
+      "what": "Train on the solver's exact best moves instead of search labels (an oracle, not solver-free).",
+      "claims": ["h40"],
+      "conclusion": "Without siblings, exact labels were the worst residual arm (h40): exact answers on the wrong positions do not give coverage.",
+      "based_on": ["h40"]
+    },
+    {
+      "key": "net_size",
+      "name": "Net size and the smallest-net frontier",
+      "what": "How small a net can hold perfect play, and how the frontier is searched (oracle fits, strategy fits, bisection with checks above).",
+      "claims": [
+        "h33",
+        "h47",
+        "h61",
+        "h62",
+        "h66",
+        "h67",
+        "h68",
+        "h72",
+        "h80",
+        "h81",
+        "h85",
+        "h87"
+      ],
+      "conclusion": "Tic-tac-toe: about 5K params hold perfect play (h47) and the process reaches it at 5,008 (h62). Connect-4 first-player play: 1,576 params certified through 8 plies (h67) and 20,616 through 10, with 8,008 unable to hold its data at 10 (h68, h72): roughly x5-13 per two plies. A 335K net trained earlier fails at its second move (h66).",
+      "based_on": ["h47", "h62", "h66", "h67", "h68", "h72"]
+    },
+    {
+      "key": "certification",
+      "name": "P-START certification",
+      "what": "The solver walks the net's own first-player tree against every reply and checks every move keeps the proven value (staged by depth).",
+      "claims": ["h66", "h67", "h72", "h78", "h79", "h87"],
+      "conclusion": "Works as a staged certificate. The root value is taken as the theorem it is instead of solved (h78), the native solver's table bug is guarded (h79), and certified nets are now saved and independently re-checked (h87).",
+      "based_on": ["h78", "h79", "h87"]
+    },
+    {
+      "key": "solver_free",
+      "name": "Solver-free guarantee and parallel relabelling",
+      "what": "Proof that training called no solver, and the relabel search spread over worker processes bit-identically.",
+      "claims": ["h1", "h75", "h77", "h86"],
+      "conclusion": "The unchanged process learned Othello with no solver (h1). The guard covers the Python and the native solver since h86. Parallel relabelling is part of the ~125x Connect-4 speed-up (h77).",
+      "based_on": ["h1", "h77", "h86"]
+    },
+    {
+      "key": "written_rules",
+      "name": "Written rules (§C.50)",
+      "what": "Play knowledge as logical statements (decision lists over predicates), verified exactly by the solver and fed to the other agents.",
+      "claims": ["h70", "h71"],
+      "conclusion": "Win, block and fork are position-sound, and settle 89% of tic-tac-toe and 29% of the Connect-4 positions our nets visit (h70). Newell–Simon is a perfect strategy from the start for both sides but is not position-sound (h71).",
+      "based_on": ["h70", "h71"]
+    },
+    {
+      "key": "diagnosis",
+      "name": "Diagnosing failures (the tic-tac-toe blind spot)",
+      "what": "Where and why the nets fail: localisation, replication, starvation, the metric itself.",
+      "claims": [
+        "h11",
+        "h12",
+        "h13",
+        "h14",
+        "h15",
+        "h16",
+        "h17",
+        "h18",
+        "h24",
+        "h30",
+        "h39",
+        "h41",
+        "h42",
+        "h48",
+        "t25",
+        "t26"
+      ],
+      "conclusion": "The blind spot is systematic and replicates (h11, h18, h24), is not explained by the eval budget (h12) or off-manifold enrichment (h14, h16), and self-play never trains the positions involved (h30). The coverage metric was wrong until it read every orientation (h39). Connect-4 accuracy away from training data is data-limited (h48).",
+      "based_on": ["h11", "h12", "h14", "h16", "h18", "h24", "h30", "h39", "h48"]
+    },
+    {
+      "key": "budget",
+      "name": "Training budget and game generality",
+      "what": "More games on the unchanged process, and new games without harness changes.",
+      "claims": ["h2", "h7", "t7", "t8"],
+      "conclusion": "Returns past ~9,600 Othello games are unresolved (h2); the deeper-search arm was still improving at 28,800 games (h7). New games need zero harness changes (t7, t8).",
+      "based_on": ["h2", "h7", "t7", "t8"]
+    },
+    {
+      "key": "methodology",
+      "name": "Measurement integrity",
+      "what": "Resume, eras and fingerprints, the register, the statistics, mutation testing: the guards that keep results honest.",
+      "claims": [
+        "t1",
+        "t2",
+        "t3",
+        "t4",
+        "t5",
+        "t6",
+        "t9",
+        "t10",
+        "t11",
+        "t12",
+        "t13",
+        "t14",
+        "t15",
+        "t16",
+        "t17",
+        "t18",
+        "t21",
+        "t22",
+        "t23",
+        "t27",
+        "t28",
+        "t29",
+        "t30",
+        "t31",
+        "t32",
+        "t33",
+        "h82",
+        "h83"
+      ],
+      "conclusion": "Each guard exists because an earlier reading was wrong without it, and each is a supported, test-backed claim; the two latest dead ends were a register hook that applied one arm's outcome to every arm (h82) and a hand-run mutation hidden by stale bytecode (h83).",
+      "based_on": ["h82", "h83", "t11", "t15", "t27"]
+    }
+  ],
+  "unproven_trials": [
+    {
+      "what": "The first Connect-4 depth-12 strategy run was replaced, with the user's agreement, by depth 10 with larger nets.",
+      "lesson": "Depth 12 costs days per width on this machine; get the depth-10 bracket first.",
+      "plan": "§C.49"
+    },
+    {
+      "what": "The first depth-10 strategy run was stopped and restarted.",
+      "lesson": "Refits must warm-start and the label cache must be saved atomically after every batch, or a stopped run loses hours of solves.",
+      "plan": "§C.49"
+    },
+    {
+      "what": "My mid-run reading of the depth-10 failures as loop instability was wrong.",
+      "lesson": "Read whether each refit held its data before blaming the loop (corrected in h68).",
+      "plan": "§C.49"
+    },
+    {
+      "what": "An existing Connect-4 solver library (BitBully) was considered and rejected for its AGPL licence.",
+      "lesson": "Write our own solver (harness/c4solver.c, a port of harness/solver.py); the provenance of solver.py is still open.",
+      "plan": "§C.49"
+    },
+    {
+      "what": "The C solver source could not join the code fingerprint, which parses Python only.",
+      "lesson": "The compiled library is named by the hash of its source, so an edited solver is always rebuilt and identifiable.",
+      "plan": "§C.49"
+    },
+    {
+      "what": "A proof module was added to the evidence guard before its evidence existed, failing the suite.",
+      "lesson": "Add a proof module to the guard only once its data file is recorded.",
+      "plan": "§C.48"
+    },
+    {
+      "what": "Changes to fingerprinted training code were needed while a long run was active.",
+      "lesson": "Work in a scratch copy and copy back after the run exits, merging the register and the evidence manifest rather than overwriting them.",
+      "plan": "§C.49"
+    },
+    {
+      "what": "The first Connect-4 solver-free pilot (2-deep siblings) was abandoned after one iteration.",
+      "lesson": "Time one iteration before registering a long run (h76 records the numbers).",
+      "plan": "§C.49"
+    },
+    {
+      "what": "Mutation specs and pilot data were kept in a temporary folder, and one spec was overwritten.",
+      "lesson": "Specs live in tests/mutations/ with their last run; pilot data goes to evidence/ and the register.",
+      "plan": "§C.51"
+    }
+  ]
+}

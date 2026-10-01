@@ -28,9 +28,9 @@ def expand_round(game, root, player: int, choose: Callable[[list], list], move_v
     `check_many` ((position, move) pairs → the value each move keeps) makes labelling CHECK-FIRST: the chosen move is
     checked with one solve, and when it keeps a WIN — nothing is better — that move alone is the label; only a move
     that does not win costs the full label (every move's value). `known` then holds partial entries ({move: 1}) that
-    grow as later rounds check other moves. Returns {"labelled": {key: (state, best moves, value)} for every `player` position walked,
-    "failures": keys where the chosen move was not best, "failures_by_depth", "complete" (nothing left beyond the
-    horizon), "nodes": {"player", "opponent"}}."""
+    grow as later rounds check other moves. Returns {"labelled": {key: (state, best moves, value)} for every
+    `player` position walked, "failures": keys where the chosen move was not best, "failures_by_depth", "complete"
+    (nothing left beyond the horizon), "nodes": {"player", "opponent"}}."""
     rng = random.Random(0)
     level = {game.state_key(root): root}
     labelled: dict = {}
@@ -105,35 +105,16 @@ def strategy_target(game, labelled: dict) -> dict:
             "eval": {"x": x, "legal": legal, "optimal": best}}
 
 
-def net_chooser(game, net) -> Callable[[list], list]:
-    """The net's RAW move: argmax over the legal moves of one forward pass, batched."""
-    import torch
-
-    from harness.neural import encode
-
-    def choose(states: list) -> list:
-        out = []
-        net.eval()
-        for i in range(0, len(states), 4096):
-            chunk = states[i:i + 4096]
-            legal = torch.zeros(len(chunk), game.num_actions, dtype=torch.bool)
-            for j, s in enumerate(chunk):
-                legal[j, game.legal_actions(s)] = True
-            with torch.no_grad():
-                logits, _v = net(torch.stack([encode(game, s) for s in chunk]))
-            out += logits.masked_fill(~legal, float("-inf")).argmax(dim=1).tolist()
-        return out
-    return choose
-
-
 def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: dict, rounds: int,
                  move_values_fn: Callable, known: dict, move_values_many: Callable[[list], list] | None = None,
-                 check_many: Callable[[list], list] | None = None, warm_start: bool = False) -> dict:
+                 check_many: Callable[[list], list] | None = None, warm_start: bool = False,
+                 return_net: bool = False) -> dict:
     """Grow a net of `arch` to a perfect strategy through `depth`: alternate walks of its own tree and refits on
     everything labelled so far. A round that labels nothing new after a refit that could NOT hold its data would only
     repeat that refit exactly, so growth stops there as STALLED — the setup could not represent what it was taught.
     `warm_start` continues each refit from the previous round's net instead of a fresh one — most of the data is
-    unchanged from round to round, so the net already holds it.
+    unchanged from round to round, so the net already holds it. `return_net` adds, under "net", the net that made
+    the last walk — the certified one when the run is certified — so it can be saved and re-checked independently.
     Returns {"certified", "stalled", "params", "positions" labelled in all, "rounds": [{"round",
     "failures", "failures_by_depth", "labelled" this walk, "positions" so far, "complete", "fit": the refit's
     readings or None}]}."""
@@ -141,6 +122,7 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
 
     from harness.frontier import fit
     from harness.neural import Connect4Net, arch_for_game
+    from harness.strategy_tree import raw_chooser
 
     torch.manual_seed(seed)
     net = Connect4Net(**arch_for_game(arch, game))
@@ -150,7 +132,7 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
     last_fit_held = True
     for r in range(rounds):
         before = len(data)
-        walk = expand_round(game, root, player, net_chooser(game, net), move_values_fn, depth, known, move_values_many,
+        walk = expand_round(game, root, player, raw_chooser(game, net), move_values_fn, depth, known, move_values_many,
                             check_many)
         data.update(walk["labelled"])
         entry = {"round": r, "failures": len(walk["failures"]), "failures_by_depth": walk["failures_by_depth"],
@@ -169,5 +151,6 @@ def fit_strategy(game, arch: dict, root, player: int, depth, seed: int, recipe: 
         net = result.pop("net")
         entry["fit"] = {k: result[k] for k in ("solved", "solved_at_epoch", "best_failures", "epochs_run")}
         last_fit_held = result["solved"]
-    return {"certified": certified, "stalled": stalled, "params": sum(p.numel() for p in net.parameters()), "positions": len(data),
-            "rounds": log}
+    out = {"certified": certified, "stalled": stalled, "params": sum(p.numel() for p in net.parameters()),
+           "positions": len(data), "rounds": log}
+    return {**out, "net": net} if return_net else out

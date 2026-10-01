@@ -24,6 +24,7 @@ import torch.nn.functional as F
 
 from harness.agents import Agent, _sign, child_move_value, prove_node, state_key
 from harness.game import Game, State
+from harness.strategy_tree import disagreements, raw_chooser, strategy_tree_positions
 
 ROWS, COLS = 6, 7  # the DEFAULT board (Connect-4); a net carries its own board_shape/num_actions in its arch
 
@@ -1491,6 +1492,56 @@ def _run_parallel_selfplay(pool, tmpdir: str, net, target_net, version: int, n_g
     return out
 
 
+# Relabelling is the other sequential cost: the 200-sim search over the buffer, its siblings and the strategy tree
+# runs one position at a time. It parallelises EXACTLY: each position's label depends only on the net and the
+# position (the relabel search is greedy, with no noise), so splitting the list across workers and joining the
+# results in order gives the serial labels bit for bit. The workers get an rng that refuses every draw, so a
+# configuration that WOULD draw (root noise, a stochastic game) fails loudly instead of silently diverging.
+_RELABEL_WORKER: dict = {}
+
+
+class _NoRandom:
+    """An rng that refuses every draw: a parallel relabel must not depend on how the positions were split."""
+
+    def __getattr__(self, name):
+        raise RuntimeError(f"a parallel relabel drew from the rng ({name}) — its labels would depend on the split")
+
+
+def _relabel_worker_init(game_name: str) -> None:
+    import torch as _torch
+
+    _torch.set_num_threads(1)
+    from harness.registry import resolve_game
+
+    _RELABEL_WORKER.clear()
+    _RELABEL_WORKER["game"] = resolve_game(game_name)
+
+
+def _relabel_worker(task: tuple) -> list:
+    net_path, version, agent_kwargs, states = task
+    st = _RELABEL_WORKER
+    if st.get("version") != version:
+        st["net"] = load_net(net_path)
+        st["version"] = version
+    return reanalyze_examples(st["game"], AlphaZeroAgent(st["net"], **agent_kwargs), states, _NoRandom())
+
+
+def _parallel_relabel(pool, workers: int, tmpdir: str, net, version: int, agent_kwargs: dict, states: list) -> list:
+    """`reanalyze_examples` over `states` across `pool`, joined in order — the serial labels, bit for bit."""
+    import os
+
+    if not states:
+        return []
+    net_path = os.path.join(tmpdir, "relabel_net.pt")
+    save_net(net, net_path)
+    size = max(1, -(-len(states) // (4 * workers)))
+    chunks = [states[i:i + size] for i in range(0, len(states), size)]
+    out: list = []
+    for part in pool.map(_relabel_worker, [(net_path, version, agent_kwargs, c) for c in chunks]):
+        out.extend(part)
+    return out
+
+
 def _endgame_enabled(game: Game, endgame_tb) -> bool:
     """§C.7 #2 GENERIC GATE: the online endgame loop runs ONLY when a run tablebase is present AND the game exposes
     the exact hooks (canonical_key + exact_optimal_actions). Absent either, the caller builds the learner with
@@ -1561,6 +1612,9 @@ def train_alphazero(
     settle_lr: float | None = None,
     record_self_agreement: bool = False,
     sibling_depth: int = 1,
+    strategy_tree: dict | None = None,
+    relabel_workers: int = 1,
+    stop_on_agreement: bool = False,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1618,6 +1672,14 @@ def train_alphazero(
     if (buffer_unique or settle_epochs > 0 or record_self_agreement) and reanalyze_frac <= 0.0:
         raise ValueError("buffer_unique / settle_epochs / record_self_agreement act on the reanalyze state buffer — "
                          "set reanalyze_frac")
+    if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0 or reanalyze_sims is None
+                                 or getattr(game, "name", None) is None):
+        raise ValueError("relabel_workers spreads the separate relabel search (reanalyze_frac > 0 and reanalyze_sims "
+                         "set) over >= 1 worker processes of a named game")
+    if stop_on_agreement and strategy_tree is None:
+        raise ValueError("stop_on_agreement reads the strategy-tree walk — set strategy_tree")
+    if strategy_tree is not None and reanalyze_frac != 1.0:
+        raise ValueError("strategy_tree relabels its positions with the whole-buffer search — set reanalyze_frac=1.0")
     if settle_lr is not None and settle_epochs <= 0:
         raise ValueError("settle_lr sets the settle's starting rate — it needs settle_epochs")
     if sibling_depth != 1 and not reanalyze_siblings:
@@ -1716,6 +1778,26 @@ def train_alphazero(
                 _os.environ.pop(k, None)
             else:
                 _os.environ[k] = v
+    _relabel_pool = _relabel_dir = None
+    relabel_calls = [0]
+    if relabel_workers > 1:
+        if endgame_on:
+            raise ValueError("relabel_workers cannot share the run's endgame tablebase with worker processes")
+        import multiprocessing as _mp
+        import os as _os
+        import tempfile
+
+        _relabel_dir = tempfile.mkdtemp(prefix="az_rl_")
+        _saved = {k: _os.environ.get(k) for k in ("OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS", "MKL_NUM_THREADS")}
+        for k in _saved:
+            _os.environ[k] = "1"
+        _relabel_pool = _mp.get_context("spawn").Pool(int(relabel_workers), initializer=_relabel_worker_init,
+                                                      initargs=(game.name,))
+        for k, v in _saved.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
     # §C.7 #3 SOLVER-FREE LEAGUE: the opening anchor accumulates seat-0 (empty-board) league examples with their
     # TRUE outcomes (honest, never win-filtered) so the opening signal isn't diluted below distillation's pin; the
     # frozen-self rung is a batch-start deepcopy — an equal-strength opponent that beats a genuinely-lost opening,
@@ -1731,6 +1813,7 @@ def train_alphazero(
     # §C.14: the RUN owns this (scaled_run passes it across batches). A local default keeps other
     # callers working, but then Adam resets per call — which is the bug this parameter fixes.
     _opt_state: dict = opt_state if opt_state is not None else {}
+    stopped = False
     for it in range(iterations):
         reanalyze_note: dict = {}
         epoch_cap: int | None = None
@@ -1771,6 +1854,8 @@ def train_alphazero(
                 state_buffer = (state_buffer + fresh_s)[-buffer_cap:]
             t_relabel = time.time()
             sib_rows: list = []
+            tree_rows: list = []
+            tree_walked = tree_disagree = 0
             sib_stats = {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}
             # Re-label a random sample of the buffer with the CURRENT net (fresh policy + search-improved value).
             k = int(reanalyze_frac * len(state_buffer))
@@ -1781,11 +1866,19 @@ def train_alphazero(
                     book=(endgame_tb if endgame_on else None), solve_endgame=(endgame_max_empty if endgame_on else 0))
                 if relabeler is not learner:
                     relabeler.add_noise = learner.add_noise  # self-play left the learner's root-noise state set
+
+                def relabel(states: list) -> list:
+                    relabel_calls[0] += 1
+                    if _relabel_pool is None:
+                        return reanalyze_examples(game, relabeler, states, rng)
+                    return _parallel_relabel(_relabel_pool, relabel_workers, _relabel_dir, net, relabel_calls[0],
+                                             {"sims": reanalyze_sims, "gumbel": gumbel, "gumbel_m": gumbel_m,
+                                              "c_scale": c_scale, "add_noise": relabeler.add_noise}, states)
                 if policy_target_fn is not None:
                     relabelled = [(encode(game, s), _checked_policy_target(game, s, policy_target_fn), None)
                                   for s in (state_buffer[i][0] for i in idxs)]
                 else:
-                    relabelled = reanalyze_examples(game, relabeler, [state_buffer[i][0] for i in idxs], rng)
+                    relabelled = relabel([state_buffer[i][0] for i in idxs])
                 if relabeler is not learner:
                     learner.endgame_solves += relabeler.endgame_solves
                     learner.endgame_hits += relabeler.endgame_hits
@@ -1806,21 +1899,38 @@ def train_alphazero(
                         sib_rows = [(encode(game, st), _checked_policy_target(game, st, policy_target_fn), float("nan"))
                                     for st in sibs]
                     else:
-                        sib_rows = [(x, pi, float("nan")) for (x, pi, _v) in reanalyze_examples(game, relabeler, sibs,
-                                                                                              rng)]
+                        sib_rows = [(x, pi, float("nan")) for (x, pi, _v) in relabel(sibs)]
                     sibling_relabel_s = time.time() - t_sib
+                if strategy_tree is not None:
+                    choose = raw_chooser(game, net)
+                    walked = strategy_tree_positions(game, game.initial_state(random.Random(0)),
+                                                     strategy_tree["player"], choose, strategy_tree.get("depth"))
+                    tree_walked = len(walked)
+                    if walked:
+                        tree_labels = relabel(walked)
+                        tree_disagree = disagreements(choose(walked), [pi for (_x, pi, _v) in tree_labels])
+                        tree_key = (game.canonical_key if (augment or canonical) and hasattr(game, "canonical_key")
+                                    else game.state_key)
+                        held = {tree_key(st) for (st, *_rest) in state_buffer}
+                        tree_rows = [(x, pi, float("nan")) for st, (x, pi, _v) in zip(walked, tree_labels, strict=True)
+                                     if tree_key(st) not in held]
             sp_aug = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
             sib_aug = augment_examples(sib_rows, perms) if sib_rows else []
-            buffer = sp_aug + sib_aug
+            tree_aug = augment_examples(tree_rows, perms) if tree_rows else []
+            buffer = sp_aug + sib_aug + tree_aug
             reanalyze_note = {"selfplay_states": len(fresh_s), "state_buffer": len(state_buffer), "evicted": evicted,
                               **({"merged": merged} if buffer_unique else {}), "siblings": sib_stats["added"],
                               **({"sibling_rings": sib_stats.get("rings", [])} if reanalyze_siblings else {}),
                               "sibling_terminal_skipped": sib_stats["terminal_skipped"],
                               "sibling_recorded_skipped": sib_stats["recorded_skipped"],
                               "sibling_holdout_skipped": sib_stats["holdout_skipped"],
-                              "nan_value_examples": len(sib_aug), "selfplay_s": round(selfplay_s, 3),
+                              "nan_value_examples": len(sib_aug) + len(tree_aug), "selfplay_s": round(selfplay_s, 3),
                               "relabel_s": round(relabel_s, 3), "sibling_relabel_s": round(sibling_relabel_s, 3)}
-            epoch_cap = len(sp_aug) if (steps_matched and sib_aug) else None
+            epoch_cap = len(sp_aug) if (steps_matched and (sib_aug or tree_aug)) else None
+            if strategy_tree is not None:
+                reanalyze_note.update({"tree_walked": tree_walked, "tree_positions": len(tree_rows),
+                                       "tree_disagreements": tree_disagree})
+                stopped = stop_on_agreement and tree_walked > 0 and tree_disagree == 0
         elif parallel_ok:  # PURE-#1 fanned out across worker processes (fills the idle cores; ~2-2.5x faster)
             fresh = _run_parallel_selfplay(_pool, _tmpdir, net, target_net, it, selfplay_games, sims, gumbel,
                                            gumbel_m, c_scale, value_n_step, selfplay_opening_plies, rng)
@@ -1876,6 +1986,9 @@ def train_alphazero(
                                                 endgame_extend_positions, endgame_extend_seconds, value_fn=_vfn)
         # ANCHOR: the solver-free opening anchor (league) is pinned at league_anchor_frac via the SAME fixed-fraction
         # mix the oracle distillation uses — so a few-hundred empty-board examples aren't diluted in a 400k buffer.
+        if stopped:
+            history.append({"iteration": it + 1, "stopped": True, **reanalyze_note})
+            break
         _anchor = distilled + opening_anchor
         _afrac = league_anchor_frac if opening_anchor else distill_fraction
         train_set = _mix_training_set(buffer, _anchor, _afrac)
@@ -1904,7 +2017,7 @@ def train_alphazero(
                        if endgame_on else "")
             log(f"iter {it + 1}/{iterations}: buffer {len(buffer)} ({vs_pool} vs-pool, {reanalyzed} reanalyzed), "
                 f"distilled {len(distilled)}, loss {loss:.3f}{eg_note}")
-    if settle_epochs > 0 and iterations > 0:
+    if settle_epochs > 0 and iterations > 0 and not stopped:
         loss = train_net(net, train_set, settle_epochs, batch_size, lr if settle_lr is None else settle_lr, device,
                          opt_state=_opt_state, epoch_examples=epoch_cap, lr_end=settle_lr_final)
         entry = {"iteration": "settle", "epochs": settle_epochs, "lr_final": settle_lr_final,
@@ -1918,6 +2031,12 @@ def train_alphazero(
         import shutil
 
         shutil.rmtree(_tmpdir, ignore_errors=True)
+    if _relabel_pool is not None:
+        _relabel_pool.close()
+        _relabel_pool.join()
+        import shutil
+
+        shutil.rmtree(_relabel_dir, ignore_errors=True)
     if return_buffer:
         return net, history, buffer
     return net, history

@@ -1,0 +1,21 @@
+{
+  "file": "harness/frontier.py",
+  "tests": ["tests/test_frontier.py"],
+  "mutations": [
+    {
+      "name": "fit trains in whatever mode it was handed",
+      "old": "    net.train()\n    opt = ",
+      "new": "    opt = "
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:52:08+00:00",
+    "killed": 1,
+    "survived": [],
+    "killed_by": {
+      "fit trains in whatever mode it was handed": [
+        "test_a_given_net_left_in_eval_mode_is_trained_in_training_mode"
+      ]
+    }
+  }
+}

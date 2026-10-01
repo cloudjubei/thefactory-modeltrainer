@@ -1,0 +1,151 @@
+{
+  "file": "harness/floor_stop.py",
+  "tests": ["tests/test_floor_stop.py"],
+  "mutations": [
+    {
+      "name": "signal paired with the net it trained",
+      "old": "certs[i - 1]) for i in range",
+      "new": "certs[i]) for i in range"
+    },
+    {
+      "name": "a zero always a stop",
+      "old": "if d == 0 and not c]",
+      "new": "if d == 0 and False]"
+    },
+    {
+      "name": "latency bound exclusive",
+      "old": "0 <= latency <= spec[\"latency\"]",
+      "new": "0 <= latency < spec[\"latency\"]"
+    },
+    {
+      "name": "early zero timely",
+      "old": "0 <= latency <= spec[\"latency\"]",
+      "new": "latency <= spec[\"latency\"]"
+    },
+    {
+      "name": "one false stop tolerated",
+      "old": "    if false_stops:\n",
+      "new": "    if false_stops > 1:\n"
+    },
+    {
+      "name": "no certify floor",
+      "old": "if certifying < spec[\"certify_at\"]:",
+      "new": "if False:"
+    },
+    {
+      "name": "support bar strict",
+      "old": "timely >= spec[\"support_at\"]",
+      "new": "timely > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "timely <= spec[\"refute_at\"]",
+      "new": "timely < spec[\"refute_at\"]"
+    },
+    {
+      "name": "strict pairing off",
+      "old": "strict[i - 1] == 0",
+      "new": "strict[i] == 0"
+    },
+    {
+      "name": "settle cert wrong pass",
+      "old": "\"certified_after_settle\": certs[-1]",
+      "new": "\"certified_after_settle\": certs[-2]"
+    },
+    {
+      "name": "tree checks skipped",
+      "old": "        if not problems:\n            for row in arm[\"seeds\"]:",
+      "new": "        if False:\n            for row in arm[\"seeds\"]:"
+    },
+    {
+      "name": "cert count unchecked",
+      "old": "if not isinstance(certs, list) or len(certs) != iterations + 1:",
+      "new": "if not isinstance(certs, list):"
+    },
+    {
+      "name": "cert verdict unchecked",
+      "old": "isinstance(c.get(\"certified\"), bool) for c in certs",
+      "new": "True for c in certs"
+    },
+    {
+      "name": "iteration 0 walk unchecked",
+      "old": "if history[0].get(\"tree_walked\") != 0:",
+      "new": "if False:"
+    },
+    {
+      "name": "walk unchecked",
+      "old": "if not (isinstance(h.get(\"tree_walked\"), int) and h[\"tree_walked\"] > 0):",
+      "new": "if False:"
+    },
+    {
+      "name": "count type unchecked",
+      "old": "if not isinstance(d, int) or isinstance(d, bool) or d < 0:",
+      "new": "if d is None:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-01T12:49:57+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "signal paired with the net it trained": [
+        "test_a_first_zero_exactly_the_latency_after_certification_is_in_time",
+        "test_a_single_false_stop_on_any_seed_refutes_even_after_certification",
+        "test_every_seed_stopping_within_the_latency_of_its_first_certified_net_with_no_false_stop_is_supported",
+        "test_iteration_i_s_signal_is_paired_with_the_net_after_pass_i_minus_one",
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[10-refuted]",
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[2-supported]",
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[3-inconclusive]",
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[4-inconclusive]",
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[5-refuted]"
+      ],
+      "a zero always a stop": [
+        "test_a_single_false_stop_on_any_seed_refutes_even_after_certification",
+        "test_iteration_i_s_signal_is_paired_with_the_net_after_pass_i_minus_one"
+      ],
+      "latency bound exclusive": [
+        "test_a_first_zero_exactly_the_latency_after_certification_is_in_time"
+      ],
+      "early zero timely": [
+        "test_iteration_i_s_signal_is_paired_with_the_net_after_pass_i_minus_one"
+      ],
+      "one false stop tolerated": [
+        "test_a_single_false_stop_on_any_seed_refutes_even_after_certification",
+        "test_iteration_i_s_signal_is_paired_with_the_net_after_pass_i_minus_one"
+      ],
+      "no certify floor": [
+        "test_the_settled_net_s_certificate_is_reported_but_never_paired",
+        "test_too_few_certified_seeds_leave_the_stop_uncalibrated[10-inconclusive]"
+      ],
+      "support bar strict": [
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[2-supported]",
+        "test_too_few_certified_seeds_leave_the_stop_uncalibrated[2-supported]"
+      ],
+      "refute bar strict": [
+        "test_seeds_stopping_later_than_the_latency_count_against_the_bars[5-refuted]"
+      ],
+      "strict pairing off": [
+        "test_the_report_says_how_often_a_stop_landed_on_a_net_perfect_at_every_position"
+      ],
+      "settle cert wrong pass": ["test_the_settled_net_s_certificate_is_reported_but_never_paired"],
+      "tree checks skipped": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificate",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificates]",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[no",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[reading",
+        "test_evidence_that_is_not_the_registered_run_is_not_run[walk"
+      ],
+      "cert count unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificates]"
+      ],
+      "cert verdict unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[certificate"
+      ],
+      "iteration 0 walk unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[walk"
+      ],
+      "walk unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[no"],
+      "count type unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[reading"]
+    }
+  }
+}

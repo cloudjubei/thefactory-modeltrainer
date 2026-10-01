@@ -39,6 +39,7 @@ TRAINING_MODULES = (
     "harness/game.py",
     "harness/symmetry.py",
     "harness/registry.py",
+    "harness/strategy_tree.py",
 )
 
 NOT_TRAINING_PATH = {
@@ -56,13 +57,15 @@ NOT_TRAINING_PATH = {
 # transfer run was launched under (ac11124cf17a) before rules.py was recognised as training-path code; V3 =
 # +rules.py, the list the completed Othello run was stamped under (4a9e255a90c6 at that revision) before
 # resume.py joined the training path; V4 = +resume.py, the list every run up to §C.46 (tic-tac-toe era
-# 2600dc4f574a) was stamped under, before game.py, symmetry.py and registry.py joined (§C.47). A list alone
-# re-derives an old code only WITH that code's `revision`: the list says which files counted, the revision says
-# what was in them.
-TRAINING_MODULES_V1 = TRAINING_MODULES[:-6]
-TRAINING_MODULES_V2 = TRAINING_MODULES[:-5]
-TRAINING_MODULES_V3 = TRAINING_MODULES[:-4]
-TRAINING_MODULES_V4 = TRAINING_MODULES[:-3]
+# 2600dc4f574a) was stamped under, before game.py, symmetry.py and registry.py joined (§C.47); V5 = +those three,
+# the list every run through §C.49's Connect-4 depth-10 hold run was stamped under, before the strategy-tree walk
+# (strategy_tree.py) joined the training path. A list alone re-derives an old code only WITH that code's
+# `revision`: the list says which files counted, the revision says what was in them.
+TRAINING_MODULES_V1 = TRAINING_MODULES[:-7]
+TRAINING_MODULES_V2 = TRAINING_MODULES[:-6]
+TRAINING_MODULES_V3 = TRAINING_MODULES[:-5]
+TRAINING_MODULES_V4 = TRAINING_MODULES[:-4]
+TRAINING_MODULES_V5 = TRAINING_MODULES[:-1]
 
 HARNESS_ROOT = Path(__file__).resolve().parent.parent
 

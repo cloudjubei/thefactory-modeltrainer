@@ -4,7 +4,9 @@ position after every pass. Writes one evidence file per arm, judged by harness.f
     PYTHONPATH=. .venv/bin/python scripts/small_floor.py --spec floor_small --arm canon_mlp32 --workers 2 \\
         --out evidence/c49_T6_canon_mlp32.json.gz
 
-`--spec` names the registration module whose arms and seeds to run: floor_small (T6) or floor_budget (T7).
+`--spec` names the registration module whose arms and seeds to run: floor_small (T6), floor_budget (T7),
+floor_stop (T8) or floor_tree (T9). An arm with a `strategy_tree` also has the solver certify the net's own tree for that player after
+every pass (harness.certify, raw moves) — an observation only; the training never sees it.
 
 A position counts as TRAINED when it is in the final training set (every recorded self-play position and the last
 sibling set) under the key the net itself tells positions apart by: every orientation is one input for a
@@ -15,7 +17,21 @@ import argparse
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 
-MEASUREMENT_MODULES = ("scripts/small_floor.py", "harness/transfer.py", "harness/coverage.py")
+MEASUREMENT_MODULES = ("scripts/small_floor.py", "harness/transfer.py", "harness/coverage.py", "harness/certify.py")
+
+
+def _tree_certificate(game, player: int):
+    import random
+
+    from harness.certify import certify
+    from harness.strategy_tree import raw_chooser
+
+    root = game.initial_state(random.Random(0))
+
+    def reading(net) -> dict:
+        r = certify(game, root, player, raw_chooser(game, net), game.position_value)
+        return {"certified": r["certified"], "failures": r["failures"], "nodes": r["nodes"]["player"]}
+    return reading
 
 
 def run(job: dict) -> dict:
@@ -35,8 +51,9 @@ def run(job: dict) -> dict:
     assert complete
     raw = [s for s in raw if not game.is_terminal(s)]
     probe = build_probe(game, raw, encode, lambda s: move_values(game, s))
+    tree = cfg.get("strategy_tree")
     t0 = time.time()
-    with record_selfplay_states(game, probe) as log:
+    with record_selfplay_states(game, probe, on_pass=_tree_certificate(game, tree["player"]) if tree else None) as log:
         net, history = train_alphazero(
             game, iterations=cfg["iterations"], selfplay_games=cfg["selfplay"], sims=cfg["train_sims"],
             channels=cfg["arch"].get("channels", 32), net_arch=cfg["arch"], augment=cfg["augment"],
@@ -47,7 +64,7 @@ def run(job: dict) -> dict:
             steps_matched=cfg["steps_matched"], buffer_unique=cfg["buffer_unique"],
             settle_epochs=cfg["settle_epochs"], settle_lr_final=cfg["settle_lr_final"],
             record_self_agreement=cfg["record_self_agreement"], sibling_depth=cfg["sibling_depth"],
-            settle_lr=cfg.get("settle_lr"))
+            settle_lr=cfg.get("settle_lr"), strategy_tree=tree)
     if any(h.get("evicted", 0) for h in history):
         raise RuntimeError(f"seed {seed}: the buffer evicted, so the recorded positions are not the trained set")
     net.eval()
@@ -58,7 +75,7 @@ def run(job: dict) -> dict:
     canonical = cfg["augment"] or cfg["arch"].get("canonical_input", False)
     key = game.canonical_key if canonical else game.state_key
     trained_keys = {key(s) for g in log["games"] for s in g["states"]}
-    trained_keys |= {key(s) for s in log["siblings"][-1]["states"]}
+    trained_keys |= {key(s) for s in (log["siblings"][-1]["states"] if log["siblings"] else [])}
     trained = [key(s) in trained_keys for s in raw]
     per_pass = [0] * log["passes"]
     for g in log["games"]:
@@ -71,7 +88,8 @@ def run(job: dict) -> dict:
             "coverage": {"trained": sum(trained), "untrained": len(raw) - sum(trained),
                          "failures_trained": sum(1 for i in failing if trained[i]),
                          "failures_untrained": sum(1 for i in failing if not trained[i])},
-            "games_per_pass": per_pass, "history": history, "train_seconds": round(time.time() - t0, 1)}
+            "games_per_pass": per_pass, "history": history, "train_seconds": round(time.time() - t0, 1),
+            **({"tree_certification_per_pass": log["on_pass"]} if tree else {})}
 
 
 def main() -> None:
@@ -82,7 +100,7 @@ def main() -> None:
     from harness.evidence import save_evidence
     from harness.fingerprint import training_fingerprint
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--spec", required=True, choices=["floor_small", "floor_budget"])
+    ap.add_argument("--spec", required=True, choices=["floor_small", "floor_budget", "floor_stop", "floor_tree"])
     ap.add_argument("--arm", required=True)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", required=True)
@@ -90,9 +108,10 @@ def main() -> None:
     if args.spec == "floor_small":
         from harness.floor_small import T6_ARMS as arms, T6_SEEDS as seeds
     else:
-        from harness.floor_budget import SPEC
+        from importlib import import_module
 
-        arms, seeds = SPEC["arms"], SPEC["seeds"]
+        spec = import_module(f"harness.{args.spec}").SPEC
+        arms, seeds = spec["arms"], spec["seeds"]
     if args.arm not in arms:
         raise SystemExit(f"{args.spec} has no arm {args.arm}: {sorted(arms)}")
     config = arms[args.arm]

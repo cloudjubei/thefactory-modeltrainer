@@ -1,0 +1,52 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_relabelling_across_worker_processes_trains_bit_identically",
+    "tests/test_neural.py::test_c49_parallel_relabelling_needs_a_separate_relabel_search",
+    "tests/test_neural.py::test_c49_a_relabel_worker_refuses_any_random_draw",
+    "tests/test_neural.py::test_c49_with_workers_every_relabel_goes_through_the_worker_pool",
+    "tests/test_neural.py::test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers"
+  ],
+  "mutations": [
+    {
+      "name": "workers draw from a real rng",
+      "old": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, _NoRandom())",
+      "new": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, random.Random(0))"
+    },
+    {
+      "name": "chunks joined out of order",
+      "old": "        out.extend(part)\n    return out\n\n\ndef _endgame_enabled",
+      "new": "        out[:0] = part\n    return out\n\n\ndef _endgame_enabled"
+    },
+    {
+      "name": "stale net kept",
+      "old": "    if st.get(\"version\") != version:\n",
+      "new": "    if \"net\" not in st:\n"
+    },
+    {
+      "name": "pool never used",
+      "old": "                    if _relabel_pool is None:\n                        return reanalyze_examples",
+      "new": "                    if True:\n                        return reanalyze_examples"
+    },
+    {
+      "name": "root noise hidden from workers",
+      "old": "\"c_scale\": c_scale, \"add_noise\": relabeler.add_noise}",
+      "new": "\"c_scale\": c_scale, \"add_noise\": False}"
+    },
+    {
+      "name": "version never advances",
+      "old": "                    relabel_calls[0] += 1\n",
+      "new": ""
+    },
+    {
+      "name": "no worker check",
+      "old": "if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0 or reanalyze_sims is None",
+      "new": "if relabel_workers != 1 and (reanalyze_frac <= 0.0 or reanalyze_sims is None"
+    },
+    {
+      "name": "no relabel-search check",
+      "old": "if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0 or reanalyze_sims is None",
+      "new": "if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0"
+    }
+  ]
+}

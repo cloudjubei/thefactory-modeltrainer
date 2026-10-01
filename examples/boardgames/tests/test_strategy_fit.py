@@ -114,6 +114,23 @@ def test_a_big_enough_net_is_grown_to_a_certified_strategy_and_a_tiny_one_is_not
     assert not tiny["certified"] and len(tiny["rounds"]) == 3
 
 
+def test_the_net_handed_back_is_the_one_that_made_the_last_walk_and_the_independent_certifier_agrees(ttt):
+    from harness.frontier import DEFAULT_RECIPE
+    from harness.strategy_tree import raw_chooser
+
+    root = ttt.initial_state(random.Random(0))
+    recipe = {**DEFAULT_RECIPE, "max_epochs": 3000}
+    arch = {"mlp_hidden": [64], "canonical_input": True}
+    r = fit_strategy(ttt, arch, root, 0, None, 1, recipe, 8, _move_values(ttt), known={}, return_net=True)
+    assert r["certified"] and _certify_tree(ttt, root, 0, raw_chooser(ttt, r.pop("net")))["certified"]
+    assert fit_strategy(ttt, arch, root, 0, None, 1, recipe, 8, _move_values(ttt), known={}) == r
+    tiny = fit_strategy(ttt, {"mlp_hidden": [1]}, root, 0, None, 1, {**recipe, "max_epochs": 200}, 3,
+                        _move_values(ttt), known={}, return_net=True)
+    walked = _certify_tree(ttt, root, 0, raw_chooser(ttt, tiny["net"]))
+    assert not tiny["certified"] and not walked["certified"]
+    assert walked["failures"] == tiny["rounds"][-1]["failures"]
+
+
 def test_a_batch_labeller_is_asked_once_per_ply_for_the_unknown_positions_only(ttt):
     from harness.coverage import move_values
 

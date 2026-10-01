@@ -1,7 +1,9 @@
 """§C.49 — the Connect-4 ORACLE FRONTIER through a horizon: for each net setup, grow it round by round on its own
 first-player strategy tree (harness.strategy_fit) and report whether it becomes certified through --depth plies.
 Exact move values come from the native solver in worker processes and are cached in --labels across widths, rounds
-and runs, so the opening's hard solves are paid for once. Labelling is CHECK-FIRST: the net's move is checked with one
+and runs, so the opening's hard solves are paid for once. Each setup's final net (the certified one when certified) is
+saved under checkpoints/c49/<out stem>/ and the evidence records its path and weights hash, so harness.certify can
+re-check it independently and a deeper run can start from it. Labelling is CHECK-FIRST: the net's move is checked with one
 solve, and only a move that does not keep the win costs the full label.
 
     PYTHONPATH=. .venv/bin/python scripts/strategy_frontier.py --depth 8 --setups canon_conv:8,16 residual:16 \\
@@ -18,6 +20,7 @@ from pathlib import Path
 MEASUREMENT_MODULES = ("scripts/strategy_frontier.py", "harness/strategy_fit.py", "harness/frontier.py",
                        "harness/native_solver.py", "harness/solver.py")
 LABELS = Path(__file__).resolve().parent.parent / "books" / "c4_labels.json.gz"
+NETS = Path(__file__).resolve().parent.parent / "checkpoints" / "c49"
 RECIPES = {"default": {"lr": 2e-3, "batch": 256, "max_epochs": 3000, "check_every": 25, "patience": 600},
            "hold": {"lr": 3e-3, "lr_end": 1e-5, "batch": 512, "max_epochs": 4000, "check_every": 25, "patience": None}}
 _BOOK = None
@@ -90,7 +93,9 @@ def main() -> None:
     from harness.evidence import save_evidence
     from harness.fingerprint import training_fingerprint
     from harness.frontier import arch_at
+    from harness.neural import save_net
     from harness.strategy_fit import fit_strategy
+    from harness.targets import _weights_sha
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--depth", type=int, required=True)
@@ -143,8 +148,12 @@ def main() -> None:
                 t0 = time.time()
                 arch = arch_at(family, width)
                 r = fit_strategy(game, arch, root, 0, args.depth, args.seed, RECIPES[args.recipe], args.rounds,
-                                 _values_local,
-                                 known, many, check, warm_start=True)
+                                 _values_local, known, many, check, warm_start=True, return_net=True)
+                net = r.pop("net")
+                net_path = NETS / Path(args.out).name.replace(".json.gz", "") / f"{family_name}_{width}.pt"
+                net_path.parent.mkdir(parents=True, exist_ok=True)
+                save_net(net, str(net_path))
+                r["net"] = {"path": str(net_path.relative_to(NETS.parent.parent)), "weights_sha": _weights_sha(net)}
                 r.update({"family": family_name, "width": width, "arch": arch, "seconds": round(time.time() - t0, 1)})
                 print(f"{family_name} width {width} ({r['params']} params): certified through depth {args.depth} = "
                       f"{r['certified']}{' (STALLED: could not hold its data)' if r['stalled'] else ''} after {len(r['rounds'])} rounds; failures by round "

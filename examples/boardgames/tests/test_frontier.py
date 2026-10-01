@@ -232,6 +232,19 @@ def test_a_given_net_of_another_shape_is_refused(ttt, targets):
         fit(ttt, arch_at({"body": "mlp"}, 16), targets[False], 1, DEFAULT_RECIPE, init_net=other)
 
 
+def test_a_given_net_left_in_eval_mode_is_trained_in_training_mode(ttt, targets):
+    import torch
+
+    from harness.neural import Connect4Net, arch_for_game
+
+    arch = {"channels": 4, "blocks": 1, "head_hidden": 4, "residual": True, "batchnorm": True}
+    net = Connect4Net(**arch_for_game(arch, ttt))
+    net.eval()
+    before = net.stem_bn.running_mean.clone()
+    fit(ttt, arch, targets[False], 1, {**DEFAULT_RECIPE, "max_epochs": 1, "check_every": 1}, init_net=net)
+    assert not torch.equal(before, net.stem_bn.running_mean), "batch statistics only move in training mode"
+
+
 def test_a_recipe_can_decay_the_learning_rate_linearly_to_its_floor_over_the_epoch_budget(ttt, targets, monkeypatch):
     import torch
 

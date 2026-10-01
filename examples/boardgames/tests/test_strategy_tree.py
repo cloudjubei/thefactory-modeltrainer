@@ -61,6 +61,29 @@ def test_the_chooser_is_asked_once_per_ply_with_that_ply_s_positions(ttt):
     assert sum(batches) == len(got) and len(batches) < len(got)
 
 
+class _Cycle:
+    """Four positions, players alternating by parity, every move leading back round the cycle — positions recur."""
+
+    def state_key(self, s):
+        return s
+
+    def is_terminal(self, s):
+        return False
+
+    def current_player(self, s):
+        return s % 2
+
+    def legal_actions(self, s):
+        return [0, 1]
+
+    def step(self, s, a, rng):
+        return (s + 1 + a) % 4
+
+
+def test_a_position_reached_again_at_a_later_ply_is_not_walked_again():
+    assert strategy_tree_positions(_Cycle(), 0, 0, lambda states: [0] * len(states), 8) == [0, 2]
+
+
 def test_a_depth_of_zero_is_refused(ttt):
     with pytest.raises(ValueError, match="depth"):
         strategy_tree_positions(ttt, ttt.initial_state(random.Random(0)), 0, _first_legal(ttt), 0)

@@ -23,7 +23,7 @@ VISITED, ONE_MOVE, TWO_MOVES, FURTHER = "visited", "one_move_off", "two_moves_of
 
 
 @contextmanager
-def record_selfplay_states(game, probe: dict | None = None):
+def record_selfplay_states(game, probe: dict | None = None, on_pass=None):
     """While active, every self-play game `harness.neural.self_play_game` plays appends one row to the yielded
     log's `games`: {"pass": the number of `train_net` calls made before the game, "states": the positions the
     game returned as training examples}. Random opening plies are not training examples and are not recorded. Every
@@ -32,7 +32,8 @@ sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
     With a `probe` ({"x": encoded positions, "legal": bool mask, "optimal": one set of moves per position}, built
     before training so nothing here needs a solver), every pass appends the raw policy's accuracy on it to
     `log["probe"]` — whether the net is still learning when training stops. The forward runs in eval mode with
-    no gradient and the net is put back in the mode the pass left it.
+    no gradient and the net is put back in the mode the pass left it. With `on_pass` (the net → a reading), every
+    pass appends its reading of the net just trained to `log["on_pass"]`; it must leave the net as it found it.
 
     It observes only: the wrapped game is asked for its states (which changes the shape of its return and nothing
     else), the caller receives exactly the shape it asked for, and nothing here draws from any RNG. Games played in
@@ -41,7 +42,7 @@ sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
     import harness.neural as neural
 
     log: dict = {"game": getattr(game, "name", type(game).__name__), "games": [], "siblings": [], "passes": 0,
-                 "probe": []}
+                 "probe": [], "on_pass": []}
     original_play, original_train, original_siblings = (neural.self_play_game, neural.train_net,
                                                          neural.sibling_positions)
 
@@ -56,6 +57,8 @@ sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
         log["passes"] += 1
         if probe is not None:
             log["probe"].append(policy_accuracy(args[0] if args else kwargs["net"], probe))
+        if on_pass is not None:
+            log["on_pass"].append(on_pass(args[0] if args else kwargs["net"]))
         return result
 
     def siblings(*args, **kwargs):
@@ -105,20 +108,21 @@ def build_probe(game, states, encode_fn, values_fn=None) -> dict:
 @contextmanager
 def forbid_solver():
     """While active, any exact solve raises — the proof, rather than a reading of the config, that a run which
-    must be solver-free called no solver. Patches the solver's search entry points; restored however the block
-    exits."""
+    must be solver-free called no solver. Patches the Python solver's search entry points and the native solver's
+    library loader, which every native solve goes through; restored however the block exits."""
+    import harness.native_solver as native_solver
     import harness.solver as solver
 
-    saved = (solver._solve, solver.move_values)
+    saved = (solver._solve, solver.move_values, native_solver._library)
 
     def refuse(*args, **kwargs):
         raise RuntimeError("the exact solver was called inside a block that must be solver-free")
 
-    solver._solve, solver.move_values = refuse, refuse
+    solver._solve, solver.move_values, native_solver._library = refuse, refuse, refuse
     try:
         yield
     finally:
-        solver._solve, solver.move_values = saved
+        solver._solve, solver.move_values, native_solver._library = saved
 
 
 def nontrivial(game, state, vals: dict) -> bool:

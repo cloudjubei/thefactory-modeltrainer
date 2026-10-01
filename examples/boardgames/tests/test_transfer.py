@@ -247,6 +247,24 @@ def test_a_probed_recorded_run_is_still_bit_identical_and_probes_once_per_pass()
     assert recorded == plain and len(log["probe"]) == 2 and all(0 <= a <= 1 for a in log["probe"])
 
 
+def test_an_observer_is_handed_the_net_after_every_pass_and_the_run_stays_bit_identical():
+    from harness.targets import _weights_sha
+
+    plain, _h = _train(reanalyze_frac=1.0, reanalyze_sims=4)
+    seen = []
+
+    def observe(net):
+        seen.append(_weights_sha(net))
+        return len(seen) * 10
+    with record_selfplay_states(G, on_pass=observe) as log:
+        recorded, _h = _train(reanalyze_frac=1.0, reanalyze_sims=4)
+    assert recorded == plain and log["on_pass"] == [10, 20]
+    assert len(set(seen)) == 2 and seen[-1] == recorded
+    with record_selfplay_states(G) as log:
+        _train()
+    assert log["on_pass"] == []
+
+
 def test_forbid_solver_makes_every_exact_solve_raise_and_restores_it():
     import harness.solver as solver
     from harness.registry import resolve_game
@@ -263,6 +281,22 @@ def test_forbid_solver_makes_every_exact_solve_raise_and_restores_it():
             except RuntimeError:
                 c4.position_value(s)
     assert solver.move_values(s) == before
+
+
+@pytest.mark.parametrize("entry", ["move_values", "position_value", "solve_position"])
+def test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it(entry):
+    from harness import native_solver
+    from harness.registry import resolve_game
+    from harness.transfer import forbid_solver
+    c4 = resolve_game("connect4")
+    s = c4.initial_state(random.Random(0))
+    for a in (3, 3, 2, 4, 2, 4, 1, 5, 1, 5, 0, 6, 0, 6, 3, 3, 2, 2, 4, 4):
+        s = c4.step(s, a)
+    before = getattr(native_solver, entry)(s)
+    with pytest.raises(RuntimeError, match="solver-free"):
+        with forbid_solver():
+            getattr(native_solver, entry)(s)
+    assert getattr(native_solver, entry)(s) == before
 
 
 def test_the_connect4_stage0_recipe_trains_with_the_solver_forbidden():

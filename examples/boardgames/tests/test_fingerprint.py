@@ -159,6 +159,17 @@ def test_the_c46_era_stays_derivable_with_the_list_it_was_recorded_under():
     assert training_fingerprint("tictactoe", modules=TRAINING_MODULES_V4) != training_fingerprint("tictactoe")
 
 
+def test_the_strategy_tree_walk_is_training_path_code_and_the_list_before_it_stays_derivable():
+    """§C.49 wired harness/strategy_tree.py into train_alphazero: its walk decides which positions are relabelled
+    and trained. Every run up to and including the Connect-4 depth-10 hold run was stamped under V5, without it."""
+    from harness.fingerprint import TRAINING_MODULES_V4, TRAINING_MODULES_V5
+
+    assert "harness/strategy_tree.py" in TRAINING_MODULES
+    assert TRAINING_MODULES_V5 == tuple(m for m in TRAINING_MODULES if m != "harness/strategy_tree.py")
+    assert TRAINING_MODULES_V5[:len(TRAINING_MODULES_V4)] == TRAINING_MODULES_V4
+    assert training_fingerprint("connect4", modules=TRAINING_MODULES_V5) != training_fingerprint("connect4")
+
+
 def _harness_imports(path: str) -> set:
     import ast
 
