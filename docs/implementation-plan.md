@@ -4392,3 +4392,26 @@ the file.
     prove minimal).
 - **At copy-back:** add `tests.test_c50_rules_evidence` to the `tests/test_evidence.py` guard list. The copy's
   version of that file already adds `tests.test_c49_stop_evidence`, so apply both.
+
+**§C.50/§C.51 literature database (2026-09-30).** The board-games Papers Library (`examples/boardgames/.factory/
+trainer.json` `papers[]`, tag `c50`; game-ladder sources also tagged `game-ladder`) now holds **46 verified
+entries**: the first 6, plus 40 checked by a second pass. Every citation was confirmed on a fetched page or via
+Crossref; entries read from the abstract only say so. Three details stayed unverified and were left out: the 1993
+Go-Moku tech-report number, the Bratko & Michie 1980 pages, and the (6,6)-Kalah thesis type. Sources that change
+the plan:
+- **Yu, Ignatiev, Stuckey & Le Bodic 2021 (JAIR 72)** — SAT computes provably minimum-size PERFECT decision lists.
+  → The E2 minimality engine: encode the positions as training data, minimise the literals, and let UNSAT at size
+  k − 1 prove minimality. Rivest 1987 (greedy k-DL) is the cheap first extractor; Narodytska et al. 2018 does the
+  same for decision trees.
+- **Maliković & Janičić 2013** — a written chess-endgame (KRK) strategy proven correct by SAT. A precedent for
+  machine-checked rule strategies.
+- **Aguilar Martín 2026** — a model 100% accurate on sampled transitions still lost games through rare pivotal
+  cases. → Never certify rules on samples alone: exhaustive or own-play checks for every claim (already the design).
+- **Schut et al. 2025 (PNAS)** — the teachability filter. → A rule "feeds" track L only if giving it to a fresh
+  self-play agent measurably helps; this becomes the acceptance test for R → L.
+- **Game ladder, confirmed solved and finite:**
+  - Kalah — Irving et al. 2000; (6,6) a first-player win, 2011;
+  - 6×6 Othello — a 16–20 second-player win (Feinstein 1993; Takeshita et al. 2015);
+  - 8×8 Hex — Henderson et al. 2009;
+  - Dots and Boxes 4×5 — a tie (Barker & Korf 2012).
+  - Too big for a small oracle: Awari, 8×8 Othello (Takizawa 2023), 9×9 Hex.

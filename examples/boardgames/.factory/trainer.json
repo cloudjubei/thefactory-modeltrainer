@@ -525,6 +525,646 @@
       "tags": ["llm", "program-search", "rule-discovery", "c50"],
       "status": "untested",
       "source": "manual"
+    },
+    {
+      "id": "allis-searching-for-solutions-1994",
+      "title": "Searching for solutions in games and artificial intelligence",
+      "url": "https://cris.maastrichtuniversity.nl/en/publications/5fc9fc42-3dcb-4420-b49e-ffb13672c6c6",
+      "authors": "L.V. Allis",
+      "year": 1994,
+      "claim": "PhD thesis on solving games; per chessprogramming.org it develops proof-number search and dependency-based search.",
+      "approach": "Game-solving search algorithms (proof-number search, dependency-based search) applied to a survey of games; the table of contents also covers other algorithms (conspiracy-number search, SSS*, B*) and a chapter reviewing many games (Awari, Othello, Checkers, Go-Moku/Renju, Go and others).",
+      "assumptions": {
+        "notes": "Only the repository record (Maastricht University / Rijksuniversiteit Limburg, defended 23 Sept 1994, supervisor H.J. van den Herik, DOI 10.26481/dis.19940923la) and a table-of-contents fragment were read; the full-text PDF was blocked (403). Contributions stated from chessprogramming.org, not from the thesis text."
+      },
+      "verdictNote": "§C.50 The standard reference for what 'solved' means and how finite games get solved; cite it when we label ladder games as having an exact oracle.",
+      "tags": ["c50", "game-solving", "proof-number-search", "game-ladder"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "allis-gomoku-solved-1996",
+      "title": "Go-Moku Solved by New Search Techniques",
+      "url": "https://doi.org/10.1111/j.1467-8640.1996.tb00250.x",
+      "authors": "L.V. Allis, H.J. van den Herik, M.P.H. Huntjens",
+      "year": 1996,
+      "claim": "The game-theoretic value of two common Go-Moku variants is established: the program Victoria wins as first player against any counterplay.",
+      "approach": "Two search techniques, threat-space search and proof-number search; the paper focuses on threat-space search, which searches only sequences of threats the opponent must answer.",
+      "assumptions": {
+        "notes": "Verified via the Crossref record for this DOI (Computational Intelligence 12(1):7-23, Feb 1996); the Crossref author field misspells Allis as 'Alus'. Only the abstract was read. The 1993 technical report (CS 93-02) was not verified."
+      },
+      "verdictNote": "§C.50 Threat-space search is itself a compact, rule-like account of a forced win (a chain of forcing threats), a good model for 'rules' that are really short forcing sequences.",
+      "tags": ["c50", "game-solving", "threat-space-search", "gomoku"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "crowley-flexible-strategy-tictactoe-1993",
+      "title": "Flexible Strategy Use in Young Children's Tic-Tac-Toe",
+      "url": "https://doi.org/10.1207/s15516709cog1704_3",
+      "authors": "Kevin Crowley, Robert S. Siegler",
+      "year": 1993,
+      "claim": "Children's tic-tac-toe strategies are rule based, with new rules added one at a time, and children adapt which rules they apply to their current primary goal.",
+      "approach": "Three experiments with children plus a computer simulation of goal-based resource allocation over a set of rules.",
+      "assumptions": {
+        "notes": "Cognitive Science 17(4):531-561 (Oct 1993), verified via Crossref. Only the abstract was read; the actual rule list is in the full text."
+      },
+      "verdictNote": "§C.50 Human evidence that tic-tac-toe play is an ordered rule set learned one rule at a time, a direct precedent for our decision-list form and for adding rules incrementally.",
+      "tags": ["c50", "tic-tac-toe", "cognitive-science", "rule-based-strategy"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "muggleton-migo-comprehensible-strategies-2019",
+      "title": "Machine Discovery of Comprehensible Strategies for Simple Games Using Meta-interpretive Learning",
+      "url": "https://doi.org/10.1007/s00354-019-00054-2",
+      "authors": "Stephen H. Muggleton, Céline Hocquette",
+      "year": 2019,
+      "claim": "The MIGO meta-interpretive learning system has lower cumulative minimax regret than tested standard and deep RL variants on Noughts-and-Crosses and Hexapawn, and learns comprehensible rules that transfer between the two games.",
+      "approach": "Meta-interpretive learning (an ILP method) learns logic-program strategies, compared on cumulative minimax regret, which is tractable to compute for small games.",
+      "assumptions": {
+        "notes": "New Generation Computing 37(2):203-217 (2019), verified via Crossref; abstract read via OpenAlex. Small games only; regret is computed against exact minimax."
+      },
+      "verdictNote": "§C.50 The closest prior work: learned logic-program strategies for tic-tac-toe, scored against exact minimax. It is the baseline to beat or reproduce with solver-verified decision lists.",
+      "tags": ["c50", "ilp", "meta-interpretive-learning", "tic-tac-toe", "comprehensibility"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "muggleton-ultra-strong-ml-2018",
+      "title": "Ultra-Strong Machine Learning: comprehensibility of programs learned with ILP",
+      "url": "https://doi.org/10.1007/s10994-018-5707-3",
+      "authors": "Stephen H. Muggleton, Ute Schmid, Christina Zeller, Alireza Tamaddoni-Nezhad, Tarek Besold",
+      "year": 2018,
+      "claim": "Defines comprehensibility of hypotheses measurable by human trials. In the trials, people could not learn a relational concept from examples alone but could apply an ILP-learned definition correctly.",
+      "approach": "Two human-participant experiments on logic programs, varying predicate invention; Metagol was chosen as the ILP system for the trials.",
+      "assumptions": {
+        "notes": "Machine Learning 107(7):1119-1140 (2018), verified via Crossref; abstract read via OpenAlex. The task was a relational concept, not a game."
+      },
+      "verdictNote": "§C.50 Supplies Michie's 'ultra-strong' test: whether a written rule improves a human's (or agent's) performance, a candidate success criterion beyond solver-verified correctness.",
+      "tags": ["c50", "ilp", "comprehensibility", "ultra-strong-ml"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "ai-beneficial-harmful-explanatory-ml-2021",
+      "title": "Beneficial and harmful explanatory machine learning",
+      "url": "https://arxiv.org/abs/2009.06410",
+      "authors": "Lun Ai, Stephen H. Muggleton, Céline Hocquette, Mark Gromowski, Ute Schmid",
+      "year": 2021,
+      "claim": "In human trials on simple two-person games, a machine-learned symbolic theory that satisfies a 'cognitive window' improves human learning over self-learning, while one that fails the window makes performance significantly worse than unaided learning.",
+      "approach": "Defines a cognitive window with two quantifiable bounds, from the cognitive-science literature, and tests it with human trials using machine-learned game theories.",
+      "assumptions": {
+        "notes": "Published in Machine Learning 110(4):695-721 (2021), DOI 10.1007/s10994-020-05941-0 (Crossref); arXiv v1 posted 2020. Only the abstract was read."
+      },
+      "verdictNote": "§C.50 Warns that a correct rule set can still harm a learner if it is too complex, so rule size and depth are part of the objective, not only correctness.",
+      "tags": ["c50", "explainability", "human-study", "rule-complexity"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "michie-menace-game-learning-1963",
+      "title": "Experiments on the Mechanization of Game-Learning Part I. Characterization of the Model and its parameters",
+      "url": "https://doi.org/10.1093/comjnl/6.3.232",
+      "authors": "D. Michie",
+      "year": 1963,
+      "claim": "Describes a trial-and-error device (MENACE) that learns Noughts and Crosses, built from matchboxes and beads and later simulated on a Pegasus 2 computer, with preliminary performance observations.",
+      "approach": "A reinforcement-style table of bead counts per position, adjusted after each game's result.",
+      "assumptions": {
+        "notes": "The Computer Journal 6(3):232-236 (Nov 1963), verified via Crossref; abstract read via OpenAlex. Historical: tabular learning only, no explicit rules."
+      },
+      "verdictNote": "§C.50 The historical baseline for learning tic-tac-toe with no rules at all, useful as the contrast case to explicit rule extraction.",
+      "tags": ["c50", "tic-tac-toe", "history", "reinforcement-learning"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "quinlan-id3-chess-endgames-1983",
+      "title": "Learning Efficient Classification Procedures and Their Application to Chess End Games",
+      "url": "https://www.chessprogramming.org/Ross_Quinlan",
+      "authors": "J. Ross Quinlan",
+      "year": 1983,
+      "claim": "Per chessprogramming.org, the chapter uses ID3 to discover classification rules for chess endgames (KRKN).",
+      "approach": "Decision-tree induction (ID3) over endgame positions labeled from exhaustive analysis.",
+      "assumptions": {
+        "notes": "Chapter in 'Machine Learning: An Artificial Intelligence Approach' (Springer, 1983), pp. 463-482 per Crossref (DOI 10.1007/978-3-662-12405-5_15). No abstract was available and the chapter text was not read; the content comes from the chessprogramming.org summary."
+      },
+      "verdictNote": "§C.50 The original case of inducing exact classification rules from a solved endgame database, the same pipeline as solver labels to decision tree or list.",
+      "tags": ["c50", "decision-trees", "id3", "chess-endgames", "tablebase"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bain-learning-optimal-chess-strategies-1994",
+      "title": "Learning Optimal Chess Strategies",
+      "url": "https://doi.org/10.1093/oso/9780198538509.003.0012",
+      "authors": "M. Bain, S. Muggleton",
+      "year": 1994,
+      "claim": "Earlier decision-tree learning of won/not-won rules from KRK databases had limited success. This work uses ILP to learn rules for black-to-move KRK positions that are won for White in a fixed number of moves.",
+      "approach": "Inductive logic programming with generalization in first-order logic and specialization by predicate invention, trained on exact depth-to-win data.",
+      "assumptions": {
+        "notes": "Machine Intelligence 13 (Oxford University Press), pp. 291-309, verified via Crossref; only the abstract was read."
+      },
+      "verdictNote": "§C.50 Shows that depth-stratified rules ('won in n') are a natural target for exact strategies, which suggests learning rules per distance-to-win layer from our solvers.",
+      "tags": ["c50", "ilp", "chess-endgames", "krk", "predicate-invention"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "sadikov-long-term-chess-strategies-2006",
+      "title": "Learning long-term chess strategies from databases",
+      "url": "https://mlanthology.org/mlj/2006/sadikov2006mlj-learning/",
+      "authors": "Aleksander Sadikov, Ivan Bratko",
+      "year": 2006,
+      "claim": "Endgames can be automatically divided into stages with different objectives. A stage-specific evaluation function induced for each stage gives strategies that achieve goals reliably, though not necessarily as fast as possible.",
+      "approach": "Automatic stage segmentation of endgame databases plus induction of a per-stage evaluation function used by minimax search.",
+      "assumptions": {
+        "notes": "Machine Learning 63(3):329-340 (2006), verified via Crossref and ML Anthology; only a paraphrased abstract was read. The strategies trade optimal speed for comprehensibility and still rely on search."
+      },
+      "verdictNote": "§C.50 Supports splitting a perfect strategy into goal stages ('first do X, then Y') rather than one flat rule list, and makes clear that 'correct' and 'fastest' are different targets.",
+      "tags": ["c50", "chess-endgames", "tablebase", "strategy-learning"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "guid-concepts-strategies-tablebases-2010",
+      "title": "Deriving Concepts and Strategies from Chess Tablebases",
+      "url": "https://www.chessprogramming.org/Advances_in_Computer_Games_12",
+      "authors": "Matej Guid, Martin Možina, Aleksander Sadikov, Ivan Bratko",
+      "year": 2010,
+      "claim": "Semi-automatically synthesizes human-understandable knowledge from the KBNK tablebase for teaching the king, bishop and knight versus lone king endgame (per the search-result abstract; not read on a fetched page).",
+      "approach": "Specialized minimax search combined with argument-based machine learning (ABML), in which an expert supplies arguments that constrain rule induction.",
+      "assumptions": {
+        "notes": "Advances in Computer Games 12 (ACG 2009, Pamplona, May 11-13, 2009), eds. van den Herik & Spronck, Springer LNCS, published 2010, pp. 195-207 per Crossref (DOI 10.1007/978-3-642-12993-3_18). The Springer page was blocked, and the abstract text was seen only via a search-result summary."
+      },
+      "verdictNote": "§C.50 A human-in-the-loop route from a tablebase to taught concepts. Argument-based ML is an option if fully automatic rules come out unreadable.",
+      "tags": ["c50", "chess-endgames", "tablebase", "argument-based-ml", "concepts"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "mcgrath-chess-knowledge-alphazero-2022",
+      "title": "Acquisition of chess knowledge in AlphaZero",
+      "url": "https://doi.org/10.1073/pnas.2206625119",
+      "authors": "Thomas McGrath, Andrei Kapishnikov, Nenad Tomašev, Adam Pearce, Martin Wattenberg, Demis Hassabis, Been Kim, Ulrich Paquet, Vladimir Kramnik",
+      "year": 2022,
+      "claim": "AlphaZero, trained only by self-play, appears to learn concepts analogous to those human chess players use.",
+      "approach": "Linear probes on AlphaZero's internal state to measure when and where concepts are represented, plus a behavioral analysis of opening play with commentary by a former world champion.",
+      "assumptions": {
+        "notes": "PNAS 119(47) (Nov 2022), verified via Crossref; only the abstract was read. The probes test predefined human concepts and do not discover rules."
+      },
+      "verdictNote": "§C.50 A method template: probe our nets for candidate rule predicates (threat, fork, center) before trying to extract a decision list over them.",
+      "tags": ["c50", "interpretability", "probing", "alphazero", "chess"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "schut-bridging-human-ai-knowledge-gap-2025",
+      "title": "Bridging the human–AI knowledge gap through concept discovery and transfer in AlphaZero",
+      "url": "https://doi.org/10.1073/pnas.2406675122",
+      "authors": "Lisa Schut, Nenad Tomašev, Thomas McGrath, Demis Hassabis, Ulrich Paquet, Been Kim",
+      "year": 2025,
+      "claim": "New chess concepts can be extracted from AlphaZero. In a preliminary study, four top grandmasters improved on puzzles built from these concepts.",
+      "approach": "Concept vectors found by convex optimization in AlphaZero's representations, filtered for teachability (transferable to another AI agent) and novelty (not present in human games), then shown to experts as puzzle-solution prototypes.",
+      "assumptions": {
+        "notes": "PNAS 122(13) (Mar 2025), verified via Crossref. The arXiv preprint 2310.16410 (2023) has a different title: 'Bridging the Human-AI Knowledge Gap: Concept Discovery and Transfer in AlphaZero'. Only abstracts were read; the human study is small (n=4)."
+      },
+      "verdictNote": "§C.50 The teachability filter (a concept counts only if it transfers to another agent) is directly usable: a written rule counts only if feeding it to a fresh self-play agent measurably helps.",
+      "tags": ["c50", "concept-discovery", "alphazero", "transfer", "teachability"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "lovering-concepts-alphazero-hex-2022",
+      "title": "Evaluation Beyond Task Performance: Analyzing Concepts in AlphaZero in Hex",
+      "url": "https://proceedings.neurips.cc/paper_files/paper/2022/file/a705747417d32ebf1916169e1a442274-Paper-Conference.pdf",
+      "authors": "Charles Lovering, Jessica Zosa Forde, George Konidaris, Ellie Pavlick, Michael L. Littman",
+      "year": 2022,
+      "claim": "In Hex, MCTS discovers concepts before the network learns to encode them. Short-term end-game concepts are encoded in the final layers and long-term planning concepts in the middle layers.",
+      "approach": "Probing and behavioral tests borrowed from NLP, applied to AlphaZero's internal representations in Hex.",
+      "assumptions": {
+        "notes": "NeurIPS 2022 (36th Conference, confirmed on the proceedings PDF); arXiv 2211.14673. Only the abstract and first page were read."
+      },
+      "verdictNote": "§C.50 Hex-specific probing precedent. If Hex joins the game ladder, its concept list is a starting predicate vocabulary for rules.",
+      "tags": ["c50", "interpretability", "probing", "hex", "alphazero"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "verma-pirl-2018",
+      "title": "Programmatically Interpretable Reinforcement Learning",
+      "url": "https://arxiv.org/abs/1804.02477",
+      "authors": "Abhinav Verma, Vijayaraghavan Murali, Rishabh Singh, Pushmeet Kohli, Swarat Chaudhuri",
+      "year": 2018,
+      "claim": "Policies written in a high-level domain-specific language can be found by neurally directed program search. On TORCS they reach significant performance bars and are smoother and more transferable than DRL policies.",
+      "approach": "NDPS: train a neural policy, then run local search over programs that minimizes distance to that neural 'oracle'.",
+      "assumptions": {
+        "notes": "ICML 2018, PMLR 80:5045-5054 (per the arXiv journal reference). Evaluated on car-racing control, not board games; only the abstract was read."
+      },
+      "verdictNote": "§C.50 The template for 'extract from net': use the trained net as an oracle to guide search over a rule DSL, then verify the result with the exact solver instead of by reward.",
+      "tags": ["c50", "programmatic-policies", "program-synthesis", "distillation"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "craven-trepan-1995",
+      "title": "Extracting Tree-Structured Representations of Trained Networks",
+      "url": "https://proceedings.neurips.cc/paper/1995/hash/45f31d16b1058d586fc3be7207b58053-Abstract.html",
+      "authors": "Mark Craven, Jude W. Shavlik",
+      "year": 1995,
+      "claim": "TREPAN extracts decision trees from trained neural networks that keep high fidelity to the network while being comprehensible and accurate, and it scales to large networks and high-dimensional inputs.",
+      "approach": "Query the network as an oracle to label generated samples and induce a decision tree that approximates the network's concept.",
+      "assumptions": {
+        "notes": "Advances in Neural Information Processing Systems 8 (NIPS 1995). Only the abstract was read. Fidelity to the net is not correctness against ground truth."
+      },
+      "verdictNote": "§C.50 The classic net-to-tree extraction. For us the oracle can be the exact solver instead of (or alongside) the net, so fidelity and correctness can be measured separately.",
+      "tags": ["c50", "rule-extraction", "decision-trees", "distillation"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "lehrach-code-world-models-2025",
+      "title": "Code World Models for General Game Playing",
+      "url": "https://arxiv.org/abs/2510.04542",
+      "authors": "Wolfgang Lehrach, Daniel Hennes, Miguel Lazaro-Gredilla, Xinghua Lou, Carter Wendelken, Zun Li, Antoine Dedieu, Jordi Grau-Moya, Marc Lanctot, Atil Iscen, John Schultz, Marcus Chiam, Ian Gemp, Piotr Zielinski, Satinder Singh, Kevin P. Murphy",
+      "year": 2025,
+      "claim": "An LLM translates natural-language rules and trajectories into executable Python world models (plus heuristic value and inference functions) used by MCTS. The method matches or beats Gemini 2.5 Pro in 9 of 10 games.",
+      "approach": "LLM synthesis of state transition, legal moves and termination code, combined with classical planners (MCTS), across 5 perfect- and 5 imperfect-information games, 4 of them novel.",
+      "assumptions": {
+        "notes": "arXiv preprint (v1, Oct 2025), no venue listed. Only the abstract was read. It synthesizes game rules, not strategy rules; verifiability depends on the synthesized model being correct."
+      },
+      "verdictNote": "§C.50 Related but different: code for the game's rules rather than for perfect-play strategy. Its LLM-generated heuristic value functions are the nearest analogue to our written rules.",
+      "tags": ["c50", "llm", "code-world-models", "general-game-playing", "mcts"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "aguilarmartin-verified-world-model-loses-2026",
+      "title": "When a Verified World Model Still Loses: Play-Adequacy vs Prediction-Accuracy in LLM-Synthesized Code World Models",
+      "url": "https://arxiv.org/abs/2607.14169",
+      "authors": "Javier Aguilar Martín",
+      "year": 2026,
+      "claim": "An LLM-synthesized code world model can pass a 100% transition-accuracy gate and still lose systematically, because the rare dynamics it gets wrong are the pivotal ones. The harm follows danger = play_cost × (1 − rarity)^N, and more data did not make the LLM infer the omitted rule.",
+      "approach": "Theory plus experiments on sampled-transition gates versus play outcomes (n=4800), including imperfect-information inference functions and a hand-built verified-but-wrong 'Beacon' example.",
+      "assumptions": {
+        "notes": "arXiv preprint (v2, July 2026), single author, not peer reviewed. Only the abstract was read."
+      },
+      "verdictNote": "§C.50 Directly supports our bar: a rule set checked on sampled positions can still be wrong on rare critical ones, so verification must cover all reachable positions against the exact solver, not a sample.",
+      "tags": ["c50", "verification", "code-world-models", "llm", "sampling-gap"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "kuang-generative-code-optimization-2025",
+      "title": "Learning Game-Playing Agents with Generative Code Optimization",
+      "url": "https://arxiv.org/abs/2508.19506",
+      "authors": "Zhiyi Kuang, Ryan Rong, YuCheng Yuan, Allen Nie",
+      "year": 2025,
+      "claim": "Game policies written as Python programs and refined by LLMs from execution traces and feedback reach performance competitive with deep RL baselines on Atari, with much less training time and far fewer environment interactions.",
+      "approach": "Generative optimization: the policy is code (observation in, action out) that an LLM iteratively rewrites using execution traces and natural-language feedback.",
+      "assumptions": {
+        "notes": "ICML 2025 Workshop on Programmatic Representations for Agent Learning (per the arXiv comment); Atari only, no exact-optimality check. Only the abstract was read."
+      },
+      "verdictNote": "§C.50 An LLM-in-the-loop way to write strategy code. For us the solver can replace reward as the feedback signal, giving exact counterexamples to the LLM.",
+      "tags": ["c50", "llm", "programmatic-policies", "code-optimization"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "cui-chess-strategy-verbalization-2026",
+      "title": "Communicating Chess Strategies in Natural Language",
+      "url": "https://arxiv.org/abs/2607.11486",
+      "authors": "Langyuan Cui, Chun Kai Ling, Hwee Tou Ng",
+      "year": 2026,
+      "claim": "Proposes chess strategy verbalization, a pipeline plus an objective evaluation framework, and finds natural language a promising, interpretable medium for passing strategy to human and LLM players.",
+      "approach": "A pipeline that verbalizes engine strategies, evaluated by how much the descriptions help human and LLM players, including off the main line.",
+      "assumptions": {
+        "notes": "arXiv preprint (July 2026). Only the abstract was read. The authors note limits of purely concept-based descriptions and of using LLMs instead of humans as evaluators."
+      },
+      "verdictNote": "§C.50 Its finding that strategies must be evaluated beyond the main line matches our requirement that rules be checked on all reachable positions. Natural-language output could be a later layer on top of verified rules.",
+      "tags": ["c50", "llm", "natural-language", "chess", "strategy-communication"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "hu-harnessing-dnn-logic-rules-2016",
+      "title": "Harnessing Deep Neural Networks with Logic Rules",
+      "url": "https://aclanthology.org/P16-1228/",
+      "authors": "Zhiting Hu, Xuezhe Ma, Zhengzhong Liu, Eduard Hovy, Eric Xing",
+      "year": 2016,
+      "claim": "An iterative distillation method transfers declarative first-order logic rules into the weights of CNNs and RNNs, giving state-of-the-art or comparable results on sentiment analysis and NER with a few intuitive rules.",
+      "approach": "A teacher network constrained by the logic rules (via posterior regularization) distills into the student network during training.",
+      "assumptions": {
+        "notes": "ACL 2016 (Volume 1: Long Papers), pp. 2410-2420; abstract read via Semantic Scholar. NLP tasks only; the rules are soft constraints, not verified-correct policies."
+      },
+      "verdictNote": "§C.50 One route for 'feeding rules to self-play agents': distill verified rules into the net as a soft prior rather than hard-coding them.",
+      "tags": ["c50", "neuro-symbolic", "distillation", "logic-rules"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "ratner-snorkel-2017",
+      "title": "Snorkel: Rapid Training Data Creation with Weak Supervision",
+      "url": "http://www.vldb.org/pvldb/vol11/p269-ratner.pdf",
+      "authors": "Alexander Ratner, Stephen H. Bach, Henry Ehrenberg, Jason Fries, Sen Wu, Christopher Ré",
+      "year": 2017,
+      "claim": "Users train models without hand labeling by writing labeling functions, whose noisy outputs Snorkel denoises without ground truth. In a user study, experts built models 2.8x faster with 45.5% better predictive performance than from seven hours of hand labeling.",
+      "approach": "Data programming: a generative model estimates labeling-function accuracies and correlations, and the resulting probabilistic labels train a discriminative model.",
+      "assumptions": {
+        "notes": "PVLDB 11(3):269-282 (Nov 2017), confirmed on the PDF header. The Crossref title field is only 'Snorkel'. Abstract read via Crossref."
+      },
+      "verdictNote": "§C.50 Partial rules can act as noisy labeling functions. Relevant if written rules are used as weak supervision for agents before they are complete, but we have exact labels, so it is secondary.",
+      "tags": ["c50", "weak-supervision", "labeling-functions"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "huberman-chess-end-games-program-1968",
+      "title": "A Program to Play Chess End Games",
+      "url": "https://archive.org/details/DTIC_AD0673971",
+      "authors": "Barbara J. Huberman",
+      "year": 1968,
+      "claim": "A program plays chess end games with a model close to that assumed in chess books; two predicates, 'better' and 'worse', hold the heuristics of play, different for each end game.",
+      "approach": "Book strategy descriptions hand-translated into program heuristics (better/worse predicates) driving a search, tested on three endgames.",
+      "assumptions": {
+        "notes": "Stanford Computer Science Department Technical Report CS-106, Ph.D. thesis, 19 Aug 1968 (DTIC AD0673971; entry confirmed on chessprogramming.org/Huberman). Only the archive description was read."
+      },
+      "verdictNote": "§C.50 The earliest form of our goal: a strategy as a few explicit predicates over positions, checked against endgame play.",
+      "tags": ["c50", "history", "chess-endgames", "hand-written-strategy"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bratko-al1-proving-correctness-1978",
+      "title": "Proving correctness of strategies in the AL1 assertional language",
+      "url": "https://doi.org/10.1016/0020-0190(78)90004-2",
+      "authors": "Ivan Bratko",
+      "year": 1978,
+      "claim": "From the title only: proves the correctness of game strategies written in the AL1 (Advice Language 1) assertional language.",
+      "approach": "Formal reasoning about AL1 advice-table strategies. Details not read.",
+      "assumptions": {
+        "notes": "Information Processing Letters 7(5):223-230 (Aug 1978), verified via Crossref and chessprogramming.org. No abstract was available and the full text was not read, so the claim is inferred from the title only."
+      },
+      "verdictNote": "§C.50 Early precedent for proving a written strategy correct rather than testing it; the same aim as our solver-verified rules.",
+      "tags": ["c50", "history", "strategy-verification", "advice-language", "chess-endgames"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bratko-pattern-knowledge-chess-endgames-1980",
+      "title": "A Representation of Pattern-Knowledge in Chess Endgames",
+      "url": "https://chessprogramming.org/Donald_Michie",
+      "authors": "Ivan Bratko, Donald Michie",
+      "year": 1980,
+      "claim": "From the title only: a representation for pattern-based knowledge about chess endgames.",
+      "approach": "Not read.",
+      "assumptions": {
+        "notes": "Only the bibliographic entry was confirmed (chessprogramming.org Donald_Michie and Ivan_Bratko pages: 'Advances in Computer Chess 2', 1980). Editor, publisher and pages (a search snippet gave M. Clarke ed., Edinburgh University Press, pp. 31-56) were NOT confirmed on a fetched page. A related, verified paper is Bratko, Kopec & Michie (1978) 'Pattern-Based Representation of Chess End-Game Knowledge', The Computer Journal 21(2):149-153."
+      },
+      "verdictNote": "§C.50 Background for pattern-plus-advice strategy representations. Low priority until the content is read.",
+      "tags": ["c50", "history", "chess-endgames", "pattern-knowledge"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "malikovic-krk-sat-correctness-2013",
+      "title": "Proving Correctness of a KRK Chess Endgame Strategy by SAT-based Constraint Solving",
+      "url": "https://argo.matf.bg.ac.rs/publications/2013/2013-icga-krk-sat.pdf",
+      "authors": "Marko Maliković, Predrag Janičić",
+      "year": 2013,
+      "claim": "Gives a computer-assisted, high-level proof that a KRK endgame strategy is correct, by reducing the relevant lemmas to SAT. The authors describe it as the first such proof for a chess endgame strategy, with a methodology that applies to other games.",
+      "approach": "The strategy's termination and completeness lemmas are encoded in propositional logic with the URSA constraint solver. The SAT instances have hundreds of thousands of variables and clauses.",
+      "assumptions": {
+        "notes": "ICGA Journal 36(2):81-99 (2013), verified via Crossref; the abstract and introduction were read from the authors' PDF. Correctness means guaranteed win (termination plus completeness), not shortest win."
+      },
+      "verdictNote": "§C.50 The strongest direct precedent: it proves a written strategy correct by SAT, separating correctness (termination plus completeness) from optimality. Adopt this framing for verified decision lists.",
+      "tags": ["c50", "sat", "strategy-verification", "chess-endgames", "krk"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "vandenherik-games-solved-2002",
+      "title": "Games solved: Now and in the future",
+      "url": "https://web.mit.edu/6.034/wwwbob/GamesSolved.pdf",
+      "authors": "H. Jaap van den Herik, Jos W.H.M. Uiterwijk, Jack van Rijswijck",
+      "year": 2002,
+      "claim": "Surveys solved two-person zero-sum perfect-information games. Decision complexity matters more than state-space size; knowledge-based methods suit low decision complexity and brute force suits low state-space complexity; first-player initiative correlates with solving effort.",
+      "approach": "Survey and comparison of game characteristics and solving methods, with per-game tables (e.g. Kalah(m,n) values).",
+      "assumptions": {
+        "notes": "Artificial Intelligence 134(1-2):277-311 (2002). The abstract and parts of the Kalah and Awari sections were read. It is a 2002 snapshot: Awari, Checkers and 8x8 Hex were solved later."
+      },
+      "verdictNote": "§C.50 The map for choosing ladder games: it lists which small finite games have exact values and which solving method fits each.",
+      "tags": ["c50", "game-ladder", "game-solving", "survey"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "irving-solving-kalah-2000",
+      "title": "Solving Kalah",
+      "url": "https://naml.us/paper/irving2000_kalah.pdf",
+      "authors": "Geoffrey Irving, Jeroen Donkers, Jos Uiterwijk",
+      "year": 2000,
+      "claim": "Kalah is solved for several starting configurations up to 6 holes and 5 counters per hole. The survey reports the standard Kalah(6,4) as a first-player win.",
+      "approach": "Full-game databases plus iterative-deepening MTD(f) with move ordering, transposition tables, futility pruning, enhanced transposition cut-off and endgame databases.",
+      "assumptions": {
+        "notes": "ICGA Journal 23(3):139-147 (2000), verified via Crossref. The abstract and introduction were read. The Kalah(6,4) value comes from van den Herik et al. 2002, Table 2. chessprogramming.org describes coverage as all m<=6, n<=6 except (6,6), which differs from the abstract's 'up to 5 counters'. The rules variant (e.g. empty-capture) matters and must match our implementation."
+      },
+      "verdictNote": "§C.50 Kalah(m,n) is a tunable ladder: small (m,n) gives a finite game we can solve exactly ourselves, and these published values are a cross-check for our oracle.",
+      "tags": ["c50", "game-ladder", "kalah", "mancala", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "carstensen-solving-6-6-kalaha-2011",
+      "title": "Solving (6,6)-Kalaha",
+      "url": "http://kalaha.krus.dk/",
+      "authors": "Anders Carstensen (supervised by Kim Skak Larsen, University of Southern Denmark)",
+      "year": 2011,
+      "claim": "(6,6)-Kalaha is a first-player win. The page also states the first player always wins Kalaha under standard rules and two rule variations.",
+      "approach": "Not described on the announcement page.",
+      "assumptions": {
+        "notes": "A web announcement first published 14 April 2011 (also cited on chessprogramming.org/Kalah), not a peer-reviewed paper. The margin, method and database sizes are not given on the page. A search snippet described it as a master's thesis; that was not confirmed."
+      },
+      "verdictNote": "§C.50 Completes the Kalah value table up to (6,6), but it is too large for our first oracle. Use it only as a reference point.",
+      "tags": ["c50", "game-ladder", "kalah", "mancala", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "romein-solving-awari-2003",
+      "title": "Solving awari with parallel retrograde analysis",
+      "url": "https://chessprogramming.org/Awari",
+      "authors": "J.W. Romein, H.E. Bal",
+      "year": 2003,
+      "claim": "A parallel search on a large cluster computes the best moves from all reachable Awari positions, with databases scoring 889 billion positions. Per chessprogramming.org, Awari is strongly solved and either side can force a draw.",
+      "approach": "Parallel retrograde analysis building full databases over all reachable positions.",
+      "assumptions": {
+        "notes": "IEEE Computer 36(10):26-33 (Oct 2003), DOI 10.1109/MC.2003.1236468 (Crossref title 'Solving awari with parallel retrograde analysis'). chessprogramming.org gives the title as 'Solving the Game of Awari using Parallel Retrograde Analysis'. The companion 'Awari is Solved' is in ICGA Journal 25(3), 2002. Only the short abstract was read. Standard Awari needs special rules for cycles and starving, so check termination before adopting."
+      },
+      "verdictNote": "§C.50 Full Awari (48 stones) is far beyond a small oracle. Its value to the ladder is as a strongly-solved endpoint; smaller mancala games (Kalah(m,n)) fit better.",
+      "tags": ["c50", "game-ladder", "awari", "mancala", "retrograde-analysis"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "feinstein-6x6-othello-1993",
+      "title": "Amenor Wins World 6x6 Championships!",
+      "url": "https://www.maths.nottingham.ac.uk/plp/pmzjff/Othello/Amenor.html",
+      "authors": "Joel Feinstein",
+      "year": 1993,
+      "claim": "Computer analysis with the program MODOT showed a given 6x6 Othello game line to be optimal, after about two weeks of CPU time and about forty billion positions. Takeshita et al. (2015) cite this as perfect play giving a 16-20 win for the second player.",
+      "approach": "Exhaustive endgame search ordered by short mid-game searches, on a Silicon Graphics machine.",
+      "assumptions": {
+        "notes": "A British Othello Federation newsletter article (July 1993) reproduced on the author's university page; not peer reviewed. The 16-20 score is stated in the Takeshita et al. paper, not quoted from Feinstein's page. The result is a weak solution (one optimal line), not a strong one."
+      },
+      "verdictNote": "§C.50 6x6 Othello is finite (at most 32 moves), has a known value, and is small enough that we may be able to build our own exact oracle; a candidate ladder step.",
+      "tags": ["c50", "game-ladder", "othello", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "takeshita-perfect-analysis-miniature-othello-2015",
+      "title": "Perfect Analysis in miniature Othello",
+      "url": "http://alife-robotics.co.jp/members2015/icarob/data/papers/OS/OS6-3.pdf",
+      "authors": "Yuki Takeshita, Satoshi Ikeda, Makoto Sakamoto, Takao Ito",
+      "year": 2015,
+      "claim": "Reports perfect play for 4x4, 4x6, 4x8, 4x10 and 6x6 Othello boards; the 6x6 result is consistent with Feinstein's 1993 result.",
+      "approach": "Exhaustive alpha-beta search on small rectangular Othello boards.",
+      "assumptions": {
+        "notes": "ICAROB 2015 (International Conference on Artificial Life and Robotics, Oita, Japan, Jan 10-12, 2015), from the page footer. Short conference paper; the abstract and parts of the results were read."
+      },
+      "verdictNote": "§C.50 Independent confirmation of the 6x6 Othello value, plus solved 4xN boards, gives a graded Othello sub-ladder (4x4 up to 6x6) with known outcomes.",
+      "tags": ["c50", "game-ladder", "othello", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "takizawa-othello-is-solved-2023",
+      "title": "Othello is Solved",
+      "url": "https://arxiv.org/abs/2310.19387",
+      "authors": "Hiroki Takizawa",
+      "year": 2023,
+      "claim": "Claims a computational proof that perfect play by both players in standard 8x8 Othello leads to a draw.",
+      "approach": "Large-scale computational search (details not read beyond the abstract).",
+      "assumptions": {
+        "notes": "arXiv preprint (v3 corrects figure typos only). Only the abstract was read, and peer-review status is unknown. It is a weak solution (value of the start position), not a playable oracle for all positions."
+      },
+      "verdictNote": "§C.50 Out of range as a ladder game (8x8 is too large for our oracle); cite only as the upper end of the Othello size ladder.",
+      "tags": ["c50", "game-ladder", "othello", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "henderson-solving-8x8-hex-2009",
+      "title": "Solving 8×8 Hex",
+      "url": "https://webdocs.cs.ualberta.ca/~hayward/papers/solve8.pdf",
+      "authors": "Philip Henderson, Broderick Arneson, Ryan B. Hayward",
+      "year": 2009,
+      "claim": "Designs an algorithm strong enough to solve all 8x8 Hex openings. Hayward et al. (2005) had previously solved all 49 7x7 openings.",
+      "approach": "Depth-first search with a virtual connection engine, plus an inferior-cell engine with over 250 patterns, combinatorial decompositions, proof-set shrinking and transposition deductions.",
+      "assumptions": {
+        "notes": "IJCAI-09 proceedings (confirmed on the PDF header). Only the abstract and introduction were read. Hex cannot end in a draw and always ends within n^2 moves."
+      },
+      "verdictNote": "§C.50 Hex is a clean ladder game: finite, no draws, adjustable board size. Up to about 5x5 or 6x6 we can build our own exact oracle; 7x7 and 8x8 have published opening results for cross-checks.",
+      "tags": ["c50", "game-ladder", "hex", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "arneson-solving-hex-beyond-humans-2011",
+      "title": "Solving Hex: Beyond Humans",
+      "url": "https://webdocs.cs.ualberta.ca/~hayward/papers/solve.beyond.pdf",
+      "authors": "Broderick Arneson, Ryan B. Hayward, Philip Henderson",
+      "year": 2011,
+      "claim": "Automated Hex solvers now surpass humans at solving Hex positions and can solve many 9x9 openings. The paper summarizes the methods behind this.",
+      "approach": "Survey of Hex solving methods (virtual connections, inferior-cell analysis, proof-number search).",
+      "assumptions": {
+        "notes": "Computers and Games (CG 2010, Kanazawa), Springer LNCS 6515, 2011, pp. 1-10 (from the PDF header). The abstract and introduction were read. It also lists known results: a first-player win on n×n boards by strategy stealing, and losing acute-corner openings."
+      },
+      "verdictNote": "§C.50 Its catalogue of known Hex facts (strategy stealing, losing corner openings) is a ready-made set of candidate written rules to verify on small boards.",
+      "tags": ["c50", "game-ladder", "hex", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "pawlewicz-scalable-parallel-dfpn-2014",
+      "title": "Scalable Parallel DFPN Search",
+      "url": "https://webdocs.cs.ualberta.ca/~hayward/papers/pawlhayw.pdf",
+      "authors": "Jakub Pawlewicz, Ryan B. Hayward",
+      "year": 2014,
+      "claim": "SPDFPN, a domain-independent shared-memory parallel depth-first proof-number search, scales well, reaching parallel efficiency of 0.74 on 16 threads. It solved all previously intractable 9x9 Hex openings and, for the first time, one 10x10 opening.",
+      "approach": "Parallel DFPN based on the serial 1+ε method, assigning jobs to threads with proof and disproof numbers and two parameters.",
+      "assumptions": {
+        "notes": "CG 2013, LNCS 8427, pp. 138-150, published 2014 (from the PDF header; the requested year 2013 is the conference year). The hardest 9x9 opening took 111 days, so this is not a small-oracle regime."
+      },
+      "verdictNote": "§C.50 Marks the ceiling for Hex on our ladder: 9x9 took months of parallel search, so our Hex steps should stop well below 8x8.",
+      "tags": ["c50", "game-ladder", "hex", "proof-number-search"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "barker-solving-dots-and-boxes-2012",
+      "title": "Solving Dots-And-Boxes",
+      "url": "https://ojs.aaai.org/index.php/AAAI/article/view/8144",
+      "authors": "Joseph Barker, Richard Korf",
+      "year": 2012,
+      "claim": "A new Dots-And-Boxes solver is over an order of magnitude faster than the previous state of the art on several large problems, and shows that the 4x5-box board is a tie under optimal play.",
+      "approach": "Alpha-Beta search with problem-specific and general techniques that reduce the search space.",
+      "assumptions": {
+        "notes": "AAAI-12, Proceedings 26(1):414-419 (2012). Crossref shows 2021, the OJS migration date. Only the abstract was read. A student abstract, 'Solving 4x5 Dots-And-Boxes', appeared at AAAI 2011. Dots and Boxes always ends after a fixed number of edge moves, but the extra-turn rule complicates the move structure."
+      },
+      "verdictNote": "§C.50 A finite, always-terminating game with solved sizes up to 4x5. Small boards (2x2, 2x3, 3x3) are easy exact oracles, and known human strategy (chain counting) gives written-rule targets.",
+      "tags": ["c50", "game-ladder", "dots-and-boxes", "game-solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "narodytska-optimal-decision-trees-sat-2018",
+      "title": "Learning Optimal Decision Trees with SAT",
+      "url": "https://doi.org/10.24963/ijcai.2018/189",
+      "authors": "Nina Narodytska, Alexey Ignatiev, Filipe Pereira, Joao Marques-Silva",
+      "year": 2018,
+      "claim": "A SAT model computes smallest-size decision trees consistent with training data and, unlike past work, scales to publicly available datasets of practical interest.",
+      "approach": "Encode 'a decision tree of size N exists that fits the data' as SAT and search over N for the minimum.",
+      "assumptions": {
+        "notes": "IJCAI-18, pp. 1362-1368, verified via Crossref; only the abstract was read. Minimality is relative to the given features and examples."
+      },
+      "verdictNote": "§C.50 Gives provably smallest rule trees. If the training set is all reachable positions labeled by the solver, 'consistent' means 'perfect play', which yields a provably minimal written strategy over our predicate set.",
+      "tags": ["c50", "sat", "decision-trees", "minimal-rules", "exact-learning"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "yu-optimal-decision-sets-lists-sat-2021",
+      "title": "Learning Optimal Decision Sets and Lists with SAT",
+      "url": "https://doi.org/10.1613/jair.1.12719",
+      "authors": "Jinqiang Yu, Alexey Ignatiev, Peter J. Stuckey, Pierre Le Bodic",
+      "year": 2021,
+      "claim": "SAT-based methods compute minimum-size 'perfect' decision sets and decision lists (fully accurate on training data, size counted in literals), plus optimal sparse alternatives that trade size for accuracy.",
+      "approach": "SAT encodings of rule-based models, minimizing the total number of literals, compared with heuristic and other optimal-list methods.",
+      "assumptions": {
+        "notes": "Journal of Artificial Intelligence Research 72:1251-1279 (Dec 2021), verified via Crossref; only the abstract was read. This extra reference was found for Part B item 33. Scalability on our position counts is untested."
+      },
+      "verdictNote": "§C.50 The most direct tool for our target: provably minimum-size decision lists that are perfect on the training data. Run it with all reachable positions as the training data to get provably minimal, solver-verified rule lists.",
+      "tags": ["c50", "sat", "decision-lists", "minimal-rules", "exact-learning"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "rivest-learning-decision-lists-1987",
+      "title": "Learning Decision Lists",
+      "url": "https://people.csail.mit.edu/rivest/pubs/Riv87b.pdf",
+      "authors": "Ronald L. Rivest",
+      "year": 1987,
+      "claim": "Introduces decision lists as a representation for Boolean functions and shows that k-DL is efficiently (polynomially) learnable from examples, strictly extending k-CNF, k-DNF and depth-k decision trees.",
+      "approach": "A constructive greedy algorithm that builds a k-DL consistent with the examples, if one exists, in Valiant's learning framework.",
+      "assumptions": {
+        "notes": "Machine Learning 2(3):229-246 (1987), from the PDF header; the abstract was read. The algorithm finds a consistent list, not a minimal one."
+      },
+      "verdictNote": "§C.50 The formal basis for our rule form. Its greedy consistent-list algorithm is a cheap first extractor before SAT minimization.",
+      "tags": ["c50", "decision-lists", "learning-theory"],
+      "status": "untested",
+      "source": "manual"
     }
   ]
 }
