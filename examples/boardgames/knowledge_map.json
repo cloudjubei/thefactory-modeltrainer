@@ -12,9 +12,9 @@
       "key": "stop_signal",
       "name": "Solver-free stop signal",
       "what": "Stop training when, on the net's own first-player tree, every raw move agrees with the net's own search (zero disagreements).",
-      "claims": ["h69", "h74", "h75"],
-      "conclusion": "Safe and timely on tic-tac-toe with siblings (h69) and without (h74): 0 false stops, latency 0-1 iterations. On Connect-4, where a 200-sim search is far from exact, it is under test (h75).",
-      "based_on": ["h69", "h74", "h75"]
+      "claims": ["h69", "h74", "h75", "h88", "h90", "h91", "h92", "h101"],
+      "conclusion": "Safe and timely on tic-tac-toe with siblings (h69) and without (h74): 0 false stops, latency 0-1 iterations. On Connect-4 it never fires (h88). Most disagreements there are harmless — both moves optimal (59%) — or the search's fault (16%) (h90), but none of the nets is certified through 10 plies (h91) and at the first failing ply the net and its 200-sim search mostly agree on the losing move (h92): an agreement signal cannot be made safe on Connect-4 until the opening labels are right. The value-aware reading (a move also agrees within Q 0.1 of the top move) is being recalibrated on tic-tac-toe under a 50-sim search (h101, pending).",
+      "based_on": ["h69", "h74", "h88", "h90", "h91", "h92"]
     },
     {
       "key": "siblings",
@@ -44,9 +44,9 @@
       "key": "relabel",
       "name": "Relabelling with a deeper search (reanalyse)",
       "what": "Relabel the whole buffer each iteration with a 200-sim search of the current net.",
-      "claims": ["h25", "h26", "h28", "h34", "h35", "h36", "h37"],
-      "conclusion": "Works and replicates, through the policy prior (h25, h26, h34, h35, h36, h37), but is a partial cause of the tic-tac-toe fix, not the whole of it (h28).",
-      "based_on": ["h26", "h28", "h34", "h36"]
+      "claims": ["h25", "h26", "h28", "h34", "h35", "h36", "h37", "h92", "h93", "h96"],
+      "conclusion": "Works and replicates on tic-tac-toe, through the policy prior (h25, h26, h34, h35, h36, h37), but is a partial cause of the fix, not the whole of it (h28). On Connect-4 a 200-sim relabel search is silently wrong in the opening (h92), and more search does not fix it: 200 / 2,000 / 20,000 sims are right at 86.5 / 87.2 / 83.7% of opening positions and at only 33-60% of the first moves, 56% at 100,000 (h96; h93 inconclusive by its bars). The opening needs a source of truth other than the net's own search.",
+      "based_on": ["h26", "h28", "h34", "h36", "h92", "h96"]
     },
     {
       "key": "settle",
@@ -105,7 +105,7 @@
       "key": "certification",
       "name": "P-START certification",
       "what": "The solver walks the net's own first-player tree against every reply and checks every move keeps the proven value (staged by depth).",
-      "claims": ["h66", "h67", "h72", "h78", "h79", "h87"],
+      "claims": ["h66", "h67", "h72", "h78", "h79", "h87", "h91"],
       "conclusion": "Works as a staged certificate. The root value is taken as the theorem it is instead of solved (h78), the native solver's table bug is guarded (h79), and certified nets are now saved and independently re-checked (h87).",
       "based_on": ["h78", "h79", "h87"]
     },
@@ -113,17 +113,17 @@
       "key": "solver_free",
       "name": "Solver-free guarantee and parallel relabelling",
       "what": "Proof that training called no solver, and the relabel search spread over worker processes bit-identically.",
-      "claims": ["h1", "h75", "h77", "h86"],
-      "conclusion": "The unchanged process learned Othello with no solver (h1). The guard covers the Python and the native solver since h86. Parallel relabelling is part of the ~125x Connect-4 speed-up (h77).",
-      "based_on": ["h1", "h77", "h86"]
+      "claims": ["h1", "h75", "h77", "h86", "h89"],
+      "conclusion": "The unchanged process learned Othello with no solver (h1). The guard covers the Python and the native solver since h86. Parallel relabelling is part of the ~125x Connect-4 speed-up (h77); its result handoff no longer uses torch shared memory and a silent pool now raises (h89).",
+      "based_on": ["h1", "h77", "h86", "h89"]
     },
     {
       "key": "written_rules",
       "name": "Written rules (§C.50)",
       "what": "Play knowledge as logical statements (decision lists over predicates), verified exactly by the solver and fed to the other agents.",
-      "claims": ["h70", "h71"],
-      "conclusion": "Win, block and fork are position-sound, and settle 89% of tic-tac-toe and 29% of the Connect-4 positions our nets visit (h70). Newell–Simon is a perfect strategy from the start for both sides but is not position-sound (h71).",
-      "based_on": ["h70", "h71"]
+      "claims": ["h70", "h71", "h94", "h95", "h97", "h98", "h99", "h100"],
+      "conclusion": "Win, block and fork are position-sound, and settle 89% of tic-tac-toe and 29% of the Connect-4 positions our nets visit (h70). Newell–Simon is a perfect strategy from the start for both sides but is not position-sound (h71). With only the 11 current predicates no position-sound playbook exists up to 12 rules (h94, pre-registered, refuted) or even 60 (h95): the obstruction is across positions, so the language needs richer predicates, not more rules. Adding three layered forced-outcome predicates (wins_in_5, gives_loss_in_4, gives_loss_in_6) makes a 3-rule, 3-literal playbook position-sound at all 4,520 positions, proven minimal by SAT (h97) — the knowledge moves into the predicates, whose lookahead (up to 6 plies) is the price. On Connect-4, Allis-style value certificates (a claimeven/baseinverse pairing for Black) never contradict the solver (h98), but they cannot supply the opening: none of the search's 144 wrong opening moves is flagged (h99, pre-registered, refuted). Through ply 8 of the nets' trees no position is certified, and certificates flag 0.5% of non-winning moves beyond the immediate-win tactic. They are an endgame tool, certifying 2 to 43 of 150 random positions as stones go from 20 to 38+ (h100).",
+      "based_on": ["h70", "h71", "h94", "h95", "h97", "h98", "h99", "h100"]
     },
     {
       "key": "diagnosis",

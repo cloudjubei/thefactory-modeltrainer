@@ -13,6 +13,9 @@ both.
 
     PYTHONPATH=. .venv/bin/python scripts/c4_solver_free.py --seeds 361 362 --iterations 60 --workers 8 \\
         --out evidence/c49_T10_solver_free.json.gz
+
+`--value-delta` makes the stop value-aware (T12, harness.floor_c4_value): a raw move also agrees when the search's
+Q for it is within that much of the label's top move.
 """
 from __future__ import annotations
 
@@ -85,7 +88,7 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path) -> dict:
             steps_matched=cfg["steps_matched"], buffer_unique=cfg["buffer_unique"],
             settle_epochs=cfg["settle_epochs"], settle_lr_final=cfg["settle_lr_final"],
             strategy_tree=cfg["strategy_tree"], relabel_workers=cfg["relabel_workers"],
-            stop_on_agreement=cfg["stop_on_agreement"])
+            stop_on_agreement=cfg["stop_on_agreement"], stop_value_delta=cfg.get("stop_value_delta"))
     path = nets / f"seed_{seed}.pt"
     save_net(net, str(path))
     stopped = bool(history and history[-1].get("stopped"))
@@ -145,12 +148,15 @@ def main() -> None:
     ap.add_argument("--certify-depth", type=int, default=10)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--value-delta", type=float, default=None,
+                    help="stop on the value-aware reading: a move also agrees within this Q of the top move (T12)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     from harness.floor_c4 import CONFIG
 
     cfg = {**CONFIG, "iterations": args.iterations, "strategy_tree": {"player": 0, "depth": args.tree_depth},
-           "relabel_workers": args.workers}
+           "relabel_workers": args.workers,
+           **({"stop_value_delta": args.value_delta} if args.value_delta is not None else {})}
     stamps = (training_fingerprint("connect4"), training_fingerprint(modules=MEASUREMENT_MODULES))
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     nets = NETS / Path(args.out).name.replace(".json.gz", "")
@@ -177,4 +183,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from harness.trials import logged
+
+    logged(main, __file__)

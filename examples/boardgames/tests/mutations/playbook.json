@@ -110,11 +110,36 @@
       "name": "opponent positions returned",
       "old": "                out.append(s)\n",
       "new": ""
+    },
+    {
+      "name": "a reply that ends the game is tolerated",
+      "old": "        if game.is_terminal(after):\n            return False\n",
+      "new": "        if game.is_terminal(after):\n            continue\n"
+    },
+    {
+      "name": "ply budget ignored",
+      "old": "    if plies < 3:\n        return False\n",
+      "new": ""
+    },
+    {
+      "name": "a finished game counts as a win",
+      "old": "        return game.winner(child) == mover\n",
+      "new": "        return True\n"
+    },
+    {
+      "name": "one good reply suffices",
+      "old": "        if not any(forced_win(game, after, m, plies - 2) for m in game.legal_actions(after)):\n            return False\n    return True",
+      "new": "        if any(forced_win(game, after, m, plies - 2) for m in game.legal_actions(after)):\n            return True\n    return False"
+    },
+    {
+      "name": "opponent budget off by two",
+      "old": "any(forced_win(game, child, b, plies - 1) for b in game.legal_actions(child))",
+      "new": "any(forced_win(game, child, b, plies + 1) for b in game.legal_actions(child))"
     }
   ],
   "last_run": {
-    "at": "2026-10-01T12:49:44+00:00",
-    "killed": 21,
+    "at": "2026-10-02T17:00:00+00:00",
+    "killed": 26,
     "survived": [],
     "killed_by": {
       "win credited to the other side": [
@@ -205,7 +230,20 @@
         "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[geometry-1]",
         "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-0]",
         "test_own_play_reaches_each_position_of_the_player_once_following_every_recommended_move[tactics-1]"
-      ]
+      ],
+      "a reply that ends the game is tolerated": ["test_the_layered_predicates_on_tic_tac_toe"],
+      "ply budget ignored": [
+        "test_a_forced_win_counts_every_reply_and_stops_at_its_ply_budget",
+        "test_the_layered_predicates_on_tic_tac_toe"
+      ],
+      "a finished game counts as a win": [
+        "test_a_forced_win_counts_every_reply_and_stops_at_its_ply_budget"
+      ],
+      "one good reply suffices": [
+        "test_a_forced_win_counts_every_reply_and_stops_at_its_ply_budget",
+        "test_the_layered_predicates_on_tic_tac_toe"
+      ],
+      "opponent budget off by two": ["test_the_layered_predicates_on_tic_tac_toe"]
     }
   }
 }

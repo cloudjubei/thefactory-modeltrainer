@@ -1,0 +1,107 @@
+{
+  "file": "harness/rule_search.py",
+  "tests": ["tests/test_rule_search.py"],
+  "mutations": [
+    {
+      "name": "a rule may recommend what its literals exclude",
+      "old": "            clauses += [[-y[j, c], -lit] for lit in failing]\n",
+      "new": ""
+    },
+    {
+      "name": "a rule may hide what its literals select",
+      "old": "            clauses.append([y[j, c]] + failing)\n",
+      "new": ""
+    },
+    {
+      "name": "coverage dropped",
+      "old": "        clauses.append([y[j, c] for j in range(k) for c in allp])\n",
+      "new": ""
+    },
+    {
+      "name": "no credit for an earlier rule",
+      "old": "            earlier = [y[i, c] for i in range(j) for c in allp]",
+      "new": "            earlier = []"
+    },
+    {
+      "name": "a rule credits itself",
+      "old": "            earlier = [y[i, c] for i in range(j) for c in allp]",
+      "new": "            earlier = [y[i, c] for i in range(j + 1) for c in allp]"
+    },
+    {
+      "name": "literal bound loosened (the strict-decrease guard keeps the loop finite)",
+      "old": "bound=max_literals, vpool=pool",
+      "new": "bound=max_literals + 1, vpool=pool"
+    },
+    {
+      "name": "one rule never tried",
+      "old": "    for k in range(1, max_rules + 1):",
+      "new": "    for k in range(2, max_rules + 1):"
+    },
+    {
+      "name": "literals not shrunk",
+      "old": "        while literals > 0:\n",
+      "new": "        while False:\n"
+    },
+    {
+      "name": "one shared profile blocks a case",
+      "old": "        if all(c.profiles[j] in bad for j in c.optimal):",
+      "new": "        if any(c.profiles[j] in bad for j in c.optimal):"
+    },
+    {
+      "name": "case check skipped",
+      "old": "    for c in cases:\n        c.check()\n",
+      "new": ""
+    },
+    {
+      "name": "empty rules allowed",
+      "old": "        clauses.append([x[j, p, v] for p in range(n_predicates) for v in (True, False)])\n",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T15:10:30+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "a rule may recommend what its literals exclude": [
+        "test_one_separable_optimal_move_is_enough_to_be_playable",
+        "test_order_matters_a_later_rule_may_recommend_a_bad_move_only_where_an_earlier_one_fires",
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "a rule may hide what its literals select": [
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "coverage dropped": [
+        "test_one_separable_optimal_move_is_enough_to_be_playable",
+        "test_order_matters_a_later_rule_may_recommend_a_bad_move_only_where_an_earlier_one_fires",
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "no credit for an earlier rule": [
+        "test_order_matters_a_later_rule_may_recommend_a_bad_move_only_where_an_earlier_one_fires"
+      ],
+      "a rule credits itself": [
+        "test_one_separable_optimal_move_is_enough_to_be_playable",
+        "test_order_matters_a_later_rule_may_recommend_a_bad_move_only_where_an_earlier_one_fires",
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "literal bound loosened (the strict-decrease guard keeps the loop finite)": [
+        "test_every_rule_names_at_least_one_literal_as_the_language_requires",
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "one rule never tried": [
+        "test_every_rule_names_at_least_one_literal_as_the_language_requires",
+        "test_one_literal_can_be_enough",
+        "test_one_separable_optimal_move_is_enough_to_be_playable"
+      ],
+      "literals not shrunk": [
+        "test_every_rule_names_at_least_one_literal_as_the_language_requires",
+        "test_the_smallest_list_is_found_and_one_rule_fewer_is_proven_impossible"
+      ],
+      "one shared profile blocks a case": [
+        "test_one_separable_optimal_move_is_enough_to_be_playable"
+      ],
+      "case check skipped": ["test_a_case_with_no_optimal_move_is_refused"],
+      "empty rules allowed": ["test_every_rule_names_at_least_one_literal_as_the_language_requires"]
+    }
+  }
+}

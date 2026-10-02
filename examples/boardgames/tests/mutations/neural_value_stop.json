@@ -1,0 +1,108 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_a_relabel_with_values_adds_each_legal_move_s_search_q_and_leaves_the_label_unchanged",
+    "tests/test_neural.py::test_c49_a_move_that_wins_at_once_has_the_mover_s_search_q_of_plus_one",
+    "tests/test_neural.py::test_c49_the_value_stop_needs_the_strategy_tree_and_a_non_negative_delta",
+    "tests/test_neural.py::test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept",
+    "tests/test_neural.py::test_c49_without_the_value_stop_the_history_has_no_share_reading",
+    "tests/test_neural.py::test_c49_the_value_stop_reads_the_same_across_worker_processes"
+  ],
+  "mutations": [
+    {
+      "name": "value stop without tree accepted",
+      "old": "if stop_value_delta is not None and (strategy_tree is None or stop_value_delta < 0):",
+      "new": "if stop_value_delta is not None and stop_value_delta < 0:"
+    },
+    {
+      "name": "negative delta accepted",
+      "old": "if stop_value_delta is not None and (strategy_tree is None or stop_value_delta < 0):",
+      "new": "if stop_value_delta is not None and strategy_tree is None:"
+    },
+    {
+      "name": "values not asked for",
+      "old": "tree_labels = relabel(walked, stop_value_delta is not None)",
+      "new": "tree_labels = relabel(walked)"
+    },
+    {
+      "name": "delta not passed",
+      "old": "[row[3] for row in tree_labels],\n                                                          stop_value_delta)",
+      "new": "[row[3] for row in tree_labels],\n                                                          0.0)"
+    },
+    {
+      "name": "share reading is the value reading",
+      "old": "tree_share_disagree = disagreements(raw_moves, tree_pis)",
+      "new": "tree_share_disagree = tree_disagree"
+    },
+    {
+      "name": "share reading always recorded",
+      "old": "if stop_value_delta is not None else {})})",
+      "new": "if True else {})})"
+    },
+    {
+      "name": "unvisited read as zero",
+      "old": "if node.child_n[a] else None) for a in node.legal}",
+      "new": "if node.child_n[a] else 0.0) for a in node.legal}"
+    },
+    {
+      "name": "q sign flipped",
+      "old": "(node.child_w[a] / node.child_n[a] if",
+      "new": "(-node.child_w[a] / node.child_n[a] if"
+    },
+    {
+      "name": "q dropped from the row",
+      "old": "out.append(row + (_root_q(agent, game, state),) if with_q else row)",
+      "new": "out.append(row)"
+    },
+    {
+      "name": "workers drop the values",
+      "old": "[(net_path, version, agent_kwargs, c, with_q) for c in chunks]",
+      "new": "[(net_path, version, agent_kwargs, c, False) for c in chunks]"
+    },
+    {
+      "name": "value reading used without the knob",
+      "old": "                        if stop_value_delta is None:\n                            tree_disagree = disagreements(raw_moves, tree_pis)\n",
+      "new": "                        if False:\n                            tree_disagree = disagreements(raw_moves, tree_pis)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:40:16+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "value stop without tree accepted": [
+        "test_c49_the_value_stop_needs_the_strategy_tree_and_a_non_negative_delta"
+      ],
+      "negative delta accepted": [
+        "test_c49_the_value_stop_needs_the_strategy_tree_and_a_non_negative_delta"
+      ],
+      "values not asked for": [
+        "test_c49_the_value_stop_reads_the_same_across_worker_processes",
+        "test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept"
+      ],
+      "delta not passed": [
+        "test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept"
+      ],
+      "share reading is the value reading": [
+        "test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept"
+      ],
+      "share reading always recorded": [
+        "test_c49_without_the_value_stop_the_history_has_no_share_reading"
+      ],
+      "unvisited read as zero": [
+        "test_c49_a_relabel_with_values_adds_each_legal_move_s_search_q_and_leaves_the_label_unchanged"
+      ],
+      "q sign flipped": ["test_c49_a_move_that_wins_at_once_has_the_mover_s_search_q_of_plus_one"],
+      "q dropped from the row": [
+        "test_c49_a_move_that_wins_at_once_has_the_mover_s_search_q_of_plus_one",
+        "test_c49_a_relabel_with_values_adds_each_legal_move_s_search_q_and_leaves_the_label_unchanged",
+        "test_c49_the_value_stop_reads_the_same_across_worker_processes",
+        "test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept"
+      ],
+      "workers drop the values": ["test_c49_the_value_stop_reads_the_same_across_worker_processes"],
+      "value reading used without the knob": [
+        "test_c49_without_the_value_stop_the_history_has_no_share_reading"
+      ]
+    }
+  }
+}

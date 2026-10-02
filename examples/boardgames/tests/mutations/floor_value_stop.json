@@ -1,0 +1,69 @@
+{
+  "file": "harness/floor_value_stop.py",
+  "tests": ["tests/test_floor_value_stop.py"],
+  "mutations": [
+    {
+      "name": "recipe without delta accepted",
+      "old": "    if \"stop_value_delta\" not in spec[\"arms\"][next(iter(spec[\"arms\"]))]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "floor_tree integrity ignored",
+      "old": "    if report[\"integrity\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "missing share reading accepted",
+      "old": "if not isinstance(share, int) or isinstance(share, bool) or share < value:",
+      "new": "if isinstance(share, int) and share < value:"
+    },
+    {
+      "name": "share below value accepted",
+      "old": "or isinstance(share, bool) or share < value:",
+      "new": "or isinstance(share, bool):"
+    },
+    {
+      "name": "share problems ignored",
+      "old": "    if problems:\n        return",
+      "new": "    if False:\n        return"
+    },
+    {
+      "name": "share read as the value",
+      "old": "\"tree_disagreements\": h.get(\"tree_disagreements_share\")",
+      "new": "\"tree_disagreements\": h.get(\"tree_disagreements\")"
+    },
+    {
+      "name": "share timeliness miscounted",
+      "old": "\"timely\": sum(1 for s in share if s[\"timely\"])",
+      "new": "\"timely\": len(share)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:48:03+00:00",
+    "killed": 7,
+    "survived": [],
+    "killed_by": {
+      "recipe without delta accepted": [
+        "test_a_run_without_the_value_delta_in_its_recipe_is_not_the_run"
+      ],
+      "floor_tree integrity ignored": ["test_floor_tree_s_integrity_still_applies"],
+      "missing share reading accepted": [
+        "test_a_missing_or_impossible_share_reading_makes_the_run_not_run[value0-share0-share"
+      ],
+      "share below value accepted": [
+        "test_a_missing_or_impossible_share_reading_makes_the_run_not_run[value1-share1-share"
+      ],
+      "share problems ignored": [
+        "test_a_missing_or_impossible_share_reading_makes_the_run_not_run[value0-share0-share",
+        "test_a_missing_or_impossible_share_reading_makes_the_run_not_run[value1-share1-share"
+      ],
+      "share read as the value": [
+        "test_a_safe_timely_value_stop_on_every_seed_is_supported_and_the_share_rule_is_reported_beside_it",
+        "test_the_share_rule_s_timeliness_is_reported_beside_the_value_rule_s_but_does_not_judge"
+      ],
+      "share timeliness miscounted": [
+        "test_the_share_rule_s_timeliness_is_reported_beside_the_value_rule_s_but_does_not_judge"
+      ]
+    }
+  }
+}

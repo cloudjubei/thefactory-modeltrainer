@@ -152,6 +152,18 @@
       "sha256": "0ccff913f7dc181f608a7227bd8e5848495304d2e403ff8bf973d3801870c58f",
       "started": "2026-09-25T17:49:30+00:00"
     },
+    "c49_D1_plateau.json.gz": {
+      "sha256": "4ba667c6d1133ae9764ac039b4c1c79a6a7d70fcd8eaef63c590ca361713abe3",
+      "started": "2026-10-02T13:26:06+00:00"
+    },
+    "c49_D2_opening.json.gz": {
+      "sha256": "2bf19dc885d1ff95697756ae66f611dcdf8314e43bd218a1b5a24d6fad8abb4e",
+      "started": "2026-10-02T14:55:34+00:00"
+    },
+    "c49_T10_partial.json.gz": {
+      "sha256": "17b1e1fe890e8be5fe320c184f1bf45d55b04a498a0eafdf2d4b6199f750600d",
+      "started": "2026-10-01T10:44:22+00:00"
+    },
     "c49_T10_pilot_siblings.json.gz": {
       "sha256": "01f746497a01a38c16d96284450d7111b4189ed052554bd7ec3f3241f96870f5",
       "started": "2026-10-01T07:13:49+00:00"
@@ -228,9 +240,29 @@
       "sha256": "1fe7d373a19333062bba90f3f3ad5929f81f0f9cc7292e6405efc74a479aa830",
       "started": "2026-09-27T16:17:43+00:00"
     },
+    "c50_C1_certificates.json.gz": {
+      "sha256": "0eddfed663d8c9ef617bab40c9ec7667384829fd2d773781414496659b628c30",
+      "started": "2026-10-02T17:11:34+00:00"
+    },
+    "c50_C1b_certificate_flags.json.gz": {
+      "sha256": "d6e3298efab549c17935d9b1fb7ade29247bc863996c84db26f88a4d48f2b748",
+      "started": "2026-10-02T17:23:06+00:00"
+    },
     "c50_E1_rules.json.gz": {
       "sha256": "8648bb6662a048791a1bae7cd0692914c7ff9c51c7f6d37d810083f812b72693",
       "started": "2026-09-30T19:07:36+00:00"
+    },
+    "c50_E2_beyond_60.json.gz": {
+      "sha256": "215483f53d6839d421a0c1914f84be41b08d7ea91b0310d6f183572fa32ba57c",
+      "started": "2026-10-02T15:12:24+00:00"
+    },
+    "c50_E2_minimal_playbook.json.gz": {
+      "sha256": "ad9b1d329f746725222d76d2fb396947191e935005aab524005ad2ef5fa56e9f",
+      "started": "2026-10-02T15:10:49+00:00"
+    },
+    "c50_E2b_layered_playbook.json.gz": {
+      "sha256": "780d5c661195c1f07dca82f8dd9bf14bdd04f82b53ca95e772a323c9d1a312ea",
+      "started": "2026-10-02T17:00:29+00:00"
     },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",

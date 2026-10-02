@@ -1,0 +1,19 @@
+{
+  "file": "harness/book.py",
+  "tests": ["tests/test_book.py::test_build_book_respects_the_deadline_within_a_band"],
+  "mutations": [
+    {
+      "name": "deadline checked only between bands",
+      "old": "        return solved >= max_positions or _deadline_hit(deadline)",
+      "new": "        return solved >= max_positions"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T16:54:08+00:00",
+    "killed": 1,
+    "survived": [],
+    "killed_by": {
+      "deadline checked only between bands": ["test_build_book_respects_the_deadline_within_a_band"]
+    }
+  }
+}

@@ -720,14 +720,23 @@ def _root_search_value(agent: "AlphaZeroAgent", game: Game, state: State) -> flo
     return sum(node.child_w[a] for a in node.legal) / total
 
 
+def _root_q(agent: "AlphaZeroAgent", game: Game, state: State) -> dict:
+    """The search's Q (mover-relative) for every legal root move — None for a move the search never visited."""
+    node = agent._nodes.get(state_key(game, state))
+    if node is None:
+        return {a: None for a in game.legal_actions(state)}
+    return {a: (node.child_w[a] / node.child_n[a] if node.child_n[a] else None) for a in node.legal}
+
+
 def reanalyze_examples(
-    game: Game, agent: "AlphaZeroAgent", states: list[State], rng: random.Random
-) -> list[tuple[torch.Tensor, list[float], float]]:
+    game: Game, agent: "AlphaZeroAgent", states: list[State], rng: random.Random, with_q: bool = False
+) -> list[tuple]:
     """MuZero REANALYZE (#2) — re-label stored positions with the CURRENT net for ~free data efficiency. For each
     stored `state`, re-run the current agent's GREEDY search (temperature 0 → the improved policy target, no
     exploration noise) to regenerate a fresh policy target AND the search-improved value. Old buffer entries were
     labelled by a weaker past net; refreshing them with the current, stronger net de-stales the targets without any
-    new self-play. Returns `(encoded, pi_vec, value)` ready for the training buffer."""
+    new self-play. Returns `(encoded, pi_vec, value)` ready for the training buffer; `with_q` appends each legal
+    move's root Q (`_root_q`) as a fourth field."""
     agent.temperature = 0.0
     out: list[tuple[torch.Tensor, list[float], float]] = []
     for state in states:
@@ -738,7 +747,8 @@ def reanalyze_examples(
         pi = agent.run_search(game, state, rng)
         pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
         value = max(-1.0, min(1.0, _root_search_value(agent, game, state)))
-        out.append((encode(game, state), pi_vec, value))
+        row = (encode(game, state), pi_vec, value)
+        out.append(row + (_root_q(agent, game, state),) if with_q else row)
     return out
 
 
@@ -1498,6 +1508,9 @@ def _run_parallel_selfplay(pool, tmpdir: str, net, target_net, version: int, n_g
 # results in order gives the serial labels bit for bit. The workers get an rng that refuses every draw, so a
 # configuration that WOULD draw (root noise, a stochastic game) fails loudly instead of silently diverging.
 _RELABEL_WORKER: dict = {}
+# A pool whose result thread dies (a torch shared-memory handoff timed out under load, §C.49 T10) never answers; a
+# relabel call that waits longer than this raises instead of hanging the run.
+RELABEL_TIMEOUT_S = 3 * 3600
 
 
 class _NoRandom:
@@ -1518,16 +1531,21 @@ def _relabel_worker_init(game_name: str) -> None:
 
 
 def _relabel_worker(task: tuple) -> list:
-    net_path, version, agent_kwargs, states = task
+    net_path, version, agent_kwargs, states, with_q = task
     st = _RELABEL_WORKER
     if st.get("version") != version:
         st["net"] = load_net(net_path)
         st["version"] = version
-    return reanalyze_examples(st["game"], AlphaZeroAgent(st["net"], **agent_kwargs), states, _NoRandom())
+    labels = reanalyze_examples(st["game"], AlphaZeroAgent(st["net"], **agent_kwargs), states, _NoRandom(), with_q)
+    return [(row[0].numpy(), *row[1:]) for row in labels]
 
 
-def _parallel_relabel(pool, workers: int, tmpdir: str, net, version: int, agent_kwargs: dict, states: list) -> list:
-    """`reanalyze_examples` over `states` across `pool`, joined in order — the serial labels, bit for bit."""
+def _parallel_relabel(pool, workers: int, tmpdir: str, net, version: int, agent_kwargs: dict, states: list,
+                      with_q: bool = False) -> list:
+    """`reanalyze_examples` over `states` across `pool`, joined in order — the serial labels, bit for bit. Workers
+    hand back plain arrays (a tensor would travel through torch's shared-memory manager, which can time out), and
+    a pool that does not answer within RELABEL_TIMEOUT_S raises."""
+    import multiprocessing
     import os
 
     if not states:
@@ -1536,10 +1554,13 @@ def _parallel_relabel(pool, workers: int, tmpdir: str, net, version: int, agent_
     save_net(net, net_path)
     size = max(1, -(-len(states) // (4 * workers)))
     chunks = [states[i:i + size] for i in range(0, len(states), size)]
-    out: list = []
-    for part in pool.map(_relabel_worker, [(net_path, version, agent_kwargs, c) for c in chunks]):
-        out.extend(part)
-    return out
+    pending = pool.map_async(_relabel_worker, [(net_path, version, agent_kwargs, c, with_q) for c in chunks])
+    try:
+        parts = pending.get(timeout=RELABEL_TIMEOUT_S)
+    except multiprocessing.TimeoutError:
+        raise RuntimeError(f"the relabel pool did not answer within {RELABEL_TIMEOUT_S}s — its result thread may have "
+                           f"died; the run stops rather than hang") from None
+    return [(torch.from_numpy(row[0]), *row[1:]) for part in parts for row in part]
 
 
 def _endgame_enabled(game: Game, endgame_tb) -> bool:
@@ -1615,6 +1636,7 @@ def train_alphazero(
     strategy_tree: dict | None = None,
     relabel_workers: int = 1,
     stop_on_agreement: bool = False,
+    stop_value_delta: float | None = None,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1678,6 +1700,9 @@ def train_alphazero(
                          "set) over >= 1 worker processes of a named game")
     if stop_on_agreement and strategy_tree is None:
         raise ValueError("stop_on_agreement reads the strategy-tree walk — set strategy_tree")
+    if stop_value_delta is not None and (strategy_tree is None or stop_value_delta < 0):
+        raise ValueError("stop_value_delta reads the strategy-tree walk's search values — set strategy_tree and a "
+                         "delta >= 0")
     if strategy_tree is not None and reanalyze_frac != 1.0:
         raise ValueError("strategy_tree relabels its positions with the whole-buffer search — set reanalyze_frac=1.0")
     if settle_lr is not None and settle_epochs <= 0:
@@ -1855,7 +1880,7 @@ def train_alphazero(
             t_relabel = time.time()
             sib_rows: list = []
             tree_rows: list = []
-            tree_walked = tree_disagree = 0
+            tree_walked = tree_disagree = tree_share_disagree = 0
             sib_stats = {"terminal_skipped": 0, "recorded_skipped": 0, "holdout_skipped": 0, "added": 0}
             # Re-label a random sample of the buffer with the CURRENT net (fresh policy + search-improved value).
             k = int(reanalyze_frac * len(state_buffer))
@@ -1867,13 +1892,13 @@ def train_alphazero(
                 if relabeler is not learner:
                     relabeler.add_noise = learner.add_noise  # self-play left the learner's root-noise state set
 
-                def relabel(states: list) -> list:
+                def relabel(states: list, with_q: bool = False) -> list:
                     relabel_calls[0] += 1
                     if _relabel_pool is None:
-                        return reanalyze_examples(game, relabeler, states, rng)
+                        return reanalyze_examples(game, relabeler, states, rng, with_q)
                     return _parallel_relabel(_relabel_pool, relabel_workers, _relabel_dir, net, relabel_calls[0],
                                              {"sims": reanalyze_sims, "gumbel": gumbel, "gumbel_m": gumbel_m,
-                                              "c_scale": c_scale, "add_noise": relabeler.add_noise}, states)
+                                              "c_scale": c_scale, "add_noise": relabeler.add_noise}, states, with_q)
                 if policy_target_fn is not None:
                     relabelled = [(encode(game, s), _checked_policy_target(game, s, policy_target_fn), None)
                                   for s in (state_buffer[i][0] for i in idxs)]
@@ -1907,12 +1932,18 @@ def train_alphazero(
                                                      strategy_tree["player"], choose, strategy_tree.get("depth"))
                     tree_walked = len(walked)
                     if walked:
-                        tree_labels = relabel(walked)
-                        tree_disagree = disagreements(choose(walked), [pi for (_x, pi, _v) in tree_labels])
+                        tree_labels = relabel(walked, stop_value_delta is not None)
+                        raw_moves, tree_pis = choose(walked), [row[1] for row in tree_labels]
+                        if stop_value_delta is None:
+                            tree_disagree = disagreements(raw_moves, tree_pis)
+                        else:
+                            tree_disagree = disagreements(raw_moves, tree_pis, [row[3] for row in tree_labels],
+                                                          stop_value_delta)
+                            tree_share_disagree = disagreements(raw_moves, tree_pis)
                         tree_key = (game.canonical_key if (augment or canonical) and hasattr(game, "canonical_key")
                                     else game.state_key)
                         held = {tree_key(st) for (st, *_rest) in state_buffer}
-                        tree_rows = [(x, pi, float("nan")) for st, (x, pi, _v) in zip(walked, tree_labels, strict=True)
+                        tree_rows = [(row[0], row[1], float("nan")) for st, row in zip(walked, tree_labels, strict=True)
                                      if tree_key(st) not in held]
             sp_aug = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
             sib_aug = augment_examples(sib_rows, perms) if sib_rows else []
@@ -1929,7 +1960,9 @@ def train_alphazero(
             epoch_cap = len(sp_aug) if (steps_matched and (sib_aug or tree_aug)) else None
             if strategy_tree is not None:
                 reanalyze_note.update({"tree_walked": tree_walked, "tree_positions": len(tree_rows),
-                                       "tree_disagreements": tree_disagree})
+                                       "tree_disagreements": tree_disagree,
+                                       **({"tree_disagreements_share": tree_share_disagree}
+                                          if stop_value_delta is not None else {})})
                 stopped = stop_on_agreement and tree_walked > 0 and tree_disagree == 0
         elif parallel_ok:  # PURE-#1 fanned out across worker processes (fills the idle cores; ~2-2.5x faster)
             fresh = _run_parallel_selfplay(_pool, _tmpdir, net, target_net, it, selfplay_games, sims, gumbel,

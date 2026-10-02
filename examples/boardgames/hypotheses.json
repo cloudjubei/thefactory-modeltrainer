@@ -2836,7 +2836,12 @@
         "tests/test_c49_solver_free_evidence.py": "ceb8863946c5d58cf851d3d9c7e04ab1d681898b47ba3aac1b5e68988ea01132",
         "harness/floor_c4.py": "d922fe16e0b41e94c326dc5f714c446449551d1fcc968c6a53cc7d587dee8265"
       },
-      "inconclusive_proof": "tests/test_c49_solver_free_evidence.py::test_c49_T10_is_undecidable"
+      "inconclusive_proof": "tests/test_c49_solver_free_evidence.py::test_c49_T10_is_undecidable",
+      "supersession": {
+        "by": "h88",
+        "reason": "the T10 run hung after 6 of 10 seeds (h89) and the fix changes its registered era, so h75 can never be judged as registered; the 6 finished seeds (h88) never stopped, which already rules out h75's >= 8/10 bar",
+        "at": "2026-10-02T13:11:02.385934+00:00"
+      }
     },
     "h76": {
       "id": "h76",
@@ -3053,6 +3058,340 @@
         }
       ],
       "reads_no_data": true
+    },
+    "h88": {
+      "id": "h88",
+      "claim": "\u00a7C.49 T10 recovered (descriptive): on Connect-4 the solver-free stop signal never fires. In all 6 seeds the T10 run finished (361-366; canon conv-32, strategy tree to 10 plies, 60 iterations), the walk's disagreement count fell from 800-1,280 to a plateau but never read zero; after iteration 15 five seeds never went below 27 and the sixth (363) bottomed at 5. As registered, h75 needed >= 8/10 stops, so it could not have been supported",
+      "mode": "test",
+      "proof": "tests/test_c49_t10_partial_evidence.py::test_c49_on_connect4_the_walk_never_reads_full_agreement_in_60_iterations_on_any_of_6_seeds",
+      "note": "Registered AFTER the data. The run hung after seed 366 (relabel pool result thread died on a torch shared-memory timeout; see h89), so h75 cannot be judged as registered: superseded by this. Whether the net or the 200-sim search is wrong at the plateau is the next, pre-registered diagnosis.",
+      "registered_at": "2026-10-02T13:11:01.946030+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_t10_partial_evidence.py::test_c49_on_connect4_the_walk_never_reads_full_agreement_in_60_iterations_on_any_of_6_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T13:11:02.346773+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T10_partial.json.gz",
+        "started": "2026-10-01T10:44:22+00:00"
+      },
+      "pins": {
+        "tests/test_c49_t10_partial_evidence.py": "c086826a7b6f038109a06482bdad2ffc6dee0ebbdc4d2d348a1e9d5559832fc5"
+      }
+    },
+    "h89": {
+      "id": "h89",
+      "claim": "\u00a7C.49 DEAD END (guarded): parallel relabelling handed torch tensors back through torch's shared-memory manager; under heavy machine load the handoff timed out, the pool's result thread died and the T10 run waited forever (9.7 h idle) instead of failing. Fixed: workers hand back plain arrays (still bit-identical to serial) and a pool that does not answer within the timeout raises.",
+      "mode": "test",
+      "proof": "tests/test_neural.py::test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever",
+      "note": "Dead end recorded 2026-10-02. Companion regression test: test_c49_a_relabel_worker_hands_back_plain_arrays_not_shared_memory_tensors.",
+      "registered_at": "2026-10-02T13:11:02.424106+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_neural.py::test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 2.38s",
+          "drawn_at": "2026-10-02T13:11:05.222591+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h90": {
+      "id": "h90",
+      "claim": "\u00a7C.49 D1: at the Connect-4 plateau the stop signal is blocked mainly by its SEARCH, not the net. Over the 6 nets the T10 run saved (seeds 361-366), recomputing each net's walk of its own first-player tree through 10 plies with the same 200-sim search, the solver finds the net's raw move OPTIMAL (the search prefers a non-optimal move, or both moves are optimal) at >= 2/3 of the pooled disagreement positions; refuted \u2014 the NET is the blocker \u2014 at <= 1/3; inconclusive between, or with no disagreement",
+      "mode": "test",
+      "proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_at_the_plateau_the_search_not_the_net_blocks_the_stop_signal",
+      "note": "Decides the next step: supported -> redesign the stop signal (recalibrate on TTT with a weakened search); refuted -> capacity/coverage (conv-48/64). Net files pinned by sha256 from the recovered T10 evidence.",
+      "registered_at": "2026-10-02T13:25:57.812782+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_at_the_plateau_the_search_not_the_net_blocks_the_stop_signal",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T14:15:50.173601+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D1_plateau.json.gz",
+        "started": "2026-10-02T13:26:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_plateau_evidence.py": "9b061f5b7204048b354e41349b83e8b05230b7688180376d89b9dc8424e6ca18",
+        "harness/floor_plateau.py": "48cf7b79782562ae05bc743e326a99a2c4b55f6bddf8c87a1111ab04d865401a"
+      },
+      "inconclusive_proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_the_blocker_is_undecidable"
+    },
+    "h91": {
+      "id": "h91",
+      "claim": "\u00a7C.49 D1: despite never stopping, >= 4 of the 6 saved T10 nets (seeds 361-366, canon conv-32, 20,616 params, trained solver-free) are certified by the solver to play perfectly from the start as the first player through 10 plies (P-START, every reply); refuted at <= 2, inconclusive at 3",
+      "mode": "test",
+      "proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_most_saved_nets_are_certified_through_10_plies_despite_never_stopping",
+      "note": "If supported, the solver-free process already reaches the oracle's depth-10 result (h72) and only the stopping rule failed.",
+      "registered_at": "2026-10-02T13:25:57.860205+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_most_saved_nets_are_certified_through_10_plies_despite_never_stopping",
+          "ok": false,
+          "detail": "d\nE         + refuted\n\ntests/test_c49_plateau_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_plateau_evidence.py::test_c49_D1_most_saved_nets_are_certified_through_10_plies_despite_never_stopping\n1 failed in 0.03s",
+          "drawn_at": "2026-10-02T14:15:50.378811+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D1_plateau.json.gz",
+        "started": "2026-10-02T13:26:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_plateau_evidence.py": "9b061f5b7204048b354e41349b83e8b05230b7688180376d89b9dc8424e6ca18",
+        "harness/floor_plateau.py": "48cf7b79782562ae05bc743e326a99a2c4b55f6bddf8c87a1111ab04d865401a"
+      },
+      "inconclusive_proof": "tests/test_c49_plateau_evidence.py::test_c49_D1_the_certified_count_is_undecidable"
+    },
+    "h92": {
+      "id": "h92",
+      "claim": "\u00a7C.49 D1 (descriptive): on Connect-4 the 200-sim search makes SILENT errors in the opening. At the first ply where the solver rejects a saved T10 net's play (plies 0-4), the net and its own 200-sim search agree on a losing move in 5 of 6 nets \u2014 two nets' very first move already loses the win, one of them with its search agreeing. So no stop signal built on net-search agreement can be safe there: the limit is label quality in the opening, not the signal",
+      "mode": "test",
+      "proof": "tests/test_c49_silent_errors_evidence.py::test_c49_at_its_first_failing_ply_the_net_and_its_search_agree_on_a_losing_move_in_5_of_6_nets",
+      "note": "Registered AFTER the data. Qualifies h90: most disagreements are harmless (both moves optimal, 59%) or the search's fault (16%), but the errors that matter at the shallowest failing plies are ones search and net share.",
+      "registered_at": "2026-10-02T14:16:36.126542+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_silent_errors_evidence.py::test_c49_at_its_first_failing_ply_the_net_and_its_search_agree_on_a_losing_move_in_5_of_6_nets",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T14:16:36.318541+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D1_plateau.json.gz",
+        "started": "2026-10-02T13:26:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_silent_errors_evidence.py": "7f53d1c5db32e53e9cfe1040a0cfdbc2d260840d441cdb65a2662d51aacfcaf5"
+      }
+    },
+    "h93": {
+      "id": "h93",
+      "claim": "\u00a7C.49 D2: more search makes the Connect-4 opening labels right. On the 6 saved T10 nets (seeds 361-366), at every position of each net's own first-player tree up to ply 4, the net's own search at some budget among 200 / 2,000 / 20,000 sims prefers an exact-optimal move (the argmax of its improved policy, the training label) at >= 95% of EVERY net's positions; refuted if even 20,000 sims, pooled over the nets, prefers an optimal move at < 80%; inconclusive otherwise. 100,000 sims at plies 0-2 is reported, not judged",
+      "mode": "test",
+      "proof": "tests/test_c49_opening_evidence.py::test_c49_D2_some_search_budget_prefers_an_optimal_opening_move_at_95_percent_of_every_net_s_positions",
+      "note": "Follows h92 (silent opening errors at 200 sims). Supported -> a ply-scaled relabel budget in the process; refuted -> opening labels need another source (written rules / proofs). Cost: ~1 h (160 distinct positions; ground truth mostly from the label cache).",
+      "registered_at": "2026-10-02T14:55:32.117814+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_opening_evidence.py::test_c49_D2_some_search_budget_prefers_an_optimal_opening_move_at_95_percent_of_every_net_s_positions",
+          "ok": false,
+          "detail": "e\n\ntests/test_c49_opening_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_opening_evidence.py::test_c49_D2_some_search_budget_prefers_an_optimal_opening_move_at_95_percent_of_every_net_s_positions\n1 failed in 0.03s",
+          "drawn_at": "2026-10-02T16:11:36.041097+00:00",
+          "inconclusive": true
+        },
+        {
+          "proof": "tests/test_c49_opening_evidence.py::test_c49_D2_some_search_budget_prefers_an_optimal_opening_move_at_95_percent_of_every_net_s_positions",
+          "ok": false,
+          "detail": "e\n\ntests/test_c49_opening_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_opening_evidence.py::test_c49_D2_some_search_budget_prefers_an_optimal_opening_move_at_95_percent_of_every_net_s_positions\n1 failed in 0.03s",
+          "drawn_at": "2026-10-02T16:11:43.843893+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D2_opening.json.gz",
+        "started": "2026-10-02T14:55:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_opening_evidence.py": "a074477b71e64517dfc7e0a7f78c1439590ca4fd8ef6ee99f7fd4ce2f0fdc406",
+        "harness/floor_opening.py": "4ea566193bb92890049b0193d41dcb2d92a688e2098c24830a7832b89618b070"
+      },
+      "inconclusive_proof": "tests/test_c49_opening_evidence.py::test_c49_D2_is_undecidable"
+    },
+    "h94": {
+      "id": "h94",
+      "claim": "\u00a7C.50 E2: within the declared rule language \u2014 harness.playbook's 11 predicates (wins, blocks, gives_win, makes_threat, forks, opp_fork_at, gives_fork, centre, corner, side, opposite_corner) and their negations; a rule is a conjunction, a playbook an ordered decision list \u2014 a POSITION-SOUND tic-tac-toe playbook exists with at most 12 rules: it recommends only optimal moves and fires at every one of the 4,520 raw positions (re-verified exactly with harness.playbook.evaluate), and SAT proves both its rule count (UNSAT at k-1) and its literal count minimal. Refuted if no such playbook has <= 12 rules (UNSAT at 12, or a position where every optimal move shares its predicate profile with a non-optimal one)",
+      "mode": "test",
+      "proof": "tests/test_c50_minimal_playbook_evidence.py::test_c50_E2_a_proven_minimal_position_sound_playbook_of_at_most_12_rules_plays_every_position_optimally",
+      "note": "Newell-Simon (9 rules) is strategy-sound but wrong at 80 arbitrary positions (h71), so a position-sound list may need more rules \u2014 or may be impossible in this language. Method: Yu et al. 2021 encoding for ordered lists (harness/rule_search.py, python-sat/CaDiCaL).",
+      "registered_at": "2026-10-02T15:09:58.362732+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_minimal_playbook_evidence.py::test_c50_E2_a_proven_minimal_position_sound_playbook_of_at_most_12_rules_plays_every_position_optimally",
+          "ok": false,
+          "detail": "nimal_playbook_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c50_minimal_playbook_evidence.py::test_c50_E2_a_proven_minimal_position_sound_playbook_of_at_most_12_rules_plays_every_position_optimally\n1 failed in 0.08s",
+          "drawn_at": "2026-10-02T15:11:06.364238+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_E2_minimal_playbook.json.gz",
+        "started": "2026-10-02T15:10:49+00:00"
+      },
+      "pins": {
+        "tests/test_c50_minimal_playbook_evidence.py": "a53880abca334ec82dcae066bc76cc6498783a6210a9e7665b5e82e4ece500f5"
+      },
+      "inconclusive_proof": "tests/test_c50_minimal_playbook_evidence.py::test_c50_E2_is_undecidable"
+    },
+    "h95": {
+      "id": "h95",
+      "claim": "\u00a7C.50 E2 (descriptive): the 11-predicate rule language cannot write a position-sound tic-tac-toe playbook of up to 60 rules \u2014 SAT proves every length 1-60 impossible \u2014 although no single position is inseparable (each has an optimal move whose predicate profile no non-optimal move shares). The obstruction is ACROSS positions: a rule can only pick sets of the 107 move profiles, and positions demand conflicting orders of them. The language needs more predicates, not more rules",
+      "mode": "test",
+      "proof": "tests/test_c50_beyond_evidence.py::test_c50_no_position_sound_playbook_of_up_to_60_rules_exists_in_the_11_predicate_language",
+      "note": "Registered AFTER the data (a follow-up to the pre-registered h94, refuted). 60 rules is far beyond the 107 distinct profiles' worth of ordering for a practical playbook; the cyclic-order explanation is reasoning, not proven.",
+      "registered_at": "2026-10-02T15:12:59.595313+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_beyond_evidence.py::test_c50_no_position_sound_playbook_of_up_to_60_rules_exists_in_the_11_predicate_language",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T15:12:59.871284+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_E2_beyond_60.json.gz",
+        "started": "2026-10-02T15:12:24+00:00"
+      },
+      "pins": {
+        "tests/test_c50_beyond_evidence.py": "9dfad950340e74003a49ac337ffc213f63ec3f1a2c64eccb938e4ec03df2704f"
+      }
+    },
+    "h96": {
+      "id": "h96",
+      "claim": "\u00a7C.49 D2 (descriptive): on Connect-4, more search does NOT fix the opening labels of the solver-free nets. Over the 6 saved T10 nets' opening positions (plies 0-4), the share where the net's own search prefers an optimal move is 86.5% at 200 sims, 87.2% at 2,000 and 83.7% at 20,000 \u2014 no gain from 100x the search \u2014 and at the first moves (plies 0-2) it is right at only 33-60% of positions at every budget, 56% even at 100,000 sims. The net's own evaluations steer the search wrong there; the opening needs a different source of truth than self-search",
+      "mode": "test",
+      "proof": "tests/test_c49_search_ceiling_evidence.py::test_c49_a_hundred_times_more_search_does_not_fix_the_opening_labels",
+      "note": "Registered AFTER the data; read beside the pre-registered h93 (INCONCLUSIVE by its bars). That the value head misleads the search is the most likely reading, not shown directly.",
+      "registered_at": "2026-10-02T16:12:00.303493+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_search_ceiling_evidence.py::test_c49_a_hundred_times_more_search_does_not_fix_the_opening_labels",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T16:12:00.511473+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D2_opening.json.gz",
+        "started": "2026-10-02T14:55:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_search_ceiling_evidence.py": "9c0db8f5f863e37fc41ff3d0a6c73f0f5a8db0a356bed85eef782677ca621312"
+      }
+    },
+    "h97": {
+      "id": "h97",
+      "claim": "\u00a7C.50 E2b: with three layered forced-outcome predicates added to the 11 (wins_in_5: the move forces a win within 5 plies; gives_loss_in_4 / gives_loss_in_6: after the move the opponent can force a win within 4 / 6 plies \u2014 the deepest lookahead 6 plies of tic-tac-toe's 9), a POSITION-SOUND tic-tac-toe playbook of at most 12 rules exists: it plays optimally at every one of the 4,520 raw positions (re-verified exactly), and SAT proves its rule count and literal count minimal. Refuted if no such playbook has <= 12 rules",
+      "mode": "test",
+      "proof": "tests/test_c50_layered_playbook_evidence.py::test_c50_E2b_with_layered_predicates_a_proven_minimal_position_sound_playbook_of_at_most_12_rules_exists",
+      "note": "Follows h94/h95 (11 predicates: impossible up to 60 rules). The predicates' lookahead is declared (harness.playbook.LOOKAHEAD) so a playbook's compute per move is reported beside its size.",
+      "registered_at": "2026-10-02T17:00:29.715059+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_layered_playbook_evidence.py::test_c50_E2b_with_layered_predicates_a_proven_minimal_position_sound_playbook_of_at_most_12_rules_exists",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T17:00:44.627251+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_E2b_layered_playbook.json.gz",
+        "started": "2026-10-02T17:00:29+00:00"
+      },
+      "pins": {
+        "tests/test_c50_layered_playbook_evidence.py": "18d66d967e6c107022d52b8dc38d053307e2ebb307382558ed3712c6b774836e"
+      },
+      "inconclusive_proof": "tests/test_c50_layered_playbook_evidence.py::test_c50_E2b_is_undecidable"
+    },
+    "h98": {
+      "id": "h98",
+      "claim": "\u00a7C.50 C1: the Allis-style Connect-4 value certificate (a claimeven/baseinverse pairing strategy for Black with White to move, harness/c4_certificates.py) is SOUND: no certified position is a White win and no move it flags as not winning (some Black reply reaches a certified or finished position) wins \u2014 over the label cache (plies 0-8), random-play bands of 20-44 stones and the D2 opening. Refuted by any contradiction; inconclusive with fewer than 100 flagged moves",
+      "mode": "test",
+      "proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_certificates_never_contradict_the_solver",
+      "note": "User chose option (a) \u2014 written certificates as the opening's source of truth. Allis's vertical is not in the pairing: it would leave a top square no reply can answer (module docstring).",
+      "registered_at": "2026-10-02T17:11:31.334988+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_certificates_never_contradict_the_solver",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T17:17:08.974233+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_C1_certificates.json.gz",
+        "started": "2026-10-02T17:11:34+00:00"
+      },
+      "pins": {
+        "tests/test_c50_certificates_evidence.py": "f4d3736b5198beff6bad504345a628749975810b135a6d786f115f299af40d45"
+      },
+      "inconclusive_proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_soundness_is_undecidable"
+    },
+    "h99": {
+      "id": "h99",
+      "claim": "\u00a7C.50 C1: the certificates are USEFUL for the opening \u2014 at plies 0-4 of the nets' own first-player trees (D2) they flag at least half of the search's non-optimal preferred White moves, pooled over budgets 200/2000/20000/100000 and the six seeds. Refuted below half; inconclusive on fewer than 20 non-optimal preferred moves",
+      "mode": "test",
+      "proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_certificates_flag_at_least_half_the_search_s_non_optimal_opening_moves",
+      "note": "Prediction at registration: REFUTED \u2014 opening positions have open groups everywhere, so a pure pairing rarely closes; the flag looks only one Black reply ahead. If refuted, certificates cannot supply the opening and the run's certificate labels act only deeper in the tree.",
+      "registered_at": "2026-10-02T17:11:31.374591+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_certificates_flag_at_least_half_the_search_s_non_optimal_opening_moves",
+          "ok": false,
+          "detail": " + refuted\n\ntests/test_c50_certificates_evidence.py:65: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c50_certificates_evidence.py::test_c50_C1_certificates_flag_at_least_half_the_search_s_non_optimal_opening_moves\n1 failed in 0.03s",
+          "drawn_at": "2026-10-02T17:17:09.177536+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_C1_certificates.json.gz",
+        "started": "2026-10-02T17:11:34+00:00"
+      },
+      "pins": {
+        "tests/test_c50_certificates_evidence.py": "f4d3736b5198beff6bad504345a628749975810b135a6d786f115f299af40d45"
+      },
+      "inconclusive_proof": "tests/test_c50_certificates_evidence.py::test_c50_C1_opening_usefulness_is_undecidable"
+    },
+    "h100": {
+      "id": "h100",
+      "claim": "\u00a7C.50 C1b (descriptive, registered after the data): beyond the tactic 'a Black reply ends the game', the Connect-4 certificates add almost nothing on the nets' own trees \u2014 through ply 8 no position is certified and only 106 of 21,175 non-winning White moves (0.5%) are flagged by a certificate (3,008 flags in all, 96% tactical). They grow with the stones on the board: 2, 7, 12, 43 of 150 random positions certified at 20/26/32/38+ stones, certificate-only flags rising from under 3% to over 35% of non-winning moves",
+      "mode": "test",
+      "proof": "tests/test_c50_certificate_flags_evidence.py::test_c50_C1b_on_the_nets_trees_through_ply_8_no_position_is_certified_and_certificates_flag_under_1pct",
+      "note": "Second proof: test_c50_C1b_certificates_grow_with_the_stones_on_the_board. Consequence: the pairing alone cannot fix the opening (h99); it is an endgame tool. Richer Allis rules (aftereven, low/highinverse, before) or a search over certificates would be needed to reach the opening.",
+      "registered_at": "2026-10-02T17:29:30.440827+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c50_certificate_flags_evidence.py::test_c50_C1b_on_the_nets_trees_through_ply_8_no_position_is_certified_and_certificates_flag_under_1pct",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T17:29:30.699724+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c50_C1b_certificate_flags.json.gz",
+        "started": "2026-10-02T17:23:06+00:00"
+      },
+      "pins": {
+        "tests/test_c50_certificate_flags_evidence.py": "260a874489c8f92e2d5545d0782ff07eccf02759bdf4dbd433bc4d90c5c3dc03"
+      }
+    },
+    "h101": {
+      "id": "h101",
+      "claim": "\u00a7C.49 T11 (tree_value_stop_weak): T9's process (strategy tree, no siblings, seeds 371-380) with the relabel search cut from 200 to 50 simulations, and the stop reading made VALUE-AWARE (a raw move also agrees when the search's Q for it is within 0.1 of the Q of the label's top move): no iteration on any seed reads zero while the solver does not certify the net that walked, and on >= 8/10 seeds the first zero comes 0-3 iterations after the first certified net; refuted on any false stop or at <= 5 timely seeds; inconclusive between, or when fewer than 8 seeds ever certify",
+      "mode": "test",
+      "proof": "tests/test_c49_value_stop_evidence.py::test_c49_T11_under_a_weak_search_the_value_stop_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+      "note": "Recalibrates the stop before the solver-free Connect-4 run uses it (plan 1.2). delta 0.1 and 50 sims fixed before the data. The share rule's reading is recorded beside it (reported: when it would have stopped). Era 0c8fa3e34fdc, measurement ee230228a735. Cost estimate: T9 took ~17 min/seed single-thread at 200 sims; at 50 sims ~10-12 min/seed, 4 workers: ~35-45 min wall.",
+      "registered_at": "2026-10-02T17:48:15.781121+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_T11_tree_value_stop_weak.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_value_stop_evidence.py": "f81b735e427d22a3278daeca86ab90f1f8ca4eae28859eac05c7cf02e99c5f44",
+        "harness/floor_value_stop.py": "175eced9e549a3545088b79e9dccd423f13f520c2f0072c31c0e16c17771b098",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_value_stop_evidence.py::test_c49_T11_the_value_stop_reading_is_undecidable"
     }
   }
 }

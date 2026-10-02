@@ -27,8 +27,8 @@
     },
     {
       "name": "tree rows carry a value",
-      "old": "tree_rows = [(x, pi, float(\"nan\")) for st",
-      "new": "tree_rows = [(x, pi, _v) for st"
+      "old": "tree_rows = [(row[0], row[1], float(\"nan\")) for st",
+      "new": "tree_rows = [(row[0], row[1], row[2]) for st"
     },
     {
       "name": "tree rows not trained",
@@ -47,8 +47,8 @@
     },
     {
       "name": "disagreements not recorded",
-      "old": "\"tree_disagreements\": tree_disagree}",
-      "new": "\"tree_disagreements\": 0}"
+      "old": "\"tree_disagreements\": tree_disagree,\n",
+      "new": "\"tree_disagreements\": 0,\n"
     },
     {
       "name": "walked reports kept",
@@ -85,5 +85,66 @@
       "old": "            if strategy_tree is not None:\n                reanalyze_note.update",
       "new": "            if True:\n                reanalyze_note.update"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:46:18+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "refusal removed": ["test_c49_strategy_tree_needs_the_whole_buffer_relabelled"],
+      "refusal accepts partial relabel": [
+        "test_c49_strategy_tree_needs_the_whole_buffer_relabelled"
+      ],
+      "buffered positions retrained": [
+        "test_c49_a_mirror_image_of_a_buffered_position_is_held_exactly_when_images_are_trained[True-1]",
+        "test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice"
+      ],
+      "tree rows carry a value": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]"
+      ],
+      "tree rows not trained": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]",
+        "test_c49_steps_matched_keeps_tree_rows_out_of_the_epoch_even_when_no_sibling_was_added"
+      ],
+      "tree rows not augmented": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]"
+      ],
+      "nan count ignores tree": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]",
+        "test_c49_steps_matched_keeps_tree_rows_out_of_the_epoch_even_when_no_sibling_was_added"
+      ],
+      "disagreements not recorded": [
+        "test_c49_the_history_records_the_disagreements_graded_on_the_walked_moves_and_their_labels"
+      ],
+      "walked reports kept": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]",
+        "test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice"
+      ],
+      "positions reports walked": [
+        "test_c49_a_mirror_image_of_a_buffered_position_is_held_exactly_when_images_are_trained[True-1]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]",
+        "test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice"
+      ],
+      "depth ignored": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]"
+      ],
+      "player ignored": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]"
+      ],
+      "raw-key dedupe under augment": [
+        "test_c49_a_mirror_image_of_a_buffered_position_is_held_exactly_when_images_are_trained[True-1]"
+      ],
+      "epoch cap ignores tree": [
+        "test_c49_steps_matched_keeps_tree_rows_out_of_the_epoch_even_when_no_sibling_was_added"
+      ],
+      "readings without knob": ["test_c49_without_the_knob_the_history_has_no_tree_readings"]
+    }
+  }
 }

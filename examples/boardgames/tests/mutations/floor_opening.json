@@ -1,0 +1,108 @@
+{
+  "file": "harness/floor_opening.py",
+  "tests": ["tests/test_floor_opening.py"],
+  "mutations": [
+    {
+      "name": "pooled instead of every net",
+      "old": "good = [int(b) for b in budgets if min(shares[b].values()) >= spec[\"support_at\"]]",
+      "new": "good = [int(b) for b in budgets if pooled[b] >= spec[\"support_at\"]]"
+    },
+    {
+      "name": "support bar strict",
+      "old": "min(shares[b].values()) >= spec[\"support_at\"]",
+      "new": "min(shares[b].values()) > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute read at the smallest budget",
+      "old": "pooled[budgets[-1]] < spec[\"refute_below\"]",
+      "new": "pooled[budgets[0]] < spec[\"refute_below\"]"
+    },
+    {
+      "name": "refute bar inclusive",
+      "old": "pooled[budgets[-1]] < spec[\"refute_below\"]",
+      "new": "pooled[budgets[-1]] <= spec[\"refute_below\"]"
+    },
+    {
+      "name": "deep budget over every ply",
+      "old": "shallow = [p for p in everything if p[\"ply\"] <= cfg[\"deep_plies\"]]",
+      "new": "shallow = everything"
+    },
+    {
+      "name": "budget coverage unchecked",
+      "old": "            if set(p[\"preferred\"]) != wanted:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "optimal and ply unchecked",
+      "old": "            if not p[\"optimal\"] or not 0 <= p[\"ply\"] <= cfg[\"max_ply\"]:\n",
+      "new": "            if not p[\"optimal\"]:\n"
+    },
+    {
+      "name": "empty net accepted",
+      "old": "        if not row.get(\"positions\"):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "any net accepted",
+      "old": "        if row.get(\"net_file_sha256\") != spec[\"nets\"].get(seed):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if evidence.get(\"config\") != cfg:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if evidence.get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "measurement unchecked",
+      "old": "    if evidence.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if sorted(rows) != sorted(spec[\"nets\"]):\n",
+      "new": "    if False:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T14:54:33+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "pooled instead of every net": [
+        "test_one_net_below_the_bar_at_every_budget_is_not_supported",
+        "test_the_refutation_reads_the_largest_budget_and_exactly_80_percent_is_not_below_it"
+      ],
+      "support bar strict": ["test_exactly_95_percent_on_every_net_is_enough"],
+      "refute read at the smallest budget": [
+        "test_the_refutation_reads_the_largest_budget_and_exactly_80_percent_is_not_below_it"
+      ],
+      "refute bar inclusive": [
+        "test_the_refutation_reads_the_largest_budget_and_exactly_80_percent_is_not_below_it"
+      ],
+      "deep budget over every ply": [
+        "test_a_budget_right_at_95_percent_of_every_net_s_opening_positions_supports",
+        "test_exactly_95_percent_on_every_net_is_enough",
+        "test_one_net_below_the_bar_at_every_budget_is_not_supported",
+        "test_shares_are_also_broken_out_by_ply",
+        "test_the_deep_budget_is_reported_only_for_the_shallowest_plies",
+        "test_the_largest_budget_still_wrong_too_often_refutes",
+        "test_the_refutation_reads_the_largest_budget_and_exactly_80_percent_is_not_below_it"
+      ],
+      "budget coverage unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[an"],
+      "optimal and ply unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[too"],
+      "empty net accepted": ["test_a_net_without_opening_positions_is_named"],
+      "any net accepted": ["test_evidence_that_is_not_the_registered_run_is_not_run[another"],
+      "config unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[config]"],
+      "era unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[era]"],
+      "measurement unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[measurement]"
+      ],
+      "seeds unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[missing"]
+    }
+  }
+}

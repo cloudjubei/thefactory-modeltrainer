@@ -68,28 +68,41 @@
 
 ## 1. Board games — in flight
 
-**1.1 T10, the solver-free Connect-4 run (h75) — running.**
-- Setup: seeds 361–370, cap 60 iterations, canon conv-32 (20,616 params), strategy tree to 10 plies, stop on full
-  agreement, then solver certification through 10 plies.
-- Seed 361 did not stop: disagreements fell 1,280 → 21 by iteration 13, then plateaued at 50–90 through iteration 60.
-  ~3.5 h per seed, so ~35 h of training plus certification.
-- On exit: verify h75; back up; update the digest.
+**Where the solver-free Connect-4 process stands.**
+- Its nets are wrong in the opening, and their own search agrees with the wrong moves (h91, h92).
+- More search does not help: 200 → 20,000 sims leaves opening labels at 84–87%, and the first moves at 33–60%
+  (h96; h93 inconclusive).
+- So **self-search cannot supply the opening**. The open question is which other source of truth can, without the
+  solver.
+- **Written certificates (option (a), the user's choice) do not reach the opening either.**
+  - The claimeven/baseinverse pairing (`harness/c4_certificates.py`) is sound: no contradictions (h98).
+  - It flags none of the search's 144 wrong opening moves (h99 refuted).
+  - Through ply 8 of the nets' trees it certifies no position, and adds 0.5% of non-winning moves beyond the
+    immediate-win tactic (h100). It is an endgame tool.
+  - So certificate labels are **not** wired into training.
 
-**1.2 Diagnose the plateau** (alongside T10, low priority; pre-registered as descriptive).
-- Method: certify seed 361's saved final net through 10 plies, and solve exactly the positions where the walk
-  disagreed. Classify each disagreement: net wrong / search wrong / both.
-- **Outcome decides the next step:**
-  - **mostly search wrong** → redesign the stop signal, and recalibrate it on tic-tac-toe with a deliberately
-    weakened search before using it on Connect-4. Candidates: stronger search at walk positions only; agreement
-    only where the search is confident; a calibrated agreement-rate threshold;
-  - **mostly net wrong** → capacity or coverage: conv-48/64 at depth 10, re-run as T10.
+**1.1 Value-aware stop — T11 recalibration on tic-tac-toe (running, h101).**
+- The stop now also counts a raw move as agreeing when its search Q is within δ = 0.1 of the label's top move
+  (`train_alphazero(stop_value_delta=…)`; the share reading is kept beside it).
+- T11: T9's process, relabel search weakened 200 → 50 sims, seeds 371–380
+  (`scripts/small_floor.py --spec floor_value_stop`).
+- **Gate:** if h101 is refuted (any false stop), the value stop is unsafe and T12 does not launch.
 
-**1.3 After T10 exits.**
-- Run the 6 pending mutation specs, so `tests/test_mutation_specs.py` is green again: `neural_strategy_tree`,
-  `neural_parallel_relabel`, `neural_stop_on_agreement`, `strategy_tree`, `transfer_on_pass`,
-  `transfer_forbid_native`.
-- Add an automatic trial log to every driver: a start line, then an end or failure line per run, so aborted runs
-  are recorded without anyone remembering to.
+**1.2 T12 — solver-free Connect-4 with the value-aware stop (pre-register and launch once h101 holds).**
+- T10's process plus δ = 0.1; seeds 381–390; cap 60; certify the stopped nets through 10 plies
+  (`harness/floor_c4_value.py`, `scripts/c4_solver_free.py --value-delta 0.1`).
+- Cost: T10 took ~2.7 h per seed with 8 relabel workers, so ≤ ~27 h for 10 seeds, less where a seed stops.
+- Prediction at registration: **refuted.** The opening labels are wrong (h91, h96) and nothing here fixes them. The
+  run's value is the false-stop count: does the value stop fire on C4, and on a wrong net?
+
+**1.3 The opening's source of truth — still open (decision for the user after T12).**
+- **(a2) Stronger certificates:** Allis's remaining rules (aftereven, lowinverse, highinverse, before), and a
+  proof-number search with certificates at the leaves, as in VICTOR. A bounded search, declared like the playbook's
+  lookahead.
+- **(b) An opening exception table** in the hybrid: a small solver-built table for the first plies (WeakC4 uses
+  ~2,600 opening nodes), counted in the description length. The process stays solver-free beyond it.
+- **(c) A stronger value signal:** much longer self-play or larger nets. Costly, and the literature says it can work
+  for Connect-4 given enough compute.
 
 ## 2. Board games — next
 
@@ -113,18 +126,21 @@ Every rule is graded **position-sound** (optimal at any legal position) or **str
 play's positions only). Only position-sound rules may label arbitrary positions or override a net. Measure each
 rule standalone and in decision-list order, by ply.
 
-- **3.1 E2 — minimal rule lists for tic-tac-toe** (pre-register).
-  - Method: the SAT encoding of Yu, Ignatiev, Stuckey & Le Bodic 2021, minimising literals.
-  - Targets:
-    - the smallest position-sound list over all 4,520 positions;
-    - the smallest strategy-sound list for each side (Newell–Simon's 9 rules are the bound to beat).
-  - **Success:** each list is proven minimal (UNSAT at k − 1) relative to the declared predicate language, and
-    verified exhaustively.
+- **3.1 E2b — a richer predicate language for tic-tac-toe.**
+  - Why: with the 11 current predicates no position-sound playbook exists up to 60 rules (h94 refuted, h95). The
+    obstruction is across positions, so add predicates, not rules.
+  - Candidates: layered MIGO-style predicates `wins_in_k` / `loses_in_k` (k = 1, 2, 3, bounded lookahead),
+    `blocks_fork_by_threat`, line counts. Each predicate's lookahead cost is declared, so a rule cannot hide a solver.
+  - Method: `harness/rule_search.py` (SAT; python-sat installed) and `scripts/minimal_playbook.py`.
+  - **Success (pre-register):** a proven-minimal position-sound playbook with the richest predicate costing at most
+    k = 3 plies of lookahead. Report the size against Newell–Simon's 9 rules.
+  - Then the strategy-sound list per side.
 - **3.2 E4 — extraction from a net.** Fit the rule language to the 938-param net's moves (VIPER-style,
   mistake-cost weighting), then verify with the solver. **Success:** as precise as E2's list.
 - **3.3 Connect-4 rules.**
   - Move rules: win, block, never play under their threat, double threats via threat-space search.
-  - **Track C — value certificates:** Allis's nine rules with their compatibility check.
+  - **Track C — value certificates:** the pairing (claimeven + baseinverse) is built and sound (h98–h100); next are
+    Allis's other rules with their compatibility check (see 1.3 (a2)).
   - Measure on three sets: a ply-matched sample, positions our agents visit, and the rules' own play.
 - **3.4 E3 — hybrid on Connect-4.** The playbook in front of a smaller certified net at depth 8. **Success:** at
   most half of 1,576 params, with the rules' compute declared and bounded and reported beside the params.

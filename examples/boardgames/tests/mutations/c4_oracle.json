@@ -1,0 +1,60 @@
+{
+  "file": "harness/c4_oracle.py",
+  "tests": ["tests/test_c4_oracle.py"],
+  "mutations": [
+    {
+      "name": "child keeps the parent's sign",
+      "old": "out[game.state_key(child)] = -int(v)",
+      "new": "out[game.state_key(child)] = int(v)"
+    },
+    {
+      "name": "finished games recorded",
+      "old": "            if not game.is_terminal(child):\n",
+      "new": "            if True:\n"
+    },
+    {
+      "name": "deepest failure read",
+      "old": "return min(int(p) for p in cert[\"failures_by_ply\"])",
+      "new": "return max(int(p) for p in cert[\"failures_by_ply\"])"
+    },
+    {
+      "name": "incomplete walk certified",
+      "old": "    if not cert[\"certified\"]:\n        raise",
+      "new": "    if False:\n        raise"
+    },
+    {
+      "name": "child value not negated",
+      "old": "else -value_of(child)",
+      "new": "else value_of(child)"
+    },
+    {
+      "name": "verdicts swapped",
+      "old": "(True, False): \"search_wrong\", (False, True): \"net_wrong\"",
+      "new": "(True, False): \"net_wrong\", (False, True): \"search_wrong\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T13:23:32+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "child keeps the parent's sign": [
+        "test_recorded_values_give_each_child_the_negated_value_its_move_keeps_for_the_mover"
+      ],
+      "finished games recorded": ["test_a_move_that_ends_the_game_is_not_a_recorded_child"],
+      "deepest failure read": [
+        "test_the_deepest_certified_ply_is_where_the_first_failure_sits[cert1-4]"
+      ],
+      "incomplete walk certified": [
+        "test_a_walk_cut_short_is_never_counted_as_certified_to_its_horizon"
+      ],
+      "child value not negated": [
+        "test_a_move_is_optimal_exactly_when_it_keeps_the_position_s_value"
+      ],
+      "verdicts swapped": [
+        "test_a_disagreement_is_classified_by_which_side_misses_the_optimum[False-True-net_wrong]",
+        "test_a_disagreement_is_classified_by_which_side_misses_the_optimum[True-False-search_wrong]"
+      ]
+    }
+  }
+}

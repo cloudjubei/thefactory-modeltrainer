@@ -5,18 +5,15 @@
     "tests/test_neural.py::test_c49_parallel_relabelling_needs_a_separate_relabel_search",
     "tests/test_neural.py::test_c49_a_relabel_worker_refuses_any_random_draw",
     "tests/test_neural.py::test_c49_with_workers_every_relabel_goes_through_the_worker_pool",
-    "tests/test_neural.py::test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers"
+    "tests/test_neural.py::test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers",
+    "tests/test_neural.py::test_c49_a_relabel_worker_hands_back_plain_arrays_not_shared_memory_tensors",
+    "tests/test_neural.py::test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever"
   ],
   "mutations": [
     {
       "name": "workers draw from a real rng",
-      "old": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, _NoRandom())",
-      "new": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, random.Random(0))"
-    },
-    {
-      "name": "chunks joined out of order",
-      "old": "        out.extend(part)\n    return out\n\n\ndef _endgame_enabled",
-      "new": "        out[:0] = part\n    return out\n\n\ndef _endgame_enabled"
+      "old": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, _NoRandom(), with_q)",
+      "new": "AlphaZeroAgent(st[\"net\"], **agent_kwargs), states, random.Random(0), with_q)"
     },
     {
       "name": "stale net kept",
@@ -47,6 +44,72 @@
       "name": "no relabel-search check",
       "old": "if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0 or reanalyze_sims is None",
       "new": "if relabel_workers != 1 and (relabel_workers < 1 or reanalyze_frac <= 0.0"
+    },
+    {
+      "name": "chunks joined out of order",
+      "old": "for part in parts for row in part]",
+      "new": "for part in reversed(parts) for row in part]"
+    },
+    {
+      "name": "workers hand back tensors",
+      "old": "    return [(row[0].numpy(), *row[1:]) for row in labels]",
+      "new": "    return labels"
+    },
+    {
+      "name": "pool waits forever",
+      "old": "parts = pending.get(timeout=RELABEL_TIMEOUT_S)",
+      "new": "parts = pending.get()"
+    },
+    {
+      "name": "silent pool swallowed",
+      "old": "        raise RuntimeError(f\"the relabel pool did not answer",
+      "new": "        return []\n        raise RuntimeError(f\"the relabel pool did not answer"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:44:24+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "workers draw from a real rng": [
+        "test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers",
+        "test_c49_a_relabel_worker_refuses_any_random_draw"
+      ],
+      "stale net kept": [
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[buffer]",
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[siblings_and_tree]"
+      ],
+      "pool never used": [
+        "test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers",
+        "test_c49_with_workers_every_relabel_goes_through_the_worker_pool"
+      ],
+      "root noise hidden from workers": [
+        "test_c49_a_relabel_search_with_root_noise_is_refused_by_the_workers"
+      ],
+      "version never advances": [
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[buffer]",
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[siblings_and_tree]"
+      ],
+      "no worker check": ["test_c49_parallel_relabelling_needs_a_separate_relabel_search[no"],
+      "no relabel-search check": [
+        "test_c49_parallel_relabelling_needs_a_separate_relabel_search[no"
+      ],
+      "chunks joined out of order": [
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[buffer]",
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[siblings_and_tree]"
+      ],
+      "workers hand back tensors": [
+        "test_c49_a_relabel_worker_hands_back_plain_arrays_not_shared_memory_tensors",
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[buffer]",
+        "test_c49_relabelling_across_worker_processes_trains_bit_identically[siblings_and_tree]",
+        "test_c49_with_workers_every_relabel_goes_through_the_worker_pool"
+      ],
+      "pool waits forever": [
+        "test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever"
+      ],
+      "silent pool swallowed": [
+        "test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever"
+      ]
+    }
+  }
 }

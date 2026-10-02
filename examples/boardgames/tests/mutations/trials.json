@@ -1,0 +1,54 @@
+{
+  "file": "harness/trials.py",
+  "tests": ["tests/test_trials.py"],
+  "mutations": [
+    {
+      "name": "failure not logged",
+      "old": "        _append(path, {\"event\": \"end\", \"id\": run_id, \"status\": \"failed\"",
+      "new": "        pass\n        dict(path=path, x={\"event\": \"end\", \"id\": run_id, \"status\": \"failed\""
+    },
+    {
+      "name": "only exceptions caught",
+      "old": "    except BaseException as e:",
+      "new": "    except Exception as e:"
+    },
+    {
+      "name": "error swallowed",
+      "old": "                       \"at\": _now(), \"seconds\": round(time.time() - t0, 1)})\n        raise\n",
+      "new": "                       \"at\": _now(), \"seconds\": round(time.time() - t0, 1)})\n        return\n"
+    },
+    {
+      "name": "log overwritten",
+      "old": "    with open(path, \"a\") as f:",
+      "new": "    with open(path, \"w\") as f:"
+    },
+    {
+      "name": "unfinished read as completed",
+      "old": "ends[i][\"status\"] if i in ends else \"aborted\"",
+      "new": "ends[i][\"status\"] if i in ends else \"completed\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T16:54:49+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "failure not logged": [
+        "test_a_run_stopped_by_systemexit_is_logged_as_failed",
+        "test_a_run_that_raises_is_logged_as_failed_with_its_error_and_the_error_still_propagates"
+      ],
+      "only exceptions caught": ["test_a_run_stopped_by_systemexit_is_logged_as_failed"],
+      "error swallowed": [
+        "test_a_run_stopped_by_systemexit_is_logged_as_failed",
+        "test_a_run_that_raises_is_logged_as_failed_with_its_error_and_the_error_still_propagates"
+      ],
+      "log overwritten": [
+        "test_a_completed_run_appends_a_start_line_and_an_end_line",
+        "test_runs_append_and_a_start_without_an_end_reads_as_aborted"
+      ],
+      "unfinished read as completed": [
+        "test_runs_append_and_a_start_without_an_end_reads_as_aborted"
+      ]
+    }
+  }
+}

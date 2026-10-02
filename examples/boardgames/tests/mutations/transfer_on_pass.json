@@ -20,5 +20,18 @@
         }
       ]
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T13:09:36+00:00",
+    "killed": 2,
+    "survived": [],
+    "killed_by": {
+      "observer never called": [
+        "test_an_observer_is_handed_the_net_after_every_pass_and_the_run_stays_bit_identical"
+      ],
+      "observer before training": [
+        "test_an_observer_is_handed_the_net_after_every_pass_and_the_run_stays_bit_identical"
+      ]
+    }
+  }
 }

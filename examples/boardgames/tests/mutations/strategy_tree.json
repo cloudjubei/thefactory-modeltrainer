@@ -51,6 +51,105 @@
       "name": "illegal moves chosen",
       "old": "logits.masked_fill(~legal, float(\"-inf\"))",
       "new": "logits"
+    },
+    {
+      "name": "value rows unchecked",
+      "old": "    if len(values) != len(moves):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "negative delta accepted",
+      "old": "    if delta < 0:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "delta ignored",
+      "old": "q[a] >= top - delta",
+      "new": "q[a] >= top"
+    },
+    {
+      "name": "unvisited move agrees",
+      "old": "return q[a] is not None and top is not None and q[a] >= top - delta",
+      "new": "return q[a] is None or q[a] >= top - delta"
+    },
+    {
+      "name": "share rule dropped with values",
+      "old": "        if pi[a] >= AGREE_SHARE * max(pi):\n            return True",
+      "new": "        if False:\n            return True"
+    },
+    {
+      "name": "top by value not by label",
+      "old": "top = q[pi.index(max(pi))]",
+      "new": "top = max(v for v in q.values() if v is not None)"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:38:48+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "depth zero accepted": ["test_a_depth_of_zero_is_refused"],
+      "repeats walked again": ["test_a_position_reached_again_at_a_later_ply_is_not_walked_again"],
+      "terminals kept": [
+        "test_the_chooser_is_asked_once_per_ply_with_that_ply_s_positions",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[None-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[None-1]"
+      ],
+      "opponent positions returned": [
+        "test_a_position_reached_again_at_a_later_ply_is_not_walked_again",
+        "test_the_chooser_is_asked_once_per_ply_with_that_ply_s_positions",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[1-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[2-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[2-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[3-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[3-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[5-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[5-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[None-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[None-1]"
+      ],
+      "one ply too deep": [
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[1-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[2-0]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[3-1]",
+        "test_the_walk_returns_every_position_of_the_player_s_own_tree_once_in_breadth_first_order[5-1]"
+      ],
+      "equal share disagrees": [
+        "test_a_raw_move_disagrees_only_when_its_search_share_is_under_half_the_top_move_s[1-label6-False]"
+      ],
+      "any lower share disagrees": [
+        "test_a_raw_move_disagrees_only_when_its_search_share_is_under_half_the_top_move_s[1-label1-False]",
+        "test_a_raw_move_disagrees_only_when_its_search_share_is_under_half_the_top_move_s[1-label6-False]",
+        "test_disagreements_are_counted_over_every_position"
+      ],
+      "length check removed": ["test_disagreements_are_counted_over_every_position"],
+      "mode not restored": [
+        "test_the_raw_chooser_is_the_argmax_over_legal_moves_and_leaves_the_net_as_it_found_it"
+      ],
+      "illegal moves chosen": [
+        "test_the_raw_chooser_is_the_argmax_over_legal_moves_and_leaves_the_net_as_it_found_it"
+      ],
+      "value rows unchecked": [
+        "test_value_agreement_needs_one_value_row_per_position_and_a_non_negative_delta"
+      ],
+      "negative delta accepted": [
+        "test_value_agreement_needs_one_value_row_per_position_and_a_non_negative_delta"
+      ],
+      "delta ignored": [
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[0-label0-q0-False]",
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[0-label1-q1-False]",
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[0-label8-q8-False]"
+      ],
+      "unvisited move agrees": [
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[0-label3-q3-True]",
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[1-label5-q5-True]"
+      ],
+      "share rule dropped with values": [
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[1-label7-q7-False]"
+      ],
+      "top by value not by label": [
+        "test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s[0-label8-q8-False]"
+      ]
+    }
+  }
 }

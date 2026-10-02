@@ -12,5 +12,22 @@
       "old": "    finally:\n        solver._solve, solver.move_values, native_solver._library = saved",
       "new": "    finally:\n        solver._solve, solver.move_values = saved[:2]"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T13:10:17+00:00",
+    "killed": 2,
+    "survived": [],
+    "killed_by": {
+      "native loader not refused": [
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[move_values]",
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[position_value]",
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[solve_position]"
+      ],
+      "native loader not restored": [
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[move_values]",
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[position_value]",
+        "test_forbid_solver_also_refuses_every_native_solver_entry_and_restores_it[solve_position]"
+      ]
+    }
+  }
 }

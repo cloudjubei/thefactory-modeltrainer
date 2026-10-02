@@ -1,0 +1,13 @@
+{"event": "start", "id": "6c560c50fec1", "name": "minimal_playbook", "argv": ["--language", "layered", "--out", "evidence/c50_E2b_layered_playbook.json.gz"], "at": "2026-10-02T17:00:29+00:00"}
+{"event": "end", "id": "6c560c50fec1", "status": "completed", "at": "2026-10-02T17:00:33+00:00", "seconds": 3.4}
+{"event": "start", "id": "4c8cbbe291b5", "name": "c4_certificate_pilot", "argv": ["--workers", "6", "--out", "evidence/c50_C1_certificates.json.gz"], "at": "2026-10-02T17:11:34+00:00"}
+{"event": "end", "id": "4c8cbbe291b5", "status": "completed", "at": "2026-10-02T17:16:55+00:00", "seconds": 321.4}
+{"event": "start", "id": "0828caeed2eb", "name": "c4_certificate_pilot", "argv": ["--workers", "6", "--out", "evidence/c50_C1_certificates.json.gz"], "at": "2026-10-02T17:17:33+00:00"}
+{"event": "end", "id": "0828caeed2eb", "status": "failed", "error": "ValueError: c50_C1_certificates.json.gz is already recorded (0eddfed663d8) \u2014 evidence is written once; pass the recorded hash as `replaces` to replace that exact version", "at": "2026-10-02T17:22:58+00:00", "seconds": 325.2}
+{"event": "start", "id": "6ec20514ac45", "name": "c4_certificate_pilot", "argv": ["--workers", "6", "--out", "evidence/c50_C1b_certificate_flags.json.gz"], "at": "2026-10-02T17:23:06+00:00"}
+{"event": "end", "id": "6ec20514ac45", "status": "completed", "at": "2026-10-02T17:29:11+00:00", "seconds": 365.6}
+{"event": "start", "id": "9dfe291e24fe", "name": "c4_solver_free", "argv": ["--help"], "at": "2026-10-02T17:49:24+00:00"}
+{"event": "end", "id": "9dfe291e24fe", "status": "failed", "error": "SystemExit: 0", "at": "2026-10-02T17:49:24+00:00", "seconds": 0.8}
+{"event": "start", "id": "5b2a86c90bad", "name": "small_floor", "argv": ["--spec", "floor_value_stop", "--arm", "tree_value_stop_weak", "--workers", "4", "--out", "evidence/c49_T11_tree_value_stop_weak.json.gz"], "at": "2026-10-02T17:59:06+00:00"}
+{"event": "start", "id": "5a7479030177", "name": "c4_solver_free", "argv": ["--seeds", "999", "--iterations", "2", "--tree-depth", "2", "--certify-depth", "2", "--workers", "2", "--threads", "1", "--value-delta", "0.1", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/t12_smoke.json.gz"], "at": "2026-10-02T17:59:21+00:00"}
+{"event": "end", "id": "5a7479030177", "status": "completed", "at": "2026-10-02T18:00:13+00:00", "seconds": 52.0}

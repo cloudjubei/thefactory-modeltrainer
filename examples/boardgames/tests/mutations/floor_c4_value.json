@@ -1,0 +1,52 @@
+{
+  "file": "harness/floor_c4_value.py",
+  "tests": ["tests/test_floor_c4_value.py"],
+  "mutations": [
+    {
+      "name": "delta not in the recipe",
+      "old": "T12_CONFIG = {**T10_CONFIG, \"stop_value_delta\": 0.1}",
+      "new": "T12_CONFIG = {**T10_CONFIG}"
+    },
+    {
+      "name": "another delta",
+      "old": "\"stop_value_delta\": 0.1}",
+      "new": "\"stop_value_delta\": 0.2}"
+    },
+    {
+      "name": "T10's seeds reused",
+      "old": "tuple(range(381, 391))",
+      "new": "tuple(range(361, 371))"
+    },
+    {
+      "name": "fewer seeds",
+      "old": "tuple(range(381, 391))",
+      "new": "tuple(range(381, 387))"
+    },
+    {
+      "name": "bars changed",
+      "old": "SPEC = {**T10_SPEC, \"config\"",
+      "new": "SPEC = {**T10_SPEC, \"support_at\": 6, \"config\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:49:43+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "delta not in the recipe": [
+        "test_a_run_on_t10_s_recipe_is_not_t12",
+        "test_the_recipe_is_t10_s_with_the_value_delta_and_fresh_seeds"
+      ],
+      "another delta": ["test_the_recipe_is_t10_s_with_the_value_delta_and_fresh_seeds"],
+      "T10's seeds reused": [
+        "test_stopped_and_certified_seeds_support_and_false_stops_are_reported",
+        "test_the_recipe_is_t10_s_with_the_value_delta_and_fresh_seeds"
+      ],
+      "fewer seeds": [
+        "test_stopped_and_certified_seeds_support_and_false_stops_are_reported",
+        "test_the_recipe_is_t10_s_with_the_value_delta_and_fresh_seeds"
+      ],
+      "bars changed": ["test_the_recipe_is_t10_s_with_the_value_delta_and_fresh_seeds"]
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "file": "harness/floor_plateau.py",
+  "tests": ["tests/test_floor_plateau.py"],
+  "mutations": [
+    {
+      "name": "search-wrong not counted for the net",
+      "old": "right = (totals[\"both_optimal\"] + totals[\"search_wrong\"]) / pooled if pooled else None",
+      "new": "right = totals[\"both_optimal\"] / pooled if pooled else None"
+    },
+    {
+      "name": "harmless disagreements not counted",
+      "old": "right = (totals[\"both_optimal\"] + totals[\"search_wrong\"]) / pooled if pooled else None",
+      "new": "right = totals[\"search_wrong\"] / pooled if pooled else None"
+    },
+    {
+      "name": "support bar strict",
+      "old": "return \"supported\" if value >= high",
+      "new": "return \"supported\" if value > high"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "else \"refuted\" if value <= low",
+      "new": "else \"refuted\" if value < low"
+    },
+    {
+      "name": "no disagreement names a blocker",
+      "old": "blocker = (\"inconclusive\" if right is None",
+      "new": "blocker = (\"supported\" if right is None"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if evidence.get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "measurement unchecked",
+      "old": "    if evidence.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if evidence.get(\"config\") != spec[\"config\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if sorted(rows) != sorted(spec[\"nets\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "any net accepted",
+      "old": "        if row.get(\"net_file_sha256\") != spec[\"nets\"].get(seed):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "class sum unchecked",
+      "old": "        if sum(row[\"classes\"][c] for c in CLASSES) != row.get(\"disagreements\"):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "any depth",
+      "old": "        if cert.get(\"horizon\") != spec[\"config\"][\"depth\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "cut walk accepted",
+      "old": "        if not cert[\"certified\"] and not cert[\"failures\"]:\n",
+      "new": "        if False:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T13:24:50+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "search-wrong not counted for the net": [
+        "test_mostly_right_nets_blocked_by_their_search_support_the_search_reading",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes1-supported]"
+      ],
+      "harmless disagreements not counted": [
+        "test_mostly_right_nets_blocked_by_their_search_support_the_search_reading",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes0-supported]",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes1-supported]",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes4-inconclusive]"
+      ],
+      "support bar strict": [
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes0-supported]",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes1-supported]",
+        "test_the_certified_reading_counts_nets_certified_through_the_horizon[1-supported]"
+      ],
+      "refute bar strict": [
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes2-refuted]",
+        "test_the_blocker_reading_pools_the_share_of_disagreements_where_the_net_is_right[classes3-refuted]",
+        "test_the_certified_reading_counts_nets_certified_through_the_horizon[2-refuted]"
+      ],
+      "no disagreement names a blocker": ["test_no_disagreement_at_all_cannot_name_a_blocker"],
+      "era unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[era]"],
+      "measurement unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[measurement]"
+      ],
+      "config unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[config]"],
+      "seeds unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[missing"],
+      "any net accepted": ["test_evidence_that_is_not_the_registered_run_is_not_run[another"],
+      "class sum unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[classes"],
+      "any depth": ["test_evidence_that_is_not_the_registered_run_is_not_run[shallower"],
+      "cut walk accepted": ["test_a_certificate_cut_short_is_named_as_such"]
+    }
+  }
+}

@@ -231,3 +231,31 @@ def test_own_play_does_not_walk_a_position_reached_again():
     from harness.playbook import own_play_positions
 
     assert own_play_positions([Rule("win", (("wins", True),))], _Cycle(), 0, 0) == [0, 2]
+
+
+def test_a_forced_win_counts_every_reply_and_stops_at_its_ply_budget():
+    from harness.playbook import forced_win
+
+    edge = _ttt("xo.......", 0)
+    assert forced_win(TTT, edge, 4, 5) and not forced_win(TTT, edge, 4, 3)
+    assert forced_win(TTT, _ttt("xx.oo....", 0), 2, 1)
+    assert not forced_win(TTT, _ttt("xoxxooox.", 0), 8, 5)
+    assert not any(forced_win(TTT, _ttt(".........", 0), m, 5) for m in range(9))
+
+
+def test_the_layered_predicates_on_tic_tac_toe():
+    edge = _ttt("xo.......", 0)
+    assert 4 in _holds("wins_in_5", TTT, edge)
+    assert _holds("wins_in_5", TTT, _ttt(".........", 0)) == []
+    after_corner = _ttt("x........", 1)
+    assert 1 in _holds("gives_loss_in_6", TTT, after_corner) and 4 not in _holds("gives_loss_in_6", TTT, after_corner)
+    assert _holds("gives_loss_in_4", TTT, after_corner) == []
+    assert _holds("gives_loss_in_4", TTT, _ttt("x...o...x", 1)) == [2, 6]
+
+
+def test_every_predicate_declares_how_many_plies_it_looks_ahead():
+    from harness.playbook import LOOKAHEAD
+
+    assert set(LOOKAHEAD) == set(PREDICATES)
+    assert LOOKAHEAD["corner"] == 0 and LOOKAHEAD["wins"] == 1 and LOOKAHEAD["wins_in_5"] == 5
+    assert LOOKAHEAD["gives_loss_in_6"] == 6

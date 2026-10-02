@@ -1116,9 +1116,9 @@ def test_reanalyze_sims_relabels_with_its_OWN_budget_while_self_play_keeps_the_l
     seen = []
     real = neural.reanalyze_examples
 
-    def spy(game, agent, states, rng):
+    def spy(game, agent, states, rng, with_q=False):
         seen.append(agent.sims)
-        return real(game, agent, states, rng)
+        return real(game, agent, states, rng, with_q)
     monkeypatch.setattr(neural, "reanalyze_examples", spy)
     real_sp = neural.self_play_game
     played = []
@@ -2310,9 +2310,9 @@ def test_c49_a_relabel_worker_refuses_any_random_draw(tmp_path):
     neural.save_net(neural.Connect4Net(**neural.arch_for_game(_C48_ARCH, g)), str(path))
     neural._relabel_worker_init("tictactoe")
     states = [g.initial_state(random.Random(0))]
-    assert len(neural._relabel_worker((str(path), 1, {"sims": 4, "gumbel": True}, states))) == 1
+    assert len(neural._relabel_worker((str(path), 1, {"sims": 4, "gumbel": True}, states, False))) == 1
     with pytest.raises(RuntimeError, match="rng"):
-        neural._relabel_worker((str(path), 2, {"sims": 4, "gumbel": False, "add_noise": True}, states))
+        neural._relabel_worker((str(path), 2, {"sims": 4, "gumbel": False, "add_noise": True}, states, False))
 
 
 def test_c49_with_workers_every_relabel_goes_through_the_worker_pool(monkeypatch):
@@ -2322,7 +2322,7 @@ def test_c49_with_workers_every_relabel_goes_through_the_worker_pool(monkeypatch
     real = neural._parallel_relabel
 
     def spy(*args, **kwargs):
-        calls.append(len(args[-1]))
+        calls.append(len(args[6]))
         return real(*args, **kwargs)
     monkeypatch.setattr(neural, "_parallel_relabel", spy)
     _sha, history, _net = _c48_train(relabel_workers=2, reanalyze_frac=1.0, reanalyze_sims=4, reanalyze_siblings=True,
@@ -2384,3 +2384,115 @@ def test_c49_full_agreement_does_not_stop_a_run_that_did_not_ask_to_stop(monkeyp
     _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, settle_epochs=2,
                                      strategy_tree={"player": 0, "depth": 4})
     assert [h["iteration"] for h in history] == [1, 2, 3, "settle"]
+
+
+def test_c49_a_relabel_with_values_adds_each_legal_move_s_search_q_and_leaves_the_label_unchanged():
+    from games.tictactoe import TicTacToe
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, reanalyze_examples
+
+    g = TicTacToe()
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game(_C48_ARCH, g))
+    s = g.step(g.initial_state(random.Random(0)), 4)
+    plain = reanalyze_examples(g, AlphaZeroAgent(net, sims=6, gumbel=True), [s], random.Random(1))
+    (x, pi, v, q), = reanalyze_examples(g, AlphaZeroAgent(net, sims=6, gumbel=True), [s], random.Random(1),
+                                        with_q=True)
+    assert torch.equal(x, plain[0][0]) and pi == plain[0][1] and v == plain[0][2]
+    assert sorted(q) == g.legal_actions(s)
+    visited = {a: val for a, val in q.items() if val is not None}
+    assert 0 < len(visited) < len(q) and all(-1.0 <= val <= 1.0 for val in visited.values())
+
+
+def test_c49_a_move_that_wins_at_once_has_the_mover_s_search_q_of_plus_one():
+    from games.tictactoe import TicTacToe
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game, reanalyze_examples
+
+    g = TicTacToe()
+    torch.manual_seed(0)
+    s = g.initial_state(random.Random(0))
+    for m in (0, 3, 1, 4):
+        s = g.step(s, m)
+    agent = AlphaZeroAgent(Connect4Net(**arch_for_game(_C48_ARCH, g)), sims=6, gumbel=True)
+    (_x, _pi, _v, q), = reanalyze_examples(g, agent, [s], random.Random(1), with_q=True)
+    assert q[2] == 1.0
+
+
+def test_c49_the_value_stop_needs_the_strategy_tree_and_a_non_negative_delta():
+    with pytest.raises(ValueError, match="stop_value_delta"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, stop_value_delta=0.1)
+    with pytest.raises(ValueError, match="stop_value_delta"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, strategy_tree={"player": 0, "depth": 4},
+                   stop_value_delta=-0.1)
+
+
+def test_c49_with_the_value_stop_the_walk_is_read_with_its_values_and_the_share_reading_is_kept(monkeypatch):
+    import harness.neural as neural
+
+    seen = []
+
+    def reading(moves, labels, values=None, delta=0.0):
+        if values is not None:
+            seen.append((len(values) == len(moves), delta, all(isinstance(q, dict) for q in values)))
+            return 0
+        return 4
+    monkeypatch.setattr(neural, "disagreements", reading)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, settle_epochs=2,
+                                     strategy_tree={"player": 0, "depth": 4}, stop_on_agreement=True,
+                                     stop_value_delta=0.25)
+    assert seen == [(True, 0.25, True)]
+    assert [h["iteration"] for h in history] == [1, 2] and history[-1]["stopped"]
+    assert history[-1]["tree_disagreements"] == 0 and history[-1]["tree_disagreements_share"] == 4
+
+
+def test_c49_without_the_value_stop_the_history_has_no_share_reading():
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, strategy_tree={"player": 0, "depth": 4})
+    assert not any("tree_disagreements_share" in h for h in history)
+
+
+def test_c49_the_value_stop_reads_the_same_across_worker_processes():
+    knobs = {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "strategy_tree": {"player": 0, "depth": 4},
+             "stop_value_delta": 0.1}
+    serial_sha, serial_history, _net = _c48_train(**knobs)
+    parallel_sha, parallel_history, _net = _c48_train(relabel_workers=2, **knobs)
+    assert parallel_sha == serial_sha and _timing_free(parallel_history) == _timing_free(serial_history)
+    assert all("tree_disagreements_share" in h for h in serial_history)
+
+
+def test_c49_a_relabel_worker_hands_back_plain_arrays_not_shared_memory_tensors(tmp_path):
+    import numpy as np
+    import torch
+
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    path = tmp_path / "net.pt"
+    neural.save_net(neural.Connect4Net(**neural.arch_for_game(_C48_ARCH, g)), str(path))
+    neural._relabel_worker_init("tictactoe")
+    out = neural._relabel_worker((str(path), 1, {"sims": 4, "gumbel": True}, [g.initial_state(random.Random(0))],
+                                  False))
+    assert all(isinstance(x, np.ndarray) and not isinstance(x, torch.Tensor) for x, _pi, _v in out)
+
+
+def test_c49_a_relabel_pool_that_stops_answering_raises_instead_of_waiting_forever(tmp_path, monkeypatch):
+    import multiprocessing
+
+    import harness.neural as neural
+    from games.tictactoe import TicTacToe
+
+    asked = {}
+
+    class _Silent:
+        def get(self, timeout=None):
+            asked["timeout"] = timeout
+            raise multiprocessing.TimeoutError()
+
+    class _Pool:
+        def map_async(self, fn, tasks):
+            return _Silent()
+    monkeypatch.setattr(neural, "RELABEL_TIMEOUT_S", 7)
+    g = TicTacToe()
+    net = neural.Connect4Net(**neural.arch_for_game(_C48_ARCH, g))
+    with pytest.raises(RuntimeError, match="did not answer"):
+        neural._parallel_relabel(_Pool(), 2, str(tmp_path), net, 1, {"sims": 4}, [g.initial_state(random.Random(0))])
+    assert asked["timeout"] == 7

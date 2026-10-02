@@ -5,8 +5,9 @@ position after every pass. Writes one evidence file per arm, judged by harness.f
         --out evidence/c49_T6_canon_mlp32.json.gz
 
 `--spec` names the registration module whose arms and seeds to run: floor_small (T6), floor_budget (T7),
-floor_stop (T8) or floor_tree (T9). An arm with a `strategy_tree` also has the solver certify the net's own tree for that player after
-every pass (harness.certify, raw moves) — an observation only; the training never sees it.
+floor_stop (T8), floor_tree (T9) or floor_value_stop (T11). An arm with a `strategy_tree` also has the solver
+certify the net's own tree for that player after every pass (harness.certify, raw moves) — an observation only; the
+training never sees it.
 
 A position counts as TRAINED when it is in the final training set (every recorded self-play position and the last
 sibling set) under the key the net itself tells positions apart by: every orientation is one input for a
@@ -64,7 +65,7 @@ def run(job: dict) -> dict:
             steps_matched=cfg["steps_matched"], buffer_unique=cfg["buffer_unique"],
             settle_epochs=cfg["settle_epochs"], settle_lr_final=cfg["settle_lr_final"],
             record_self_agreement=cfg["record_self_agreement"], sibling_depth=cfg["sibling_depth"],
-            settle_lr=cfg.get("settle_lr"), strategy_tree=tree)
+            settle_lr=cfg.get("settle_lr"), strategy_tree=tree, stop_value_delta=cfg.get("stop_value_delta"))
     if any(h.get("evicted", 0) for h in history):
         raise RuntimeError(f"seed {seed}: the buffer evicted, so the recorded positions are not the trained set")
     net.eval()
@@ -100,7 +101,8 @@ def main() -> None:
     from harness.evidence import save_evidence
     from harness.fingerprint import training_fingerprint
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--spec", required=True, choices=["floor_small", "floor_budget", "floor_stop", "floor_tree"])
+    ap.add_argument("--spec", required=True, choices=["floor_small", "floor_budget", "floor_stop", "floor_tree",
+                                                                 "floor_value_stop"])
     ap.add_argument("--arm", required=True)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", required=True)
@@ -133,4 +135,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from harness.trials import logged
+
+    logged(main, __file__)

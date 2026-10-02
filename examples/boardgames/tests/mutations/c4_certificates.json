@@ -1,0 +1,146 @@
+{
+  "file": "harness/c4_certificates.py",
+  "tests": ["tests/test_c4_certificates.py"],
+  "mutations": [
+    {
+      "name": "lower square claimed",
+      "old": "claimed.add(upper)",
+      "new": "claimed.add(lower)"
+    },
+    {
+      "name": "black stones ignored",
+      "old": "board[s] == BLACK or s in claimed",
+      "new": "s in claimed"
+    },
+    {
+      "name": "one square of a pair refutes",
+      "old": "a in g and b in g",
+      "new": "a in g or b in g"
+    },
+    {
+      "name": "one refuted group suffices",
+      "old": "if all(any(a in g",
+      "new": "if any(any(a in g"
+    },
+    {
+      "name": "odd column not loose",
+      "old": "    if h % 2:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "loose square also in a claimeven",
+      "old": "        h += 1\n",
+      "new": "        pass\n"
+    },
+    {
+      "name": "lowest claimeven dropped",
+      "old": "range(h, ROWS, 2)",
+      "new": "range(h + 2, ROWS, 2)"
+    },
+    {
+      "name": "only the first matching tried",
+      "old": "enumerate(rest):",
+      "new": "enumerate(rest[:1]):"
+    },
+    {
+      "name": "black to move accepted",
+      "old": "    if state.to_move != 0:\n        raise",
+      "new": "    if False:\n        raise"
+    },
+    {
+      "name": "immediate win flagged",
+      "old": "return game.winner(child) != state.to_move",
+      "new": "return True"
+    },
+    {
+      "name": "black winning reply ignored",
+      "old": "if game.is_terminal(after) or black_draw_certificate(after)",
+      "new": "if black_draw_certificate(after)"
+    },
+    {
+      "name": "one reply decides",
+      "old": "            return True\n    return False",
+      "new": "            return True\n        return False\n    return False"
+    },
+    {
+      "name": "group direction dropped",
+      "old": "((0, 1), (1, 0), (1, 1), (1, -1))",
+      "new": "((0, 1), (1, 0), (1, 1))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:09:39+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "lower square claimed": [
+        "test_a_position_with_only_even_columns_is_certified_by_claimevens_alone",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "black stones ignored": [
+        "test_a_position_with_only_even_columns_is_certified_by_claimevens_alone",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "one square of a pair refutes": [
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "one refuted group suffices": [
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_a_position_with_only_even_columns_is_certified_by_claimevens_alone",
+        "test_a_white_three_whose_last_square_black_cannot_claim_leaves_no_certificate[columns1]",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win"
+      ],
+      "odd column not loose": [
+        "test_a_column_s_empty_squares_split_into_its_forced_units[x-units1]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xox-units3]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xoxox-units5]",
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "loose square also in a claimeven": [
+        "test_a_column_s_empty_squares_split_into_its_forced_units[x-units1]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xox-units3]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xoxox-units5]",
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "lowest claimeven dropped": [
+        "test_a_column_s_empty_squares_split_into_its_forced_units[-units0]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[x-units1]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xo-units2]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xox-units3]",
+        "test_a_column_s_empty_squares_split_into_its_forced_units[xoxo-units4]",
+        "test_a_position_with_only_even_columns_is_certified_by_claimevens_alone",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "only the first matching tried": [
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together"
+      ],
+      "black to move accepted": ["test_a_certificate_is_only_for_white_to_move"],
+      "immediate win flagged": [
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_a_move_that_lets_black_win_at_once_is_flagged_and_the_move_that_wins_is_not"
+      ],
+      "black winning reply ignored": [
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_a_move_that_lets_black_win_at_once_is_flagged_and_the_move_that_wins_is_not"
+      ],
+      "one reply decides": [
+        "test_a_move_that_lets_black_win_at_once_is_flagged_and_the_move_that_wins_is_not"
+      ],
+      "group direction dropped": [
+        "test_a_flagged_move_is_never_a_winning_move_and_an_immediate_win_is_never_flagged",
+        "test_every_certified_position_is_one_the_solver_does_not_score_as_a_white_win",
+        "test_the_loose_squares_are_matched_so_that_the_pair_inside_a_live_group_is_kept_together",
+        "test_there_are_69_groups_of_four"
+      ]
+    }
+  }
+}

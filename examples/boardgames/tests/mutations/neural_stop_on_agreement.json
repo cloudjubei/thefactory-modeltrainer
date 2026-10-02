@@ -45,5 +45,30 @@
       "old": "    if stop_on_agreement and strategy_tree is None:\n",
       "new": "    if False:\n"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-02T17:40:54+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "stops before any walk": [
+        "test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked",
+        "test_c49_without_full_agreement_the_run_trains_every_iteration_and_settles"
+      ],
+      "stops whatever the reading": [
+        "test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked",
+        "test_c49_without_full_agreement_the_run_trains_every_iteration_and_settles"
+      ],
+      "stops without the knob": [
+        "test_c49_full_agreement_does_not_stop_a_run_that_did_not_ask_to_stop"
+      ],
+      "trains once more before stopping": [
+        "test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked"
+      ],
+      "settles after a stop": [
+        "test_c49_the_run_stops_when_the_walk_first_reads_full_agreement_and_returns_the_net_that_walked"
+      ],
+      "knob accepted without tree": ["test_c49_stopping_on_agreement_needs_the_strategy_tree"]
+    }
+  }
 }

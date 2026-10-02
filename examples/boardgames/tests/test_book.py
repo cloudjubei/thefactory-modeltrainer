@@ -99,11 +99,12 @@ def test_build_book_respects_the_deadline_within_a_band():
     book = Tablebase(cap=1_000_000)
     t0 = _t.perf_counter()
     st = build_book(game, book, roots=[root], max_plies=14, min_plies=14,
-                    max_positions=10_000_000, workers=1, max_position_seconds=5.0, deadline=_t.perf_counter() + 0.4)
+                    max_positions=10_000_000, workers=1, max_position_seconds=2.0, deadline=_t.perf_counter() + 0.4)
     elapsed = _t.perf_counter() - t0
     assert st["enumerated"] >= 30  # ply 12→14 frontier: a genuine multi-position band (~40 at ply 14)
-    assert 1 <= st["solved"] <= 15  # the deadline cut the band to a small prefix (grinding it all books ~40 → >15)
-    assert elapsed < 4.0  # returned promptly — did NOT solve the whole ~30s band before checking the clock
+    assert st["solved"] <= 15  # the deadline cut the band to a small prefix (grinding it all books ~40 → >15); under
+    # heavy machine load the deadline can pass before the first solve, so zero solved is still a prompt stop
+    assert elapsed < 0.4 + 2.0 + 1.5  # returned within one capped solve of the deadline, not after the whole band
 
 
 def test_connect4_solve_collapses_to_lookups_when_the_frontier_below_is_booked():

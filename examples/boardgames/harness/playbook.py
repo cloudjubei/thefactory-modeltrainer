@@ -14,6 +14,7 @@ recommends is value-optimal, so a rule cannot pass by offering one good move amo
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from functools import lru_cache
 
 
 def their_view(state):
@@ -74,6 +75,44 @@ def gives_fork(game, state, move) -> bool:
     return child is not None and any(forks(game, child, b) for b in game.legal_actions(child))
 
 
+@lru_cache(maxsize=None)
+def forced_win(game, state, move, plies: int) -> bool:
+    """Playing `move` wins by force within `plies` plies counting the move itself: every reply leaves a move that
+    keeps the forced win within what remains (MIGO's layered win_k, as a bounded AND-OR search)."""
+    mover = game.current_player(state)
+    child = game.step(state, move)
+    if game.is_terminal(child):
+        return game.winner(child) == mover
+    if plies < 3:
+        return False
+    for reply in game.legal_actions(child):
+        after = game.step(child, reply)
+        if game.is_terminal(after):
+            return False
+        if not any(forced_win(game, after, m, plies - 2) for m in game.legal_actions(after)):
+            return False
+    return True
+
+
+def wins_in_5(game, state, move) -> bool:
+    return forced_win(game, state, move, 5)
+
+
+def _gives_loss(game, state, move, plies: int) -> bool:
+    child = _child(game, state, move)
+    return child is not None and any(forced_win(game, child, b, plies - 1) for b in game.legal_actions(child))
+
+
+def gives_loss_in_4(game, state, move) -> bool:
+    """After `move` the opponent can force a win within their next 3 plies."""
+    return _gives_loss(game, state, move, 4)
+
+
+def gives_loss_in_6(game, state, move) -> bool:
+    """After `move` the opponent can force a win within their next 5 plies."""
+    return _gives_loss(game, state, move, 6)
+
+
 def _ttt_only(game) -> None:
     if game.name != "tictactoe":
         raise ValueError(f"this geometry predicate is defined for tic-tac-toe only, not {game.name}")
@@ -101,7 +140,11 @@ def opposite_corner(game, state, move) -> bool:
 
 
 PREDICATES = {f.__name__: f for f in (wins, blocks, gives_win, makes_threat, forks, opp_fork_at, gives_fork,
-                                      centre, corner, side, opposite_corner)}
+                                      centre, corner, side, opposite_corner, wins_in_5, gives_loss_in_4,
+                                      gives_loss_in_6)}
+LOOKAHEAD = {"wins": 1, "blocks": 1, "gives_win": 2, "makes_threat": 2, "forks": 2, "opp_fork_at": 2, "gives_fork": 3,
+             "centre": 0, "corner": 0, "side": 0, "opposite_corner": 0, "wins_in_5": 5, "gives_loss_in_4": 4,
+             "gives_loss_in_6": 6}
 
 
 @dataclass(frozen=True)

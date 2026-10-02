@@ -46,11 +46,25 @@ def strategy_tree_positions(game, root, player: int, choose: Callable[[list], li
     return out
 
 
-def disagreements(moves: list, labels: list) -> int:
-    """How many raw moves got under AGREE_SHARE of the top move's share in their search label."""
+def disagreements(moves: list, labels: list, values: list | None = None, delta: float = 0.0) -> int:
+    """How many raw moves got under AGREE_SHARE of the top move's share in their search label. With `values` (one
+    {move: search Q, None when unvisited} per position) a move also agrees when its Q is within `delta` of the Q of
+    the label's top move — two moves the search values alike are both kept, whatever their shares."""
     if len(moves) != len(labels):
         raise ValueError(f"moves and labels must be the same length, got {len(moves)} and {len(labels)}")
-    return sum(1 for a, pi in zip(moves, labels) if pi[a] < AGREE_SHARE * max(pi))
+    if values is None:
+        return sum(1 for a, pi in zip(moves, labels) if pi[a] < AGREE_SHARE * max(pi))
+    if len(values) != len(moves):
+        raise ValueError(f"value agreement needs one value row per position, got {len(values)} for {len(moves)}")
+    if delta < 0:
+        raise ValueError(f"delta must be >= 0, got {delta}")
+
+    def agrees(a, pi, q) -> bool:
+        if pi[a] >= AGREE_SHARE * max(pi):
+            return True
+        top = q[pi.index(max(pi))]
+        return q[a] is not None and top is not None and q[a] >= top - delta
+    return sum(1 for a, pi, q in zip(moves, labels, values) if not agrees(a, pi, q))
 
 
 def raw_chooser(game, net) -> Callable[[list], list]:

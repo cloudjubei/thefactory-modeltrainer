@@ -110,6 +110,29 @@ def test_disagreements_are_counted_over_every_position():
         disagreements([0], [])
 
 
+@pytest.mark.parametrize("move,label,q,disagrees", [
+    (0, [0.1, 0.9], {0: 0.45, 1: 0.5}, False),
+    (0, [0.1, 0.9], {0: 0.41, 1: 0.5}, False),
+    (0, [0.1, 0.9], {0: 0.39, 1: 0.5}, True),
+    (0, [0.1, 0.9], {0: None, 1: 0.5}, True),
+    (0, [0.1, 0.9], {0: 0.9, 1: 0.5}, False),
+    (1, [0.5, 0.0, 0.5], {0: 0.2, 1: None, 2: 0.6}, True),
+    (2, [0.4, 0.0, 0.6], {0: 1.0, 1: None, 2: -1.0}, False),
+    (1, [0.0, 0.4, 0.6], {0: None, 1: 0.0, 2: 0.9}, False),
+    (0, [0.1, 0.1, 0.8], {0: 0.45, 1: 0.9, 2: 0.5}, False),
+])
+def test_with_values_a_raw_move_also_agrees_when_its_search_value_is_within_delta_of_the_top_move_s(
+        move, label, q, disagrees):
+    assert disagreements([move], [label], [q], 0.1) == int(disagrees)
+
+
+def test_value_agreement_needs_one_value_row_per_position_and_a_non_negative_delta():
+    with pytest.raises(ValueError, match="value"):
+        disagreements([0], [[1.0]], [], 0.1)
+    with pytest.raises(ValueError, match="delta"):
+        disagreements([0], [[1.0]], [{0: 0.0}], -0.1)
+
+
 class _Fixed:
     def __init__(self, logits):
         import torch

@@ -92,4 +92,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    from harness.trials import logged
+
+    logged(main, __file__)
