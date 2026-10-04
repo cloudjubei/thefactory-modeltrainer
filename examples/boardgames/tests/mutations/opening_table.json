@@ -1,0 +1,110 @@
+{
+  "file": "harness/opening_table.py",
+  "tests": ["tests/test_opening_table.py"],
+  "mutations": [
+    {
+      "name": "horizon 0 accepted",
+      "old": "    if horizon < 1:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "horizon off by one",
+      "old": "while level and ply < horizon:",
+      "new": "while level and ply <= horizon:"
+    },
+    {
+      "name": "right moves stored too",
+      "old": "                if values[move] != best:\n                    move = next",
+      "new": "                if True:\n                    move = next"
+    },
+    {
+      "name": "worst move stored",
+      "old": "move = next(a for a in game.legal_actions(s) if values[a] == best)",
+      "new": "move = next(a for a in game.legal_actions(s) if values[a] == min(values.values()))"
+    },
+    {
+      "name": "walk ignores the override",
+      "old": "                    table[game.state_key(s)] = move\n",
+      "new": "                    table[game.state_key(s)] = move\n                    move = choose([s])[0]\n"
+    },
+    {
+      "name": "overrides not counted",
+      "old": "                    stats[\"overridden\"] += 1\n",
+      "new": ""
+    },
+    {
+      "name": "replies not walked",
+      "old": "                for b in game.legal_actions(s):\n                    child = game.step(s, b, rng)",
+      "new": "                for b in game.legal_actions(s)[:1]:\n                    child = game.step(s, b, rng)"
+    },
+    {
+      "name": "positions recounted",
+      "old": "{k: s for k, s in level.items() if k not in seen and not game.is_terminal(s)}",
+      "new": "{k: s for k, s in level.items() if not game.is_terminal(s)}"
+    },
+    {
+      "name": "chooser ignores the table",
+      "old": "return [table.get(game.state_key(s), m) for s, m in zip(states, choose(states), strict=True)]",
+      "new": "return list(choose(states))"
+    },
+    {
+      "name": "table always wins",
+      "old": "return [table.get(game.state_key(s), m) for s, m in zip(states, choose(states), strict=True)]",
+      "new": "return [table.get(game.state_key(s), 0) for s, m in zip(states, choose(states), strict=True)]"
+    },
+    {
+      "name": "other side's positions tabled",
+      "old": "mine = [s for s in fresh.values() if game.current_player(s) == player]",
+      "new": "mine = list(fresh.values())"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T20:23:21+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "horizon 0 accepted": ["test_a_horizon_below_one_is_refused"],
+      "horizon off by one": [
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[2-plies1]",
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[4-plies3]"
+      ],
+      "right moves stored too": [
+        "test_a_perfect_strategy_needs_no_table",
+        "test_every_entry_is_an_optimal_move_where_the_strategy_s_move_was_not"
+      ],
+      "worst move stored": [
+        "test_a_position_reached_again_at_a_later_ply_is_counted_and_tabled_once",
+        "test_every_entry_is_an_optimal_move_where_the_strategy_s_move_was_not",
+        "test_the_hybrid_with_a_whole_game_table_certifies_and_the_strategy_alone_does_not"
+      ],
+      "walk ignores the override": [
+        "test_the_hybrid_with_a_whole_game_table_certifies_and_the_strategy_alone_does_not"
+      ],
+      "overrides not counted": [
+        "test_a_position_reached_again_at_a_later_ply_is_counted_and_tabled_once",
+        "test_every_entry_is_an_optimal_move_where_the_strategy_s_move_was_not"
+      ],
+      "replies not walked": [
+        "test_the_hybrid_with_a_whole_game_table_certifies_and_the_strategy_alone_does_not",
+        "test_the_walk_follows_the_hybrid_s_own_moves_so_the_tree_is_the_one_it_will_play"
+      ],
+      "positions recounted": [
+        "test_a_position_reached_again_at_a_later_ply_is_counted_and_tabled_once"
+      ],
+      "chooser ignores the table": [
+        "test_the_chooser_falls_back_to_the_strategy_off_the_table",
+        "test_the_hybrid_with_a_whole_game_table_certifies_and_the_strategy_alone_does_not"
+      ],
+      "table always wins": [
+        "test_the_chooser_falls_back_to_the_strategy_off_the_table",
+        "test_the_hybrid_with_a_whole_game_table_certifies_and_the_strategy_alone_does_not"
+      ],
+      "other side's positions tabled": [
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[2-plies1]",
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[3-plies2]",
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[4-plies3]",
+        "test_the_table_covers_only_the_player_s_positions_before_the_horizon[5-plies4]"
+      ]
+    }
+  }
+}

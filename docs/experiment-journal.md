@@ -4681,3 +4681,41 @@ absolute sizes in the sign-flip test — dropped). The fixed-set readout now car
 n-step +3.4 points (5/7 pairs, one-sided p 0.031 — inconclusive under Holm, h118), tree values -0.4 (h119 refuted),
 curriculum -2.3 (h120 refuted). The calibration's post-hoc +1.7..+2.1 readings held only for n-step (h121). A focused
 n-step replication needs 9 pairs. The opening — the actual target — is still not fixed by any variant.
+
+## 2026-10-04 — The exploiter; T18 voided by a recorder bug, rerun as T18b
+
+`train_alphazero(exploiter=...)` plays a share of self-play games against the current net with more search, greedily,
+the learner at a random seat (15/15 mutants killed). T18's tic-tac-toe run trained fine but the run recorder counted
+only self-play games, so its integrity check refused to judge it (h122 not run). Dead end h123: the recorder now
+records games against an opponent too (4/4 mutants killed). T18b reruns on fresh seeds (training is deterministic, so
+T18's seeds would only reproduce the unjudged nets); T19 (powered Connect-4, h125) is chained to launch if T18b passes.
+
+## 2026-10-04 — T19: the exploiter changed nothing
+
+T18b: no harm on tic-tac-toe, 10/10 (h124; h122 superseded). T19 launched automatically on that gate: base vs
+exploiter, seeds 451-457 (~30 min per seed per arm). Fixed set +0.06 points (4/7 pairs, p 0.48, h125 inconclusive);
+plies 0-4 567/798 vs 568/798 (h126); 0/14 certified; ~470 exploiter games per seed. Five fixes in, the opening has not
+moved in any arm — next is either the last planned fix (a real-event reward), an n-step replication, or a cheap
+learning-curve diagnostic of the pilot itself.
+
+## 2026-10-04 — T20 launched: the learning curve
+
+Pre-registered h127 (plies 0-4) and h128 (overall): base pilot recipe for 60 iterations on seeds 471-473, fixed-set
+reading after every pass (`--curve`), gain from passes 16-20 to 56-60, >= 3 points = still learning, <= 1 = flat.
+Judge `harness/curve_diagnosis.py` reads one run file per seed (15/15 mutants killed).
+
+## 2026-10-04 — T20: general play keeps learning, the opening does not
+
+Base recipe 60 iterations, seeds 471-473 (~4-5 h under load ~50-120). Fixed-set share from passes 16-20 to 56-60:
+overall 68.1/61.6/67.4% → 72.4/70.0/71.3% (+5.5 points, h128 supported); plies 0-4 74.9/56.1/61.4% →
+68.2/60.4/65.4% (+0.5 points, h127 refuted). 0/3 certified through 6 plies. The opening is not a matter of run length;
+per the user's "if it makes sense", the real-event reward and n-step replication were not launched.
+
+## 2026-10-04 — H1: the hybrid's exception table
+
+`harness/opening_table.py` (12 tests, 11/11 mutants killed): the process walks the hybrid's own first-player tree and
+stores an exact optimal move wherever the net's move is not optimal, before a horizon; the hybrid plays the table,
+else the net. A design catch: certification through D plies checks only White plies below D, so a table covering
+them all proves nothing — every reading leaves the net one ply to carry. Pre-registered h129 (table before ply 3,
+certified through 5) and h130 (before ply 5, through 7) on the ten base-recipe nets, ≥ 8/10, predicted refuted;
+horizon 7 and table sizes reported. Launched as a measurement (no training).

@@ -60,3 +60,23 @@
 {"event": "start", "id": "a503301081cd", "name": "c4_fixed_set_readout", "argv": ["--runs", "c49_T17", "--out", "evidence/c49_T17_fixed_set.json.gz"], "at": "2026-10-04T03:15:03+00:00"}
 {"event": "end", "id": "a503301081cd", "status": "completed", "at": "2026-10-04T03:15:09+00:00", "seconds": 5.9}
 {"event": "start", "id": "912089e372c8", "name": "c4_solver_free", "argv": ["--seeds", "998", "--iterations", "2", "--tree-depth", "2", "--certify-depth", "2", "--workers", "2", "--threads", "1", "--no-stop", "--exploiter", "0.5", "8", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/t19_smoke.json.gz"], "at": "2026-10-04T08:28:06+00:00"}
+{"event": "end", "id": "912089e372c8", "status": "completed", "at": "2026-10-04T08:29:35+00:00", "seconds": 88.8}
+{"event": "start", "id": "8fd76f90162b", "name": "small_floor", "argv": ["--spec", "floor_exploiter", "--arm", "exploiter", "--workers", "5", "--out", "evidence/c49_T18_exploiter.json.gz"], "at": "2026-10-04T08:38:33+00:00"}
+{"event": "end", "id": "8fd76f90162b", "status": "completed", "at": "2026-10-04T08:55:49+00:00", "seconds": 1036.1}
+{"event": "start", "id": "9456987ac26d", "name": "small_floor", "argv": ["--spec", "floor_exploiter_t18b", "--arm", "exploiter", "--workers", "5", "--out", "evidence/c49_T18b_exploiter.json.gz"], "at": "2026-10-04T09:00:11+00:00"}
+{"event": "end", "id": "9456987ac26d", "status": "completed", "at": "2026-10-04T09:18:27+00:00", "seconds": 1096.6}
+{"event": "start", "id": "8b687fe6a9dd", "name": "c4_solver_free", "argv": ["--seeds", "451", "452", "453", "454", "455", "456", "457", "--iterations", "20", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--exploiter", "0.5", "8", "--out", "evidence/c49_T19_exploiter.json.gz"], "at": "2026-10-04T09:18:27+00:00"}
+{"event": "start", "id": "5f80662beabe", "name": "c4_solver_free", "argv": ["--seeds", "451", "452", "453", "454", "455", "456", "457", "--iterations", "20", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--out", "evidence/c49_T19_base.json.gz"], "at": "2026-10-04T09:18:27+00:00"}
+{"event": "end", "id": "8b687fe6a9dd", "status": "completed", "at": "2026-10-04T12:18:16+00:00", "seconds": 10788.5}
+{"event": "end", "id": "5f80662beabe", "status": "completed", "at": "2026-10-04T12:21:25+00:00", "seconds": 10978.1}
+{"event": "start", "id": "9fecc92c141a", "name": "c4_fixed_set_readout", "argv": ["--runs", "c49_T19", "--out", "evidence/c49_T19_fixed_set.json.gz"], "at": "2026-10-04T12:21:58+00:00"}
+{"event": "end", "id": "9fecc92c141a", "status": "completed", "at": "2026-10-04T12:22:01+00:00", "seconds": 3.2}
+{"event": "start", "id": "1ad204666c99", "name": "c4_solver_free", "argv": ["--seeds", "997", "--iterations", "2", "--tree-depth", "2", "--certify-depth", "2", "--workers", "2", "--threads", "1", "--no-stop", "--curve", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/t20_smoke.json.gz"], "at": "2026-10-04T15:33:23+00:00"}
+{"event": "end", "id": "1ad204666c99", "status": "completed", "at": "2026-10-04T15:34:26+00:00", "seconds": 62.8}
+{"event": "start", "id": "c66c057ac1d3", "name": "c4_solver_free", "argv": ["--seeds", "472", "--iterations", "60", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--curve", "--out", "evidence/c49_T20_s472.json.gz"], "at": "2026-10-04T15:36:25+00:00"}
+{"event": "start", "id": "539d55b7d139", "name": "c4_solver_free", "argv": ["--seeds", "473", "--iterations", "60", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--curve", "--out", "evidence/c49_T20_s473.json.gz"], "at": "2026-10-04T15:36:25+00:00"}
+{"event": "start", "id": "ac5ea630634d", "name": "c4_solver_free", "argv": ["--seeds", "471", "--iterations", "60", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--curve", "--out", "evidence/c49_T20_s471.json.gz"], "at": "2026-10-04T15:36:25+00:00"}
+{"event": "end", "id": "ac5ea630634d", "status": "completed", "at": "2026-10-04T19:44:19+00:00", "seconds": 14874.0}
+{"event": "end", "id": "c66c057ac1d3", "status": "completed", "at": "2026-10-04T19:44:24+00:00", "seconds": 14878.9}
+{"event": "end", "id": "539d55b7d139", "status": "completed", "at": "2026-10-04T20:13:13+00:00", "seconds": 16608.5}
+{"event": "start", "id": "7ab91bc266e6", "name": "c4_hybrid", "argv": ["--workers", "8", "--out", "evidence/c49_H1_hybrid.json.gz"], "at": "2026-10-04T20:25:58+00:00"}

@@ -27,7 +27,10 @@ def _train(seed=3, **knobs):
     return _weights_sha(net), history
 
 
-@pytest.mark.parametrize("knobs", [{}, {"reanalyze_frac": 1.0, "reanalyze_sims": 4}], ids=["pure", "reanalyze"])
+@pytest.mark.parametrize("knobs", [{}, {"reanalyze_frac": 1.0, "reanalyze_sims": 4},
+                                   {"reanalyze_frac": 1.0, "reanalyze_sims": 4,
+                                    "exploiter": {"frac": 0.5, "sims_factor": 2}}],
+                         ids=["pure", "reanalyze", "exploiter"])
 def test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration(knobs):
     plain, _h = _train(**knobs)
     with record_selfplay_states(G) as log:
@@ -70,6 +73,29 @@ def test_the_recorder_puts_back_what_it_wrapped_however_the_block_exits():
             assert neural.self_play_game is not before[0] and neural.train_net is not before[1]
             raise RuntimeError("boom")
     assert (neural.self_play_game, neural.train_net) == before
+
+
+def test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for():
+    import torch
+
+    import harness.neural as neural
+    from harness.neural import AlphaZeroAgent, Connect4Net, arch_for_game
+
+    torch.manual_seed(0)
+    net = Connect4Net(**arch_for_game(ARCH, G))
+    opponent = AlphaZeroAgent(net, sims=8, gumbel=True)
+    opponent.temperature = 0.0
+    before = neural.vs_opponent_game
+    for asked in (False, True):
+        plain = neural.vs_opponent_game(G, AlphaZeroAgent(net, sims=4, gumbel=True), opponent, 1, random.Random(5),
+                                        return_states=asked)
+        with record_selfplay_states(G) as log:
+            seen = neural.vs_opponent_game(G, AlphaZeroAgent(net, sims=4, gumbel=True), opponent, 1,
+                                           random.Random(5), return_states=asked)
+        assert [len(r) for r in seen] == [len(r) for r in plain] == [4 if asked else 3] * len(plain)
+        assert len(log["games"]) == 1 and len(log["games"][0]["states"]) == len(plain)
+        assert all(G.current_player(s) == 1 for s in log["games"][0]["states"])
+    assert neural.vs_opponent_game is before
 
 
 def _canonical_at(ply):

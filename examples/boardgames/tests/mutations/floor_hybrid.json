@@ -1,0 +1,98 @@
+{
+  "file": "harness/floor_hybrid.py",
+  "tests": ["tests/test_floor_hybrid.py"],
+  "mutations": [
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if evidence.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "horizons unchecked",
+      "old": "    if evidence.get(\"horizons\") != spec[\"horizons\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "net set unchecked",
+      "old": "    if nets != sorted((run, s) for run, seeds in spec[\"runs\"] for s in seeds):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "depth unchecked",
+      "old": "if not isinstance(reading, dict) or reading.get(\"depth\") != h + 2 \\",
+      "new": "if not isinstance(reading, dict) \\"
+    },
+    {
+      "name": "certified counts every net",
+      "old": "certified = sum(1 for r in readings if r[\"certified\"])",
+      "new": "certified = len(readings)"
+    },
+    {
+      "name": "support strict",
+      "old": "certified >= spec[\"support_at\"]",
+      "new": "certified > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute strict",
+      "old": "certified <= spec[\"refute_at\"]",
+      "new": "certified < spec[\"refute_at\"]"
+    },
+    {
+      "name": "unjudged horizon judged",
+      "old": "                if h in spec[\"judged\"]:\n",
+      "new": "                if True:\n"
+    },
+    {
+      "name": "failures overwritten",
+      "old": "failures[ply] = failures.get(ply, 0) + count",
+      "new": "failures[ply] = count"
+    },
+    {
+      "name": "only one horizon judged",
+      "old": "\"judged\": [3, 5]",
+      "new": "\"judged\": [3]"
+    },
+    {
+      "name": "looser bar",
+      "old": "\"support_at\": 8, \"refute_at\": 5}",
+      "new": "\"support_at\": 7, \"refute_at\": 5}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T20:24:53+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "fingerprint unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "horizons unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[horizons]"
+      ],
+      "net set unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[extra",
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[missing"
+      ],
+      "depth unchecked": ["test_evidence_that_is_not_the_registered_measurement_is_not_run[wrong"],
+      "certified counts every net": [
+        "test_each_judged_horizon_counts_the_nets_whose_hybrid_is_certified_one_ply_past_the_table",
+        "test_the_bars_apply_to_the_count_of_certified_nets[1-supported]",
+        "test_the_bars_apply_to_the_count_of_certified_nets[2-inconclusive]",
+        "test_the_bars_apply_to_the_count_of_certified_nets[3-refuted]",
+        "test_the_bars_apply_to_the_count_of_certified_nets[6-refuted]"
+      ],
+      "support strict": ["test_the_bars_apply_to_the_count_of_certified_nets[1-supported]"],
+      "refute strict": ["test_the_bars_apply_to_the_count_of_certified_nets[3-refuted]"],
+      "unjudged horizon judged": [
+        "test_each_judged_horizon_counts_the_nets_whose_hybrid_is_certified_one_ply_past_the_table"
+      ],
+      "failures overwritten": ["test_table_sizes_and_the_net_s_failures_are_reported_per_horizon"],
+      "only one horizon judged": [
+        "test_the_registered_measurement_reads_the_ten_base_recipe_nets_at_three_horizons"
+      ],
+      "looser bar": [
+        "test_the_registered_measurement_reads_the_ten_base_recipe_nets_at_three_horizons"
+      ]
+    }
+  }
+}

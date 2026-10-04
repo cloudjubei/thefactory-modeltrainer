@@ -3919,10 +3919,18 @@
       "proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
       "note": "The punishing-opponent fix (plan \u00a71.6): real outcomes from games where the learner's mistakes are punished, not the net's own estimates (h113). Gate before T19. Baseline T9 10/10 (h73). Era af36c90425bb, measurement d10de436db78. Cost: self-play ~2-3x dearer; ~15-20 min/seed single-thread, 5 workers, ~45-75 min wall.",
       "registered_at": "2026-10-04T08:27:52.725916+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+          "ok": false,
+          "detail": "tests/test_c49_exploiter_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_exploiter_evidence.py::test_c49_T18_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T08:56:25.106556+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_T18_exploiter.json.gz",
-        "started": null
+        "started": "2026-10-04T08:38:33+00:00"
       },
       "pins": {
         "tests/test_c49_exploiter_evidence.py": "8e8f630a49da2cb0c40c616e936e90fc9f99a62838c10cf4e251be70b725023a",
@@ -3930,7 +3938,220 @@
         "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
         "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
       },
-      "inconclusive_proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_is_undecidable"
+      "inconclusive_proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_is_undecidable",
+      "supersession": {
+        "by": "h124",
+        "reason": "h122's run could not be judged (the run recorder missed the exploiter games \u2014 dead end h123); h124 is the same claim, recorder fixed, on fresh seeds",
+        "at": "2026-10-04T09:19:24.509857+00:00"
+      }
+    },
+    "h123": {
+      "id": "h123",
+      "claim": "\u00a7C.49 dead end (T18's first run): the run recorder (harness.transfer.record_selfplay_states) wrapped only self_play_game, so games against the exploiter (vs_opponent_game) were neither counted nor had their positions recorded; T18's integrity check therefore read fewer games per iteration than registered and refused to judge the run (h122 NOT_RUN). Fixed: the recorder records games against an opponent too, in the shape the caller asked for",
+      "mode": "test",
+      "proof": "tests/test_transfer.py::test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for",
+      "note": "Regression test also: test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[exploiter]. Mutation spec tests/mutations/transfer_opponent_games.json (4/4 killed). The integrity check worked as designed: an incomplete record was refused, not judged. Rerun as T18b on fresh seeds (h124).",
+      "registered_at": "2026-10-04T08:59:02.202493+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_transfer.py::test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 1.86s",
+          "drawn_at": "2026-10-04T08:59:04.626622+00:00"
+        }
+      ],
+      "reads_no_data": true
+    },
+    "h124": {
+      "id": "h124",
+      "claim": "\u00a7C.49 T18b (exploiter, recorder fixed): playing half of each iteration's self-play games against the current net with 8x its search, greedily, the learner taking a random seat, does no harm on tic-tac-toe: T9's process with it on, fresh seeds 461-470, ends with a net the solver certifies as perfect from the start as the first player on >= 8/10 seeds; refuted at <= 5; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_exploiter_t18b_evidence.py::test_c49_T18b_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+      "note": "Replaces h122, whose run could not be judged (h123). Gate before T19. Era af36c90425bb, measurement 0c03f10d2147. Cost ~45-75 min wall with 5 workers.",
+      "registered_at": "2026-10-04T08:59:04.679444+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_exploiter_t18b_evidence.py::test_c49_T18b_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-04T09:19:13.272035+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T18b_exploiter.json.gz",
+        "started": "2026-10-04T09:00:11+00:00"
+      },
+      "pins": {
+        "tests/test_c49_exploiter_t18b_evidence.py": "56e35e61281dc2a7880b15f7b738d4fe757a4177fb34b006dc8453c85fb4e8c4",
+        "harness/floor_exploiter_t18b.py": "f07a189a36200a8d88dbf6dcb1e5af64b694465e9589959552a84f9e2d63db4d",
+        "harness/floor_exploiter.py": "aa351a70c9bb080b36e3ae31dc35fdbfa582db600ebe36600e1a66298aa68b49",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_exploiter_t18b_evidence.py::test_c49_T18b_is_undecidable"
+    },
+    "h125": {
+      "id": "h125",
+      "claim": "\u00a7C.49 T19 (exploiter, powered): on Connect-4, playing half of each iteration's self-play games against the current net with 8x its search, greedily, the learner taking a random seat, raises the share of optimal moves on the fixed set of 5,142 exactly valued positions (label cache, White, plies 0-8) against base \u2014 T14's pilot shape (6-ply tree, 20 iterations, no stop), seven seed-matched pairs (seeds 451-457), exact one-sided sign-flip permutation test at 5% (one treatment, so no multiplicity correction). Refuted when the mean difference is <= 0; inconclusive when positive but not rejected",
+      "mode": "test",
+      "proof": "tests/test_c49_exploiter_c4_evidence.py::test_c49_T19_an_exploiter_raises_the_fixed_set_share_against_base",
+      "note": "The punishing-opponent fix (plan \u00a71.6): the learner's mistakes are punished in real games, so outcomes carry information the net's own estimates cannot (h113). Launches only if T18b passes its no-harm gate (h124). Seven pairs detect ~3.5 points (paired SD ~3.5). Certification through 6 plies and the fixed set's plies-0-4 subset reported, not judged. Era 13284aea9fa6, readout cfc0a014ec57. Cost: two arms x 7 seeds side by side, ~8-10 h, plus seconds of readout.",
+      "registered_at": "2026-10-04T08:59:19.197038+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_exploiter_c4_evidence.py::test_c49_T19_an_exploiter_raises_the_fixed_set_share_against_base",
+          "ok": false,
+          "detail": "ed\nE         + inconclusive\n\ntests/test_c49_exploiter_c4_evidence.py:32: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_exploiter_c4_evidence.py::test_c49_T19_an_exploiter_raises_the_fixed_set_share_against_base\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T12:22:02.390359+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T19_fixed_set.json.gz",
+        "started": "2026-10-04T12:21:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_exploiter_c4_evidence.py": "8ead5b02a8bb09a47da2ecd69b5b202aa0078036a5a4a382151d7e70e10f5388",
+        "harness/floor_c4_exploiter.py": "6a3e9114459010954013195a5d7cf9b0e98e0f432c4d5ebb95dc3f66d2f291aa",
+        "harness/floor_c4_powered.py": "46e1b101b9cdb0904b8be6983696800ff425c3b89a1c8c759f90f44611bdf2e8"
+      },
+      "inconclusive_proof": "tests/test_c49_exploiter_c4_evidence.py::test_c49_T19_is_undecidable"
+    },
+    "h126": {
+      "id": "h126",
+      "claim": "\u00a7C.49 T19b (descriptive, registered after the data): the exploiter changed nothing in the Connect-4 opening either \u2014 at the fixed set's plies 0-4 positions (114 per net, 7 nets per arm) base plays the optimal move at 567 of 798 and the exploiter arm at 568 of 798 (71.1% vs 71.2%), although the exploiter really played ~470 games per seed (458-488)",
+      "mode": "test",
+      "proof": "tests/test_c49_exploiter_opening_evidence.py::test_c49_T19b_at_plies_0_4_the_exploiter_and_base_play_the_optimal_move_equally_often",
+      "note": "Second proof: test_c49_T19b_the_exploiter_really_played_about_470_games_per_seed. With h125 (fixed set +0.06 points, p 0.48) the exploiter is a clean null on this pilot footing. Likely reason (not proven): the exploiter is the same net with more search, and more search does not see the opening errors either (h96) \u2014 it punishes mid-game slips the base process already learns from.",
+      "registered_at": "2026-10-04T12:22:38.296053+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_exploiter_opening_evidence.py::test_c49_T19b_at_plies_0_4_the_exploiter_and_base_play_the_optimal_move_equally_often",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-04T12:22:38.495021+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T19_fixed_set.json.gz",
+          "started": "2026-10-04T12:21:59+00:00"
+        },
+        {
+          "path": "evidence/c49_T19_exploiter.json.gz",
+          "started": "2026-10-04T09:18:28+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_exploiter_opening_evidence.py": "d38bbe4a7f8b08cc087be90cfa42930f7e54e591f35373855e8b227d257fbbcc"
+      }
+    },
+    "h127": {
+      "id": "h127",
+      "claim": "\u00a7C.49 T20 (learning curve): the base pilot recipe (T10's process at a 6-ply tree, no stop) run for 60 iterations instead of 20 on fresh seeds 471-473, the net scored on the fixed set of 5,142 exactly valued positions after every training pass (observation only), the share averaged over passes 56-60 against passes 16-20 per seed, pooled over the three seeds. Claim: at plies 0-4 the share is still rising \u2014 pooled gain >= 3 points (refuted at <= 1 point, inconclusive between).",
+      "mode": "test",
+      "proof": "tests/test_c49_curve_evidence.py::test_c49_T20_the_opening_is_still_improving_at_iteration_20",
+      "note": "Decides whether the 20-iteration pilots (h111-h126) could show an opening effect at all: every arm ends at ~71% at plies 0-4. SUPPORTED: the pilots were too short, so the next fix needs longer runs. REFUTED: the process has flattened and the opening is out of its reach as it stands. Era 13284aea9fa6, measurement 68a23ee868fa. Cost: three seeds side by side, ~3-6 h.",
+      "registered_at": "2026-10-04T15:36:24.668097+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_curve_evidence.py::test_c49_T20_the_opening_is_still_improving_at_iteration_20",
+          "ok": false,
+          "detail": "     \nE         - supported\nE         + refuted\n\ntests/test_c49_curve_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_curve_evidence.py::test_c49_T20_the_opening_is_still_improving_at_iteration_20\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T20:13:23.807375+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T20_s471.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        },
+        {
+          "path": "evidence/c49_T20_s472.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        },
+        {
+          "path": "evidence/c49_T20_s473.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_curve_evidence.py": "04c073eb9342aa6e8a9af53816407bd7b76deca6a83c8af4f533c6b258147a76",
+        "harness/curve_diagnosis.py": "108e63954c4261f2285882633b0c045c204462d339beb82053369becffcc4859"
+      },
+      "inconclusive_proof": "tests/test_c49_curve_evidence.py::test_c49_T20_the_opening_reading_is_undecidable"
+    },
+    "h128": {
+      "id": "h128",
+      "claim": "\u00a7C.49 T20 (learning curve): the base pilot recipe (T10's process at a 6-ply tree, no stop) run for 60 iterations instead of 20 on fresh seeds 471-473, the net scored on the fixed set of 5,142 exactly valued positions after every training pass (observation only), the share averaged over passes 56-60 against passes 16-20 per seed, pooled over the three seeds. Claim: over all positions the share is still rising \u2014 pooled gain >= 3 points (refuted at <= 1 point, inconclusive between).",
+      "mode": "test",
+      "proof": "tests/test_c49_curve_evidence.py::test_c49_T20_play_overall_is_still_improving_at_iteration_20",
+      "note": "Decides whether the 20-iteration pilots (h111-h126) could show an opening effect at all: every arm ends at ~71% at plies 0-4. SUPPORTED: the pilots were too short, so the next fix needs longer runs. REFUTED: the process has flattened and the opening is out of its reach as it stands. Era 13284aea9fa6, measurement 68a23ee868fa. Cost: three seeds side by side, ~3-6 h.",
+      "registered_at": "2026-10-04T15:36:24.717089+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_curve_evidence.py::test_c49_T20_play_overall_is_still_improving_at_iteration_20",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-04T20:13:24.189837+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T20_s471.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        },
+        {
+          "path": "evidence/c49_T20_s472.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        },
+        {
+          "path": "evidence/c49_T20_s473.json.gz",
+          "started": "2026-10-04T15:36:27+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_curve_evidence.py": "04c073eb9342aa6e8a9af53816407bd7b76deca6a83c8af4f533c6b258147a76",
+        "harness/curve_diagnosis.py": "108e63954c4261f2285882633b0c045c204462d339beb82053369becffcc4859"
+      },
+      "inconclusive_proof": "tests/test_c49_curve_evidence.py::test_c49_T20_the_overall_reading_is_undecidable"
+    },
+    "h129": {
+      "id": "h129",
+      "claim": "\u00a7C.49 H1 (hybrid): an exception table computed by the process with an exact solve step (harness.opening_table) stores an optimal move at each of the first player's positions in the hybrid's own tree, before a horizon, wherever the self-play net's move is not optimal; the net plays everywhere else. Read on the ten base-recipe nets (T19 base seeds 451-457; T20 seeds 471-473, 60 iterations), certified (P-START) one White ply past the table, so the net must carry that ply itself. Claim: with the table before ply 3 (White plies 0 and 2), the hybrid is certified through 5 plies \u2014 the net keeps the value at every ply-4 position of its tree \u2014 on >= 8 of the 10 nets; refuted at <= 5.",
+      "mode": "test",
+      "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_3_the_net_carries_ply_4_on_8_of_10_nets",
+      "note": "Prediction at registration: REFUTED \u2014 these nets play the optimal move at ~72% of general positions at plies 6-8 and ~65-71% at plies 0-4, and a hybrid's own tree holds dozens of positions per ply. The useful output is the trade-off curve: table entries (the hybrid's description cost) against how far it certifies; the horizon-7 table (net carries ply 8, certified through 9) is reported, not judged. Measurement ae504f03a68d. Cost: tables and certificates for 10 nets x 3 horizons, solves at plies <= 9, ~1-4 h with 8 workers.",
+      "registered_at": "2026-10-04T20:25:39.853747+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_H1_hybrid.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_hybrid_evidence.py": "aaf01f4757280ea896f8cb94e03a55e9ba08c6478f9fc45334d87f4c5fdec351",
+        "harness/floor_hybrid.py": "fa19c85db74abed938c18e177e8d67776f771f93753089ddc1e55e37d26040f1"
+      },
+      "inconclusive_proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_horizon_3_is_undecidable"
+    },
+    "h130": {
+      "id": "h130",
+      "claim": "\u00a7C.49 H1 (hybrid): an exception table computed by the process with an exact solve step (harness.opening_table) stores an optimal move at each of the first player's positions in the hybrid's own tree, before a horizon, wherever the self-play net's move is not optimal; the net plays everywhere else. Read on the ten base-recipe nets (T19 base seeds 451-457; T20 seeds 471-473, 60 iterations), certified (P-START) one White ply past the table, so the net must carry that ply itself. Claim: with the table before ply 5 (White plies 0, 2 and 4), the hybrid is certified through 7 plies \u2014 the net keeps the value at every ply-6 position of its tree \u2014 on >= 8 of the 10 nets; refuted at <= 5.",
+      "mode": "test",
+      "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_5_the_net_carries_ply_6_on_8_of_10_nets",
+      "note": "Prediction at registration: REFUTED \u2014 these nets play the optimal move at ~72% of general positions at plies 6-8 and ~65-71% at plies 0-4, and a hybrid's own tree holds dozens of positions per ply. The useful output is the trade-off curve: table entries (the hybrid's description cost) against how far it certifies; the horizon-7 table (net carries ply 8, certified through 9) is reported, not judged. Measurement ae504f03a68d. Cost: tables and certificates for 10 nets x 3 horizons, solves at plies <= 9, ~1-4 h with 8 workers.",
+      "registered_at": "2026-10-04T20:25:39.900871+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_H1_hybrid.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_hybrid_evidence.py": "aaf01f4757280ea896f8cb94e03a55e9ba08c6478f9fc45334d87f4c5fdec351",
+        "harness/floor_hybrid.py": "fa19c85db74abed938c18e177e8d67776f771f93753089ddc1e55e37d26040f1"
+      },
+      "inconclusive_proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_horizon_5_is_undecidable"
     }
   }
 }

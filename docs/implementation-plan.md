@@ -113,14 +113,29 @@
 - Two of the three post-hoc readings from the calibration vanished on fresh seeds (h121).
 - Caveat: n-step's gain is on general play (mostly plies 6–8). On the own-tree opening it was worse in T14 (h112).
 
-**1.6 Next (decision for the user).**
-- **Replicate n-step alone:** 9 seed pairs detect its observed +3.4 points (no multiplicity correction). Two arms,
-  ~9–12 h. Add an opening-specific secondary reading so a gain in general play is not mistaken for the opening fix.
-- **Or move to the remaining real-outcome fixes:** an opponent that punishes the net's opening lines; a reward from
-  real game events, potential-based. Same powered footing.
-- Either way the main gap is unchanged: no process variant yet makes the opening right (0 certified nets).
+**1.6 The punishing opponent changed nothing (T19).**
+- No harm on tic-tac-toe (h124, after the recorder fix, h123). On Connect-4: +0.06 points on the fixed set (p 0.48;
+  h125 inconclusive), 71.1% vs 71.2% optimal at plies 0–4 (h126). 0 of 14 nets certified.
+- Five fixes tried on this pilot footing (tree values, n-step, curriculum, exploiter, plus the stop variants): only
+  n-step shows a lead (+3.4 points, p 0.031, uncorrected), and none moves the opening.
 
-**1.7 Stored knowledge the process computes itself** (a solved opening/exception table counted in the description
+**1.7 T20 result: general play keeps learning, the opening does not.**
+- Base recipe for 60 iterations, seeds 471–473, fixed-set reading after every pass. From passes 16–20 to 56–60:
+  +5.5 points overall (h128 supported), +0.5 points at plies 0–4 (h127 refuted; one seed fell 75% → 68%).
+- So longer runs would not rescue the opening fixes, and the real-event reward and n-step replication were **not**
+  launched (the user's order was "if it makes sense"): both would be judged where nothing moves.
+
+**1.8 H1 running: the hybrid's first measurement (h129, h130).** `harness/opening_table.py`, `harness/floor_hybrid.py`,
+`scripts/c4_hybrid.py`.
+- The process computes an exception table with an exact solve step: at the first player's positions in the hybrid's
+  own tree before a horizon, an optimal move wherever the net's move is not optimal. The net plays the rest.
+- On the ten base-recipe nets, horizons 3/5/7, the hybrid is certified one White ply past the table, so the net
+  carries that ply. Judged at 3 and 5 (≥ 8/10); 7 and every table's size reported. Predicted refuted.
+- Its output is the trade-off curve the hybrid needs: table entries against certified depth.
+- Next, depending on it: put the table in the training loop (self-play starts from the table's opening, the
+  strategy tree trains the net where the table stops), and size the table that certifies through 10.
+
+**1.9 Stored knowledge (now H1) the process computes itself** (a solved opening/exception table counted in the description
 length) remains an option for the hybrid, not the fix for 1.1.
 
 ## 2. Board games — next

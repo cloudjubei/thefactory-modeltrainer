@@ -1,0 +1,125 @@
+{
+  "file": "harness/curve_diagnosis.py",
+  "tests": ["tests/test_curve_diagnosis.py"],
+  "mutations": [
+    {
+      "name": "pass read off by one",
+      "old": "mean(at[p - 1] for p in spec[\"late\"])",
+      "new": "mean(at[p] for p in spec[\"late\"] if p < len(at))"
+    },
+    {
+      "name": "early not averaged",
+      "old": "\"early\": mean(at[p - 1] for p in spec[\"early\"])",
+      "new": "\"early\": at[spec[\"early\"][0] - 1]"
+    },
+    {
+      "name": "opening plies ignored",
+      "old": "\"opening\": _reading(rows, spec, spec[\"opening\"])",
+      "new": "\"opening\": _reading(rows, spec, None)"
+    },
+    {
+      "name": "support strict",
+      "old": "gain >= spec[\"support_at\"]",
+      "new": "gain > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute strict",
+      "old": "gain <= spec[\"refute_at\"]",
+      "new": "gain < spec[\"refute_at\"]"
+    },
+    {
+      "name": "gain unrounded",
+      "old": "gain = round(mean(s[\"late\"] - s[\"early\"] for s in seeds.values()), 9)",
+      "new": "gain = mean(s[\"late\"] - s[\"early\"] for s in seeds.values())"
+    },
+    {
+      "name": "shorter run",
+      "old": "\"iterations\": 60}",
+      "new": "\"iterations\": 40}"
+    },
+    {
+      "name": "late window moved",
+      "old": "\"late\": [56, 57, 58, 59, 60]",
+      "new": "\"late\": [36, 37, 38, 39, 40]"
+    },
+    {
+      "name": "looser bar",
+      "old": "\"support_at\": 0.03, \"refute_at\": 0.01}",
+      "new": "\"support_at\": 0.02, \"refute_at\": 0.01}"
+    },
+    {
+      "name": "era unchecked",
+      "old": "        if run.get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "        if run.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "if config != spec[\"config\"] or sorted(r[\"seed\"] for r in run[\"seeds\"]) != sorted(run[\"config\"][\"seeds\"]):",
+      "new": "if sorted(r[\"seed\"] for r in run[\"seeds\"]) != sorted(run[\"config\"][\"seeds\"]):"
+    },
+    {
+      "name": "seed labels unchecked",
+      "old": "if config != spec[\"config\"] or sorted(r[\"seed\"] for r in run[\"seeds\"]) != sorted(run[\"config\"][\"seeds\"]):",
+      "new": "if config != spec[\"config\"]:"
+    },
+    {
+      "name": "curve length unchecked",
+      "old": "            if len(row.get(\"curve\") or []) != spec[\"config\"][\"iterations\"] + 1:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "seed set unchecked",
+      "old": "    if sorted(r[\"seed\"] for run in runs for r in run[\"seeds\"]) != list(spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T15:36:02+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "pass read off by one": ["test_early_and_late_are_the_registered_passes_averaged_per_seed"],
+      "early not averaged": ["test_early_and_late_are_the_registered_passes_averaged_per_seed"],
+      "opening plies ignored": [
+        "test_early_and_late_are_the_registered_passes_averaged_per_seed",
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[-0.02-refuted]",
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.01-refuted]",
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.02-inconclusive]",
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.03-supported]",
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.05-supported]",
+        "test_the_overall_reading_is_judged_on_its_own"
+      ],
+      "support strict": [
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.03-supported]"
+      ],
+      "refute strict": [
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.01-refuted]"
+      ],
+      "gain unrounded": [
+        "test_the_opening_reading_is_the_pooled_late_minus_early_share[0.01-refuted]"
+      ],
+      "shorter run": [
+        "test_the_registered_diagnostic_runs_the_base_pilot_three_times_as_long_on_three_fresh_seeds"
+      ],
+      "late window moved": [
+        "test_the_registered_diagnostic_runs_the_base_pilot_three_times_as_long_on_three_fresh_seeds"
+      ],
+      "looser bar": [
+        "test_the_registered_diagnostic_runs_the_base_pilot_three_times_as_long_on_three_fresh_seeds"
+      ],
+      "era unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[era]"],
+      "fingerprint unchecked": [
+        "test_evidence_that_is_not_the_registered_run_is_not_run[fingerprint]"
+      ],
+      "config unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[config]"],
+      "seed labels unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[seed"],
+      "curve length unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[short"],
+      "seed set unchecked": ["test_evidence_that_is_not_the_registered_run_is_not_run[seeds]"]
+    }
+  }
+}

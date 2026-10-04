@@ -20,7 +20,8 @@ target, `--value-n-step` / `--target-refresh` bootstrap the value targets from a
 trains to the cap whatever the walk reads (T14, harness.floor_c4_value_signal). `--backplay FRAC RAMP` starts that
 share of the games near the end of the last iteration's games (T16, harness.floor_c4_backplay). `--exploiter FRAC
 FACTOR` plays that share of the games against the current net with FACTOR times the search (T19,
-harness.floor_c4_exploiter).
+harness.floor_c4_exploiter). `--curve` scores the net on the fixed position set (harness.fixed_set) after every
+training pass and records the readings as `curve` (T20, harness.curve_diagnosis).
 """
 from __future__ import annotations
 
@@ -35,7 +36,7 @@ ROOT = Path(__file__).resolve().parent.parent
 NETS = ROOT / "checkpoints" / "c49_sf"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_solver_free.py", "harness/certify.py", "harness/native_solver.py",
-                       "harness/transfer.py")
+                       "harness/transfer.py", "harness/fixed_set.py")
 EMPTY_BOARD_VALUE = 1
 EMPTY_BOARD_VALUE_SOURCE = "Connect-4 is a first-player win (Allis 1988; Allen 1988; Tromp's database)"
 _BOOK = None
@@ -71,7 +72,7 @@ def _recorded_values(game) -> dict:
     return out
 
 
-def _train(cfg: dict, seed: int, threads: int, nets: Path) -> dict:
+def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | None = None) -> dict:
     import torch
 
     from harness.neural import save_net, train_alphazero
@@ -82,7 +83,16 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path) -> dict:
     torch.set_num_threads(threads)
     game = resolve_game(cfg["game"])
     t0 = time.time()
-    with forbid_solver(), record_selfplay_states(game, on_pass=lambda net: round(time.time() - t0, 1)) as log:
+    def on_pass(net):
+        seconds = round(time.time() - t0, 1)
+        if curve_cases is None:
+            return seconds
+        from harness.fixed_set import score
+        from harness.strategy_tree import raw_chooser
+
+        return {"seconds": seconds, **score(raw_chooser(game, net)([s for s, _p, _v in curve_cases]), curve_cases)}
+
+    with forbid_solver(), record_selfplay_states(game, on_pass=on_pass) as log:
         net, history = train_alphazero(
             game, iterations=cfg["iterations"], selfplay_games=cfg["selfplay"], sims=cfg["train_sims"],
             channels=cfg["arch"]["channels"], net_arch=cfg["arch"], augment=cfg["augment"], gumbel=cfg["gumbel"],
@@ -106,7 +116,10 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path) -> dict:
     return {"seed": seed, "stopped": stopped,
             "net": {"path": str(path.relative_to(ROOT)), "weights_sha": _weights_sha(net),
                     "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
-            "params": sum(p.numel() for p in net.parameters()), "pass_seconds": log["on_pass"],
+            "params": sum(p.numel() for p in net.parameters()),
+            "pass_seconds": [r["seconds"] for r in log["on_pass"]] if curve_cases else log["on_pass"],
+            **({"curve": [{k: v for k, v in r.items() if k != "seconds"} for r in log["on_pass"]]}
+               if curve_cases else {}),
             "games_per_pass": [sum(1 for g in log["games"] if g["pass"] == p) for p in range(log["passes"])],
             "train_seconds": round(time.time() - t0, 1), "history": history}
 
@@ -170,6 +183,8 @@ def main() -> None:
                          "RAMP iterations (T16)")
     ap.add_argument("--exploiter", type=float, nargs=2, metavar=("FRAC", "FACTOR"), default=None,
                     help="play FRAC of the games against the current net with FACTOR times the search, greedily (T19)")
+    ap.add_argument("--curve", action="store_true",
+                    help="score the net on the fixed position set after every training pass (T20)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
     from harness.floor_c4 import CONFIG
@@ -188,7 +203,13 @@ def main() -> None:
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     nets = NETS / Path(args.out).name.replace(".json.gz", "")
     nets.mkdir(parents=True, exist_ok=True)
-    rows = [_train(cfg, seed, args.threads, nets) for seed in args.seeds]
+    curve_cases = None
+    if args.curve:
+        from harness.evidence import load_evidence
+        from harness.fixed_set import fixed_positions
+
+        curve_cases = fixed_positions(load_evidence(LABELS)["positions"], Connect4(), player=0, plies=[0, 2, 4, 6, 8])
+    rows = [_train(cfg, seed, args.threads, nets, curve_cases) for seed in args.seeds]
     game = Connect4()
     recorded = _recorded_values(game)
     with ProcessPoolExecutor(max_workers=args.workers + 2) as pool:
@@ -206,6 +227,7 @@ def main() -> None:
                              "solver_c_sha256": hashlib.sha256(native_solver.SOURCE.read_bytes()).hexdigest(),
                              "root_value_source": EMPTY_BOARD_VALUE_SOURCE,
                              "config": {**cfg, "seeds": list(args.seeds), "certify_depth": args.certify_depth},
+                             **({"curve_positions": len(curve_cases)} if curve_cases else {}),
                              "seeds": rows})
 
 

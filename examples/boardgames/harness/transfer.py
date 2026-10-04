@@ -24,9 +24,10 @@ VISITED, ONE_MOVE, TWO_MOVES, FURTHER = "visited", "one_move_off", "two_moves_of
 
 @contextmanager
 def record_selfplay_states(game, probe: dict | None = None, on_pass=None):
-    """While active, every self-play game `harness.neural.self_play_game` plays appends one row to the yielded
-    log's `games`: {"pass": the number of `train_net` calls made before the game, "states": the positions the
-    game returned as training examples}. Random opening plies are not training examples and are not recorded. Every
+    """While active, every self-play game `harness.neural.self_play_game` plays, and every game against an opponent
+    `harness.neural.vs_opponent_game` plays, appends one row to the yielded log's `games`: {"pass": the number of
+    `train_net` calls made before the game, "states": the positions the game returned as training examples (only the
+    learner's, against an opponent)}. Random opening plies are not training examples and are not recorded. Every
 sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
 
     With a `probe` ({"x": encoded positions, "legal": bool mask, "optimal": one set of moves per position}, built
@@ -37,20 +38,22 @@ sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
 
     It observes only: the wrapped game is asked for its states (which changes the shape of its return and nothing
     else), the caller receives exactly the shape it asked for, and nothing here draws from any RNG. Games played in
-    worker processes are invisible to it, so a caller compares the recorded game count with what it launched. Both
-    wrapped functions are restored however the block exits."""
+    worker processes are invisible to it, so a caller compares the recorded game count with what it launched. Every
+    wrapped function is restored however the block exits."""
     import harness.neural as neural
 
     log: dict = {"game": getattr(game, "name", type(game).__name__), "games": [], "siblings": [], "passes": 0,
                  "probe": [], "on_pass": []}
-    original_play, original_train, original_siblings = (neural.self_play_game, neural.train_net,
-                                                         neural.sibling_positions)
+    original_play, original_opponent, original_train, original_siblings = (
+        neural.self_play_game, neural.vs_opponent_game, neural.train_net, neural.sibling_positions)
 
-    def play(*args, **kwargs):
-        asked = kwargs.get("return_states", False)
-        full = original_play(*args, **{**kwargs, "return_states": True})
-        log["games"].append({"pass": log["passes"], "states": [e[0] for e in full]})
-        return full if asked else [tuple(e[1:]) for e in full]
+    def recording(original):
+        def play(*args, **kwargs):
+            asked = kwargs.get("return_states", False)
+            full = original(*args, **{**kwargs, "return_states": True})
+            log["games"].append({"pass": log["passes"], "states": [e[0] for e in full]})
+            return full if asked else [tuple(e[1:]) for e in full]
+        return play
 
     def train(*args, **kwargs):
         result = original_train(*args, **kwargs)
@@ -66,12 +69,13 @@ sibling set the trainer builds appends {"pass", "states"} to `log["siblings"]`.
         log["siblings"].append({"pass": log["passes"], "states": list(result[0])})
         return result
 
-    neural.self_play_game, neural.train_net, neural.sibling_positions = play, train, siblings
+    neural.self_play_game, neural.vs_opponent_game = recording(original_play), recording(original_opponent)
+    neural.train_net, neural.sibling_positions = train, siblings
     try:
         yield log
     finally:
-        neural.self_play_game, neural.train_net, neural.sibling_positions = (original_play, original_train,
-                                                                             original_siblings)
+        neural.self_play_game, neural.vs_opponent_game = original_play, original_opponent
+        neural.train_net, neural.sibling_positions = original_train, original_siblings
 
 
 def policy_accuracy(net, probe: dict) -> float:

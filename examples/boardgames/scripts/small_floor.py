@@ -5,8 +5,8 @@ position after every pass. Writes one evidence file per arm, judged by harness.f
         --out evidence/c49_T6_canon_mlp32.json.gz
 
 `--spec` names the registration module whose arms and seeds to run: floor_small (T6), floor_budget (T7),
-floor_stop (T8), floor_tree (T9), floor_value_stop (T11), floor_tree_value (T13), floor_backplay (T15) or
-floor_exploiter (T18). An arm with a `strategy_tree` also has the solver certify the net's own tree for that player
+floor_stop (T8), floor_tree (T9), floor_value_stop (T11), floor_tree_value (T13), floor_backplay (T15),
+floor_exploiter (T18) or floor_exploiter_t18b (T18b). An arm with a `strategy_tree` also has the solver certify the net's own tree for that player
 after every pass (harness.certify, raw moves) — an observation only; the training never sees it.
 
 A position counts as TRAINED when it is in the final training set (every recorded self-play position and the last
@@ -105,7 +105,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--spec", required=True, choices=["floor_small", "floor_budget", "floor_stop", "floor_tree",
                                                                  "floor_value_stop", "floor_tree_value",
-                                                                 "floor_backplay", "floor_exploiter"])
+                                                                 "floor_backplay", "floor_exploiter",
+                                                                 "floor_exploiter_t18b"])
     ap.add_argument("--arm", required=True)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--out", required=True)

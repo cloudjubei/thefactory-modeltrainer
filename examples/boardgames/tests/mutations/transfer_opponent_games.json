@@ -1,0 +1,53 @@
+{
+  "file": "harness/transfer.py",
+  "tests": [
+    "tests/test_transfer.py::test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration",
+    "tests/test_transfer.py::test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for"
+  ],
+  "mutations": [
+    {
+      "name": "opponent games not wrapped",
+      "old": "neural.self_play_game, neural.vs_opponent_game = recording(original_play), recording(original_opponent)",
+      "new": "neural.self_play_game, neural.vs_opponent_game = recording(original_play), original_opponent"
+    },
+    {
+      "name": "opponent wrapper left behind",
+      "old": "        neural.self_play_game, neural.vs_opponent_game = original_play, original_opponent\n",
+      "new": "        neural.self_play_game = original_play\n"
+    },
+    {
+      "name": "shape not restored",
+      "old": "            return full if asked else [tuple(e[1:]) for e in full]",
+      "new": "            return full"
+    },
+    {
+      "name": "states not logged",
+      "old": "            log[\"games\"].append({\"pass\": log[\"passes\"], \"states\": [e[0] for e in full]})",
+      "new": "            log[\"games\"].append({\"pass\": log[\"passes\"], \"states\": []})"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T08:58:08+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "opponent games not wrapped": [
+        "test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[exploiter]",
+        "test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for"
+      ],
+      "opponent wrapper left behind": [
+        "test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for"
+      ],
+      "shape not restored": [
+        "test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[pure]",
+        "test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for"
+      ],
+      "states not logged": [
+        "test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[exploiter]",
+        "test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[pure]",
+        "test_a_recorded_run_trains_bit_identically_and_records_every_game_of_every_iteration[reanalyze]",
+        "test_games_against_an_opponent_are_recorded_with_the_learner_s_states_and_the_shape_asked_for"
+      ]
+    }
+  }
+}
