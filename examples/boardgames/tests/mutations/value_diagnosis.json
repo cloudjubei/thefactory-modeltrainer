@@ -1,0 +1,168 @@
+{
+  "file": "harness/value_diagnosis.py",
+  "tests": ["tests/test_value_diagnosis.py"],
+  "mutations": [
+    {
+      "name": "move sets unchecked",
+      "old": "    if set(q_hat) != set(values):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "all-optimal positions read",
+      "old": "    if not others:\n        return None\n",
+      "new": ""
+    },
+    {
+      "name": "optimal read as the worst",
+      "old": "    best = max(values.values())",
+      "new": "    best = min(values.values())"
+    },
+    {
+      "name": "top optimal is the weakest",
+      "old": "    top = max(q_hat[a] for a in optimal)",
+      "new": "    top = min(q_hat[a] for a in optimal)"
+    },
+    {
+      "name": "ties do not back",
+      "old": "q_hat[raw] >= top",
+      "new": "q_hat[raw] > top"
+    },
+    {
+      "name": "backing without an error",
+      "old": "\"backs_raw\": error and q_hat[raw] >= top",
+      "new": "\"backs_raw\": q_hat[raw] >= top"
+    },
+    {
+      "name": "misranks ignores ties",
+      "old": "max(q_hat[a] for a in others) >= top",
+      "new": "max(q_hat[a] for a in others) > top"
+    },
+    {
+      "name": "control counts errors",
+      "old": "slot[\"misranked_when_right\"] += int(not reading[\"error\"] and reading[\"misranks\"])",
+      "new": "slot[\"misranked_when_right\"] += int(reading[\"misranks\"])"
+    },
+    {
+      "name": "right counts errors",
+      "old": "slot[\"right\"] += int(not reading[\"error\"])",
+      "new": "slot[\"right\"] += 1"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if evidence.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if evidence.get(\"config\") != spec[\"config\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if evidence.get(\"seeds\") != list(spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "stray ply accepted",
+      "old": "r[\"seed\"] not in spec[\"seeds\"] or r[\"ply\"] not in spec[\"config\"][\"plies\"]",
+      "new": "r[\"seed\"] not in spec[\"seeds\"]"
+    },
+    {
+      "name": "stray seed accepted",
+      "old": "r[\"seed\"] not in spec[\"seeds\"] or r[\"ply\"] not in spec[\"config\"][\"plies\"]",
+      "new": "r[\"ply\"] not in spec[\"config\"][\"plies\"]"
+    },
+    {
+      "name": "minimum errors ignored",
+      "old": "\"inconclusive\" if errors < spec[\"min_errors\"] else",
+      "new": "\"inconclusive\" if errors < 1 else"
+    },
+    {
+      "name": "support bar strict",
+      "old": "share >= spec[\"support_at\"]",
+      "new": "share > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "share <= spec[\"refute_at\"]",
+      "new": "share < spec[\"refute_at\"]"
+    },
+    {
+      "name": "registered bars changed",
+      "old": "\"min_errors\": 100, \"support_at\": 0.6",
+      "new": "\"min_errors\": 50, \"support_at\": 0.6"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T20:25:53+00:00",
+    "killed": 18,
+    "survived": [],
+    "killed_by": {
+      "move sets unchecked": ["test_the_value_head_must_rate_exactly_the_legal_moves"],
+      "all-optimal positions read": ["test_a_position_where_every_move_is_optimal_has_no_reading"],
+      "optimal read as the worst": [
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat0-values0-reading0]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat1-values1-reading1]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat2-values2-reading2]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat6-values6-reading6]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[1-q_hat3-values3-reading3]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[1-q_hat4-values4-reading4]",
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[2-q_hat5-values5-reading5]",
+        "test_a_share_exactly_on_a_bar_takes_that_bar_s_verdict[2-refuted]",
+        "test_a_share_exactly_on_a_bar_takes_that_bar_s_verdict[3-supported]",
+        "test_the_control_counts_correct_positions_where_the_value_head_still_misranks",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[0-refuted]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[1-refuted]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[2-inconclusive]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[3-supported]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[4-supported]",
+        "test_too_few_errors_is_inconclusive_and_the_reading_is_broken_out_by_net_and_ply"
+      ],
+      "top optimal is the weakest": [
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat6-values6-reading6]"
+      ],
+      "ties do not back": [
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat2-values2-reading2]"
+      ],
+      "backing without an error": [
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[1-q_hat3-values3-reading3]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[0-refuted]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[1-refuted]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[2-inconclusive]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[3-supported]",
+        "test_the_verdict_is_the_pooled_share_of_errors_the_value_head_backs[4-supported]",
+        "test_too_few_errors_is_inconclusive_and_the_reading_is_broken_out_by_net_and_ply"
+      ],
+      "misranks ignores ties": [
+        "test_a_position_reads_whether_the_raw_move_errs_and_whether_the_value_head_backs_it[0-q_hat2-values2-reading2]"
+      ],
+      "control counts errors": [
+        "test_too_few_errors_is_inconclusive_and_the_reading_is_broken_out_by_net_and_ply"
+      ],
+      "right counts errors": [
+        "test_too_few_errors_is_inconclusive_and_the_reading_is_broken_out_by_net_and_ply"
+      ],
+      "fingerprint unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "config unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "seeds unchecked": ["test_evidence_that_is_not_the_registered_measurement_is_not_run[seeds]"],
+      "stray ply accepted": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[ply]"
+      ],
+      "stray seed accepted": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[unknown"
+      ],
+      "minimum errors ignored": [
+        "test_too_few_errors_is_inconclusive_and_the_reading_is_broken_out_by_net_and_ply"
+      ],
+      "support bar strict": ["test_a_share_exactly_on_a_bar_takes_that_bar_s_verdict[3-supported]"],
+      "refute bar strict": ["test_a_share_exactly_on_a_bar_takes_that_bar_s_verdict[2-refuted]"],
+      "registered bars changed": [
+        "test_the_registered_measurement_reads_the_six_t10_nets_at_white_s_plies_through_8"
+      ]
+    }
+  }
+}

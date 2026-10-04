@@ -66,43 +66,62 @@
 
 ---
 
-## 1. Board games — in flight
+## 1. Board games — in flight: why does self-play stall on Connect-4?
 
-**Where the solver-free Connect-4 process stands.**
-- Its nets are wrong in the opening, and their own search agrees with the wrong moves (h91, h92).
-- More search does not help: 200 → 20,000 sims leaves opening labels at 84–87%, and the first moves at 33–60%
-  (h96; h93 inconclusive).
-- So **self-search cannot supply the opening**. The open question is which other source of truth can, without the
-  solver.
-- **Written certificates (option (a), the user's choice) do not reach the opening either.**
-  - The claimeven/baseinverse pairing (`harness/c4_certificates.py`) is sound: no contradictions (h98).
-  - It flags none of the search's 144 wrong opening moves (h99 refuted).
-  - Through ply 8 of the nets' trees it certifies no position, and adds 0.5% of non-winning moves beyond the
-    immediate-win tactic (h100). It is an endgame tool.
-  - So certificate labels are **not** wired into training.
+**Where it stands.**
+- At our budget the self-play process plateaus wrong in the opening, and its own search agrees with the wrong moves
+  (h91, h92).
+- More labelling search (h96), written certificates (h99, h100) and a value-aware stop (h102, h105) did not fix it.
+- The net can represent the answer (h72), so the **training method** is the suspect.
+- Out of bounds (user, 2026-10-02): bigger nets or days of compute as the answer to a failure, and rules supplied
+  from outside the process.
 
-**1.1 Value-aware stop — T11 recalibration on tic-tac-toe (running, h101).**
-- The stop now also counts a raw move as agreeing when its search Q is within δ = 0.1 of the label's top move
-  (`train_alphazero(stop_value_delta=…)`; the share reading is kept beside it).
-- T11: T9's process, relabel search weakened 200 → 50 sims, seeds 371–380
-  (`scripts/small_floor.py --spec floor_value_stop`).
-- **Gate:** if h101 is refuted (any false stop), the value stop is unsafe and T12 does not launch.
+**1.1 What D3 and D4 found: in the opening the training target itself is wrong.**
+- The value head backs 42% of the nets' wrong moves, 57% at plies 0–4. At the empty board every value head rates the
+  winning centre below at least two other moves (h106, h107).
+- Where the value head ranks the right move higher one move ahead, the net's own 200-sim search still labels a
+  wrong move: 85% of the time at plies 2–4. Where the value head backs the error, the search follows it 82% of the
+  time (h108, h109).
+- So the policy target is wrong at most opening errors. Fixing how the policy fits its labels cannot help. The lever
+  is **the value signal the search reads**: its leaf evaluations come from the value head, which is worst in the
+  opening.
 
-**1.2 T12 — solver-free Connect-4 with the value-aware stop (pre-register and launch once h101 holds).**
-- T10's process plus δ = 0.1; seeds 381–390; cap 60; certify the stopped nets through 10 plies
-  (`harness/floor_c4_value.py`, `scripts/c4_solver_free.py --value-delta 0.1`).
-- Cost: T10 took ~2.7 h per seed with 8 relabel workers, so ≤ ~27 h for 10 seeds, less where a seed stops.
-- Prediction at registration: **refuted.** The opening labels are wrong (h91, h96) and nothing here fixes them. The
-  run's value is the false-stop count: does the value stop fire on C4, and on a wrong net?
+**1.2 Value targets the net computes itself do not help (T14).**
+- Tree-position targets from the search's root value and n-step targets from the lagged net both lowered the share
+  of optimal opening moves: 86% → 82% and 75% (h111, h112 refuted; 4 paired seeds, 20 iterations, 6-ply tree).
+- They echo: with search-value targets the value head backs 73% of the opening errors, against 36% without (h113).
+- Lesson for the process: **new information has to come from real game outcomes**, not from the net's own estimates.
 
-**1.3 The opening's source of truth — still open (decision for the user after T12).**
-- **(a2) Stronger certificates:** Allis's remaining rules (aftereven, lowinverse, highinverse, before), and a
-  proof-number search with certificates at the leaves, as in VICTOR. A bounded search, declared like the playbook's
-  lookahead.
-- **(b) An opening exception table** in the hybrid: a small solver-built table for the first plies (WeakC4 uses
-  ~2,600 opening nodes), counted in the description length. The process stays solver-free beyond it.
-- **(c) A stronger value signal:** much longer self-play or larger nets. Costly, and the literature says it can work
-  for Connect-4 given enough compute.
+**1.3 The backward curriculum did not show a large gain either (T16), and the pilot is too noisy to see less.**
+- `train_alphazero(backplay=...)` is built and does no harm on tic-tac-toe (h114). On Connect-4 it scored 72% optimal
+  opening moves against base's 73% (1 win of 4; h115 refuted).
+- The pilot measure is noisy: the unchanged process scores 86% and 73% on two sets of four seeds, and single nets
+  range from 62% to 94% (h116). h111, h112 and h115 rule out large gains, not moderate ones.
+
+**1.4 Calibration done: a fixed position set is ~16× less noisy per comparison (h117).**
+- `harness/fixed_set.py` + `scripts/c4_fixed_set_readout.py`: every net plays its raw move at the same 5,142 exactly
+  valued positions (the label cache's White positions, plies 0–8). Seconds per run, no solver.
+- Nets of one arm spread 3.5 points; seed-matched differences 3.1. A paired pilot needs 7 pairs for a 3-point gain,
+  16 for 2 points, 3 for 5 points.
+- Post hoc, the three refuted treatments read +1.7 to +2.1 points over base on this set — a hypothesis, not evidence.
+- The trade-off: the fixed set measures general play (only 114 positions at plies 0–4); P-START needs the first
+  player's own opening tree, which stays the secondary reading with certification.
+
+**1.5 T17 result: only n-step is a lead, and it is not yet proven (h118–h121).**
+- Fixed-set share against base, 7 seed pairs, Holm across three: n-step +3.4 points (5 of 7, p 0.031: inconclusive,
+  short of Holm's 0.0167); tree values −0.4 and the curriculum −2.3 (refuted). 0 of 28 nets certified through 6 plies.
+- Two of the three post-hoc readings from the calibration vanished on fresh seeds (h121).
+- Caveat: n-step's gain is on general play (mostly plies 6–8). On the own-tree opening it was worse in T14 (h112).
+
+**1.6 Next (decision for the user).**
+- **Replicate n-step alone:** 9 seed pairs detect its observed +3.4 points (no multiplicity correction). Two arms,
+  ~9–12 h. Add an opening-specific secondary reading so a gain in general play is not mistaken for the opening fix.
+- **Or move to the remaining real-outcome fixes:** an opponent that punishes the net's opening lines; a reward from
+  real game events, potential-based. Same powered footing.
+- Either way the main gap is unchanged: no process variant yet makes the opening right (0 certified nets).
+
+**1.7 Stored knowledge the process computes itself** (a solved opening/exception table counted in the description
+length) remains an option for the hybrid, not the fix for 1.1.
 
 ## 2. Board games — next
 
@@ -113,7 +132,7 @@
   whole-game first-player certificate (~10^9 positions) is feasible on this machine.
 - Optional: sharpen the depth-10 bracket (8,008, 20,616] with conv-20/24.
 
-**2.2 Solver-free Connect-4 at depth 12**, once 1.2's fix holds at depth 10.
+**2.2 Self-play Connect-4 at depth 12**, once the process certifies at depth 10.
 
 ## 3. Written rules (track R) — runs beside self-play
 
@@ -140,7 +159,7 @@ rule standalone and in decision-list order, by ply.
 - **3.3 Connect-4 rules.**
   - Move rules: win, block, never play under their threat, double threats via threat-space search.
   - **Track C — value certificates:** the pairing (claimeven + baseinverse) is built and sound (h98–h100); next are
-    Allis's other rules with their compatibility check (see 1.3 (a2)).
+    Allis's other rules with their compatibility check (see 1.1 (a2)).
   - Measure on three sets: a ply-matched sample, positions our agents visit, and the rules' own play.
 - **3.4 E3 — hybrid on Connect-4.** The playbook in front of a smaller certified net at depth 8. **Success:** at
   most half of 1,576 params, with the rules' compute declared and bounded and reported beside the params.

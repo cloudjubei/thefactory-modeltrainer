@@ -1,0 +1,56 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_with_tree_value_targets_the_walked_positions_train_on_their_search_value",
+    "tests/test_neural.py::test_c49_tree_value_targets_need_the_strategy_tree",
+    "tests/test_neural.py::test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only"
+  ],
+  "mutations": [
+    {
+      "name": "tree rows keep no value",
+      "old": "row[2] if tree_value_target else float(\"nan\")",
+      "new": "float(\"nan\")"
+    },
+    {
+      "name": "tree rows always valued",
+      "old": "row[2] if tree_value_target else float(\"nan\")",
+      "new": "row[2]"
+    },
+    {
+      "name": "tree rows valued by the raw policy share",
+      "old": "row[2] if tree_value_target else float(\"nan\")",
+      "new": "max(row[1]) if tree_value_target else float(\"nan\")"
+    },
+    {
+      "name": "nan count ignores the knob",
+      "old": "(0 if tree_value_target else len(tree_aug))",
+      "new": "len(tree_aug)"
+    },
+    {
+      "name": "knob without tree accepted",
+      "old": "    if tree_value_target and strategy_tree is None:\n",
+      "new": "    if False:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T20:47:44+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "tree rows keep no value": [
+        "test_c49_with_tree_value_targets_the_walked_positions_train_on_their_search_value"
+      ],
+      "tree rows always valued": [
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[0]",
+        "test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_positions_policy_only[1]"
+      ],
+      "tree rows valued by the raw policy share": [
+        "test_c49_with_tree_value_targets_the_walked_positions_train_on_their_search_value"
+      ],
+      "nan count ignores the knob": [
+        "test_c49_with_tree_value_targets_the_walked_positions_train_on_their_search_value"
+      ],
+      "knob without tree accepted": ["test_c49_tree_value_targets_need_the_strategy_tree"]
+    }
+  }
+}

@@ -22,13 +22,13 @@
     },
     {
       "name": "buffered positions retrained",
-      "old": "                                     if tree_key(st) not in held]",
-      "new": "                                     ]"
+      "old": " for st, row in zip(walked, tree_labels, strict=True) if tree_key(st) not in held]",
+      "new": " for st, row in zip(walked, tree_labels, strict=True)]"
     },
     {
       "name": "tree rows carry a value",
-      "old": "tree_rows = [(row[0], row[1], float(\"nan\")) for st",
-      "new": "tree_rows = [(row[0], row[1], row[2]) for st"
+      "old": "row[2] if tree_value_target else float(\"nan\"))",
+      "new": "row[2] if True else float(\"nan\"))"
     },
     {
       "name": "tree rows not trained",
@@ -42,8 +42,8 @@
     },
     {
       "name": "nan count ignores tree",
-      "old": "len(sib_aug) + len(tree_aug)",
-      "new": "len(sib_aug)"
+      "old": "len(sib_aug) + (0 if tree_value_target else len(tree_aug))",
+      "new": "len(sib_aug) + 0"
     },
     {
       "name": "disagreements not recorded",
@@ -87,7 +87,7 @@
     }
   ],
   "last_run": {
-    "at": "2026-10-02T17:46:18+00:00",
+    "at": "2026-10-02T20:49:30+00:00",
     "killed": 15,
     "survived": [],
     "killed_by": {

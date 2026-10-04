@@ -4570,3 +4570,114 @@ that walked (no further training, no settle). 4 tests; 6 mutations killed.
   - add an automatic trial log to the drivers (a start line and an end or failure line per run), so aborted runs
     are recorded without anyone remembering to.
   - The drivers are fingerprinted by T10, hence the wait.
+
+## 2026-10-02 — Solver-free Connect-4 closed (decision)
+
+**What was tried, in order, all on the T10 process (T9's process, conv-32 at 20,616 params, 200-sim relabel,
+60-iteration cap, ~2.7 h per seed with 8 relabel workers):**
+- T10 itself: 6/6 seeds ran to the cap without the stop firing (h88); none certified through 10 plies, first
+  failures at plies 0-4 (h91); the net and its own search mostly agree on the losing move (h92).
+- More search at labelling time: 200 → 20,000 sims leaves opening labels at 84-87%; 100,000 sims at plies 0-2 reach
+  56% (h96).
+- Allis-style written certificates (option (a)): sound (h98), but flag none of the 144 wrong opening moves (h99) and
+  add 0.5% beyond tactics through ply 8 (h100).
+- A value-aware stop: identical to the share rule at δ ≤ 0.1 on tic-tac-toe (h101 vacuous, h102) and on the T10
+  nets (h103, h105). T12 (T10 plus that stop) was built but not launched — it would train and read as T10.
+
+**Not the limit:** net capacity — conv-32 is certified through 10 plies when trained on exact labels (h72).
+
+**Decision (user):** reaching optimal Connect-4 by pure self-play would take days of brute-force compute on a
+trivial game; that is not worth it and the approach does not scale to harder games. The process will store
+knowledge it computes itself — solved positions (an opening/exception table counted in the description length) or
+derived rules — instead. Unbounded self-play remains untested by choice, not refuted. Rules supplied from outside
+the process (Allis's remaining rules) are out, since an unknown game has none.
+
+**Revision (same day, user):** "closed" was too strong. Self-play is **not** rejected — what is ruled out is brute
+force (bigger nets or days of compute) as the answer to a failure, and rules supplied from outside the process.
+Since the net can represent the solution (h72), the training method itself is the next suspect: how the value head
+is trained (targets are outcomes of 32-sim self-play games; strategy-tree positions get no value target),
+exploration, the self-play opponent, the terminal-only reward, and untuned settings. First step: a diagnostic of
+the T10 nets' value heads against exact values (D3). Stored self-computed knowledge stays an option for the hybrid,
+not the fix for this.
+
+## 2026-10-02 — D3: the value head is part of the cause
+
+Over the label cache's 5,142 readable White positions (plies 0-8) × the six T10 nets: 7,429 wrong raw moves. The value
+head backs 42% of them (h106, inconclusive between the pre-registered 40%/60% bars), against 25% misranking where
+the raw move is right (the control). It is worse in the opening: 57% at plies 0-4, and at the empty board every value
+head rates the winning centre below at least two other moves, three of them worst of all seven (h107, descriptive).
+So both the value signal and the policy side need work; D4 (policy-side errors vs the relabel label) comes next.
+
+## 2026-10-02 — D4: in the opening the training target is wrong
+
+At the same positions, the nets' own 200-sim relabel search (training's policy target) labels an optimal move at 47%
+of the policy-side errors (h108, inconclusive between 40%/60%) — only 15% at plies 2-4 (12/78) against 49% at ply 8 —
+and at 18% where the value head backs the error (h109, descriptive). In the opening the target is wrong at most of
+the nets' errors, so the value signal the search reads is the lever, not how the policy fits its labels. Plan §1.2
+now lists value-signal fixes, each to be pre-registered on tic-tac-toe and small Connect-4 depths first.
+
+## 2026-10-02 — Idea (user): teach the outcomes first
+
+The value head learns only from whole-game outcomes, so credit reaches the opening through ~40 moves. Proposed:
+teach positions 1 move from the end first, then 2, then 3 — a backward curriculum — and more generally maximise how
+much reward signal the net sees, possibly with a richer reward. Recorded in plan §1.2 with the literature
+(Backplay; reverse curriculum; Salimans & Chen; Ng-Harada-Russell for safe shaping; KataGo for richer targets),
+added to `.factory/trainer.json`.
+
+## 2026-10-02 — T13 passed; T14 launched
+
+Tree-position value targets (the relabel search's root value) do no harm on tic-tac-toe: 10/10 seeds still perfect
+from the start, stop safe and timely (h110). T14 pre-registered (h111 tree_value, h112 n_step with the earlier
+contrary result on record) and launched: three arms × seeds 401-404 × 20 iterations at a 6-ply tree, side by side.
+A first launch failed at once on an argument-quoting slip (zsh does not split a variable into words); logged as
+failed trials, nothing ran.
+
+## 2026-10-03 — T14: value targets the net computes itself do not help
+
+Three arms × seeds 401-404, T10's process at a 6-ply tree, 20 iterations, no stop (~80 min per seed per arm, three
+arms side by side). No net was certified through 6 plies in any arm. Readout (each net's own White positions through
+ply 4, exact values; 112-132 positions solved): optimal share base 85.9%, tree-position value targets 82.2% (1 of 4
+seed wins; h111 refuted), n-step value targets 75.4% (0 wins; h112 refuted — replicating the 2026-08 contrary
+result). The echo (h113): with search-value targets the value head backs 73% of the opening errors against 36% in
+base; n-step nearly doubles the errors. A value target computed by the net cannot add information it lacks. Next:
+fixes that bring real outcomes — backward curriculum, a punishing opponent, a reward from real game events.
+The first readout attempt was stopped by hand (it would have hit a 30-minute background limit) and relaunched
+detached; its trial-log entry reads aborted.
+
+## 2026-10-03 — Backward curriculum built; T15 passed; T16 launched
+
+`train_alphazero(backplay={"frac", "ramp"})` (and `self_play_game(start_state=...)`): a share of each iteration's
+self-play games starts near the end of the previous iteration's full games, the reach growing as a fraction of each
+game's length until whole games at `ramp`. Off by default with no rng draws. On tic-tac-toe (T9's process, half the
+games started late, ramp 15 of 30): 10/10 seeds still perfect from the start, stop safe (h114). T16 pre-registered
+(h115) and launched: base vs curriculum (ramp 10 of 20), seeds 411-414, T14's pilot shape, base retrained under this
+code (no control reuse across code eras).
+
+## 2026-10-03 — T16: the backward curriculum, no large gain; the pilot is underpowered
+
+Base vs curriculum, seeds 411-414 (~35 min per seed per arm; readout ~5 h under load ~19, 179 positions solved).
+Every net fails certification through 6 plies, at plies 0-4. Optimal opening share: base 73.1%, curriculum 72.1%
+(1 win of 4; h115 refuted). The curriculum did run (~450 late-start games per seed). Checking the verdict found the
+real lesson (h116): the unchanged base process scores 85.9% on T14's seeds and 73.1% on T16's, and single nets range
+62-94% — a 4-seed pilot with a 10-point bar can only detect large effects. The next step is to power the measure.
+
+## 2026-10-03 — P1: calibrating the measurement on a fixed position set
+
+All 20 T14/T16 nets scored on the same 5,142 exactly valued positions (label cache, White, plies 0-8) in 6 seconds.
+Within-arm spread 3.5 points, seed-matched differences 3.1 — 7 pairs detect a 3-point gain, 16 a 2-point one (h117).
+Post hoc, every refuted treatment reads 1.7-2.1 points above base here, opposite in sign to the own-tree measure for
+n-step; only a powered pre-registered run can say whether that is real.
+
+## 2026-10-03 — T17 launched: the powered comparison
+
+Pre-registered h118-h120: base vs n-step, tree values and the curriculum, seven seeds (431-437), every final net
+scored on the fixed 5,142-position set, one-sided sign-flip permutation tests with Holm's correction (~3.5-point
+detectable gain). Judge `harness/floor_c4_powered.py` (17/17 mutants killed; one equivalent mutant — signed vs
+absolute sizes in the sign-flip test — dropped). The fixed-set readout now carries each net's certificate verdict.
+
+## 2026-10-04 — T17: the powered comparison
+
+28 nets (4 arms × seeds 431-437, ~10 h side by side), none certified through 6 plies. Fixed-set share vs base:
+n-step +3.4 points (5/7 pairs, one-sided p 0.031 — inconclusive under Holm, h118), tree values -0.4 (h119 refuted),
+curriculum -2.3 (h120 refuted). The calibration's post-hoc +1.7..+2.1 readings held only for n-step (h121). A focused
+n-step replication needs 9 pairs. The opening — the actual target — is still not fixed by any variant.

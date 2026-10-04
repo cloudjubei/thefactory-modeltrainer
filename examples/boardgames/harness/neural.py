@@ -861,7 +861,7 @@ def self_play_game(
     target_net: "Connect4Net | None" = None, n_step: int = 0, device: str = "cpu",
     return_states: bool = False, opening_plies: int = 0,
     endgame_tb=None, exact_value_targets: bool = False, record_aux: bool = False,
-    forced_opening: list[int] | None = None, record: dict | None = None,
+    forced_opening: list[int] | None = None, record: dict | None = None, start_state: State | None = None,
 ) -> list:
     """Play ONE self-play game and return training examples (encoded board, policy, value). With `return_states`,
     each example is prefixed with the game STATE `(state, x, pi, v)` so the buffer can be REANALYZED (#2) — the
@@ -869,22 +869,28 @@ def self_play_game(
     that many RANDOM opening moves before net-guided play begins (those plies are NOT recorded as training
     examples) — so the net TRAINS on positions reached from DIVERSE openings, not just its own main line. This is
     the robustness lever: a net trained only on its canonical line loses AWAY from it (measured); off-line coverage
-    teaches it to never lose a drawable position. Generic (no game knowledge)."""
+    teaches it to never lose a drawable position. Generic (no game knowledge). `start_state` starts the game from
+    that position instead (no opening plies) — the backward curriculum's late starts."""
+    if start_state is not None and game.is_terminal(start_state):
+        raise ValueError("a self-play game cannot start from a finished position")
     agent._nodes = {}
     agent.add_noise = not agent.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
     pending: list[tuple[State, torch.Tensor, list[float], int]] = []
     actions: list[int] = []
-    state = game.initial_state(rng)
-    if forced_opening:  # §C.8 #5: replay a REFUTED line exactly (scripted, unrecorded — the search didn't pick
-        for a in forced_opening:  # these moves, so they get no policy targets); recording starts where it led.
-            if game.is_terminal(state) or a not in game.legal_actions(state):
-                break
-            state = game.step(state, a, rng)
+    if start_state is not None:
+        state = start_state
     else:
-        for _ in range(opening_plies):  # DIVERSE random opening (unrecorded) → off-main-line training coverage
-            if game.is_terminal(state):
-                break
-            state = game.step(state, rng.choice(game.legal_actions(state)), rng)
+        state = game.initial_state(rng)
+        if forced_opening:  # §C.8 #5: replay a REFUTED line exactly (scripted, unrecorded — the search didn't pick
+            for a in forced_opening:  # these moves, so they get no policy targets); recording starts where it led.
+                if game.is_terminal(state) or a not in game.legal_actions(state):
+                    break
+                state = game.step(state, a, rng)
+        else:
+            for _ in range(opening_plies):  # DIVERSE random opening (unrecorded) → off-main-line training coverage
+                if game.is_terminal(state):
+                    break
+                state = game.step(state, rng.choice(game.legal_actions(state)), rng)
     move = 0
     while not game.is_terminal(state):
         agent.temperature = 1.0 if move < temp_moves else 0.0
@@ -1024,16 +1030,24 @@ def vs_opponent_game(
     rng: random.Random,
     temp_moves: int = 6,
     record: dict | None = None,
-) -> list[tuple[torch.Tensor, list[float], float]]:
+    return_states: bool = False,
+    opening_plies: int = 0,
+) -> list[tuple]:
     """League game: the LEARNER (net-guided, exploring) plays an arbitrary opponent (a strong mcts / heuristic
     / a past champion). Training examples are collected from ONLY the learner's moves — we learn to BEAT the
     opponent, we don't imitate it. A caller-supplied `record` dict is filled with the played `actions` and the
-    `learner_return` — the refutation-replay loop (§C.8 #5) reads it to learn WHICH lines the opponent refutes."""
+    `learner_return` — the refutation-replay loop (§C.8 #5) reads it to learn WHICH lines the opponent refutes.
+    `return_states` prefixes each example with its state (for the reanalyze buffer); `opening_plies` random moves are
+    played first and not recorded, as in self-play."""
     learner._nodes = {}
     learner.add_noise = not learner.gumbel  # Gumbel supplies its own root exploration; Dirichlet would double it
-    pending: list[tuple[torch.Tensor, list[float], int]] = []
+    pending: list[tuple[State, torch.Tensor, list[float], int]] = []
     actions: list[int] = []
     state = game.initial_state(rng)
+    for _ in range(opening_plies):
+        if game.is_terminal(state):
+            break
+        state = game.step(state, rng.choice(game.legal_actions(state)), rng)
     move = 0
     while not game.is_terminal(state):
         player = game.current_player(state)
@@ -1041,7 +1055,7 @@ def vs_opponent_game(
             learner.temperature = 1.0 if move < temp_moves else 0.0
             pi = learner.run_search(game, state, rng)
             pi_vec = [pi.get(a, 0.0) for a in range(game.num_actions)]
-            pending.append((encode(game, state), pi_vec, player))
+            pending.append((state, encode(game, state), pi_vec, player))
             action = learner._gumbel_selected if learner.gumbel else sample_action(pi, learner.temperature, rng)
         else:
             action = opponent.act(game, state, rng)
@@ -1052,7 +1066,9 @@ def vs_opponent_game(
     if record is not None:
         record["actions"] = actions
         record["learner_return"] = returns[learner_seat]
-    return [(x, pi_vec, returns[player]) for (x, pi_vec, player) in pending]
+    if return_states:
+        return [(s, x, pi_vec, returns[player]) for (s, x, pi_vec, player) in pending]
+    return [(x, pi_vec, returns[player]) for (_s, x, pi_vec, player) in pending]
 
 
 def head_to_head(
@@ -1637,6 +1653,9 @@ def train_alphazero(
     relabel_workers: int = 1,
     stop_on_agreement: bool = False,
     stop_value_delta: float | None = None,
+    tree_value_target: bool = False,
+    backplay: dict | None = None,
+    exploiter: dict | None = None,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1703,6 +1722,15 @@ def train_alphazero(
     if stop_value_delta is not None and (strategy_tree is None or stop_value_delta < 0):
         raise ValueError("stop_value_delta reads the strategy-tree walk's search values — set strategy_tree and a "
                          "delta >= 0")
+    if backplay is not None and (reanalyze_frac <= 0.0 or not 0.0 < backplay["frac"] < 1.0 or backplay["ramp"] < 1):
+        raise ValueError("backplay starts games from the state buffer's recorded games — it needs reanalyze_frac "
+                         "> 0, 0 < frac < 1 (some games must start normally to refill its pool) and ramp >= 1")
+    if exploiter is not None and (reanalyze_frac <= 0.0 or not 0.0 < exploiter["frac"] <= 1.0
+                                  or exploiter["sims_factor"] <= 1):
+        raise ValueError("an exploiter plays games for the state buffer — it needs reanalyze_frac > 0, 0 < frac <= 1 "
+                         "and sims_factor > 1 (more search than the learner)")
+    if tree_value_target and strategy_tree is None:
+        raise ValueError("tree_value_target gives the strategy-tree positions a value target — set strategy_tree")
     if strategy_tree is not None and reanalyze_frac != 1.0:
         raise ValueError("strategy_tree relabels its positions with the whole-buffer search — set reanalyze_frac=1.0")
     if settle_lr is not None and settle_epochs <= 0:
@@ -1759,6 +1787,7 @@ def train_alphazero(
     # REANALYZE (#2) holds STATES in the buffer so old entries can be re-labelled by the current net. The training
     # set is always the (x, pi, v) view; the state is carried only to re-search. `state_buffer` mirrors `buffer`.
     state_buffer: list[tuple[State, torch.Tensor, list[float], float]] = []
+    backplay_pool: list[list[State]] = []
     # §C.7 #2: the online endgame loop is armed only for a game with the exact hooks — else pure #1 (no crash).
     endgame_on = _endgame_enabled(game, endgame_tb)
     eg_targets = endgame_on and bool(endgame_exact_targets)
@@ -1856,11 +1885,34 @@ def train_alphazero(
         if reanalyze_frac > 0.0:
             fresh_s: list[tuple[State, torch.Tensor, list[float], float]] = []
             t_selfplay = time.time()
+            full_games: list[list[State]] = []
+            backplay_games = exploiter_games = 0
+            if exploiter is not None:
+                exploiter_agent = AlphaZeroAgent(net, sims=sims * exploiter["sims_factor"], device=device,
+                                                 gumbel=gumbel, gumbel_m=gumbel_m, c_scale=c_scale)
+                exploiter_agent.temperature = 0.0
+                exploiter_agent.add_noise = False
             for _ in range(selfplay_games):
-                fresh_s.extend(self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
-                                              device=device, return_states=True, opening_plies=_game_plies(rng),
-                                              endgame_tb=(endgame_tb if endgame_on else None),
-                                              exact_value_targets=eg_targets))
+                start = None
+                if backplay is not None and backplay_pool and rng.random() < backplay["frac"]:
+                    source = backplay_pool[rng.randrange(len(backplay_pool))]
+                    reach = min(len(source), math.ceil(len(source) * (it + 1) / backplay["ramp"]))
+                    start = source[len(source) - rng.randint(1, reach)]
+                    backplay_games += 1
+                if exploiter is not None and start is None and rng.random() < exploiter["frac"]:
+                    fresh_s.extend(vs_opponent_game(game, learner, exploiter_agent, rng.randrange(game.num_players),
+                                                    rng, return_states=True, opening_plies=_game_plies(rng)))
+                    exploiter_games += 1
+                    continue
+                played = self_play_game(game, learner, rng, target_net=target_net, n_step=value_n_step,
+                                        device=device, return_states=True, opening_plies=_game_plies(rng),
+                                        endgame_tb=(endgame_tb if endgame_on else None),
+                                        exact_value_targets=eg_targets, start_state=start)
+                fresh_s.extend(played)
+                if start is None and played:
+                    full_games.append([row[0] for row in played])
+            if backplay is not None and full_games:
+                backplay_pool = full_games
             if endgame_on:
                 eg_visited.extend(s for (s, *_rest) in fresh_s)
             selfplay_s = time.time() - t_selfplay
@@ -1943,19 +1995,22 @@ def train_alphazero(
                         tree_key = (game.canonical_key if (augment or canonical) and hasattr(game, "canonical_key")
                                     else game.state_key)
                         held = {tree_key(st) for (st, *_rest) in state_buffer}
-                        tree_rows = [(row[0], row[1], float("nan")) for st, row in zip(walked, tree_labels, strict=True)
-                                     if tree_key(st) not in held]
+                        tree_rows = [(row[0], row[1], row[2] if tree_value_target else float("nan"))
+                                     for st, row in zip(walked, tree_labels, strict=True) if tree_key(st) not in held]
             sp_aug = augment_examples([(x, pi, v) for (_s, x, pi, v) in state_buffer], perms)
             sib_aug = augment_examples(sib_rows, perms) if sib_rows else []
             tree_aug = augment_examples(tree_rows, perms) if tree_rows else []
             buffer = sp_aug + sib_aug + tree_aug
             reanalyze_note = {"selfplay_states": len(fresh_s), "state_buffer": len(state_buffer), "evicted": evicted,
+                              **({"backplay_games": backplay_games} if backplay is not None else {}),
+                              **({"exploiter_games": exploiter_games} if exploiter is not None else {}),
                               **({"merged": merged} if buffer_unique else {}), "siblings": sib_stats["added"],
                               **({"sibling_rings": sib_stats.get("rings", [])} if reanalyze_siblings else {}),
                               "sibling_terminal_skipped": sib_stats["terminal_skipped"],
                               "sibling_recorded_skipped": sib_stats["recorded_skipped"],
                               "sibling_holdout_skipped": sib_stats["holdout_skipped"],
-                              "nan_value_examples": len(sib_aug) + len(tree_aug), "selfplay_s": round(selfplay_s, 3),
+                              "nan_value_examples": len(sib_aug) + (0 if tree_value_target else len(tree_aug)),
+                              "selfplay_s": round(selfplay_s, 3),
                               "relabel_s": round(relabel_s, 3), "sibling_relabel_s": round(sibling_relabel_s, 3)}
             epoch_cap = len(sp_aug) if (steps_matched and (sib_aug or tree_aug)) else None
             if strategy_tree is not None:

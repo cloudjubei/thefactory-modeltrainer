@@ -3380,10 +3380,17 @@
       "proof": "tests/test_c49_value_stop_evidence.py::test_c49_T11_under_a_weak_search_the_value_stop_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
       "note": "Recalibrates the stop before the solver-free Connect-4 run uses it (plan 1.2). delta 0.1 and 50 sims fixed before the data. The share rule's reading is recorded beside it (reported: when it would have stopped). Era 0c8fa3e34fdc, measurement ee230228a735. Cost estimate: T9 took ~17 min/seed single-thread at 200 sims; at 50 sims ~10-12 min/seed, 4 workers: ~35-45 min wall.",
       "registered_at": "2026-10-02T17:48:15.781121+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_stop_evidence.py::test_c49_T11_under_a_weak_search_the_value_stop_never_stops_early_and_stops_in_time_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T18:29:14.985895+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_T11_tree_value_stop_weak.json.gz",
-        "started": null
+        "started": "2026-10-02T17:59:07+00:00"
       },
       "pins": {
         "tests/test_c49_value_stop_evidence.py": "f81b735e427d22a3278daeca86ab90f1f8ca4eae28859eac05c7cf02e99c5f44",
@@ -3392,6 +3399,538 @@
         "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
       },
       "inconclusive_proof": "tests/test_c49_value_stop_evidence.py::test_c49_T11_the_value_stop_reading_is_undecidable"
+    },
+    "h102": {
+      "id": "h102",
+      "claim": "\u00a7C.49 T11b (descriptive, registered after the data): in T11 the value-aware reading (Q within 0.1 of the top move) equalled the share reading on all 290 walked iterations of the 10 seeds (569 disagreements each) \u2014 on tic-tac-toe every move under half the top share also had a Q gap above 0.1 or no visits, so h101's SUPPORTED verdict does not exercise the value rule and cannot calibrate it",
+      "mode": "test",
+      "proof": "tests/test_c49_value_stop_vacuous_evidence.py::test_c49_T11b_the_value_reading_equals_the_share_reading_on_every_walked_iteration_of_every_seed",
+      "note": "Found by checking the verdict adversarially before using it as the gate for T12. Consequence: the value stop's safety must be tested on Connect-4 itself \u2014 on nets known to be uncertified (T10's, h91).",
+      "registered_at": "2026-10-02T18:29:39.783114+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_stop_vacuous_evidence.py::test_c49_T11b_the_value_reading_equals_the_share_reading_on_every_walked_iteration_of_every_seed",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T18:29:39.985263+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T11_tree_value_stop_weak.json.gz",
+        "started": "2026-10-02T17:59:07+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_stop_vacuous_evidence.py": "bcd0afad5dd9b936ed809d7b8470c0a3b267314271ea3775393ba5a1c466df68"
+      }
+    },
+    "h103": {
+      "id": "h103",
+      "claim": "\u00a7C.49 T11c: the value-aware stop (Q within 0.1 of the top move) would NOT fire on Connect-4 nets the solver does not certify \u2014 on each of the six T10 final nets (seeds 361-366, none certified through 10 plies, h91), its reading over the net's own first-player tree through 10 plies, relabelled with T10's 200-sim search, is above zero. Refuted if any net reads zero; inconclusive if a net is missing or walks nothing",
+      "mode": "test",
+      "proof": "tests/test_c49_c4_value_reading_evidence.py::test_c49_T11c_the_value_stop_reads_above_zero_on_every_uncertified_T10_net",
+      "note": "Replaces T11 as the value stop's safety test (h102: T11 never exercised the rule). Share and value readings at 0.05/0.1/0.2 are recorded per net and per ply for the T12 decision: T12 trains exactly as T10 (the delta changes only when it stops), so its outcome is largely predicted by this probe. Cost: ~6 relabels of a depth-10 tree, ~10-20 min with 8 workers.",
+      "registered_at": "2026-10-02T18:30:21.128842+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_c4_value_reading_evidence.py::test_c49_T11c_the_value_stop_reads_above_zero_on_every_uncertified_T10_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T18:31:24.733944+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T11c_c4_value_reading.json.gz",
+        "started": "2026-10-02T18:30:22+00:00"
+      },
+      "pins": {
+        "tests/test_c49_c4_value_reading_evidence.py": "3747c6b00d82baf9043c1edcbb2af54a7bb05fc8cee267cfd9b771af7af78b4e"
+      },
+      "inconclusive_proof": "tests/test_c49_c4_value_reading_evidence.py::test_c49_T11c_is_undecidable"
+    },
+    "h104": {
+      "id": "h104",
+      "claim": "\u00a7C.49 T11d (descriptive, registered after the data): on all six T10 Connect-4 nets the value-aware reading at delta 0.05 and 0.1 equals the share reading exactly (76, 71, 17, 59, 53, 78 disagreements over trees of 571-1,304 positions), and delta 0.2 removes at most a fifth \u2014 the raw moves the search rejects are ones its own Q values more than 0.1 below the top move, so counting 'equal-value moves as agreement' changes nothing at any usable delta, and the value-aware stop cannot make T10's process stop",
+      "mode": "test",
+      "proof": "tests/test_c49_value_equals_share_evidence.py::test_c49_T11d_the_value_reading_is_the_share_reading_at_delta_0_1_on_every_T10_net",
+      "note": "Likely mechanism (not proven here): the Gumbel completed-Q target is softmax(logit + sigma(Q)) with sigma ~ (c_visit + max_n) * c_scale per unit Q, so 'under half the top share' already implies a Q gap of roughly 0.07 or more \u2014 the share rule IS a value rule. D1's 'both moves optimal' (h90) is by the solver; the search's own Q separates them. Consequence: T12 (T10 + value stop) would train identically to T10 and read identically, so it was not launched.",
+      "registered_at": "2026-10-02T18:31:24.943372+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_equals_share_evidence.py::test_c49_T11d_the_value_reading_is_the_share_reading_at_delta_0_1_on_every_T10_net",
+          "ok": false,
+          "detail": "tests/test_c49_value_equals_share_evidence.py:25: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_value_equals_share_evidence.py::test_c49_T11d_the_value_reading_is_the_share_reading_at_delta_0_1_on_every_T10_net\n1 failed in 0.03s",
+          "drawn_at": "2026-10-02T18:31:25.139443+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T11c_c4_value_reading.json.gz",
+        "started": "2026-10-02T18:30:22+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_equals_share_evidence.py": "aae1c4da3d7db34eefe34f1cd8f7f806ed7f3e67595901049196dc9729acb443"
+      },
+      "supersession": {
+        "by": "h105",
+        "reason": "h104's bound 'delta 0.2 removes at most a fifth' was misstated (seed 365 drops 21%); h105 states the measured 21% \u2014 the substance (delta <= 0.1 changes nothing) is unchanged",
+        "at": "2026-10-02T18:31:41.254432+00:00"
+      }
+    },
+    "h105": {
+      "id": "h105",
+      "claim": "\u00a7C.49 T11e (descriptive, registered after the data): on all six T10 Connect-4 nets the value-aware reading at delta 0.05 and 0.1 equals the share reading exactly (76, 71, 17, 59, 53, 78 disagreements over trees of 571-1,304 positions), and delta 0.2 removes at most 21% \u2014 the raw moves the search rejects are ones its own Q values more than 0.1 below the top move, so counting 'equal-value moves as agreement' changes nothing at delta <= 0.1, and the value-aware stop cannot make T10's process stop",
+      "mode": "test",
+      "proof": "tests/test_c49_value_equals_share_v2_evidence.py::test_c49_T11e_the_value_reading_is_the_share_reading_at_delta_0_1_on_every_T10_net",
+      "note": "Corrects h104, whose 'at most a fifth' was wrong (seed 365: 53 -> 42, 21%). Likely mechanism (not proven): the Gumbel completed-Q target is softmax(logit + sigma(Q)) with sigma ~ (c_visit + max_n) * c_scale per unit Q, so 'under half the top share' already implies a Q gap of roughly 0.07 or more \u2014 the share rule IS a value rule. Consequence: T12 (T10 + value stop) would train identically to T10 and read identically, so it was not launched.",
+      "registered_at": "2026-10-02T18:31:40.902071+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_equals_share_v2_evidence.py::test_c49_T11e_the_value_reading_is_the_share_reading_at_delta_0_1_on_every_T10_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T18:31:41.203248+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T11c_c4_value_reading.json.gz",
+        "started": "2026-10-02T18:30:22+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_equals_share_v2_evidence.py": "60bc4756df39908307ae2f4ce783190a206d10a5e2d2b6e94802eafacbc013c0"
+      }
+    },
+    "h106": {
+      "id": "h106",
+      "claim": "\u00a7C.49 D3: the T10 Connect-4 nets' VALUE HEADS back their own wrong moves \u2014 over the label cache's White-to-move positions at plies 0-8 with every move's exact value recorded, at the positions where a net's raw move is not optimal, its value head rates the position after the raw move at least as high (mover's view; a finished game counts its exact result) as after every optimal move in >= 60% of them, pooled over the six nets (seeds 361-366). Refuted at <= 40%; inconclusive between, or on fewer than 100 such positions",
+      "mode": "test",
+      "proof": "tests/test_c49_value_head_evidence.py::test_c49_D3_the_value_head_rates_the_net_s_wrong_move_at_least_as_high_as_the_best_move_in_60pct_of_errors",
+      "note": "Why: the net can represent the answer (h72) but its search agrees with its opening errors (h92) and more search does not fix them (h96) \u2014 the search reads the value head, whose targets are outcomes of 32-sim self-play games and which gets no target at strategy-tree positions. SUPPORTED points the fixes at the value signal; REFUTED points them at the policy or the search. Control reported: how often the value head misranks where the raw move is right. Cost: forward passes only, a few minutes.",
+      "registered_at": "2026-10-02T20:26:04.369761+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_head_evidence.py::test_c49_D3_the_value_head_rates_the_net_s_wrong_move_at_least_as_high_as_the_best_move_in_60pct_of_errors",
+          "ok": false,
+          "detail": "st_c49_value_head_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_value_head_evidence.py::test_c49_D3_the_value_head_rates_the_net_s_wrong_move_at_least_as_high_as_the_best_move_in_60pct_of_errors\n1 failed in 0.30s",
+          "drawn_at": "2026-10-02T20:26:21.084320+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D3_value_head.json.gz",
+        "started": "2026-10-02T20:26:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_head_evidence.py": "8d9ca19a9a74b8a6cbec48ee820bd6cebaeb3cea618ecb45dde4aa8eb32743a4",
+        "harness/value_diagnosis.py": "c2b14b8305a1ceb0ac542811379950012ae79e8590e07c4b2a951cb825c655aa"
+      },
+      "inconclusive_proof": "tests/test_c49_value_head_evidence.py::test_c49_D3_is_undecidable"
+    },
+    "h107": {
+      "id": "h107",
+      "claim": "\u00a7C.49 D3b (descriptive, registered after the data): the T10 value heads' failure concentrates in the opening. At plies 0-4 they back 104 of the nets' 182 wrong moves (57%), against 3,026 of 7,247 (42%) at plies 6-8. At the empty board every one of the six value heads rates the winning centre move below at least two losing or drawing moves, and three rate it the worst of all seven",
+      "mode": "test",
+      "proof": "tests/test_c49_value_head_opening_evidence.py::test_c49_D3b_at_the_empty_board_every_value_head_rates_the_winning_centre_below_two_other_moves",
+      "note": "Second proof: test_c49_D3b_the_value_head_backs_opening_errors_more_than_deeper_ones. The value head is trained only on outcomes of 32-sim self-play games (half of them opened with 2 random plies) and gets no target at strategy-tree positions; it is an on-policy estimate, so its opening ratings reflect how its own weak self-play turns out, not the game's value. Plies 0-2 are few positions (48), so the opening share is indicative, not powered.",
+      "registered_at": "2026-10-02T20:27:04.879204+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_head_opening_evidence.py::test_c49_D3b_at_the_empty_board_every_value_head_rates_the_winning_centre_below_two_other_moves",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.10s",
+          "drawn_at": "2026-10-02T20:27:05.339744+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D3_value_head.json.gz",
+        "started": "2026-10-02T20:26:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_head_opening_evidence.py": "1a3ce61a924e62dc7ff33697245c6cb66164ea551ae34302b94abbcc1f774ae5"
+      }
+    },
+    "h108": {
+      "id": "h108",
+      "claim": "\u00a7C.49 D4: at the T10 nets' POLICY-SIDE errors on D3's positions (the raw move is not optimal, yet the value head rates some optimal move strictly above it), the net's own 200-sim relabel search (T10's settings; the argmax of its improved policy, i.e. training's policy target) labels an optimal move in >= 60% of them, pooled over the six nets. Refuted at <= 40%; inconclusive between, or on fewer than 100 such positions",
+      "mode": "test",
+      "proof": "tests/test_c49_labels_evidence.py::test_c49_D4_at_policy_side_errors_the_relabel_search_labels_an_optimal_move_in_60pct",
+      "note": "Follows D3 (h106, h107). SUPPORTED: the search converts the value head's ranking into a right label, so the failure is downstream \u2014 split by whether the position is on the net's own tree (trained every iteration: the label was not absorbed) or off it (never trained there). REFUTED: the search does not turn the value head's knowledge into its label (c_scale, simulations). Value-side errors are reported apart. Cost: one 200-sim search per wrong move (~7,400), a few minutes with 8 workers.",
+      "registered_at": "2026-10-02T20:35:26.769478+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_labels_evidence.py::test_c49_D4_at_policy_side_errors_the_relabel_search_labels_an_optimal_move_in_60pct",
+          "ok": false,
+          "detail": "      + inconclusive\n\ntests/test_c49_labels_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_labels_evidence.py::test_c49_D4_at_policy_side_errors_the_relabel_search_labels_an_optimal_move_in_60pct\n1 failed in 0.09s",
+          "drawn_at": "2026-10-02T20:36:42.967519+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D4_labels.json.gz",
+        "started": "2026-10-02T20:35:28+00:00"
+      },
+      "pins": {
+        "tests/test_c49_labels_evidence.py": "70df00722bb4b7d623e2a9d7db8163dbf25c32c0f35866a4105d9e407b4fb74e",
+        "harness/label_diagnosis.py": "b87dd256fc1880eb3df7e9c090a73a0cfaa9d1726f604c05a3cd56d9189f2ad6",
+        "harness/value_diagnosis.py": "c2b14b8305a1ceb0ac542811379950012ae79e8590e07c4b2a951cb825c655aa"
+      },
+      "inconclusive_proof": "tests/test_c49_labels_evidence.py::test_c49_D4_is_undecidable"
+    },
+    "h109": {
+      "id": "h109",
+      "claim": "\u00a7C.49 D4b (descriptive, registered after the data): the T10 nets' relabel search mislabels most of their wrong moves in the opening and follows the value head. At plies 2-4 it labels an optimal move at only 12 of 78 policy-side errors (15%, where the value head ranks an optimal move higher one move ahead), against 1,818 of 3,674 (49%) at ply 8; where the value head backs the wrong move, the search labels an optimal move at only 559 of 3,130 (18%). Only 84 policy-side errors lie on the nets' own trees (27 labelled optimally)",
+      "mode": "test",
+      "proof": "tests/test_c49_labels_opening_evidence.py::test_c49_D4b_in_the_opening_the_search_mislabels_most_policy_side_errors",
+      "note": "Further proofs: test_c49_D4b_where_the_value_head_backs_the_error_the_search_follows_it, test_c49_D4b_few_policy_side_errors_lie_on_the_nets_own_trees. Reading: in the opening the policy TARGET is wrong at most errors whichever head is at fault \u2014 the search's leaf evaluations come from the value head, which D3 found worst in the opening (h107) \u2014 so fixing how the policy fits its labels cannot fix the opening; the value signal the search reads is the lever. Plies 2-4 are few (78), so the opening share is indicative.",
+      "registered_at": "2026-10-02T20:37:08.867119+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_labels_opening_evidence.py::test_c49_D4b_in_the_opening_the_search_mislabels_most_policy_side_errors",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-02T20:37:09.170856+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_D4_labels.json.gz",
+        "started": "2026-10-02T20:35:28+00:00"
+      },
+      "pins": {
+        "tests/test_c49_labels_opening_evidence.py": "b9e3df34d620e6240113777ddad1ffdc96eae912e76f741395e0d2f553e8efa8"
+      }
+    },
+    "h110": {
+      "id": "h110",
+      "claim": "\u00a7C.49 T13 (tree_value_target): giving the strategy-tree positions a value target \u2014 the root value of the 200-sim relabel search that labels their policy \u2014 does no harm on tic-tac-toe: T9's process (strategy tree, no siblings) with the option on, seeds 391-400, ends with a net the solver certifies as perfect from the start as the first player on >= 8/10 seeds; refuted at <= 5; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_tree_value_evidence.py::test_c49_T13_with_tree_value_targets_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+      "note": "The first value-signal fix from D3/D4 (h106-h109): the positions training cares about most get no value target today. Gate before the Connect-4 pilot. Baseline: T9 10/10 (h73). Era 607d6dccb102, measurement 851a36746117. Cost: ~17 min/seed single-thread, 4 workers, ~50-60 min wall.",
+      "registered_at": "2026-10-02T20:50:14.094822+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_tree_value_evidence.py::test_c49_T13_with_tree_value_targets_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-02T21:35:00.720453+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T13_tree_value_target.json.gz",
+        "started": "2026-10-02T21:01:06+00:00"
+      },
+      "pins": {
+        "tests/test_c49_tree_value_evidence.py": "5810b6ff0d1936d7556bd25d7b73b7e83139bf86c6c8abbefff6cd3f665f21cb",
+        "harness/floor_tree_value.py": "427814411879339c4c13e0b6c576b56384d7ab8094f9efe4daefe9cdba933588",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_tree_value_evidence.py::test_c49_T13_is_undecidable"
+    },
+    "h111": {
+      "id": "h111",
+      "claim": "\u00a7C.49 T14 (tree_value): on Connect-4, giving the strategy-tree positions the relabel search's root value as their value target makes the final net play the optimal move at more of its own first-player positions through ply 4 \u2014 against T10's process without it at a 6-ply tree, 20 iterations, no stop, seeds 401-404 paired: a strictly higher share on >= 3 of 4 seed pairs AND a pooled share >= 10 points higher. Refuted at <= 1 win or no pooled gain; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_tree_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+      "note": "The first value-signal fix from D3/D4 (h106-h109); passed the tic-tac-toe no-harm gate (h110). A 4-pair pilot: it can show a large effect, not a small one. Era 74c9ad808be0, readout 796d1e3db0c8. The readout also records the value-head and label readings at each error (reported, not judged). Cost: 3 arms x 4 seeds x 20 iterations, 4 relabel workers per arm in parallel, ~6-8 h, plus certification through 6 plies and the readout.",
+      "registered_at": "2026-10-02T21:35:19.717149+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_tree_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+          "ok": false,
+          "detail": "9_value_signal_c4_evidence.py:35: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_tree_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points\n1 failed in 0.04s",
+          "drawn_at": "2026-10-03T02:57:00.258972+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T14_readout.json.gz",
+        "started": "2026-10-03T01:16:38+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_signal_c4_evidence.py": "4488306c817e38544e287e907d433d170c6ec651ee1ab10f4b02fea10f757504",
+        "harness/floor_c4_value_signal.py": "9f69e8f7f49e1f1af791e93ae1e459268802a53fd009f9c9c8084ea0d313828e"
+      },
+      "inconclusive_proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_tree_value_is_undecidable"
+    },
+    "h112": {
+      "id": "h112",
+      "claim": "\u00a7C.49 T14 (n_step): on Connect-4, bootstrapping value targets from a lagged target net 8 moves ahead (refreshed every 2 iterations) instead of whole-game outcomes makes the final net play the optimal move at more of its own first-player positions through ply 4 \u2014 against T10's process without it at a 6-ply tree, 20 iterations, no stop, seeds 401-404 paired: a strictly higher share on >= 3 of 4 seed pairs AND a pooled share >= 10 points higher. Refuted at <= 1 win or no pooled gain; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_n_step_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+      "note": "The user's 'teach outcomes from the end' idea, in its cheapest form (the option already existed, value_n_step=0 by default). Prior on record: in an earlier era, with one seed, n=8 LOWERED the empty-board value estimate (+0.38 pure outcomes vs +0.26, journal 2026-08) \u2014 so a refutation would replicate it. Same pilot and readout as h111.",
+      "registered_at": "2026-10-02T21:35:19.772683+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_n_step_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+          "ok": false,
+          "detail": "value_signal_c4_evidence.py:43: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_n_step_value_targets_raise_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points\n1 failed in 0.04s",
+          "drawn_at": "2026-10-03T02:57:00.656857+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T14_readout.json.gz",
+        "started": "2026-10-03T01:16:38+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_signal_c4_evidence.py": "4488306c817e38544e287e907d433d170c6ec651ee1ab10f4b02fea10f757504",
+        "harness/floor_c4_value_signal.py": "9f69e8f7f49e1f1af791e93ae1e459268802a53fd009f9c9c8084ea0d313828e"
+      },
+      "inconclusive_proof": "tests/test_c49_value_signal_c4_evidence.py::test_c49_T14_n_step_is_undecidable"
+    },
+    "h113": {
+      "id": "h113",
+      "claim": "\u00a7C.49 T14b (descriptive, registered after the data): both refuted value-signal fixes take their value target from the net itself, and the readout shows the echo. With the relabel search's root value as the target of the strategy-tree positions, the value head backs 24 of the nets' 33 opening errors (73%), against 10 of 28 (36%) without it \u2014 it learned to agree with its own search, wrong moves included. With n-step targets bootstrapped from the lagged net, the errors rise from 28 to 52 (backed 25)",
+      "mode": "test",
+      "proof": "tests/test_c49_value_signal_echo_evidence.py::test_c49_T14b_search_value_targets_double_how_often_the_value_head_backs_the_net_s_errors",
+      "note": "Second proof: test_c49_T14b_n_step_targets_nearly_double_the_errors. 4 seeds per arm, plies 0-4 of each net's own tree, so the counts are small. Lesson for the process: a value target computed by the net (its search's root value, its own lagged estimate) cannot add information the net lacks \u2014 it consolidates its beliefs. Information has to come from REAL outcomes: games that reach a result the net did not predict (a backward curriculum from late positions, an opponent that punishes the net's lines, a reward built only from real game events).",
+      "registered_at": "2026-10-03T02:57:01.036057+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_value_signal_echo_evidence.py::test_c49_T14b_search_value_targets_double_how_often_the_value_head_backs_the_net_s_errors",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-03T02:57:01.244157+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T14_readout.json.gz",
+        "started": "2026-10-03T01:16:38+00:00"
+      },
+      "pins": {
+        "tests/test_c49_value_signal_echo_evidence.py": "edddec34d5ca5ad58c545b9127ef8bba58334d1b809bfaa42c7f4b85979ec1ac"
+      }
+    },
+    "h114": {
+      "id": "h114",
+      "claim": "\u00a7C.49 T15 (backplay): the backward curriculum \u2014 half of each iteration's self-play games started near the end of the previous iteration's games, the start moving back to whole games by iteration 15 \u2014 does no harm on tic-tac-toe: T9's process with it on, seeds 421-430, ends with a net the solver certifies as perfect from the start as the first player on >= 8/10 seeds; refuted at <= 5; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_backplay_evidence.py::test_c49_T15_with_the_backward_curriculum_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+      "note": "The user's idea (2026-10-02): teach outcomes from the end backwards, so real results \u2014 not the net's own estimates (h113) \u2014 reach the opening. Gate before the Connect-4 pilot T16. Baseline: T9 10/10 (h73). Era 9ea894591459, measurement 3758500de40d. Cost: ~10-12 min/seed single-thread, 4 workers, ~45-60 min wall.",
+      "registered_at": "2026-10-03T08:25:56.856566+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_backplay_evidence.py::test_c49_T15_with_the_backward_curriculum_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-03T09:06:53.744816+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T15_backplay.json.gz",
+        "started": "2026-10-03T08:37:11+00:00"
+      },
+      "pins": {
+        "tests/test_c49_backplay_evidence.py": "75f32855393315e96bcc15b3a5032325b3d56be2f5aa536410ab33121be42ca1",
+        "harness/floor_backplay.py": "a8de58ad15799bb827ffb967bd9fa17e6ca46d94c536bc270dc997501e263b82",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_backplay_evidence.py::test_c49_T15_is_undecidable"
+    },
+    "h115": {
+      "id": "h115",
+      "claim": "\u00a7C.49 T16 (backplay): on Connect-4, the backward curriculum \u2014 half of each iteration's self-play games started near the end of the previous iteration's games, the start moving back to whole games by iteration 10 \u2014 makes the final net play the optimal move at more of its own first-player positions through ply 4, against T10's process without it at a 6-ply tree, 20 iterations, no stop, seeds 411-414 paired (base retrained under the same code): a strictly higher share on >= 3 of 4 seed pairs AND a pooled share >= 10 points higher. Refuted at <= 1 win or no pooled gain; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_backplay_c4_evidence.py::test_c49_T16_the_backward_curriculum_raises_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+      "note": "The user's idea (2026-10-02): real outcomes, not the net's own estimates (h113), taught from the end backwards. Passed the tic-tac-toe no-harm gate (h114). A 4-pair pilot: it can show a large effect, not a small one. Era 7b7e2b460262, readout c0d85a95888e. Cost: 2 arms x 4 seeds x 20 iterations side by side, ~5.5 h, plus certification through 6 plies and the readout (~1.5 h).",
+      "registered_at": "2026-10-03T09:07:07.644008+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_backplay_c4_evidence.py::test_c49_T16_the_backward_curriculum_raises_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points",
+          "ok": false,
+          "detail": "c49_backplay_c4_evidence.py:32: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_backplay_c4_evidence.py::test_c49_T16_the_backward_curriculum_raises_the_share_of_optimal_opening_moves_on_3_of_4_seeds_by_10_points\n1 failed in 0.03s",
+          "drawn_at": "2026-10-03T14:35:57.034477+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T16_readout.json.gz",
+        "started": "2026-10-03T11:19:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_backplay_c4_evidence.py": "10ceedc3d55c4450030b92aa972ff356f692786ecbef8c5cee23ef13c10fcd62",
+        "harness/floor_c4_backplay.py": "1cb6dd29dbab09b24cd7ac9bc5a58239b83b7ba9b0835bf89bc78e8bd29b68b9",
+        "harness/floor_c4_value_signal.py": "9f69e8f7f49e1f1af791e93ae1e459268802a53fd009f9c9c8084ea0d313828e"
+      },
+      "inconclusive_proof": "tests/test_c49_backplay_c4_evidence.py::test_c49_T16_is_undecidable"
+    },
+    "h116": {
+      "id": "h116",
+      "claim": "\u00a7C.49 T16b (descriptive, registered after the data): the 4-seed Connect-4 pilot measure is too noisy for its 10-point bar. The same unchanged base process scores 85.9% optimal opening moves on seeds 401-404 (T14) and 73.1% on seeds 411-414 (T16) \u2014 12.8 points apart from the seed set alone \u2014 and single base nets range from 62% to 94%. The three refutations it produced (h111, h112, h115) rule out large gains, not moderate ones",
+      "mode": "test",
+      "proof": "tests/test_c49_pilot_power_evidence.py::test_c49_T16b_the_unchanged_process_scores_13_points_apart_on_two_sets_of_four_seeds",
+      "note": "Second proof: test_c49_T16b_single_base_nets_range_from_62_to_94_percent. Found by checking h115's verdict adversarially (its two arms' error totals matched exactly \u2014 a coincidence: per-seed counts differ and the curriculum ran ~450 late-start games per seed). The two base sets differ in code era too (the curriculum code, off by default and byte-identical when off). Consequence: power the next pilot before running it \u2014 more seeds, or a measure over a fixed position set instead of each net's own tree.",
+      "registered_at": "2026-10-03T14:36:37.479149+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_pilot_power_evidence.py::test_c49_T16b_the_unchanged_process_scores_13_points_apart_on_two_sets_of_four_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-03T14:36:37.697664+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_T14_readout.json.gz",
+          "started": "2026-10-03T01:16:38+00:00"
+        },
+        {
+          "path": "evidence/c49_T16_readout.json.gz",
+          "started": "2026-10-03T11:19:55+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_pilot_power_evidence.py": "d3d73bc821ae47d4cbbd06fb989d988debcdd2e0844262197866590590bb99a5"
+      }
+    },
+    "h117": {
+      "id": "h117",
+      "claim": "\u00a7C.49 P1 (descriptive, registered after the data): scored on ONE FIXED SET of 5,142 exactly valued positions (the label cache's White positions, plies 0-8), the 20 T14/T16 Connect-4 nets of the same arm spread 3.5 points (within-arm SD) and seed-matched differences to base spread 3.1 points \u2014 so a paired pilot needs 7 seed pairs to detect a 3-point gain and 16 for 2 points (one-sided 5%, 80% power). Post hoc, all three refuted treatments read slightly ABOVE base on this set (n-step +2.1, tree values +1.9, curriculum +1.7 points; 3 of 4 pairs positive each) \u2014 opposite in sign, for n-step, to the own-tree opening measure",
+      "mode": "test",
+      "proof": "tests/test_c49_calibration_evidence.py::test_c49_P1_nets_of_one_arm_spread_3_5_points_and_seed_matched_differences_3_1",
+      "note": "Further proofs: test_c49_P1_a_paired_pilot_needs_7_pairs_for_3_points_and_16_for_2, test_c49_P1_post_hoc_all_three_refuted_treatments_read_slightly_above_base_on_the_fixed_set. The post-hoc reading is a HYPOTHESIS for a powered pre-registered test, not a finding: it was looked at after the data, on a different measure (mostly plies 6-8; only 114 of the 5,142 positions are plies 0-4). The fixed set is ~16x less noisy per comparison than the own-tree measure (h116) but measures general play, not the first player's own opening tree that P-START needs.",
+      "registered_at": "2026-10-03T20:17:47.364062+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_calibration_evidence.py::test_c49_P1_nets_of_one_arm_spread_3_5_points_and_seed_matched_differences_3_1",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-03T20:17:47.576403+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_P1_fixed_set.json.gz",
+        "started": "2026-10-03T20:17:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_calibration_evidence.py": "f5f1d6f5d9e3f886123005faca715e5c73acb9d11a097fc402dde7b4e49cf83a"
+      }
+    },
+    "h118": {
+      "id": "h118",
+      "claim": "\u00a7C.49 T17, powered (seeds 431-437, seven seed-matched pairs against base; T14's pilot shape: 6-ply tree, 20 iterations, no stop): every final net scored on one fixed set of 5,142 exactly valued positions (label cache, White, plies 0-8); judged by an exact one-sided sign-flip permutation test on the seed-matched differences with Holm's correction across the three treatments at 5%. Refuted when the mean difference is <= 0; inconclusive when positive but not rejected. Claim: n-step value targets (bootstrapped from a lagged target net 8 moves ahead, refreshed every 2 iterations) raises the share of optimal moves on that set against base.",
+      "mode": "test",
+      "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_n_step_value_targets_raise_the_fixed_set_share_against_base",
+      "note": "Follows calibration h117 (paired SD ~3.1 points; with Holm across 3, seven pairs detect ~3.5 points at 80% power). Post hoc on that set, all three earlier refuted treatments read +1.7..+2.1 points over base \u2014 this run tests that prediction properly, on fresh seeds. Certification through 6 plies reported per arm, not judged; the own-tree opening readout is dropped (10+ h of solving). Era 7b7e2b460262, readout cfc0a014ec57. Cost: 4 arms x 7 seeds x 20 iterations, four arms side by side, ~12-16 h.",
+      "registered_at": "2026-10-03T20:22:04.373994+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_n_step_value_targets_raise_the_fixed_set_share_against_base",
+          "ok": false,
+          "detail": "orted\nE         + inconclusive\n\ntests/test_c49_powered_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_powered_evidence.py::test_c49_T17_n_step_value_targets_raise_the_fixed_set_share_against_base\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T03:15:09.892075+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T17_fixed_set.json.gz",
+        "started": "2026-10-04T03:15:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_powered_evidence.py": "bee582d711c0b8b2860951a6d5e50fd12eafacaf73bf7447db5fc53cabbba96d",
+        "harness/floor_c4_powered.py": "46e1b101b9cdb0904b8be6983696800ff425c3b89a1c8c759f90f44611bdf2e8"
+      },
+      "inconclusive_proof": "tests/test_c49_powered_evidence.py::test_c49_T17_n_step_is_undecidable"
+    },
+    "h119": {
+      "id": "h119",
+      "claim": "\u00a7C.49 T17, powered (seeds 431-437, seven seed-matched pairs against base; T14's pilot shape: 6-ply tree, 20 iterations, no stop): every final net scored on one fixed set of 5,142 exactly valued positions (label cache, White, plies 0-8); judged by an exact one-sided sign-flip permutation test on the seed-matched differences with Holm's correction across the three treatments at 5%. Refuted when the mean difference is <= 0; inconclusive when positive but not rejected. Claim: value targets for the strategy-tree positions from the relabel search's root value raises the share of optimal moves on that set against base.",
+      "mode": "test",
+      "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_tree_value_targets_raise_the_fixed_set_share_against_base",
+      "note": "Follows calibration h117 (paired SD ~3.1 points; with Holm across 3, seven pairs detect ~3.5 points at 80% power). Post hoc on that set, all three earlier refuted treatments read +1.7..+2.1 points over base \u2014 this run tests that prediction properly, on fresh seeds. Certification through 6 plies reported per arm, not judged; the own-tree opening readout is dropped (10+ h of solving). Era 7b7e2b460262, readout cfc0a014ec57. Cost: 4 arms x 7 seeds x 20 iterations, four arms side by side, ~12-16 h.",
+      "registered_at": "2026-10-03T20:22:04.420732+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_tree_value_targets_raise_the_fixed_set_share_against_base",
+          "ok": false,
+          "detail": " - supported\nE         + refuted\n\ntests/test_c49_powered_evidence.py:39: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_powered_evidence.py::test_c49_T17_tree_value_targets_raise_the_fixed_set_share_against_base\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T03:15:10.272936+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T17_fixed_set.json.gz",
+        "started": "2026-10-04T03:15:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_powered_evidence.py": "bee582d711c0b8b2860951a6d5e50fd12eafacaf73bf7447db5fc53cabbba96d",
+        "harness/floor_c4_powered.py": "46e1b101b9cdb0904b8be6983696800ff425c3b89a1c8c759f90f44611bdf2e8"
+      },
+      "inconclusive_proof": "tests/test_c49_powered_evidence.py::test_c49_T17_tree_value_is_undecidable"
+    },
+    "h120": {
+      "id": "h120",
+      "claim": "\u00a7C.49 T17, powered (seeds 431-437, seven seed-matched pairs against base; T14's pilot shape: 6-ply tree, 20 iterations, no stop): every final net scored on one fixed set of 5,142 exactly valued positions (label cache, White, plies 0-8); judged by an exact one-sided sign-flip permutation test on the seed-matched differences with Holm's correction across the three treatments at 5%. Refuted when the mean difference is <= 0; inconclusive when positive but not rejected. Claim: the backward curriculum (half the games started near the end of the previous iteration's games, whole games by iteration 10) raises the share of optimal moves on that set against base.",
+      "mode": "test",
+      "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_the_backward_curriculum_raises_the_fixed_set_share_against_base",
+      "note": "Follows calibration h117 (paired SD ~3.1 points; with Holm across 3, seven pairs detect ~3.5 points at 80% power). Post hoc on that set, all three earlier refuted treatments read +1.7..+2.1 points over base \u2014 this run tests that prediction properly, on fresh seeds. Certification through 6 plies reported per arm, not judged; the own-tree opening readout is dropped (10+ h of solving). Era 7b7e2b460262, readout cfc0a014ec57. Cost: 4 arms x 7 seeds x 20 iterations, four arms side by side, ~12-16 h.",
+      "registered_at": "2026-10-03T20:22:04.467641+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_powered_evidence.py::test_c49_T17_the_backward_curriculum_raises_the_fixed_set_share_against_base",
+          "ok": false,
+          "detail": "ported\nE         + refuted\n\ntests/test_c49_powered_evidence.py:47: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_powered_evidence.py::test_c49_T17_the_backward_curriculum_raises_the_fixed_set_share_against_base\n1 failed in 0.04s",
+          "drawn_at": "2026-10-04T03:15:10.663773+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_T17_fixed_set.json.gz",
+        "started": "2026-10-04T03:15:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_powered_evidence.py": "bee582d711c0b8b2860951a6d5e50fd12eafacaf73bf7447db5fc53cabbba96d",
+        "harness/floor_c4_powered.py": "46e1b101b9cdb0904b8be6983696800ff425c3b89a1c8c759f90f44611bdf2e8"
+      },
+      "inconclusive_proof": "tests/test_c49_powered_evidence.py::test_c49_T17_backplay_is_undecidable"
+    },
+    "h121": {
+      "id": "h121",
+      "claim": "\u00a7C.49 T17b (descriptive, registered after the data): of the three post-hoc readings the calibration showed (h117: all treatments 1.7-2.1 points above base), only n-step kept its direction on fresh seeds in the powered run \u2014 n-step +3.4 points (5 of 7 pairs, uncorrected one-sided p 0.031), tree values -0.4, the curriculum -2.3. n-step's seed-matched differences spread 4.0 points, so a focused replication of n-step alone (no multiplicity correction) needs 9 seed pairs to detect its observed gain at 80% power",
+      "mode": "test",
+      "proof": "tests/test_c49_powered_replication_evidence.py::test_c49_T17b_only_n_step_kept_the_direction_the_calibration_showed_after_the_data",
+      "note": "Second proof: test_c49_T17b_a_focused_n_step_replication_needs_9_seed_pairs_for_its_observed_gain. Lesson: two of three post-hoc patterns vanished on fresh seeds \u2014 exactly why h117's reading was registered as a hypothesis, not a finding. n-step's gain is on the fixed set (mostly plies 6-8); on the own-tree opening measure it was worse in T14 (h112), and no net in any arm is certified through 6 plies (0 of 28).",
+      "registered_at": "2026-10-04T03:15:49.474381+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_powered_replication_evidence.py::test_c49_T17b_only_n_step_kept_the_direction_the_calibration_showed_after_the_data",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-04T03:15:49.676941+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_P1_fixed_set.json.gz",
+          "started": "2026-10-03T20:17:04+00:00"
+        },
+        {
+          "path": "evidence/c49_T17_fixed_set.json.gz",
+          "started": "2026-10-04T03:15:04+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_powered_replication_evidence.py": "690ec6395fe4f58e6b30a59886165f94dcbe4b13765b58ec5475e5d68e7c37a4"
+      }
+    },
+    "h122": {
+      "id": "h122",
+      "claim": "\u00a7C.49 T18 (exploiter): playing half of each iteration's self-play games against the current net with 8x its search, greedily, the learner taking a random seat, does no harm on tic-tac-toe: T9's process with it on, seeds 441-450, ends with a net the solver certifies as perfect from the start as the first player on >= 8/10 seeds; refuted at <= 5; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_with_an_exploiter_the_settled_net_still_plays_perfectly_from_the_start_on_8_of_10_seeds",
+      "note": "The punishing-opponent fix (plan \u00a71.6): real outcomes from games where the learner's mistakes are punished, not the net's own estimates (h113). Gate before T19. Baseline T9 10/10 (h73). Era af36c90425bb, measurement d10de436db78. Cost: self-play ~2-3x dearer; ~15-20 min/seed single-thread, 5 workers, ~45-75 min wall.",
+      "registered_at": "2026-10-04T08:27:52.725916+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_T18_exploiter.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_exploiter_evidence.py": "8e8f630a49da2cb0c40c616e936e90fc9f99a62838c10cf4e251be70b725023a",
+        "harness/floor_exploiter.py": "aa351a70c9bb080b36e3ae31dc35fdbfa582db600ebe36600e1a66298aa68b49",
+        "harness/floor_tree.py": "97c0841c9be0151cf2e4272e33c11949e26f49a3359669e4f55bb50a3827dc3d",
+        "harness/floor_stop.py": "001d0e4ab2a7ba2b3b9e4fd94cf76c066b430aa0129a54bdb2b7fa5077aa3024"
+      },
+      "inconclusive_proof": "tests/test_c49_exploiter_evidence.py::test_c49_T18_is_undecidable"
     }
   }
 }

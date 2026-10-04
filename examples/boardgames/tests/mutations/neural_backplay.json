@@ -1,0 +1,122 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_self_play_from_a_start_state_records_that_position_first_and_plays_no_opening",
+    "tests/test_neural.py::test_a_finished_start_state_is_refused",
+    "tests/test_neural.py::test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games",
+    "tests/test_neural.py::test_c49_backplay_is_off_by_default_and_draws_nothing_from_the_rng",
+    "tests/test_neural.py::test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp"
+  ],
+  "mutations": [
+    {
+      "name": "every game starts normally",
+      "old": "if backplay is not None and backplay_pool and rng.random() < backplay[\"frac\"]:",
+      "new": "if False:"
+    },
+    {
+      "name": "ramp ignored",
+      "old": "math.ceil(len(source) * (it + 1) / backplay[\"ramp\"])",
+      "new": "len(source)"
+    },
+    {
+      "name": "start counted from the front",
+      "old": "start = source[len(source) - rng.randint(1, reach)]",
+      "new": "start = source[rng.randint(1, reach) - 1]"
+    },
+    {
+      "name": "late starts refill the pool",
+      "old": "if start is None and played:",
+      "new": "if played:"
+    },
+    {
+      "name": "pool never filled",
+      "old": "                backplay_pool = full_games\n",
+      "new": "                pass\n"
+    },
+    {
+      "name": "frac 1 accepted",
+      "old": "not 0.0 < backplay[\"frac\"] < 1.0",
+      "new": "not 0.0 < backplay[\"frac\"] <= 1.0"
+    },
+    {
+      "name": "frac 0 accepted",
+      "old": "not 0.0 < backplay[\"frac\"] < 1.0",
+      "new": "not 0.0 <= backplay[\"frac\"] < 1.0"
+    },
+    {
+      "name": "ramp 0 accepted",
+      "old": "backplay[\"ramp\"] < 1)",
+      "new": "backplay[\"ramp\"] < 0)"
+    },
+    {
+      "name": "no state buffer accepted",
+      "old": "if backplay is not None and (reanalyze_frac <= 0.0 or not",
+      "new": "if backplay is not None and (not"
+    },
+    {
+      "name": "late starts not counted",
+      "old": "**({\"backplay_games\": backplay_games} if backplay is not None else {})",
+      "new": "**({\"backplay_games\": 0} if backplay is not None else {})"
+    },
+    {
+      "name": "start state ignored",
+      "old": "        state = start_state\n",
+      "new": "        state = game.initial_state(rng)\n"
+    },
+    {
+      "name": "finished start accepted",
+      "old": "    if start_state is not None and game.is_terminal(start_state):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "reported without the knob",
+      "old": "**({\"backplay_games\": backplay_games} if backplay is not None else {})",
+      "new": "**({\"backplay_games\": backplay_games})"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-03T08:24:24+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "every game starts normally": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "ramp ignored": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "start counted from the front": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "late starts refill the pool": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "pool never filled": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "frac 1 accepted": [
+        "test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp[frac"
+      ],
+      "frac 0 accepted": [
+        "test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp[frac"
+      ],
+      "ramp 0 accepted": [
+        "test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp[ramp"
+      ],
+      "no state buffer accepted": [
+        "test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp[no"
+      ],
+      "late starts not counted": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games"
+      ],
+      "start state ignored": [
+        "test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games",
+        "test_self_play_from_a_start_state_records_that_position_first_and_plays_no_opening"
+      ],
+      "finished start accepted": ["test_a_finished_start_state_is_refused"],
+      "reported without the knob": [
+        "test_c49_backplay_is_off_by_default_and_draws_nothing_from_the_rng"
+      ]
+    }
+  }
+}

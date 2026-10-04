@@ -1,0 +1,122 @@
+{
+  "file": "harness/fixed_set.py",
+  "tests": ["tests/test_fixed_set.py"],
+  "mutations": [
+    {
+      "name": "any side kept",
+      "old": "if s.to_move != player or ply not in plies",
+      "new": "if ply not in plies"
+    },
+    {
+      "name": "any ply kept",
+      "old": "if s.to_move != player or ply not in plies",
+      "new": "if s.to_move != player"
+    },
+    {
+      "name": "partial rows kept",
+      "old": "if set(values) == set(game.legal_actions(s)) and len(set(values.values())) > 1:",
+      "new": "if len(set(values.values())) > 1:"
+    },
+    {
+      "name": "no-choice positions kept",
+      "old": "if set(values) == set(game.legal_actions(s)) and len(set(values.values())) > 1:",
+      "new": "if set(values) == set(game.legal_actions(s)):"
+    },
+    {
+      "name": "worst move counted",
+      "old": "right = values[m] == max(values.values())",
+      "new": "right = values[m] == min(values.values())"
+    },
+    {
+      "name": "move count unchecked",
+      "old": "    if len(moves) != len(cases):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "two-sided test",
+      "old": "NormalDist().inv_cdf(1 - alpha)",
+      "new": "NormalDist().inv_cdf(1 - alpha / 2)"
+    },
+    {
+      "name": "power ignored",
+      "old": " + NormalDist().inv_cdf(power)",
+      "new": ""
+    },
+    {
+      "name": "rounded not ceiled",
+      "old": "math.ceil((z * sd / effect) ** 2)",
+      "new": "round((z * sd / effect) ** 2)"
+    },
+    {
+      "name": "zero effect accepted",
+      "old": "    if effect <= 0:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "population spread",
+      "old": "\"sd\": stdev(v.values()) if len(v) > 1 else 0.0}",
+      "new": "\"sd\": __import__(\"statistics\").pstdev(v.values()) if len(v) > 1 else 0.0}"
+    },
+    {
+      "name": "differences unmatched",
+      "old": "diffs = [shares[s] - base[s] for s in sorted(shares) if s in base]",
+      "new": "diffs = [a - b for a, b in zip(sorted(shares.values()), sorted(base.values()))]"
+    },
+    {
+      "name": "base paired with itself",
+      "old": "        if arm == \"base\" or base is None:\n",
+      "new": "        if base is None:\n"
+    },
+    {
+      "name": "pooled spread unweighted",
+      "old": "sum((len(v) - 1) * arms[k][\"sd\"] ** 2 for k, v in groups.items()) / dof",
+      "new": "sum(arms[k][\"sd\"] ** 2 for k, v in groups.items()) / len(groups)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-03T20:16:43+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "any side kept": ["test_the_side_to_move_decides_which_positions_are_kept"],
+      "any ply kept": [
+        "test_only_full_positions_of_the_registered_side_and_plies_with_a_choice_are_kept"
+      ],
+      "partial rows kept": [
+        "test_only_full_positions_of_the_registered_side_and_plies_with_a_choice_are_kept"
+      ],
+      "no-choice positions kept": [
+        "test_only_full_positions_of_the_registered_side_and_plies_with_a_choice_are_kept"
+      ],
+      "worst move counted": ["test_a_net_s_score_counts_optimal_raw_moves_overall_and_by_ply"],
+      "move count unchecked": ["test_a_net_s_score_counts_optimal_raw_moves_overall_and_by_ply"],
+      "two-sided test": [
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.02-0.05-1]",
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.1-0.05-25]",
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.1-0.1-7]",
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.15-0.1-14]"
+      ],
+      "power ignored": [
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.1-0.05-25]",
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.1-0.1-7]",
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.15-0.1-14]"
+      ],
+      "rounded not ceiled": [
+        "test_the_pairs_needed_for_a_one_sided_test_at_5pct_with_80pct_power[0.1-0.1-7]"
+      ],
+      "zero effect accepted": ["test_pairs_needed_refuses_a_non_positive_effect"],
+      "population spread": [
+        "test_calibration_reads_each_arm_s_spread_and_the_seed_matched_differences_to_base"
+      ],
+      "differences unmatched": [
+        "test_calibration_reads_each_arm_s_spread_and_the_seed_matched_differences_to_base"
+      ],
+      "base paired with itself": [
+        "test_calibration_reads_each_arm_s_spread_and_the_seed_matched_differences_to_base"
+      ],
+      "pooled spread unweighted": [
+        "test_calibration_reads_each_arm_s_spread_and_the_seed_matched_differences_to_base"
+      ]
+    }
+  }
+}

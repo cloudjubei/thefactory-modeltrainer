@@ -1,0 +1,141 @@
+{
+  "file": "harness/label_diagnosis.py",
+  "tests": ["tests/test_label_diagnosis.py"],
+  "mutations": [
+    {
+      "name": "correct moves read",
+      "old": "if reading is None or not reading[\"error\"]:",
+      "new": "if reading is None:"
+    },
+    {
+      "name": "value-side errors judged",
+      "old": "                if reading[\"backs_raw\"]:\n",
+      "new": "                if False:\n"
+    },
+    {
+      "name": "label must be the best-valued first move",
+      "old": "optimal_label = values[int(r[\"label\"])] == max(values.values())",
+      "new": "optimal_label = int(r[\"label\"]) == max(values, key=values.get)"
+    },
+    {
+      "name": "value side miscounted",
+      "old": "value_side[\"label_optimal\"] += int(optimal_label)",
+      "new": "value_side[\"label_optimal\"] += 1"
+    },
+    {
+      "name": "tree split inverted",
+      "old": "\"on_tree\" if r[\"on_tree\"] else \"off_tree\"",
+      "new": "\"off_tree\" if r[\"on_tree\"] else \"on_tree\""
+    },
+    {
+      "name": "label counted always",
+      "old": "    slot[\"label_optimal\"] += int(optimal_label)",
+      "new": "    slot[\"label_optimal\"] += 1"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if evidence.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if evidence.get(\"config\") != spec[\"config\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if evidence.get(\"seeds\") != list(spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "minimum ignored",
+      "old": "\"inconclusive\" if n < spec[\"min_errors\"] else",
+      "new": "\"inconclusive\" if n < 1 else"
+    },
+    {
+      "name": "support bar strict",
+      "old": "share >= spec[\"support_at\"]",
+      "new": "share > spec[\"support_at\"]"
+    },
+    {
+      "name": "refute bar strict",
+      "old": "share <= spec[\"refute_at\"]",
+      "new": "share < spec[\"refute_at\"]"
+    },
+    {
+      "name": "registered budget changed",
+      "old": "\"sims\": 200}",
+      "new": "\"sims\": 400}"
+    },
+    {
+      "name": "registered minimum changed",
+      "old": "\"min_errors\": 100,",
+      "new": "\"min_errors\": 50,"
+    },
+    {
+      "name": "stray seed accepted",
+      "old": "if r[\"seed\"] not in spec[\"seeds\"] or r[\"ply\"]",
+      "new": "if False or r[\"ply\"]"
+    },
+    {
+      "name": "stray ply accepted",
+      "old": "or r[\"ply\"] not in spec[\"config\"][\"plies\"]:",
+      "new": "or False:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T20:35:15+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "correct moves read": [
+        "test_value_side_errors_and_correct_moves_are_counted_apart_and_do_not_judge"
+      ],
+      "value-side errors judged": [
+        "test_value_side_errors_and_correct_moves_are_counted_apart_and_do_not_judge"
+      ],
+      "label must be the best-valued first move": [
+        "test_a_label_counts_when_it_is_any_optimal_move",
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[label]"
+      ],
+      "value side miscounted": [
+        "test_value_side_errors_and_correct_moves_are_counted_apart_and_do_not_judge"
+      ],
+      "tree split inverted": ["test_the_reading_is_broken_out_by_the_net_s_own_tree_and_by_ply"],
+      "label counted always": [
+        "test_the_reading_is_broken_out_by_the_net_s_own_tree_and_by_ply",
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[4-2-inconclusive]",
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[5-0-refuted]",
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[5-2-refuted]",
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[5-3-supported]"
+      ],
+      "fingerprint unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "config unchecked": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "seeds unchecked": ["test_evidence_that_is_not_the_registered_measurement_is_not_run[seeds]"],
+      "minimum ignored": [
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[3-3-inconclusive]",
+        "test_value_side_errors_and_correct_moves_are_counted_apart_and_do_not_judge"
+      ],
+      "support bar strict": [
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[5-3-supported]"
+      ],
+      "refute bar strict": [
+        "test_the_verdict_is_the_share_of_policy_side_errors_whose_label_is_optimal[5-2-refuted]"
+      ],
+      "registered budget changed": [
+        "test_the_registered_measurement_is_d3_s_population_with_t10_s_relabel_search"
+      ],
+      "registered minimum changed": [
+        "test_the_registered_measurement_is_d3_s_population_with_t10_s_relabel_search"
+      ],
+      "stray seed accepted": [
+        "test_evidence_that_is_not_the_registered_measurement_is_not_run[seed]"
+      ],
+      "stray ply accepted": ["test_evidence_that_is_not_the_registered_measurement_is_not_run[ply]"]
+    }
+  }
+}

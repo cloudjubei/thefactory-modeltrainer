@@ -1,0 +1,53 @@
+{
+  "file": "harness/floor_c4_backplay.py",
+  "tests": ["tests/test_floor_c4_backplay.py"],
+  "mutations": [
+    {
+      "name": "another ramp",
+      "old": "{\"frac\": 0.5, \"ramp\": 10}",
+      "new": "{\"frac\": 0.5, \"ramp\": 20}"
+    },
+    {
+      "name": "T14's seeds reused",
+      "old": "(411, 412, 413, 414)",
+      "new": "(401, 402, 403, 404)"
+    },
+    {
+      "name": "not a treatment",
+      "old": "\"treatments\": (\"backplay\",)",
+      "new": "\"treatments\": ()"
+    },
+    {
+      "name": "T14's era",
+      "old": "\"era\": \"7b7e2b460262\"",
+      "new": "\"era\": T14_SPEC[\"era\"]"
+    },
+    {
+      "name": "bars changed",
+      "old": "SPEC = {**T14_SPEC, \"arms\"",
+      "new": "SPEC = {**T14_SPEC, \"min_gain\": 0.05, \"arms\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-03T08:25:34+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "another ramp": [
+        "test_the_pilot_is_t14_s_base_against_the_curriculum_on_fresh_seeds_with_t14_s_bars"
+      ],
+      "T14's seeds reused": [
+        "test_the_pilot_is_t14_s_base_against_the_curriculum_on_fresh_seeds_with_t14_s_bars"
+      ],
+      "not a treatment": [
+        "test_the_pilot_is_t14_s_base_against_the_curriculum_on_fresh_seeds_with_t14_s_bars"
+      ],
+      "T14's era": [
+        "test_the_pilot_is_t14_s_base_against_the_curriculum_on_fresh_seeds_with_t14_s_bars"
+      ],
+      "bars changed": [
+        "test_the_pilot_is_t14_s_base_against_the_curriculum_on_fresh_seeds_with_t14_s_bars"
+      ]
+    }
+  }
+}

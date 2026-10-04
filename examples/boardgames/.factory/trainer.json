@@ -1165,6 +1165,84 @@
       "tags": ["c50", "decision-lists", "learning-theory"],
       "status": "untested",
       "source": "manual"
+    },
+    {
+      "id": "resnick-backplay-2018",
+      "title": "Backplay: \"Man muss immer umkehren\"",
+      "url": "https://arxiv.org/abs/1807.06919",
+      "authors": "Cinjon Resnick, Roberta Raileanu, Sanyam Kapoor, Alexander Peysakhovich, Kyunghyun Cho, Joan Bruna",
+      "year": 2018,
+      "claim": "Starting episodes near the end of a single demonstration and moving the start point backwards towards the initial state improves sample efficiency over starting at the initial state, and compares favourably with reward shaping and behavioural cloning.",
+      "approach": "A curriculum over START STATES taken from one demonstration, from near its end back to the true start.",
+      "assumptions": {
+        "notes": "arXiv 1807.06919; the abstract was read. Needs a trajectory to start from — in self-play the net's own recorded games can serve."
+      },
+      "verdictNote": "§C.49 The user's 'teach outcomes first: 1 move from the end, then 2, then 3' idea (2026-10-02). Candidate fix for the slow value signal found by D3/D4: start self-play from late positions of the net's own games and move the start back.",
+      "tags": ["c49", "curriculum", "value-signal"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "florensa-reverse-curriculum-2017",
+      "title": "Reverse Curriculum Generation for Reinforcement Learning",
+      "url": "https://arxiv.org/abs/1707.05300",
+      "authors": "Carlos Florensa, David Held, Markus Wulfmeier, Michael Zhang, Pieter Abbeel",
+      "year": 2017,
+      "claim": "Training from start states increasingly far from the goal, chosen adaptively by the agent's own performance, solves navigation and manipulation tasks that state-of-the-art RL could not, given only one successful end state.",
+      "approach": "Adaptive reverse curriculum: grow the set of start states outward from the goal, keeping those of intermediate difficulty.",
+      "assumptions": {
+        "notes": "arXiv 1707.05300; the abstract was read. Needs a resettable environment — trivially true for board games."
+      },
+      "verdictNote": "§C.49 The adaptive version of the backward curriculum: pick start positions where the net's outcome is still uncertain.",
+      "tags": ["c49", "curriculum", "value-signal"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "salimans-montezuma-single-demo-2018",
+      "title": "Learning Montezuma's Revenge from a Single Demonstration",
+      "url": "https://arxiv.org/abs/1812.03381",
+      "authors": "Tim Salimans, Richard Chen",
+      "year": 2018,
+      "claim": "Resetting episodes to states along one demonstration lets standard RL solve a hard-exploration game (74,500 on Montezuma's Revenge), using the demonstration's states as starts rather than imitating its actions.",
+      "approach": "Backward start-state curriculum along a demonstration, then ordinary RL from each start.",
+      "assumptions": { "notes": "arXiv 1812.03381; the abstract was read." },
+      "verdictNote": "§C.49 Independent evidence that a backward start-state curriculum fixes slow credit assignment over long horizons.",
+      "tags": ["c49", "curriculum", "value-signal"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "ng-harada-russell-shaping-1999",
+      "title": "Policy Invariance Under Reward Transformations: Theory and Application to Reward Shaping",
+      "url": "https://www.cs.utexas.edu/~shivaram/readings/b2hd-NgHR1999.html",
+      "authors": "Andrew Y. Ng, Daishi Harada, Stuart J. Russell",
+      "year": 1999,
+      "claim": "A shaping reward of the form F(s, s') = γΦ(s') − Φ(s) is necessary and sufficient for the optimal policy to stay unchanged; other shaping can change what is optimal.",
+      "approach": "Potential-based reward shaping, with proofs of policy invariance.",
+      "assumptions": {
+        "notes": "ICML 1999, pp. 278-287; the bibliographic record and a summary were read, not the full paper."
+      },
+      "verdictNote": "§C.49 The safety rule for any 'richer reward' we try: shaping must be potential-based, or the net may learn to optimise something other than winning.",
+      "tags": ["c49", "reward-shaping", "value-signal"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "wu-katago-2019",
+      "title": "Accelerating Self-Play Learning in Go",
+      "url": "https://arxiv.org/abs/1902.10565",
+      "authors": "David J. Wu",
+      "year": 2019,
+      "claim": "Several improvements to the AlphaZero process and architecture, some general and some Go-specific, cut the computation needed for strong Go by about 50x.",
+      "approach": "AlphaZero-style self-play with additional training targets and process changes (the abstract does not list them).",
+      "assumptions": {
+        "notes": "arXiv 1902.10565; the abstract was read and does not enumerate the techniques — read the paper before citing any specific one."
+      },
+      "verdictNote": "§C.49 The main published account of making AlphaZero self-play cheaper with extra targets; read before designing richer value targets.",
+      "tags": ["c49", "self-play", "value-signal"],
+      "status": "untested",
+      "source": "manual"
     }
   ]
 }

@@ -1,0 +1,45 @@
+{
+  "file": "harness/floor_backplay.py",
+  "tests": ["tests/test_floor_backplay.py"],
+  "mutations": [
+    {
+      "name": "another share",
+      "old": "{\"frac\": 0.5, \"ramp\": 15}",
+      "new": "{\"frac\": 0.25, \"ramp\": 15}"
+    },
+    {
+      "name": "another ramp",
+      "old": "{\"frac\": 0.5, \"ramp\": 15}",
+      "new": "{\"frac\": 0.5, \"ramp\": 30}"
+    },
+    {
+      "name": "T9's seeds reused",
+      "old": "tuple(range(421, 431))",
+      "new": "tuple(range(351, 361))"
+    },
+    {
+      "name": "bars changed",
+      "old": "SPEC = {**T9_SPEC, \"arms\"",
+      "new": "SPEC = {**T9_SPEC, \"support_at\": 6, \"arms\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-03T08:25:31+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "another share": [
+        "test_the_recipe_is_t9_s_with_half_the_games_started_late_reaching_whole_games_at_iteration_15"
+      ],
+      "another ramp": [
+        "test_the_recipe_is_t9_s_with_half_the_games_started_late_reaching_whole_games_at_iteration_15"
+      ],
+      "T9's seeds reused": [
+        "test_the_recipe_is_t9_s_with_half_the_games_started_late_reaching_whole_games_at_iteration_15"
+      ],
+      "bars changed": [
+        "test_the_recipe_is_t9_s_with_half_the_games_started_late_reaching_whole_games_at_iteration_15"
+      ]
+    }
+  }
+}

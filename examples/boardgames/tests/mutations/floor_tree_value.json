@@ -1,0 +1,37 @@
+{
+  "file": "harness/floor_tree_value.py",
+  "tests": ["tests/test_floor_tree_value.py"],
+  "mutations": [
+    {
+      "name": "option off",
+      "old": "\"tree_value_target\": True}",
+      "new": "\"tree_value_target\": False}"
+    },
+    {
+      "name": "T9's seeds reused",
+      "old": "tuple(range(391, 401))",
+      "new": "tuple(range(351, 361))"
+    },
+    {
+      "name": "bars changed",
+      "old": "SPEC = {**T9_SPEC, \"arms\"",
+      "new": "SPEC = {**T9_SPEC, \"support_at\": 6, \"arms\""
+    },
+    {
+      "name": "params of another arm",
+      "old": "\"params\": {T13_ARM: _CONFIG[\"params\"]}",
+      "new": "\"params\": {T13_ARM: 1}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-02T20:50:06+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "option off": ["test_the_recipe_is_t9_s_with_tree_value_targets_and_fresh_seeds"],
+      "T9's seeds reused": ["test_the_recipe_is_t9_s_with_tree_value_targets_and_fresh_seeds"],
+      "bars changed": ["test_the_recipe_is_t9_s_with_tree_value_targets_and_fresh_seeds"],
+      "params of another arm": ["test_the_recipe_is_t9_s_with_tree_value_targets_and_fresh_seeds"]
+    }
+  }
+}

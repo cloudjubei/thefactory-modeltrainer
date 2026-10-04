@@ -205,7 +205,18 @@ def test_git_tracks_no_evidence_data_and_never_ignores_the_manifest():
                                     "tests.test_c50_minimal_playbook_evidence", "tests.test_c50_beyond_evidence",
                                     "tests.test_c49_opening_evidence", "tests.test_c49_search_ceiling_evidence",
                                     "tests.test_c50_layered_playbook_evidence",
-                                    "tests.test_c50_certificates_evidence", "tests.test_c50_certificate_flags_evidence"])
+                                    "tests.test_c50_certificates_evidence", "tests.test_c50_certificate_flags_evidence",
+                                    "tests.test_c49_value_stop_evidence", "tests.test_c49_value_stop_vacuous_evidence",
+                                    "tests.test_c49_c4_value_reading_evidence",
+                                    "tests.test_c49_value_equals_share_evidence",
+                                    "tests.test_c49_value_equals_share_v2_evidence",
+                                    "tests.test_c49_value_head_evidence", "tests.test_c49_value_head_opening_evidence",
+                                    "tests.test_c49_labels_evidence", "tests.test_c49_labels_opening_evidence",
+                                    "tests.test_c49_tree_value_evidence", "tests.test_c49_value_signal_c4_evidence",
+                                    "tests.test_c49_value_signal_echo_evidence", "tests.test_c49_backplay_evidence",
+                                    "tests.test_c49_backplay_c4_evidence", "tests.test_c49_pilot_power_evidence",
+                                    "tests.test_c49_calibration_evidence", "tests.test_c49_powered_evidence",
+                                    "tests.test_c49_powered_replication_evidence"])
 def test_the_evidence_proofs_skip_only_when_their_recorded_files_are_absent(module):
     """The pinned proofs skip on a checkout without the evidence. A skip condition that names the wrong path skips
     them EVERYWHERE, silently — so each module's files must be ones the manifest records, and on a machine holding

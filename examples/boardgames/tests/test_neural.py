@@ -745,6 +745,42 @@ def test_self_play_opening_plies_trains_from_diverse_off_line_positions():
     assert float(ex4[0][0].sum()) == 4.0  # diverse: first recorded position already carries the 4 opening stones
 
 
+def test_self_play_from_a_start_state_records_that_position_first_and_plays_no_opening():
+    game = Connect4()
+    torch.manual_seed(0)
+    agent = AlphaZeroAgent(Connect4Net(), sims=6, gumbel=True)
+    start = game.initial_state(random.Random(0))
+    for a in (3, 3, 2, 4, 1):
+        start = game.step(start, a)
+    ex = self_play_game(game, agent, random.Random(0), opening_plies=4, return_states=True, start_state=start)
+    assert ex[0][0] == start and all(sum(1 for c in s.board if c) >= 5 for s, *_rest in ex)
+
+
+def test_a_finished_start_state_is_refused():
+    game = Connect4()
+    s = game.initial_state(random.Random(0))
+    for a in (0, 1, 0, 1, 0, 1, 0):
+        s = game.step(s, a)
+    with pytest.raises(ValueError, match="finished"):
+        self_play_game(game, AlphaZeroAgent(Connect4Net(), sims=4, gumbel=True), random.Random(0), start_state=s)
+
+
+def test_an_opponent_game_can_record_the_learner_s_states_after_an_unrecorded_random_opening():
+    from harness.neural import vs_opponent_game
+
+    game = Connect4()
+    torch.manual_seed(0)
+    learner = AlphaZeroAgent(Connect4Net(), sims=4, gumbel=True)
+    opponent = AlphaZeroAgent(Connect4Net(), sims=4, gumbel=True)
+    opponent.temperature = 0.0
+    rows = vs_opponent_game(game, learner, opponent, 1, random.Random(0), return_states=True, opening_plies=3)
+    assert rows and all(len(r) == 4 for r in rows)
+    stones = [sum(1 for c in s.board if c) for s, *_rest in rows]
+    assert stones[0] >= 3 and all(game.current_player(s) == 1 for s, *_rest in rows)
+    plain = vs_opponent_game(game, learner, opponent, 1, random.Random(0))
+    assert all(len(r) == 3 for r in plain)
+
+
 def test_train_alphazero_buffer_persists_across_calls():
     # §C.7 batched training must be equivalent to a continuous run: return the replay buffer and accept it back so
     # a resumed batch does NOT restart from an empty buffer (which would starve a big net that needs more data).
@@ -2215,6 +2251,129 @@ def test_c49_each_relabelled_iteration_walks_the_tree_and_trains_on_its_new_posi
         assert 0 <= h["tree_positions"] <= len(walked) and 0 <= h["tree_disagreements"] <= len(walked)
     assert trained[1:] == [8 * h["tree_positions"] for h in history[1:]]
     assert [h["nan_value_examples"] for h in history] == [8 * h["tree_positions"] for h in history]
+
+
+def test_c49_with_tree_value_targets_the_walked_positions_train_on_their_search_value(monkeypatch):
+    import harness.neural as neural
+
+    monkeypatch.setattr(neural, "_root_search_value", lambda agent, game, state: 0.375)
+    trained = []
+    real_train = neural.train_net
+
+    def spy_train(net, examples, *args, **kwargs):
+        trained.append((sum(1 for e in examples if e[2] != e[2]), sum(1 for e in examples if e[2] == 0.375)))
+        return real_train(net, examples, *args, **kwargs)
+    monkeypatch.setattr(neural, "train_net", spy_train)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, buffer_unique=True,
+                                     strategy_tree={"player": 0, "depth": 4}, tree_value_target=True)
+    walked = history[1:]
+    assert all(h["tree_positions"] > 0 and h["nan_value_examples"] == 0 for h in walked)
+    assert [n for n, _v in trained[1:]] == [0, 0]
+    assert [v for _n, v in trained[1:]] == [8 * h["tree_positions"] for h in walked]
+
+
+def test_c49_tree_value_targets_need_the_strategy_tree():
+    with pytest.raises(ValueError, match="tree_value_target"):
+        _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, tree_value_target=True)
+
+
+def _exploiter_spy(monkeypatch):
+    import harness.neural as neural
+
+    games = []
+    real = neural.vs_opponent_game
+
+    def spy(game, learner, opponent, seat, rng, **kw):
+        games.append((learner.sims, opponent.sims, opponent.temperature, opponent.add_noise, seat,
+                      kw.get("return_states")))
+        return real(game, learner, opponent, seat, rng, **kw)
+    monkeypatch.setattr(neural, "vs_opponent_game", spy)
+    return games
+
+
+def test_c49_an_exploiter_plays_a_share_of_games_with_the_current_net_and_more_search_greedily(monkeypatch):
+    games = _exploiter_spy(monkeypatch)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4,
+                                     exploiter={"frac": 0.5, "sims_factor": 4})
+    assert len(games) == sum(h["exploiter_games"] for h in history) > 0
+    assert all(g == (8, 32, 0.0, False, g[4], True) for g in games)
+    assert {g[4] for g in games} <= {0, 1}
+    assert sum(h["exploiter_games"] for h in history) < 3 * 3
+
+
+def test_c49_the_learner_meets_the_exploiter_from_both_seats(monkeypatch):
+    games = _exploiter_spy(monkeypatch)
+    _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, exploiter={"frac": 1.0, "sims_factor": 2})
+    assert len(games) == 9 and {g[4] for g in games} == {0, 1}
+
+
+def test_c49_the_exploiter_is_off_by_default_and_draws_nothing_from_the_rng(monkeypatch):
+    games = _exploiter_spy(monkeypatch)
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)
+    assert games == [] and not any("exploiter_games" in h for h in history)
+
+
+@pytest.mark.parametrize("knobs", [
+    {"exploiter": {"frac": 0.5, "sims_factor": 4}},
+    {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "exploiter": {"frac": 0.0, "sims_factor": 4}},
+    {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "exploiter": {"frac": 1.5, "sims_factor": 4}},
+    {"reanalyze_frac": 1.0, "reanalyze_sims": 4, "exploiter": {"frac": 0.5, "sims_factor": 1}},
+], ids=["no state buffer", "frac 0", "frac above 1", "no extra search"])
+def test_c49_the_exploiter_needs_the_state_buffer_a_share_in_0_1_and_more_search_than_the_learner(knobs):
+    with pytest.raises(ValueError, match="exploiter"):
+        _c48_train(**knobs)
+
+
+def _backplay_spy(monkeypatch):
+    import harness.neural as neural
+
+    games = []
+    real = neural.self_play_game
+
+    def spy(game, agent, rng, **kw):
+        out = real(game, agent, rng, **kw)
+        games.append((kw.get("start_state"), [row[0] for row in out]))
+        return out
+    monkeypatch.setattr(neural, "self_play_game", spy)
+    return games
+
+
+def test_c49_backplay_starts_a_share_of_games_near_the_end_of_last_iteration_s_full_games(monkeypatch):
+    import math
+
+    games = _backplay_spy(monkeypatch)
+    _sha, history, _net = _c48_train(iterations=4, reanalyze_frac=1.0, reanalyze_sims=4,
+                                     backplay={"frac": 0.5, "ramp": 4})
+    per_it = [games[i * 3:(i + 1) * 3] for i in range(4)]
+    assert all(start is None for start, _states in per_it[0])
+    assert sum(1 for g in per_it[1:] for start, _s in g if start is not None) == sum(h["backplay_games"]
+                                                                                       for h in history)
+    assert history[0]["backplay_games"] == 0 and sum(h["backplay_games"] for h in history[1:]) > 0
+    for it in range(1, 4):
+        full = [states for start, states in per_it[it - 1] if start is None]
+        for start, states in per_it[it]:
+            if start is None:
+                continue
+            assert states[0] == start
+            source = next(s for s in full if start in s)
+            from_end = len(source) - source.index(start)
+            assert 1 <= from_end <= math.ceil(len(source) * (it + 1) / 4)
+
+
+def test_c49_backplay_is_off_by_default_and_draws_nothing_from_the_rng():
+    _sha, history, _net = _c48_train(reanalyze_frac=1.0, reanalyze_sims=4)
+    assert not any("backplay_games" in h for h in history)
+
+
+@pytest.mark.parametrize("knobs,match", [
+    ({"backplay": {"frac": 0.5, "ramp": 4}}, "backplay"),
+    ({"reanalyze_frac": 1.0, "reanalyze_sims": 4, "backplay": {"frac": 0.0, "ramp": 4}}, "backplay"),
+    ({"reanalyze_frac": 1.0, "reanalyze_sims": 4, "backplay": {"frac": 1.0, "ramp": 4}}, "backplay"),
+    ({"reanalyze_frac": 1.0, "reanalyze_sims": 4, "backplay": {"frac": 0.5, "ramp": 0}}, "backplay"),
+], ids=["no state buffer", "frac 0", "frac 1", "ramp 0"])
+def test_c49_backplay_needs_the_state_buffer_a_share_strictly_between_0_and_1_and_a_positive_ramp(knobs, match):
+    with pytest.raises(ValueError, match=match):
+        _c48_train(**knobs)
 
 
 def test_c49_tree_positions_already_in_the_buffer_are_not_trained_twice(monkeypatch):

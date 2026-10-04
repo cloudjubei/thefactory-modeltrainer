@@ -1,0 +1,150 @@
+{
+  "file": "harness/floor_c4_powered.py",
+  "tests": ["tests/test_floor_c4_powered.py"],
+  "mutations": [
+    {
+      "name": "strict permutation count",
+      "old": ">= observed - 1e-12)",
+      "new": "> observed + 1e-12)"
+    },
+    {
+      "name": "two-sided p",
+      "old": "if mean(s * d for s, d in zip(signs, sizes)) >= observed - 1e-12)",
+      "new": "if abs(mean(s * d for s, d in zip(signs, sizes))) >= abs(observed) - 1e-12)"
+    },
+    {
+      "name": "holm without step-up",
+      "old": "if p > alpha / (len(ps) - k):",
+      "new": "if p > alpha / len(ps):"
+    },
+    {
+      "name": "holm never stops",
+      "old": "            break\n        rejected.add(name)",
+      "new": "            continue\n        rejected.add(name)"
+    },
+    {
+      "name": "no correction",
+      "old": "if p > alpha / (len(ps) - k):",
+      "new": "if p > alpha:"
+    },
+    {
+      "name": "zero gain inconclusive",
+      "old": "\"refuted\" if mean(d) <= 0 else \"inconclusive\"",
+      "new": "\"refuted\" if mean(d) < 0 else \"inconclusive\""
+    },
+    {
+      "name": "differences unpaired",
+      "old": "diffs = {t: [share[(t, s)] - share[(\"base\", s)] for s in spec[\"seeds\"]] for t in spec[\"treatments\"]}",
+      "new": "diffs = {t: [share[(t, s)] - share[(\"base\", r)] for s, r in zip(spec[\"seeds\"], reversed(spec[\"seeds\"]))] for t in spec[\"treatments\"]}"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if readout.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "fixed set unchecked",
+      "old": "    if readout.get(\"positions\") != spec[\"positions\"] or readout.get(\"plies\") != spec[\"plies\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "plies unchecked",
+      "old": "readout.get(\"positions\") != spec[\"positions\"] or readout.get(\"plies\") != spec[\"plies\"]",
+      "new": "readout.get(\"positions\") != spec[\"positions\"]"
+    },
+    {
+      "name": "recipes unchecked",
+      "old": "    if {k: v.get(\"config\") for k, v in runs.items()} != expected:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if any(v.get(\"training_fingerprint\") != spec[\"era\"] for v in runs.values()):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "coverage unchecked",
+      "old": "    if nets != sorted((spec[\"prefix\"], a, s) for a in spec[\"arms\"] for s in spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "certification miscounted",
+      "old": "if n[\"arm\"] == a and n[\"certified\"])",
+      "new": "if n[\"arm\"] == a)"
+    },
+    {
+      "name": "another seed set",
+      "old": "tuple(range(431, 438))",
+      "new": "tuple(range(431, 435))"
+    },
+    {
+      "name": "curriculum not a treatment",
+      "old": "\"treatments\": (\"n_step\", \"tree_value\", \"backplay\")",
+      "new": "\"treatments\": (\"n_step\", \"tree_value\")"
+    },
+    {
+      "name": "looser alpha",
+      "old": "\"certify_depth\": 6, \"alpha\": 0.05}",
+      "new": "\"certify_depth\": 6, \"alpha\": 0.1}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-03T20:21:45+00:00",
+    "killed": 17,
+    "survived": [],
+    "killed_by": {
+      "strict permutation count": [
+        "test_a_positive_gain_the_test_does_not_reject_is_inconclusive",
+        "test_a_treatment_better_on_every_seed_is_supported_and_one_never_better_is_refuted",
+        "test_holm_s_correction_is_applied_across_the_treatments",
+        "test_the_permutation_p_counts_sign_flips_at_least_as_favourable_as_the_observed_differences"
+      ],
+      "two-sided p": [
+        "test_a_treatment_better_on_every_seed_is_supported_and_one_never_better_is_refuted",
+        "test_holm_s_correction_is_applied_across_the_treatments",
+        "test_the_permutation_p_counts_sign_flips_at_least_as_favourable_as_the_observed_differences"
+      ],
+      "holm without step-up": [
+        "test_holm_rejects_in_order_of_p_against_a_stepped_up_threshold_and_stops_at_the_first_miss[ps1-rejected1]",
+        "test_holm_rejects_in_order_of_p_against_a_stepped_up_threshold_and_stops_at_the_first_miss[ps4-rejected4]"
+      ],
+      "holm never stops": [
+        "test_holm_rejects_in_order_of_p_against_a_stepped_up_threshold_and_stops_at_the_first_miss[ps2-rejected2]",
+        "test_holm_s_correction_is_applied_across_the_treatments"
+      ],
+      "no correction": [
+        "test_holm_rejects_in_order_of_p_against_a_stepped_up_threshold_and_stops_at_the_first_miss[ps2-rejected2]",
+        "test_holm_s_correction_is_applied_across_the_treatments"
+      ],
+      "zero gain inconclusive": ["test_a_positive_gain_the_test_does_not_reject_is_inconclusive"],
+      "differences unpaired": ["test_holm_s_correction_is_applied_across_the_treatments"],
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "fixed set unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[plies]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[positions]"
+      ],
+      "plies unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[plies]"
+      ],
+      "recipes unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "era unchecked": ["test_a_readout_that_is_not_the_registered_measurement_is_not_run[era]"],
+      "coverage unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[extra"
+      ],
+      "certification miscounted": ["test_certification_is_reported_per_arm_and_does_not_judge"],
+      "another seed set": [
+        "test_the_registered_comparison_is_base_against_the_three_earlier_fixes_on_seven_fresh_seeds"
+      ],
+      "curriculum not a treatment": [
+        "test_the_registered_comparison_is_base_against_the_three_earlier_fixes_on_seven_fresh_seeds"
+      ],
+      "looser alpha": [
+        "test_the_registered_comparison_is_base_against_the_three_earlier_fixes_on_seven_fresh_seeds"
+      ]
+    }
+  }
+}
