@@ -136,14 +136,20 @@
   ply past the table, against 75.0% for the base process (+6.5 points, 6/7 pairs, p 0.016). Fewer failures at the
   never-trained ply 8 too (681 vs 865). Still no hybrid certified through 9 plies (0/14).
 
-**1.10 H3 running: train the plies the net carries (h134, h135).** `harness/floor_h3.py`, `scripts/c4_h3_readout.py`.
-- H2's recipe with the strategy tree walked from the frontier through plies 6 and 8 (1,894 positions), seeds
-  481–487, 20 iterations, `--curve` scoring the 284 ply-6 positions after every pass. Control: H2's table-arm nets.
-- Judged: the gain at the fixed ply-8 set (permutation test), and whether the ply-6 share is still rising at
-  iteration 20. Reported: each net's certified-through-9 hybrid size (table + exceptions) against a table alone.
-- If still rising: a longer H3 run is scaling a method that works. Then description-length comparison across variants:
-  `harness/description_length.py` is built for it (net params × bits + table entries × index-and-move bits; ranks
-  certified variants only).
+**1.10 H3 result: no judged gain, and the size accounting says the table wins through ply 9 (h134–h141).**
+- Not judged: launched with 6 relabel workers against the registered 4, so the pinned judge refused (h138; h134,
+  h135 inconclusive by protocol). With the run's own worker count both tests are still inconclusive: +1.2 points at
+  ply 8 (5/7, p 0.14), and the ply-6 curve flattened (+0.6 points over the last ten passes; h139).
+- H3 needs fewer table exceptions for a certified-through-9 hybrid on 6/7 seeds (253 vs 278; h141).
+- **Every certified-through-9 hybrid is over 25× a table alone over the same tree** (~663K vs ~25K bits): the
+  20,616-parameter net at 32 bits dominates; break-even is ~1 bit per weight (h140).
+- So for the north star the open question is no longer "can the net carry ply 6/8" but **where a net can ever be
+  cheaper than the table**: only where it carries far deeper than a table can afford (the tree grows ~6× per
+  first-player ply), or at very low precision. **Next (user, 2026-10-05): in this order** — (1) net cost against
+  table cost as the certified depth grows (`harness/description_length.py`), before any further training fix;
+  (2) the two launch/judge fixes below; (3) the alternation fix and Kalah's registration (§4).
+- Process fixes proposed by h138: build launch commands from the registered SPEC; exclude knobs proven not to change
+  training (relabel workers) from the judges' recipe check, as `certify_depth` already is.
 
 **1.11 Stored knowledge (now H1/H2) the process computes itself** (a solved opening/exception table counted in the description
 length) remains an option for the hybrid, not the fix for 1.1.
@@ -158,6 +164,19 @@ length) remains an option for the hybrid, not the fix for 1.1.
 - Optional: sharpen the depth-10 bracket (8,008, 20,616] with conv-20/24.
 
 **2.2 Self-play Connect-4 at depth 12**, once the process certifies at depth 10.
+
+**2.3 Game-state compression (user, 2026-10-05) — research running.**
+- Idea: encode a position by the moves that reached it — Connect-4 one column per move (3 bits; 0 spare as a
+  marker), Kalah the hole sown (the rest follows from the rules); the player is implied by the rules. Build
+  "rainbow tables" keyed by these sequences, filling in between as the process explores, so stored knowledge maps
+  more and more of the game.
+- Questions: how many bits per position each encoding needs (move sequence, board bitboard, a perfect index over
+  reachable positions); how many move sequences collapse to one position (transpositions) and so how big a
+  sequence-keyed table is against a position-keyed one; worst-case size to cover Connect-4 and Kalah whole, and
+  whether that is ever worth computing; how it scales to Chess and Go; whether a compact encoding helps the net or
+  the table in the description length (§4).
+- First: a literature and sizing study (agent, 2026-10-05), with measured sequence-vs-position counts on the
+  repo's own games. Then decide whether it earns an experiment.
 
 ## 3. Written rules (track R) — runs beside self-play
 

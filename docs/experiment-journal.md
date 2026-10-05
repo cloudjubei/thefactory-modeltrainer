@@ -4764,3 +4764,13 @@ at move one); strict xfails in `tests/test_alternation.py`, fix after H3. The mu
 suite `timeout`: a mutant that stops the game ending (start hole not emptied) used to hang the run forever.
 Check run (24 shapes, 41 s, peak 753 MB): h136 and h137 supported; Kalah mutants 36/36 killed (the hanging one by
 the 120 s timeout), runner timeout 4/4.
+
+## 2026-10-05 — H3: not judged (launch slip), and the hybrid is 25× a table
+
+Seven seeds, ~1.5 h each in wall time (one at 3.5 h under machine load ~100); readout ~2 h (9,036 solved). The
+judge refused: H3 ran with 6 relabel workers, the registered recipe says 4 (h138 dead end; h134, h135 inconclusive
+by protocol). Substituting the run's own worker count (relabelling is bit-identical across workers) both registered
+tests are still inconclusive: ply 8 +1.2 points, 5/7, p 18/128; ply-6 curve +0.6 points, flattened after pass 10
+(h139). H3 needs fewer exceptions (253 vs 278 entries, 6/7; h141). Every certified-through-9 hybrid is ~663K bits
+against ~25K for a table alone over its tree — break-even at ~1 bit per weight (h140). Through ply 9 the table is the
+smallest certified description.

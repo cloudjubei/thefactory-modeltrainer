@@ -1,0 +1,223 @@
+{
+  "file": "harness/depth_cost.py",
+  "tests": ["tests/test_depth_cost.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "walk table charged an index",
+      "old": "    return entries * math.ceil(math.log2(actions))\n",
+      "new": "    return entries * (math.ceil(math.log2(actions)) + math.ceil(math.log2(max(entries, 1))))\n"
+    },
+    {
+      "name": "oversized exceptions accepted",
+      "old": "    if exceptions > positions:\n",
+      "new": "    if exceptions > positions + 1:\n"
+    },
+    {
+      "name": "no-exception tree charged",
+      "old": "    if exceptions == 0:\n        return 0\n",
+      "new": ""
+    },
+    {
+      "name": "sparse only",
+      "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
+      "new": "    return exceptions * (math.ceil(math.log2(positions)) + move)"
+    },
+    {
+      "name": "mask only",
+      "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
+      "new": "    return positions + exceptions * move"
+    },
+    {
+      "name": "mask without moves",
+      "old": "positions + exceptions * move)",
+      "new": "positions)"
+    },
+    {
+      "name": "through includes the depth",
+      "old": "if int(p) < depth)",
+      "new": "if int(p) <= depth)"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if e[\"run\"].get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "table depth unchecked",
+      "old": "    if e[\"table\"][\"horizon\"] != max(spec[\"depths\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "seeds unchecked",
+      "old": "    if sorted(n[\"seed\"] for n in e[\"nets\"]) != sorted(spec[\"seeds\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "net depth unchecked",
+      "old": "        if n[\"horizon\"] != want:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "certificate unchecked",
+      "old": "        if not n[\"certified\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "late ply unchecked",
+      "old": "        if n[\"seed\"] in spec[\"deep\"] and not n[\"positions_by_ply\"].get(str(spec[\"late_ply\"])):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "integrity ignored",
+      "old": "    if integrity:\n        return",
+      "new": "    if False:\n        return"
+    },
+    {
+      "name": "rows stop short",
+      "old": "for d in spec[\"depths\"] if d <= n[\"horizon\"]",
+      "new": "for d in spec[\"depths\"] if d < n[\"horizon\"]"
+    },
+    {
+      "name": "break-even ignores exceptions",
+      "old": "\"break_even\": (table - exc) / n[\"params\"]",
+      "new": "\"break_even\": table / n[\"params\"]"
+    },
+    {
+      "name": "hybrid omits exceptions",
+      "old": "{str(b): n[\"params\"] * b + exc for b",
+      "new": "{str(b): n[\"params\"] * b for b"
+    },
+    {
+      "name": "trend pools every net",
+      "old": "    deep = [n for n in e[\"nets\"] if n[\"seed\"] in spec[\"deep\"]]\n",
+      "new": "    deep = list(e[\"nets\"])\n"
+    },
+    {
+      "name": "drop ignored",
+      "old": "if late <= early - spec[\"drop\"] else",
+      "new": "if late < early else"
+    },
+    {
+      "name": "flat reads inconclusive",
+      "old": "else \"refuted\" if late >= early else",
+      "new": "else \"refuted\" if late > early else"
+    },
+    {
+      "name": "break-even reads every depth",
+      "old": "and r[\"depth\"] == spec[\"judged_depth\"]]",
+      "new": "]"
+    },
+    {
+      "name": "one deep net enough",
+      "old": "verdict = \"supported\" if min(values) >= at else",
+      "new": "verdict = \"supported\" if max(values) >= at else"
+    },
+    {
+      "name": "split reads refuted",
+      "old": "else \"refuted\" if max(values) < at else",
+      "new": "else \"refuted\" if min(values) < at else"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T19:12:42+00:00",
+    "killed": 24,
+    "survived": [],
+    "killed_by": {
+      "walk table charged an index": [
+        "test_a_complete_table_costs_one_move_per_entry_in_walk_order[10-7-30]",
+        "test_a_complete_table_costs_one_move_per_entry_in_walk_order[10-8-30]",
+        "test_a_complete_table_costs_one_move_per_entry_in_walk_order[10-9-40]",
+        "test_a_complete_table_costs_one_move_per_entry_in_walk_order[5-1-0]",
+        "test_a_complete_table_costs_one_move_per_entry_in_walk_order[5-2-5]",
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table"
+      ],
+      "oversized exceptions accepted": ["test_exceptions_outside_the_tree_are_refused"],
+      "no-exception tree charged": ["test_an_empty_tree_has_no_exceptions_to_pay_for"],
+      "sparse only": [
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[150-1000-1450]",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[3-4-13]",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[500-1000-2500]"
+      ],
+      "mask only": [
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[1-1000-13]",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[50-1000-650]"
+      ],
+      "mask without moves": [
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[150-1000-1450]",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[3-4-13]",
+        "test_exceptions_cost_the_cheaper_of_a_sparse_index_and_a_position_mask[500-1000-2500]"
+      ],
+      "through includes the depth": ["test_through_sums_the_plies_before_the_depth"],
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "era unchecked": ["test_a_readout_that_is_not_the_registered_measurement_is_not_run[era]"],
+      "table depth unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[deep"
+      ],
+      "seeds unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[missing"
+      ],
+      "net depth unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[shallow"
+      ],
+      "certificate unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified]"
+      ],
+      "late ply unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[deep"
+      ],
+      "integrity ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[deep",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[era]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[missing",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[shallow",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified]"
+      ],
+      "rows stop short": [
+        "test_a_late_share_no_lower_refutes_the_trend_and_a_small_drop_is_inconclusive",
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table",
+        "test_every_deep_net_must_break_even_above_the_registered_precision_for_support",
+        "test_rows_cover_every_depth_each_net_reaches",
+        "test_the_late_ply_share_falling_by_the_registered_drop_supports_the_trend"
+      ],
+      "break-even ignores exceptions": [
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table"
+      ],
+      "hybrid omits exceptions": [
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table"
+      ],
+      "trend pools every net": [
+        "test_a_late_share_no_lower_refutes_the_trend_and_a_small_drop_is_inconclusive",
+        "test_break_even_is_the_bits_per_weight_at_which_net_and_exceptions_cost_the_table",
+        "test_every_deep_net_must_break_even_above_the_registered_precision_for_support",
+        "test_rows_cover_every_depth_each_net_reaches",
+        "test_the_late_ply_share_falling_by_the_registered_drop_supports_the_trend"
+      ],
+      "drop ignored": [
+        "test_a_late_share_no_lower_refutes_the_trend_and_a_small_drop_is_inconclusive"
+      ],
+      "flat reads inconclusive": [
+        "test_a_late_share_no_lower_refutes_the_trend_and_a_small_drop_is_inconclusive"
+      ],
+      "break-even reads every depth": [
+        "test_every_deep_net_must_break_even_above_the_registered_precision_for_support"
+      ],
+      "one deep net enough": [
+        "test_every_deep_net_must_break_even_above_the_registered_precision_for_support"
+      ],
+      "split reads refuted": [
+        "test_every_deep_net_must_break_even_above_the_registered_precision_for_support"
+      ]
+    }
+  }
+}

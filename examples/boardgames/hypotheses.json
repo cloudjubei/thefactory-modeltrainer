@@ -4341,6 +4341,106 @@
         "harness/kalah_paper.py": "a4bb88431bfd2bdd70b50e0139eecd5747e6bbaebee7c8693227ffdac63a8476"
       },
       "inconclusive_proof": "tests/test_kalah_paper_evidence.py::test_kalah_paper_check_is_undecidable"
+    },
+    "h138": {
+      "id": "h138",
+      "claim": "\u00a7C.49 H3 DEAD END (protocol): H3 was launched with 6 relabel workers while its registered recipe (H2's table arm) records 4, so the pinned judge refused the readout and h134 and h135 are INCONCLUSIVE by protocol, not by data",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_was_launched_with_6_relabel_workers_not_the_registered_4_so_the_judge_did_not_run",
+      "note": "Registered after the data. The launch line set --workers 6 for speed; the judge compares the whole recorded config with the registered one, as it should. Lesson: build the launch command from the registered SPEC, never by hand; and a knob proven not to change training (relabel workers: bit-identical, tests/test_neural.py) could be excluded from the recipe check like certify_depth \u2014 proposed, not done.",
+      "registered_at": "2026-10-05T16:35:16.023756+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_was_launched_with_6_relabel_workers_not_the_registered_4_so_the_judge_did_not_run",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.24s",
+          "drawn_at": "2026-10-05T16:35:25.538200+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_findings_evidence.py": "3ac861e0d326e010054f468934497f0f70f3ed3fb076a8ff48a397c90290268b",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
+        "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
+      }
+    },
+    "h139": {
+      "id": "h139",
+      "claim": "\u00a7C.49 H3 (registered after the data): with the run's own relabel worker count substituted (relabelling across workers trains bit-identically), both registered tests are still inconclusive \u2014 ply-8 share +1.2 points over H2 (5 of 7 seeds, p = 18/128) and the ply-6 curve +0.6 points from passes 11-15 to 16-20 (flat <= 0.5, rising >= 1.5)",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_with_the_run_s_own_worker_count_both_registered_tests_are_still_inconclusive",
+      "note": "Registered after the data; a reading, not a verdict. The slip did not hide a result. Pooled ply-6 share by pass: 62.6% at 0, 81.2% by pass 10, 82.6% at 20 \u2014 most of the gain comes in the first ten passes. Ply-6 shares H3 vs H2 per seed: better on 4, worse on 3.",
+      "registered_at": "2026-10-05T16:35:16.100813+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_with_the_run_s_own_worker_count_both_registered_tests_are_still_inconclusive",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.23s",
+          "drawn_at": "2026-10-05T16:35:26.825856+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_findings_evidence.py": "3ac861e0d326e010054f468934497f0f70f3ed3fb076a8ff48a397c90290268b",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
+        "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
+      }
+    },
+    "h140": {
+      "id": "h140",
+      "claim": "\u00a7C.49 H3 (registered after the data): every certified-through-9 hybrid of the 14 H2/H3 nets is over 25x the size of a table alone over the same first-player tree (about 663K bits vs 24-26K: 20,616 params x 32 bits dominate); a hybrid would only match the table at about 1 bit per weight (0.99-1.08)",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_every_certified_through_9_hybrid_is_over_25_times_a_table_alone_and_breaks_even_near_1_bit_a_weight",
+      "note": "Registered after the data. Sizes via harness/description_length.py (reproduces the readout's bits exactly). The table-alone figure indexes the hybrid's own tree (~1,750 positions); a table-only strategy's own tree would differ but be of the same order. Consequence for the north star: through ply 9 the smallest certified description is the table; a net pays only where it carries far deeper than the table can afford (the tree grows ~6x per first-player ply) or at very low precision.",
+      "registered_at": "2026-10-05T16:35:16.216763+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_every_certified_through_9_hybrid_is_over_25_times_a_table_alone_and_breaks_even_near_1_bit_a_weight",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-05T16:35:28.007214+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_findings_evidence.py": "3ac861e0d326e010054f468934497f0f70f3ed3fb076a8ff48a397c90290268b",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
+        "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
+      }
+    },
+    "h141": {
+      "id": "h141",
+      "claim": "\u00a7C.49 H3 (registered after the data): H3's nets need fewer exceptions than H2's for a certified-through-9 hybrid on 6 of 7 seeds \u2014 mean 253 vs 278 entries (56 of them the opening table)",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_needs_fewer_exceptions_than_h2_on_6_of_7_seeds",
+      "note": "Registered after the data; not tested for significance. Next to the net's 660K bits the ~350-bit saving is immaterial (h140).",
+      "registered_at": "2026-10-05T16:35:16.291982+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_findings_evidence.py::test_c49_H3_needs_fewer_exceptions_than_h2_on_6_of_7_seeds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.27s",
+          "drawn_at": "2026-10-05T16:35:29.067448+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_findings_evidence.py": "3ac861e0d326e010054f468934497f0f70f3ed3fb076a8ff48a397c90290268b",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
+        "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
+      }
     }
   }
 }
