@@ -33,18 +33,24 @@ def clear_bytecode(root: Path) -> int:
     return n
 
 
-def run_suite(tests: list[str], cwd: Path | None = None, runner=None) -> dict:
+def run_suite(tests: list[str], cwd: Path | None = None, runner=None, timeout: float | None = None) -> dict:
     """Run pytest with bytecode writing OFF, returning which test ids failed.
 
     Exit 5 is "no tests collected" — a green-by-vacuum run, which must never read as a pass (the same trap
-    harness.hypotheses.verify refuses)."""
+    harness.hypotheses.verify refuses). A suite still running after `timeout` seconds is stopped and read as
+    failed: a mutation that makes the code under test never return (a game that no longer ends) is caught, not
+    waited on forever."""
     cwd = Path(cwd or ".")
     clear_bytecode(cwd)
     if runner is not None:
         return runner(tests)
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    r = subprocess.run([sys.executable, "-m", "pytest", *tests, "-q", "-p", "no:randomly"],
-                       capture_output=True, text=True, cwd=str(cwd), env=env)
+    try:
+        r = subprocess.run([sys.executable, "-m", "pytest", *tests, "-q", "-p", "no:randomly"],
+                           capture_output=True, text=True, cwd=str(cwd), env=env, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return {"green": False, "collected": True, "failed": [f"timeout after {timeout:g}s"],
+                "detail": f"stopped after {timeout:g}s"}
     out = (r.stdout or "") + (r.stderr or "")
     failed = sorted({ln.split(" ")[1] for ln in out.splitlines()
                      if ln.startswith("FAILED ") and len(ln.split(" ")) > 1})
@@ -91,7 +97,8 @@ def _apply(original: str, m: dict) -> str:
     return "".join(out)
 
 
-def mutate(path, mutations: list[dict], tests: list[str], cwd: Path | None = None, runner=None) -> dict:
+def mutate(path, mutations: list[dict], tests: list[str], cwd: Path | None = None, runner=None,
+           timeout: float | None = None) -> dict:
     """Apply each mutation to `path` in turn, run `tests`, restore, and report what each one killed.
 
     `mutations` are {"name", "old", "new"} text substitutions. Each is applied to the PRISTINE file, never on
@@ -99,7 +106,7 @@ def mutate(path, mutations: list[dict], tests: list[str], cwd: Path | None = Non
     tree mutated."""
     path = Path(path)
     original = path.read_text()
-    base = run_suite(tests, cwd=cwd, runner=runner)
+    base = run_suite(tests, cwd=cwd, runner=runner, timeout=timeout)
     if not base["collected"]:
         raise ValueError(f"baseline collected no tests from {tests} — a mutation run against nothing would "
                          f"report every mutation as killed")
@@ -110,7 +117,7 @@ def mutate(path, mutations: list[dict], tests: list[str], cwd: Path | None = Non
     try:
         for m in mutations:
             path.write_text(_apply(original, m))
-            res = run_suite(tests, cwd=cwd, runner=runner)
+            res = run_suite(tests, cwd=cwd, runner=runner, timeout=timeout)
             results.append({"name": m["name"], "killed": not res["green"], "killed_by": res["failed"]})
     finally:
         path.write_text(original)

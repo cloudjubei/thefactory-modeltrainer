@@ -1,0 +1,112 @@
+{
+  "file": "harness/kalah_paper.py",
+  "tests": ["tests/test_kalah_paper.py"],
+  "mutations": [
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "shapes unchecked",
+      "old": "    if solved != sorted(spec[\"solve\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "missing reading accepted",
+      "old": "        if rows is None or sorted((r[\"holes\"], r[\"counters\"]) for r in rows) != sorted(PERFECT_GAMES):\n",
+      "new": "        if rows is None:\n"
+    },
+    {
+      "name": "integrity ignored",
+      "old": "    if integrity:\n        return",
+      "new": "    if False:\n        return"
+    },
+    {
+      "name": "margin ignored for consistency",
+      "old": "    return row[\"result\"] == \"end\" and row[\"margin\"] == PERFECT_GAMES[(row[\"holes\"], row[\"counters\"])][0]",
+      "new": "    return row[\"result\"] == \"end\""
+    },
+    {
+      "name": "result ignored for consistency",
+      "old": "    return row[\"result\"] == \"end\" and row[\"margin\"]",
+      "new": "    return row[\"margin\"]"
+    },
+    {
+      "name": "wdl sign flipped",
+      "old": "\"LDW\"[(margin > 0) - (margin < 0) + 1]",
+      "new": "\"WDL\"[(margin > 0) - (margin < 0) + 1]"
+    },
+    {
+      "name": "table 9 margins unchecked",
+      "old": "        elif shape in PERFECT_GAMES and margin != PERFECT_GAMES[shape][0]:\n",
+      "new": "        elif False:\n"
+    },
+    {
+      "name": "break site unchecked",
+      "old": "    replays_hold = broken == spec[\"inconsistent\"] and best_alone",
+      "new": "    replays_hold = len(broken) == len(spec[\"inconsistent\"]) and best_alone"
+    },
+    {
+      "name": "alternatives may tie",
+      "old": "all(consistent[v] < consistent[\"paper\"]",
+      "new": "all(consistent[v] <= consistent[\"paper\"]"
+    },
+    {
+      "name": "alternatives unchecked",
+      "old": " and best_alone and not e[\"repairs\"]",
+      "new": " and not e[\"repairs\"]"
+    },
+    {
+      "name": "repairs ignored",
+      "old": " and best_alone and not e[\"repairs\"]",
+      "new": " and best_alone"
+    },
+    {
+      "name": "values always supported",
+      "old": "\"verdict\": \"refuted\" if disagreements else \"supported\"",
+      "new": "\"verdict\": \"supported\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T08:00:52+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "fingerprint unchecked": [
+        "test_a_check_that_is_not_the_registered_one_is_not_run[fingerprint]"
+      ],
+      "shapes unchecked": [
+        "test_a_check_that_is_not_the_registered_one_is_not_run[extra",
+        "test_a_check_that_is_not_the_registered_one_is_not_run[missing"
+      ],
+      "missing reading accepted": ["test_a_check_that_is_not_the_registered_one_is_not_run[short"],
+      "integrity ignored": [
+        "test_a_check_that_is_not_the_registered_one_is_not_run[extra",
+        "test_a_check_that_is_not_the_registered_one_is_not_run[fingerprint]",
+        "test_a_check_that_is_not_the_registered_one_is_not_run[missing",
+        "test_a_check_that_is_not_the_registered_one_is_not_run[short"
+      ],
+      "margin ignored for consistency": [
+        "test_a_line_that_ends_on_the_wrong_margin_is_not_consistent"
+      ],
+      "result ignored for consistency": [
+        "test_a_line_that_ends_on_the_wrong_margin_is_not_consistent"
+      ],
+      "wdl sign flipped": [
+        "test_a_check_that_agrees_with_both_tables_supports_both_claims",
+        "test_a_wrong_win_draw_loss_or_a_wrong_margin_refutes_the_values"
+      ],
+      "table 9 margins unchecked": [
+        "test_a_wrong_win_draw_loss_or_a_wrong_margin_refutes_the_values"
+      ],
+      "break site unchecked": ["test_the_4_6_line_must_break_where_registered"],
+      "alternatives may tie": ["test_an_alternative_reading_that_fits_as_well_refutes_the_replays"],
+      "alternatives unchecked": [
+        "test_an_alternative_reading_that_fits_as_well_refutes_the_replays"
+      ],
+      "repairs ignored": ["test_a_one_character_repair_of_the_4_6_line_refutes_the_replays"],
+      "values always supported": ["test_a_wrong_win_draw_loss_or_a_wrong_margin_refutes_the_values"]
+    }
+  }
+}

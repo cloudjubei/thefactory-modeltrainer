@@ -52,6 +52,35 @@ def exception_table(game, root, player: int, choose: Callable[[list], list], mov
     return table, stats
 
 
+def full_table(game, root, player: int, move_values: Callable[[list], list], horizon: int) -> tuple:
+    """({position key: the first optimal move in legal order} at every one of `player`'s positions on the table's own
+    tree before `horizon` plies, the unfinished positions at exactly `horizon` plies on that tree). The table fixes
+    `player`'s opening outright, so the tree through `horizon` is the same for every net — the frontier is where a
+    net trained beside it starts to carry play."""
+    if horizon < 1:
+        raise ValueError(f"the table horizon must be >= 1 ply, got {horizon}")
+    rng = random.Random(0)
+    level = {game.state_key(root): root}
+    table: dict = {}
+    for _ply in range(horizon):
+        fresh = {k: s for k, s in level.items() if not game.is_terminal(s)}
+        mine = [s for s in fresh.values() if game.current_player(s) == player]
+        nxt: dict = {}
+        for s, values in zip(mine, move_values(mine) if mine else [], strict=True):
+            best = max(values.values())
+            move = next(a for a in game.legal_actions(s) if values[a] == best)
+            table[game.state_key(s)] = move
+            child = game.step(s, move, rng)
+            nxt.setdefault(game.state_key(child), child)
+        for s in fresh.values():
+            if game.current_player(s) != player:
+                for b in game.legal_actions(s):
+                    child = game.step(s, b, rng)
+                    nxt.setdefault(game.state_key(child), child)
+        level = nxt
+    return table, [s for s in level.values() if not game.is_terminal(s)]
+
+
 def hybrid_chooser(game, table: dict, choose: Callable[[list], list]) -> Callable[[list], list]:
     """The table's move where it has one, the strategy's move everywhere else."""
     def hybrid(states: list) -> list:

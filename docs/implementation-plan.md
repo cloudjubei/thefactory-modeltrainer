@@ -125,17 +125,27 @@
 - So longer runs would not rescue the opening fixes, and the real-event reward and n-step replication were **not**
   launched (the user's order was "if it makes sense"): both would be judged where nothing moves.
 
-**1.8 H1 running: the hybrid's first measurement (h129, h130).** `harness/opening_table.py`, `harness/floor_hybrid.py`,
-`scripts/c4_hybrid.py`.
-- The process computes an exception table with an exact solve step: at the first player's positions in the hybrid's
-  own tree before a horizon, an optimal move wherever the net's move is not optimal. The net plays the rest.
-- On the ten base-recipe nets, horizons 3/5/7, the hybrid is certified one White ply past the table, so the net
-  carries that ply. Judged at 3 and 5 (≥ 8/10); 7 and every table's size reported. Predicted refuted.
-- Its output is the trade-off curve the hybrid needs: table entries against certified depth.
-- Next, depending on it: put the table in the training loop (self-play starts from the table's opening, the
-  strategy tree trains the net where the table stops), and size the table that certifies through 10.
+**1.8 H1 result: the net carries no ply on its own past an exact opening table (h129–h131).**
+- Ten base-recipe nets, tables before ply 3/5/7: no hybrid certifies one ply further at any horizon (0/10 each).
+- The table overrides 50% / 26% / 15% of its positions; the net is wrong at 23% / 12% / 12% of the ply it carries.
+  It improves with depth, but its tree grows ~6× per White ply.
+- A hybrid certified through 10 needs ~190 table entries per net (~12% of its first-player positions at plies 0–8).
 
-**1.9 Stored knowledge (now H1) the process computes itself** (a solved opening/exception table counted in the description
+**1.9 H2 result: training beside the table works (h132, h133).**
+- Self-play from the table's frontier and the strategy tree walked from there: 81.6% optimal at the 284 positions one
+  ply past the table, against 75.0% for the base process (+6.5 points, 6/7 pairs, p 0.016). Fewer failures at the
+  never-trained ply 8 too (681 vs 865). Still no hybrid certified through 9 plies (0/14).
+
+**1.10 H3 running: train the plies the net carries (h134, h135).** `harness/floor_h3.py`, `scripts/c4_h3_readout.py`.
+- H2's recipe with the strategy tree walked from the frontier through plies 6 and 8 (1,894 positions), seeds
+  481–487, 20 iterations, `--curve` scoring the 284 ply-6 positions after every pass. Control: H2's table-arm nets.
+- Judged: the gain at the fixed ply-8 set (permutation test), and whether the ply-6 share is still rising at
+  iteration 20. Reported: each net's certified-through-9 hybrid size (table + exceptions) against a table alone.
+- If still rising: a longer H3 run is scaling a method that works. Then description-length comparison across variants:
+  `harness/description_length.py` is built for it (net params × bits + table entries × index-and-move bits; ranks
+  certified variants only).
+
+**1.11 Stored knowledge (now H1/H2) the process computes itself** (a solved opening/exception table counted in the description
 length) remains an option for the hybrid, not the fix for 1.1.
 
 ## 2. Board games — next
@@ -200,8 +210,18 @@ rule standalone and in decision-list order, by ply.
 - **Game ladder (finite, with an exact oracle):**
   1. tic-tac-toe;
   2. Connect-4;
-  3. **Kalah**, small variants first: game module, solver, termination test (seeds in pits or their distance to the
-     owner's store falls every move);
+  3. **Kalah**, small variants first. Built: `games/kalah.py` (rules of Irving, Donkers & Uiterwijk 2000; exact
+     solver memoised on the counters in play; `progress` rises every move, checked on random play in six shapes) and
+     `harness/kalah_paper.py` (the paper's tables and the judge, h136, h137). Solver memory: Kalah(5, 2) needs 2.4M
+     memo entries (16 s); Kalah(6, 2) passed 10 GB unfinished. Before it enters the process:
+     - **generic value steps assume the mover alternates** — Kalah's extra move breaks `harness/certify.py` (child
+       value negated; exact play on Kalah(2, 1) fails at its first move) and `harness.agents.child_move_value`
+       (search proofs); strict xfails in `tests/test_alternation.py`. Fix with a mover comparison, as the search
+       backup already does. The n-step target (`neural.py`, sign from n's parity) and `harness/exact_values.py`
+       (Connect-4 states) have the same assumption;
+     - register it in `harness/registry.py` (after H3: nothing H3 imports changes while it runs);
+     - a solver for the 6-hole game needs a compact memo (the paper's endgame databases index positions by counters
+       in play, 4 bits each);
   4. **Othello 6×6**: add a board-size parameter to `games/othello.py` (fixed at 8);
   5. **small Hex or Dots and Boxes**.
 - **Order:**

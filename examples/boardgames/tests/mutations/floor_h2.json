@@ -1,0 +1,124 @@
+{
+  "file": "harness/floor_h2.py",
+  "tests": ["tests/test_floor_h2.py"],
+  "mutations": [
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if readout.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "table and positions unchecked",
+      "old": "    if readout.get(\"horizon\") != spec[\"horizon\"] or readout.get(\"carried_positions\") != spec[\"carried_positions\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "horizon unchecked",
+      "old": "readout.get(\"horizon\") != spec[\"horizon\"] or readout.get(\"carried_positions\")",
+      "new": "readout.get(\"carried_positions\")"
+    },
+    {
+      "name": "recipes unchecked",
+      "old": "            != expected:\n",
+      "new": "            != expected and False:\n"
+    },
+    {
+      "name": "era unchecked",
+      "old": "    if any(v.get(\"training_fingerprint\") != spec[\"era\"] for v in runs.values()):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "coverage unchecked",
+      "old": "        problems.append(\"the readout does not cover exactly every registered arm and seed\")",
+      "new": "        pass"
+    },
+    {
+      "name": "per-net positions unchecked",
+      "old": "if n[\"carried\"][\"positions\"] != spec[\"carried_positions\"] or n[\"certificate\"][\"depth\"] != spec[\"horizon\"] + 4:",
+      "new": "if n[\"certificate\"][\"depth\"] != spec[\"horizon\"] + 4:"
+    },
+    {
+      "name": "certificate depth unchecked",
+      "old": "if n[\"carried\"][\"positions\"] != spec[\"carried_positions\"] or n[\"certificate\"][\"depth\"] != spec[\"horizon\"] + 4:",
+      "new": "if n[\"carried\"][\"positions\"] != spec[\"carried_positions\"]:"
+    },
+    {
+      "name": "gains unpaired",
+      "old": "diffs = [t - b for t, b in zip(share[\"table\"], share[\"base\"])]",
+      "new": "diffs = [t - b for t, b in zip(share[\"table\"], reversed(share[\"base\"]))]"
+    },
+    {
+      "name": "zero gain inconclusive",
+      "old": "\"refuted\" if mean(diffs) <= 0 else \"inconclusive\"",
+      "new": "\"refuted\" if mean(diffs) < 0 else \"inconclusive\""
+    },
+    {
+      "name": "looser test",
+      "old": "\"supported\" if p <= spec[\"alpha\"] else",
+      "new": "\"supported\" if p <= 2 * spec[\"alpha\"] else"
+    },
+    {
+      "name": "failures overwritten",
+      "old": "failures[n[\"arm\"]][ply] = failures[n[\"arm\"]].get(ply, 0) + count",
+      "new": "failures[n[\"arm\"]][ply] = count"
+    },
+    {
+      "name": "certified counts all",
+      "old": "if n[\"arm\"] == a and n[\"certificate\"][\"certified\"])",
+      "new": "if n[\"arm\"] == a)"
+    },
+    {
+      "name": "another horizon",
+      "old": "\"horizon\": 5, \"carried_positions\": 284",
+      "new": "\"horizon\": 3, \"carried_positions\": 284"
+    },
+    {
+      "name": "another seed set",
+      "old": "tuple(range(481, 488))",
+      "new": "tuple(range(481, 485))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T21:29:44+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "table and positions unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[horizon]"
+      ],
+      "horizon unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[horizon]"
+      ],
+      "recipes unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "era unchecked": ["test_a_readout_that_is_not_the_registered_measurement_is_not_run[era]"],
+      "coverage unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[extra"
+      ],
+      "per-net positions unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[carried"
+      ],
+      "certificate depth unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[certificate"
+      ],
+      "gains unpaired": [
+        "test_a_p_just_above_alpha_is_not_supported",
+        "test_the_gain_is_paired_by_seed"
+      ],
+      "zero gain inconclusive": ["test_no_gain_is_refuted_and_a_noisy_gain_is_inconclusive"],
+      "looser test": ["test_a_p_just_above_alpha_is_not_supported"],
+      "failures overwritten": ["test_shares_and_certificates_are_reported_per_arm"],
+      "certified counts all": ["test_shares_and_certificates_are_reported_per_arm"],
+      "another horizon": [
+        "test_the_registered_comparison_trains_base_and_table_arms_on_seven_fresh_seeds"
+      ],
+      "another seed set": [
+        "test_the_registered_comparison_trains_base_and_table_arms_on_seven_fresh_seeds"
+      ]
+    }
+  }
+}

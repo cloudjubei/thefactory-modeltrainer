@@ -1,0 +1,94 @@
+{
+  "file": "harness/exact_values.py",
+  "tests": ["tests/test_exact_values.py"],
+  "mutations": [
+    {
+      "name": "child sign kept",
+      "old": "self.position[game.state_key(child)] = -v",
+      "new": "self.position[game.state_key(child)] = v"
+    },
+    {
+      "name": "partial rows taken as full",
+      "old": "            if set(values) == set(game.legal_actions(s)):\n",
+      "new": "            if True:\n"
+    },
+    {
+      "name": "position value the worst move",
+      "old": "self.position[game.state_key(s)] = max(values.values())",
+      "new": "self.position[game.state_key(s)] = min(values.values())"
+    },
+    {
+      "name": "recorded answers re-solved",
+      "old": "todo = list({key(s): s for s in states if key(s) not in self.position}.values())",
+      "new": "todo = list({key(s): s for s in states}.values())"
+    },
+    {
+      "name": "duplicates solved twice",
+      "old": "todo = list({key(s): s for s in states if key(s) not in self.position}.values())",
+      "new": "todo = [s for s in states if key(s) not in self.position]"
+    },
+    {
+      "name": "empty batch sent",
+      "old": "        if todo:\n            for s, v",
+      "new": "        if True:\n            for s, v"
+    },
+    {
+      "name": "solved not counted",
+      "old": "        self.counts[\"solved\"] += len(todo)\n",
+      "new": ""
+    },
+    {
+      "name": "terminal read as solved",
+      "old": "v = round(self.game.returns(c)[mover]) if self.game.is_terminal(c) else -next(values)",
+      "new": "v = -next(values)"
+    },
+    {
+      "name": "child value not negated",
+      "old": "else -next(values)",
+      "new": "else next(values)"
+    },
+    {
+      "name": "known move tables refilled",
+      "old": "todo = [s for s in states if key(s) not in self.moves]",
+      "new": "todo = list(states)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T21:17:54+00:00",
+    "killed": 10,
+    "survived": [],
+    "killed_by": {
+      "child sign kept": [
+        "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too",
+        "test_a_partially_recorded_position_is_completed_by_solving"
+      ],
+      "partial rows taken as full": ["test_a_partially_recorded_position_is_completed_by_solving"],
+      "position value the worst move": [
+        "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too"
+      ],
+      "recorded answers re-solved": [
+        "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too",
+        "test_a_partially_recorded_position_is_completed_by_solving",
+        "test_unknown_positions_are_solved_once_in_one_batch_and_remembered"
+      ],
+      "duplicates solved twice": [
+        "test_unknown_positions_are_solved_once_in_one_batch_and_remembered"
+      ],
+      "empty batch sent": [
+        "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too",
+        "test_unknown_positions_are_solved_once_in_one_batch_and_remembered"
+      ],
+      "solved not counted": ["test_unknown_positions_are_solved_once_in_one_batch_and_remembered"],
+      "terminal read as solved": [
+        "test_move_values_read_finished_games_from_the_result_and_the_rest_as_minus_the_child_s_value"
+      ],
+      "child value not negated": [
+        "test_a_partially_recorded_position_is_completed_by_solving",
+        "test_move_values_read_finished_games_from_the_result_and_the_rest_as_minus_the_child_s_value"
+      ],
+      "known move tables refilled": [
+        "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too"
+      ]
+    }
+  }
+}

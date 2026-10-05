@@ -4719,3 +4719,48 @@ else the net. A design catch: certification through D plies checks only White pl
 them all proves nothing — every reading leaves the net one ply to carry. Pre-registered h129 (table before ply 3,
 certified through 5) and h130 (before ply 5, through 7) on the ten base-recipe nets, ≥ 8/10, predicted refuted;
 horizon 7 and table sizes reported. Launched as a measurement (no training).
+
+## 2026-10-04 — H1: no ply carried past the opening table
+
+Ten base-recipe nets × tables before ply 3/5/7 (2,722 positions solved, 16,581 recorded; ~40 min): 0/10 hybrids
+certified one ply past the table at every horizon (h129, h130 refuted, as predicted). The table overrides 40/80,
+149/563, 492/3,387 positions; the net fails 109/483, 343/2,824, 1,441/12,235 on the ply it carries (h131). A
+certified-through-10 hybrid would need ~190 entries per net. Next proposed: H2, the table in the training loop.
+
+## 2026-10-05 — H2 built and pre-registered: the table in the training loop
+
+New: `opening_table.full_table` (an exact optimal move at every first-player position before the horizon, plus the
+frontier; 16/16 mutants killed), `harness/exact_values.py` (the shared exact-value step, moved out of the H1 script;
+10/10), `train_alphazero(selfplay_starts=..., tree_roots=...)` (11/11), the driver's `--opening-table` (smoke: 56
+entries, 44 frontier positions, 284 positions at ply 6), the H2 judge (15/15) and readout. Pre-registered h132.
+
+## 2026-10-05 — H2: training beside the table works
+
+Base vs table arm, seeds 481-487 (~40 min per seed per arm; readout ~35 min, 2,558 solved). At the 284 positions one
+ply past the 56-entry opening table: base 79.6/74.3/75.7/75.4/74.3/74.6/71.5% → table 78.5/79.9/82.0/86.3/81.7/
+82.0/80.6% — +6.5 points, 6/7 pairs, p = 2/128 (h132 supported, the first fix in this investigation that helps).
+Never-trained ply 8: 681 vs 865 failures (h133). 0/14 hybrids certified through 9 plies.
+
+## 2026-10-05 — H3 launched: train the plies the net carries
+
+The driver's `--curve` now also scores the positions one ply past the table after every pass (exact values solved
+before training). H3 judge (19/19 mutants killed; one guard removed as dead code — an empty ply-8 set already
+fails into NOT_RUN) and readout (fixed ply-6 and ply-8 sets; certified-through-9 hybrid size per net) built.
+Pre-registered h134 (ply-8 gain over H2) and h135 (ply-6 curve still rising at 20). H2's nets are the control
+(identical training fingerprint).
+
+## 2026-10-05 — Side work while H3 runs: description length, the Kalah rung, an alternation gap
+
+`harness/description_length.py`: a hybrid's size in bits (net params × bits + table entries × index-and-move bits),
+ranking certified variants only (10/10 mutants killed). `games/kalah.py`: Kalah(m, n) under the rules of Irving,
+Donkers & Uiterwijk (2000) with an exact solver memoised on the counters in play and a `progress` measure that rises
+every move. 16 of the paper's 17 perfect games replay to their stated margins; its 4(6) line breaks at North's
+tenth turn under every rule reading tried (11/17, 4/17, 4/17 for the alternatives), with no one-character repair. The
+solver matches Table 10 and the Table 9 margins wherever tested. Registered h136 (values) and h137 (replays) before
+the fingerprinted check (`scripts/kalah_paper_check.py`). Memory: Kalah(5, 2) 2.4M memo entries in 16 s; a Kalah(6, 2)
+timing run passed 10 GB and was stopped beside H3. Found: `certify` and `agents.child_move_value` negate a child's
+value without asking who moves next, so Kalah's extra move breaks them (exact play on Kalah(2, 1) fails certification
+at move one); strict xfails in `tests/test_alternation.py`, fix after H3. The mutation runner gained an optional
+suite `timeout`: a mutant that stops the game ending (start hole not emptied) used to hang the run forever.
+Check run (24 shapes, 41 s, peak 753 MB): h136 and h137 supported; Kalah mutants 36/36 killed (the hanging one by
+the 120 s timeout), runner timeout 4/4.

@@ -40,11 +40,14 @@ def main() -> int:
     ap.add_argument("--tests", nargs="+", help="pytest targets that should catch the mutations")
     ap.add_argument("--mutations", help="JSON list of {name, old, new}")
     ap.add_argument("--cwd", default=".")
+    ap.add_argument("--timeout", type=float, help="seconds before a hung suite is stopped and read as killing the "
+                                                  "mutation; a spec may carry its own `timeout`")
     args = ap.parse_args()
 
     if args.spec:
         spec = json.loads(Path(args.spec).read_text())
         args.file, args.tests, muts = spec["file"], spec["tests"], spec["mutations"]
+        args.timeout = spec.get("timeout", args.timeout)
     elif not (args.file and args.tests and args.mutations):
         raise SystemExit("give --spec, or all of --file, --tests and --mutations")
     else:
@@ -59,7 +62,7 @@ def main() -> int:
                              f"{{old, new}} — use 'edits' to RELOCATE a guard (delete here, re-insert there), "
                              f"the mutation class that catches a check which runs but too late")
 
-    res = mutate(args.file, muts, args.tests, cwd=Path(args.cwd))
+    res = mutate(args.file, muts, args.tests, cwd=Path(args.cwd), timeout=args.timeout)
     width = max(len(m["name"]) for m in muts)
     for r in res["results"]:
         by = ", ".join(t.split("::")[-1] for t in r["killed_by"]) or "-"

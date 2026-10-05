@@ -10,7 +10,7 @@ import pytest
 from games.tictactoe import TicTacToe
 from harness.certify import certify
 from harness.coverage import move_values
-from harness.opening_table import exception_table, hybrid_chooser
+from harness.opening_table import exception_table, full_table, hybrid_chooser
 
 G = TicTacToe()
 ROOT = G.initial_state(random.Random(0))
@@ -117,3 +117,46 @@ def test_a_position_reached_again_at_a_later_ply_is_counted_and_tabled_once():
     table, stats = exception_table(_Cycle(), 0, 0, lambda states: [0] * len(states),
                                    lambda states: [{0: 0, 1: 1} for _ in states], horizon=12)
     assert stats["positions"] == 2 and stats["overridden"] == 2 and table == {0: 1, 2: 1}
+
+
+def test_a_full_table_stores_the_first_optimal_move_at_every_player_position_before_the_horizon():
+    table, frontier = full_table(G, ROOT, 0, _values, horizon=3)
+    assert len(table) == 1 + 8
+    for (board, side), move in table.items():
+        assert side == 0 and sum(1 for c in board if c) in (0, 2)
+        s = next(st for st in _walk_all() if G.state_key(st) == (board, side))
+        v = move_values(G, s)
+        assert move == next(a for a in G.legal_actions(s) if v[a] == max(v.values()))
+
+
+def test_the_frontier_is_every_unfinished_position_at_the_horizon_on_the_table_s_tree():
+    table, frontier = full_table(G, ROOT, 0, _values, horizon=3)
+    expected = set()
+    for s2 in (G.step(G.step(ROOT, table[G.state_key(ROOT)]), b) for b in G.legal_actions(
+            G.step(ROOT, table[G.state_key(ROOT)]))):
+        child = G.step(s2, table[G.state_key(s2)])
+        if not G.is_terminal(child):
+            expected.add(G.state_key(child))
+    assert {G.state_key(s) for s in frontier} == expected and len(frontier) == len(expected)
+    assert all(sum(1 for c in s.board if c) == 3 and not G.is_terminal(s) for s in frontier)
+
+
+def test_a_full_table_horizon_below_one_is_refused():
+    with pytest.raises(ValueError, match="horizon"):
+        full_table(G, ROOT, 0, _values, horizon=0)
+
+
+def test_games_the_table_wins_before_the_horizon_are_not_part_of_the_frontier():
+    table, frontier = full_table(G, ROOT, 0, _values, horizon=5)
+    reached, level = [], [ROOT]
+    for _ply in range(5):
+        nxt = []
+        for s in level:
+            if G.is_terminal(s):
+                continue
+            moves = [table[G.state_key(s)]] if G.current_player(s) == 0 else G.legal_actions(s)
+            nxt += [G.step(s, a) for a in moves]
+        level = nxt
+    finished = {G.state_key(s) for s in level if G.is_terminal(s)}
+    assert finished and not finished & {G.state_key(s) for s in frontier}
+    assert {G.state_key(s) for s in frontier} == {G.state_key(s) for s in level if not G.is_terminal(s)}

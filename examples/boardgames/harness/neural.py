@@ -1656,6 +1656,8 @@ def train_alphazero(
     tree_value_target: bool = False,
     backplay: dict | None = None,
     exploiter: dict | None = None,
+    selfplay_starts: list | None = None,
+    tree_roots: list | None = None,
     sibling_holdout: dict | None = None,
     policy_target_fn: Callable | None = None,
     selfplay_opening_plies: int = 0,
@@ -1729,6 +1731,13 @@ def train_alphazero(
                                   or exploiter["sims_factor"] <= 1):
         raise ValueError("an exploiter plays games for the state buffer — it needs reanalyze_frac > 0, 0 < frac <= 1 "
                          "and sims_factor > 1 (more search than the learner)")
+    if selfplay_starts is not None and (reanalyze_frac <= 0.0 or not selfplay_starts or backplay is not None
+                                        or exploiter is not None):
+        raise ValueError("selfplay_starts starts every state-buffer self-play game at one of the given positions — it "
+                         "needs reanalyze_frac > 0, at least one position, and no backplay or exploiter")
+    if tree_roots is not None and (strategy_tree is None or not tree_roots):
+        raise ValueError("tree_roots walks the strategy tree from the given positions — set strategy_tree and give at "
+                         "least one root")
     if tree_value_target and strategy_tree is None:
         raise ValueError("tree_value_target gives the strategy-tree positions a value target — set strategy_tree")
     if strategy_tree is not None and reanalyze_frac != 1.0:
@@ -1899,6 +1908,8 @@ def train_alphazero(
                     reach = min(len(source), math.ceil(len(source) * (it + 1) / backplay["ramp"]))
                     start = source[len(source) - rng.randint(1, reach)]
                     backplay_games += 1
+                if selfplay_starts is not None:
+                    start = selfplay_starts[rng.randrange(len(selfplay_starts))]
                 if exploiter is not None and start is None and rng.random() < exploiter["frac"]:
                     fresh_s.extend(vs_opponent_game(game, learner, exploiter_agent, rng.randrange(game.num_players),
                                                     rng, return_states=True, opening_plies=_game_plies(rng)))
@@ -1980,8 +1991,16 @@ def train_alphazero(
                     sibling_relabel_s = time.time() - t_sib
                 if strategy_tree is not None:
                     choose = raw_chooser(game, net)
-                    walked = strategy_tree_positions(game, game.initial_state(random.Random(0)),
-                                                     strategy_tree["player"], choose, strategy_tree.get("depth"))
+                    if tree_roots is None:
+                        walked = strategy_tree_positions(game, game.initial_state(random.Random(0)),
+                                                         strategy_tree["player"], choose, strategy_tree.get("depth"))
+                    else:
+                        by_key: dict = {}
+                        for tree_root in tree_roots:
+                            for st in strategy_tree_positions(game, tree_root, strategy_tree["player"], choose,
+                                                              strategy_tree.get("depth")):
+                                by_key.setdefault(game.state_key(st), st)
+                        walked = list(by_key.values())
                     tree_walked = len(walked)
                     if walked:
                         tree_labels = relabel(walked, stop_value_delta is not None)

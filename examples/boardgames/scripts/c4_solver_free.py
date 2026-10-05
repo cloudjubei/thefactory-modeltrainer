@@ -21,7 +21,12 @@ trains to the cap whatever the walk reads (T14, harness.floor_c4_value_signal). 
 share of the games near the end of the last iteration's games (T16, harness.floor_c4_backplay). `--exploiter FRAC
 FACTOR` plays that share of the games against the current net with FACTOR times the search (T19,
 harness.floor_c4_exploiter). `--curve` scores the net on the fixed position set (harness.fixed_set) after every
-training pass and records the readings as `curve` (T20, harness.curve_diagnosis).
+training pass and records the readings as `curve` (T20, harness.curve_diagnosis). `--opening-table HORIZON` builds
+the hybrid's exact opening table (harness.opening_table.full_table) before training — outside the solver guard, it is
+the process's declared exact step — then starts every self-play game at its frontier and walks the strategy tree from
+there, so the net trains only where the table stops (H2, harness.floor_h2). With `--curve` it also scores the net
+after every pass at the positions one ply past the table, against exact values solved before training
+(`carried_curve`, H3, harness.floor_h3).
 """
 from __future__ import annotations
 
@@ -36,7 +41,8 @@ ROOT = Path(__file__).resolve().parent.parent
 NETS = ROOT / "checkpoints" / "c49_sf"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_solver_free.py", "harness/certify.py", "harness/native_solver.py",
-                       "harness/transfer.py", "harness/fixed_set.py")
+                       "harness/transfer.py", "harness/fixed_set.py", "harness/opening_table.py",
+                       "harness/exact_values.py")
 EMPTY_BOARD_VALUE = 1
 EMPTY_BOARD_VALUE_SOURCE = "Connect-4 is a first-player win (Allis 1988; Allen 1988; Tromp's database)"
 _BOOK = None
@@ -72,7 +78,8 @@ def _recorded_values(game) -> dict:
     return out
 
 
-def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | None = None) -> dict:
+def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | None = None,
+           starts: list | None = None, carried_cases: list | None = None) -> dict:
     import torch
 
     from harness.neural import save_net, train_alphazero
@@ -90,7 +97,11 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | N
         from harness.fixed_set import score
         from harness.strategy_tree import raw_chooser
 
-        return {"seconds": seconds, **score(raw_chooser(game, net)([s for s, _p, _v in curve_cases]), curve_cases)}
+        choose = raw_chooser(game, net)
+        reading = {"seconds": seconds, **score(choose([s for s, _p, _v in curve_cases]), curve_cases)}
+        if carried_cases:
+            reading["carried"] = score(choose([s for s, _p, _v in carried_cases]), carried_cases)
+        return reading
 
     with forbid_solver(), record_selfplay_states(game, on_pass=on_pass) as log:
         net, history = train_alphazero(
@@ -106,7 +117,7 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | N
             stop_on_agreement=cfg["stop_on_agreement"], stop_value_delta=cfg.get("stop_value_delta"),
             tree_value_target=cfg.get("tree_value_target", False), value_n_step=cfg.get("value_n_step", 0),
             target_refresh=cfg.get("target_refresh", 4), backplay=cfg.get("backplay"),
-            exploiter=cfg.get("exploiter"))
+            exploiter=cfg.get("exploiter"), selfplay_starts=starts, tree_roots=starts)
     path = nets / f"seed_{seed}.pt"
     save_net(net, str(path))
     stopped = bool(history and history[-1].get("stopped"))
@@ -118,8 +129,9 @@ def _train(cfg: dict, seed: int, threads: int, nets: Path, curve_cases: list | N
                     "file_sha256": hashlib.sha256(path.read_bytes()).hexdigest()},
             "params": sum(p.numel() for p in net.parameters()),
             "pass_seconds": [r["seconds"] for r in log["on_pass"]] if curve_cases else log["on_pass"],
-            **({"curve": [{k: v for k, v in r.items() if k != "seconds"} for r in log["on_pass"]]}
+            **({"curve": [{k: v for k, v in r.items() if k not in ("seconds", "carried")} for r in log["on_pass"]]}
                if curve_cases else {}),
+            **({"carried_curve": [r["carried"] for r in log["on_pass"]]} if carried_cases else {}),
             "games_per_pass": [sum(1 for g in log["games"] if g["pass"] == p) for p in range(log["passes"])],
             "train_seconds": round(time.time() - t0, 1), "history": history}
 
@@ -183,6 +195,9 @@ def main() -> None:
                          "RAMP iterations (T16)")
     ap.add_argument("--exploiter", type=float, nargs=2, metavar=("FRAC", "FACTOR"), default=None,
                     help="play FRAC of the games against the current net with FACTOR times the search, greedily (T19)")
+    ap.add_argument("--opening-table", type=int, default=None, metavar="HORIZON",
+                    help="the hybrid's exact opening table before HORIZON plies: self-play starts at its frontier and "
+                         "the strategy tree is walked from there (H2)")
     ap.add_argument("--curve", action="store_true",
                     help="score the net on the fixed position set after every training pass (T20)")
     ap.add_argument("--out", required=True)
@@ -209,7 +224,27 @@ def main() -> None:
         from harness.fixed_set import fixed_positions
 
         curve_cases = fixed_positions(load_evidence(LABELS)["positions"], Connect4(), player=0, plies=[0, 2, 4, 6, 8])
-    rows = [_train(cfg, seed, args.threads, nets, curve_cases) for seed in args.seeds]
+    starts, table_rows, carried_cases = None, None, None
+    if args.opening_table:
+        import random
+
+        from harness.evidence import load_evidence
+        from harness.exact_values import ExactValues
+        from harness.opening_table import full_table
+
+        with ProcessPoolExecutor(max_workers=args.workers) as pool:
+            exact = ExactValues(Connect4(), pool, load_evidence(LABELS)["positions"])
+            table, starts = full_table(Connect4(), Connect4().initial_state(random.Random(0)), 0, exact.move_values,
+                                       args.opening_table)
+            if args.curve:
+                game = Connect4()
+                carried = list({game.state_key(c): c for s in starts for b in game.legal_actions(s)
+                                for c in [game.step(s, b)] if not game.is_terminal(c)}.values())
+                carried_cases = [(s, args.opening_table + 1, v) for s, v in zip(carried, exact.move_values(carried))]
+        cfg = {**cfg, "opening_table": {"horizon": args.opening_table, "entries": len(table),
+                                        "frontier": len(starts)}}
+        table_rows = [[list(k[0]), k[1], m] for k, m in table.items()]
+    rows = [_train(cfg, seed, args.threads, nets, curve_cases, starts, carried_cases) for seed in args.seeds]
     game = Connect4()
     recorded = _recorded_values(game)
     with ProcessPoolExecutor(max_workers=args.workers + 2) as pool:
@@ -228,6 +263,7 @@ def main() -> None:
                              "root_value_source": EMPTY_BOARD_VALUE_SOURCE,
                              "config": {**cfg, "seeds": list(args.seeds), "certify_depth": args.certify_depth},
                              **({"curve_positions": len(curve_cases)} if curve_cases else {}),
+                             **({"opening_table": table_rows} if table_rows else {}),
                              "seeds": rows})
 
 

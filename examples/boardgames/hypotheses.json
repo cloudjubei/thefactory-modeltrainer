@@ -4124,10 +4124,18 @@
       "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_3_the_net_carries_ply_4_on_8_of_10_nets",
       "note": "Prediction at registration: REFUTED \u2014 these nets play the optimal move at ~72% of general positions at plies 6-8 and ~65-71% at plies 0-4, and a hybrid's own tree holds dozens of positions per ply. The useful output is the trade-off curve: table entries (the hybrid's description cost) against how far it certifies; the horizon-7 table (net carries ply 8, certified through 9) is reported, not judged. Measurement ae504f03a68d. Cost: tables and certificates for 10 nets x 3 horizons, solves at plies <= 9, ~1-4 h with 8 workers.",
       "registered_at": "2026-10-04T20:25:39.853747+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_3_the_net_carries_ply_4_on_8_of_10_nets",
+          "ok": false,
+          "detail": "supported\nE         + refuted\n\ntests/test_c49_hybrid_evidence.py:32: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_3_the_net_carries_ply_4_on_8_of_10_nets\n1 failed in 0.05s",
+          "drawn_at": "2026-10-04T21:04:50.578043+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_H1_hybrid.json.gz",
-        "started": null
+        "started": "2026-10-04T20:25:59+00:00"
       },
       "pins": {
         "tests/test_c49_hybrid_evidence.py": "aaf01f4757280ea896f8cb94e03a55e9ba08c6478f9fc45334d87f4c5fdec351",
@@ -4142,16 +4150,197 @@
       "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_5_the_net_carries_ply_6_on_8_of_10_nets",
       "note": "Prediction at registration: REFUTED \u2014 these nets play the optimal move at ~72% of general positions at plies 6-8 and ~65-71% at plies 0-4, and a hybrid's own tree holds dozens of positions per ply. The useful output is the trade-off curve: table entries (the hybrid's description cost) against how far it certifies; the horizon-7 table (net carries ply 8, certified through 9) is reported, not judged. Measurement ae504f03a68d. Cost: tables and certificates for 10 nets x 3 horizons, solves at plies <= 9, ~1-4 h with 8 workers.",
       "registered_at": "2026-10-04T20:25:39.900871+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_5_the_net_carries_ply_6_on_8_of_10_nets",
+          "ok": false,
+          "detail": "supported\nE         + refuted\n\ntests/test_c49_hybrid_evidence.py:40: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_hybrid_evidence.py::test_c49_H1_with_a_table_before_ply_5_the_net_carries_ply_6_on_8_of_10_nets\n1 failed in 0.30s",
+          "drawn_at": "2026-10-04T21:04:51.585080+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_H1_hybrid.json.gz",
-        "started": null
+        "started": "2026-10-04T20:25:59+00:00"
       },
       "pins": {
         "tests/test_c49_hybrid_evidence.py": "aaf01f4757280ea896f8cb94e03a55e9ba08c6478f9fc45334d87f4c5fdec351",
         "harness/floor_hybrid.py": "fa19c85db74abed938c18e177e8d67776f771f93753089ddc1e55e37d26040f1"
       },
       "inconclusive_proof": "tests/test_c49_hybrid_evidence.py::test_c49_H1_horizon_5_is_undecidable"
+    },
+    "h131": {
+      "id": "h131",
+      "claim": "\u00a7C.49 H1b (descriptive, registered after the data): the hybrid's trade-off curve on the ten base-recipe nets. The exception table overrides 40 of 80 positions with the table before ply 3 (50%), 149 of 563 before ply 5 (26%) and 492 of 3,387 before ply 7 (15%); on the ply the net carries it is wrong at 109 of 483 positions (23%, ply 4), 343 of 2,824 (12%, ply 6) and 1,441 of 12,235 (12%, ply 8). The net gets better deeper, but its own tree grows ~6x per White ply, so its errors grow in number and no hybrid certifies at any horizon",
+      "mode": "test",
+      "proof": "tests/test_c49_hybrid_curve_evidence.py::test_c49_H1b_the_net_is_wrong_at_about_a_fifth_of_ply_4_and_an_eighth_of_plies_6_and_8_and_no_hybrid_certifies",
+      "note": "Second proof: test_c49_H1b_the_table_overrides_a_falling_share_of_its_positions. Implication: a hybrid certified through 10 plies needs the table over plies 0-8 \u2014 about 492 + 1,441 = 1,933 entries pooled, ~190 per net, ~12% of its ~1,560 first-player positions at plies 0-8; the net saves ~88%. For scale: WeakC4 describes a perfect first-player strategy for the whole game with ~2,600 opening nodes plus rules. The next step is training the net where the table stops (the table in the loop), which should cut those 12%.",
+      "registered_at": "2026-10-04T21:05:32.491994+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_hybrid_curve_evidence.py::test_c49_H1b_the_net_is_wrong_at_about_a_fifth_of_ply_4_and_an_eighth_of_plies_6_and_8_and_no_hybrid_certifies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-04T21:05:32.746090+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H1_hybrid.json.gz",
+        "started": "2026-10-04T20:25:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_hybrid_curve_evidence.py": "dfed09a2b565a684b9e31b7af7178f94e21ccceba7612817bfa253385b205dc0"
+      }
+    },
+    "h132": {
+      "id": "h132",
+      "claim": "\u00a7C.49 H2 (table in the loop): training the net beside the hybrid's exact opening table \u2014 the process solves the first optimal move at every first-player position before ply 5 (56 entries), every self-play game starts at the table's frontier (44 positions at ply 5) and the strategy tree is walked from there \u2014 makes it play the optimal move more often at the 284 positions one ply past the table (ply 6, the same for every net because the table fixes the opening) than T17's base recipe without the table: seven seed-matched pairs (seeds 481-487, 20 iterations), exact one-sided sign-flip permutation test at 5%. Refuted when the mean gain is <= 0; inconclusive when positive but not rejected",
+      "mode": "test",
+      "proof": "tests/test_c49_h2_evidence.py::test_c49_H2_the_table_trained_net_plays_the_optimal_move_more_often_one_ply_past_the_table",
+      "note": "Follows H1 (h129-h131: a net trained without the table is wrong at ~12% one ply past it). The table arm trains on exactly the measured positions (with search labels, not exact ones) \u2014 that is the hybrid's point: all capacity where the net must carry play. Reported, not judged: the hybrid (table + net) certified through 9 plies \u2014 the net carrying ply 6 and the never-trained ply 8 \u2014 and its failures by ply. Era 33939d5e2d76, readout 05ef8262c544. Cost: two arms x 7 seeds side by side (~4-6 h), then the readout (~1-2 h).",
+      "registered_at": "2026-10-04T21:30:03.658935+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h2_evidence.py::test_c49_H2_the_table_trained_net_plays_the_optimal_move_more_often_one_ply_past_the_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T01:51:25.314859+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H2_readout.json.gz",
+        "started": "2026-10-05T01:19:31+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h2_evidence.py": "e891c4d80a47c0b0b1242d76f93b673b51594fce5df45bc308a5b38ea964ba67",
+        "harness/floor_h2.py": "d9ab36e03051f5413c22125b3572b49a4d1d559b70aa5aa546721c7cae9c586a"
+      },
+      "inconclusive_proof": "tests/test_c49_h2_evidence.py::test_c49_H2_is_undecidable"
+    },
+    "h133": {
+      "id": "h133",
+      "claim": "\u00a7C.49 H2b (descriptive, registered after the data): the table-trained nets also err less at ply 8, which their training never walked \u2014 the hybrids (table + net) of the seven table-arm nets fail at 681 ply-8 positions in all against 865 for the seven base nets (-21%), as well as 366 against 496 at ply 6; no hybrid in either arm is certified through 9 plies",
+      "mode": "test",
+      "proof": "tests/test_c49_h2_untrained_ply_evidence.py::test_c49_H2b_the_table_trained_hybrids_fail_at_fewer_ply_8_positions_than_base_and_none_certifies",
+      "note": "Counts, not shares: certification does not expand below a failing position, so a net with more ply-6 failures has fewer ply-8 positions to fail at \u2014 the comparison is biased toward base, and base still fails more. With h132 (+6.5 points at ply 6, p 0.016), the first value-signal change that helps: training only where the table stops, from the table's frontier, with real outcomes from there.",
+      "registered_at": "2026-10-05T01:51:45.991990+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h2_untrained_ply_evidence.py::test_c49_H2b_the_table_trained_hybrids_fail_at_fewer_ply_8_positions_than_base_and_none_certifies",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T01:51:46.193586+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H2_readout.json.gz",
+        "started": "2026-10-05T01:19:31+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h2_untrained_ply_evidence.py": "adb474774c2e14d1dbd17e872a248e784586c7ca38faee9f22508a499982b4e5"
+      }
+    },
+    "h134": {
+      "id": "h134",
+      "claim": "\u00a7C.49 H3 (train the plies the net carries): walking the strategy tree from the opening table's frontier through plies 6 and 8 (depth 4, else H2's recipe) raises the net's share of optimal moves at the fixed ply-8 positions \u2014 those reached when the first player also plays optimally at ply 6 \u2014 against H2's table-arm nets of the same seven seeds, by an exact one-sided sign-flip permutation test at 5%. Refuted when the mean gain is <= 0; inconclusive when positive but not rejected",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_evidence.py::test_c49_H3_training_plies_6_and_8_raises_the_ply_8_share_over_h2",
+      "note": "Follows H2 (h132: +6.5 points one ply past the table; h133). Control: H2's table-arm nets (seeds 481-487), reused because the training fingerprint is unchanged (33939d5e2d76) \u2014 a rerun would reproduce them bit for bit. The ply-8 set (positions reached with the first player also optimal at ply 6) is fixed by the game, its size whatever the readout solves, the same for every net. Reported, not judged: ply-6 shares, and each net's certified-through-9 hybrid size (56 table entries + the net's exceptions at plies 6 and 8; params x 32 bits + entries x index bits) against a table alone. Readout 65225dd2ce54. Cost: the H3 arm alone, 7 seeds x 20 iterations, ~6-8 h, then the readout (~1-2 h).",
+      "registered_at": "2026-10-05T07:12:39.245902+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_evidence.py::test_c49_H3_training_plies_6_and_8_raises_the_ply_8_share_over_h2",
+          "ok": false,
+          "detail": "     \nE         - supported\nE         + not_run\n\ntests/test_c49_h3_evidence.py:31: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_h3_evidence.py::test_c49_H3_training_plies_6_and_8_raises_the_ply_8_share_over_h2\n1 failed in 0.11s",
+          "drawn_at": "2026-10-05T16:33:56.990562+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_evidence.py": "b11f718bdc0d36d2b9d13e03b847dbd1a8a3d664dcc9396bb37d538a85cd7511",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea"
+      },
+      "inconclusive_proof": "tests/test_c49_h3_evidence.py::test_c49_H3_the_ply_8_reading_is_undecidable"
+    },
+    "h135": {
+      "id": "h135",
+      "claim": "\u00a7C.49 H3 (curve): the H3 nets' share of optimal moves at the 284 positions one ply past the table is still rising at the end of their 20 iterations \u2014 pooled over the seven seeds, the mean share at passes 16-20 exceeds passes 11-15 by >= 1.5 points; refuted (flat) at <= 0.5 points; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_h3_evidence.py::test_c49_H3_the_ply_6_share_is_still_rising_at_iteration_20",
+      "note": "Decides whether this working recipe deserves longer runs (scaling a method that works, not answering a failure with compute). Follows H2 (h132: +6.5 points one ply past the table; h133). Control: H2's table-arm nets (seeds 481-487), reused because the training fingerprint is unchanged (33939d5e2d76) \u2014 a rerun would reproduce them bit for bit. The ply-8 set (positions reached with the first player also optimal at ply 6) is fixed by the game, its size whatever the readout solves, the same for every net. Reported, not judged: ply-6 shares, and each net's certified-through-9 hybrid size (56 table entries + the net's exceptions at plies 6 and 8; params x 32 bits + entries x index bits) against a table alone. Readout 65225dd2ce54. Cost: the H3 arm alone, 7 seeds x 20 iterations, ~6-8 h, then the readout (~1-2 h).",
+      "registered_at": "2026-10-05T07:12:39.292572+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_h3_evidence.py::test_c49_H3_the_ply_6_share_is_still_rising_at_iteration_20",
+          "ok": false,
+          "detail": "\nE         \nE         - supported\nE         + not_run\n\ntests/test_c49_h3_evidence.py:39: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_h3_evidence.py::test_c49_H3_the_ply_6_share_is_still_rising_at_iteration_20\n1 failed in 0.15s",
+          "drawn_at": "2026-10-05T16:33:58.732637+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_H3_readout.json.gz",
+        "started": "2026-10-05T14:48:16+00:00"
+      },
+      "pins": {
+        "tests/test_c49_h3_evidence.py": "b11f718bdc0d36d2b9d13e03b847dbd1a8a3d664dcc9396bb37d538a85cd7511",
+        "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea"
+      },
+      "inconclusive_proof": "tests/test_c49_h3_evidence.py::test_c49_H3_the_curve_reading_is_undecidable"
+    },
+    "h136": {
+      "id": "h136",
+      "claim": "Kalah rung: games/kalah.py's exact solver, under the rules Irving, Donkers & Uiterwijk (2000) state, gives from the start the win/draw/loss of their Table 10 for every Kalah(m, n) with m <= 3 (n = 1..6) and for 4(1..3), 5(1..2), 6(1), and the first-player margin of their Table 9 for 4(1..3), 5(1..2), 6(1). Refuted by any disagreement",
+      "mode": "test",
+      "proof": "tests/test_kalah_paper_evidence.py::test_kalah_the_solver_agrees_with_the_paper_s_values_on_every_registered_shape",
+      "note": "Not blind: the unit tests (tests/test_kalah.py) already check m <= 3 with m*n <= 12, 4(1), 5(1) and the margins 4(1), 4(2), 5(1), 6(1); an exploratory timing run printed 3(5) +6, 3(6) -10, 4(3) +8, 5(2) 0 before this was registered. The evidence run is the full registered set in one fingerprinted check (measurement 5b474aa32b1c). Shapes are capped where the memo was measured: Kalah(6, 2) passed 10 GB unfinished and was stopped beside H3. Outside oracle: the paper, ICGA Journal 23(3):139-147.",
+      "registered_at": "2026-10-05T08:05:03.891659+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_kalah_paper_evidence.py::test_kalah_the_solver_agrees_with_the_paper_s_values_on_every_registered_shape",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-05T08:12:57.843978+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/kalah_paper_check.json.gz",
+        "started": "2026-10-05T08:12:15+00:00"
+      },
+      "pins": {
+        "tests/test_kalah_paper_evidence.py": "718f2affa23acf57da634db09767d58d5fd19f75751f4ad5f09b9502cb4ac5d6",
+        "harness/kalah_paper.py": "a4bb88431bfd2bdd70b50e0139eecd5747e6bbaebee7c8693227ffdac63a8476"
+      },
+      "inconclusive_proof": "tests/test_kalah_paper_evidence.py::test_kalah_paper_check_is_undecidable"
+    },
+    "h137": {
+      "id": "h137",
+      "claim": "Kalah rung: the paper's 17 Table 9 perfect games, replayed under its stated rules (no hole skipped on a lap; a capture into an empty own hole even when the opposite hole is empty), reach their stated margins in every case but 4(6), which breaks at its tenth turn (North's '201', second move: the turn passes, the line plays on); each other reading (start hole skipped, capture only from a non-empty opposite hole, both) fits fewer lines; and no one-character edit repairs 4(6). Refuted otherwise",
+      "mode": "test",
+      "proof": "tests/test_kalah_paper_evidence.py::test_kalah_the_paper_s_perfect_games_fit_its_stated_rules_best_and_only_4_6_breaks",
+      "note": "Registered after the data: an exploratory replay in the scratchpad gave 16/17 under the stated rules, 11/17 with the start hole skipped, 4/17 without empty capture, 4/17 with both, and found no one-character repair of 4(6) (digits 0-3 and dashes, insert/replace/delete). The evidence run repeats it through games/kalah.py itself and refuses to write if the script's reading of the rules disagrees with the module on any line. Consequence: 4(6)'s line is a misprint or a rule not stated in the paper; its margin (draw) is not used as a check here.",
+      "registered_at": "2026-10-05T08:05:03.959227+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_kalah_paper_evidence.py::test_kalah_the_paper_s_perfect_games_fit_its_stated_rules_best_and_only_4_6_breaks",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T08:12:58.113305+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/kalah_paper_check.json.gz",
+        "started": "2026-10-05T08:12:15+00:00"
+      },
+      "pins": {
+        "tests/test_kalah_paper_evidence.py": "718f2affa23acf57da634db09767d58d5fd19f75751f4ad5f09b9502cb4ac5d6",
+        "harness/kalah_paper.py": "a4bb88431bfd2bdd70b50e0139eecd5747e6bbaebee7c8693227ffdac63a8476"
+      },
+      "inconclusive_proof": "tests/test_kalah_paper_evidence.py::test_kalah_paper_check_is_undecidable"
     }
   }
 }

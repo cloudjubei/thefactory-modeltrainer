@@ -80,3 +80,20 @@
 {"event": "end", "id": "c66c057ac1d3", "status": "completed", "at": "2026-10-04T19:44:24+00:00", "seconds": 14878.9}
 {"event": "end", "id": "539d55b7d139", "status": "completed", "at": "2026-10-04T20:13:13+00:00", "seconds": 16608.5}
 {"event": "start", "id": "7ab91bc266e6", "name": "c4_hybrid", "argv": ["--workers", "8", "--out", "evidence/c49_H1_hybrid.json.gz"], "at": "2026-10-04T20:25:58+00:00"}
+{"event": "end", "id": "7ab91bc266e6", "status": "completed", "at": "2026-10-04T21:04:34+00:00", "seconds": 2316.2}
+{"event": "start", "id": "65c64c54025f", "name": "c4_solver_free", "argv": ["--seeds", "996", "--iterations", "2", "--tree-depth", "2", "--certify-depth", "2", "--workers", "4", "--threads", "1", "--no-stop", "--opening-table", "5", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/h2_smoke.json.gz"], "at": "2026-10-04T21:18:27+00:00"}
+{"event": "end", "id": "65c64c54025f", "status": "completed", "at": "2026-10-04T21:27:31+00:00", "seconds": 543.8}
+{"event": "start", "id": "8a28811ca9a8", "name": "c4_solver_free", "argv": ["--seeds", "481", "482", "483", "484", "485", "486", "487", "--iterations", "20", "--tree-depth", "6", "--certify-depth", "6", "--workers", "4", "--no-stop", "--out", "evidence/c49_H2_base.json.gz"], "at": "2026-10-04T21:41:35+00:00"}
+{"event": "start", "id": "157734399332", "name": "c4_solver_free", "argv": ["--seeds", "481", "482", "483", "484", "485", "486", "487", "--iterations", "20", "--tree-depth", "2", "--certify-depth", "6", "--workers", "4", "--no-stop", "--opening-table", "5", "--out", "evidence/c49_H2_table.json.gz"], "at": "2026-10-04T21:41:35+00:00"}
+{"event": "end", "id": "157734399332", "status": "completed", "at": "2026-10-05T01:13:24+00:00", "seconds": 12709.0}
+{"event": "end", "id": "8a28811ca9a8", "status": "completed", "at": "2026-10-05T01:19:29+00:00", "seconds": 13074.4}
+{"event": "start", "id": "257a118a792f", "name": "c4_h2_readout", "argv": ["--workers", "8", "--out", "evidence/c49_H2_readout.json.gz"], "at": "2026-10-05T01:19:30+00:00"}
+{"event": "end", "id": "257a118a792f", "status": "completed", "at": "2026-10-05T01:51:15+00:00", "seconds": 1905.4}
+{"event": "start", "id": "6bcafb44bd1e", "name": "c4_solver_free", "argv": ["--seeds", "995", "--iterations", "2", "--tree-depth", "4", "--certify-depth", "2", "--workers", "4", "--threads", "1", "--no-stop", "--opening-table", "5", "--curve", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/h3_smoke.json.gz"], "at": "2026-10-05T06:35:18+00:00"}
+{"event": "end", "id": "6bcafb44bd1e", "status": "completed", "at": "2026-10-05T07:12:07+00:00", "seconds": 2208.9}
+{"event": "start", "id": "4f4da16711f6", "name": "c4_solver_free", "argv": ["--seeds", "481", "482", "483", "484", "485", "486", "487", "--iterations", "20", "--tree-depth", "4", "--certify-depth", "6", "--workers", "6", "--no-stop", "--opening-table", "5", "--curve", "--out", "evidence/c49_H3_deep.json.gz"], "at": "2026-10-05T07:12:56+00:00"}
+{"event": "start", "id": "7fcfe1e4e51f", "name": "kalah_paper_check", "argv": ["--out", "evidence/kalah_paper_check.json.gz"], "at": "2026-10-05T08:12:14+00:00"}
+{"event": "end", "id": "7fcfe1e4e51f", "status": "completed", "at": "2026-10-05T08:12:46+00:00", "seconds": 31.4}
+{"event": "end", "id": "4f4da16711f6", "status": "completed", "at": "2026-10-05T14:48:14+00:00", "seconds": 27318.8}
+{"event": "start", "id": "84ad52bf8665", "name": "c4_h3_readout", "argv": ["--workers", "8", "--out", "evidence/c49_H3_readout.json.gz"], "at": "2026-10-05T14:48:15+00:00"}
+{"event": "end", "id": "84ad52bf8665", "status": "completed", "at": "2026-10-05T16:32:49+00:00", "seconds": 6274.2}

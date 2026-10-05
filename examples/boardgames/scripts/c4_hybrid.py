@@ -16,51 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_hybrid.py", "harness/opening_table.py", "harness/certify.py",
-                       "harness/c4_oracle.py", "harness/native_solver.py")
+                       "harness/exact_values.py", "harness/c4_oracle.py", "harness/native_solver.py")
 EMPTY_BOARD_VALUE = 1
-
-
-class _Values:
-    """Exact values to the side to move: recorded ones first, then batched native solves."""
-
-    def __init__(self, game, pool, rows: list):
-        from games.connect4 import C4State
-
-        self.game, self.pool = game, pool
-        self.moves: dict = {}
-        self.position: dict = {}
-        self.counts = {"recorded": 0, "solved": 0}
-        for row in rows:
-            s = C4State(tuple(row["board"]), row["to_move"], None, False)
-            values = {int(a): int(v) for a, v in row["values"].items()}
-            for a, v in values.items():
-                child = game.step(s, a)
-                if not game.is_terminal(child):
-                    self.position[game.state_key(child)] = -v
-            if set(values) == set(game.legal_actions(s)):
-                self.moves[game.state_key(s)] = values
-                self.position[game.state_key(s)] = max(values.values())
-
-    def positions(self, states: list) -> list:
-        from harness.c4_oracle import solve
-
-        todo = list({self.game.state_key(s): s for s in states if self.game.state_key(s) not in self.position}.values())
-        for s, v in zip(todo, self.pool.map(solve, [(s.board, s.to_move) for s in todo], chunksize=2)):
-            self.position[self.game.state_key(s)] = int(v)
-        self.counts["solved"] += len(todo)
-        self.counts["recorded"] += len(states) - len(todo)
-        return [self.position[self.game.state_key(s)] for s in states]
-
-    def move_values(self, states: list) -> list:
-        todo = [s for s in states if self.game.state_key(s) not in self.moves]
-        children = [(s, a, self.game.step(s, a)) for s in todo for a in self.game.legal_actions(s)]
-        open_children = [c for _s, _a, c in children if not self.game.is_terminal(c)]
-        values = iter(self.positions(open_children))
-        for s, a, c in children:
-            mover = self.game.current_player(s)
-            v = round(self.game.returns(c)[mover]) if self.game.is_terminal(c) else -next(values)
-            self.moves.setdefault(self.game.state_key(s), {})[a] = v
-        return [self.moves[self.game.state_key(s)] for s in states]
 
 
 def main() -> None:
@@ -72,6 +29,7 @@ def main() -> None:
 
     from games.connect4 import Connect4
     from harness.certify import certify
+    from harness.exact_values import ExactValues
     from harness.evidence import load_evidence, save_evidence
     from harness.fingerprint import training_fingerprint
     from harness.floor_hybrid import SPEC
@@ -90,7 +48,7 @@ def main() -> None:
     root = game.initial_state(random.Random(0))
     nets = []
     with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        values = _Values(game, pool, load_evidence(LABELS)["positions"])
+        values = ExactValues(game, pool, load_evidence(LABELS)["positions"])
         for run, seeds in SPEC["runs"]:
             trained = {r["seed"]: r for r in load_evidence(ROOT / "evidence" / run)["seeds"]}
             for seed in seeds:

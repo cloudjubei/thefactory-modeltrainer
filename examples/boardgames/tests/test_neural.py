@@ -2277,6 +2277,68 @@ def test_c49_tree_value_targets_need_the_strategy_tree():
         _c48_train(reanalyze_frac=1.0, reanalyze_sims=4, tree_value_target=True)
 
 
+def _ttt_frontier(plies=2):
+    from games.tictactoe import TicTacToe
+
+    g = TicTacToe()
+    level = [g.initial_state(random.Random(0))]
+    for _ in range(plies):
+        level = [g.step(s, a) for s in level for a in g.legal_actions(s)][:4]
+    return level
+
+
+def test_c49_self_play_can_start_every_game_from_given_positions(monkeypatch):
+    import harness.neural as neural
+
+    starts = _ttt_frontier()
+    seen = []
+    real = neural.self_play_game
+
+    def spy(game, agent, rng, **kw):
+        seen.append(kw.get("start_state"))
+        return real(game, agent, rng, **kw)
+    monkeypatch.setattr(neural, "self_play_game", spy)
+    _sha, history, _net = _c48_train(iterations=3, reanalyze_frac=1.0, reanalyze_sims=4, selfplay_starts=starts)
+    assert len(seen) == 9 and all(s in starts for s in seen) and len({id(s) for s in seen}) > 1
+
+
+def test_c49_the_strategy_tree_can_be_walked_from_given_roots_each_position_once(monkeypatch):
+    import harness.neural as neural
+
+    roots = _ttt_frontier() + _ttt_frontier()[:1]
+    walks = []
+    real = neural.strategy_tree_positions
+
+    def spy(game, root, player, choose, depth):
+        out = real(game, root, player, choose, depth)
+        walks.append((root, depth, out))
+        return out
+    monkeypatch.setattr(neural, "strategy_tree_positions", spy)
+    _sha, history, _net = _c48_train(iterations=2, reanalyze_frac=1.0, reanalyze_sims=4,
+                                     strategy_tree={"player": 0, "depth": 2}, tree_roots=roots)
+    assert [w[0] for w in walks] == roots and all(w[1] == 2 for w in walks)
+    assert history[1]["tree_walked"] == len({(s.board, s.to_move) for w in walks for s in w[2]})
+
+
+@pytest.mark.parametrize("case", ["starts without the state buffer", "empty starts", "roots without a tree",
+                                  "empty roots", "starts with backplay", "starts with an exploiter"])
+def test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree(case):
+    buffer = {"reanalyze_frac": 1.0, "reanalyze_sims": 4}
+    tree = {"strategy_tree": {"player": 0, "depth": 2}}
+    knobs, match = {
+        "starts without the state buffer": ({"selfplay_starts": _ttt_frontier()}, "selfplay_starts"),
+        "empty starts": ({**buffer, "selfplay_starts": []}, "selfplay_starts"),
+        "roots without a tree": ({**buffer, "tree_roots": _ttt_frontier()}, "tree_roots"),
+        "empty roots": ({**buffer, **tree, "tree_roots": []}, "tree_roots"),
+        "starts with backplay": ({**buffer, "selfplay_starts": _ttt_frontier(),
+                                  "backplay": {"frac": 0.5, "ramp": 2}}, "selfplay_starts"),
+        "starts with an exploiter": ({**buffer, "selfplay_starts": _ttt_frontier(),
+                                      "exploiter": {"frac": 0.5, "sims_factor": 2}}, "selfplay_starts"),
+    }[case]
+    with pytest.raises(ValueError, match=match):
+        _c48_train(**knobs)
+
+
 def _exploiter_spy(monkeypatch):
     import harness.neural as neural
 

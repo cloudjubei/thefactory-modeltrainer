@@ -1,0 +1,101 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_c49_self_play_can_start_every_game_from_given_positions",
+    "tests/test_neural.py::test_c49_the_strategy_tree_can_be_walked_from_given_roots_each_position_once",
+    "tests/test_neural.py::test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree"
+  ],
+  "mutations": [
+    {
+      "name": "starts ignored",
+      "old": "                if selfplay_starts is not None:\n                    start = selfplay_starts[rng.randrange(len(selfplay_starts))]\n",
+      "new": ""
+    },
+    {
+      "name": "always the first start",
+      "old": "start = selfplay_starts[rng.randrange(len(selfplay_starts))]",
+      "new": "start = selfplay_starts[0]"
+    },
+    {
+      "name": "roots ignored",
+      "old": "                    if tree_roots is None:\n",
+      "new": "                    if True:\n"
+    },
+    {
+      "name": "only the first root walked",
+      "old": "                        for tree_root in tree_roots:\n",
+      "new": "                        for tree_root in tree_roots[:1]:\n"
+    },
+    {
+      "name": "repeats walked twice",
+      "old": "                                by_key.setdefault(game.state_key(st), st)\n                        walked = list(by_key.values())",
+      "new": "                                by_key[len(by_key)] = st\n                        walked = list(by_key.values())"
+    },
+    {
+      "name": "starts without buffer accepted",
+      "old": "if selfplay_starts is not None and (reanalyze_frac <= 0.0 or not selfplay_starts",
+      "new": "if selfplay_starts is not None and (not selfplay_starts"
+    },
+    {
+      "name": "empty starts accepted",
+      "old": "(reanalyze_frac <= 0.0 or not selfplay_starts or backplay",
+      "new": "(reanalyze_frac <= 0.0 or backplay"
+    },
+    {
+      "name": "starts with backplay accepted",
+      "old": "or not selfplay_starts or backplay is not None\n",
+      "new": "or not selfplay_starts\n"
+    },
+    {
+      "name": "starts with exploiter accepted",
+      "old": "                                        or exploiter is not None):\n",
+      "new": "                                        ):\n"
+    },
+    {
+      "name": "roots without tree accepted",
+      "old": "if tree_roots is not None and (strategy_tree is None or not tree_roots):",
+      "new": "if tree_roots is not None and not tree_roots:"
+    },
+    {
+      "name": "empty roots accepted",
+      "old": "if tree_roots is not None and (strategy_tree is None or not tree_roots):",
+      "new": "if tree_roots is not None and strategy_tree is None:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-04T21:11:57+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "starts ignored": ["test_c49_self_play_can_start_every_game_from_given_positions"],
+      "always the first start": ["test_c49_self_play_can_start_every_game_from_given_positions"],
+      "roots ignored": [
+        "test_c49_the_strategy_tree_can_be_walked_from_given_roots_each_position_once"
+      ],
+      "only the first root walked": [
+        "test_c49_the_strategy_tree_can_be_walked_from_given_roots_each_position_once"
+      ],
+      "repeats walked twice": [
+        "test_c49_the_strategy_tree_can_be_walked_from_given_roots_each_position_once"
+      ],
+      "starts without buffer accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[starts"
+      ],
+      "empty starts accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[empty"
+      ],
+      "starts with backplay accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[starts"
+      ],
+      "starts with exploiter accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[starts"
+      ],
+      "roots without tree accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[roots"
+      ],
+      "empty roots accepted": [
+        "test_c49_given_starts_and_roots_need_the_state_buffer_and_the_tree[empty"
+      ]
+    }
+  }
+}

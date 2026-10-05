@@ -1,0 +1,612 @@
+{
+  "file": "games/kalah.py",
+  "tests": ["tests/test_kalah.py"],
+  "mutations": [
+    {
+      "name": "start hole not emptied",
+      "old": "seeds, ring[hole], pos = ring[hole], 0, hole",
+      "new": "seeds, pos = ring[hole], hole"
+    },
+    {
+      "name": "opponent store not skipped",
+      "old": "    ring = list(own) + [0] + list(opp)\n",
+      "new": "    ring = list(own) + [0] + list(opp) + [0]\n"
+    },
+    {
+      "name": "capture needs non-empty opposite",
+      "old": "    if pos < m and ring[pos] == 1:\n",
+      "new": "    if pos < m and ring[pos] == 1 and ring[2 * m - pos]:\n"
+    },
+    {
+      "name": "capture in any own hole",
+      "old": "    if pos < m and ring[pos] == 1:\n",
+      "new": "    if pos < m:\n"
+    },
+    {
+      "name": "capture on opponent side",
+      "old": "    if pos < m and ring[pos] == 1:\n",
+      "new": "    if pos != m and ring[pos] == 1:\n"
+    },
+    {
+      "name": "wrong opposite hole",
+      "old": "        captured = 1 + ring[2 * m - pos]\n        ring[pos] = ring[2 * m - pos] = 0",
+      "new": "        captured = 1 + ring[m + 1 + pos]\n        ring[pos] = ring[m + 1 + pos] = 0"
+    },
+    {
+      "name": "last counter not captured",
+      "old": "        captured = 1 + ring[2 * m - pos]",
+      "new": "        captured = ring[2 * m - pos]"
+    },
+    {
+      "name": "no extra move",
+      "old": "ring[m], pos == m, captured",
+      "new": "ring[m], False, captured"
+    },
+    {
+      "name": "zero holes accepted",
+      "old": "        if holes < 1:\n",
+      "new": "        if holes < 0:\n"
+    },
+    {
+      "name": "zero counters accepted",
+      "old": "        if counters < 1:\n",
+      "new": "        if counters < 0:\n"
+    },
+    {
+      "name": "empty hole legal",
+      "old": "        return [h for h in range(self.holes) if own[h]]",
+      "new": "        return list(range(self.holes))"
+    },
+    {
+      "name": "game ends only when mover is empty",
+      "old": "        done = not any(own) or not any(opp)\n",
+      "new": "        done = not any(own)\n"
+    },
+    {
+      "name": "game ends only when opponent is empty",
+      "old": "        done = not any(own) or not any(opp)\n",
+      "new": "        done = not any(opp)\n"
+    },
+    {
+      "name": "leftovers to the mover",
+      "old": "            stores[1 - me] += sum(opp)\n",
+      "new": "            stores[me] += sum(opp)\n"
+    },
+    {
+      "name": "mover's leftovers dropped",
+      "old": "            stores[me] += sum(own)\n",
+      "new": ""
+    },
+    {
+      "name": "turn always passes",
+      "old": "to_move=me if again else 1 - me",
+      "new": "to_move=1 - me"
+    },
+    {
+      "name": "tie is a win for South",
+      "old": "        if not state.done or state.stores[0] == state.stores[1]:\n",
+      "new": "        if not state.done:\n"
+    },
+    {
+      "name": "winner reversed",
+      "old": "        return 0 if state.stores[0] > state.stores[1] else 1",
+      "new": "        return 1 if state.stores[0] > state.stores[1] else 0"
+    },
+    {
+      "name": "opponent row not reversed",
+      "old": "list(reversed(opp))",
+      "new": "list(opp)"
+    },
+    {
+      "name": "shares of one side",
+      "old": "        total = 2 * self.holes * self.counters\n",
+      "new": "        total = self.holes * self.counters\n"
+    },
+    {
+      "name": "to-move flag inverted",
+      "old": "[1.0 if state.to_move == player else 0.0]",
+      "new": "[0.0 if state.to_move == player else 1.0]"
+    },
+    {
+      "name": "heuristic ignores extra moves",
+      "old": "(2, 0, hole) if again else",
+      "new": "(0, 0, hole) if again else"
+    },
+    {
+      "name": "heuristic ignores capture size",
+      "old": "(1, captured, hole) if captured",
+      "new": "(1, 0, hole) if captured"
+    },
+    {
+      "name": "heuristic prefers far holes",
+      "old": "else (0, 0, hole)\n",
+      "new": "else (0, 0, -hole)\n"
+    },
+    {
+      "name": "progress ignores stores",
+      "old": "        return sum(state.stores), -distance",
+      "new": "        return 0, -distance"
+    },
+    {
+      "name": "distance from the far end",
+      "old": "v * (m - i)",
+      "new": "v * (i + 1)"
+    },
+    {
+      "name": "key ignores side to move",
+      "old": "        own, opp = self._sides(state, state.to_move)\n        me = state.to_move\n        key = 0",
+      "new": "        own, opp = self._sides(state, 0)\n        me = 0\n        key = 0"
+    },
+    {
+      "name": "key ignores stores",
+      "old": "own + opp + (state.stores[me], state.stores[1 - me])",
+      "new": "own + opp"
+    },
+    {
+      "name": "value sign flipped",
+      "old": "        return (m > 0) - (m < 0)",
+      "new": "        return (m < 0) - (m > 0)"
+    },
+    {
+      "name": "margin ignores stored lead",
+      "old": "        return lead if state.done else lead + self._best(*self._sides(state, me))",
+      "new": "        return lead if state.done else self._best(*self._sides(state, me))"
+    },
+    {
+      "name": "done margin from South",
+      "old": "        lead = state.stores[me] - state.stores[1 - me]\n",
+      "new": "        lead = state.stores[0] - state.stores[1]\n"
+    },
+    {
+      "name": "move margin ignores stored lead",
+      "old": "        return state.stores[me] - state.stores[1 - me] + self._after(own, opp, action)",
+      "new": "        return self._after(own, opp, action)"
+    },
+    {
+      "name": "optimal actions take the worst",
+      "old": "if v == max(values.values())",
+      "new": "if v == min(values.values())"
+    },
+    {
+      "name": "leftovers not counted at the end",
+      "old": "            return stored + sum(own) - sum(opp)",
+      "new": "            return stored"
+    },
+    {
+      "name": "extra move read as a pass",
+      "old": "(self._best(own, opp) if again else -self._best(opp, own))",
+      "new": "-self._best(opp, own)"
+    },
+    {
+      "name": "solver minimises",
+      "old": "            self._future[key] = max(",
+      "new": "            self._future[key] = min("
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T08:12:14+00:00",
+    "killed": 36,
+    "survived": [],
+    "killed_by": {
+      "start hole not emptied": ["timeout after 120s"],
+      "opponent store not skipped": [
+        "test_a_lap_that_ends_in_the_emptied_start_hole_captures",
+        "test_a_last_counter_in_an_empty_hole_of_the_opponent_captures_nothing",
+        "test_a_last_counter_in_an_empty_own_hole_captures_it_and_the_opposite_hole",
+        "test_a_last_counter_in_the_mover_s_store_moves_again",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_sowing_includes_the_mover_s_store_and_skips_the_opponent_s",
+        "test_the_capture_is_taken_even_when_the_opposite_hole_is_empty",
+        "test_the_paper_s_kalah_4_6_line_cannot_be_played_past_north_s_tenth_turn",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape0]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape11]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-5]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-5]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[4-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[5-1]"
+      ],
+      "capture needs non-empty opposite": [
+        "test_the_capture_is_taken_even_when_the_opposite_hole_is_empty",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]"
+      ],
+      "capture in any own hole": [
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_sowing_includes_the_mover_s_store_and_skips_the_opponent_s",
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store",
+        "test_the_paper_s_kalah_4_6_line_cannot_be_played_past_north_s_tenth_turn",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[5-1]"
+      ],
+      "capture on opponent side": [
+        "test_a_last_counter_in_an_empty_hole_of_the_opponent_captures_nothing",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]"
+      ],
+      "wrong opposite hole": [
+        "test_a_lap_that_ends_in_the_emptied_start_hole_captures",
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape0]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape11]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[5-1]"
+      ],
+      "last counter not captured": [
+        "test_a_lap_that_ends_in_the_emptied_start_hole_captures",
+        "test_a_last_counter_in_an_empty_own_hole_captures_it_and_the_opposite_hole",
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_the_capture_is_taken_even_when_the_opposite_hole_is_empty",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape0]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape11]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]"
+      ],
+      "no extra move": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_a_last_counter_in_the_mover_s_store_moves_again",
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store",
+        "test_the_paper_s_kalah_4_6_line_cannot_be_played_past_north_s_tenth_turn",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape0]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape11]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]"
+      ],
+      "zero holes accepted": ["test_a_variant_needs_at_least_one_hole_and_one_counter"],
+      "zero counters accepted": ["test_a_variant_needs_at_least_one_hole_and_one_counter"],
+      "empty hole legal": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_an_empty_or_missing_hole_is_not_a_move[1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_only_non_empty_holes_are_legal_and_holes_are_numbered_from_the_mover_s_side"
+      ],
+      "game ends only when mover is empty": [
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]"
+      ],
+      "game ends only when opponent is empty": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_an_equal_split_is_a_draw",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape0]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]"
+      ],
+      "leftovers to the mover": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_an_equal_split_is_a_draw",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]"
+      ],
+      "mover's leftovers dropped": [
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]"
+      ],
+      "turn always passes": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_a_last_counter_in_the_mover_s_store_moves_again",
+        "test_the_paper_s_kalah_4_6_line_cannot_be_played_past_north_s_tenth_turn",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape0]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape10]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape11]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape12]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape13]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape14]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape15]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape1]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape2]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape3]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape4]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape5]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape6]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape7]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape8]",
+        "test_the_paper_s_perfect_games_replay_to_their_stated_margins[shape9]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]"
+      ],
+      "tie is a win for South": ["test_an_equal_split_is_a_draw"],
+      "winner reversed": [
+        "test_a_move_that_empties_either_side_ends_the_game_and_the_other_player_takes_the_rest"
+      ],
+      "opponent row not reversed": [
+        "test_the_observation_is_one_plane_of_counter_shares_from_the_viewer_s_side_with_opposite_holes_aligned"
+      ],
+      "shares of one side": [
+        "test_the_observation_is_one_plane_of_counter_shares_from_the_viewer_s_side_with_opposite_holes_aligned"
+      ],
+      "to-move flag inverted": [
+        "test_the_observation_is_one_plane_of_counter_shares_from_the_viewer_s_side_with_opposite_holes_aligned"
+      ],
+      "heuristic ignores extra moves": [
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store"
+      ],
+      "heuristic ignores capture size": [
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store"
+      ],
+      "heuristic prefers far holes": [
+        "test_the_heuristic_takes_an_extra_move_then_the_largest_capture_then_the_hole_nearest_the_store"
+      ],
+      "progress ignores stores": [
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_progress_is_the_captured_count_then_the_negated_distance_to_the_owners_stores"
+      ],
+      "distance from the far end": [
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape1]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape2]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape3]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape4]",
+        "test_every_move_raises_the_captured_count_or_brings_counters_nearer_their_owner_s_store[shape5]",
+        "test_progress_is_the_captured_count_then_the_negated_distance_to_the_owners_stores"
+      ],
+      "key ignores side to move": [
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move"
+      ],
+      "key ignores stores": [
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move"
+      ],
+      "value sign flipped": [
+        "test_a_finished_game_s_margin_is_its_store_difference_for_the_side_that_would_move",
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-5]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-5]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[4-1]"
+      ],
+      "margin ignores stored lead": [
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move"
+      ],
+      "done margin from South": [
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move"
+      ],
+      "move margin ignores stored lead": [
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move"
+      ],
+      "optimal actions take the worst": [
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]"
+      ],
+      "leftovers not counted at the end": [
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_the_margin_counts_what_is_already_stored_and_is_read_by_the_side_to_move",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-5]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[5-1]"
+      ],
+      "extra move read as a pass": [
+        "test_optimal_actions_are_every_move_that_keeps_the_best_margin",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[1-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]"
+      ],
+      "solver minimises": [
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape0]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape1]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape2]",
+        "test_the_solver_reproduces_the_paper_s_margins_and_its_perfect_games_are_optimal[shape3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[2-6]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-1]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-2]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]",
+        "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[4-1]"
+      ]
+    }
+  },
+  "timeout": 120
+}

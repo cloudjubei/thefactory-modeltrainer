@@ -1,0 +1,160 @@
+{
+  "file": "harness/floor_h3.py",
+  "tests": ["tests/test_floor_h3.py"],
+  "mutations": [
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if readout.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "recipe unchecked",
+      "old": "        if config != {**cfg, \"seeds\": list(spec[\"seeds\"])}:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "era unchecked",
+      "old": "        if run.get(\"training_fingerprint\") != spec[\"era\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "coverage unchecked",
+      "old": "        problems.append(\"the readout does not cover exactly every registered arm and seed\")",
+      "new": "        pass"
+    },
+    {
+      "name": "per-net sizes unchecked",
+      "old": "        if n[\"s6\"][\"positions\"] != spec[\"s6_positions\"] or n[\"s8\"][\"positions\"] != s8:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "curve length unchecked",
+      "old": "if n[\"arm\"] == \"h3\" and len(n.get(\"carried_curve\") or []) != spec[\"iterations\"] + 1:",
+      "new": "if n[\"arm\"] == \"h3\" and not n.get(\"carried_curve\"):"
+    },
+    {
+      "name": "early not averaged",
+      "old": "- mean(at[p - 1] for p in spec[\"early\"]))",
+      "new": "- at[spec[\"early\"][0] - 1])"
+    },
+    {
+      "name": "late pass off by one",
+      "old": "mean(at[p - 1] for p in spec[\"late\"])",
+      "new": "mean(at[p - 2] for p in spec[\"late\"])"
+    },
+    {
+      "name": "rising strict",
+      "old": "gain >= spec[\"rising_at\"]",
+      "new": "gain > spec[\"rising_at\"]"
+    },
+    {
+      "name": "flat strict",
+      "old": "gain <= spec[\"flat_at\"]",
+      "new": "gain < spec[\"flat_at\"]"
+    },
+    {
+      "name": "gain unrounded",
+      "old": "gain = round(mean(gains), 9)",
+      "new": "gain = mean(gains)"
+    },
+    {
+      "name": "s8 gain unpaired",
+      "old": "diffs = [h3 - h2 for h3, h2 in zip(share[\"s8\"][\"h3\"], share[\"s8\"][\"h2\"])]",
+      "new": "diffs = [h3 - h2 for h3, h2 in zip(share[\"s8\"][\"h3\"], reversed(share[\"s8\"][\"h2\"]))]"
+    },
+    {
+      "name": "s8 judged on s6",
+      "old": "zip(share[\"s8\"][\"h3\"], share[\"s8\"][\"h2\"])",
+      "new": "zip(share[\"s6\"][\"h3\"], share[\"s8\"][\"h2\"])"
+    },
+    {
+      "name": "zero gain inconclusive",
+      "old": "\"refuted\" if mean(diffs) <= 0 else \"inconclusive\"",
+      "new": "\"refuted\" if mean(diffs) < 0 else \"inconclusive\""
+    },
+    {
+      "name": "looser test",
+      "old": "\"supported\" if p <= spec[\"alpha\"] else",
+      "new": "\"supported\" if p <= 2 * spec[\"alpha\"] else"
+    },
+    {
+      "name": "shallower H3 tree",
+      "old": "\"strategy_tree\": {\"player\": 0, \"depth\": 4}",
+      "new": "\"strategy_tree\": {\"player\": 0, \"depth\": 3}"
+    },
+    {
+      "name": "wider bands",
+      "old": "\"rising_at\": 0.015, \"flat_at\": 0.005",
+      "new": "\"rising_at\": 0.01, \"flat_at\": 0.005"
+    },
+    {
+      "name": "s6 size unchecked",
+      "old": "if readout.get(\"s6_positions\") != spec[\"s6_positions\"] or readout",
+      "new": "if readout"
+    },
+    {
+      "name": "s8 size unchecked",
+      "old": "!= spec[\"s6_positions\"] or readout.get(\"s8_positions\") != s8:",
+      "new": "!= spec[\"s6_positions\"]:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T06:49:03+00:00",
+    "killed": 19,
+    "survived": [],
+    "killed_by": {
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "recipe unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "era unchecked": ["test_a_readout_that_is_not_the_registered_measurement_is_not_run[era]"],
+      "coverage unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[extra"
+      ],
+      "per-net sizes unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[s6",
+        "test_an_open_s8_size_still_needs_every_net_scored_on_the_same_set"
+      ],
+      "curve length unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[short"
+      ],
+      "early not averaged": ["test_early_and_late_are_averaged_over_their_registered_passes"],
+      "late pass off by one": ["test_early_and_late_are_averaged_over_their_registered_passes"],
+      "rising strict": [
+        "test_the_curve_reading_is_the_pooled_late_minus_early_share[0.8-0.815-supported]"
+      ],
+      "flat strict": [
+        "test_the_curve_reading_is_the_pooled_late_minus_early_share[0.8-0.805-refuted]"
+      ],
+      "gain unrounded": [
+        "test_the_curve_reading_is_the_pooled_late_minus_early_share[0.8-0.805-refuted]",
+        "test_the_curve_reading_is_the_pooled_late_minus_early_share[0.8-0.815-supported]"
+      ],
+      "s8 gain unpaired": [
+        "test_a_p_just_above_alpha_is_not_supported",
+        "test_an_h3_net_better_at_ply_8_on_every_seed_supports_the_gain"
+      ],
+      "s8 judged on s6": [
+        "test_a_p_just_above_alpha_is_not_supported",
+        "test_an_h3_net_better_at_ply_8_on_every_seed_supports_the_gain",
+        "test_no_gain_at_ply_8_is_refuted_and_a_noisy_one_is_inconclusive"
+      ],
+      "zero gain inconclusive": [
+        "test_no_gain_at_ply_8_is_refuted_and_a_noisy_one_is_inconclusive"
+      ],
+      "looser test": ["test_a_p_just_above_alpha_is_not_supported"],
+      "shallower H3 tree": [
+        "test_the_registered_comparison_is_h3_against_h2_s_table_nets_on_the_same_seeds"
+      ],
+      "wider bands": [
+        "test_the_registered_comparison_is_h3_against_h2_s_table_nets_on_the_same_seeds"
+      ],
+      "s6 size unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[readout"
+      ],
+      "s8 size unchecked": ["test_a_readout_that_is_not_the_registered_measurement_is_not_run[s8"]
+    }
+  }
+}

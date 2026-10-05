@@ -216,3 +216,17 @@ def test_an_empty_edit_list_is_refused(tmp_path):
     with pytest.raises(ValueError) as exc:
         mutate(d / "mod.py", [{"name": "nothing", "edits": []}], ["test_mod.py"], cwd=d, runner=_fake([_ok()]))
     assert "SURVIVED" in str(exc.value)
+
+
+def test_a_mutation_that_hangs_the_suite_is_killed_by_the_timeout_not_waited_on_forever(tmp_path):
+    d = _tree(tmp_path)
+    hang = {"name": "never returns", "old": "VALUE = 1\n", "new": "import time\ntime.sleep(120)\nVALUE = 1\n"}
+    res = mutate(d / "mod.py", [hang], ["test_mod.py"], cwd=d, timeout=20)
+    assert res["results"] == [{"name": "never returns", "killed": True, "killed_by": ["timeout after 20s"]}]
+    assert (d / "mod.py").read_text() == MOD
+
+
+def test_without_a_timeout_a_slow_suite_is_waited_on(tmp_path):
+    d = _tree(tmp_path, mod="import time\ntime.sleep(2)\nVALUE = 1\n")
+    assert run_suite(["test_mod.py"], cwd=d)["green"]
+    assert not run_suite(["test_mod.py"], cwd=d, timeout=1)["green"]

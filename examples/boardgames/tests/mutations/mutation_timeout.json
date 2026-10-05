@@ -1,0 +1,48 @@
+{
+  "file": "harness/mutation.py",
+  "tests": ["tests/test_mutation.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "timeout not handed to pytest",
+      "old": "cwd=str(cwd), env=env, timeout=timeout)",
+      "new": "cwd=str(cwd), env=env)"
+    },
+    {
+      "name": "a hung suite reads as green",
+      "old": "        return {\"green\": False, \"collected\": True, \"failed\": [f\"timeout after {timeout:g}s\"],",
+      "new": "        return {\"green\": True, \"collected\": True, \"failed\": [f\"timeout after {timeout:g}s\"],"
+    },
+    {
+      "name": "a hung suite names no killer",
+      "old": "\"failed\": [f\"timeout after {timeout:g}s\"],",
+      "new": "\"failed\": [],"
+    },
+    {
+      "name": "mutants run without the timeout",
+      "old": "            res = run_suite(tests, cwd=cwd, runner=runner, timeout=timeout)",
+      "new": "            res = run_suite(tests, cwd=cwd, runner=runner)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T08:09:09+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "timeout not handed to pytest": [
+        "test_a_mutation_that_hangs_the_suite_is_killed_by_the_timeout_not_waited_on_forever",
+        "test_without_a_timeout_a_slow_suite_is_waited_on"
+      ],
+      "a hung suite reads as green": [
+        "test_a_mutation_that_hangs_the_suite_is_killed_by_the_timeout_not_waited_on_forever",
+        "test_without_a_timeout_a_slow_suite_is_waited_on"
+      ],
+      "a hung suite names no killer": [
+        "test_a_mutation_that_hangs_the_suite_is_killed_by_the_timeout_not_waited_on_forever"
+      ],
+      "mutants run without the timeout": [
+        "test_a_mutation_that_hangs_the_suite_is_killed_by_the_timeout_not_waited_on_forever"
+      ]
+    }
+  }
+}

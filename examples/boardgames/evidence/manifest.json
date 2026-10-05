@@ -168,6 +168,30 @@
       "sha256": "f831bd8f0bd7f5e65f12d9f872e3803c278abfe4d1b5e174f55abcc8bc5006bc",
       "started": "2026-10-02T20:35:28+00:00"
     },
+    "c49_H1_hybrid.json.gz": {
+      "sha256": "746c6d7c7087c58659a20855bc2273b6ccfde16641ca351a1cc044854b85084b",
+      "started": "2026-10-04T20:25:59+00:00"
+    },
+    "c49_H2_base.json.gz": {
+      "sha256": "26540a9ee9a3fff12be5a2de39d858b67eccba10b0d97ac903767fa0cea2d76b",
+      "started": "2026-10-04T21:41:36+00:00"
+    },
+    "c49_H2_readout.json.gz": {
+      "sha256": "b20969f3bcb60d2a4203dc01e1d516bce2ca97fd1f558e40a60be92864365e0e",
+      "started": "2026-10-05T01:19:31+00:00"
+    },
+    "c49_H2_table.json.gz": {
+      "sha256": "2284a7403fcf00eb2e5cc1fd7c63819d4c3a23f66e36e009f1b27ce1acf21863",
+      "started": "2026-10-04T21:41:36+00:00"
+    },
+    "c49_H3_deep.json.gz": {
+      "sha256": "5c13a189a2297a5f5a17b0ade4d0d78ef91c93df0986128b830c1b1a6b4b5a48",
+      "started": "2026-10-05T07:12:57+00:00"
+    },
+    "c49_H3_readout.json.gz": {
+      "sha256": "3497bd174dd3dc11e112edbcdade24723fedcab9a86af0473b44d48e632bf4eb",
+      "started": "2026-10-05T14:48:16+00:00"
+    },
     "c49_P1_fixed_set.json.gz": {
       "sha256": "2f149cfa5a9887bc78073ef32fb84be409ed2df307cac71589fe92b7e4f078fa",
       "started": "2026-10-03T20:17:04+00:00"
@@ -371,6 +395,10 @@
     "c50_E2b_layered_playbook.json.gz": {
       "sha256": "780d5c661195c1f07dca82f8dd9bf14bdd04f82b53ca95e772a323c9d1a312ea",
       "started": "2026-10-02T17:00:29+00:00"
+    },
+    "kalah_paper_check.json.gz": {
+      "sha256": "ffc7a519f0dff7ee677da477b24397bac01b27a649f9096d06bf8d95c3f785cd",
+      "started": "2026-10-05T08:12:15+00:00"
     },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",

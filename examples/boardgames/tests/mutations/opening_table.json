@@ -4,8 +4,8 @@
   "mutations": [
     {
       "name": "horizon 0 accepted",
-      "old": "    if horizon < 1:\n",
-      "new": "    if False:\n"
+      "old": "    if horizon < 1:\n        raise ValueError(f\"the table horizon must be >= 1 ply, got {horizon}\")\n    rng = random.Random(0)\n    level = {game.state_key(root): root}\n    seen",
+      "new": "    if False:\n        raise ValueError(f\"the table horizon must be >= 1 ply, got {horizon}\")\n    rng = random.Random(0)\n    level = {game.state_key(root): root}\n    seen"
     },
     {
       "name": "horizon off by one",
@@ -19,8 +19,8 @@
     },
     {
       "name": "worst move stored",
-      "old": "move = next(a for a in game.legal_actions(s) if values[a] == best)",
-      "new": "move = next(a for a in game.legal_actions(s) if values[a] == min(values.values()))"
+      "old": "                    move = next(a for a in game.legal_actions(s) if values[a] == best)",
+      "new": "                    move = next(a for a in game.legal_actions(s) if values[a] == min(values.values()))"
     },
     {
       "name": "walk ignores the override",
@@ -34,8 +34,8 @@
     },
     {
       "name": "replies not walked",
-      "old": "                for b in game.legal_actions(s):\n                    child = game.step(s, b, rng)",
-      "new": "                for b in game.legal_actions(s)[:1]:\n                    child = game.step(s, b, rng)"
+      "old": "                for b in game.legal_actions(s):\n                    child = game.step(s, b, rng)\n                    nxt.setdefault(game.state_key(child), child)\n        level = nxt\n        ply += 1",
+      "new": "                for b in game.legal_actions(s)[:1]:\n                    child = game.step(s, b, rng)\n                    nxt.setdefault(game.state_key(child), child)\n        level = nxt\n        ply += 1"
     },
     {
       "name": "positions recounted",
@@ -54,13 +54,38 @@
     },
     {
       "name": "other side's positions tabled",
-      "old": "mine = [s for s in fresh.values() if game.current_player(s) == player]",
-      "new": "mine = list(fresh.values())"
+      "old": "        mine = [s for s in fresh.values() if game.current_player(s) == player]\n        nxt: dict = {}\n        if mine:",
+      "new": "        mine = list(fresh.values())\n        nxt: dict = {}\n        if mine:"
+    },
+    {
+      "name": "full table horizon 0 accepted",
+      "old": "        raise ValueError(f\"the table horizon must be >= 1 ply, got {horizon}\")\n    rng = random.Random(0)\n    level = {game.state_key(root): root}\n    table: dict = {}\n    for",
+      "new": "        pass\n    rng = random.Random(0)\n    level = {game.state_key(root): root}\n    table: dict = {}\n    for"
+    },
+    {
+      "name": "full table stores the last optimal move",
+      "old": "            move = next(a for a in game.legal_actions(s) if values[a] == best)\n            table[game.state_key(s)] = move",
+      "new": "            move = [a for a in game.legal_actions(s) if values[a] == best][-1]\n            table[game.state_key(s)] = move"
+    },
+    {
+      "name": "full table one ply short",
+      "old": "    for _ply in range(horizon):",
+      "new": "    for _ply in range(horizon - 1):"
+    },
+    {
+      "name": "frontier keeps finished games",
+      "old": "    return table, [s for s in level.values() if not game.is_terminal(s)]",
+      "new": "    return table, list(level.values())"
+    },
+    {
+      "name": "full table walks one reply",
+      "old": "                for b in game.legal_actions(s):\n                    child = game.step(s, b, rng)\n                    nxt.setdefault(game.state_key(child), child)\n        level = nxt\n    return",
+      "new": "                for b in game.legal_actions(s)[:1]:\n                    child = game.step(s, b, rng)\n                    nxt.setdefault(game.state_key(child), child)\n        level = nxt\n    return"
     }
   ],
   "last_run": {
-    "at": "2026-10-04T20:23:21+00:00",
-    "killed": 11,
+    "at": "2026-10-04T21:16:35+00:00",
+    "killed": 16,
     "survived": [],
     "killed_by": {
       "horizon 0 accepted": ["test_a_horizon_below_one_is_refused"],
@@ -104,6 +129,23 @@
         "test_the_table_covers_only_the_player_s_positions_before_the_horizon[3-plies2]",
         "test_the_table_covers_only_the_player_s_positions_before_the_horizon[4-plies3]",
         "test_the_table_covers_only_the_player_s_positions_before_the_horizon[5-plies4]"
+      ],
+      "full table horizon 0 accepted": ["test_a_full_table_horizon_below_one_is_refused"],
+      "full table stores the last optimal move": [
+        "test_a_full_table_stores_the_first_optimal_move_at_every_player_position_before_the_horizon"
+      ],
+      "full table one ply short": [
+        "test_a_full_table_stores_the_first_optimal_move_at_every_player_position_before_the_horizon",
+        "test_games_the_table_wins_before_the_horizon_are_not_part_of_the_frontier",
+        "test_the_frontier_is_every_unfinished_position_at_the_horizon_on_the_table_s_tree"
+      ],
+      "frontier keeps finished games": [
+        "test_games_the_table_wins_before_the_horizon_are_not_part_of_the_frontier"
+      ],
+      "full table walks one reply": [
+        "test_a_full_table_stores_the_first_optimal_move_at_every_player_position_before_the_horizon",
+        "test_games_the_table_wins_before_the_horizon_are_not_part_of_the_frontier",
+        "test_the_frontier_is_every_unfinished_position_at_the_horizon_on_the_table_s_tree"
       ]
     }
   }
