@@ -1,0 +1,23 @@
+{
+  "file": "harness/fingerprint.py",
+  "tests": ["tests/test_fingerprint.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "name taken as the file",
+      "old": "    return type(resolve_game(game)).__module__.replace(\".\", \"/\") + \".py\"",
+      "new": "    return f\"games/{game}.py\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:16:58+00:00",
+    "killed": 1,
+    "survived": [],
+    "killed_by": {
+      "name taken as the file": [
+        "test_an_unregistered_game_is_refused_rather_than_fingerprinted_as_absent",
+        "test_every_shape_of_a_game_fingerprints_its_one_module"
+      ]
+    }
+  }
+}

@@ -175,9 +175,12 @@ def main() -> None:
     from harness.fingerprint import training_fingerprint
 
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--seeds", type=int, nargs="+", required=True)
-    ap.add_argument("--iterations", type=int, required=True, help="the cap; a run that stops on agreement ends sooner")
-    ap.add_argument("--tree-depth", type=int, default=10)
+    ap.add_argument("--recipe", default=None, metavar="MODULE:ARM",
+                    help="train exactly a registered recipe (harness.recipe.load_recipe): its config and seeds, with "
+                         "every other training flag refused (h138)")
+    ap.add_argument("--seeds", type=int, nargs="+", default=None)
+    ap.add_argument("--iterations", type=int, default=None, help="the cap; a run that stops on agreement ends sooner")
+    ap.add_argument("--tree-depth", type=int, default=None, help="default 10")
     ap.add_argument("--certify-depth", type=int, default=10)
     ap.add_argument("--threads", type=int, default=2)
     ap.add_argument("--workers", type=int, default=8)
@@ -204,16 +207,34 @@ def main() -> None:
     args = ap.parse_args()
     from harness.floor_c4 import CONFIG
 
-    cfg = {**CONFIG, "iterations": args.iterations, "strategy_tree": {"player": 0, "depth": args.tree_depth},
-           "relabel_workers": args.workers,
-           **({"stop_value_delta": args.value_delta} if args.value_delta is not None else {}),
-           **({"tree_value_target": True} if args.tree_value_target else {}),
-           **({"stop_on_agreement": False} if args.no_stop else {}),
-           **({"value_n_step": args.value_n_step} if args.value_n_step else {}),
-           **({"target_refresh": args.target_refresh} if args.target_refresh is not None else {}),
-           **({"backplay": {"frac": args.backplay[0], "ramp": int(args.backplay[1])}} if args.backplay else {}),
-           **({"exploiter": {"frac": args.exploiter[0], "sims_factor": int(args.exploiter[1])}}
-              if args.exploiter else {})}
+    if args.recipe:
+        from harness.recipe import load_recipe
+
+        hand_set = [flag for flag, value in (("--seeds", args.seeds), ("--iterations", args.iterations),
+                                             ("--tree-depth", args.tree_depth), ("--value-delta", args.value_delta),
+                                             ("--tree-value-target", args.tree_value_target),
+                                             ("--no-stop", args.no_stop), ("--value-n-step", args.value_n_step),
+                                             ("--target-refresh", args.target_refresh), ("--backplay", args.backplay),
+                                             ("--exploiter", args.exploiter),
+                                             ("--opening-table", args.opening_table)) if value]
+        if hand_set:
+            ap.error(f"--recipe trains the registered recipe as it stands; drop {', '.join(hand_set)}")
+        cfg, args.seeds = load_recipe(args.recipe)
+        args.opening_table = cfg.get("opening_table", {}).get("horizon")
+    elif args.seeds is None or args.iterations is None:
+        ap.error("give --recipe, or --seeds and --iterations")
+    else:
+        cfg = {**CONFIG, "iterations": args.iterations,
+               "strategy_tree": {"player": 0, "depth": 10 if args.tree_depth is None else args.tree_depth},
+               "relabel_workers": args.workers,
+               **({"stop_value_delta": args.value_delta} if args.value_delta is not None else {}),
+               **({"tree_value_target": True} if args.tree_value_target else {}),
+               **({"stop_on_agreement": False} if args.no_stop else {}),
+               **({"value_n_step": args.value_n_step} if args.value_n_step else {}),
+               **({"target_refresh": args.target_refresh} if args.target_refresh is not None else {}),
+               **({"backplay": {"frac": args.backplay[0], "ramp": int(args.backplay[1])}} if args.backplay else {}),
+               **({"exploiter": {"frac": args.exploiter[0], "sims_factor": int(args.exploiter[1])}}
+                  if args.exploiter else {})}
     stamps = (training_fingerprint("connect4"), training_fingerprint(modules=MEASUREMENT_MODULES))
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     nets = NETS / Path(args.out).name.replace(".json.gz", "")
@@ -241,8 +262,10 @@ def main() -> None:
                 carried = list({game.state_key(c): c for s in starts for b in game.legal_actions(s)
                                 for c in [game.step(s, b)] if not game.is_terminal(c)}.values())
                 carried_cases = [(s, args.opening_table + 1, v) for s, v in zip(carried, exact.move_values(carried))]
-        cfg = {**cfg, "opening_table": {"horizon": args.opening_table, "entries": len(table),
-                                        "frontier": len(starts)}}
+        built = {"horizon": args.opening_table, "entries": len(table), "frontier": len(starts)}
+        if args.recipe and cfg["opening_table"] != built:
+            raise SystemExit(f"the opening table built here {built} is not the recipe's {cfg['opening_table']}")
+        cfg = {**cfg, "opening_table": built}
         table_rows = [[list(k[0]), k[1], m] for k, m in table.items()]
     rows = [_train(cfg, seed, args.threads, nets, curve_cases, starts, carried_cases) for seed in args.seeds]
     game = Connect4()

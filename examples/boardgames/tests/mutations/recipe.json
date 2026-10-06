@@ -1,0 +1,71 @@
+{
+  "file": "harness/recipe.py",
+  "tests": ["tests/test_recipe.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "relabel workers compared",
+      "old": "NOT_TRAINING = (\"certify_depth\", \"relabel_workers\")",
+      "new": "NOT_TRAINING = (\"certify_depth\",)"
+    },
+    {
+      "name": "everything ignored",
+      "old": "        return {k: v for k, v in cfg.items() if k not in NOT_TRAINING}",
+      "new": "        return {}"
+    },
+    {
+      "name": "seeds not compared",
+      "old": "    return trained(recorded) == trained({**registered, \"seeds\": list(seeds)})",
+      "new": "    return {k: v for k, v in trained(recorded).items() if k != \"seeds\"} == trained(registered)"
+    },
+    {
+      "name": "subset accepted",
+      "old": "    return trained(recorded) == trained({**registered, \"seeds\": list(seeds)})",
+      "new": "    return all(trained(recorded).get(k) == v for k, v in trained({**registered, \"seeds\": list(seeds)}).items())"
+    },
+    {
+      "name": "malformed reference accepted",
+      "old": "    if len(parts) != 2:\n",
+      "new": "    if len(parts) < 2:\n"
+    },
+    {
+      "name": "unknown arm accepted",
+      "old": "    if arm not in spec[\"arms\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "recipe shared, not copied",
+      "old": "    return copy.deepcopy(spec[\"arms\"][arm]), list(spec[\"seeds\"])",
+      "new": "    return spec[\"arms\"][arm], list(spec[\"seeds\"])"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T19:24:29+00:00",
+    "killed": 7,
+    "survived": [],
+    "killed_by": {
+      "relabel workers compared": [
+        "test_a_recorded_config_matches_its_recipe_whatever_the_relabel_workers_and_certify_depth",
+        "test_only_settings_proven_not_to_change_training_are_ignored"
+      ],
+      "everything ignored": [
+        "test_a_missing_setting_is_not_the_recipe",
+        "test_any_other_difference_is_not_the_recipe[change0]",
+        "test_any_other_difference_is_not_the_recipe[change1]",
+        "test_any_other_difference_is_not_the_recipe[change2]",
+        "test_any_other_difference_is_not_the_recipe[change3]"
+      ],
+      "seeds not compared": ["test_any_other_difference_is_not_the_recipe[change3]"],
+      "subset accepted": ["test_any_other_difference_is_not_the_recipe[change2]"],
+      "malformed reference accepted": [
+        "test_a_reference_that_names_no_registered_arm_is_refused[fake_floor:h3:x-MODULE:ARM]"
+      ],
+      "unknown arm accepted": [
+        "test_a_reference_that_names_no_registered_arm_is_refused[fake_floor:nope-nope]"
+      ],
+      "recipe shared, not copied": [
+        "test_a_recipe_is_loaded_from_a_registered_spec_arm_with_its_seeds"
+      ]
+    }
+  }
+}

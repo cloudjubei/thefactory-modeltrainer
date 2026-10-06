@@ -1,0 +1,29 @@
+{
+  "file": "harness/registry.py",
+  "tests": ["tests/test_registry.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "variant rebuilt at the standard shape",
+      "old": "    \"kalah4x3\": partial(Kalah, 4, 3),",
+      "new": "    \"kalah4x3\": Kalah,"
+    },
+    {
+      "name": "variant without personas",
+      "old": "    \"kalah3x3\": {},\n}",
+      "new": "}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:16:42+00:00",
+    "killed": 2,
+    "survived": [],
+    "killed_by": {
+      "variant rebuilt at the standard shape": [
+        "test_every_registered_name_rebuilds_a_game_that_answers_to_it[kalah4x3]",
+        "test_kalah_is_registered_at_the_standard_shape_and_two_exactly_solvable_ones[kalah4x3-shape1]"
+      ],
+      "variant without personas": ["test_every_game_has_a_personas_entry"]
+    }
+  }
+}

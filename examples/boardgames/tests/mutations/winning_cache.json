@@ -1,0 +1,81 @@
+{
+  "file": "harness/winning_cache.py",
+  "tests": ["tests/test_winning_cache.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "cache never read",
+      "old": "        known = {k: self.cache[k] for k in keys if k in self.cache}",
+      "new": "        known = {}"
+    },
+    {
+      "name": "cache never filled",
+      "old": "            self.cache.update(fresh)",
+      "new": "            pass"
+    },
+    {
+      "name": "limit ignored",
+      "old": "            if len(self.cache) + len(missing) > self.limit:",
+      "new": "            if False:"
+    },
+    {
+      "name": "limit off by one",
+      "old": "            if len(self.cache) + len(missing) > self.limit:",
+      "new": "            if len(self.cache) + len(missing) >= self.limit:"
+    },
+    {
+      "name": "clears not counted",
+      "old": "                self.cleared += 1",
+      "new": "                self.cleared += 0"
+    },
+    {
+      "name": "duplicates asked twice",
+      "old": "            fresh = dict(zip(missing, self.winning(list(missing.values()))))",
+      "new": "            fresh = dict(zip(keys, self.winning([s for s in states])))"
+    },
+    {
+      "name": "oracle asked for an empty batch",
+      "old": "        if missing:\n",
+      "new": "        if True:\n"
+    },
+    {
+      "name": "keyed by state not key",
+      "old": "        keys = [self.key(s) for s in states]",
+      "new": "        keys = list(states)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T18:56:01+00:00",
+    "killed": 8,
+    "survived": [],
+    "killed_by": {
+      "cache never read": [
+        "test_answers_match_the_oracle_and_repeats_are_not_asked_again",
+        "test_positions_are_told_apart_by_their_key"
+      ],
+      "cache never filled": [
+        "test_answers_match_the_oracle_and_repeats_are_not_asked_again",
+        "test_positions_are_told_apart_by_their_key",
+        "test_the_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "limit ignored": [
+        "test_the_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "limit off by one": [
+        "test_the_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "clears not counted": [
+        "test_the_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "duplicates asked twice": [
+        "test_a_batch_asks_each_new_position_once",
+        "test_answers_match_the_oracle_and_repeats_are_not_asked_again"
+      ],
+      "oracle asked for an empty batch": [
+        "test_nothing_is_asked_for_an_empty_batch",
+        "test_positions_are_told_apart_by_their_key"
+      ],
+      "keyed by state not key": ["test_positions_are_told_apart_by_their_key"]
+    }
+  }
+}

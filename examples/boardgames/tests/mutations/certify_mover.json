@@ -1,0 +1,33 @@
+{
+  "file": "harness/certify.py",
+  "tests": ["tests/test_alternation.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "extra move negated",
+      "old": "                kept = own if game.current_player(child) == game.current_player(s) else -own",
+      "new": "                kept = -own"
+    },
+    {
+      "name": "child value always kept",
+      "old": "                kept = own if game.current_player(child) == game.current_player(s) else -own",
+      "new": "                kept = own"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:11:39+00:00",
+    "killed": 2,
+    "survived": [],
+    "killed_by": {
+      "extra move negated": [
+        "test_exact_play_certifies_through_extra_moves",
+        "test_exact_play_certifies_whole_games_that_mix_extra_and_normal_moves[shape1]"
+      ],
+      "child value always kept": [
+        "test_exact_play_certifies_whole_games_that_mix_extra_and_normal_moves[shape0]",
+        "test_exact_play_certifies_whole_games_that_mix_extra_and_normal_moves[shape1]",
+        "test_exact_play_certifies_whole_games_that_mix_extra_and_normal_moves[shape2]"
+      ]
+    }
+  }
+}

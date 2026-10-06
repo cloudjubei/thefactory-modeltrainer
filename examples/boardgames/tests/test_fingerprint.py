@@ -202,3 +202,12 @@ def test_every_harness_module_the_training_path_imports_is_fingerprinted_or_excl
     assert not unlisted, f"training-path imports neither fingerprinted nor excluded: {sorted(unlisted)}"
     assert all(reason.strip() for reason in NOT_TRAINING_PATH.values())
     assert not set(NOT_TRAINING_PATH) & set(TRAINING_MODULES)
+
+
+def test_every_shape_of_a_game_fingerprints_its_one_module():
+    assert training_fingerprint("kalah4x3") == training_fingerprint("kalah") != training_fingerprint("connect4")
+
+
+def test_an_unregistered_game_is_refused_rather_than_fingerprinted_as_absent():
+    with pytest.raises(ValueError, match="unknown game"):
+        training_fingerprint("no_such_game")

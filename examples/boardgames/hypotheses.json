@@ -4415,6 +4415,11 @@
         "tests/test_c49_h3_findings_evidence.py": "3ac861e0d326e010054f468934497f0f70f3ed3fb076a8ff48a397c90290268b",
         "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
         "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
+      },
+      "supersession": {
+        "by": "h144",
+        "reason": "h140 charged the complete table a position index (14 bits an entry); a table read in canonical walk order needs only the move (3 bits). Under that accounting (harness/depth_cost.py) break-even at depth 9 is ~0.2 bits per weight, not ~1; the table still wins there by far.",
+        "at": "2026-10-05T23:07:34.264815+00:00"
       }
     },
     "h141": {
@@ -4441,6 +4446,988 @@
         "harness/floor_h3.py": "ef0328fa0715bc7f2f9e2df77cf4bebdbbb2f36c06c73092e7365af0e58ef7ea",
         "harness/description_length.py": "f612a43f97cb13550140578339690b1c4f8e3e3f7a90a734a12696515c39206c"
       }
+    },
+    "h142": {
+      "id": "h142",
+      "claim": "\u00a7C.49 net vs table by depth: on H3's nets' own certified hybrid trees, the share of first-player positions where the raw net is not optimal falls from ply 8 to ply 12 \u2014 pooled over seeds 481-483, the ply-12 share is at least 2 points below the ply-8 share. Refuted if the ply-12 share is no lower; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_the_net_s_exception_share_falls_from_ply_8_to_ply_12",
+      "note": "Follows H3 (h140: through ply 9 a table alone is far smaller than net + exceptions). Accounting (harness/depth_cost.py): a complete table is one 3-bit move per first-player position in the tree's canonical walk order, no index (h140 charged the table an index too \u2014 corrected here); exceptions cost the cheaper of a sparse index or a 1-bit-per-position mask. Table: the canonical optimal table (first optimal move) on its own tree. Hybrids: each H3 net (seeds 481-487, era 33939d5e2d76) plus an exception only where its raw move is not optimal, certified independently through its depth; seeds 481-483 (the first three, fixed in advance) through 13 plies, the rest through 11. Break-even assumes the net keeps its moves at that precision: it bounds what quantization must achieve, nothing was quantized. Readout 04f6c37f1a25. Cost: ~10-15 h of solving on 8 workers. Why it matters: the table grows ~6x per first-player ply, so a net only ever wins if its exception share keeps falling (or at least does not rise) on plies it was never trained on (H3 trained the tree through ply 8).",
+      "registered_at": "2026-10-05T19:23:06.562042+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_the_net_s_exception_share_falls_from_ply_8_to_ply_12",
+          "ok": false,
+          "detail": "rted\nE         + inconclusive\n\ntests/test_c49_depth_cost_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_depth_cost_evidence.py::test_c49_depth_the_net_s_exception_share_falls_from_ply_8_to_ply_12\n1 failed in 0.04s",
+          "drawn_at": "2026-10-05T23:06:22.904354+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_depth_cost.json.gz",
+        "started": "2026-10-05T19:23:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_depth_cost_evidence.py": "7deae690ab4bb4fc54bb8dc125c186cd2736b43d6c0176ee0ff7ad67392f9e31",
+        "harness/depth_cost.py": "d4cdb5a44beacb6464bab08cfd2428fa4add3a9f0c0813cdde7892dfc137db73"
+      },
+      "inconclusive_proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_the_trend_is_undecidable"
+    },
+    "h143": {
+      "id": "h143",
+      "claim": "\u00a7C.49 net vs table by depth: at depth 13 (first-player positions through ply 12) every one of H3's nets 481-483 breaks even above 4 bits per weight \u2014 a hybrid of that net at 4 bits per weight with its exceptions would be no larger than the canonical table alone. Refuted if every one breaks even below 4; inconclusive if they split",
+      "mode": "test",
+      "proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_every_deep_net_breaks_even_above_4_bits_a_weight_at_depth_13",
+      "note": "Follows H3 (h140: through ply 9 a table alone is far smaller than net + exceptions). Accounting (harness/depth_cost.py): a complete table is one 3-bit move per first-player position in the tree's canonical walk order, no index (h140 charged the table an index too \u2014 corrected here); exceptions cost the cheaper of a sparse index or a 1-bit-per-position mask. Table: the canonical optimal table (first optimal move) on its own tree. Hybrids: each H3 net (seeds 481-487, era 33939d5e2d76) plus an exception only where its raw move is not optimal, certified independently through its depth; seeds 481-483 (the first three, fixed in advance) through 13 plies, the rest through 11. Break-even assumes the net keeps its moves at that precision: it bounds what quantization must achieve, nothing was quantized. Readout 04f6c37f1a25. Cost: ~10-15 h of solving on 8 workers. Prediction from H3's numbers before the run: break-even ~0.1 bits/weight at depth 9 and ~5 at depth 13 if the exception share stays ~10%.",
+      "registered_at": "2026-10-05T19:23:06.611884+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_every_deep_net_breaks_even_above_4_bits_a_weight_at_depth_13",
+          "ok": false,
+          "detail": "       + inconclusive\n\ntests/test_c49_depth_cost_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_depth_cost_evidence.py::test_c49_depth_every_deep_net_breaks_even_above_4_bits_a_weight_at_depth_13\n1 failed in 0.03s",
+          "drawn_at": "2026-10-05T23:06:23.317550+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_depth_cost.json.gz",
+        "started": "2026-10-05T19:23:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_depth_cost_evidence.py": "7deae690ab4bb4fc54bb8dc125c186cd2736b43d6c0176ee0ff7ad67392f9e31",
+        "harness/depth_cost.py": "d4cdb5a44beacb6464bab08cfd2428fa4add3a9f0c0813cdde7892dfc137db73"
+      },
+      "inconclusive_proof": "tests/test_c49_depth_cost_evidence.py::test_c49_depth_the_break_even_is_undecidable"
+    },
+    "h144": {
+      "id": "h144",
+      "claim": "\u00a7C.49 net vs table by depth (registered after the data): the break-even precision of H3's nets roughly quadruples every two plies \u2014 0.17-0.22 bits per weight at depth 9 (7 nets), 0.9-1.05 at depth 11 (7 nets), 3.7-4.36 at depth 13 (3 nets) \u2014 as the canonical table grows 1,862 -> 8,845 -> 36,431 entries (5.6K -> 26.5K -> 109.3K bits)",
+      "mode": "test",
+      "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_break_even_roughly_quadruples_every_two_plies_as_the_table_does",
+      "note": "Registered after the data. Corrects h140, which charged the table an index (~1 bit/weight at depth 9 there; 0.2 under walk-order accounting). Extrapolated, not measured: at ~4x per two plies a 32-bit net breaks even near depth 17 and an 8-bit net near depth 15. The judged reading (h143) is inconclusive: 4.13 / 3.72 / 4.35 split around the registered 4.",
+      "registered_at": "2026-10-05T23:07:22.548805+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_break_even_roughly_quadruples_every_two_plies_as_the_table_does",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T23:07:22.898259+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_depth_cost.json.gz",
+        "started": "2026-10-05T19:23:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_depth_cost_findings_evidence.py": "07944b77126894b9ccb6e7d883c6a51f4d0011400e7a97c362d5da8ae847e261",
+        "harness/depth_cost.py": "d4cdb5a44beacb6464bab08cfd2428fa4add3a9f0c0813cdde7892dfc137db73"
+      }
+    },
+    "h145": {
+      "id": "h145",
+      "claim": "\u00a7C.49 net vs table by depth (registered after the data): pooled over H3's seven nets the raw net is wrong at 10.9% of its own hybrid tree's first-player positions at ply 6, 10.0% at ply 8 and 9.1% at ply 10, and the three deep nets hold 9.1% at ply 12 \u2014 about a point lower per ply, then flat, on plies the strategy tree never trained (10, 12)",
+      "mode": "test",
+      "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_the_net_s_exception_share_falls_about_a_point_a_ply_then_holds_near_9_percent",
+      "note": "Registered after the data; the judged trend (h142, deep nets ply 8 vs 12) was inconclusive: 10.0% -> 9.1%, short of the 2-point bar. Per net the ply-12 share ranges 8.3-10.0%.",
+      "registered_at": "2026-10-05T23:07:22.600640+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_the_net_s_exception_share_falls_about_a_point_a_ply_then_holds_near_9_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T23:07:23.112301+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_depth_cost.json.gz",
+        "started": "2026-10-05T19:23:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_depth_cost_findings_evidence.py": "07944b77126894b9ccb6e7d883c6a51f4d0011400e7a97c362d5da8ae847e261",
+        "harness/depth_cost.py": "d4cdb5a44beacb6464bab08cfd2428fa4add3a9f0c0813cdde7892dfc137db73"
+      }
+    },
+    "h146": {
+      "id": "h146",
+      "claim": "\u00a7C.49 net vs table by depth (registered after the data): the registered table baseline (the first optimal move in column order) is not the smallest table \u2014 at depth 13 the deep nets' own certified trees hold 15,782 / 19,269 / 24,707 first-player positions against its 36,431, and a table over the smallest of them (every move optimal) costs under half as much; against it the break-even falls to ~1.3 bits per weight",
+      "mode": "test",
+      "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_the_canonical_table_is_not_the_smallest_a_net_s_own_tree_is_up_to_57_percent_smaller",
+      "note": "Registered after the data. Consequence: much of a net's apparent value against the canonical table comes from steering into a smaller tree, which a table can do too by choosing tree-shrinking optimal moves; the fair baseline for the hybrid is the smallest certified table one can find, not the canonical one. Next design: choose the table's optimal moves to minimise its own tree (as WeakC4's opening tree does).",
+      "registered_at": "2026-10-05T23:07:22.651330+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_depth_cost_findings_evidence.py::test_c49_depth_the_canonical_table_is_not_the_smallest_a_net_s_own_tree_is_up_to_57_percent_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-05T23:07:23.320232+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_depth_cost.json.gz",
+        "started": "2026-10-05T19:23:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_depth_cost_findings_evidence.py": "07944b77126894b9ccb6e7d883c6a51f4d0011400e7a97c362d5da8ae847e261",
+        "harness/depth_cost.py": "d4cdb5a44beacb6464bab08cfd2428fa4add3a9f0c0813cdde7892dfc137db73"
+      }
+    },
+    "h147": {
+      "id": "h147",
+      "claim": "\u00a7C.49 era bridge: comparing movers instead of negating every child's value (harness.agents.child_move_value, harness.certify, harness.neural.n_step_value_targets) and registering Kalah leave training on an alternating game bit-for-bit unchanged \u2014 tic-tac-toe nets trained with the MCTS solver path, n-step 1 and n-step 2 hash exactly as recorded on the code before the fix, as do the three earlier golden paths",
+      "mode": "test",
+      "proof": "tests/test_neural.py::test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers",
+      "note": "Why: the fix is needed for Kalah (an extra move keeps the mover), and it moves the Connect-4 training era 33939d5e2d76 -> 6eedd699d12d (agents.py, neural.py and registry.py are training-path files). This claim is what lets H2/H3 nets of the old era serve as controls for Connect-4 runs of the new era: on games whose mover always alternates the two eras train identically. Goldens: n_step and solver recorded on the pre-fix code (the solver path runs child_move_value 1,656 times per run); n_step_odd recorded by patching the pre-fix n_step_value_targets back in, the only code on that path that changed. A judge that accepts both eras must cite this claim.",
+      "registered_at": "2026-10-05T23:18:10.349143+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_neural.py::test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers",
+          "ok": true,
+          "detail": "...                                                                      [100%]\n3 passed in 2.30s",
+          "drawn_at": "2026-10-05T23:18:13.345712+00:00"
+        }
+      ],
+      "reads_no_data": true,
+      "pins": {
+        "tests/test_neural.py": "7131a432024d5cfe807c8ebe0c74230b0fae897b50b350986a68b2a26f99bd45",
+        "harness/agents.py": "9e01ce7864817aa8394f4f991667e07c0f8bf4bd2c1b94f2a902f3d157292dbe",
+        "harness/neural.py": "b331320927a7ac1a39ebd257bfca6721344cb1759d010344622b910619581a8d"
+      }
+    },
+    "h148": {
+      "id": "h148",
+      "claim": "Kalah rung DEAD END (guarded): the certifier and the search's proof step negated every child's value, assuming the opponent always moves next; Kalah's extra move broke both (exact play on Kalah(2,1) failed certification at its first move) and the n-step target took its sign from n's parity. Fixed by comparing movers; exact play now certifies whole Kalah(2,1), (2,2), (3,2), (2,3) games, and a losing extra move is still caught",
+      "mode": "test",
+      "proof": "tests/test_alternation.py",
+      "note": "Found by plugging in Kalah (2026-10-05), the first ladder game whose rules keep the same mover; Checkers had avoided it by folding a multi-jump into one turn (t7). Mutation specs agents_mover, certify_mover, neural_n_step_movers all killed. Alternating-game training unchanged: h147.",
+      "registered_at": "2026-10-05T23:18:25.278105+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_alternation.py",
+          "ok": true,
+          "detail": "........                                                                 [100%]\n8 passed in 0.02s",
+          "drawn_at": "2026-10-05T23:18:25.495838+00:00"
+        }
+      ],
+      "reads_no_data": true,
+      "pins": {
+        "tests/test_alternation.py": "22bff7f24408fdf499b6e34c132b720133ec906f0ac29665cf165c338e03e4b2",
+        "harness/certify.py": "24bf0b398c56c07b30ab522519d8b5aa72a46bcc4658193b77f4f9abe2c76236",
+        "harness/agents.py": "9e01ce7864817aa8394f4f991667e07c0f8bf4bd2c1b94f2a902f3d157292dbe"
+      }
+    },
+    "h149": {
+      "id": "h149",
+      "claim": "Kalah E2: on every measured Kalah shape whose game graph holds at least 1,000 reachable positions, the tree-minimising certified first-player strategy (value-keeping moves chosen to minimise its decisions) decides at no more than 5% of those positions. Refuted if any shape exceeds 10%; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_a_certified_first_player_strategy_decides_at_no_more_than_5_percent_of_the_game",
+      "note": "Not blind: the research agent measured Kalah(4,3)'s perfect first-player strategy at 124 decisions (no transpositions) before this was registered, and a 3-shape smoke of this script showed Kalah(3,3) 22 minimised vs 61 canonical decisions in a 23,118-position graph, Kalah(4,1) 6 vs 6 (graph 694), Kalah(2,2) 2 vs 2. Shapes: every m <= 3 (n = 1..6), 4(1), 4(2), 5(1), 6(1) \u2014 all whose solver memo fits in memory (4(3) and 5(2) left out: 0.75-2.4 GB memos). Judged shapes are those with graph >= 1,000, decided by the data. Strategies keep the game-theoretic value (win/draw/loss sign), not the margin; both certified whole-game by harness.certify (mover-aware since h148). Measurement d59eb0fda1dd.",
+      "registered_at": "2026-10-06T00:43:15.572123+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_a_certified_first_player_strategy_decides_at_no_more_than_5_percent_of_the_game",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-06T00:44:58.159423+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/kalah_strategy_size.json.gz",
+        "started": "2026-10-06T00:43:22+00:00"
+      },
+      "pins": {
+        "tests/test_kalah_strategy_size_evidence.py": "a3516e1b1bd8162f4294873e002913e480cd318b9f6224d6a42c18e403e28439",
+        "harness/floor_e2.py": "d800900fd53f30d3bb41126a44a61d4f2123d127b3b6362f9550d3bec047c942"
+      },
+      "inconclusive_proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_the_fraction_is_undecidable"
+    },
+    "h150": {
+      "id": "h150",
+      "claim": "Kalah E2: on at least two thirds of the measured Kalah shapes with game graph >= 1,000, the tree-minimising certified first-player strategy needs at most half the decisions of the canonical one (the first value-keeping move in hole order). Refuted at one third or fewer; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_choosing_value_keeping_moves_halves_the_strategy_on_two_thirds_of_shapes",
+      "note": "Not blind: the research agent measured Kalah(4,3)'s perfect first-player strategy at 124 decisions (no transpositions) before this was registered, and a 3-shape smoke of this script showed Kalah(3,3) 22 minimised vs 61 canonical decisions in a 23,118-position graph, Kalah(4,1) 6 vs 6 (graph 694), Kalah(2,2) 2 vs 2. Shapes: every m <= 3 (n = 1..6), 4(1), 4(2), 5(1), 6(1) \u2014 all whose solver memo fits in memory (4(3) and 5(2) left out: 0.75-2.4 GB memos). Judged shapes are those with graph >= 1,000, decided by the data. Strategies keep the game-theoretic value (win/draw/loss sign), not the margin; both certified whole-game by harness.certify (mover-aware since h148). Measurement d59eb0fda1dd. Why: the Connect-4 depth study found the canonical table is not the smallest (h146); this measures how much the choice matters when the whole game can be checked.",
+      "registered_at": "2026-10-06T00:43:15.688517+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_choosing_value_keeping_moves_halves_the_strategy_on_two_thirds_of_shapes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-06T00:44:58.524352+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/kalah_strategy_size.json.gz",
+        "started": "2026-10-06T00:43:22+00:00"
+      },
+      "pins": {
+        "tests/test_kalah_strategy_size_evidence.py": "a3516e1b1bd8162f4294873e002913e480cd318b9f6224d6a42c18e403e28439",
+        "harness/floor_e2.py": "d800900fd53f30d3bb41126a44a61d4f2123d127b3b6362f9550d3bec047c942"
+      },
+      "inconclusive_proof": "tests/test_kalah_strategy_size_evidence.py::test_kalah_the_halving_is_undecidable"
+    },
+    "h151": {
+      "id": "h151",
+      "claim": "\u00a73.6 S1 DEAD END (guarded): one ProcessPoolExecutor.map over ~190,000 exact solves (the canonical table's ply-12 batch) deadlocked on Python 3.10 after 1.5 h of solving \u2014 main thread blocked in os.write on the executor's wake-up pipe, manager thread blocked on a lock, every worker idle (CPython gh-105829). Fixed: harness.exact_values submits solves in slices of at most SUBMIT_LIMIT (2,048), each drained before the next",
+      "mode": "test",
+      "proof": "tests/test_exact_values.py::test_solves_are_submitted_in_bounded_slices_so_a_large_batch_cannot_fill_the_pool_s_wakeup_pipe",
+      "note": "Seen 2026-10-06 04:16 via /usr/bin/sample of the stalled frontier build (0% CPU on all 9 processes for > 30 min). The depth readout (h142-h146) ran the same-size batch and finished \u2014 the race depends on timing, so a lucky pass proves nothing. Lost: ~2.3 h of solving (no persistent cache). Related dead end: h89 (relabel pool result thread under load).",
+      "registered_at": "2026-10-06T02:18:19.186369+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_exact_values.py::test_solves_are_submitted_in_bounded_slices_so_a_large_batch_cannot_fill_the_pool_s_wakeup_pipe",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T02:18:19.647543+00:00"
+        }
+      ],
+      "reads_no_data": true,
+      "pins": {
+        "tests/test_exact_values.py": "fa1199f65cd4f94015353eff21d5747ac3b91bb139027cb9155a44f0dd10639b",
+        "harness/exact_values.py": "5e55ba1255f084f66c2804eab39b16aa490025389bdc37a13b58f2d9cf66fe6b"
+      }
+    },
+    "h152": {
+      "id": "h152",
+      "claim": "\u00a73.6 S1 pilots (registered after the data): with the registered priority-map language (8 levels) and budget (300 s, 60K constraints, 64 failing lines a round), our own SAT search found no steady state for any non-trivial pilot position at plies 10 and 12 (ply 10: 8 out of budget; ply 12: 2 proven impossible in the language \u2014 the same position in both pilots \u2014 and 4 out of budget) and one at ply 14 (40 bits, 129 first-player positions, both independent checks passed; 4 out of budget). Most frontier positions are trivial (win/block/forced moves alone win): 21 of 40",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_pilot_evidence.py::test_c49_s1_pilots_find_nothing_at_plies_10_and_12_and_one_state_at_ply_14",
+      "note": "The ply-12 rows of the two pilots are the same ten positions (same pilot seed). An unrecorded scratch probe (24 ply-14 positions after the table's move and a random reply) found 5 of 7 non-trivial within budget (31-67 bits; the 67-bit state replaces 2,239 positions) \u2014 it moved the registered design from plies 10/12 to 12/14 (judged 14). The budget binds at the 60K-constraint cap (~150 s) at ply 10; raising it costs ~1.6 GB per worker per 50K constraints.",
+      "registered_at": "2026-10-06T04:22:19.146187+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_pilot_evidence.py::test_c49_s1_pilots_find_nothing_at_plies_10_and_12_and_one_state_at_ply_14",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T04:22:19.355623+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_s1_pilot.json.gz",
+          "started": "2026-10-06T04:02:36+00:00"
+        },
+        {
+          "path": "evidence/c49_s1_pilot14.json.gz",
+          "started": "2026-10-06T04:16:40+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_s1_pilot_evidence.py": "8cc2c6c72640f4a12ffd25d1ac3906af79fb77ec1cc742c2bbb2e5aba5244fdb"
+      }
+    },
+    "h153": {
+      "id": "h153",
+      "claim": "\u00a73.6 S1: at ply 14 of the canonical exact Connect-4 table's first-player tree, our own SAT search finds a verified steady state (priority-map rule) within the registered budget for at least 30% of the sampled non-trivial positions. Refuted below 10%; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_evidence.py::test_c49_s1_our_search_finds_a_steady_state_for_30_percent_of_ply_14_frontier_positions",
+      "note": "Design fixed after two pilots (h152) and an unrecorded probe: plies 10-12 gave nothing within budget, ply 14 gave 1/5 (uniform pilot) and 5/7 (probe after random replies) \u2014 not blind on ply 14. Registered sample: seed 1, 100 positions per ply at plies 12 and 14 (ply 14 = the canonical table's move from each saved ply-12 position, then every reply: 97,072 positions), never touched by the pilots. Language: win; else the single safe move; else the first of 8 priority levels holding exactly one safe move \u2014 generic, read from the observation, no Connect-4 knowledge; content found by our own search (no WeakC4 library). Budget 300 s / 60K constraints / 64 lines; timeouts count as not covered; 'impossible' is impossible-in-the-language, not a game value. Every found map must pass the solver-free walk and harness.certify. Bits: 1 per empty cell + 3 per levelled cell after greedy simplification. Measurement a64ca5bfca25, positions a276d6c10259. Proof test renamed ply_12 -> ply_14 and its docstring corrected minutes after registering, before any data existed (the judged ply moved to 14 with the design).",
+      "registered_at": "2026-10-06T04:22:19.405579+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_evidence.py::test_c49_s1_our_search_finds_a_steady_state_for_30_percent_of_ply_14_frontier_positions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-10-06T05:54:26.615473+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1.json.gz",
+        "started": "2026-10-06T04:23:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_evidence.py": "203f40b568125c8c8fb7f903b236d8b1df5db4f7aeaff644a517e29cf21f91f3",
+        "harness/floor_s1.py": "65d0034cd2407c6d0b520ba843b711836d892e7090bcf0a480e424012846694c"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_evidence.py::test_c49_s1_coverage_is_undecidable"
+    },
+    "h154": {
+      "id": "h154",
+      "claim": "\u00a73.6 S1: the median steady state found at ply 14 replaces at least 10x its own bits in 3-bit table entries (3 x first-player positions in its verified subtree / map bits). Refuted below 1x; inconclusive between, or with fewer than five found",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_evidence.py::test_c49_s1_a_found_steady_state_replaces_at_least_10_times_its_bits_of_table",
+      "note": "Design fixed after two pilots (h152) and an unrecorded probe: plies 10-12 gave nothing within budget, ply 14 gave 1/5 (uniform pilot) and 5/7 (probe after random replies) \u2014 not blind on ply 14. Registered sample: seed 1, 100 positions per ply at plies 12 and 14 (ply 14 = the canonical table's move from each saved ply-12 position, then every reply: 97,072 positions), never touched by the pilots. Language: win; else the single safe move; else the first of 8 priority levels holding exactly one safe move \u2014 generic, read from the observation, no Connect-4 knowledge; content found by our own search (no WeakC4 library). Budget 300 s / 60K constraints / 64 lines; timeouts count as not covered; 'impossible' is impossible-in-the-language, not a game value. Every found map must pass the solver-free walk and harness.certify. Bits: 1 per empty cell + 3 per levelled cell after greedy simplification. Measurement a64ca5bfca25, positions a276d6c10259. Proof test renamed ply_12 -> ply_14 and its docstring corrected minutes after registering, before any data existed (the judged ply moved to 14 with the design).",
+      "registered_at": "2026-10-06T04:22:19.453635+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_evidence.py::test_c49_s1_a_found_steady_state_replaces_at_least_10_times_its_bits_of_table",
+          "ok": false,
+          "detail": " supported\nE         + inconclusive\n\ntests/test_c49_s1_evidence.py:40: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_evidence.py::test_c49_s1_a_found_steady_state_replaces_at_least_10_times_its_bits_of_table\n1 failed in 0.04s",
+          "drawn_at": "2026-10-06T05:54:26.852402+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1.json.gz",
+        "started": "2026-10-06T04:23:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_evidence.py": "203f40b568125c8c8fb7f903b236d8b1df5db4f7aeaff644a517e29cf21f91f3",
+        "harness/floor_s1.py": "65d0034cd2407c6d0b520ba843b711836d892e7090bcf0a480e424012846694c"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_evidence.py::test_c49_s1_compression_is_undecidable"
+    },
+    "h155": {
+      "id": "h155",
+      "claim": "\u00a73.6 S1 (registered after the data): the steady states found at ply 14 are bimodal in value \u2014 14 of 25 replace under 8x their bits in 3-bit table entries (they govern 7-65 first-player positions), 11 replace 11.7x to 432x (43-94 bits governing 537-12,229 positions; the largest, 85 bits, plays 12,229 positions); at ply 12, 4 of 11 reach 10x (25.6-87x). So the registered median (5.7x, h154 inconclusive) hides that the valuable states exist and are large",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_compression_is_bimodal_small_states_cost_about_a_table_large_ones_10_to_432_times_less",
+      "note": "Registered after the data. A hybrid would use a state only where it is cheaper than the subtree's table (the DP of \u00a73.6), so the small states cost nothing in the accounting \u2014 they are simply not used. Every found state passed the solver-free walk and harness.certify.",
+      "registered_at": "2026-10-06T05:56:08.162645+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_compression_is_bimodal_small_states_cost_about_a_table_large_ones_10_to_432_times_less",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T05:56:08.383312+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1.json.gz",
+        "started": "2026-10-06T04:23:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_findings_evidence.py": "6e9e05bc3172cf1a7983e305f16c4cf945b59324e8684a83adfe887749eb9364"
+      }
+    },
+    "h156": {
+      "id": "h156",
+      "claim": "\u00a73.6 S1 (registered after the data): coverage of the canonical table's frontier by our own search rises with depth \u2014 11 of 58 non-trivial positions (19%) at ply 12, 25 of 50 (50%) at ply 14 \u2014 and no registered position was proven impossible in the language; half or more of all frontier positions (42% at ply 12, 50% at ply 14) are already won by win/block/forced moves alone",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_coverage_rises_with_depth_from_19_to_50_percent_and_nothing_is_proven_impossible",
+      "note": "Registered after the data; matches the research pattern (WeakC4-library pilot: 33% at 12, 43% at 14, 97% at 16) without any outside library. Everything not found ran out of budget, so coverage is a lower bound for the language.",
+      "registered_at": "2026-10-06T05:56:08.433208+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_coverage_rises_with_depth_from_19_to_50_percent_and_nothing_is_proven_impossible",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T05:56:08.652319+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1.json.gz",
+        "started": "2026-10-06T04:23:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_findings_evidence.py": "6e9e05bc3172cf1a7983e305f16c4cf945b59324e8684a83adfe887749eb9364"
+      }
+    },
+    "h157": {
+      "id": "h157",
+      "claim": "\u00a73.6 S1 DEFECT (registered after the data): the search's time budget is not hard \u2014 the wall clock is checked only between rounds, so eight budget-out searches ran 460-3,066 s against the registered 300 s, and three found states took 738-2,308 s in total (search plus simplification and both checks, not separated in the record). Dropping those three, ply-14 coverage is still >= 44%, so h153 holds either way",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_the_time_budget_was_not_hard_eight_searches_overran_it_up_to_tenfold",
+      "note": "Registered after the data. Fix (next): interrupt the SAT solve and the counterexample walk at the deadline, and record search time separately from checking time. Cost of the defect: ~6 h of worker time on searches past their budget.",
+      "registered_at": "2026-10-06T05:56:08.702050+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_findings_evidence.py::test_c49_s1_the_time_budget_was_not_hard_eight_searches_overran_it_up_to_tenfold",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T05:56:08.914978+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1.json.gz",
+        "started": "2026-10-06T04:23:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_findings_evidence.py": "6e9e05bc3172cf1a7983e305f16c4cf945b59324e8684a83adfe887749eb9364"
+      }
+    },
+    "h158": {
+      "id": "h158",
+      "claim": "\u00a73.6 S1 (fix of h157, guarded): the steady-state search's time budget is now a hard deadline \u2014 a SAT solve still running at the deadline is interrupted and a counterexample walk stops mid-walk, both ending the search as out of budget; the runner records search time apart from simplification and checking time",
+      "mode": "test",
+      "proof": "tests/test_steady_search.py::test_a_solve_still_running_at_the_deadline_is_interrupted",
+      "note": "Diagnosis: run alone, an overrunning ply-14 position finished in 196 s (344 rounds; SAT rounds grew to 4.9 s, walks <= 0.4 s); in the registered run under 8 workers and heavy machine load it took 3,063 s \u2014 single solves stretching, which a between-rounds clock check cannot stop. Also guarded: tests for the walk deadline and for a walk timeout ending the search; mutation spec steady_search 19/19.",
+      "registered_at": "2026-10-06T07:59:18.504112+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_steady_search.py::test_a_solve_still_running_at_the_deadline_is_interrupted",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.58s",
+          "drawn_at": "2026-10-06T07:59:19.478203+00:00"
+        }
+      ],
+      "reads_no_data": true,
+      "pins": {
+        "tests/test_steady_search.py": "c9bc8541dc80a301eff27900f1fae60e80c5f8c3dbebfe5e4545eb301b0548a9",
+        "harness/steady_search.py": "4771f6053d89684260ea4c2ab5e70b899dacdcc88d504880ae4d78ba2480b729"
+      }
+    },
+    "h159": {
+      "id": "h159",
+      "claim": "\u00a73.6 S2 pilot (registered after the data): from a ply-10 position of the canonical exact Connect-4 table, the strategy builder made a complete certified first-player strategy for the rest of the game \u2014 21 table moves and 99 leaves over 36 searched maps, 2,791 bits in all, playing 31,701 distinct first-player positions (34x under the same strategy as a 3-bit table) \u2014 in 11 minutes; a second root ran out of a 20-minute cap after 180 nodes",
+      "mode": "test",
+      "proof": "tests/test_c49_s2_pilot_evidence.py::test_c49_s2_pilot_one_complete_certified_strategy_34_times_under_its_table",
+      "note": "Pilot roots are the 9th and 10th non-trivial ply-10 positions of the seeded shuffle, never the registered eight. All three independent checks passed on the complete one (oracle-free walk, every table move winning by the solver, every non-trivial leaf certified).",
+      "registered_at": "2026-10-06T08:41:55.328627+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s2_pilot_evidence.py::test_c49_s2_pilot_one_complete_certified_strategy_34_times_under_its_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T08:41:55.552617+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s2_pilot.json.gz",
+        "started": "2026-10-06T08:21:01+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s2_pilot_evidence.py": "9bcf9e5a7bee52c9011e3ac8b93a9c00f20194ba1a6cf96eabde5443e58eeb97"
+      }
+    },
+    "h160": {
+      "id": "h160",
+      "claim": "\u00a73.6 S2: at least 6 of 8 sampled ply-10 positions of the canonical exact Connect-4 table get a complete certified first-player strategy for the rest of the game (table moves + discovered steady-state leaves) within 2 hours each. Refuted at 3 or fewer; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s2_evidence.py::test_c49_s2_six_of_eight_ply_10_roots_get_a_complete_certified_strategy_within_the_cap",
+      "note": "Not blind: the S2 pilot (h159) finished one root at 34x within 11 minutes and timed out a second at 20 minutes. Registered: the first 8 non-trivial positions of a seed-2 shuffle of the canonical table's 6,983 ply-10 first-player positions; builder (harness.strategy_builder): leaves tried as the empty map, then the 200 most recent maps, then a 30 s / 20K-constraint search from 2 plies below the root; move nodes choose the winning move whose children are most ready; 2 h per root. A completed strategy must pass the oracle-free walk, every table move must win by the solver, every non-trivial leaf must certify. Bits: 1 per node + 3 per table move + leaf reference + each map's bits (1 per cell empty where found + 3 per levelled cell). Measurement f429a42919a7, positions a276d6c10259.",
+      "registered_at": "2026-10-06T08:41:55.605790+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s2_evidence.py::test_c49_s2_six_of_eight_ply_10_roots_get_a_complete_certified_strategy_within_the_cap",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T09:10:39.657488+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s2.json.gz",
+        "started": "2026-10-06T08:41:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s2_evidence.py": "17bac4803144c86660e727ba6f46c6d03f5f5d0bd65d6e4ad006cc80b261b5c1",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s2_evidence.py::test_c49_s2_completion_is_undecidable"
+    },
+    "h161": {
+      "id": "h161",
+      "claim": "\u00a73.6 S2: over the completed roots, the median complete certified strategy is at least 10x smaller in bits than the same strategy written as a 3-bit-per-position table (3 x distinct first-player positions it plays / its bits). Refuted below 1x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s2_evidence.py::test_c49_s2_the_strategies_are_at_least_10_times_smaller_than_their_table",
+      "note": "Not blind: the S2 pilot (h159) finished one root at 34x within 11 minutes and timed out a second at 20 minutes. Registered: the first 8 non-trivial positions of a seed-2 shuffle of the canonical table's 6,983 ply-10 first-player positions; builder (harness.strategy_builder): leaves tried as the empty map, then the 200 most recent maps, then a 30 s / 20K-constraint search from 2 plies below the root; move nodes choose the winning move whose children are most ready; 2 h per root. A completed strategy must pass the oracle-free walk, every table move must win by the solver, every non-trivial leaf must certify. Bits: 1 per node + 3 per table move + leaf reference + each map's bits (1 per cell empty where found + 3 per levelled cell). Measurement f429a42919a7, positions a276d6c10259.",
+      "registered_at": "2026-10-06T08:41:55.654847+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s2_evidence.py::test_c49_s2_the_strategies_are_at_least_10_times_smaller_than_their_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T09:10:39.874948+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s2.json.gz",
+        "started": "2026-10-06T08:41:55+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s2_evidence.py": "17bac4803144c86660e727ba6f46c6d03f5f5d0bd65d6e4ad006cc80b261b5c1",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s2_evidence.py::test_c49_s2_compression_is_undecidable"
+    },
+    "h162": {
+      "id": "h162",
+      "claim": "\u00a73.6 diagnostic: the search budget is what stops steady states at ply 10 \u2014 with 8 levels and a 6x budget (1,800 s, 200K constraints) our search finds a verified steady state for at least 3 of the 8 ply-10 positions the S1 pilot left out of budget. Refuted if it finds none; inconclusive at 1-2",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_a_6x_budget_finds_steady_states_for_3_of_8_ply_10_positions",
+      "note": "Diagnostic pre-registered after launch but before any row was written (the probe's first results take minutes; evidence is written only at the end). Positions: the 8 ply-10 positions of the S1 pilot (h152) that ran out of the registered 300 s / 60K budget \u2014 never in a registered sample. Settings: 'budget' = 8 levels, 1,800 s, 200K constraints; 'levels' = 14 levels, same budget; both 64 lines, 1M conflicts per solve, hard deadline (h158). Why: S2 (h160, h161) works from ply 10 because leaves start at ply 12; a whole-game strategy near WeakC4's size needs leaves near ply 8.",
+      "registered_at": "2026-10-06T09:12:27.364067+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_a_6x_budget_finds_steady_states_for_3_of_8_ply_10_positions",
+          "ok": false,
+          "detail": "rt 1 >= 3\n\ntests/test_c49_s1_budget_probe_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_a_6x_budget_finds_steady_states_for_3_of_8_ply_10_positions\n1 failed in 0.04s",
+          "drawn_at": "2026-10-06T11:13:25.790806+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_budget_probe.json.gz",
+        "started": "2026-10-06T09:11:53+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_budget_probe_evidence.py": "8c83e3131cb7c0ff4d7a13ebe4eb126abb8aded4fd2063442ded9fa8469ab752"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_the_budget_reading_is_undecidable"
+    },
+    "h163": {
+      "id": "h163",
+      "claim": "\u00a73.6 diagnostic: the language's 8 priority levels limit steady states at ply 10 \u2014 with the same 6x budget, 14 levels find verified steady states for at least 2 more of the 8 positions than 8 levels do. Refuted if 14 levels find no more; inconclusive at exactly 1 more",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_14_levels_find_at_least_2_more_than_8_levels",
+      "note": "Diagnostic pre-registered after launch but before any row was written (the probe's first results take minutes; evidence is written only at the end). Positions: the 8 ply-10 positions of the S1 pilot (h152) that ran out of the registered 300 s / 60K budget \u2014 never in a registered sample. Settings: 'budget' = 8 levels, 1,800 s, 200K constraints; 'levels' = 14 levels, same budget; both 64 lines, 1M conflicts per solve, hard deadline (h158). Why: S2 (h160, h161) works from ply 10 because leaves start at ply 12; a whole-game strategy near WeakC4's size needs leaves near ply 8.",
+      "registered_at": "2026-10-06T09:12:27.439775+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_14_levels_find_at_least_2_more_than_8_levels",
+          "ok": false,
+          "detail": "     assert (0 - 1) >= 2\n\ntests/test_c49_s1_budget_probe_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_14_levels_find_at_least_2_more_than_8_levels\n1 failed in 0.03s",
+          "drawn_at": "2026-10-06T11:13:26.165206+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_budget_probe.json.gz",
+        "started": "2026-10-06T09:11:53+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_budget_probe_evidence.py": "8c83e3131cb7c0ff4d7a13ebe4eb126abb8aded4fd2063442ded9fa8469ab752"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_budget_probe_evidence.py::test_c49_s1_probe_the_levels_reading_is_undecidable"
+    },
+    "h164": {
+      "id": "h164",
+      "claim": "\u00a73.6 S3: at least 3 of 4 sampled ply-8 positions get a complete certified first-player strategy for the rest of the game (table moves + steady-state leaves from ply 12) within 4 hours each. Refuted at 1 or fewer; inconclusive at 2",
+      "mode": "test",
+      "proof": "tests/test_c49_s3_evidence.py::test_c49_s3_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+      "note": "Side run beside the search work (user, 2026-10-06: option 3). Ply-8 roots: winning first-player positions at ply 8 of books/c4_labels.json.gz (16,259 rows; file hash bf548bd7612c), the first 4 non-trivial in a seed-3 shuffle. Builder exactly as S2 (h160, h161: 8/8 ply-10 subtrees complete, median 36x) except leaves searched only from 4 plies below the root (ply 12) and 4 h per root. Purpose: a measured basis for projecting the whole-game size while leaves start at ply 12 (the ply-10 diagnostic, h162/h163, found the search cannot yet place leaves at ply 10). Measurement bfcc93d79ed7.",
+      "registered_at": "2026-10-06T12:52:13.521287+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s3_evidence.py::test_c49_s3_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+          "ok": false,
+          "detail": "d\nE         + inconclusive\n\ntests/test_c49_s3_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s3_evidence.py::test_c49_s3_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours\n1 failed in 0.06s",
+          "drawn_at": "2026-10-06T16:54:37.927072+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s3.json.gz",
+        "started": "2026-10-06T12:52:13+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s3_evidence.py": "7e02eff25197983b67900ba71d541a3de9bb2c726c32e566b94211b1a6a580b4",
+        "harness/floor_s3.py": "2406615c6c6c98029a932625c291cc33ec907be49a2726583bc45fb4a9c2c772"
+      },
+      "inconclusive_proof": "tests/test_c49_s3_evidence.py::test_c49_s3_completion_is_undecidable"
+    },
+    "h165": {
+      "id": "h165",
+      "claim": "\u00a73.6 S3: over completed ply-8 roots, the median complete certified strategy is at least 10x smaller than the same strategy as a 3-bit-per-position table. Refuted below 1x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s3_evidence.py::test_c49_s3_the_strategies_are_at_least_10_times_smaller_than_their_table",
+      "note": "Side run beside the search work (user, 2026-10-06: option 3). Ply-8 roots: winning first-player positions at ply 8 of books/c4_labels.json.gz (16,259 rows; file hash bf548bd7612c), the first 4 non-trivial in a seed-3 shuffle. Builder exactly as S2 (h160, h161: 8/8 ply-10 subtrees complete, median 36x) except leaves searched only from 4 plies below the root (ply 12) and 4 h per root. Purpose: a measured basis for projecting the whole-game size while leaves start at ply 12 (the ply-10 diagnostic, h162/h163, found the search cannot yet place leaves at ply 10). Measurement bfcc93d79ed7.",
+      "registered_at": "2026-10-06T12:52:13.571745+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s3_evidence.py::test_c49_s3_the_strategies_are_at_least_10_times_smaller_than_their_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-06T16:54:38.342324+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s3.json.gz",
+        "started": "2026-10-06T12:52:13+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s3_evidence.py": "7e02eff25197983b67900ba71d541a3de9bb2c726c32e566b94211b1a6a580b4",
+        "harness/floor_s3.py": "2406615c6c6c98029a932625c291cc33ec907be49a2726583bc45fb4a9c2c772"
+      },
+      "inconclusive_proof": "tests/test_c49_s3_evidence.py::test_c49_s3_compression_is_undecidable"
+    },
+    "h166": {
+      "id": "h166",
+      "claim": "\u00a73.6 option 1: local search over priority maps (hill-climbing one cell's level at a time, scored by the lines a map fails; 8 levels, 30 minutes) finds verified steady states for at least 3 of the 8 ply-10 positions the S1 pilot left out of budget. Refuted at 1 or fewer (no better than SAT's 1 of 8 under the same conditions, h162); inconclusive at 2",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_local_probe_evidence.py::test_c49_s1_local_search_finds_steady_states_for_3_of_8_ply_10_positions",
+      "note": "Method after WeakC4's genetic proposals (user chose option 1, 2026-10-06). harness/steady_local.py: 11 tests, 11/11 mutants. No SAT in this run (the phase-hint hand-off waits until S3 stops importing steady_search.py). rng seeded by position index. Not blind on the positions: their SAT results are known (h162: only #705 found).",
+      "registered_at": "2026-10-06T12:55:19.686226+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_local_probe_evidence.py::test_c49_s1_local_search_finds_steady_states_for_3_of_8_ply_10_positions",
+          "ok": false,
+          "detail": "ere 0 = _found()\n\ntests/test_c49_s1_local_probe_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_local_probe_evidence.py::test_c49_s1_local_search_finds_steady_states_for_3_of_8_ply_10_positions\n1 failed in 0.23s",
+          "drawn_at": "2026-10-06T13:57:02.760310+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_local_probe.json.gz",
+        "started": "2026-10-06T12:55:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_local_probe_evidence.py": "feb00a1241c169ddf4a2dbc67c693e2d0261eb299f021d6dde46da1ff058d0ab",
+        "harness/steady_local.py": "92d3d99cdaab23172a455d0095cae6903630bfbad37cf2907234ef71efe3273e"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_local_probe_evidence.py::test_c49_s1_the_local_search_reading_is_undecidable"
+    },
+    "h167": {
+      "id": "h167",
+      "claim": "\u00a73.6 option 1 (registered after the data): local search finds no complete steady state at ply 10 within 30 minutes (h166 refuted, 0 of 8), but its best map fails only one line on 7 of the 8 positions and two on the eighth \u2014 the language is close to enough there; the search's last step is what fails",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_local_findings_evidence.py::test_c49_s1_local_search_ends_one_line_short_on_7_of_8_positions",
+      "note": "Registered after the data. 335-915 evaluations per position (each a full walk, 2-5 s under machine load). Two follow-ups: (1) hand the near-miss map to SAT as phase hints so SAT repairs the last line (after S3, which imports steady_search.py, finishes); (2) a leaf as a map plus exceptions \u2014 the failing line's positions get their own table moves or sub-leaves, the hybrid's table-plus-exceptions idea inside a leaf. The probe did not save the near-miss maps (only found maps were recorded) \u2014 the next run must.",
+      "registered_at": "2026-10-06T13:57:27.279470+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_local_findings_evidence.py::test_c49_s1_local_search_ends_one_line_short_on_7_of_8_positions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T13:57:27.518939+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_local_probe.json.gz",
+        "started": "2026-10-06T12:55:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_local_findings_evidence.py": "21b4093e721a2138db63af5f0940ef8bedd19998cb9f54514dad90c9a2990e1b"
+      },
+      "supersession": {
+        "by": "h170",
+        "reason": "h167's one failing line is the root itself on 7/8 \u2014 the empty map's undefined root; the score stops at it (h170)",
+        "at": "2026-10-06T15:19:53.008087+00:00"
+      }
+    },
+    "h168": {
+      "id": "h168",
+      "claim": "\u00a73.6: local search (30 min, 8 levels) plus at most 100 exceptions (table moves where the map's move stops winning) gives a verified map-plus-exceptions leaf for at least 6 of the 8 ply-10 positions the S1 pilot left out of budget. Refuted at 2 or fewer; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_map_plus_exceptions_leaves_for_6_of_8_ply_10_positions",
+      "note": "Design after a one-position smoke (20 s search): a map scoring 1 failure needed > 20 exceptions \u2014 score() does not walk below a failure, so one failure point can hide a failing subtree; the exception cap was raised 20 -> 100 before registering. Same 8 positions and local-search settings as h166 (seeded by index). harness/steady_exceptions.py: 13 tests, 12/12 mutants. Bits: map (1 per empty cell + 3 per levelled cell) + exceptions (ceil log2 own positions + 3 each).",
+      "registered_at": "2026-10-06T14:16:54.008809+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_map_plus_exceptions_leaves_for_6_of_8_ply_10_positions",
+          "ok": false,
+          "detail": "  where [] = _leaves()\n\ntests/test_c49_s1_patch_probe_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_map_plus_exceptions_leaves_for_6_of_8_ply_10_positions\n1 failed in 0.04s",
+          "drawn_at": "2026-10-06T15:19:31.812497+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_patch_probe.json.gz",
+        "started": "2026-10-06T14:16:54+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_patch_probe_evidence.py": "aa3d7a6544469fe783695565f17abb6e1f09d4a9e87c625fb2e4607b754f0b0b",
+        "harness/steady_exceptions.py": "df5128960395390efd78e4b9a71c11b65037ed203b1669a96601158b14b9745d"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_the_leaf_count_is_undecidable"
+    },
+    "h169": {
+      "id": "h169",
+      "claim": "\u00a73.6: the median map-plus-exceptions leaf at ply 10 is at least 10x smaller than its own first-player positions as a 3-bit table. Refuted below 1x; inconclusive between (or with no leaf)",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_map_plus_exceptions_leaves_are_10_times_smaller_than_their_table",
+      "note": "Design after a one-position smoke (20 s search): a map scoring 1 failure needed > 20 exceptions \u2014 score() does not walk below a failure, so one failure point can hide a failing subtree; the exception cap was raised 20 -> 100 before registering. Same 8 positions and local-search settings as h166 (seeded by index). harness/steady_exceptions.py: 13 tests, 12/12 mutants. Bits: map (1 per empty cell + 3 per levelled cell) + exceptions (ceil log2 own positions + 3 each).",
+      "registered_at": "2026-10-06T14:16:54.079755+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s1_patch_probe.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_s1_patch_probe_evidence.py": "aa3d7a6544469fe783695565f17abb6e1f09d4a9e87c625fb2e4607b754f0b0b",
+        "harness/steady_exceptions.py": "df5128960395390efd78e4b9a71c11b65037ed203b1669a96601158b14b9745d"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_patch_probe_evidence.py::test_c49_s1_the_leaf_compression_is_undecidable",
+      "supersession": {
+        "by": "h171",
+        "reason": "no leaf was produced; h169's inconclusive check read no leaf as refuted, against its own text (h171) \u2014 h169 left unjudged",
+        "at": "2026-10-06T15:19:53.057766+00:00"
+      }
+    },
+    "h170": {
+      "id": "h170",
+      "claim": "\u00a73.6 (registered after the data): the local search's best map at ply 10 is the empty map on 7 of the 8 positions, and its single failing line is the root itself, where the empty map gives no move. The score counts an undefined position as one failure and walks no further, so any map giving a root move exposes failures below and is rejected \u2014 h167's 'one line short, the language is nearly enough' reading is an artefact of the score",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_patch_findings_evidence.py::test_c49_s1_the_best_local_map_is_empty_and_undefined_at_the_root_on_7_of_8",
+      "note": "Found when the patch probe saved its near-miss maps: 7 had no levels. Re-scoring the empty map on the 8 roots: 1 failure, 1 own position on 7; 7 failures on #1401 (local search's best there: 2, 15 levels).",
+      "registered_at": "2026-10-06T15:19:52.416638+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_patch_findings_evidence.py::test_c49_s1_the_best_local_map_is_empty_and_undefined_at_the_root_on_7_of_8",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T15:19:52.714322+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_patch_probe.json.gz",
+        "started": "2026-10-06T14:16:54+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_patch_findings_evidence.py": "5fc8761663d3b23d8fc7468d207a7f02eb2b150d7616076fcd80f5a81d4680f1"
+      }
+    },
+    "h171": {
+      "id": "h171",
+      "claim": "\u00a73.6 (registered after the data): no ply-10 position got a map-plus-exceptions leaf (0/8 within 100 exceptions), so h169's compression has nothing to measure \u2014 undecidable, as h169's text says for 'no leaf'; its registered inconclusive check read no leaf as a refutation (a test slip)",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_patch_findings_evidence.py::test_c49_s1_no_ply_10_position_got_a_map_plus_exceptions_leaf",
+      "note": "",
+      "registered_at": "2026-10-06T15:19:52.470514+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_patch_findings_evidence.py::test_c49_s1_no_ply_10_position_got_a_map_plus_exceptions_leaf",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T15:19:52.950773+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_patch_probe.json.gz",
+        "started": "2026-10-06T14:16:54+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_patch_findings_evidence.py": "5fc8761663d3b23d8fc7468d207a7f02eb2b150d7616076fcd80f5a81d4680f1"
+      }
+    },
+    "h172": {
+      "id": "h172",
+      "claim": "\u00a73.6: local search scored by leaf size (map bits + the exceptions it needs over every line; 30 min, 8 levels) gives verified, certified map-plus-exceptions leaves for the 8 ply-10 positions the S1 pilot left out of budget, with the median leaf at least 10x smaller than its own positions as a 3-bit table. Refuted below 3x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_size_searched_leaves_are_10_times_smaller_than_their_table",
+      "note": "Design after h170 and a one-position smoke (#472, 120 s): 22 evaluations took the leaf from 154,218 to 129,750 bits (1.75x its table), verified and certified; ~5 s an evaluation, most of it the oracle on newly reached positions (243K cached). harness/steady_local.py 13 tests, 11/11 mutants; harness/steady_exceptions.py 23 tests, 23/23 mutants. Exceptions cost the cheaper of a sparse index list or a mask over own positions.",
+      "registered_at": "2026-10-06T15:33:07.145674+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_size_searched_leaves_are_10_times_smaller_than_their_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T16:35:09.853678+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_leaf_probe.json.gz",
+        "started": "2026-10-06T15:33:07+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_leaf_probe_evidence.py": "f408b73f8d952bb694946fcef29a127b545c00cb886f434df61dd04e1be34df0",
+        "harness/steady_local.py": "4d59096466af0b4eca7b2910d87cacf337758db28df77c6448009c7bdc44a01a",
+        "harness/steady_exceptions.py": "9f6c7a0207b303ea478f92faafeb9734a439ce7bec67b73f3bec533059a4e9ba"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_the_size_searched_leaf_compression_is_undecidable"
+    },
+    "h173": {
+      "id": "h173",
+      "claim": "\u00a73.6: on the same run, the median searched leaf is at least 2x smaller than the empty map's leaf it starts from (all exceptions). Refuted below 1.2x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_the_search_halves_the_empty_map_s_leaf",
+      "note": "Design after h170 and a one-position smoke (#472, 120 s): 22 evaluations took the leaf from 154,218 to 129,750 bits (1.75x its table), verified and certified; ~5 s an evaluation, most of it the oracle on newly reached positions (243K cached). harness/steady_local.py 13 tests, 11/11 mutants; harness/steady_exceptions.py 23 tests, 23/23 mutants. Exceptions cost the cheaper of a sparse index list or a mask over own positions.",
+      "registered_at": "2026-10-06T15:33:07.203642+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_the_search_halves_the_empty_map_s_leaf",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T16:35:10.086551+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_leaf_probe.json.gz",
+        "started": "2026-10-06T15:33:07+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_leaf_probe_evidence.py": "f408b73f8d952bb694946fcef29a127b545c00cb886f434df61dd04e1be34df0",
+        "harness/steady_local.py": "4d59096466af0b4eca7b2910d87cacf337758db28df77c6448009c7bdc44a01a",
+        "harness/steady_exceptions.py": "9f6c7a0207b303ea478f92faafeb9734a439ce7bec67b73f3bec533059a4e9ba"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_leaf_probe_evidence.py::test_c49_s1_the_search_s_gain_is_undecidable"
+    },
+    "h174": {
+      "id": "h174",
+      "claim": "\u00a73.6 (registered after the data): local search scored by leaf size ends at a pure, verified, certified steady state for 4 of the 8 ply-10 positions within 30 minutes (#705 in 23 s), where SAT with a 6x budget found 1 (h162) and the failure-count local search 0 (h166) on the same positions \u2014 the search's score, not the language, was the ply-10 limit",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_leaf_findings_evidence.py::test_c49_s1_size_scored_search_finds_4_pure_steady_states_where_failure_counting_found_none",
+      "note": "Pure: #705 80 bits/1,300 positions, #2557 98/1,504, #472 89/3,581, #2993 98/5,208. The rest: #5563 187 bits (8 exceptions), #6944 751 (41), #760 3,733 (227), #1401 31,699 (1,850). Oracle cache 0.04-2.4M positions per worker; peak worker RSS ~4 GB at 10 min.",
+      "registered_at": "2026-10-06T16:35:23.410251+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_leaf_findings_evidence.py::test_c49_s1_size_scored_search_finds_4_pure_steady_states_where_failure_counting_found_none",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T16:35:23.645753+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_local_probe.json.gz",
+        "started": "2026-10-06T12:55:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_leaf_findings_evidence.py": "eb4ade3a445cdbcde89abf7fa26156a67e48c2d82aca47bb754172008966c330"
+      }
+    },
+    "h175": {
+      "id": "h175",
+      "claim": "\u00a73.6 SAT hand-off: on the 4 ply-10 positions where size-scored local search ended with exceptions, SAT started at its best map with the exception positions constrained first finds a pure, verified, certified steady state for at least 2 within 30 minutes and 200K constraints. Refuted at 0; inconclusive at 1",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_2_of_4_near_miss_positions",
+      "note": "Design after a 60 s smoke on #5563: both arms built ~35-41K constraints a minute, so the constraint cap was raised 60K -> 200K (h162's 6x budget) before registering. harness/steady_search.py: hint (solver phases) and seeds (constrained before the first solve); 63 tests, 24/24 mutants. Positions: #760, #1401, #5563, #6944 (8-1,850 exceptions after local search).",
+      "registered_at": "2026-10-06T17:01:50.975744+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_2_of_4_near_miss_positions",
+          "ok": false,
+          "detail": "\"] >= 2\nE       assert 0 >= 2\n\ntests/test_c49_s1_handoff_probe_evidence.py:35: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_2_of_4_near_miss_positions\n1 failed in 0.04s",
+          "drawn_at": "2026-10-06T18:02:18.637869+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_handoff_probe.json.gz",
+        "started": "2026-10-06T17:01:51+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_handoff_probe_evidence.py": "4244bb66ed9c3ea5e71ccf695e48c67a6dae774cb54a473b5f87c248df85ea48",
+        "harness/steady_search.py": "c773c171271a346eeed670b4b3e4ef88fc4a25a7b0a2347c6218bc1d3177c7d4"
+      },
+      "inconclusive_proof": "tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_one_near_miss_position"
+    },
+    "h176": {
+      "id": "h176",
+      "claim": "\u00a73.6 SAT hand-off: under the same budget the hinted search finds steady states for more of the 4 positions than the same SAT search started cold. Refuted if cold finds as many or more",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_more_than_cold_sat",
+      "note": "Design after a 60 s smoke on #5563: both arms built ~35-41K constraints a minute, so the constraint cap was raised 60K -> 200K (h162's 6x budget) before registering. harness/steady_search.py: hint (solver phases) and seeds (constrained before the first solve); 63 tests, 24/24 mutants. Positions: #760, #1401, #5563, #6944 (8-1,850 exceptions after local search).",
+      "registered_at": "2026-10-06T17:01:51.025554+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_more_than_cold_sat",
+          "ok": false,
+          "detail": "_found()[\"cold\"]\nE       assert 0 > 0\n\ntests/test_c49_s1_handoff_probe_evidence.py:43: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s1_handoff_probe_evidence.py::test_c49_s1_hinted_sat_finds_more_than_cold_sat\n1 failed in 0.03s",
+          "drawn_at": "2026-10-06T18:02:19.027255+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_handoff_probe.json.gz",
+        "started": "2026-10-06T17:01:51+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_handoff_probe_evidence.py": "4244bb66ed9c3ea5e71ccf695e48c67a6dae774cb54a473b5f87c248df85ea48",
+        "harness/steady_search.py": "c773c171271a346eeed670b4b3e4ef88fc4a25a7b0a2347c6218bc1d3177c7d4"
+      }
+    },
+    "h177": {
+      "id": "h177",
+      "claim": "\u00a73.6 (registered after the data): the hint does not steer the SAT search \u2014 on each of the 4 positions, hinted and cold runs build constraints and run rounds within 10% of each other, both ending at the budget; phase hints with counterexample seeds leave SAT no nearer the near-miss map than starting cold",
+      "mode": "test",
+      "proof": "tests/test_c49_s1_handoff_findings_evidence.py::test_c49_s1_hinted_and_cold_sat_do_the_same_work",
+      "note": "Constraints hinted/cold: #760 200,080/200,094; #1401 162,564/153,873; #5563 175,832/172,891; #6944 171,857/182,316. Rounds 998-1,094 throughout. Local search remains the leaf engine at ply 10; SAT adds nothing here.",
+      "registered_at": "2026-10-06T18:02:44.952262+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s1_handoff_findings_evidence.py::test_c49_s1_hinted_and_cold_sat_do_the_same_work",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-06T18:02:45.157062+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s1_handoff_probe.json.gz",
+        "started": "2026-10-06T17:01:51+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s1_handoff_findings_evidence.py": "c61e2b3108fd37bcb386605e8f5683dc59c1da7780465dd11aaebbabef49cf5f"
+      }
+    },
+    "h178": {
+      "id": "h178",
+      "claim": "\u00a73.6 S4 pilot (registered after the data): with size-scored local-search leaves accepted at >= 4x, a ply-8 root (#12433) gets a complete certified strategy in 31 minutes (S3's SAT leaves: none of its timed-out roots did in 4 h) but exceptions are over 90% of its bits \u2014 96,625 bits for 198,602 positions, 6.2x",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_pilot_evidence.py::test_c49_s4_pilot_at_4x_completes_a_root_whose_bits_are_mostly_exceptions",
+      "note": "Roots #13141, #12433 (the two after S3's sample), 1 h each. #13141 incomplete at 1 h. Excepted leaves: median 55-137 exceptions over 3.7-6.9K own positions.",
+      "registered_at": "2026-10-06T21:04:14.182432+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_pilot_evidence.py::test_c49_s4_pilot_at_4x_completes_a_root_whose_bits_are_mostly_exceptions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-06T21:04:14.680068+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s4_pilot.json.gz",
+        "started": "2026-10-06T19:02:14+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s4_pilot_evidence.py": "f1bd87e3754f8b6d6d1361654457c71ea1fe755fa6d9ad802cc7dc6b7c48e1da"
+      }
+    },
+    "h179": {
+      "id": "h179",
+      "claim": "\u00a73.6 S4 pilot (registered after the data): at a 10x acceptance threshold neither pilot root completes within the hour, but exceptions fall below 65% of the partial strategies' bits (57-60%) \u2014 the threshold trades completion time for size",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_pilot_evidence.py::test_c49_s4_pilot_at_10x_completes_nothing_in_an_hour_but_halves_the_exception_share",
+      "note": "Partial at 1 h: #13141 22,038 bits (12,625 exceptions), #12433 22,720 (13,668); 158-168 searches each. S4 registered at 10x (the 10x target) with S3's 4 h cap.",
+      "registered_at": "2026-10-06T21:04:14.263632+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_pilot_evidence.py::test_c49_s4_pilot_at_10x_completes_nothing_in_an_hour_but_halves_the_exception_share",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-06T21:04:14.899543+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s4_pilot_accept10.json.gz",
+        "started": "2026-10-06T20:03:33+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s4_pilot_evidence.py": "f1bd87e3754f8b6d6d1361654457c71ea1fe755fa6d9ad802cc7dc6b7c48e1da"
+      }
+    },
+    "h180": {
+      "id": "h180",
+      "claim": "\u00a73.6 S4: with size-scored local-search leaves (exceptions allowed at >= 10x), at least 3 of S3's 4 ply-8 roots get a complete certified first-player strategy within 4 hours (S3 with SAT leaves: 2). Refuted at 1 or fewer; inconclusive at 2",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+      "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
+      "registered_at": "2026-10-06T21:04:47.655048+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_s4_evidence.py": "5a187fa9b832e23a81612df02dc3b3c96c29ec8f9908102e965de04cf42fd029",
+        "harness/floor_s4.py": "08f86c86cdade369aab8d9040cb061487228c6677fa45daa17b1472d150c6f86",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s4_evidence.py::test_c49_s4_completion_is_undecidable"
+    },
+    "h181": {
+      "id": "h181",
+      "claim": "\u00a73.6 S4: over completed roots, the median strategy is at least 10x smaller than the same strategy as a 3-bit-per-position table. Refuted below 1x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_the_strategies_are_at_least_10_times_smaller_than_their_table",
+      "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
+      "registered_at": "2026-10-06T21:04:47.698501+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_s4_evidence.py": "5a187fa9b832e23a81612df02dc3b3c96c29ec8f9908102e965de04cf42fd029",
+        "harness/floor_s4.py": "08f86c86cdade369aab8d9040cb061487228c6677fa45daa17b1472d150c6f86",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s4_evidence.py::test_c49_s4_compression_is_undecidable"
+    },
+    "h182": {
+      "id": "h182",
+      "claim": "\u00a73.6 S4 vs S3: on every root both complete, S4's strategy is no larger in bits than S3's. Refuted if S4's is larger on any; undecidable with no root completed by both",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_is_no_larger_than_s3_on_every_root_both_complete",
+      "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
+      "registered_at": "2026-10-06T21:04:47.741673+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s3.json.gz",
+        "started": "2026-10-06T12:52:13+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s4_evidence.py": "5a187fa9b832e23a81612df02dc3b3c96c29ec8f9908102e965de04cf42fd029",
+        "harness/floor_s4.py": "08f86c86cdade369aab8d9040cb061487228c6677fa45daa17b1472d150c6f86"
+      },
+      "inconclusive_proof": "tests/test_c49_s4_evidence.py::test_c49_s4_no_root_completed_by_both"
     }
   }
 }

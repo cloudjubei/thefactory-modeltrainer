@@ -4774,3 +4774,176 @@ tests are still inconclusive: ply 8 +1.2 points, 5/7, p 18/128; ply-6 curve +0.6
 (h139). H3 needs fewer exceptions (253 vs 278 entries, 6/7; h141). Every certified-through-9 hybrid is ~663K bits
 against ~25K for a table alone over its tree — break-even at ~1 bit per weight (h140). Through ply 9 the table is the
 smallest certified description.
+
+## 2026-10-05 — Net vs table by depth: pre-registered and running; launch-from-recipe; compression study
+
+`harness/depth_cost.py` (24/24 mutants killed): a complete table costs one 3-bit move per first-player position in
+canonical walk order, no index — h140 charged it an index too, so the gap it reported is if anything understated;
+a hybrid's exceptions cost the cheaper of a sparse index or a position mask; the break-even precision is the bits per
+weight at which net + exceptions cost the table. Readout `scripts/c4_depth_cost.py`: canonical table and all seven H3
+nets through 11 plies, seeds 481-483 through 13, every hybrid certified independently. Solve rates measured first on
+net-played positions: 0.58 s (ply 11) and 0.21 s (ply 13) per solve per worker, so ~10-15 h on 8 workers. Smoke at
+depths 3/5 passed. Pre-registered h142 (exception share falls from ply 8 to 12 by >= 2 points) and h143 (break-even
+above 4 bits per weight at depth 13 on all three deep nets).
+
+h138's fixes: `harness/recipe.py` (7/7) — `load_recipe("module:arm")` and `recipe_matches`, which ignores only
+`certify_depth` and `relabel_workers`; `scripts/c4_solver_free.py --recipe` trains a registered arm with its seeds and
+refuses hand-set training flags. Pinned judges stay as registered.
+
+Game-state compression (user's idea, agent study `docs/research/game-state-compression.md`): sequence keys lose to
+position keys — 31x more sequences than positions at Connect-4 ply 8, 404x at ply 11 (counts match OEIS A212693);
+whole-game value stores are TB-scale for Connect-4 and impossible for checkers/chess/Go. Useful residue: walk-order
+tables need no keys, and rank-coding moves under a parameter-free ordering may cut an entry to ~1 bit. Eight sources
+added to the paper library.
+
+## 2026-10-06 — Net vs table by depth: both judged claims inconclusive; break-even ~4 bits at depth 13
+
+Readout 3.7 h (stage one 3 h, stage two 40 min; ply-13 positions solve fast). Canonical table 1,862 / 8,845 / 36,431
+entries through 9 / 11 / 13; all 21 hybrids certified. h142 inconclusive (pooled exception share 10.0% -> 9.1% from ply 8
+to 12, bar 2 points); h143 inconclusive (break-even 4.13 / 3.72 / 4.35 bits per weight around the bar of 4). After the
+data: break-even quadruples every two plies (h144, supersedes h140's index-charged ~1 bit at depth 9 — it is ~0.2); the
+share falls ~1 point a ply then holds near 9% (h145); the nets' own trees are up to 57% smaller than the canonical
+table's, against which break-even is ~1.3 bits (h146) — the baseline should be the smallest certified table.
+
+## 2026-10-06 — Kalah registered; the process no longer assumes the mover alternates
+
+Fixed `agents.child_move_value`, `certify` and `n_step_value_targets` to compare movers (h148; the alternation tests
+now pass, mutation specs killed). Goldens recorded on the pre-fix code (MCTS-solver path, n-step 1 and 2) prove
+alternating-game training bit-identical (h147), bridging Connect-4's era 33939d5e2d76 -> 6eedd699d12d. Kalah
+registered at 6x4, 4x3, 3x3 under per-shape names; `training_fingerprint` now maps a registered name to its module
+file and refuses unknown names; a registry test checks every name rebuilds a game answering to it. Smoke: Kalah(3,3)
+trains with workers (2,996-param net).
+
+## 2026-10-06 — E2: certified Kalah play is tiny, and choosing the moves matters
+
+`harness/strategy_size.py` (game graph, canonical strategy, tree-minimising strategy by DP; 8/8 mutants) and judge
+`harness/floor_e2.py` (12/12). 19 shapes in 2 minutes, every strategy certified whole-game (mover-aware certify). h149
+supported: on the 9 shapes with graph >= 1,000 the minimised strategy decides at 0.01-0.45% of the positions. h150
+supported: it at least halves the canonical strategy on 7/9 (Kalah(3,6) 2,699 -> 202; Kalah(5,1) 128 -> 21).
+Unproven trial: the paper's Table 3 graph sizes are not reproduced by any rule reading — not used as a check.
+
+## 2026-10-06 — Frontier build deadlocked; exact solves now submitted in slices
+
+The canonical-table frontier build (for S1) stalled after ply 10 (6,983 positions, 86 min): 0% CPU on all processes for
+> 30 min. `/usr/bin/sample` showed the main thread blocked in `os.write` on ProcessPoolExecutor's wake-up pipe and the
+manager thread on a lock — CPython gh-105829 (Python 3.10; fixed in 3.11.5/3.12), triggered by one `map` over ~190,000
+child solves. Fix: `harness.exact_values` submits at most 2,048 jobs per `map`, draining each (h151; 12/12 mutants).
+Rebuild relaunched with a stall alarm on the monitor. Also built while waiting: S1's language, verifier, SAT search,
+judge and runner (all mutation-clean), and E2 (h149, h150 supported).
+
+## 2026-10-06 — S1 steady states: built, piloted, pre-registered at ply 14
+
+Language (win; else the single safe move; else the first of 8 priority levels holding exactly one safe move — the cell
+read from the observation, so generic for placement games), solver-free verifier, SAT search with counterexamples
+(each failing line's positions constrained "choose a winning move when reached", guarded by reachability, so UNSAT is
+exact), judge and runner: all test-first, mutation-clean (14 + 16 + 20 mutants), the search agreeing with brute force
+on every 1-3 piece tic-tac-toe position. Two equivalent mutants removed as dead code. Pilots outside the registered
+sample (h152): plies 10-12 found nothing within budget (300 s / 60K constraints / 64 lines; the constraint cap binds
+at ply 10 near 150 s; one ply-12 position proven impossible in the language); ply 14 found 1/5, and an unrecorded
+probe after random replies 5/7 (31-67 bits, the best replacing 2,239 first-player positions). Design moved to plies
+12/14, judged at 14; h153 (coverage >= 30%), h154 (median compression >= 10x) pre-registered; proof renamed ply_12 ->
+ply_14 before any data. Registered run launched (200 positions).
+
+## 2026-10-06 — S1 result: half of ply 14 covered by discovered steady states; compression bimodal
+
+Registered run (200 positions, ~1.5 h): h153 SUPPORTED — at ply 14 our own search found a verified steady state for 25
+of 50 non-trivial positions (50%); ply 12: 11 of 58 (19%; h156); nothing proven impossible. h154 INCONCLUSIVE — median
+compression 5.7x, but bimodal (h155): 14 states govern 7-65 positions (< 8x), 11 govern 537-12,229 (12-432x; 85 bits
+play 12,229 first-player positions). Defect (h157): the time budget was checked only between rounds, so searches ran
+to 3,066 s under machine load; coverage holds at >= 44% without the slow finds. Fixed (h158): a timer interrupts the
+SAT solve and the walk checks the deadline; search time now recorded apart from checking.
+
+## 2026-10-06 — S2: complete certified strategies from ply 10, built and pre-registered
+
+Map reuse probes: a found map covers none of 72 unrelated positions but 35 of 111 non-trivial siblings (same parent,
+other reply) — reuse is local, as in WeakC4. `harness/strategy_builder.py`: leaves by empty map, recent maps, then a
+short search; move nodes by readiness of their children; oracle-free `check`. Pilot (h159): root #2556 complete —
+21 moves, 99 leaves, 36 maps, 2,791 bits for 31,701 first-player positions (34x) in 11 min, all checks passed; root
+#1149 timed out at 20 min. Registered h160 (>= 6/8 roots complete within 2 h) and h161 (median compression >= 10x);
+run launched on 8 roots.
+
+## 2026-10-06 — S2 result: complete certified strategies for 8/8 ply-10 subtrees, 36x under their tables
+
+h160 supported (8/8 within 2 h; slowest 28 min), h161 supported (median 36x; 24.1-68.7x). 18,219 bits play 250,840
+distinct first-player positions; 174 table moves, 859 leaves (262 trivial, 597 mapped), 206 maps from 372 searches.
+Every strategy passed the oracle-free walk, the solver's check of every table move, and certify on every mapped leaf.
+Projection to the whole game is poor while leaves start at ply 12 — earlier leaves are the lever.
+
+## 2026-10-06 — Ply-10 diagnostic: neither budget nor more levels unlock steady states
+
+The 8 ply-10 positions the S1 pilot left out of budget, re-searched (16 runs, ~2.2 h, 4 at a time): 8 levels with a
+6x budget found one (#705: 107 bits for 6,115 positions, 21 min, 135K constraints; h162 inconclusive); 14 levels found
+none, not even #705 (h163 refuted). The search's efficiency is the limit at shallower plies.
+
+## 2026-10-06 — Local search at ply 10: nothing complete, but one line short
+
+`harness/steady_local.py` (hill-climbing one cell's level at a time, scored by every failing line; 11 tests, 11/11
+mutants) on the same 8 positions, 30 min each: h166 refuted (0/8). Registered after the data, h167 supported: the
+best map fails one line on 7/8 and two on the eighth. The language is close; the search's last step fails.
+
+## 2026-10-06 — S3 and map-plus-exceptions registered and launched
+
+S3 (`harness/floor_s3.py`): the S2 builder from 4 ply-8 roots (label cache, seed 3), leaves from depth 4, 4 h each;
+h164 (>= 3/4 complete), h165 (median >= 10x). Root #2071 complete in 11 s (2 maps, 647 positions) — likely a root
+after a weak reply, the label-cache caveat. Map plus exceptions (`harness/steady_exceptions.py`; 13 tests, 12/12
+mutants): a near-miss map gets a table move at the first position on each failing line where its move stops
+winning. Smoke: one map scored at 1 failure needed > 20 exceptions — the score stops at a failure, so one failure
+can hide a failing subtree — so the cap was raised to 100 before registering h168 (>= 6/8 patched) and h169 (median
+>= 10x). Probe launched on 4 workers beside S3.
+
+## 2026-10-06 — Map plus exceptions: no leaf, and the local-search score was defective
+
+h168 refuted: no ply-10 position's near-miss map patched within 100 exceptions (0/8). The saved maps showed why
+(h170, registered after the data, supersedes h167): on 7/8 the best map was the empty map, giving no move at the
+root — one 'failure' — and the score walked no further, so every map that gave a root move exposed failures below and
+was rejected. h169's pre-registered inconclusive check read 'no leaf' as refuted against its own text; h171 records
+it undecidable instead (pins kept h169's file unchanged). Fix: `steady_exceptions.needed` walks every line once,
+fixing each position where the map's move does not win; `steady_local` hill-climbs on the complete leaf's bits
+(exceptions as the cheaper of a sparse list or a mask). Empty-map leaf at #472: 81,490 own positions, 24,232
+exceptions. Pre-registered h172 (median >= 10x its table) and h173 (>= 2x under the empty map's leaf); launched.
+
+## 2026-10-06 — Size-scored local search: ply-10 leaves for 8/8, four of them pure steady states
+
+h172 supported (median leaf 39x under its table; 2.5-159x), h173 supported (median 260x under the empty map's leaf;
+>= 17.5x everywhere). Pure steady states for #705 (80 bits, 1,300 positions, 23 s), #2557 (98, 1,504), #472 (89,
+3,581), #2993 (98, 5,208); the rest are map-plus-exceptions leaves — #5563 (187 bits, 8 exceptions), #6944 (751, 41),
+#760 (3,733, 227), #1401 (31,699, 1,850). All verified without the oracle and certified. Registered after the data,
+h174: 4/8 pure where SAT with a 6x budget found 1 and failure counting 0 — the score was the limit. Workers peaked
+near 4 GB from the oracle cache; swap was already near its 40 GB file mark, so a memory alarm ran alongside.
+
+## 2026-10-06 — S3 result: 2 of 4 ply-8 strategies complete; failed leaf searches use the time
+
+h164 inconclusive (2/4 complete within 4 h), h165 supported (median 18.7x; 9.5x and 28.0x). #2071: 205 bits for 647
+positions in 11 s (likely after a weak reply — the label-cache caveat). #3591: 34,115 bits for 318,473 positions,
+327 table moves and 363 maps, 3.4 h, checked three ways. #11342 and #14026 timed out with ~400 maps found in ~760
+searches each; the ~360 failed searches at up to 30 s are most of the 4 h. Next: the size-scored leaf (h172-h174) in
+the builder — it never fails, it carries exceptions instead.
+
+## 2026-10-06 — SAT hand-off built and registered; register gap: claims superseded before judgement
+
+`find_steady_state` takes a `hint` (solver phases at a map) and `seeds` (positions constrained before the first
+solve); neither changes the answer (tic-tac-toe: hinted search agrees with brute force; a found map as hint is found
+in 1 round instead of 3); 63 tests, 24/24 mutants. Probe `scripts/c4_steady_handoff_probe.py`: the 4 ply-10 leaves
+left with exceptions, SAT hinted (local search's best map + its exception positions) vs cold, 30 min and 200K
+constraints each (raised from 60K after a 60 s smoke reached ~40K). Pre-registered h175 (hinted finds >= 2 of 4) and
+h176 (hinted finds more than cold); launched. Gap found by the full suite: h169, superseded before it was judged,
+had pinned proofs failing every run; the conftest now skips both proofs of such a claim, naming its successor
+(3 tests, 6/6 mutants in a new spec, tests/mutations/conftest_register.json).
+
+## 2026-10-06 — SAT hand-off result: no gain; local search is the leaf engine
+
+h175 refuted (hinted SAT 0/4 within 30 min and 200K constraints), h176 refuted (cold 0/4 too). Registered after the
+data, h177: hinted and cold runs did the same work — constraints within 6% (153-200K) and ~1,000 rounds each — so
+phases plus 8-1,850 seeded counterexamples do not keep the solver near the near-miss map. Even #5563, 8 exceptions
+from pure, stayed unsolved. Option 2 (a better SAT encoding) loses priority; size-scored leaves in the builder are
+the proposed next step.
+
+## 2026-10-06 — S4: size-scored leaves inside the builder, piloted and launched
+
+`strategy_builder`: the leaf search starts from the most recent map and may return a map plus exceptions, kept when
+>= `accept` times under its table; size adds a flag bit per leaf, each excepted leaf's count and its exceptions;
+`check` and the certification play the exceptions (23 tests, 32/32 mutants). `harness/winning_cache.py` shares the
+oracle's answers across a build, emptied at its limit (5 tests, 8/8). Pilots on the two roots after S3's sample, 1 h:
+at 4x #12433 completes in 31 min (198,602 positions, 96,625 bits, 6.2x) with exceptions 95% of its bits (h178); at
+10x neither completes, exceptions ~58% of the partial bits (h179). (h178's note compares with S3's timed-out roots,
+which are other roots.) Registered S4 at 10x on S3's roots, 4 h: h180-h182. #2071 done in 4 s: 133 bits (S3: 205).

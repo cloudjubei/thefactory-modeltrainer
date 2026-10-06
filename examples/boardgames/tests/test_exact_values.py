@@ -63,3 +63,27 @@ def test_a_partially_recorded_position_is_completed_by_solving():
     values = v.move_values([_state([])])[0]
     assert values[3] == -(-1) and all(values[a] == -7 for a in range(7) if a != 3)
     assert pool.batches == [6]
+
+
+class _EchoPool(_Pool):
+    def map(self, fn, jobs, chunksize=1):
+        jobs = list(jobs)
+        self.batches.append(len(jobs))
+        return [sum(board) + to_move for board, to_move in jobs]
+
+
+def test_solves_are_submitted_in_bounded_slices_so_a_large_batch_cannot_fill_the_pool_s_wakeup_pipe(monkeypatch):
+    import harness.exact_values as ev
+
+    monkeypatch.setattr(ev, "SUBMIT_LIMIT", 3)
+    pool = _EchoPool()
+    v = ExactValues(C4, pool, [])
+    states = [_state([a, b]) for a in range(7) for b in (0, 1)][:7]
+    assert v.positions(states) == [sum(s.board) + s.to_move for s in states]
+    assert pool.batches == [3, 3, 1]
+
+
+def test_the_submission_limit_keeps_a_slice_well_under_a_pipe_s_buffer():
+    import harness.exact_values as ev
+
+    assert 0 < ev.SUBMIT_LIMIT <= 4096

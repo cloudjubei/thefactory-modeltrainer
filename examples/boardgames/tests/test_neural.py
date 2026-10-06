@@ -669,20 +669,31 @@ def test_completed_q_policy_preserves_q_magnitude_soft_on_ties_peaky_on_decisive
 
 def test_n_step_value_targets_bootstrap_from_target_net_else_terminal_outcome():
     # #3: the n-step value target replaces the raw-MC outcome (contaminated by LATER blunders) with the lagged
-    # target-net value n plies ahead, sign-corrected to the mover (n even → same mover, n odd → opponent), and
-    # falls back to the real terminal outcome only when the terminal is within n plies.
+    # target-net value n plies ahead, sign-corrected to the mover (the same mover keeps it, the opponent's is
+    # negated), and falls back to the real terminal outcome only when the terminal is within n plies.
     from harness.neural import n_step_value_targets
 
     vt = [0.1, -0.2, 0.3, -0.4, 0.5]        # lagged target-net values, mover-relative, 5 pending positions
     outcome = [1.0, -1.0, 1.0, -1.0, 1.0]   # P0 wins → mover-relative MC outcomes alternate
-    t2 = n_step_value_targets(vt, outcome, n=2)  # even → sign +1
-    assert t2[0] == 0.3 and t2[1] == -0.4 and t2[2] == 0.5      # bootstrap vt[i+2]
+    movers = [0, 1, 0, 1, 0]
+    t2 = n_step_value_targets(vt, outcome, 2, movers)
+    assert t2[0] == 0.3 and t2[1] == -0.4 and t2[2] == 0.5      # bootstrap vt[i+2], same mover
     assert t2[3] == -1.0 and t2[4] == 1.0                       # terminal within 2 → real outcome
-    t1 = n_step_value_targets(vt, outcome, n=1)  # odd → sign −1
-    assert abs(t1[0] - 0.2) < 1e-9 and abs(t1[3] - (-0.5)) < 1e-9  # bootstrap −vt[i+1]
+    t1 = n_step_value_targets(vt, outcome, 1, movers)
+    assert abs(t1[0] - 0.2) < 1e-9 and abs(t1[3] - (-0.5)) < 1e-9  # bootstrap −vt[i+1], the opponent's
     assert t1[4] == 1.0                                          # last position: terminal next ply
     # n large enough that EVERY position's terminal is within n → pure MC (no bootstrap), i.e. current behaviour
-    assert n_step_value_targets(vt, outcome, n=5) == outcome
+    assert n_step_value_targets(vt, outcome, 5, movers) == outcome
+
+
+def test_n_step_value_targets_keep_the_sign_when_the_same_player_moves_again():
+    from harness.neural import n_step_value_targets
+
+    vt = [0.1, 0.2, 0.3, 0.4]
+    outcome = [1.0, 1.0, -1.0, -1.0]
+    movers = [0, 0, 1, 1]
+    assert n_step_value_targets(vt, outcome, 1, movers)[:3] == [0.2, -0.3, 0.4]
+    assert n_step_value_targets(vt, outcome, 2, movers)[:2] == [-0.3, -0.4]
 
 
 def test_train_alphazero_with_n_step_value_target_and_lagged_net_runs():
@@ -1556,6 +1567,25 @@ def _c48_train(iterations=3, **knobs):
 @pytest.mark.parametrize("key", sorted(_C48_BEFORE))
 def test_c48_every_existing_path_trains_bit_for_bit_as_before_with_the_new_knobs_off(key):
     assert _c48_train(**_C48_KNOBS[key])[0] == _C48_BEFORE[key]
+
+
+_MOVER_FIX_BEFORE = {"n_step": "6ee68aa27c811938fee9df127b745a182bf01363574c34ce2f7478f2c1ca3a02",
+                     "n_step_odd": "f8538936819f1323b193b60854f24bdfde4baa353a3d182f9ae714f1a8eacde7",
+                     "solver": "85dbcf4558514154e0fd4d337aec3f875e8c4f03aad0fea934cc18f4abf28666"}
+
+
+def _mover_fix_knobs(key):
+    from harness.tablebase import Tablebase
+
+    return {"n_step": {"value_n_step": 2, "target_refresh": 1}, "n_step_odd": {"value_n_step": 1, "target_refresh": 1},
+            "solver": {"endgame_tb": Tablebase(cap=100000), "endgame_max_empty": 5, "endgame_extend_positions": 0}}[key]
+
+
+@pytest.mark.parametrize("key", sorted(_MOVER_FIX_BEFORE))
+def test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers(key):
+    """Recorded on the code that negated every child's value: on a game whose mover always alternates, comparing movers
+    instead must change nothing, so runs on either side of the fix are the same experiment."""
+    assert _c48_train(**_mover_fix_knobs(key))[0] == _MOVER_FIX_BEFORE[key]
 
 
 def test_c48_a_unique_buffer_holds_each_position_once_and_evicts_only_when_distinct_positions_overflow():

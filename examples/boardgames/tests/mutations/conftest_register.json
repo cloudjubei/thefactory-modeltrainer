@@ -1,0 +1,66 @@
+{
+  "file": "tests/conftest.py",
+  "tests": ["tests/test_hypotheses.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "superseded unjudged proofs run",
+      "old": "            if h.get(\"supersession\"):\n                why",
+      "new": "            if False:\n                why"
+    },
+    {
+      "name": "every unjudged claim skipped",
+      "old": "            if h.get(\"supersession\"):\n                why",
+      "new": "            if True:\n                why"
+    },
+    {
+      "name": "superseded undecidable proof still runs",
+      "old": "                if inc:\n                    out[node(inc)] = (\"skip\", why)",
+      "new": "                if False:\n                    out[node(inc)] = (\"skip\", why)"
+    },
+    {
+      "name": "judged superseded claim skipped",
+      "old": "        if not runs:\n",
+      "new": "        if not runs or h.get(\"supersession\"):\n"
+    },
+    {
+      "name": "failing proof not expected to fail",
+      "old": "            out[node(h[\"proof\"])] = (\"xfail\"",
+      "new": "            out[node(h[\"proof\"])] = (\"skip\""
+    },
+    {
+      "name": "supported undecidable proof runs",
+      "old": "                out[node(inc)] = (\"skip\", f\"{h['id']} is supported",
+      "new": "                out[node(inc + \"x\")] = (\"skip\", f\"{h['id']} is supported"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T17:04:22+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "superseded unjudged proofs run": [
+        "test_a_claim_SUPERSEDED_before_it_was_judged_has_its_proofs_skipped"
+      ],
+      "every unjudged claim skipped": [],
+      "superseded undecidable proof still runs": [
+        "test_a_claim_SUPERSEDED_before_it_was_judged_has_its_proofs_skipped"
+      ],
+      "judged superseded claim skipped": [
+        "test_a_JUDGED_claim_that_was_later_superseded_keeps_its_recorded_outcome"
+      ],
+      "failing proof not expected to fail": [
+        "test_a_JUDGED_claim_that_was_later_superseded_keeps_its_recorded_outcome",
+        "test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm",
+        "test_a_REFUTED_claim_s_proofs_are_both_expected_to_fail",
+        "test_a_proof_recorded_as_failing_that_now_PASSES_fails_the_suite",
+        "test_an_INCONCLUSIVE_claim_s_failing_proof_is_expected_to_fail_and_its_undecidable_proof_runs"
+      ],
+      "supported undecidable proof runs": [
+        "test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm",
+        "test_the_LAST_recorded_verification_decides_what_the_suite_expects",
+        "test_the_suite_follows_the_REGISTER_a_supported_claim_s_undecidable_proof_is_not_run"
+      ]
+    }
+  }
+}

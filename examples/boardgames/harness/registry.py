@@ -1,10 +1,12 @@
 """Game + persona registry — the one place a new game (or a luck-based game's protocol personas) is wired in."""
 from __future__ import annotations
 
+from functools import partial
 from typing import Callable
 
 from games.connect4 import Connect4
 from games.checkers import Checkers
+from games.kalah import Kalah
 from games.othello import Othello
 from games.ninemensmorris import NineMensMorris
 from games.tictactoe import TicTacToe
@@ -17,6 +19,9 @@ GAMES: dict[str, Callable[[], Game]] = {
     "checkers": Checkers,
     "tictactoe": TicTacToe,
     "ninemensmorris": NineMensMorris,
+    "kalah": Kalah,
+    "kalah4x3": partial(Kalah, 4, 3),
+    "kalah3x3": partial(Kalah, 3, 3),
 }
 
 # Per-game protocol PERSONAS (fixed-strategy archetypes) — the opponent rungs the luck-based games (Skull,
@@ -27,6 +32,9 @@ PERSONAS: dict[str, dict[str, Callable[[dict], Agent]]] = {
     "checkers": {},
     "tictactoe": {},
     "ninemensmorris": {},
+    "kalah": {},
+    "kalah4x3": {},
+    "kalah3x3": {},
 }
 
 

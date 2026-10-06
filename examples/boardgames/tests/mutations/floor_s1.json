@@ -1,0 +1,170 @@
+{
+  "file": "harness/floor_s1.py",
+  "tests": ["tests/test_floor_s1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "pilot overlaps the sample",
+      "old": "    taken = set(sample_indices(total, per_ply, seed))",
+      "new": "    taken = set()"
+    },
+    {
+      "name": "sample not seeded",
+      "old": "    return sorted(random.Random(seed).sample(range(total), per_ply))",
+      "new": "    return sorted(random.Random(0).sample(range(total), per_ply))"
+    },
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "positions unchecked",
+      "old": "    if e.get(\"positions_fingerprint\") != spec[\"positions_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "config unchecked",
+      "old": "    if e.get(\"config\") != {k: spec[k] for k in (\"n_levels\", \"level_bits\", \"budget\")}:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "sample size unchecked",
+      "old": "        if n != spec[\"per_ply\"]:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "independent checks ignored",
+      "old": "    if any(r[\"status\"] == \"found\" and not (r[\"verified\"] and r[\"certified\"]) for r in e[\"results\"]):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "certify alone ignored",
+      "old": "not (r[\"verified\"] and r[\"certified\"])",
+      "new": "not r[\"verified\"]"
+    },
+    {
+      "name": "integrity ignored",
+      "old": "    if integrity:\n        return",
+      "new": "    if False:\n        return"
+    },
+    {
+      "name": "trivial counted in coverage",
+      "old": "    live = [r for r in rows if not r[\"trivial\"]]",
+      "new": "    live = list(rows)"
+    },
+    {
+      "name": "coverage support bar loose",
+      "old": "    coverage = (\"supported\" if c >= spec[\"coverage_support\"]",
+      "new": "    coverage = (\"supported\" if c > spec[\"coverage_support\"]"
+    },
+    {
+      "name": "coverage refute bar loose",
+      "old": "else \"refuted\" if c < spec[\"coverage_refute\"]",
+      "new": "else \"refuted\" if c <= spec[\"coverage_refute\"]"
+    },
+    {
+      "name": "compression not per bit",
+      "old": "    values = [3 * r[\"own_positions\"] / r[\"bits\"] for r in e[\"results\"]",
+      "new": "    values = [3 * r[\"own_positions\"] for r in e[\"results\"]"
+    },
+    {
+      "name": "compression reads every ply",
+      "old": "              if r[\"ply\"] == spec[\"judged_ply\"] and r[\"status\"] == \"found\"]",
+      "new": "              if r[\"status\"] == \"found\"]"
+    },
+    {
+      "name": "too few found still judged",
+      "old": "    if len(values) < spec[\"min_found\"]:",
+      "new": "    if len(values) < 1:"
+    },
+    {
+      "name": "compression support bar loose",
+      "old": "        compression = (\"supported\" if median >= spec[\"compression_support\"]",
+      "new": "        compression = (\"supported\" if median > spec[\"compression_support\"]"
+    },
+    {
+      "name": "compression refute bar loose",
+      "old": "                       else \"refuted\" if median < spec[\"compression_refute\"] else",
+      "new": "                       else \"refuted\" if median <= spec[\"compression_refute\"] else"
+    },
+    {
+      "name": "table plays the last optimal move",
+      "old": "        move = min(int(a) for a, v in row[\"values\"].items() if v == best)",
+      "new": "        move = max(int(a) for a, v in row[\"values\"].items() if v == best)"
+    },
+    {
+      "name": "table plays any move",
+      "old": "        move = min(int(a) for a, v in row[\"values\"].items() if v == best)",
+      "new": "        move = min(int(a) for a in row[\"values\"])"
+    },
+    {
+      "name": "repeated positions kept",
+      "old": "            if not game.is_terminal(s) and key not in seen:",
+      "new": "            if not game.is_terminal(s):"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T04:16:34+00:00",
+    "killed": 20,
+    "survived": [],
+    "killed_by": {
+      "pilot overlaps the sample": [
+        "test_the_sample_is_fixed_by_the_seed_and_the_pilot_never_touches_it"
+      ],
+      "sample not seeded": ["test_the_sample_is_fixed_by_the_seed_and_the_pilot_never_touches_it"],
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "positions unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[positions]"
+      ],
+      "config unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[config]"
+      ],
+      "sample size unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[short"
+      ],
+      "independent checks ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[unverified]"
+      ],
+      "certify alone ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified]"
+      ],
+      "integrity ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[config]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[positions]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[short",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[unverified]"
+      ],
+      "trivial counted in coverage": ["test_coverage_counts_found_over_non_trivial_positions"],
+      "coverage support bar loose": ["test_the_coverage_bars_are_registered[3-supported]"],
+      "coverage refute bar loose": ["test_the_coverage_bars_are_registered[1-inconclusive]"],
+      "compression not per bit": [
+        "test_compression_is_three_bits_per_replaced_position_over_the_map_bits",
+        "test_the_compression_bars_are_registered[10-refuted]",
+        "test_the_compression_bars_are_registered[150-inconclusive]",
+        "test_the_compression_bars_are_registered[20-inconclusive]"
+      ],
+      "compression reads every ply": [
+        "test_compression_is_three_bits_per_replaced_position_over_the_map_bits",
+        "test_too_few_found_states_leave_compression_inconclusive"
+      ],
+      "too few found still judged": ["test_too_few_found_states_leave_compression_inconclusive"],
+      "compression support bar loose": ["test_the_compression_bars_are_registered[200-supported]"],
+      "compression refute bar loose": ["test_the_compression_bars_are_registered[20-inconclusive]"],
+      "table plays the last optimal move": [
+        "test_the_next_frontier_is_the_table_s_move_then_every_reply_each_position_once"
+      ],
+      "table plays any move": [
+        "test_the_next_frontier_is_the_table_s_move_then_every_reply_each_position_once"
+      ],
+      "repeated positions kept": [
+        "test_the_next_frontier_is_the_table_s_move_then_every_reply_each_position_once"
+      ]
+    }
+  }
+}

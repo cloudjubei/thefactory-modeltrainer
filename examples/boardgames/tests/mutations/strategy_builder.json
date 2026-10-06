@@ -1,0 +1,260 @@
+{
+  "file": "harness/strategy_builder.py",
+  "tests": ["tests/test_strategy_builder.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "empty map not tried first",
+      "old": "        for i in [0, *recent]:",
+      "new": "        for i in recent:"
+    },
+    {
+      "name": "reuse ignores the window",
+      "old": "    recent = range(len(self.maps) - 1, max(0, len(self.maps) - 1 - self.reuse_window), -1)",
+      "new": "    recent = range(0)"
+    },
+    {
+      "name": "search before reuse",
+      "old": "        found = self._covering_map(state)\n        if found is not None:\n            return {\"leaf\": found}\n        if depth < self.min_leaf_depth:\n            return None",
+      "new": "        found = None\n        if depth < self.min_leaf_depth:\n            found = self._covering_map(state)\n            return None if found is None else {\"leaf\": found}"
+    },
+    {
+      "name": "search below the minimum depth",
+      "old": "        if depth < self.min_leaf_depth:\n            return None",
+      "new": "        if False:\n            return None"
+    },
+    {
+      "name": "unsimplified map kept",
+      "old": "self._keep(simplify(self.facts, state, levels, self.n_levels, self.cap), len(empty))",
+      "new": "self._keep(levels, len(empty))"
+    },
+    {
+      "name": "failed search read as a leaf",
+      "old": "        if result is None:\n            return None",
+      "new": "        if result is None:\n            return {\"leaf\": 0}"
+    },
+    {
+      "name": "deadline ignored",
+      "old": "        if time.monotonic() > self.deadline:\n            return False",
+      "new": "        if False:\n            return False"
+    },
+    {
+      "name": "unwinnable root not refused",
+      "old": "        if not moves:\n            raise",
+      "new": "        if False:\n            raise"
+    },
+    {
+      "name": "move chosen without readiness",
+      "old": "            scored.append((-(ready - len(children)), len(children), a, children))",
+      "new": "            scored.append((0, 0, a, children))"
+    },
+    {
+      "name": "only first child built",
+      "old": "        return all(self.build(c, depth + 2) for c in children)",
+      "new": "        return all(self.build(c, depth + 2) for c in children[:1])"
+    },
+    {
+      "name": "node bit dropped",
+      "old": "        return {\"nodes\": len(self.nodes) + moves * move_bits",
+      "new": "        return {\"nodes\": moves * move_bits"
+    },
+    {
+      "name": "leaf reference free",
+      "old": "        ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0",
+      "new": "        ref = 0"
+    },
+    {
+      "name": "map bits dropped",
+      "old": "+ leaves * ref + maps + exc_bits,",
+      "new": "+ leaves * ref + exc_bits,"
+    },
+    {
+      "name": "check skips opponent replies",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))\n            continue",
+      "new": "            stack.extend(game.step(s, b) for b in game.legal_actions(s)[:1])\n            continue"
+    },
+    {
+      "name": "check accepts missing nodes",
+      "old": "        if node is None:\n            return",
+      "new": "        if node is None:\n            continue\n            return"
+    },
+    {
+      "name": "check trusts leaves",
+      "old": "        if not walk[\"won\"]:",
+      "new": "        if False:"
+    },
+    {
+      "name": "check accepts a lost line",
+      "old": "            if game.winner(s) != player:\n                return {\"won\": False, \"reason\": \"lost line\"",
+      "new": "            if False:\n                return {\"won\": False, \"reason\": \"lost line\""
+    },
+    {
+      "name": "exceptions always refused",
+      "old": "        if self.accept is None:\n            return None",
+      "new": "        if True:\n            return None"
+    },
+    {
+      "name": "exceptions accepted without a threshold",
+      "old": "        if self.accept is None:\n            return None",
+      "new": "        if self.accept is None:\n            self.accept = 0"
+    },
+    {
+      "name": "threshold ignored",
+      "old": "        if 3 * own < self.accept * bits:",
+      "new": "        if False:"
+    },
+    {
+      "name": "threshold boundary",
+      "old": "        if 3 * own < self.accept * bits:",
+      "new": "        if 3 * own <= self.accept * bits:"
+    },
+    {
+      "name": "leaf map bits not charged",
+      "old": "        bits = ((map_bits(levels, len(empty), self.level_bits) if levels else 0)",
+      "new": "        bits = (0"
+    },
+    {
+      "name": "leaf exceptions not charged",
+      "old": "                + exception_bits(len(exc), own, self.game.num_actions))\n        if 3",
+      "new": "                + 0)\n        if 3"
+    },
+    {
+      "name": "leaf map dropped",
+      "old": "        return {\"leaf\": self._keep(levels, len(empty)) if levels else 0, \"exceptions\"",
+      "new": "        return {\"leaf\": 0, \"exceptions\""
+    },
+    {
+      "name": "exceptions dropped from the leaf",
+      "old": "\"exceptions\": exc, \"own\": own}",
+      "new": "\"own\": own}"
+    },
+    {
+      "name": "search started cold",
+      "old": "        result = self.search(state, start)",
+      "new": "        result = self.search(state, {})"
+    },
+    {
+      "name": "start keeps filled cells",
+      "old": "        start = {c: k for c, k in self.maps[-1].items() if c in set(empty)}",
+      "new": "        start = dict(self.maps[-1])"
+    },
+    {
+      "name": "no flag bit per leaf",
+      "old": "        exc_bits = (leaves + sum(",
+      "new": "        exc_bits = (0 + sum("
+    },
+    {
+      "name": "no exception count",
+      "old": "math.ceil(math.log2(n[\"own\"] + 1))\n",
+      "new": "0\n"
+    },
+    {
+      "name": "exception bits dropped",
+      "old": "                                 + exception_bits(len(n[\"exceptions\"]), n[\"own\"], self.game.num_actions)",
+      "new": "                                 + 0"
+    },
+    {
+      "name": "check ignores exceptions",
+      "old": "        exc = node.get(\"exceptions\", {})",
+      "new": "        exc = {}"
+    },
+    {
+      "name": "own positions ignore exceptions",
+      "old": "            stack.append(game.step(s, choose_with(facts, s, levels, n_levels, exceptions)))",
+      "new": "            stack.append(game.step(s, choose_with(facts, s, levels, n_levels, {})))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T18:55:35+00:00",
+    "killed": 32,
+    "survived": [],
+    "killed_by": {
+      "empty map not tried first": [
+        "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
+        "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
+      ],
+      "reuse ignores the window": ["test_a_known_map_covers_a_position_without_searching"],
+      "search before reuse": ["test_a_known_map_covers_a_position_without_searching"],
+      "search below the minimum depth": [
+        "test_moves_are_chosen_to_make_the_most_children_ready",
+        "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
+        "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
+      ],
+      "unsimplified map kept": ["test_a_found_map_is_simplified_before_it_is_kept"],
+      "failed search read as a leaf": ["test_a_failed_search_makes_a_move_node_not_an_empty_leaf"],
+      "deadline ignored": ["test_the_deadline_stops_the_build"],
+      "unwinnable root not refused": ["test_a_root_its_side_cannot_win_is_refused"],
+      "move chosen without readiness": [
+        "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one"
+      ],
+      "only first child built": [
+        "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
+      ],
+      "node bit dropped": [
+        "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count",
+        "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
+      ],
+      "leaf reference free": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
+      "map bits dropped": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
+      "check skips opponent replies": [
+        "test_check_rejects_a_line_the_opponent_wins",
+        "test_check_walks_every_reply_not_just_the_first"
+      ],
+      "check accepts missing nodes": [
+        "test_check_rejects_a_missing_node_and_a_losing_leaf",
+        "test_check_walks_every_reply_not_just_the_first"
+      ],
+      "check trusts leaves": [
+        "test_check_plays_a_leaf_s_exceptions",
+        "test_check_rejects_a_losing_exception",
+        "test_check_rejects_a_missing_node_and_a_losing_leaf"
+      ],
+      "check accepts a lost line": ["test_check_rejects_a_line_the_opponent_wins"],
+      "exceptions always refused": [
+        "test_a_leaf_exactly_at_the_threshold_is_kept",
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"
+      ],
+      "exceptions accepted without a threshold": [
+        "test_without_a_threshold_a_leaf_with_exceptions_is_never_kept"
+      ],
+      "threshold ignored": [
+        "test_a_leaf_with_exceptions_too_large_for_the_threshold_becomes_a_move",
+        "test_the_threshold_counts_the_leaf_s_map_bits"
+      ],
+      "threshold boundary": ["test_a_leaf_exactly_at_the_threshold_is_kept"],
+      "leaf map bits not charged": ["test_the_threshold_counts_the_leaf_s_map_bits"],
+      "leaf exceptions not charged": [
+        "test_a_leaf_with_exceptions_too_large_for_the_threshold_becomes_a_move",
+        "test_the_threshold_counts_the_leaf_s_map_bits"
+      ],
+      "leaf map dropped": [
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size"
+      ],
+      "exceptions dropped from the leaf": [
+        "test_a_leaf_exactly_at_the_threshold_is_kept",
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"
+      ],
+      "search started cold": [
+        "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
+      ],
+      "start keeps filled cells": [
+        "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
+      ],
+      "no flag bit per leaf": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
+      "no exception count": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
+      "exception bits dropped": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
+      "check ignores exceptions": [
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_check_plays_a_leaf_s_exceptions"
+      ],
+      "own positions ignore exceptions": [
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_check_plays_a_leaf_s_exceptions"
+      ]
+    }
+  }
+}

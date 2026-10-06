@@ -1,0 +1,128 @@
+{
+  "file": "harness/steady_state.py",
+  "tests": ["tests/test_steady_state.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "several changed cells accepted",
+      "old": "        if len(changed) != 1 or before[changed[0]] != 0:",
+      "new": "        if len(changed) < 1:"
+    },
+    {
+      "name": "win not played first",
+      "old": "    if wins:\n        return min(wins)\n",
+      "new": "    if False:\n        return min(wins)\n"
+    },
+    {
+      "name": "single safe move not forced",
+      "old": "    if len(safe) == 1:\n        return safe[0]\n",
+      "new": ""
+    },
+    {
+      "name": "first level holding any safe move decides",
+      "old": "        if len(at) == 1:",
+      "new": "        if len(at) >= 1:"
+    },
+    {
+      "name": "levels read backwards",
+      "old": "    for k in range(n_levels):",
+      "new": "    for k in reversed(range(n_levels)):"
+    },
+    {
+      "name": "unsafe moves kept",
+      "old": "                elif game.current_player(child) == mover or not any(",
+      "new": "                elif True or not any("
+    },
+    {
+      "name": "facts recomputed",
+      "old": "        if key not in self._facts:",
+      "new": "        if True:"
+    },
+    {
+      "name": "draw accepted",
+      "old": "            if w != player:",
+      "new": "            if w == 1 - player:"
+    },
+    {
+      "name": "undefined skipped",
+      "old": "                return result(\"undefined\")",
+      "new": "                continue"
+    },
+    {
+      "name": "one reply walked",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))",
+      "new": "            stack.extend(game.step(s, b) for b in game.legal_actions(s)[:1])"
+    },
+    {
+      "name": "cap ignored",
+      "old": "        if len(seen) > cap:",
+      "new": "        if len(seen) > cap + 100:"
+    },
+    {
+      "name": "empty cells free",
+      "old": "    return empty + level_bits * len(levels)",
+      "new": "    return level_bits * len(levels)"
+    },
+    {
+      "name": "oversized map accepted",
+      "old": "    if len(levels) > empty:",
+      "new": "    if False:"
+    },
+    {
+      "name": "simplify drops unverified",
+      "old": "        if verify(facts, root, trial, n_levels, cap)[\"won\"]:",
+      "new": "        if True:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:45:09+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
+      "win not played first": [
+        "test_a_walk_past_the_cap_is_rejected",
+        "test_a_winning_map_is_verified_over_every_reply",
+        "test_a_winning_move_is_played_whatever_the_map",
+        "test_simplify_drops_every_level_the_win_does_not_need"
+      ],
+      "single safe move not forced": [
+        "test_a_forced_draw_is_rejected",
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_the_only_safe_move_is_played_whatever_the_map"
+      ],
+      "first level holding any safe move decides": [
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]"
+      ],
+      "levels read backwards": [
+        "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]"
+      ],
+      "unsafe moves kept": [
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_the_only_safe_move_is_played_whatever_the_map"
+      ],
+      "facts recomputed": ["test_facts_are_computed_once_per_position"],
+      "draw accepted": [
+        "test_a_forced_draw_is_rejected",
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]"
+      ],
+      "undefined skipped": [
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels0-undefined]",
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels3-undefined]",
+        "test_simplify_drops_every_level_the_win_does_not_need"
+      ],
+      "one reply walked": [
+        "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
+        "test_a_winning_map_is_verified_over_every_reply"
+      ],
+      "cap ignored": ["test_a_walk_past_the_cap_is_rejected"],
+      "empty cells free": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
+      "oversized map accepted": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
+      "simplify drops unverified": ["test_simplify_drops_every_level_the_win_does_not_need"]
+    }
+  }
+}

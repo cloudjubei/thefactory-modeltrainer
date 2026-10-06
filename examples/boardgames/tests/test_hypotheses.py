@@ -821,9 +821,10 @@ def test_only_a_test_backed_claim_takes_pins(tmp_path):
         _reg(tmp_path).register("h1", claim="c", a="b35", b="a11", direction="a>b", unit="simulations", pins=[judge])
 
 
-def _suite_on(tmp_path, claims, bodies, register_proof=False, source=None):
+def _suite_on(tmp_path, claims, bodies, register_proof=False, source=None, superseded=()):
     """Run pytest (with the suite's conftest) over a probe test file, against a register holding `claims` — each
-    (proof, inconclusive_proof, recorded ok, recorded inconclusive) over the probe's test names."""
+    (proof, inconclusive_proof, recorded ok, recorded inconclusive) over the probe's test names; a recorded ok of None
+    means the claim was never judged. Claims whose index is in `superseded` carry a supersession."""
     import os
     import subprocess
     import sys
@@ -834,14 +835,16 @@ def _suite_on(tmp_path, claims, bodies, register_proof=False, source=None):
     hyps = {}
     for i, (proof, inc, ok, inconclusive, *earlier) in enumerate(claims):
         entries = []
-        for run_ok, run_inc in [*earlier, (ok, inconclusive)]:
+        for run_ok, run_inc in [*earlier, *([] if ok is None else [(ok, inconclusive)])]:
             entry = {"proof": f"{test}::{proof}", "ok": run_ok, "detail": "", "drawn_at": "2026-09-24T00:00:00"}
             if run_inc is not None:
                 entry["inconclusive"] = run_inc
             entries.append(entry)
         hyps[f"p{i}"] = {"id": f"p{i}", "claim": "c", "mode": "test", "proof": f"{test}::{proof}", "note": "",
                          "registered_at": "2026-09-01T00:00:00", "evidence": entries,
-                         **({"inconclusive_proof": f"{test}::{inc}"} if inc else {})}
+                         **({"inconclusive_proof": f"{test}::{inc}"} if inc else {}),
+                         **({"supersession": {"by": "h0", "reason": "r", "at": "2026-09-02T00:00:00"}}
+                            if i in superseded else {})}
     register = tmp_path / "register.json"
     register.write_text(json.dumps({"hypotheses": hyps}))
     env = {k: v for k, v in os.environ.items() if k != "REGISTER_PROOF"}
@@ -899,6 +902,26 @@ def test_a_PARAMETRIZED_proof_follows_the_register_arm_by_arm(tmp_path):
     code, summary = _suite_on(tmp_path, [("test_arm[a]", "test_und[a]", True, None),
                                          ("test_arm[b]", "test_und[b]", False, False)], {}, source=source)
     assert code == 0 and summary.startswith("1 passed, 1 skipped, 2 xfailed")
+
+
+def test_a_claim_SUPERSEDED_before_it_was_judged_has_its_proofs_skipped(tmp_path):
+    """Its pinned proofs can be neither edited nor judged any more — the claim that superseded it carries the
+    verdict — so they would otherwise fail every suite run."""
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", None, None)],
+                              {"test_holds": False, "test_undecidable": False}, superseded={0})
+    assert code == 0 and summary.startswith("2 skipped")
+
+
+def test_an_unjudged_claim_that_is_not_superseded_runs_its_proofs_as_written(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", None, None)],
+                              {"test_holds": False, "test_undecidable": True})
+    assert code != 0 and summary.startswith("1 failed, 1 passed")
+
+
+def test_a_JUDGED_claim_that_was_later_superseded_keeps_its_recorded_outcome(tmp_path):
+    code, summary = _suite_on(tmp_path, [("test_holds", "test_undecidable", False, False)],
+                              {"test_holds": False, "test_undecidable": False}, superseded={0})
+    assert code == 0 and summary.startswith("2 xfailed")
 
 
 def test_tests_the_register_does_not_name_are_untouched(tmp_path):

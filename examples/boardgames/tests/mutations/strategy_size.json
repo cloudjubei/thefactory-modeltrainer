@@ -1,0 +1,113 @@
+{
+  "file": "harness/strategy_size.py",
+  "tests": ["tests/test_strategy_size.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "graph revisits counted",
+      "old": "            if k not in seen:\n                seen.add(k)\n                stack.append(child)",
+      "new": "            seen.add(k)\n            if len(seen) < 10**7:\n                stack.append(child) if k not in seen else None"
+    },
+    {
+      "name": "extra move negated",
+      "old": "    return v if game.current_player(child) == me else -v",
+      "new": "    return -v"
+    },
+    {
+      "name": "terminal read as draw",
+      "old": "        return (r > 0) - (r < 0)",
+      "new": "        return 0"
+    },
+    {
+      "name": "any move kept",
+      "old": "    return [a for a in game.legal_actions(state) if _kept(game, state, a) == value]",
+      "new": "    return list(game.legal_actions(state))"
+    },
+    {
+      "name": "canonical takes the last keeping move",
+      "old": "            choice[key] = _keeping(game, s)[0]",
+      "new": "            choice[key] = _keeping(game, s)[-1]"
+    },
+    {
+      "name": "tree takes the largest",
+      "old": "                cost[key], best[key] = min(options)",
+      "new": "                cost[key], best[key] = max(options)"
+    },
+    {
+      "name": "own decision not counted",
+      "old": "                options = [(1 + tree(game.step(s, a)), a) for a in _keeping(game, s)]",
+      "new": "                options = [(tree(game.step(s, a)), a) for a in _keeping(game, s)]"
+    },
+    {
+      "name": "one reply counted",
+      "old": "                cost[key] = sum(tree(game.step(s, b)) for b in game.legal_actions(s))",
+      "new": "                cost[key] = max(tree(game.step(s, b)) for b in game.legal_actions(s))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T00:43:15+00:00",
+    "killed": 8,
+    "survived": [],
+    "killed_by": {
+      "graph revisits counted": [
+        "test_the_game_graph_counts_every_reachable_position_once[shape1-3]",
+        "test_the_game_graph_counts_every_reachable_position_once[shape2-8]",
+        "test_tic_tac_toe_has_5478_reachable_positions"
+      ],
+      "extra move negated": [
+        "test_both_strategies_certify_over_whole_kalah_games[shape1]",
+        "test_both_strategies_certify_over_whole_kalah_games[shape3]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape1]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape2]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape3]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape4]"
+      ],
+      "terminal read as draw": [
+        "test_both_strategies_certify_over_whole_kalah_games[shape0]",
+        "test_both_strategies_certify_over_whole_kalah_games[shape1]",
+        "test_both_strategies_certify_over_whole_kalah_games[shape2]",
+        "test_both_strategies_certify_over_whole_kalah_games[shape3]",
+        "test_decisions_count_each_position_of_the_strategy_once",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape0]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape1]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape2]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape3]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape4]",
+        "test_the_canonical_strategy_plays_the_first_value_keeping_move",
+        "test_the_minimal_tree_is_the_smallest_over_every_value_keeping_choice"
+      ],
+      "any move kept": [
+        "test_both_strategies_certify_over_whole_kalah_games[shape1]",
+        "test_both_strategies_certify_over_whole_kalah_games[shape3]",
+        "test_decisions_count_each_position_of_the_strategy_once",
+        "test_the_minimal_tree_is_the_smallest_over_every_value_keeping_choice"
+      ],
+      "canonical takes the last keeping move": [
+        "test_decisions_count_each_position_of_the_strategy_once"
+      ],
+      "tree takes the largest": [
+        "test_decisions_count_each_position_of_the_strategy_once",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape0]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape2]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape3]",
+        "test_the_minimal_tree_is_the_smallest_over_every_value_keeping_choice"
+      ],
+      "own decision not counted": [
+        "test_decisions_count_each_position_of_the_strategy_once",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape0]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape1]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape2]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape3]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape4]",
+        "test_the_minimal_tree_is_the_smallest_over_every_value_keeping_choice"
+      ],
+      "one reply counted": [
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape1]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape2]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape3]",
+        "test_minimising_the_tree_never_needs_more_decisions_than_the_canonical_tree[shape4]",
+        "test_the_minimal_tree_is_the_smallest_over_every_value_keeping_choice"
+      ]
+    }
+  }
+}

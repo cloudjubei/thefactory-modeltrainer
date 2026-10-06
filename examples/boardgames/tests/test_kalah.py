@@ -215,3 +215,8 @@ def test_a_variant_needs_at_least_one_hole_and_one_counter():
         Kalah(0, 4)
     with pytest.raises(ValueError, match="counters"):
         Kalah(4, 0)
+
+
+def test_the_standard_shape_is_named_kalah_and_every_other_shape_carries_its_size():
+    assert Kalah().name == "kalah" and (Kalah().holes, Kalah().counters) == (6, 4)
+    assert Kalah(4, 3).name == "kalah4x3" and Kalah(6, 5).name == "kalah6x5"

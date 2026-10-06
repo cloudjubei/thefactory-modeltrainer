@@ -1,0 +1,105 @@
+{
+  "file": "harness/steady_local.py",
+  "tests": ["tests/test_steady_local.py"],
+  "timeout": 180,
+  "mutations": [
+    {
+      "name": "capped walk given a size",
+      "old": "    if r[\"status\"] == \"cap\":",
+      "new": "    if False:"
+    },
+    {
+      "name": "map bits dropped",
+      "old": "    bits = (map_bits(levels, len(facts.empty_cells(root)), level_bits)",
+      "new": "    bits = (0"
+    },
+    {
+      "name": "exceptions free",
+      "old": "            + exception_bits(len(r[\"exceptions\"]), r[\"own_positions\"], facts.game.num_actions))",
+      "new": "            + 0)"
+    },
+    {
+      "name": "capped leaf costs nothing",
+      "old": "    return math.inf if leaf[\"bits\"] is None else leaf[\"bits\"]",
+      "new": "    return 0 if leaf[\"bits\"] is None else leaf[\"bits\"]"
+    },
+    {
+      "name": "ties rejected",
+      "old": "        if _cost(leaf) <= _cost(now):",
+      "new": "        if _cost(leaf) < _cost(now):"
+    },
+    {
+      "name": "worse changes taken",
+      "old": "        if _cost(leaf) <= _cost(now):",
+      "new": "        if True:"
+    },
+    {
+      "name": "best replaced by ties",
+      "old": "            if _cost(now) < _cost(best_leaf):",
+      "new": "            if _cost(now) <= _cost(best_leaf):"
+    },
+    {
+      "name": "stops at the first sized leaf",
+      "old": "    while (best_leaf[\"bits\"] is None or best_leaf[\"exceptions\"]) and",
+      "new": "    while best_leaf[\"bits\"] is None and"
+    },
+    {
+      "name": "levels never cleared",
+      "old": "        if level == n_levels:\n            trial.pop(cell, None)",
+      "new": "        if False:\n            trial.pop(cell, None)"
+    },
+    {
+      "name": "found with exceptions",
+      "old": "    found = best_leaf[\"bits\"] is not None and not best_leaf[\"exceptions\"]",
+      "new": "    found = best_leaf[\"bits\"] is not None"
+    },
+    {
+      "name": "time budget ignored",
+      "old": "and time.monotonic() < deadline:",
+      "new": "and True:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T15:28:50+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "capped walk given a size": [
+        "test_a_capped_walk_is_never_read_as_a_win",
+        "test_a_walk_past_the_cap_has_no_size"
+      ],
+      "map bits dropped": [
+        "test_a_map_with_no_root_move_pays_for_an_exception_there",
+        "test_a_winning_map_costs_only_its_own_bits"
+      ],
+      "exceptions free": [
+        "test_a_level_that_blocks_the_win_can_be_cleared",
+        "test_a_map_with_no_root_move_pays_for_an_exception_there",
+        "test_local_search_finds_the_fork_and_the_map_verifies",
+        "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies"
+      ],
+      "capped leaf costs nothing": ["test_a_capped_change_is_never_taken"],
+      "ties rejected": ["test_an_equal_sized_change_is_taken"],
+      "worse changes taken": [
+        "test_a_capped_change_is_never_taken",
+        "test_a_change_that_grows_the_leaf_is_rejected"
+      ],
+      "best replaced by ties": ["test_the_best_leaf_is_kept_when_later_changes_only_tie"],
+      "stops at the first sized leaf": [
+        "test_a_capped_change_is_never_taken",
+        "test_a_change_that_grows_the_leaf_is_rejected",
+        "test_a_level_that_blocks_the_win_can_be_cleared",
+        "test_an_equal_sized_change_is_taken",
+        "test_local_search_finds_the_fork_and_the_map_verifies",
+        "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies",
+        "test_the_best_leaf_is_kept_when_later_changes_only_tie"
+      ],
+      "levels never cleared": ["test_a_level_that_blocks_the_win_can_be_cleared"],
+      "found with exceptions": [
+        "test_local_search_reports_its_best_leaf_when_time_runs_out",
+        "test_the_best_leaf_is_kept_when_later_changes_only_tie"
+      ],
+      "time budget ignored": ["timeout after 180s"]
+    }
+  }
+}

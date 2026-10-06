@@ -70,7 +70,8 @@ def certify(game, root, player: int, choose: Callable[[list], list], value_fn: C
             elif game.is_terminal(child):
                 kept = int(round(game.returns(child)[player]))
             else:
-                kept = -values[game.state_key(child)]
+                own = values[game.state_key(child)]
+                kept = own if game.current_player(child) == game.current_player(s) else -own
             if kept != value:
                 failures += 1
                 failures_by_ply[ply] = failures_by_ply.get(ply, 0) + 1

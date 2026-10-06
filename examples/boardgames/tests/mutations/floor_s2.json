@@ -1,0 +1,148 @@
+{
+  "file": "harness/floor_s2.py",
+  "tests": ["tests/test_floor_s2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "fingerprint unchecked",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "positions unchecked",
+      "old": "    if e.get(\"positions_fingerprint\") != spec[\"positions_fp\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "builder unchecked",
+      "old": "    if e.get(\"builder\") != spec[\"builder\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "root count unchecked",
+      "old": "    if len(e[\"roots\"]) != spec[\"roots\"]:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "checks ignored",
+      "old": "    if not all(r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"] for r in done):\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "walk check ignored",
+      "old": "r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"]",
+      "new": "r[\"moves_win\"] and r[\"leaves_certified\"]"
+    },
+    {
+      "name": "move check ignored",
+      "old": "r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"]",
+      "new": "r[\"checked\"] and r[\"leaves_certified\"]"
+    },
+    {
+      "name": "leaf check ignored",
+      "old": "r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"]",
+      "new": "r[\"checked\"] and r[\"moves_win\"]"
+    },
+    {
+      "name": "integrity ignored",
+      "old": "    if integrity:\n        return",
+      "new": "    if False:\n        return"
+    },
+    {
+      "name": "incomplete roots counted",
+      "old": "    done = [r for r in e[\"roots\"] if r[\"complete\"]]\n    n = len(done)",
+      "new": "    done = [r for r in e[\"roots\"] if r[\"complete\"]]\n    n = len(e[\"roots\"])"
+    },
+    {
+      "name": "completion support loose",
+      "old": "    complete = (\"supported\" if n >= spec[\"complete_support\"]",
+      "new": "    complete = (\"supported\" if n > spec[\"complete_support\"]"
+    },
+    {
+      "name": "completion refute loose",
+      "old": "else \"refuted\" if n <= spec[\"complete_refute\"]",
+      "new": "else \"refuted\" if n < spec[\"complete_refute\"]"
+    },
+    {
+      "name": "compression not per bit",
+      "old": "    values = [3 * r[\"own_positions\"] / r[\"bits\"][\"nodes\"] for r in done]",
+      "new": "    values = [3 * r[\"own_positions\"] for r in done]"
+    },
+    {
+      "name": "compression support loose",
+      "old": "    compression = (\"supported\" if median >= spec[\"compression_support\"]",
+      "new": "    compression = (\"supported\" if median > spec[\"compression_support\"]"
+    },
+    {
+      "name": "compression refute loose",
+      "old": "                   else \"refuted\" if median < spec[\"compression_refute\"] else",
+      "new": "                   else \"refuted\" if median <= spec[\"compression_refute\"] else"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T08:22:00+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "fingerprint unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]"
+      ],
+      "positions unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[positions]"
+      ],
+      "builder unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[builder]"
+      ],
+      "root count unchecked": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[roots]"
+      ],
+      "checks ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[losing",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[unchecked]"
+      ],
+      "walk check ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[unchecked]"
+      ],
+      "move check ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[losing"
+      ],
+      "leaf check ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified"
+      ],
+      "integrity ignored": [
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[builder]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[fingerprint]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[losing",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[positions]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[roots]",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[uncertified",
+        "test_a_readout_that_is_not_the_registered_measurement_is_not_run[unchecked]"
+      ],
+      "incomplete roots counted": [
+        "test_completed_roots_are_compared_with_the_same_strategy_as_a_3_bit_table",
+        "test_the_completion_bars_are_registered[0-refuted]",
+        "test_the_completion_bars_are_registered[1-refuted]",
+        "test_the_completion_bars_are_registered[2-inconclusive]"
+      ],
+      "completion support loose": [
+        "test_completed_roots_are_compared_with_the_same_strategy_as_a_3_bit_table",
+        "test_the_completion_bars_are_registered[3-supported]"
+      ],
+      "completion refute loose": ["test_the_completion_bars_are_registered[1-refuted]"],
+      "compression not per bit": [
+        "test_a_median_exactly_on_a_bar_reads_as_registered[10-inconclusive]",
+        "test_completed_roots_are_compared_with_the_same_strategy_as_a_3_bit_table",
+        "test_the_compression_bars_are_registered[300-inconclusive]",
+        "test_the_compression_bars_are_registered[33-refuted]",
+        "test_the_compression_bars_are_registered[34-inconclusive]"
+      ],
+      "compression support loose": [
+        "test_a_median_exactly_on_a_bar_reads_as_registered[100-supported]"
+      ],
+      "compression refute loose": [
+        "test_a_median_exactly_on_a_bar_reads_as_registered[10-inconclusive]"
+      ]
+    }
+  }
+}

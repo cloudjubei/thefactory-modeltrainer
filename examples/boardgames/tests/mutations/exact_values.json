@@ -29,8 +29,8 @@
     },
     {
       "name": "empty batch sent",
-      "old": "        if todo:\n            for s, v",
-      "new": "        if True:\n            for s, v"
+      "old": "        for start in range(0, len(todo), SUBMIT_LIMIT):",
+      "new": "        for start in range(0, max(len(todo), 1), SUBMIT_LIMIT):"
     },
     {
       "name": "solved not counted",
@@ -51,11 +51,21 @@
       "name": "known move tables refilled",
       "old": "todo = [s for s in states if key(s) not in self.moves]",
       "new": "todo = list(states)"
+    },
+    {
+      "name": "one slice for everything",
+      "old": "            part = todo[start:start + SUBMIT_LIMIT]",
+      "new": "            part = todo[start:]"
+    },
+    {
+      "name": "limit unbounded",
+      "old": "SUBMIT_LIMIT = 2048",
+      "new": "SUBMIT_LIMIT = 10**9"
     }
   ],
   "last_run": {
-    "at": "2026-10-04T21:17:54+00:00",
-    "killed": 10,
+    "at": "2026-10-06T02:18:02+00:00",
+    "killed": 12,
     "survived": [],
     "killed_by": {
       "child sign kept": [
@@ -88,7 +98,11 @@
       ],
       "known move tables refilled": [
         "test_a_fully_recorded_position_is_answered_without_solving_and_its_children_too"
-      ]
+      ],
+      "one slice for everything": [
+        "test_solves_are_submitted_in_bounded_slices_so_a_large_batch_cannot_fill_the_pool_s_wakeup_pipe"
+      ],
+      "limit unbounded": ["test_the_submission_limit_keeps_a_slice_well_under_a_pipe_s_buffer"]
     }
   }
 }

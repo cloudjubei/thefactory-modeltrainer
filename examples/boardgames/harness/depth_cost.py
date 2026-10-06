@@ -16,7 +16,7 @@ import math
 SPEC = {
     "run": "c49_H3_deep",
     "era": "33939d5e2d76",
-    "measurement_fp": None,
+    "measurement_fp": "04f6c37f1a25",
     "seeds": [481, 482, 483, 484, 485, 486, 487],
     "deep": [481, 482, 483],
     "depths": [9, 11, 13],

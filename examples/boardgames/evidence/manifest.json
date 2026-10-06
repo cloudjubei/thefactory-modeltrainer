@@ -348,9 +348,69 @@
       "sha256": "c5b648600664e7f62d0eeea39cebe20273114b47d838c8fdb74cadb17e0d3552",
       "started": "2026-09-27T09:32:53+00:00"
     },
+    "c49_depth_cost.json.gz": {
+      "sha256": "727d0f5c070008022f9029a0117d197936b5ba9a80fc70fb7585c6f4fa6d81c0",
+      "started": "2026-10-05T19:23:14+00:00"
+    },
+    "c49_frontier_positions.json.gz": {
+      "sha256": "0109626579e166720bc104e1c7f24b719557419ffb021e4f3c034bd3a5f57634",
+      "started": "2026-10-06T02:18:19+00:00"
+    },
     "c49_frontier_tictactoe.json.gz": {
       "sha256": "14ec579ab10bd6d82cc83a3c116cb5865cbfe40b4f525d9f334b92d72e56d8e3",
       "started": "2026-09-26T22:57:40+00:00"
+    },
+    "c49_s1.json.gz": {
+      "sha256": "48937613c1f4ea8ecc1d60ab1ec6078435628f1061e764d37ef0dab2969acb69",
+      "started": "2026-10-06T04:23:55+00:00"
+    },
+    "c49_s1_budget_probe.json.gz": {
+      "sha256": "f0f446eedf1c851e4114b3e0e4585a0744c1104c2f6db693c2439865a5521623",
+      "started": "2026-10-06T09:11:53+00:00"
+    },
+    "c49_s1_handoff_probe.json.gz": {
+      "sha256": "b0197c76c39638bc91ec828bfb46d941b9ce3150f05babdc6082c27d247c1918",
+      "started": "2026-10-06T17:01:51+00:00"
+    },
+    "c49_s1_leaf_probe.json.gz": {
+      "sha256": "63d058604134d8a57bdd1cac85a011c8f56b354b850e0333b868051db6b83245",
+      "started": "2026-10-06T15:33:07+00:00"
+    },
+    "c49_s1_local_probe.json.gz": {
+      "sha256": "9699d2d204a8a5566ecf92480ac1b001538102775a7e794f8bd71d1a354b8511",
+      "started": "2026-10-06T12:55:19+00:00"
+    },
+    "c49_s1_patch_probe.json.gz": {
+      "sha256": "a7aab696f0492f5e58f8fff02b50beb4617770258e9fa48a9ddf9ccc147ea3c8",
+      "started": "2026-10-06T14:16:54+00:00"
+    },
+    "c49_s1_pilot.json.gz": {
+      "sha256": "b4d71540287f62b2118b84aa4a330ba5049e6a80e1b6df24c640ce93bd52ea76",
+      "started": "2026-10-06T04:02:36+00:00"
+    },
+    "c49_s1_pilot14.json.gz": {
+      "sha256": "5e254ed57d0e97e1bb8822da14b94d026dfdf654d39a4b97ef5dafce092bb34e",
+      "started": "2026-10-06T04:16:40+00:00"
+    },
+    "c49_s2.json.gz": {
+      "sha256": "1810ac724f645b47b29e201938750bfdefec650c4f9364292f0ab9d159eec1d3",
+      "started": "2026-10-06T08:41:55+00:00"
+    },
+    "c49_s2_pilot.json.gz": {
+      "sha256": "b565040967be1cbe207897b5900277d637bddfb7499a95eb040f7f81647c9ba4",
+      "started": "2026-10-06T08:21:01+00:00"
+    },
+    "c49_s3.json.gz": {
+      "sha256": "2a2cc85dc35c91047e52a14495afaff655b07302a6da44d29311870e63b86bfd",
+      "started": "2026-10-06T12:52:13+00:00"
+    },
+    "c49_s4_pilot.json.gz": {
+      "sha256": "e87fc02fe0c41d60c355a9eb5f743b12890c72a60e2bb7b11f31483a33d6c7d2",
+      "started": "2026-10-06T19:02:14+00:00"
+    },
+    "c49_s4_pilot_accept10.json.gz": {
+      "sha256": "9b157bee697b1d69eee199cd38c91dda69dcc5186889b00b62b1a6cf00dffad3",
+      "started": "2026-10-06T20:03:33+00:00"
     },
     "c49_strategy_d10.json.gz": {
       "sha256": "c61f1f1a7d9d7a3eae13197e8dc5b4c0bad9522dda86da17d41c2dae2074f577",
@@ -399,6 +459,10 @@
     "kalah_paper_check.json.gz": {
       "sha256": "ffc7a519f0dff7ee677da477b24397bac01b27a649f9096d06bf8d95c3f785cd",
       "started": "2026-10-05T08:12:15+00:00"
+    },
+    "kalah_strategy_size.json.gz": {
+      "sha256": "23f1ebffa4978d954bd58cc107f2f5c51bdadd9923ed716700d616c4c02a400f",
+      "started": "2026-10-06T00:43:22+00:00"
     },
     "tictactoe_base.json.gz": {
       "sha256": "ce68fea885470f7b871f1762a4635e2f852025d393fb8cc142316c475b7e12b1",

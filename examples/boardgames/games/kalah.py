@@ -41,7 +41,6 @@ def _sow(own: tuple, opp: tuple, hole: int) -> tuple[tuple, tuple, int, bool, in
 
 
 class Kalah:
-    name = "kalah"
     num_players = 2
     input_planes = 1
 
@@ -51,6 +50,7 @@ class Kalah:
         if counters < 1:
             raise ValueError(f"Kalah needs at least one counter a hole, got {counters} counters")
         self.holes, self.counters = holes, counters
+        self.name = "kalah" if (holes, counters) == (6, 4) else f"kalah{holes}x{counters}"
         self.num_actions = holes
         self.board_shape = (2, holes + 1)
         self._future: dict = {}

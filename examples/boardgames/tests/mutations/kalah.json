@@ -181,11 +181,16 @@
       "name": "solver minimises",
       "old": "            self._future[key] = max(",
       "new": "            self._future[key] = min("
+    },
+    {
+      "name": "every shape named kalah",
+      "old": "        self.name = \"kalah\" if (holes, counters) == (6, 4) else f\"kalah{holes}x{counters}\"\n",
+      "new": "        self.name = \"kalah\"\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-05T08:12:14+00:00",
-    "killed": 36,
+    "at": "2026-10-05T23:16:41+00:00",
+    "killed": 37,
     "survived": [],
     "killed_by": {
       "start hole not emptied": ["timeout after 120s"],
@@ -605,6 +610,9 @@
         "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-3]",
         "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[3-4]",
         "test_the_solver_reproduces_the_paper_s_win_draw_loss_table[4-1]"
+      ],
+      "every shape named kalah": [
+        "test_the_standard_shape_is_named_kalah_and_every_other_shape_carries_its_size"
       ]
     }
   },

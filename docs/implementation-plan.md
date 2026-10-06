@@ -50,6 +50,10 @@
   - comparisons are paired, final-vs-final;
   - power the claim before making it;
   - one training run is one sample.
+- **Launch from the registered recipe, never by hand** (h138): `scripts/c4_solver_free.py --recipe MODULE:ARM`
+  trains a judge's SPEC arm with its seeds and refuses hand-set training flags. New judges compare configs with
+  `harness.recipe.recipe_matches`, which ignores only settings proven not to change training (`certify_depth`,
+  `relabel_workers`); judges already pinned by claims stay as registered.
 - **Fingerprinted code is frozen while a run is active.** Runs refuse to write evidence if their training or
   measurement fingerprint changes. Edit in a scratch copy and copy back after the run exits, merging
   `hypotheses.json` and `evidence/manifest.json` rather than overwriting them.
@@ -151,7 +155,18 @@
 - Process fixes proposed by h138: build launch commands from the registered SPEC; exclude knobs proven not to change
   training (relabel workers) from the judges' recipe check, as `certify_depth` already is.
 
-**1.11 Stored knowledge (now H1/H2) the process computes itself** (a solved opening/exception table counted in the description
+**1.11 Net vs table by depth: the table wins through 13 unless the net is ~4 bits a weight (h142–h146).**
+- Accounting corrected (`harness/depth_cost.py`): a complete table is 3 bits per first-player position in walk order;
+  h140's index charge superseded (h144).
+- Break-even quadruples every two plies: ~0.2 bits per weight at depth 9, ~1 at 11, 3.7–4.35 at 13 (h144; judged bar
+  of 4 split, h143 inconclusive). The net stays wrong at ~9–11% of its own tree, also on untrained plies (h145; h142
+  inconclusive).
+- The canonical table is not the smallest: the nets' own certified trees are up to 57% smaller, and against such a
+  table break-even is ~1.3 bits (h146). **The fair baseline is the smallest certified table** — optimal moves chosen
+  to shrink the tree, as WeakC4's opening does — and the cheapest leaves are discovered rules (§3.6), not a net.
+- Next: §3.6 S1 (steady states at the frontier) with a tree-minimising table as the baseline.
+
+**1.12 Stored knowledge (now H1/H2) the process computes itself** (a solved opening/exception table counted in the description
 length) remains an option for the hybrid, not the fix for 1.1.
 
 ## 2. Board games — next
@@ -175,8 +190,19 @@ length) remains an option for the hybrid, not the fix for 1.1.
   sequence-keyed table is against a position-keyed one; worst-case size to cover Connect-4 and Kalah whole, and
   whether that is ever worth computing; how it scales to Chess and Go; whether a compact encoding helps the net or
   the table in the description length (§4).
-- First: a literature and sizing study (agent, 2026-10-05), with measured sequence-vs-position counts on the
-  repo's own games. Then decide whether it earns an experiment.
+- Study done (`docs/research/game-state-compression.md`, 2026-10-05). Verdict: a sequence-keyed table is never
+  smaller than a position-keyed one — measured on Connect-4, sequences per distinct position are 31× at ply 8 and
+  404× at ply 11, growing ~2.4× a ply (counts match Tromp's OEIS A212693); Kalah(4,3) 31× by move 17. Storing every
+  Connect-4 value takes ~1.1 TB perfectly indexed (Böck 2025 does it in 89.6 GB with BDDs); checkers, chess and Go are
+  out of reach by 10^20+ bytes. A compact code is a storage format, not a useful net input.
+- What carries over: the canonical-walk table needs no keys at all (3 bits an entry — `harness/depth_cost.py`), and an
+  entry can be coded more cheaply still by its rank under a parameter-free move ordering (~1.1 bits an entry at
+  ply 9, measured by the agent). Caveat: the agent's ordering used win/block/centre — win and block are generic
+  (one-ply search), "centre" is Connect-4 knowledge and is out unless learned. E1 overlaps the depth study (§1.11).
+- **E2 done (h149, h150 supported, 2026-10-06):** on every Kalah shape with a graph >= 1,000 positions a certified
+  first-player strategy decides at <= 0.45% of them (Kalah(3,6): 1.57M positions, 202 decisions, 404 bits); choosing
+  among value-keeping moves to minimise the tree halves it on 7 of 9 shapes (Kalah(3,6): 2,699 -> 202).
+  `harness/strategy_size.py` is generic (any game with an exact `position_value`).
 
 ## 3. Written rules (track R) — runs beside self-play
 
@@ -210,11 +236,97 @@ rule standalone and in decision-list order, by ply.
 - **3.5 Feeding self-play (R → L).** One pre-registered experiment each for labels, features and search pruning.
   A rule counts as feeding only if a fresh self-play agent measurably improves with it.
 
+- **3.6 S1 — discovered steady states at the table's frontier (user, 2026-10-05; design after the research below).**
+  - Why: WeakC4 plays all of Connect-4 for the first player in ~12 KB — an opening tree of <2,600 nodes whose ~1,700
+    leaves are "steady states" (win; block; else a per-square priority map), found by search (GA, later SAT) and
+    verified by brute force. So compact certified play exists past the opening, and its content was discovered, not
+    written by hand. Our own pairing certificates found nothing through ply 8 (h99, h100): setups live deeper.
+  - Question: at the frontier of the exact opening table (first-player positions at plies ~9–13), what fraction
+    admit a small verified steady state in a generic language, at how many bits each — and does table + discovered
+    rules beat table + net in `harness/depth_cost.py`'s accounting?
+  - Research done (`docs/research/discovering-winning-setups.md`, 2026-10-05). WeakC4 at HEAD: 132 opening decisions
+    + 522 leaves using 481 distinct priority-map diagrams, all found by search (GA, hill-climbing, SAT with
+    counterexamples) and exhaustively verified; ~35–45K bits entropy-coded, 15–20× under our net. A median diagram
+    (~70 bits) replaces a median 4,038-position first-player subtree. Leaves are 76% of stored first-player nodes at
+    ply 8, 86–95% at plies 10–14. The language is our decision lists plus a cell-identity predicate and an
+    "exactly one" firing rule; what we lack is **closed-loop certification** (a diagram must hold on every position
+    it steers into, against all replies — `rule_search.py` only fits fixed labelled positions).
+  - Agent pilot (not evidence; it reused WeakC4's own diagrams, which is outside knowledge for us): on uncurated
+    winning frontier positions, win/block alone and plain claimeven/claimodd covered 0/120; with library reuse plus
+    exact SAT, ≥37% at ply 10, ≥33% at 12, ≥43% at 14, 97% at 16.
+  - Design (to pre-register): frontier positions at plies 10/12/14 (first player to move, winning); a library built
+    only by our own search; exact SAT existence per position (found / impossible-in-language / timeout = not covered);
+    entropy-coded diagram bits; the opening tree chosen by DP (cost = min(diagram, move + children)); table-only vs
+    table + rules vs table + net in `harness/depth_cost.py` terms. The checker: exactly one move at every reached
+    position, every reply covered, no draw/opponent four, sound memo across move orders and mirrors, never consults
+    the solver; a second independent checker plus mutation tests. Caps: subtree ≤ 10^6 positions, SAT time/state
+    budget. Vacuity guards: exclude positions win/block alone wins; "impossible in the language" is not a game value.
+  - Before any external code (dsat, CaDiCaL) enters the repo: check its licence (no AGPL).
+  - **Built and running (2026-10-06):** `harness/steady_state.py` (language + solver-free verifier), `harness/
+    steady_search.py` (SAT with counterexamples, exact "impossible"; agrees with brute force on every 1-3 piece
+    tic-tac-toe position), `harness/floor_s1.py`, `scripts/c4_steady_states.py`, frontier positions in
+    `evidence/c49_frontier_positions.json.gz` (ply 10: 6,983; ply 12: 27,586; ply 14 derived: 97,072). Pilots (h152):
+    nothing found at plies 10-12 within budget, 1/5 at ply 14 (a probe: 5/7) — so the registered run is judged at
+    ply 14: h153 (coverage >= 30%), h154 (median compression >= 10x).
+  - **Result (2026-10-06):** h153 supported — 25/50 non-trivial ply-14 positions (50%) get a verified steady state
+    from our own search; 11/58 (19%) at ply 12 (h156). h154 inconclusive (median 5.7x) because value is bimodal: 11 of
+    25 states replace 12-432x their bits (85 bits play 12,229 first-player positions), the rest govern a handful of
+    positions (h155). Time budget was soft (h157), now a hard deadline (h158).
+  - **S2 running (2026-10-06): complete certified strategies for subtrees.** `harness/strategy_builder.py` (13 tests,
+    17/17 mutants): depth first, a position becomes a leaf (empty map, then the 200 most recent maps — a sibling's map
+    covers a third of non-trivial siblings — then a 30 s search) or a table move chosen to make its children ready;
+    `check` re-walks without any oracle. Pilot (h159): a ply-10 root got a complete certified strategy — 2,791 bits for
+    31,701 first-player positions, 34x under its table — in 11 minutes. Registered on 8 ply-10 roots: h160 (>= 6/8
+    complete in 2 h), h161 (median >= 10x).
+  - **S2 result: h160, h161 supported.** 8/8 roots complete (slowest 28 min); median 36x (24-69x); in all 18,219 bits
+    play 250,840 first-player positions to the end of the game, every strategy checked three ways.
+  - **Gap to the whole game:** leaves start at ply 12 (searches find nothing earlier within budget), so a whole-game
+    strategy would need a table over every ply-10 position its opening reaches — ~2.3K bits per ply-10 subtree times
+    thousands of subtrees, far above WeakC4 (~35-45K bits), whose leaves start around ply 8. The lever is earlier
+    leaves: a stronger search at plies 8-10 and opening moves chosen to reach steady positions sooner.
+  - **Diagnostic (h162 inconclusive, h163 refuted):** at ply 10 a 6x budget finds 1/8 (21 min, 135K constraints) and
+    14 levels find 0/8 — the limit is the search's efficiency. Options: (a) a faster exact search — Waffle3z's dsat
+    (C++, CaDiCaL; licence to check) behind our own encoding and verifier; (b) a different search — WeakC4's genetic
+    proposals checked by our verifier; (c) steer the opening into easier positions — build from ply-8 roots and let
+    move choice look one step further for ready children.
+  - **Local search (h166 refuted; h167 superseded by h170):** hill-climbing over maps (`harness/steady_local.py`)
+    found 0/8 complete at ply 10. Its 'one line short' was the empty map, undefined at the root: the failure count
+    stopped at the first failure, so any map giving a root move scored worse (h170). Patching those maps with <= 100
+    exceptions gave no leaf (h168 refuted; h169 undecidable, h171 — its registered test read 'no leaf' as refuted).
+  - **Fixed score (h172, h173 supported; h174 after the data):** a map is charged for the complete leaf it makes —
+    map bits plus the exceptions it needs over every line (`steady_exceptions.needed`, one walk; exceptions cost the
+    cheaper of a sparse index or a mask). On the same 8 ply-10 positions (`scripts/c4_steady_leaf_probe.py`, 30 min):
+    4 pure steady states (80-98 bits for 1,300-5,208 positions; #705 in 23 s, SAT 21 min), the other 4 verified
+    map-plus-exceptions leaves (8-1,850 exceptions); median 39x under the table (2.5-159x), 260x under the empty map's
+    leaf. The score, not the language, was the ply-10 limit. Cost: the oracle on every newly reached position (up to
+    2.4M cached, ~4 GB a worker).
+  - **S3 result (h164 inconclusive, h165 supported):** from 4 ply-8 roots (leaves from depth 4, SAT leaf search,
+    4 h each) 2 strategies completed — 647 positions in 205 bits; 318,473 in 34,115 bits — median 18.7x under their
+    tables. The other two timed out with ~400 of ~760 leaf searches failing at up to 30 s each: failed searches, not
+    the tree, use the time. A size-scored leaf never fails (it falls back to exceptions).
+  - **SAT hand-off (h175, h176 refuted; h177 after the data):** on the 4 leaves left with exceptions, SAT started at
+    local search's best map with its exception positions constrained first found nothing in 30 min / 200K constraints,
+    and did the same work as SAT started cold (within 6%). Local search is the leaf engine at ply 10; option 2 (a
+    better SAT encoding) loses priority accordingly.
+  - **S4 running (2026-10-06):** S3's study with one change — leaves by size-scored local search (30 s, a shared
+    oracle cache bounded at 1.5M positions, `harness/winning_cache.py`), a leaf kept with exceptions when >= 10x
+    under its table (`strategy_builder` `accept`). Pilots: 4x completes a root in 31 min at 6.2x, exceptions > 90% of
+    bits (h178); 10x completes neither pilot root in 1 h (h179). Registered on S3's 4 roots, 4 h: h180 (>= 3/4
+    complete), h181 (median >= 10x), h182 (no larger than S3 where both complete).
+  - **Next:** earlier leaves (min leaf depth below ply 12) once S4 shows the leaf search holds up; the exception
+    encoding is the cost lever (exceptions are ~17 bits each against 3 for a table move).
+  - **Then:** the full certified first-player strategy as table + discovered steady states —
+    a DP over the canonical tree from ply 12 (use a state where found and cheaper than the subtree, else one table
+    move and recurse), giving the first complete certified Connect-4 strategy from this process and its size against
+    WeakC4 (~35-45K bits) and the net (~660K). Blocker: cost — tens of thousands of searches at up to 300 s each in
+    Python; needs a faster search (e.g. counterexample lines reused across sibling positions, or a C SAT front end
+    once its licence is checked) and table moves chosen so children become steady (WeakC4's trick, h146's lesson).
+
 ## 4. The hybrid process — definition of done
 
 - **"Best", measurably:**
   - a certificate for every claim;
-  - the smallest total description in bits (rules + net params × bits + table), each part reported; WeakC4's ~25 KB
+  - the smallest total description in bits (rules + net params × bits + table), each part reported; WeakC4's ~12 KB
     first-player Connect-4 strategy is the outside benchmark;
   - bounded compute per move;
   - minimality proven relative to the declared language or net family;
@@ -233,14 +345,13 @@ rule standalone and in decision-list order, by ply.
      solver memoised on the counters in play; `progress` rises every move, checked on random play in six shapes) and
      `harness/kalah_paper.py` (the paper's tables and the judge, h136, h137). Solver memory: Kalah(5, 2) needs 2.4M
      memo entries (16 s); Kalah(6, 2) passed 10 GB unfinished. Before it enters the process:
-     - **generic value steps assume the mover alternates** — Kalah's extra move breaks `harness/certify.py` (child
-       value negated; exact play on Kalah(2, 1) fails at its first move) and `harness.agents.child_move_value`
-       (search proofs); strict xfails in `tests/test_alternation.py`. Fix with a mover comparison, as the search
-       backup already does. The n-step target (`neural.py`, sign from n's parity) and `harness/exact_values.py`
-       (Connect-4 states) have the same assumption;
-     - register it in `harness/registry.py` (after H3: nothing H3 imports changes while it runs);
-     - a solver for the 6-hole game needs a compact memo (the paper's endgame databases index positions by counters
-       in play, 4 bits each);
+     - done 2026-10-06: the certifier, the search's proof step and the n-step target compare movers (h148);
+       alternating-game training is bit-for-bit unchanged (h147), so Connect-4's new era 6eedd699d12d and the old
+       33939d5e2d76 train identically. Registered as `kalah` (6×4), `kalah4x3`, `kalah3x3` (each shape its own name;
+       the fingerprint maps a name to its module). Smoke: a Kalah(3,3) net trains with self-play and relabel workers.
+       `harness/exact_values.py` still builds Connect-4 states — generalise it before the hybrid runs on Kalah;
+     - next on Kalah: the hybrid on `kalah4x3` (exact solver in seconds), then larger shapes — a solver for the
+       6-hole game needs a compact memo (the paper's databases rank positions by counters in play, 4 bits each);
   4. **Othello 6×6**: add a board-size parameter to `games/othello.py` (fixed at 8);
   5. **small Hex or Dots and Boxes**.
 - **Order:**

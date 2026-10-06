@@ -26,7 +26,8 @@ REGISTER = Path(__file__).resolve().parent.parent / "hypotheses.json"
 
 def _recorded_outcomes(root: Path) -> dict:
     """What the register last recorded for every test-backed claim's proof nodes, keyed (resolved file, test name):
-    ("skip", why) for the undecidable proof of a SUPPORTED claim, which the register never consulted; ("xfail", why)
+    ("skip", why) for the undecidable proof of a SUPPORTED claim, which the register never consulted, and for both
+    proofs of a claim SUPERSEDED before it was judged (its verdict lives in the claim that replaced it); ("xfail", why)
     for a proof the register recorded FAILING — an inconclusive claim's proof, a refuted claim's proof and its
     undecidable proof. Nodes it recorded passing are absent: they run as written."""
     try:
@@ -41,9 +42,17 @@ def _recorded_outcomes(root: Path) -> dict:
     out = {}
     for h in claims.values():
         runs = [e for e in h.get("evidence", []) if "proof" in e]
-        if not h.get("proof") or not runs:
+        inc = h.get("inconclusive_proof")
+        if not h.get("proof"):
             continue
-        last, inc = runs[-1], h.get("inconclusive_proof")
+        if not runs:
+            if h.get("supersession"):
+                why = f"{h['id']} was superseded by {h['supersession']['by']} before it was judged"
+                out[node(h["proof"])] = ("skip", why)
+                if inc:
+                    out[node(inc)] = ("skip", why)
+            continue
+        last = runs[-1]
         if last["ok"]:
             if inc:
                 out[node(inc)] = ("skip", f"{h['id']} is supported; the register never consults its undecidable proof")

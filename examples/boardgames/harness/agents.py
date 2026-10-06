@@ -133,13 +133,14 @@ def mover_returns(game: Game, state: State, mover_value: float) -> list[float]:
 
 def child_move_value(game: Game, state: State, action: int, proven: dict) -> float | None:
     """The PROVEN value (sign) to the mover of playing `action`, or None if not yet proven: a terminal child reads
-    its own result; a proven non-terminal child negates its stored opponent-relative value (zero-sum, 2-player)."""
+    its own result; a proven non-terminal child's value is its own mover's — kept when the same player moves again (an
+    extra move), negated when the opponent moves (zero-sum, 2-player)."""
     child = game.step(state, action)
     if game.is_terminal(child):
         return _sign(game.returns(child)[game.current_player(state)])
     ck = state_key(game, child)
     if ck in proven and game.num_players == 2:
-        return -proven[ck]
+        return proven[ck] if game.current_player(child) == game.current_player(state) else -proven[ck]
     return None
 
 

@@ -111,6 +111,14 @@ def _git_root(root: Path) -> Path:
     return Path(out)
 
 
+def _game_source(game: str) -> str:
+    """The module file a registered game is defined in, so every shape of a parameterised game (kalah, kalah4x3)
+    fingerprints the one file that holds its rules."""
+    from harness.registry import resolve_game
+
+    return type(resolve_game(game)).__module__.replace(".", "/") + ".py"
+
+
 def training_fingerprint(game: str | None = None, revision: str | None = None, root: Path | None = None,
                          modules: tuple[str, ...] = TRAINING_MODULES) -> str:
     """A short hash of the training path's normalized source, optionally as of a git `revision`.
@@ -120,7 +128,7 @@ def training_fingerprint(game: str | None = None, revision: str | None = None, r
     root = HARNESS_ROOT if root is None else Path(root)
     paths = list(modules)
     if game:
-        paths.append(f"games/{game}.py")
+        paths.append(_game_source(game))
     h = hashlib.sha256()
     for path in paths:
         h.update(path.encode())

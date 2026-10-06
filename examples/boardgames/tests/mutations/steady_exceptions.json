@@ -1,0 +1,224 @@
+{
+  "file": "harness/steady_exceptions.py",
+  "tests": ["tests/test_steady_exceptions.py"],
+  "timeout": 180,
+  "mutations": [
+    {
+      "name": "exception ignored",
+      "old": "    return exceptions[key] if key in exceptions else choose(facts, state, levels, n_levels",
+      "new": "    return choose(facts, state, levels, n_levels"
+    },
+    {
+      "name": "walk: draw not a failure",
+      "old": "            if game.winner(s) != player:\n                return \"failed\"",
+      "new": "            if game.winner(s) == 1 - player:\n                return \"failed\""
+    },
+    {
+      "name": "walk: undefined not a failure",
+      "old": "            if move is None:\n                return \"failed\", \"undefined\", _line(owner, key)\n",
+      "new": "            if move is None:\n                continue\n"
+    },
+    {
+      "name": "walk: one reply walked",
+      "old": "            stack.extend((game.step(s, b), last_own) for b in game.legal_actions(s))",
+      "new": "            stack.extend((game.step(s, b), last_own) for b in game.legal_actions(s)[:1])"
+    },
+    {
+      "name": "walk: cap ignored",
+      "old": "        if len(seen) > cap:\n            return \"cap\", \"cap\", []",
+      "new": "        if False:\n            return \"cap\", \"cap\", []"
+    },
+    {
+      "name": "unwinnable root accepted",
+      "old": "    if not winning([root])[0]:\n        raise",
+      "new": "    if False:\n        raise"
+    },
+    {
+      "name": "needed: cap ignored",
+      "old": "        if len(seen) > cap:\n            return {\"status\": \"cap\"",
+      "new": "        if False:\n            return {\"status\": \"cap\""
+    },
+    {
+      "name": "needed: a non-won line passes",
+      "old": "            if game.winner(s) != player:\n                raise RuntimeError",
+      "new": "            if False:\n                raise RuntimeError"
+    },
+    {
+      "name": "needed: no winning move passes",
+      "old": "                if not wins:\n                    raise",
+      "new": "                if False:\n                    raise"
+    },
+    {
+      "name": "needed: oracle asked everywhere",
+      "old": "            if move is None or move not in facts.of(s)[0]:",
+      "new": "            if True:"
+    },
+    {
+      "name": "needed: map moves trusted unchecked",
+      "old": "            if move is None or move not in facts.of(s)[0]:",
+      "new": "            if move is None:"
+    },
+    {
+      "name": "needed: exception at a winning map move",
+      "old": "                if move not in wins:\n                    move = min(wins)",
+      "new": "                if True:\n                    move = min(wins)"
+    },
+    {
+      "name": "needed: exception not followed",
+      "old": "                    move = min(wins)\n                    exceptions[key] = move",
+      "new": "                    exceptions[key] = min(wins)"
+    },
+    {
+      "name": "needed: own positions not counted",
+      "old": "            own += 1",
+      "new": "            own += 0"
+    },
+    {
+      "name": "needed: one reply walked",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))\n    return {\"status\": \"ok\"",
+      "new": "            stack.extend(game.step(s, b) for b in game.legal_actions(s)[:1])\n    return {\"status\": \"ok\""
+    },
+    {
+      "name": "patch: cap read as patched",
+      "old": "        return {\"status\": \"cap\", \"exceptions\": {}}\n    if len",
+      "new": "        return {\"status\": \"patched\", \"exceptions\": {}}\n    if len"
+    },
+    {
+      "name": "patch: exception limit ignored",
+      "old": "    if len(r[\"exceptions\"]) > max_exceptions:",
+      "new": "    if False:"
+    },
+    {
+      "name": "patch: limit off by one",
+      "old": "    if len(r[\"exceptions\"]) > max_exceptions:",
+      "new": "    if len(r[\"exceptions\"]) >= max_exceptions:"
+    },
+    {
+      "name": "patch: partial exceptions returned on refusal",
+      "old": "        return {\"status\": \"too_many\", \"exceptions\": {}}",
+      "new": "        return {\"status\": \"too_many\", \"exceptions\": r[\"exceptions\"]}"
+    },
+    {
+      "name": "no exceptions charged",
+      "old": "    if exceptions == 0:\n        return 0\n",
+      "new": "    if exceptions == 0:\n        return 1\n"
+    },
+    {
+      "name": "sparse list only",
+      "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
+      "new": "    return exceptions * (math.ceil(math.log2(positions)) + move)"
+    },
+    {
+      "name": "mask only",
+      "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
+      "new": "    return positions + exceptions * move"
+    },
+    {
+      "name": "sparse list without the index",
+      "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
+      "new": "    return min(exceptions * move, positions + exceptions * move)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T15:29:36+00:00",
+    "killed": 23,
+    "survived": [],
+    "killed_by": {
+      "exception ignored": [
+        "test_a_map_failing_several_lines_is_patched_until_it_wins",
+        "test_an_exception_overrides_the_map_and_the_map_plays_elsewhere",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
+        "test_the_empty_map_needs_one_exception_at_the_root",
+        "test_verify_with_rejects_a_losing_exception"
+      ],
+      "walk: draw not a failure": ["test_a_forced_draw_is_a_failure"],
+      "walk: undefined not a failure": [
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary"
+      ],
+      "walk: one reply walked": [
+        "test_a_failure_behind_a_later_reply_is_found",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary"
+      ],
+      "walk: cap ignored": ["test_verify_with_reports_a_walk_past_the_cap"],
+      "unwinnable root accepted": [
+        "test_a_root_its_side_cannot_win_is_refused",
+        "test_needed_refuses_a_root_its_side_cannot_win"
+      ],
+      "needed: cap ignored": [
+        "test_a_walk_past_the_cap_is_reported",
+        "test_needed_reports_a_walk_past_the_cap"
+      ],
+      "needed: a non-won line passes": [
+        "test_needed_refuses_an_oracle_that_calls_a_losing_move_winning"
+      ],
+      "needed: no winning move passes": [
+        "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root"
+      ],
+      "needed: oracle asked everywhere": [
+        "test_needed_asks_the_oracle_only_where_the_map_has_no_immediate_win"
+      ],
+      "needed: map moves trusted unchecked": [
+        "test_a_map_failing_several_lines_is_patched_until_it_wins",
+        "test_a_map_needing_more_exceptions_than_allowed_is_refused",
+        "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
+        "test_a_winning_map_move_is_never_overridden",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
+        "test_needed_refuses_an_oracle_that_calls_a_losing_move_winning"
+      ],
+      "needed: exception at a winning map move": [
+        "test_a_winning_map_move_is_never_overridden",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary"
+      ],
+      "needed: exception not followed": [
+        "test_a_map_failing_several_lines_is_patched_until_it_wins",
+        "test_a_map_needing_more_exceptions_than_allowed_is_refused",
+        "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
+        "test_a_walk_past_the_cap_is_reported",
+        "test_a_winning_map_move_is_never_overridden",
+        "test_needed_asks_the_oracle_only_where_the_map_has_no_immediate_win",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
+        "test_needed_refuses_an_oracle_that_calls_a_losing_move_winning",
+        "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root",
+        "test_needed_reports_a_walk_past_the_cap",
+        "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win",
+        "test_the_empty_map_needs_one_exception_at_the_root"
+      ],
+      "needed: own positions not counted": [
+        "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win"
+      ],
+      "needed: one reply walked": [
+        "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
+        "test_a_winning_map_move_is_never_overridden",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
+        "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root",
+        "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win"
+      ],
+      "patch: cap read as patched": ["test_a_walk_past_the_cap_is_reported"],
+      "patch: exception limit ignored": [
+        "test_a_map_needing_more_exceptions_than_allowed_is_refused",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some"
+      ],
+      "patch: limit off by one": ["test_a_patch_with_exactly_the_allowed_exceptions_is_kept"],
+      "patch: partial exceptions returned on refusal": [
+        "test_a_map_needing_more_exceptions_than_allowed_is_refused",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some"
+      ],
+      "no exceptions charged": [
+        "test_an_empty_leaf_costs_nothing",
+        "test_exceptions_cost_an_index_into_the_leaf_s_positions_and_a_move"
+      ],
+      "sparse list only": ["test_dense_exceptions_cost_a_mask_over_the_leaf_s_positions"],
+      "mask only": [
+        "test_dense_exceptions_cost_a_mask_over_the_leaf_s_positions",
+        "test_exceptions_cost_an_index_into_the_leaf_s_positions_and_a_move"
+      ],
+      "sparse list without the index": [
+        "test_dense_exceptions_cost_a_mask_over_the_leaf_s_positions",
+        "test_exceptions_cost_an_index_into_the_leaf_s_positions_and_a_move"
+      ]
+    }
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "file": "harness/neural.py",
+  "tests": [
+    "tests/test_neural.py::test_n_step_value_targets_bootstrap_from_target_net_else_terminal_outcome",
+    "tests/test_neural.py::test_n_step_value_targets_keep_the_sign_when_the_same_player_moves_again",
+    "tests/test_neural.py::test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers"
+  ],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "sign from n's parity",
+      "old": "(vt[i + n] if movers[i + n] == movers[i] else -vt[i + n])",
+      "new": "((1.0 if n % 2 == 0 else -1.0) * vt[i + n])"
+    },
+    {
+      "name": "bootstrap never negated",
+      "old": "(vt[i + n] if movers[i + n] == movers[i] else -vt[i + n])",
+      "new": "vt[i + n]"
+    },
+    {
+      "name": "call site movers lost",
+      "old": "n_step, [p for (_s, _x, _pi, p) in pending])",
+      "new": "n_step, [0] * len(pending))"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:11:59+00:00",
+    "killed": 3,
+    "survived": [],
+    "killed_by": {
+      "sign from n's parity": [
+        "test_n_step_value_targets_keep_the_sign_when_the_same_player_moves_again"
+      ],
+      "bootstrap never negated": [
+        "test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers[n_step_odd]",
+        "test_n_step_value_targets_bootstrap_from_target_net_else_terminal_outcome",
+        "test_n_step_value_targets_keep_the_sign_when_the_same_player_moves_again"
+      ],
+      "call site movers lost": [
+        "test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers[n_step_odd]"
+      ]
+    }
+  }
+}

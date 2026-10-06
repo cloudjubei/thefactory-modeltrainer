@@ -834,16 +834,17 @@ def sibling_positions(game: Game, states: list, key_fn, holdout: dict | None, de
     return out, {**stats, "added": len(out), "rings": rings}
 
 
-def n_step_value_targets(vt: list[float], outcome_for: list[float], n: int) -> list[float]:
+def n_step_value_targets(vt: list[float], outcome_for: list[float], n: int, movers: list[int]) -> list[float]:
     """The n-step / TD value target (MuZero) — the fix for opening value-label CONTAMINATION. The raw-MC target
     labels every position with the FINAL game outcome, so an opening gets blamed for a blunder 20 plies later. The
     n-step target instead bootstraps from the LAGGED target-net's value `n` plies ahead (`vt[i+n]`, sign-corrected
-    to mover-i: n even → same mover +1, n odd → opponent −1), falling back to the real terminal `outcome_for[i]`
+    to mover-i: kept when `movers[i+n]` is the same player, negated otherwise — a game with extra moves does not
+    alternate), falling back to the real terminal `outcome_for[i]`
     only when the terminal is within n plies. Large n → mostly real outcome (low bias); small n → mostly bootstrap
     (low variance, but needs a decent target net). `n ≥ trajectory length` reproduces the pure-MC target exactly."""
     length = len(vt)
-    sign = 1.0 if n % 2 == 0 else -1.0
-    return [outcome_for[i] if i + n >= length else sign * vt[i + n] for i in range(length)]
+    return [outcome_for[i] if i + n >= length else (vt[i + n] if movers[i + n] == movers[i] else -vt[i + n])
+            for i in range(length)]
 
 
 def _value_batch(net: "Connect4Net", xs: list[torch.Tensor], device: str = "cpu") -> list[float]:
@@ -913,7 +914,7 @@ def self_play_game(
     outcome_for = [returns[player] for (_s, _x, _pi, player) in pending]
     if n_step > 0 and target_net is not None:
         vt = _value_batch(target_net, [x for (_s, x, _pi, _p) in pending], device)  # lagged target-net bootstrap
-        values = n_step_value_targets(vt, outcome_for, n_step)
+        values = n_step_value_targets(vt, outcome_for, n_step, [p for (_s, _x, _pi, p) in pending])
     else:
         values = outcome_for  # raw-MC outcome (default / unchanged)
     if exact_value_targets and endgame_tb is not None:

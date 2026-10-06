@@ -1,0 +1,31 @@
+{
+  "file": "harness/agents.py",
+  "tests": [
+    "tests/test_alternation.py",
+    "tests/test_neural.py::test_an_alternating_game_trains_bit_for_bit_as_before_values_compared_movers"
+  ],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "extra move negated",
+      "old": "        return proven[ck] if game.current_player(child) == game.current_player(state) else -proven[ck]",
+      "new": "        return -proven[ck]"
+    },
+    {
+      "name": "opponent's value kept",
+      "old": "        return proven[ck] if game.current_player(child) == game.current_player(state) else -proven[ck]",
+      "new": "        return proven[ck]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-05T23:10:40+00:00",
+    "killed": 2,
+    "survived": [],
+    "killed_by": {
+      "extra move negated": [
+        "test_a_proven_child_after_an_extra_move_keeps_its_value_for_the_same_mover"
+      ],
+      "opponent's value kept": ["test_a_proven_child_after_a_normal_move_is_still_negated"]
+    }
+  }
+}

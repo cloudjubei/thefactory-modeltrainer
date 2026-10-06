@@ -1,0 +1,398 @@
+{
+  "file": "harness/steady_search.py",
+  "tests": ["tests/test_steady_search.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "draw not a failure",
+      "old": "            if game.winner(s) != player:",
+      "new": "            if game.winner(s) == 1 - player:"
+    },
+    {
+      "name": "undefined not a failure",
+      "old": "                lines.append(_line(owner, key))\n                continue",
+      "new": "                continue"
+    },
+    {
+      "name": "a cell may hold two levels",
+      "old": "                    self.solver.add_clause([-xs[i], -xs[j]])",
+      "new": "                    pass"
+    },
+    {
+      "name": "root not reached",
+      "old": "        self.solver.add_clause([self.r(root)])\n",
+      "new": ""
+    },
+    {
+      "name": "exactly-one does not force the level",
+      "old": "                add([e[k], -xs[i]] + [xs[j] for j in range(len(xs)) if j != i])\n",
+      "new": ""
+    },
+    {
+      "name": "two candidates may fire a level",
+      "old": "                    add([-e[k], -xs[i], -xs[j]])",
+      "new": "                    pass"
+    },
+    {
+      "name": "undefined allowed",
+      "old": "        add([-r] + f)\n",
+      "new": ""
+    },
+    {
+      "name": "non-winning move allowed",
+      "old": "                if children is None:\n                    add(guard)",
+      "new": "                if children is None:\n                    pass"
+    },
+    {
+      "name": "forced losing move allowed",
+      "old": "            if forced is None or forced not in winning:",
+      "new": "            if forced is None:"
+    },
+    {
+      "name": "winning move reaches nothing",
+      "old": "                        add(guard + [self.r(child)])",
+      "new": "                        add(guard)"
+    },
+    {
+      "name": "forced move reaches nothing",
+      "old": "                add([-r, self.r(child)])",
+      "new": "                pass"
+    },
+    {
+      "name": "constraint budget ignored",
+      "old": "        if len(enc.constrained) > max_constraints or remaining <= 0:",
+      "new": "        if remaining <= 0:"
+    },
+    {
+      "name": "cap read as clean",
+      "old": "        if status in (\"cap\", \"timeout\"):\n            return out(\"budget\")\n",
+      "new": ""
+    },
+    {
+      "name": "unsat read as found",
+      "old": "            return out(\"impossible\")",
+      "new": "            return out(\"found\", {})"
+    },
+    {
+      "name": "one failing line per round whatever lines says",
+      "old": "    while stack and len(lines) < limit:",
+      "new": "    while stack and not lines:"
+    },
+    {
+      "name": "lines merged before deduplication lost",
+      "old": "        fresh = list({enc.game.state_key(s): s for line in failing for s in line\n                      if enc.game.state_key(s) not in enc.constrained}.values())",
+      "new": "        fresh = [s for s in failing[0] if enc.game.state_key(s) not in enc.constrained]"
+    },
+    {
+      "name": "solve never interrupted",
+      "old": "        timer.start()\n",
+      "new": ""
+    },
+    {
+      "name": "walk ignores the deadline",
+      "old": "        if deadline is not None and len(seen) % 1024 == 1 and time.monotonic() > deadline:\n            return \"timeout\", []\n",
+      "new": ""
+    },
+    {
+      "name": "walk timeout read as clean",
+      "old": "        if status in (\"cap\", \"timeout\"):",
+      "new": "        if status == \"cap\":"
+    },
+    {
+      "name": "hint ignored",
+      "old": "    if hint:\n        enc.hint(hint)",
+      "new": "    if False:\n        enc.hint(hint)"
+    },
+    {
+      "name": "hint outside the language accepted",
+      "old": "        if bad:\n            raise ValueError(f\"hint",
+      "new": "        if False:\n            raise ValueError(f\"hint"
+    },
+    {
+      "name": "hint levels unchecked",
+      "old": "c not in self.cells or not 0 <= k < self.n_levels}",
+      "new": "c not in self.cells}"
+    },
+    {
+      "name": "hint phases all off",
+      "old": "self.x(c, k) if levels.get(c) == k else -self.x(c, k)",
+      "new": "-self.x(c, k)"
+    },
+    {
+      "name": "seeds ignored",
+      "old": "    for s, wins in zip(seeds, winning(seeds) if seeds else []):",
+      "new": "    for s, wins in []:"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-06T16:58:53+00:00",
+    "killed": 24,
+    "survived": [],
+    "killed_by": {
+      "draw not a failure": [
+        "test_a_hint_never_changes_the_answer",
+        "test_a_wrong_oracle_is_caught_instead_of_looping",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one"
+      ],
+      "undefined not a failure": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_a_wrong_oracle_is_caught_instead_of_looping",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]"
+      ],
+      "a cell may hold two levels": [
+        "test_a_hint_never_changes_the_answer",
+        "test_every_model_is_a_map_with_at_most_one_level_per_cell",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one"
+      ],
+      "root not reached": [
+        "test_a_forced_move_into_a_draw_is_impossible_at_once",
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_a_position_with_no_winning_move_is_impossible_at_once",
+        "test_an_exhausted_budget_is_reported_not_guessed[budget2]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-8]",
+        "test_seeds_are_constrained_before_the_first_solve",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[0]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[10]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[11]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[12]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[13]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[14]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[15]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[16]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[17]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[18]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[19]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[1]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[20]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[21]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[22]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[23]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[24]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[25]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[26]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[27]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[28]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[29]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[2]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[30]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[31]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[32]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[33]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[34]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[35]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[36]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[37]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[38]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[39]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[3]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[4]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[5]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[6]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[7]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[8]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[9]",
+        "test_the_fork_position_is_found_and_the_map_verifies"
+      ],
+      "exactly-one does not force the level": [
+        "test_a_hint_never_changes_the_answer",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[12]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[14]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[17]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[21]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[23]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[28]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[29]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[30]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[8]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[9]"
+      ],
+      "two candidates may fire a level": [
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[0]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[10]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[11]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[13]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[19]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[2]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[31]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[38]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[4]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[5]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[7]"
+      ],
+      "undefined allowed": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_a_position_with_no_winning_move_is_impossible_at_once",
+        "test_an_exhausted_budget_is_reported_not_guessed[budget2]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-8]",
+        "test_seeds_are_constrained_before_the_first_solve",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[0]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[10]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[11]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[12]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[13]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[14]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[15]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[16]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[17]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[18]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[19]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[1]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[20]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[21]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[22]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[23]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[24]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[25]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[26]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[27]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[28]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[29]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[2]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[30]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[31]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[32]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[33]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[34]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[35]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[36]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[37]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[38]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[39]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[3]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[4]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[5]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[6]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[7]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[8]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[9]",
+        "test_the_fork_position_is_found_and_the_map_verifies"
+      ],
+      "non-winning move allowed": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_a_position_with_no_winning_move_is_impossible_at_once",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-8]",
+        "test_seeds_are_constrained_before_the_first_solve",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one",
+        "test_the_fork_position_is_found_and_the_map_verifies"
+      ],
+      "forced losing move allowed": ["test_a_forced_move_into_a_draw_is_impossible_at_once"],
+      "winning move reaches nothing": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_a_walk_that_times_out_ends_the_search_as_budget",
+        "test_a_wrong_oracle_is_caught_instead_of_looping",
+        "test_an_exhausted_budget_is_reported_not_guessed[budget2]",
+        "test_every_model_is_a_map_with_at_most_one_level_per_cell",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[3-8]",
+        "test_seeds_are_constrained_before_the_first_solve",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[12]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[14]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[15]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[16]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[17]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[18]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[1]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[20]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[21]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[22]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[23]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[24]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[25]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[26]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[27]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[28]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[29]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[30]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[31]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[32]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[33]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[34]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[35]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[36]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[37]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[38]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[39]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[3]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[6]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[8]",
+        "test_the_encoding_fires_exactly_the_level_the_rule_reads[9]",
+        "test_the_fork_position_is_found_and_the_map_verifies"
+      ],
+      "forced move reaches nothing": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_never_changes_the_answer",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[2-8]",
+        "test_seeds_are_constrained_before_the_first_solve"
+      ],
+      "constraint budget ignored": ["test_an_exhausted_budget_is_reported_not_guessed[budget0]"],
+      "cap read as clean": [
+        "test_a_walk_that_times_out_ends_the_search_as_budget",
+        "test_an_exhausted_budget_is_reported_not_guessed[budget2]"
+      ],
+      "unsat read as found": [
+        "test_a_forced_move_into_a_draw_is_impossible_at_once",
+        "test_a_position_with_no_winning_move_is_impossible_at_once",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-1]",
+        "test_found_and_impossible_agree_with_brute_force_over_every_one_level_map[1-8]"
+      ],
+      "one failing line per round whatever lines says": [
+        "test_a_walk_collects_up_to_the_limit_of_failing_lines_each_from_the_root",
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one"
+      ],
+      "lines merged before deduplication lost": [
+        "test_several_failing_lines_per_round_need_no_more_rounds_than_one"
+      ],
+      "solve never interrupted": ["test_a_solve_still_running_at_the_deadline_is_interrupted"],
+      "walk ignores the deadline": ["test_a_walk_past_its_deadline_stops_as_a_timeout"],
+      "walk timeout read as clean": ["test_a_walk_that_times_out_ends_the_search_as_budget"],
+      "hint ignored": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_a_hint_outside_the_language_is_refused",
+        "test_seeds_are_constrained_before_the_first_solve"
+      ],
+      "hint outside the language accepted": ["test_a_hint_outside_the_language_is_refused"],
+      "hint levels unchecked": ["test_a_hint_outside_the_language_is_refused"],
+      "hint phases all off": [
+        "test_a_found_map_given_as_the_hint_is_found_in_one_round",
+        "test_seeds_are_constrained_before_the_first_solve"
+      ],
+      "seeds ignored": ["test_seeds_are_constrained_before_the_first_solve"]
+    }
+  }
+}

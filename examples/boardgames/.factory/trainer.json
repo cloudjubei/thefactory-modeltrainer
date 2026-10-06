@@ -452,7 +452,7 @@
       "title": "WeakC4: a search-free weak solution of Connect 4",
       "url": "https://2swap.github.io/WeakC4/explanation/",
       "authors": "2swap (with Waffle3z, dave-zyx, CTL560, Meghanto)",
-      "claim": "A weak solution for the first player that needs no runtime search fits in about 25 KB: an opening tree of under 2,600 nodes, about two-thirds of them leaves holding 'steady states' played by a tiny rule language.",
+      "claim": "A weak solution for the first player that needs no runtime search fits in about 12 KB (live page, read 2026-10-05; earlier recorded as 25 KB): an opening tree of under 2,600 nodes, about two-thirds of them leaves holding 'steady states'. A steady state is played by: win if you can; block if you must; else a priority digit (0-d) per empty square, playing the unique playable square at the highest level. Steady states were found by a genetic algorithm and verified by brute force; a contributor later reduced finding them to SAT.",
       "approach": "Rule language at a steady state: win if you can, block if you must, else follow priority levels 0-d on the empty squares (play the one playable square of the lowest level with exactly one). Candidates found by a genetic algorithm and a SAT reduction, verified by brute force against every reply.",
       "assumptions": {
         "notes": "Strategy-sound, not position-sound: correct from its own roots against every reply, not at arbitrary positions. Language design by trial and error."
@@ -1241,6 +1241,254 @@
       },
       "verdictNote": "§C.49 The main published account of making AlphaZero self-play cheaper with extra targets; read before designing richer value targets.",
       "tags": ["c49", "self-play", "value-signal"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bock-connect4-strong-solution-2025",
+      "title": "Connect-4 strong solution stored with BDDs",
+      "url": "https://arxiv.org/abs/2507.05267",
+      "authors": "Böck",
+      "year": 2025,
+      "claim": "Every Connect-4 position's value stored in 89.6 GB (~0.158 bits a position) using binary decision diagrams.",
+      "approach": "Symbolic (BDD) state-set representation of the whole game's values.",
+      "assumptions": {
+        "notes": "Per the compression research agent (2026-10-05); per-ply BDD node figures not cross-checked."
+      },
+      "verdictNote": "Benchmark for 'store everything': ~1.1 TB with a plain perfect index vs 89.6 GB with BDDs (plan §2.3).",
+      "tags": ["compression", "connect4", "tablebase"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "edelkamp-kissmann-symbolic-c4-2008",
+      "title": "Symbolic classification of general two-player games (Connect-4 state counting)",
+      "url": "https://fai.cs.uni-saarland.de/kissmann/publications/ki08-ggpsolver.pdf",
+      "authors": "Stefan Edelkamp, Peter Kissmann",
+      "year": 2008,
+      "claim": "All reachable Connect-4 states represented in 84,088,763 BDD nodes, against ~43.8 TiB as an explicit list.",
+      "approach": "BDD-based symbolic search over the game's state sets.",
+      "assumptions": { "notes": "Per the compression research agent (2026-10-05)." },
+      "verdictNote": "Shows how far structure-aware state sets beat explicit keys (plan §2.3).",
+      "tags": ["compression", "connect4", "bdd"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "takizawa-semi-strong-solving-2024",
+      "title": "Semi-strong solving of games",
+      "url": "https://arxiv.org/abs/2411.01029",
+      "authors": "Takizawa",
+      "year": 2024,
+      "claim": "Proposes semi-strong solving — optimal play from every position reachable when one side plays optimally — and reports a much smaller Othello-type solution (abstract: '9,074x smaller').",
+      "approach": "Restrict the solved set to positions reachable under one side's optimal play.",
+      "assumptions": {
+        "notes": "Abstract only, via the compression research agent; the 9,074x figure is unverified."
+      },
+      "verdictNote": "Same idea as our first-player strategy tree (P-START): store only the tree one side's strategy reaches.",
+      "tags": ["compression", "solving", "strategy-tree"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "considine-compressed-game-solving-2024",
+      "title": "Compressed game solving",
+      "url": "https://arxiv.org/abs/2411.07273",
+      "authors": "Considine",
+      "year": 2024,
+      "claim": "Represents a game's solution compactly rather than as a full table.",
+      "approach": "Compression of game solutions (details not read).",
+      "assumptions": {
+        "notes": "Abstract-level, via the compression research agent; read before citing specifics."
+      },
+      "verdictNote": "Directly on the north star's 'smallest total description'; read before the next description-length design.",
+      "tags": ["compression", "description-length"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "romein-bal-awari-solved-2003",
+      "title": "Solving Awari with parallel retrograde analysis",
+      "url": "https://www.semanticscholar.org/paper/Awari-is-Solved-Romein-Bal/9651f4a7fd03be889d1e8a47407471ca38d68381",
+      "authors": "John Romein, Henri Bal",
+      "year": 2003,
+      "claim": "Awari solved (a draw) by parallel retrograde analysis over ~204 billion positions (~178 GB).",
+      "approach": "Distributed retrograde analysis with combinatorially ranked position databases.",
+      "assumptions": {
+        "notes": "Figures from abstract/search snippets only (compression research agent)."
+      },
+      "verdictNote": "Upper end of 'store every value' that has been done for a mancala game (plan §2.3).",
+      "tags": ["compression", "mancala", "retrograde"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "gasser-nine-mens-morris-1996",
+      "title": "Solving Nine Men's Morris",
+      "url": "https://www.cs.brandeis.edu/~storer/JimPuzzles/GAMES/NineMensMorris/INFO/GasserArticle.pdf",
+      "authors": "Ralph Gasser",
+      "year": 1996,
+      "claim": "Nine Men's Morris is a draw; 7,673,759,269 states stored in 9,074,932,579 perfect-hash indices.",
+      "approach": "Retrograde analysis with perfect hashing of positions plus opening search.",
+      "assumptions": { "notes": "Per the compression research agent (2026-10-05)." },
+      "verdictNote": "Perfect hashing overhead ~18% over the state count: the 'perfect index' baseline in practice.",
+      "tags": ["compression", "retrograde", "ninemensmorris"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "schaeffer-checkers-solved-2007",
+      "title": "Checkers is solved",
+      "url": "https://www.cs.mcgill.ca/~dprecup/courses/AI/Materials/checkers_is_solved.pdf",
+      "authors": "Jonathan Schaeffer et al.",
+      "year": 2007,
+      "claim": "Checkers is a draw; endgame databases of 3.9x10^13 positions in 237 GB (~154 positions a byte).",
+      "approach": "Endgame databases by retrograde analysis plus proof-number forward search from the opening.",
+      "assumptions": { "notes": "Per the compression research agent (2026-10-05)." },
+      "verdictNote": "Weak solving = forward search over a small tree + huge compressed endgame store (plan §2.3).",
+      "tags": ["compression", "checkers", "solving"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "tromp-farneback-go-positions-2016",
+      "title": "Combinatorics of Go",
+      "url": "https://tromp.github.io/go/gostate.pdf",
+      "authors": "John Tromp, Gunnar Farnebäck",
+      "year": 2016,
+      "claim": "The number of legal 19x19 Go positions is about 2.08x10^170.",
+      "approach": "Exact counting via dynamic programming over border states.",
+      "assumptions": { "notes": "Per the compression research agent (2026-10-05)." },
+      "verdictNote": "Why brute-force coverage is out for Go by ~10^169 bytes (plan §2.3).",
+      "tags": ["compression", "go", "state-space"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "weakc4lab-dsat-waffle3z",
+      "title": "weakc4lab / dsat: SAT search for Connect-4 steady states",
+      "url": "https://github.com/Waffle3z/weakc4lab",
+      "authors": "Waffle3z",
+      "year": 2025,
+      "claim": "Finding a WeakC4 steady-state priority diagram for a position reduces to boolean satisfiability, with an exact engine that can also prove none exists in the language.",
+      "approach": "SAT encoding with one reachability variable per board plus counterexample-guided refinement.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 S1: the discovery method to reproduce with our own search (licence to check before any code enters the repo).",
+      "tags": ["c50", "steady-state", "sat", "connect4"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "hayward-hex-strategy-verification",
+      "title": "Verifying Hex strategies",
+      "url": "https://webdocs.cs.ualberta.ca/~hayward/papers/verify.pdf",
+      "authors": "Hayward et al.",
+      "year": null,
+      "claim": "Hex winning strategies can be stored compactly and checked independently of the search that found them.",
+      "approach": "Strategy representation plus an independent verifier.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 model for 'the verifier never consults the solver' on a second ladder game.",
+      "tags": ["c50", "hex", "verification"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "anshelevich-h-search-2002",
+      "title": "A hierarchical approach to computer Hex (H-search)",
+      "url": "https://philpapers.org/rec/ANSAHA-2",
+      "authors": "Vadim Anshelevich",
+      "year": 2002,
+      "claim": "Virtual connections — small proven setups — compose by AND/OR rules into proofs about large Hex positions.",
+      "approach": "H-search: combine proven sub-connections into larger ones.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 the composition idea: setups that combine, not just a library of independent ones.",
+      "tags": ["c50", "hex", "composition"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "muller-decomposition-search-1999",
+      "title": "Decomposition search: a combinatorial games approach to game tree search",
+      "url": "https://www.ijcai.org/Proceedings/99-1/Papers/083.pdf",
+      "authors": "Martin Müller",
+      "year": 1999,
+      "claim": "Go endgames that split into independent regions are solved far faster by valuing each region with combinatorial game theory and summing.",
+      "approach": "Combinatorial game theory sums over local subgames.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 decomposition as a discoverable setup family (CGT sums).",
+      "tags": ["c50", "go", "cgt"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "bonet-geffner-general-policies-2018",
+      "title": "Features, projections and representation change for generalized planning",
+      "url": "https://arxiv.org/pdf/1811.07231",
+      "authors": "Blai Bonet, Hector Geffner",
+      "year": 2018,
+      "claim": "Policies over abstract features can solve whole families of problems, learned from small instances.",
+      "approach": "Learn general policies over boolean/numeric features from small examples.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 generic rule languages that transfer across instances — relevant to 'rules that apply time and again'.",
+      "tags": ["c50", "generalized-policies"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "frances-learning-general-policies-2021",
+      "title": "Learning general planning policies from small examples without supervision",
+      "url": "https://arxiv.org/pdf/2101.00692",
+      "authors": "Guillem Francès, Blai Bonet, Hector Geffner",
+      "year": 2021,
+      "claim": "General policies can be learned from small instances without supervision and verified to generalize.",
+      "approach": "Combinatorial optimisation over a feature pool, then verification.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 discovery method for generic, reusable rules.",
+      "tags": ["c50", "generalized-policies"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "yu-optimal-decision-lists-sat-jair",
+      "title": "Computing optimal decision sets and lists with SAT",
+      "url": "https://www.jair.org/index.php/jair/article/download/12719/26747/29092",
+      "authors": "Jinqiang Yu et al.",
+      "year": 2021,
+      "claim": "Minimal decision lists consistent with labelled data can be computed exactly with SAT.",
+      "approach": "SAT encodings for minimum-size decision sets/lists.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "Track R's rule_search basis; S1 needs closed-loop certification on top.",
+      "tags": ["c50", "decision-lists", "sat"],
+      "status": "untested",
+      "source": "manual"
+    },
+    {
+      "id": "malikovic-krk-sat-2013",
+      "title": "KRK endgame strategy proved correct with SAT",
+      "url": "https://argo.matf.bg.ac.rs/publications/2013/2013-icga-krk-sat.pdf",
+      "authors": "Maliković, Janičić",
+      "year": 2013,
+      "claim": "A compact rule-based strategy for the chess KRK endgame is proved correct with SAT/SMT.",
+      "approach": "Formal verification of a written strategy.",
+      "assumptions": {
+        "notes": "Via the setups research agent (docs/research/discovering-winning-setups.md, 2026-10-05); read the source before citing specifics."
+      },
+      "verdictNote": "§3.6 precedent for certifying a compact strategy in chess.",
+      "tags": ["c50", "chess", "verification", "sat"],
       "status": "untested",
       "source": "manual"
     }
