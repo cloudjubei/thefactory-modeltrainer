@@ -109,24 +109,9 @@
       "new": "        if 3 * own <= self.accept * bits:"
     },
     {
-      "name": "leaf map bits not charged",
-      "old": "        bits = ((map_bits(levels, len(empty), self.level_bits) if levels else 0)",
-      "new": "        bits = (0"
-    },
-    {
-      "name": "leaf exceptions not charged",
-      "old": "                + exception_bits(len(exc), own, self.game.num_actions))\n        if 3",
-      "new": "                + 0)\n        if 3"
-    },
-    {
       "name": "leaf map dropped",
       "old": "        return {\"leaf\": self._keep(levels, len(empty)) if levels else 0, \"exceptions\"",
       "new": "        return {\"leaf\": 0, \"exceptions\""
-    },
-    {
-      "name": "exceptions dropped from the leaf",
-      "old": "\"exceptions\": exc, \"own\": own}",
-      "new": "\"own\": own}"
     },
     {
       "name": "search started cold",
@@ -139,21 +124,6 @@
       "new": "        start = dict(self.maps[-1])"
     },
     {
-      "name": "no flag bit per leaf",
-      "old": "        exc_bits = (leaves + sum(",
-      "new": "        exc_bits = (0 + sum("
-    },
-    {
-      "name": "no exception count",
-      "old": "math.ceil(math.log2(n[\"own\"] + 1))\n",
-      "new": "0\n"
-    },
-    {
-      "name": "exception bits dropped",
-      "old": "                                 + exception_bits(len(n[\"exceptions\"]), n[\"own\"], self.game.num_actions)",
-      "new": "                                 + 0"
-    },
-    {
       "name": "check ignores exceptions",
       "old": "        exc = node.get(\"exceptions\", {})",
       "new": "        exc = {}"
@@ -162,10 +132,40 @@
       "name": "own positions ignore exceptions",
       "old": "            stack.append(game.step(s, choose_with(facts, s, levels, n_levels, exceptions)))",
       "new": "            stack.append(game.step(s, choose_with(facts, s, levels, n_levels, {})))"
+    },
+    {
+      "name": "leaf map bits not charged",
+      "old": "        bits = (map_bits(levels, len(empty), self.level_bits) if levels else 0) + coded",
+      "new": "        bits = coded"
+    },
+    {
+      "name": "leaf exceptions not charged",
+      "old": "        bits = (map_bits(levels, len(empty), self.level_bits) if levels else 0) + coded",
+      "new": "        bits = (map_bits(levels, len(empty), self.level_bits) if levels else 0)"
+    },
+    {
+      "name": "no flag bit per leaf",
+      "old": "        exc_bits = leaves + sum(n[\"coded\"] for n in excepted) if excepted else 0",
+      "new": "        exc_bits = sum(n[\"coded\"] for n in excepted) if excepted else 0"
+    },
+    {
+      "name": "exception code dropped",
+      "old": "        exc_bits = leaves + sum(n[\"coded\"] for n in excepted) if excepted else 0",
+      "new": "        exc_bits = leaves if excepted else 0"
+    },
+    {
+      "name": "code not stored",
+      "old": "                \"coded\": coded}",
+      "new": "                \"coded\": 0}"
+    },
+    {
+      "name": "exceptions dropped from the leaf",
+      "old": "\"exceptions\": exc, \"own\": own,",
+      "new": "\"own\": own,"
     }
   ],
   "last_run": {
-    "at": "2026-10-06T18:55:35+00:00",
+    "at": "2026-10-07T07:04:37+00:00",
     "killed": 32,
     "survived": [],
     "killed_by": {
@@ -192,7 +192,7 @@
       ],
       "node bit dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
-        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count",
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
       "leaf reference free": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
@@ -215,7 +215,7 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
-        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
       ],
       "exceptions accepted without a threshold": [
         "test_without_a_threshold_a_leaf_with_exceptions_is_never_kept"
@@ -225,18 +225,8 @@
         "test_the_threshold_counts_the_leaf_s_map_bits"
       ],
       "threshold boundary": ["test_a_leaf_exactly_at_the_threshold_is_kept"],
-      "leaf map bits not charged": ["test_the_threshold_counts_the_leaf_s_map_bits"],
-      "leaf exceptions not charged": [
-        "test_a_leaf_with_exceptions_too_large_for_the_threshold_becomes_a_move",
-        "test_the_threshold_counts_the_leaf_s_map_bits"
-      ],
       "leaf map dropped": [
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size"
-      ],
-      "exceptions dropped from the leaf": [
-        "test_a_leaf_exactly_at_the_threshold_is_kept",
-        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
-        "test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"
       ],
       "search started cold": [
         "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
@@ -244,9 +234,6 @@
       "start keeps filled cells": [
         "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
       ],
-      "no flag bit per leaf": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
-      "no exception count": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
-      "exception bits dropped": ["test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count"],
       "check ignores exceptions": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
         "test_check_plays_a_leaf_s_exceptions"
@@ -254,6 +241,26 @@
       "own positions ignore exceptions": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
         "test_check_plays_a_leaf_s_exceptions"
+      ],
+      "leaf map bits not charged": ["test_the_threshold_counts_the_leaf_s_map_bits"],
+      "leaf exceptions not charged": [
+        "test_a_leaf_with_exceptions_too_large_for_the_threshold_becomes_a_move",
+        "test_the_threshold_counts_the_leaf_s_map_bits"
+      ],
+      "no flag bit per leaf": [
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+      ],
+      "exception code dropped": [
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+      ],
+      "code not stored": [
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+      ],
+      "exceptions dropped from the leaf": [
+        "test_a_leaf_exactly_at_the_threshold_is_kept",
+        "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
       ]
     }
   }

@@ -72,11 +72,31 @@
       "name": "simplify drops unverified",
       "old": "        if verify(facts, root, trial, n_levels, cap)[\"won\"]:",
       "new": "        if True:"
+    },
+    {
+      "name": "facts cache unbounded",
+      "old": "            if len(self._facts) >= self.limit:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "facts cache limit off by one",
+      "old": "            if len(self._facts) >= self.limit:\n",
+      "new": "            if len(self._facts) > self.limit:\n"
+    },
+    {
+      "name": "facts clears not counted",
+      "old": "                self.cleared += 1",
+      "new": "                self.cleared += 0"
+    },
+    {
+      "name": "facts default unbounded",
+      "old": "    def __init__(self, game, limit: int = 2_000_000):",
+      "new": "    def __init__(self, game, limit: int = 10 ** 12):"
     }
   ],
   "last_run": {
-    "at": "2026-10-05T23:45:09+00:00",
-    "killed": 14,
+    "at": "2026-10-07T07:02:56+00:00",
+    "killed": 18,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
@@ -122,7 +142,17 @@
       "cap ignored": ["test_a_walk_past_the_cap_is_rejected"],
       "empty cells free": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
       "oversized map accepted": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
-      "simplify drops unverified": ["test_simplify_drops_every_level_the_win_does_not_need"]
+      "simplify drops unverified": ["test_simplify_drops_every_level_the_win_does_not_need"],
+      "facts cache unbounded": [
+        "test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "facts cache limit off by one": [
+        "test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "facts clears not counted": [
+        "test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
+      ],
+      "facts default unbounded": ["test_the_facts_cache_is_bounded_by_default"]
     }
   }
 }

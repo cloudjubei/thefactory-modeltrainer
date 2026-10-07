@@ -172,20 +172,21 @@ def _excepted(levels=None, exceptions=None, own=5):
 def test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough():
     b = _builder(search=_excepted(), accept=1)
     assert b.build(FORK)
-    assert b.nodes == {GAME.state_key(FORK): {"leaf": 0, "exceptions": ROOT_FIX, "own": 5}}
+    assert b.nodes == {GAME.state_key(FORK): {"leaf": 0, "exceptions": ROOT_FIX, "own": 5, "coded": 3}}
     assert b.searches == {"tried": 1, "found": 0, "excepted": 1}
     assert check(b.facts, FORK, b.nodes, b.maps, 2, 100_000) == {"won": True, "reason": None, "own_positions": 5}
 
 
 def test_a_leaf_with_exceptions_too_large_for_the_threshold_becomes_a_move():
-    """Its size: no map bits (the empty map) + exception_bits(1, 5, 9) = 7, so 15 table bits over 7: 2.1x."""
-    b = _builder(search=_excepted(), accept=3)
+    """Its size: no map bits (the empty map) + the walk-order code — the root is undefined, so its exception needs no
+    flag, only its move among 5 safe ones (3 bits): 15 table bits over 3, 5x."""
+    b = _builder(search=_excepted(), accept=6)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}
 
 
 def test_a_leaf_exactly_at_the_threshold_is_kept():
-    """own 7: exception_bits(1, 7, 9) = 7 bits against a 21-bit table — exactly 3x."""
-    b = _builder(search=_excepted(own=7), accept=3)
+    """3 coded bits against a 15-bit table — exactly 5x."""
+    b = _builder(search=_excepted(), accept=5)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)]["exceptions"] == ROOT_FIX
 
 
@@ -200,11 +201,11 @@ def test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size():
     assert b.nodes[GAME.state_key(FORK)]["leaf"] == 1 and b.maps[1] == {5: 1}
 
 
-def test_exceptions_are_charged_with_a_flag_per_leaf_and_a_count():
+def test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code():
     b = _builder(search=_excepted(), accept=1)
     assert b.build(FORK)
-    assert b.bits() == {"nodes": 1 + 1 + 3 + 7, "moves": 0, "leaves": 1, "maps": 0, "map_bits": 0, "exceptions": 1,
-                        "exception_bits": 1 + 3 + 7}
+    assert b.bits() == {"nodes": 1 + 1 + 3, "moves": 0, "leaves": 1, "maps": 0, "map_bits": 0, "exceptions": 1,
+                        "exception_bits": 1 + 3}
 
 
 def test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty():
@@ -234,6 +235,7 @@ def test_check_rejects_a_losing_exception():
 
 
 def test_the_threshold_counts_the_leaf_s_map_bits():
-    """own 7, map {5: 1}: 5 + 3 map bits + 7 exception bits against a 21-bit table — 1.4x, though 3x without the map."""
+    """own 7, map {5: 1}: 5 + 3 map bits + 3 coded bits (flag 1 of 1, move 2 of 4) against a 21-bit table — 1.9x,
+    though 7x without the map."""
     b = _builder(search=_excepted(levels={5: 1}, own=7), accept=2)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}

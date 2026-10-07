@@ -1,0 +1,144 @@
+{
+  "file": "harness/exception_coding.py",
+  "tests": ["tests/test_exception_coding.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "count not charged",
+      "old": "    return math.ceil(math.log2(math.comb(m, k))) + math.ceil(math.log2(m + 1))",
+      "new": "    return math.ceil(math.log2(math.comb(m, k)))"
+    },
+    {
+      "name": "choice not charged",
+      "old": "    return math.ceil(math.log2(math.comb(m, k))) + math.ceil(math.log2(m + 1))",
+      "new": "    return math.ceil(math.log2(m + 1))"
+    },
+    {
+      "name": "impossible choice accepted",
+      "old": "    if not 0 <= k <= m:",
+      "new": "    if False:"
+    },
+    {
+      "name": "exception at a forced win accepted",
+      "old": "            if wins or len(safe) == 1:\n                raise",
+      "new": "            if len(safe) == 1:\n                raise"
+    },
+    {
+      "name": "exception at a single safe move accepted",
+      "old": "            if wins or len(safe) == 1:\n                raise",
+      "new": "            if wins:\n                raise"
+    },
+    {
+      "name": "unsafe exception accepted",
+      "old": "            if fix not in safe:\n                raise",
+      "new": "            if False:\n                raise"
+    },
+    {
+      "name": "map move not excluded",
+      "old": "            alternatives = len(safe) - (move is not None)",
+      "new": "            alternatives = len(safe)"
+    },
+    {
+      "name": "move among all actions",
+      "old": "            alternatives = len(safe) - (move is not None)",
+      "new": "            alternatives = len(game.legal_actions(s))"
+    },
+    {
+      "name": "single alternative charged",
+      "old": "            move_bits += math.ceil(math.log2(alternatives)) if alternatives > 1 else 0",
+      "new": "            move_bits += max(1, math.ceil(math.log2(alternatives)))"
+    },
+    {
+      "name": "uncovered undefined accepted",
+      "old": "            if fix is None:\n                raise",
+      "new": "            if False:\n                raise"
+    },
+    {
+      "name": "implicit not counted",
+      "old": "            implicit += 1",
+      "new": "            implicit += 0"
+    },
+    {
+      "name": "forced counted as contested",
+      "old": "        elif not wins and len(safe) > 1:",
+      "new": "        elif True:"
+    },
+    {
+      "name": "flags not counted",
+      "old": "            flagged += fix is not None",
+      "new": "            flagged += 0"
+    },
+    {
+      "name": "walk follows the map",
+      "old": "        stack.append(game.step(s, choose_with(facts, s, levels, n_levels, exceptions)))",
+      "new": "        stack.append(game.step(s, move if move is not None else exceptions[key]))"
+    },
+    {
+      "name": "one reply walked",
+      "old": "            stack.extend(game.step(s, b) for b in game.legal_actions(s))",
+      "new": "            stack.extend(game.step(s, b) for b in game.legal_actions(s)[:1])"
+    },
+    {
+      "name": "moves not charged",
+      "old": "            \"bits\": enumerative_bits(contested, flagged) + move_bits}",
+      "new": "            \"bits\": enumerative_bits(contested, flagged)}"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-07T06:57:52+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "count not charged": [
+        "test_a_contested_position_without_an_exception_still_costs_its_share_of_the_flags",
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_an_exception_with_a_single_alternative_costs_no_move_bits",
+        "test_choosing_k_of_m_costs_the_count_and_the_choice"
+      ],
+      "choice not charged": ["test_choosing_k_of_m_costs_the_count_and_the_choice"],
+      "impossible choice accepted": ["test_choosing_k_of_m_costs_the_count_and_the_choice"],
+      "exception at a forced win accepted": [
+        "test_an_exception_where_the_rule_is_forced_is_refused"
+      ],
+      "exception at a single safe move accepted": [
+        "test_an_exception_where_only_one_move_is_safe_is_refused"
+      ],
+      "unsafe exception accepted": ["test_an_exception_move_that_is_not_safe_is_refused"],
+      "map move not excluded": [
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_an_exception_with_a_single_alternative_costs_no_move_bits"
+      ],
+      "move among all actions": [
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_an_exception_with_a_single_alternative_costs_no_move_bits"
+      ],
+      "single alternative charged": [
+        "test_an_exception_with_a_single_alternative_costs_no_move_bits"
+      ],
+      "uncovered undefined accepted": [
+        "test_an_undefined_position_without_an_exception_is_refused"
+      ],
+      "implicit not counted": [
+        "test_a_position_the_map_leaves_undefined_needs_no_flag_only_its_move",
+        "test_the_walk_follows_the_exception_not_the_map"
+      ],
+      "forced counted as contested": [
+        "test_a_contested_position_without_an_exception_still_costs_its_share_of_the_flags",
+        "test_a_position_the_map_leaves_undefined_needs_no_flag_only_its_move",
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest"
+      ],
+      "flags not counted": [
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_an_exception_with_a_single_alternative_costs_no_move_bits"
+      ],
+      "walk follows the map": [
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest"
+      ],
+      "one reply walked": ["test_the_walk_follows_the_exception_not_the_map"],
+      "moves not charged": [
+        "test_a_position_the_map_leaves_undefined_needs_no_flag_only_its_move",
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest"
+      ]
+    }
+  }
+}

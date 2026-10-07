@@ -4947,3 +4947,29 @@ oracle's answers across a build, emptied at its limit (5 tests, 8/8). Pilots on 
 at 4x #12433 completes in 31 min (198,602 positions, 96,625 bits, 6.2x) with exceptions 95% of its bits (h178); at
 10x neither completes, exceptions ~58% of the partial bits (h179). (h178's note compares with S3's timed-out roots,
 which are other roots.) Registered S4 at 10x on S3's roots, 4 h: h180-h182. #2071 done in 4 s: 133 bits (S3: 205).
+
+## 2026-10-07 — S4 result: size-scored leaves complete 3 of 4 ply-8 roots, but exceptions cost the size
+
+h180 supported (3/4 complete within 4 h; S3: 2), h181 supported (median 18.3x; 4.7x, 18.3x, 19.8x), h182 refuted.
+#2071: 133 bits for 207 positions (S3: 205 for 647), 4 s. #3591: 64,047 bits for 390,526 positions in 1.6 h (S3:
+34,115 for 318,473 in 3.4 h) — 49,725 of the bits are 2,944 exceptions. #14026 (S3 timed out): 99,451 bits for
+657,615 positions in 3.9 h. #11342 timed out again (560 searches). The session crashed mid-run; the run itself kept
+going and wrote its evidence. One worker reached 9.6 GB although the oracle cache is capped at 1.5M entries — another
+cache grows unbounded; to bound before longer runs.
+
+## 2026-10-07 — Walk-order exception coding: S4's strategies 40-50% smaller, #3591 now under S3
+
+`harness/exception_coding.py` (10 tests, 16/16 mutants): a decoder replays a leaf with the game's rules; an exception
+is impossible where the rule is forced (immediate win, one safe move), certain where the map is undefined, and only
+flagged at contested positions — coded as how many and which (enumerative), each move among the safe moves left.
+Re-costing S4's saved strategies (no oracle, strategies unchanged; the charged bits recomputed and matched):
+pre-registered h183 supported (exception bits -61% on #3591, -58% on #14026) and h184 supported (#3591: 33,782 bits vs
+S3's 34,115). Contested positions are ~37% of the leaves' own positions; ~1.5% of them carry an exception.
+
+## 2026-10-07 — Bounded Facts cache; builder charges walk-order exceptions; S5 piloting
+
+`Facts` (harness/steady_state.py) cached every position's immediate wins and safe moves for the life of a build,
+~1 KB each — S4's 9.6 GB worker. Now emptied at a limit (default 2M; 3 tests, 18/18 mutants in its spec); results
+are unchanged, only recomputed. `strategy_builder` charges a leaf's exceptions by `walk_order_cost` in its accept test
+and in `bits()` (32/32 mutants). Full suite 2,707 passed. S5 (`harness/floor_s5.py`): leaves from ply 10, piloting on
+the two roots after the sample, 1 h each, under a load average near 57 from other work on the machine.

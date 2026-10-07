@@ -5380,10 +5380,17 @@
       "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
       "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
       "registered_at": "2026-10-06T21:04:47.655048+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-07T01:06:46.180704+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_s4.json.gz",
-        "started": null
+        "started": "2026-10-06T21:04:47+00:00"
       },
       "pins": {
         "tests/test_c49_s4_evidence.py": "5a187fa9b832e23a81612df02dc3b3c96c29ec8f9908102e965de04cf42fd029",
@@ -5399,10 +5406,17 @@
       "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_the_strategies_are_at_least_10_times_smaller_than_their_table",
       "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
       "registered_at": "2026-10-06T21:04:47.698501+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_the_strategies_are_at_least_10_times_smaller_than_their_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-07T01:06:46.517696+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_s4.json.gz",
-        "started": null
+        "started": "2026-10-06T21:04:47+00:00"
       },
       "pins": {
         "tests/test_c49_s4_evidence.py": "5a187fa9b832e23a81612df02dc3b3c96c29ec8f9908102e965de04cf42fd029",
@@ -5418,7 +5432,15 @@
       "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_is_no_larger_than_s3_on_every_root_both_complete",
       "note": "S4 = S3 (same 4 ply-8 roots #2071 #14026 #11342 #3591, leaves from ply 12, 4 h) with one change: leaves by size-scored local search (30 s, oracle cache 1.5M positions shared within a build), a leaf kept with exceptions only when >= 10x under its table. Pilots h178 (4x: complete in 31 min but 6.2x) and h179 (10x: none complete in 1 h). harness/strategy_builder.py 23 tests, 32/32 mutants; harness/winning_cache.py 5 tests, 8/8. Measurement fingerprint 7dd17b1d62ef.",
       "registered_at": "2026-10-06T21:04:47.741673+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_evidence.py::test_c49_s4_is_no_larger_than_s3_on_every_root_both_complete",
+          "ok": false,
+          "detail": "ot_both_complete.<locals>.<genexpr> at 0x10506d620>)\n\ntests/test_c49_s4_evidence.py:54: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s4_evidence.py::test_c49_s4_is_no_larger_than_s3_on_every_root_both_complete\n1 failed in 0.11s",
+          "drawn_at": "2026-10-07T01:06:46.874479+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_s3.json.gz",
         "started": "2026-10-06T12:52:13+00:00"
@@ -5428,6 +5450,134 @@
         "harness/floor_s4.py": "08f86c86cdade369aab8d9040cb061487228c6677fa45daa17b1472d150c6f86"
       },
       "inconclusive_proof": "tests/test_c49_s4_evidence.py::test_c49_s4_no_root_completed_by_both"
+    },
+    "h183": {
+      "id": "h183",
+      "claim": "\u00a73.6: coding exceptions in walk order \u2014 flags only at contested positions (enumerative code), none where the rule is forced or undefined, each move among the safe moves left \u2014 cuts the median completed S4 strategy's exception bits by at least 40%. Refuted below 10%; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_exception_coding_evidence.py::test_c49_s4_walk_order_coding_cuts_exception_bits_by_40_percent",
+      "note": "Re-costing only: the S4 strategies are unchanged, no oracle is used. harness/exception_coding.py: 10 tests, 16/16 mutants. The script recomputes the charged exception bits and stops if they differ from the run's. Registered before the script was run on S4's evidence.",
+      "registered_at": "2026-10-07T06:58:25.119901+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_exception_coding_evidence.py::test_c49_s4_walk_order_coding_cuts_exception_bits_by_40_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-07T07:00:49.765708+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s4_exception_coding.json.gz",
+        "started": "2026-10-07T06:58:25+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s4_exception_coding_evidence.py": "cf010c23c790053ef55632fea32c73a343e77eebf34e28624bfbc9831e09a0ee",
+        "harness/exception_coding.py": "36318a2e905df2e025f79275c8e6dd30a4787fa65fa38e001662a7e864f4e43f"
+      },
+      "inconclusive_proof": "tests/test_c49_s4_exception_coding_evidence.py::test_c49_s4_the_coding_saving_is_undecidable"
+    },
+    "h184": {
+      "id": "h184",
+      "claim": "\u00a73.6: with exceptions coded in walk order, S4's strategy for #3591 is no larger than S3's (34,115 bits; S4 as charged: 64,047). Refuted if larger",
+      "mode": "test",
+      "proof": "tests/test_c49_s4_exception_coding_evidence.py::test_c49_s4_with_walk_order_coding_3591_is_no_larger_than_s3",
+      "note": "Re-costing only: the S4 strategies are unchanged, no oracle is used. harness/exception_coding.py: 10 tests, 16/16 mutants. The script recomputes the charged exception bits and stops if they differ from the run's. Registered before the script was run on S4's evidence.",
+      "registered_at": "2026-10-07T06:58:25.165515+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s4_exception_coding_evidence.py::test_c49_s4_with_walk_order_coding_3591_is_no_larger_than_s3",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-07T07:00:50.003820+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s3.json.gz",
+        "started": "2026-10-06T12:52:13+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s4_exception_coding_evidence.py": "cf010c23c790053ef55632fea32c73a343e77eebf34e28624bfbc9831e09a0ee",
+        "harness/exception_coding.py": "36318a2e905df2e025f79275c8e6dd30a4787fa65fa38e001662a7e864f4e43f"
+      }
+    },
+    "h185": {
+      "id": "h185",
+      "claim": "\u00a73.6 S5 pilot (registered after the data): leaves from ply 10 kept with exceptions at >= 10x (walk-order accounting) complete a root (#12433) in 15 minutes but at only 10.5x (227,995 bits for 801,860 positions): the excepted leaves are big (up to 283K own positions, 19.6K exceptions) and overlap, together covering 1.4x the positions the strategy reaches, so shared positions are paid for more than once. A per-leaf bar at the target lets the whole strategy settle at the bar",
+      "mode": "test",
+      "proof": "tests/test_c49_s5_pilot_evidence.py::test_c49_s5_pilot_ply_10_leaves_at_10x_give_a_strategy_just_over_10x_from_big_overlapping_leaves",
+      "note": "#13141 incomplete at 1 h with 246,582 bits already. Excepted-leaf compression median 16-19x, low end 10.2-10.3x. One worker at 8.5 GB with both caches bounded \u2014 memory still to explain. S5 registered at accept 30 (S4's ply-12 strategies reach 31.7-34.7x in walk order: a leaf worse than that should be expanded instead).",
+      "registered_at": "2026-10-07T08:18:42.856936+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s5_pilot_evidence.py::test_c49_s5_pilot_ply_10_leaves_at_10x_give_a_strategy_just_over_10x_from_big_overlapping_leaves",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.36s",
+          "drawn_at": "2026-10-07T08:18:44.146803+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s5_pilot.json.gz",
+        "started": "2026-10-07T07:17:33+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s5_pilot_evidence.py": "a5a8e8206d5f0530841665bbe718628429ad0e6140fb8ab8a48de546617f0787"
+      }
+    },
+    "h186": {
+      "id": "h186",
+      "claim": "\u00a73.6 S5: with leaves from ply 10 (kept with exceptions at >= 30x, walk-order accounting), at least 3 of the 4 ply-8 roots get a complete certified first-player strategy within 4 hours. Refuted at 1 or fewer; inconclusive at 2",
+      "mode": "test",
+      "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+      "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
+      "registered_at": "2026-10-07T08:19:16.986662+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s5.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_s5_evidence.py": "ee4c7c5134ce7f6b221de2d6fdf7ce653ea6a3b3e6c8fcdb2f82e9cac9fd2678",
+        "harness/floor_s5.py": "9fcd2b541d9adc44fbb40269d149b53f8187e82bef717d1bed05ef20c0f7bad0",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s5_evidence.py::test_c49_s5_completion_is_undecidable"
+    },
+    "h187": {
+      "id": "h187",
+      "claim": "\u00a73.6 S5: over completed roots, the median strategy is at least 10x smaller than the same strategy as a 3-bit-per-position table. Refuted below 1x; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_the_strategies_are_at_least_10_times_smaller_than_their_table",
+      "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
+      "registered_at": "2026-10-07T08:19:17.035151+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s5.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_s5_evidence.py": "ee4c7c5134ce7f6b221de2d6fdf7ce653ea6a3b3e6c8fcdb2f82e9cac9fd2678",
+        "harness/floor_s5.py": "9fcd2b541d9adc44fbb40269d149b53f8187e82bef717d1bed05ef20c0f7bad0",
+        "harness/floor_s2.py": "b1c0a492d0dc0eee44595b77a648ae56cfa91cf466e3f8018dd830ad8da0729c"
+      },
+      "inconclusive_proof": "tests/test_c49_s5_evidence.py::test_c49_s5_compression_is_undecidable"
+    },
+    "h188": {
+      "id": "h188",
+      "claim": "\u00a73.6 S5 vs S4: on every root both complete, S5's strategy is no larger in bits than S4's re-costed in walk order (#2071 133, #3591 33,782, #14026 62,188). Refuted if larger on any; undecidable with none completed by both",
+      "mode": "test",
+      "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_is_no_larger_than_s4_in_walk_order_on_every_root_both_complete",
+      "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
+      "registered_at": "2026-10-07T08:19:17.081548+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_s4_exception_coding.json.gz",
+        "started": "2026-10-07T06:58:25+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s5_evidence.py": "ee4c7c5134ce7f6b221de2d6fdf7ce653ea6a3b3e6c8fcdb2f82e9cac9fd2678",
+        "harness/floor_s5.py": "9fcd2b541d9adc44fbb40269d149b53f8187e82bef717d1bed05ef20c0f7bad0"
+      },
+      "inconclusive_proof": "tests/test_c49_s5_evidence.py::test_c49_s5_no_root_completed_by_both"
     }
   }
 }

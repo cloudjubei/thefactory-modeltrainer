@@ -404,6 +404,14 @@
       "sha256": "2a2cc85dc35c91047e52a14495afaff655b07302a6da44d29311870e63b86bfd",
       "started": "2026-10-06T12:52:13+00:00"
     },
+    "c49_s4.json.gz": {
+      "sha256": "55dbc1568583b6a86f854ec4cc7906b994df07cbbfdf99746ee2fc69b9e4a4b6",
+      "started": "2026-10-06T21:04:47+00:00"
+    },
+    "c49_s4_exception_coding.json.gz": {
+      "sha256": "288c45592bb7e3e6a8e3fe29d79b365c429d829045e4b1c81c7b7e4fc54d3134",
+      "started": "2026-10-07T06:58:25+00:00"
+    },
     "c49_s4_pilot.json.gz": {
       "sha256": "e87fc02fe0c41d60c355a9eb5f743b12890c72a60e2bb7b11f31483a33d6c7d2",
       "started": "2026-10-06T19:02:14+00:00"
@@ -411,6 +419,10 @@
     "c49_s4_pilot_accept10.json.gz": {
       "sha256": "9b157bee697b1d69eee199cd38c91dda69dcc5186889b00b62b1a6cf00dffad3",
       "started": "2026-10-06T20:03:33+00:00"
+    },
+    "c49_s5_pilot.json.gz": {
+      "sha256": "2490910f6e26d74304260440285c0e42d4c1b97ba1f25e229e0b8b5cd4e88c1e",
+      "started": "2026-10-07T07:17:33+00:00"
     },
     "c49_strategy_d10.json.gz": {
       "sha256": "c61f1f1a7d9d7a3eae13197e8dc5b4c0bad9522dda86da17d41c2dae2074f577",

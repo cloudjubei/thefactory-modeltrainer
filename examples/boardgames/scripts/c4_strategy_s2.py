@@ -29,7 +29,7 @@ LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_strategy_s2.py", "harness/strategy_builder.py", "harness/steady_state.py",
                        "harness/steady_search.py", "harness/certify.py", "harness/c4_oracle.py",
                        "harness/native_solver.py", "scripts/c4_steady_states.py", "harness/steady_local.py",
-                       "harness/steady_exceptions.py", "harness/winning_cache.py")
+                       "harness/steady_exceptions.py", "harness/winning_cache.py", "harness/exception_coding.py")
 
 
 def build_one(job: dict) -> dict:

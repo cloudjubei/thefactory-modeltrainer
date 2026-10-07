@@ -103,3 +103,26 @@ def test_facts_are_computed_once_per_position(facts, monkeypatch):
     facts.of(FORK)
     monkeypatch.setattr(facts, "_wins_now", lambda *a: pytest.fail("recomputed"))
     assert facts.of(FORK)[1] == [4, 5, 6, 7, 8]
+
+
+def test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right():
+    game = TicTacToe()
+    small, plain = Facts(game, limit=2), Facts(game, limit=1_000)
+    states = [_ttt((i,), ()) for i in range(1, 5)]
+    for s in states:
+        assert small.of(s) == plain.of(s)
+        assert len(small._facts) <= 2
+    assert small.cleared >= 1
+    assert all(small.of(s) == plain.of(s) for s in states)
+
+
+def test_the_facts_cache_keeps_everything_below_its_limit():
+    game = TicTacToe()
+    facts = Facts(game, limit=4)
+    for i in range(1, 5):
+        facts.of(_ttt((i,), ()))
+    assert len(facts._facts) == 4 and facts.cleared == 0
+
+
+def test_the_facts_cache_is_bounded_by_default():
+    assert Facts(TicTacToe()).limit == 2_000_000

@@ -308,13 +308,23 @@ rule standalone and in decision-list order, by ply.
     local search's best map with its exception positions constrained first found nothing in 30 min / 200K constraints,
     and did the same work as SAT started cold (within 6%). Local search is the leaf engine at ply 10; option 2 (a
     better SAT encoding) loses priority accordingly.
-  - **S4 running (2026-10-06):** S3's study with one change — leaves by size-scored local search (30 s, a shared
-    oracle cache bounded at 1.5M positions, `harness/winning_cache.py`), a leaf kept with exceptions when >= 10x
-    under its table (`strategy_builder` `accept`). Pilots: 4x completes a root in 31 min at 6.2x, exceptions > 90% of
-    bits (h178); 10x completes neither pilot root in 1 h (h179). Registered on S3's 4 roots, 4 h: h180 (>= 3/4
-    complete), h181 (median >= 10x), h182 (no larger than S3 where both complete).
-  - **Next:** earlier leaves (min leaf depth below ply 12) once S4 shows the leaf search holds up; the exception
-    encoding is the cost lever (exceptions are ~17 bits each against 3 for a table move).
+  - **S4 result (h180, h181 supported; h182 refuted):** S3's study with leaves by size-scored local search (30 s,
+    shared oracle cache, `harness/winning_cache.py`), a leaf kept with exceptions when >= 10x under its table. 3 of 4
+    roots complete in 4 h (S3: 2) — #14026, which S3 could not finish: 657,615 positions in 99,451 bits — median
+    18.3x (4.7x, 18.3x, 19.8x). Not smaller where both complete: #3591 64,047 bits vs S3's 34,115, 78% exceptions.
+    Pilots: 4x completes fast at 6.2x with exceptions > 90% of bits (h178); 10x is slower (h179).
+  - **Exception coding (h183, h184 supported):** exceptions coded in walk order (`harness/exception_coding.py`:
+    flags only at contested positions, enumerative; undefined positions implicit; moves among the safe moves left)
+    cut S4's exception bits by a median 59% — #3591 64,047 -> 33,782 bits (S3: 34,115), #14026 99,451 -> 62,188;
+    compression 34.7x and 31.7x. Only ~37% of a leaf's positions are contested, ~1.5% of those flagged.
+  - **Done 2026-10-07:** `Facts` bounded (default 2M positions, emptied at the limit; ~1 KB a position — the cause
+    of S4's 9.6 GB worker); the builder charges exceptions in walk order in its accept test and size.
+  - **S5 (running since 2026-10-07 10:19, ~4 h):** earlier leaves — S4 with leaves from ply 10 (min leaf depth 2),
+    walk-order accounting, a leaf kept with exceptions only at >= 30x (pilot at 10x: 10.5x from big overlapping leaves,
+    h185); h186 (>= 3/4 complete), h187 (median >= 10x), h188 (no larger than S4 in walk order).
+  - **After S5:** bound `_SOLVED` in `scripts/c4_steady_states.py` — the exact-value cache behind the winning-moves
+    oracle, unbounded (up to 7 children per oracle position; ~10M entries at 1.5M oracle positions) — the rest of the
+    8.5 GB workers; then one memory budget per worker across the three caches.
   - **Then:** the full certified first-player strategy as table + discovered steady states —
     a DP over the canonical tree from ply 12 (use a state where found and cheaper than the subtree, else one table
     move and recurse), giving the first complete certified Connect-4 strategy from this process and its size against

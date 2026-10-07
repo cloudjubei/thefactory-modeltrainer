@@ -13,7 +13,8 @@ Once a line reaches a leaf its map plays the rest of the game; each leaf's map w
 continuation, so the composite wins wherever play goes. `check` re-walks the whole strategy without the oracle. Size:
 one bit per node (move or leaf), three bits per table move, a leaf's reference into the map list, every map's bits
 (harness.steady_state.map_bits over the cells empty where it was found) and, once any leaf carries exceptions, a flag
-bit per leaf plus each such leaf's exception count and its exceptions (harness.steady_exceptions.exception_bits).
+bit per leaf plus each such leaf's exceptions coded in walk order (harness.exception_coding: flags only where the
+rules leave a choice, h183).
 
 `search(state, start)` returns None (nothing found) or {"levels", "exceptions" (empty for a map that wins every
 line), "own_positions" (the leaf's own positions; needed only with exceptions)}."""
@@ -22,7 +23,8 @@ from __future__ import annotations
 import math
 import time
 
-from harness.steady_exceptions import choose_with, exception_bits, verify_with
+from harness.exception_coding import walk_order_cost
+from harness.steady_exceptions import choose_with, verify_with
 from harness.steady_state import Facts, map_bits, simplify, verify
 
 
@@ -82,12 +84,13 @@ class Builder:
         if self.accept is None:
             return None
         own = result["own_positions"]
-        bits = ((map_bits(levels, len(empty), self.level_bits) if levels else 0)
-                + exception_bits(len(exc), own, self.game.num_actions))
+        coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc)["bits"]
+        bits = (map_bits(levels, len(empty), self.level_bits) if levels else 0) + coded
         if 3 * own < self.accept * bits:
             return None
         self.searches["excepted"] += 1
-        return {"leaf": self._keep(levels, len(empty)) if levels else 0, "exceptions": exc, "own": own}
+        return {"leaf": self._keep(levels, len(empty)) if levels else 0, "exceptions": exc, "own": own,
+                "coded": coded}
 
     def build(self, state, depth: int = 0) -> bool:
         """Fill `nodes` for the strategy from `state`; False when the deadline passes first."""
@@ -119,9 +122,7 @@ class Builder:
         maps = sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[1:], self.map_empty[1:]))
         move_bits = math.ceil(math.log2(self.game.num_actions))
         excepted = [n for n in self.nodes.values() if n.get("exceptions")]
-        exc_bits = (leaves + sum(math.ceil(math.log2(n["own"] + 1))
-                                 + exception_bits(len(n["exceptions"]), n["own"], self.game.num_actions)
-                                 for n in excepted)) if excepted else 0
+        exc_bits = leaves + sum(n["coded"] for n in excepted) if excepted else 0
         return {"nodes": len(self.nodes) + moves * move_bits + leaves * ref + maps + exc_bits, "moves": moves,
                 "leaves": leaves, "maps": len(self.maps) - 1, "map_bits": maps,
                 "exceptions": sum(len(n["exceptions"]) for n in excepted), "exception_bits": exc_bits}

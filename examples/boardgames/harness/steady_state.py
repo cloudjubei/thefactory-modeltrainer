@@ -13,19 +13,22 @@ about any particular game; it applies to placement games, where every move fills
 
 `verify` walks every position the rule reaches against every reply and accepts only if every line ends in a win for
 the side the rule plays — an undefined position, a draw or a loss rejects it. It never consults a solver. Facts that
-do not depend on the map (immediate wins, safe moves, their cells) are cached per position across calls."""
+do not depend on the map (immediate wins, safe moves, their cells) are cached per position across calls, in a cache
+emptied whenever it reaches its limit (~1 KB a position: a 4-hour build reached 9.6 GB a worker unbounded)."""
 from __future__ import annotations
 
 
 class Facts:
     """Per-position facts for one game, independent of any priority map: immediate wins, safe moves, each safe
-    move's cell. Shared by the verifier and the search so a position is analysed once."""
+    move's cell. Shared by the verifier and the search so a position is analysed once (until the cache is emptied)."""
 
-    def __init__(self, game):
+    def __init__(self, game, limit: int = 2_000_000):
         self.game = game
         h, w = getattr(game, "board_shape")
         self.cells = h * w
+        self.limit = limit
         self._facts: dict = {}
+        self.cleared = 0
 
     def placed_cell(self, state, action) -> int:
         game = self.game
@@ -62,6 +65,9 @@ class Facts:
                 elif game.current_player(child) == mover or not any(
                         self._wins_now(child, b) for b in game.legal_actions(child)):
                     safe.append(a)
+            if len(self._facts) >= self.limit:
+                self._facts.clear()
+                self.cleared += 1
             self._facts[key] = (wins, safe, {a: self.placed_cell(state, a) for a in safe})
         return self._facts[key]
 
