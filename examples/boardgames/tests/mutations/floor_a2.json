@@ -1,0 +1,95 @@
+{
+  "file": "harness/floor_a2.py",
+  "tests": ["tests/test_floor_a2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no choice",
+      "old": "\"builder\": {**W6[\"builder\"], \"choose_by_size\": True},",
+      "new": "\"builder\": {**W6[\"builder\"], \"choose_by_size\": False},"
+    },
+    {
+      "name": "old fingerprint",
+      "old": "\"measurement_fp\": \"a416e9353561\",",
+      "new": "\"measurement_fp\": W6[\"measurement_fp\"],"
+    },
+    {
+      "name": "roots unchecked",
+      "old": "    if not integrity and sorted(r[\"index\"] for r in e[\"roots\"]) != sorted(spec[\"indices\"]):\n        integrity = [\"the roots are not the registered positions\"]\n",
+      "new": ""
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if integrity:\n        return {\"integrity\": integrity, \"complete\": {\"verdict\": \"not_run\"}, \"size\": {\"verdict\": \"not_run\"}}\n",
+      "new": ""
+    },
+    {
+      "name": "three of four complete",
+      "old": "complete = \"supported\" if n == len(roots)",
+      "new": "complete = \"supported\" if n >= len(roots) - 1"
+    },
+    {
+      "name": "refute at one unfinished",
+      "old": "else \"refuted\" if n <= len(roots) // 2",
+      "new": "else \"refuted\" if n < len(roots)"
+    },
+    {
+      "name": "refute boundary",
+      "old": "size = (\"refuted\" if bits >= spec[\"a1_bits\"]",
+      "new": "size = (\"refuted\" if bits > spec[\"a1_bits\"]"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and bits <= spec[\"best_bits\"]",
+      "new": "\"supported\" if not lower and bits < spec[\"best_bits\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and bits <= spec[\"best_bits\"]",
+      "new": "\"supported\" if bits <= spec[\"best_bits\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = n < len(roots)\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "one root's size",
+      "old": "    bits = sum(r[\"bits\"][\"nodes\"] for r in roots)\n",
+      "new": "    bits = roots[0][\"bits\"][\"nodes\"]\n"
+    },
+    {
+      "name": "best bar at a1",
+      "old": "        \"best_bits\": 28_248,",
+      "new": "        \"best_bits\": 42_464,"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T20:32:59+00:00",
+    "killed": 12,
+    "survived": [],
+    "killed_by": {
+      "no choice": ["test_a2_is_w6_on_a1_s_positions_choosing_by_size"],
+      "old fingerprint": [
+        "test_a2_is_w6_on_a1_s_positions_choosing_by_size",
+        "test_a_run_off_its_registration_is_not_judged"
+      ],
+      "roots unchecked": ["test_a_run_off_its_registration_is_not_judged"],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "three of four complete": ["test_completion_needs_all_four"],
+      "refute at one unfinished": ["test_completion_needs_all_four"],
+      "refute boundary": [
+        "test_an_unfinished_root_can_only_refute",
+        "test_the_size_is_judged_against_the_best_per_position_and_against_a1"
+      ],
+      "support boundary": ["test_the_size_is_judged_against_the_best_per_position_and_against_a1"],
+      "partial supports": ["test_an_unfinished_root_can_only_refute"],
+      "never a lower bound": ["test_an_unfinished_root_can_only_refute"],
+      "one root's size": ["test_the_size_is_judged_against_the_best_per_position_and_against_a1"],
+      "best bar at a1": [
+        "test_a2_is_w6_on_a1_s_positions_choosing_by_size",
+        "test_the_size_is_judged_against_the_best_per_position_and_against_a1"
+      ]
+    }
+  }
+}

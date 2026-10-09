@@ -6529,6 +6529,282 @@
       "pins": {
         "harness/hypotheses.py": "19b98947035ac0e9ec6fe6e508e7206aafbca1d70e3f8fe5c05b78e27142c941"
       }
+    },
+    "h225": {
+      "id": "h225",
+      "claim": "\u00a73.6 W6: at least 28 of the next 32 frontier positions in W1's seeded order get a complete certified strategy within 2 hours, built as W5b. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_28_of_32_complete_within_2_hours",
+      "note": "W6 = the next 32 of W1's seeded frontier order (W1's 8 reproduced first), built exactly as W5b (root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap) with no library (W2: 2 of 61 leaves; W5b: 0). Judged on the 32 alone (W5b's 8 already seen). harness/floor_w6.py 8 tests, 20/20 mutants. Full suite before launch: 2,864 passed. Measurement fingerprint 81a037019fab (= W5b), C sources f59473d91de1 / e4278203f2aa. Bootstrap: 10,000 resamples, seed 6, 2.5-97.5%. A first launch at 17:54 ran 14 s before these were registered (a failed shell registration did not stop the chained launch); it was stopped by pid with its workers, wrote no evidence, and is not this data.",
+      "registered_at": "2026-10-09T15:55:50.203198+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.10s",
+          "drawn_at": "2026-10-09T18:48:34.686745+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w6.json.gz",
+        "started": "2026-10-09T15:55:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w6_evidence.py": "7b06a0328542521df8e6f40afc1aabff5067f44162499ec01d046d9c9949855f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w6_evidence.py::test_c49_w6_completion_is_undecidable"
+    },
+    "h226": {
+      "id": "h226",
+      "claim": "\u00a73.6 W6: the whole-game first-player strategy projects above the trained net's ~660K bits \u2014 the opening plus 671 x the 32 strategies' mean, the whole 95% bootstrap interval above 660K. Refuted when the whole interval is below and all 32 finished; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_whole_game_projects_above_the_net",
+      "note": "W6 = the next 32 of W1's seeded frontier order (W1's 8 reproduced first), built exactly as W5b (root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap) with no library (W2: 2 of 61 leaves; W5b: 0). Judged on the 32 alone (W5b's 8 already seen). harness/floor_w6.py 8 tests, 20/20 mutants. Full suite before launch: 2,864 passed. Measurement fingerprint 81a037019fab (= W5b), C sources f59473d91de1 / e4278203f2aa. Bootstrap: 10,000 resamples, seed 6, 2.5-97.5%. A first launch at 17:54 ran 14 s before these were registered (a failed shell registration did not stop the chained launch); it was stopped by pid with its workers, wrote no evidence, and is not this data.",
+      "registered_at": "2026-10-09T15:55:51.012606+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_whole_game_projects_above_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.20s",
+          "drawn_at": "2026-10-09T18:48:35.157363+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w6.json.gz",
+        "started": "2026-10-09T15:55:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w6_evidence.py": "7b06a0328542521df8e6f40afc1aabff5067f44162499ec01d046d9c9949855f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_projection_against_the_net_is_undecidable"
+    },
+    "h227": {
+      "id": "h227",
+      "claim": "\u00a73.6 W6: the size is in the tail \u2014 the 4 largest of the 32 strategies carry at least half their bits. Refuted under a quarter; inconclusive between, or while any of the 32 is unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_4_largest_carry_half_the_bits",
+      "note": "W6 = the next 32 of W1's seeded frontier order (W1's 8 reproduced first), built exactly as W5b (root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap) with no library (W2: 2 of 61 leaves; W5b: 0). Judged on the 32 alone (W5b's 8 already seen). harness/floor_w6.py 8 tests, 20/20 mutants. Full suite before launch: 2,864 passed. Measurement fingerprint 81a037019fab (= W5b), C sources f59473d91de1 / e4278203f2aa. Bootstrap: 10,000 resamples, seed 6, 2.5-97.5%. A first launch at 17:54 ran 14 s before these were registered (a failed shell registration did not stop the chained launch); it was stopped by pid with its workers, wrote no evidence, and is not this data.",
+      "registered_at": "2026-10-09T15:55:52.015090+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_4_largest_carry_half_the_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.10s",
+          "drawn_at": "2026-10-09T18:48:35.523443+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w6.json.gz",
+        "started": "2026-10-09T15:55:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w6_evidence.py": "7b06a0328542521df8e6f40afc1aabff5067f44162499ec01d046d9c9949855f",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w6_evidence.py::test_c49_w6_the_tail_is_undecidable"
+    },
+    "h228": {
+      "id": "h228",
+      "claim": "\u00a73.6 W6 (registered after the data): the frontier splits in two \u2014 16 of the 32 strategies take under 200 bits (one map at the root, near enough: together under 1% of the sample's bits) and the other 16 carry the size, 84% of all bits being exceptions; W5b's 8 split the same way (4 under 200 bits). W1's first 40 frontier positions, all built alike, project the whole game to 3.93M bits",
+      "mode": "test",
+      "proof": "tests/test_c49_w6_after_evidence.py::test_c49_w6_half_the_frontier_is_tiny_and_exceptions_are_most_of_the_rest",
+      "note": "Sizes (W6): 39-125 bits x16, then 949, 1,324, 1,636, 2,172, 2,935, 3,877, 6,065, 6,453, 7,137, 16,654, 16,917, 20,013, 27,525, 27,824, 30,009, 32,544. Every heavy build took >= 20 minutes (its root search failed to find a pure map); 15 of the 16 small are one leaf at the root. Whole-frontier build ~210 h.",
+      "registered_at": "2026-10-09T18:49:39.312028+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w6_after_evidence.py::test_c49_w6_half_the_frontier_is_tiny_and_exceptions_are_most_of_the_rest",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-09T18:49:39.743237+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_w6.json.gz",
+          "started": "2026-10-09T15:55:59+00:00"
+        },
+        {
+          "path": "evidence/c49_w5b.json.gz",
+          "started": "2026-10-09T13:32:10+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_w6_after_evidence.py": "18b770eba2e1fe0d475536e5960ce2a2076a18c9ef9b8519b046f3f42fbabe3c"
+      }
+    },
+    "h229": {
+      "id": "h229",
+      "claim": "\u00a73.6 (registered after the data): at ply 6 the opening has little room to steer around its heavy frontier positions \u2014 of the 13 decisions leading to one of the 12 sampled positions of >= 5,000 bits, 6 have a single winning move, and at the other 7 every alternative leaves 7 replies the empty map does not win, never fewer than the move chosen; with half the frontier heavy (h228), a swap trades one heavy position for seven unbuilt ones",
+      "mode": "test",
+      "proof": "tests/test_c49_opening_alternatives_evidence.py::test_c49_the_decisions_above_the_heavy_positions_have_no_lighter_alternative",
+      "note": "scripts/c4_opening_alternatives.py: 148 ply-6 decisions in the opening, 114 with an alternative winning move. #316 sits under two decisions. The plan's 'opening lever' is shelved at ply 6 on this; a map at ply 6 (choosing later moves too) is a different lever.",
+      "registered_at": "2026-10-09T18:52:08.620422+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_opening_alternatives_evidence.py::test_c49_the_decisions_above_the_heavy_positions_have_no_lighter_alternative",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-09T18:52:08.824345+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_opening_alternatives.json.gz",
+        "started": "2026-10-09T18:51:09.855683+00:00"
+      },
+      "pins": {
+        "tests/test_c49_opening_alternatives_evidence.py": "71a5db88edc149541c7a52130aadea9877a5679f85da78b18dcf7f1d227c17f3"
+      }
+    },
+    "h230": {
+      "id": "h230",
+      "claim": "\u00a73.6 A1: four of W6's heavy frontier positions, rebuilt as W6 with leaves kept with exceptions only at >= 100x under their table (W6: 30x), all complete within 2 hours. Refuted at 2 or fewer; inconclusive at 3",
+      "mode": "test",
+      "proof": "tests/test_c49_a1_evidence.py::test_c49_a1_all_four_complete_within_2_hours",
+      "note": "A1 = W6's settings (root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on four heavy W6 positions \u2014 #95 (6,453 bits) and #565 (3,877), one root map with exceptions; #594 (32,544) and #535 (30,009), already split \u2014 with only `accept` raised from 30 to 100. harness/floor_a1.py 5 tests, 11/11 mutants. Full suite before launch: 2,875 passed. Measurement fingerprint 81a037019fab (= W5b, W6).",
+      "registered_at": "2026-10-09T19:04:09.703446+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a1_evidence.py::test_c49_a1_all_four_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-09T20:27:01.517713+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a1.json.gz",
+        "started": "2026-10-09T19:04:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a1_evidence.py": "8998d5d5fbb382dd8825beb4f75db49504d04694f7c06ab848c007ea8e36eacc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a1_evidence.py::test_c49_a1_completion_is_undecidable"
+    },
+    "h231": {
+      "id": "h231",
+      "claim": "\u00a73.6 A1: splitting more pays \u2014 the four rebuilt positions together take at most 4/5 of W6's 72,883 bits. Refuted at W6's total or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_a1_evidence.py::test_c49_a1_splitting_more_makes_them_a_fifth_smaller",
+      "note": "A1 = W6's settings (root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on four heavy W6 positions \u2014 #95 (6,453 bits) and #565 (3,877), one root map with exceptions; #594 (32,544) and #535 (30,009), already split \u2014 with only `accept` raised from 30 to 100. harness/floor_a1.py 5 tests, 11/11 mutants. Full suite before launch: 2,875 passed. Measurement fingerprint 81a037019fab (= W5b, W6).",
+      "registered_at": "2026-10-09T19:04:10.012761+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a1_evidence.py::test_c49_a1_splitting_more_makes_them_a_fifth_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-09T20:27:01.740045+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a1.json.gz",
+        "started": "2026-10-09T19:04:17+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a1_evidence.py": "8998d5d5fbb382dd8825beb4f75db49504d04694f7c06ab848c007ea8e36eacc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a1_evidence.py::test_c49_a1_the_size_change_is_undecidable"
+    },
+    "h232": {
+      "id": "h232",
+      "claim": "\u00a73.6 A1 (registered after the data): a fixed threshold for keeping exceptions cuts both ways \u2014 splitting more (accept 100x) shrinks three of four heavy positions (#594 32,544 -> 6,207 bits) but makes #565 4.7x larger (3,877 -> 18,093): its one root map with exceptions covered 43,562 positions, the split strategy reaches 321,970. The smaller of the two builds per position gives 28,248 bits, under 39% of W6's 72,883 \u2014 the builder should choose between a leaf with exceptions and the split below it by size",
+      "mode": "test",
+      "proof": "tests/test_c49_a1_after_evidence.py::test_c49_a1_a_fixed_threshold_cuts_both_ways_and_the_smaller_build_per_position_is_under_two_fifths",
+      "note": "A1 at 100x: exceptions fall from 84-97% of the bits to 7-31%, maps rise to 45-173 per position (~70 bits each); builds 38-82 minutes (W6: 20-36). The split's table moves are chosen by readiness, not size, which is how a split can reach 7x the positions.",
+      "registered_at": "2026-10-09T20:27:36.718201+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a1_after_evidence.py::test_c49_a1_a_fixed_threshold_cuts_both_ways_and_the_smaller_build_per_position_is_under_two_fifths",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.10s",
+          "drawn_at": "2026-10-09T20:27:37.145918+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_a1.json.gz",
+          "started": "2026-10-09T19:04:17+00:00"
+        },
+        {
+          "path": "evidence/c49_w6.json.gz",
+          "started": "2026-10-09T15:55:59+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_a1_after_evidence.py": "daf1b389aff6f89356c7b7b2b9f3c14c0bbc132587c16dfeb3592daf0a299b65"
+      }
+    },
+    "h233": {
+      "id": "h233",
+      "claim": "\u00a73.6 A2: A1's four heavy frontier positions, rebuilt as W6 with the builder choosing between a leaf with exceptions and the split below it by size, all complete within 2 hours. Refuted at 2 or fewer; inconclusive at 3",
+      "mode": "test",
+      "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_all_four_complete_within_2_hours",
+      "note": "A2 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions with Builder(choose_by_size=True): a leaf with exceptions is kept only where the split below it (same rule, recursively) would not make the strategy smaller; a split that runs out of time loses to the leaf. harness/floor_a2.py 5 tests, 12/12 mutants; builder 42 tests, 58/58 mutants. Full suite before launch: 2,891 passed. Measurement fingerprint a416e9353561. Bars: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248.",
+      "registered_at": "2026-10-09T20:44:01.441282+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_a2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_a2_evidence.py": "2122efaf11d2c8b6979bcfae2bd85e41fe13c9cccf3406f7feb5d77c1d8146cd",
+        "harness/floor_a2.py": "b77b66358cb5db06f1995b9269da76107c44be3ad0d9380637a7b6819baa0bdc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a2_evidence.py::test_c49_a2_completion_is_undecidable"
+    },
+    "h234": {
+      "id": "h234",
+      "claim": "\u00a73.6 A2: choosing by size matches the best fixed threshold per position \u2014 the four take no more than 28,248 bits together (the smaller of W6's and A1's build for each). Refuted at A1's 42,464 or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_choosing_by_size_matches_the_best_build_per_position",
+      "note": "A2 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions with Builder(choose_by_size=True): a leaf with exceptions is kept only where the split below it (same rule, recursively) would not make the strategy smaller; a split that runs out of time loses to the leaf. harness/floor_a2.py 5 tests, 12/12 mutants; builder 42 tests, 58/58 mutants. Full suite before launch: 2,891 passed. Measurement fingerprint a416e9353561. Bars: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248.",
+      "registered_at": "2026-10-09T20:44:02.023274+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_a2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_a2_evidence.py": "2122efaf11d2c8b6979bcfae2bd85e41fe13c9cccf3406f7feb5d77c1d8146cd",
+        "harness/floor_a2.py": "b77b66358cb5db06f1995b9269da76107c44be3ad0d9380637a7b6819baa0bdc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a2_evidence.py::test_c49_a2_the_size_is_undecidable"
     }
   }
 }

@@ -5,7 +5,10 @@ Depth first from the root, each of the side's positions becomes:
     first (the position is trivial), then the maps already found in this build (most recent first — siblings share
     them), then a fresh `search` from the most recent map: a map that wins every line is simplified and added; a map
     plus exceptions (harness.steady_exceptions — table moves where its move does not win) is kept only when the leaf
-    is at least `accept` times smaller than its own positions as a 3-bit table;
+    is at least `accept` times smaller than its own positions as a 3-bit table — and, with `choose_by_size`, only
+    when the whole strategy is no larger with it than with the split below the position (built under the same rule):
+    a fixed threshold alone splits some positions to 7x the positions they reach and keeps exceptions others should
+    split (h232); a split that runs out of time loses to the leaf, so the choice never costs completion;
   - otherwise a MOVE node: one of its winning moves, chosen to maximise how many of the positions it leads to (after
     every reply) are already trivial or covered by a known map, and the build continues below it.
 
@@ -38,12 +41,13 @@ from harness.steady_state import Facts, map_bits, simplify, verify
 class Builder:
     def __init__(self, facts: Facts, winning, search, n_levels: int, level_bits: int, cap: int,
                  min_leaf_depth: int, reuse_window: int, seconds: float, accept: float | None = None,
-                 budgets: list | None = None, library: list | None = None, verifier=verify):
+                 budgets: list | None = None, library: list | None = None, verifier=verify,
+                 choose_by_size: bool = False):
         self.facts, self.game = facts, facts.game
         self.winning, self.search = winning, search
         self.n_levels, self.level_bits, self.cap = n_levels, level_bits, cap
         self.min_leaf_depth, self.reuse_window, self.accept = min_leaf_depth, reuse_window, accept
-        self.verifier = verifier
+        self.verifier, self.choose_by_size = verifier, choose_by_size
         self.budgets = sorted(budgets or [])
         self.deadline = time.monotonic() + seconds
         self.shared = len(library or [])
@@ -111,8 +115,27 @@ class Builder:
         if 3 * own < self.accept * bits:
             return None
         self.searches["excepted"] += 1
-        return {"leaf": self._keep(levels, len(empty)) if levels else 0, "exceptions": exc, "own": own,
-                "coded": coded}
+        return {"levels": levels, "empty": len(empty), "exceptions": exc, "own": own, "coded": coded}
+
+    def _place(self, key, leaf: dict) -> None:
+        if "levels" in leaf:
+            index = self._keep(leaf["levels"], leaf["empty"]) if leaf["levels"] else 0
+            leaf = {"leaf": index, "exceptions": leaf["exceptions"], "own": leaf["own"], "coded": leaf["coded"]}
+        self.nodes[key] = leaf
+
+    def _smaller(self, state, depth: int, leaf: dict) -> bool:
+        key = self.game.state_key(state)
+        nodes, kept = dict(self.nodes), len(self.maps)
+        split = None
+        if self._split(state, depth):
+            split = (self.nodes, self.maps[kept:], self.map_empty[kept:], self.bits()["nodes"])
+        self.nodes = nodes
+        del self.maps[kept:], self.map_empty[kept:]
+        self._place(key, leaf)
+        if split is not None and split[3] < self.bits()["nodes"]:
+            self.nodes = split[0]
+            self.maps[kept:], self.map_empty[kept:] = split[1], split[2]
+        return True
 
     def build(self, state, depth: int = 0) -> bool:
         """Fill `nodes` for the strategy from `state`; False when the deadline passes first."""
@@ -122,9 +145,15 @@ class Builder:
         if time.monotonic() > self.deadline:
             return False
         leaf = self._leaf(state, depth)
+        if leaf is not None and "levels" in leaf and self.choose_by_size:
+            return self._smaller(state, depth, leaf)
         if leaf is not None:
-            self.nodes[key] = leaf
+            self._place(key, leaf)
             return True
+        return self._split(state, depth)
+
+    def _split(self, state, depth: int) -> bool:
+        key = self.game.state_key(state)
         moves = sorted(self.winning([state])[0])
         if not moves:
             raise ValueError("the build reached a position its side cannot win — the oracle or the root is wrong")

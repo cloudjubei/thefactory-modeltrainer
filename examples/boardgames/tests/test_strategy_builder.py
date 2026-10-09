@@ -3,6 +3,8 @@ leaves, built depth first, and checked without any oracle. Tic-tac-toe fixtures 
 X to move, only the centre wins (the map {4: 0}); after it, every O reply leaves X an immediate win."""
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from games.tictactoe import TicTacToe, TTTState
@@ -45,11 +47,12 @@ def _sat(facts):
     return search
 
 
-def _builder(min_leaf_depth=0, seconds=60.0, search=None, accept=None, budgets=None, verifier=verify):
+def _builder(min_leaf_depth=0, seconds=60.0, search=None, accept=None, budgets=None, verifier=verify,
+             by_size=False):
     facts = Facts(GAME)
     return Builder(facts, _winning, search or _sat(facts), n_levels=2, level_bits=3, cap=100_000,
                    min_leaf_depth=min_leaf_depth, reuse_window=50, seconds=seconds, accept=accept, budgets=budgets,
-                   verifier=verifier)
+                   verifier=verifier, choose_by_size=by_size)
 
 
 def test_a_searched_leaf_at_the_root_is_the_whole_strategy():
@@ -371,3 +374,111 @@ def test_the_builder_s_covering_and_simplify_use_its_verifier():
                 verifier=verifier)
     assert b.build(FORK) and b.maps[1] == {4: 0}
     assert {} in calls and {4: 0} in calls
+
+
+EARLY = _ttt((0,), (1,))
+
+
+def test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept():
+    """The leaf: 1 node + a flag + 3 coded bits = 5; the split: a move (1 + 4 bits) and 4 trivial leaves = 9."""
+    b = _builder(search=_excepted(), accept=1, by_size=True)
+    assert b.build(FORK)
+    assert b.nodes == {GAME.state_key(FORK): {"leaf": 0, "exceptions": ROOT_FIX, "own": 5, "coded": 3}}
+    assert b.maps == [{}] and b.bits()["nodes"] == 5
+
+
+def test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept():
+    """The leaf with the map {5: 1} costs 14 bits (node, reference, 8 map bits, flag, 3 coded), the split 9 — and
+    without the choice that leaf is kept (test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size)."""
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01, by_size=True)
+    assert b.build(FORK)
+    assert b.nodes[GAME.state_key(FORK)] == {"move": 4} and len(b.nodes) == 5
+    assert b.maps == [{}] and b.map_empty == [0] and b.bits()["nodes"] == 9
+    assert check(b.facts, FORK, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_by_size_a_tie_keeps_the_leaf():
+    b = _builder(search=_excepted(), accept=1, by_size=True)
+    b.bits = lambda: {"nodes": 7}
+    assert b.build(FORK) and "exceptions" in b.nodes[GAME.state_key(FORK)]
+
+
+def test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01, by_size=True)
+    split = b._split
+
+    def late(state, depth):
+        b.deadline = time.monotonic() - 1.0
+        return split(state, depth)
+
+    b._split = late
+    assert b.build(FORK)
+    assert b.nodes == {GAME.state_key(FORK): {"leaf": 1, "exceptions": ROOT_FIX, "own": 1, "coded": 3}}
+    assert b.maps == [{}, {5: 1}] and b.map_empty == [0, 5]
+
+
+def test_by_size_a_winning_split_keeps_the_maps_it_found(monkeypatch):
+    import harness.strategy_builder as sb
+
+    monkeypatch.setattr(sb, "walk_order_cost", lambda *a, **k: {"bits": 10_000})
+    facts = Facts(GAME)
+    sat = _sat(facts)
+    root = GAME.state_key(EARLY)
+    fix = {root: min(_winning([EARLY])[0])}
+
+    def search(s, start, seconds):
+        if GAME.state_key(s) == root:
+            return {"levels": {}, "exceptions": dict(fix), "own_positions": 10**9}
+        return sat(s, start, seconds)
+
+    b = Builder(facts, _winning, search, n_levels=2, level_bits=3, cap=100_000, min_leaf_depth=0, reuse_window=50,
+                seconds=60.0, accept=1, choose_by_size=True)
+    assert b.build(EARLY)
+    assert "move" in b.nodes[root] and not any(n.get("exceptions") for n in b.nodes.values())
+    assert len(b.maps) > 1 and all(n["leaf"] < len(b.maps) for n in b.nodes.values() if "leaf" in n)
+    assert any(n.get("leaf", 0) > 0 for n in b.nodes.values())
+    assert check(facts, EARLY, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_by_size_the_choice_is_made_below_the_root_too(monkeypatch):
+    import harness.strategy_builder as sb
+
+    monkeypatch.setattr(sb, "walk_order_cost", lambda *a, **k: {"bits": 1})
+
+    def search(s, start, seconds):
+        return {"levels": {}, "exceptions": {GAME.state_key(s): min(_winning([s])[0])}, "own_positions": 10**9}
+
+    b = _builder(search=search, accept=1, by_size=True)
+    depths = []
+    split = b._split
+
+    def recorded(state, depth):
+        depths.append(depth)
+        return split(state, depth)
+
+    b._split = recorded
+    assert b.build(EARLY)
+    assert 0 in depths and any(d >= 2 for d in depths)
+
+
+def test_by_size_a_losing_split_leaves_none_of_its_maps_behind(monkeypatch):
+    import harness.strategy_builder as sb
+
+    monkeypatch.setattr(sb, "walk_order_cost", lambda *a, **k: {"bits": 1})
+    facts = Facts(GAME)
+    sat = _sat(facts)
+    root = GAME.state_key(EARLY)
+    found = []
+
+    def search(s, start, seconds):
+        if GAME.state_key(s) == root:
+            return {"levels": {}, "exceptions": {root: min(_winning([EARLY])[0])}, "own_positions": 10**9}
+        r = sat(s, start, seconds)
+        found.append(r is not None)
+        return r
+
+    b = Builder(facts, _winning, search, n_levels=2, level_bits=3, cap=100_000, min_leaf_depth=0, reuse_window=50,
+                seconds=60.0, accept=1, choose_by_size=True)
+    assert b.build(EARLY)
+    assert any(found) and "exceptions" in b.nodes[root] and len(b.nodes) == 1
+    assert b.maps == [{}] and b.map_empty == [0]

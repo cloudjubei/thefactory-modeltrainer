@@ -80,7 +80,8 @@ def main() -> None:
         return None if r["bits"] is None else {k: r[k] for k in ("levels", "exceptions", "own_positions")}
 
     builder = Builder(facts, winning, search, b["n_levels"], b["level_bits"], b["cap"], b["min_leaf_depth"],
-                      b["reuse_window"], args.seconds, b.get("accept"), b.get("budgets"), library)
+                      b["reuse_window"], args.seconds, b.get("accept"), b.get("budgets"), library,
+                      choose_by_size=b.get("choose_by_size", False))
     profile = cProfile.Profile()
     t0 = time.monotonic()
     profile.enable()

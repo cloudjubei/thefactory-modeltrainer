@@ -9,7 +9,8 @@ harness.floor_w1), and the opening's own size is saved with them. A SPEC may nam
 sampling them, and give the builder search budgets by depth ("budgets", harness.floor_p1). With "wave_size" the roots
 are built in waves and each wave's builds start from a library of every map the earlier waves found
 (harness.floor_w2); with "library_from" every build starts from the maps an earlier run's builds found
-(harness.floor_w3). A local search with "walker": "native" walks its leaves and verifies its maps in C
+(harness.floor_w3). With the builder's "choose_by_size" a leaf with exceptions is kept only where the split
+below it would not make the strategy smaller (harness.floor_a2). A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
 Roots: the first `roots` non-trivial positions in a seeded shuffle (harness.floor_s2), or with `--pilot N` the next N
@@ -83,7 +84,8 @@ def build_one(job: dict) -> dict:
             return {"levels": r["levels"], "exceptions": {}, "own_positions": None} if r["status"] == "found" else None
     library = [({int(c): k for c, k in levels.items()}, empty) for levels, empty in job.get("library", [])]
     builder = Builder(facts, winning, search, b["n_levels"], b["level_bits"], b["cap"], b["min_leaf_depth"],
-                      b["reuse_window"], b["seconds"], b.get("accept"), b.get("budgets"), library, verifier)
+                      b["reuse_window"], b["seconds"], b.get("accept"), b.get("budgets"), library, verifier,
+                      choose_by_size=b.get("choose_by_size", False))
     t0 = time.time()
     complete = builder.build(root)
     row = {"index": job["index"], "board": job["board"], "to_move": job["to_move"], "complete": complete,

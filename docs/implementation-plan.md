@@ -391,12 +391,30 @@ rule standalone and in decision-list order, by ply.
     the 8-root mean. The library offered 39 maps to the second wave and none was used (W2: 2 of 61 leaves). h221-h223
     read post-hoc only because they were registered in the second the run started; the register now waits out that
     second (t34).
-  - **W6 (next):** the next 32 of W1's seeded frontier positions, built exactly as W5b without a library
-    (`harness/floor_w6.py`), judged on the 32 alone: h225 (>= 28/32 complete), h226 (the whole game projects above
-    the net's ~660K — the whole bootstrap interval of the mean), h227 (the 4 largest carry >= half the bits). If the
-    tail carries the size, the lever is the opening: choosing, at the parents of heavy positions, winning moves that
-    avoid them — now affordable, since a build (median ~20 minutes) is its own size estimate (h193: cheap stand-ins
-    fail).
+  - **W6 result (h225, h226, h227 supported, pre-registered; h228, h229 after the data):** the next 32 of W1's
+    seeded frontier positions, built as W5b without the library: all 32 complete and certified within 2 h (longest 51
+    minutes). The whole game projects to 4.31M bits, 95% bootstrap interval 2.10M-6.85M — all above the net's ~660K;
+    W5b's 8 had read low. The 4 largest carry 57% of the bits. The frontier splits in two: 16 of 32 take under 200
+    bits (one map at the root, near enough) and hold under 1% of the bits; the other 16 carry the size, 84% of all bits
+    exceptions. The first 40 frontier positions project to 3.93M bits; building all 671 would take ~210 h.
+  - **The opening lever is shelved at ply 6 (h229):** of the 13 opening decisions above the 12 sampled positions of
+    >= 5,000 bits, 6 have one winning move, and every alternative at the other 7 leaves 7 unwon replies — never fewer
+    than the move chosen (`scripts/c4_opening_alternatives.py`). A swap trades one heavy position for seven unbuilt
+    ones, half of them heavy on W6's rate.
+  - **The lever is now the exceptions.** The builder keeps the FIRST leaf with exceptions that is `accept` times under
+    its table (30x) without asking whether a move and smaller leaves below would cost less; five of W6's heavy
+    positions are exactly that — one root map carrying 133-1,671 exceptions.
+  - **A1 result (h230, h231 supported, pre-registered; h232 after the data):** the four heavy positions rebuilt with
+    `accept` 100x all complete within 2 h and together take 42,464 bits — 58% of W6's 72,883. Exceptions fall from
+    84-97% of the bits to 7-31%; maps take their place (45-173 per position, ~70 bits each); builds 38-82 minutes. But
+    the threshold cuts both ways: #594 32,544 -> 6,207 bits, #535 30,009 -> 12,857, #95 6,453 -> 5,307, while #565
+    grows 3,877 -> 18,093 — its one root map with exceptions covered 43,562 positions, the split reaches 321,970 (its
+    table moves are chosen by readiness, not size). The smaller build per position: 28,248 bits, 39% of W6's.
+  - **Choose by size — built 2026-10-09 (`Builder(choose_by_size=True)`, 58/58 mutants); A2 next:** wherever the builder finds a leaf with exceptions that clears `accept`, it also
+    builds the split below that position (recursively, under the same rule) and keeps whichever makes the whole
+    strategy smaller; a split that runs out of time loses to the leaf, so the choice never costs completion. Then A2
+    rebuilds A1's four positions at W6's 30x with this choice, and, if it holds, the 20 heavy positions of the 40
+    sampled are rebuilt to re-project the whole game.
 
 ## 4. The hybrid process — definition of done
 

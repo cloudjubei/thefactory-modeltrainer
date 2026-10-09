@@ -344,6 +344,10 @@
       "sha256": "7fc9a21498227cbcfb6217d7784ead1a04a3926974d19849fa928d92b01bc2c0",
       "started": "2026-10-01T09:49:17+00:00"
     },
+    "c49_a1.json.gz": {
+      "sha256": "f038f0a4d0a7a9c81ad4d21402b594d836fa51897b173c5305bf73da88b6522f",
+      "started": "2026-10-09T19:04:17+00:00"
+    },
     "c49_build_profile.json.gz": {
       "sha256": "a637ac4a5151ad1a5e31a4455aab27a2d03b14518b5c117a3828db8e9efd6334",
       "started": "2026-10-08T09:48:47+00:00"
@@ -387,6 +391,10 @@
     "c49_native_leaf_bench_lazy.json.gz": {
       "sha256": "7fcb366ed98ae8a079c194f996fd20df7212e3cdc7b294b383e5ef6a1a6e607d",
       "started": "2026-10-08T21:38:04+00:00"
+    },
+    "c49_opening_alternatives.json.gz": {
+      "sha256": "68fc61324b48bd1502114cabb4f2019091f2b7278303be10861c0efbc3d1bbd0",
+      "started": "2026-10-09T18:51:09.855683+00:00"
     },
     "c49_p1.json.gz": {
       "sha256": "6548efb6fb22583bc8058e690ea01f8d25933672466ab568dedceee0243c8af2",
@@ -511,6 +519,10 @@
     "c49_w5b.json.gz": {
       "sha256": "753a5619fe6378465269559ad7e316464643d9dfea4f1ab12409039c8e112a55",
       "started": "2026-10-09T13:32:10+00:00"
+    },
+    "c49_w6.json.gz": {
+      "sha256": "0889220500d5d4b7704d968466a836402a05267f00e0050a224c03dd0eb232fe",
+      "started": "2026-10-09T15:55:59+00:00"
     },
     "c50_C1_certificates.json.gz": {
       "sha256": "0eddfed663d8c9ef617bab40c9ec7667384829fd2d773781414496659b628c30",

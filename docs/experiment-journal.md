@@ -5168,3 +5168,54 @@ run's pid.
 
 Next (plan): W6 — the next 32 of W1's seeded frontier positions built exactly as W5b, without the unused library,
 to measure the tail: h225-h227.
+
+## 2026-10-09 — W6 launched (after a false start)
+
+`harness/floor_w6.py` (8 tests, 20/20 mutants, run in a scratch copy); full suite 2,864 passed. The first launch
+(17:54:50) ran before its claims existed: the three registrations were one shell chain with the launch, the
+registrations failed on quoting, and the trailing `&` put the whole chain in the background, so the launch ran anyway.
+Stopped by pid after 14 s with its 4 orphaned workers (also by pid); it wrote no evidence, and its trials.jsonl
+start (8db6c9c07ba3) has no end. h225-h227 were then registered through the register's Python API — each waiting out
+its second (t34) — and W6 relaunched alone at 17:56:21. Rule: register in one step, check it, launch in the next.
+
+## 2026-10-09 — W6: half the frontier is tiny, the other half is exceptions
+
+W6 finished 20:48 (pid run, no false starts after the relaunch): all 32 of the next frontier positions in W1's seeded
+order complete and certified, the longest in 51 minutes (h225). Pre-registered and timed correctly this time (t34):
+the whole game projects to 4.31M bits, its 95% bootstrap interval 2.10M-6.85M entirely above the net's ~660K (h226),
+and the 4 largest strategies carry 57% of the bits (h227). W5b's 2.42M had read low on 8 positions.
+
+The sizes are bimodal (h228, after the data): 16 of the 32 take 39-125 bits — one map at the root, 15 of them
+literally — and hold 0.7% of the bits between them; the other 16 run from 949 to 32,544 bits, and 84% of all bits are
+exceptions. W5b's 8 split the same way (4 under 200). Every heavy build took at least 20 minutes, i.e. its root search
+found no pure map. Whole-frontier build at this rate: ~210 CPU-hours.
+
+The plan's next lever was the opening — choose, above a heavy position, a winning move that avoids it. Measured first
+(scripts/c4_opening_alternatives.py, h229 after the data): of the 13 ply-6 decisions above the 12 sampled positions of
+>= 5,000 bits, 6 have a single winning move, and at the other 7 every alternative leaves 7 unwon replies, never fewer
+than the move chosen. With half the frontier heavy, a swap trades one heavy position for seven unbuilt ones. Shelved.
+
+What W6 does show: the builder keeps the first leaf with exceptions that clears `accept` (30x under its table) and
+never compares it with splitting the position. Five heavy W6 positions are exactly that — one root map carrying
+133-1,671 exceptions. Next: A1 rebuilds four heavy positions with accept 100x, nothing else changed (h230, h231).
+Judges 5 tests, 11/11 mutants after one fix (the 4/5 boundary was never hit exactly; the fixture now is).
+
+## 2026-10-09 — A1: splitting pays on balance, but a fixed threshold cuts both ways
+
+A1 finished 22:26: with leaves kept with exceptions only at >= 100x under their table (W6: 30x), all four heavy
+positions complete within 2 h (h230) and together take 42,464 bits, 58% of W6's 72,883 (h231) — both pre-registered.
+Exceptions fall from 84-97% of the bits to 7-31% and maps take their place, 45-173 per position at ~70 bits each.
+Per position (h232, after the data): #594 32,544 -> 6,207, #535 30,009 -> 12,857, #95 6,453 -> 5,307 — and #565
+3,877 -> 18,093. W6's single root map with 718 exceptions covered 43,562 positions; the forced split chose its table
+moves for readiness and reached 321,970. The smaller of the two builds per position totals 28,248 bits, 39% of W6's.
+So the rule should not be a threshold but a comparison: at a leaf with exceptions, build the split too and keep the
+smaller. Next: the builder learns that choice (TDD, mutants), then A2 on the same four positions at 30x.
+
+## 2026-10-09 — the builder chooses a leaf or a split by size
+
+`Builder(choose_by_size=True)` (spec key `"choose_by_size"`): wherever a leaf with exceptions clears `accept`, the
+builder snapshots its nodes and maps, builds the split below the position (recursively under the same rule), records
+the whole strategy's bits, undoes it, places the leaf, and restores the split only if it is strictly smaller. The
+leaf's map is kept only once the leaf is placed, so the split never sees it; a split that runs out of time loses to
+the leaf, so the choice never costs completion. Tests 42 (8 new), mutants 58/58 (10 new; one survivor — a losing split
+whose maps stayed charged — closed by a test). Measurement fingerprint now a416e9353561. Next: A2 (h233, h234).

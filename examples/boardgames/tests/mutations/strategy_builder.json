@@ -105,8 +105,8 @@
     },
     {
       "name": "leaf map dropped",
-      "old": "        return {\"leaf\": self._keep(levels, len(empty)) if levels else 0, \"exceptions\"",
-      "new": "        return {\"leaf\": 0, \"exceptions\""
+      "old": "            index = self._keep(leaf[\"levels\"], leaf[\"empty\"]) if leaf[\"levels\"] else 0\n",
+      "new": "            index = 0\n"
     },
     {
       "name": "search started cold",
@@ -150,8 +150,8 @@
     },
     {
       "name": "code not stored",
-      "old": "                \"coded\": coded}",
-      "new": "                \"coded\": 0}"
+      "old": "\"own\": leaf[\"own\"], \"coded\": leaf[\"coded\"]}",
+      "new": "\"own\": leaf[\"own\"], \"coded\": 0}"
     },
     {
       "name": "exceptions dropped from the leaf",
@@ -242,14 +242,69 @@
       "name": "simplify by the python verify",
       "old": "                            verifier=self.verifier)",
       "new": "                            verifier=None)"
+    },
+    {
+      "name": "by size ignored",
+      "old": "        if leaf is not None and \"levels\" in leaf and self.choose_by_size:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "by size always on",
+      "old": "        self.verifier, self.choose_by_size = verifier, choose_by_size\n",
+      "new": "        self.verifier, self.choose_by_size = verifier, True\n"
+    },
+    {
+      "name": "split always wins",
+      "old": "        if split is not None and split[3] < self.bits()[\"nodes\"]:\n",
+      "new": "        if split is not None:\n"
+    },
+    {
+      "name": "tie goes to the split",
+      "old": "        if split is not None and split[3] < self.bits()[\"nodes\"]:\n",
+      "new": "        if split is not None and split[3] <= self.bits()[\"nodes\"]:\n"
+    },
+    {
+      "name": "unfinished split kept",
+      "old": "        if self._split(state, depth):\n            split = ",
+      "new": "        self._split(state, depth)\n        if True:\n            split = "
+    },
+    {
+      "name": "split's nodes not undone",
+      "old": "        self.nodes = nodes\n        del self.maps",
+      "new": "        del self.maps"
+    },
+    {
+      "name": "split's maps not undone",
+      "old": "        del self.maps[kept:], self.map_empty[kept:]\n",
+      "new": ""
+    },
+    {
+      "name": "split's maps not restored",
+      "old": "            self.maps[kept:], self.map_empty[kept:] = split[1], split[2]\n",
+      "new": ""
+    },
+    {
+      "name": "leaf's map seen by the split",
+      "edits": [
+        {
+          "old": "        nodes, kept = dict(self.nodes), len(self.maps)\n",
+          "new": "        if leaf[\"levels\"]:\n            self._keep(leaf[\"levels\"], leaf[\"empty\"])\n        nodes, kept = dict(self.nodes), len(self.maps)\n"
+        }
+      ]
+    },
+    {
+      "name": "choice only at the root",
+      "old": "        if leaf is not None and \"levels\" in leaf and self.choose_by_size:\n",
+      "new": "        if leaf is not None and \"levels\" in leaf and self.choose_by_size and depth == 0:\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-09T08:09:49+00:00",
-    "killed": 48,
+    "at": "2026-10-09T20:31:51+00:00",
+    "killed": 58,
     "survived": [],
     "killed_by": {
       "empty map not tried first": [
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_the_builder_s_covering_and_simplify_use_its_verifier",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
@@ -262,6 +317,7 @@
       "search before reuse": [
         "test_a_known_map_covers_a_position_without_searching",
         "test_a_library_map_covers_a_position_without_searching",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_the_builder_s_covering_and_simplify_use_its_verifier"
       ],
@@ -287,11 +343,17 @@
       ],
       "only first child built": [
         "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found",
+        "test_by_size_the_choice_is_made_below_the_root_too",
         "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
       "node bit dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
@@ -318,6 +380,10 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
+        "test_by_size_a_tie_keeps_the_leaf",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
         "test_the_builder_s_own_walks_get_its_deadline"
       ],
@@ -330,7 +396,9 @@
       ],
       "threshold boundary": ["test_a_leaf_exactly_at_the_threshold_is_kept"],
       "leaf map dropped": [
-        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size"
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
       ],
       "search started cold": [
         "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
@@ -352,19 +420,34 @@
         "test_the_threshold_counts_the_leaf_s_map_bits"
       ],
       "no flag bit per leaf": [
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
       ],
       "exception code dropped": [
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
       ],
       "code not stored": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
       ],
       "exceptions dropped from the leaf": [
         "test_a_leaf_exactly_at_the_threshold_is_kept",
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
-        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
+        "test_by_size_a_tie_keeps_the_leaf",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found",
+        "test_by_size_the_choice_is_made_below_the_root_too",
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_the_builder_s_own_walks_get_its_deadline"
       ],
       "budget ignored": [
         "test_a_search_budget_never_runs_past_the_build_s_deadline",
@@ -386,7 +469,10 @@
         "test_a_search_budget_never_runs_past_the_build_s_deadline"
       ],
       "negative time given": ["test_a_build_past_its_deadline_gives_a_search_no_time"],
-      "map bits dropped": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
+      "map bits dropped": [
+        "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept"
+      ],
       "library ignored": [
         "test_a_library_map_covers_a_position_without_searching",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
@@ -411,7 +497,43 @@
       "covering by the python verify": [
         "test_the_builder_s_covering_and_simplify_use_its_verifier"
       ],
-      "simplify by the python verify": ["test_the_builder_s_covering_and_simplify_use_its_verifier"]
+      "simplify by the python verify": [
+        "test_the_builder_s_covering_and_simplify_use_its_verifier"
+      ],
+      "by size ignored": [
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found",
+        "test_by_size_the_choice_is_made_below_the_root_too"
+      ],
+      "by size always on": [
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size"
+      ],
+      "split always wins": [
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_tie_keeps_the_leaf"
+      ],
+      "tie goes to the split": ["test_by_size_a_tie_keeps_the_leaf"],
+      "unfinished split kept": [
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
+      ],
+      "split's nodes not undone": [
+        "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
+        "test_by_size_a_losing_split_leaves_none_of_its_maps_behind",
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found"
+      ],
+      "split's maps not undone": ["test_by_size_a_losing_split_leaves_none_of_its_maps_behind"],
+      "split's maps not restored": [
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_winning_split_keeps_the_maps_it_found"
+      ],
+      "leaf's map seen by the split": [
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
+      ],
+      "choice only at the root": ["test_by_size_the_choice_is_made_below_the_root_too"]
     }
   }
 }
