@@ -117,11 +117,26 @@
       "name": "sparse list without the index",
       "old": "    return min(exceptions * (math.ceil(math.log2(positions)) + move), positions + exceptions * move)",
       "new": "    return min(exceptions * move, positions + exceptions * move)"
+    },
+    {
+      "name": "needed: deadline ignored",
+      "old": "        if deadline is not None and len(seen) % CHECK_EVERY == 1 % CHECK_EVERY and time.monotonic() > deadline:",
+      "new": "        if False:"
+    },
+    {
+      "name": "needed: no deadline read as passed",
+      "old": "        if deadline is not None and len(seen) % CHECK_EVERY == 1 % CHECK_EVERY and time.monotonic() > deadline:",
+      "new": "        if (deadline is None or time.monotonic() > deadline) and len(seen) % CHECK_EVERY == 1 % CHECK_EVERY:"
+    },
+    {
+      "name": "needed: timeout returns its partial exceptions",
+      "old": "            return {\"status\": \"timeout\", \"exceptions\": {}, \"own_positions\": own}",
+      "new": "            return {\"status\": \"timeout\", \"exceptions\": exceptions, \"own_positions\": own}"
     }
   ],
   "last_run": {
-    "at": "2026-10-06T15:29:36+00:00",
-    "killed": 23,
+    "at": "2026-10-08T10:27:13+00:00",
+    "killed": 26,
     "survived": [],
     "killed_by": {
       "exception ignored": [
@@ -176,6 +191,7 @@
         "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
         "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
         "test_a_walk_past_the_cap_is_reported",
+        "test_a_walk_stopped_mid_way_returns_no_exceptions",
         "test_a_winning_map_move_is_never_overridden",
         "test_needed_asks_the_oracle_only_where_the_map_has_no_immediate_win",
         "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
@@ -183,14 +199,17 @@
         "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root",
         "test_needed_reports_a_walk_past_the_cap",
         "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win",
+        "test_needed_without_a_deadline_walks_to_the_end",
         "test_the_empty_map_needs_one_exception_at_the_root"
       ],
       "needed: own positions not counted": [
+        "test_a_walk_stopped_mid_way_returns_no_exceptions",
         "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win"
       ],
       "needed: one reply walked": [
         "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
         "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
+        "test_a_walk_stopped_mid_way_returns_no_exceptions",
         "test_a_winning_map_move_is_never_overridden",
         "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
         "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root",
@@ -218,6 +237,29 @@
       "sparse list without the index": [
         "test_dense_exceptions_cost_a_mask_over_the_leaf_s_positions",
         "test_exceptions_cost_an_index_into_the_leaf_s_positions_and_a_move"
+      ],
+      "needed: deadline ignored": [
+        "test_a_walk_stopped_mid_way_returns_no_exceptions",
+        "test_needed_stops_at_its_deadline_mid_walk"
+      ],
+      "needed: no deadline read as passed": [
+        "test_a_map_failing_several_lines_is_patched_until_it_wins",
+        "test_a_map_needing_more_exceptions_than_allowed_is_refused",
+        "test_a_patch_with_exactly_the_allowed_exceptions_is_kept",
+        "test_a_refused_patch_returns_no_exceptions_even_when_it_had_some",
+        "test_a_walk_past_the_cap_is_reported",
+        "test_a_walk_stopped_mid_way_returns_no_exceptions",
+        "test_a_winning_map_move_is_never_overridden",
+        "test_needed_gives_a_winning_leaf_whose_every_exception_is_necessary",
+        "test_needed_refuses_an_oracle_that_calls_a_losing_move_winning",
+        "test_needed_refuses_an_oracle_with_no_winning_move_below_the_root",
+        "test_needed_reports_a_walk_past_the_cap",
+        "test_needed_walks_every_line_and_fixes_each_position_the_map_does_not_win",
+        "test_needed_without_a_deadline_walks_to_the_end",
+        "test_the_empty_map_needs_one_exception_at_the_root"
+      ],
+      "needed: timeout returns its partial exceptions": [
+        "test_a_walk_stopped_mid_way_returns_no_exceptions"
       ]
     }
   }

@@ -1,0 +1,100 @@
+{
+  "file": "harness/floor_w3.py",
+  "tests": ["tests/test_floor_w3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "foreign measurement accepted",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other settings accepted",
+      "old": "    if e.get(\"builder\") != spec[\"builder\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other roots accepted",
+      "old": "    if sorted(r[\"index\"] for r in e[\"roots\"]) != sorted(spec[\"indices\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "other positions accepted",
+      "old": "    if any(r[\"index\"] not in before or r[\"board\"] != before[r[\"index\"]][\"board\"] for r in e[\"roots\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "library unchecked",
+      "old": "    if any(r[\"shared\"] != library for r in e[\"roots\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "failed checks accepted",
+      "old": "    if not all(r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"] for r in e[\"roots\"] if r[\"complete\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "w2 sizes kept for redone roots",
+      "old": "    sample = [redone.get(r[\"index\"], r) for r in w2[\"roots\"]]",
+      "new": "    sample = list(w2[\"roots\"])"
+    },
+    {
+      "name": "only redone roots averaged",
+      "old": "    sample = [redone.get(r[\"index\"], r) for r in w2[\"roots\"]]",
+      "new": "    sample = list(redone.values())"
+    },
+    {
+      "name": "lower bound supports",
+      "old": "    verdict = (\"refuted\" if bits > spec[\"projection_line\"] else \"supported\" if not lower else \"inconclusive\")",
+      "new": "    verdict = (\"refuted\" if bits > spec[\"projection_line\"] else \"supported\")"
+    },
+    {
+      "name": "line boundary",
+      "old": "    verdict = (\"refuted\" if bits > spec[\"projection_line\"]",
+      "new": "    verdict = (\"refuted\" if bits >= spec[\"projection_line\"] - 5_000"
+    },
+    {
+      "name": "opening free",
+      "old": "    bits = (opening[\"moves\"] * 4 + opening[\"trivial\"]",
+      "new": "    bits = (0"
+    },
+    {
+      "name": "completion refute ignored",
+      "old": "else \"refuted\" if n == 0 else \"inconclusive\"",
+      "new": "else \"inconclusive\""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-08T14:48:05+00:00",
+    "killed": 12,
+    "survived": [],
+    "killed_by": {
+      "foreign measurement accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other settings accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other roots accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other positions accepted": ["test_integrity_problems_stop_the_judgement"],
+      "library unchecked": ["test_integrity_problems_stop_the_judgement"],
+      "failed checks accepted": ["test_integrity_problems_stop_the_judgement"],
+      "w2 sizes kept for redone roots": [
+        "test_an_unfinished_root_keeps_a_small_projection_undecided_but_a_large_one_refutes",
+        "test_both_finished_and_small_decides_the_projection_under_the_net",
+        "test_the_redone_roots_replace_w2_s_and_the_rest_are_w2_s"
+      ],
+      "only redone roots averaged": ["test_the_redone_roots_replace_w2_s_and_the_rest_are_w2_s"],
+      "lower bound supports": [
+        "test_an_unfinished_root_keeps_a_small_projection_undecided_but_a_large_one_refutes"
+      ],
+      "line boundary": [
+        "test_an_unfinished_root_keeps_a_small_projection_undecided_but_a_large_one_refutes",
+        "test_both_finished_and_small_decides_the_projection_under_the_net"
+      ],
+      "opening free": [
+        "test_both_finished_and_small_decides_the_projection_under_the_net",
+        "test_the_redone_roots_replace_w2_s_and_the_rest_are_w2_s"
+      ],
+      "completion refute ignored": [
+        "test_an_unfinished_root_keeps_a_small_projection_undecided_but_a_large_one_refutes"
+      ]
+    }
+  }
+}

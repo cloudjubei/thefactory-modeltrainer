@@ -1,0 +1,153 @@
+{
+  "file": "harness/floor_w6.py",
+  "tests": ["tests/test_floor_w6.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "a W1 root sampled again",
+      "old": "[471, 178, 95,",
+      "new": "[362, 178, 95,"
+    },
+    {
+      "name": "library waves kept",
+      "old": "\"time_support\", \"library_support\", \"wave_size\")}",
+      "new": "\"time_support\", \"library_support\")}"
+    },
+    {
+      "name": "completion support boundary",
+      "old": "\"supported\" if n >= spec[\"complete_support\"]",
+      "new": "\"supported\" if n > spec[\"complete_support\"]"
+    },
+    {
+      "name": "completion refute boundary",
+      "old": "\"refuted\" if n <= spec[\"complete_refute\"]",
+      "new": "\"refuted\" if n < spec[\"complete_refute\"]"
+    },
+    {
+      "name": "completion judged off registration",
+      "old": "    integrity = _integrity(e, spec)\n    if integrity:\n        return {\"integrity\": integrity, \"complete\": {\"verdict\": \"not_run\"}}\n",
+      "new": "    integrity = []\n"
+    },
+    {
+      "name": "projection judged off registration",
+      "old": "def w6_projection(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w6_projection(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "above by the point estimate",
+      "old": "(\"supported\" if low > spec[\"net_bits\"]",
+      "new": "(\"supported\" if bits > spec[\"net_bits\"]"
+    },
+    {
+      "name": "above at the net",
+      "old": "(\"supported\" if low > spec[\"net_bits\"]",
+      "new": "(\"supported\" if low >= spec[\"net_bits\"]"
+    },
+    {
+      "name": "below while unfinished",
+      "old": "else \"refuted\" if not lower and high < spec[\"net_bits\"]",
+      "new": "else \"refuted\" if high < spec[\"net_bits\"]"
+    },
+    {
+      "name": "below by the point estimate",
+      "old": "else \"refuted\" if not lower and high < spec[\"net_bits\"]",
+      "new": "else \"refuted\" if not lower and bits < spec[\"net_bits\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in roots)\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "interval ends swapped",
+      "old": "(statistics.mean(sizes), means[int(0.025 * len(means))],\n                                 means[int(0.975 * len(means)) - 1])",
+      "new": "(statistics.mean(sizes), means[int(0.975 * len(means)) - 1],\n                                 means[int(0.025 * len(means))])"
+    },
+    {
+      "name": "opening left out",
+      "old": "    base = opening[\"moves\"] * 4 + opening[\"trivial\"]\n",
+      "new": "    base = 0\n"
+    },
+    {
+      "name": "hours from one root",
+      "old": "statistics.mean(r[\"build_seconds\"] for r in roots) / 3600",
+      "new": "roots[0][\"build_seconds\"] * 2 / 3600"
+    },
+    {
+      "name": "tail judged off registration",
+      "old": "def w6_tail(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w6_tail(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "tail judged while unfinished",
+      "old": "    if not all(r[\"complete\"] for r in e[\"roots\"]):\n        return {\"verdict\": \"inconclusive\"}\n",
+      "new": ""
+    },
+    {
+      "name": "tail of the smallest",
+      "old": "sizes = sorted((r[\"bits\"][\"nodes\"] for r in e[\"roots\"]), reverse=True)",
+      "new": "sizes = sorted(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])"
+    },
+    {
+      "name": "tail unsorted",
+      "old": "sizes = sorted((r[\"bits\"][\"nodes\"] for r in e[\"roots\"]), reverse=True)",
+      "new": "sizes = [r[\"bits\"][\"nodes\"] for r in e[\"roots\"]][::-1]"
+    },
+    {
+      "name": "tail support boundary",
+      "old": "\"supported\" if share >= spec[\"tail_support\"]",
+      "new": "\"supported\" if share > spec[\"tail_support\"]"
+    },
+    {
+      "name": "tail refute boundary",
+      "old": "\"refuted\" if share < spec[\"tail_refute\"]",
+      "new": "\"refuted\" if share <= spec[\"tail_refute\"]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T15:24:10+00:00",
+    "killed": 20,
+    "survived": [],
+    "killed_by": {
+      "a W1 root sampled again": [
+        "test_w6_builds_the_next_32_of_w1_s_order_exactly_as_w5b_without_a_library"
+      ],
+      "library waves kept": [
+        "test_w6_builds_the_next_32_of_w1_s_order_exactly_as_w5b_without_a_library"
+      ],
+      "completion support boundary": ["test_completion_is_judged_on_the_32"],
+      "completion refute boundary": ["test_completion_is_judged_on_the_32"],
+      "completion judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "projection judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "above by the point estimate": [
+        "test_the_projection_is_above_the_net_only_when_the_whole_interval_is"
+      ],
+      "above at the net": ["test_the_projection_is_above_the_net_only_when_the_whole_interval_is"],
+      "below while unfinished": [
+        "test_the_projection_is_below_the_net_only_when_every_root_finished"
+      ],
+      "below by the point estimate": [
+        "test_the_projection_is_below_the_net_only_when_every_root_finished"
+      ],
+      "never a lower bound": ["test_the_projection_is_below_the_net_only_when_every_root_finished"],
+      "interval ends swapped": [
+        "test_the_projection_is_above_the_net_only_when_the_whole_interval_is",
+        "test_the_projection_is_below_the_net_only_when_every_root_finished",
+        "test_the_projection_is_the_opening_plus_the_frontier_times_the_mean_with_a_bootstrap_interval"
+      ],
+      "opening left out": [
+        "test_the_projection_is_above_the_net_only_when_the_whole_interval_is",
+        "test_the_projection_is_the_opening_plus_the_frontier_times_the_mean_with_a_bootstrap_interval"
+      ],
+      "hours from one root": [
+        "test_the_projection_is_the_opening_plus_the_frontier_times_the_mean_with_a_bootstrap_interval"
+      ],
+      "tail judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "tail judged while unfinished": ["test_the_tail_is_not_judged_while_any_root_is_unfinished"],
+      "tail of the smallest": ["test_the_tail_is_the_share_of_the_bits_in_the_4_largest"],
+      "tail unsorted": ["test_the_tail_is_the_share_of_the_bits_in_the_4_largest"],
+      "tail support boundary": ["test_the_tail_is_the_share_of_the_bits_in_the_4_largest"],
+      "tail refute boundary": ["test_the_tail_is_the_share_of_the_bits_in_the_4_largest"]
+    }
+  }
+}

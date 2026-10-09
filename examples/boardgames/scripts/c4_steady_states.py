@@ -23,6 +23,7 @@ POSITIONS = ROOT / "evidence" / "c49_frontier_positions.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_steady_states.py", "harness/steady_state.py", "harness/steady_search.py",
                        "harness/certify.py", "harness/c4_oracle.py", "harness/native_solver.py")
 _SOLVED: dict = {}
+SOLVED_LIMIT = 3_000_000
 
 
 def _value(game, state) -> int:
@@ -30,6 +31,8 @@ def _value(game, state) -> int:
 
     key = game.state_key(state)
     if key not in _SOLVED:
+        if len(_SOLVED) >= SOLVED_LIMIT:
+            _SOLVED.clear()
         _SOLVED[key] = int(solve((state.board, state.to_move)))
     return _SOLVED[key]
 

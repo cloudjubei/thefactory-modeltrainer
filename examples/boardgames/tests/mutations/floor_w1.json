@@ -1,0 +1,111 @@
+{
+  "file": "harness/floor_w1.py",
+  "tests": ["tests/test_floor_w1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "foreign measurement accepted",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other settings accepted",
+      "old": "    if e.get(\"builder\") != spec[\"builder\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other frontier accepted",
+      "old": "    if (e.get(\"opening\") or {}).get(\"frontier\") != spec[\"frontier\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "root count unchecked",
+      "old": "    if len(e[\"roots\"]) != spec[\"roots\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "failed checks accepted",
+      "old": "    if not all(r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"] for r in e[\"roots\"] if r[\"complete\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "completion support off by one",
+      "old": "    complete = (\"supported\" if n >= spec[\"complete_support\"]",
+      "new": "    complete = (\"supported\" if n > spec[\"complete_support\"]"
+    },
+    {
+      "name": "completion refute off by one",
+      "old": "else \"refuted\" if n <= spec[\"complete_refute\"]",
+      "new": "else \"refuted\" if n < spec[\"complete_refute\"]"
+    },
+    {
+      "name": "opening moves free",
+      "old": "    bits = (opening[\"moves\"] * 4 + opening[\"trivial\"]",
+      "new": "    bits = (opening[\"trivial\"]"
+    },
+    {
+      "name": "opening moves without their move bits",
+      "old": "    bits = (opening[\"moves\"] * 4 + opening[\"trivial\"]",
+      "new": "    bits = (opening[\"moves\"] + opening[\"trivial\"]"
+    },
+    {
+      "name": "frontier not multiplied",
+      "old": "            + opening[\"frontier\"] * statistics.mean(r[\"bits\"][\"nodes\"] for r in roots))",
+      "new": "            + statistics.mean(r[\"bits\"][\"nodes\"] for r in roots))"
+    },
+    {
+      "name": "only complete roots averaged",
+      "old": "            + opening[\"frontier\"] * statistics.mean(r[\"bits\"][\"nodes\"] for r in roots))",
+      "new": "            + opening[\"frontier\"] * statistics.mean(r[\"bits\"][\"nodes\"] for r in roots if r[\"complete\"]))"
+    },
+    {
+      "name": "lower bound supports",
+      "old": "               else \"supported\" if not lower and bits <= spec[\"projection_support\"]",
+      "new": "               else \"supported\" if bits <= spec[\"projection_support\"]"
+    },
+    {
+      "name": "refute ignored",
+      "old": "    verdict = (\"refuted\" if bits > spec[\"projection_refute\"]",
+      "new": "    verdict = (\"refuted\" if False"
+    },
+    {
+      "name": "hours not over the frontier",
+      "old": "    hours = opening[\"frontier\"] * statistics.mean",
+      "new": "    hours = statistics.mean"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-07T14:05:49+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "foreign measurement accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other settings accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other frontier accepted": ["test_integrity_problems_stop_the_judgement"],
+      "root count unchecked": ["test_integrity_problems_stop_the_judgement"],
+      "failed checks accepted": ["test_integrity_problems_stop_the_judgement"],
+      "completion support off by one": ["test_completion_is_judged_against_its_lines"],
+      "completion refute off by one": ["test_completion_is_judged_against_its_lines"],
+      "opening moves free": [
+        "test_all_complete_and_small_projects_under_the_net",
+        "test_an_unfinished_root_counts_at_its_partial_size"
+      ],
+      "opening moves without their move bits": [
+        "test_all_complete_and_small_projects_under_the_net",
+        "test_an_unfinished_root_counts_at_its_partial_size"
+      ],
+      "frontier not multiplied": [
+        "test_a_lower_bound_above_the_refute_line_refutes_even_with_unfinished_roots",
+        "test_a_projection_between_the_lines_is_inconclusive",
+        "test_all_complete_and_small_projects_under_the_net",
+        "test_an_unfinished_root_counts_at_its_partial_size"
+      ],
+      "only complete roots averaged": ["test_an_unfinished_root_counts_at_its_partial_size"],
+      "lower bound supports": ["test_an_unfinished_root_keeps_a_small_projection_inconclusive"],
+      "refute ignored": [
+        "test_a_lower_bound_above_the_refute_line_refutes_even_with_unfinished_roots"
+      ],
+      "hours not over the frontier": ["test_the_build_time_is_projected_over_the_frontier"]
+    }
+  }
+}

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -120,9 +121,10 @@ def _now() -> str:
 class Register:
     """A persistent register of hypotheses and the ledger evidence attached to each."""
 
-    def __init__(self, path, now=_now):
+    def __init__(self, path, now=_now, sleep=time.sleep):
         self.path = Path(path)
         self._now = now
+        self._sleep = sleep
         blob = {}
         if self.path.exists():
             try:
@@ -159,6 +161,10 @@ class Register:
         judged (a pre-registered gate failed, or the data only bound the effect). A failed proof then reads
         INCONCLUSIVE instead of REFUTED — without it the only outcomes are pass and refuted, and an underpowered
         null reads as a refutation (§C.44 h19-h22 did).
+
+        A claim on data not produced yet returns only once the clock has passed the second it was registered in:
+        runs stamp `started` in whole seconds, so a run launched in that same second would read as data produced
+        before the claim (W5b's h221-h223 did).
 
         `pins` names the files that JUDGE a test-backed claim — the report that computes its verdict, the proof
         test itself. The register stores a proof's node id, not its content, so without a pin the bar could be
@@ -212,6 +218,8 @@ class Register:
                 h["inconclusive_proof"] = inconclusive_proof
             self._h[id] = h
             self._save()
+            if data and any(f["started"] is None for f in files):
+                self._sleep(1 - _ts(h["registered_at"]).microsecond / 1e6)
             return self._view(h)
         if direction not in DIRECTIONS:
             raise ValueError(f"direction must be one of {DIRECTIONS}, got {direction!r} — an undeclared "

@@ -181,3 +181,29 @@ def test_dense_exceptions_cost_a_mask_over_the_leaf_s_positions():
 def test_a_patch_with_exactly_the_allowed_exceptions_is_kept():
     r = patch(Facts(GAME), EARLY, {2: 0, 3: 1}, 2, _winning, 100_000, 2)
     assert r["status"] == "patched" and len(r["exceptions"]) == 2
+
+
+def test_needed_stops_at_its_deadline_mid_walk():
+    import time
+
+    r = needed(Facts(GAME), EARLY, {}, 2, _winning, 100_000, deadline=time.monotonic() - 1)
+    assert r == {"status": "timeout", "exceptions": {}, "own_positions": r["own_positions"]}
+
+
+def test_needed_without_a_deadline_walks_to_the_end():
+    assert needed(Facts(GAME), EARLY, {}, 2, _winning, 100_000)["status"] == "ok"
+    import time
+
+    assert needed(Facts(GAME), EARLY, {}, 2, _winning, 100_000, deadline=time.monotonic() + 60)["status"] == "ok"
+
+
+def test_a_walk_stopped_mid_way_returns_no_exceptions(monkeypatch):
+    import harness.steady_exceptions as se
+
+    ticks = iter(range(10_000))
+    monkeypatch.setattr(se, "CHECK_EVERY", 1)
+    monkeypatch.setattr(se.time, "monotonic", lambda: next(ticks))
+    full = needed(Facts(GAME), EARLY, {}, 2, _winning, 100_000)
+    assert len(full["exceptions"]) > 1
+    r = needed(Facts(GAME), EARLY, {}, 2, _winning, 100_000, deadline=next(ticks) + 6)
+    assert r["status"] == "timeout" and r["exceptions"] == {} and r["own_positions"] > 1

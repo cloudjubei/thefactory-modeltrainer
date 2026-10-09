@@ -319,18 +319,84 @@ rule standalone and in decision-list order, by ply.
     compression 34.7x and 31.7x. Only ~37% of a leaf's positions are contested, ~1.5% of those flagged.
   - **Done 2026-10-07:** `Facts` bounded (default 2M positions, emptied at the limit; ~1 KB a position — the cause
     of S4's 9.6 GB worker); the builder charges exceptions in walk order in its accept test and size.
-  - **S5 (running since 2026-10-07 10:19, ~4 h):** earlier leaves — S4 with leaves from ply 10 (min leaf depth 2),
-    walk-order accounting, a leaf kept with exceptions only at >= 30x (pilot at 10x: 10.5x from big overlapping leaves,
-    h185); h186 (>= 3/4 complete), h187 (median >= 10x), h188 (no larger than S4 in walk order).
-  - **After S5:** bound `_SOLVED` in `scripts/c4_steady_states.py` — the exact-value cache behind the winning-moves
-    oracle, unbounded (up to 7 children per oracle position; ~10M entries at 1.5M oracle positions) — the rest of the
-    8.5 GB workers; then one memory budget per worker across the three caches.
-  - **Then:** the full certified first-player strategy as table + discovered steady states —
-    a DP over the canonical tree from ply 12 (use a state where found and cheaper than the subtree, else one table
-    move and recurse), giving the first complete certified Connect-4 strategy from this process and its size against
-    WeakC4 (~35-45K bits) and the net (~660K). Blocker: cost — tens of thousands of searches at up to 300 s each in
-    Python; needs a faster search (e.g. counterexample lines reused across sibling positions, or a C SAT front end
-    once its licence is checked) and table moves chosen so children become steady (WeakC4's trick, h146's lesson).
+  - **S5 result (h186 inconclusive, h187 supported, h188 refuted; h185, h189 after the data):** leaves from ply 10,
+    kept with exceptions at >= 30x, walk-order accounting. 2 of 4 complete within 4 h on a heavily shared machine;
+    median 20.3x. #3591: 24,908 bits for 295,930 positions (35.6x) — the smallest for that root, > 20% under S3
+    (34,115) and S4 in walk order (33,782). #2071 10 bits over S4's. The pilot at 10x settled at 10.5x (h185).
+  - **Memory (done 2026-10-07):** all three per-worker caches are bounded — `Facts` 2M positions, the winning-moves
+    cache 1.5M, `_SOLVED` (exact values, `scripts/c4_steady_states.py`) 3M — each emptied at its limit; ~5 GB a worker
+    at most instead of 8.5+ GB.
+  - **Open:** #11342 has timed out in S3, S4 and S5 alike; completion under a shared machine is not comparable
+    across runs (S5's workers got a fraction of a core for much of its 4 h).
+  - **Whole game, step 1 — W1 projection (h190 supported, h191 refuted; h192 after the data):** `harness/opening.py`
+    walks an opening from the empty board to ply 8 with the label cache as oracle (the winning move whose replies the
+    empty map most often wins; centre first): 204 moves, 259 positions already won, 671 frontier positions. 8 sampled,
+    built as S5 with a 2 h cap: 7 complete, each 33-49x under its own table, but the whole strategy projects to at
+    least 7.97M bits (12x the net, ~200x WeakC4) and ~415 h of builds; three of the eight carry 86% of the bits.
+  - **Cheap size stand-ins fail (h193):** unwon positions two plies down and the solver's win distance do not
+    order W1's sizes; size tracks the positions a strategy plays (~40x compression throughout).
+  - **Next — the opening is the lever, but blocked:** choosing opening moves for small frontier strategies needs a
+    size estimate, and the cheap ones fail (h193).
+  - **P1 — bigger pure leaves (h194, h195 inconclusive; h196 after the data):** W1's three largest rebuilt with
+    leaves allowed at the frontier root and long pure-map searches (20 min at ply 8, 5 min at ply 10), 3 h cap. #323
+    completes at 4,304 bits (W1: 25,324) playing 52K positions (W1: 389K) — a map near the root changes which part of
+    the game the strategy reaches. #316 and #230 run out of time after 54-56 searches (W1: 238-311). Fixed after the
+    run: a search's budget is capped at the build's remaining time (it could overrun by up to its budget).
+  - **P2 (h197, h198 inconclusive; h199 after the data):** only the root's 20-minute search, 30 s below. #323
+    completes at 2,415 bits (W1 25,324; P1 4,304) — one table move and one excepted leaf covering 48K positions. #316
+    and #230 make only 16 searches each in 3 h and stay unfinished (partials 2,443 and 1,665 bits).
+  - **Profile (h200, supersedes h199):** leaf searches take > 95% of a build; near the root one search step walks
+    up to 450K positions (65-209 s) and overruns its budget 2-3.5x. Fixed: the leaf walk honours the search deadline
+    (`needed(deadline=...)`), so budgets are real.
+  - **Map library (built 2026-10-08):** `Builder(library=...)` tries maps from earlier builds; a build pays only its
+    references, library bits are paid once; `found_maps()` feeds the next build. The strategy script builds roots in
+    waves (`wave_size`), each wave starting from every map the earlier waves found.
+  - **W2 result (h201 supported; h202, h203 inconclusive; h205 after the data, correcting h204):** 6 of 8 complete;
+    every frontier strategy smaller than W1's, the three largest more than tenfold (#323 1,264 vs 25,324); the
+    projection's lower bound falls from 7.97M to 533K bits — under the net's ~660K, undecided while #316 and #230 are
+    unfinished. The library is barely used (2 of 61 leaves): the root searches carry the gain.
+  - **W3 result (h206 inconclusive, h207 refuted; h209 after the data):** from W2's library, #316 finishes at 9,057
+    bits — nearly tenfold its 2-hour partial — and #230 passes 5,446 unfinished in 6 h. Partials undercount badly;
+    the whole first-player strategy projects to at least 1.62M bits: 2.5x the net (~660K), ~40x WeakC4, ~5x under W1.
+  - **Build speed, step 1 (h208):** `harness/native_leaf.py` + `harness/c4leafwalk.c` — the leaf walk in C for
+    Connect-4, identical results to the Python walk (5 tests, 15/15 C mutants) but only 2-7x faster warm and 1-3x
+    cold: the exact solves of newly reached positions dominate. Wired in (2026-10-08): `local_search(walker=...)`,
+    and a search spec's `"walker": "native"`; runs record the C sources' hashes.
+  - **Fewer solves (h210 supported, user's choice 2026-10-08):** the C walk solves only the moves that decide — the
+    map's move where it gives one, otherwise columns up to the lowest winning one — caching single move results:
+    cold walks 3.4-8.5x faster again (median ~6x), results unchanged (17/17 C mutants). Against the Python walk a
+    cold walk is now 5-17x faster.
+  - **W4 result (h211, h212 refuted; h213 after the data):** the C walk leaves a time-bounded build's time unchanged
+    (#316 15,851 s vs 15,637; 8,804 bits vs 9,057) and #230 unfinished (13,083 bits); both builds make fewer
+    searches than W3. Searches run to their budgets, so walk speed becomes evaluations, not wall time; the build's
+    time goes outside the searches — the builder's own Python walks (covering checks, simplify, walk-order coding)
+    are the suspects. Profiling a W4 build (2026-10-09) to place it.
+  - **CORRECTION (h216, supersedes h213):** a budget entry covers its depth and every depth below. P2-W4's
+    [[0, 1200]] gave every search 20 minutes (P1's [[0, 1200], [2, 300]]: 5 minutes at every depth from ply 10);
+    the "root-only long search" was never run, and W4's build time was its searches' own budgets. Specs must close
+    the root budget explicitly: [[0, 1200], [2, 30]].
+  - **C walk wrapper (h214, h215):** exception keys built only when read and buffers reused — warm walks ~16x
+    faster again (40-135x the Python walk).
+  - **W5 stopped (h220; h217-h219 superseded unjudged):** #362 became one pure steady state at the ply-8 root —
+    90 bits for 13,934 positions in 39 s — but three first-wave builds overran the 2 h cap by over an hour: the
+    builder's own Python walks (covering checks, simplify, walk-order coding) ignored its deadline, exposed by the C
+    walk's fast, large leaves. Fixed: all of them stop at the build's deadline, and maps are checked by a C verify
+    (`native_leaf.verify`, one C walk shared with the leaf walk; identical to the Python verify, counts included).
+  - **W5b result (h221, h223 supported; h222 refuted; h224 after the data):** all 8 complete and certified within
+    2 h — the longest, #230, in 56 minutes — in 30% of W2's total build time (9,562 s vs 32,232). Six of the eight are
+    one map at the frontier root (90-470 bits); #316 takes 6,675 bits in 35 minutes (W3: 9,057 in 4 h 21 min). Where
+    W2 or W3 also finished, W5b is 44% smaller in total (7,766 bits vs 13,842; 6 of 7 smaller). But the projection is
+    2.42M bits, over W3's 1.62M lower bound: #230, unfinished in W1-W4, completes for the first time at 21,054 bits —
+    73% of the sample's bits, 72% of its own bits exceptions — where W3 counted a 5,446-bit partial. One position sets
+    the 8-root mean. The library offered 39 maps to the second wave and none was used (W2: 2 of 61 leaves). h221-h223
+    read post-hoc only because they were registered in the second the run started; the register now waits out that
+    second (t34).
+  - **W6 (next):** the next 32 of W1's seeded frontier positions, built exactly as W5b without a library
+    (`harness/floor_w6.py`), judged on the 32 alone: h225 (>= 28/32 complete), h226 (the whole game projects above
+    the net's ~660K — the whole bootstrap interval of the mean), h227 (the 4 largest carry >= half the bits). If the
+    tail carries the size, the lever is the opening: choosing, at the parents of heavy positions, winning moves that
+    avoid them — now affordable, since a build (median ~20 minutes) is its own size estimate (h193: cheap stand-ins
+    fail).
 
 ## 4. The hybrid process — definition of done
 

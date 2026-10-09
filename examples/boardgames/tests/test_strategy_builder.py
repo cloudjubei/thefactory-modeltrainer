@@ -7,7 +7,7 @@ import pytest
 
 from games.tictactoe import TicTacToe, TTTState
 from harness.steady_search import find_steady_state
-from harness.steady_state import Facts
+from harness.steady_state import Facts, verify
 from harness.strategy_builder import Builder, check
 
 GAME = TicTacToe()
@@ -39,16 +39,17 @@ def _winning(states):
 
 
 def _sat(facts):
-    def search(s, start):
+    def search(s, start, seconds):
         r = find_steady_state(facts, s, _winning, 2, max_constraints=500, conflicts=100_000, seconds=30.0)
         return {"levels": r["levels"], "exceptions": {}, "own_positions": None} if r["status"] == "found" else None
     return search
 
 
-def _builder(min_leaf_depth=0, seconds=60.0, search=None, accept=None):
+def _builder(min_leaf_depth=0, seconds=60.0, search=None, accept=None, budgets=None, verifier=verify):
     facts = Facts(GAME)
     return Builder(facts, _winning, search or _sat(facts), n_levels=2, level_bits=3, cap=100_000,
-                   min_leaf_depth=min_leaf_depth, reuse_window=50, seconds=seconds, accept=accept)
+                   min_leaf_depth=min_leaf_depth, reuse_window=50, seconds=seconds, accept=accept, budgets=budgets,
+                   verifier=verifier)
 
 
 def test_a_searched_leaf_at_the_root_is_the_whole_strategy():
@@ -93,7 +94,7 @@ def test_a_whole_game_from_an_early_win_builds_and_checks_and_every_move_wins():
 
 
 def test_a_known_map_covers_a_position_without_searching():
-    b = _builder(search=lambda s, start: pytest.fail("searched"))
+    b = _builder(search=lambda s, start, seconds: pytest.fail("searched"))
     b.maps.append({4: 0, 8: 1})
     b.map_empty.append(5)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"leaf": 1}
@@ -127,12 +128,12 @@ def test_moves_are_chosen_to_make_the_most_children_ready():
 
 
 def test_a_found_map_is_simplified_before_it_is_kept():
-    b = _builder(search=lambda s, start: {"levels": {4: 0, 5: 1, 6: 1}, "exceptions": {}, "own_positions": None})
+    b = _builder(search=lambda s, start, seconds: {"levels": {4: 0, 5: 1, 6: 1}, "exceptions": {}, "own_positions": None})
     assert b.build(FORK) and b.maps[1] == {4: 0}
 
 
 def test_a_failed_search_makes_a_move_node_not_an_empty_leaf():
-    b = _builder(search=lambda s, start: None)
+    b = _builder(search=lambda s, start, seconds: None)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}
 
 
@@ -165,7 +166,7 @@ ROOT_FIX = {GAME.state_key(FORK): 4}
 
 
 def _excepted(levels=None, exceptions=None, own=5):
-    return lambda s, start: {"levels": levels or {}, "exceptions": dict(ROOT_FIX if exceptions is None else exceptions),
+    return lambda s, start, seconds: {"levels": levels or {}, "exceptions": dict(ROOT_FIX if exceptions is None else exceptions),
                              "own_positions": own}
 
 
@@ -211,7 +212,7 @@ def test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code():
 def test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty():
     starts = []
 
-    def search(s, start):
+    def search(s, start, seconds):
         starts.append(start)
         return None
 
@@ -239,3 +240,134 @@ def test_the_threshold_counts_the_leaf_s_map_bits():
     though 7x without the map."""
     b = _builder(search=_excepted(levels={5: 1}, own=7), accept=2)
     assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}
+
+
+def _recording(calls):
+    def search(s, start, seconds):
+        calls.append((sum(1 for v in s.board if v), seconds))
+        return None
+    return search
+
+
+def test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth():
+    calls = []
+    b = _builder(search=_recording(calls), budgets=[[0, 20.0], [2, 5.0]])
+    assert b.build(EARLY_ROOT)
+    pieces = {p: s for p, s in calls}
+    assert pieces[2] == 20.0 and pieces[4] == 5.0 and pieces.get(6, 5.0) == 5.0
+
+
+def test_without_budgets_the_search_uses_its_own_default():
+    calls = []
+    assert _builder(search=_recording(calls)).build(EARLY_ROOT)
+    assert calls and all(seconds is None for _p, seconds in calls)
+
+
+def test_a_search_shallower_than_every_budget_uses_its_own_default():
+    calls = []
+    assert _builder(search=_recording(calls), budgets=[[2, 5.0]]).build(EARLY_ROOT)
+    assert dict(calls)[2] is None and dict(calls)[4] == 5.0
+
+
+EARLY_ROOT = _ttt((0,), (1,))
+
+
+def test_a_search_budget_never_runs_past_the_build_s_deadline():
+    calls = []
+    assert _builder(search=_recording(calls), budgets=[[0, 1000.0]], seconds=5.0).build(EARLY_ROOT)
+    assert calls and all(0 <= seconds <= 5.0 for _p, seconds in calls)
+
+
+def test_a_build_past_its_deadline_gives_a_search_no_time():
+    b = _builder(search=lambda s, start, seconds: None, budgets=[[0, 1000.0]])
+    b.deadline = 0.0
+    assert b._budget(0) == 0.0
+
+
+def _with_library(library, search=None, accept=None):
+    facts = Facts(GAME)
+    return Builder(facts, _winning, search or (lambda s, start, seconds: None), n_levels=2, level_bits=3, cap=100_000,
+                   min_leaf_depth=0, reuse_window=50, seconds=60.0, accept=accept, library=library)
+
+
+def test_a_library_map_covers_a_position_without_searching():
+    b = _with_library([({4: 0, 8: 1}, 5)], search=lambda s, start, seconds: pytest.fail("searched"))
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"leaf": 1}
+
+
+def test_library_maps_are_not_charged_to_the_build_but_their_references_are():
+    b = _with_library([({4: 0, 8: 1}, 5), ({6: 0}, 4)])
+    assert b.build(FORK)
+    assert b.bits() == {"nodes": 1 + 2, "moves": 0, "leaves": 1, "maps": 0, "map_bits": 0, "exceptions": 0,
+                        "exception_bits": 0}
+    assert b.found_maps() == []
+
+
+def test_maps_found_in_the_build_are_charged_and_reported_after_the_library():
+    b = _with_library([({6: 0}, 4)], search=lambda s, start, seconds: {"levels": {4: 0}, "exceptions": {},
+                                                                         "own_positions": None})
+    assert b.build(FORK)
+    assert b.nodes[GAME.state_key(FORK)] == {"leaf": 2}
+    assert b.found_maps() == [({4: 0}, 5)]
+    assert b.bits()["maps"] == 1 and b.bits()["map_bits"] == 5 + 3
+
+
+def test_without_a_library_the_build_is_unchanged():
+    b = _with_library(None, search=lambda s, start, seconds: {"levels": {4: 0}, "exceptions": {},
+                                                              "own_positions": None})
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"leaf": 1} and b.found_maps() == [({4: 0}, 5)]
+
+
+def test_the_builder_s_own_walks_get_its_deadline(monkeypatch):
+    import harness.strategy_builder as sb
+
+    seen = {"verify": [], "simplify": [], "code": []}
+    real_verify, real_simplify, real_code = sb.verify, sb.simplify, sb.walk_order_cost
+
+    def verify(*a, deadline=None, **k):
+        seen["verify"].append(deadline)
+        return real_verify(*a, deadline=deadline, **k)
+
+    def simplify(*a, deadline=None, **k):
+        seen["simplify"].append(deadline)
+        return real_simplify(*a, deadline=deadline, **k)
+
+    def code(*a, deadline=None, **k):
+        seen["code"].append(deadline)
+        return real_code(*a, deadline=deadline, **k)
+
+    monkeypatch.setattr(sb, "simplify", simplify)
+    monkeypatch.setattr(sb, "walk_order_cost", code)
+    pure = _builder(search=lambda s, start, seconds: {"levels": {4: 0, 5: 1}, "exceptions": {}, "own_positions": None},
+                    verifier=verify)
+    assert pure.build(FORK)
+    excepted = _builder(search=_excepted(), accept=1, verifier=verify)
+    assert excepted.build(FORK)
+    assert all(seen[k] and all(d == pure.deadline or d == excepted.deadline for d in seen[k]) for k in seen)
+
+
+def test_a_leaf_whose_coding_runs_out_of_time_is_not_kept(monkeypatch):
+    import harness.strategy_builder as sb
+
+    def late(*a, **k):
+        raise TimeoutError("past the deadline")
+
+    monkeypatch.setattr(sb, "walk_order_cost", late)
+    b = _builder(search=_excepted(), accept=1)
+    assert b.build(FORK) and b.nodes[GAME.state_key(FORK)] == {"move": 4}
+
+
+def test_the_builder_s_covering_and_simplify_use_its_verifier():
+    calls = []
+
+    def verifier(*a, **k):
+        calls.append(a[2])
+        return verify(*a, **k)
+
+    facts = Facts(GAME)
+    b = Builder(facts, _winning, lambda s, start, seconds: {"levels": {4: 0, 5: 1}, "exceptions": {},
+                                                            "own_positions": None},
+                n_levels=2, level_bits=3, cap=100_000, min_leaf_depth=0, reuse_window=50, seconds=60.0,
+                verifier=verifier)
+    assert b.build(FORK) and b.maps[1] == {4: 0}
+    assert {} in calls and {4: 0} in calls

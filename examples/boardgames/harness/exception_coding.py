@@ -8,6 +8,7 @@ list or mask of harness.steady_exceptions.exception_bits, positions the rules se
 from __future__ import annotations
 
 import math
+import time
 
 from harness.steady_exceptions import choose_with
 from harness.steady_state import Facts, choose
@@ -20,10 +21,12 @@ def enumerative_bits(m: int, k: int) -> int:
     return math.ceil(math.log2(math.comb(m, k))) + math.ceil(math.log2(m + 1))
 
 
-def walk_order_cost(facts: Facts, root, levels: dict, n_levels: int, exceptions: dict) -> dict:
+def walk_order_cost(facts: Facts, root, levels: dict, n_levels: int, exceptions: dict,
+                    deadline: float | None = None) -> dict:
     """{"contested", "flagged" (exceptions at contested positions), "implicit" (exceptions where the map is undefined),
     "move_bits", "bits"} for coding `exceptions` of the leaf at `root` in walk order. Refuses exceptions the decoder
-    could never read: at a forced position, with a move that is not safe, or a position left undefined without one."""
+    could never read: at a forced position, with a move that is not safe, or a position left undefined without one.
+    Raises TimeoutError when time.monotonic() passes `deadline` mid-walk."""
     game = facts.game
     player = game.current_player(root)
     seen: set = set()
@@ -35,6 +38,8 @@ def walk_order_cost(facts: Facts, root, levels: dict, n_levels: int, exceptions:
         if key in seen or game.is_terminal(s):
             continue
         seen.add(key)
+        if deadline is not None and len(seen) % 1024 == 1 and time.monotonic() > deadline:
+            raise TimeoutError("the walk-order coding ran past its deadline")
         if game.current_player(s) != player:
             stack.extend(game.step(s, b) for b in game.legal_actions(s))
             continue

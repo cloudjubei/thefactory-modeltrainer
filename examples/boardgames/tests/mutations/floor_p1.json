@@ -1,0 +1,87 @@
+{
+  "file": "harness/floor_p1.py",
+  "tests": ["tests/test_floor_p1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "foreign measurement accepted",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other settings accepted",
+      "old": "    if e.get(\"builder\") != spec[\"builder\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other roots accepted",
+      "old": "    if sorted(r[\"index\"] for r in e[\"roots\"]) != sorted(spec[\"indices\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "other positions accepted",
+      "old": "    if any(r[\"index\"] not in before or r[\"board\"] != before[r[\"index\"]][\"board\"] for r in e[\"roots\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "failed checks accepted",
+      "old": "    if not all(r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"] for r in e[\"roots\"] if r[\"complete\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "unfinished w1 roots paired",
+      "old": "    paired = [r for r in e[\"roots\"] if before[r[\"index\"]][\"complete\"]]",
+      "new": "    paired = list(e[\"roots\"])"
+    },
+    {
+      "name": "lower bound supports",
+      "old": "    size = (\"refuted\" if p1 >= old else \"supported\" if not lower and p1 <= spec[\"size_support\"] * old",
+      "new": "    size = (\"refuted\" if p1 >= old else \"supported\" if p1 <= spec[\"size_support\"] * old"
+    },
+    {
+      "name": "refute boundary",
+      "old": "    size = (\"refuted\" if p1 >= old",
+      "new": "    size = (\"refuted\" if p1 > old"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and p1 <= spec[\"size_support\"] * old",
+      "new": "\"supported\" if not lower and p1 < spec[\"size_support\"] * old"
+    },
+    {
+      "name": "completion refute ignored",
+      "old": "else \"refuted\" if n <= spec[\"complete_refute\"]",
+      "new": "else \"refuted\" if False"
+    },
+    {
+      "name": "completion support off by one",
+      "old": "    complete = (\"supported\" if n >= spec[\"complete_support\"]",
+      "new": "    complete = (\"supported\" if n > spec[\"complete_support\"]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-07T18:30:55+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "foreign measurement accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other settings accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other roots accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other positions accepted": ["test_integrity_problems_stop_the_judgement"],
+      "failed checks accepted": ["test_integrity_problems_stop_the_judgement"],
+      "unfinished w1 roots paired": [
+        "test_exactly_half_supports_and_exactly_w1_refutes",
+        "test_halving_the_two_strategies_w1_finished_supports",
+        "test_no_smaller_than_w1_refutes_even_as_a_lower_bound"
+      ],
+      "lower bound supports": ["test_an_unfinished_strategy_never_supports"],
+      "refute boundary": ["test_exactly_half_supports_and_exactly_w1_refutes"],
+      "support boundary": ["test_exactly_half_supports_and_exactly_w1_refutes"],
+      "completion refute ignored": ["test_completion_is_judged_against_its_lines"],
+      "completion support off by one": [
+        "test_between_half_and_all_is_inconclusive",
+        "test_completion_is_judged_against_its_lines"
+      ]
+    }
+  }
+}

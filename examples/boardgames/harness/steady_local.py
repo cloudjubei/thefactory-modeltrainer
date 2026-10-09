@@ -13,10 +13,13 @@ from harness.steady_exceptions import exception_bits, needed
 from harness.steady_state import Facts, map_bits
 
 
-def leaf_bits(facts: Facts, root, levels: dict, n_levels: int, level_bits: int, winning, cap: int) -> dict:
-    """{"bits": map bits + exception bits (None when the walk outgrows `cap`), "exceptions", "own_positions"}."""
-    r = needed(facts, root, levels, n_levels, winning, cap)
-    if r["status"] == "cap":
+def leaf_bits(facts: Facts, root, levels: dict, n_levels: int, level_bits: int, winning, cap: int,
+              deadline: float | None = None, walker=needed) -> dict:
+    """{"bits": map bits + exception bits (None when the walk outgrows `cap` or runs past `deadline`), "exceptions",
+    "own_positions"}. `walker` is the leaf walk — harness.steady_exceptions.needed, or one with its contract (the
+    C walk for Connect-4, harness.native_leaf)."""
+    r = walker(facts, root, levels, n_levels, winning, cap, deadline)
+    if r["status"] != "ok":
         return {"bits": None, "exceptions": {}, "own_positions": r["own_positions"]}
     bits = (map_bits(levels, len(facts.empty_cells(root)), level_bits)
             + exception_bits(len(r["exceptions"]), r["own_positions"], facts.game.num_actions))
@@ -28,14 +31,15 @@ def _cost(leaf: dict) -> float:
 
 
 def local_search(facts: Facts, root, n_levels: int, level_bits: int, winning, rng, seconds: float, cap: int,
-                 start: dict | None = None) -> dict:
-    """Hill-climb from `start` (or the empty map) until the smallest leaf has no exceptions or `seconds` pass. Returns
+                 start: dict | None = None, walker=needed) -> dict:
+    """Hill-climb from `start` (or the empty map) until the smallest leaf has no exceptions or `seconds` pass — every
+    walk, the first included, stops at the deadline, and a walk cut short has no size. Returns
     {"status": "found" (the smallest leaf is a steady state) | "budget", "levels", "exceptions", "bits" (None when
     every walk outgrew `cap`), "own_positions", "evaluations"}."""
     deadline = time.monotonic() + seconds
     cells = facts.empty_cells(root)
     current = dict(start or {})
-    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap)
+    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline, walker)
     best, best_leaf, evaluations = dict(current), now, 1
     while (best_leaf["bits"] is None or best_leaf["exceptions"]) and time.monotonic() < deadline:
         cell = rng.choice(cells)
@@ -45,7 +49,7 @@ def local_search(facts: Facts, root, n_levels: int, level_bits: int, winning, rn
             trial.pop(cell, None)
         else:
             trial[cell] = level
-        leaf = leaf_bits(facts, root, trial, n_levels, level_bits, winning, cap)
+        leaf = leaf_bits(facts, root, trial, n_levels, level_bits, winning, cap, deadline, walker)
         evaluations += 1
         if _cost(leaf) <= _cost(now):
             current, now = trial, leaf

@@ -16,8 +16,15 @@ one bit per node (move or leaf), three bits per table move, a leaf's reference i
 bit per leaf plus each such leaf's exceptions coded in walk order (harness.exception_coding: flags only where the
 rules leave a choice, h183).
 
-`search(state, start)` returns None (nothing found) or {"levels", "exceptions" (empty for a map that wins every
-line), "own_positions" (the leaf's own positions; needed only with exceptions)}."""
+`search(state, start, seconds)` returns None (nothing found) or {"levels", "exceptions" (empty for a map that wins
+every line), "own_positions" (the leaf's own positions; needed only with exceptions)}. `seconds` is the search's
+budget at that depth — from `budgets`, [[depth, seconds], ...]: the deepest entry at or above the position's depth, so
+shallow positions, whose one map would cover the most, can be searched longer, never past the build's deadline — or
+None for the search's default. A `library` of maps found in earlier builds ([(levels, cells empty where found), ...])
+is tried like the build's own maps; a build pays only its references to library maps, their bits being paid once for
+all the builds sharing them, and `found_maps` hands the maps it adds to the next build. `verifier` checks that a map
+wins every line (harness.steady_state.verify, or one with its contract — the C verify for Connect-4); every walk the
+builder makes stops at its deadline (h220)."""
 from __future__ import annotations
 
 import math
@@ -30,14 +37,18 @@ from harness.steady_state import Facts, map_bits, simplify, verify
 
 class Builder:
     def __init__(self, facts: Facts, winning, search, n_levels: int, level_bits: int, cap: int,
-                 min_leaf_depth: int, reuse_window: int, seconds: float, accept: float | None = None):
+                 min_leaf_depth: int, reuse_window: int, seconds: float, accept: float | None = None,
+                 budgets: list | None = None, library: list | None = None, verifier=verify):
         self.facts, self.game = facts, facts.game
         self.winning, self.search = winning, search
         self.n_levels, self.level_bits, self.cap = n_levels, level_bits, cap
         self.min_leaf_depth, self.reuse_window, self.accept = min_leaf_depth, reuse_window, accept
+        self.verifier = verifier
+        self.budgets = sorted(budgets or [])
         self.deadline = time.monotonic() + seconds
-        self.maps: list = [{}]
-        self.map_empty: list = [0]
+        self.shared = len(library or [])
+        self.maps: list = [{}] + [dict(levels) for levels, _empty in library or []]
+        self.map_empty: list = [0] + [empty for _levels, empty in library or []]
         self.nodes: dict = {}
         self.searches = {"tried": 0, "found": 0, "excepted": 0}
 
@@ -46,7 +57,7 @@ class Builder:
         empty = set(self.facts.empty_cells(state))
         for i in [0, *recent]:
             levels = {c: k for c, k in self.maps[i].items() if c in empty}
-            if verify(self.facts, state, levels, self.n_levels, self.cap)["won"]:
+            if self.verifier(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline)["won"]:
                 return i
         return None
 
@@ -59,6 +70,12 @@ class Builder:
         if game.current_player(child) == player:
             return [child]
         return [c for b in game.legal_actions(child) for c in [game.step(child, b)] if not game.is_terminal(c)]
+
+    def _budget(self, depth: int):
+        within = [seconds for d, seconds in self.budgets if d <= depth]
+        if not within:
+            return None
+        return min(within[-1], max(0.0, self.deadline - time.monotonic()))
 
     def _keep(self, levels: dict, empty: int) -> int:
         self.maps.append(levels)
@@ -74,17 +91,22 @@ class Builder:
         self.searches["tried"] += 1
         empty = self.facts.empty_cells(state)
         start = {c: k for c, k in self.maps[-1].items() if c in set(empty)}
-        result = self.search(state, start)
+        result = self.search(state, start, self._budget(depth))
         if result is None:
             return None
         levels, exc = result["levels"], result["exceptions"]
         if not exc:
             self.searches["found"] += 1
-            return {"leaf": self._keep(simplify(self.facts, state, levels, self.n_levels, self.cap), len(empty))}
+            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,
+                            verifier=self.verifier)
+            return {"leaf": self._keep(kept, len(empty))}
         if self.accept is None:
             return None
         own = result["own_positions"]
-        coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc)["bits"]
+        try:
+            coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc, deadline=self.deadline)["bits"]
+        except TimeoutError:
+            return None
         bits = (map_bits(levels, len(empty), self.level_bits) if levels else 0) + coded
         if 3 * own < self.accept * bits:
             return None
@@ -119,13 +141,20 @@ class Builder:
         moves = sum(1 for n in self.nodes.values() if "move" in n)
         leaves = len(self.nodes) - moves
         ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0
-        maps = sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[1:], self.map_empty[1:]))
+        own = 1 + self.shared
+        maps = sum(map_bits(m, e, self.level_bits) for m, e in zip(self.maps[own:], self.map_empty[own:]))
         move_bits = math.ceil(math.log2(self.game.num_actions))
         excepted = [n for n in self.nodes.values() if n.get("exceptions")]
         exc_bits = leaves + sum(n["coded"] for n in excepted) if excepted else 0
         return {"nodes": len(self.nodes) + moves * move_bits + leaves * ref + maps + exc_bits, "moves": moves,
-                "leaves": leaves, "maps": len(self.maps) - 1, "map_bits": maps,
+                "leaves": leaves, "maps": len(self.maps) - own, "map_bits": maps,
                 "exceptions": sum(len(n["exceptions"]) for n in excepted), "exception_bits": exc_bits}
+
+
+    def found_maps(self) -> list:
+        """The maps this build added, as (levels, cells empty where found) — the next build's library."""
+        own = 1 + self.shared
+        return list(zip(self.maps[own:], self.map_empty[own:]))
 
 
 def check(facts: Facts, root, nodes: dict, maps: list, n_levels: int, cap: int) -> dict:

@@ -25,8 +25,8 @@
     },
     {
       "name": "unsimplified map kept",
-      "old": "self._keep(simplify(self.facts, state, levels, self.n_levels, self.cap), len(empty))",
-      "new": "self._keep(levels, len(empty))"
+      "old": "            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,\n                            verifier=self.verifier)",
+      "new": "            kept = levels"
     },
     {
       "name": "failed search read as a leaf",
@@ -62,11 +62,6 @@
       "name": "leaf reference free",
       "old": "        ref = math.ceil(math.log2(len(self.maps))) if len(self.maps) > 1 else 0",
       "new": "        ref = 0"
-    },
-    {
-      "name": "map bits dropped",
-      "old": "+ leaves * ref + maps + exc_bits,",
-      "new": "+ leaves * ref + exc_bits,"
     },
     {
       "name": "check skips opponent replies",
@@ -115,8 +110,8 @@
     },
     {
       "name": "search started cold",
-      "old": "        result = self.search(state, start)",
-      "new": "        result = self.search(state, {})"
+      "old": "        result = self.search(state, start, self._budget(depth))",
+      "new": "        result = self.search(state, {}, self._budget(depth))"
     },
     {
       "name": "start keeps filled cells",
@@ -162,41 +157,149 @@
       "name": "exceptions dropped from the leaf",
       "old": "\"exceptions\": exc, \"own\": own,",
       "new": "\"own\": own,"
+    },
+    {
+      "name": "budget ignored",
+      "old": "        result = self.search(state, start, self._budget(depth))",
+      "new": "        result = self.search(state, start, None)"
+    },
+    {
+      "name": "deeper budgets used too",
+      "old": "        within = [seconds for d, seconds in self.budgets if d <= depth]",
+      "new": "        within = [seconds for d, seconds in self.budgets]"
+    },
+    {
+      "name": "budgets unsorted",
+      "old": "        self.budgets = sorted(budgets or [])",
+      "new": "        self.budgets = list(reversed(budgets or []))"
+    },
+    {
+      "name": "shallowest budget used",
+      "old": "        return min(within[-1], max(0.0, self.deadline - time.monotonic()))",
+      "new": "        return min(within[0], max(0.0, self.deadline - time.monotonic()))"
+    },
+    {
+      "name": "deadline not capped",
+      "old": "        return min(within[-1], max(0.0, self.deadline - time.monotonic()))",
+      "new": "        return within[-1]"
+    },
+    {
+      "name": "negative time given",
+      "old": "        return min(within[-1], max(0.0, self.deadline - time.monotonic()))",
+      "new": "        return min(within[-1], self.deadline - time.monotonic())"
+    },
+    {
+      "name": "map bits dropped",
+      "old": "+ leaves * ref + maps + exc_bits,",
+      "new": "+ leaves * ref + exc_bits,"
+    },
+    {
+      "name": "library ignored",
+      "old": "        self.maps: list = [{}] + [dict(levels) for levels, _empty in library or []]",
+      "new": "        self.maps: list = [{}]"
+    },
+    {
+      "name": "library charged",
+      "old": "        own = 1 + self.shared\n        maps = sum(",
+      "new": "        own = 1\n        maps = sum("
+    },
+    {
+      "name": "library counted as found",
+      "old": "        own = 1 + self.shared\n        return list(",
+      "new": "        own = 1\n        return list("
+    },
+    {
+      "name": "library size forgotten",
+      "old": "        self.shared = len(library or [])",
+      "new": "        self.shared = 0"
+    },
+    {
+      "name": "covering ignores the deadline",
+      "old": "            if self.verifier(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline)[\"won\"]:",
+      "new": "            if self.verifier(self.facts, state, levels, self.n_levels, self.cap)[\"won\"]:"
+    },
+    {
+      "name": "simplify ignores the deadline",
+      "old": "            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,",
+      "new": "            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=None,"
+    },
+    {
+      "name": "coding ignores the deadline",
+      "old": "            coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc, deadline=self.deadline)[\"bits\"]",
+      "new": "            coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc)[\"bits\"]"
+    },
+    {
+      "name": "late coding kept as a leaf",
+      "old": "        except TimeoutError:\n            return None",
+      "new": "        except TimeoutError:\n            coded = 0"
+    },
+    {
+      "name": "covering by the python verify",
+      "old": "            if self.verifier(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline)[\"won\"]:",
+      "new": "            if verify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline)[\"won\"]:"
+    },
+    {
+      "name": "simplify by the python verify",
+      "old": "                            verifier=self.verifier)",
+      "new": "                            verifier=None)"
     }
   ],
   "last_run": {
-    "at": "2026-10-07T07:04:37+00:00",
-    "killed": 32,
+    "at": "2026-10-09T08:09:49+00:00",
+    "killed": 48,
     "survived": [],
     "killed_by": {
       "empty map not tried first": [
+        "test_the_builder_s_covering_and_simplify_use_its_verifier",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
-      "reuse ignores the window": ["test_a_known_map_covers_a_position_without_searching"],
-      "search before reuse": ["test_a_known_map_covers_a_position_without_searching"],
+      "reuse ignores the window": [
+        "test_a_known_map_covers_a_position_without_searching",
+        "test_a_library_map_covers_a_position_without_searching",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are"
+      ],
+      "search before reuse": [
+        "test_a_known_map_covers_a_position_without_searching",
+        "test_a_library_map_covers_a_position_without_searching",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_the_builder_s_covering_and_simplify_use_its_verifier"
+      ],
       "search below the minimum depth": [
         "test_moves_are_chosen_to_make_the_most_children_ready",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
-      "unsimplified map kept": ["test_a_found_map_is_simplified_before_it_is_kept"],
-      "failed search read as a leaf": ["test_a_failed_search_makes_a_move_node_not_an_empty_leaf"],
+      "unsimplified map kept": [
+        "test_a_found_map_is_simplified_before_it_is_kept",
+        "test_the_builder_s_covering_and_simplify_use_its_verifier",
+        "test_the_builder_s_own_walks_get_its_deadline"
+      ],
+      "failed search read as a leaf": [
+        "test_a_failed_search_makes_a_move_node_not_an_empty_leaf",
+        "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth"
+      ],
       "deadline ignored": ["test_the_deadline_stops_the_build"],
       "unwinnable root not refused": ["test_a_root_its_side_cannot_win_is_refused"],
       "move chosen without readiness": [
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one"
       ],
       "only first child built": [
+        "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
       "node bit dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
-      "leaf reference free": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
-      "map bits dropped": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
+      "leaf reference free": [
+        "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are"
+      ],
       "check skips opponent replies": [
         "test_check_rejects_a_line_the_opponent_wins",
         "test_check_walks_every_reply_not_just_the_first"
@@ -215,7 +318,8 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
-        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_the_builder_s_own_walks_get_its_deadline"
       ],
       "exceptions accepted without a threshold": [
         "test_without_a_threshold_a_leaf_with_exceptions_is_never_kept"
@@ -261,7 +365,53 @@
         "test_a_leaf_exactly_at_the_threshold_is_kept",
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
-      ]
+      ],
+      "budget ignored": [
+        "test_a_search_budget_never_runs_past_the_build_s_deadline",
+        "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth"
+      ],
+      "deeper budgets used too": [
+        "test_a_search_shallower_than_every_budget_uses_its_own_default",
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth"
+      ],
+      "budgets unsorted": [
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth"
+      ],
+      "shallowest budget used": [
+        "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth"
+      ],
+      "deadline not capped": [
+        "test_a_build_past_its_deadline_gives_a_search_no_time",
+        "test_a_search_budget_never_runs_past_the_build_s_deadline"
+      ],
+      "negative time given": ["test_a_build_past_its_deadline_gives_a_search_no_time"],
+      "map bits dropped": ["test_a_searched_leaf_at_the_root_is_the_whole_strategy"],
+      "library ignored": [
+        "test_a_library_map_covers_a_position_without_searching",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
+      ],
+      "library charged": [
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
+      ],
+      "library counted as found": [
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
+      ],
+      "library size forgotten": [
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
+      ],
+      "covering ignores the deadline": ["test_the_builder_s_own_walks_get_its_deadline"],
+      "simplify ignores the deadline": ["test_the_builder_s_own_walks_get_its_deadline"],
+      "coding ignores the deadline": ["test_the_builder_s_own_walks_get_its_deadline"],
+      "late coding kept as a leaf": ["test_a_leaf_whose_coding_runs_out_of_time_is_not_kept"],
+      "covering by the python verify": [
+        "test_the_builder_s_covering_and_simplify_use_its_verifier"
+      ],
+      "simplify by the python verify": ["test_the_builder_s_covering_and_simplify_use_its_verifier"]
     }
   }
 }

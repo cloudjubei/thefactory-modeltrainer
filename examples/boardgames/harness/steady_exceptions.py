@@ -7,8 +7,11 @@ first failure hides the rest of the tree)."""
 from __future__ import annotations
 
 import math
+import time
 
 from harness.steady_state import Facts, choose
+
+CHECK_EVERY = 1024
 
 
 def choose_with(facts: Facts, state, levels: dict, n_levels: int, exceptions: dict):
@@ -59,11 +62,12 @@ def verify_with(facts: Facts, root, levels: dict, n_levels: int, exceptions: dic
     return {"won": status == "clean", "reason": reason}
 
 
-def needed(facts: Facts, root, levels: dict, n_levels: int, winning, cap: int) -> dict:
-    """{"status": "ok" | "cap", "exceptions": {position key: move}, "own_positions": the side's positions walked} — one
-    walk over every line from `root`: where the map's move is not one of `winning`'s moves (or it gives none), an
-    exception plays the smallest winning move and the walk follows it, so the leaf is complete by construction. The
-    oracle is asked only where the map's move is not an immediate win."""
+def needed(facts: Facts, root, levels: dict, n_levels: int, winning, cap: int, deadline: float | None = None) -> dict:
+    """{"status": "ok" | "cap" | "timeout", "exceptions": {position key: move}, "own_positions": the side's positions
+    walked} — one walk over every line from `root`: where the map's move is not one of `winning`'s moves (or it gives
+    none), an exception plays the smallest winning move and the walk follows it, so the leaf is complete by
+    construction. The oracle is asked only where the map's move is not an immediate win. "timeout" when
+    time.monotonic() passes `deadline` mid-walk (a walk near the root can take minutes, h200)."""
     if not winning([root])[0]:
         raise ValueError("the root is a position its side cannot win — no map or exception can")
     game = facts.game
@@ -80,6 +84,8 @@ def needed(facts: Facts, root, levels: dict, n_levels: int, winning, cap: int) -
         seen.add(key)
         if len(seen) > cap:
             return {"status": "cap", "exceptions": {}, "own_positions": own}
+        if deadline is not None and len(seen) % CHECK_EVERY == 1 % CHECK_EVERY and time.monotonic() > deadline:
+            return {"status": "timeout", "exceptions": {}, "own_positions": own}
         if game.is_terminal(s):
             if game.winner(s) != player:
                 raise RuntimeError("a line the oracle's winning moves lead to is not won — the oracle is wrong")

@@ -4,11 +4,6 @@
   "timeout": 180,
   "mutations": [
     {
-      "name": "capped walk given a size",
-      "old": "    if r[\"status\"] == \"cap\":",
-      "new": "    if False:"
-    },
-    {
       "name": "map bits dropped",
       "old": "    bits = (map_bits(levels, len(facts.empty_cells(root)), level_bits)",
       "new": "    bits = (0"
@@ -57,26 +52,54 @@
       "name": "time budget ignored",
       "old": "and time.monotonic() < deadline:",
       "new": "and True:"
+    },
+    {
+      "name": "timeout given a size",
+      "old": "    if r[\"status\"] != \"ok\":",
+      "new": "    if r[\"status\"] == \"cap\":"
+    },
+    {
+      "name": "first walk ignores the deadline",
+      "old": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline, walker)",
+      "new": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, None, walker)"
+    },
+    {
+      "name": "trial walks ignore the deadline",
+      "old": "        leaf = leaf_bits(facts, root, trial, n_levels, level_bits, winning, cap, deadline, walker)",
+      "new": "        leaf = leaf_bits(facts, root, trial, n_levels, level_bits, winning, cap, None, walker)"
+    },
+    {
+      "name": "capped walk given a size",
+      "old": "    if r[\"status\"] != \"ok\":",
+      "new": "    if False:"
+    },
+    {
+      "name": "leaf walk not the given one",
+      "old": "    r = walker(facts, root, levels, n_levels, winning, cap, deadline)",
+      "new": "    r = needed(facts, root, levels, n_levels, winning, cap, deadline)"
+    },
+    {
+      "name": "search walk not passed on",
+      "old": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline, walker)",
+      "new": "    now = leaf_bits(facts, root, current, n_levels, level_bits, winning, cap, deadline)"
     }
   ],
   "last_run": {
-    "at": "2026-10-06T15:28:50+00:00",
-    "killed": 11,
+    "at": "2026-10-08T21:14:45+00:00",
+    "killed": 16,
     "survived": [],
     "killed_by": {
-      "capped walk given a size": [
-        "test_a_capped_walk_is_never_read_as_a_win",
-        "test_a_walk_past_the_cap_has_no_size"
-      ],
       "map bits dropped": [
         "test_a_map_with_no_root_move_pays_for_an_exception_there",
-        "test_a_winning_map_costs_only_its_own_bits"
+        "test_a_winning_map_costs_only_its_own_bits",
+        "test_the_walk_can_be_replaced_and_receives_every_argument"
       ],
       "exceptions free": [
         "test_a_level_that_blocks_the_win_can_be_cleared",
         "test_a_map_with_no_root_move_pays_for_an_exception_there",
         "test_local_search_finds_the_fork_and_the_map_verifies",
-        "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies"
+        "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies",
+        "test_the_walk_can_be_replaced_and_receives_every_argument"
       ],
       "capped leaf costs nothing": ["test_a_capped_change_is_never_taken"],
       "ties rejected": ["test_an_equal_sized_change_is_taken"],
@@ -90,16 +113,37 @@
         "test_a_change_that_grows_the_leaf_is_rejected",
         "test_a_level_that_blocks_the_win_can_be_cleared",
         "test_an_equal_sized_change_is_taken",
+        "test_every_walk_of_a_search_gets_its_deadline",
         "test_local_search_finds_the_fork_and_the_map_verifies",
         "test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies",
-        "test_the_best_leaf_is_kept_when_later_changes_only_tie"
+        "test_the_best_leaf_is_kept_when_later_changes_only_tie",
+        "test_the_walk_can_be_replaced_and_receives_every_argument"
       ],
       "levels never cleared": ["test_a_level_that_blocks_the_win_can_be_cleared"],
-      "found with exceptions": [
-        "test_local_search_reports_its_best_leaf_when_time_runs_out",
-        "test_the_best_leaf_is_kept_when_later_changes_only_tie"
+      "found with exceptions": ["test_the_best_leaf_is_kept_when_later_changes_only_tie"],
+      "time budget ignored": ["timeout after 180s"],
+      "timeout given a size": [
+        "test_a_capped_walk_is_never_read_as_a_win",
+        "test_a_search_out_of_time_mid_walk_has_no_leaf",
+        "test_a_walk_past_the_deadline_has_no_size"
       ],
-      "time budget ignored": ["timeout after 180s"]
+      "first walk ignores the deadline": [
+        "test_a_search_out_of_time_mid_walk_has_no_leaf",
+        "test_every_walk_of_a_search_gets_its_deadline",
+        "test_the_walk_can_be_replaced_and_receives_every_argument"
+      ],
+      "trial walks ignore the deadline": [
+        "test_every_walk_of_a_search_gets_its_deadline",
+        "test_the_walk_can_be_replaced_and_receives_every_argument"
+      ],
+      "capped walk given a size": [
+        "test_a_capped_walk_is_never_read_as_a_win",
+        "test_a_search_out_of_time_mid_walk_has_no_leaf",
+        "test_a_walk_past_the_cap_has_no_size",
+        "test_a_walk_past_the_deadline_has_no_size"
+      ],
+      "leaf walk not the given one": ["test_the_walk_can_be_replaced_and_receives_every_argument"],
+      "search walk not passed on": ["test_the_walk_can_be_replaced_and_receives_every_argument"]
     }
   }
 }

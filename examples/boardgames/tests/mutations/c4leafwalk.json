@@ -1,0 +1,201 @@
+{
+  "file": "harness/c4leafwalk.c",
+  "tests": ["tests/test_native_leaf.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "winning map moves overridden",
+      "old": "            if (!verify_only && !immediate && (move < 0 || !move_wins(s.position, s.mask, s.moves, move))) {",
+      "new": "            if (!verify_only && !immediate) {"
+    },
+    {
+      "name": "map moves never checked",
+      "old": "            if (!verify_only && !immediate && (move < 0 || !move_wins(s.position, s.mask, s.moves, move))) {",
+      "new": "            if (!verify_only && !immediate && move < 0) {"
+    },
+    {
+      "name": "every move safe",
+      "old": "            is_safe = 1;\n            for (int b = 0; b < WIDTH && is_safe; b++)",
+      "new": "            is_safe = 1;\n            for (int b = 0; b < 0 && is_safe; b++)"
+    },
+    {
+      "name": "a level with several safe moves decides",
+      "old": "        if (count == 1) return found;",
+      "new": "        if (count >= 1) return found;"
+    },
+    {
+      "name": "only safe move ignored",
+      "old": "    if (n_safe == 1) return safe[0];",
+      "new": "    if (0) return safe[0];"
+    },
+    {
+      "name": "revisits counted",
+      "old": "        if (!keyset_add(&seen, s.position + s.mask + 1)) continue;",
+      "new": "        keyset_add(&seen, s.position + s.mask + 1);"
+    },
+    {
+      "name": "cap ignored",
+      "old": "        if ((int64_t)seen.used > cap) {",
+      "new": "        if (0) {"
+    },
+    {
+      "name": "deadline ignored",
+      "old": "        if (deadline >= 0 && seen.used % CHECK_EVERY == 1 % CHECK_EVERY && now() > deadline) {",
+      "new": "        if (0) {"
+    },
+    {
+      "name": "draws read as wins",
+      "old": "    int wins = c4_solve(all ^ mine, all, moves + 1, 1) < 0;",
+      "new": "    int wins = c4_solve(all ^ mine, all, moves + 1, 1) <= 0;"
+    },
+    {
+      "name": "one reply walked",
+      "old": "                stack[top++] = (Node){all ^ mine, all, s.moves + 1, won || full_after(all), won ? 2 : 0};",
+      "new": "                stack[top++] = (Node){all ^ mine, all, s.moves + 1, won || full_after(all), won ? 2 : 0};\n                break;"
+    },
+    {
+      "name": "highest winning column",
+      "old": "    for (int c = 0; c < WIDTH; c++)\n        if (playable(mask, c) && move_wins(position, mask, moves, c)) return c;",
+      "new": "    for (int c = WIDTH - 1; c >= 0; c--)\n        if (playable(mask, c) && move_wins(position, mask, moves, c)) return c;"
+    },
+    {
+      "name": "cell is the column",
+      "old": "            cells[n_safe] = landing_row(mask, c) * WIDTH + c;",
+      "new": "            cells[n_safe] = c;"
+    },
+    {
+      "name": "own positions not counted",
+      "old": "            (*own_positions)++;",
+      "new": "            (*own_positions) += 0;"
+    },
+    {
+      "name": "unwinnable root accepted",
+      "old": "    if (!verify_only && lowest_winning(root_position, root_mask, root_moves) < 0) return WALK_ROOT_UNWINNABLE;",
+      "new": "    if (0) return WALK_ROOT_UNWINNABLE;"
+    },
+    {
+      "name": "immediate wins not taken",
+      "old": "        if (playable(mask, c) && alignment(position | move_bit(mask, c))) {\n            *immediate = 1;",
+      "new": "        if (0) {\n            *immediate = 1;"
+    },
+    {
+      "name": "move cache answers other positions",
+      "old": "    if (move_keys[slot] == key) return move_wins_cache[slot];",
+      "new": "    if (move_keys[slot]) return move_wins_cache[slot];"
+    },
+    {
+      "name": "immediate wins not counted as winning",
+      "old": "    if (alignment(mine)) return 1;\n    if (full_after(all)) return 0;",
+      "new": "    if (alignment(mine)) return 0;\n    if (full_after(all)) return 0;"
+    },
+    {
+      "name": "verify: undefined passes",
+      "old": "            if (verify_only && move < 0) {",
+      "new": "            if (0) {"
+    },
+    {
+      "name": "verify: draws pass",
+      "old": "            if (s.winner_is_player != 1) {",
+      "new": "            if (s.winner_is_player == 2) {"
+    },
+    {
+      "name": "verify: positions not reported",
+      "old": "    *positions = (int64_t)seen.used;",
+      "new": "    *positions = 0;"
+    },
+    {
+      "name": "verify walks with exceptions",
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, cap, seconds, 1, NULL, NULL, NULL, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, cap, seconds, 0, NULL, NULL, NULL, 0,"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T13:26:52+00:00",
+    "killed": 21,
+    "survived": [],
+    "killed_by": {
+      "winning map moves overridden": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "map moves never checked": [
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "every move safe": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "a level with several safe moves decides": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "only safe move ignored": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "revisits counted": [
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "cap ignored": ["timeout after 300s"],
+      "deadline ignored": [
+        "test_a_walk_past_its_deadline_is_a_timeout",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ],
+      "draws read as wins": [],
+      "one reply walked": ["timeout after 300s"],
+      "highest winning column": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "cell is the column": [
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "own positions not counted": ["timeout after 300s"],
+      "unwinnable root accepted": ["test_a_root_its_side_cannot_win_is_refused"],
+      "immediate wins not taken": [
+        "test_a_walk_past_the_cap_is_a_cap_in_both",
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "move cache answers other positions": [
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "immediate wins not counted as winning": [],
+      "verify: undefined passes": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ],
+      "verify: draws pass": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map"
+      ],
+      "verify: positions not reported": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ],
+      "verify walks with exceptions": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ]
+    }
+  },
+  "note": "'verify: loss read as draw' is not listed: the rule plays only immediate wins or safe moves, so the opponent never wins on its next move and a line of the rule's ends in a loss never — the branch is unreachable for Connect-4 and the mutant equivalent."
+}

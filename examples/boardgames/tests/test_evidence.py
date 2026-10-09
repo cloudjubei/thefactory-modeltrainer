@@ -236,7 +236,19 @@ def test_git_tracks_no_evidence_data_and_never_ignores_the_manifest():
                                     "tests.test_c49_s3_evidence",
                                     "tests.test_c49_s1_handoff_probe_evidence", "tests.test_c49_s1_handoff_findings_evidence",
                                     "tests.test_c49_s4_pilot_evidence", "tests.test_c49_s4_evidence",
-                                    "tests.test_c49_s4_exception_coding_evidence"])
+                                    "tests.test_c49_s4_exception_coding_evidence",
+                                    "tests.test_c49_s5_pilot_evidence", "tests.test_c49_s5_evidence", "tests.test_c49_s5_findings_evidence",
+                                    "tests.test_c49_w1_evidence", "tests.test_c49_w1_findings_evidence",
+                                    "tests.test_c49_w1_proxies_evidence", "tests.test_c49_p1_evidence",
+                                    "tests.test_c49_p1_findings_evidence", "tests.test_c49_p2_evidence",
+                                    "tests.test_c49_p2_findings_evidence",
+                                    "tests.test_c49_build_profile_evidence", "tests.test_c49_w2_evidence",
+                                    "tests.test_c49_w2_findings_evidence", "tests.test_c49_native_leaf_bench_evidence",
+                                    "tests.test_c49_w3_evidence", "tests.test_c49_w3_findings_evidence",
+                                    "tests.test_c49_native_leaf_lazy_evidence", "tests.test_c49_w4_evidence",
+                                    "tests.test_c49_w4_findings_evidence", "tests.test_c49_native_leaf_keys_evidence",
+                                    "tests.test_c49_build_profile_w4_evidence", "tests.test_c49_budget_spec_findings_evidence",
+                                    "tests.test_c49_w5_aborted_evidence"])
 def test_the_evidence_proofs_skip_only_when_their_recorded_files_are_absent(module):
     """The pinned proofs skip on a checkout without the evidence. A skip condition that names the wrong path skips
     them EVERYWHERE, silently — so each module's files must be ones the manifest records, and on a machine holding

@@ -1,0 +1,68 @@
+{
+  "file": "harness/floor_w4.py",
+  "tests": ["tests/test_floor_w4.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "foreign measurement accepted",
+      "old": "    if e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"]:",
+      "new": "    if False:"
+    },
+    {
+      "name": "other walk accepted",
+      "old": "    if e.get(\"builder\") != spec[\"builder\"] or e.get(\"search\") != spec[\"search\"]:",
+      "new": "    if e.get(\"builder\") != spec[\"builder\"]:"
+    },
+    {
+      "name": "other roots accepted",
+      "old": "    if sorted(r[\"index\"] for r in e[\"roots\"]) != sorted(spec[\"indices\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "other library accepted",
+      "old": "           or r[\"shared\"] != before[r[\"index\"]][\"shared\"] for r in e[\"roots\"]):",
+      "new": "           for r in e[\"roots\"]):"
+    },
+    {
+      "name": "failed checks accepted",
+      "old": "    if not all(r[\"checked\"] and r[\"moves_win\"] and r[\"leaves_certified\"] for r in e[\"roots\"] if r[\"complete\"]):",
+      "new": "    if False:"
+    },
+    {
+      "name": "unfinished read as fast",
+      "old": "    elif len(ratios) < len(done_before) or any(r > 1 for r in ratios.values()):",
+      "new": "    elif any(r > 1 for r in ratios.values()):"
+    },
+    {
+      "name": "slower accepted",
+      "old": "    elif len(ratios) < len(done_before) or any(r > 1 for r in ratios.values()):",
+      "new": "    elif len(ratios) < len(done_before):"
+    },
+    {
+      "name": "half boundary",
+      "old": "\"supported\" if all(r <= spec[\"time_support\"] for r in ratios.values())",
+      "new": "\"supported\" if all(r < spec[\"time_support\"] for r in ratios.values())"
+    },
+    {
+      "name": "unfinished never refuted",
+      "old": "else \"refuted\" if finished == 0",
+      "new": "else \"refuted\" if False"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-08T22:04:34+00:00",
+    "killed": 9,
+    "survived": [],
+    "killed_by": {
+      "foreign measurement accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other walk accepted": ["test_integrity_problems_stop_the_judgement"],
+      "other roots accepted": ["test_a_missing_root_is_an_integrity_problem"],
+      "other library accepted": ["test_integrity_problems_stop_the_judgement"],
+      "failed checks accepted": ["test_integrity_problems_stop_the_judgement"],
+      "unfinished read as fast": ["test_unfinished_where_w3_finished_refutes_the_time_claim"],
+      "slower accepted": ["test_faster_but_not_half_is_inconclusive_and_slower_refutes"],
+      "half boundary": ["test_half_the_time_and_the_unfinished_one_finished_supports_both"],
+      "unfinished never refuted": ["test_faster_but_not_half_is_inconclusive_and_slower_refutes"]
+    }
+  }
+}

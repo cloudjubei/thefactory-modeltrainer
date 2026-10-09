@@ -1,0 +1,105 @@
+{
+  "file": "harness/native_leaf.py",
+  "tests": ["tests/test_native_leaf.py"],
+  "timeout": 300,
+  "mutations": [
+    {
+      "name": "count lost",
+      "old": "        return len(self._raw)",
+      "new": "        return 0"
+    },
+    {
+      "name": "last exception dropped",
+      "old": "    raw = list(zip(exc_position[:n], exc_mask[:n], exc_move[:n]))",
+      "new": "    raw = list(zip(exc_position[:n - 1], exc_mask[:n - 1], exc_move[:n - 1]))"
+    },
+    {
+      "name": "keys for the other side",
+      "old": "            self._built = {(_board(p, m, self._to_move), self._to_move): c for p, m, c in self._raw}",
+      "new": "            self._built = {(_board(p, m, 1 - self._to_move), self._to_move): c for p, m, c in self._raw}"
+    },
+    {
+      "name": "stones swapped",
+      "old": "    mover, other = to_move + 1, 2 - to_move",
+      "new": "    mover, other = 2 - to_move, to_move + 1"
+    },
+    {
+      "name": "unwinnable root returned",
+      "old": "    if status == 5:\n        raise ValueError",
+      "new": "    if False:\n        raise ValueError"
+    },
+    {
+      "name": "timeout read as ok",
+      "old": "    if status != 0:\n        return {\"status\": STATUS[status]",
+      "new": "    if status not in (0, 2):\n        return {\"status\": STATUS[status]"
+    },
+    {
+      "name": "walk deadline ignored",
+      "old": "    seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())\n    status = lib.c4_leaf_walk",
+      "new": "    seconds = -1.0\n    status = lib.c4_leaf_walk"
+    },
+    {
+      "name": "walk levels misplaced",
+      "old": "    cells = (ctypes.c_int8 * 42)(*[levels.get(i, -1) for i in range(42)])\n    exc_position",
+      "new": "    cells = (ctypes.c_int8 * 42)(*[levels.get(41 - i, -1) for i in range(42)])\n    exc_position"
+    },
+    {
+      "name": "verify levels misplaced",
+      "old": "    cells = (ctypes.c_int8 * 42)(*[levels.get(i, -1) for i in range(42)])\n    own, walked",
+      "new": "    cells = (ctypes.c_int8 * 42)(*[levels.get(41 - i, -1) for i in range(42)])\n    own, walked"
+    },
+    {
+      "name": "verify reason lost",
+      "old": "    return {\"won\": reason is None, \"reason\": reason, \"own_positions\": own.value, \"positions\": walked.value}",
+      "new": "    return {\"won\": reason is None, \"reason\": None, \"own_positions\": own.value, \"positions\": walked.value}"
+    },
+    {
+      "name": "verify deadline ignored",
+      "old": "    seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())\n    status = lib.c4_verify_walk",
+      "new": "    seconds = -1.0\n    status = lib.c4_verify_walk"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T08:30:28+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "count lost": ["test_exceptions_are_counted_without_building_their_keys"],
+      "last exception dropped": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "keys for the other side": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "stones swapped": [
+        "test_exceptions_are_counted_without_building_their_keys",
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_one_walk_s_exceptions_survive_the_next_walk",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "unwinnable root returned": ["test_a_root_its_side_cannot_win_is_refused"],
+      "timeout read as ok": ["test_a_walk_past_its_deadline_is_a_timeout"],
+      "walk deadline ignored": ["test_a_walk_past_its_deadline_is_a_timeout"],
+      "walk levels misplaced": [
+        "test_fewer_levels_read_the_same_map_differently_in_both",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map"
+      ],
+      "verify levels misplaced": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map"
+      ],
+      "verify reason lost": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map",
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ],
+      "verify deadline ignored": [
+        "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
+      ]
+    }
+  }
+}

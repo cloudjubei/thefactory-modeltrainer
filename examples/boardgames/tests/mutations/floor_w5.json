@@ -1,0 +1,47 @@
+{
+  "file": "harness/floor_w5.py",
+  "tests": ["tests/test_floor_w5.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "budget left open",
+      "old": "        \"builder\": {**W2[\"builder\"], \"budgets\": [[0, 1200.0], [2, 30.0]]},",
+      "new": "        \"builder\": {**W2[\"builder\"], \"budgets\": [[0, 1200.0]]},"
+    },
+    {
+      "name": "python walk",
+      "old": "        \"search\": {**W2[\"search\"], \"walker\": \"native\"},",
+      "new": "        \"search\": dict(W2[\"search\"]),"
+    },
+    {
+      "name": "support boundary",
+      "old": "    return {\"verdict\": \"supported\" if ratio <= spec[\"time_support\"]",
+      "new": "    return {\"verdict\": \"supported\" if ratio < spec[\"time_support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "else \"refuted\" if ratio >= 1 else \"inconclusive\"",
+      "new": "else \"refuted\" if ratio > 1 else \"inconclusive\""
+    },
+    {
+      "name": "total of one root",
+      "old": "    total = sum(r[\"build_seconds\"] for r in e[\"roots\"])",
+      "new": "    total = e[\"roots\"][0][\"build_seconds\"]"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T04:45:25+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "budget left open": [
+        "test_the_budget_closes_after_the_root",
+        "test_w5_closes_the_root_budget_and_walks_in_c_otherwise_as_w2"
+      ],
+      "python walk": ["test_w5_closes_the_root_budget_and_walks_in_c_otherwise_as_w2"],
+      "support boundary": ["test_build_time_is_judged_against_w2_s_total"],
+      "refute boundary": ["test_build_time_is_judged_against_w2_s_total"],
+      "total of one root": ["test_build_time_is_judged_against_w2_s_total"]
+    }
+  }
+}

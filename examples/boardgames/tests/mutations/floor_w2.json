@@ -1,0 +1,47 @@
+{
+  "file": "harness/floor_w2.py",
+  "tests": ["tests/test_floor_w2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "first wave counted",
+      "old": "    later = [r for r in e[\"roots\"] if r[\"shared\"] > 0]",
+      "new": "    later = list(e[\"roots\"])"
+    },
+    {
+      "name": "support boundary",
+      "old": "    verdict = \"supported\" if share >= spec[\"library_support\"]",
+      "new": "    verdict = \"supported\" if share > spec[\"library_support\"]"
+    },
+    {
+      "name": "refute ignored",
+      "old": "else \"refuted\" if used == 0 else \"inconclusive\"",
+      "new": "else \"inconclusive\""
+    },
+    {
+      "name": "empty library judged",
+      "old": "    if not later or not leaves:",
+      "new": "    if not later:"
+    },
+    {
+      "name": "share of all leaves",
+      "old": "    leaves = sum(r[\"bits\"][\"leaves\"] for r in later)",
+      "new": "    leaves = sum(r[\"bits\"][\"leaves\"] for r in e[\"roots\"])"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-08T10:36:14+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "first wave counted": [
+        "test_the_library_share_counts_only_builds_that_had_a_library",
+        "test_without_a_library_there_is_nothing_to_judge"
+      ],
+      "support boundary": ["test_the_library_share_counts_only_builds_that_had_a_library"],
+      "refute ignored": ["test_no_library_leaf_refutes_and_a_small_share_is_inconclusive"],
+      "empty library judged": ["test_without_a_library_there_is_nothing_to_judge"],
+      "share of all leaves": ["test_the_library_share_counts_only_builds_that_had_a_library"]
+    }
+  }
+}

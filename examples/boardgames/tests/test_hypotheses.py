@@ -45,8 +45,8 @@ def _discordant(tmp_path, only_a, only_b, both=100, name="disc"):
     return led
 
 
-def _reg(tmp_path, now="2026-09-01T00:00:00"):
-    return Register(tmp_path / "hypotheses.json", now=lambda: now)
+def _reg(tmp_path, now="2026-09-01T00:00:00", sleep=lambda seconds: None):
+    return Register(tmp_path / "hypotheses.json", now=lambda: now, sleep=sleep)
 
 
 def test_a_registered_hypothesis_starts_untested(tmp_path):
@@ -622,6 +622,26 @@ def test_a_PRE_registered_claim_names_data_that_does_not_exist_yet_and_is_timed_
     save_evidence(future, {"started": "2026-09-10T00:00:00"})
     h = later.verify("h1", run_test=_pass)
     assert h["pre_registered"] is True and h["data"]["started"] == "2026-09-10T00:00:00"
+
+
+def test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second(tmp_path):
+    slept = []
+    _reg(tmp_path, now="2026-09-01T00:00:00.250000", sleep=slept.append).register(
+        "h1", claim="c", proof="t::p", data=str(tmp_path / "later.json.gz"))
+    assert slept == [0.75], ("runs stamp `started` in whole seconds, so a run launched in the claim's own second "
+                             "would read as data produced before it (W5b: h221-h223)")
+    _reg(tmp_path, now="2026-09-01T00:00:07", sleep=slept.append).register(
+        "h2", claim="c", proof="t::p", data=[_data(tmp_path, "2026-08-31T00:00:00"), str(tmp_path / "b.json.gz")])
+    assert slept == [0.75, 1.0]
+
+
+def test_registering_without_future_data_does_not_wait(tmp_path):
+    slept = []
+    r = _reg(tmp_path, now="2026-09-01T00:00:00.250000", sleep=slept.append)
+    r.register("h1", claim="c", proof="t::p", data=_data(tmp_path, "2026-08-31T00:00:00"))
+    r.register("h2", claim="c", proof="t::p", reads_no_data=True)
+    r.register("h3", claim="c", a="b35", b="a11", direction="a>b", unit="simulations")
+    assert slept == []
 
 
 def test_data_named_at_registration_that_ALREADY_exists_is_timed_at_registration(tmp_path):

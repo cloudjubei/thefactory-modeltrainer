@@ -1,0 +1,52 @@
+{
+  "file": "harness/hypotheses.py",
+  "tests": ["tests/test_hypotheses.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no wait",
+      "old": "                self._sleep(1 - _ts(h[\"registered_at\"]).microsecond / 1e6)\n",
+      "new": "                pass\n"
+    },
+    {
+      "name": "waits on existing data too",
+      "old": "            if data and any(f[\"started\"] is None for f in files):",
+      "new": "            if data:"
+    },
+    {
+      "name": "waits only when every file is future",
+      "old": "            if data and any(f[\"started\"] is None for f in files):",
+      "new": "            if data and all(f[\"started\"] is None for f in files):"
+    },
+    {
+      "name": "always a whole second",
+      "old": "                self._sleep(1 - _ts(h[\"registered_at\"]).microsecond / 1e6)\n",
+      "new": "                self._sleep(1)\n"
+    },
+    {
+      "name": "only the fraction",
+      "old": "                self._sleep(1 - _ts(h[\"registered_at\"]).microsecond / 1e6)\n",
+      "new": "                self._sleep(_ts(h[\"registered_at\"]).microsecond / 1e6)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T15:17:31+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "no wait": [
+        "test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second"
+      ],
+      "waits on existing data too": ["test_registering_without_future_data_does_not_wait"],
+      "waits only when every file is future": [
+        "test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second"
+      ],
+      "always a whole second": [
+        "test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second"
+      ],
+      "only the fraction": [
+        "test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second"
+      ]
+    }
+  }
+}

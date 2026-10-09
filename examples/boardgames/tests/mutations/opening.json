@@ -1,0 +1,76 @@
+{
+  "file": "harness/opening.py",
+  "tests": ["tests/test_opening.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "unwinnable root accepted",
+      "old": "    if not winning([root])[0]:\n        raise",
+      "new": "    if False:\n        raise"
+    },
+    {
+      "name": "trivial positions given moves",
+      "old": "        if verify(facts, s, {}, n_levels, cap)[\"won\"]:\n            trivial[key] = True\n            continue",
+      "new": "        if False:\n            trivial[key] = True\n            continue"
+    },
+    {
+      "name": "depth ignored",
+      "old": "        if depth >= plies:",
+      "new": "        if depth > plies:"
+    },
+    {
+      "name": "one reply followed",
+      "old": "            stack.extend((game.step(s, b), depth + 1) for b in game.legal_actions(s))",
+      "new": "            stack.extend((game.step(s, b), depth + 1) for b in game.legal_actions(s)[:1])"
+    },
+    {
+      "name": "readiness ignored",
+      "old": "            score = (-(ready - len(replies)), len(replies), a)",
+      "new": "            score = (0, len(replies), a)"
+    },
+    {
+      "name": "highest move preferred",
+      "old": "            score = (-(ready - len(replies)), len(replies), a)",
+      "new": "            score = (-(ready - len(replies)), len(replies), -a)"
+    },
+    {
+      "name": "readiness inverted",
+      "old": "            score = (-(ready - len(replies)), len(replies), a)",
+      "new": "            score = ((ready - len(replies)), len(replies), a)"
+    },
+    {
+      "name": "move not recorded",
+      "old": "        moves[key] = move",
+      "new": "        pass"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-07T14:02:05+00:00",
+    "killed": 8,
+    "survived": [],
+    "killed_by": {
+      "unwinnable root accepted": ["test_a_root_its_side_cannot_win_is_refused"],
+      "trivial positions given moves": [
+        "test_a_root_already_won_by_the_empty_map_needs_nothing",
+        "test_frontier_positions_still_need_a_strategy_and_trivial_ones_do_not"
+      ],
+      "depth ignored": [
+        "test_a_depth_of_zero_returns_the_root_itself",
+        "test_every_reply_ends_in_a_win_a_trivial_position_or_the_frontier",
+        "test_frontier_positions_still_need_a_strategy_and_trivial_ones_do_not"
+      ],
+      "one reply followed": [
+        "test_every_reply_ends_in_a_win_a_trivial_position_or_the_frontier",
+        "test_frontier_positions_still_need_a_strategy_and_trivial_ones_do_not"
+      ],
+      "readiness ignored": ["test_the_move_with_the_most_trivially_won_replies_is_chosen"],
+      "highest move preferred": ["test_the_move_with_the_most_trivially_won_replies_is_chosen"],
+      "readiness inverted": ["test_the_move_with_the_most_trivially_won_replies_is_chosen"],
+      "move not recorded": [
+        "test_every_reply_ends_in_a_win_a_trivial_position_or_the_frontier",
+        "test_frontier_positions_still_need_a_strategy_and_trivial_ones_do_not",
+        "test_the_move_with_the_most_trivially_won_replies_is_chosen"
+      ]
+    }
+  }
+}

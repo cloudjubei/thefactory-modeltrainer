@@ -110,3 +110,11 @@ def test_an_exception_with_a_single_alternative_costs_no_move_bits():
     assert Facts(GAME).of(last)[:2] == ([], [7, 8])
     assert walk_order_cost(Facts(GAME), last, {7: 0}, 2, {GAME.state_key(last): 8}) == {
         "contested": 1, "flagged": 1, "implicit": 0, "move_bits": 0, "bits": 1}
+
+
+def test_coding_past_its_deadline_is_refused():
+    import time
+
+    with pytest.raises(TimeoutError):
+        walk_order_cost(Facts(GAME), FORK, {}, 2, {KEY: 4}, deadline=time.monotonic() - 1)
+    assert walk_order_cost(Facts(GAME), FORK, {}, 2, {KEY: 4}, deadline=time.monotonic() + 60)["bits"] == 3

@@ -82,11 +82,16 @@
       "name": "moves not charged",
       "old": "            \"bits\": enumerative_bits(contested, flagged) + move_bits}",
       "new": "            \"bits\": enumerative_bits(contested, flagged)}"
+    },
+    {
+      "name": "coding deadline ignored",
+      "old": "        if deadline is not None and len(seen) % 1024 == 1 and time.monotonic() > deadline:\n            raise TimeoutError",
+      "new": "        if False:\n            raise TimeoutError"
     }
   ],
   "last_run": {
-    "at": "2026-10-07T06:57:52+00:00",
-    "killed": 16,
+    "at": "2026-10-09T08:06:33+00:00",
+    "killed": 17,
     "survived": [],
     "killed_by": {
       "count not charged": [
@@ -125,7 +130,8 @@
       "forced counted as contested": [
         "test_a_contested_position_without_an_exception_still_costs_its_share_of_the_flags",
         "test_a_position_the_map_leaves_undefined_needs_no_flag_only_its_move",
-        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest"
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_coding_past_its_deadline_is_refused"
       ],
       "flags not counted": [
         "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
@@ -137,8 +143,10 @@
       "one reply walked": ["test_the_walk_follows_the_exception_not_the_map"],
       "moves not charged": [
         "test_a_position_the_map_leaves_undefined_needs_no_flag_only_its_move",
-        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest"
-      ]
+        "test_an_exception_at_a_contested_position_is_flagged_and_its_move_read_among_the_rest",
+        "test_coding_past_its_deadline_is_refused"
+      ],
+      "coding deadline ignored": ["test_coding_past_its_deadline_is_refused"]
     }
   }
 }

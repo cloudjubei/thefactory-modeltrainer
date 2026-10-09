@@ -126,3 +126,34 @@ def test_the_facts_cache_keeps_everything_below_its_limit():
 
 def test_the_facts_cache_is_bounded_by_default():
     assert Facts(TicTacToe()).limit == 2_000_000
+
+
+def test_a_verify_past_its_deadline_is_a_timeout(facts):
+    import time
+
+    r = verify(facts, FORK, {4: 0}, 2, deadline=time.monotonic() - 1)
+    assert r["won"] is False and r["reason"] == "timeout"
+
+
+def test_a_verify_within_its_deadline_is_unchanged(facts):
+    import time
+
+    assert verify(facts, FORK, {4: 0}, 2, deadline=time.monotonic() + 60)["won"]
+
+
+def test_simplify_past_its_deadline_keeps_every_level(facts):
+    import time
+
+    levels = {4: 0, 5: 1, 6: 1}
+    assert simplify(facts, FORK, levels, 2, deadline=time.monotonic() - 1) == levels
+    assert simplify(facts, FORK, levels, 2) == {4: 0}
+
+
+def test_simplify_uses_the_given_verifier(facts):
+    calls = []
+
+    def verifier(*a, **k):
+        calls.append(a[2])
+        return verify(*a, **k)
+
+    assert simplify(facts, FORK, {4: 0, 5: 1}, 2, verifier=verifier) == {4: 0} and calls

@@ -70,7 +70,7 @@
     },
     {
       "name": "simplify drops unverified",
-      "old": "        if verify(facts, root, trial, n_levels, cap)[\"won\"]:",
+      "old": "        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
       "new": "        if True:"
     },
     {
@@ -92,19 +92,37 @@
       "name": "facts default unbounded",
       "old": "    def __init__(self, game, limit: int = 2_000_000):",
       "new": "    def __init__(self, game, limit: int = 10 ** 12):"
+    },
+    {
+      "name": "verify deadline ignored",
+      "old": "        if deadline is not None and len(seen) % 1024 == 1 and time.monotonic() > deadline:\n            return result(\"timeout\")",
+      "new": "        if False:\n            return result(\"timeout\")"
+    },
+    {
+      "name": "simplify deadline not passed",
+      "old": "        if check(facts, root, trial, n_levels, cap, deadline=deadline)[\"won\"]:",
+      "new": "        if check(facts, root, trial, n_levels, cap)[\"won\"]:"
+    },
+    {
+      "name": "simplify ignores its verifier",
+      "old": "    check = verifier or verify",
+      "new": "    check = verify"
     }
   ],
   "last_run": {
-    "at": "2026-10-07T07:02:56+00:00",
-    "killed": 18,
+    "at": "2026-10-09T08:09:15+00:00",
+    "killed": 21,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
       "win not played first": [
+        "test_a_verify_within_its_deadline_is_unchanged",
         "test_a_walk_past_the_cap_is_rejected",
         "test_a_winning_map_is_verified_over_every_reply",
         "test_a_winning_move_is_played_whatever_the_map",
-        "test_simplify_drops_every_level_the_win_does_not_need"
+        "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_past_its_deadline_keeps_every_level",
+        "test_simplify_uses_the_given_verifier"
       ],
       "single safe move not forced": [
         "test_a_forced_draw_is_rejected",
@@ -117,6 +135,7 @@
       ],
       "levels read backwards": [
         "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_past_its_deadline_keeps_every_level",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]"
       ],
@@ -133,7 +152,8 @@
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels0-undefined]",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels3-undefined]",
-        "test_simplify_drops_every_level_the_win_does_not_need"
+        "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_past_its_deadline_keeps_every_level"
       ],
       "one reply walked": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
@@ -142,7 +162,11 @@
       "cap ignored": ["test_a_walk_past_the_cap_is_rejected"],
       "empty cells free": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
       "oversized map accepted": ["test_a_map_is_one_bit_per_empty_cell_plus_its_levels"],
-      "simplify drops unverified": ["test_simplify_drops_every_level_the_win_does_not_need"],
+      "simplify drops unverified": [
+        "test_simplify_drops_every_level_the_win_does_not_need",
+        "test_simplify_past_its_deadline_keeps_every_level",
+        "test_simplify_uses_the_given_verifier"
+      ],
       "facts cache unbounded": [
         "test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
       ],
@@ -152,7 +176,13 @@
       "facts clears not counted": [
         "test_the_facts_cache_is_emptied_before_it_outgrows_its_limit_and_answers_stay_right"
       ],
-      "facts default unbounded": ["test_the_facts_cache_is_bounded_by_default"]
+      "facts default unbounded": ["test_the_facts_cache_is_bounded_by_default"],
+      "verify deadline ignored": [
+        "test_a_verify_past_its_deadline_is_a_timeout",
+        "test_simplify_past_its_deadline_keeps_every_level"
+      ],
+      "simplify deadline not passed": ["test_simplify_past_its_deadline_keeps_every_level"],
+      "simplify ignores its verifier": ["test_simplify_uses_the_given_verifier"]
     }
   }
 }

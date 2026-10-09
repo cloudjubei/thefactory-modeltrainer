@@ -5530,10 +5530,18 @@
       "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
       "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
       "registered_at": "2026-10-07T08:19:16.986662+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours",
+          "ok": false,
+          "detail": "d\nE         + inconclusive\n\ntests/test_c49_s5_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s5_evidence.py::test_c49_s5_three_of_four_ply_8_roots_get_a_complete_certified_strategy_within_4_hours\n1 failed in 0.09s",
+          "drawn_at": "2026-10-07T12:20:26.719608+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_s5.json.gz",
-        "started": null
+        "started": "2026-10-07T08:19:17+00:00"
       },
       "pins": {
         "tests/test_c49_s5_evidence.py": "ee4c7c5134ce7f6b221de2d6fdf7ce653ea6a3b3e6c8fcdb2f82e9cac9fd2678",
@@ -5549,10 +5557,17 @@
       "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_the_strategies_are_at_least_10_times_smaller_than_their_table",
       "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
       "registered_at": "2026-10-07T08:19:17.035151+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_the_strategies_are_at_least_10_times_smaller_than_their_table",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-07T12:20:27.273902+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_s5.json.gz",
-        "started": null
+        "started": "2026-10-07T08:19:17+00:00"
       },
       "pins": {
         "tests/test_c49_s5_evidence.py": "ee4c7c5134ce7f6b221de2d6fdf7ce653ea6a3b3e6c8fcdb2f82e9cac9fd2678",
@@ -5568,7 +5583,15 @@
       "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_is_no_larger_than_s4_in_walk_order_on_every_root_both_complete",
       "note": "S5 = S4 with leaves from ply 10 (min leaf depth 2), exceptions charged in walk order in the accept test and size, accept raised 10 -> 30 after the pilot (h185). Same roots #2071 #14026 #11342 #3591, 4 h. Facts cache now bounded (2M). Two changes from S4 (depth, accounting) \u2014 h188 compares with S4 re-costed in walk order. Measurement fingerprint 605e04961a21.",
       "registered_at": "2026-10-07T08:19:17.081548+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s5_evidence.py::test_c49_s5_is_no_larger_than_s4_in_walk_order_on_every_root_both_complete",
+          "ok": false,
+          "detail": "te.<locals>.<genexpr> at 0x104a795b0>)\n\ntests/test_c49_s5_evidence.py:55: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_s5_evidence.py::test_c49_s5_is_no_larger_than_s4_in_walk_order_on_every_root_both_complete\n1 failed in 0.09s",
+          "drawn_at": "2026-10-07T12:20:27.556645+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": {
         "path": "evidence/c49_s4_exception_coding.json.gz",
         "started": "2026-10-07T06:58:25+00:00"
@@ -5578,6 +5601,934 @@
         "harness/floor_s5.py": "9fcd2b541d9adc44fbb40269d149b53f8187e82bef717d1bed05ef20c0f7bad0"
       },
       "inconclusive_proof": "tests/test_c49_s5_evidence.py::test_c49_s5_no_root_completed_by_both"
+    },
+    "h189": {
+      "id": "h189",
+      "claim": "\u00a73.6 S5 (registered after the data): on #3591, the root S3, S4 and S5 all completed, S5's strategy (leaves from ply 10, kept with exceptions at >= 30x) is the smallest \u2014 24,908 bits for 295,930 positions (35.6x), against S3's 34,115 and S4's 33,782 in walk order \u2014 more than 20% under both, built in 2.3 h",
+      "mode": "test",
+      "proof": "tests/test_c49_s5_findings_evidence.py::test_c49_s5_ply_10_leaves_give_the_smallest_3591_strategy_by_over_20_percent",
+      "note": "S5 ran on a heavily shared machine (other work; its workers got a fraction of a core each for much of the run), so h186's 2/4 completion is not comparable to S3/S4's. h188 was refuted by #2071 alone (143 vs 133 bits). #3591: 653 leaves, 189 maps, 925 exceptions in 7,020 bits.",
+      "registered_at": "2026-10-07T12:20:49.581126+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_s5_findings_evidence.py::test_c49_s5_ply_10_leaves_give_the_smallest_3591_strategy_by_over_20_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-10-07T12:20:49.873047+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_s4_exception_coding.json.gz",
+        "started": "2026-10-07T06:58:25+00:00"
+      },
+      "pins": {
+        "tests/test_c49_s5_findings_evidence.py": "067ce1f49802b3e0343f6b491b31fadd54a2c4db696e5e6ec3d64e367a01b58b"
+      }
+    },
+    "h190": {
+      "id": "h190",
+      "claim": "\u00a73.6 W1: at least 6 of 8 sampled ply-8 frontier positions of the first player's opening get a complete certified strategy within 2 hours (S5 settings). Refuted at 3 or fewer; inconclusive at 4-5",
+      "mode": "test",
+      "proof": "tests/test_c49_w1_evidence.py::test_c49_w1_six_of_eight_frontier_positions_get_a_complete_strategy_within_2_hours",
+      "note": "Opening (harness/opening.py, 7 tests, 8/8 mutants): from the empty board, label cache as oracle, the winning move whose replies the empty map most often wins \u2014 204 moves, 259 positions already won, 671 frontier positions at ply 8; first move the centre. Sample: 8 of the 671, seed 4. Builder as S5 (leaves from ply 10, accept 30, walk-order) with a 2 h cap. Judge harness/floor_w1.py (9 tests, 14/14 mutants); an unfinished root counts at its partial size (a lower bound). Benchmarks: the trained net ~660K bits, WeakC4 ~35-45K. Measurement fingerprint bc95c6d34925. The machine is shared with heavy other work.",
+      "registered_at": "2026-10-07T14:06:12.337116+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w1_evidence.py::test_c49_w1_six_of_eight_frontier_positions_get_a_complete_strategy_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-10-07T16:08:53.879202+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w1_evidence.py": "9309074af808939fd9e8f797df78567b0189069532424141dfbe825c3faf583a",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w1_evidence.py::test_c49_w1_completion_is_undecidable"
+    },
+    "h191": {
+      "id": "h191",
+      "claim": "\u00a73.6 W1: the whole-game certified first-player strategy, projected from the opening (204 moves) plus its 671 frontier positions at the sample's mean strategy size, is no larger than the trained net (660K bits). Refuted when even the lower bound (unfinished roots at their partial size) exceeds 6.6M bits; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w1_evidence.py::test_c49_w1_the_projected_whole_game_strategy_is_no_larger_than_the_net",
+      "note": "Opening (harness/opening.py, 7 tests, 8/8 mutants): from the empty board, label cache as oracle, the winning move whose replies the empty map most often wins \u2014 204 moves, 259 positions already won, 671 frontier positions at ply 8; first move the centre. Sample: 8 of the 671, seed 4. Builder as S5 (leaves from ply 10, accept 30, walk-order) with a 2 h cap. Judge harness/floor_w1.py (9 tests, 14/14 mutants); an unfinished root counts at its partial size (a lower bound). Benchmarks: the trained net ~660K bits, WeakC4 ~35-45K. Measurement fingerprint bc95c6d34925. The machine is shared with heavy other work.",
+      "registered_at": "2026-10-07T14:06:12.389109+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w1_evidence.py::test_c49_w1_the_projected_whole_game_strategy_is_no_larger_than_the_net",
+          "ok": false,
+          "detail": "E         - supported\nE         + refuted\n\ntests/test_c49_w1_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w1_evidence.py::test_c49_w1_the_projected_whole_game_strategy_is_no_larger_than_the_net\n1 failed in 0.07s",
+          "drawn_at": "2026-10-07T16:08:54.145333+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w1_evidence.py": "9309074af808939fd9e8f797df78567b0189069532424141dfbe825c3faf583a",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w1_evidence.py::test_c49_w1_the_projection_is_undecidable"
+    },
+    "h192": {
+      "id": "h192",
+      "claim": "\u00a73.6 W1 (registered after the data): every completed frontier strategy is 30-50x under its own table (32.7-48.9x), yet the three largest of the 8 sampled strategies carry over 80% of the sample's bits (86%; sizes 429 to 29,935) \u2014 the whole game's size is set by what the opening leaves at ply 8, a few big subtrees, not by how each subtree is compressed",
+      "mode": "test",
+      "proof": "tests/test_c49_w1_findings_evidence.py::test_c49_w1_subtrees_compress_alike_but_three_big_ones_carry_most_of_the_bits",
+      "note": "h190 supported (7/8 within 2 h), h191 refuted (projected lower bound 7.97M bits; ~415 h of builds). Median subtree ~5K bits, mean ~11.9K. Levers named in the plan: an opening chosen for small frontier strategies (not merely trivially-won replies), and maps shared across the frontier.",
+      "registered_at": "2026-10-07T16:09:16.912361+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w1_findings_evidence.py::test_c49_w1_subtrees_compress_alike_but_three_big_ones_carry_most_of_the_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-10-07T16:09:17.196948+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w1_findings_evidence.py": "b3a71aee4980753c7ce643db7c80a46c1399def113eeefe11478d8bf23442548"
+      }
+    },
+    "h193": {
+      "id": "h193",
+      "claim": "\u00a73.6 W1 (registered after the data): two cheap stand-ins for a frontier position's strategy size fail on W1's 8 \u2014 the fewest unwon first-player positions two plies below is 1 for both the smallest (429 bits) and the largest (29,935) strategy, and the exact solver's strong score (how soon the win can be forced) is lowest for the largest \u2014 so neither can steer an opening toward small frontier strategies",
+      "mode": "test",
+      "proof": "tests/test_c49_w1_proxies_evidence.py::test_c49_w1_neither_cheap_stand_in_orders_frontier_strategy_sizes",
+      "note": "Strategy size tracks the positions the strategy plays (compression ~40x throughout); neither stand-in measures that. Dead end recorded per the capture-every-trial rule.",
+      "registered_at": "2026-10-07T16:12:26.997745+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w1_proxies_evidence.py::test_c49_w1_neither_cheap_stand_in_orders_frontier_strategy_sizes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.02s",
+          "drawn_at": "2026-10-07T16:12:27.190000+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1_proxies.json.gz",
+        "started": "2026-10-07T16:11:44+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w1_proxies_evidence.py": "a5346ab35753a437faddb26f64d0f9d44ddad5f89afbbf921f37c44112a27934"
+      }
+    },
+    "h194": {
+      "id": "h194",
+      "claim": "\u00a73.6 P1: with long searches for pure steady states near the frontier root (20 min at ply 8, 5 min at ply 10), the two of W1's three largest frontier strategies that W1 finished (#316, #323: 55,259 bits together) come out at no more than half that size together. Refuted at W1's size or more (an unfinished one counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_p1_evidence.py::test_c49_p1_long_root_searches_halve_w1_s_largest_finished_strategies",
+      "note": "Lever 1 after W1/h192/h193: long searches for pure steady states near the frontier root (builder budgets by depth: 20 min at ply 8, 5 min at ply 10, 30 s deeper; leaves allowed at the root, min leaf depth 0). Roots named: W1's #316 (29,935 bits), #323 (25,324), #230 (unfinished, 26,062). harness/strategy_builder.py 26 tests, 36/36 mutants; harness/floor_p1.py 8 tests, 11/11. 3 h cap. Measurement fingerprint 223cfe3c6122. Shared, heavily loaded machine.",
+      "registered_at": "2026-10-07T18:31:17.774272+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p1_evidence.py::test_c49_p1_long_root_searches_halve_w1_s_largest_finished_strategies",
+          "ok": false,
+          "detail": "       - supported\nE         + inconclusive\n\ntests/test_c49_p1_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_p1_evidence.py::test_c49_p1_long_root_searches_halve_w1_s_largest_finished_strategies\n1 failed in 0.08s",
+          "drawn_at": "2026-10-07T21:33:20.873871+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p1_evidence.py": "6cc9e84e98141bc8e7ad72105b325482c65bf4e532a5e6e785ea8ed2bb9ee68b",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7"
+      },
+      "inconclusive_proof": "tests/test_c49_p1_evidence.py::test_c49_p1_the_size_change_is_undecidable"
+    },
+    "h195": {
+      "id": "h195",
+      "claim": "\u00a73.6 P1: all three of W1's largest frontier positions (#316, #323, #230 \u2014 W1 left #230 unfinished in 2 h) get a complete certified strategy within 3 hours with long root searches. Refuted if none does; inconclusive at 1-2",
+      "mode": "test",
+      "proof": "tests/test_c49_p1_evidence.py::test_c49_p1_all_three_complete_within_3_hours",
+      "note": "Lever 1 after W1/h192/h193: long searches for pure steady states near the frontier root (builder budgets by depth: 20 min at ply 8, 5 min at ply 10, 30 s deeper; leaves allowed at the root, min leaf depth 0). Roots named: W1's #316 (29,935 bits), #323 (25,324), #230 (unfinished, 26,062). harness/strategy_builder.py 26 tests, 36/36 mutants; harness/floor_p1.py 8 tests, 11/11. 3 h cap. Measurement fingerprint 223cfe3c6122. Shared, heavily loaded machine.",
+      "registered_at": "2026-10-07T18:31:17.857210+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p1_evidence.py::test_c49_p1_all_three_complete_within_3_hours",
+          "ok": false,
+          "detail": "upported'\nE         \nE         - supported\nE         + inconclusive\n\ntests/test_c49_p1_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_p1_evidence.py::test_c49_p1_all_three_complete_within_3_hours\n1 failed in 0.08s",
+          "drawn_at": "2026-10-07T21:33:21.356207+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p1_evidence.py": "6cc9e84e98141bc8e7ad72105b325482c65bf4e532a5e6e785ea8ed2bb9ee68b",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7"
+      },
+      "inconclusive_proof": "tests/test_c49_p1_evidence.py::test_c49_p1_completion_is_undecidable"
+    },
+    "h196": {
+      "id": "h196",
+      "claim": "\u00a73.6 P1 (registered after the data): where long searches near the root succeed the strategy shrinks several-fold \u2014 #323 completes at 4,304 bits against W1's 25,324, playing 52,394 positions against 389,346 \u2014 but on #316 and #230 the long searches use the time: 56 and 54 searches against W1's 238 and 311, neither finished in 3 hours",
+      "mode": "test",
+      "proof": "tests/test_c49_p1_findings_evidence.py::test_c49_p1_a_root_map_shrinks_323_five_fold_but_long_searches_starve_the_other_two",
+      "note": "h194 inconclusive (#323 + #316's partial = 14,123 bits vs W1's 55,259, but #316 unfinished), h195 inconclusive (1/3). Partials at 3 h: #316 9,819 (W1 complete 29,935), #230 11,624 (W1 partial 26,062). A map near the root changes which positions the strategy reaches, not just how they are described. Searches could also overrun the build's cap by up to their budget (the deadline was checked only between positions) \u2014 fixed after this run.",
+      "registered_at": "2026-10-07T21:33:42.561536+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p1_findings_evidence.py::test_c49_p1_a_root_map_shrinks_323_five_fold_but_long_searches_starve_the_other_two",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-07T21:33:42.876068+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p1_findings_evidence.py": "dc1bc1162aa2084c572e15b32344d2c9eadb301a62857aa243b5ecd54d8ff77f"
+      }
+    },
+    "h197": {
+      "id": "h197",
+      "claim": "\u00a73.6 P2: with one 20-minute search for a pure steady state at each frontier root (30 s below), the two of W1's three largest frontier strategies that W1 finished (#316, #323: 55,259 bits together) come out at no more than half that size together. Refuted at W1's size or more (an unfinished one at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_p2_evidence.py::test_c49_p2_long_root_searches_halve_w1_s_largest_finished_strategies",
+      "note": "P2 = P1 with budgets [[0, 1200]] only \u2014 the 20 min search at the frontier root, W1's 30 s below \u2014 after h196 (P1's 5-min ply-10 searches starved #316 and #230). Builder now caps searches at the remaining time. Same roots #316 #323 #230, 3 h cap. harness/floor_p2.py 2 tests (judged by floor_p1's report, 11/11 mutants). Measurement fingerprint 2e4bc3465b9c.",
+      "registered_at": "2026-10-07T21:35:18.368911+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p2_evidence.py::test_c49_p2_long_root_searches_halve_w1_s_largest_finished_strategies",
+          "ok": false,
+          "detail": "       - supported\nE         + inconclusive\n\ntests/test_c49_p2_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_p2_evidence.py::test_c49_p2_long_root_searches_halve_w1_s_largest_finished_strategies\n1 failed in 0.07s",
+          "drawn_at": "2026-10-08T09:47:56.018320+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p2_evidence.py": "ae5d7a77c3f01ede7eb38a0abc96929109b825ddbe5796a948a60cd177f61ced",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7"
+      },
+      "inconclusive_proof": "tests/test_c49_p2_evidence.py::test_c49_p2_the_size_change_is_undecidable"
+    },
+    "h198": {
+      "id": "h198",
+      "claim": "\u00a73.6 P2: all three of W1's largest frontier positions (#316, #323, #230) get a complete certified strategy within 3 hours with one long search at each root. Refuted if none does; inconclusive at 1-2",
+      "mode": "test",
+      "proof": "tests/test_c49_p2_evidence.py::test_c49_p2_all_three_complete_within_3_hours",
+      "note": "P2 = P1 with budgets [[0, 1200]] only \u2014 the 20 min search at the frontier root, W1's 30 s below \u2014 after h196 (P1's 5-min ply-10 searches starved #316 and #230). Builder now caps searches at the remaining time. Same roots #316 #323 #230, 3 h cap. harness/floor_p2.py 2 tests (judged by floor_p1's report, 11/11 mutants). Measurement fingerprint 2e4bc3465b9c.",
+      "registered_at": "2026-10-07T21:35:18.447413+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p2_evidence.py::test_c49_p2_all_three_complete_within_3_hours",
+          "ok": false,
+          "detail": "upported'\nE         \nE         - supported\nE         + inconclusive\n\ntests/test_c49_p2_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_p2_evidence.py::test_c49_p2_all_three_complete_within_3_hours\n1 failed in 0.07s",
+          "drawn_at": "2026-10-08T09:47:56.505544+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p2_evidence.py": "ae5d7a77c3f01ede7eb38a0abc96929109b825ddbe5796a948a60cd177f61ced",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7"
+      },
+      "inconclusive_proof": "tests/test_c49_p2_evidence.py::test_c49_p2_completion_is_undecidable"
+    },
+    "h199": {
+      "id": "h199",
+      "claim": "\u00a73.6 P2 (registered after the data): with one 20-minute search at the root (30 s below), #323 completes at 2,415 bits \u2014 a tenth of W1's 25,324 and under P1's 4,304 \u2014 but #316 and #230 make only 16 searches each in 3 hours (P1: 56, 54; W1: 238, 311): the build near the root, not the leaf searches' budgets, keeps the big frontier positions from finishing",
+      "mode": "test",
+      "proof": "tests/test_c49_p2_findings_evidence.py::test_c49_p2_a_root_search_shrinks_323_ten_fold_but_the_other_two_barely_search",
+      "note": "h197 inconclusive (#323 + #316's partial = 4,858 bits vs 55,259, a lower bound), h198 inconclusive (1/3). Partials at 3 h: #316 2,443, #230 1,665. Where the time goes near the root is not measured by the run; to profile before the next study.",
+      "registered_at": "2026-10-08T09:48:18.462041+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_p2_findings_evidence.py::test_c49_p2_a_root_search_shrinks_323_ten_fold_but_the_other_two_barely_search",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-08T09:48:18.779264+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_p2_findings_evidence.py": "d95ce2e786810b3376e483c0facc80df546fbc611e88ff56971b2c1eac3e679c"
+      },
+      "supersession": {
+        "by": "h200",
+        "reason": "h199's cause (the build around the searches) was untested; profiling shows the leaf searches take >95% of the time and overrun their budgets near the root (h200)",
+        "at": "2026-10-08T10:20:34.644325+00:00"
+      }
+    },
+    "h200": {
+      "id": "h200",
+      "claim": "\u00a73.6 (registered after the data): in profiled builds of #316 under P2's settings the leaf searches take over 95% of the time (938 of 945 s; 874 of 900 s), and near the root one search step \u2014 a full walk of the leaf, 450K own positions at ply 8 \u2014 takes 65-209 s, so searches there overrun their budgets by 2-3.5x (60 s budgets ran 209 s and 130 s): the search checks its budget only between steps. This, not the build around the searches, is what slowed P1/P2 near the root",
+      "mode": "test",
+      "proof": "tests/test_c49_build_profile_evidence.py::test_c49_leaf_searches_take_the_build_and_overrun_their_budgets_near_the_root",
+      "note": "Supersedes h199's causal wording. Within a step: game stepping ~45%, the steady-state rule and Facts ~35%, the oracle (exact solver via the winning cache) ~26% (cumulative, overlapping). Deeper leaves (< 50K positions) keep to their budgets. Fix: the walk itself honours the deadline.",
+      "registered_at": "2026-10-08T10:20:34.238787+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_build_profile_evidence.py::test_c49_leaf_searches_take_the_build_and_overrun_their_budgets_near_the_root",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-08T10:20:34.599668+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_build_profile_below_root.json.gz",
+        "started": "2026-10-08T10:04:58+00:00"
+      },
+      "pins": {
+        "tests/test_c49_build_profile_evidence.py": "85bfb5aaf415ee01d4d835e512ee43ffcb5894f581f006f4fe72040dbd0bbac2"
+      }
+    },
+    "h201": {
+      "id": "h201",
+      "claim": "\u00a73.6 W2: with root searches, honest budgets, walk-order exceptions and a shared map library, at least 6 of W1's 8 sampled frontier positions get a complete certified strategy within 2 hours (W1: 7). Refuted at 3 or fewer; inconclusive at 4-5",
+      "mode": "test",
+      "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_six_of_eight_frontier_positions_complete_within_2_hours",
+      "note": "W2 = W1's 8 sampled frontier roots in W1's order, P2's builder (min leaf depth 0, 20 min root search, 30 s below, accept 30) with W1's 2 h cap; since W1: walks honour the search deadline (h200 fix; harness/steady_exceptions.py 26/26, steady_local.py 14/14 mutants), walk-order exceptions in the builder, and a map library: two waves of 4, the second starting from every map the first found (strategy_builder.py 32 tests, 42/42 mutants; floor_w2.py 5 tests, 5/5). Smoke: the library reaches the second wave. Measurement fingerprint 4f5008ffc2ef. Shared machine.",
+      "registered_at": "2026-10-08T10:45:18.764272+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_six_of_eight_frontier_positions_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-08T14:45:53.133529+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w2_evidence.py": "fcd4655b97bc2bcfa7c6c7ebec9f5f7d3ecb2a6d9482e4e67eab70cd765cf34c",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w2_evidence.py::test_c49_w2_completion_is_undecidable"
+    },
+    "h202": {
+      "id": "h202",
+      "claim": "\u00a73.6 W2: the projected whole-game first-player strategy (opening + 671 frontier positions at the sample's mean) is at most half of W1's projection (<= 3.98M bits). Refuted when even its lower bound exceeds W1's 7.97M; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_the_projected_whole_game_strategy_is_half_of_w1_s_or_less",
+      "note": "W2 = W1's 8 sampled frontier roots in W1's order, P2's builder (min leaf depth 0, 20 min root search, 30 s below, accept 30) with W1's 2 h cap; since W1: walks honour the search deadline (h200 fix; harness/steady_exceptions.py 26/26, steady_local.py 14/14 mutants), walk-order exceptions in the builder, and a map library: two waves of 4, the second starting from every map the first found (strategy_builder.py 32 tests, 42/42 mutants; floor_w2.py 5 tests, 5/5). Smoke: the library reaches the second wave. Measurement fingerprint 4f5008ffc2ef. Shared machine.",
+      "registered_at": "2026-10-08T10:45:18.845723+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_the_projected_whole_game_strategy_is_half_of_w1_s_or_less",
+          "ok": false,
+          "detail": "       - supported\nE         + inconclusive\n\ntests/test_c49_w2_evidence.py:42: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w2_evidence.py::test_c49_w2_the_projected_whole_game_strategy_is_half_of_w1_s_or_less\n1 failed in 0.04s",
+          "drawn_at": "2026-10-08T14:45:53.362813+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w2_evidence.py": "fcd4655b97bc2bcfa7c6c7ebec9f5f7d3ecb2a6d9482e4e67eab70cd765cf34c",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w2_evidence.py::test_c49_w2_the_projection_is_undecidable"
+    },
+    "h203": {
+      "id": "h203",
+      "claim": "\u00a73.6 W2: maps found in the first wave's builds are reused \u2014 at least a tenth of the second wave's leaves use a library map. Refuted if none does; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_a_tenth_of_the_second_wave_s_leaves_use_the_library",
+      "note": "W2 = W1's 8 sampled frontier roots in W1's order, P2's builder (min leaf depth 0, 20 min root search, 30 s below, accept 30) with W1's 2 h cap; since W1: walks honour the search deadline (h200 fix; harness/steady_exceptions.py 26/26, steady_local.py 14/14 mutants), walk-order exceptions in the builder, and a map library: two waves of 4, the second starting from every map the first found (strategy_builder.py 32 tests, 42/42 mutants; floor_w2.py 5 tests, 5/5). Smoke: the library reaches the second wave. Measurement fingerprint 4f5008ffc2ef. Shared machine.",
+      "registered_at": "2026-10-08T10:45:18.912106+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w2_evidence.py::test_c49_w2_a_tenth_of_the_second_wave_s_leaves_use_the_library",
+          "ok": false,
+          "detail": "  \nE         - supported\nE         + inconclusive\n\ntests/test_c49_w2_evidence.py:50: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w2_evidence.py::test_c49_w2_a_tenth_of_the_second_wave_s_leaves_use_the_library\n1 failed in 0.04s",
+          "drawn_at": "2026-10-08T14:45:53.753814+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w2_evidence.py": "fcd4655b97bc2bcfa7c6c7ebec9f5f7d3ecb2a6d9482e4e67eab70cd765cf34c",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0"
+      },
+      "inconclusive_proof": "tests/test_c49_w2_evidence.py::test_c49_w2_library_use_is_undecidable"
+    },
+    "h204": {
+      "id": "h204",
+      "claim": "\u00a73.6 W2 (registered after the data): every one of the 8 sampled frontier strategies is smaller under W2 than under W1 (seven at no more than two-thirds; #87 403 vs 429), the three W1 largest by more than tenfold (#316 926 partial vs 29,935; #230 633 partial vs 26,062; #323 1,264 vs 25,324), the sample's total by more than tenfold (6,344 vs 94,953 bits) \u2014 the projected lower bound falls from 7.97M to 533K bits; the library is used by 2 of the second wave's 61 leaves, so the gain is the root searches'",
+      "mode": "test",
+      "proof": "tests/test_c49_w2_findings_evidence.py::test_c49_w2_every_frontier_strategy_is_smaller_and_the_biggest_by_tenfold",
+      "note": "h201 supported (6/8 within 2 h), h202 inconclusive (533K is a lower bound: #316 and #230 unfinished), h203 inconclusive (3% library use). Completed strategies reach fewer positions too (#323 53K vs 389K; #346 12.5K vs 102K). Projected build time at the cap ~751 h. 533K is below the net's ~660K but only as a lower bound.",
+      "registered_at": "2026-10-08T14:46:18.842204+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w2_findings_evidence.py::test_c49_w2_every_frontier_strategy_is_smaller_and_the_biggest_by_tenfold",
+          "ok": false,
+          "detail": "xpr> at 0x103229620>)\n\ntests/test_c49_w2_findings_evidence.py:24: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w2_findings_evidence.py::test_c49_w2_every_frontier_strategy_is_smaller_and_the_biggest_by_tenfold\n1 failed in 0.08s",
+          "drawn_at": "2026-10-08T14:46:19.178146+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w2_findings_evidence.py": "19c3e5799cad891906ca8b9d04147cb44efac5053bcf2a3a917ba1c07780e29a"
+      },
+      "supersession": {
+        "by": "h205",
+        "reason": "h204's 'seven at no more than two-thirds' was an arithmetic slip (#362 at 0.677); h205 states the measured bound (0.7) and keeps the rest",
+        "at": "2026-10-08T14:46:40.842994+00:00"
+      }
+    },
+    "h205": {
+      "id": "h205",
+      "claim": "\u00a73.6 W2 (registered after the data; corrects h204): every one of the 8 sampled frontier strategies is smaller under W2 than under W1, seven by at least 30% (#362 1,966 vs 2,905 is the largest ratio among them, 0.68; #87 403 vs 429), the three W1 largest by more than tenfold (#316 926 partial vs 29,935; #230 633 partial vs 26,062; #323 1,264 vs 25,324), the sample's total by more than tenfold (6,344 vs 94,953 bits) \u2014 the projected lower bound falls from 7.97M to 533K bits; the library is used by 2 of the second wave's 61 leaves, so the gain is the root searches'",
+      "mode": "test",
+      "proof": "tests/test_c49_w2_findings_evidence.py::test_c49_w2_every_frontier_strategy_is_smaller_seven_by_at_least_30_percent_the_biggest_tenfold",
+      "note": "h204 stated 'seven at no more than two-thirds'; #362 is at 0.677 \u2014 an arithmetic slip in the claim, recorded as h204 REFUTED; the rest of h204 held.",
+      "registered_at": "2026-10-08T14:46:40.433964+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w2_findings_evidence.py::test_c49_w2_every_frontier_strategy_is_smaller_seven_by_at_least_30_percent_the_biggest_tenfold",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-08T14:46:40.788487+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w1.json.gz",
+        "started": "2026-10-07T14:06:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w2_findings_evidence.py": "925ff3a7de6bf8b04a4cf136566f27193fb29af347e3602148780e8eeb30322d"
+      }
+    },
+    "h206": {
+      "id": "h206",
+      "claim": "\u00a73.6 W3: W2's two unfinished frontier positions (#316, #230) both get a complete certified strategy within 6 hours, starting from W2's map library. Refuted if neither does; inconclusive at one",
+      "mode": "test",
+      "proof": "tests/test_c49_w3_evidence.py::test_c49_w3_both_unfinished_frontier_positions_complete_within_6_hours",
+      "note": "W3 = W2's builder (root search 20 min, 30 s below, accept 30, walk-order exceptions, deadline-honouring walks) on W2's two unfinished roots (#316 926 bits partial, #230 633 partial at 2 h) with a 6 h cap, each starting from all maps W2 found (library_from c49_w2). Projection uses W2's six finished strategies (4,785 bits) plus these two: it is <= 660K iff the two total <= ~3,070 bits. harness/floor_w3.py 5 tests, 12/12 mutants. Full suite 2,790 passed before launch. Measurement fingerprint 276ae6b8c7cf.",
+      "registered_at": "2026-10-08T15:04:08.504614+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w3_evidence.py::test_c49_w3_both_unfinished_frontier_positions_complete_within_6_hours",
+          "ok": false,
+          "detail": "      - supported\nE         + inconclusive\n\ntests/test_c49_w3_evidence.py:30: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w3_evidence.py::test_c49_w3_both_unfinished_frontier_positions_complete_within_6_hours\n1 failed in 0.05s",
+          "drawn_at": "2026-10-08T21:04:48.974475+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w3_evidence.py": "a51d805e4e373afc5e9de4543696373100206ddf48f9c539b4ec88c36f17ae7c",
+        "harness/floor_w3.py": "5af0dde34e26f8d21ce04236de209e05bbdf04d60ffd44b88962d465b996c2b8"
+      },
+      "inconclusive_proof": "tests/test_c49_w3_evidence.py::test_c49_w3_completion_is_undecidable"
+    },
+    "h207": {
+      "id": "h207",
+      "claim": "\u00a73.6 W3: with W2's six finished strategies and W3's two, the whole-game certified first-player strategy (opening + 671 frontier positions at the sample's mean) projects to no more than the trained net's ~660K bits. Supported only when all 8 are finished; refuted when even a lower bound exceeds 660K; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w3_evidence.py::test_c49_w3_the_whole_game_strategy_projects_no_larger_than_the_net",
+      "note": "W3 = W2's builder (root search 20 min, 30 s below, accept 30, walk-order exceptions, deadline-honouring walks) on W2's two unfinished roots (#316 926 bits partial, #230 633 partial at 2 h) with a 6 h cap, each starting from all maps W2 found (library_from c49_w2). Projection uses W2's six finished strategies (4,785 bits) plus these two: it is <= 660K iff the two total <= ~3,070 bits. harness/floor_w3.py 5 tests, 12/12 mutants. Full suite 2,790 passed before launch. Measurement fingerprint 276ae6b8c7cf.",
+      "registered_at": "2026-10-08T15:04:08.663347+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w3_evidence.py::test_c49_w3_the_whole_game_strategy_projects_no_larger_than_the_net",
+          "ok": false,
+          "detail": "   \nE         - supported\nE         + refuted\n\ntests/test_c49_w3_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w3_evidence.py::test_c49_w3_the_whole_game_strategy_projects_no_larger_than_the_net\n1 failed in 0.05s",
+          "drawn_at": "2026-10-08T21:04:49.443984+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w3_evidence.py": "a51d805e4e373afc5e9de4543696373100206ddf48f9c539b4ec88c36f17ae7c",
+        "harness/floor_w3.py": "5af0dde34e26f8d21ce04236de209e05bbdf04d60ffd44b88962d465b996c2b8"
+      },
+      "inconclusive_proof": "tests/test_c49_w3_evidence.py::test_c49_w3_the_projection_is_undecidable"
+    },
+    "h208": {
+      "id": "h208",
+      "claim": "\u00a73.6 (registered after the data): the C leaf walk (harness/c4leafwalk.c) returns exactly the Python walk's result on 4 frontier positions (37K-429K positions each); a repeated, warm-cache walk is 2.1-7.2x faster (0.08-2.98 s against 0.59-6.97 s), a first, cold walk only 1.1-3.2x (2.7-60 s against 8.5-116 s): the exact solves for newly reached positions bound a cold walk either way",
+      "mode": "test",
+      "proof": "tests/test_c49_native_leaf_bench_evidence.py::test_c49_the_c_walk_matches_and_is_two_to_seven_times_faster_warm_but_solve_bound_cold",
+      "note": "harness/native_leaf.py + c4leafwalk.c (includes c4solver.c; winning-move cache 2^22 direct-mapped): 5 tests (32 position-map pairs vs the Python walk), 15/15 C mutants. Not yet wired into the search: W3 imports the walk's modules. The modest cold gain says the next lever is fewer solves (e.g. a bigger winning cache, or solving only where the map's move is in doubt), not a faster walk.",
+      "registered_at": "2026-10-08T16:35:08.068223+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_native_leaf_bench_evidence.py::test_c49_the_c_walk_matches_and_is_two_to_seven_times_faster_warm_but_solve_bound_cold",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-08T16:35:08.331889+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_native_leaf_bench.json.gz",
+        "started": "2026-10-08T16:29:00+00:00"
+      },
+      "pins": {
+        "tests/test_c49_native_leaf_bench_evidence.py": "84a41bb14ac1af1ce22bd204ef75442b47761734eab266b71435b0805f88d35e"
+      }
+    },
+    "h209": {
+      "id": "h209",
+      "claim": "\u00a73.6 W3 (registered after the data): given 6 hours from W2's library, #316 finishes at 9,057 bits for 153,869 positions \u2014 nearly tenfold its 2-hour partial (926) \u2014 and #230 reaches 5,446 bits, more than eightfold its partial (633), still unfinished: a partial size undercounts the finished strategy badly, so W2's 533K lower bound was far below the whole game's size, which now projects to at least 1.62M bits (2.5x the net, ~5x under W1)",
+      "mode": "test",
+      "proof": "tests/test_c49_w3_findings_evidence.py::test_c49_w3_two_hour_partials_undercount_the_finished_strategies_tenfold",
+      "note": "h206 inconclusive (1/2 complete), h207 refuted (lower bound 1,618,856 bits > 660K). Library use rose: 5 of #316's 33 leaves, 8 of #230's 44. The finished whole-game strategy would be at least 1.62M bits and take far more than W2's ~750 h projection at these speeds.",
+      "registered_at": "2026-10-08T21:05:12.612501+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w3_findings_evidence.py::test_c49_w3_two_hour_partials_undercount_the_finished_strategies_tenfold",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-08T21:05:12.832944+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w2.json.gz",
+        "started": "2026-10-08T10:45:19+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w3_findings_evidence.py": "a0c81c901c7d0763b4d74c3f255746c49458744aabd7711afde78f7a7487be36"
+      }
+    },
+    "h210": {
+      "id": "h210",
+      "claim": "\u00a73.6: solving only the moves the C leaf walk needs \u2014 the map's move where it gives one, otherwise columns up to the lowest winning one \u2014 instead of every column of every position makes the median cold walk on h208's 4 frontier positions at least 2x faster, with results still equal to the Python walk's. Refuted if no faster (< 1x); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_native_leaf_lazy_evidence.py::test_c49_solving_only_needed_moves_halves_the_cold_walk",
+      "note": "User chose this lever (fewer solves) 2026-10-08. Cold C walks were 2.7-60 s (h208), bound by up to 7 exact solves per position. A cache of single move results replaces the cache of whole winning-move sets.",
+      "registered_at": "2026-10-08T21:20:33.910402+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_native_leaf_lazy_evidence.py::test_c49_solving_only_needed_moves_halves_the_cold_walk",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-08T21:42:32.772261+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_native_leaf_bench.json.gz",
+        "started": "2026-10-08T16:29:00+00:00"
+      },
+      "pins": {
+        "tests/test_c49_native_leaf_lazy_evidence.py": "a1ff98c380deef5d2a7027d037c8097d14f4288691a604edf571d690b920e894"
+      },
+      "inconclusive_proof": "tests/test_c49_native_leaf_lazy_evidence.py::test_c49_the_cold_speedup_is_undecidable"
+    },
+    "h211": {
+      "id": "h211",
+      "claim": "\u00a73.6 W4: with the leaves walked in C, #316 finishes in at most half W3's time (<= 7,818 s of W3's 15,637 s). Refuted if it is slower than W3 or unfinished; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_halves_the_time_to_finish_316",
+      "note": "W4 = W3 (roots #316, #230; W2's library; 6 h cap; W2's builder) with the search spec's walker 'native' \u2014 the C leaf walk with lazy solves (h208, h210: identical results, cold walks 5-17x faster than Python). harness/floor_w4.py 6 tests, 9/9 mutants. Full suite 2,812 passed. Measurement fingerprint c7705789fd85. W3: #316 complete in 15,637 s at 9,057 bits; #230 unfinished at 5,446.",
+      "registered_at": "2026-10-08T22:04:52.063703+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_halves_the_time_to_finish_316",
+          "ok": false,
+          "detail": "ported'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_w4_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_halves_the_time_to_finish_316\n1 failed in 0.06s",
+          "drawn_at": "2026-10-09T04:05:14.926959+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w3.json.gz",
+        "started": "2026-10-08T15:04:09+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w4_evidence.py": "dce7c9a58fd81cf8c2659744465a7894d05aa075f29b30163f8d5f4cdf42ea51",
+        "harness/floor_w4.py": "bd07d74beb27bb0e16a52bf1be66f9682d4b82b388ab099c4c6d17e9e3a00676"
+      },
+      "inconclusive_proof": "tests/test_c49_w4_evidence.py::test_c49_w4_the_time_change_is_undecidable"
+    },
+    "h212": {
+      "id": "h212",
+      "claim": "\u00a73.6 W4: with the leaves walked in C, #230 \u2014 unfinished in W3's 6 hours \u2014 finishes within 6 hours. Refuted if it does not",
+      "mode": "test",
+      "proof": "tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_finishes_230",
+      "note": "W4 = W3 (roots #316, #230; W2's library; 6 h cap; W2's builder) with the search spec's walker 'native' \u2014 the C leaf walk with lazy solves (h208, h210: identical results, cold walks 5-17x faster than Python). harness/floor_w4.py 6 tests, 9/9 mutants. Full suite 2,812 passed. Measurement fingerprint c7705789fd85. W3: #316 complete in 15,637 s at 9,057 bits; #230 unfinished at 5,446.",
+      "registered_at": "2026-10-08T22:04:52.118070+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_finishes_230",
+          "ok": false,
+          "detail": "d' == 'supported'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_w4_evidence.py:36: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w4_evidence.py::test_c49_w4_the_c_walk_finishes_230 - A...\n1 failed in 0.05s",
+          "drawn_at": "2026-10-09T04:05:15.344307+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w3.json.gz",
+        "started": "2026-10-08T15:04:09+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w4_evidence.py": "dce7c9a58fd81cf8c2659744465a7894d05aa075f29b30163f8d5f4cdf42ea51",
+        "harness/floor_w4.py": "bd07d74beb27bb0e16a52bf1be66f9682d4b82b388ab099c4c6d17e9e3a00676"
+      }
+    },
+    "h213": {
+      "id": "h213",
+      "claim": "\u00a73.6 W4 (registered after the data): walking the leaves in C leaves a time-bounded build's time unchanged \u2014 #316 finishes in 15,851 s against W3's 15,637 (+1.4%) at 8,804 bits against 9,057 \u2014 and both builds make fewer searches than W3's (17 vs 22, 20 vs 28): searches run to their budgets, so a faster walk turns into more evaluations per search, and the build's time goes elsewhere",
+      "mode": "test",
+      "proof": "tests/test_c49_w4_findings_evidence.py::test_c49_w4_the_c_walk_leaves_build_time_unchanged_and_searches_fewer",
+      "note": "h211, h212 refuted. #230 unfinished again at 13,083 bits (W3: 5,446). Pure maps found: 4 and 2 (W3: 10 and 10); excepted leaves 7 and 13 (W3: 6 and 6). Candidate sinks outside the searches, all still Python: covering checks of library maps (verify), simplify of found maps, walk_order_cost of excepted leaves \u2014 to profile.",
+      "registered_at": "2026-10-09T04:05:38.845597+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w4_findings_evidence.py::test_c49_w4_the_c_walk_leaves_build_time_unchanged_and_searches_fewer",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T04:05:39.064247+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w3.json.gz",
+        "started": "2026-10-08T15:04:09+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w4_findings_evidence.py": "10bd30abea9e68d96131c41a0771ec2df88144fa45c8c569f089dc324251a1c8"
+      },
+      "supersession": {
+        "by": "h216",
+        "reason": "h213 read W4's build time as spent outside the searches; the searches themselves had 20 minutes each \u2014 the budgets [[0, 1200]] covered every depth (h216)",
+        "at": "2026-10-09T04:44:28.939030+00:00"
+      }
+    },
+    "h214": {
+      "id": "h214",
+      "claim": "\u00a73.6: building the C walk's exception keys (board tuples) only when they are read, and reusing its output buffers, makes the median warm walk on h210's 4 frontier positions at least 1.5x faster, results unchanged. Refuted if no faster; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_native_leaf_keys_evidence.py::test_c49_lazy_keys_make_warm_walks_half_again_faster",
+      "note": "From the W4 below-root profile (evidence/c49_build_profile_w4_below_root.json.gz): ~45% of native_leaf.needed's time went to building exception keys (366 of 801 s), which local search never reads beyond their count; 17 MB of buffers were also zeroed per call. harness/native_leaf.py: 7 tests, 8/8 mutants.",
+      "registered_at": "2026-10-09T04:39:08.059785+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_native_leaf_keys_evidence.py::test_c49_lazy_keys_make_warm_walks_half_again_faster",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-09T04:43:27.115821+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_native_leaf_bench_lazy.json.gz",
+        "started": "2026-10-08T21:38:04+00:00"
+      },
+      "pins": {
+        "tests/test_c49_native_leaf_keys_evidence.py": "1ba05a87a5b6d29a4b6d1f6d1b2039aafcd12fde559afcd67744d21feed46663"
+      },
+      "inconclusive_proof": "tests/test_c49_native_leaf_keys_evidence.py::test_c49_the_warm_speedup_is_undecidable"
+    },
+    "h215": {
+      "id": "h215",
+      "claim": "\u00a73.6 (registered after the data): in profiled W4-style builds of #230 the C walk lets the root search make 1,697 evaluations in 15 minutes (the Python walk: 46 on #316), the searches keep to their budgets and take over 85% of the build, and inside the C walk's wrapper building the exceptions' Python keys took over a third of the walk's time (353 of 801 s)",
+      "mode": "test",
+      "proof": "tests/test_c49_build_profile_w4_evidence.py::test_c49_the_c_walk_multiplies_evaluations_and_its_key_building_was_a_third_of_it",
+      "note": "Fixed by h214 (keys built when read; buffers reused). The two 15-minute windows do not reach the ~4 h W4's #316 spent outside its ~28 min of search budgets \u2014 still unexplained, to profile over a longer window.",
+      "registered_at": "2026-10-09T04:43:27.199463+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_build_profile_w4_evidence.py::test_c49_the_c_walk_multiplies_evaluations_and_its_key_building_was_a_third_of_it",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-09T04:43:27.403851+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_build_profile.json.gz",
+        "started": "2026-10-08T09:48:47+00:00"
+      },
+      "pins": {
+        "tests/test_c49_build_profile_w4_evidence.py": "59afb1b709130790857822c49a3110c8ab17ecab924851c691ab028a595028db"
+      }
+    },
+    "h216": {
+      "id": "h216",
+      "claim": "\u00a73.6 (registered after the data; a specification defect): P2, W2, W3 and W4 registered budgets [[0, 1200]] and described them as '20 minutes at the root, 30 s below', but a budget entry covers its depth and every depth below it, so every leaf search had 20 minutes (P1's [[0, 1200], [2, 300]] likewise gave 5 minutes at every depth from ply 10, not 30 s below it). Every build with 10+ searches averaged 600-1,080 s a search; at the described budgets it would average under 150 s",
+      "mode": "test",
+      "proof": "tests/test_c49_budget_spec_findings_evidence.py::test_c49_every_search_had_the_root_s_twenty_minutes",
+      "note": "The measured sizes stand as measurements of what ran; their descriptions (floor_p1/floor_p2 docstrings, claims h194-h213's wording of the budgets) are wrong. Those modules are pinned by registered claims, so the correction lives here, in the knowledge map and the journal. Consequences: W4's 'time outside the searches' (h213) was the searches' own 20-minute budgets; the root-only long search (P2's design) was never actually run. Future specs must close the root budget explicitly: [[0, 1200], [2, 30]].",
+      "registered_at": "2026-10-09T04:44:13.714048+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_budget_spec_findings_evidence.py::test_c49_every_search_had_the_root_s_twenty_minutes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T04:44:13.947452+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w4.json.gz",
+        "started": "2026-10-08T22:04:52+00:00"
+      },
+      "pins": {
+        "tests/test_c49_budget_spec_findings_evidence.py": "79b385d6bf6457f8055a8885766b1cf73caaf62cb32e327e8dbb8f377c90d14f"
+      }
+    },
+    "h217": {
+      "id": "h217",
+      "claim": "\u00a73.6 W5: with a 20-minute search only at each frontier root (30 s below) and the C walk, at least 6 of W1's 8 sampled frontier positions get a complete certified strategy within 2 hours. Refuted at 3 or fewer; inconclusive at 4-5",
+      "mode": "test",
+      "proof": "tests/test_c49_w5_evidence.py::test_c49_w5_six_of_eight_complete_within_2_hours",
+      "note": "W5 = W2 (W1's 8 roots in order, two waves of 4 sharing a library, 2 h cap, accept 30, walk-order exceptions, min leaf depth 0) with the budget closed after the root ([[0, 1200], [2, 30]] \u2014 the design P2 meant, h216) and the C walk (native, lazy solves, lazy keys; h210, h214). harness/floor_w5.py 3 tests, 5/5 mutants. Full suite 2,835 passed. Measurement fingerprint bea9663e4304. W2's total build time 32,232 s; W3's projection lower bound 1,618,856 bits.",
+      "registered_at": "2026-10-09T04:56:42.495217+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_w5.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_w5_evidence.py": "d978f8b79c4dc3fe44b3b2f3019024b7300e2de945f4fe6354e877914b4d7bcb",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w5_evidence.py::test_c49_w5_completion_is_undecidable",
+      "supersession": {
+        "by": "h220",
+        "reason": "W5 was stopped before writing evidence: its builds overran the 2 h cap by over an hour (the builder's Python walks ignore its deadline, h220); a corrected rerun is registered separately",
+        "at": "2026-10-09T08:04:47.205995+00:00"
+      }
+    },
+    "h218": {
+      "id": "h218",
+      "claim": "\u00a73.6 W5: the whole-game first-player strategy projects to no more than W3's lower bound of 1,618,856 bits (supported only when all 8 finish). Refuted when even W5's lower bound exceeds it; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w5_evidence.py::test_c49_w5_the_whole_game_projects_within_w3_s_bound",
+      "note": "W5 = W2 (W1's 8 roots in order, two waves of 4 sharing a library, 2 h cap, accept 30, walk-order exceptions, min leaf depth 0) with the budget closed after the root ([[0, 1200], [2, 30]] \u2014 the design P2 meant, h216) and the C walk (native, lazy solves, lazy keys; h210, h214). harness/floor_w5.py 3 tests, 5/5 mutants. Full suite 2,835 passed. Measurement fingerprint bea9663e4304. W2's total build time 32,232 s; W3's projection lower bound 1,618,856 bits.",
+      "registered_at": "2026-10-09T04:56:42.545604+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_w5.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_w5_evidence.py": "d978f8b79c4dc3fe44b3b2f3019024b7300e2de945f4fe6354e877914b4d7bcb",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w5_evidence.py::test_c49_w5_the_projection_is_undecidable",
+      "supersession": {
+        "by": "h220",
+        "reason": "W5 was stopped before writing evidence: its builds overran the 2 h cap by over an hour (the builder's Python walks ignore its deadline, h220); a corrected rerun is registered separately",
+        "at": "2026-10-09T08:04:47.248726+00:00"
+      }
+    },
+    "h219": {
+      "id": "h219",
+      "claim": "\u00a73.6 W5: the 8 builds take at most half W2's total build time (<= 16,116 s of 32,232 s). Refuted at W2's time or more; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w5_evidence.py::test_c49_w5_the_builds_take_half_w2_s_time",
+      "note": "W5 = W2 (W1's 8 roots in order, two waves of 4 sharing a library, 2 h cap, accept 30, walk-order exceptions, min leaf depth 0) with the budget closed after the root ([[0, 1200], [2, 30]] \u2014 the design P2 meant, h216) and the C walk (native, lazy solves, lazy keys; h210, h214). harness/floor_w5.py 3 tests, 5/5 mutants. Full suite 2,835 passed. Measurement fingerprint bea9663e4304. W2's total build time 32,232 s; W3's projection lower bound 1,618,856 bits.",
+      "registered_at": "2026-10-09T04:56:42.593442+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_w5.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_w5_evidence.py": "d978f8b79c4dc3fe44b3b2f3019024b7300e2de945f4fe6354e877914b4d7bcb",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73"
+      },
+      "inconclusive_proof": "tests/test_c49_w5_evidence.py::test_c49_w5_the_time_change_is_undecidable",
+      "supersession": {
+        "by": "h220",
+        "reason": "W5 was stopped before writing evidence: its builds overran the 2 h cap by over an hour (the builder's Python walks ignore its deadline, h220); a corrected rerun is registered separately",
+        "at": "2026-10-09T08:04:47.292492+00:00"
+      }
+    },
+    "h220": {
+      "id": "h220",
+      "claim": "\u00a73.6 W5 (registered after the data; run stopped by hand): with the C walk a frontier root can be one pure steady state found at once \u2014 #362: 90 bits for 13,934 positions in 39 s (W2: 1,966 bits in 20 min) \u2014 but three of the four first-wave builds were still running at 3 h 08 min, over an hour past the 2-hour cap: the builder checks its deadline only between positions, and its own Python walks (covering checks, simplify, walk-order coding) ignore it, which the C walk's fast, large leaves exposed",
+      "mode": "test",
+      "proof": "tests/test_c49_w5_aborted_evidence.py::test_c49_w5_one_root_is_one_pure_map_but_three_builds_overran_the_cap_by_an_hour",
+      "note": "W5 started 06:57, stopped 10:05 CEST; its evidence file was never written (it is written at the end), so h217-h219 have no data \u2014 superseded here. Worker elapsed times captured with ps before stopping. Fix next: the builder's walks honour its deadline, and covering checks / simplify walk in C (a pure-map check needs no solves).",
+      "registered_at": "2026-10-09T08:04:46.733619+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w5_aborted_evidence.py::test_c49_w5_one_root_is_one_pure_map_but_three_builds_overran_the_cap_by_an_hour",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T08:04:47.159532+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w5_aborted.json.gz",
+        "started": "2026-10-09T04:56:57+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w5_aborted_evidence.py": "70ffef20d6f8274fe24e1cfd35ab83439a2d4b35c690afd6b8d187afdb2b9a50"
+      }
+    },
+    "h221": {
+      "id": "h221",
+      "claim": "\u00a73.6 W5b: with the root-only long search, the C walk and a builder that keeps its deadline, at least 6 of W1's 8 sampled frontier positions get a complete certified strategy within 2 hours. Refuted at 3 or fewer; inconclusive at 4-5",
+      "mode": "test",
+      "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_six_of_eight_complete_within_2_hours",
+      "note": "W5b = W5 (root-only budget [[0, 1200], [2, 30]], C walk, W1's 8 roots, two library waves, 2 h cap) after h220's fix: the builder's covering checks, simplify and walk-order coding stop at its deadline, and maps are checked by the C verify (identical to the Python verify, counts included). harness/floor_w5b.py 2 tests; builder 48/48, steady_state 21/21, exception_coding 17/17, native_leaf 11/11, c4leafwalk 21/21 mutants. Full suite before launch: 2,844 passed, 2 bookkeeping failures since fixed (h220 unfiled; c4leafwalk's recorded run stale). Measurement fingerprint 81a037019fab.",
+      "registered_at": "2026-10-09T13:32:10.135615+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_six_of_eight_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T15:04:45.499149+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w5b.json.gz",
+        "started": "2026-10-09T13:32:10+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w5b_evidence.py": "629c3c435cbaeae554ff0ad789a4fa229497abfb42557b1fb9efcd583be0ce79",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_completion_is_undecidable"
+    },
+    "h222": {
+      "id": "h222",
+      "claim": "\u00a73.6 W5b: the whole-game first-player strategy projects to no more than W3's lower bound of 1,618,856 bits (supported only when all 8 finish). Refuted when even W5b's lower bound exceeds it; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_whole_game_projects_within_w3_s_bound",
+      "note": "W5b = W5 (root-only budget [[0, 1200], [2, 30]], C walk, W1's 8 roots, two library waves, 2 h cap) after h220's fix: the builder's covering checks, simplify and walk-order coding stop at its deadline, and maps are checked by the C verify (identical to the Python verify, counts included). harness/floor_w5b.py 2 tests; builder 48/48, steady_state 21/21, exception_coding 17/17, native_leaf 11/11, c4leafwalk 21/21 mutants. Full suite before launch: 2,844 passed, 2 bookkeeping failures since fixed (h220 unfiled; c4leafwalk's recorded run stale). Measurement fingerprint 81a037019fab.",
+      "registered_at": "2026-10-09T13:32:10.188606+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_whole_game_projects_within_w3_s_bound",
+          "ok": false,
+          "detail": "ed'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_w5b_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w5b_evidence.py::test_c49_w5b_the_whole_game_projects_within_w3_s_bound\n1 failed in 0.05s",
+          "drawn_at": "2026-10-09T15:04:45.780713+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w5b.json.gz",
+        "started": "2026-10-09T13:32:10+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w5b_evidence.py": "629c3c435cbaeae554ff0ad789a4fa229497abfb42557b1fb9efcd583be0ce79",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_projection_is_undecidable"
+    },
+    "h223": {
+      "id": "h223",
+      "claim": "\u00a73.6 W5b: the 8 builds take at most half W2's total build time (<= 16,116 s of 32,232 s). Refuted at W2's time or more; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_builds_take_half_w2_s_time",
+      "note": "W5b = W5 (root-only budget [[0, 1200], [2, 30]], C walk, W1's 8 roots, two library waves, 2 h cap) after h220's fix: the builder's covering checks, simplify and walk-order coding stop at its deadline, and maps are checked by the C verify (identical to the Python verify, counts included). harness/floor_w5b.py 2 tests; builder 48/48, steady_state 21/21, exception_coding 17/17, native_leaf 11/11, c4leafwalk 21/21 mutants. Full suite before launch: 2,844 passed, 2 bookkeeping failures since fixed (h220 unfiled; c4leafwalk's recorded run stale). Measurement fingerprint 81a037019fab.",
+      "registered_at": "2026-10-09T13:32:10.247625+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_builds_take_half_w2_s_time",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T15:04:46.278108+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w5b.json.gz",
+        "started": "2026-10-09T13:32:10+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w5b_evidence.py": "629c3c435cbaeae554ff0ad789a4fa229497abfb42557b1fb9efcd583be0ce79",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73"
+      },
+      "inconclusive_proof": "tests/test_c49_w5b_evidence.py::test_c49_w5b_the_time_change_is_undecidable"
+    },
+    "h224": {
+      "id": "h224",
+      "claim": "\u00a73.6 W5b (registered after the data): on the 7 frontier positions W2 or W3 also completed, W5b's strategies total 7,766 bits against 13,842 \u2014 44% smaller, 6 of 7 smaller (#87 470 vs 403) \u2014 so h222's refutation is not larger strategies: #230, unfinished in W1-W4, completes for the first time at 21,054 bits, 73% of the sample's bits; W3's 1.62M bound had counted it at a 5,446-bit partial. One position sets the 8-root mean",
+      "mode": "test",
+      "proof": "tests/test_c49_w5b_after_evidence.py::test_c49_w5b_is_smaller_where_earlier_builds_finished_and_one_position_holds_most_of_its_bits",
+      "note": "#230: 2,292 exceptions, 15,229 of its 21,054 bits (72%); #316: 3,524 of 6,675 (53%). Six roots are one map (90-470 bits). Projection 2,418,352 bits (sample mean x 671 + opening), ~223 h of builds (W1 ~415 h).",
+      "registered_at": "2026-10-09T15:18:13.880681+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w5b_after_evidence.py::test_c49_w5b_is_smaller_where_earlier_builds_finished_and_one_position_holds_most_of_its_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T15:18:14.186440+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_w5b.json.gz",
+          "started": "2026-10-09T13:32:10+00:00"
+        },
+        {
+          "path": "evidence/c49_w2.json.gz",
+          "started": "2026-10-08T10:45:19+00:00"
+        },
+        {
+          "path": "evidence/c49_w3.json.gz",
+          "started": "2026-10-08T15:04:09+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_w5b_after_evidence.py": "fc6be9396f335334998424aad8affe4e7b7250fb61974832f62649647f7b1af1"
+      }
+    },
+    "t34": {
+      "id": "t34",
+      "claim": "A claim registered on data not produced yet returns only once the clock has passed the second it was registered in: runs stamp `started` in whole seconds, so a run launched in that same second read as data produced before the claim \u2014 W5b's h221-h223 were registered and launched in one second (13:32:10) and read POST-HOC",
+      "mode": "test",
+      "proof": "tests/test_hypotheses.py::test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second",
+      "note": "Mutants 5/5 killed (tests/mutations/hypotheses_register_wait.json), run in a scratch copy. h221-h223 stay flagged POST-HOC: the register cannot order events inside one second, and is not overridden.",
+      "registered_at": "2026-10-09T15:18:13.950983+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_hypotheses.py::test_registering_against_data_not_produced_yet_returns_only_once_the_clock_is_past_its_whole_second",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-09T15:18:14.449145+00:00"
+        }
+      ],
+      "reads_no_data": true,
+      "pins": {
+        "harness/hypotheses.py": "19b98947035ac0e9ec6fe6e508e7206aafbca1d70e3f8fe5c05b78e27142c941"
+      }
     }
   }
 }

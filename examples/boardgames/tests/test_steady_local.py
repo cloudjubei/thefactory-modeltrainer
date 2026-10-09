@@ -78,11 +78,22 @@ def test_local_search_shrinks_a_whole_game_leaf_and_the_leaf_verifies():
     assert r["bits"] == leaf_bits(facts, EARLY, r["levels"], 3, 2, _winning, 100_000)["bits"]
 
 
+def test_a_search_out_of_time_mid_walk_has_no_leaf():
+    r = local_search(Facts(GAME), EARLY, 2, 1, _winning, random.Random(0), seconds=0.0, cap=100_000)
+    assert r["status"] == "budget" and r["evaluations"] == 1 and r["bits"] is None and r["exceptions"] == {}
+
+
+def test_a_walk_past_the_deadline_has_no_size():
+    import time
+
+    assert leaf_bits(Facts(GAME), EARLY, {}, 2, 1, _winning, 100_000, deadline=time.monotonic() - 1)["bits"] is None
+
+
 def test_local_search_reports_its_best_leaf_when_time_runs_out():
     facts = Facts(GAME)
-    r = local_search(facts, EARLY, 2, 1, _winning, random.Random(0), seconds=0.0, cap=100_000)
-    assert r["status"] == "budget" and r["evaluations"] == 1 and r["levels"] == {}
-    assert r["exceptions"] == needed(facts, EARLY, {}, 2, _winning, 100_000)["exceptions"]
+    r = local_search(facts, EARLY, 2, 1, _winning, random.Random(0), seconds=0.5, cap=100_000)
+    assert r["bits"] is not None and r["evaluations"] >= 1
+    assert verify_with(facts, EARLY, r["levels"], 2, r["exceptions"], 100_000)["won"]
 
 
 def test_local_search_refuses_a_root_its_side_cannot_win():
@@ -116,7 +127,7 @@ class _Script:
 def _scripted(monkeypatch, costs):
     import harness.steady_local as sl
 
-    def fake(facts, root, levels, n, level_bits, winning, cap):
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
         bits = costs.get(tuple(sorted(levels.items())), 70)
         return {"bits": bits, "exceptions": {} if bits == 0 else {"x": 1}, "own_positions": 1}
 
@@ -144,7 +155,7 @@ def test_the_best_leaf_is_kept_when_later_changes_only_tie(monkeypatch):
 def test_a_capped_change_is_never_taken(monkeypatch):
     import harness.steady_local as sl
 
-    def fake(facts, root, levels, n, level_bits, winning, cap):
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
         key = tuple(sorted(levels.items()))
         bits = {(): 50, ((5, 0),): 0}.get(key, None if key == ((7, 1),) else 70)
         return {"bits": bits, "exceptions": {} if bits == 0 else {"x": 1}, "own_positions": 1}
@@ -158,3 +169,41 @@ def test_a_level_that_blocks_the_win_can_be_cleared():
     facts = Facts(GAME)
     r = local_search(facts, FORK, 1, 1, _winning, random.Random(0), seconds=10.0, cap=10_000, start={5: 0})
     assert r["status"] == "found" and 5 not in r["levels"] and verify(facts, FORK, r["levels"], 1)["won"]
+
+
+def test_every_walk_of_a_search_gets_its_deadline(monkeypatch):
+    import harness.steady_local as sl
+
+    seen = []
+
+    def fake(facts, root, levels, n, level_bits, winning, cap, deadline=None, walker=None):
+        seen.append(deadline)
+        return {"bits": 50, "exceptions": {"x": 1}, "own_positions": 1}
+
+    monkeypatch.setattr(sl, "leaf_bits", fake)
+    local_search(Facts(GAME), FORK, 2, 1, _winning, _Script([7, 5], [1, 0]), seconds=0.2, cap=10_000)
+    assert len(seen) > 1 and all(d is not None for d in seen)
+
+
+def test_the_walk_can_be_replaced_and_receives_every_argument():
+    calls = []
+
+    def walker(facts, root, levels, n_levels, winning, cap, deadline=None):
+        calls.append((root, dict(levels), n_levels, cap, deadline is not None))
+        return needed(facts, root, levels, n_levels, winning, cap, deadline)
+
+    facts = Facts(GAME)
+    r = local_search(facts, FORK, 2, 1, _winning, random.Random(0), seconds=10.0, cap=10_000, walker=walker)
+    assert r["status"] == "found" and calls and all(c[0] is FORK and c[2] == 2 and c[3] == 10_000 and c[4]
+                                                     for c in calls)
+    assert calls[0][1] == {} and len(calls) == r["evaluations"]
+    assert leaf_bits(facts, FORK, {4: 0}, 2, 1, _winning, 10_000, walker=walker)["bits"] == 6
+
+
+def test_the_default_walk_is_the_python_reference():
+    import inspect
+
+    import harness.steady_local as sl
+
+    assert inspect.signature(sl.local_search).parameters["walker"].default is needed
+    assert inspect.signature(sl.leaf_bits).parameters["walker"].default is needed

@@ -17,6 +17,8 @@ do not depend on the map (immediate wins, safe moves, their cells) are cached pe
 emptied whenever it reaches its limit (~1 KB a position: a 4-hour build reached 9.6 GB a worker unbounded)."""
 from __future__ import annotations
 
+import time
+
 
 class Facts:
     """Per-position facts for one game, independent of any priority map: immediate wins, safe moves, each safe
@@ -86,10 +88,11 @@ def choose(facts: Facts, state, levels: dict, n_levels: int):
     return None
 
 
-def verify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000) -> dict:
+def verify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000,
+           deadline: float | None = None) -> dict:
     """Whether the rule wins every line from `root` for the side to move there. Returns {"won", "reason" (None, or
-    the first failure: "undefined", "draw", "loss", "cap"), "own_positions" (the rule's decision positions walked),
-    "positions" (all positions walked)}."""
+    the first failure: "undefined", "draw", "loss", "cap", "timeout" — time.monotonic() past `deadline` mid-walk),
+    "own_positions" (the rule's decision positions walked), "positions" (all positions walked)}."""
     game = facts.game
     player = game.current_player(root)
     seen: set = set()
@@ -107,6 +110,8 @@ def verify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000
         seen.add(key)
         if len(seen) > cap:
             return result("cap")
+        if deadline is not None and len(seen) % 1024 == 1 and time.monotonic() > deadline:
+            return result("timeout")
         if game.is_terminal(s):
             w = game.winner(s)
             if w != player:
@@ -130,12 +135,15 @@ def map_bits(levels: dict, empty: int, level_bits: int) -> int:
     return empty + level_bits * len(levels)
 
 
-def simplify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000) -> dict:
+def simplify(facts: Facts, root, levels: dict, n_levels: int, cap: int = 1_000_000,
+             deadline: float | None = None, verifier=None) -> dict:
     """Drop every level the rule does not need: each levelled cell in turn is cleared and kept cleared if the map
-    still verifies. The result verifies whenever the input did."""
+    still verifies (by `verifier`, `verify` by default). The result verifies whenever the input did; past `deadline`
+    the remaining levels are kept."""
+    check = verifier or verify
     kept = dict(levels)
     for cell in sorted(levels):
         trial = {c: k for c, k in kept.items() if c != cell}
-        if verify(facts, root, trial, n_levels, cap)["won"]:
+        if check(facts, root, trial, n_levels, cap, deadline=deadline)["won"]:
             kept = trial
     return kept
