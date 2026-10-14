@@ -10,9 +10,19 @@ sampling them, and give the builder search budgets by depth ("budgets", harness.
 are built in waves and each wave's builds start from a library of every map the earlier waves found
 (harness.floor_w2); with "library_from" every build starts from the maps an earlier run's builds found
 (harness.floor_w3). With the builder's "choose_by_size" a leaf with exceptions is kept only where the split
-below it would not make the strategy smaller (harness.floor_a2). A local search with "walker": "native" walks its leaves and verifies its maps in C
+below it would not make the strategy smaller (harness.floor_a2); with "improve" a complete build then spends the
+time left splitting its costliest leaves with exceptions, keeping each split that shrinks it (harness.floor_a3), and
+with "lookahead" too, once that runs dry, it goes over them again judging each split with its own leaves improved
+(harness.floor_a4); with "research" (seconds) it then re-searches its costliest leaves with exceptions for that
+long, keeping what shrinks it, and improves with lookahead once more (harness.floor_a5).
+The builder's "ties" sets how the rule reads a level (harness.steady_state.Facts: "exact" by default, or
+"lowest" — the first level holding any safe move decides; harness.floor_l2) and "safe_depth" what makes a move
+safe (1 by default, or 2 — nor may the opponent force a win in two; harness.floor_l3).
+A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
+With --resume the roots the progress file already holds are kept (their maps
+joining the library first) and only the rest are built — a long run survives being stopped part-way.
 Roots: the first `roots` non-trivial positions in a seeded shuffle (harness.floor_s2), or with `--pilot N` the next N
 after them. Per root, in parallel: harness.strategy_builder within the registered cap, then three independent checks
 — the oracle-free walk (strategy_builder.check), every table move a winning move by the exact solver, and every leaf
@@ -61,7 +71,7 @@ def build_one(job: dict) -> dict:
 
     game = Connect4()
     root = C4State(tuple(job["board"]), job["to_move"], None, False)
-    facts = Facts(game)
+    facts = Facts(game, ties=job["builder"].get("ties", "exact"), safe_depth=job["builder"].get("safe_depth", 1))
     b, s = job["builder"], job["search"]
     if s.get("kind") == "local":
         winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
@@ -88,8 +98,22 @@ def build_one(job: dict) -> dict:
                       choose_by_size=b.get("choose_by_size", False))
     t0 = time.time()
     complete = builder.build(root)
+    improved = None
+    if complete and b.get("improve"):
+        improved = {"complete_seconds": round(time.time() - t0, 1), "complete_bits": builder.bits()["nodes"],
+                    **builder.improve()}
+        if b.get("lookahead"):
+            improved["plain_seconds"] = round(time.time() - t0, 1)
+            improved["plain_bits"] = builder.bits()["nodes"]
+            improved["lookahead"] = builder.improve(lookahead=True)
+        if b.get("research"):
+            improved["lookahead_seconds"] = round(time.time() - t0, 1)
+            improved["lookahead_bits"] = builder.bits()["nodes"]
+            improved["research"] = builder.research(b["research"])
+            improved["again"] = builder.improve(lookahead=True)
     row = {"index": job["index"], "board": job["board"], "to_move": job["to_move"], "complete": complete,
            "build_seconds": round(time.time() - t0, 1), "searches": builder.searches, "bits": builder.bits(),
+           "improved": improved,
            "shared": builder.shared,
            "found_maps": [[{str(c): v for c, v in m.items()}, e] for m, e in builder.found_maps()],
            "library_leaves": sum(1 for n in builder.nodes.values() if "leaf" in n and 1 <= n["leaf"] <= builder.shared),
@@ -163,6 +187,8 @@ def main() -> None:
     ap.add_argument("--pilot", type=int, default=None, help="build this many roots after the registered ones")
     ap.add_argument("--seconds", type=float, default=None, help="pilot only: a shorter per-root cap")
     ap.add_argument("--spec", default="harness.floor_s2", help="the judge whose SPEC registers the study")
+    ap.add_argument("--resume", action="store_true",
+                    help="keep the roots the progress file already holds (a run stopped part-way) and build the rest")
     args = ap.parse_args()
     SPEC = importlib.import_module(args.spec).SPEC
     if args.seconds is not None and not args.pilot:
@@ -201,29 +227,39 @@ def main() -> None:
     jobs = [{"index": i, "board": rows[i]["board"], "to_move": rows[i]["to_move"], "builder": builder,
              "search": SPEC["search"]} for i in picked]
     print(f"{len(jobs)} roots ({'pilot' if args.pilot else 'registered'}): {picked}", flush=True)
-    results = []
-    size = SPEC.get("wave_size") or len(jobs)
+    progress = Path(args.progress)
+    results = json.loads(progress.read_text())["roots"] if args.resume and progress.exists() else []
+    resumed = len(results)
+    done = {r["index"] for r in results}
+    todo = [j for j in jobs if j["index"] not in done]
+    size = SPEC.get("wave_size") or len(todo) or 1
     earlier = load_evidence(ROOT / "evidence" / SPEC["library_from"])["roots"] if SPEC.get("library_from") else []
     library: list = [m for r in earlier for m in r["found_maps"]]
-    for start in range(0, len(jobs), size):
-        wave = [{**j, "library": list(library)} for j in jobs[start:start + size]]
+    if SPEC.get("wave_size"):
+        library += [m for r in results for m in r["found_maps"]]
+    for start in range(0, len(todo), size):
+        first = len(results)
+        wave = [{**j, "library": list(library)} for j in todo[start:start + size]]
         with ProcessPoolExecutor(max_workers=args.workers) as pool:
             for fut in as_completed([pool.submit(build_one, j) for j in wave]):
                 r = fut.result()
                 results.append(r)
-                Path(args.progress).write_text(json.dumps({"roots": results}))
+                partial = progress.with_suffix(progress.suffix + ".tmp")
+                partial.write_text(json.dumps({"roots": results}))
+                partial.replace(progress)
                 print(f"root #{r['index']}: complete {r['complete']}, bits {r['bits']}, searches {r['searches']}, "
                       f"library {r['shared']} maps / {r['library_leaves']} leaves, own positions "
                       f"{r['own_positions']}, checked {r['checked']}, moves win {r['moves_win']}, "
                       f"leaves certified {r['leaves_certified']}, build {r['build_seconds']}s", flush=True)
         if SPEC.get("wave_size"):
-            library += [m for r in results[start:] for m in r["found_maps"]]
+            library += [m for r in results[first:] for m in r["found_maps"]]
     if training_fingerprint(modules=MEASUREMENT_MODULES) != stamp:
         raise SystemExit("measurement code changed while the run ran — evidence not written")
     save_evidence(args.out, {"started": started, "finished": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                              "measurement_fingerprint": stamp,
                              "positions_fingerprint": positions_fp, "spec": args.spec,
                              "versions": {"python": platform.python_version()}, "pilot": args.pilot,
+                             "resumed": resumed,
                              "builder": builder, "search": SPEC["search"],
                              "c_sources": {f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest()[:12]
                                            for f in C_SOURCES},

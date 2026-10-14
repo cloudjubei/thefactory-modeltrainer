@@ -1,0 +1,38 @@
+{
+  "file": "harness/floor_a3.py",
+  "tests": ["tests/test_floor_a3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "not improved",
+      "old": "\"builder\": {**W6[\"builder\"], \"improve\": True}}",
+      "new": "\"builder\": dict(W6[\"builder\"])}"
+    },
+    {
+      "name": "a2's builder",
+      "old": "\"builder\": {**W6[\"builder\"], \"improve\": True}}",
+      "new": "\"builder\": {**A2[\"builder\"], \"improve\": True}}"
+    },
+    {
+      "name": "a2's fingerprint",
+      "old": "SPEC = {**A2, \"measurement_fp\": \"79d96bd72825\", ",
+      "new": "SPEC = {**A2, "
+    },
+    {
+      "name": "another judge",
+      "old": "a3_report = a2_report\n",
+      "new": "def a3_report(e, spec):\n    return a2_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-09T23:00:20+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "not improved": ["test_a3_is_w6_on_a1_s_positions_then_improved_and_judged_as_a2"],
+      "a2's builder": ["test_a3_is_w6_on_a1_s_positions_then_improved_and_judged_as_a2"],
+      "a2's fingerprint": ["test_a3_is_w6_on_a1_s_positions_then_improved_and_judged_as_a2"],
+      "another judge": ["test_a3_is_w6_on_a1_s_positions_then_improved_and_judged_as_a2"]
+    }
+  }
+}

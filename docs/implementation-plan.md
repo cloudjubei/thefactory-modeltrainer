@@ -410,11 +410,77 @@ rule standalone and in decision-list order, by ply.
     the threshold cuts both ways: #594 32,544 -> 6,207 bits, #535 30,009 -> 12,857, #95 6,453 -> 5,307, while #565
     grows 3,877 -> 18,093 — its one root map with exceptions covered 43,562 positions, the split reaches 321,970 (its
     table moves are chosen by readiness, not size). The smaller build per position: 28,248 bits, 39% of W6's.
-  - **Choose by size — built 2026-10-09 (`Builder(choose_by_size=True)`, 58/58 mutants); A2 next:** wherever the builder finds a leaf with exceptions that clears `accept`, it also
-    builds the split below that position (recursively, under the same rule) and keeps whichever makes the whole
-    strategy smaller; a split that runs out of time loses to the leaf, so the choice never costs completion. Then A2
-    rebuilds A1's four positions at W6's 30x with this choice, and, if it holds, the 20 heavy positions of the 40
-    sampled are rebuilt to re-project the whole game.
+  - **A2 result (h233, h234 inconclusive; h235 after the data):** `Builder(choose_by_size=True)` — at every leaf with
+    exceptions that clears 30x, build the split below too (recursively) and keep the smaller. Where it finished it beat
+    both thresholds: #95 3,481 bits (best threshold build 5,307), #535 6,637 (12,857); the three finished total 13,995
+    against 22,041. But it does not fit 2 hours: #565's split never finished (the leaf was kept — W6's 3,877) and #594,
+    with no leaf at its root to fall back on, did not finish (6,376-bit partial).
+  - **A3 result (h236, h237 supported, pre-registered; h239 after the data, correcting h238):** `Builder.improve()`
+    — W6's build first, then the costliest leaves with exceptions split while time remains, each split kept only if
+    the whole strategy shrinks. All four complete in 16,740 bits: 23% of W6's 72,883, 59% of the best fixed threshold
+    per position (28,248). Each queue ran dry within 15 minutes of completion; the longest build took 45 minutes.
+    Completed -> improved: #95 6,453 -> 2,919, #535 18,081 -> 6,559, #565 3,877 -> 1,253, #594 34,210 -> 6,009.
+  - **W7 result (h240, h241, h242 supported, pre-registered; h243 after the data):** W6's 32 positions rebuilt as W6
+    plus `improve`: all 32 complete (longest 69 minutes). The whole game projects to 1.47M bits — 34% of W6's 4.31M —
+    its 95% interval 0.78M-2.30M still entirely above the net's ~660K. Exceptions fall from 84% to 36% of the bits.
+    Two parts: the same settings' builds completed at 154,777 bits against W6's 205,322 (run-to-run variance, a tenth
+    to 2.4x per position), and improving cut them to 69,847 — alone, 3.25M -> 1.47M. Four positions (#95, #271, #374,
+    #512) kept no split: one root leaf each, whose first split was larger one level down, so nothing below was tried.
+    The whole frontier would take ~229 CPU-hours.
+  - **A4 result (h244, h245 supported, pre-registered; h246 after the data):** `improve(lookahead=True)` — a split not
+    smaller at once is judged after its own new leaves are improved, kept or undone with them. Measured inside each
+    build after plain improvement ran dry: a further 21% (37,848 -> 29,989 bits over eight positions); both positions
+    plain improvement could not change were cut (#374 949 -> 514, #271 1,324 -> 720). Build, plain and lookahead
+    together cut the completed builds by 63%; every build was done within 72 minutes of its 2-hour cap.
+  - **A5 result (h247 refuted, pre-registered; h249 after the data; h248 a dead end):** re-searching the costliest
+    leaves with exceptions for 120 s each in the idle time, then improving with lookahead once more, cut a further
+    0.56% (28,892 -> 28,729 bits): only 29 leaves with exceptions were left to try across the eight (3 kept).
+    Exceptions are now 14% of these strategies' bits; maps are 64%. No map is paid twice and 148 of 233 maps already
+    serve several leaves; coding maps as edits of the previous map costs 18% more (h248). `research` stays in the
+    builder, unused by default.
+  - **W8 result (h250, h252, h253 supported; h251 refuted — all pre-registered; h254 after the data):** W6's 32
+    built, improved and improved with lookahead: all complete; lookahead cut 16% of what plain improvement left inside
+    the builds; the whole game projects to 1.57M bits (95% interval 0.83M-2.41M), above the net — and above W7's
+    1.47M, because this run's builds completed 20% larger (186,359 bits against 154,777): run-to-run variance is
+    bigger than the pipeline's last gains. The smaller of W7's and W8's certified strategy per position projects 1.26M.
+    Exceptions are 22% of the bits, maps 58%. At W8's pace the whole frontier is ~300 CPU-hours.
+  - **Decided (user, 2026-10-11): the leaf language first.**
+  - **L1 result (h255, h256 refuted, pre-registered; h257 after the data — a dead end):** maps of 4 levels at 2 bits
+    instead of 8 at 3: only 23 of 32 complete in 2 hours and the 32 take at least 276,519 bits, 3.7x the 8-level runs
+    — 2,132 maps against W8's 586, larger on 25 of 32. A map's expressiveness, not its cell cost, binds.
+  - **L2 result (h258, h259 supported, pre-registered; h260 after the data):** `Facts(ties="lowest")` — the first
+    level holding any safe move decides, with its lowest move. All 32 complete (longest 47 minutes) in 14,666 bits: a
+    fifth of the exact rule's two runs (69,847 and 74,714), with 90 maps instead of 586. The whole game projects to
+    308,603 bits, its 95% bootstrap interval 177K-469K entirely under the net's ~660K — the first projection below the
+    net, but on positions built five times before. Builds 7.7 CPU-hours (whole frontier ~161 CPU-hours).
+  - **W9 result (h261, h262 supported, pre-registered):** the next 32 positions of W1's seeded order, never built
+    before, with L2's rule and pipeline: all complete (longest 61 minutes) in 12,908 bits with 104 maps; the whole
+    first-player strategy projects to 271,740 bits, its 95% bootstrap interval 137K-476K entirely below the trained
+    net's ~660K. Whole frontier ~153 CPU-hours (~1.6 days on 4 workers). WeakC4's ~35-45K is ~7x below.
+  - **Decided (user, 2026-10-11): more language first.**
+  - **L3 result (h263 supported, h264 refuted, pre-registered; h265 after the data):** two-ply safety
+    (`Facts(safe_depth=2)`) — all 32 complete, but 15,343 bits against L2's 14,666 (+4.6%): exceptions fall from 34%
+    to 16% of the bits while maps rise from 90 to 118; builds a fifth slower. Kept in the language, off by default.
+  - **Maps carry across the frontier (h266, after the data):** under L2's rule 35% of W9's fresh leaves are won from
+    by one of L2's 90 maps found on other positions (none of the leaves with exceptions; 3 of 32 roots outright).
+  - **W10 result (h267, h268 supported; h269 inconclusive — pre-registered; h270 after the data):** W9's 32 rebuilt
+    from a library of L2's 90 maps (8,618 bits paid once): all complete; the whole game projects to 158,844 bits —
+    58% of W9's 271,740, about a quarter of the net, ~4x WeakC4; 13% of leaves use the library; maps 104 -> 55. But
+    most of the cut is one position (#638 4,322 -> 356, no library leaf) and the rest is 21% smaller: whether the
+    library helps as a search start, by covering, or not at all (variance) is not separated.
+  - **Decided (user, 2026-10-12): build the whole frontier.** F1 (h271-h273): all 671 positions with L2's rule, in
+    waves of 32 from a growing library seeded with L2's 90 maps; ~38 hours on 4 workers, resumable (`--resume`,
+    progress in evidence/c49_f1_progress.json).
+  - **F1 result (h271, h273 supported; h272 refuted — pre-registered; h274-h276 after the data):** all 671 frontier
+    positions certified complete: a certified first-player strategy from the empty board in **548,424 bits** (opening
+    1,075 + seed library 8,618 + positions 538,731), below the net's ~660K, ~13x WeakC4's ~40K — and twice W9's
+    projection, above its 95% high. Sampling in a heavy tail, not drift: the heaviest 10% of positions hold 58% of the
+    bits, the median takes 154; the library carried 9.9% of leaves; a 32-position bootstrap high missed this
+    frontier's mean 11% of the time, so projections from samples are guesses, not bounds.
+  - **Strategic note:** the whole game is now built and below the net; the gap to WeakC4 (~13x) sits in the heavy
+    tail (67 positions, 311,823 bits) and in maps (292,054 of the positions' bits). Next fork is the user's: the
+    heavy tail (rebuild the heaviest with the 3,196-map library / best-of-runs), the leaf language (maps), or the
+    opening (which frontier the heavy positions come from).
 
 ## 4. The hybrid process — definition of done
 

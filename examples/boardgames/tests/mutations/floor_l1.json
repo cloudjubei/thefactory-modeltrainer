@@ -1,0 +1,95 @@
+{
+  "file": "harness/floor_l1.py",
+  "tests": ["tests/test_floor_l1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "eight levels",
+      "old": "        \"builder\": {**W8[\"builder\"], \"n_levels\": 4, \"level_bits\": 2},\n",
+      "new": "        \"builder\": dict(W8[\"builder\"]),\n"
+    },
+    {
+      "name": "four levels at three bits",
+      "old": "        \"builder\": {**W8[\"builder\"], \"n_levels\": 4, \"level_bits\": 2},\n",
+      "new": "        \"builder\": {**W8[\"builder\"], \"n_levels\": 4},\n"
+    },
+    {
+      "name": "one run only",
+      "old": "        \"eight_level_bits\": [69_847, 74_714],\n",
+      "new": "        \"eight_level_bits\": [74_714],\n"
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "refute at the smaller run",
+      "old": "verdict = (\"refuted\" if bits >= max(spec[\"eight_level_bits\"])",
+      "new": "verdict = (\"refuted\" if bits >= min(spec[\"eight_level_bits\"])"
+    },
+    {
+      "name": "refute boundary",
+      "old": "verdict = (\"refuted\" if bits >= max(spec[\"eight_level_bits\"])",
+      "new": "verdict = (\"refuted\" if bits > max(spec[\"eight_level_bits\"])"
+    },
+    {
+      "name": "support against the larger run",
+      "old": "bits <= spec[\"support\"] * min(spec[\"eight_level_bits\"])",
+      "new": "bits <= spec[\"support\"] * max(spec[\"eight_level_bits\"])"
+    },
+    {
+      "name": "support boundary",
+      "old": "bits <= spec[\"support\"] * min(spec[\"eight_level_bits\"])",
+      "new": "bits < spec[\"support\"] * min(spec[\"eight_level_bits\"])"
+    },
+    {
+      "name": "partial supports",
+      "old": "else \"supported\" if not lower and bits <=",
+      "new": "else \"supported\" if bits <="
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "one root's size",
+      "old": "    bits = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])\n",
+      "new": "    bits = e[\"roots\"][0][\"bits\"][\"nodes\"]\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l1_report = w6_report\n",
+      "new": "def l1_report(e, spec):\n    return w6_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-10T22:21:42+00:00",
+    "killed": 12,
+    "survived": [],
+    "killed_by": {
+      "eight levels": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_l1_is_w8_with_four_levels_of_two_bits"
+      ],
+      "four levels at three bits": ["test_l1_is_w8_with_four_levels_of_two_bits"],
+      "one run only": [
+        "test_l1_is_w8_with_four_levels_of_two_bits",
+        "test_the_size_is_judged_against_both_eight_level_runs"
+      ],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "refute at the smaller run": ["test_the_size_is_judged_against_both_eight_level_runs"],
+      "refute boundary": [
+        "test_an_unfinished_root_can_only_refute",
+        "test_the_size_is_judged_against_both_eight_level_runs"
+      ],
+      "support against the larger run": ["test_the_size_is_judged_against_both_eight_level_runs"],
+      "support boundary": ["test_the_size_is_judged_against_both_eight_level_runs"],
+      "partial supports": ["test_an_unfinished_root_can_only_refute"],
+      "never a lower bound": ["test_an_unfinished_root_can_only_refute"],
+      "one root's size": ["test_the_size_is_judged_against_both_eight_level_runs"],
+      "own completion judge": ["test_l1_is_w8_with_four_levels_of_two_bits"]
+    }
+  }
+}

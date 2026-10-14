@@ -61,7 +61,7 @@ def main() -> None:
     row = rows[args.index]
     game = Connect4()
     root = C4State(tuple(row["board"]), row["to_move"], None, False)
-    facts = Facts(game)
+    facts = Facts(game, ties=spec["builder"].get("ties", "exact"), safe_depth=spec["builder"].get("safe_depth", 1))
     b, s = spec["builder"], spec["search"]
     winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
     rng = random.Random(args.index)

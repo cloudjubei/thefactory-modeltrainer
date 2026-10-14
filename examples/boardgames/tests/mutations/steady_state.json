@@ -20,7 +20,7 @@
     },
     {
       "name": "first level holding any safe move decides",
-      "old": "        if len(at) == 1:",
+      "old": "        if len(at) == 1 or (at and facts.ties == \"lowest\"):",
       "new": "        if len(at) >= 1:"
     },
     {
@@ -90,8 +90,8 @@
     },
     {
       "name": "facts default unbounded",
-      "old": "    def __init__(self, game, limit: int = 2_000_000):",
-      "new": "    def __init__(self, game, limit: int = 10 ** 12):"
+      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1):",
+      "new": "    def __init__(self, game, limit: int = 10 ** 12, ties: str = \"exact\", safe_depth: int = 1):"
     },
     {
       "name": "verify deadline ignored",
@@ -107,11 +107,66 @@
       "name": "simplify ignores its verifier",
       "old": "    check = verifier or verify",
       "new": "    check = verify"
+    },
+    {
+      "name": "ties ignored",
+      "old": "        if len(at) == 1 or (at and facts.ties == \"lowest\"):",
+      "new": "        if len(at) == 1:"
+    },
+    {
+      "name": "highest move of a tied level",
+      "old": "            return min(at)\n",
+      "new": "            return max(at)\n"
+    },
+    {
+      "name": "lowest ties by default",
+      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1):",
+      "new": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"lowest\", safe_depth: int = 1):"
+    },
+    {
+      "name": "any ties accepted",
+      "old": "        if ties not in TIES:\n            raise ValueError",
+      "new": "        if False:\n            raise ValueError"
+    },
+    {
+      "name": "ties not kept",
+      "old": "        self.ties = ties\n",
+      "new": "        self.ties = \"exact\"\n"
+    },
+    {
+      "name": "depth two ignored",
+      "old": "            if self.safe_depth == 2 and len(safe) > 1:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "no fallback to one-ply safety",
+      "old": "                safe = [a for a in safe if not self._loses_in_two(state, a)] or safe\n",
+      "new": "                safe = [a for a in safe if not self._loses_in_two(state, a)]\n"
+    },
+    {
+      "name": "any depth accepted",
+      "old": "        if safe_depth not in (1, 2):\n            raise ValueError",
+      "new": "        if False:\n            raise ValueError"
+    },
+    {
+      "name": "depth not kept",
+      "old": "        self.safe_depth = safe_depth\n",
+      "new": "        self.safe_depth = 1\n"
+    },
+    {
+      "name": "a lost answer counts as a threat",
+      "old": "            if game.is_terminal(after):\n                continue\n",
+      "new": "            if game.is_terminal(after):\n                return True\n"
+    },
+    {
+      "name": "loses in two always",
+      "old": "            if not held:\n                return True\n        return False\n",
+      "new": "            if not held:\n                return True\n        return True\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-09T08:09:15+00:00",
-    "killed": 21,
+    "at": "2026-10-11T19:08:05+00:00",
+    "killed": 32,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
@@ -122,26 +177,36 @@
         "test_a_winning_move_is_played_whatever_the_map",
         "test_simplify_drops_every_level_the_win_does_not_need",
         "test_simplify_past_its_deadline_keeps_every_level",
-        "test_simplify_uses_the_given_verifier"
+        "test_simplify_uses_the_given_verifier",
+        "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "single safe move not forced": [
         "test_a_forced_draw_is_rejected",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
-        "test_the_only_safe_move_is_played_whatever_the_map"
+        "test_the_only_safe_move_is_played_whatever_the_map",
+        "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
+        "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
       ],
       "first level holding any safe move decides": [
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
-        "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]"
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
+        "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "levels read backwards": [
         "test_simplify_drops_every_level_the_win_does_not_need",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
-        "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]"
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels3-8]"
       ],
       "unsafe moves kept": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
-        "test_the_only_safe_move_is_played_whatever_the_map"
+        "test_the_only_safe_move_is_played_whatever_the_map",
+        "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
+        "test_two_ply_safety_changes_neither_the_wins_nor_a_forced_safe_move"
       ],
       "facts recomputed": ["test_facts_are_computed_once_per_position"],
       "draw accepted": [
@@ -153,7 +218,8 @@
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels3-undefined]",
         "test_simplify_drops_every_level_the_win_does_not_need",
-        "test_simplify_past_its_deadline_keeps_every_level"
+        "test_simplify_past_its_deadline_keeps_every_level",
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "one reply walked": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
@@ -182,7 +248,54 @@
         "test_simplify_past_its_deadline_keeps_every_level"
       ],
       "simplify deadline not passed": ["test_simplify_past_its_deadline_keeps_every_level"],
-      "simplify ignores its verifier": ["test_simplify_uses_the_given_verifier"]
+      "simplify ignores its verifier": ["test_simplify_uses_the_given_verifier"],
+      "ties ignored": [
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+      ],
+      "highest move of a tied level": [
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+      ],
+      "lowest ties by default": [
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
+        "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
+        "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
+      ],
+      "any ties accepted": [
+        "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise"
+      ],
+      "ties not kept": [
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+      ],
+      "depth two ignored": [
+        "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
+        "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
+      ],
+      "no fallback to one-ply safety": [
+        "test_two_ply_safety_keeps_the_one_ply_safe_moves_when_every_one_of_them_loses_in_two"
+      ],
+      "any depth accepted": ["test_safety_is_one_ply_unless_told_otherwise"],
+      "depth not kept": [
+        "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
+        "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
+      ],
+      "a lost answer counts as a threat": [
+        "test_an_answer_that_fills_the_board_is_a_draw_not_a_threat"
+      ],
+      "loses in two always": [
+        "test_an_answer_that_fills_the_board_is_a_draw_not_a_threat",
+        "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
+        "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
+      ]
     }
   }
 }

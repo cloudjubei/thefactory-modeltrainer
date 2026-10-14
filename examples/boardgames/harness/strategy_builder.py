@@ -54,6 +54,7 @@ class Builder:
         self.maps: list = [{}] + [dict(levels) for levels, _empty in library or []]
         self.map_empty: list = [0] + [empty for _levels, empty in library or []]
         self.nodes: dict = {}
+        self.leaf_states: dict = {}
         self.searches = {"tried": 0, "found": 0, "excepted": 0}
 
     def _covering_map(self, state):
@@ -123,6 +124,7 @@ class Builder:
             leaf = {"leaf": index, "exceptions": leaf["exceptions"], "own": leaf["own"], "coded": leaf["coded"]}
         self.nodes[key] = leaf
 
+
     def _smaller(self, state, depth: int, leaf: dict) -> bool:
         key = self.game.state_key(state)
         nodes, kept = dict(self.nodes), len(self.maps)
@@ -149,6 +151,7 @@ class Builder:
             return self._smaller(state, depth, leaf)
         if leaf is not None:
             self._place(key, leaf)
+            self.leaf_states[key] = (state, depth)
             return True
         return self._split(state, depth)
 
@@ -165,6 +168,96 @@ class Builder:
         _gap, _n, move, children = min(scored)
         self.nodes[key] = {"move": move}
         return all(self.build(c, depth + 2) for c in children)
+
+    def improve(self, lookahead: bool = False) -> dict:
+        """After a complete build, while time remains: take the leaf with exceptions whose walk-order code costs most
+        and not yet tried, build the split below it with the ordinary rule, and keep that only if the whole strategy
+        shrinks (maps no leaf uses any more are dropped); otherwise undo it. Leaves a kept split makes join the queue,
+        and a split that runs out of time is undone, so the strategy stays complete. With `lookahead` a split that is
+        not smaller at once first has the leaves it made improved the same way (only those, and the leaves splits kept
+        among them make), and is judged with them: kept or undone together — the greedy rule alone stops at a split
+        that is larger one level down, though splitting below it would pay (h243). Returns {"tried", "kept"}."""
+        stats = {"tried": 0, "kept": 0}
+        self._improve(None, lookahead, stats, set())
+        return stats
+
+    def _improve(self, within: set | None, lookahead: bool, stats: dict, tried: set) -> None:
+        while time.monotonic() < self.deadline:
+            queue = [(n["coded"], k) for k, n in self.nodes.items()
+                     if n.get("exceptions") and k in self.leaf_states and k not in tried
+                     and (within is None or k in within)]
+            if not queue:
+                return
+            _coded, key = max(queue)
+            tried.add(key)
+            stats["tried"] += 1
+            state, depth = self.leaf_states[key]
+            before = self.bits()["nodes"]
+            saved = (dict(self.nodes), list(self.maps), list(self.map_empty), dict(self.leaf_states), stats["kept"])
+            del self.nodes[key]
+            if self._split(state, depth):
+                self._compact()
+                made = set(self.nodes) - set(saved[0])
+                if lookahead and self.bits()["nodes"] >= before:
+                    self._improve(made, lookahead, stats, tried)
+                if self.bits()["nodes"] < before:
+                    stats["kept"] += 1
+                    if within is not None:
+                        within |= set(self.nodes) - set(saved[0])
+                    continue
+            self.nodes, self.maps, self.map_empty, self.leaf_states, stats["kept"] = saved
+
+    def research(self, seconds: float) -> dict:
+        """After improving, while time remains: search the leaf with exceptions whose code costs most, not yet
+        re-searched, again from its own map for `seconds` (never past the deadline) — leaves below the root were
+        searched only briefly, and builds finish well inside their cap (h246) — and keep what the search finds, a map
+        that wins every line or one with fewer exceptions, only if the whole strategy shrinks. Returns {"tried",
+        "kept"}."""
+        tried: set = set()
+        kept = 0
+        while time.monotonic() < self.deadline:
+            queue = [(n["coded"], k) for k, n in self.nodes.items()
+                     if n.get("exceptions") and k in self.leaf_states and k not in tried]
+            if not queue:
+                break
+            _coded, key = max(queue)
+            tried.add(key)
+            state, _depth = self.leaf_states[key]
+            empty = self.facts.empty_cells(state)
+            start = {c: k for c, k in self.maps[self.nodes[key]["leaf"]].items() if c in set(empty)}
+            result = self.search(state, start, min(seconds, max(0.0, self.deadline - time.monotonic())))
+            if result is None:
+                continue
+            before = self.bits()["nodes"]
+            saved = (dict(self.nodes), list(self.maps), list(self.map_empty))
+            levels, exc = result["levels"], result["exceptions"]
+            if exc:
+                try:
+                    coded = walk_order_cost(self.facts, state, levels, self.n_levels, exc,
+                                            deadline=self.deadline)["bits"]
+                except TimeoutError:
+                    continue
+                self._place(key, {"levels": levels, "empty": len(empty), "exceptions": exc,
+                                  "own": result["own_positions"], "coded": coded})
+            else:
+                levels = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,
+                                  verifier=self.verifier)
+                self.nodes[key] = {"leaf": self._keep(levels, len(empty))}
+            self._compact()
+            if self.bits()["nodes"] < before:
+                kept += 1
+                continue
+            self.nodes, self.maps, self.map_empty = saved
+        return {"tried": len(tried), "kept": kept}
+
+    def _compact(self) -> None:
+        own = 1 + self.shared
+        used = {n["leaf"] for n in self.nodes.values() if "leaf" in n}
+        keep = [i for i in range(len(self.maps)) if i < own or i in used]
+        index = {old: new for new, old in enumerate(keep)}
+        self.maps = [self.maps[i] for i in keep]
+        self.map_empty = [self.map_empty[i] for i in keep]
+        self.nodes = {k: {**n, "leaf": index[n["leaf"]]} if "leaf" in n else n for k, n in self.nodes.items()}
 
     def bits(self) -> dict:
         moves = sum(1 for n in self.nodes.values() if "move" in n)

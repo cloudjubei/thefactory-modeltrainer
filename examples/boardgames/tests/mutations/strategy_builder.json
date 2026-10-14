@@ -240,8 +240,8 @@
     },
     {
       "name": "simplify by the python verify",
-      "old": "                            verifier=self.verifier)",
-      "new": "                            verifier=None)"
+      "old": "            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,\n                            verifier=self.verifier)",
+      "new": "            kept = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,\n                            verifier=None)"
     },
     {
       "name": "by size ignored",
@@ -296,15 +296,191 @@
       "name": "choice only at the root",
       "old": "        if leaf is not None and \"levels\" in leaf and self.choose_by_size:\n",
       "new": "        if leaf is not None and \"levels\" in leaf and self.choose_by_size and depth == 0:\n"
+    },
+    {
+      "name": "improving ignores the deadline",
+      "old": "    def _improve(self, within: set | None, lookahead: bool, stats: dict, tried: set) -> None:\n        while time.monotonic() < self.deadline:\n",
+      "new": "    def _improve(self, within: set | None, lookahead: bool, stats: dict, tried: set) -> None:\n        while True:\n"
+    },
+    {
+      "name": "cheapest leaf first",
+      "old": "            _coded, key = max(queue)\n            tried.add(key)\n            stats[\"tried\"] += 1\n",
+      "new": "            _coded, key = min(queue)\n            tried.add(key)\n            stats[\"tried\"] += 1\n"
+    },
+    {
+      "name": "a leaf tried again",
+      "old": "            tried.add(key)\n            stats[\"tried\"] += 1\n",
+      "new": "            stats[\"tried\"] += 1\n"
+    },
+    {
+      "name": "tie goes to the split when improving",
+      "old": "                if self.bits()[\"nodes\"] < before:\n",
+      "new": "                if self.bits()[\"nodes\"] <= before:\n"
+    },
+    {
+      "name": "every split kept",
+      "old": "                if self.bits()[\"nodes\"] < before:\n",
+      "new": "                if True:\n"
+    },
+    {
+      "name": "unfinished split kept",
+      "edits": [
+        {
+          "old": "            if self._split(state, depth):\n                self._compact()\n",
+          "new": "            self._split(state, depth)\n            if True:\n                self._compact()\n"
+        }
+      ]
+    },
+    {
+      "name": "unused maps kept",
+      "old": "                self._compact()\n",
+      "new": ""
+    },
+    {
+      "name": "rejected split not undone",
+      "old": "            self.nodes, self.maps, self.map_empty, self.leaf_states, stats[\"kept\"] = saved\n",
+      "new": ""
+    },
+    {
+      "name": "library maps dropped",
+      "old": "        keep = [i for i in range(len(self.maps)) if i < own or i in used]\n",
+      "new": "        keep = [i for i in range(len(self.maps)) if i == 0 or i in used]\n"
+    },
+    {
+      "name": "compaction edits the nodes in place",
+      "old": "        self.nodes = {k: {**n, \"leaf\": index[n[\"leaf\"]]} if \"leaf\" in n else n for k, n in self.nodes.items()}\n",
+      "new": "        for n in self.nodes.values():\n            if \"leaf\" in n:\n                n[\"leaf\"] = index[n[\"leaf\"]]\n"
+    },
+    {
+      "name": "map_empty not compacted",
+      "old": "        self.map_empty = [self.map_empty[i] for i in keep]\n",
+      "new": ""
+    },
+    {
+      "name": "leaves not recorded",
+      "old": "            self.leaf_states[key] = (state, depth)\n",
+      "new": ""
+    },
+    {
+      "name": "lookahead ignored",
+      "old": "                if lookahead and self.bits()[\"nodes\"] >= before:\n",
+      "new": "                if False:\n"
+    },
+    {
+      "name": "lookahead always",
+      "old": "                if lookahead and self.bits()[\"nodes\"] >= before:\n",
+      "new": "                if self.bits()[\"nodes\"] >= before:\n"
+    },
+    {
+      "name": "lookahead over every leaf",
+      "old": "                    self._improve(made, lookahead, stats, tried)\n",
+      "new": "                    self._improve(None, lookahead, stats, tried)\n"
+    },
+    {
+      "name": "lookahead one level only",
+      "old": "                    self._improve(made, lookahead, stats, tried)\n",
+      "new": "                    self._improve(made, False, stats, tried)\n"
+    },
+    {
+      "name": "made leaves not followed",
+      "old": "                    if within is not None:\n                        within |= set(self.nodes) - set(saved[0])\n",
+      "new": ""
+    },
+    {
+      "name": "kept count not undone",
+      "edits": [
+        {
+          "old": "list(self.map_empty), dict(self.leaf_states), stats[\"kept\"])\n",
+          "new": "list(self.map_empty), dict(self.leaf_states), 0)\n"
+        },
+        {
+          "old": "            self.nodes, self.maps, self.map_empty, self.leaf_states, stats[\"kept\"] = saved\n",
+          "new": "            self.nodes, self.maps, self.map_empty, self.leaf_states, _kept = saved\n"
+        }
+      ]
+    },
+    {
+      "name": "within ignored",
+      "old": "                     and (within is None or k in within)]\n",
+      "new": "                     ]\n"
+    },
+    {
+      "name": "research ignores the deadline",
+      "old": "        kept = 0\n        while time.monotonic() < self.deadline:\n            queue = [(n[\"coded\"], k) for k, n in self.nodes.items()\n                     if n.get(\"exceptions\") and k in self.leaf_states and k not in tried]\n            if not queue:\n                break\n",
+      "new": "        kept = 0\n        while True:\n            queue = [(n[\"coded\"], k) for k, n in self.nodes.items()\n                     if n.get(\"exceptions\") and k in self.leaf_states and k not in tried]\n            if not queue:\n                break\n"
+    },
+    {
+      "name": "research cheapest first",
+      "old": "            _coded, key = max(queue)\n            tried.add(key)\n            state, _depth",
+      "new": "            _coded, key = min(queue)\n            tried.add(key)\n            state, _depth"
+    },
+    {
+      "name": "research from the empty map",
+      "old": "            start = {c: k for c, k in self.maps[self.nodes[key][\"leaf\"]].items() if c in set(empty)}\n",
+      "new": "            start = {}\n"
+    },
+    {
+      "name": "research budget past the deadline",
+      "old": "            result = self.search(state, start, min(seconds, max(0.0, self.deadline - time.monotonic())))\n",
+      "new": "            result = self.search(state, start, seconds)\n"
+    },
+    {
+      "name": "research budget ignored",
+      "old": "            result = self.search(state, start, min(seconds, max(0.0, self.deadline - time.monotonic())))\n",
+      "new": "            result = self.search(state, start, max(0.0, self.deadline - time.monotonic()))\n"
+    },
+    {
+      "name": "research keeps anything",
+      "old": "            if self.bits()[\"nodes\"] < before:\n                kept += 1\n                continue\n            self.nodes, self.maps, self.map_empty = saved\n",
+      "new": "            kept += 1\n"
+    },
+    {
+      "name": "research tie to the new leaf",
+      "old": "            if self.bits()[\"nodes\"] < before:\n                kept += 1\n                continue\n            self.nodes, self.maps, self.map_empty = saved\n",
+      "new": "            if self.bits()[\"nodes\"] <= before:\n                kept += 1\n                continue\n            self.nodes, self.maps, self.map_empty = saved\n"
+    },
+    {
+      "name": "research old map kept",
+      "edits": [
+        {
+          "old": "                self.nodes[key] = {\"leaf\": self._keep(levels, len(empty))}\n            self._compact()\n",
+          "new": "                self.nodes[key] = {\"leaf\": self._keep(levels, len(empty))}\n"
+        }
+      ]
+    },
+    {
+      "name": "research keeps an uncoded leaf",
+      "edits": [
+        {
+          "old": "                except TimeoutError:\n                    continue\n                self._place(key, {\"levels\": levels",
+          "new": "                except TimeoutError:\n                    coded = 0\n                self._place(key, {\"levels\": levels"
+        }
+      ]
+    },
+    {
+      "name": "research unsimplified",
+      "old": "                levels = simplify(self.facts, state, levels, self.n_levels, self.cap, deadline=self.deadline,\n                                  verifier=self.verifier)\n",
+      "new": ""
+    },
+    {
+      "name": "research pure leaf with stale exceptions",
+      "old": "                self.nodes[key] = {\"leaf\": self._keep(levels, len(empty))}\n",
+      "new": "                self.nodes[key] = {**self.nodes[key], \"leaf\": self._keep(levels, len(empty))}\n"
+    },
+    {
+      "name": "research leaf tried again",
+      "old": "            tried.add(key)\n            state, _depth = self.leaf_states[key]\n",
+      "new": "            state, _depth = self.leaf_states[key]\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-09T20:31:51+00:00",
-    "killed": 58,
+    "at": "2026-10-10T06:14:01+00:00",
+    "killed": 89,
     "survived": [],
     "killed_by": {
       "empty map not tried first": [
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_the_builder_s_covering_and_simplify_use_its_verifier",
         "test_the_move_whose_children_are_all_ready_is_preferred_over_a_lower_numbered_one",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
@@ -318,6 +494,7 @@
         "test_a_known_map_covers_a_position_without_searching",
         "test_a_library_map_covers_a_position_without_searching",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_the_builder_s_covering_and_simplify_use_its_verifier"
       ],
@@ -348,6 +525,8 @@
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
         "test_by_size_the_choice_is_made_below_the_root_too",
         "test_each_search_gets_the_budget_of_the_deepest_entry_at_or_above_its_depth",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
       "node bit dropped": [
@@ -355,12 +534,18 @@
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
         "test_without_searching_the_root_becomes_a_move_and_its_children_trivial_leaves"
       ],
       "leaf reference free": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
-        "test_library_maps_are_not_charged_to_the_build_but_their_references_are"
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "check skips opponent replies": [
         "test_check_rejects_a_line_the_opponent_wins",
@@ -385,6 +570,18 @@
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
         "test_by_size_a_tie_keeps_the_leaf",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_stops_at_the_deadline",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_researching_a_tie_keeps_the_leaf",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
+        "test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline",
         "test_the_builder_s_own_walks_get_its_deadline"
       ],
       "exceptions accepted without a threshold": [
@@ -398,7 +595,11 @@
       "leaf map dropped": [
         "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
-        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
+        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
       ],
       "search started cold": [
         "test_the_search_starts_from_the_most_recent_map_on_the_cells_still_empty"
@@ -421,19 +622,33 @@
       ],
       "no flag bit per leaf": [
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
-        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "exception code dropped": [
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
-        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "code not stored": [
         "test_a_leaf_with_exceptions_is_kept_when_it_is_small_enough",
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes",
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
-        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code"
+        "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "exceptions dropped from the leaf": [
         "test_a_leaf_exactly_at_the_threshold_is_kept",
@@ -447,6 +662,19 @@
         "test_by_size_a_winning_split_keeps_the_maps_it_found",
         "test_by_size_the_choice_is_made_below_the_root_too",
         "test_exceptions_are_charged_a_flag_per_leaf_and_their_walk_order_code",
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_stops_at_the_deadline",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_researching_a_tie_keeps_the_leaf",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
+        "test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline",
+        "test_researching_stops_at_the_deadline",
         "test_the_builder_s_own_walks_get_its_deadline"
       ],
       "budget ignored": [
@@ -471,10 +699,14 @@
       "negative time given": ["test_a_build_past_its_deadline_gives_a_search_no_time"],
       "map bits dropped": [
         "test_a_searched_leaf_at_the_root_is_the_whole_strategy",
-        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept"
+        "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
       ],
       "library ignored": [
         "test_a_library_map_covers_a_position_without_searching",
+        "test_dropping_unused_maps_keeps_the_library_s",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
       ],
@@ -487,6 +719,7 @@
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
       ],
       "library size forgotten": [
+        "test_dropping_unused_maps_keeps_the_library_s",
         "test_library_maps_are_not_charged_to_the_build_but_their_references_are",
         "test_maps_found_in_the_build_are_charged_and_reported_after_the_library"
       ],
@@ -507,7 +740,19 @@
         "test_by_size_the_choice_is_made_below_the_root_too"
       ],
       "by size always on": [
-        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size"
+        "test_a_leaf_s_map_is_kept_beside_its_exceptions_and_charged_in_its_size",
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_stops_at_the_deadline",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_researching_a_tie_keeps_the_leaf",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
+        "test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
       ],
       "split always wins": [
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
@@ -516,7 +761,12 @@
       ],
       "tie goes to the split": ["test_by_size_a_tie_keeps_the_leaf"],
       "unfinished split kept": [
-        "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
+        "test_improving_takes_the_costliest_leaf_first",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them",
+        "test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it",
+        "test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy",
+        "test_the_leaves_a_kept_split_makes_join_the_queue"
       ],
       "split's nodes not undone": [
         "test_by_size_a_leaf_with_exceptions_smaller_than_the_split_below_it_is_kept",
@@ -533,7 +783,113 @@
         "test_by_size_a_split_smaller_than_the_leaf_replaces_it_and_the_leaf_s_map_is_not_kept",
         "test_by_size_a_split_that_runs_out_of_time_loses_to_the_leaf_and_the_build_completes"
       ],
-      "choice only at the root": ["test_by_size_the_choice_is_made_below_the_root_too"]
+      "choice only at the root": ["test_by_size_the_choice_is_made_below_the_root_too"],
+      "improving ignores the deadline": ["test_improving_stops_at_the_deadline"],
+      "cheapest leaf first": [
+        "test_improving_takes_the_costliest_leaf_first",
+        "test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it"
+      ],
+      "a leaf tried again": ["timeout after 300s"],
+      "tie goes to the split when improving": ["test_improving_a_tie_keeps_the_leaf"],
+      "every split kept": [
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them",
+        "test_lookahead_keeps_a_split_that_is_smaller_once_its_own_leaves_are_improved",
+        "test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy"
+      ],
+      "unused maps kept": [
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map"
+      ],
+      "rejected split not undone": [
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them",
+        "test_lookahead_keeps_a_split_that_is_smaller_once_its_own_leaves_are_improved",
+        "test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy"
+      ],
+      "library maps dropped": ["test_dropping_unused_maps_keeps_the_library_s"],
+      "compaction edits the nodes in place": [
+        "test_dropping_unused_maps_renumbers_leaves_without_touching_the_nodes_it_was_given"
+      ],
+      "map_empty not compacted": [
+        "test_dropping_unused_maps_keeps_the_library_s",
+        "test_dropping_unused_maps_renumbers_leaves_without_touching_the_nodes_it_was_given",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map"
+      ],
+      "leaves not recorded": [
+        "test_improving_a_tie_keeps_the_leaf",
+        "test_improving_keeps_a_leaf_smaller_than_its_split",
+        "test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map",
+        "test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes",
+        "test_improving_undoes_a_split_that_runs_out_of_time",
+        "test_researching_a_tie_keeps_the_leaf",
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds",
+        "test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map",
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
+      ],
+      "lookahead ignored": [
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them",
+        "test_lookahead_follows_leaves_made_by_splits_kept_inside_it",
+        "test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it",
+        "test_lookahead_keeps_a_split_that_is_smaller_once_its_own_leaves_are_improved",
+        "test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy"
+      ],
+      "lookahead always": [
+        "test_lookahead_keeps_a_split_that_is_smaller_once_its_own_leaves_are_improved",
+        "test_the_leaves_a_kept_split_makes_join_the_queue"
+      ],
+      "lookahead over every leaf": [
+        "test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it"
+      ],
+      "lookahead one level only": [
+        "test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy"
+      ],
+      "made leaves not followed": [
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them",
+        "test_lookahead_follows_leaves_made_by_splits_kept_inside_it"
+      ],
+      "kept count not undone": [
+        "test_lookahead_does_not_count_splits_undone_with_the_split_above_them"
+      ],
+      "within ignored": [
+        "test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it"
+      ],
+      "research ignores the deadline": ["test_researching_stops_at_the_deadline"],
+      "research cheapest first": [
+        "test_researching_tries_the_costliest_leaves_first_and_each_once"
+      ],
+      "research from the empty map": [
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
+      ],
+      "research budget past the deadline": [
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
+      ],
+      "research budget ignored": [
+        "test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline"
+      ],
+      "research keeps anything": [
+        "test_researching_a_tie_keeps_the_leaf",
+        "test_researching_keeps_a_leaf_smaller_than_what_the_search_finds"
+      ],
+      "research tie to the new leaf": ["test_researching_a_tie_keeps_the_leaf"],
+      "research old map kept": [
+        "test_researching_can_keep_a_smaller_leaf_with_exceptions",
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
+      ],
+      "research keeps an uncoded leaf": [
+        "test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time"
+      ],
+      "research unsimplified": [
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
+      ],
+      "research pure leaf with stale exceptions": [
+        "test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map"
+      ],
+      "research leaf tried again": ["timeout after 300s"]
     }
   }
 }

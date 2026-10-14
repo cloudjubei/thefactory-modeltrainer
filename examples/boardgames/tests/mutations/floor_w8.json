@@ -1,0 +1,110 @@
+{
+  "file": "harness/floor_w8.py",
+  "tests": ["tests/test_floor_w8.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no lookahead",
+      "old": "        \"builder\": {**W7[\"builder\"], \"lookahead\": True},\n",
+      "new": "        \"builder\": dict(W7[\"builder\"]),\n"
+    },
+    {
+      "name": "w7's fingerprint",
+      "old": "        \"measurement_fp\": \"b2f5efcf2ac9\",\n",
+      "new": ""
+    },
+    {
+      "name": "another w7 total",
+      "old": "        \"w7_bits\": 1_465_679,\n",
+      "new": "        \"w7_bits\": 4_306_421,\n"
+    },
+    {
+      "name": "vs w7 off registration",
+      "old": "def w8_vs_w7(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w8_vs_w7(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "lookahead off registration",
+      "old": "def w8_lookahead(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w8_lookahead(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "opening left out",
+      "old": "    bits = (opening[\"moves\"] * 4 + opening[\"trivial\"]\n            + opening",
+      "new": "    bits = (0\n            + opening"
+    },
+    {
+      "name": "refute boundary",
+      "old": "verdict = (\"refuted\" if ratio >= 1",
+      "new": "verdict = (\"refuted\" if ratio > 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and ratio <= spec[\"below_w7_support\"]",
+      "new": "\"supported\" if not lower and ratio < spec[\"below_w7_support\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and ratio <= spec[\"below_w7_support\"]",
+      "new": "\"supported\" if ratio <= spec[\"below_w7_support\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in roots)\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "lookahead judged while unfinished",
+      "old": "    if not all(r[\"complete\"] for r in e[\"roots\"]):\n        return {\"verdict\": \"inconclusive\"}\n",
+      "new": ""
+    },
+    {
+      "name": "cut against the final size",
+      "old": "    plain = sum(r[\"improved\"][\"plain_bits\"] for r in e[\"roots\"])\n",
+      "new": "    plain = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"]) + 1\n"
+    },
+    {
+      "name": "lookahead support boundary",
+      "old": "verdict = (\"supported\" if cut >= spec[\"lookahead_support\"]",
+      "new": "verdict = (\"supported\" if cut > spec[\"lookahead_support\"]"
+    },
+    {
+      "name": "lookahead refute boundary",
+      "old": "else \"refuted\" if cut < spec[\"lookahead_refute\"]",
+      "new": "else \"refuted\" if cut <= spec[\"lookahead_refute\"]"
+    },
+    {
+      "name": "own completion judge",
+      "old": "w8_report = w6_report\n",
+      "new": "def w8_report(e, spec):\n    return w6_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-10T08:58:23+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "no lookahead": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_w8_is_w7_with_lookahead_on_the_same_positions"
+      ],
+      "w7's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_w8_is_w7_with_lookahead_on_the_same_positions"
+      ],
+      "another w7 total": ["test_w8_is_w7_with_lookahead_on_the_same_positions"],
+      "vs w7 off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "lookahead off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "opening left out": ["test_the_projection_is_judged_against_w7_s"],
+      "refute boundary": ["test_the_projection_is_judged_against_w7_s"],
+      "support boundary": ["test_the_projection_is_judged_against_w7_s"],
+      "partial supports": ["test_the_projection_is_judged_against_w7_s"],
+      "never a lower bound": ["test_the_projection_is_judged_against_w7_s"],
+      "lookahead judged while unfinished": ["test_lookahead_s_cut_is_measured_inside_the_builds"],
+      "cut against the final size": ["test_lookahead_s_cut_is_measured_inside_the_builds"],
+      "lookahead support boundary": ["test_lookahead_s_cut_is_measured_inside_the_builds"],
+      "lookahead refute boundary": ["test_lookahead_s_cut_is_measured_inside_the_builds"],
+      "own completion judge": ["test_w8_is_w7_with_lookahead_on_the_same_positions"]
+    }
+  }
+}

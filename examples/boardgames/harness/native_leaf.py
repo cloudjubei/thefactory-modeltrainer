@@ -45,11 +45,11 @@ def _library():
         lib.c4_leaf_init.argtypes = [ctypes.c_int, ctypes.c_int]
         u64p, i8p, i64p = (ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(ctypes.c_int8),
                            ctypes.POINTER(ctypes.c_int64))
-        lib.c4_leaf_walk.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, i8p, ctypes.c_int,
-                                     ctypes.c_int64, ctypes.c_double, u64p, u64p, i8p, ctypes.c_int64, i64p, i64p]
+        lib.c4_leaf_walk.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, i8p, ctypes.c_int, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int64, ctypes.c_double, u64p, u64p, i8p, ctypes.c_int64, i64p, i64p]
         lib.c4_leaf_walk.restype = ctypes.c_int
-        lib.c4_verify_walk.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, i8p, ctypes.c_int,
-                                       ctypes.c_int64, ctypes.c_double, i64p, i64p]
+        lib.c4_verify_walk.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, i8p, ctypes.c_int, ctypes.c_int,
+                                       ctypes.c_int, ctypes.c_int64, ctypes.c_double, i64p, i64p]
         lib.c4_verify_walk.restype = ctypes.c_int
         if not lib.c4_leaf_init(LOG2_SOLVER_TABLE, LOG2_MOVE_CACHE):
             raise MemoryError("could not allocate the C walk's tables")
@@ -104,8 +104,8 @@ def verify(facts, root, levels: dict, n_levels: int, cap: int = 1_000_000, deadl
     cells = (ctypes.c_int8 * 42)(*[levels.get(i, -1) for i in range(42)])
     own, walked = ctypes.c_int64(0), ctypes.c_int64(0)
     seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())
-    status = lib.c4_verify_walk(position, mask, moves, cells, n_levels, cap, seconds, ctypes.byref(own),
-                                ctypes.byref(walked))
+    status = lib.c4_verify_walk(position, mask, moves, cells, n_levels, facts.ties == "lowest", facts.safe_depth,
+                                cap, seconds, ctypes.byref(own), ctypes.byref(walked))
     if status not in VERIFY_REASONS:
         raise RuntimeError(ERRORS[status])
     reason = VERIFY_REASONS[status]
@@ -121,8 +121,9 @@ def needed(facts, root, levels: dict, n_levels: int, winning, cap: int, deadline
     exc_position, exc_mask, exc_move = _buffers()
     count, own = ctypes.c_int64(0), ctypes.c_int64(0)
     seconds = -1.0 if deadline is None else max(0.0, deadline - time.monotonic())
-    status = lib.c4_leaf_walk(position, mask, moves, cells, n_levels, cap, seconds, exc_position, exc_mask, exc_move,
-                              MAX_EXCEPTIONS, ctypes.byref(count), ctypes.byref(own))
+    status = lib.c4_leaf_walk(position, mask, moves, cells, n_levels, facts.ties == "lowest", facts.safe_depth,
+                              cap, seconds, exc_position, exc_mask, exc_move, MAX_EXCEPTIONS, ctypes.byref(count),
+                              ctypes.byref(own))
     if status == 5:
         raise ValueError("the root is a position its side cannot win — no map or exception can")
     if status in ERRORS:

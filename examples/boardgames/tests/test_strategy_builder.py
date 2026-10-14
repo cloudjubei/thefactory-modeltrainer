@@ -482,3 +482,289 @@ def test_by_size_a_losing_split_leaves_none_of_its_maps_behind(monkeypatch):
     assert b.build(EARLY)
     assert any(found) and "exceptions" in b.nodes[root] and len(b.nodes) == 1
     assert b.maps == [{}] and b.map_empty == [0]
+
+
+def test_improving_replaces_a_leaf_with_exceptions_by_a_smaller_split_and_drops_its_map():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK) and b.bits()["nodes"] == 14
+    assert b.improve() == {"tried": 1, "kept": 1}
+    assert b.nodes[GAME.state_key(FORK)] == {"move": 4} and b.maps == [{}] and b.map_empty == [0]
+    assert b.bits()["nodes"] == 9 and check(b.facts, FORK, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_improving_keeps_a_leaf_smaller_than_its_split():
+    b = _builder(search=_excepted(), accept=1)
+    assert b.build(FORK)
+    before = (dict(b.nodes), list(b.maps))
+    assert b.improve() == {"tried": 1, "kept": 0}
+    assert (b.nodes, b.maps) == before and b.bits()["nodes"] == 5
+
+
+def test_improving_a_tie_keeps_the_leaf():
+    b = _builder(search=_excepted(), accept=1)
+    assert b.build(FORK)
+    b.bits = lambda: {"nodes": 7}
+    assert b.improve() == {"tried": 1, "kept": 0} and "exceptions" in b.nodes[GAME.state_key(FORK)]
+
+
+def test_improving_stops_at_the_deadline():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    b.deadline = time.monotonic() - 1.0
+    assert b.improve() == {"tried": 0, "kept": 0} and "exceptions" in b.nodes[GAME.state_key(FORK)]
+
+
+def test_improving_undoes_a_split_that_runs_out_of_time():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    before = (dict(b.nodes), list(b.maps), list(b.map_empty))
+    split = b._split
+
+    def late(state, depth):
+        b.deadline = time.monotonic() - 1.0
+        return split(state, depth)
+
+    b._split = late
+    assert b.improve() == {"tried": 1, "kept": 0}
+    assert (b.nodes, b.maps, b.map_empty) == before
+
+
+def test_improving_tries_the_costliest_leaves_first_and_the_leaves_a_kept_split_makes(monkeypatch):
+    import harness.strategy_builder as sb
+
+    root = GAME.state_key(EARLY)
+
+    def weight(s):
+        return 1000 - 100 * sum(1 for v in s.board if v) + sum(i for i, v in enumerate(s.board) if v)
+
+    monkeypatch.setattr(sb, "walk_order_cost",
+                        lambda facts, s, *a, **k: {"bits": 10_000 if GAME.state_key(s) == root else weight(s)})
+
+    def search(s, start, seconds):
+        return {"levels": {}, "exceptions": {GAME.state_key(s): min(_winning([s])[0])}, "own_positions": 10**9}
+
+    b = _builder(search=search, accept=1)
+    assert b.build(EARLY) and "exceptions" in b.nodes[root]
+    order = []
+    split = b._split
+
+    def recorded(state, depth):
+        order.append((b.nodes.get(GAME.state_key(state)), GAME.state_key(state), weight(state)))
+        return split(state, depth)
+
+    b._split = recorded
+    stats = b.improve()
+    assert order[0][1] == root and stats["kept"] >= 1 and stats["tried"] > 1
+    assert check(b.facts, EARLY, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def _fabricated(coded):
+    states = [_ttt((0,), (1,)), _ttt((4,), (1,)), _ttt((0, 4), (1, 8)), _ttt((2,), (5,))]
+    b = _builder()
+    for s, c in zip(states, coded):
+        k = GAME.state_key(s)
+        b.nodes[k] = {"leaf": 0, "exceptions": {k: 0}, "own": 1, "coded": c}
+        b.leaf_states[k] = (s, 0)
+    return b, [GAME.state_key(s) for s in states]
+
+
+def test_improving_takes_the_costliest_leaf_first():
+    b, keys = _fabricated([5, 9, 7])
+    order = []
+    b._split = lambda state, depth: order.append(GAME.state_key(state)) or False
+    assert b.improve() == {"tried": 3, "kept": 0}
+    assert order == [keys[1], keys[2], keys[0]]
+
+
+def test_the_leaves_a_kept_split_makes_join_the_queue():
+    b, keys = _fabricated([5])
+    extra = _ttt((2,), (5,))
+    order = []
+
+    def split(state, depth):
+        order.append(GAME.state_key(state))
+        if GAME.state_key(state) == keys[0]:
+            b.nodes[keys[0]] = {"move": 0}
+            b.nodes[GAME.state_key(extra)] = {"leaf": 0, "exceptions": {GAME.state_key(extra): 0}, "own": 1, "coded": 1}
+            b.leaf_states[GAME.state_key(extra)] = (extra, 2)
+            return True
+        return False
+
+    sizes = iter([10, 5, 5])
+    b.bits = lambda: {"nodes": next(sizes)}
+    b._split = split
+    assert b.improve() == {"tried": 2, "kept": 1}
+    assert order == [keys[0], GAME.state_key(extra)]
+
+
+def test_dropping_unused_maps_renumbers_leaves_without_touching_the_nodes_it_was_given():
+    b = _builder()
+    b.maps, b.map_empty = [{}, {1: 0}, {2: 0}], [0, 5, 5]
+    node = {"leaf": 2}
+    b.nodes = {"a": node, "b": {"move": 3}}
+    b._compact()
+    assert b.maps == [{}, {2: 0}] and b.map_empty == [0, 5]
+    assert b.nodes == {"a": {"leaf": 1}, "b": {"move": 3}} and node == {"leaf": 2}
+
+
+def test_dropping_unused_maps_keeps_the_library_s():
+    b = _with_library([({6: 0}, 4)])
+    b.maps += [{1: 0}, {2: 0}]
+    b.map_empty += [5, 5]
+    b.nodes = {"a": {"leaf": 3}}
+    b._compact()
+    assert b.maps == [{}, {6: 0}, {2: 0}] and b.map_empty == [0, 4, 5] and b.nodes == {"a": {"leaf": 2}}
+
+
+_STATES = [_ttt((0,), (1,)), _ttt((4,), (1,)), _ttt((0, 4), (1, 8)), _ttt((2,), (5,)), _ttt((6,), (3,))]
+
+
+def _planned(leaves: dict, plan: dict, order: list):
+    """A builder over fabricated leaves {name: coded bits}; splitting a name in `plan` makes it a move node and creates
+    the leaves listed for it; any other split fails. Size: the leaves' coded bits plus 3 per move node."""
+    b = _builder()
+    key = {name: GAME.state_key(s) for name, s in zip("abcde", _STATES)}
+    state = {name: s for name, s in zip("abcde", _STATES)}
+
+    def leaf(name, coded):
+        b.nodes[key[name]] = {"leaf": 0, "exceptions": {key[name]: 0}, "own": 1, "coded": coded}
+        b.leaf_states[key[name]] = (state[name], 0)
+
+    for name, coded in leaves.items():
+        leaf(name, coded)
+    names = {v: k for k, v in key.items()}
+
+    def split(s, depth):
+        name = names[GAME.state_key(s)]
+        order.append(name)
+        if name not in plan:
+            return False
+        b.nodes[key[name]] = {"move": 0}
+        for child, coded in plan[name]:
+            leaf(child, coded)
+        return True
+
+    b._split = split
+    b.bits = lambda: {"nodes": sum(n.get("coded", 0) for n in b.nodes.values())
+                      + 3 * sum(1 for n in b.nodes.values() if "move" in n)}
+    return b, key
+
+
+def test_lookahead_keeps_a_split_that_is_smaller_once_its_own_leaves_are_improved():
+    plan = {"a": [("b", 9)], "b": []}
+    order = []
+    b, key = _planned({"a": 10}, plan, order)
+    assert b.improve(lookahead=True) == {"tried": 2, "kept": 2}
+    assert b.nodes[key["a"]] == {"move": 0} and b.nodes[key["b"]] == {"move": 0} and b.bits()["nodes"] == 6
+    plain, key = _planned({"a": 10}, plan, [])
+    assert plain.improve() == {"tried": 1, "kept": 0} and "exceptions" in plain.nodes[key["a"]]
+
+
+def test_lookahead_undoes_a_split_and_its_improvements_together_when_they_do_not_shrink_the_strategy():
+    b, key = _planned({"a": 10}, {"a": [("b", 9)], "b": [("c", 8)]}, [])
+    assert b.improve(lookahead=True) == {"tried": 3, "kept": 0}
+    assert set(b.nodes) == {key["a"]} and "exceptions" in b.nodes[key["a"]] and b.bits()["nodes"] == 10
+
+
+def test_lookahead_improves_only_the_leaves_the_split_made_before_judging_it():
+    order = []
+    b, key = _planned({"a": 10, "e": 9.5}, {"a": [("b", 9)], "b": []}, order)
+    assert b.improve(lookahead=True)["kept"] == 2
+    assert order == ["a", "b", "e"]
+
+
+def test_lookahead_follows_leaves_made_by_splits_kept_inside_it():
+    b, key = _planned({"a": 10}, {"a": [("b", 9)], "b": [("c", 4)], "c": []}, [])
+    assert b.improve(lookahead=True) == {"tried": 3, "kept": 3} and b.bits()["nodes"] == 9
+
+
+def test_lookahead_does_not_count_splits_undone_with_the_split_above_them():
+    b, key = _planned({"a": 10}, {"a": [("b", 9)], "b": [("c", 5)]}, [])
+    assert b.improve(lookahead=True) == {"tried": 3, "kept": 0}
+    assert set(b.nodes) == {key["a"]}
+
+
+def _found(levels):
+    return lambda s, start, seconds: {"levels": dict(levels), "exceptions": {}, "own_positions": None}
+
+
+def test_researching_replaces_a_leaf_with_exceptions_by_a_smaller_pure_map_and_drops_the_old_map():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK) and b.bits()["nodes"] == 14
+    b.search = _found({4: 0, 5: 1})
+    assert b.research(60.0) == {"tried": 1, "kept": 1}
+    assert b.nodes[GAME.state_key(FORK)] == {"leaf": 1} and b.maps == [{}, {4: 0}] and b.bits()["nodes"] == 10
+    assert check(b.facts, FORK, b.nodes, b.maps, 2, 100_000)["won"]
+
+
+def test_researching_keeps_a_leaf_smaller_than_what_the_search_finds():
+    b = _builder(search=_excepted(), accept=1)
+    assert b.build(FORK)
+    before = (dict(b.nodes), list(b.maps), list(b.map_empty))
+    b.search = _found({4: 0})
+    assert b.research(60.0) == {"tried": 1, "kept": 0}
+    assert (b.nodes, b.maps, b.map_empty) == before
+
+
+def test_researching_can_keep_a_smaller_leaf_with_exceptions():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    b.search = _excepted()
+    assert b.research(60.0) == {"tried": 1, "kept": 1}
+    assert b.nodes[GAME.state_key(FORK)] == {"leaf": 0, "exceptions": ROOT_FIX, "own": 5, "coded": 3}
+    assert b.maps == [{}] and b.bits()["nodes"] == 5
+
+
+def test_researching_starts_from_the_leaf_s_map_with_the_budget_never_past_the_deadline():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01, seconds=600.0)
+    assert b.build(FORK)
+    calls = []
+    b.search = lambda s, start, seconds: calls.append((start, seconds))
+    assert b.research(60.0) == {"tried": 1, "kept": 0}
+    assert calls == [({5: 1}, 60.0)]
+    b2 = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b2.build(FORK)
+    b2.deadline = time.monotonic() + 5.0
+    b2.search = lambda s, start, seconds: calls.append((start, seconds))
+    b2.research(60.0)
+    assert 0 < calls[-1][1] <= 5.0
+
+
+def test_researching_tries_the_costliest_leaves_first_and_each_once():
+    order = []
+    b, key = _planned({"a": 4, "b": 9, "c": 6}, {}, [])
+    names = {v: k for k, v in key.items()}
+    b.search = lambda s, start, seconds: order.append(names[GAME.state_key(s)])
+    assert b.research(1.0) == {"tried": 3, "kept": 0} and order == ["b", "c", "a"]
+
+
+def test_researching_stops_at_the_deadline():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    b.deadline = time.monotonic() - 1.0
+    b.search = lambda s, start, seconds: pytest.fail("searched past the deadline")
+    assert b.research(60.0) == {"tried": 0, "kept": 0}
+
+
+def test_researching_leaves_a_leaf_alone_when_coding_the_new_one_runs_out_of_time(monkeypatch):
+    import harness.strategy_builder as sb
+
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    before = (dict(b.nodes), list(b.maps))
+
+    def late(*a, **k):
+        raise TimeoutError("past the deadline")
+
+    monkeypatch.setattr(sb, "walk_order_cost", late)
+    b.search = _excepted()
+    assert b.research(60.0) == {"tried": 1, "kept": 0} and (b.nodes, b.maps) == before
+
+
+def test_researching_a_tie_keeps_the_leaf():
+    b = _builder(search=_excepted(levels={5: 1}, own=1), accept=0.01)
+    assert b.build(FORK)
+    before = (dict(b.nodes), list(b.maps))
+    b.search = _found({4: 0})
+    b.bits = lambda: {"nodes": 7}
+    assert b.research(60.0) == {"tried": 1, "kept": 0} and (b.nodes, b.maps) == before

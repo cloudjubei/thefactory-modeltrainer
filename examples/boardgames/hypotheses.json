@@ -6765,10 +6765,18 @@
       "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_all_four_complete_within_2_hours",
       "note": "A2 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions with Builder(choose_by_size=True): a leaf with exceptions is kept only where the split below it (same rule, recursively) would not make the strategy smaller; a split that runs out of time loses to the leaf. harness/floor_a2.py 5 tests, 12/12 mutants; builder 42 tests, 58/58 mutants. Full suite before launch: 2,891 passed. Measurement fingerprint a416e9353561. Bars: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248.",
       "registered_at": "2026-10-09T20:44:01.441282+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_all_four_complete_within_2_hours",
+          "ok": false,
+          "detail": "supported'\nE         \nE         - supported\nE         + inconclusive\n\ntests/test_c49_a2_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a2_evidence.py::test_c49_a2_all_four_complete_within_2_hours\n1 failed in 0.05s",
+          "drawn_at": "2026-10-09T22:44:37.359875+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_a2.json.gz",
-        "started": null
+        "started": "2026-10-09T20:44:08+00:00"
       },
       "pins": {
         "tests/test_c49_a2_evidence.py": "2122efaf11d2c8b6979bcfae2bd85e41fe13c9cccf3406f7feb5d77c1d8146cd",
@@ -6789,10 +6797,18 @@
       "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_choosing_by_size_matches_the_best_build_per_position",
       "note": "A2 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions with Builder(choose_by_size=True): a leaf with exceptions is kept only where the split below it (same rule, recursively) would not make the strategy smaller; a split that runs out of time loses to the leaf. harness/floor_a2.py 5 tests, 12/12 mutants; builder 42 tests, 58/58 mutants. Full suite before launch: 2,891 passed. Measurement fingerprint a416e9353561. Bars: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248.",
       "registered_at": "2026-10-09T20:44:02.023274+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a2_evidence.py::test_c49_a2_choosing_by_size_matches_the_best_build_per_position",
+          "ok": false,
+          "detail": " \nE         - supported\nE         + inconclusive\n\ntests/test_c49_a2_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a2_evidence.py::test_c49_a2_choosing_by_size_matches_the_best_build_per_position\n1 failed in 0.05s",
+          "drawn_at": "2026-10-09T22:44:37.804996+00:00",
+          "inconclusive": true
+        }
+      ],
       "data": {
         "path": "evidence/c49_a2.json.gz",
-        "started": null
+        "started": "2026-10-09T20:44:08+00:00"
       },
       "pins": {
         "tests/test_c49_a2_evidence.py": "2122efaf11d2c8b6979bcfae2bd85e41fe13c9cccf3406f7feb5d77c1d8146cd",
@@ -6805,6 +6821,1289 @@
         "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
       },
       "inconclusive_proof": "tests/test_c49_a2_evidence.py::test_c49_a2_the_size_is_undecidable"
+    },
+    "h235": {
+      "id": "h235",
+      "claim": "\u00a73.6 A2 (registered after the data): choosing between a leaf with exceptions and the split below it by size makes smaller strategies than either fixed threshold where it finishes \u2014 #95 3,481 bits (best threshold build 5,307), #535 6,637 (12,857); the three that finished total 13,995 against 22,041 \u2014 but building the split under every such leaf, recursively, does not fit 2 hours: #565's split never finished (the leaf was kept, W6's 3,877 exactly) and #594 did not finish",
+      "mode": "test",
+      "proof": "tests/test_c49_a2_after_evidence.py::test_c49_a2_choosing_by_size_beats_both_thresholds_where_it_finishes_but_runs_out_of_time",
+      "note": "h233, h234 inconclusive (3/4 complete; 20,371 bits with #594's partial 6,376). Searches tried 154-400 (A1: 74-277). #594 has no leaf at its root to fall back on, so a late split there leaves it unfinished. Next: make the comparison anytime \u2014 complete the threshold build first, then split the largest leaves first while time remains, keeping each split only if the strategy shrinks.",
+      "registered_at": "2026-10-09T22:45:18.515956+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a2_after_evidence.py::test_c49_a2_choosing_by_size_beats_both_thresholds_where_it_finishes_but_runs_out_of_time",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-09T22:45:18.979544+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_a2.json.gz",
+          "started": "2026-10-09T20:44:08+00:00"
+        },
+        {
+          "path": "evidence/c49_a1.json.gz",
+          "started": "2026-10-09T19:04:17+00:00"
+        },
+        {
+          "path": "evidence/c49_w6.json.gz",
+          "started": "2026-10-09T15:55:59+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_a2_after_evidence.py": "db2073b73069c531a23674f81585d99375ecc42baa4ad2c7178c0995b763d67d"
+      }
+    },
+    "h236": {
+      "id": "h236",
+      "claim": "\u00a73.6 A3: A1's four heavy frontier positions, built as W6 and then improved anytime (costliest leaves with exceptions split first, a split kept only if the strategy shrinks), all complete within 2 hours. Refuted at 2 or fewer; inconclusive at 3",
+      "mode": "test",
+      "proof": "tests/test_c49_a3_evidence.py::test_c49_a3_all_four_complete_within_2_hours",
+      "note": "A3 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions, then Builder.improve() for the rest of the 2 hours: the costliest leaf with exceptions (walk-order code) not yet tried is split with the ordinary rule and the split kept only if the whole strategy shrinks; unused maps dropped, a late split undone. harness/floor_a3.py 1 test, 4/4 mutants; builder 52 tests, 70/70 mutants. Full suite before launch: 2,906 passed. Measurement fingerprint 79d96bd72825. Bars as A2: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248; A2's three finished 13,995.",
+      "registered_at": "2026-10-09T23:13:14.170761+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a3_evidence.py::test_c49_a3_all_four_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T23:59:25.586958+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a3.json.gz",
+        "started": "2026-10-09T23:13:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a3_evidence.py": "c4ea69ce77ef7eb0c5fccf288a2909d8a9e8bdd29441f6665f0b5e219f4a86ef",
+        "harness/floor_a3.py": "1072d2d23bca17fd436bfd31a3e4778e8bf03b7472a4d0366fdcf5d09241a9f9",
+        "harness/floor_a2.py": "b77b66358cb5db06f1995b9269da76107c44be3ad0d9380637a7b6819baa0bdc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a3_evidence.py::test_c49_a3_completion_is_undecidable"
+    },
+    "h237": {
+      "id": "h237",
+      "claim": "\u00a73.6 A3: improving anytime matches the best fixed threshold per position \u2014 the four take no more than 28,248 bits together (the smaller of W6's and A1's build for each). Refuted at A1's 42,464 or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_a3_evidence.py::test_c49_a3_improving_anytime_matches_the_best_build_per_position",
+      "note": "A3 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on A1's four positions, then Builder.improve() for the rest of the 2 hours: the costliest leaf with exceptions (walk-order code) not yet tried is split with the ordinary rule and the split kept only if the whole strategy shrinks; unused maps dropped, a late split undone. harness/floor_a3.py 1 test, 4/4 mutants; builder 52 tests, 70/70 mutants. Full suite before launch: 2,906 passed. Measurement fingerprint 79d96bd72825. Bars as A2: W6 72,883 bits; A1 42,464; the smaller per position of W6 and A1 28,248; A2's three finished 13,995.",
+      "registered_at": "2026-10-09T23:13:15.023984+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a3_evidence.py::test_c49_a3_improving_anytime_matches_the_best_build_per_position",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-09T23:59:25.859947+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a3.json.gz",
+        "started": "2026-10-09T23:13:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a3_evidence.py": "c4ea69ce77ef7eb0c5fccf288a2909d8a9e8bdd29441f6665f0b5e219f4a86ef",
+        "harness/floor_a3.py": "1072d2d23bca17fd436bfd31a3e4778e8bf03b7472a4d0366fdcf5d09241a9f9",
+        "harness/floor_a2.py": "b77b66358cb5db06f1995b9269da76107c44be3ad0d9380637a7b6819baa0bdc",
+        "harness/floor_a1.py": "258ba5a91b326754f539f3361ac3b31919dad0bb4701f5371681d7c9c8d6f0f0",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a3_evidence.py::test_c49_a3_the_size_is_undecidable"
+    },
+    "h238": {
+      "id": "h238",
+      "claim": "\u00a73.6 A3 (registered after the data): improving anytime is cheap and cuts deep \u2014 each of the four heavy positions' queue ran dry within 15 minutes of its threshold build completing (longest build 45 minutes, far inside 2 hours), and improving cut each completed build by 55-82%: 62,621 bits to 16,740 in all, 23% of W6's 72,883 for the same positions",
+      "mode": "test",
+      "proof": "tests/test_c49_a3_after_evidence.py::test_c49_a3_improving_runs_dry_within_15_minutes_and_cuts_each_build_by_more_than_half",
+      "note": "Per position (completed -> improved): #95 6,453 -> 2,919; #535 18,081 -> 6,559; #565 3,877 -> 1,253; #594 34,210 -> 6,009. Splits tried 10-30, kept 7-26. Strategies reach fewer positions than W6's (#594 277,012 against 480,197). Next: W7 re-projects the whole game \u2014 W6's 32 positions built with improve.",
+      "registered_at": "2026-10-09T23:59:56.437694+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a3_after_evidence.py::test_c49_a3_improving_runs_dry_within_15_minutes_and_cuts_each_build_by_more_than_half",
+          "ok": false,
+          "detail": " 6453) <= 0.45\n\ntests/test_c49_a3_after_evidence.py:26: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a3_after_evidence.py::test_c49_a3_improving_runs_dry_within_15_minutes_and_cuts_each_build_by_more_than_half\n1 failed in 0.04s",
+          "drawn_at": "2026-10-09T23:59:56.725798+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a3.json.gz",
+        "started": "2026-10-09T23:13:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a3_after_evidence.py": "734dd2074021178ba357f0dd2546c8cd4449ab0f5e3023b3b7ca0f7ff878f97d"
+      },
+      "supersession": {
+        "by": "h239",
+        "reason": "h238's 'cut each completed build by 55-82%' was an arithmetic slip (#95: 6,453 -> 2,919 is a 54.8% cut); h239 states the measured range (54-82%) and keeps the rest",
+        "at": "2026-10-10T00:00:32.225544+00:00"
+      }
+    },
+    "h239": {
+      "id": "h239",
+      "claim": "\u00a73.6 A3 (registered after the data): improving anytime is cheap and cuts deep \u2014 each of the four heavy positions' queue ran dry within 15 minutes of its threshold build completing (longest build 45 minutes, far inside 2 hours), and improving cut each completed build by 54-82%: 62,621 bits to 16,740 in all, 23% of W6's 72,883 for the same positions",
+      "mode": "test",
+      "proof": "tests/test_c49_a3_after_evidence.py::test_c49_a3_improving_runs_dry_within_15_minutes_and_cuts_each_build_by_54_to_82_percent",
+      "note": "Corrects h238 (#95's cut is 54.8%, not >= 55%). Per position (completed -> improved): #95 6,453 -> 2,919; #535 18,081 -> 6,559; #565 3,877 -> 1,253; #594 34,210 -> 6,009. Splits tried 10-30, kept 7-26.",
+      "registered_at": "2026-10-10T00:00:24.527547+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a3_after_evidence.py::test_c49_a3_improving_runs_dry_within_15_minutes_and_cuts_each_build_by_54_to_82_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-10T00:00:28.050035+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a3.json.gz",
+        "started": "2026-10-09T23:13:21+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a3_after_evidence.py": "5858a6d78584316e7aebb63984f38438067391da5932705ee50a18c3f0ebdaf8"
+      }
+    },
+    "h240": {
+      "id": "h240",
+      "claim": "\u00a73.6 W7: W6's 32 frontier positions, rebuilt as W6 plus the anytime improvement, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_28_of_32_complete_within_2_hours",
+      "note": "W7 = W6's 32 frontier positions (same order, same settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) plus Builder.improve() after each complete build. Paired with W6. harness/floor_w7.py 4 tests, 11/11 mutants. Full suite before launch: 2,914 passed. Measurement fingerprint 79d96bd72825. W6: 4,306,421 bits projected (95% interval 2.10M-6.85M); A3 cut four heavy positions to 23%.",
+      "registered_at": "2026-10-10T00:15:34.759988+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-10T03:26:56.561376+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w7.json.gz",
+        "started": "2026-10-10T00:15:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w7_evidence.py": "ee188c9d225e479b8332562bccb46c7b09262b695c2c80e7a6236b54f2eb3e80",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w7_evidence.py::test_c49_w7_completion_is_undecidable"
+    },
+    "h241": {
+      "id": "h241",
+      "claim": "\u00a73.6 W7: improving anytime at least halves the whole game \u2014 the projection (the opening plus 671 x the 32 strategies' mean) is at most half W6's 4,306,421 bits. Refuted at W6's or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_improving_halves_the_whole_game",
+      "note": "W7 = W6's 32 frontier positions (same order, same settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) plus Builder.improve() after each complete build. Paired with W6. harness/floor_w7.py 4 tests, 11/11 mutants. Full suite before launch: 2,914 passed. Measurement fingerprint 79d96bd72825. W6: 4,306,421 bits projected (95% interval 2.10M-6.85M); A3 cut four heavy positions to 23%.",
+      "registered_at": "2026-10-10T00:15:35.015913+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_improving_halves_the_whole_game",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-10-10T03:26:56.811185+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w7.json.gz",
+        "started": "2026-10-10T00:15:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w7_evidence.py": "ee188c9d225e479b8332562bccb46c7b09262b695c2c80e7a6236b54f2eb3e80",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w7_evidence.py::test_c49_w7_the_halving_is_undecidable"
+    },
+    "h242": {
+      "id": "h242",
+      "claim": "\u00a73.6 W7: the whole game still projects above the trained net's ~660K bits \u2014 the whole 95% bootstrap interval of the projection above 660K. Refuted when the whole interval is below and all 32 finished; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_the_whole_game_still_projects_above_the_net",
+      "note": "W7 = W6's 32 frontier positions (same order, same settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) plus Builder.improve() after each complete build. Paired with W6. harness/floor_w7.py 4 tests, 11/11 mutants. Full suite before launch: 2,914 passed. Measurement fingerprint 79d96bd72825. W6: 4,306,421 bits projected (95% interval 2.10M-6.85M); A3 cut four heavy positions to 23%.",
+      "registered_at": "2026-10-10T00:15:36.014701+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w7_evidence.py::test_c49_w7_the_whole_game_still_projects_above_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-10T03:26:57.158768+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w7.json.gz",
+        "started": "2026-10-10T00:15:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w7_evidence.py": "ee188c9d225e479b8332562bccb46c7b09262b695c2c80e7a6236b54f2eb3e80",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w7_evidence.py::test_c49_w7_the_projection_against_the_net_is_undecidable"
+    },
+    "h243": {
+      "id": "h243",
+      "claim": "\u00a73.6 W7 (registered after the data): W7's cut from W6 has two parts \u2014 with W6's settings its builds complete at 154,777 bits against W6's 205,322 (run-to-run variance, per position from under a tenth to over 2.4x W6's), and improving then cuts them to 69,847: improving alone takes the projection from 3.25M bits to 1.47M. Four positions kept no split: their one candidate, a leaf at the root, split larger one level down, so nothing below it was tried",
+      "mode": "test",
+      "proof": "tests/test_c49_w7_after_evidence.py::test_c49_w7_the_cut_is_build_variance_and_improvement_and_four_roots_got_stuck_at_one_split",
+      "note": "h241's halving is real but part of it is variance between two builds of the same settings: the same 32 positions under W6's rules complete at 75% of W6's bits this time. Stuck at one split: #95 6,453, #271 1,324, #374 949, #512 1,486 (one root leaf each; A3 improved #95 to 2,919 when its first split happened to be smaller). Improvement phases 1-984 s; builds total 39,314 s (W6 36,103); the whole frontier ~229 h.",
+      "registered_at": "2026-10-10T03:27:38.967422+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w7_after_evidence.py::test_c49_w7_the_cut_is_build_variance_and_improvement_and_four_roots_got_stuck_at_one_split",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.12s",
+          "drawn_at": "2026-10-10T03:27:39.574169+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_w7.json.gz",
+          "started": "2026-10-10T00:15:48+00:00"
+        },
+        {
+          "path": "evidence/c49_w6.json.gz",
+          "started": "2026-10-09T15:55:59+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_w7_after_evidence.py": "5a1066d6864c63287ce702eb8d4629f16820fb750be2a7d4a2aeb282dd2ee359"
+      }
+    },
+    "h244": {
+      "id": "h244",
+      "claim": "\u00a73.6 A4: improving with lookahead, after plain improvement has run dry, cuts the eight positions' total by at least 15% more. Refuted under 3%; inconclusive between, or while a position is unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_a4_evidence.py::test_c49_a4_lookahead_cuts_what_plain_improvement_left_by_15_percent",
+      "note": "A4 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on #95, #271, #374, #512 (W7: one root leaf each, no split kept) and #594, #535, #98, #457 (heavy); each complete build improved as W7 until the queue runs dry (size recorded as plain_bits), then Builder.improve(lookahead=True) for the time left. harness/floor_a4.py 5 tests, 16/16 mutants; builder 57 tests, 77/77 mutants. Full suite before launch: 2,929 passed. Measurement fingerprint 0594eb30c588.",
+      "registered_at": "2026-10-10T03:53:31.275780+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a4_evidence.py::test_c49_a4_lookahead_cuts_what_plain_improvement_left_by_15_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-10T05:48:01.112267+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a4.json.gz",
+        "started": "2026-10-10T03:53:41+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a4_evidence.py": "b213d3c4058a9718c95c43744e2988d113dfcb0b04a190798208328c707ee7b3",
+        "harness/floor_a4.py": "55a5f90321c229a01fe872db4efb2d824d12bfdd03cbbe8b8d3cd9e8402b191a",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a4_evidence.py::test_c49_a4_the_further_cut_is_undecidable"
+    },
+    "h245": {
+      "id": "h245",
+      "claim": "\u00a73.6 A4: lookahead unsticks positions plain improvement could not change \u2014 of the heavy positions (more than 200 bits) where it kept no split, lookahead cuts at least half. Refuted when it cuts none; inconclusive with fewer than two such positions, between, or while a position is unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_a4_evidence.py::test_c49_a4_lookahead_unsticks_at_least_half_the_stuck_positions",
+      "note": "A4 = W6's settings (accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library) on #95, #271, #374, #512 (W7: one root leaf each, no split kept) and #594, #535, #98, #457 (heavy); each complete build improved as W7 until the queue runs dry (size recorded as plain_bits), then Builder.improve(lookahead=True) for the time left. harness/floor_a4.py 5 tests, 16/16 mutants; builder 57 tests, 77/77 mutants. Full suite before launch: 2,929 passed. Measurement fingerprint 0594eb30c588.",
+      "registered_at": "2026-10-10T03:53:32.033776+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a4_evidence.py::test_c49_a4_lookahead_unsticks_at_least_half_the_stuck_positions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-10T05:48:01.334501+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a4.json.gz",
+        "started": "2026-10-10T03:53:41+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a4_evidence.py": "b213d3c4058a9718c95c43744e2988d113dfcb0b04a190798208328c707ee7b3",
+        "harness/floor_a4.py": "55a5f90321c229a01fe872db4efb2d824d12bfdd03cbbe8b8d3cd9e8402b191a",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a4_evidence.py::test_c49_a4_unsticking_is_undecidable"
+    },
+    "h246": {
+      "id": "h246",
+      "claim": "\u00a73.6 A4 (registered after the data): building, improving and improving with lookahead cut the eight positions' completed builds by 63% (82,138 bits to 29,989), and every build was done within 72 minutes \u2014 at least 48 minutes of each 2-hour cap left unused",
+      "mode": "test",
+      "proof": "tests/test_c49_a4_after_evidence.py::test_c49_a4_the_pipeline_cuts_completed_builds_by_63_percent_inside_72_minutes",
+      "note": "Lookahead per position (plain -> final): #594 9,951 -> 5,373; #535 7,304 -> 5,949; #457 8,776 -> 8,130; #271 1,324 -> 720; #374 949 -> 514; #512 933 -> 692; #95 2,357 and #98 6,254 unchanged (plain improvement had already unstuck #95 this time). Lookahead passes 16-1,375 s. The idle time is the next lever.",
+      "registered_at": "2026-10-10T05:48:45.164853+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a4_after_evidence.py::test_c49_a4_the_pipeline_cuts_completed_builds_by_63_percent_inside_72_minutes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-10T05:48:45.508218+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a4.json.gz",
+        "started": "2026-10-10T03:53:41+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a4_after_evidence.py": "af07eda096d3e33efbd7244e25245604b543692a5602efa9e4ab54ee55f2ff7d"
+      }
+    },
+    "h247": {
+      "id": "h247",
+      "claim": "\u00a73.6 A5: re-searching the costliest leaves with exceptions for 120 s each in the time left, then improving with lookahead once more, cuts the total A4's passes left on its eight positions by at least 10%. Refuted under 2%; inconclusive between, or while a position is unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_a5_evidence.py::test_c49_a5_research_cuts_what_lookahead_left_by_10_percent",
+      "note": "A5 = A4 exactly (W6's settings; build, improve, improve with lookahead) plus Builder.research(120) and one more improve(lookahead=True), measured inside each build against the size after the first lookahead pass. harness/floor_a5.py 4 tests, 9/9 mutants; builder 65 tests, 89/89 mutants. Full suite before launch: 2,945 passed. Measurement fingerprint b2f5efcf2ac9.",
+      "registered_at": "2026-10-10T06:40:02.097851+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a5_evidence.py::test_c49_a5_research_cuts_what_lookahead_left_by_10_percent",
+          "ok": false,
+          "detail": "\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_a5_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a5_evidence.py::test_c49_a5_research_cuts_what_lookahead_left_by_10_percent\n1 failed in 0.05s",
+          "drawn_at": "2026-10-10T08:56:14.998528+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a5.json.gz",
+        "started": "2026-10-10T06:40:15+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a5_evidence.py": "c9e2a56d55d0e3253a4b88751e0557c899fc49afc55db465a93b7cb0e44e5cff",
+        "harness/floor_a5.py": "48e7702d0a11d4c05bb8b5b19ef7663de640c0798d620cb532cc20064f782e66",
+        "harness/floor_a4.py": "55a5f90321c229a01fe872db4efb2d824d12bfdd03cbbe8b8d3cd9e8402b191a",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_a5_evidence.py::test_c49_a5_the_research_cut_is_undecidable"
+    },
+    "h248": {
+      "id": "h248",
+      "claim": "\u00a73.6 (registered after the data; dead end): a strategy's maps are not near-copies of one another, though each search starts from the most recent map \u2014 coded as an edit of the map before it (how many cells differ, which, and each one's 3-bit level), A4's 215 maps take 20,354 bits against 17,259 coded whole: 18% more",
+      "mode": "test",
+      "proof": "tests/test_c49_map_edit_coding_evidence.py::test_c49_maps_coded_as_edits_of_the_map_before_cost_more_than_coded_whole",
+      "note": "Checked while A5 ran, because after improvement maps carry most of a heavy position's bits (an average map levels 15-21 of 27-31 empty cells). Simplification clears levels per map, so neighbours differ in many cells. Not pursued.",
+      "registered_at": "2026-10-10T07:41:33.030517+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_map_edit_coding_evidence.py::test_c49_maps_coded_as_edits_of_the_map_before_cost_more_than_coded_whole",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-10T07:41:33.460348+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a4.json.gz",
+        "started": "2026-10-10T03:53:41+00:00"
+      },
+      "pins": {
+        "tests/test_c49_map_edit_coding_evidence.py": "a8ae6447cdadf9bc929e0c5e1914804999e50079f1f581db53d59a02f0a96e12"
+      }
+    },
+    "h249": {
+      "id": "h249",
+      "claim": "\u00a73.6 A5 (registered after the data): after improving with lookahead little is left for longer leaf searches \u2014 the eight positions held only 29 leaves with exceptions to re-search between them (3 kept) \u2014 because exceptions are now 14% of their bits and maps 64%: the maps are the cost to attack next",
+      "mode": "test",
+      "proof": "tests/test_c49_a5_after_evidence.py::test_c49_a5_little_is_left_to_research_because_maps_are_now_most_of_the_bits",
+      "note": "h247 refuted (pre-registered): research plus one more lookahead pass cut 0.56% (28,892 -> 28,729). Each re-search ran 120 s; builds took 25-83 minutes. The eight's completed builds total 66,252 bits, the finished strategies 28,729 (-57%). Map coding as edits of the previous map is a dead end (h248).",
+      "registered_at": "2026-10-10T08:56:50.970845+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a5_after_evidence.py::test_c49_a5_little_is_left_to_research_because_maps_are_now_most_of_the_bits",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-10T08:56:51.313410+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a5.json.gz",
+        "started": "2026-10-10T06:40:15+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a5_after_evidence.py": "8c3a9ebad35deae986040b7c942bf4dde736d9d520974537a7e16e4d5cb3d79f"
+      }
+    },
+    "h250": {
+      "id": "h250",
+      "claim": "\u00a73.6 W8: W6's 32 frontier positions built, improved and improved with lookahead, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_28_of_32_complete_within_2_hours",
+      "note": "W8 = W6's 32 frontier positions (W6's settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library), each complete build improved until dry (plain_bits recorded) then improved with lookahead; no research. harness/floor_w8.py 4 tests, 15/15 mutants; builder 65 tests, 89/89 mutants. Full suite before launch: 2,952 passed. Measurement fingerprint b2f5efcf2ac9. W7: 1,465,679 bits (95% interval 0.78M-2.30M); run-to-run variance between builds is large (h243), so the comparison with W7 carries it.",
+      "registered_at": "2026-10-10T09:09:22.835828+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-10T13:25:27.411919+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w8.json.gz",
+        "started": "2026-10-10T09:09:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w8_evidence.py": "150eb5f54f665d10ae9b19cd4b8d3f65fac958cac50c95f2f83c695751e8b984",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w8_evidence.py::test_c49_w8_completion_is_undecidable"
+    },
+    "h251": {
+      "id": "h251",
+      "claim": "\u00a73.6 W8: with lookahead the whole game projects to at most nine tenths of W7's 1,465,679 bits. Refuted at W7's or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_whole_game_projects_under_nine_tenths_of_w7",
+      "note": "W8 = W6's 32 frontier positions (W6's settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library), each complete build improved until dry (plain_bits recorded) then improved with lookahead; no research. harness/floor_w8.py 4 tests, 15/15 mutants; builder 65 tests, 89/89 mutants. Full suite before launch: 2,952 passed. Measurement fingerprint b2f5efcf2ac9. W7: 1,465,679 bits (95% interval 0.78M-2.30M); run-to-run variance between builds is large (h243), so the comparison with W7 carries it.",
+      "registered_at": "2026-10-10T09:09:23.022378+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_whole_game_projects_under_nine_tenths_of_w7",
+          "ok": false,
+          "detail": "\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_w8_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w8_evidence.py::test_c49_w8_the_whole_game_projects_under_nine_tenths_of_w7\n1 failed in 0.05s",
+          "drawn_at": "2026-10-10T13:25:27.668346+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w8.json.gz",
+        "started": "2026-10-10T09:09:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w8_evidence.py": "150eb5f54f665d10ae9b19cd4b8d3f65fac958cac50c95f2f83c695751e8b984",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_projection_against_w7_is_undecidable"
+    },
+    "h252": {
+      "id": "h252",
+      "claim": "\u00a73.6 W8: the whole game still projects above the trained net's ~660K bits \u2014 the whole 95% bootstrap interval above 660K. Refuted when the whole interval is below and all 32 finished; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_whole_game_still_projects_above_the_net",
+      "note": "W8 = W6's 32 frontier positions (W6's settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library), each complete build improved until dry (plain_bits recorded) then improved with lookahead; no research. harness/floor_w8.py 4 tests, 15/15 mutants; builder 65 tests, 89/89 mutants. Full suite before launch: 2,952 passed. Measurement fingerprint b2f5efcf2ac9. W7: 1,465,679 bits (95% interval 0.78M-2.30M); run-to-run variance between builds is large (h243), so the comparison with W7 carries it.",
+      "registered_at": "2026-10-10T09:09:24.033983+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_whole_game_still_projects_above_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-10T13:25:28.199189+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w8.json.gz",
+        "started": "2026-10-10T09:09:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w8_evidence.py": "150eb5f54f665d10ae9b19cd4b8d3f65fac958cac50c95f2f83c695751e8b984",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_projection_against_the_net_is_undecidable"
+    },
+    "h253": {
+      "id": "h253",
+      "claim": "\u00a73.6 W8: inside the 32 builds, improving with lookahead cuts what plain improvement left by at least 10%. Refuted under 2%; inconclusive between, or while a position is unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_lookahead_cuts_a_tenth_inside_the_builds",
+      "note": "W8 = W6's 32 frontier positions (W6's settings: accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library), each complete build improved until dry (plain_bits recorded) then improved with lookahead; no research. harness/floor_w8.py 4 tests, 15/15 mutants; builder 65 tests, 89/89 mutants. Full suite before launch: 2,952 passed. Measurement fingerprint b2f5efcf2ac9. W7: 1,465,679 bits (95% interval 0.78M-2.30M); run-to-run variance between builds is large (h243), so the comparison with W7 carries it.",
+      "registered_at": "2026-10-10T09:09:25.038460+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w8_evidence.py::test_c49_w8_lookahead_cuts_a_tenth_inside_the_builds",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-10T13:25:28.441152+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w8.json.gz",
+        "started": "2026-10-10T09:09:34+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w8_evidence.py": "150eb5f54f665d10ae9b19cd4b8d3f65fac958cac50c95f2f83c695751e8b984",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w8_evidence.py::test_c49_w8_the_lookahead_cut_is_undecidable"
+    },
+    "h254": {
+      "id": "h254",
+      "claim": "\u00a73.6 W8 (registered after the data): between runs of the same settings the builds swing more than lookahead gains inside them \u2014 W8's builds completed at 186,359 bits against W7's 154,777 (+20%), so the whole game projects higher than W7's (1.57M) though lookahead cut 16% of what plain improvement left; keeping the smaller of W7's and W8's certified strategy per position gives 60,235 bits, the whole game at 1.26M, 14% under W7's projection",
+      "mode": "test",
+      "proof": "tests/test_c49_w8_after_evidence.py::test_c49_w8_runs_swing_more_than_lookahead_gains_and_the_better_of_two_runs_projects_1_26m",
+      "note": "h251 refuted (pre-registered: <= 0.9 x W7) by this swing; h253 supported (lookahead -15.8% inside builds). W8 smaller than W7 on 10 positions, W7 smaller on 6, the rest equal. Adding W6's builds to the minimum changes it by 343 bits. Exceptions 22% of W8's bits, maps 58%. One build reached the 2-hour cap (#457) and completed. Whole frontier ~299 CPU-hours at W8's pace.",
+      "registered_at": "2026-10-10T13:26:07.709486+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w8_after_evidence.py::test_c49_w8_runs_swing_more_than_lookahead_gains_and_the_better_of_two_runs_projects_1_26m",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-10-10T13:26:08.115194+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_w8.json.gz",
+          "started": "2026-10-10T09:09:34+00:00"
+        },
+        {
+          "path": "evidence/c49_w7.json.gz",
+          "started": "2026-10-10T00:15:48+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_w8_after_evidence.py": "915bf74a06e068b7f9e20a82dc179d9e58d420e7cd958e265eafa9aefa476c75"
+      }
+    },
+    "h255": {
+      "id": "h255",
+      "claim": "\u00a73.6 L1: W6's 32 frontier positions built with the full pipeline but maps of 4 levels at 2 bits, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_l1_evidence.py::test_c49_l1_28_of_32_complete_within_2_hours",
+      "note": "L1 = W8 exactly (W6's 32 positions; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with maps of 4 levels at 2 bits a levelled cell instead of 8 at 3. User's choice of the leaf language over building the whole frontier (2026-10-11). harness/floor_l1.py 4 tests, 12/12 mutants. Smoke: #486 a pure 4-level root map in 48 s. Full suite before launch: 2,961 passed. Measurement fingerprint b2f5efcf2ac9 (= W8).",
+      "registered_at": "2026-10-10T22:32:45.926671+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l1_evidence.py::test_c49_l1_28_of_32_complete_within_2_hours",
+          "ok": false,
+          "detail": " == 'supported'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_l1_evidence.py:29: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l1_evidence.py::test_c49_l1_28_of_32_complete_within_2_hours\n1 failed in 0.18s",
+          "drawn_at": "2026-10-11T09:15:35.736356+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l1.json.gz",
+        "started": "2026-10-10T22:32:56+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l1_evidence.py": "b42be25b8c0f287041b955af7228694ce2bc1dc277d04ad42d5642eeae67739e",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l1_evidence.py::test_c49_l1_completion_is_undecidable"
+    },
+    "h256": {
+      "id": "h256",
+      "claim": "\u00a73.6 L1: maps of 4 levels at 2 bits make the 32 strategies at least a fifth smaller \u2014 no more than four fifths of the smaller 8-level run (W7, 69,847 bits). Refuted at the larger 8-level run (W8, 74,714) or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_l1_evidence.py::test_c49_l1_four_levels_make_the_strategies_a_fifth_smaller",
+      "note": "L1 = W8 exactly (W6's 32 positions; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with maps of 4 levels at 2 bits a levelled cell instead of 8 at 3. User's choice of the leaf language over building the whole frontier (2026-10-11). harness/floor_l1.py 4 tests, 12/12 mutants. Smoke: #486 a pure 4-level root map in 48 s. Full suite before launch: 2,961 passed. Measurement fingerprint b2f5efcf2ac9 (= W8).",
+      "registered_at": "2026-10-10T22:32:46.022709+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l1_evidence.py::test_c49_l1_four_levels_make_the_strategies_a_fifth_smaller",
+          "ok": false,
+          "detail": "\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_l1_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l1_evidence.py::test_c49_l1_four_levels_make_the_strategies_a_fifth_smaller\n1 failed in 0.13s",
+          "drawn_at": "2026-10-11T09:15:36.491441+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l1.json.gz",
+        "started": "2026-10-10T22:32:56+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l1_evidence.py": "b42be25b8c0f287041b955af7228694ce2bc1dc277d04ad42d5642eeae67739e",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l1_evidence.py::test_c49_l1_the_size_is_undecidable"
+    },
+    "h257": {
+      "id": "h257",
+      "claim": "\u00a73.6 L1 (registered after the data; dead end): fewer, cheaper levels lose \u2014 with 4 levels at 2 bits the 32 strategies need 2,132 maps against W8's 586 with 8 levels, and are larger on 25 of the 32 positions; 9 did not finish in 2 hours. A map's expressiveness, not its cell cost, binds",
+      "mode": "test",
+      "proof": "tests/test_c49_l1_after_evidence.py::test_c49_l1_four_levels_need_more_than_three_times_the_maps_and_are_larger_on_most_positions",
+      "note": "h255 refuted (23/32 complete), h256 refuted (>= 276,519 bits, a lower bound, against 74,714). The run took 10 h 42 min against W8's 4 h 16 min. Positions that one 8-level map covered (#471: 96 bits) split into several 4-level maps (522). Next: the other direction \u2014 a richer rule at the same cost (L2, ties).",
+      "registered_at": "2026-10-11T09:15:57.349230+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l1_after_evidence.py::test_c49_l1_four_levels_need_more_than_three_times_the_maps_and_are_larger_on_most_positions",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-11T09:15:58.035556+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l1.json.gz",
+          "started": "2026-10-10T22:32:56+00:00"
+        },
+        {
+          "path": "evidence/c49_w8.json.gz",
+          "started": "2026-10-10T09:09:34+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l1_after_evidence.py": "51e1c80b3069ed557a48331ab35da8ca44d6b6761eda11f7671cef13de8983f2"
+      }
+    },
+    "h258": {
+      "id": "h258",
+      "claim": "\u00a73.6 L2: W6's 32 frontier positions built with W8's pipeline, the rule's levels read with ties to the lowest move, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_l2_evidence.py::test_c49_l2_28_of_32_complete_within_2_hours",
+      "note": "L2 = W8 exactly (W6's 32 positions; 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with the rule's levels read with ties to the lowest move: harness.steady_state.Facts(ties=\"lowest\") \u2014 the first level holding any safe move decides, its lowest move, instead of only a level holding exactly one. C walk identical to Python under both rules; SAT search refuses it. Mutants: steady_state 26/26, c4leafwalk 25/25, native_leaf 13/13, steady_search 25/25, floor_l2 5/5. Smoke: #471 a pure root map in 62 s. Full suite before launch: 2,978 passed. Measurement fingerprint e5968103e6f4.",
+      "registered_at": "2026-10-11T09:27:55.161455+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l2_evidence.py::test_c49_l2_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T11:29:45.273192+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l2.json.gz",
+        "started": "2026-10-11T09:28:05+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l2_evidence.py": "5c2485a3b3d8c28e73223964e52bdb1352597454757594c2e2d4d911da23d05a",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l2_evidence.py::test_c49_l2_completion_is_undecidable"
+    },
+    "h259": {
+      "id": "h259",
+      "claim": "\u00a73.6 L2: reading levels with ties to the lowest move makes the 32 strategies at least a fifth smaller \u2014 no more than four fifths of the smaller run of the exact rule (W7, 69,847 bits). Refuted at the larger (W8, 74,714) or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_l2_evidence.py::test_c49_l2_ties_to_the_lowest_make_the_strategies_a_fifth_smaller",
+      "note": "L2 = W8 exactly (W6's 32 positions; 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with the rule's levels read with ties to the lowest move: harness.steady_state.Facts(ties=\"lowest\") \u2014 the first level holding any safe move decides, its lowest move, instead of only a level holding exactly one. C walk identical to Python under both rules; SAT search refuses it. Mutants: steady_state 26/26, c4leafwalk 25/25, native_leaf 13/13, steady_search 25/25, floor_l2 5/5. Smoke: #471 a pure root map in 62 s. Full suite before launch: 2,978 passed. Measurement fingerprint e5968103e6f4.",
+      "registered_at": "2026-10-11T09:27:56.017704+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l2_evidence.py::test_c49_l2_ties_to_the_lowest_make_the_strategies_a_fifth_smaller",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T11:29:45.491478+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l2.json.gz",
+        "started": "2026-10-11T09:28:05+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l2_evidence.py": "5c2485a3b3d8c28e73223964e52bdb1352597454757594c2e2d4d911da23d05a",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l2_evidence.py::test_c49_l2_the_size_is_undecidable"
+    },
+    "h260": {
+      "id": "h260",
+      "claim": "\u00a73.6 L2 (registered after the data): with the first level holding any safe move deciding, the 32 strategies need 90 maps instead of W8's 586 and take 14,666 bits \u2014 and the whole game projects to 308,603 bits, its 95% bootstrap interval (177K-469K) entirely under the trained net's ~660K: the first projection below the net, on positions seen before (W9 tests it on fresh ones)",
+      "mode": "test",
+      "proof": "tests/test_c49_l2_after_evidence.py::test_c49_l2_ninety_maps_and_the_whole_game_projects_under_the_net",
+      "note": "L2 smaller than W8 on 19 positions, larger on 7; largest #594 2,633 bits (W8 5,079-ish range). Exceptions 34% of the bits, maps 59%. Builds 7.7 CPU-hours in all (W8 ~11), longest 47 minutes; the whole frontier ~161 CPU-hours at this pace. WeakC4's ~35-45K is still ~8x below.",
+      "registered_at": "2026-10-11T11:30:11.158982+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l2_after_evidence.py::test_c49_l2_ninety_maps_and_the_whole_game_projects_under_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.14s",
+          "drawn_at": "2026-10-11T11:30:11.639867+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l2.json.gz",
+          "started": "2026-10-11T09:28:05+00:00"
+        },
+        {
+          "path": "evidence/c49_w8.json.gz",
+          "started": "2026-10-10T09:09:34+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l2_after_evidence.py": "c2c9eb9bb809c19cfc866ae47c5c1875d375d4c99bb534ba3a886d6263f35495"
+      }
+    },
+    "h261": {
+      "id": "h261",
+      "claim": "\u00a73.6 W9: the next 32 fresh frontier positions of W1's seeded order, built with L2's rule and pipeline, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_w9_evidence.py::test_c49_w9_28_of_32_complete_within_2_hours",
+      "note": "W9 = L2 exactly (8 levels at 3 bits, ties to the lowest move, accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) on the next 32 positions of W1's seeded frontier order (41st-72nd; the first 40 reproduced), never built before. harness/floor_w9.py 4 tests, 7/7 mutants. Full suite before launch: 2,986 passed. Measurement fingerprint e5968103e6f4 (= L2). L2 on W6's 32 projected 308,603 bits (interval 177K-469K; h260, after the data).",
+      "registered_at": "2026-10-11T11:42:21.455443+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w9_evidence.py::test_c49_w9_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T13:42:58.936787+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w9.json.gz",
+        "started": "2026-10-11T11:42:32+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w9_evidence.py": "58154d5f9b48c128a45d1ab62de63deaf5d280fc74d1513f5e4bb130e75e6376",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w9_evidence.py::test_c49_w9_completion_is_undecidable"
+    },
+    "h262": {
+      "id": "h262",
+      "claim": "\u00a73.6 W9: with L2's rule the whole-game first-player strategy projects below the trained net's ~660K bits \u2014 the opening plus 671 x the 32 fresh strategies' mean, the whole 95% bootstrap interval below 660K and every root finished. Refuted when the whole interval is above; inconclusive otherwise",
+      "mode": "test",
+      "proof": "tests/test_c49_w9_evidence.py::test_c49_w9_the_whole_game_projects_below_the_net",
+      "note": "W9 = L2 exactly (8 levels at 3 bits, ties to the lowest move, accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) on the next 32 positions of W1's seeded frontier order (41st-72nd; the first 40 reproduced), never built before. harness/floor_w9.py 4 tests, 7/7 mutants. Full suite before launch: 2,986 passed. Measurement fingerprint e5968103e6f4 (= L2). L2 on W6's 32 projected 308,603 bits (interval 177K-469K; h260, after the data).",
+      "registered_at": "2026-10-11T11:42:22.035482+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w9_evidence.py::test_c49_w9_the_whole_game_projects_below_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.13s",
+          "drawn_at": "2026-10-11T13:42:59.257487+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w9.json.gz",
+        "started": "2026-10-11T11:42:32+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w9_evidence.py": "58154d5f9b48c128a45d1ab62de63deaf5d280fc74d1513f5e4bb130e75e6376",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w9_evidence.py::test_c49_w9_the_projection_against_the_net_is_undecidable"
+    },
+    "h263": {
+      "id": "h263",
+      "claim": "\u00a73.6 L3: W6's 32 frontier positions built as L2 but with two-ply safety, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_l3_evidence.py::test_c49_l3_28_of_32_complete_within_2_hours",
+      "note": "L3 = L2 exactly (W6's 32 positions; 8 levels at 3 bits, ties to the lowest move, accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with two-ply safety: Facts(safe_depth=2) \u2014 a move also unsafe when the opponent can answer it with a forced win in two (every reply then loses at once); the 1-ply safe set kept when all fail. User's choice of more leaf language (2026-10-11). Mutants steady_state 32/32, c4leafwalk 31/31, native_leaf 15/15, steady_search 26/26, floor_l3 10/10 (four equivalent mutants dropped, journal). Smoke: #471 a pure root map in 82 s. Full suite before launch: 3,005 passed. Measurement fingerprint 081011f9bbfa.",
+      "registered_at": "2026-10-11T20:20:09.683257+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l3_evidence.py::test_c49_l3_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T23:24:38.473721+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l3.json.gz",
+        "started": "2026-10-11T20:20:23+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l3_evidence.py": "17a052fb325d8a34a9d153fd399826eff435583d9879c98e644b58d72ec1411c",
+        "harness/floor_l3.py": "cbe0fbb55838bd67ce4b97ffc653af9575202f85cdd57a9b208f6a055390b4ea",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l3_evidence.py::test_c49_l3_completion_is_undecidable"
+    },
+    "h264": {
+      "id": "h264",
+      "claim": "\u00a73.6 L3: two-ply safety makes the 32 strategies at least a fifth smaller than L2's \u2014 no more than four fifths of L2's 14,666 bits on the same positions. Refuted at L2's or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_l3_evidence.py::test_c49_l3_two_ply_safety_makes_the_strategies_a_fifth_smaller",
+      "note": "L3 = L2 exactly (W6's 32 positions; 8 levels at 3 bits, ties to the lowest move, accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap, no library; built, improved, improved with lookahead) with two-ply safety: Facts(safe_depth=2) \u2014 a move also unsafe when the opponent can answer it with a forced win in two (every reply then loses at once); the 1-ply safe set kept when all fail. User's choice of more leaf language (2026-10-11). Mutants steady_state 32/32, c4leafwalk 31/31, native_leaf 15/15, steady_search 26/26, floor_l3 10/10 (four equivalent mutants dropped, journal). Smoke: #471 a pure root map in 82 s. Full suite before launch: 3,005 passed. Measurement fingerprint 081011f9bbfa.",
+      "registered_at": "2026-10-11T20:20:10.023391+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l3_evidence.py::test_c49_l3_two_ply_safety_makes_the_strategies_a_fifth_smaller",
+          "ok": false,
+          "detail": "       \nE         - supported\nE         + refuted\n\ntests/test_c49_l3_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l3_evidence.py::test_c49_l3_two_ply_safety_makes_the_strategies_a_fifth_smaller\n1 failed in 0.05s",
+          "drawn_at": "2026-10-11T23:24:38.724538+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l3.json.gz",
+        "started": "2026-10-11T20:20:23+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l3_evidence.py": "17a052fb325d8a34a9d153fd399826eff435583d9879c98e644b58d72ec1411c",
+        "harness/floor_l3.py": "cbe0fbb55838bd67ce4b97ffc653af9575202f85cdd57a9b208f6a055390b4ea",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_l3_evidence.py::test_c49_l3_the_size_is_undecidable"
+    },
+    "h265": {
+      "id": "h265",
+      "claim": "\u00a73.6 L3 (registered after the data): two-ply safety trades exceptions for maps \u2014 exceptions fall from 34% of L2's bits to 16% of L3's, but the strategies need 118 maps against 90 and come out 4.6% larger in all (15,343 bits against 14,666), smaller on 13 positions and larger on 9, with the builds a fifth slower",
+      "mode": "test",
+      "proof": "tests/test_c49_l3_after_evidence.py::test_c49_l3_two_ply_safety_trades_exceptions_for_maps",
+      "note": "h263 supported (32/32), h264 refuted (pre-registered: <= 4/5 of L2). Maps are now 74% of L3's bits. The whole game projects to 322,799 bits (interval 164K-512K), still under the net. `safe_depth` stays in the language, 1 by default. Next lever under test: sharing maps across frontier positions under L2's rule.",
+      "registered_at": "2026-10-11T23:25:08.715009+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l3_after_evidence.py::test_c49_l3_two_ply_safety_trades_exceptions_for_maps",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T23:25:09.124301+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l3.json.gz",
+          "started": "2026-10-11T20:20:23+00:00"
+        },
+        {
+          "path": "evidence/c49_l2.json.gz",
+          "started": "2026-10-11T09:28:05+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l3_after_evidence.py": "58fae2e6e937b3d31da512f7346cc02297ddb20b8214a4cc6b5cd2639028fdfd"
+      }
+    },
+    "h266": {
+      "id": "h266",
+      "claim": "\u00a73.6 (registered after the data): under L2's rule maps carry across the frontier in part \u2014 of the 223 leaves of W9's 32 strategies (fresh positions), 77 (35%) are won from by one of the 90 maps L2 found on W6's 32 positions, none of the 25 leaves with exceptions; 3 of W9's 32 roots are covered outright (tiny ones, 177 of 12,908 bits)",
+      "mode": "test",
+      "proof": "tests/test_c49_map_reuse_evidence.py::test_c49_a_third_of_fresh_leaves_are_won_by_maps_found_elsewhere",
+      "note": "scripts/c4_map_reuse.py, the C verify under Facts(ties='lowest'), 30 s a check. Under the exact rule the library was barely used (W2: 2 of 61 leaves; W5b: 0). A covered leaf could reference a shared map; a map of W9's own is saved only where all its leaves are covered \u2014 measured by building with the library (W10).",
+      "registered_at": "2026-10-11T23:26:41.396330+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_map_reuse_evidence.py::test_c49_a_third_of_fresh_leaves_are_won_by_maps_found_elsewhere",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-11T23:26:41.752643+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_map_reuse.json.gz",
+        "started": "2026-10-11T23:25:53.121847+00:00"
+      },
+      "pins": {
+        "tests/test_c49_map_reuse_evidence.py": "656d69fc359b06c7cf089f00569432c7ecc12d9d371a7be93d369b04b97f4132"
+      }
+    },
+    "h267": {
+      "id": "h267",
+      "claim": "\u00a73.6 W10: W9's 32 fresh positions rebuilt with L2's rule from a library of L2's 90 maps, at least 28 complete within 2 hours. Refuted at 24 or fewer; inconclusive at 25-27",
+      "mode": "test",
+      "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_28_of_32_complete_within_2_hours",
+      "note": "W10 = W9 exactly (its 32 fresh positions; L2's rule \u2014 ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead) with every build starting from a library of the 90 maps L2 found (library_from c49_l2.json.gz; 8,618 bits paid once; a build pays only its references). h266: 35% of W9's leaves were won from by those maps. harness/floor_w10.py 4 tests, 13/13 mutants. Full suite before launch: 3,013 passed. Measurement fingerprint 081011f9bbfa (the code with two-ply safety present but off; the same rule as W9).",
+      "registered_at": "2026-10-11T23:39:32.908865+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_28_of_32_complete_within_2_hours",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.08s",
+          "drawn_at": "2026-10-12T01:10:36.980001+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w10.json.gz",
+        "started": "2026-10-11T23:39:46+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w10_evidence.py": "94f04a0dcf356a960640d6636f6be83013f022ee699b6134863573870bee2224",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w10_evidence.py::test_c49_w10_completion_is_undecidable"
+    },
+    "h268": {
+      "id": "h268",
+      "claim": "\u00a73.6 W10: a shared library cuts the whole game \u2014 the opening, the library's 8,618 bits once and 671 x the 32 strategies' mean project to at most four fifths of W9's 271,740 bits. Refuted at W9's or more (an unfinished root counting at its partial size); inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_a_shared_library_cuts_the_whole_game_by_a_fifth",
+      "note": "W10 = W9 exactly (its 32 fresh positions; L2's rule \u2014 ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead) with every build starting from a library of the 90 maps L2 found (library_from c49_l2.json.gz; 8,618 bits paid once; a build pays only its references). h266: 35% of W9's leaves were won from by those maps. harness/floor_w10.py 4 tests, 13/13 mutants. Full suite before launch: 3,013 passed. Measurement fingerprint 081011f9bbfa (the code with two-ply safety present but off; the same rule as W9).",
+      "registered_at": "2026-10-11T23:39:33.021640+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_a_shared_library_cuts_the_whole_game_by_a_fifth",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-12T01:10:37.230082+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w10.json.gz",
+        "started": "2026-10-11T23:39:46+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w10_evidence.py": "94f04a0dcf356a960640d6636f6be83013f022ee699b6134863573870bee2224",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w10_evidence.py::test_c49_w10_the_projection_against_w9_is_undecidable"
+    },
+    "h269": {
+      "id": "h269",
+      "claim": "\u00a73.6 W10: at least a fifth of the 32 strategies' leaves use a library map. Refuted under a twentieth; inconclusive between",
+      "mode": "test",
+      "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_a_fifth_of_the_leaves_use_the_library",
+      "note": "W10 = W9 exactly (its 32 fresh positions; L2's rule \u2014 ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead) with every build starting from a library of the 90 maps L2 found (library_from c49_l2.json.gz; 8,618 bits paid once; a build pays only its references). h266: 35% of W9's leaves were won from by those maps. harness/floor_w10.py 4 tests, 13/13 mutants. Full suite before launch: 3,013 passed. Measurement fingerprint 081011f9bbfa (the code with two-ply safety present but off; the same rule as W9).",
+      "registered_at": "2026-10-11T23:39:34.035349+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w10_evidence.py::test_c49_w10_a_fifth_of_the_leaves_use_the_library",
+          "ok": false,
+          "detail": "d'\nE         \nE         - supported\nE         + inconclusive\n\ntests/test_c49_w10_evidence.py:46: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_w10_evidence.py::test_c49_w10_a_fifth_of_the_leaves_use_the_library\n1 failed in 0.05s",
+          "drawn_at": "2026-10-12T01:10:37.483187+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_w10.json.gz",
+        "started": "2026-10-11T23:39:46+00:00"
+      },
+      "pins": {
+        "tests/test_c49_w10_evidence.py": "94f04a0dcf356a960640d6636f6be83013f022ee699b6134863573870bee2224",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_w10_evidence.py::test_c49_w10_library_use_is_undecidable"
+    },
+    "h270": {
+      "id": "h270",
+      "claim": "\u00a73.6 W10 (registered after the data): most of W10's cut is one position \u2014 #638 fell from 4,322 bits (70 leaves) to 356, one root map with 17 exceptions and no library leaf; the other 31 are 21% smaller together (6,757 bits against 8,586). Only 16 of 122 leaves reference the library (three tiny roots covered outright at 8 bits each), so a library map as the searches' starting point is as likely a cause as covering, and run-to-run variance cannot be ruled out",
+      "mode": "test",
+      "proof": "tests/test_c49_w10_after_evidence.py::test_c49_w10_most_of_the_cut_is_one_position_and_few_leaves_use_the_library",
+      "note": "h267, h268 supported; h269 inconclusive (13% of leaves use the library) \u2014 all pre-registered. The whole game projects to 158,844 bits with the library paid once (own strategies alone: 150K, interval 104K-202K). Maps fell from 104 to 55. Run-to-run swings of single heavy positions (h243, h254) dominate 32-position comparisons.",
+      "registered_at": "2026-10-12T01:11:28.796225+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_w10_after_evidence.py::test_c49_w10_most_of_the_cut_is_one_position_and_few_leaves_use_the_library",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.04s",
+          "drawn_at": "2026-10-12T01:11:29.170540+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_w10.json.gz",
+          "started": "2026-10-11T23:39:46+00:00"
+        },
+        {
+          "path": "evidence/c49_w9.json.gz",
+          "started": "2026-10-11T11:42:32+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_w10_after_evidence.py": "1a702b1a7998947d01f5630939f3c3b1b71462598425b843067fe8b03998eea6"
+      }
+    },
+    "h271": {
+      "id": "h271",
+      "claim": "\u00a73.6 F1: every one of the opening's 671 frontier positions gets a complete certified strategy within 2 hours under L2's rule and pipeline, built in waves from a growing library. Refuted when more than 7 do not finish; inconclusive at 1-7",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_every_frontier_position_completes",
+      "note": "F1 = every one of the opening's 671 frontier positions in W1's seeded order, L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead), in waves of 32, each starting from a library of every map found so far, seeded with L2's 90 maps (8,618 bits once). User's choice (2026-10-12). Resumable (--resume; progress in evidence/c49_f1_progress.json). harness/floor_f1.py 6 tests, 15/15 mutants. Full suite before launch: 3,024 passed. Measurement fingerprint 4242d4bca6e2. Projections: W9 271,740 (95% high 476,290); W10 158,844 with L2's library.",
+      "registered_at": "2026-10-12T06:17:44.351067+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_every_frontier_position_completes",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.95s",
+          "drawn_at": "2026-10-14T14:48:24.295832+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_f1.json.gz",
+        "started": "2026-10-13T22:20:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_f1_evidence.py": "ba8ff9e3c451c3297c991b66f3b4689b7a70b2fb101fbe9a347acbd4a80a5c1a",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_f1_evidence.py::test_c49_f1_completion_is_undecidable"
+    },
+    "h272": {
+      "id": "h272",
+      "claim": "\u00a73.6 F1: the certified whole-game first-player strategy \u2014 the opening, the seed library once and every frontier position's own bits \u2014 takes no more than W9's projection of 271,740 bits. Refuted above W9's 95% high of 476,290 (a partial total counting as a lower bound); inconclusive between, or unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_is_within_w9_s_projection",
+      "note": "F1 = every one of the opening's 671 frontier positions in W1's seeded order, L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead), in waves of 32, each starting from a library of every map found so far, seeded with L2's 90 maps (8,618 bits once). User's choice (2026-10-12). Resumable (--resume; progress in evidence/c49_f1_progress.json). harness/floor_f1.py 6 tests, 15/15 mutants. Full suite before launch: 3,024 passed. Measurement fingerprint 4242d4bca6e2. Projections: W9 271,740 (95% high 476,290); W10 158,844 with L2's library.",
+      "registered_at": "2026-10-12T06:17:45.029184+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_is_within_w9_s_projection",
+          "ok": false,
+          "detail": "ed'\nE         \nE         - supported\nE         + refuted\n\ntests/test_c49_f1_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_is_within_w9_s_projection\n1 failed in 4.09s",
+          "drawn_at": "2026-10-14T14:48:33.003913+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_f1.json.gz",
+        "started": "2026-10-13T22:20:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_f1_evidence.py": "ba8ff9e3c451c3297c991b66f3b4689b7a70b2fb101fbe9a347acbd4a80a5c1a",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_s_size_is_undecidable"
+    },
+    "h273": {
+      "id": "h273",
+      "claim": "\u00a73.6 F1: the certified whole-game first-player strategy is smaller than the trained net's ~660K bits. Refuted at 660K or more (a partial total counting as a lower bound); inconclusive while unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_is_smaller_than_the_net",
+      "note": "F1 = every one of the opening's 671 frontier positions in W1's seeded order, L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and C verify, 2 h cap; built, improved, improved with lookahead), in waves of 32, each starting from a library of every map found so far, seeded with L2's 90 maps (8,618 bits once). User's choice (2026-10-12). Resumable (--resume; progress in evidence/c49_f1_progress.json). harness/floor_f1.py 6 tests, 15/15 mutants. Full suite before launch: 3,024 passed. Measurement fingerprint 4242d4bca6e2. Projections: W9 271,740 (95% high 476,290); W10 158,844 with L2's library.",
+      "registered_at": "2026-10-12T06:17:46.022515+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_whole_strategy_is_smaller_than_the_net",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 4.33s",
+          "drawn_at": "2026-10-14T14:48:48.427990+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_f1.json.gz",
+        "started": "2026-10-13T22:20:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_f1_evidence.py": "ba8ff9e3c451c3297c991b66f3b4689b7a70b2fb101fbe9a347acbd4a80a5c1a",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4"
+      },
+      "inconclusive_proof": "tests/test_c49_f1_evidence.py::test_c49_f1_the_comparison_with_the_net_is_undecidable"
+    },
+    "h274": {
+      "id": "h274",
+      "claim": "\u00a73.6 F1 (registered after the data): the miss of W9's projection (548,424 bits, above its 95% high of 476,290) is sampling in a heavy tail, not drift \u2014 W9's 32 positions are light in F1 too (10,932 bits, mean 342 against the frontier's 803; a random 32 is that light 273 times in 20,000); the heaviest 67 positions hold 311,823 bits (58%), the median position 154; the seeded order's two halves cost the same (269,927 and 268,804)",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_the_projection_missed_by_sampling_a_heavy_tail_not_by_drift",
+      "note": "h271 and h273 supported, h272 refuted \u2014 all pre-registered. F1 = 671/671 positions certified complete (four reached the 2-h cap \u2014 #207, #218, #487, #600 \u2014 and were still complete, checked and leaves certified); 548,424 bits = opening 1,075 + seed library 8,618 + own 538,731; 3,196 maps found; 191.9 build-hours on 4 workers. Interrupted by a laptop restart at 459/671 and resumed with --resume (evidence `started` stamps the resumed launch, 2026-10-13T22:20Z).",
+      "registered_at": "2026-10-14T14:51:44.491227+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_the_projection_missed_by_sampling_a_heavy_tail_not_by_drift",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.44s",
+          "drawn_at": "2026-10-14T14:52:07.099524+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_f1.json.gz",
+        "started": "2026-10-13T22:20:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_f1_after_evidence.py": "eddc1a61672654e06312f753315b209fdc39dcaf2a56bab65b2239dc4659fe29",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e"
+      }
+    },
+    "h275": {
+      "id": "h275",
+      "claim": "\u00a73.6 F1 (registered after the data): the library carried little beyond the positions it was found on \u2014 880 of 8,904 leaves (9.9%) reference it, while L2's 32 positions, where the seed library was found, cost 8,432 bits in F1 against 14,666 in L2",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_the_library_carried_little_beyond_the_positions_it_was_found_on",
+      "note": "h271 and h273 supported, h272 refuted \u2014 all pre-registered. F1 = 671/671 positions certified complete (four reached the 2-h cap \u2014 #207, #218, #487, #600 \u2014 and were still complete, checked and leaves certified); 548,424 bits = opening 1,075 + seed library 8,618 + own 538,731; 3,196 maps found; 191.9 build-hours on 4 workers. Interrupted by a laptop restart at 459/671 and resumed with --resume (evidence `started` stamps the resumed launch, 2026-10-13T22:20Z).",
+      "registered_at": "2026-10-14T14:51:48.080532+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_the_library_carried_little_beyond_the_positions_it_was_found_on",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.23s",
+          "drawn_at": "2026-10-14T14:52:14.184925+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_f1.json.gz",
+          "started": "2026-10-13T22:20:39+00:00"
+        },
+        {
+          "path": "evidence/c49_l2.json.gz",
+          "started": "2026-10-11T09:28:05+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_f1_after_evidence.py": "eddc1a61672654e06312f753315b209fdc39dcaf2a56bab65b2239dc4659fe29",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e"
+      }
+    },
+    "h276": {
+      "id": "h276",
+      "claim": "\u00a73.6 F1 (registered after the data, a method finding): on this frontier a 32-position bootstrap's 95% high falls below the true mean 113 times in 1,000, not 25 \u2014 projections from 32 positions are guesses, not bounds",
+      "mode": "test",
+      "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_a_32_position_bootstrap_high_is_not_a_bound_on_this_frontier",
+      "note": "h271 and h273 supported, h272 refuted \u2014 all pre-registered. F1 = 671/671 positions certified complete (four reached the 2-h cap \u2014 #207, #218, #487, #600 \u2014 and were still complete, checked and leaves certified); 548,424 bits = opening 1,075 + seed library 8,618 + own 538,731; 3,196 maps found; 191.9 build-hours on 4 workers. Interrupted by a laptop restart at 459/671 and resumed with --resume (evidence `started` stamps the resumed launch, 2026-10-13T22:20Z).",
+      "registered_at": "2026-10-14T14:51:51.537428+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_f1_after_evidence.py::test_c49_f1_a_32_position_bootstrap_high_is_not_a_bound_on_this_frontier",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 4.23s",
+          "drawn_at": "2026-10-14T14:52:22.483407+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_f1.json.gz",
+        "started": "2026-10-13T22:20:39+00:00"
+      },
+      "pins": {
+        "tests/test_c49_f1_after_evidence.py": "eddc1a61672654e06312f753315b209fdc39dcaf2a56bab65b2239dc4659fe29",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e"
+      }
     }
   }
 }

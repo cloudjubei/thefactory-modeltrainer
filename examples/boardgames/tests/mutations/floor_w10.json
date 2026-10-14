@@ -1,0 +1,98 @@
+{
+  "file": "harness/floor_w10.py",
+  "tests": ["tests/test_floor_w10.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no library",
+      "old": "\"library_from\": \"c49_l2.json.gz\", ",
+      "new": "\"library_from\": None, "
+    },
+    {
+      "name": "library free",
+      "old": " + spec[\"library_bits\"]\n",
+      "new": "\n"
+    },
+    {
+      "name": "another w9 total",
+      "old": "\"w9_bits\": 271_740,",
+      "new": "\"w9_bits\": 308_603,"
+    },
+    {
+      "name": "projection off registration",
+      "old": "def w10_projection(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w10_projection(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "library off registration",
+      "old": "def w10_library(e: dict, spec: dict) -> dict:\n    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": "def w10_library(e: dict, spec: dict) -> dict:\n"
+    },
+    {
+      "name": "refute boundary",
+      "old": "verdict = (\"refuted\" if ratio >= 1",
+      "new": "verdict = (\"refuted\" if ratio > 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and ratio <= spec[\"support\"]",
+      "new": "\"supported\" if not lower and ratio < spec[\"support\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and ratio <= spec[\"support\"]",
+      "new": "\"supported\" if ratio <= spec[\"support\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in roots)\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "library support boundary",
+      "old": "verdict = (\"supported\" if share >= spec[\"library_support\"]",
+      "new": "verdict = (\"supported\" if share > spec[\"library_support\"]"
+    },
+    {
+      "name": "library refute boundary",
+      "old": "else \"refuted\" if share < spec[\"library_refute\"]",
+      "new": "else \"refuted\" if share <= spec[\"library_refute\"]"
+    },
+    {
+      "name": "share of roots",
+      "old": "    leaves = sum(r[\"bits\"][\"leaves\"] for r in e[\"roots\"])\n",
+      "new": "    leaves = len(e[\"roots\"])\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "w10_report = w6_report\n",
+      "new": "def w10_report(e, spec):\n    return w6_report(e, spec)\n"
+    },
+    {
+      "name": "w9's fingerprint",
+      "old": "\"measurement_fp\": \"081011f9bbfa\", ",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-11T23:39:25+00:00",
+    "killed": 14,
+    "survived": [],
+    "killed_by": {
+      "no library": ["test_w10_is_w9_built_from_l2_s_maps"],
+      "library free": ["test_the_projection_pays_the_library_once_and_is_judged_against_w9"],
+      "another w9 total": ["test_w10_is_w9_built_from_l2_s_maps"],
+      "projection off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "library off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "refute boundary": ["test_the_projection_pays_the_library_once_and_is_judged_against_w9"],
+      "support boundary": ["test_the_projection_pays_the_library_once_and_is_judged_against_w9"],
+      "partial supports": ["test_the_projection_pays_the_library_once_and_is_judged_against_w9"],
+      "never a lower bound": ["test_the_projection_pays_the_library_once_and_is_judged_against_w9"],
+      "library support boundary": ["test_library_use_is_the_share_of_leaves_that_reference_it"],
+      "library refute boundary": ["test_library_use_is_the_share_of_leaves_that_reference_it"],
+      "share of roots": ["test_library_use_is_the_share_of_leaves_that_reference_it"],
+      "own completion judge": ["test_w10_is_w9_built_from_l2_s_maps"],
+      "w9's fingerprint": ["test_w10_is_w9_built_from_l2_s_maps"]
+    }
+  }
+}

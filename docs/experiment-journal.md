@@ -5219,3 +5219,212 @@ the whole strategy's bits, undoes it, places the leaf, and restores the split on
 leaf's map is kept only once the leaf is placed, so the split never sees it; a split that runs out of time loses to
 the leaf, so the choice never costs completion. Tests 42 (8 new), mutants 58/58 (10 new; one survivor — a losing split
 whose maps stayed charged — closed by a test). Measurement fingerprint now a416e9353561. Next: A2 (h233, h234).
+
+## 2026-10-10 — A2: choosing by size wins where it finishes, but it is too slow recursively
+
+A2 finished 00:44: #95 3,481 bits and #535 6,637 — under both fixed thresholds' builds (5,307 and 12,857) — while
+#565's split never finished in 2 h, so W6's leaf was kept (3,877 exactly), and #594, which has no leaf at its root to
+fall back on, did not finish (6,376-bit partial). h233 and h234 are inconclusive (3/4; a 20,371-bit lower bound);
+h235 records the reading after the data. Building the split under every leaf with exceptions, recursively, roughly
+doubles the searches (154-400 against A1's 74-277). Next: make the comparison anytime — finish the threshold build
+first, then split the largest leaves first while time remains, keeping a split only if the whole strategy shrinks.
+
+## 2026-10-10 — the builder improves anytime
+
+`Builder.improve()`: after a complete build, while time remains, take the leaf with exceptions whose walk-order code
+costs most and has not been tried, build the split below it with the ordinary rule, and keep it only if the whole
+strategy shrinks — maps no leaf uses any more are dropped (library maps never), leaves a kept split makes join the
+queue, and a split that runs out of time is undone, so the strategy stays complete. The strategy script runs it after
+a complete build when the spec's builder has `"improve"`, and records the size and time at completion. Tests 52
+(10 new), mutants 70/70: two survivors fixed — a recording branch no test could see (simplified away: every leaf's
+position is recorded, the queue takes those with exceptions) and library maps dropped by compaction (now tested).
+Review also caught compaction renumbering node records the undo snapshot shared; it now builds new ones (tested).
+Measurement fingerprint 79d96bd72825. A3 (`harness/floor_a3.py`, 4/4 mutants) next: h236, h237.
+
+## 2026-10-10 — A3: improving anytime cuts the heavy positions to under a quarter
+
+A3 finished 01:59: all four heavy positions complete (h236) in 16,740 bits — 23% of W6's 72,883 and 59% of the best
+fixed threshold per position (h237), both pre-registered. The improvement queues ran dry 6-15 minutes after each
+threshold build completed, so the longest build took 45 minutes; improving cut each completed build by 54-82%.
+I first registered that as 55-82% (h238) and its proof failed — #95's cut is 54.8% — and because the registration was
+chained after a check whose failure did not stop the chain, h238 was registered and verified anyway: refuted, then
+superseded by h239 with the measured range. Rule kept from W6's false start, applied again: check, then register.
+Next: W7 rebuilds W6's 32 positions with improve to re-project the whole game.
+
+## 2026-10-10 — W7: the whole game re-projected at 1.47M bits
+
+W7 finished 05:26: W6's 32 frontier positions rebuilt with W6's settings plus the anytime improvement, all complete
+(h240), the longest in 69 minutes. Pre-registered: the whole game now projects to 1.47M bits, 34% of W6's 4.31M
+(h241), and its 95% bootstrap interval 0.78M-2.30M is still entirely above the net's ~660K (h242). Exceptions are 36%
+of the bits, down from 84%.
+
+After the data (h243): the cut has two parts. The same settings completed at 154,777 bits this time against W6's
+205,322 — run-to-run variance from the time-bounded searches, a tenth to 2.4x per position (#512 1,486 against
+16,654; #639 15,019 against 6,065) — and improving then cut the completed builds to 69,847, 45% of them. Four
+positions kept no split at all: each is one leaf at the root, and its split one level down was larger, so the greedy
+rule never looked below it — A3 improved #95 to 2,919 only because its first split happened to come out smaller.
+Next: improve with lookahead — improve a split's own new leaves before judging it.
+
+## 2026-10-10 — improving with lookahead
+
+`Builder.improve(lookahead=True)`: a split that is not smaller at once first has the leaves it made improved the same
+way (only those, plus the leaves splits kept among them make), then is judged with them and kept or undone together,
+its inner kept splits uncounted when undone. Tests 57 (5 new, on fabricated split plans with exact sizes), mutants
+77/77 (one survivor — an undone inner kept split still counted — closed by a test). The strategy script, given
+`"lookahead"`, runs plain improvement until it runs dry, records that size, then a lookahead pass: a paired
+measurement inside each build, free of the build-to-build variance h243 found. Fingerprint 0594eb30c588.
+A4 (`harness/floor_a4.py`, 5 tests, 16/16 mutants): W7's four stuck positions and four heavy ones.
+
+## 2026-10-10 — A4: lookahead cuts a further fifth and unsticks the stuck
+
+A4 finished 07:47. Inside each of eight builds, after plain improvement had run dry, the lookahead pass cut the total
+by a further 20.8% (37,848 -> 29,989 bits; h244, pre-registered) and cut both positions plain improvement could not
+change (#374 949 -> 514, #271 1,324 -> 720; h245, pre-registered). It found nothing on #95 and #98 — this time plain
+improvement had unstuck #95 by itself. Build, plain and lookahead passes together cut the completed builds 63%
+(82,138 -> 29,989; h246 after the data), and every build was done within 72 minutes: at least 48 minutes of each
+2-hour cap unused. Next: spend that idle time re-searching the costliest leaves for longer (A5).
+
+## 2026-10-10 — the builder re-searches its costliest leaves in the time left
+
+`Builder.research(seconds)`: after improving, while time remains, the leaf with exceptions whose code costs most and
+not yet re-searched is searched again from its own map for `seconds` (never past the deadline); what the search finds
+— a map winning every line (simplified) or one with exceptions (walk-order coded; a coding that runs out of time
+leaves the leaf alone) — replaces the leaf only if the whole strategy shrinks, unused maps dropped. The strategy
+script, given `"research"`, records the size after the lookahead pass, re-searches, then improves with lookahead once
+more. Tests 65 (8 new), mutants 89/89: three survivors — a tie, a found map with a removable cell, and an equivalent
+mutant (a leaf coded at a billion bits is always rolled back) replaced by the meaningful one (an uncoded leaf kept).
+Fingerprint b2f5efcf2ac9. A5 (`harness/floor_a5.py`, 4 tests, 9/9 mutants): A4's eight positions plus research
+at 120 s, measured inside each build: h247.
+
+## 2026-10-10 — A5: nothing left for longer searches; maps are the cost now
+
+A5 finished 10:56. Re-searching the costliest leaves with exceptions for 120 s each in the idle time, then improving
+with lookahead once more, cut what the lookahead pass left by 0.56% (28,892 -> 28,729 bits): h247 refuted,
+pre-registered. There was little to work on (h249): the eight positions held only 29 leaves with exceptions between
+them (3 replaced) — exceptions are 14% of these strategies' bits, maps 64%. Two quick checks on maps: none is paid
+twice and 148 of 233 already serve several leaves; and coding each map as an edit of the one before costs 18% more
+(h248, a dead end — simplification makes neighbours differ). Next: W8, the whole game with the full pipeline.
+
+## 2026-10-10 — W8: the full pipeline, and run-to-run variance bigger than its last gains
+
+W8 finished 15:25. W6's 32 positions built, improved and improved with lookahead (all pre-registered): all 32
+complete (h250); inside the builds lookahead cut 16% of what plain improvement left (h253); the whole game still
+projects above the net (h252) — but at 1.57M bits, above W7's 1.47M, so h251 (at most nine tenths of W7) is refuted.
+The builds themselves completed 20% larger this run (186,359 bits against W7's 154,777): run-to-run variance of the
+time-bounded searches outweighs the pipeline's last gains. After the data (h254): keeping the smaller of W7's and
+W8's certified strategy per position gives 60,235 bits — the whole game at 1.26M, 14% under W7. Exceptions are 22%
+of W8's bits and maps 58%. The builder passes have run their course; what remains is the leaf language (maps) or
+building the whole frontier (~300 CPU-hours). That choice is the user's.
+
+## 2026-10-11 — the leaf language, step 1: fewer levels (user's choice)
+
+The user chose the leaf language over building the whole frontier. First and cheapest: maps of 4 levels at 2 bits a
+levelled cell instead of 8 at 3 (each map ~one fifth cheaper if nothing else changed). L1 (`harness/floor_l1.py`,
+4 tests, 12/12 mutants) builds W6's 32 positions with W8's full pipeline and only that change; smoke: #486 a pure
+4-level map at the root in 48 s. Because run-to-run variance is ~20% (h254), the bar is both 8-level runs: supported at
+<= 4/5 of W7's 69,847 bits, refuted at >= W8's 74,714. No code changed: fingerprint b2f5efcf2ac9.
+
+## 2026-10-11 — L1: fewer levels lose; a richer rule next
+
+L1 finished 11:15 after 10 h 42 min (W8: 4 h 16 min). With maps of 4 levels at 2 bits only 23 of 32 positions
+completed within 2 hours (h255 refuted) and the 32 take at least 276,519 bits — 3.7x the 8-level runs (h256 refuted;
+both pre-registered). The strategies needed 2,132 maps against W8's 586 and are larger on 25 of 32 positions (h257,
+after the data): a map covering a position at 8 levels splits into several at 4 (#471: 96 bits -> 522). Expressiveness
+binds, not cell cost. While L1 ran, the other direction was built in a scratch copy: a richer rule at the same bits —
+`Facts(ties="lowest")`, the first level holding any safe move decides with its lowest move (Python `choose` and the C
+walk; the SAT search refuses it; the C walk still matches Python exactly under both rules). Mutants: steady_state
+26/26, c4leafwalk 25/25, native_leaf 13/13, steady_search 25/25, floor_l2 5/5. Smoke: #471 a pure root map in 62 s.
+
+## 2026-10-11 — L2: a richer rule makes strategies five times smaller — below the net
+
+L2 finished 13:29. Reading each level with ties to the lowest move — the first level holding any safe move decides,
+instead of only a level holding exactly one — all 32 positions complete (h258) in 14,666 bits, a fifth of the exact
+rule's runs (h259; both pre-registered). The strategies need 90 maps instead of 586: a map now defines play wherever
+its first useful level holds a safe move, so far fewer positions fall to exceptions or splits. After the data (h260):
+the whole game projects to 308,603 bits, its 95% bootstrap interval 177K-469K entirely under the trained net's ~660K
+— the first projection below the net. These 32 positions had been built five times, so W9 tests it, pre-registered,
+on the next 32 fresh positions of W1's seeded order. (Expressiveness again, as L1 showed from the other side.)
+
+## 2026-10-11 — W9: below the net on fresh positions, pre-registered
+
+W9 finished 15:42. On the next 32 frontier positions of W1's seeded order — never built before — L2's rule and
+pipeline complete all 32 (h261) in 12,908 bits with 104 maps, the builds 7.3 CPU-hours in all, the longest 61
+minutes. The whole first-player strategy projects to 271,740 bits, its 95% bootstrap interval 137K-476K entirely below
+the trained net's ~660K (h262) — the first pre-registered projection below the net. Sizes: 17 of 32 under 120 bits,
+one heavy position at 4,322. The whole frontier would take ~153 CPU-hours. WeakC4 (~35-45K) is still ~7x smaller.
+
+## 2026-10-11 — L3 built: two-ply safety (user: more language first)
+
+The user chose more leaf-language work over building the whole frontier. A per-map tie order was set aside: under
+L2's rule a map can already part tied moves by giving them different levels. L3 deepens what makes a move safe —
+`Facts(safe_depth=2)`: also unsafe when the opponent can answer it with a move after which every reply loses at once
+(a forced win in two), the 1-ply safe set kept when every move fails that — a generic 3-ply check on the game's own
+rules, in Python (`Facts._loses_in_two`) and in the C walk (`loses_in_two`, identical to Python under all four
+rule settings). The SAT search refuses it. Tic-tac-toe fixtures: X on opposite corners against the centre leaves the
+edges safe; X on 0 and 2 against 1 leaves only the centre; an answer that fills the board is a draw, not a threat.
+Mutants: steady_state 32/32, c4leafwalk 31/31, native_leaf 15/15, steady_search 26/26, floor_l3 10/10. Four
+equivalent mutants dropped: the depth check skipped for a single safe move (the fallback keeps it), a removed `break`
+after a held reply, and — in Python and in C — a board-filling reply not counted as holding (on a full board the
+opponent has no move, so it holds by the other clause). Smoke: #471 a pure root map in 82 s, 18,220 positions against
+L2's 25,451. Fingerprint 081011f9bbfa. L3 = L2 + two-ply safety on W6's 32, against L2's 14,666 bits: h263, h264.
+
+## 2026-10-12 — L3: two-ply safety trades exceptions for maps
+
+L3 finished 01:24. All 32 complete (h263) but 15,343 bits against L2's 14,666 on the same positions — 4.6% larger,
+so h264 (at least a fifth smaller) is refuted, pre-registered. After the data (h265): the deeper safety does what it
+should to exceptions — 34% of L2's bits, 16% of L3's — but the strategies need 118 maps against 90 and the builds run
+a fifth slower; 13 positions came out smaller, 9 larger. Maps are now 74% of the bits. `safe_depth` stays, 1 by
+default. Next: whether maps found on some frontier positions already win elsewhere under L2's rule.
+
+## 2026-10-12 — maps carry across the frontier under the richer rule
+
+Measured before building (scripts/c4_map_reuse.py, h266 after the data): under L2's rule, 77 of the 223 leaves of
+W9's 32 strategies — 35% — are won from by one of the 90 maps L2 found on W6's 32 positions (the C verify, each map
+restricted to the cells empty at the leaf); none of W9's 25 leaves with exceptions is; 3 of W9's 32 roots are covered
+outright (tiny positions). Under the exact rule a library was barely used (W2: 2 of 61 leaves; W5b: none). Those 90
+maps cost 8,618 bits, paid once for the whole game — about 13 bits a frontier position. Next: W10 rebuilds W9's 32
+positions from that library (`harness/floor_w10.py`, 4 tests, 13/13 mutants): h267 completion, h268 the whole game
+(library paid once) at most four fifths of W9's 271,740, h269 at least a fifth of the leaves using the library.
+
+## 2026-10-12 — W10: the whole game at ~159K bits with a shared library
+
+W10 finished 03:10. W9's 32 fresh positions rebuilt from a library of L2's 90 maps: all complete (h267); the whole
+game, the library's 8,618 bits paid once, projects to 158,844 bits — 58% of W9's 271,740 (h268); 13% of leaves
+reference the library (h269 inconclusive; all pre-registered). After the data (h270): most of the cut is one position,
+#638, 4,322 bits in W9 and 356 in W10 — a single root map with 17 exceptions, no library leaf; the other 31 are 21%
+smaller together. Each search starts from the most recent map — in W10 a library map, in W9 the empty map — so the
+library may help as a starting point as much as by covering; single heavy positions swing between runs too (h243,
+h254). Recorded slip: before registering, W10's spec carried W9's measurement fingerprint, though the code now
+carries two-ply safety (off) and fingerprints 081011f9bbfa — caught by checking, fixed (14/14 mutants with a
+mutation for it); and a registration was chained after a piped test again (the tests had passed).
+
+## 2026-10-12 — F1: the whole game, built (user's choice)
+
+The user chose to build the whole frontier. F1 (`harness/floor_f1.py`, 6 tests, 15/15 mutants after two boundary
+tests were added) builds all 671 frontier positions in W1's seeded order (the first 72 are W1's 8, W6's 32 and W9's
+32), in waves of 32, each wave starting from a library of every map found so far, seeded with L2's 90 maps (8,618
+bits, paid once); L2's rule and pipeline. The whole strategy's size: the opening, the seed library once, and every
+position's own bits (a map is charged in the build that found it). About 150 CPU-hours — ~38 hours on 4 workers — so
+the strategy script now takes `--resume`: the roots the progress file holds are kept (their maps joining the library
+first) and only the rest built; the progress file is written atomically and lives in evidence/ (scratch space under
+/private/tmp does not survive a reboot). Checked in a scratch copy: a two-position run cut back to one and resumed
+built only the other, its evidence holding both. Fingerprint 4242d4bca6e2. Claims h271-h273.
+
+## 2026-10-14 — F1 finished: a certified whole-game strategy in 548,424 bits
+
+F1 finished 14:46Z. It was interrupted once: a laptop restart at 459 of 671 positions (all complete), resumed with
+`--resume` (the log appended after a marker; the evidence's `started` stamps the resumed launch). Pre-registered: all
+671 positions certified complete (h271 supported) — four reached the 2-hour cap (#207, #218, #487, #600) with their
+strategies already complete and certified, the cap cutting the improvement passes; the whole first-player strategy
+from the empty board takes 548,424 bits — opening 1,075, seed library 8,618, positions 538,731 (3,196 maps, 292,054
+bits of them) — below the net's ~660K (h273 supported) but twice W9's projection and above its 95% high of 476,290
+(h272 refuted). 191.9 build-hours on 4 workers.
+
+After the data, why the projection missed (h274): sampling in a heavy tail, not drift. W9's 32 positions are light in
+F1 too (10,932 bits, a mean of 342 against the frontier's 803; a random 32 is that light 1.4% of the time); the
+heaviest 67 positions hold 58% of the bits while the median position takes 154; the seeded order's two halves cost
+the same (269,927 and 268,804 bits), so a growing library did not make later waves cheaper. The library carried
+little (h275): 880 of 8,904 leaves reference it; L2's 32 positions, where the seed library was found, cost 8,432 bits
+in F1 against 14,666 in L2. As a method (h276): on this frontier a 32-position bootstrap's 95% high falls below the
+true mean 113 times in 1,000, not 25 — projections from 32 positions were guesses, not bounds, and every projection
+from W6 to W10 should be read so. WeakC4's ~35-45K is ~13x smaller; the net is 1.2x larger.

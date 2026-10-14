@@ -158,7 +158,12 @@ def find_steady_state(facts: Facts, root, winning, n_levels: int, max_constraint
     constrained before the first solve; neither changes the answer, only the route to it. Returns {"status": "found" |
     "impossible" | "budget", "levels" (the map when found), "constraints"
     (positions constrained), "iterations"}; "budget" when the constraint count, a solve's conflict budget, the wall
-    time (a hard deadline: a solve still running is interrupted, a walk stops) or the walk cap runs out."""
+    time (a hard deadline: a solve still running is interrupted, a walk stops) or the walk cap runs out. The encoding
+    is of the rule with exact levels and 1-ply safety (`Facts.ties` "exact", `Facts.safe_depth` 1); other rules are
+    refused."""
+    if facts.ties != "exact" or facts.safe_depth != 1:
+        raise ValueError(f"the SAT encoding is of exact levels and 1-ply safety; facts read ties as {facts.ties!r} "
+                         f"and safety at depth {facts.safe_depth}")
     enc = _Encoding(facts, root, n_levels, solver_name)
     if hint:
         enc.hint(hint)

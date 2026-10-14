@@ -1,0 +1,92 @@
+{
+  "file": "harness/floor_w7.py",
+  "tests": ["tests/test_floor_w7.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "not improved",
+      "old": "\"builder\": {**W6[\"builder\"], \"improve\": True},",
+      "new": "\"builder\": dict(W6[\"builder\"]),"
+    },
+    {
+      "name": "w6's fingerprint",
+      "old": "SPEC = {**W6, \"measurement_fp\": \"79d96bd72825\", ",
+      "new": "SPEC = {**W6, "
+    },
+    {
+      "name": "another w6 total",
+      "old": "\"w6_bits\": 4_306_421,",
+      "new": "\"w6_bits\": 3_928_807,"
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "opening left out",
+      "old": "    bits = (opening[\"moves\"] * 4 + opening[\"trivial\"]\n            + opening",
+      "new": "    bits = (0\n            + opening"
+    },
+    {
+      "name": "sum not mean",
+      "old": "sum(r[\"bits\"][\"nodes\"] for r in roots) / len(roots))",
+      "new": "sum(r[\"bits\"][\"nodes\"] for r in roots) / 32 * 2)"
+    },
+    {
+      "name": "refute boundary",
+      "old": "verdict = (\"refuted\" if ratio >= 1",
+      "new": "verdict = (\"refuted\" if ratio > 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and ratio <= spec[\"halving_support\"]",
+      "new": "\"supported\" if not lower and ratio < spec[\"halving_support\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and ratio <= spec[\"halving_support\"]",
+      "new": "\"supported\" if ratio <= spec[\"halving_support\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in roots)\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "w7_report = w6_report\n",
+      "new": "def w7_report(e, spec):\n    return w6_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-10T00:01:37+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "not improved": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_w7_is_w6_on_the_same_positions_plus_improvement"
+      ],
+      "w6's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_w7_is_w6_on_the_same_positions_plus_improvement"
+      ],
+      "another w6 total": ["test_w7_is_w6_on_the_same_positions_plus_improvement"],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "opening left out": [
+        "test_an_unfinished_root_can_only_refute_the_halving",
+        "test_halving_is_judged_against_w6_s_projection"
+      ],
+      "sum not mean": ["test_halving_is_judged_against_w6_s_projection"],
+      "refute boundary": [
+        "test_an_unfinished_root_can_only_refute_the_halving",
+        "test_halving_is_judged_against_w6_s_projection"
+      ],
+      "support boundary": ["test_halving_is_judged_against_w6_s_projection"],
+      "partial supports": ["test_an_unfinished_root_can_only_refute_the_halving"],
+      "never a lower bound": ["test_an_unfinished_root_can_only_refute_the_halving"],
+      "own completion judge": ["test_w7_is_w6_on_the_same_positions_plus_improvement"]
+    }
+  }
+}

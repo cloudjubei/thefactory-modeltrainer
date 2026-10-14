@@ -1,0 +1,83 @@
+{
+  "file": "harness/floor_l3.py",
+  "tests": ["tests/test_floor_l3.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "one-ply safety",
+      "old": "        \"builder\": {**L2[\"builder\"], \"safe_depth\": 2},\n",
+      "new": "        \"builder\": dict(L2[\"builder\"]),\n"
+    },
+    {
+      "name": "l2's fingerprint",
+      "old": "        \"measurement_fp\": \"081011f9bbfa\",\n",
+      "new": ""
+    },
+    {
+      "name": "another l2 total",
+      "old": "        \"l2_bits\": 14_666,\n",
+      "new": "        \"l2_bits\": 12_908,\n"
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if _integrity(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "refute boundary",
+      "old": "verdict = (\"refuted\" if ratio >= 1",
+      "new": "verdict = (\"refuted\" if ratio > 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "\"supported\" if not lower and ratio <= spec[\"support\"]",
+      "new": "\"supported\" if not lower and ratio < spec[\"support\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and ratio <= spec[\"support\"]",
+      "new": "\"supported\" if ratio <= spec[\"support\"]"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "one root's size",
+      "old": "    bits = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])\n",
+      "new": "    bits = e[\"roots\"][0][\"bits\"][\"nodes\"]\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l3_report = w6_report\n",
+      "new": "def l3_report(e, spec):\n    return w6_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-11T19:08:08+00:00",
+    "killed": 10,
+    "survived": [],
+    "killed_by": {
+      "one-ply safety": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_l3_is_l2_with_two_ply_safety_on_the_same_positions"
+      ],
+      "l2's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_l3_is_l2_with_two_ply_safety_on_the_same_positions"
+      ],
+      "another l2 total": ["test_l3_is_l2_with_two_ply_safety_on_the_same_positions"],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "refute boundary": [
+        "test_an_unfinished_root_can_only_refute",
+        "test_the_size_is_judged_against_l2_s"
+      ],
+      "support boundary": ["test_the_size_is_judged_against_l2_s"],
+      "partial supports": ["test_an_unfinished_root_can_only_refute"],
+      "never a lower bound": ["test_an_unfinished_root_can_only_refute"],
+      "one root's size": ["test_the_size_is_judged_against_l2_s"],
+      "own completion judge": ["test_l3_is_l2_with_two_ply_safety_on_the_same_positions"]
+    }
+  }
+}

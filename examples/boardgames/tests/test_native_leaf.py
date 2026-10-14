@@ -64,11 +64,15 @@ def positions():
     return _positions(8, 5)
 
 
-def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions):
+RULES = [("exact", 1), ("lowest", 1), ("exact", 2), ("lowest", 2)]
+
+
+@pytest.mark.parametrize("ties,depth", RULES)
+def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions, ties, depth):
     rng = random.Random(7)
     checked = 0
     for s in positions:
-        facts = Facts(GAME)
+        facts = Facts(GAME, ties=ties, safe_depth=depth)
         for levels in _maps(facts, s, rng):
             assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
             checked += 1
@@ -125,13 +129,14 @@ def test_one_walk_s_exceptions_survive_the_next_walk(positions):
     assert dict(first["exceptions"]) == reference(facts, positions[0], {}, 8, _winning, 1_000_000)["exceptions"]
 
 
-def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positions):
+@pytest.mark.parametrize("ties,depth", RULES)
+def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positions, ties, depth):
     from harness.native_leaf import verify as native_verify
     from harness.steady_state import verify as python_verify
 
     rng = random.Random(9)
     for s in positions:
-        facts = Facts(GAME)
+        facts = Facts(GAME, ties=ties, safe_depth=depth)
         empty = facts.empty_cells(s)
         for levels in ({}, {c: rng.randrange(8) for c in empty}, {c: 0 for c in empty},
                        {c: k for k, c in enumerate(empty[:8])}):
@@ -151,3 +156,26 @@ def test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify(positions
     late = time.monotonic() - 1
     assert native_verify(facts, s, {}, 8, deadline=late) == python_verify(facts, s, {}, 8, deadline=late)
     assert native_verify(facts, s, {}, 8, deadline=late)["reason"] == "timeout"
+
+
+def test_the_tie_rule_changes_what_both_walks_find(positions):
+    from harness.native_leaf import verify as native_verify
+
+    s = positions[0]
+    exact, lowest = Facts(GAME), Facts(GAME, ties="lowest")
+    level = {c: 0 for c in exact.empty_cells(s)}
+    assert native(exact, s, level, 8, None, 1_000_000) != native(lowest, s, level, 8, None, 1_000_000)
+    assert native_verify(exact, s, level, 8)["reason"] == "undefined"
+    assert native_verify(lowest, s, level, 8) != native_verify(exact, s, level, 8)
+
+
+def test_two_ply_safety_changes_what_both_walks_find(positions):
+    from harness.native_leaf import verify as native_verify
+
+    changed = 0
+    for s in positions:
+        one, two = Facts(GAME, ties="lowest"), Facts(GAME, ties="lowest", safe_depth=2)
+        level = {c: 0 for c in one.empty_cells(s)}
+        changed += native(one, s, level, 8, None, 1_000_000) != native(two, s, level, 8, None, 1_000_000)
+        changed += native_verify(one, s, level, 8) != native_verify(two, s, level, 8)
+    assert changed

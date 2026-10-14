@@ -20,12 +20,26 @@ from __future__ import annotations
 import time
 
 
+TIES = ("exact", "lowest")
+
+
 class Facts:
     """Per-position facts for one game, independent of any priority map: immediate wins, safe moves, each safe
-    move's cell. Shared by the verifier and the search so a position is analysed once (until the cache is emptied)."""
+    move's cell. Shared by the verifier and the search so a position is analysed once (until the cache is emptied).
+    `ties` is how the rule reads a level (`choose`), carried here because every walk that applies the rule has these
+    facts: "exact" — a level decides only when it holds exactly one safe move; "lowest" — the first level holding any
+    safe move decides, with its lowest-numbered move. `safe_depth` is what makes a move safe: 1 — the opponent cannot
+    win at once after it; 2 — nor can the opponent answer it with a move after which every reply of ours lets them win
+    at once (unless none of the 1-ply safe moves passes, when those are kept)."""
 
-    def __init__(self, game, limit: int = 2_000_000):
+    def __init__(self, game, limit: int = 2_000_000, ties: str = "exact", safe_depth: int = 1):
+        if ties not in TIES:
+            raise ValueError(f"ties must be one of {TIES}, got {ties!r}")
+        if safe_depth not in (1, 2):
+            raise ValueError(f"safe_depth must be 1 or 2, got {safe_depth!r}")
         self.game = game
+        self.ties = ties
+        self.safe_depth = safe_depth
         h, w = getattr(game, "board_shape")
         self.cells = h * w
         self.limit = limit
@@ -51,6 +65,27 @@ class Facts:
         child = game.step(state, action)
         return game.is_terminal(child) and game.winner(child) == game.current_player(state)
 
+    def _loses_in_two(self, state, action) -> bool:
+        """Whether the opponent can answer `action` with a move after which every reply of the mover's either loses at
+        once (the opponent then wins immediately) or is not available — no reply wins, draws or holds."""
+        game = self.game
+        child = game.step(state, action)
+        if game.is_terminal(child) or game.current_player(child) == game.current_player(state):
+            return False
+        for b in game.legal_actions(child):
+            after = game.step(child, b)
+            if game.is_terminal(after):
+                continue
+            held = False
+            for c in game.legal_actions(after):
+                reply = game.step(after, c)
+                if game.is_terminal(reply) or not any(self._wins_now(reply, d) for d in game.legal_actions(reply)):
+                    held = True
+                    break
+            if not held:
+                return True
+        return False
+
     def of(self, state) -> tuple:
         """(winning actions, safe actions, {safe action: its cell}) at `state`."""
         key = self.game.state_key(state)
@@ -67,6 +102,8 @@ class Facts:
                 elif game.current_player(child) == mover or not any(
                         self._wins_now(child, b) for b in game.legal_actions(child)):
                     safe.append(a)
+            if self.safe_depth == 2 and len(safe) > 1:
+                safe = [a for a in safe if not self._loses_in_two(state, a)] or safe
             if len(self._facts) >= self.limit:
                 self._facts.clear()
                 self.cleared += 1
@@ -75,7 +112,8 @@ class Facts:
 
 
 def choose(facts: Facts, state, levels: dict, n_levels: int):
-    """The rule's move at `state` under the priority map `levels` ({cell: level}), or None where it is undefined."""
+    """The rule's move at `state` under the priority map `levels` ({cell: level}), or None where it is undefined: a
+    winning move; else the only safe move; else the first level that decides (`facts.ties`)."""
     wins, safe, cell = facts.of(state)
     if wins:
         return min(wins)
@@ -83,8 +121,8 @@ def choose(facts: Facts, state, levels: dict, n_levels: int):
         return safe[0]
     for k in range(n_levels):
         at = [a for a in safe if levels.get(cell[a]) == k]
-        if len(at) == 1:
-            return at[0]
+        if len(at) == 1 or (at and facts.ties == "lowest"):
+            return min(at)
     return None
 
 

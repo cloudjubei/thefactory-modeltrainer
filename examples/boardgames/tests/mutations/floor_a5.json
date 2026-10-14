@@ -1,0 +1,76 @@
+{
+  "file": "harness/floor_a5.py",
+  "tests": ["tests/test_floor_a5.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no research",
+      "old": "        \"builder\": {**A4[\"builder\"], \"research\": 120.0},\n",
+      "new": "        \"builder\": dict(A4[\"builder\"]),\n"
+    },
+    {
+      "name": "shorter research",
+      "old": "        \"builder\": {**A4[\"builder\"], \"research\": 120.0},\n",
+      "new": "        \"builder\": {**A4[\"builder\"], \"research\": 30.0},\n"
+    },
+    {
+      "name": "a4's fingerprint",
+      "old": "        \"measurement_fp\": \"b2f5efcf2ac9\",\n",
+      "new": ""
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if not _checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "judged while unfinished",
+      "old": "    if not all(r[\"complete\"] for r in e[\"roots\"]):\n        return {\"verdict\": \"inconclusive\"}\n",
+      "new": ""
+    },
+    {
+      "name": "cut against the plain pass",
+      "old": "    before = sum(r[\"improved\"][\"lookahead_bits\"] for r in e[\"roots\"])\n",
+      "new": "    before = sum(r[\"improved\"][\"lookahead_bits\"] for r in e[\"roots\"][1:]) + 1\n"
+    },
+    {
+      "name": "support boundary",
+      "old": "verdict = (\"supported\" if cut >= spec[\"further_support\"]",
+      "new": "verdict = (\"supported\" if cut > spec[\"further_support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "else \"refuted\" if cut < spec[\"further_refute\"]",
+      "new": "else \"refuted\" if cut <= spec[\"further_refute\"]"
+    },
+    {
+      "name": "a4's bar",
+      "old": "        \"further_support\": 0.10,\n",
+      "new": "        \"further_support\": 0.15,\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-10T06:14:17+00:00",
+    "killed": 9,
+    "survived": [],
+    "killed_by": {
+      "no research": [
+        "test_a5_is_a4_plus_research_on_the_same_positions",
+        "test_a_run_off_its_registration_is_not_judged"
+      ],
+      "shorter research": ["test_a5_is_a4_plus_research_on_the_same_positions"],
+      "a4's fingerprint": [
+        "test_a5_is_a4_plus_research_on_the_same_positions",
+        "test_a_run_off_its_registration_is_not_judged"
+      ],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "judged while unfinished": ["test_an_unfinished_position_leaves_the_cut_undecided"],
+      "cut against the plain pass": [
+        "test_the_further_cut_is_judged_on_what_the_lookahead_pass_left"
+      ],
+      "support boundary": ["test_the_further_cut_is_judged_on_what_the_lookahead_pass_left"],
+      "refute boundary": ["test_the_further_cut_is_judged_on_what_the_lookahead_pass_left"],
+      "a4's bar": ["test_the_further_cut_is_judged_on_what_the_lookahead_pass_left"]
+    }
+  }
+}

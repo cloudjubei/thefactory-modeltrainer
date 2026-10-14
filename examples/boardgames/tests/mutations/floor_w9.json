@@ -1,0 +1,70 @@
+{
+  "file": "harness/floor_w9.py",
+  "tests": ["tests/test_floor_w9.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "a seen position",
+      "old": "\"indices\": [615, 180, 504,",
+      "new": "\"indices\": [471, 180, 504,"
+    },
+    {
+      "name": "a w5b position",
+      "old": "\"indices\": [615, 180, 504,",
+      "new": "\"indices\": [362, 180, 504,"
+    },
+    {
+      "name": "verdicts not flipped",
+      "old": "    return {**r, \"verdict\": {\"supported\": \"refuted\", \"refuted\": \"supported\"}.get(r[\"verdict\"], r[\"verdict\"])}\n",
+      "new": "    return r\n"
+    },
+    {
+      "name": "only below flipped",
+      "old": "{\"supported\": \"refuted\", \"refuted\": \"supported\"}",
+      "new": "{\"refuted\": \"supported\"}"
+    },
+    {
+      "name": "only above flipped",
+      "old": "{\"supported\": \"refuted\", \"refuted\": \"supported\"}",
+      "new": "{\"supported\": \"refuted\"}"
+    },
+    {
+      "name": "undecided read as below",
+      "old": ".get(r[\"verdict\"], r[\"verdict\"])}",
+      "new": ".get(r[\"verdict\"], \"supported\")}"
+    },
+    {
+      "name": "own completion judge",
+      "old": "w9_report = w6_report\n",
+      "new": "def w9_report(e, spec):\n    return w6_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-11T11:31:16+00:00",
+    "killed": 7,
+    "survived": [],
+    "killed_by": {
+      "a seen position": [
+        "test_below_the_net_needs_the_whole_interval_below_and_every_root_finished",
+        "test_w9_is_l2_on_the_next_32_fresh_positions_of_w1_s_order"
+      ],
+      "a w5b position": [
+        "test_below_the_net_needs_the_whole_interval_below_and_every_root_finished",
+        "test_w9_is_l2_on_the_next_32_fresh_positions_of_w1_s_order"
+      ],
+      "verdicts not flipped": [
+        "test_above_the_net_refutes_even_when_unfinished",
+        "test_below_the_net_needs_the_whole_interval_below_and_every_root_finished"
+      ],
+      "only below flipped": ["test_above_the_net_refutes_even_when_unfinished"],
+      "only above flipped": [
+        "test_below_the_net_needs_the_whole_interval_below_and_every_root_finished"
+      ],
+      "undecided read as below": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_below_the_net_needs_the_whole_interval_below_and_every_root_finished"
+      ],
+      "own completion judge": ["test_w9_is_l2_on_the_next_32_fresh_positions_of_w1_s_order"]
+    }
+  }
+}

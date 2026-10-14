@@ -259,3 +259,10 @@ def test_a_hint_never_changes_the_answer():
             assert verify(facts, s, r["levels"], 2)["won"]
         checked += 1
     assert checked >= 5
+
+
+@pytest.mark.parametrize("ties,depth", [("lowest", 1), ("exact", 2)])
+def test_the_sat_encoding_refuses_a_rule_it_does_not_encode(ties, depth):
+    with pytest.raises(ValueError, match="encoding"):
+        find_steady_state(Facts(GAME, ties=ties, safe_depth=depth), FORK, _winning, 2, max_constraints=10,
+                          conflicts=10, seconds=1.0)

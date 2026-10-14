@@ -1,0 +1,130 @@
+{
+  "file": "harness/floor_f1.py",
+  "tests": ["tests/test_floor_f1.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no waves",
+      "old": "        \"wave_size\": 32,\n",
+      "new": ""
+    },
+    {
+      "name": "old fingerprint",
+      "old": "        \"measurement_fp\": \"4242d4bca6e2\",\n",
+      "new": ""
+    },
+    {
+      "name": "indices unchecked",
+      "old": "    return not _integrity(e, spec) and sorted(r[\"index\"] for r in e[\"roots\"]) == sorted(spec[\"indices\"])\n",
+      "new": "    return not _integrity(e, spec)\n"
+    },
+    {
+      "name": "library free",
+      "old": " + spec[\"library_bits\"] + own\n",
+      "new": " + own\n"
+    },
+    {
+      "name": "opening free",
+      "old": "    return opening[\"moves\"] * 4 + opening[\"trivial\"] + spec",
+      "new": "    return spec"
+    },
+    {
+      "name": "one unfinished allowed",
+      "old": "    verdict = \"supported\" if missing == 0 else",
+      "new": "    verdict = \"supported\" if missing <= 1 else"
+    },
+    {
+      "name": "refute at seven",
+      "old": "else \"refuted\" if missing > spec[\"unfinished_refute\"]",
+      "new": "else \"refuted\" if missing >= spec[\"unfinished_refute\"]"
+    },
+    {
+      "name": "size refute boundary",
+      "old": "verdict = (\"refuted\" if bits > spec[\"w9_high\"]",
+      "new": "verdict = (\"refuted\" if bits >= spec[\"w9_high\"]"
+    },
+    {
+      "name": "size support boundary",
+      "old": "\"supported\" if not lower and bits <= spec[\"w9_bits\"]",
+      "new": "\"supported\" if not lower and bits < spec[\"w9_bits\"]"
+    },
+    {
+      "name": "partial size supports",
+      "old": "\"supported\" if not lower and bits <= spec[\"w9_bits\"]",
+      "new": "\"supported\" if bits <= spec[\"w9_bits\"]"
+    },
+    {
+      "name": "net boundary",
+      "old": "    verdict = \"refuted\" if bits >= spec[\"net_bits\"] else",
+      "new": "    verdict = \"refuted\" if bits > spec[\"net_bits\"] else"
+    },
+    {
+      "name": "partial below the net",
+      "old": "else \"supported\" if not lower else \"inconclusive\"\n",
+      "new": "else \"supported\"\n"
+    },
+    {
+      "name": "complete off registration",
+      "edits": [
+        {
+          "old": "def f1_complete(e: dict, spec: dict) -> dict:\n    if not f1_checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+          "new": "def f1_complete(e: dict, spec: dict) -> dict:\n"
+        }
+      ]
+    },
+    {
+      "name": "size off registration",
+      "edits": [
+        {
+          "old": "def f1_size(e: dict, spec: dict) -> dict:\n    if not f1_checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+          "new": "def f1_size(e: dict, spec: dict) -> dict:\n"
+        }
+      ]
+    },
+    {
+      "name": "net off registration",
+      "edits": [
+        {
+          "old": "def f1_net(e: dict, spec: dict) -> dict:\n    if not f1_checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+          "new": "def f1_net(e: dict, spec: dict) -> dict:\n"
+        }
+      ]
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-12T06:05:49+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "no waves": [
+        "test_f1_builds_every_frontier_position_in_w1_s_order_with_l2_s_rule_and_a_growing_library"
+      ],
+      "old fingerprint": [
+        "test_f1_builds_every_frontier_position_in_w1_s_order_with_l2_s_rule_and_a_growing_library"
+      ],
+      "indices unchecked": ["test_a_run_off_its_registration_is_not_judged"],
+      "library free": [
+        "test_below_the_net_only_when_complete_and_above_refutes_even_unfinished",
+        "test_the_size_is_judged_against_w9_s_projection_and_its_high",
+        "test_the_size_is_the_opening_the_seed_library_and_every_position"
+      ],
+      "opening free": [
+        "test_below_the_net_only_when_complete_and_above_refutes_even_unfinished",
+        "test_the_size_is_judged_against_w9_s_projection_and_its_high",
+        "test_the_size_is_the_opening_the_seed_library_and_every_position"
+      ],
+      "one unfinished allowed": ["test_completion_needs_every_position"],
+      "refute at seven": ["test_completion_needs_every_position"],
+      "size refute boundary": ["test_the_size_is_judged_against_w9_s_projection_and_its_high"],
+      "size support boundary": ["test_the_size_is_judged_against_w9_s_projection_and_its_high"],
+      "partial size supports": ["test_the_size_is_judged_against_w9_s_projection_and_its_high"],
+      "net boundary": ["test_below_the_net_only_when_complete_and_above_refutes_even_unfinished"],
+      "partial below the net": [
+        "test_below_the_net_only_when_complete_and_above_refutes_even_unfinished"
+      ],
+      "complete off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "size off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "net off registration": ["test_a_run_off_its_registration_is_not_judged"]
+    }
+  }
+}

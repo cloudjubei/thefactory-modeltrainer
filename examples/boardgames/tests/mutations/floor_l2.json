@@ -1,0 +1,44 @@
+{
+  "file": "harness/floor_l2.py",
+  "tests": ["tests/test_floor_l2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "exact ties",
+      "old": "\"builder\": {**W8[\"builder\"], \"ties\": \"lowest\"}}",
+      "new": "\"builder\": dict(W8[\"builder\"])}"
+    },
+    {
+      "name": "l1's four levels",
+      "old": "\"builder\": {**W8[\"builder\"], \"ties\": \"lowest\"}}",
+      "new": "\"builder\": {**L1[\"builder\"], \"ties\": \"lowest\"}}"
+    },
+    {
+      "name": "l1's fingerprint",
+      "old": "SPEC = {**L1, \"measurement_fp\": \"e5968103e6f4\", ",
+      "new": "SPEC = {**L1, "
+    },
+    {
+      "name": "own size judge",
+      "old": "l2_size = l1_size\n",
+      "new": "def l2_size(e, spec):\n    return l1_size(e, spec)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l2_report = l1_report\n",
+      "new": "def l2_report(e, spec):\n    return l1_report(e, spec)\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-11T01:59:23+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "exact ties": ["test_l2_is_w8_with_ties_to_the_lowest_move_judged_as_l1"],
+      "l1's four levels": ["test_l2_is_w8_with_ties_to_the_lowest_move_judged_as_l1"],
+      "l1's fingerprint": ["test_l2_is_w8_with_ties_to_the_lowest_move_judged_as_l1"],
+      "own size judge": ["test_l2_is_w8_with_ties_to_the_lowest_move_judged_as_l1"],
+      "own completion judge": ["test_l2_is_w8_with_ties_to_the_lowest_move_judged_as_l1"]
+    }
+  }
+}

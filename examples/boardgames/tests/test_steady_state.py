@@ -62,6 +62,67 @@ def test_the_first_level_holding_exactly_one_safe_move_decides(facts, levels, mo
     assert choose(facts, FORK, levels, 2) == move
 
 
+@pytest.mark.parametrize("levels,move", [({4: 0}, 4), ({4: 0, 5: 0}, 4), ({5: 0, 4: 0, 6: 1}, 4),
+                                         ({4: 1, 5: 1, 8: 0}, 8), ({7: 1, 5: 1}, 5), ({}, None), ({4: 2}, None)])
+def test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides(levels, move):
+    assert choose(Facts(TicTacToe(), ties="lowest"), FORK, levels, 2) == move
+
+
+def test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise(facts):
+    assert facts.ties == "exact" and choose(facts, FORK, {4: 0, 5: 0}, 2) is None
+    with pytest.raises(ValueError, match="ties"):
+        Facts(TicTacToe(), ties="highest")
+
+
+def test_ties_change_only_the_levels_not_wins_or_the_one_safe_move():
+    lowest = Facts(TicTacToe(), ties="lowest")
+    assert choose(lowest, _ttt((0, 1), (3, 4)), {5: 0, 8: 0}, 2) == 2
+    assert choose(lowest, _ttt((0, 8), (4, 2)), {3: 0, 7: 0}, 2) == 6
+
+
+def test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined():
+    assert verify(Facts(TicTacToe()), FORK, {4: 0, 5: 0}, 2)["reason"] == "undefined"
+    assert verify(Facts(TicTacToe(), ties="lowest"), FORK, {4: 0, 5: 0}, 2)["won"]
+
+
+DEEP = Facts(TicTacToe(), safe_depth=2)
+
+
+def test_safety_is_one_ply_unless_told_otherwise(facts):
+    corners = _ttt((0, 8), (4,), to_move=1)
+    assert facts.safe_depth == 1 and facts.of(corners)[1] == [1, 2, 3, 5, 6, 7]
+    with pytest.raises(ValueError, match="safe_depth"):
+        Facts(TicTacToe(), safe_depth=3)
+
+
+def test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops():
+    """X on opposite corners, O in the centre: a corner lets X fork (two threats, one block), an edge does not."""
+    corners = _ttt((0, 8), (4,), to_move=1)
+    assert DEEP.of(corners)[1] == [1, 3, 5, 7] and DEEP.of(corners)[2] == {1: 1, 3: 3, 5: 5, 7: 7}
+    assert DEEP.of(_ttt((0, 2), (1,), to_move=1))[1] == [4]
+
+
+def test_two_ply_safety_keeps_the_one_ply_safe_moves_when_every_one_of_them_loses_in_two():
+    lost = _ttt((0, 5, 7), (1, 2), to_move=1)
+    assert DEEP.of(lost)[1] == Facts(TicTacToe()).of(lost)[1] == [3, 4, 6, 8]
+
+
+def test_two_ply_safety_changes_neither_the_wins_nor_a_forced_safe_move():
+    assert DEEP.of(_ttt((0, 1), (3, 4)))[0] == [2]
+    assert DEEP.of(_ttt((0, 8), (4, 2)))[1] == [6]
+
+
+def test_an_answer_that_fills_the_board_is_a_draw_not_a_threat():
+    """O to move with two empties: 6 wins at once; after 3, X's only answer, 6, fills the board — a draw, so 3 stays
+    safe beside 6."""
+    assert DEEP.of(_ttt((0, 1, 4, 5), (2, 7, 8), to_move=1))[:2] == ([6], [3, 6])
+
+
+def test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map():
+    s = _ttt((0, 2), (1,), to_move=1)
+    assert choose(DEEP, s, {3: 0, 5: 0}, 2) == 4 and choose(Facts(TicTacToe()), s, {3: 0}, 2) == 3
+
+
 def test_a_winning_map_is_verified_over_every_reply(facts):
     assert verify(facts, FORK, {4: 0}, 2) == {"won": True, "reason": None, "own_positions": 5, "positions": 10}
 

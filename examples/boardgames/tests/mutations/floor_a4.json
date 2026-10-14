@@ -1,0 +1,147 @@
+{
+  "file": "harness/floor_a4.py",
+  "tests": ["tests/test_floor_a4.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "no lookahead",
+      "old": "\"builder\": {**W6[\"builder\"], \"improve\": True, \"lookahead\": True},",
+      "new": "\"builder\": {**W6[\"builder\"], \"improve\": True},"
+    },
+    {
+      "name": "old fingerprint",
+      "old": "        \"measurement_fp\": \"0594eb30c588\",\n",
+      "new": ""
+    },
+    {
+      "name": "roots unchecked",
+      "old": "    return not _integrity(e, spec) and sorted(r[\"index\"] for r in e[\"roots\"]) == sorted(spec[\"indices\"])\n",
+      "new": "    return not _integrity(e, spec)\n"
+    },
+    {
+      "name": "judged off registration",
+      "edits": [
+        {
+          "old": "def a4_further(e: dict, spec: dict) -> dict:\n    if not _checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+          "new": "def a4_further(e: dict, spec: dict) -> dict:\n"
+        }
+      ]
+    },
+    {
+      "name": "unstuck off registration",
+      "edits": [
+        {
+          "old": "def a4_unstuck(e: dict, spec: dict) -> dict:\n    if not _checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+          "new": "def a4_unstuck(e: dict, spec: dict) -> dict:\n"
+        }
+      ]
+    },
+    {
+      "name": "further judged while unfinished",
+      "edits": [
+        {
+          "old": "        return {\"verdict\": \"not_run\"}\n    if not all(r[\"complete\"] for r in e[\"roots\"]):\n        return {\"verdict\": \"inconclusive\"}\n    plain = ",
+          "new": "        return {\"verdict\": \"not_run\"}\n    plain = "
+        }
+      ]
+    },
+    {
+      "name": "unstuck judged while unfinished",
+      "edits": [
+        {
+          "old": "        return {\"verdict\": \"not_run\"}\n    if not all(r[\"complete\"] for r in e[\"roots\"]):\n        return {\"verdict\": \"inconclusive\"}\n    stuck = ",
+          "new": "        return {\"verdict\": \"not_run\"}\n    stuck = [r for r in e[\"roots\"] if r[\"improved\"] and 0] or "
+        }
+      ]
+    },
+    {
+      "name": "cut against the completed build",
+      "old": "    plain = sum(r[\"improved\"][\"plain_bits\"] for r in e[\"roots\"])\n",
+      "new": "    plain = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"]) + 1\n"
+    },
+    {
+      "name": "support boundary",
+      "old": "verdict = (\"supported\" if cut >= spec[\"further_support\"]",
+      "new": "verdict = (\"supported\" if cut > spec[\"further_support\"]"
+    },
+    {
+      "name": "refute boundary",
+      "old": "else \"refuted\" if cut < spec[\"further_refute\"]",
+      "new": "else \"refuted\" if cut <= spec[\"further_refute\"]"
+    },
+    {
+      "name": "stuck includes kept",
+      "old": "if r[\"improved\"][\"kept\"] == 0 and r[\"improved\"][\"plain_bits\"] > spec[\"stuck_above\"]]",
+      "new": "if r[\"improved\"][\"plain_bits\"] > spec[\"stuck_above\"]]"
+    },
+    {
+      "name": "stuck includes small",
+      "old": "if r[\"improved\"][\"kept\"] == 0 and r[\"improved\"][\"plain_bits\"] > spec[\"stuck_above\"]]",
+      "new": "if r[\"improved\"][\"kept\"] == 0]"
+    },
+    {
+      "name": "cut counts equal",
+      "old": "    cut = sum(1 for r in stuck if r[\"bits\"][\"nodes\"] < r[\"improved\"][\"plain_bits\"])\n",
+      "new": "    cut = sum(1 for r in stuck if r[\"bits\"][\"nodes\"] <= r[\"improved\"][\"plain_bits\"])\n"
+    },
+    {
+      "name": "one stuck enough",
+      "old": "verdict = (\"inconclusive\" if len(stuck) < 2 else",
+      "new": "verdict = (\"inconclusive\" if len(stuck) < 1 else"
+    },
+    {
+      "name": "half not enough",
+      "old": "else \"supported\" if 2 * cut >= len(stuck)",
+      "new": "else \"supported\" if 2 * cut > len(stuck)"
+    },
+    {
+      "name": "refuted with some cut",
+      "old": "else \"refuted\" if cut == 0\n",
+      "new": "else \"refuted\" if cut <= 1\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-10T03:42:29+00:00",
+    "killed": 16,
+    "survived": [],
+    "killed_by": {
+      "no lookahead": ["test_a4_is_w6_improved_then_improved_with_lookahead_on_eight_positions"],
+      "old fingerprint": [
+        "test_a4_is_w6_improved_then_improved_with_lookahead_on_eight_positions",
+        "test_a_run_off_its_registration_is_not_judged"
+      ],
+      "roots unchecked": ["test_a_run_off_its_registration_is_not_judged"],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "unstuck off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "further judged while unfinished": [
+        "test_a_position_that_did_not_finish_leaves_the_cut_undecided"
+      ],
+      "unstuck judged while unfinished": [
+        "test_a_position_that_did_not_finish_leaves_the_cut_undecided"
+      ],
+      "cut against the completed build": [
+        "test_the_further_cut_is_judged_on_the_total_plain_improvement_left"
+      ],
+      "support boundary": ["test_the_further_cut_is_judged_on_the_total_plain_improvement_left"],
+      "refute boundary": ["test_the_further_cut_is_judged_on_the_total_plain_improvement_left"],
+      "stuck includes kept": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ],
+      "stuck includes small": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ],
+      "cut counts equal": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ],
+      "one stuck enough": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ],
+      "half not enough": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ],
+      "refuted with some cut": [
+        "test_unstuck_is_judged_on_the_heavy_positions_plain_improvement_could_not_change"
+      ]
+    }
+  }
+}
