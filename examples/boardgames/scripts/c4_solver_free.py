@@ -41,6 +41,7 @@ ROOT = Path(__file__).resolve().parent.parent
 NETS = ROOT / "checkpoints" / "c49_sf"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_solver_free.py", "harness/certify.py", "harness/native_solver.py",
+                       "harness/native_build.py",
                        "harness/transfer.py", "harness/fixed_set.py", "harness/opening_table.py",
                        "harness/exact_values.py")
 EMPTY_BOARD_VALUE = 1

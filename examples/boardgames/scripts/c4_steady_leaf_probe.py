@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MEASUREMENT_MODULES = ("scripts/c4_steady_leaf_probe.py", "scripts/c4_steady_states.py", "harness/steady_local.py",
                        "harness/steady_exceptions.py", "harness/steady_state.py", "harness/certify.py",
-                       "harness/c4_oracle.py", "harness/native_solver.py")
+                       "harness/c4_oracle.py", "harness/native_solver.py", "harness/native_build.py")
 N_LEVELS, LEVEL_BITS, SECONDS, CAP = 8, 3, 1800.0, 1_000_000
 
 

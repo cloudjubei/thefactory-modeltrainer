@@ -1,0 +1,134 @@
+{
+  "file": "harness/floor_l4.py",
+  "tests": ["tests/test_floor_l4.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "forcing off",
+      "old": "        \"builder\": {**L2[\"builder\"], \"forcing\": True},\n",
+      "new": "        \"builder\": dict(L2[\"builder\"]),\n"
+    },
+    {
+      "name": "l2's fingerprint",
+      "old": "        \"measurement_fp\": \"1d12399d877c\",\n",
+      "new": ""
+    },
+    {
+      "name": "another position",
+      "old": "226, 530, 121,",
+      "new": "226, 530, 122,"
+    },
+    {
+      "name": "another support",
+      "old": "        \"support\": 0.8}",
+      "new": "        \"support\": 0.9}"
+    },
+    {
+      "name": "arm judged off registration",
+      "old": "    if _integrity(e, spec) or _integrity(control, control_spec):",
+      "new": "    if _integrity(control, control_spec):"
+    },
+    {
+      "name": "control judged off registration",
+      "old": "    if _integrity(e, spec) or _integrity(control, control_spec):",
+      "new": "    if _integrity(e, spec):"
+    },
+    {
+      "name": "refute boundary",
+      "old": "not control_lower and ratio >= 1",
+      "new": "not control_lower and ratio > 1"
+    },
+    {
+      "name": "partial control refutes",
+      "old": "not control_lower and ratio >= 1",
+      "new": "ratio >= 1"
+    },
+    {
+      "name": "support boundary",
+      "old": "not lower and ratio <= spec[\"support\"]",
+      "new": "not lower and ratio < spec[\"support\"]"
+    },
+    {
+      "name": "partial arm supports",
+      "old": "not lower and ratio <= spec[\"support\"]",
+      "new": "ratio <= spec[\"support\"]"
+    },
+    {
+      "name": "arm never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "control never a lower bound",
+      "old": "    control_lower = not all(r[\"complete\"] for r in control[\"roots\"])\n",
+      "new": "    control_lower = False\n"
+    },
+    {
+      "name": "one root's size",
+      "old": "    bits = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])\n",
+      "new": "    bits = e[\"roots\"][0][\"bits\"][\"nodes\"]\n"
+    },
+    {
+      "name": "control is the arm",
+      "old": "    control_bits = sum(r[\"bits\"][\"nodes\"] for r in control[\"roots\"])\n",
+      "new": "    control_bits = sum(r[\"bits\"][\"nodes\"] for r in e[\"roots\"])\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l4_report = w6_report",
+      "new": "l4_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-15T10:46:25+00:00",
+    "killed": 15,
+    "survived": [],
+    "killed_by": {
+      "forcing off": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_l4_is_l2_preferring_forcing_moves_on_f1_s_heaviest_and_spread_positions"
+      ],
+      "l2's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_l4_is_l2_preferring_forcing_moves_on_f1_s_heaviest_and_spread_positions"
+      ],
+      "another position": [
+        "test_l4_is_l2_preferring_forcing_moves_on_f1_s_heaviest_and_spread_positions"
+      ],
+      "another support": [
+        "test_l4_is_l2_preferring_forcing_moves_on_f1_s_heaviest_and_spread_positions",
+        "test_the_forcing_arm_is_judged_against_the_control"
+      ],
+      "arm judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "control judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "refute boundary": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support",
+        "test_the_forcing_arm_is_judged_against_the_control"
+      ],
+      "partial control refutes": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support"
+      ],
+      "support boundary": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support",
+        "test_the_forcing_arm_is_judged_against_the_control"
+      ],
+      "partial arm supports": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support"
+      ],
+      "arm never a lower bound": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support"
+      ],
+      "control never a lower bound": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support"
+      ],
+      "one root's size": ["test_the_forcing_arm_is_judged_against_the_control"],
+      "control is the arm": [
+        "test_an_unfinished_forcing_root_can_only_refute_and_an_unfinished_control_root_only_support",
+        "test_the_forcing_arm_is_judged_against_the_control"
+      ],
+      "own completion judge": [
+        "test_l4_is_l2_preferring_forcing_moves_on_f1_s_heaviest_and_spread_positions"
+      ]
+    }
+  }
+}

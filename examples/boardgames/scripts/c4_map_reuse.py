@@ -1,7 +1,8 @@
-"""§3.6 — do maps carry across the frontier? Under a SPEC's rule (its builder's `ties` and `safe_depth`), for every root
-and every leaf of the strategies in one run's evidence, whether any map found by another run's builds wins every line
-from there (the C verify, each map restricted to the cells empty at that position, as the builder applies it). Saved:
-per root, whether a map covers the root and how many of its leaves (with exceptions or without) one covers.
+"""§3.6 — do maps carry across the frontier? Under a SPEC's rule (its builder's `ties`, `safe_depth`, `forcing`,
+`unlevelled`), for every root and every leaf of the strategies in one run's evidence, whether any map found by
+another run's builds wins every line from there (the C verify, each map restricted to the cells empty at that
+position, as the builder applies it). Saved: per root, whether a map covers the root and how many of its leaves (with
+exceptions or without) one covers.
 
     PYTHONPATH=. .venv/bin/python -u scripts/c4_map_reuse.py --spec harness.floor_l2 --maps c49_l2.json.gz \\
         --targets c49_w9.json.gz --out evidence/c49_map_reuse.json.gz
@@ -16,7 +17,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MEASUREMENT_MODULES = ("scripts/c4_map_reuse.py", "harness/native_leaf.py", "harness/steady_state.py")
+MEASUREMENT_MODULES = ("scripts/c4_map_reuse.py", "harness/native_leaf.py",
+                       "harness/native_build.py", "harness/steady_state.py")
 C_SOURCES = ("harness/c4leafwalk.c", "harness/c4solver.c")
 SECONDS = 30.0
 
@@ -40,7 +42,8 @@ def main() -> None:
     started = datetime.now(timezone.utc).isoformat(timespec="microseconds")
     b = importlib.import_module(args.spec).SPEC["builder"]
     game = Connect4()
-    facts = Facts(game, ties=b.get("ties", "exact"), safe_depth=b.get("safe_depth", 1))
+    facts = Facts(game, ties=b.get("ties", "exact"), safe_depth=b.get("safe_depth", 1),
+                  forcing=b.get("forcing", False), unlevelled=b.get("unlevelled", "none"))
     offered = [{int(c): k for c, k in m.items()}
                for r in load_evidence(ROOT / "evidence" / args.maps)["roots"] for m in r["maps"][1:]]
     seen: set = set()

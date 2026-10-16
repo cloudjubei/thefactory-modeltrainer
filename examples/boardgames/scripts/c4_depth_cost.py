@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_depth_cost.py", "harness/opening_table.py", "harness/exact_values.py",
                        "harness/certify.py", "harness/c4_oracle.py", "harness/native_solver.py",
+                       "harness/native_build.py",
                        "harness/strategy_tree.py")
 
 

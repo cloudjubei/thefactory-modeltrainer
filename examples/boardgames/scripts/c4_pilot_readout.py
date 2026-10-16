@@ -17,7 +17,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 LABELS = ROOT / "books" / "c4_labels.json.gz"
-MEASUREMENT_MODULES = ("scripts/c4_pilot_readout.py", "harness/c4_oracle.py", "harness/native_solver.py")
+MEASUREMENT_MODULES = ("scripts/c4_pilot_readout.py", "harness/c4_oracle.py", "harness/native_solver.py",
+                       "harness/native_build.py")
 SEARCH = {"gumbel": True, "gumbel_m": 16, "c_scale": 0.1, "add_noise": False}
 
 

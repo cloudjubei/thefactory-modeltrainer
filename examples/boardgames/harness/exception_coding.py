@@ -3,7 +3,8 @@ exceptions read so far, visiting positions in one fixed order. At each of the si
 whether an exception is possible: none where the rule is FORCED (an immediate win, or exactly one safe move — a
 winning move is always safe); one for certain where the map gives no move (UNDEFINED); otherwise the position is
 CONTESTED and only there is an exception flagged. The flags are coded as how many and which of the contested positions
-(an enumerative code), and each exception's move as one of the safe moves the map did not play. Against the sparse
+(an enumerative code), and each exception's move as one of the safe moves the map did not play — every safe move, not
+only those the rule chooses among (with forcing moves preferred, a winning move may not force). Against the sparse
 list or mask of harness.steady_exceptions.exception_bits, positions the rules settle cost nothing."""
 from __future__ import annotations
 
@@ -43,7 +44,8 @@ def walk_order_cost(facts: Facts, root, levels: dict, n_levels: int, exceptions:
         if game.current_player(s) != player:
             stack.extend(game.step(s, b) for b in game.legal_actions(s))
             continue
-        wins, safe, _cell = facts.of(s)
+        wins = facts.of(s)[0]
+        safe = facts.safe_moves(s)
         move = choose(facts, s, levels, n_levels)
         fix = exceptions.get(key)
         if fix is not None:

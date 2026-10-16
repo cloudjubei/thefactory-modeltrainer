@@ -3,7 +3,9 @@
  * steady-state rule of harness.steady_state.choose plays (win at once; else the only safe move; else the first level
  * of the priority map holding exactly one safe move — or, with `ties_lowest`, any safe move, the lowest column
  * deciding; else no move — a move safe when the opponent cannot win at once after it, and with `safe_depth` 2 nor
- * force a win in two), and where its move is not a winning one an
+ * force a win in two; with `forcing`, of several safe moves those leaving the opponent at most one reply that stops an
+ * immediate win, when any do; with `unlevelled_last`, the safe moves on unlevelled cells read as a last level), and
+ * where its move is not a winning one an
  * exception plays the lowest winning column instead; every reply is followed. Moves are judged by the exact solve of
  * harness/c4solver.c (included below), and only the moves that decide: the map's move where it gives one, otherwise
  * columns from the left up to the first winning one (h210) — each result cached by the position it leads to across
@@ -109,11 +111,29 @@ static int loses_in_two(uint64_t position, uint64_t mask, int c) {
     return 0;
 }
 
+/* Whether column c leaves the opponent at most one reply after which the side to move cannot win at once. Called only
+ * for one of several safe moves where none wins at once — so c ends nothing (a move ending the game forces nothing in
+ * harness.steady_state.Facts._forces, which this mirrors), no reply wins for the opponent, and a reply filling the
+ * board leaves no column to win with. */
+static int forces(uint64_t position, uint64_t mask, int c) {
+    uint64_t mb = move_bit(mask, c), mine = position | mb, all = mask | mb;
+    int safe_replies = 0;
+    for (int b = 0; b < WIDTH; b++) {
+        if (!playable(all, b)) continue;
+        uint64_t all2 = all | move_bit(all, b);
+        int threat = 0;
+        for (int d = 0; d < WIDTH && !threat; d++)
+            if (playable(all2, d) && alignment(mine | move_bit(all2, d))) threat = 1;
+        if (!threat) safe_replies++;
+    }
+    return safe_replies <= 1;
+}
+
 /* The rule's column at a position of the side to move, or -1 where it gives none; *immediate set when it wins at
  * once. Mirrors harness.steady_state.Facts.of and choose (`ties_lowest`: Facts.ties == "lowest"; `safe_depth`:
- * Facts.safe_depth). */
+ * Facts.safe_depth; `forcing`: Facts.forcing; `unlevelled_last`: Facts.unlevelled == "last"). */
 static int rule_move(uint64_t position, uint64_t mask, const int8_t *levels, int n_levels, int ties_lowest,
-                     int safe_depth, int *immediate) {
+                     int safe_depth, int forcing, int unlevelled_last, int *immediate) {
     int safe[WIDTH], cells[WIDTH], n_safe = 0;
     *immediate = 0;
     for (int c = 0; c < WIDTH; c++) {
@@ -148,11 +168,30 @@ static int rule_move(uint64_t position, uint64_t mask, const int8_t *levels, int
             }
         if (kept) n_safe = kept;
     }
+    if (forcing && n_safe > 1) {
+        int kept = 0;
+        for (int i = 0; i < n_safe; i++)
+            if (forces(position, mask, safe[i])) {
+                safe[kept] = safe[i];
+                cells[kept] = cells[i];
+                kept++;
+            }
+        if (kept) n_safe = kept;
+    }
     if (n_safe == 1) return safe[0];
     for (int k = 0; k < n_levels; k++) {
         int found = -1, count = 0;
         for (int i = 0; i < n_safe; i++)
             if (levels[cells[i]] == k) {
+                if (found < 0) found = safe[i];
+                count++;
+            }
+        if (count == 1 || (count > 0 && ties_lowest)) return found;
+    }
+    if (unlevelled_last) {
+        int found = -1, count = 0;
+        for (int i = 0; i < n_safe; i++)
+            if (levels[cells[i]] < 0) {
                 if (found < 0) found = safe[i];
                 count++;
             }
@@ -194,9 +233,9 @@ static double now(void) {
  * exception plays the lowest winning column (written as (position, mask, column) triples). Positions are visited in
  * the Python walks' order, so counts match them even at a failure. */
 static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                int ties_lowest, int safe_depth, int64_t cap, double seconds, int verify_only,
-                uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move, int64_t max_exceptions,
-                int64_t *n_exceptions, int64_t *own_positions, int64_t *positions) {
+                int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int64_t cap, double seconds,
+                int verify_only, uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move,
+                int64_t max_exceptions, int64_t *n_exceptions, int64_t *own_positions, int64_t *positions) {
     *n_exceptions = 0;
     *own_positions = 0;
     *positions = 0;
@@ -243,7 +282,8 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
         }
         if ((s.moves & 1) == player_parity) {
             (*own_positions)++;
-            int immediate, move = rule_move(s.position, s.mask, levels, n_levels, ties_lowest, safe_depth, &immediate);
+            int immediate, move = rule_move(s.position, s.mask, levels, n_levels, ties_lowest, safe_depth, forcing,
+                                            unlevelled_last, &immediate);
             if (verify_only && move < 0) {
                 status = VERIFY_UNDEFINED;
                 break;
@@ -284,22 +324,21 @@ static int walk(uint64_t root_position, uint64_t root_mask, int root_moves, cons
 
 /* harness.steady_exceptions.needed: a WALK_* status; on WALK_OK the exceptions and *own_positions are set. */
 int c4_leaf_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                 int ties_lowest, int safe_depth, int64_t cap, double seconds, uint64_t *exc_position,
-                 uint64_t *exc_mask, int8_t *exc_move, int64_t max_exceptions, int64_t *n_exceptions,
-                 int64_t *own_positions) {
+                 int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int64_t cap, double seconds,
+                 uint64_t *exc_position, uint64_t *exc_mask, int8_t *exc_move, int64_t max_exceptions,
+                 int64_t *n_exceptions, int64_t *own_positions) {
     int64_t positions;
-    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 0,
-                exc_position,
-                exc_mask, exc_move, max_exceptions, n_exceptions, own_positions, &positions);
+    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,
+                unlevelled_last, cap, seconds, 0, exc_position, exc_mask, exc_move, max_exceptions, n_exceptions,
+                own_positions, &positions);
 }
 
 /* harness.steady_state.verify: 0 when every line is won, else WALK_CAP, WALK_TIMEOUT, VERIFY_UNDEFINED, VERIFY_DRAW,
  * VERIFY_LOSS or WALK_OUT_OF_MEMORY; *own_positions and *positions as walked. */
 int c4_verify_walk(uint64_t root_position, uint64_t root_mask, int root_moves, const int8_t *levels, int n_levels,
-                   int ties_lowest, int safe_depth, int64_t cap, double seconds, int64_t *own_positions,
-                   int64_t *positions) {
+                   int ties_lowest, int safe_depth, int forcing, int unlevelled_last, int64_t cap, double seconds,
+                   int64_t *own_positions, int64_t *positions) {
     int64_t n_exceptions;
-    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 1, NULL,
-                NULL, NULL,
-                0, &n_exceptions, own_positions, positions);
+    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,
+                unlevelled_last, cap, seconds, 1, NULL, NULL, NULL, 0, &n_exceptions, own_positions, positions);
 }

@@ -123,6 +123,85 @@ def test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map():
     assert choose(DEEP, s, {3: 0, 5: 0}, 2) == 4 and choose(Facts(TicTacToe()), s, {3: 0}, 2) == 3
 
 
+LAST = Facts(TicTacToe(), ties="lowest", unlevelled="last")
+
+
+def test_unlevelled_cells_are_passed_over_unless_told_otherwise(facts):
+    assert facts.unlevelled == "none" and choose(Facts(TicTacToe(), ties="lowest"), FORK, {}, 2) is None
+    with pytest.raises(ValueError, match="unlevelled"):
+        Facts(TicTacToe(), unlevelled="first")
+
+
+@pytest.mark.parametrize("levels,move", [({}, 4), ({5: 0}, 5), ({5: 1, 7: 1}, 5), ({4: 0, 5: 0, 6: 1}, 4),
+                                         ({4: 1, 5: 1}, 4), ({4: 2, 5: 2, 6: 2, 7: 2, 8: 2}, None)])
+def test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s(levels, move):
+    assert choose(LAST, FORK, levels, 2) == move
+
+
+def test_the_last_level_is_read_like_any_other():
+    exact = Facts(TicTacToe(), unlevelled="last")
+    assert choose(exact, FORK, {}, 2) is None and choose(exact, FORK, {4: 0, 5: 0, 6: 0, 7: 0}, 2) == 8
+    assert choose(exact, FORK, {4: 0, 5: 0, 6: 0}, 2) is None
+
+
+def test_unlevelled_cells_last_change_neither_the_wins_nor_a_forced_safe_move():
+    assert choose(LAST, _ttt((0, 1), (3, 4)), {5: 0}, 2) == 2
+    assert choose(LAST, _ttt((0, 8), (4, 2)), {3: 0}, 2) == 6
+
+
+def test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined():
+    assert verify(LAST, FORK, {}, 2)["won"]
+    assert verify(Facts(TicTacToe(), ties="lowest"), FORK, {}, 2)["reason"] == "undefined"
+
+
+FORCING = Facts(TicTacToe(), forcing=True)
+
+
+def test_every_safe_move_is_kept_unless_told_to_prefer_forcing_ones(facts):
+    assert facts.forcing is False and facts.of(FORK)[1] == [4, 5, 6, 7, 8]
+    with pytest.raises(ValueError, match="forcing"):
+        Facts(TicTacToe(), forcing="yes")
+
+
+def test_preferring_forcing_moves_keeps_the_safe_moves_that_leave_the_opponent_at_most_one_safe_reply():
+    """In FORK the centre makes two threats (no safe reply for O), 7 and 8 one each (one safe reply); 5 and 6 none."""
+    assert FORCING.of(FORK)[1] == [4, 7, 8] and FORCING.of(FORK)[2] == {4: 4, 7: 7, 8: 8}
+
+
+def test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred(facts):
+    assert facts.safe_moves(FORK) == facts.of(FORK)[1] == [4, 5, 6, 7, 8]
+    assert FORCING.safe_moves(FORK) == [4, 5, 6, 7, 8] and FORCING.of(FORK)[1] == [4, 7, 8]
+    assert DEEP.safe_moves(_ttt((0, 8), (4,), to_move=1)) == [1, 3, 5, 7]
+
+
+def test_a_move_leaving_the_opponent_two_safe_replies_does_not_force():
+    """X{0,1,5} O{2,3,7}, X to move: 4 and 8 each threaten one line (one block), 6 threatens nothing and leaves O two
+    replies, both safe."""
+    assert FORCING.of(_ttt((0, 1, 5), (2, 3, 7)))[1] == [4, 8]
+
+
+def test_preferring_forcing_moves_keeps_every_safe_move_when_none_forces():
+    empty = TicTacToe().initial_state()
+    assert FORCING.of(empty)[1] == Facts(TicTacToe()).of(empty)[1] == list(range(9))
+
+
+def test_a_move_that_ends_the_game_forces_nothing_and_a_reply_that_fills_the_board_counts_as_safe():
+    """O to move, 3 and 6 empty: 6 wins at once (the game ends: not forcing); after 3 X's only reply fills the board
+    and draws, one safe reply — so 3 forces."""
+    assert FORCING.of(_ttt((0, 1, 4, 5), (2, 7, 8), to_move=1))[:2] == ([6], [3])
+
+
+def test_preferring_forcing_moves_changes_neither_the_wins_nor_a_forced_safe_move():
+    assert FORCING.of(_ttt((0, 1), (3, 4)))[0] == [2]
+    assert FORCING.of(_ttt((0, 8), (4, 2)))[1] == [6]
+
+
+def test_with_forcing_moves_preferred_the_levels_choose_among_them():
+    assert choose(FORCING, FORK, {5: 0, 7: 1}, 2) == 7 and choose(Facts(TicTacToe()), FORK, {5: 0, 7: 1}, 2) == 5
+    assert verify(FORCING, FORK, {4: 0, 5: 0}, 2)["won"]
+    assert verify(Facts(TicTacToe()), FORK, {4: 0, 5: 0}, 2)["reason"] == "undefined"
+
+
 def test_a_winning_map_is_verified_over_every_reply(facts):
     assert verify(facts, FORK, {4: 0}, 2) == {"won": True, "reason": None, "own_positions": 5, "positions": 10}
 

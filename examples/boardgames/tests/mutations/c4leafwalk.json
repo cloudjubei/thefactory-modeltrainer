@@ -20,8 +20,8 @@
     },
     {
       "name": "a level with several safe moves decides",
-      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return found;",
-      "new": "        if (count >= 1) return found;"
+      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1 || (count > 0 && ties_lowest)) return found;",
+      "new": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count >= 1) return found;"
     },
     {
       "name": "only safe move ignored",
@@ -105,28 +105,28 @@
     },
     {
       "name": "verify walks with exceptions",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 1, NULL,\n",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 0, NULL,\n"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,"
     },
     {
       "name": "ties ignored in c",
-      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return found;",
-      "new": "        if (count == 1) return found;"
+      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1 || (count > 0 && ties_lowest)) return found;",
+      "new": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1) return found;"
     },
     {
       "name": "highest column of a tied level",
-      "old": "                if (found < 0) found = safe[i];\n",
-      "new": "                found = safe[i];\n"
+      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n",
+      "new": "            if (levels[cells[i]] == k) {\n                found = safe[i];\n"
     },
     {
       "name": "leaf walk drops ties",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 0,\n",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, cap, seconds, 0,\n"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,"
     },
     {
       "name": "verify drops ties",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 1, NULL,\n",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, cap, seconds, 1, NULL,\n"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,"
     },
     {
       "name": "depth two ignored in c",
@@ -135,13 +135,13 @@
     },
     {
       "name": "no fallback in c",
-      "old": "        if (kept) n_safe = kept;\n",
-      "new": "        n_safe = kept;\n"
+      "old": "            if (!loses_in_two(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];\n                kept++;\n            }\n        if (kept) n_safe = kept;\n",
+      "new": "            if (!loses_in_two(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];\n                kept++;\n            }\n        n_safe = kept;\n"
     },
     {
       "name": "cells not moved with moves",
-      "old": "                cells[kept] = cells[i];\n",
-      "new": ""
+      "old": "            if (!loses_in_two(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];\n",
+      "new": "            if (!loses_in_two(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n"
     },
     {
       "name": "their win checked on our stones",
@@ -150,38 +150,105 @@
     },
     {
       "name": "leaf walk drops depth",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 0,\n",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, cap, seconds, 0,\n"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, cap, seconds, 0,"
     },
     {
       "name": "verify drops depth",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, cap, seconds, 1, NULL,\n",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, cap, seconds, 1, NULL,\n"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, cap, seconds, 1,"
+    },
+    {
+      "name": "forcing never kept in c",
+      "old": "    if (forcing && n_safe > 1) {",
+      "new": "    if (0 && forcing && n_safe > 1) {"
+    },
+    {
+      "name": "forcing allows two replies in c",
+      "old": "    return safe_replies <= 1;",
+      "new": "    return safe_replies <= 2;"
+    },
+    {
+      "name": "forcing needs no reply in c",
+      "old": "    return safe_replies <= 1;",
+      "new": "    return safe_replies < 1;"
+    },
+    {
+      "name": "no forcing move empties the safe moves in c",
+      "old": "            if (forces(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];\n                kept++;\n            }\n        if (kept) n_safe = kept;",
+      "new": "            if (forces(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];\n                kept++;\n            }\n        n_safe = kept;"
+    },
+    {
+      "name": "forcing keeps the wrong cells in c",
+      "old": "            if (forces(position, mask, safe[i])) {\n                safe[kept] = safe[i];\n                cells[kept] = cells[i];",
+      "new": "            if (forces(position, mask, safe[i])) {\n                safe[kept] = safe[i];"
+    },
+    {
+      "name": "forcing not passed in c",
+      "old": "ties_lowest, safe_depth, forcing,\n                                            unlevelled_last, &immediate);",
+      "new": "ties_lowest, safe_depth, 0,\n                                            unlevelled_last, &immediate);"
+    },
+    {
+      "name": "unlevelled last never read in c",
+      "old": "    if (unlevelled_last) {\n",
+      "new": "    if (0) {\n"
+    },
+    {
+      "name": "unlevelled last reads levelled cells in c",
+      "old": "            if (levels[cells[i]] < 0) {\n",
+      "new": "            if (levels[cells[i]] <= 0) {\n"
+    },
+    {
+      "name": "unlevelled last ignores ties in c",
+      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return found;\n    }\n    return -1;",
+      "new": "        if (count > 0) return found;\n    }\n    return -1;"
+    },
+    {
+      "name": "unlevelled last not passed in c",
+      "old": "                                            unlevelled_last, &immediate);",
+      "new": "                                            0, &immediate);"
+    },
+    {
+      "name": "leaf walk drops unlevelled last",
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, cap, seconds, 0,"
+    },
+    {
+      "name": "verify drops unlevelled last",
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, cap, seconds, 1,"
     }
   ],
   "note": "'verify: loss read as draw' is not listed: the rule plays only immediate wins or safe moves, so the opponent never wins on its next move and a line of the rule's ends in a loss never — the branch is unreachable for Connect-4 and the mutant equivalent.",
   "last_run": {
-    "at": "2026-10-11T19:58:40+00:00",
-    "killed": 31,
+    "at": "2026-10-15T07:26:05+00:00",
+    "killed": 37,
     "survived": [],
     "killed_by": {
       "winning map moves overridden": [
         "test_exceptions_are_counted_without_building_their_keys",
         "test_fewer_levels_read_the_same_map_differently_in_both",
         "test_one_walk_s_exceptions_survive_the_next_walk",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find",
         "test_two_ply_safety_changes_what_both_walks_find"
       ],
       "map moves never checked": [
         "test_fewer_levels_read_the_same_map_differently_in_both",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_preferring_forcing_moves_changes_what_both_walks_find",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find",
         "test_two_ply_safety_changes_what_both_walks_find"
       ],
@@ -189,45 +256,65 @@
         "test_exceptions_are_counted_without_building_their_keys",
         "test_fewer_levels_read_the_same_map_differently_in_both",
         "test_one_walk_s_exceptions_survive_the_next_walk",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "a level with several safe moves decides": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "only safe move ignored": [
         "test_exceptions_are_counted_without_building_their_keys",
         "test_fewer_levels_read_the_same_map_differently_in_both",
         "test_one_walk_s_exceptions_survive_the_next_walk",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "revisits counted": [
         "test_fewer_levels_read_the_same_map_differently_in_both",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "cap ignored": ["timeout after 300s"],
       "deadline ignored": [
@@ -240,21 +327,30 @@
         "test_exceptions_are_counted_without_building_their_keys",
         "test_fewer_levels_read_the_same_map_differently_in_both",
         "test_one_walk_s_exceptions_survive_the_next_walk",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "cell is the column": [
         "test_fewer_levels_read_the_same_map_differently_in_both",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "own positions not counted": ["timeout after 300s"],
@@ -264,104 +360,200 @@
         "test_exceptions_are_counted_without_building_their_keys",
         "test_fewer_levels_read_the_same_map_differently_in_both",
         "test_one_walk_s_exceptions_survive_the_next_walk",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
         "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "move cache answers other positions": [
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "immediate wins not counted as winning": [],
       "verify: undefined passes": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
         "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "verify: draws pass": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]"
       ],
       "verify: positions not reported": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
         "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify"
       ],
       "verify walks with exceptions": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
+        "test_preferring_forcing_moves_changes_what_both_walks_find",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
         "test_the_c_verify_reports_a_cap_and_a_timeout_as_the_python_verify",
         "test_the_tie_rule_changes_what_both_walks_find",
         "test_two_ply_safety_changes_what_both_walks_find"
       ],
       "ties ignored in c": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "highest column of a tied level": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "leaf walk drops ties": [
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "verify drops ties": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
         "test_the_tie_rule_changes_what_both_walks_find"
       ],
       "depth two ignored in c": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_two_ply_safety_changes_what_both_walks_find"
       ],
-      "no fallback in c": ["timeout after 300s"],
+      "no fallback in c": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]"
+      ],
       "cells not moved with moves": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "their win checked on our stones": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ],
       "leaf walk drops depth": [
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2]",
-        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]",
         "test_two_ply_safety_changes_what_both_walks_find"
       ],
       "verify drops depth": [
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2]",
-        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2]"
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-False]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]"
+      ],
+      "forcing never kept in c": [
+        "test_preferring_forcing_moves_changes_what_both_walks_find",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
+      ],
+      "forcing allows two replies in c": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
+      ],
+      "forcing needs no reply in c": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
+      ],
+      "no forcing move empties the safe moves in c": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
+      ],
+      "forcing keeps the wrong cells in c": [
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
+      ],
+      "forcing not passed in c": [
+        "test_preferring_forcing_moves_changes_what_both_walks_find",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[exact-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_verify_matches_the_python_verify_on_every_position_and_map[lowest-2-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[exact-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-1-True]",
+        "test_the_c_walk_matches_the_python_walk_on_every_position_and_map[lowest-2-True]"
       ]
     }
   }

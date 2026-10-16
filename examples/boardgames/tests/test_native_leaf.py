@@ -64,15 +64,19 @@ def positions():
     return _positions(8, 5)
 
 
-RULES = [("exact", 1), ("lowest", 1), ("exact", 2), ("lowest", 2)]
+RULES = [("exact", 1, False, "none"), ("lowest", 1, False, "none"), ("exact", 2, False, "none"),
+         ("lowest", 2, False, "none"), ("exact", 1, True, "none"), ("lowest", 1, True, "none"),
+         ("lowest", 2, True, "none"), ("lowest", 1, False, "last"), ("exact", 1, False, "last"),
+         ("lowest", 2, True, "last")]
 
 
-@pytest.mark.parametrize("ties,depth", RULES)
-def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions, ties, depth):
+@pytest.mark.parametrize("ties,depth,forcing,unlevelled", RULES)
+def test_the_c_walk_matches_the_python_walk_on_every_position_and_map(positions, ties, depth, forcing,
+                                                                      unlevelled):
     rng = random.Random(7)
     checked = 0
     for s in positions:
-        facts = Facts(GAME, ties=ties, safe_depth=depth)
+        facts = Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled)
         for levels in _maps(facts, s, rng):
             assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
             checked += 1
@@ -129,14 +133,15 @@ def test_one_walk_s_exceptions_survive_the_next_walk(positions):
     assert dict(first["exceptions"]) == reference(facts, positions[0], {}, 8, _winning, 1_000_000)["exceptions"]
 
 
-@pytest.mark.parametrize("ties,depth", RULES)
-def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positions, ties, depth):
+@pytest.mark.parametrize("ties,depth,forcing,unlevelled", RULES)
+def test_the_c_verify_matches_the_python_verify_on_every_position_and_map(positions, ties, depth, forcing,
+                                                                          unlevelled):
     from harness.native_leaf import verify as native_verify
     from harness.steady_state import verify as python_verify
 
     rng = random.Random(9)
     for s in positions:
-        facts = Facts(GAME, ties=ties, safe_depth=depth)
+        facts = Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled)
         empty = facts.empty_cells(s)
         for levels in ({}, {c: rng.randrange(8) for c in empty}, {c: 0 for c in empty},
                        {c: k for k, c in enumerate(empty[:8])}):
@@ -178,4 +183,27 @@ def test_two_ply_safety_changes_what_both_walks_find(positions):
         level = {c: 0 for c in one.empty_cells(s)}
         changed += native(one, s, level, 8, None, 1_000_000) != native(two, s, level, 8, None, 1_000_000)
         changed += native_verify(one, s, level, 8) != native_verify(two, s, level, 8)
+    assert changed
+
+
+def test_preferring_forcing_moves_changes_what_both_walks_find(positions):
+    from harness.native_leaf import verify as native_verify
+
+    changed = 0
+    for s in positions:
+        plain, forcing = Facts(GAME, ties="lowest"), Facts(GAME, ties="lowest", forcing=True)
+        level = {c: 0 for c in plain.empty_cells(s)}
+        changed += native(plain, s, level, 8, None, 1_000_000) != native(forcing, s, level, 8, None, 1_000_000)
+        changed += native_verify(plain, s, level, 8) != native_verify(forcing, s, level, 8)
+    assert changed
+
+
+def test_unlevelled_cells_last_change_what_both_walks_find(positions):
+    from harness.native_leaf import verify as native_verify
+
+    changed = 0
+    for s in positions:
+        plain, last = Facts(GAME, ties="lowest"), Facts(GAME, ties="lowest", unlevelled="last")
+        changed += native(plain, s, {}, 8, None, 1_000_000) != native(last, s, {}, 8, None, 1_000_000)
+        changed += native_verify(plain, s, {}, 8) != native_verify(last, s, {}, 8)
     assert changed

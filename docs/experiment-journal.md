@@ -5428,3 +5428,69 @@ little (h275): 880 of 8,904 leaves reference it; L2's 32 positions, where the se
 in F1 against 14,666 in L2. As a method (h276): on this frontier a 32-position bootstrap's 95% high falls below the
 true mean 113 times in 1,000, not 25 — projections from 32 positions were guesses, not bounds, and every projection
 from W6 to W10 should be read so. WeakC4's ~35-45K is ~13x smaller; the net is 1.2x larger.
+
+Recorded slip (2026-10-15): F1's progress file and log were kept in evidence/, which the evidence check
+(tests/test_evidence.py) reserves for managed evidence — the full suite flagged them after the run. Both moved to
+checkpoints/runs/ (gitignored, survives a reboot); runs from L4 on keep their logs and progress files there.
+
+## 2026-10-15 — L4: prefer forcing moves (the leaf language, user's choice)
+
+The user chose the leaf language next. Maps are 292,054 of F1's 538,731 position bits, and the largest single gain so
+far was a richer rule at no cost in bits (L2's ties, 5x). L4 is another such: `Facts(forcing=True)` keeps, of several
+safe moves, those that FORCE — leave the opponent at most one reply after which the mover cannot win at once (generic:
+defined through the game's own moves and wins) — when any do, all of them otherwise. Python reference and C walk
+agree on every rule combination (tests/test_native_leaf.py); the SAT search refuses it. Mutants: steady_state 38/38
+(two equivalent ones noted in the spec, one redundant check removed), C walk 37/37 (two unreachable guards removed),
+native_leaf 17/17, steady_search 27/27, floor_l4 15/15. Positions are chosen from F1's evidence — its 16 heaviest and 16
+spread evenly over the rest by size — because a random 32 misleads on this frontier (h276); a control without `forcing`
+is built right after, no library in either, so the comparison is within one day's conditions. Claims h277 (completion)
+and h278 (no more than four fifths of the control) pre-registered. The smoke run found a real bug: workers starting on
+a fresh build directory compiled the C library into one shared temporary file, and the second rename failed (F1 never
+hit it — its library was prebuilt by the tests). Fixed at the root for both C wrappers (harness/native_build.py:
+per-call temporary file, atomic replace; 6/6 mutants, a deterministic rival-finishes-first test), which moved the
+fingerprint to 11890b144886.
+
+L4's first run crashed (2026-10-15 10:40Z, 2 h 44 min in, no position written): the walk-order exception coder
+(harness/exception_coding.py) read an exception's move among the rule's safe moves, and decided a position was forced
+when only one was left — but with forcing moves preferred `Facts.of` returns only the preferred moves, so a winning
+move that does not force cannot be coded ("plays 0, which is not safe"), and a position narrowed to one non-winning
+forcing move needs an exception the coder calls forced. Fixed at the source: `Facts.safe_moves` gives every safe move
+(before the preference), and the coder reads both the forced test and the exception's move from it — with the crash's
+own Connect-4 position and a found one-forcing-candidate position as tests. Mutants re-run. The control, started by
+the chain after the crash, was stopped by PID (it would have been judged under the old fingerprint). h277/h278 never
+got evidence; the rerun is registered as h279/h280 (own proof file, same spec, new fingerprint 1d12399d877c) and
+h277/h278 are superseded by them once judged. Unexplained, watched for in the rerun: one of the four workers sat idle
+in a pipe read for about two hours before the crash, while the parent received no result.
+
+Correction: the crash was at 12:40 local time (10:40Z), 2 h 44 min into the run — not 12:40Z and 4 h 44 min as first written here and in h279/h280's register note. The rerun started 10:59Z (chain shell PID 32382, arm PID 32384); the first run's logs are kept as checkpoints/runs/c49_l4{,_control}_run1_crashed.log.
+
+## 2026-10-16 — L4 judged: preferring forcing moves is a dead end
+
+Forcing arm finished 2026-10-16 02:59Z; the control, interrupted at 9 of 32 by a laptop restart and resumed with
+`--resume`, finished 17:28Z. Pre-registered: preferring forcing moves completes 4 of 32 within 2 hours (h279 refuted;
+the control 32 of 32) and takes at least 160,659 bits — a lower bound, 28 unfinished — against the control's 130,061
+(h280 refuted, ratio 1.24 or more). h277/h278, whose run crashed before evidence, are superseded by h279/h280.
+
+After the data (h281): the preference starves the leaf search. Restricting the rule to forcing moves leaves fewer maps
+that win every line — searches find one 12% of the time (766 of 6,464) against the control's 44% (1,213 of 2,753) — so
+the builder keeps splitting and every unfinished build ends at the cap with 171-201 table moves (the control: at most
+70). Where both complete the preference is never smaller (#15 4,480 bits against 658; #568 2,674 against 102). In
+Connect-4 forcing moves are often not the winning ones; preferring them makes the rule play losing moves that cost
+exceptions or more maps. h282: the control — same rule, no library — rebuilt F1's 32 positions in 130,061 bits against
+F1's 144,144 (smaller on 20, larger on 12): run-to-run variance near 10%, and no sign the library was needed.
+
+Notes: laptop sleep paused both arms harmlessly — the build deadline is on the monotonic clock, which stops in sleep —
+but `build_seconds` is wall time, so a few logged builds exceed 7,200 s without the cap having been exceeded.
+
+## 2026-10-16 — M1: cheaper exact map codes (user's choice) — a dead end
+
+Measured on F1's own maps, no rebuild: harness/map_coding.py codes a map exactly given the cells empty at its position
+— the builder's bitmap (a bit per empty cell, three per levelled cell), the levelled cells chosen enumeratively among
+the empty ones, the used levels by rank (the rule reads only their order), or by how many cells each holds (a
+composition and a multinomial index). scripts/c4_map_coding.py reproduced F1's recorded map bits root by root
+(292,054) before coding. Pre-registered h283 refuted: the cheapest code per map plus a 2-bit selector takes 284,818 bits
+(2.5% saved). After the data (h284): one code for every map — chosen cells — does better, 282,825 (3.2%); by count
+288,075; by rank 291,758 (1,644 of 3,196 maps use all eight levels, 979 use seven). With ~20 levelled of ~30 empty
+cells and levels spread evenly, the maps are near their information content under simple codes; together with h248
+(edit-coding maps cost 18% more) this closes the coding route: fewer or simpler maps must come from the rule or the
+search.

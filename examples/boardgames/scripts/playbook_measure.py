@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MEASUREMENT_MODULES = ("scripts/playbook_measure.py", "harness/playbook.py", "harness/coverage.py",
-                       "harness/native_solver.py", "harness/benchmark.py")
+                       "harness/native_solver.py", "harness/native_build.py", "harness/benchmark.py")
 BANDS = (10, 16, 22, 28)
 LABELS = Path(__file__).resolve().parent.parent / "books" / "c4_labels.json.gz"
 

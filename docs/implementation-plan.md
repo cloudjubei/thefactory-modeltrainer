@@ -470,7 +470,7 @@ rule standalone and in decision-list order, by ply.
     library helps as a search start, by covering, or not at all (variance) is not separated.
   - **Decided (user, 2026-10-12): build the whole frontier.** F1 (h271-h273): all 671 positions with L2's rule, in
     waves of 32 from a growing library seeded with L2's 90 maps; ~38 hours on 4 workers, resumable (`--resume`,
-    progress in evidence/c49_f1_progress.json).
+    progress, after the run, in checkpoints/runs/ with its log — evidence/ holds managed evidence only).
   - **F1 result (h271, h273 supported; h272 refuted — pre-registered; h274-h276 after the data):** all 671 frontier
     positions certified complete: a certified first-player strategy from the empty board in **548,424 bits** (opening
     1,075 + seed library 8,618 + positions 538,731), below the net's ~660K, ~13x WeakC4's ~40K — and twice W9's
@@ -481,6 +481,17 @@ rule standalone and in decision-list order, by ply.
     tail (67 positions, 311,823 bits) and in maps (292,054 of the positions' bits). Next fork is the user's: the
     heavy tail (rebuild the heaviest with the 3,196-map library / best-of-runs), the leaf language (maps), or the
     opening (which frontier the heavy positions come from).
+  - **Decided (user, 2026-10-15): the leaf language next.** Maps are 292,054 of F1's 538,731 position bits. Judge
+    candidates on the heaviest positions plus a stratified sample, never a random 32 alone (h276).
+  - **L4 result (h279, h280 refuted — pre-registered; h281, h282 after the data): a dead end.** Preferring forcing
+    moves (`Facts(forcing=True)`, zero bits) completes 4 of 32 within 2 hours and takes at least 160,659 bits against
+    the control's 130,061 (all complete). It starves the leaf search (maps in 12% of searches against 44%), so builds
+    run out of time splitting. The control rebuilds F1's 32 a tenth smaller without any library (run-to-run variance).
+    Kept in the language, off by default.
+  - **M1 result (h283 refuted — pre-registered; h284 after the data): map coding is a dead end.** Exact cheaper codes
+    for F1's 3,196 maps (`harness/map_coding.py`: chosen cells, levels by rank or by count) save 2.5% with a per-map
+    selector, 3.2% with one code for all. Map bits are set by how many maps and levelled cells there are — the next
+    gain must come from fewer or simpler maps (rule or search), not from writing them better. Next step: user's choice.
 
 ## 4. The hybrid process — definition of done
 

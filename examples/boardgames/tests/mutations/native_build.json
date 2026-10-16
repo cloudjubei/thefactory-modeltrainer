@@ -1,0 +1,55 @@
+{
+  "file": "harness/native_build.py",
+  "tests": ["tests/test_native_build.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "a fixed temporary name",
+      "old": "    fd, tmp = tempfile.mkstemp(dir=out.parent, prefix=f\".{out.stem}-\", suffix=\".tmp.so\")\n    os.close(fd)\n",
+      "new": "    tmp = str(out.with_suffix(\".tmp.so\"))\n"
+    },
+    {
+      "name": "compiled when present",
+      "old": "    if out.exists():\n        return\n",
+      "new": ""
+    },
+    {
+      "name": "a failure leaves its file",
+      "old": "    finally:\n        if os.path.exists(tmp):\n            os.unlink(tmp)\n",
+      "new": "    finally:\n        pass\n"
+    },
+    {
+      "name": "a failure passes",
+      "old": "        if r.returncode != 0:\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "flags dropped",
+      "old": "[\"cc\", *flags, \"-o\", tmp, str(source)]",
+      "new": "[\"cc\", \"-o\", tmp, str(source)]"
+    },
+    {
+      "name": "never moved into place",
+      "old": "        os.replace(tmp, out)\n",
+      "new": ""
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-15T06:36:27+00:00",
+    "killed": 6,
+    "survived": [],
+    "killed_by": {
+      "a fixed temporary name": [
+        "test_a_rival_finishing_between_our_compile_and_its_move_does_not_break_the_build"
+      ],
+      "compiled when present": ["test_a_library_is_compiled_once_into_place"],
+      "a failure leaves its file": ["test_a_failed_compile_raises_and_leaves_nothing_behind"],
+      "a failure passes": ["test_a_failed_compile_raises_and_leaves_nothing_behind"],
+      "flags dropped": ["test_a_library_is_compiled_once_into_place"],
+      "never moved into place": [
+        "test_a_library_is_compiled_once_into_place",
+        "test_a_rival_finishing_between_our_compile_and_its_move_does_not_break_the_build"
+      ]
+    }
+  }
+}

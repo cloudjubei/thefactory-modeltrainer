@@ -15,7 +15,8 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime, timezone
 
-MEASUREMENT_MODULES = ("scripts/certify_c4.py", "harness/certify.py", "harness/native_solver.py", "harness/solver.py")
+MEASUREMENT_MODULES = ("scripts/certify_c4.py", "harness/certify.py", "harness/native_solver.py",
+                       "harness/native_build.py", "harness/solver.py")
 EMPTY_BOARD_VALUE = 1
 EMPTY_BOARD_VALUE_SOURCE = "Connect-4 is a first-player win (Allis 1988; Allen 1988; Tromp's database)"
 _BOOK = None

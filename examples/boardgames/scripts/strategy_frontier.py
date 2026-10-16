@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 MEASUREMENT_MODULES = ("scripts/strategy_frontier.py", "harness/strategy_fit.py", "harness/frontier.py",
-                       "harness/native_solver.py", "harness/solver.py")
+                       "harness/native_solver.py", "harness/native_build.py", "harness/solver.py")
 LABELS = Path(__file__).resolve().parent.parent / "books" / "c4_labels.json.gz"
 NETS = Path(__file__).resolve().parent.parent / "checkpoints" / "c49"
 RECIPES = {"default": {"lr": 2e-3, "batch": 256, "max_epochs": 3000, "check_every": 25, "patience": 600},

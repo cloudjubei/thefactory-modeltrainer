@@ -21,7 +21,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 POSITIONS = ROOT / "evidence" / "c49_frontier_positions.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_steady_states.py", "harness/steady_state.py", "harness/steady_search.py",
-                       "harness/certify.py", "harness/c4_oracle.py", "harness/native_solver.py")
+                       "harness/certify.py", "harness/c4_oracle.py", "harness/native_solver.py",
+                       "harness/native_build.py")
 _SOLVED: dict = {}
 SOLVED_LIMIT = 3_000_000
 

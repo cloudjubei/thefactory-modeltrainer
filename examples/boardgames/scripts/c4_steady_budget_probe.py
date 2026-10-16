@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MEASUREMENT_MODULES = ("scripts/c4_steady_budget_probe.py", "scripts/c4_steady_states.py", "harness/steady_state.py",
                        "harness/steady_search.py", "harness/certify.py", "harness/c4_oracle.py",
-                       "harness/native_solver.py")
+                       "harness/native_solver.py", "harness/native_build.py")
 SETTINGS = {"budget": {"n_levels": 8, "max_constraints": 200_000, "seconds": 1800.0},
             "levels": {"n_levels": 14, "max_constraints": 200_000, "seconds": 1800.0}}
 

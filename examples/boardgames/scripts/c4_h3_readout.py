@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_h3_readout.py", "harness/opening_table.py", "harness/exact_values.py",
-                       "harness/c4_oracle.py", "harness/native_solver.py")
+                       "harness/c4_oracle.py", "harness/native_solver.py", "harness/native_build.py")
 HORIZON = 5
 CERTIFIED_THROUGH = 9
 

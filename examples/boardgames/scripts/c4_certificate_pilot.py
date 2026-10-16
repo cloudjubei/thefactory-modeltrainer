@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 OPENING = ROOT / "evidence" / "c49_D2_opening.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_certificate_pilot.py", "harness/c4_certificates.py", "harness/native_solver.py",
+                       "harness/native_build.py",
                        "harness/benchmark.py")
 CONFIG = {"bands": [20, 26, 32, 38], "per_band": 150, "seed": 98, "opening_max_ply": 4}
 

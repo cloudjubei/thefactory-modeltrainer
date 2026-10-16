@@ -20,7 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 NETS = ROOT / "checkpoints" / "c49_sf" / "c49_T10_solver_free"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 SEEDS = (361, 362, 363, 364, 365, 366)
-MEASUREMENT_MODULES = ("scripts/c4_opening_budget.py", "harness/c4_oracle.py", "harness/native_solver.py")
+MEASUREMENT_MODULES = ("scripts/c4_opening_budget.py", "harness/c4_oracle.py", "harness/native_solver.py",
+                       "harness/native_build.py")
 CONFIG = {"budgets": [200, 2000, 20000], "deep_budget": 100000, "deep_plies": 2, "max_ply": 4}
 SEARCH = {"gumbel": True, "gumbel_m": 16, "c_scale": 0.1, "add_noise": False}
 

@@ -8104,6 +8104,275 @@
         "tests/test_c49_f1_after_evidence.py": "eddc1a61672654e06312f753315b209fdc39dcaf2a56bab65b2239dc4659fe29",
         "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e"
       }
+    },
+    "h277": {
+      "id": "h277",
+      "claim": "\u00a73.6 L4: preferring forcing moves, at least 28 of the 32 positions (F1's 16 heaviest and 16 spread over the rest) get a complete certified strategy within 2 hours under L2's rule and pipeline. Refuted at 24 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_evidence.py::test_c49_l4_28_of_32_complete_within_2_hours_preferring_forcing_moves",
+      "note": "L4 = L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and verify, 2 h cap; built, improved, improved with lookahead), no library, plus `forcing`: of several safe moves keep those leaving the opponent at most one reply that stops an immediate win, when any do \u2014 zero bits. Positions: F1's 16 heaviest (134,603 F1 bits) and 16 spread evenly over the rest by F1 size (9,541), chosen from F1's evidence because a random 32 misleads on this frontier (h276). Control (harness.floor_l4_control): the same without `forcing`, built right after the forcing arm. User's choice: the leaf language (2026-10-15). Code: steady_state 38/38 mutants, C walk 37/37, native_leaf 17/17, steady_search 27/27, floor_l4 15/15, native_build 6/6 (new: race-free first-use compile, found by the smoke run). Full suite green (3,053 passed; the evidence-dir check after moving F1's run files to checkpoints/runs/). Fingerprint 11890b144886.",
+      "registered_at": "2026-10-15T07:55:10.193525+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_l4.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_l4_evidence.py": "d64d66a30d2667d771b30de60e3a1fc3d5eab39f748619b6b4a4833dce194b34",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l4.py": "c3e49b692195d22ec94ec66d988e9f06ab4a4ce5c99d7ff2892f425175451275",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l4_evidence.py::test_c49_l4_completion_is_undecidable",
+      "supersession": {
+        "by": "h279",
+        "reason": "its run crashed 2 h 44 min in on a coding bug (the exception coder read moves among the preferred forcing moves only) before writing evidence; the replacing claim is the same claim on the fixed code and new fingerprint, judged",
+        "at": "2026-10-16T17:29:31.995838+00:00"
+      }
+    },
+    "h278": {
+      "id": "h278",
+      "claim": "\u00a73.6 L4: preferring forcing moves makes the 32 strategies take no more than four fifths of the bits of a control built the same way without it. Refuted at the control's bits or more (an unfinished forcing root counts at its partial size; an unfinished control root leaves a refutation open)",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_evidence.py::test_c49_l4_preferring_forcing_moves_makes_the_strategies_a_fifth_smaller",
+      "note": "L4 = L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and verify, 2 h cap; built, improved, improved with lookahead), no library, plus `forcing`: of several safe moves keep those leaving the opponent at most one reply that stops an immediate win, when any do \u2014 zero bits. Positions: F1's 16 heaviest (134,603 F1 bits) and 16 spread evenly over the rest by F1 size (9,541), chosen from F1's evidence because a random 32 misleads on this frontier (h276). Control (harness.floor_l4_control): the same without `forcing`, built right after the forcing arm. User's choice: the leaf language (2026-10-15). Code: steady_state 38/38 mutants, C walk 37/37, native_leaf 17/17, steady_search 27/27, floor_l4 15/15, native_build 6/6 (new: race-free first-use compile, found by the smoke run). Full suite green (3,053 passed; the evidence-dir check after moving F1's run files to checkpoints/runs/). Fingerprint 11890b144886.",
+      "registered_at": "2026-10-15T07:55:11.094435+00:00",
+      "evidence": [],
+      "data": [
+        {
+          "path": "evidence/c49_l4.json.gz",
+          "started": null
+        },
+        {
+          "path": "evidence/c49_l4_control.json.gz",
+          "started": null
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l4_evidence.py": "d64d66a30d2667d771b30de60e3a1fc3d5eab39f748619b6b4a4833dce194b34",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l4.py": "c3e49b692195d22ec94ec66d988e9f06ab4a4ce5c99d7ff2892f425175451275",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l4_evidence.py::test_c49_l4_the_size_is_undecidable",
+      "supersession": {
+        "by": "h280",
+        "reason": "its run crashed 2 h 44 min in on a coding bug (the exception coder read moves among the preferred forcing moves only) before writing evidence; the replacing claim is the same claim on the fixed code and new fingerprint, judged",
+        "at": "2026-10-16T17:29:32.038824+00:00"
+      }
+    },
+    "h279": {
+      "id": "h279",
+      "claim": "\u00a73.6 L4 (rerun of h277): preferring forcing moves, at least 28 of the 32 positions (F1's 16 heaviest and 16 spread over the rest) get a complete certified strategy within 2 hours under L2's rule and pipeline. Refuted at 24 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_28_of_32_complete_within_2_hours_preferring_forcing_moves",
+      "note": "L4 = L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and verify, 2 h cap; built, improved, improved with lookahead), no library, plus `forcing`: of several safe moves keep those leaving the opponent at most one reply that stops an immediate win, when any do \u2014 zero bits. Positions: F1's 16 heaviest (134,603 F1 bits) and 16 spread evenly over the rest by F1 size (9,541), chosen from F1's evidence because a random 32 misleads on this frontier (h276). Control (harness.floor_l4_control): the same without `forcing`, built right after the forcing arm. User's choice: the leaf language (2026-10-15). RERUN of h277/h278: their run crashed 4 h 44 min in, before writing evidence \u2014 the walk-order exception coder read exception moves among the preferred (forcing) moves only; fixed with Facts.safe_moves (every safe move), tests from the crash's own position, mutants steady_state 40/40, exception_coding 18/18, floor_l4 15/15 (C walk 37/37, native_leaf 17/17, steady_search 27/27, native_build 6/6 unchanged). Full suite green (3,057 passed; the knowledge-map filing fixed after). Fingerprint 1d12399d877c. h277/h278 are superseded by these once judged.",
+      "registered_at": "2026-10-15T10:58:40.096594+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_28_of_32_complete_within_2_hours_preferring_forcing_moves",
+          "ok": false,
+          "detail": "orted\nE         + refuted\n\ntests/test_c49_l4_rerun_evidence.py:36: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_28_of_32_complete_within_2_hours_preferring_forcing_moves\n1 failed in 0.10s",
+          "drawn_at": "2026-10-16T17:29:05.257940+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l4.json.gz",
+        "started": "2026-10-15T10:58:59+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l4_rerun_evidence.py": "3204f6b86cea43c5617deb08bbdfd92046d1cb4386d22f4668de186803932555",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_completion_is_undecidable"
+    },
+    "h280": {
+      "id": "h280",
+      "claim": "\u00a73.6 L4 (rerun of h278): preferring forcing moves makes the 32 strategies take no more than four fifths of the bits of a control built the same way without it. Refuted at the control's bits or more (an unfinished forcing root counts at its partial size; an unfinished control root leaves a refutation open)",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_preferring_forcing_moves_makes_the_strategies_a_fifth_smaller",
+      "note": "L4 = L2's rule and pipeline (ties to the lowest move, 1-ply safety, 8 levels at 3 bits; accept 30x, root-only [[0, 1200], [2, 30]], C walk and verify, 2 h cap; built, improved, improved with lookahead), no library, plus `forcing`: of several safe moves keep those leaving the opponent at most one reply that stops an immediate win, when any do \u2014 zero bits. Positions: F1's 16 heaviest (134,603 F1 bits) and 16 spread evenly over the rest by F1 size (9,541), chosen from F1's evidence because a random 32 misleads on this frontier (h276). Control (harness.floor_l4_control): the same without `forcing`, built right after the forcing arm. User's choice: the leaf language (2026-10-15). RERUN of h277/h278: their run crashed 4 h 44 min in, before writing evidence \u2014 the walk-order exception coder read exception moves among the preferred (forcing) moves only; fixed with Facts.safe_moves (every safe move), tests from the crash's own position, mutants steady_state 40/40, exception_coding 18/18, floor_l4 15/15 (C walk 37/37, native_leaf 17/17, steady_search 27/27, native_build 6/6 unchanged). Full suite green (3,057 passed; the knowledge-map filing fixed after). Fingerprint 1d12399d877c. h277/h278 are superseded by these once judged.",
+      "registered_at": "2026-10-15T10:58:41.063301+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_preferring_forcing_moves_makes_the_strategies_a_fifth_smaller",
+          "ok": false,
+          "detail": "d\nE         + refuted\n\ntests/test_c49_l4_rerun_evidence.py:44: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_preferring_forcing_moves_makes_the_strategies_a_fifth_smaller\n1 failed in 0.12s",
+          "drawn_at": "2026-10-16T17:29:05.945461+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l4.json.gz",
+          "started": "2026-10-15T10:58:59+00:00"
+        },
+        {
+          "path": "evidence/c49_l4_control.json.gz",
+          "started": "2026-10-16T14:17:12+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l4_rerun_evidence.py": "3204f6b86cea43c5617deb08bbdfd92046d1cb4386d22f4668de186803932555",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_p1.py": "bfcf778e369556128c6c2d6ff98f5254c449a4163d741c6f7defaeacb4e385b7",
+        "harness/floor_p2.py": "9c8729a04ef4f5a6cf3b3bf775bd779ff7a8f5b70d0ac6778ae54bbd931ccdee",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w2.py": "2f552509f50aed5a90c9a863ef817e0d2c69f885853f8c637ec7b20d31df5ea0",
+        "harness/floor_w5.py": "33a477bbfe0bbfb464baeb2e6160eb1902ea9c7c9767df44c8a1b314dd103c73",
+        "harness/floor_w5b.py": "e6a437681b4da4073228870665ed0d3e9eb1623866ef1d76f2e29305f6eb4fc7",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w7.py": "f9b1032b4cec40e1c4b593d643719c3766633013e038895d964a8d9f7f796ea8",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l4_rerun_evidence.py::test_c49_l4_rerun_the_size_is_undecidable"
+    },
+    "h281": {
+      "id": "h281",
+      "claim": "\u00a73.6 L4 (registered after the data): preferring forcing moves starves the leaf search \u2014 its searches find a map 766 times in 6,464 (12%) against the control's 1,213 in 2,753 (44%); its 28 unfinished builds each carry 171-201 table moves when the cap ends them (the control at most 70); and on the four positions both complete it is never smaller (4,480 bits against 658, 2,674 against 102, 117 against 90, 39 against 39)",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_after_evidence.py::test_c49_l4_preferring_forcing_moves_starves_the_leaf_search",
+      "note": "h279, h280 refuted (pre-registered): preferring forcing moves, 4 of 32 complete within 2 hours; at least 160,659 bits (a lower bound, 28 unfinished) against the control's 130,061, all 32 complete \u2014 ratio 1.24 or more. L4 is a dead end. h277/h278 superseded by them (their run crashed before evidence). The control was interrupted at 9/32 by a laptop restart and resumed with --resume; sleeps paused runs (deadlines on the monotonic clock), so some logged build_seconds (wall) exceed the 2-hour cap without the cap being exceeded.",
+      "registered_at": "2026-10-16T17:30:04.239331+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l4_after_evidence.py::test_c49_l4_preferring_forcing_moves_starves_the_leaf_search",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.11s",
+          "drawn_at": "2026-10-16T17:30:12.342960+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l4.json.gz",
+          "started": "2026-10-15T10:58:59+00:00"
+        },
+        {
+          "path": "evidence/c49_l4_control.json.gz",
+          "started": "2026-10-16T14:17:12+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l4_after_evidence.py": "949e360755aaecec5aaf15b34a4561921ac5345696c8208ce6967fee6a9c0aa5",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72"
+      }
+    },
+    "h282": {
+      "id": "h282",
+      "claim": "\u00a73.6 L4 (registered after the data): the control \u2014 L2's rule, no library, another day \u2014 builds F1's 32 positions in 130,061 bits against F1's 144,144 with its growing library: smaller on 20, larger on 12, the heaviest 16 still 121,313 bits (93%). A same-rule rerun of F1's heavy tail lands a tenth lower, as library-free as F1 was nearly (h275) \u2014 run-to-run variance at the 10% scale",
+      "mode": "test",
+      "proof": "tests/test_c49_l4_after_evidence.py::test_c49_l4_the_control_rebuilds_f1_s_positions_a_tenth_smaller_without_a_library",
+      "note": "h279, h280 refuted (pre-registered): preferring forcing moves, 4 of 32 complete within 2 hours; at least 160,659 bits (a lower bound, 28 unfinished) against the control's 130,061, all 32 complete \u2014 ratio 1.24 or more. L4 is a dead end. h277/h278 superseded by them (their run crashed before evidence). The control was interrupted at 9/32 by a laptop restart and resumed with --resume; sleeps paused runs (deadlines on the monotonic clock), so some logged build_seconds (wall) exceed the 2-hour cap without the cap being exceeded.",
+      "registered_at": "2026-10-16T17:30:04.368426+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l4_after_evidence.py::test_c49_l4_the_control_rebuilds_f1_s_positions_a_tenth_smaller_without_a_library",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 3.30s",
+          "drawn_at": "2026-10-16T17:30:19.626471+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l4_control.json.gz",
+          "started": "2026-10-16T14:17:12+00:00"
+        },
+        {
+          "path": "evidence/c49_f1.json.gz",
+          "started": "2026-10-13T22:20:39+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l4_after_evidence.py": "949e360755aaecec5aaf15b34a4561921ac5345696c8208ce6967fee6a9c0aa5",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72"
+      }
+    },
+    "h283": {
+      "id": "h283",
+      "claim": "\u00a73.6 M1: coding each of F1's 3,196 maps with the cheapest of harness.map_coding's exact codes (levelled cells chosen among the empty ones; the used levels by rank, or by how many cells each holds) plus a 2-bit selector saves at least a tenth of F1's 292,054 map bits, no move changed. Refuted under a twentieth",
+      "mode": "test",
+      "proof": "tests/test_c49_m1_evidence.py::test_c49_m1_cheaper_exact_codes_save_a_tenth_of_f1_s_map_bits",
+      "note": "User's choice (2026-10-16): cheaper map coding, measured first on F1's existing maps \u2014 no rebuild. The measurement must reproduce F1's recorded map bits root by root (one bit per empty cell, three per levelled cell) or writes nothing. F1's maps: 65,608 levelled of 95,230 empty cells; 1,644 use all 8 levels, 979 use 7 (seen before registering \u2014 so rank renumbering was expected to save little). Code: harness/map_coding.py 13/13 mutants, harness/floor_m1.py 10/10. Fingerprint 133c5f0ac4b4.",
+      "registered_at": "2026-10-16T17:45:20.367593+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_m1_evidence.py::test_c49_m1_cheaper_exact_codes_save_a_tenth_of_f1_s_map_bits",
+          "ok": false,
+          "detail": "         \nE         - supported\nE         + refuted\n\ntests/test_c49_m1_evidence.py:28: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_m1_evidence.py::test_c49_m1_cheaper_exact_codes_save_a_tenth_of_f1_s_map_bits\n1 failed in 0.04s",
+          "drawn_at": "2026-10-16T17:45:36.942875+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_m1.json.gz",
+        "started": "2026-10-16T17:45:27.736974+00:00"
+      },
+      "pins": {
+        "tests/test_c49_m1_evidence.py": "329c34f5699be182d54a6e15d544708fc842a64434f61ab9b3bea2cb30df07a6",
+        "harness/floor_m1.py": "f4f0b970bdb4489523e7be95e077b10c00af90bc599df0ea4ad12e0d0f5c2f7d"
+      },
+      "inconclusive_proof": "tests/test_c49_m1_evidence.py::test_c49_m1_the_saving_is_undecidable"
+    },
+    "h284": {
+      "id": "h284",
+      "claim": "\u00a73.6 M1 (registered after the data): F1's maps are near their information content under simple exact codes \u2014 one code for every map (levelled cells chosen among the empty ones) saves 3.2% (282,825 bits against 292,054), more than the cheapest code per map with a 2-bit selector (284,818); by count 288,075, by rank 291,758. The map bits are set by how many maps and levelled cells there are, not how they are written",
+      "mode": "test",
+      "proof": "tests/test_c49_m1_after_evidence.py::test_c49_m1_one_simple_code_beats_choosing_per_map_and_saves_three_percent",
+      "note": "h283 refuted (pre-registered): 2.5% saved, under the twentieth that refutes. Map coding is a dead end at this scale (cf. h248, edit-coding maps cost 18% more).",
+      "registered_at": "2026-10-16T17:45:54.829576+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_m1_after_evidence.py::test_c49_m1_one_simple_code_beats_choosing_per_map_and_saves_three_percent",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-16T17:45:55.062654+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_m1.json.gz",
+        "started": "2026-10-16T17:45:27.736974+00:00"
+      },
+      "pins": {
+        "tests/test_c49_m1_after_evidence.py": "a9b6c7ab22725e907cc7d1acd2c00a11e89e48260eb2be3c3fe6e478f274b70a"
+      }
     }
   }
 }

@@ -125,18 +125,28 @@
     },
     {
       "name": "any rule encoded",
-      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1:\n",
+      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.forcing or facts.unlevelled != \"none\":\n",
       "new": "    if False:\n"
     },
     {
       "name": "any depth encoded",
-      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1:\n",
-      "new": "    if facts.ties != \"exact\":\n"
+      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.forcing or facts.unlevelled != \"none\":\n",
+      "new": "    if facts.ties != \"exact\" or facts.forcing or facts.unlevelled != \"none\":\n"
+    },
+    {
+      "name": "forcing encoded as if absent",
+      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.forcing or facts.unlevelled != \"none\":\n",
+      "new": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.unlevelled != \"none\":\n"
+    },
+    {
+      "name": "unlevelled last encoded as if absent",
+      "old": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.forcing or facts.unlevelled != \"none\":\n",
+      "new": "    if facts.ties != \"exact\" or facts.safe_depth != 1 or facts.forcing:\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-11T18:37:32+00:00",
-    "killed": 26,
+    "at": "2026-10-15T06:38:55+00:00",
+    "killed": 27,
     "survived": [],
     "killed_by": {
       "draw not a failure": [
@@ -404,10 +414,16 @@
       ],
       "seeds ignored": ["test_seeds_are_constrained_before_the_first_solve"],
       "any rule encoded": [
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2]",
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[lowest-1]"
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True]",
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False]",
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[lowest-1-False]"
       ],
-      "any depth encoded": ["test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2]"]
+      "any depth encoded": [
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False]"
+      ],
+      "forcing encoded as if absent": [
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True]"
+      ]
     }
   }
 }

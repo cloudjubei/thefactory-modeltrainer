@@ -20,8 +20,8 @@
     },
     {
       "name": "first level holding any safe move decides",
-      "old": "        if len(at) == 1 or (at and facts.ties == \"lowest\"):",
-      "new": "        if len(at) >= 1:"
+      "old": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) >= 1:\n            return min(at)\n"
     },
     {
       "name": "levels read backwards",
@@ -90,8 +90,8 @@
     },
     {
       "name": "facts default unbounded",
-      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1):",
-      "new": "    def __init__(self, game, limit: int = 10 ** 12, ties: str = \"exact\", safe_depth: int = 1):"
+      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1, forcing: bool = False,\n",
+      "new": "    def __init__(self, game, limit: int = 10 ** 12, ties: str = \"exact\", safe_depth: int = 1, forcing: bool = False,\n"
     },
     {
       "name": "verify deadline ignored",
@@ -110,18 +110,18 @@
     },
     {
       "name": "ties ignored",
-      "old": "        if len(at) == 1 or (at and facts.ties == \"lowest\"):",
-      "new": "        if len(at) == 1:"
+      "old": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) == 1:\n            return min(at)\n"
     },
     {
       "name": "highest move of a tied level",
-      "old": "            return min(at)\n",
-      "new": "            return max(at)\n"
+      "old": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe if levels.get(cell[a]) == k]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return max(at)\n"
     },
     {
       "name": "lowest ties by default",
-      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1):",
-      "new": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"lowest\", safe_depth: int = 1):"
+      "old": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"exact\", safe_depth: int = 1, forcing: bool = False,\n",
+      "new": "    def __init__(self, game, limit: int = 2_000_000, ties: str = \"lowest\", safe_depth: int = 1, forcing: bool = False,\n"
     },
     {
       "name": "any ties accepted",
@@ -162,11 +162,81 @@
       "name": "loses in two always",
       "old": "            if not held:\n                return True\n        return False\n",
       "new": "            if not held:\n                return True\n        return True\n"
+    },
+    {
+      "name": "forcing never kept",
+      "old": "            if self.forcing and len(safe) > 1:\n",
+      "new": "            if False:\n"
+    },
+    {
+      "name": "no forcing move empties the safe moves",
+      "old": "                chosen = [a for a in safe if self._forces(state, a)] or safe\n",
+      "new": "                chosen = [a for a in safe if self._forces(state, a)]\n"
+    },
+    {
+      "name": "forcing allows two replies",
+      "old": "        return safe_replies <= 1\n",
+      "new": "        return safe_replies <= 2\n"
+    },
+    {
+      "name": "forcing needs no reply",
+      "old": "        return safe_replies <= 1\n",
+      "new": "        return safe_replies < 1\n"
+    },
+    {
+      "name": "a game-ending move forces",
+      "old": "        if game.is_terminal(child) or game.current_player(child) == game.current_player(state):\n            return False\n        safe_replies",
+      "new": "        if game.current_player(child) == game.current_player(state):\n            return False\n        safe_replies"
+    },
+    {
+      "name": "forcing unchecked",
+      "old": "        if not isinstance(forcing, bool):\n",
+      "new": "        if False:\n"
+    },
+    {
+      "name": "safe moves are the chosen ones",
+      "old": "            self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in chosen}, safe)",
+      "new": "            self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in chosen}, chosen)"
+    },
+    {
+      "name": "cells of every safe move",
+      "old": "            self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in chosen}, safe)",
+      "new": "            self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in safe}, safe)"
+    },
+    {
+      "name": "unlevelled last never read",
+      "old": "    if facts.unlevelled == \"last\":\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "unlevelled last reads every safe move",
+      "old": "        at = [a for a in safe if cell[a] not in levels]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe ]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n"
+    },
+    {
+      "name": "unlevelled last ignores ties",
+      "old": "        at = [a for a in safe if cell[a] not in levels]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe if cell[a] not in levels]\n        if at:\n            return min(at)\n"
+    },
+    {
+      "name": "unlevelled last highest",
+      "old": "        at = [a for a in safe if cell[a] not in levels]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return min(at)\n",
+      "new": "        at = [a for a in safe if cell[a] not in levels]\n        if len(at) == 1 or (at and facts.ties == \"lowest\"):\n            return max(at)\n"
+    },
+    {
+      "name": "unlevelled last by default",
+      "old": "                 unlevelled: str = \"none\"):",
+      "new": "                 unlevelled: str = \"last\"):"
+    },
+    {
+      "name": "unlevelled unchecked",
+      "old": "        if unlevelled not in UNLEVELLED:\n",
+      "new": "        if False:\n"
     }
   ],
   "last_run": {
-    "at": "2026-10-11T19:08:05+00:00",
-    "killed": 32,
+    "at": "2026-10-15T10:46:15+00:00",
+    "killed": 40,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
@@ -179,6 +249,7 @@
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_simplify_uses_the_given_verifier",
         "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "single safe move not forced": [
@@ -192,6 +263,7 @@
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
         "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "levels read backwards": [
@@ -199,11 +271,13 @@
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels1-4]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels3-8]"
       ],
       "unsafe moves kept": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
+        "test_preferring_forcing_moves_changes_neither_the_wins_nor_a_forced_safe_move",
         "test_the_only_safe_move_is_played_whatever_the_map",
         "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
         "test_two_ply_safety_changes_neither_the_wins_nor_a_forced_safe_move"
@@ -219,6 +293,7 @@
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels3-undefined]",
         "test_simplify_drops_every_level_the_win_does_not_need",
         "test_simplify_past_its_deadline_keeps_every_level",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "one reply walked": [
@@ -265,6 +340,7 @@
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
         "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
       ],
       "any ties accepted": [
@@ -277,6 +353,7 @@
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
       ],
       "depth two ignored": [
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
         "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
         "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
       ],
@@ -285,6 +362,7 @@
       ],
       "any depth accepted": ["test_safety_is_one_ply_unless_told_otherwise"],
       "depth not kept": [
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
         "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
         "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
       ],
@@ -293,9 +371,41 @@
       ],
       "loses in two always": [
         "test_an_answer_that_fills_the_board_is_a_draw_not_a_threat",
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
         "test_two_ply_safety_drops_a_move_the_opponent_answers_with_a_win_no_reply_stops",
         "test_with_two_ply_safety_the_only_safe_move_is_played_whatever_the_map"
+      ],
+      "forcing never kept": [
+        "test_a_move_leaving_the_opponent_two_safe_replies_does_not_force",
+        "test_a_move_that_ends_the_game_forces_nothing_and_a_reply_that_fills_the_board_counts_as_safe",
+        "test_preferring_forcing_moves_keeps_the_safe_moves_that_leave_the_opponent_at_most_one_safe_reply",
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them"
+      ],
+      "no forcing move empties the safe moves": [
+        "test_preferring_forcing_moves_keeps_every_safe_move_when_none_forces"
+      ],
+      "forcing allows two replies": [
+        "test_a_move_leaving_the_opponent_two_safe_replies_does_not_force"
+      ],
+      "forcing needs no reply": [
+        "test_a_move_leaving_the_opponent_two_safe_replies_does_not_force",
+        "test_a_move_that_ends_the_game_forces_nothing_and_a_reply_that_fills_the_board_counts_as_safe",
+        "test_preferring_forcing_moves_keeps_the_safe_moves_that_leave_the_opponent_at_most_one_safe_reply",
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
+        "test_with_forcing_moves_preferred_the_levels_choose_among_them"
+      ],
+      "a game-ending move forces": [
+        "test_a_move_that_ends_the_game_forces_nothing_and_a_reply_that_fills_the_board_counts_as_safe"
+      ],
+      "forcing unchecked": ["test_every_safe_move_is_kept_unless_told_to_prefer_forcing_ones"],
+      "safe moves are the chosen ones": [
+        "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred"
+      ],
+      "cells of every safe move": [
+        "test_preferring_forcing_moves_keeps_the_safe_moves_that_leave_the_opponent_at_most_one_safe_reply"
       ]
     }
-  }
+  },
+  "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed))."
 }

@@ -261,8 +261,9 @@ def test_a_hint_never_changes_the_answer():
     assert checked >= 5
 
 
-@pytest.mark.parametrize("ties,depth", [("lowest", 1), ("exact", 2)])
-def test_the_sat_encoding_refuses_a_rule_it_does_not_encode(ties, depth):
+@pytest.mark.parametrize("ties,depth,forcing,unlevelled", [("lowest", 1, False, "none"), ("exact", 2, False, "none"),
+                                                            ("exact", 1, True, "none"), ("exact", 1, False, "last")])
+def test_the_sat_encoding_refuses_a_rule_it_does_not_encode(ties, depth, forcing, unlevelled):
     with pytest.raises(ValueError, match="encoding"):
-        find_steady_state(Facts(GAME, ties=ties, safe_depth=depth), FORK, _winning, 2, max_constraints=10,
-                          conflicts=10, seconds=1.0)
+        find_steady_state(Facts(GAME, ties=ties, safe_depth=depth, forcing=forcing, unlevelled=unlevelled), FORK,
+                          _winning, 2, max_constraints=10, conflicts=10, seconds=1.0)

@@ -22,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MEASUREMENT_MODULES = ("scripts/c4_build_profile.py", "scripts/c4_strategy_s2.py", "harness/strategy_builder.py",
-                       "harness/native_leaf.py",
+                       "harness/native_leaf.py", "harness/native_build.py",
                        "harness/steady_local.py", "harness/steady_exceptions.py", "harness/steady_state.py",
                        "harness/winning_cache.py", "harness/exception_coding.py", "harness/opening.py",
                        "scripts/c4_steady_states.py")
@@ -61,7 +61,8 @@ def main() -> None:
     row = rows[args.index]
     game = Connect4()
     root = C4State(tuple(row["board"]), row["to_move"], None, False)
-    facts = Facts(game, ties=spec["builder"].get("ties", "exact"), safe_depth=spec["builder"].get("safe_depth", 1))
+    facts = Facts(game, ties=spec["builder"].get("ties", "exact"), safe_depth=spec["builder"].get("safe_depth", 1),
+                  forcing=spec["builder"].get("forcing", False), unlevelled=spec["builder"].get("unlevelled", "none"))
     b, s = spec["builder"], spec["search"]
     winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
     rng = random.Random(args.index)

@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MEASUREMENT_MODULES = ("scripts/c4_steady_handoff_probe.py", "scripts/c4_steady_states.py", "harness/steady_search.py",
                        "harness/steady_state.py", "harness/certify.py", "harness/c4_oracle.py",
-                       "harness/native_solver.py")
+                       "harness/native_solver.py", "harness/native_build.py")
 N_LEVELS, LEVEL_BITS = 8, 3
 BUDGET = {"max_constraints": 200_000, "conflicts": 1_000_000, "seconds": 1800.0, "cap": 1_000_000, "lines": 64}
 ARMS = ("hinted", "cold")

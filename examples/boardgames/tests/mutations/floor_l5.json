@@ -1,0 +1,27 @@
+{
+  "file": "harness/floor_l5.py",
+  "tests": ["tests/test_floor_l5.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "unlevelled passed over",
+      "old": "\"builder\": {**L2[\"builder\"], \"unlevelled\": \"last\"}",
+      "new": "\"builder\": dict(L2[\"builder\"])"
+    },
+    {
+      "name": "the control's fingerprint",
+      "old": "\"measurement_fp\": \"7717c79f94ea\", ",
+      "new": ""
+    },
+    {
+      "name": "judged against its own registration",
+      "old": "    return l4_size(e, control, spec, CONTROL)\n",
+      "new": "    return l4_size(e, control, spec, spec)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l5_report = w6_report",
+      "new": "l5_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ]
+}

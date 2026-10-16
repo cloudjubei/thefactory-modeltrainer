@@ -1,8 +1,8 @@
 """Direct tests for harness/exception_coding.py — exceptions coded in walk order: a decoder that replays the leaf with
 the game's rules flags only CONTESTED positions (no immediate win, two or more safe moves, the map gives a move),
 knows every position where the map gives none must be an exception, and reads each exception's move among the safe
-moves left. Fixture X{0,1} O{2,3}, X to move: five safe moves, only the centre (4) wins, and after it every O reply
-leaves X an immediate win."""
+moves left — every safe move, whether or not the rule prefers forcing ones. Fixture X{0,1} O{2,3}, X to move: five
+safe moves, only the centre (4) wins, and after it every O reply leaves X an immediate win."""
 from __future__ import annotations
 
 import pytest
@@ -118,3 +118,50 @@ def test_coding_past_its_deadline_is_refused():
     with pytest.raises(TimeoutError):
         walk_order_cost(Facts(GAME), FORK, {}, 2, {KEY: 4}, deadline=time.monotonic() - 1)
     assert walk_order_cost(Facts(GAME), FORK, {}, 2, {KEY: 4}, deadline=time.monotonic() + 60)["bits"] == 3
+
+
+def test_with_forcing_moves_preferred_an_exception_is_read_among_every_safe_move():
+    """A Connect-4 position from L4's first run: preferring forcing moves leaves 4 and 5, and the winning exception
+    plays 0, a safe move that does not force; with no map every position the preference leaves open is undefined, so
+    every exception is implicit, read among all the safe moves (3 bits at the root), and the five positions it narrows
+    to one winning move among several safe ones are contested, unflagged."""
+    from games.connect4 import C4State, Connect4
+    from harness.native_leaf import needed
+
+    game = Connect4()
+    board = (1, 2, 1, 1, 0, 0, 2, 2, 1, 1, 2, 0, 0, 2, 1, 1, 2, 2, 0, 0, 2, 2, 1, 1, 1, 0, 0, 1, 0, 2, 1, 1, 0, 0, 2, 0,
+             0, 0, 2, 0, 0, 2)
+    root = C4State(board, 0, None, False)
+    facts = Facts(game, ties="lowest", forcing=True)
+    assert facts.of(root)[1] == [4, 5] and facts.safe_moves(root) == [0, 1, 2, 4, 5]
+    exceptions = dict(needed(facts, root, {}, 8, None, 1_000_000)["exceptions"])
+    assert exceptions[game.state_key(root)] == 0
+    r = walk_order_cost(facts, root, {}, 8, exceptions)
+    assert (r["implicit"], r["contested"], r["flagged"]) == (len(exceptions), 5, 0) and r["move_bits"] >= 3
+
+
+def test_with_forcing_moves_preferred_a_contested_exception_is_read_among_every_safe_move():
+    """FORK with forcing moves preferred and the map on 7: three forcing moves, the map plays 7, which loses — so the
+    exception (the centre) is flagged at a contested position and read among the four other safe moves."""
+    facts = Facts(GAME, forcing=True)
+    r = walk_order_cost(facts, FORK, {7: 0}, 2, {KEY: 4})
+    assert (r["contested"], r["flagged"], r["implicit"], r["move_bits"]) == (1, 1, 0, 2)
+
+
+def test_with_forcing_moves_preferred_a_position_left_one_forcing_move_is_contested_not_forced():
+    """A Connect-4 position where preferring forcing moves leaves only 3, which does not win, among five safe moves (2
+    wins): the rule plays 3 with no map, so the exception at the root is flagged at a contested position and read
+    among the four other safe moves."""
+    from games.connect4 import C4State, Connect4
+    from harness.native_leaf import needed
+
+    game = Connect4()
+    board = (2, 1, 1, 1, 2, 1, 1, 2, 2, 2, 1, 1, 2, 2, 2, 2, 0, 0, 2, 2, 0, 1, 1, 0, 0, 1, 1, 0, 2, 1, 0, 0, 1, 1, 0, 0,
+             2, 0, 0, 2, 0, 0)
+    root = C4State(board, 0, None, False)
+    facts = Facts(game, ties="lowest", forcing=True)
+    assert facts.of(root)[1] == [3] and facts.safe_moves(root) == [0, 2, 3, 5, 6]
+    exceptions = dict(needed(facts, root, {}, 8, None, 1_000_000)["exceptions"])
+    assert exceptions[game.state_key(root)] == 2
+    r = walk_order_cost(facts, root, {}, 8, exceptions)
+    assert r["contested"] >= 1 and r["flagged"] >= 1 and r["move_bits"] >= 2

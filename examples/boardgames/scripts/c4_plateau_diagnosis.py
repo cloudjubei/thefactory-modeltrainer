@@ -22,7 +22,7 @@ NETS = ROOT / "checkpoints" / "c49_sf" / "c49_T10_solver_free"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 SEEDS = (361, 362, 363, 364, 365, 366)
 MEASUREMENT_MODULES = ("scripts/c4_plateau_diagnosis.py", "harness/c4_oracle.py", "harness/certify.py",
-                       "harness/native_solver.py")
+                       "harness/native_solver.py", "harness/native_build.py")
 CONFIG = {"sims": 200, "depth": 10, "agree_share": 0.5, "gumbel": True, "gumbel_m": 16, "c_scale": 0.1}
 EXAMPLES = 30
 

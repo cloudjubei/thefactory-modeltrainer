@@ -1,0 +1,113 @@
+{
+  "file": "harness/map_coding.py",
+  "tests": ["tests/test_map_coding.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "bitmap without the empty cells",
+      "old": "        return empty + width * k\n",
+      "new": "        return width * k\n"
+    },
+    {
+      "name": "chosen levels narrower",
+      "old": "        return cells + width * k\n",
+      "new": "        return cells + (width - 1) * k\n"
+    },
+    {
+      "name": "empty map pays a header",
+      "old": "    if not k:\n        return cells\n",
+      "new": ""
+    },
+    {
+      "name": "ranks without the level count",
+      "old": "        return cells + width + k * _bits_for(u)\n",
+      "new": "        return cells + k * _bits_for(u)\n"
+    },
+    {
+      "name": "ranks of all levels",
+      "old": "        return cells + width + k * _bits_for(u)\n",
+      "new": "        return cells + width + k * width\n"
+    },
+    {
+      "name": "counts without the split",
+      "old": "    return cells + width + _bits_for(math.comb(k - 1, u - 1)) + _bits_for(which)\n",
+      "new": "    return cells + width + _bits_for(which)\n"
+    },
+    {
+      "name": "counts ignore equal cells",
+      "old": "    for n in counts:\n        which //= math.factorial(n)\n",
+      "new": ""
+    },
+    {
+      "name": "no selector",
+      "old": "SELECTOR_BITS = 2\n",
+      "new": "SELECTOR_BITS = 0\n"
+    },
+    {
+      "name": "the dearest code",
+      "old": "    code = min(CODES, key=lambda c: costs[c])\n",
+      "new": "    code = max(CODES, key=lambda c: costs[c])\n"
+    },
+    {
+      "name": "ranks keep gaps",
+      "old": "    order = {k: i for i, k in enumerate(sorted(set(levels.values())))}\n",
+      "new": "    order = {k: k for k in set(levels.values())}\n"
+    },
+    {
+      "name": "bits for one thing",
+      "old": "    return (n - 1).bit_length()\n",
+      "new": "    return n.bit_length()\n"
+    },
+    {
+      "name": "unknown code accepted",
+      "old": "    if code not in CODES:\n",
+      "new": "    if False:\n"
+    },
+    {
+      "name": "too many cells accepted",
+      "old": "    if k > empty:\n",
+      "new": "    if False:\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-16T17:45:00+00:00",
+    "killed": 13,
+    "survived": [],
+    "killed_by": {
+      "bitmap without the empty cells": [
+        "test_the_bitmap_code_is_the_builder_s_one_bit_an_empty_cell_and_three_a_level"
+      ],
+      "chosen levels narrower": [
+        "test_choosing_the_levelled_cells_costs_their_count_and_which_of_the_empty_cells"
+      ],
+      "empty map pays a header": [
+        "test_an_empty_map_costs_only_the_cell_count_in_the_chosen_codes"
+      ],
+      "ranks without the level count": [
+        "test_ranked_levels_cost_the_count_of_levels_used_and_a_rank_a_cell"
+      ],
+      "ranks of all levels": ["test_ranked_levels_cost_the_count_of_levels_used_and_a_rank_a_cell"],
+      "counts without the split": [
+        "test_level_counts_cost_how_the_cells_split_over_the_used_levels_and_which_cell_has_which"
+      ],
+      "counts ignore equal cells": [
+        "test_level_counts_cost_how_the_cells_split_over_the_used_levels_and_which_cell_has_which"
+      ],
+      "no selector": ["test_the_best_code_is_the_cheapest_plus_a_selector"],
+      "the dearest code": ["test_the_best_code_is_the_cheapest_plus_a_selector"],
+      "ranks keep gaps": ["test_ranked_levels_keep_their_order_and_drop_the_gaps"],
+      "bits for one thing": [
+        "test_choosing_the_levelled_cells_costs_their_count_and_which_of_the_empty_cells",
+        "test_level_counts_cost_how_the_cells_split_over_the_used_levels_and_which_cell_has_which",
+        "test_ranked_levels_cost_the_count_of_levels_used_and_a_rank_a_cell",
+        "test_the_bitmap_code_is_the_builder_s_one_bit_an_empty_cell_and_three_a_level"
+      ],
+      "unknown code accepted": [
+        "test_an_unknown_code_or_more_levelled_cells_than_empty_ones_is_refused"
+      ],
+      "too many cells accepted": [
+        "test_an_unknown_code_or_more_levelled_cells_than_empty_ones_is_refused"
+      ]
+    }
+  }
+}

@@ -17,7 +17,10 @@ with "lookahead" too, once that runs dry, it goes over them again judging each s
 long, keeping what shrinks it, and improves with lookahead once more (harness.floor_a5).
 The builder's "ties" sets how the rule reads a level (harness.steady_state.Facts: "exact" by default, or
 "lowest" — the first level holding any safe move decides; harness.floor_l2) and "safe_depth" what makes a move
-safe (1 by default, or 2 — nor may the opponent force a win in two; harness.floor_l3).
+safe (1 by default, or 2 — nor may the opponent force a win in two; harness.floor_l3), and "forcing" whether, of
+several safe moves, those leaving the opponent at most one reply that stops an immediate win are kept when any
+are (off by default; harness.floor_l4), and "unlevelled" whether the safe moves on cells a map leaves without a
+level are passed over ("none", the default) or read as a last level ("last"; harness.floor_l5).
 A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
@@ -47,7 +50,8 @@ POSITIONS = ROOT / "evidence" / "c49_frontier_positions.json.gz"
 LABELS = ROOT / "books" / "c4_labels.json.gz"
 MEASUREMENT_MODULES = ("scripts/c4_strategy_s2.py", "harness/strategy_builder.py", "harness/steady_state.py",
                        "harness/steady_search.py", "harness/certify.py", "harness/c4_oracle.py",
-                       "harness/native_solver.py", "scripts/c4_steady_states.py", "harness/steady_local.py",
+                       "harness/native_solver.py",
+                       "harness/native_build.py", "scripts/c4_steady_states.py", "harness/steady_local.py",
                        "harness/steady_exceptions.py", "harness/winning_cache.py", "harness/exception_coding.py",
                        "harness/opening.py", "harness/native_leaf.py")
 C_SOURCES = ("harness/c4leafwalk.c", "harness/c4solver.c")
@@ -71,7 +75,8 @@ def build_one(job: dict) -> dict:
 
     game = Connect4()
     root = C4State(tuple(job["board"]), job["to_move"], None, False)
-    facts = Facts(game, ties=job["builder"].get("ties", "exact"), safe_depth=job["builder"].get("safe_depth", 1))
+    facts = Facts(game, ties=job["builder"].get("ties", "exact"), safe_depth=job["builder"].get("safe_depth", 1),
+                  forcing=job["builder"].get("forcing", False), unlevelled=job["builder"].get("unlevelled", "none"))
     b, s = job["builder"], job["search"]
     if s.get("kind") == "local":
         winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])

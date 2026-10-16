@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import ctypes
 import hashlib
-import subprocess
 from pathlib import Path
 
+from harness.native_build import compile_library
 from harness.solver import _can_play, _is_winning_move, _bottom_mask_col, _column_mask, _TOTAL, WIDTH, to_bitboard
 
 SOURCE = Path(__file__).resolve().parent / "c4solver.c"
@@ -23,14 +23,7 @@ def _library(log2_table: int = DEFAULT_LOG2_TABLE):
     if _LIB is None:
         digest = hashlib.sha256(SOURCE.read_bytes()).hexdigest()[:12]
         out = BUILD_DIR / f"c4solver-{digest}.so"
-        if not out.exists():
-            BUILD_DIR.mkdir(exist_ok=True)
-            tmp = out.with_suffix(".tmp.so")
-            r = subprocess.run(["cc", "-O3", "-shared", "-fPIC", "-o", str(tmp), str(SOURCE)], capture_output=True,
-                               text=True)
-            if r.returncode != 0:
-                raise RuntimeError(f"compiling {SOURCE.name} failed:\n{r.stderr}")
-            tmp.rename(out)
+        compile_library(out, ["-O3", "-shared", "-fPIC"], SOURCE)
         lib = ctypes.CDLL(str(out))
         lib.c4_init.argtypes = [ctypes.c_int]
         lib.c4_solve.argtypes = [ctypes.c_uint64, ctypes.c_uint64, ctypes.c_int, ctypes.c_int]

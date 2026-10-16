@@ -16,7 +16,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-MEASUREMENT_MODULES = ("scripts/c4_native_leaf_bench.py", "harness/native_leaf.py", "harness/steady_exceptions.py",
+MEASUREMENT_MODULES = ("scripts/c4_native_leaf_bench.py", "harness/native_leaf.py",
+                       "harness/native_build.py", "harness/steady_exceptions.py",
                        "harness/steady_state.py", "harness/winning_cache.py", "scripts/c4_steady_states.py")
 C_SOURCES = ("harness/c4leafwalk.c", "harness/c4solver.c")
 INDICES = (393, 346, 87, 263)

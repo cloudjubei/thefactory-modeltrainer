@@ -21,6 +21,7 @@ import time
 
 
 TIES = ("exact", "lowest")
+UNLEVELLED = ("none", "last")
 
 
 class Facts:
@@ -30,16 +31,27 @@ class Facts:
     facts: "exact" — a level decides only when it holds exactly one safe move; "lowest" — the first level holding any
     safe move decides, with its lowest-numbered move. `safe_depth` is what makes a move safe: 1 — the opponent cannot
     win at once after it; 2 — nor can the opponent answer it with a move after which every reply of ours lets them win
-    at once (unless none of the 1-ply safe moves passes, when those are kept)."""
+    at once (unless none of the 1-ply safe moves passes, when those are kept). `forcing` keeps, of several safe moves,
+    those that FORCE — that leave the opponent at most one reply after which the mover cannot win at once (a move that
+    ends the game forces nothing) — when any does, all of them otherwise. `unlevelled` is what the rule makes of the
+    safe moves on cells the map leaves without a level: "none" — passes them over; "last" — reads them as one more level
+    after the map's, by `ties` like any other."""
 
-    def __init__(self, game, limit: int = 2_000_000, ties: str = "exact", safe_depth: int = 1):
+    def __init__(self, game, limit: int = 2_000_000, ties: str = "exact", safe_depth: int = 1, forcing: bool = False,
+                 unlevelled: str = "none"):
         if ties not in TIES:
             raise ValueError(f"ties must be one of {TIES}, got {ties!r}")
         if safe_depth not in (1, 2):
             raise ValueError(f"safe_depth must be 1 or 2, got {safe_depth!r}")
+        if not isinstance(forcing, bool):
+            raise ValueError(f"forcing must be True or False, got {forcing!r}")
+        if unlevelled not in UNLEVELLED:
+            raise ValueError(f"unlevelled must be one of {UNLEVELLED}, got {unlevelled!r}")
         self.game = game
         self.ties = ties
         self.safe_depth = safe_depth
+        self.forcing = forcing
+        self.unlevelled = unlevelled
         h, w = getattr(game, "board_shape")
         self.cells = h * w
         self.limit = limit
@@ -86,8 +98,30 @@ class Facts:
                 return True
         return False
 
+    def _forces(self, state, action) -> bool:
+        """Whether the opponent has at most one answer to `action` after which the mover cannot win at once."""
+        game = self.game
+        child = game.step(state, action)
+        if game.is_terminal(child) or game.current_player(child) == game.current_player(state):
+            return False
+        safe_replies = 0
+        for b in game.legal_actions(child):
+            after = game.step(child, b)
+            if not any(self._wins_now(after, d) for d in game.legal_actions(after)):
+                safe_replies += 1
+        return safe_replies <= 1
+
     def of(self, state) -> tuple:
-        """(winning actions, safe actions, {safe action: its cell}) at `state`."""
+        """(winning actions, the safe actions the rule chooses among — the forcing ones where they are preferred and
+        any force — {such action: its cell}) at `state`."""
+        return self._entry(state)[:3]
+
+    def safe_moves(self, state) -> list:
+        """Every safe action at `state` (at `safe_depth`), whether or not forcing ones are preferred — the moves an
+        exception may play, a winning move always among them."""
+        return self._entry(state)[3]
+
+    def _entry(self, state) -> tuple:
         key = self.game.state_key(state)
         if key not in self._facts:
             game = self.game
@@ -104,16 +138,20 @@ class Facts:
                     safe.append(a)
             if self.safe_depth == 2 and len(safe) > 1:
                 safe = [a for a in safe if not self._loses_in_two(state, a)] or safe
+            chosen = safe
+            if self.forcing and len(safe) > 1:
+                chosen = [a for a in safe if self._forces(state, a)] or safe
             if len(self._facts) >= self.limit:
                 self._facts.clear()
                 self.cleared += 1
-            self._facts[key] = (wins, safe, {a: self.placed_cell(state, a) for a in safe})
+            self._facts[key] = (wins, chosen, {a: self.placed_cell(state, a) for a in chosen}, safe)
         return self._facts[key]
 
 
 def choose(facts: Facts, state, levels: dict, n_levels: int):
     """The rule's move at `state` under the priority map `levels` ({cell: level}), or None where it is undefined: a
-    winning move; else the only safe move; else the first level that decides (`facts.ties`)."""
+    winning move; else the only safe move; else the first level that decides (`facts.ties`) — the safe moves on
+    unlevelled cells a last level when `facts.unlevelled` is "last"."""
     wins, safe, cell = facts.of(state)
     if wins:
         return min(wins)
@@ -121,6 +159,10 @@ def choose(facts: Facts, state, levels: dict, n_levels: int):
         return safe[0]
     for k in range(n_levels):
         at = [a for a in safe if levels.get(cell[a]) == k]
+        if len(at) == 1 or (at and facts.ties == "lowest"):
+            return min(at)
+    if facts.unlevelled == "last":
+        at = [a for a in safe if cell[a] not in levels]
         if len(at) == 1 or (at and facts.ties == "lowest"):
             return min(at)
     return None
