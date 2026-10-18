@@ -145,8 +145,8 @@
     }
   ],
   "last_run": {
-    "at": "2026-10-15T06:38:55+00:00",
-    "killed": 27,
+    "at": "2026-10-16T18:57:05+00:00",
+    "killed": 28,
     "survived": [],
     "killed_by": {
       "draw not a failure": [
@@ -414,15 +414,19 @@
       ],
       "seeds ignored": ["test_seeds_are_constrained_before_the_first_solve"],
       "any rule encoded": [
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True]",
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False]",
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[lowest-1-False]"
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-False-last]",
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True-none]",
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False-none]",
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[lowest-1-False-none]"
       ],
       "any depth encoded": [
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False]"
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-2-False-none]"
       ],
       "forcing encoded as if absent": [
-        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True]"
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-True-none]"
+      ],
+      "unlevelled last encoded as if absent": [
+        "test_the_sat_encoding_refuses_a_rule_it_does_not_encode[exact-1-False-last]"
       ]
     }
   }

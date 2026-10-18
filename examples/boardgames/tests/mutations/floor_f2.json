@@ -1,0 +1,90 @@
+{
+  "file": "harness/floor_f2.py",
+  "tests": ["tests/test_floor_f2.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "f1's rule",
+      "old": "\"builder\": L5[\"builder\"]",
+      "new": "\"builder\": F1[\"builder\"]"
+    },
+    {
+      "name": "f1's fingerprint",
+      "old": "\"measurement_fp\": L5[\"measurement_fp\"], ",
+      "new": ""
+    },
+    {
+      "name": "another f1 total",
+      "old": "\"f1_bits\": 548_424,",
+      "new": "\"f1_bits\": 538_731,"
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": (9, 10)}",
+      "new": "\"support\": (19, 20)}"
+    },
+    {
+      "name": "judged off registration",
+      "old": "    if not f1_checked(e, spec):\n        return {\"verdict\": \"not_run\"}\n",
+      "new": ""
+    },
+    {
+      "name": "refute boundary",
+      "old": "\"refuted\" if bits >= spec[\"f1_bits\"]",
+      "new": "\"refuted\" if bits > spec[\"f1_bits\"]"
+    },
+    {
+      "name": "support boundary",
+      "old": "den * bits <= num * spec[\"f1_bits\"]",
+      "new": "den * bits < num * spec[\"f1_bits\"]"
+    },
+    {
+      "name": "partial supports",
+      "old": "\"supported\" if not lower and den",
+      "new": "\"supported\" if den"
+    },
+    {
+      "name": "never a lower bound",
+      "old": "    lower = not all(r[\"complete\"] for r in e[\"roots\"])\n",
+      "new": "    lower = False\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "f2_complete = f1_complete",
+      "new": "f2_complete = lambda e, spec: f1_complete(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-17T07:03:55+00:00",
+    "killed": 10,
+    "survived": [],
+    "killed_by": {
+      "f1's rule": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_f2_is_f1_with_l5_s_rule"
+      ],
+      "f1's fingerprint": [
+        "test_a_run_off_its_registration_is_not_judged",
+        "test_f2_is_f1_with_l5_s_rule"
+      ],
+      "another f1 total": [
+        "test_f2_is_f1_with_l5_s_rule",
+        "test_the_whole_strategy_is_judged_against_f1_s"
+      ],
+      "a looser support": [
+        "test_exactly_nine_tenths_supports",
+        "test_f2_is_f1_with_l5_s_rule",
+        "test_the_whole_strategy_is_judged_against_f1_s"
+      ],
+      "judged off registration": ["test_a_run_off_its_registration_is_not_judged"],
+      "refute boundary": [
+        "test_an_unfinished_position_can_only_refute",
+        "test_the_whole_strategy_is_judged_against_f1_s"
+      ],
+      "support boundary": ["test_exactly_nine_tenths_supports"],
+      "partial supports": ["test_an_unfinished_position_can_only_refute"],
+      "never a lower bound": ["test_an_unfinished_position_can_only_refute"],
+      "own completion judge": ["test_f2_is_f1_with_l5_s_rule"]
+    }
+  }
+}

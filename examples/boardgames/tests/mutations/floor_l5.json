@@ -23,5 +23,23 @@
       "old": "l5_report = w6_report",
       "new": "l5_report = lambda e, spec: w6_report(e, spec)"
     }
-  ]
+  ],
+  "last_run": {
+    "at": "2026-10-16T18:53:42+00:00",
+    "killed": 4,
+    "survived": [],
+    "killed_by": {
+      "unlevelled passed over": [
+        "test_l5_is_judged_against_l4_s_control_under_the_control_s_own_registration",
+        "test_l5_is_l2_reading_unlevelled_cells_last_on_l4_s_positions"
+      ],
+      "the control's fingerprint": [
+        "test_l5_is_l2_reading_unlevelled_cells_last_on_l4_s_positions"
+      ],
+      "judged against its own registration": [
+        "test_l5_is_judged_against_l4_s_control_under_the_control_s_own_registration"
+      ],
+      "own completion judge": ["test_l5_is_l2_reading_unlevelled_cells_last_on_l4_s_positions"]
+    }
+  }
 }

@@ -207,3 +207,22 @@ def test_unlevelled_cells_last_change_what_both_walks_find(positions):
         changed += native(plain, s, {}, 8, None, 1_000_000) != native(last, s, {}, 8, None, 1_000_000)
         changed += native_verify(plain, s, {}, 8) != native_verify(last, s, {}, 8)
     assert changed
+
+
+def test_the_last_level_holds_only_unlevelled_cells_in_both_walks(positions):
+    """Under exact ties, a map putting all but one safe move on level 0: level 0 holds several and does not decide, the
+    one unlevelled safe move does — in both walks alike."""
+    from harness.native_leaf import verify as native_verify
+    from harness.steady_state import verify as python_verify
+
+    facts = Facts(GAME, unlevelled="last")
+    tried = 0
+    for s in positions:
+        _wins, safe, cell = facts.of(s)
+        if len(safe) < 3:
+            continue
+        levels = {c: 0 for c in facts.empty_cells(s) if c != cell[safe[-1]]}
+        assert native(facts, s, levels, 8, None, 1_000_000) == reference(facts, s, levels, 8, _winning, 1_000_000)
+        assert native_verify(facts, s, levels, 8) == python_verify(facts, s, levels, 8)
+        tried += 1
+    assert tried >= 3

@@ -8373,6 +8373,153 @@
       "pins": {
         "tests/test_c49_m1_after_evidence.py": "a9b6c7ab22725e907cc7d1acd2c00a11e89e48260eb2be3c3fe6e478f274b70a"
       }
+    },
+    "h285": {
+      "id": "h285",
+      "claim": "\u00a73.6 L5: reading the safe moves on unlevelled cells as a last level, at least 28 of L4's 32 positions (F1's 16 heaviest and 16 spread) get a complete certified strategy within 2 hours under L2's rule and pipeline. Refuted at 24 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_l5_evidence.py::test_c49_l5_28_of_32_complete_within_2_hours_reading_unlevelled_cells_last",
+      "note": "User's choice (2026-10-16): another zero-bit rule. L5 = L2's rule and pipeline, no library, with `unlevelled` \"last\": the safe moves on cells the map leaves unlevelled form one more level after the map's, read by ties (the lowest decides) \u2014 positions L2 left undefined get a default move, and simplify can drop every level that only reproduces it. Free: the empty map (leaf 0, no bits) is tried before any search. Positions: L4's 32 (F1's 16 heaviest + 16 spread). Judged against L4's control (130,061 bits, 32/32 complete; built 2026-10-15/16, fingerprint 1d12399d877c) under the control's own registration. Smoke: #548 63 bits (control 105), #9 39 (39). Mutants: steady_state 46/46, C walk 43/43, native_leaf 19/19, steady_search 28/28, floor_l5 4/4. Full suite green (3,090 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-16T20:54:02.248579+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l5_evidence.py::test_c49_l5_28_of_32_complete_within_2_hours_reading_unlevelled_cells_last",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.05s",
+          "drawn_at": "2026-10-17T03:04:43.577563+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l5.json.gz",
+        "started": "2026-10-16T20:54:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l5_evidence.py": "7e7d7c1a7cab66c32166d4e0bc897eb3a9d7e53bff78ea924395b090b77e2ab3",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l5_evidence.py::test_c49_l5_completion_is_undecidable"
+    },
+    "h286": {
+      "id": "h286",
+      "claim": "\u00a73.6 L5: reading the safe moves on unlevelled cells as a last level makes the 32 strategies take no more than four fifths of L4's control's 130,061 bits. Refuted at the control's bits or more (an unfinished root counts at its partial size)",
+      "mode": "test",
+      "proof": "tests/test_c49_l5_evidence.py::test_c49_l5_reading_unlevelled_cells_last_makes_the_strategies_a_fifth_smaller",
+      "note": "User's choice (2026-10-16): another zero-bit rule. L5 = L2's rule and pipeline, no library, with `unlevelled` \"last\": the safe moves on cells the map leaves unlevelled form one more level after the map's, read by ties (the lowest decides) \u2014 positions L2 left undefined get a default move, and simplify can drop every level that only reproduces it. Free: the empty map (leaf 0, no bits) is tried before any search. Positions: L4's 32 (F1's 16 heaviest + 16 spread). Judged against L4's control (130,061 bits, 32/32 complete; built 2026-10-15/16, fingerprint 1d12399d877c) under the control's own registration. Smoke: #548 63 bits (control 105), #9 39 (39). Mutants: steady_state 46/46, C walk 43/43, native_leaf 19/19, steady_search 28/28, floor_l5 4/4. Full suite green (3,090 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-16T20:54:03.085705+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l5_evidence.py::test_c49_l5_reading_unlevelled_cells_last_makes_the_strategies_a_fifth_smaller",
+          "ok": false,
+          "detail": "supported\nE         + inconclusive\n\ntests/test_c49_l5_evidence.py:42: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_l5_evidence.py::test_c49_l5_reading_unlevelled_cells_last_makes_the_strategies_a_fifth_smaller\n1 failed in 0.09s",
+          "drawn_at": "2026-10-17T03:04:43.890295+00:00",
+          "inconclusive": true
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_l5.json.gz",
+        "started": "2026-10-16T20:54:12+00:00"
+      },
+      "pins": {
+        "tests/test_c49_l5_evidence.py": "7e7d7c1a7cab66c32166d4e0bc897eb3a9d7e53bff78ea924395b090b77e2ab3",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l4_control.py": "afaaf29978410af7a96dd1db1ed2d6f273e2e4ef2b4943509e47deb9572043e7",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_l1.py": "f1819725957a71baa13cc6c64d49408b8fca1089fd3277243ec8e06f4da73b42",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c",
+        "harness/floor_w8.py": "e33e64f1294bcb83f2f3d063e8c48382caa6f899c213e1821c9b8b14b64d94d3"
+      },
+      "inconclusive_proof": "tests/test_c49_l5_evidence.py::test_c49_l5_the_size_is_undecidable"
+    },
+    "h287": {
+      "id": "h287",
+      "claim": "\u00a73.6 L5 (registered after the data): reading the safe moves on unlevelled cells as a last level shrinks the maps \u2014 levelled cells 12,497 against 17,276, map bits 59,697 against 76,858 \u2014 and the 32 strategies take 109,017 bits against L4's control's 130,061 (0.84); smaller on 24 positions, larger on 7 (a sign test: p = 0.003, beyond h282's ~10% run-to-run swing). The gain is in the heavy tail: the 16 heaviest 96,913 against 121,313 (0.80); the 16 spread grow 8,748 -> 12,104, most of it #121 (3,429 against 373)",
+      "mode": "test",
+      "proof": "tests/test_c49_l5_after_evidence.py::test_c49_l5_unlevelled_cells_last_shrink_the_maps_and_the_heavy_tail",
+      "note": "h285 supported (32/32 complete), h286 inconclusive (0.838: between the registered 0.8 and 1.0) \u2014 both pre-registered. L5 is the first rule change since L2 to shrink the strategies; kept, worth carrying into the whole frontier.",
+      "registered_at": "2026-10-17T03:05:16.512013+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_l5_after_evidence.py::test_c49_l5_unlevelled_cells_last_shrink_the_maps_and_the_heavy_tail",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.07s",
+          "drawn_at": "2026-10-17T03:05:16.819402+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_l5.json.gz",
+          "started": "2026-10-16T20:54:12+00:00"
+        },
+        {
+          "path": "evidence/c49_l4_control.json.gz",
+          "started": "2026-10-16T14:17:12+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_l5_after_evidence.py": "49f04a4fa0cf248f75c881380bd53ed1d357be4db15df50a632f8861764996d3",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649"
+      }
+    },
+    "h288": {
+      "id": "h288",
+      "claim": "\u00a73.6 F2: every one of the opening's 671 frontier positions gets a complete certified strategy within 2 hours under L5's rule (L2's, the safe moves on unlevelled cells a last level), built as F1. Refuted when more than 7 do not finish; inconclusive at 1-7",
+      "mode": "test",
+      "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_every_frontier_position_completes",
+      "note": "User's choice (2026-10-17): rebuild the whole game with L5. F2 = F1 with only the rule changed (unlevelled safe moves a last level): all 671 frontier positions in W1's seeded order, waves of 32 from a growing library seeded with L2's 90 maps (8,618 bits once), L2's pipeline, 2 h cap. Pilot (h287): 0.84 of a same-rule control on 32 of F1's positions, 0.80 on the heaviest 16, which hold 58% of F1's bits; run-to-run swing ~10% (h282). Resumable (--resume; run files in checkpoints/runs/c49_f2*). harness/floor_f2.py 5 tests, 10/10 mutants. Full suite green (3,105 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-17T07:16:44.111907+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_f2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_f2_evidence.py": "bc7cdef19513b6798e8dfebd2025a791af1f250ddb1e3081e25673e8b591c8ae",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_f2_evidence.py::test_c49_f2_completion_is_undecidable"
+    },
+    "h289": {
+      "id": "h289",
+      "claim": "\u00a73.6 F2: the certified whole-game first-player strategy built with L5's rule \u2014 the opening, the seed library once and every frontier position's own bits \u2014 takes no more than nine tenths of F1's 548,424 bits. Refuted at F1's or more (a partial total counting as a lower bound); inconclusive between, or unfinished",
+      "mode": "test",
+      "proof": "tests/test_c49_f2_evidence.py::test_c49_f2_the_whole_strategy_is_a_tenth_smaller_than_f1_s",
+      "note": "User's choice (2026-10-17): rebuild the whole game with L5. F2 = F1 with only the rule changed (unlevelled safe moves a last level): all 671 frontier positions in W1's seeded order, waves of 32 from a growing library seeded with L2's 90 maps (8,618 bits once), L2's pipeline, 2 h cap. Pilot (h287): 0.84 of a same-rule control on 32 of F1's positions, 0.80 on the heaviest 16, which hold 58% of F1's bits; run-to-run swing ~10% (h282). Resumable (--resume; run files in checkpoints/runs/c49_f2*). harness/floor_f2.py 5 tests, 10/10 mutants. Full suite green (3,105 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-17T07:16:45.082753+00:00",
+      "evidence": [],
+      "data": {
+        "path": "evidence/c49_f2.json.gz",
+        "started": null
+      },
+      "pins": {
+        "tests/test_c49_f2_evidence.py": "bc7cdef19513b6798e8dfebd2025a791af1f250ddb1e3081e25673e8b591c8ae",
+        "harness/floor_f2.py": "004c166c3d1ba7d1cfb98ff6ced4432acb939b14b693d2602c9240fd82f0900d",
+        "harness/floor_f1.py": "bd631e79fd7cb9f14b4c724dfef62a8a286a13d40f5b62f5382e45d7a652b20e",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w10.py": "5d9059b5885b7e9324977edd0df6b0a0d58893564e904dd34aa52a60f54a5f8a",
+        "harness/floor_w9.py": "dc0de16eae3e4dd005f2d474f685de465775306cc554d7d81ab1755cff1ff082",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_f2_evidence.py::test_c49_f2_the_whole_strategy_s_size_is_undecidable"
     }
   }
 }

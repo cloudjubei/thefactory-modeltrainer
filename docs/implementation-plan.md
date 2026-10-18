@@ -491,7 +491,15 @@ rule standalone and in decision-list order, by ply.
   - **M1 result (h283 refuted — pre-registered; h284 after the data): map coding is a dead end.** Exact cheaper codes
     for F1's 3,196 maps (`harness/map_coding.py`: chosen cells, levels by rank or by count) save 2.5% with a per-map
     selector, 3.2% with one code for all. Map bits are set by how many maps and levelled cells there are — the next
-    gain must come from fewer or simpler maps (rule or search), not from writing them better. Next step: user's choice.
+    gain must come from fewer or simpler maps (rule or search), not from writing them better.
+  - **L5 result (h285 supported, h286 inconclusive — pre-registered; h287 after the data): a real gain.**
+    `Facts(unlevelled="last")` — unlevelled safe moves a last level — completes all 32 in 109,017 bits against
+    L4's control's 130,061 (0.84; the registered bar was 0.80). Smaller on 24 of 32 (sign test p = 0.003); 28% fewer
+    levelled cells, 22% fewer map bits; the heaviest 16 at 0.80. Next: the user's choice (e.g. carry L5 into the whole
+    frontier, or stack another rule on it).
+  - **Decided (user, 2026-10-17): rebuild the whole game with L5.** F2 (h288, h289; running since 07:17Z): F1 with
+    only the rule changed, judged on completion and on the whole strategy against F1's 548,424 bits (nine tenths
+    supports). ~2-3 days on 4 workers; resumable (`--resume`, run files in checkpoints/runs/c49_f2*).
 
 ## 4. The hybrid process — definition of done
 

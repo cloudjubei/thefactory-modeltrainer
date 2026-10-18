@@ -235,8 +235,8 @@
     }
   ],
   "last_run": {
-    "at": "2026-10-15T10:46:15+00:00",
-    "killed": 40,
+    "at": "2026-10-16T18:53:59+00:00",
+    "killed": 46,
     "survived": [],
     "killed_by": {
       "several changed cells accepted": ["test_a_game_whose_moves_do_not_fill_one_cell_is_refused"],
@@ -249,8 +249,10 @@
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_simplify_uses_the_given_verifier",
         "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
+        "test_unlevelled_cells_last_change_neither_the_wins_nor_a_forced_safe_move",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
-        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined"
       ],
       "single safe move not forced": [
         "test_a_forced_draw_is_rejected",
@@ -262,6 +264,7 @@
       "first level holding any safe move decides": [
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
+        "test_the_last_level_is_read_like_any_other",
         "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
@@ -273,14 +276,16 @@
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels3-5]",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
-        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels3-8]"
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels3-8]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels3-4]"
       ],
       "unsafe moves kept": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels2-draw]",
         "test_preferring_forcing_moves_changes_neither_the_wins_nor_a_forced_safe_move",
         "test_the_only_safe_move_is_played_whatever_the_map",
         "test_ties_change_only_the_levels_not_wins_or_the_one_safe_move",
-        "test_two_ply_safety_changes_neither_the_wins_nor_a_forced_safe_move"
+        "test_two_ply_safety_changes_neither_the_wins_nor_a_forced_safe_move",
+        "test_unlevelled_cells_last_change_neither_the_wins_nor_a_forced_safe_move"
       ],
       "facts recomputed": ["test_facts_are_computed_once_per_position"],
       "draw accepted": [
@@ -294,7 +299,8 @@
         "test_simplify_drops_every_level_the_win_does_not_need",
         "test_simplify_past_its_deadline_keeps_every_level",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
-        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
+        "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined"
       ],
       "one reply walked": [
         "test_a_map_that_misses_a_line_is_rejected_with_the_first_failure[levels1-undefined]",
@@ -328,17 +334,24 @@
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
-        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels2-5]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels3-4]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels4-4]"
       ],
       "highest move of a tied level": [
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
-        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels2-5]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels3-4]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels4-4]"
       ],
       "lowest ties by default": [
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels2-6]",
         "test_the_first_level_holding_exactly_one_safe_move_decides[levels4-None]",
+        "test_the_last_level_is_read_like_any_other",
         "test_the_rule_reads_exactly_one_safe_move_a_level_unless_told_otherwise",
         "test_with_forcing_moves_preferred_the_levels_choose_among_them",
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined"
@@ -350,7 +363,12 @@
         "test_with_ties_to_the_lowest_a_map_verifies_that_the_exact_rule_leaves_undefined",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels1-4]",
         "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels2-4]",
-        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]"
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels4-5]",
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels0-4]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels2-5]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels3-4]",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels4-4]"
       ],
       "depth two ignored": [
         "test_the_safe_moves_are_every_safe_move_whether_or_not_forcing_ones_are_preferred",
@@ -404,7 +422,28 @@
       ],
       "cells of every safe move": [
         "test_preferring_forcing_moves_keeps_the_safe_moves_that_leave_the_opponent_at_most_one_safe_reply"
-      ]
+      ],
+      "unlevelled last never read": [
+        "test_the_last_level_is_read_like_any_other",
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels0-4]"
+      ],
+      "unlevelled last reads every safe move": [
+        "test_the_last_level_is_read_like_any_other",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels5-None]"
+      ],
+      "unlevelled last ignores ties": ["test_the_last_level_is_read_like_any_other"],
+      "unlevelled last highest": [
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined",
+        "test_with_unlevelled_cells_last_they_form_a_level_after_the_map_s[levels0-4]"
+      ],
+      "unlevelled last by default": [
+        "test_unlevelled_cells_are_passed_over_unless_told_otherwise",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels5-None]",
+        "test_with_ties_to_the_lowest_the_first_level_holding_any_safe_move_decides[levels6-None]",
+        "test_with_unlevelled_cells_last_the_empty_map_verifies_where_it_was_undefined"
+      ],
+      "unlevelled unchecked": ["test_unlevelled_cells_are_passed_over_unless_told_otherwise"]
     }
   },
   "note": "Not listed, equivalent: 'forcing for one safe move too' (with one safe move the filter's fallback (`or safe`) keeps it, so the length check only saves work); 'a board-filling reply is a threat' (a reply can fill the board only when it is the opponent's one reply, so the count is at most 1 either way (the check was removed))."

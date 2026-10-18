@@ -5494,3 +5494,33 @@ composition and a multinomial index). scripts/c4_map_coding.py reproduced F1's r
 cells and levels spread evenly, the maps are near their information content under simple codes; together with h248
 (edit-coding maps cost 18% more) this closes the coding route: fewer or simpler maps must come from the rule or the
 search.
+
+## 2026-10-16 — L5: unlevelled cells as a last level (user's choice: another zero-bit rule)
+
+L2's one big gain came from the rule deciding in more positions at no cost in bits. L5 goes one step further:
+`Facts(unlevelled="last")` reads the safe moves on cells a map leaves without a level as one more level after the
+map's (the lowest decides, as in every level under L2), so a position where no safe move is levelled is no longer
+undefined. Maps then need level only what the default gets wrong, and simplify drops the rest; where the default alone
+wins, the free empty map (leaf 0) is the leaf. Python reference and C walk agree on every rule combination, including
+a targeted case (exact ties, all but one safe move on level 0) added when a C mutant survived the random maps; the SAT
+search refuses the rule. Mutants: steady_state 46/46, C walk 43/43, native_leaf 19/19, steady_search 28/28, floor_l5
+4/4. Judged against L4's control (130,061 bits on the same 32 positions, no library), under the control's own
+registration, so one arm suffices: h285 (completion), h286 (four fifths of the control). Smoke: #548 in 63 bits (control
+105). Launched 20:54Z, chain shell PID 38978.
+
+## 2026-10-17 — L5 judged: unlevelled cells as a last level shrink the maps
+
+Finished 03:04Z, all 32 complete (h285 supported). The 32 take 109,017 bits against L4's control's 130,061 — 0.838,
+between the registered four fifths and the control, so h286 is inconclusive. After the data (h287): the effect is
+real and where it was meant to be. Levelled cells fall from 17,276 to 12,497 (−28%) and map bits from 76,858 to
+59,697 (−22%); exceptions fall 12%. L5 is smaller on 24 positions, larger on 7 and equal on one — a sign test puts
+that at p = 0.003, beyond h282's ~10% run-to-run swing. F1's 16 heaviest positions take 96,913 bits against 121,313
+(0.80); the 16 spread ones grow from 8,748 to 12,104, nearly all of it #121 (3,429 against 373), where the default
+evidently leads the search astray. Without #121 the ratio is 0.814. The first rule change since L2 that shrinks the
+strategies; it is free in bits and costs no completion.
+
+F2 launched 2026-10-17 07:17Z (user's choice: rebuild the whole game with L5): harness/floor_f2.py is F1 with only the
+builder's rule changed (`unlevelled` "last"), same order, waves, seed library and cap; h288 (completion, as F1) and h289
+(no more than nine tenths of F1's 548,424 bits; refuted at F1's or more) pre-registered; 10/10 mutants after a
+boundary test was added (with F1's total the nine-tenths line falls between whole bits, so `<` and `<=` agreed until a
+test used a total where it does not). Chain shell PID 37008; run files in checkpoints/runs/c49_f2*.
