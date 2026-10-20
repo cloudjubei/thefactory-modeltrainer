@@ -1,5 +1,5 @@
 """§3.6 — do maps carry across the frontier? Under a SPEC's rule (its builder's `ties`, `safe_depth`, `forcing`,
-`unlevelled`), for every root and every leaf of the strategies in one run's evidence, whether any map found by
+`unlevelled`, `order`), for every root and every leaf of the strategies in one run's evidence, whether any map found by
 another run's builds wins every line from there (the C verify, each map restricted to the cells empty at that
 position, as the builder applies it). Saved: per root, whether a map covers the root and how many of its leaves (with
 exceptions or without) one covers.
@@ -43,7 +43,8 @@ def main() -> None:
     b = importlib.import_module(args.spec).SPEC["builder"]
     game = Connect4()
     facts = Facts(game, ties=b.get("ties", "exact"), safe_depth=b.get("safe_depth", 1),
-                  forcing=b.get("forcing", False), unlevelled=b.get("unlevelled", "none"))
+                  forcing=b.get("forcing", False), unlevelled=b.get("unlevelled", "none"),
+                  order=b.get("order", "lowest"))
     offered = [{int(c): k for c, k in m.items()}
                for r in load_evidence(ROOT / "evidence" / args.maps)["roots"] for m in r["maps"][1:]]
     seen: set = set()

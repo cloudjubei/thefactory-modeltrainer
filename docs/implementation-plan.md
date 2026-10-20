@@ -504,7 +504,18 @@ rule standalone and in decision-list order, by ply.
     end.** 120-s deeper searches complete all 16 heaviest positions but take 1.30 times a 30-s control's bits: they
     settle near the root for leaves that clear the 30x acceptance threshold with thousands of exceptions (9,094
     against 1,972). The lever is the acceptance rule (what a leaf may cost against a split), not search time.
-    Next: the user's choice.
+  - **A6 result (h294 supported, h295 refuted — pre-registered; h296 after the data): a stricter bar is a dead end.**
+    Leaves kept only at 100x: 15 of 16 complete, but 1.34 times the control's bits (140,404 against 104,860; smaller
+    on 3). The first complete build is under half the control's (156,348 against 348,245 where both complete), but
+    improvement — which compares a leaf with its split — then cuts the control by 73% and A6 by 23%: the 30x bar
+    hands it leaves to split selectively, 100x splits blindly at build time. Exceptions saved 3,436 bits; maps and
+    splits cost 38,980 more. Search time and the acceptance bar are both settled; the heavy tail needs something else.
+  - **D1 result (h297 supported — registered before its measured run): which zero-bit default.** On 4,523 own
+    positions with several safe moves sampled from L5's certified leaves and solved, the lowest move keeps the win at
+    93.2% (random 92.8%); plain reorderings do no better, but "tactics" — first a move that wins by force in two, then
+    one that does not lose by force in two, else the lowest — misses 200 against 308 (0.65). It becomes L6's rule.
+  - **L6 (next, user's choice: another zero-bit rule):** L5 with ties broken by tactics (`Facts.order`), on L4's 32
+    positions, against L5 (109,017 bits): ≥28/32 complete; ≤0.9 of L5's bits.
 
 ## 4. The hybrid process — definition of done
 

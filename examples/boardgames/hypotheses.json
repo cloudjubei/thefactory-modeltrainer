@@ -8663,6 +8663,125 @@
       "pins": {
         "tests/test_c49_b1_after_evidence.py": "f40d1be2d1fe0d495641fdffccdfc7e5dd6aa5951b964f8dfa76a725a34d7f9c"
       }
+    },
+    "h294": {
+      "id": "h294",
+      "claim": "\u00a73.6 A6: keeping leaves with exceptions only at 100x (not 30x), at least 14 of F2's 16 heaviest positions get a complete certified strategy within 2 hours under L5's rule and pipeline. Refuted at 12 or fewer",
+      "mode": "test",
+      "proof": "tests/test_c49_a6_evidence.py::test_c49_a6_14_of_16_complete_within_2_hours_accepting_at_100x",
+      "note": "User's choice (2026-10-20): stricter acceptance. A6 = L5's rule and pipeline, no library, leaves with exceptions kept only at 100x their bits in positions (not 30x); 30-s searches, 20-min root, 2-h cap unchanged. Positions: F2's 16 heaviest (B1's). Judged against B1's control (104,860 bits, 16/16 complete, built 2026-10-20 under the same fingerprint) under the control's own registration. A1 raised the bar under the exact rule and it cut both ways (h232). floor_a6 5/5 mutants. Full suite green (3,118 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-20T15:36:38.494302+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a6_evidence.py::test_c49_a6_14_of_16_complete_within_2_hours_accepting_at_100x",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-10-20T21:52:40.529160+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a6.json.gz",
+        "started": "2026-10-20T15:36:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a6_evidence.py": "da63e10ebbfcb5a54594d79d1567b271c8e6759ca59dff7d32eace4d14d6a1d8",
+        "harness/floor_a6.py": "1143e2a3f7b37aef5fef4312fda80011af8c58dddcbb991c7dfcf05f4a75ad16",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_a6_evidence.py::test_c49_a6_completion_is_undecidable"
+    },
+    "h295": {
+      "id": "h295",
+      "claim": "\u00a73.6 A6: keeping leaves with exceptions only at 100x (not 30x) makes the strategies for F2's 16 heaviest positions take no more than nine tenths of B1's control's 104,860 bits. Refuted at the control's bits or more (an unfinished root counts at its partial size)",
+      "mode": "test",
+      "proof": "tests/test_c49_a6_evidence.py::test_c49_a6_accepting_at_100x_makes_the_heavy_strategies_a_tenth_smaller",
+      "note": "User's choice (2026-10-20): stricter acceptance. A6 = L5's rule and pipeline, no library, leaves with exceptions kept only at 100x their bits in positions (not 30x); 30-s searches, 20-min root, 2-h cap unchanged. Positions: F2's 16 heaviest (B1's). Judged against B1's control (104,860 bits, 16/16 complete, built 2026-10-20 under the same fingerprint) under the control's own registration. A1 raised the bar under the exact rule and it cut both ways (h232). floor_a6 5/5 mutants. Full suite green (3,118 passed). Fingerprint 7717c79f94ea.",
+      "registered_at": "2026-10-20T15:36:39.154842+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a6_evidence.py::test_c49_a6_accepting_at_100x_makes_the_heavy_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": "         - supported\nE         + refuted\n\ntests/test_c49_a6_evidence.py:37: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_a6_evidence.py::test_c49_a6_accepting_at_100x_makes_the_heavy_strategies_a_tenth_smaller\n1 failed in 0.23s",
+          "drawn_at": "2026-10-20T21:52:41.202033+00:00",
+          "inconclusive": false
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_a6.json.gz",
+        "started": "2026-10-20T15:36:48+00:00"
+      },
+      "pins": {
+        "tests/test_c49_a6_evidence.py": "da63e10ebbfcb5a54594d79d1567b271c8e6759ca59dff7d32eace4d14d6a1d8",
+        "harness/floor_a6.py": "1143e2a3f7b37aef5fef4312fda80011af8c58dddcbb991c7dfcf05f4a75ad16",
+        "harness/floor_b1.py": "07f8cf0fbe358127e3006a2bad53d48034084518f8b1a3c8ff3e58b3614a9692",
+        "harness/floor_b1_control.py": "cfae115293f6191e108b1956dfd50b9a52a2d1329184319be5f8663294170fa2",
+        "harness/floor_l5.py": "06fb94f5321469e10671f9e27f97c599c71b6963ed181132748d92c2e4276649",
+        "harness/floor_l4.py": "452ee20d8b259b96c125cdbcbb76cc012935f369cbc171c186831568fe5b7e1f",
+        "harness/floor_l2.py": "8338c9db1d7b438bde60ca74adc3cccfe5629c098e4678e6559fedb5aa597e72",
+        "harness/floor_w1.py": "b75b4226fcf2b0e49a8f449fce236c1298b14aec23080518ac866b709beaccc4",
+        "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
+      },
+      "inconclusive_proof": "tests/test_c49_a6_evidence.py::test_c49_a6_the_size_is_undecidable"
+    },
+    "h296": {
+      "id": "h296",
+      "claim": "\u00a73.6 A6 (registered after the data): a stricter acceptance bar makes the first complete build smaller but leaves the improvement pass less to choose from \u2014 on the 15 positions both complete, A6's first complete builds take 156,348 bits against the control's 348,245 (smaller on 13), but improvement cuts the control's to 93,033 and A6's only to 120,834 (larger on 12): at 30x the build accepts leaves with exceptions that improvement splits only where the split is smaller (259 kept of 437 tried), while 100x splits at build time without comparing (129 of 239). Over all 16: table moves 510 -> 1,007, leaves 2,597 -> 4,686, maps 766 -> 1,199 (58,299 -> 76,113 bits), exceptions 25,698 -> 22,262 bits \u2014 3,436 bits of exceptions saved for 17,814 more in maps and 21,166 more in the rest. Which leaves to keep is best left to improvement, which compares sizes; the acceptance bar should stay low",
+      "mode": "test",
+      "proof": "tests/test_c49_a6_after_evidence.py::test_c49_a6_stricter_acceptance_builds_smaller_first_but_leaves_improvement_less_to_choose",
+      "note": "h294 supported (15/16 complete; #207 unfinished at 19,570 bits), h295 refuted (140,404 bits against 104,860 = 1.34; smaller on 3 of 16) \u2014 pre-registered. Refines h293: the 30x bar's exception-heavy leaves under 120-s searches were B1's cost, but raising the bar costs more.",
+      "registered_at": "2026-10-20T21:54:08.433122+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_a6_after_evidence.py::test_c49_a6_stricter_acceptance_builds_smaller_first_but_leaves_improvement_less_to_choose",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.17s",
+          "drawn_at": "2026-10-20T21:54:09.104150+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_a6.json.gz",
+          "started": "2026-10-20T15:36:48+00:00"
+        },
+        {
+          "path": "evidence/c49_b1_control.json.gz",
+          "started": "2026-10-20T08:39:48+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_a6_after_evidence.py": "8dbf190f1ab8e13b9b2d1b67858f0babed8f1a0b94c72814258fdd5c174bd4d8"
+      }
+    },
+    "h297": {
+      "id": "h297",
+      "claim": "\u00a73.6 D1: on own positions with two or more safe moves and no winning move sampled from L5's certified leaves (150 a root), the 'tactics' default \u2014 the lowest safe move after preferring moves that win by force in two, then moves that do not lose by force in two \u2014 fails to keep the win at no more than two thirds as many positions as L5's lowest-first default. Refuted above two thirds; undecidable if the lowest misses fewer than 30",
+      "mode": "test",
+      "proof": "tests/test_c49_d1_evidence.py::test_c49_d1_the_tactics_default_misses_two_thirds_of_the_lowest_s_positions_or_fewer",
+      "note": "User's choice (2026-10-21): another zero-bit rule. A pilot to choose which: a 621-position smoke (20 a root, scratch only) scored lowest 93.1% of positions kept, highest/centre 92.3%, fewest-replies 91.6%, a random safe move 92.4% \u2014 reordering alone is no lever; 'tactics' was added after it and not scored there. The winning order becomes L6's rule, built and pre-registered separately. floor_d1 11/11 mutants. Fingerprint 576f1422643b.",
+      "registered_at": "2026-10-20T22:35:00.283904+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_d1_evidence.py::test_c49_d1_the_tactics_default_misses_two_thirds_of_the_lowest_s_positions_or_fewer",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.03s",
+          "drawn_at": "2026-10-20T22:39:20.482659+00:00"
+        }
+      ],
+      "data": {
+        "path": "evidence/c49_d1.json.gz",
+        "started": "2026-10-20T22:35:08.711790+00:00"
+      },
+      "pins": {
+        "tests/test_c49_d1_evidence.py": "7bfae9051a9b5ea2f071df24e504be3f8408040ca58da0c46df116c04da0d36c",
+        "harness/floor_d1.py": "1426ca089f27fd1f6dfcf29eb2b8efc30d0f87e0ddd64e3b86ea6a97dad7bc74"
+      },
+      "inconclusive_proof": "tests/test_c49_d1_evidence.py::test_c49_d1_the_misses_are_undecidable"
     }
   }
 }

@@ -364,6 +364,10 @@
       "sha256": "529655c22d06b6f896a3f191acbd6ed91627c63a9e7d1a5e98353385610b8415",
       "started": "2026-10-10T06:40:15+00:00"
     },
+    "c49_a6.json.gz": {
+      "sha256": "1c078382600582413aabe759212f2937b6b9df06353f065b80952fdc816292d2",
+      "started": "2026-10-20T15:36:48+00:00"
+    },
     "c49_b1.json.gz": {
       "sha256": "02c27b884ce22c77e18bb4bfb1399775580e9e0d6f8a1075958acb164fa89155",
       "started": "2026-10-19T22:31:34+00:00"
@@ -391,6 +395,10 @@
     "c49_certify_ab302_d12.json.gz": {
       "sha256": "c5b648600664e7f62d0eeea39cebe20273114b47d838c8fdb74cadb17e0d3552",
       "started": "2026-09-27T09:32:53+00:00"
+    },
+    "c49_d1.json.gz": {
+      "sha256": "58d4ab26194085bb8eaf4a39a39d095f11b4c8186ed97e05d8deadd27afbf04a",
+      "started": "2026-10-20T22:35:08.711790+00:00"
     },
     "c49_depth_cost.json.gz": {
       "sha256": "727d0f5c070008022f9029a0117d197936b5ba9a80fc70fb7585c6f4fa6d81c0",

@@ -20,8 +20,8 @@
     },
     {
       "name": "a level with several safe moves decides",
-      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1 || (count > 0 && ties_lowest)) return found;",
-      "new": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count >= 1) return found;"
+      "old": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);",
+      "new": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count >= 1) return pick(position, mask, at, count, tactics);"
     },
     {
       "name": "only safe move ignored",
@@ -105,28 +105,28 @@
     },
     {
       "name": "verify walks with exceptions",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,"
     },
     {
       "name": "ties ignored in c",
-      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1 || (count > 0 && ties_lowest)) return found;",
-      "new": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n                count++;\n            }\n        if (count == 1) return found;"
+      "old": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);",
+      "new": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count == 1) return pick(position, mask, at, count, tactics);"
     },
     {
       "name": "highest column of a tied level",
-      "old": "            if (levels[cells[i]] == k) {\n                if (found < 0) found = safe[i];\n",
-      "new": "            if (levels[cells[i]] == k) {\n                found = safe[i];\n"
+      "old": "    if (!tactics || n == 1) return at[0];",
+      "new": "    if (!tactics || n == 1) return at[n - 1];"
     },
     {
       "name": "leaf walk drops ties",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,"
     },
     {
       "name": "verify drops ties",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, 0, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,"
     },
     {
       "name": "depth two ignored in c",
@@ -150,13 +150,13 @@
     },
     {
       "name": "leaf walk drops depth",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, cap, seconds, 0,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,"
     },
     {
       "name": "verify drops depth",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, cap, seconds, 1,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, 1, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,"
     },
     {
       "name": "forcing never kept in c",
@@ -185,8 +185,8 @@
     },
     {
       "name": "forcing not passed in c",
-      "old": "ties_lowest, safe_depth, forcing,\n                                            unlevelled_last, &immediate);",
-      "new": "ties_lowest, safe_depth, 0,\n                                            unlevelled_last, &immediate);"
+      "old": "ties_lowest, safe_depth, forcing,\n                                            unlevelled_last, tactics, &immediate);",
+      "new": "ties_lowest, safe_depth, 0,\n                                            unlevelled_last, tactics, &immediate);"
     },
     {
       "name": "unlevelled last never read in c",
@@ -195,28 +195,83 @@
     },
     {
       "name": "unlevelled last reads levelled cells in c",
-      "old": "            if (levels[cells[i]] < 0) {\n",
-      "new": "            if (levels[cells[i]] <= 0) {\n"
+      "old": "            if (levels[cells[i]] < 0) at[count++] = safe[i];\n",
+      "new": "            if (levels[cells[i]] <= 0) at[count++] = safe[i];\n"
     },
     {
       "name": "unlevelled last ignores ties in c",
-      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return found;\n    }\n    return -1;",
-      "new": "        if (count > 0) return found;\n    }\n    return -1;"
+      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);\n    }\n    return -1;",
+      "new": "        if (count > 0) return pick(position, mask, at, count, tactics);\n    }\n    return -1;"
     },
     {
       "name": "unlevelled last not passed in c",
-      "old": "                                            unlevelled_last, &immediate);",
-      "new": "                                            0, &immediate);"
+      "old": "                                            unlevelled_last, tactics, &immediate);",
+      "new": "                                            0, tactics, &immediate);"
     },
     {
       "name": "leaf walk drops unlevelled last",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 0,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, cap, seconds, 0,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, tactics, cap, seconds, 0,"
     },
     {
       "name": "verify drops unlevelled last",
-      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, cap, seconds, 1,",
-      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, cap, seconds, 1,"
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                0, tactics, cap, seconds, 1,"
+    },
+    {
+      "name": "tactics not passed in c",
+      "old": "                                            unlevelled_last, tactics, &immediate);",
+      "new": "                                            unlevelled_last, 0, &immediate);"
+    },
+    {
+      "name": "leaf walk drops tactics",
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 0,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, 0, cap, seconds, 0,"
+    },
+    {
+      "name": "verify drops tactics",
+      "old": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, tactics, cap, seconds, 1,",
+      "new": "    return walk(root_position, root_mask, root_moves, levels, n_levels, ties_lowest, safe_depth, forcing,\n                unlevelled_last, 0, cap, seconds, 1,"
+    },
+    {
+      "name": "levels ignore tactics in c",
+      "old": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);",
+      "new": "            if (levels[cells[i]] == k) at[count++] = safe[i];\n        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, 0);"
+    },
+    {
+      "name": "unlevelled last ignores tactics in c",
+      "old": "        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, tactics);\n    }\n    return -1;",
+      "new": "        if (count == 1 || (count > 0 && ties_lowest)) return pick(position, mask, at, count, 0);\n    }\n    return -1;"
+    },
+    {
+      "name": "tactics never rank",
+      "old": "    if (!tactics || n == 1) return at[0];",
+      "new": "    return at[0];"
+    },
+    {
+      "name": "wins in two ignored",
+      "old": "        int rank = (!wins_in_two(position, mask, at[i])) * 2 + loses_in_two(position, mask, at[i]);",
+      "new": "        int rank = loses_in_two(position, mask, at[i]);"
+    },
+    {
+      "name": "losses in two ignored",
+      "old": "        int rank = (!wins_in_two(position, mask, at[i])) * 2 + loses_in_two(position, mask, at[i]);",
+      "new": "        int rank = (!wins_in_two(position, mask, at[i])) * 2;"
+    },
+    {
+      "name": "rank ties to the highest",
+      "old": "        if (rank < best_rank) {",
+      "new": "        if (rank <= best_rank) {"
+    },
+    {
+      "name": "one answer without a threat suffices",
+      "old": "        if (!threat) return 0;\n    }\n    return 1;",
+      "new": "    }\n    return 1;"
+    },
+    {
+      "name": "a threat in any answer wins in two",
+      "old": "        if (!threat) return 0;\n    }\n    return 1;",
+      "new": "        if (threat) return 1;\n    }\n    return 0;"
     }
   ],
   "note": "'verify: loss read as draw' is not listed: the rule plays only immediate wins or safe moves, so the opponent never wins on its next move and a line of the rule's ends in a loss never — the branch is unreachable for Connect-4 and the mutant equivalent.",

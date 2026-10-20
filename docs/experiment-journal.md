@@ -5557,3 +5557,34 @@ acceptance rule (a leaf with exceptions is kept whenever it covers 30x its bits 
 split below it, except later by the improve passes within the time left), not search time. The control, without a
 library, took 104,860 bits against F2's 110,650 on the same positions (0.95). Also: stopped a stray vitest worker
 from another session (PID 3376, at the user's request) that had held a core and 2.3 GB for 45 hours.
+
+A6 launched 2026-10-20 15:37Z (user's choice: stricter acceptance): L5 with leaves kept only at 100x their bits in
+positions, 30-s searches, on F2's 16 heaviest positions, judged against B1's control (104,860 bits) — h294 (14 of 16
+complete), h295 (nine tenths of the control). floor_a6 5/5 mutants; chain shell PID 77280.
+
+## 2026-10-20 — A6 judged: a stricter acceptance bar makes the heavy tail larger
+
+A6 ended 21:51Z (6 h 14 m). Pre-registered: h294 supported — 15 of 16 complete within 2 hours (#207 unfinished at
+19,570 bits); h295 refuted — 140,404 bits against B1's 30-s control's 104,860 (1.34), smaller on 3 of 16 (#584 0.74,
+#58 0.96, #605 0.99), #467 the worst at 2.11. After the data (h296): on the 15 positions both complete the first
+complete build is under half the control's (156,348 bits against 348,245, smaller on 13), but the improvement pass cuts
+the control's to 93,033 (−73%) and A6's only to 120,834 (−23%), larger on 12. At 30x the build accepts leaves with
+exceptions and improvement then splits them only where the split is smaller (259 kept of 437 tried); at 100x the build
+splits at once without comparing (129 of 239). Over all 16: table moves 510 -> 1,007, leaves 2,597 -> 4,686, maps
+766 -> 1,199 (58,299 -> 76,113 bits), exception bits 25,698 -> 22,262 — 3,436 bits saved for 17,814 more in maps and
+21,166 more in table moves and leaves. With B1 (h293), both sides of the 30x bar are now measured: longer searches let
+exception-heavy leaves in, a stricter bar forces blind splits. Which leaves to keep is best left to improvement.
+
+## 2026-10-21 — D1: which zero-bit default (user's choice: another zero-bit rule)
+
+A pilot to choose the rule before building it. scripts/c4_default_accuracy.py walks every certified leaf of L5's 32
+strategies (400 own positions a leaf at most), pools the own positions with two or more safe moves and no winning move,
+samples 150 a root (seed 0) and solves them exactly: 4,523 positions. Each order picks among all the safe moves (the
+default with no map). Kept the win: lowest 93.2% (308 misses), highest 93.0%, nearest the board's centre 91.9%, fewest
+opponent replies that stop an immediate win 92.3%, a random safe move 92.8% — reordering alone is no lever (a
+621-position smoke, scratch only, showed the same and was why tactical orders were added). Preferring moves that win
+by force in two: 232 misses; that do not lose by force in two: 266; both in that order ("tactics"): 200 — 0.65 of the
+lowest's, inside the two thirds registered before the run (h297 supported; floor_d1 11/11 mutants). Within the levels
+the rule actually tied on, the lowest is right everywhere by construction (the leaves are certified under it), so
+only the all-safe-moves score is read.
+

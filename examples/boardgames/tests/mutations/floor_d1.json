@@ -1,0 +1,93 @@
+{
+  "file": "harness/floor_d1.py",
+  "tests": ["tests/test_floor_d1.py"],
+  "timeout": 60,
+  "mutations": [
+    {
+      "name": "another fingerprint",
+      "old": "\"measurement_fp\": \"576f1422643b\"",
+      "new": "\"measurement_fp\": \"000000000000\""
+    },
+    {
+      "name": "another order",
+      "old": "\"order\": \"tactics\"",
+      "new": "\"order\": \"win2\""
+    },
+    {
+      "name": "a looser support",
+      "old": "\"support\": Fraction(2, 3)",
+      "new": "\"support\": Fraction(3, 4)"
+    },
+    {
+      "name": "fewer misses suffice",
+      "old": "\"min_misses\": 30",
+      "new": "\"min_misses\": 29"
+    },
+    {
+      "name": "support boundary",
+      "old": "if ratio <= spec[\"support\"]",
+      "new": "if ratio < spec[\"support\"]"
+    },
+    {
+      "name": "min-misses boundary",
+      "old": "if lowest < spec[\"min_misses\"]",
+      "new": "if lowest <= spec[\"min_misses\"]"
+    },
+    {
+      "name": "unfingerprinted judged",
+      "old": " or (\n            e.get(\"measurement_fingerprint\") != spec[\"measurement_fp\"])",
+      "new": ""
+    },
+    {
+      "name": "settings not checked",
+      "old": "(\"spec\", \"targets\", \"per_root\", \"per_leaf\", \"seed\")",
+      "new": "(\"spec\", \"targets\")"
+    },
+    {
+      "name": "seed not checked",
+      "old": "\"per_leaf\", \"seed\")",
+      "new": "\"per_leaf\")"
+    },
+    {
+      "name": "order read off the evidence",
+      "old": "t[\"hits\"][spec[\"order\"]]",
+      "new": "t[\"hits\"][\"tactics\"]"
+    },
+    {
+      "name": "misses against the random chance",
+      "old": "    lowest = t[\"solved\"] - t[\"hits\"][\"lowest\"]\n",
+      "new": "    lowest = t[\"solved\"] - t[\"hits\"][\"highest\"]\n"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-20T22:34:45+00:00",
+    "killed": 11,
+    "survived": [],
+    "killed_by": {
+      "another fingerprint": ["test_d1_measures_l5_s_leaves"],
+      "another order": [
+        "test_d1_measures_l5_s_leaves",
+        "test_the_order_s_misses_are_judged_against_the_lowest_s",
+        "test_too_few_misses_of_the_lowest_cannot_judge"
+      ],
+      "a looser support": [
+        "test_d1_measures_l5_s_leaves",
+        "test_the_order_s_misses_are_judged_against_the_lowest_s"
+      ],
+      "fewer misses suffice": [
+        "test_d1_measures_l5_s_leaves",
+        "test_too_few_misses_of_the_lowest_cannot_judge"
+      ],
+      "support boundary": ["test_the_order_s_misses_are_judged_against_the_lowest_s"],
+      "min-misses boundary": ["test_too_few_misses_of_the_lowest_cannot_judge"],
+      "unfingerprinted judged": ["test_another_measurement_is_not_judged"],
+      "settings not checked": ["test_another_measurement_is_not_judged"],
+      "seed not checked": ["test_another_measurement_is_not_judged"],
+      "order read off the evidence": ["test_the_judged_order_is_the_spec_s"],
+      "misses against the random chance": [
+        "test_the_order_s_misses_are_judged_against_the_lowest_s",
+        "test_too_few_misses_of_the_lowest_cannot_judge"
+      ]
+    }
+  }
+}

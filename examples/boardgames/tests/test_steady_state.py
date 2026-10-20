@@ -202,6 +202,81 @@ def test_with_forcing_moves_preferred_the_levels_choose_among_them():
     assert verify(Facts(TicTacToe()), FORK, {4: 0, 5: 0}, 2)["reason"] == "undefined"
 
 
+TACTICS = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="tactics")
+WIN_IN_TWO = _ttt((0, 2), (1, 8))
+LOSE_IN_TWO = _ttt((0, 2), (1,), to_move=1)
+
+
+def test_ties_go_to_the_lowest_move_unless_told_otherwise(facts):
+    assert facts.order == "lowest" and choose(LAST, WIN_IN_TWO, {}, 2) == 3
+    with pytest.raises(ValueError, match="order"):
+        Facts(TicTacToe(), ties="lowest", order="highest")
+
+
+def test_an_order_needs_ties_to_break():
+    with pytest.raises(ValueError, match="order"):
+        Facts(TicTacToe(), order="tactics")
+
+
+def test_a_move_wins_in_two_when_every_answer_leaves_an_immediate_win():
+    """X{0,2} O{1,8}, X to move: only 6 makes two threats (0-3-6 and 2-4-6) that no answer blocks both of."""
+    assert [a for a in TACTICS.of(WIN_IN_TWO)[1] if TACTICS._wins_in_two(WIN_IN_TWO, a)] == [6]
+
+
+def test_a_move_ending_the_game_or_answered_by_one_doing_so_wins_nothing_in_two():
+    """O to move, 3 and 6 empty: 6 wins at once (the game ends); after 3 X's only answer fills the board."""
+    s = _ttt((0, 1, 4, 5), (2, 7, 8), to_move=1)
+    assert not TACTICS._wins_in_two(s, 6) and not TACTICS._wins_in_two(s, 3)
+
+
+def test_with_tactics_a_tie_goes_first_to_a_move_that_wins_in_two():
+    assert choose(TACTICS, WIN_IN_TWO, {}, 2) == 6
+    assert choose(TACTICS, _ttt((0, 2), (1, 5)), {}, 2) == 4
+
+
+def test_with_tactics_a_tie_goes_next_to_a_move_that_does_not_lose_in_two():
+    """X{0,2} O{1}, O to move: no move wins in two, and every safe move but the centre loses in two."""
+    assert choose(LAST, LOSE_IN_TWO, {}, 2) == 3 and choose(TACTICS, LOSE_IN_TWO, {}, 2) == 4
+
+
+def test_with_tactics_the_lowest_breaks_what_is_left():
+    assert choose(TACTICS, WIN_IN_TWO, {3: 0, 7: 0}, 2) == 3
+    assert choose(TACTICS, LOSE_IN_TWO, {5: 0, 7: 0, 8: 0}, 2) == 5
+
+
+def test_with_tactics_only_the_deciding_level_is_ordered():
+    assert choose(TACTICS, WIN_IN_TWO, {3: 0, 6: 0, 7: 0}, 2) == 6
+    assert choose(TACTICS, WIN_IN_TWO, {3: 0, 7: 0, 6: 1}, 2) == 3
+    assert choose(TACTICS, LOSE_IN_TWO, {3: 0, 4: 1}, 2) == 3
+
+
+def test_tactics_change_neither_the_wins_nor_a_forced_safe_move_nor_a_level_of_one():
+    assert choose(TACTICS, _ttt((0, 1), (3, 4)), {5: 0}, 2) == 2
+    assert choose(TACTICS, _ttt((0, 8), (4, 2)), {3: 0}, 2) == 6
+    assert choose(TACTICS, WIN_IN_TWO, {7: 0}, 2) == 7
+
+
+def test_tactics_are_worked_out_once_per_position(monkeypatch):
+    facts = Facts(TicTacToe(), ties="lowest", unlevelled="last", order="tactics")
+    calls = []
+    real = facts._loses_in_two
+    monkeypatch.setattr(facts, "_loses_in_two", lambda s, a: calls.append(a) or real(s, a))
+    choose(facts, LOSE_IN_TWO, {}, 2)
+    first = len(calls)
+    choose(facts, LOSE_IN_TWO, {5: 0, 7: 0}, 2)
+    assert first == 6 and len(calls) == first
+
+
+@pytest.mark.parametrize("order,state", [("lowest", LOSE_IN_TWO), ("tactics", _ttt((0, 8), (4, 2)))])
+def test_tactics_are_worked_out_only_where_a_tie_can_need_them(monkeypatch, order, state):
+    facts = Facts(TicTacToe(), ties="lowest", unlevelled="last", order=order)
+    calls = []
+    monkeypatch.setattr(facts, "_loses_in_two", lambda s, a: calls.append(a))
+    monkeypatch.setattr(facts, "_wins_in_two", lambda s, a: calls.append(a))
+    choose(facts, state, {}, 2)
+    assert calls == []
+
+
 def test_a_winning_map_is_verified_over_every_reply(facts):
     assert verify(facts, FORK, {4: 0}, 2) == {"won": True, "reason": None, "own_positions": 5, "positions": 10}
 

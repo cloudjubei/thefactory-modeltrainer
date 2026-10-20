@@ -1,0 +1,49 @@
+{
+  "file": "harness/floor_a6.py",
+  "tests": ["tests/test_floor_a6.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "30x acceptance",
+      "old": "SPEC = {**B1, \"builder\": {**L5[\"builder\"], \"accept\": 100}}",
+      "new": "SPEC = {**B1, \"builder\": dict(L5[\"builder\"])}"
+    },
+    {
+      "name": "another bar",
+      "old": "\"accept\": 100}",
+      "new": "\"accept\": 60}"
+    },
+    {
+      "name": "b1's longer searches",
+      "old": "SPEC = {**B1, \"builder\": {**L5[\"builder\"], \"accept\": 100}}",
+      "new": "SPEC = {**B1, \"builder\": {**B1[\"builder\"], \"accept\": 100}}"
+    },
+    {
+      "name": "judged against its own registration",
+      "old": "    return l4_size(e, control, SPEC, CONTROL)\n",
+      "new": "    return l4_size(e, control, SPEC, SPEC)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "a6_report = w6_report",
+      "new": "a6_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-20T15:20:01+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "30x acceptance": [
+        "test_a6_is_judged_against_b1_s_control_under_the_control_s_own_registration",
+        "test_a6_is_l5_accepting_leaves_at_100x_on_b1_s_positions"
+      ],
+      "another bar": ["test_a6_is_l5_accepting_leaves_at_100x_on_b1_s_positions"],
+      "b1's longer searches": ["test_a6_is_l5_accepting_leaves_at_100x_on_b1_s_positions"],
+      "judged against its own registration": [
+        "test_a6_is_judged_against_b1_s_control_under_the_control_s_own_registration"
+      ],
+      "own completion judge": ["test_a6_is_l5_accepting_leaves_at_100x_on_b1_s_positions"]
+    }
+  }
+}

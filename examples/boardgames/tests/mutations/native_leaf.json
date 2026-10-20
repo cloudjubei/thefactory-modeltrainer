@@ -80,23 +80,33 @@
     },
     {
       "name": "verify drops forcing",
-      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", cap,",
-      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                                False, facts.unlevelled == \"last\", cap,"
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                                False, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,"
     },
     {
       "name": "walk drops forcing",
-      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", cap,",
-      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                              False, facts.unlevelled == \"last\", cap,"
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                              False, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,"
     },
     {
       "name": "verify drops unlevelled last",
-      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", cap,",
-      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, False, cap,"
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, False, facts.order == \"tactics\", cap,"
     },
     {
       "name": "walk drops unlevelled last",
-      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", cap,",
-      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, False, cap,"
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, False, facts.order == \"tactics\", cap,"
+    },
+    {
+      "name": "verify drops tactics",
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                                facts.forcing, facts.unlevelled == \"last\", False, cap,"
+    },
+    {
+      "name": "walk drops tactics",
+      "old": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", facts.order == \"tactics\", cap,",
+      "new": "facts.ties == \"lowest\", facts.safe_depth,\n                              facts.forcing, facts.unlevelled == \"last\", False, cap,"
     }
   ],
   "last_run": {

@@ -251,3 +251,9 @@
 {"event": "end", "id": "54a41acaccab", "status": "completed", "at": "2026-10-20T08:39:48+00:00", "seconds": 36494.1}
 {"event": "start", "id": "c4a749975b17", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_b1_control", "--workers", "4", "--out", "evidence/c49_b1_control.json.gz", "--progress", "checkpoints/runs/c49_b1_control_progress.json"], "at": "2026-10-20T08:39:48+00:00"}
 {"event": "end", "id": "c4a749975b17", "status": "completed", "at": "2026-10-20T15:13:08+00:00", "seconds": 23599.6}
+{"event": "start", "id": "e80f59963367", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_a6", "--workers", "4", "--out", "evidence/c49_a6.json.gz", "--progress", "checkpoints/runs/c49_a6_progress.json"], "at": "2026-10-20T15:36:48+00:00"}
+{"event": "end", "id": "e80f59963367", "status": "completed", "at": "2026-10-20T21:51:36+00:00", "seconds": 22488.0}
+{"event": "start", "id": "c54d457e5e04", "name": "c4_default_accuracy", "argv": ["--spec", "harness.floor_l5", "--targets", "c49_l5.json.gz", "--per-root", "20", "--out", "/private/tmp/claude-501/-Users-cloud-Documents-Work-thefactory-tools/da5a4b0e-014f-4c03-b74e-234e8b96709f/scratchpad/da_smoke.json.gz"], "at": "2026-10-20T22:30:43+00:00"}
+{"event": "end", "id": "c54d457e5e04", "status": "completed", "at": "2026-10-20T22:33:00+00:00", "seconds": 137.3}
+{"event": "start", "id": "41be95063d08", "name": "c4_default_accuracy", "argv": ["--spec", "harness.floor_l5", "--targets", "c49_l5.json.gz", "--out", "evidence/c49_d1.json.gz"], "at": "2026-10-20T22:35:08+00:00"}
+{"event": "end", "id": "41be95063d08", "status": "completed", "at": "2026-10-20T22:39:15+00:00", "seconds": 247.1}

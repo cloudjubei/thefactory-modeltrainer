@@ -62,7 +62,8 @@ def main() -> None:
     game = Connect4()
     root = C4State(tuple(row["board"]), row["to_move"], None, False)
     facts = Facts(game, ties=spec["builder"].get("ties", "exact"), safe_depth=spec["builder"].get("safe_depth", 1),
-                  forcing=spec["builder"].get("forcing", False), unlevelled=spec["builder"].get("unlevelled", "none"))
+                  forcing=spec["builder"].get("forcing", False), unlevelled=spec["builder"].get("unlevelled", "none"),
+                  order=spec["builder"].get("order", "lowest"))
     b, s = spec["builder"], spec["search"]
     winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
     rng = random.Random(args.index)

@@ -1,0 +1,52 @@
+{
+  "file": "harness/floor_l6.py",
+  "tests": ["tests/test_floor_l6.py"],
+  "timeout": 120,
+  "mutations": [
+    {
+      "name": "ties to the lowest",
+      "old": "\"builder\": {**L5[\"builder\"], \"order\": \"tactics\"}",
+      "new": "\"builder\": dict(L5[\"builder\"])"
+    },
+    {
+      "name": "L5's fingerprint",
+      "old": "\"measurement_fp\": \"2285bc9e9ca8\", ",
+      "new": ""
+    },
+    {
+      "name": "L5's support",
+      "old": ", \"support\": 0.9}",
+      "new": "}"
+    },
+    {
+      "name": "judged against its own registration",
+      "old": "    return l4_size(e, control, spec, L5)\n",
+      "new": "    return l4_size(e, control, spec, spec)\n"
+    },
+    {
+      "name": "own completion judge",
+      "old": "l6_report = w6_report",
+      "new": "l6_report = lambda e, spec: w6_report(e, spec)"
+    }
+  ],
+  "last_run": {
+    "at": "2026-10-20T22:49:17+00:00",
+    "killed": 5,
+    "survived": [],
+    "killed_by": {
+      "ties to the lowest": [
+        "test_l6_is_judged_against_l5_under_l5_s_own_registration",
+        "test_l6_is_l5_breaking_ties_by_tactics_on_l4_s_positions"
+      ],
+      "L5's fingerprint": ["test_l6_is_l5_breaking_ties_by_tactics_on_l4_s_positions"],
+      "L5's support": [
+        "test_l6_is_judged_against_l5_under_l5_s_own_registration",
+        "test_l6_is_l5_breaking_ties_by_tactics_on_l4_s_positions"
+      ],
+      "judged against its own registration": [
+        "test_l6_is_judged_against_l5_under_l5_s_own_registration"
+      ],
+      "own completion judge": ["test_l6_is_l5_breaking_ties_by_tactics_on_l4_s_positions"]
+    }
+  }
+}

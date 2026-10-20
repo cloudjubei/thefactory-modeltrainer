@@ -20,7 +20,9 @@ The builder's "ties" sets how the rule reads a level (harness.steady_state.Facts
 safe (1 by default, or 2 — nor may the opponent force a win in two; harness.floor_l3), and "forcing" whether, of
 several safe moves, those leaving the opponent at most one reply that stops an immediate win are kept when any
 are (off by default; harness.floor_l4), and "unlevelled" whether the safe moves on cells a map leaves without a
-level are passed over ("none", the default) or read as a last level ("last"; harness.floor_l5).
+level are passed over ("none", the default) or read as a last level ("last"; harness.floor_l5), and "order"
+which move a deciding level holding several plays ("lowest", the default, or "tactics" — first a move that wins by
+force in two, then one that does not lose by force in two; harness.floor_l6).
 A local search with "walker": "native" walks its leaves and verifies its maps in C
 (harness.native_leaf); every run
 records the C sources' hashes, which the Python fingerprint cannot cover.
@@ -76,7 +78,8 @@ def build_one(job: dict) -> dict:
     game = Connect4()
     root = C4State(tuple(job["board"]), job["to_move"], None, False)
     facts = Facts(game, ties=job["builder"].get("ties", "exact"), safe_depth=job["builder"].get("safe_depth", 1),
-                  forcing=job["builder"].get("forcing", False), unlevelled=job["builder"].get("unlevelled", "none"))
+                  forcing=job["builder"].get("forcing", False), unlevelled=job["builder"].get("unlevelled", "none"),
+                  order=job["builder"].get("order", "lowest"))
     b, s = job["builder"], job["search"]
     if s.get("kind") == "local":
         winning = CachedWinning(lambda states: _winning(game, states), game.state_key, s["cache_limit"])
