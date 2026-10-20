@@ -8573,10 +8573,17 @@
       "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_14_of_16_complete_within_2_hours_with_longer_searches",
       "note": "User's choice (2026-10-20): longer searches on the heavy tail. B1 = L5's rule and pipeline, no library, the deeper leaf searches (depth 2 and below) given 120 s instead of 30 s; root search 20 min and the 2-h cap unchanged. Positions: F2's 16 heaviest (110,650 F2 bits; #207, #216, #218 already took the full 2 h in F2). Control (harness.floor_b1_control): the same with 30 s, built right after the arm. P1-P2 showed long searches near the root can starve a build, so completion is claimed too. floor_b1 8/8 mutants. Full suite green (3,113 passed). Fingerprint 7717c79f94ea.",
       "registered_at": "2026-10-19T22:31:24.013713+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_14_of_16_complete_within_2_hours_with_longer_searches",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.06s",
+          "drawn_at": "2026-10-20T15:13:21.799714+00:00"
+        }
+      ],
       "data": {
         "path": "evidence/c49_b1.json.gz",
-        "started": null
+        "started": "2026-10-19T22:31:34+00:00"
       },
       "pins": {
         "tests/test_c49_b1_evidence.py": "b1d97ea2c6ad13d51cf0eac536b2276dacd9912e7ee50e64d11a43c181cbec0c",
@@ -8597,15 +8604,23 @@
       "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_longer_searches_make_the_heavy_strategies_a_tenth_smaller",
       "note": "User's choice (2026-10-20): longer searches on the heavy tail. B1 = L5's rule and pipeline, no library, the deeper leaf searches (depth 2 and below) given 120 s instead of 30 s; root search 20 min and the 2-h cap unchanged. Positions: F2's 16 heaviest (110,650 F2 bits; #207, #216, #218 already took the full 2 h in F2). Control (harness.floor_b1_control): the same with 30 s, built right after the arm. P1-P2 showed long searches near the root can starve a build, so completion is claimed too. floor_b1 8/8 mutants. Full suite green (3,113 passed). Fingerprint 7717c79f94ea.",
       "registered_at": "2026-10-19T22:31:25.085877+00:00",
-      "evidence": [],
+      "evidence": [
+        {
+          "proof": "tests/test_c49_b1_evidence.py::test_c49_b1_longer_searches_make_the_heavy_strategies_a_tenth_smaller",
+          "ok": false,
+          "detail": " \nE         - supported\nE         + refuted\n\ntests/test_c49_b1_evidence.py:38: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_c49_b1_evidence.py::test_c49_b1_longer_searches_make_the_heavy_strategies_a_tenth_smaller\n1 failed in 0.10s",
+          "drawn_at": "2026-10-20T15:13:22.186596+00:00",
+          "inconclusive": false
+        }
+      ],
       "data": [
         {
           "path": "evidence/c49_b1.json.gz",
-          "started": null
+          "started": "2026-10-19T22:31:34+00:00"
         },
         {
           "path": "evidence/c49_b1_control.json.gz",
-          "started": null
+          "started": "2026-10-20T08:39:48+00:00"
         }
       ],
       "pins": {
@@ -8619,6 +8634,35 @@
         "harness/floor_w6.py": "afb05762c0316e04936a86c50ce7d46e24a488b761ffb990f892e8587b3b138c"
       },
       "inconclusive_proof": "tests/test_c49_b1_evidence.py::test_c49_b1_the_size_is_undecidable"
+    },
+    "h293": {
+      "id": "h293",
+      "claim": "\u00a73.6 B1 (registered after the data): longer deeper searches make the heavy strategies larger by settling early for exception-heavy leaves \u2014 with 120 s the builds stop splitting sooner (196 table moves against 510, 1,061 leaves against 2,597) and their maps cost less (39,575 bits against 58,299), but they carry 9,094 exceptions against 1,972 (88,728 bits against 25,698); the whole 136,006 bits against 104,860, larger on 10 of 16. The binding limit is the acceptance threshold (30x) letting exception-heavy leaves in, not search time",
+      "mode": "test",
+      "proof": "tests/test_c49_b1_after_evidence.py::test_c49_b1_longer_searches_settle_early_for_exception_heavy_leaves",
+      "note": "h291 supported (16/16 complete), h292 refuted (1.297) \u2014 pre-registered. The control (no library) took 104,860 bits on these positions against F2's 110,650 (0.95, within run-to-run swing).",
+      "registered_at": "2026-10-20T15:13:41.967230+00:00",
+      "evidence": [
+        {
+          "proof": "tests/test_c49_b1_after_evidence.py::test_c49_b1_longer_searches_settle_early_for_exception_heavy_leaves",
+          "ok": true,
+          "detail": ".                                                                        [100%]\n1 passed in 0.09s",
+          "drawn_at": "2026-10-20T15:13:42.388521+00:00"
+        }
+      ],
+      "data": [
+        {
+          "path": "evidence/c49_b1.json.gz",
+          "started": "2026-10-19T22:31:34+00:00"
+        },
+        {
+          "path": "evidence/c49_b1_control.json.gz",
+          "started": "2026-10-20T08:39:48+00:00"
+        }
+      ],
+      "pins": {
+        "tests/test_c49_b1_after_evidence.py": "f40d1be2d1fe0d495641fdffccdfc7e5dd6aa5951b964f8dfa76a725a34d7f9c"
+      }
     }
   }
 }

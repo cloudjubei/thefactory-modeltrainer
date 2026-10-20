@@ -250,3 +250,4 @@
 {"event": "start", "id": "54a41acaccab", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_b1", "--workers", "4", "--out", "evidence/c49_b1.json.gz", "--progress", "checkpoints/runs/c49_b1_progress.json"], "at": "2026-10-19T22:31:34+00:00"}
 {"event": "end", "id": "54a41acaccab", "status": "completed", "at": "2026-10-20T08:39:48+00:00", "seconds": 36494.1}
 {"event": "start", "id": "c4a749975b17", "name": "c4_strategy_s2", "argv": ["--spec", "harness.floor_b1_control", "--workers", "4", "--out", "evidence/c49_b1_control.json.gz", "--progress", "checkpoints/runs/c49_b1_control_progress.json"], "at": "2026-10-20T08:39:48+00:00"}
+{"event": "end", "id": "c4a749975b17", "status": "completed", "at": "2026-10-20T15:13:08+00:00", "seconds": 23599.6}

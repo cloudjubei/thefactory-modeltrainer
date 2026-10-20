@@ -5545,3 +5545,15 @@ pipeline, no library, against a control built the same way with 30 s right after
 8/8 mutants). P1-P2 showed long searches below the root can starve a build of its 2 hours, so completion is
 pre-registered as well as size: h291 (14 of 16 complete) and h292 (nine tenths of the control). Launched 22:31Z, chain
 shell PID 21710.
+
+## 2026-10-20 — B1 judged: longer searches make the heavy tail larger
+
+Both arms complete 16/16 (h291 supported; the control too). Pre-registered h292 refuted: the 120-s arm takes 136,006
+bits against the 30-s control's 104,860 (1.30), larger on 10 of 16. After the data (h293): with more time a search near
+the root finds a map that clears the builder's 30x acceptance threshold while carrying thousands of exceptions, and
+the build stops splitting there — 196 table moves against 510, 1,061 leaves against 2,597, map bits 39,575 against
+58,299 — but 9,094 exceptions against 1,972 (88,728 bits against 25,698). The binding limit on the heavy tail is the
+acceptance rule (a leaf with exceptions is kept whenever it covers 30x its bits in positions, never compared with the
+split below it, except later by the improve passes within the time left), not search time. The control, without a
+library, took 104,860 bits against F2's 110,650 on the same positions (0.95). Also: stopped a stray vitest worker
+from another session (PID 3376, at the user's request) that had held a core and 2.3 GB for 45 hours.

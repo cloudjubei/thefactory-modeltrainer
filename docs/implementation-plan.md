@@ -500,9 +500,11 @@ rule standalone and in decision-list order, by ply.
   - **F2 result (h288, h289 supported — pre-registered; h290 after the data): the whole game in 455,959 bits.**
     F1 with L5's rule: every position complete; 0.83 of F1's 548,424 (maps −24%, exceptions −21%; F1's heaviest 67 at
     0.72). The heavy tail still holds 57% of the bits. ~11x WeakC4's ~40K.
-  - **B1 (h291, h292; running since 2026-10-19 22:31Z, user's choice: longer searches on the heavy tail):** L5's rule,
-    deeper leaf searches 120 s instead of 30 s, on F2's 16 heaviest positions, against a 30-s control run after;
-    no library. ~8 h per arm. Run files in checkpoints/runs/c49_b1*.
+  - **B1 result (h291 supported, h292 refuted — pre-registered; h293 after the data): longer searches are a dead
+    end.** 120-s deeper searches complete all 16 heaviest positions but take 1.30 times a 30-s control's bits: they
+    settle near the root for leaves that clear the 30x acceptance threshold with thousands of exceptions (9,094
+    against 1,972). The lever is the acceptance rule (what a leaf may cost against a split), not search time.
+    Next: the user's choice.
 
 ## 4. The hybrid process — definition of done
 
